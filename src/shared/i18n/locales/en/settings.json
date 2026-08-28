@@ -235,6 +235,10 @@
       "description": "Pin saved prompts to Home that run with one click, optionally with an attached agent.",
       "title": "Prompt pins"
     },
+    "remoteSshSessions": {
+      "description": "Run sessions on a remote machine over SSH using hosts from your SSH config. Berd starts and tunnels to a Goose daemon on the remote host.",
+      "title": "Remote SSH sessions"
+    },
     "resetToAuto": "Reset to auto",
     "saveError": "Couldn't save the experiment setting. Try again.",
     "skillDiscovery": {
@@ -689,6 +693,44 @@
     "showMore": "Show {{count}} more providers",
     "title": "Providers",
     "waitingForSignIn": "Waiting for sign-in..."
+  },
+  "remoteHosts": {
+    "actions": {
+      "check": "Check host",
+      "connect": "Connect",
+      "disconnect": "Disconnect",
+      "shutdown": "Stop remote backend"
+    },
+    "custom": {
+      "description": "Connect to a machine that isn't in your SSH config.",
+      "emptyError": "Enter a host to connect to.",
+      "label": "Connect to another host",
+      "placeholder": "user@host"
+    },
+    "description": "Hosts come from your ~/.ssh/config. Key or agent authentication must already work — check that `ssh <host>` succeeds in a terminal first.",
+    "doctor": {
+      "checking": "Checking host...",
+      "found": "Found",
+      "gooseMissing": "Install goose on this host to use it for remote sessions.",
+      "notFound": "Not found"
+    },
+    "empty": "No hosts found in ~/.ssh/config.",
+    "shutdownConfirm": {
+      "cancel": "Cancel",
+      "confirm": "Stop backend",
+      "description": "This stops the agent daemon on the remote host and ends any remote work running through it.",
+      "stopping": "Stopping...",
+      "title": "Stop the remote backend on \"{{host}}\"?"
+    },
+    "status": {
+      "connecting": "Connecting...",
+      "disconnected": "Disconnected",
+      "failed": "Failed",
+      "ready": "Connected",
+      "reconnecting": "Reconnecting...",
+      "reconnectingAttempt": "Reconnecting (attempt {{attempt}})..."
+    },
+    "title": "Remote SSH hosts"
   },
   "runtimeConfig": {
     "clearError": "Couldn't clear fake endpoint response.",

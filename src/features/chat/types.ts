@@ -171,6 +171,16 @@ export interface ChatInputProjectPicker {
   }) => void;
 }
 
+export interface ChatInputRemoteHostPicker {
+  enabled?: boolean;
+  selectedHost?: string | null;
+  /** SSH host aliases to offer; defaults to the remote-host store's list. */
+  hosts?: string[];
+  onHostChange?: (host: string | null) => void;
+  selectedDir?: string | null;
+  onDirChange?: (dir: string | null) => void;
+}
+
 export interface ChatInputReasoningEffort {
   config?: ChatSessionReasoningEffortConfig;
   onChange?: (value: string) => void;
@@ -220,6 +230,7 @@ export interface ChatInputProps {
   agentModelPicker?: ChatInputAgentModelPicker;
   reasoningEffort?: ChatInputReasoningEffort;
   projectPicker?: ChatInputProjectPicker;
+  remoteHostPicker?: ChatInputRemoteHostPicker;
   contextUsage?: ChatInputContextUsage;
   controls?: ChatInputControls;
   /** Called when ↑ should recall the last sent user message. */

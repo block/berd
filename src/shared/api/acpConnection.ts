@@ -12,6 +12,11 @@ import {
   type RequestPermissionResponse,
 } from "@agentclientprotocol/sdk";
 import packageJson from "../../../package.json";
+import {
+  LOCAL_BACKEND_ID,
+  remoteHostFromBackendId,
+  type AcpBackendId,
+} from "./acpBackendId";
 import { createWebSocketStream } from "./createWebSocketStream";
 import { perfLog } from "@/shared/lib/perfLog";
 
@@ -58,10 +63,9 @@ export function setPermissionHandler(handler: PermissionRequestHandler): void {
   permissionHandler = handler;
 }
 
-let clientPromise: Promise<GooseClient> | null = null;
-let resolvedClient: GooseClient | null = null;
-let activeStream: ReturnType<typeof createWebSocketStream> | null = null;
-
+// The handler slots above are shared by every backend connection: downstream
+// routing is sessionId-keyed, so notifications from any backend flow through
+// the same callbacks.
 function createClientCallbacks(): () => Client {
   return () => ({
     requestPermission: async (
@@ -92,49 +96,148 @@ function createClientCallbacks(): () => Client {
   });
 }
 
-function monitorConnection(
-  client: GooseClient,
-  stream: ReturnType<typeof createWebSocketStream>,
-): void {
-  const clearCurrentConnection = () => {
-    if (activeStream !== stream) {
-      return;
-    }
+export interface AcpConnection {
+  getClient(): Promise<GooseClient>;
+  getClientSync(): GooseClient | null;
+  isReady(): boolean;
+  /**
+   * Abort the current transport after an ACP request exceeds its liveness
+   * bound. A timed-out request leaves the connection state unknowable;
+   * reconnecting is safer than allowing later mutations to race work still
+   * running remotely.
+   */
+  invalidate(): Promise<void>;
+  /** Notifies when the active transport closes. Returns an unsubscribe. */
+  onClosed(cb: () => void): () => void;
+}
+
+export function createAcpConnection(
+  resolveWsUrl: () => Promise<string>,
+): AcpConnection {
+  let clientPromise: Promise<GooseClient> | null = null;
+  let resolvedClient: GooseClient | null = null;
+  let activeStream: ReturnType<typeof createWebSocketStream> | null = null;
+  const closedListeners = new Set<() => void>();
+
+  function monitorConnection(
+    client: GooseClient,
+    stream: ReturnType<typeof createWebSocketStream>,
+  ): void {
+    const clearCurrentConnection = () => {
+      if (activeStream !== stream) {
+        return;
+      }
+      resolvedClient = null;
+      clientPromise = null;
+      activeStream = null;
+      for (const listener of closedListeners) {
+        listener();
+      }
+    };
+    client.closed
+      .then(() => {
+        console.warn(
+          "[acp] Connection closed. Will reconnect on next getClient().",
+        );
+        clearCurrentConnection();
+      })
+      .catch(() => {
+        console.warn(
+          "[acp] Connection error. Will reconnect on next getClient().",
+        );
+        clearCurrentConnection();
+      });
+  }
+
+  async function invalidate(): Promise<void> {
+    const stream = activeStream;
+    activeStream = null;
     resolvedClient = null;
     clientPromise = null;
-    activeStream = null;
-  };
-  client.closed
-    .then(() => {
-      console.warn(
-        "[acp] Connection closed. Will reconnect on next getClient().",
-      );
-      clearCurrentConnection();
-    })
-    .catch(() => {
-      console.warn(
-        "[acp] Connection error. Will reconnect on next getClient().",
-      );
-      clearCurrentConnection();
-    });
-}
-
-/**
- * Abort the current transport after an ACP request exceeds its liveness bound.
- * A timed-out request leaves the connection state unknowable; reconnecting is
- * safer than allowing later mutations to race work still running remotely.
- */
-export async function invalidateClientConnection(): Promise<void> {
-  const stream = activeStream;
-  activeStream = null;
-  resolvedClient = null;
-  clientPromise = null;
-  if (stream) {
-    await stream.writable.abort();
+    if (stream) {
+      await stream.writable.abort();
+    }
   }
+
+  async function initializeConnection(): Promise<GooseClient> {
+    const tStart = performance.now();
+    const wsUrl = await resolveWsUrl();
+    perfLog(
+      `[perf:conn] get_goose_serve_url in ${(performance.now() - tStart).toFixed(1)}ms`,
+    );
+
+    const tStream = performance.now();
+    const stream = createWebSocketStream(wsUrl);
+    activeStream = stream;
+
+    const client = new GooseClient(createClientCallbacks(), stream);
+    perfLog(
+      `[perf:conn] ws stream + client created in ${(performance.now() - tStream).toFixed(1)}ms`,
+    );
+
+    const tInit = performance.now();
+    await client.initialize({
+      protocolVersion: PROTOCOL_VERSION,
+      clientCapabilities: {
+        _meta: {
+          goose: {
+            mcpHostCapabilities: DEFAULT_GOOSE_MCP_HOST_CAPABILITIES,
+            toolCallLabelEnrichment: true,
+          },
+        },
+      },
+      clientInfo: {
+        name: packageJson.name,
+        version: packageJson.version,
+      },
+    } satisfies GooseInitializeRequest);
+    perfLog(
+      `[perf:conn] client.initialize in ${(performance.now() - tInit).toFixed(1)}ms (total ${(performance.now() - tStart).toFixed(1)}ms)`,
+    );
+
+    monitorConnection(client, stream);
+
+    return client;
+  }
+
+  async function getClient(): Promise<GooseClient> {
+    if (resolvedClient) {
+      return resolvedClient;
+    }
+
+    if (!clientPromise) {
+      perfLog("[perf:conn] getClient() → initializing new ACP connection");
+      clientPromise = initializeConnection()
+        .then((client) => {
+          resolvedClient = client;
+          return client;
+        })
+        .catch((error) => {
+          clientPromise = null;
+          throw error;
+        });
+    } else {
+      perfLog(
+        "[perf:conn] getClient() awaiting in-flight initializeConnection",
+      );
+    }
+
+    return clientPromise;
+  }
+
+  return {
+    getClient,
+    getClientSync: () => resolvedClient,
+    isReady: () => resolvedClient !== null,
+    invalidate,
+    onClosed: (cb: () => void) => {
+      closedListeners.add(cb);
+      return () => closedListeners.delete(cb);
+    },
+  };
 }
 
-async function initializeConnection(): Promise<GooseClient> {
+async function resolveLocalWsUrl(): Promise<string> {
   // Dev-only: inject a real failure into startup so the WARP probe runs
   // for real against kgoose. `VITE_DEV_STARTUP_ERROR=warp just dev` lets
   // us experience the diagnostic UI with whatever real WARP state the
@@ -159,73 +262,64 @@ async function initializeConnection(): Promise<GooseClient> {
     }
   }
 
-  const tStart = performance.now();
-  const wsUrl: string = await invoke("get_goose_serve_url");
-  perfLog(
-    `[perf:conn] get_goose_serve_url in ${(performance.now() - tStart).toFixed(1)}ms`,
-  );
+  return await invoke("get_goose_serve_url");
+}
 
-  const tStream = performance.now();
-  const stream = createWebSocketStream(wsUrl);
-  activeStream = stream;
+const connections = new Map<AcpBackendId, AcpConnection>();
 
-  const client = new GooseClient(createClientCallbacks(), stream);
-  perfLog(
-    `[perf:conn] ws stream + client created in ${(performance.now() - tStream).toFixed(1)}ms`,
-  );
+function createBackendConnection(backendId: AcpBackendId): AcpConnection {
+  if (backendId === LOCAL_BACKEND_ID) {
+    return createAcpConnection(resolveLocalWsUrl);
+  }
+  const host = remoteHostFromBackendId(backendId);
+  if (!host) {
+    throw new Error(`Unknown ACP backend id: ${backendId}`);
+  }
+  return createAcpConnection(async () => {
+    const { connectRemoteHost } = await import("./remoteHosts");
+    const remote = await connectRemoteHost(host);
+    return remote.wsUrl;
+  });
+}
 
-  const tInit = performance.now();
-  await client.initialize({
-    protocolVersion: PROTOCOL_VERSION,
-    clientCapabilities: {
-      _meta: {
-        goose: {
-          mcpHostCapabilities: DEFAULT_GOOSE_MCP_HOST_CAPABILITIES,
-          toolCallLabelEnrichment: true,
-        },
-      },
-    },
-    clientInfo: {
-      name: packageJson.name,
-      version: packageJson.version,
-    },
-  } satisfies GooseInitializeRequest);
-  perfLog(
-    `[perf:conn] client.initialize in ${(performance.now() - tInit).toFixed(1)}ms (total ${(performance.now() - tStart).toFixed(1)}ms)`,
-  );
+export function getBackendConnection(backendId: AcpBackendId): AcpConnection {
+  let connection = connections.get(backendId);
+  if (!connection) {
+    connection = createBackendConnection(backendId);
+    connections.set(backendId, connection);
+  }
+  return connection;
+}
 
-  monitorConnection(client, stream);
+export function getBackendClient(
+  backendId: AcpBackendId,
+): Promise<GooseClient> {
+  return getBackendConnection(backendId).getClient();
+}
 
-  return client;
+export async function invalidateBackendConnection(
+  backendId: AcpBackendId,
+): Promise<void> {
+  await connections.get(backendId)?.invalidate();
+}
+
+/**
+ * Abort the current transport after an ACP request exceeds its liveness bound.
+ * A timed-out request leaves the connection state unknowable; reconnecting is
+ * safer than allowing later mutations to race work still running remotely.
+ */
+export async function invalidateClientConnection(): Promise<void> {
+  await invalidateBackendConnection(LOCAL_BACKEND_ID);
 }
 
 export async function getClient(): Promise<GooseClient> {
-  if (resolvedClient) {
-    return resolvedClient;
-  }
-
-  if (!clientPromise) {
-    perfLog("[perf:conn] getClient() → initializing new ACP connection");
-    clientPromise = initializeConnection()
-      .then((client) => {
-        resolvedClient = client;
-        return client;
-      })
-      .catch((error) => {
-        clientPromise = null;
-        throw error;
-      });
-  } else {
-    perfLog("[perf:conn] getClient() awaiting in-flight initializeConnection");
-  }
-
-  return clientPromise;
+  return getBackendConnection(LOCAL_BACKEND_ID).getClient();
 }
 
 export function isClientReady(): boolean {
-  return resolvedClient !== null;
+  return getBackendConnection(LOCAL_BACKEND_ID).isReady();
 }
 
 export function getClientSync(): GooseClient | null {
-  return resolvedClient;
+  return getBackendConnection(LOCAL_BACKEND_ID).getClientSync();
 }

@@ -38,9 +38,9 @@ const GOOSE_SERVE_CONNECT_RETRY_DELAY: Duration = Duration::from_millis(100);
 const GOOSE_SEARCH_PATHS_ENV: &str = "GOOSE_SEARCH_PATHS";
 const LOCALHOST: &str = "127.0.0.1";
 #[cfg(target_os = "windows")]
-const TAURI_WEBVIEW_ORIGIN: &str = "http://tauri.localhost";
+pub(crate) const TAURI_WEBVIEW_ORIGIN: &str = "http://tauri.localhost";
 #[cfg(not(target_os = "windows"))]
-const TAURI_WEBVIEW_ORIGIN: &str = "tauri://localhost";
+pub(crate) const TAURI_WEBVIEW_ORIGIN: &str = "tauri://localhost";
 const DATABRICKS_HOST_ENV: &str = "DATABRICKS_HOST";
 const GOOSE_FAST_MODEL_ENV: &str = "GOOSE_FAST_MODEL";
 
@@ -360,7 +360,7 @@ impl GooseServeProcess {
     }
 }
 
-fn acp_websocket_url(port: u16, secret_key: &str) -> String {
+pub(crate) fn acp_websocket_url(port: u16, secret_key: &str) -> String {
     let mut url = reqwest::Url::parse(&format!("ws://{LOCALHOST}:{port}/acp"))
         .expect("local ACP WebSocket URL should be valid");
     url.query_pairs_mut().append_pair("token", secret_key);
@@ -1208,7 +1208,7 @@ fn apply_runtime_goose_provider_env(command: &mut Command, runtime_config: &Runt
     }
 }
 
-fn reserve_free_port() -> Result<u16, String> {
+pub(crate) fn reserve_free_port() -> Result<u16, String> {
     let listener = std::net::TcpListener::bind((LOCALHOST, 0))
         .map_err(|error| format!("Failed to reserve Goose serve port: {error}"))?;
     listener

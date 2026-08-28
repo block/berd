@@ -117,6 +117,38 @@ describe("attachSessionFolder", () => {
     );
   });
 
+  it("rejects attach/detach/replace for remote sessions before touching local path checks", async () => {
+    useChatSessionStore.setState({
+      sessions: [{ ...session, remoteHost: "devbox" }],
+    });
+
+    await expect(
+      attachSessionFolder("session-1", "/repo-wt"),
+    ).rejects.toMatchObject({
+      name: "FolderAttachmentError",
+      message: expect.stringContaining("devbox"),
+    });
+    await expect(
+      detachSessionFolder("session-1", "/repo"),
+    ).rejects.toMatchObject({ name: "FolderAttachmentError" });
+    await expect(
+      replaceSessionFolder("session-1", "/repo", "/repo-wt"),
+    ).rejects.toMatchObject({ name: "FolderAttachmentError" });
+
+    // The guard fires before any local canonicalization or git probe: those
+    // Tauri commands act on the local filesystem and the session's paths
+    // live on the SSH host.
+    expect(
+      mocks.canonicalizeAuthorizedWorkspaceDirectory,
+    ).not.toHaveBeenCalled();
+    expect(mocks.resolvePath).not.toHaveBeenCalled();
+    expect(mocks.getGitState).not.toHaveBeenCalled();
+    expect(
+      useChatSessionStore.getState().getSession("session-1")
+        ?.workspaceAttachments ?? [],
+    ).toHaveLength(0);
+  });
+
   it("merges concurrent registrations against current store state", async () => {
     const first = attachSessionFolder("session-1", "/first");
     const second = attachSessionFolder("session-1", "/second");

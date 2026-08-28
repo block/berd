@@ -36,12 +36,15 @@ import { useProviderCatalogStore } from "@/features/providers/stores/providerCat
 import { supportsContextCompactionControls } from "../lib/autoCompact";
 import { requestOpenSettings } from "@/features/settings/lib/settingsEvents";
 import { ProjectInputSelector } from "./ProjectInputSelector";
+import { RemoteDirectoryPicker } from "./RemoteDirectoryPicker";
+import { RemoteHostSelector } from "./RemoteHostSelector";
 import type {
   AgentPickerOption,
   ChatInputAgentModelPicker,
   ChatInputContextUsage,
   ChatInputProjectPicker,
   ChatInputReasoningEffort,
+  ChatInputRemoteHostPicker,
   ChatInputVoiceConversation,
 } from "../types";
 
@@ -64,12 +67,19 @@ interface ChatInputToolbarComposerActions {
   voiceConversation?: ChatInputVoiceConversation;
 }
 
-type OpenToolbarMenu = "attachments" | "model" | "project" | "context";
+type OpenToolbarMenu =
+  | "attachments"
+  | "model"
+  | "project"
+  | "remoteHost"
+  | "remoteDir"
+  | "context";
 
 interface ChatInputToolbarProps {
   agentModelPicker: ChatInputAgentModelPicker & { enabled?: boolean };
   reasoningEffort?: ChatInputReasoningEffort;
   projectPicker: ChatInputProjectPicker;
+  remoteHostPicker?: ChatInputRemoteHostPicker;
   contextUsage: ChatInputContextUsage;
   composerActions: ChatInputToolbarComposerActions;
   onRequestComposerFocus?: () => void;
@@ -80,6 +90,7 @@ export function ChatInputToolbar({
   agentModelPicker,
   reasoningEffort,
   projectPicker,
+  remoteHostPicker,
   contextUsage,
   composerActions,
   onRequestComposerFocus,
@@ -117,6 +128,10 @@ export function ChatInputToolbar({
     onProjectChange,
     onCreateProject,
   } = projectPicker;
+  const remoteHostPickerEnabled = remoteHostPicker?.enabled === true;
+  const selectedRemoteHost = remoteHostPickerEnabled
+    ? (remoteHostPicker?.selectedHost ?? null)
+    : null;
   const {
     contextTokens = 0,
     contextLimit = 0,
@@ -321,7 +336,9 @@ export function ChatInputToolbar({
               </DropdownMenuItem>
               <DropdownMenuItem
                 onSelect={() => onAttachFolders?.()}
-                disabled={disabled}
+                // Local folder attachments are meaningless for a session that
+                // runs its backend on a remote host.
+                disabled={disabled || Boolean(selectedRemoteHost)}
               >
                 <FolderOpen className="mr-2 h-4 w-4" />
                 {t("toolbar.attachFolder")}
@@ -365,6 +382,33 @@ export function ChatInputToolbar({
             onOpenChange={handleMenuOpenChange("project")}
             onRequestComposerFocus={onRequestComposerFocus}
             modal={false}
+            triggerIconOnly={isCompact}
+            // Remote sessions are project-less in v1; local project folders
+            // do not exist on the SSH host.
+            disabled={Boolean(selectedRemoteHost)}
+          />
+        ) : null}
+
+        {remoteHostPickerEnabled ? (
+          <RemoteHostSelector
+            selectedHost={selectedRemoteHost}
+            hosts={remoteHostPicker?.hosts}
+            onHostChange={remoteHostPicker?.onHostChange}
+            open={openMenu === "remoteHost"}
+            onOpenChange={handleMenuOpenChange("remoteHost")}
+            onRequestComposerFocus={onRequestComposerFocus}
+            modal={false}
+            triggerIconOnly={isCompact}
+          />
+        ) : null}
+
+        {remoteHostPickerEnabled && selectedRemoteHost ? (
+          <RemoteDirectoryPicker
+            host={selectedRemoteHost}
+            selectedDir={remoteHostPicker?.selectedDir ?? null}
+            onDirChange={remoteHostPicker?.onDirChange}
+            open={openMenu === "remoteDir"}
+            onOpenChange={handleMenuOpenChange("remoteDir")}
             triggerIconOnly={isCompact}
           />
         ) : null}

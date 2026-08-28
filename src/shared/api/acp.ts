@@ -6,6 +6,7 @@ import type {
   AcpSessionsPage,
   AcpSteerResponse,
 } from "./acpApi";
+import { sshBackendId } from "./acpBackendId";
 import * as sessionRegistry from "./acpSessionRegistry";
 import type { AcpSessionExecutionSelection } from "./acpSessionRegistry";
 import {
@@ -70,6 +71,12 @@ export interface AcpCreateSessionOptions {
   projectId?: string;
   modelId?: string | null;
   deferProviderSetup?: boolean;
+  /**
+   * SSH host to create the session on. When set, the session is created on
+   * that host's remote backend instead of the local `goose serve` sidecar;
+   * every later per-session call routes by the session's registered backend.
+   */
+  remoteHost?: string;
 }
 
 export interface AcpSessionConfigApplyOptions {
@@ -424,10 +431,12 @@ export async function acpCreateSession(
     options.deferProviderSetup === true &&
     !options.modelId &&
     providerId === "goose";
+  const remoteHost = options.remoteHost?.trim();
   const response = await directAcp.newSession(workingDir, {
     providerId: deferProviderSetup ? undefined : providerId,
     projectId: options.projectId,
     personaId: options.personaId,
+    ...(remoteHost ? { backendId: sshBackendId(remoteHost) } : {}),
   });
   const sessionId = response.sessionId;
   let rollbackSessionRegistration: (() => void) | undefined;

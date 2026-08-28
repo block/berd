@@ -14,6 +14,8 @@ import { useTranslation } from "react-i18next";
 import { usePersistedState } from "@/shared/hooks/usePersistedState";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 import { ArtifactViewer } from "./ArtifactViewer";
+import { isRemoteSession } from "../lib/remoteSession";
+import { useChatSessionStore } from "../stores/chatSessionStore";
 import {
   useArtifactViewerStore,
   useOpenArtifact,
@@ -94,6 +96,14 @@ function ViewerPanel({
 }) {
   const { t } = useTranslation("chat");
   const close = useArtifactViewerStore((s) => s.close);
+  // A remote session's artifact paths live on its SSH host; the viewer then
+  // renders a placeholder instead of statting/reading the local filesystem.
+  const remoteHost = useChatSessionStore((s) => {
+    const session = s.sessions.find((candidate) => candidate.id === sessionId);
+    return isRemoteSession(session)
+      ? (session?.remoteHost?.trim() ?? null)
+      : null;
+  });
   const reduceMotion = useReducedMotion();
   // False while AnimatePresence is exit-animating this panel. The min-width
   // floor must lift during enter/exit so the width can actually reach 0;
@@ -185,7 +195,11 @@ function ViewerPanel({
           </TooltipTrigger>
           <TooltipContent>{t("artifactViewer.resize")}</TooltipContent>
         </Tooltip>
-        <ArtifactViewer artifact={artifact} onClose={() => close(sessionId)} />
+        <ArtifactViewer
+          artifact={artifact}
+          remoteHost={remoteHost}
+          onClose={() => close(sessionId)}
+        />
       </div>
     </motion.div>
   );

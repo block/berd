@@ -14,6 +14,7 @@ vi.mock("@/shared/api/acpApi", () => ({
 
 vi.mock("@/shared/api/acpConnection", () => ({
   getClient: () => mockGetClient(),
+  getBackendClient: () => mockGetClient(),
 }));
 
 const managedRuntimeConfig: RuntimeConfig = {

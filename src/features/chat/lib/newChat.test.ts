@@ -277,6 +277,94 @@ describe("findExistingDraft", () => {
     ).toBeUndefined();
   });
 
+  it("does not reuse a draft whose remote host differs from the request", () => {
+    const localDraft = makeSession("local-draft", {
+      projectId: "alpha",
+      executionTarget: { harnessId: "goose" },
+    });
+    const remoteDraft = makeSession("remote-draft", {
+      projectId: "alpha",
+      executionTarget: { harnessId: "goose" },
+      remoteHost: "devbox",
+    });
+
+    expect(
+      findExistingDraft({
+        sessions: [localDraft, remoteDraft],
+        activeSessionId: null,
+        draftsBySession: {
+          "local-draft": "draft text",
+          "remote-draft": "draft text",
+        },
+        messagesBySession: {},
+        request: {
+          title: "New Chat",
+          projectId: "alpha",
+          remoteHost: "otherbox",
+        },
+      }),
+    ).toBeUndefined();
+
+    expect(
+      findExistingDraft({
+        sessions: [localDraft, remoteDraft],
+        activeSessionId: null,
+        draftsBySession: {
+          "local-draft": "draft text",
+          "remote-draft": "draft text",
+        },
+        messagesBySession: {},
+        request: {
+          title: "New Chat",
+          projectId: "alpha",
+          remoteHost: "devbox",
+        },
+      }),
+    ).toEqual(remoteDraft);
+  });
+
+  it("treats an absent remote host as local on both sides", () => {
+    const localDraft = makeSession("local-draft", {
+      projectId: "alpha",
+      executionTarget: { harnessId: "goose" },
+    });
+    const remoteDraft = makeSession("remote-draft", {
+      projectId: "alpha",
+      executionTarget: { harnessId: "goose" },
+      remoteHost: "devbox",
+    });
+
+    expect(
+      findExistingDraft({
+        sessions: [remoteDraft, localDraft],
+        activeSessionId: null,
+        draftsBySession: {
+          "local-draft": "draft text",
+          "remote-draft": "draft text",
+        },
+        messagesBySession: {},
+        request: {
+          title: "New Chat",
+          projectId: "alpha",
+        },
+      }),
+    ).toEqual(localDraft);
+
+    expect(
+      findExistingDraft({
+        sessions: [localDraft],
+        activeSessionId: null,
+        draftsBySession: { "local-draft": "draft text" },
+        messagesBySession: {},
+        request: {
+          title: "New Chat",
+          projectId: "alpha",
+          remoteHost: "",
+        },
+      }),
+    ).toEqual(localDraft);
+  });
+
   it("does not reuse a session with local messages even if messageCount is 0", () => {
     const session = makeSession("alpha-session", {
       projectId: "alpha",

@@ -50,6 +50,13 @@ const revealLabelKey =
 interface ArtifactViewerProps {
   artifact: OpenArtifact;
   onClose: () => void;
+  /**
+   * SSH host carrying the session's files, when the session is remote. The
+   * viewer then renders a compact placeholder (file name + host chip) instead
+   * of statting/reading/polling the path on the local filesystem, and hides
+   * the local-only hand-off actions (open in editor, reveal).
+   */
+  remoteHost?: string | null;
 }
 
 type MarkdownView = "preview" | "raw";
@@ -129,7 +136,11 @@ function sameFingerprint(
   );
 }
 
-export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
+export function ArtifactViewer({
+  artifact,
+  onClose,
+  remoteHost = null,
+}: ArtifactViewerProps) {
   const { t } = useTranslation(["chat", "common"]);
   const { openResolvedPath } = useArtifactActionsContext();
   const viewMode = useMemo(
@@ -221,6 +232,8 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
   // the same path retain last-good content while loading so tool-triggered and
   // manual refreshes do not flash a spinner or reset the scroll container.
   useEffect(() => {
+    // Remote artifacts: no local stat/read — the placeholder body is the view.
+    if (remoteHost) return;
     let cancelled = false;
     const refreshGeneration = ++forcedRefreshGenerationRef.current;
     // A forced ACP/manual refresh supersedes a poll already in flight. Polls
@@ -372,6 +385,7 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
     contentReadRevision,
     flagDiverged,
     recordDivergenceStrike,
+    remoteHost,
     retryRevision,
     updateDiskStatus,
     updateTextState,
@@ -383,6 +397,8 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
   // slowing down when the app is not focused and checking immediately when it
   // returns to the foreground.
   useEffect(() => {
+    // No freshness polling for remote artifacts — the file is not local.
+    if (remoteHost) return;
     let cancelled = false;
     let checkInFlight = false;
     let pollTimerId: number | null = null;
@@ -523,6 +539,7 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
     artifact.resolvedPath,
     artifact.revision,
     recordDivergenceStrike,
+    remoteHost,
     updateDiskStatus,
     updateTextState,
     viewMode,
@@ -542,7 +559,7 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
           </ArtifactTitle>
         </div>
         <ArtifactActions>
-          {viewMode !== "image" ? (
+          {remoteHost == null && viewMode !== "image" ? (
             <ToggleGroup
               type="single"
               variant="outline"
@@ -571,35 +588,39 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
               the button does. The distinguishing icons live on the menu items,
               where each one labels a single action — ExternalLink for the
               hand-off out of the app, FolderOpen for the reveal in place. */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <ArtifactAction
-                icon={EllipsisIcon}
-                tooltip={t("artifactViewer.fileActions")}
-                label={t("artifactViewer.fileActions")}
-              />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem
-                onSelect={() => {
-                  void openResolvedPath(artifact.resolvedPath).catch(() => {});
-                }}
-              >
-                <ExternalLinkIcon />
-                {t("artifactViewer.openExternally")}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onSelect={() => {
-                  void revealInFileManager(artifact.resolvedPath).catch(
-                    () => {},
-                  );
-                }}
-              >
-                <FolderOpenIcon />
-                {t(revealLabelKey)}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {remoteHost == null ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <ArtifactAction
+                  icon={EllipsisIcon}
+                  tooltip={t("artifactViewer.fileActions")}
+                  label={t("artifactViewer.fileActions")}
+                />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  onSelect={() => {
+                    void openResolvedPath(artifact.resolvedPath).catch(
+                      () => {},
+                    );
+                  }}
+                >
+                  <ExternalLinkIcon />
+                  {t("artifactViewer.openExternally")}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => {
+                    void revealInFileManager(artifact.resolvedPath).catch(
+                      () => {},
+                    );
+                  }}
+                >
+                  <FolderOpenIcon />
+                  {t(revealLabelKey)}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
           <ArtifactAction
             icon={XIcon}
             tooltip={t("artifactViewer.close")}
@@ -609,7 +630,7 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
         </ArtifactActions>
       </ArtifactHeader>
 
-      {diskStatus === "diverged" ? (
+      {remoteHost == null && diskStatus === "diverged" ? (
         <div
           role="status"
           className="flex items-center justify-between gap-3 border-b border-border bg-muted/60 px-4 py-2 text-xs text-muted-foreground"
@@ -641,10 +662,12 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
       <div
         className={cn(
           "flex-1 overflow-auto",
-          diskStatus === "diverged" && "opacity-60",
+          remoteHost == null && diskStatus === "diverged" && "opacity-60",
         )}
       >
-        {viewMode === "image" ? (
+        {remoteHost != null ? (
+          <RemoteArtifactBody artifact={artifact} host={remoteHost} />
+        ) : viewMode === "image" ? (
           <ImageBody
             artifact={artifact}
             src={imageSrc}
@@ -678,6 +701,36 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
         )}
       </div>
     </Artifact>
+  );
+}
+
+function RemoteArtifactBody({
+  artifact,
+  host,
+}: {
+  artifact: OpenArtifact;
+  host: string;
+}) {
+  const { t } = useTranslation("chat");
+  return (
+    <div
+      data-testid="remote-artifact-placeholder"
+      className="flex h-40 flex-col items-center justify-center gap-2 px-4 text-center"
+    >
+      <div className="flex min-w-0 max-w-full items-center gap-2 text-sm text-foreground">
+        <FileTextIcon
+          className="size-4 shrink-0 text-muted-foreground"
+          aria-hidden="true"
+        />
+        <span className="truncate">{artifact.filename}</span>
+        <span className="shrink-0 rounded-full border border-border/80 bg-muted/40 px-1.5 py-px text-xs text-muted-foreground">
+          {t("remoteSessionGuards.onHostChip", { host })}
+        </span>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {t("remoteSessionGuards.viewerUnavailable", { host })}
+      </p>
+    </div>
   );
 }
 

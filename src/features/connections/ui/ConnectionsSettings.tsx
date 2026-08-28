@@ -26,6 +26,7 @@ import {
 } from "@/shared/ui/settings-section";
 import { SearchBar } from "@/shared/ui/SearchBar";
 import { Skeleton } from "@/shared/ui/skeleton";
+import { RemoteHostsSettings } from "@/features/remoteHosts/ui/RemoteHostsSettings";
 import { OAuthConnectionCard } from "./ConnectionCards";
 import { LocalMcpSection } from "./LocalMcpSection";
 
@@ -188,6 +189,9 @@ export function ConnectionsSettings({
             onAskAgentToAddMcp ? askAgentToAddConnection : undefined
           }
         />
+
+        {/* Renders nothing unless the remote-ssh-sessions experiment is on. */}
+        <RemoteHostsSettings />
       </SettingsSections>
     </div>
   );

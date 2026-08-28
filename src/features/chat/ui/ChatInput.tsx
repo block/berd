@@ -290,6 +290,7 @@ export function ChatInput({
   agentModelPicker,
   reasoningEffort,
   projectPicker,
+  remoteHostPicker,
   contextUsage,
   controls,
   onRecallLastUserMessage,
@@ -1979,6 +1980,7 @@ export function ChatInput({
                   onProjectChange,
                   onCreateProject,
                 }}
+                remoteHostPicker={remoteHostPicker}
                 reasoningEffort={reasoningEffort}
                 onRequestComposerFocus={() => textareaRef.current?.focus()}
                 contextUsage={{

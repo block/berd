@@ -27,6 +27,8 @@ import {
 } from "@/features/settings/ui/settingsSections";
 import { useProfileCapabilities } from "@/shared/profile/capabilities";
 import { telemetryConsentEnforced } from "@/shared/telemetry/consent";
+import { REMOTE_SSH_SESSIONS_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { selectLocalMessageCountsBySession } from "@/features/chat/stores/chatSelectors";
 import {
@@ -111,6 +113,8 @@ export function SearchView({
   ]);
   const { formatRelativeTimeToNow } = useLocaleFormatting();
   const capabilities = useProfileCapabilities();
+  const remoteSshSessionsEnabled =
+    useExperiment(REMOTE_SSH_SESSIONS_EXPERIMENT_ID)?.enabled === true;
   const visibleSettingsSections = useMemo(
     () => getVisibleSettingsSections(capabilities),
     [capabilities],
@@ -204,12 +208,16 @@ export function SearchView({
           ...(telemetryConsentEnforced() || !capabilities.telemetry
             ? ["telemetry"]
             : []),
+          // The remote SSH hosts card only renders on the connections page
+          // while its experiment is on (RemoteHostsSettings returns null).
+          ...(remoteSshSessionsEnabled ? [] : ["remote-ssh-hosts"]),
         ],
       }),
     [
       capabilities.agentTools,
       capabilities.telemetry,
       onOpenSettings,
+      remoteSshSessionsEnabled,
       t,
       trimmedDebouncedQuery,
       visibleSettingsSections,

@@ -38,6 +38,10 @@ import {
   hydrateSessionTarget,
   transitionSessionTarget,
 } from "@/features/chat/lib/sessionTargetCoordinator";
+import {
+  ensureRemoteHostConnected,
+  isRemoteSession,
+} from "@/features/chat/lib/remoteSession";
 
 export function clearIdleStreamingMessageAfterReplay(
   sessionId: string,
@@ -78,6 +82,12 @@ async function resolveWorkingDirForSessionLoad(
   session: ChatSession | undefined,
   project: ProjectInfo | null,
 ): Promise<SessionLoadWorkingDir> {
+  if (session && isRemoteSession(session)) {
+    // The session's paths live on the remote host: local existence checks,
+    // path resolution, and the local artifact-cwd fallback are all
+    // meaningless there, so pass the stored workingDir through verbatim.
+    return { workingDir: session.workingDir ?? "" };
+  }
   const activeWorkspace =
     session?.id != null
       ? useChatSessionStore.getState().activeWorkspaceBySession[session.id]
@@ -380,6 +390,11 @@ async function performSessionMessagesLoad(
       : null;
     const { workingDir, missingCwdWarning } =
       await resolveWorkingDirForSessionLoad(session, project);
+    if (session && isRemoteSession(session) && session.remoteHost) {
+      // A failed connect throws into the shared catch below, which surfaces
+      // the standard session-load-failed notification for this session.
+      await ensureRemoteHostConnected(session.remoteHost);
+    }
     const loadedSelection = await acpLoadSession(sessionId, workingDir);
     const loadedTarget = loadedSelection
       ? executionTargetFromGooseServeSession(loadedSelection)

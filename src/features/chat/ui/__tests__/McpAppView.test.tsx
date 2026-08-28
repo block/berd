@@ -60,8 +60,8 @@ vi.mock("@mcp-ui/client", () => ({
   },
 }));
 
-vi.mock("@/shared/api/acpConnection", () => ({
-  getClient: mocks.getClient,
+vi.mock("@/shared/api/acpSessionBackends", () => ({
+  getClientForSession: mocks.getClient,
 }));
 
 vi.mock("@/shared/api/gooseServeHost", () => ({

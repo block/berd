@@ -235,6 +235,10 @@
       "description": "Fija prompts guardados en Inicio que se ejecutan con un clic, opcionalmente con un agente adjunto.",
       "title": "Pins de prompts"
     },
+    "remoteSshSessions": {
+      "description": "Ejecuta sesiones en una máquina remota por SSH usando los hosts de tu configuración SSH. Berd inicia un daemon de Goose en el host remoto y crea un túnel hacia él.",
+      "title": "Sesiones SSH remotas"
+    },
     "resetToAuto": "Restablecer a automático",
     "saveError": "No se pudo guardar el ajuste del experimento. Inténtalo de nuevo.",
     "skillDiscovery": {
@@ -692,6 +696,44 @@
     "showMore": "Mostrar {{count}} proveedores más",
     "title": "Proveedores",
     "waitingForSignIn": "Esperando inicio de sesión..."
+  },
+  "remoteHosts": {
+    "actions": {
+      "check": "Comprobar host",
+      "connect": "Conectar",
+      "disconnect": "Desconectar",
+      "shutdown": "Detener backend remoto"
+    },
+    "custom": {
+      "description": "Conéctate a una máquina que no está en tu configuración SSH.",
+      "emptyError": "Introduce un host al que conectarte.",
+      "label": "Conectar a otro host",
+      "placeholder": "usuario@host"
+    },
+    "description": "Los hosts provienen de tu ~/.ssh/config. La autenticación por clave o agente ya debe funcionar: comprueba primero que `ssh <host>` funciona en una terminal.",
+    "doctor": {
+      "checking": "Comprobando el host...",
+      "found": "Encontrado",
+      "gooseMissing": "Instala goose en este host para usarlo en sesiones remotas.",
+      "notFound": "No encontrado"
+    },
+    "empty": "No se encontraron hosts en ~/.ssh/config.",
+    "shutdownConfirm": {
+      "cancel": "Cancelar",
+      "confirm": "Detener backend",
+      "description": "Esto detiene el daemon del agente en el host remoto y finaliza cualquier trabajo remoto en curso.",
+      "stopping": "Deteniendo...",
+      "title": "¿Detener el backend remoto en \"{{host}}\"?"
+    },
+    "status": {
+      "connecting": "Conectando...",
+      "disconnected": "Desconectado",
+      "failed": "Error",
+      "ready": "Conectado",
+      "reconnecting": "Reconectando...",
+      "reconnectingAttempt": "Reconectando (intento {{attempt}})..."
+    },
+    "title": "Hosts SSH remotos"
   },
   "runtimeConfig": {
     "clearError": "No se pudo limpiar la respuesta del endpoint falso.",

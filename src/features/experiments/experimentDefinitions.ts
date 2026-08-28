@@ -67,6 +67,8 @@ export const RELATED_PULL_REQUESTS_EXPERIMENT_ID = "related-pull-requests";
 
 export const PROMPT_PINS_EXPERIMENT_ID = "prompt-pins";
 
+export const REMOTE_SSH_SESSIONS_EXPERIMENT_ID = "remote-ssh-sessions";
+
 export const EXPERIMENT_DEFINITIONS = [
   {
     id: BUILDERBOT_SURFACE_EXPERIMENT_ID,
@@ -125,5 +127,14 @@ export const EXPERIMENT_DEFINITIONS = [
     // keep rendering when disabled (user data is never hidden). No explicit
     // default, so it follows the global auto-enable preference: on in dev
     // builds, off in production.
+  },
+  {
+    id: REMOTE_SSH_SESSIONS_EXPERIMENT_ID,
+    titleKey: "experiments.remoteSshSessions.title",
+    descriptionKey: "experiments.remoteSshSessions.description",
+    // Opt-in only: connecting runs Goose on user-configured SSH hosts, so it
+    // must never turn on via the dev auto-enable default.
+    manualEnableOnly: true,
+    settingsVisibility: "all",
   },
 ] as const satisfies readonly ExperimentDefinition[];

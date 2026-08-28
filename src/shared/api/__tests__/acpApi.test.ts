@@ -56,6 +56,7 @@ function createConfigOptionsResponse() {
 
 vi.mock("../acpConnection", () => ({
   getClient: (...args: unknown[]) => mocks.getClient(...args),
+  getBackendClient: (...args: unknown[]) => mocks.getClient(...args),
   interceptSessionNotifications: (...args: unknown[]) =>
     mocks.interceptSessionNotifications(...args),
 }));

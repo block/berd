@@ -1,5 +1,6 @@
 import * as acpApi from "./acpApi";
-import { invalidateClientConnection } from "./acpConnection";
+import { invalidateBackendConnection } from "./acpConnection";
+import { getSessionBackend } from "./acpSessionBackends";
 import {
   readSessionExecutionConfigSnapshot,
   type AcpSessionConfigSnapshotContext,
@@ -84,12 +85,14 @@ async function runBoundedSessionMutation<T>(
   } catch (error) {
     if (didTimeOut) {
       prepared.delete(sessionId);
-      await invalidateClientConnection().catch((invalidationError) => {
-        console.error(
-          "Failed to invalidate timed-out ACP connection:",
-          invalidationError,
-        );
-      });
+      await invalidateBackendConnection(getSessionBackend(sessionId)).catch(
+        (invalidationError) => {
+          console.error(
+            "Failed to invalidate timed-out ACP connection:",
+            invalidationError,
+          );
+        },
+      );
     }
     throw error;
   } finally {
