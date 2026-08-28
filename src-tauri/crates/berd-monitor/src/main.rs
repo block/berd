@@ -881,22 +881,7 @@ fn flush_pending(
             persist_pending(&paths.pending, pending)?;
         }
         let end = pending.active_len;
-        let text = String::from_utf8_lossy(&pending.bytes[..end]);
-        let mut prompt = format!(
-            "[monitor: {label} | pid {}]\n{}",
-            std::process::id(),
-            text.trim_end()
-        );
-        if !instructions.is_empty() {
-            prompt.push_str("\n\n");
-            prompt.push_str(instructions);
-        }
-        if prompt.encode_utf16().count() > MAX_PROMPT_CODE_UNITS {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "monitor delivery prompt exceeded its internal size bound",
-            ));
-        }
+        let prompt = build_delivery_prompt(label, &pending.bytes[..end], instructions)?;
         let delivery_id = pending.delivery_id(paths);
         if !deliver_to_session(paths, session_id, &prompt, if_running, &delivery_id) {
             log_line(paths, "delivery failed; buffered output will be retried")?;
@@ -908,6 +893,26 @@ fn flush_pending(
         log_line(paths, "delivered one event batch")?;
     }
     Ok(())
+}
+
+fn build_delivery_prompt(label: &str, bytes: &[u8], instructions: &str) -> io::Result<String> {
+    let text = String::from_utf8_lossy(bytes).replace('\0', "\u{fffd}");
+    let mut prompt = format!(
+        "[monitor: {label} | pid {}]\n{}",
+        std::process::id(),
+        text.trim_end()
+    );
+    if !instructions.is_empty() {
+        prompt.push_str("\n\n");
+        prompt.push_str(instructions);
+    }
+    if prompt.encode_utf16().count() > MAX_PROMPT_CODE_UNITS {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "monitor delivery prompt exceeded its internal size bound",
+        ));
+    }
+    Ok(prompt)
 }
 
 fn deliver_to_session(
@@ -1409,6 +1414,73 @@ mod tests {
         let mut output = records.concat();
         assert_eq!(output.pop(), Some(b'\n'));
         assert_eq!(output, input);
+    }
+
+    #[test]
+    fn delivery_prompt_replaces_embedded_nul_bytes_without_growing() {
+        let prompt = build_delivery_prompt("test", b"before\0after\n", "continue").unwrap();
+
+        assert!(!prompt.contains('\0'));
+        assert!(prompt.contains("before\u{fffd}after"));
+        assert!(prompt.contains("continue"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn nul_output_is_delivered_once_and_does_not_block_later_output() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let key = format!(
+            "delivery-nul-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let session_id = "test-session";
+        let paths = StatePaths::for_key(&key, session_id);
+        ensure_private_directory(&paths.root).unwrap();
+        let capture = paths.root.join("delivered.txt");
+        let fake_berdctl = paths.root.join("fake-berdctl");
+        fs::write(
+            &fake_berdctl,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" >> '{}'\n",
+                capture.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&fake_berdctl, fs::Permissions::from_mode(0o700)).unwrap();
+        let binary = fake_berdctl.into_os_string();
+
+        let first = build_delivery_prompt("test", b"before\0after\n", "").unwrap();
+        assert!(deliver_with_candidates(
+            &paths,
+            session_id,
+            &first,
+            RunningMode::Steer,
+            "nul-delivery",
+            vec![PathBuf::from("stale")],
+            vec![binary.clone()],
+            Duration::from_secs(2),
+        ));
+        let later = build_delivery_prompt("test", b"later output\n", "").unwrap();
+        assert!(deliver_with_candidates(
+            &paths,
+            session_id,
+            &later,
+            RunningMode::Steer,
+            "later-delivery",
+            vec![PathBuf::from("stale")],
+            vec![binary],
+            Duration::from_secs(2),
+        ));
+
+        let delivered = fs::read_to_string(capture).unwrap();
+        assert_eq!(delivered.matches("before\u{fffd}after").count(), 1);
+        assert!(delivered.contains("later output"));
+        fs::remove_dir_all(paths.root).unwrap();
     }
 
     #[cfg(unix)]
