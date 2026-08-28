@@ -19,6 +19,7 @@ import { importPersonas } from "@/shared/api/agents";
 import { useAvatarLibrary } from "@/features/agents/hooks/useAvatarLibrary";
 import type { AvatarLibraryState } from "@/features/agents/hooks/useAvatarLibrary";
 import type { CreatePersonaRequest } from "@/shared/types/agents";
+import { placeholderAgentName } from "@/features/agents/lib/agentBuilderIdentity";
 import { AgentsView } from "../AgentsView";
 
 const mockCreatePersona = vi.hoisted(() => vi.fn());
@@ -27,7 +28,7 @@ const mockTrackAgentCreateCompleted = vi.hoisted(() => vi.fn());
 const mockTrackAgentEditCompleted = vi.hoisted(() => vi.fn());
 
 const mockDraftSource = vi.hoisted(() => ({
-  type: "agent",
+  type: "agent" as const,
   path: "/Users/x/.agents/agents/draft-session.md",
   name: "New agent",
   description: "Draft",
@@ -136,12 +137,13 @@ vi.mock("@/features/agents/lib/agentTelemetry", () => ({
   trackAgentDeleteCompleted: vi.fn(),
 }));
 
+const mockRefreshFromDisk = vi.fn();
 vi.mock("@/features/agents/hooks/usePersonas", () => ({
   usePersonas: () => ({
     createPersona: mockCreatePersona,
     updatePersona: mockUpdatePersona,
     deletePersona: vi.fn(),
-    refreshFromDisk: vi.fn(),
+    refreshFromDisk: mockRefreshFromDisk,
   }),
 }));
 
@@ -291,6 +293,9 @@ describe("AgentsView entry points", () => {
     useAgentStore.setState({
       personas: [],
       personasLoading: false,
+      draftSources: [],
+      galleryRevision: 0,
+      galleryMutationsInFlight: 0,
       providers: [],
     });
     useChatSessionStore.setState({
@@ -718,10 +723,13 @@ describe("AgentsView entry points", () => {
     expect(onStartAgentBuilderSession).toHaveBeenCalledWith({});
   });
 
-  it("shows draft sessions at the end of the gallery and continues or deletes them", async () => {
+  it("shows drafts from disk at the end of the gallery and continues or deletes them", async () => {
     const onStartAgentBuilderSession = vi.fn();
     const onDeleteDraftSession = vi.fn();
-    useAgentStore.setState({ personas: [persona] });
+    useAgentStore.setState({
+      personas: [persona],
+      draftSources: [mockDraftSource],
+    });
     useChatSessionStore.setState({
       sessions: [
         {
@@ -734,7 +742,6 @@ describe("AgentsView entry points", () => {
           targetAgentPath: "/Users/x/.agents/agents/draft-session.md",
           targetAgentSlug: "draft-session",
           targetAgentDraftState: null,
-          targetAgentDraftSaved: true,
         },
       ],
     });
@@ -763,7 +770,131 @@ describe("AgentsView entry points", () => {
       screen.getByRole("button", { name: "gallery.deleteDraftAria" }),
     );
 
-    expect(onDeleteDraftSession).toHaveBeenCalledWith("draft-session");
+    await waitFor(() => {
+      expect(onDeleteDraftSession).toHaveBeenCalledWith("draft-session");
+    });
+    expect(useAgentStore.getState().draftSources).toEqual([]);
+  });
+
+  it("shows a draft whose builder chat is gone and deletes its file directly", async () => {
+    const onDeleteDraftSession = vi.fn();
+    const { deletePersonaSource } = await import("@/shared/api/agents");
+    useAgentStore.setState({
+      personas: [persona],
+      draftSources: [mockDraftSource],
+    });
+    useChatSessionStore.setState({ sessions: [] });
+
+    render(<AgentsView onDeleteDraftSession={onDeleteDraftSession} />);
+
+    expect(screen.getByText("gallery.draft")).toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(
+      screen.getByRole("button", { name: "gallery.deleteDraftAria" }),
+    );
+
+    await waitFor(() => {
+      expect(deletePersonaSource).toHaveBeenCalledWith(mockDraftSource.path);
+    });
+    expect(onDeleteDraftSession).not.toHaveBeenCalled();
+    expect(useAgentStore.getState().draftSources).toEqual([]);
+  });
+
+  it("does not let a disk refresh that started before Delete put the card back", async () => {
+    const { deletePersonaSource } = await import("@/shared/api/agents");
+    useAgentStore.setState({
+      personas: [persona],
+      draftSources: [mockDraftSource],
+    });
+    useChatSessionStore.setState({ sessions: [] });
+
+    // A focus/interval refresh photographs the folder with the draft still in
+    // it, but the answer is slow to come back.
+    let resolveRefresh: (listing: {
+      personas: (typeof persona)[];
+      drafts: (typeof mockDraftSource)[];
+    }) => void = () => {};
+    const staleRefresh = useAgentStore.getState().refreshGallery(
+      () =>
+        new Promise((resolve) => {
+          resolveRefresh = resolve;
+        }),
+    );
+
+    render(<AgentsView onDeleteDraftSession={vi.fn()} />);
+    const user = userEvent.setup();
+    await user.click(
+      screen.getByRole("button", { name: "gallery.deleteDraftAria" }),
+    );
+    await waitFor(() => {
+      expect(deletePersonaSource).toHaveBeenCalledWith(mockDraftSource.path);
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("gallery.draft")).not.toBeInTheDocument();
+    });
+
+    // The old photo arrives after the delete. It must be ignored.
+    resolveRefresh({ personas: [persona], drafts: [mockDraftSource] });
+    await expect(staleRefresh).resolves.toBe(false);
+    expect(useAgentStore.getState().draftSources).toEqual([]);
+    expect(screen.queryByText("gallery.draft")).not.toBeInTheDocument();
+  });
+
+  it("does not delete a finished agent that now lives where a stale Draft card points", async () => {
+    // The card was photographed while the path held a draft. Since then the
+    // file at that path became a finished agent. Delete must re-read and
+    // refuse, then show what is really on disk.
+    const { deletePersonaSource, readAgentSourceFile } = await import(
+      "@/shared/api/agents"
+    );
+    vi.mocked(readAgentSourceFile).mockResolvedValueOnce({
+      ...mockDraftSource,
+      name: "Constructive Critic",
+      properties: {},
+    });
+    useAgentStore.setState({
+      personas: [persona],
+      draftSources: [mockDraftSource],
+    });
+    useChatSessionStore.setState({ sessions: [] });
+
+    render(<AgentsView onDeleteDraftSession={vi.fn()} />);
+    const user = userEvent.setup();
+    await user.click(
+      screen.getByRole("button", { name: "gallery.deleteDraftAria" }),
+    );
+
+    await waitFor(() => {
+      expect(mockRefreshFromDisk).toHaveBeenCalled();
+    });
+    expect(deletePersonaSource).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("does not show a card for an untouched New agent placeholder", () => {
+    useAgentStore.setState({
+      personas: [persona],
+      draftSources: [
+        {
+          ...mockDraftSource,
+          path: "/Users/x/.agents/agents/untitled-agent-1.md",
+          name: placeholderAgentName("draft-session"),
+          properties: {
+            draft: true,
+            builderSessionId: "draft-session",
+            provider: "claude-acp",
+            modelProviderId: "claude-acp",
+            model: "claude-sonnet-5",
+            avatar: "app-avatar:gloopies-1",
+          },
+        },
+      ],
+    });
+
+    render(<AgentsView />);
+
+    expect(screen.queryByText("gallery.draft")).not.toBeInTheDocument();
   });
 
   it("returns from the detail page to the agents gallery", () => {

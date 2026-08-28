@@ -10,6 +10,7 @@ import {
   type CreatePersonaSourceRequest,
   type PersonaSourcePatch,
 } from "@/shared/api/agents";
+import { useAgentStore } from "@/features/agents/stores/agentStore";
 import {
   deriveSlug,
   fileStem,
@@ -103,9 +104,44 @@ export async function updateAgentBuilderSource(
   return updated;
 }
 
+/**
+ * Thrown when a delete was asked for a path that no longer holds a draft:
+ * the caller was working from a stale view of the file.
+ */
+export class AgentBuilderSourceNotDraftError extends Error {
+  readonly path: string;
+
+  constructor(path: string) {
+    super(`Agent source at ${path} is no longer a draft`);
+    this.name = "AgentBuilderSourceNotDraftError";
+    this.path = path;
+  }
+}
+
+/**
+ * The one way a builder draft leaves disk. Re-reads the file first so a
+ * caller holding a stale entry (a gallery card, a cached lookup) can never
+ * delete an agent that has since been finished or replaced at that path. A
+ * file that cannot be read is handed to the backend as-is; the backend is the
+ * authority on whether it exists. Runs as a gallery mutation so a disk
+ * listing that started before the delete cannot land afterwards.
+ */
 export async function discardAgentBuilderSource(path: string): Promise<void> {
-  await deletePersonaSource(path);
-  localDraftSourcesByPath.delete(path);
+  await useAgentStore.getState().mutateGallery(async () => {
+    let fresh: AgentSourceEntry | undefined;
+    try {
+      fresh = await readAgentSourceFile(path);
+    } catch {
+      fresh = undefined;
+    }
+    if (fresh && fresh.properties?.draft !== true) {
+      localDraftSourcesByPath.delete(path);
+      throw new AgentBuilderSourceNotDraftError(path);
+    }
+
+    await deletePersonaSource(path);
+    localDraftSourcesByPath.delete(path);
+  });
 }
 
 export function forgetLocalAgentBuilderSource(path: string): void {
@@ -119,21 +155,27 @@ export async function promoteAgentBuilderDraftSource(
     return source;
   }
 
-  return promotePersonaSource(source.path, {
-    name: source.name,
-    description: source.description,
-    content: source.content,
-    properties: source.properties,
-  }).finally(() => {
-    localDraftSourcesByPath.delete(source.path);
-  });
+  // A gallery mutation for the same reason as discard: the draft file is
+  // replaced by the promoted one, and a listing from before must not win.
+  return useAgentStore.getState().mutateGallery(() =>
+    promotePersonaSource(source.path, {
+      name: source.name,
+      description: source.description,
+      content: source.content,
+      properties: source.properties,
+    }).finally(() => {
+      localDraftSourcesByPath.delete(source.path);
+    }),
+  );
 }
 
 export async function findAgentBuilderSource(
   sessionId: string,
   path: string,
 ): Promise<AgentSourceEntry | undefined> {
-  const sources = await listAgentBuilderSources();
+  const backendSources = await listPersonaSources();
+  const backendPaths = new Set(backendSources.map((source) => source.path));
+  const sources = mergeLocalDraftSources(backendSources);
   const foundByPath = sources.find((source) => source.path === path);
   const sessionMatches = sources.filter(
     (source) => source.properties?.builderSessionId === sessionId,
@@ -142,13 +184,29 @@ export async function findAgentBuilderSource(
     (source) => source.path !== path && !isEmptyPlaceholderDraft(source),
   );
 
-  if (foundByPath && !isEmptyPlaceholderDraft(foundByPath)) {
-    return readListedDraftFresh(foundByPath);
-  }
+  // Candidates in order of trust. An edited file at the known path wins only
+  // while the backend still lists it; otherwise a backend-listed file that
+  // moved under this session (external rename) beats a cache entry whose
+  // file is gone. Each candidate is read fresh, and a read that evicts a
+  // stale cache entry falls through to the next candidate instead of
+  // reporting the draft missing.
+  const editedAtPath =
+    foundByPath && !isEmptyPlaceholderDraft(foundByPath)
+      ? foundByPath
+      : undefined;
+  const ordered =
+    editedAtPath && backendPaths.has(editedAtPath.path)
+      ? [editedAtPath, movedNonPlaceholder, foundByPath, sessionMatches[0]]
+      : [movedNonPlaceholder, editedAtPath, foundByPath, sessionMatches[0]];
+  const candidates = [
+    ...new Set(ordered.filter((c): c is AgentSourceEntry => c !== undefined)),
+  ];
 
-  const listedSource = movedNonPlaceholder ?? foundByPath ?? sessionMatches[0];
-  if (listedSource) {
-    return readListedDraftFresh(listedSource);
+  for (const candidate of candidates) {
+    const fresh = await readListedDraftFresh(candidate, backendPaths);
+    if (fresh) {
+      return fresh;
+    }
   }
 
   try {
@@ -262,7 +320,8 @@ function isBuilderDraftProperties(
 
 async function readListedDraftFresh(
   source: AgentSourceEntry,
-): Promise<AgentSourceEntry> {
+  backendPaths: ReadonlySet<string>,
+): Promise<AgentSourceEntry | undefined> {
   if (source.properties?.draft !== true) {
     return source;
   }
@@ -270,6 +329,14 @@ async function readListedDraftFresh(
   try {
     return await readAgentSourceFile(source.path, source);
   } catch {
+    // A draft the backend still lists may be temporarily unreadable; keep the
+    // listed copy. A draft only the local cache remembers has no file behind
+    // it anymore (moved or removed outside the app), so forget it rather than
+    // hand back a stale entry that later delete/save calls will trip over.
+    if (!backendPaths.has(source.path)) {
+      localDraftSourcesByPath.delete(source.path);
+      return undefined;
+    }
     return source;
   }
 }

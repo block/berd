@@ -3988,7 +3988,10 @@ export function AppShell({
           }
           if (wasActiveSession) {
             setActiveSession(null);
-            setActiveView("home");
+            // Only leave a view that was showing the archived chat. Settings,
+            // Agents, and other surfaces keep the active chat selected
+            // underneath them; the user is looking at those, not at the chat.
+            setActiveView((view) => (view === "chat" ? "home" : view));
           }
 
           return cleanupFailureReason
