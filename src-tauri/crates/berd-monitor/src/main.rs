@@ -973,12 +973,70 @@ fn append_file(path: &Path, data: &[u8]) -> io::Result<()> {
 }
 
 fn atomic_write(path: &Path, data: &[u8]) -> io::Result<()> {
+    atomic_write_with(path, data, replace_file_atomically)
+}
+
+fn atomic_write_with(
+    path: &Path,
+    data: &[u8],
+    replace: impl FnOnce(&Path, &Path) -> io::Result<()>,
+) -> io::Result<()> {
     let temporary = path.with_extension(format!("tmp.{}", std::process::id()));
-    fs::write(&temporary, data)?;
-    if path.exists() {
-        fs::remove_file(path)?;
+    let mut file = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(&temporary)?;
+    file.write_all(data)?;
+    file.sync_all()?;
+    drop(file);
+
+    if let Err(error) = replace(&temporary, path) {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
     }
-    fs::rename(temporary, path)
+
+    #[cfg(unix)]
+    if let Some(parent) = path.parent() {
+        File::open(parent)?.sync_all()?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn replace_file_atomically(source: &Path, destination: &Path) -> io::Result<()> {
+    fs::rename(source, destination)
+}
+
+#[cfg(windows)]
+fn replace_file_atomically(source: &Path, destination: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let destination = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let result = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if result == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
 }
 
 fn log_line(paths: &StatePaths, message: &str) -> io::Result<()> {
@@ -1002,6 +1060,29 @@ fn render_command(command: &[OsString]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_atomic_replace_preserves_pending_output() {
+        let root = env::temp_dir().join(format!(
+            "berd-monitor-atomic-write-test-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let pending = root.join("pending");
+        fs::write(&pending, b"still pending").unwrap();
+
+        let error = atomic_write_with(&pending, b"replacement", |_, _| {
+            Err(io::Error::other("injected replacement failure"))
+        })
+        .unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+        assert_eq!(fs::read(&pending).unwrap(), b"still pending");
+        assert!(!pending
+            .with_extension(format!("tmp.{}", std::process::id()))
+            .exists());
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[cfg(unix)]
     fn test_process_exists(pid: u32) -> bool {
