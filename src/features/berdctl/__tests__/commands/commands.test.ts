@@ -1847,6 +1847,43 @@ describe("sessions.send", () => {
     expect(mocks.acpSteerMessage).not.toHaveBeenCalled();
   });
 
+  it("deduplicates a delivery id restored while hydrating a cold transcript", async () => {
+    mockSessionFound({ providerId: "codex-acp" });
+    mocks.loadSessionMessages.mockImplementationOnce(async () => {
+      const accepted = createUserMessage("monitor event");
+      accepted.metadata = {
+        origin: "berdctl_cross_session",
+        berdDeliveryId: "monitor-event-1",
+      };
+      useChatStore.getState().addMessage("session-1", accepted);
+      return true;
+    });
+
+    const duplicate = await dispatchCommand(
+      "sessions",
+      {
+        action: "send",
+        session_id: "session-1",
+        prompt: "monitor event retried after restart",
+        delivery_id: "monitor-event-1",
+      },
+      ctx,
+    );
+
+    expect(duplicate).toEqual({
+      session_id: "session-1",
+      send_status: "deduplicated",
+    });
+    expect(useChatStore.getState().messagesBySession["session-1"]).toHaveLength(
+      1,
+    );
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-1"],
+    ).toBeUndefined();
+    expect(mocks.acpSendMessage).not.toHaveBeenCalled();
+    expect(mocks.acpSteerMessage).not.toHaveBeenCalled();
+  });
+
   it("rejects multiline sender labels before dispatch", async () => {
     const error = await expectCommandError(
       dispatchCommand(

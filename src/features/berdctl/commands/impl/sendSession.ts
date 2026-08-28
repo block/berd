@@ -101,6 +101,8 @@ Result:
       { findProjectOrThrow },
       {
         berdctlCrossSessionSendOptions,
+        BerdctlDeliveryAlreadyAcceptedError,
+        hasAcceptedBerdctlDelivery,
         reserveBerdctlDelivery,
         sendPromptToExistingSessionInBackground,
         SessionDispatchContentionError,
@@ -237,9 +239,20 @@ Result:
           {
             returnOnDispatch: true,
             sendOptions,
+            validateHydratedTranscript: () => {
+              if (
+                args.delivery_id &&
+                hasAcceptedBerdctlDelivery(args.session_id, args.delivery_id)
+              ) {
+                throw new BerdctlDeliveryAlreadyAcceptedError();
+              }
+            },
           },
         );
       } catch (error) {
+        if (error instanceof BerdctlDeliveryAlreadyAcceptedError) {
+          return { session_id: session.id, send_status: "deduplicated" };
+        }
         if (error instanceof SessionDispatchContentionError) {
           if (args.if_running === "queue") {
             useChatStore.getState().enqueueTransportReadyMessage(

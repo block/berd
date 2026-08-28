@@ -26,6 +26,13 @@ export const BERDCTL_CROSS_SESSION_ORIGIN =
 
 const reservedDeliveryIds = new Set<string>();
 
+export class BerdctlDeliveryAlreadyAcceptedError extends Error {
+  constructor() {
+    super("The Berd delivery was already accepted.");
+    this.name = "BerdctlDeliveryAlreadyAcceptedError";
+  }
+}
+
 export function berdctlCrossSessionSendOptions(
   options: { senderLabel?: string; deliveryId?: string } = {},
 ): ChatSendOptions {
@@ -93,6 +100,7 @@ export async function sendPromptToExistingSessionInBackground(
   options: {
     returnOnDispatch?: boolean;
     sendOptions?: ChatSendOptions;
+    validateHydratedTranscript?: () => void;
   } = {},
 ): Promise<void> {
   const acquisition = await acquireExistingSessionForBackgroundSend(sessionId);
@@ -126,6 +134,7 @@ export async function sendPromptToExistingSessionInBackground(
           dispatchToken: targetLease.token,
         });
       const session = useChatSessionStore.getState().getSession(sessionId);
+      options.validateHydratedTranscript?.();
       await sendPromptInBackground(
         sessionId,
         prompt,
