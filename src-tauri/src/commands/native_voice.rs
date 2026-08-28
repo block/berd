@@ -24,8 +24,7 @@ use tokio::sync::mpsc as tokio_mpsc;
 
 use super::mac_speech;
 use super::{
-    native_input_mute, pocket_voice::parakeet_model_dir, voice_buddy,
-    voice_capture::VoiceCaptureState,
+    native_input_mute, pocket_voice::parakeet_model_dir, voice_capture::VoiceCaptureState,
 };
 
 pub(crate) const EVENT_NAME: &str = "voice-conversation:event";
@@ -1672,65 +1671,11 @@ pub async fn stop_native_voice_conversation_for_replacement(
     Ok(status(&app, &state).await)
 }
 
-fn replacement_caller_matches_target(
-    caller_window_label: &str,
-    target_owner: Option<&str>,
-    owns_foreground_session: bool,
-) -> bool {
-    if !owns_foreground_session {
-        return false;
-    }
+fn caller_owns_target(caller_window_label: &str, target_owner: Option<&str>) -> bool {
     match target_owner {
         Some(owner_window_label) => owner_window_label == caller_window_label,
         None => caller_window_label == "main",
     }
-}
-
-fn voice_target_window_focus_is_valid(
-    window_label: &str,
-    focused: bool,
-    app_is_active: bool,
-    main_surface_is_available: bool,
-    another_window_is_focused: bool,
-) -> bool {
-    focused
-        || (window_label == "main"
-            && app_is_active
-            && main_surface_is_available
-            && !another_window_is_focused)
-}
-
-fn voice_main_surface_is_available(visible: bool, minimized: bool) -> bool {
-    visible && !minimized
-}
-
-#[cfg(target_os = "macos")]
-fn app_is_active_for_main_window_focus_fallback() -> bool {
-    use objc2_app_kit::NSRunningApplication;
-
-    // The non-activating floating controls can leave Berd frontmost while
-    // AppKit reports that none of its ordinary windows are focused.
-    NSRunningApplication::currentApplication().isActive()
-}
-
-#[cfg(not(target_os = "macos"))]
-fn app_is_active_for_main_window_focus_fallback() -> bool {
-    false
-}
-
-fn another_user_window_is_focused(webview_window: &WebviewWindow) -> Result<bool, String> {
-    for (label, window) in webview_window.app_handle().webview_windows() {
-        if label == webview_window.label() || label == voice_buddy::WINDOW_LABEL {
-            continue;
-        }
-        if window
-            .is_focused()
-            .map_err(|error| format!("Could not confirm Berd window focus: {error}"))?
-        {
-            return Ok(true);
-        }
-    }
-    Ok(false)
 }
 
 fn validate_voice_target_session(
@@ -1740,50 +1685,12 @@ fn validate_voice_target_session(
     renderer_id: &str,
     renderer_epoch: u64,
     target_session_id: &str,
-    foreground_generation: Option<u64>,
+    _foreground_generation: Option<u64>,
 ) -> Result<(), String> {
+    capture.activate_renderer(webview_window.label(), renderer_id, renderer_epoch)?;
     let target_owner = window_sessions.label_for(target_session_id);
-    let owns_foreground_session = capture.foreground_session_matches_generation(
-        webview_window.label(),
-        renderer_id,
-        renderer_epoch,
-        target_session_id,
-        foreground_generation,
-    )?;
-    if !replacement_caller_matches_target(
-        webview_window.label(),
-        target_owner.as_deref(),
-        owns_foreground_session,
-    ) {
-        return Err("The target session is no longer in the foreground.".to_string());
-    }
-    let focused = webview_window
-        .is_focused()
-        .map_err(|error| format!("Could not confirm the target session window focus: {error}"))?;
-    let app_is_active = !focused
-        && webview_window.label() == "main"
-        && app_is_active_for_main_window_focus_fallback();
-    let main_surface_is_available = if app_is_active {
-        let visible = webview_window
-            .is_visible()
-            .map_err(|error| format!("Could not confirm the main window visibility: {error}"))?;
-        let minimized = webview_window
-            .is_minimized()
-            .map_err(|error| format!("Could not confirm the main window state: {error}"))?;
-        voice_main_surface_is_available(visible, minimized)
-    } else {
-        false
-    };
-    let another_window_is_focused =
-        main_surface_is_available && another_user_window_is_focused(webview_window)?;
-    if !voice_target_window_focus_is_valid(
-        webview_window.label(),
-        focused,
-        app_is_active,
-        main_surface_is_available,
-        another_window_is_focused,
-    ) {
-        return Err("The target session window is no longer focused.".to_string());
+    if !caller_owns_target(webview_window.label(), target_owner.as_deref()) {
+        return Err("The target session belongs to a different Berd window.".to_string());
     }
     Ok(())
 }
@@ -2965,65 +2872,12 @@ mod tests {
     }
 
     #[test]
-    fn replacement_stop_requires_the_target_session_window() {
-        assert!(replacement_caller_matches_target("main", None, true));
-        assert!(!replacement_caller_matches_target("main", None, false));
-        assert!(!replacement_caller_matches_target(
-            "main",
-            Some("session:target"),
-            true,
-        ));
-        assert!(replacement_caller_matches_target(
-            "session:target",
-            Some("session:target"),
-            true,
-        ));
-        assert!(!replacement_caller_matches_target(
-            "session:other",
-            Some("session:target"),
-            true,
-        ));
-        assert!(!replacement_caller_matches_target(
-            "voice-buddy",
-            None,
-            true,
-        ));
-    }
-
-    #[test]
-    fn replacement_focus_accepts_an_active_app_only_for_the_main_window() {
-        assert!(voice_main_surface_is_available(true, false));
-        assert!(!voice_main_surface_is_available(false, false));
-        assert!(!voice_main_surface_is_available(true, true));
-        assert!(voice_target_window_focus_is_valid(
-            "main", true, false, false, false,
-        ));
-        assert!(voice_target_window_focus_is_valid(
-            "main", false, true, true, false,
-        ));
-        assert!(!voice_target_window_focus_is_valid(
-            "main", false, true, true, true,
-        ));
-        assert!(!voice_target_window_focus_is_valid(
-            "main", false, true, false, false,
-        ));
-        assert!(!voice_target_window_focus_is_valid(
-            "main", false, false, true, false,
-        ));
-        assert!(voice_target_window_focus_is_valid(
-            "session:target",
-            true,
-            false,
-            false,
-            false,
-        ));
-        assert!(!voice_target_window_focus_is_valid(
-            "session:target",
-            false,
-            true,
-            true,
-            false,
-        ));
+    fn call_target_ownership_survives_focus_changes_and_rejects_other_windows() {
+        assert!(caller_owns_target("main", None));
+        assert!(!caller_owns_target("main", Some("session:target")));
+        assert!(caller_owns_target("session:target", Some("session:target"),));
+        assert!(!caller_owns_target("session:other", Some("session:target"),));
+        assert!(!caller_owns_target("voice-buddy", None));
     }
 
     #[test]
