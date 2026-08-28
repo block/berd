@@ -1267,13 +1267,9 @@ mod tests {
             .unwrap();
         let pid = child.id();
 
-        let error = wait_for_launch(
-            &mut child,
-            &paths,
-            &status_path,
-            Duration::from_millis(100),
-        )
-        .unwrap_err();
+        let launch_timeout = Duration::from_millis(100);
+        let launch_result = wait_for_launch(&mut child, &paths, &status_path, launch_timeout);
+        let error = launch_result.unwrap_err();
 
         assert!(error.contains("did not become ready"));
         assert!(!test_process_exists(pid));
@@ -1362,9 +1358,11 @@ mod tests {
             resume_producer(&producer.child)?;
             let direct_pid = producer.child.id();
             let mut descendant = String::new();
-            BufReader::new(producer.child.stdout.take().unwrap())
-                .read_line(&mut descendant)?;
-            observed_pids = Some((direct_pid, descendant.trim().parse::<u32>().unwrap()));
+            let stdout = producer.child.stdout.take().unwrap();
+            let mut reader = BufReader::new(stdout);
+            reader.read_line(&mut descendant)?;
+            let descendant_pid = descendant.trim().parse::<u32>().unwrap();
+            observed_pids = Some((direct_pid, descendant_pid));
             Err(io::Error::other("injected post-spawn failure"))
         })();
 
@@ -1668,7 +1666,9 @@ mod tests {
         }
         let child_pid = loop {
             if let Ok(pending) = read_pending(&paths.pending) {
-                if let Ok(pid) = String::from_utf8_lossy(&pending.bytes).trim().parse::<i32>() {
+                let pending_text = String::from_utf8_lossy(&pending.bytes);
+                let parsed_pid = pending_text.trim().parse::<i32>();
+                if let Ok(pid) = parsed_pid {
                     break pid;
                 }
             }
