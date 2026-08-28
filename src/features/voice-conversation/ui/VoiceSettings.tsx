@@ -15,7 +15,11 @@ import {
   SelectValue,
 } from "@/shared/ui/select";
 import { useEffect, useState } from "react";
-import { setOpenAiPlaybackSpeed } from "../api/openAiVoice";
+import {
+  clearOpenAiTtsApiKey,
+  setOpenAiPlaybackSpeed,
+  setOpenAiTtsApiKey,
+} from "../api/openAiVoice";
 import { usePocketVoiceSetup } from "../hooks/usePocketVoiceSetup";
 import { useMacSpeechSetup } from "../hooks/useMacSpeechSetup";
 import { useMicrophonePermission } from "../hooks/useMicrophonePermission";
@@ -34,6 +38,7 @@ import { MacSpeechSettings } from "./MacSpeechSettings";
 import { SiriVoiceSettings } from "./SiriVoiceSettings";
 import { PlaybackSpeedRow } from "./PlaybackSpeedRow";
 import { useOpenAiVoiceSetup } from "../hooks/useOpenAiVoiceSetup";
+import { OpenAiApiKeyField } from "./OpenAiApiKeyField";
 
 const INTERRUPTION_MODES: VoiceInterruptionMode[] = [
   "automatic",
@@ -259,6 +264,12 @@ export function VoiceSettings() {
           details={
             output.backend === "openai" ? (
               <div className="space-y-2">
+                <OpenAiApiKeyField
+                  kind="tts"
+                  configured={openAiStatus?.configured ?? false}
+                  onSave={setOpenAiTtsApiKey}
+                  onClear={clearOpenAiTtsApiKey}
+                />
                 <p className="text-xs text-muted-foreground">
                   {openAiError ??
                     openAiStatus?.unavailableReason ??

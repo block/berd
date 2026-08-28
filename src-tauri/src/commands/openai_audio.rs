@@ -15,7 +15,6 @@ use reqwest::header::CONTENT_TYPE;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use serde::Serialize;
 use serde_json::json;
-#[cfg(target_os = "macos")]
 use tauri::Emitter;
 use tauri::{AppHandle, State};
 
@@ -38,6 +37,9 @@ use std::time::Instant;
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 const DEFAULT_TTS_MODEL: &str = "gpt-4o-mini-tts";
 const DEFAULT_TTS_VOICE: &str = "marin";
+const KEYRING_SERVICE: &str = "berd-openai-voice";
+const TTS_KEYRING_ACCOUNT: &str = "tts-api-key";
+const SETTINGS_CHANGED_EVENT: &str = "openai-voice:settings-changed";
 #[cfg(target_os = "macos")]
 const TTS_SAMPLE_RATE: u32 = 24_000;
 // Avoid starting the audio device from a tiny first network chunk that can drain
@@ -166,66 +168,58 @@ fn goose_yaml_value(path: &std::path::Path, name: &str) -> Result<Option<String>
 }
 
 #[cfg(target_os = "macos")]
-fn goose_openai_api_key() -> Result<Option<String>, String> {
-    if let Some(value) = env_trimmed("OPENAI_API_KEY") {
-        return Ok(Some(value));
+fn stored_api_key(account: &str) -> Result<Option<String>, String> {
+    let entry = keyring::Entry::new(KEYRING_SERVICE, account)
+        .map_err(|error| format!("Could not access Berd's OpenAI voice credentials: {error}"))?;
+    match entry.get_password() {
+        Ok(value) => Ok(Some(value)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(error) => Err(format!(
+            "Could not read Berd's OpenAI voice credential: {error}"
+        )),
     }
-    #[cfg(target_os = "macos")]
-    let mut secure_store_error = None;
-    #[cfg(target_os = "macos")]
-    {
-        match keyring::Entry::new("goose", "secrets") {
-            Ok(entry) => match entry.get_password() {
-                Ok(payload) => match serde_json::from_str::<serde_json::Value>(&payload) {
-                    Ok(secrets) => {
-                        if let Some(key) = secrets
-                            .get("OPENAI_API_KEY")
-                            .and_then(serde_json::Value::as_str)
-                            .map(str::trim)
-                            .filter(|value| !value.is_empty())
-                        {
-                            return Ok(Some(key.to_string()));
-                        }
-                    }
-                    Err(error) => {
-                        secure_store_error = Some(format!(
-                            "Goose's secure credential store is not valid JSON: {error}"
-                        ));
-                    }
-                },
-                Err(keyring::Error::NoEntry) => {}
-                Err(error) => {
-                    secure_store_error = Some(format!(
-                        "Could not read Goose's OpenAI credential from secure storage: {error}"
-                    ));
-                }
-            },
-            Err(error) => {
-                secure_store_error = Some(format!(
-                    "Could not access Goose's secure credential store: {error}"
-                ));
-            }
-        }
-    }
-    let config_path = crate::services::goose_config::config_path()?;
-    let secrets_path = config_path
-        .parent()
-        .ok_or_else(|| "Could not resolve Goose's credential directory".to_string())?
-        .join("secrets.yaml");
-    if let Some(key) = goose_yaml_value(&secrets_path, "OPENAI_API_KEY")? {
-        return Ok(Some(key));
-    }
-    #[cfg(target_os = "macos")]
-    if let Some(error) = secure_store_error {
-        return Err(error);
-    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn stored_api_key(_account: &str) -> Result<Option<String>, String> {
     Ok(None)
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn api_key() -> Result<String, String> {
-    goose_openai_api_key()?.ok_or_else(|| {
-        "OpenAI voice is not configured. Configure the OpenAI provider in Berd, then try again."
+fn store_api_key(account: &str, api_key: &str) -> Result<(), String> {
+    let entry = keyring::Entry::new(KEYRING_SERVICE, account)
+        .map_err(|error| format!("Could not access Berd's OpenAI voice credentials: {error}"))?;
+    entry
+        .set_password(api_key)
+        .map_err(|error| format!("Could not save Berd's OpenAI voice credential: {error}"))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn store_api_key(_account: &str, _api_key: &str) -> Result<(), String> {
+    Err("OpenAI voice credentials are unsupported on this platform".to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn clear_api_key(account: &str) -> Result<(), String> {
+    let entry = keyring::Entry::new(KEYRING_SERVICE, account)
+        .map_err(|error| format!("Could not access Berd's OpenAI voice credentials: {error}"))?;
+    match entry.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(error) => Err(format!(
+            "Could not remove Berd's OpenAI voice credential: {error}"
+        )),
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn clear_api_key(_account: &str) -> Result<(), String> {
+    Err("OpenAI voice credentials are unsupported on this platform".to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn tts_api_key() -> Result<String, String> {
+    stored_api_key(TTS_KEYRING_ACCOUNT)?.ok_or_else(|| {
+        "OpenAI text-to-speech is not configured. Add its API key in Voice settings, then try again."
             .to_string()
     })
 }
@@ -292,10 +286,6 @@ fn endpoint_for_base_url(base_url: &str, path: &str) -> Result<String, String> {
     Ok(url.to_string())
 }
 
-fn openai_voice_configured(provider_configured: bool, environment_key: Option<&str>) -> bool {
-    provider_configured || environment_key.is_some_and(|key| !key.trim().is_empty())
-}
-
 #[cfg(target_os = "macos")]
 fn authorized_headers(key: &str) -> Result<HeaderMap, String> {
     let mut headers = HeaderMap::new();
@@ -350,13 +340,8 @@ fn client() -> Result<reqwest::Client, String> {
 #[tauri::command]
 pub fn get_openai_voice_status(
     state: State<'_, OpenAiVoiceState>,
-    provider_configured: bool,
 ) -> Result<OpenAiVoiceStatus, String> {
-    // Provider metadata avoids a passive Keychain read; the environment is
-    // safe to inspect directly and has the same highest-priority semantics as
-    // the credential resolver used when a stream starts.
-    let environment_key = env_trimmed("OPENAI_API_KEY");
-    let configured = openai_voice_configured(provider_configured, environment_key.as_deref());
+    let configured = stored_api_key(TTS_KEYRING_ACCOUNT)?.is_some();
     let playback_speed = state
         .playback
         .lock()
@@ -370,13 +355,33 @@ pub fn get_openai_voice_status(
         playback_speed,
         tts_available,
         unavailable_reason: if !configured {
-            Some("Configure the OpenAI provider in Berd to use OpenAI voice.".to_string())
+            Some("Add an OpenAI text-to-speech API key in Voice settings.".to_string())
         } else if !tts_available {
             Some("OpenAI voice playback is currently supported on macOS only.".to_string())
         } else {
             None
         },
     })
+}
+
+#[tauri::command]
+pub fn set_openai_tts_api_key(app: AppHandle, api_key: String) -> Result<(), String> {
+    let api_key = api_key.trim();
+    if api_key.is_empty() {
+        return Err("OpenAI text-to-speech API key cannot be empty".to_string());
+    }
+    store_api_key(TTS_KEYRING_ACCOUNT, api_key)?;
+    app.emit(SETTINGS_CHANGED_EVENT, ())
+        .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn clear_openai_tts_api_key(app: AppHandle) -> Result<(), String> {
+    clear_api_key(TTS_KEYRING_ACCOUNT)?;
+    app.emit(SETTINGS_CHANGED_EVENT, ())
+        .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -408,7 +413,7 @@ pub fn start_openai_voice_stream(
         if stream_id.trim().is_empty() {
             return Err("OpenAI voice stream id cannot be empty".to_string());
         }
-        let key = api_key()?;
+        let key = tts_api_key()?;
         let (sender, receiver) = mpsc::channel();
         let active = Arc::new(AtomicBool::new(true));
         {
@@ -1175,13 +1180,6 @@ mod tests {
             endpoint_for_base_url(&base, "audio/speech").unwrap(),
             "https://proxy.example/openai/audio/speech?api-version=2026-01-01"
         );
-    }
-
-    #[test]
-    fn environment_credential_makes_openai_voice_ready() {
-        assert!(openai_voice_configured(false, Some("environment-key")));
-        assert!(!openai_voice_configured(false, None));
-        assert!(!openai_voice_configured(false, Some("  ")));
     }
 
     #[test]

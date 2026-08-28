@@ -5,18 +5,15 @@ import { useOpenAiVoiceSetup } from "./useOpenAiVoiceSetup";
 
 const mocks = vi.hoisted(() => ({
   getStatus: vi.fn<() => Promise<OpenAiVoiceStatus>>(),
-  configChanged: null as ((providerId: string) => void) | null,
+  settingsChanged: null as (() => void) | null,
   finishListening: null as (() => void) | null,
   listenerError: null as Error | null,
 }));
 
 vi.mock("../api/openAiVoice", () => ({
   getOpenAiVoiceStatus: () => mocks.getStatus(),
-}));
-
-vi.mock("@/features/providers/api/credentials", () => ({
-  onProviderConfigChanged: (listener: (providerId: string) => void) => {
-    mocks.configChanged = listener;
+  listenToOpenAiVoiceSettings: (listener: () => void) => {
+    mocks.settingsChanged = listener;
     if (mocks.listenerError) return Promise.reject(mocks.listenerError);
     return new Promise<() => void>((resolve) => {
       mocks.finishListening = () => resolve(() => undefined);
@@ -46,7 +43,7 @@ function status(configured: boolean): OpenAiVoiceStatus {
 describe("useOpenAiVoiceSetup", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.configChanged = null;
+    mocks.settingsChanged = null;
     mocks.finishListening = null;
     mocks.listenerError = null;
   });
@@ -58,11 +55,11 @@ describe("useOpenAiVoiceSetup", () => {
       .mockReturnValueOnce(initial.promise)
       .mockReturnValueOnce(refreshed.promise);
     const { result } = renderHook(() => useOpenAiVoiceSetup());
-    await waitFor(() => expect(mocks.configChanged).not.toBeNull());
+    await waitFor(() => expect(mocks.settingsChanged).not.toBeNull());
     act(() => mocks.finishListening?.());
     await waitFor(() => expect(mocks.getStatus).toHaveBeenCalledTimes(1));
 
-    act(() => mocks.configChanged?.("openai"));
+    act(() => mocks.settingsChanged?.());
     refreshed.resolve(status(true));
     await waitFor(() => expect(result.current.status?.configured).toBe(true));
 

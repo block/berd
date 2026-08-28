@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import {
   getOpenAiVoiceStatus,
+  listenToOpenAiVoiceSettings,
   type OpenAiVoiceStatus,
 } from "../api/openAiVoice";
-import { onProviderConfigChanged } from "@/features/providers/api/credentials";
 
 export function useOpenAiVoiceSetup(enabled = true) {
   const [status, setStatus] = useState<OpenAiVoiceStatus | null>(null);
@@ -30,9 +30,7 @@ export function useOpenAiVoiceSetup(enabled = true) {
         },
       );
     };
-    void onProviderConfigChanged((providerId) => {
-      if (providerId === "openai") refresh();
-    }).then(
+    void listenToOpenAiVoiceSettings(refresh).then(
       (nextUnsubscribe) => {
         if (active) {
           unsubscribe = nextUnsubscribe;

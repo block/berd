@@ -60,9 +60,15 @@ const openAiStatusState = vi.hoisted(() => ({
     unavailableReason: null as string | null,
   },
 }));
+const openAiApiMocks = vi.hoisted(() => ({
+  setTtsApiKey: vi.fn(() => Promise.resolve()),
+  clearTtsApiKey: vi.fn(() => Promise.resolve()),
+}));
 
 vi.mock("../api/openAiVoice", () => ({
   setOpenAiPlaybackSpeed: vi.fn(() => Promise.resolve()),
+  setOpenAiTtsApiKey: openAiApiMocks.setTtsApiKey,
+  clearOpenAiTtsApiKey: openAiApiMocks.clearTtsApiKey,
 }));
 vi.mock("../hooks/useOpenAiVoiceSetup", () => ({
   useOpenAiVoiceSetup: () => ({
@@ -218,6 +224,8 @@ describe("VoiceSettings", () => {
       ttsAvailable: true,
       unavailableReason: null,
     };
+    openAiApiMocks.setTtsApiKey.mockClear();
+    openAiApiMocks.clearTtsApiKey.mockClear();
   });
 
   it("renders selected OpenAI output settings", async () => {
@@ -231,20 +239,35 @@ describe("VoiceSettings", () => {
     expect(screen.getByText("Playback speed")).toBeInTheDocument();
   });
 
+  it("saves a dedicated OpenAI text-to-speech API key", async () => {
+    outputState.backend = "openai";
+    setupState.current = setup(pocketStatus({ parakeetInstalled: true }));
+    renderWithProviders(<VoiceSettings />);
+
+    const user = userEvent.setup();
+    await user.type(
+      screen.getByLabelText("OpenAI text-to-speech API key"),
+      "tts-secret",
+    );
+    await user.click(screen.getByRole("button", { name: "Save key" }));
+
+    expect(openAiApiMocks.setTtsApiKey).toHaveBeenCalledWith("tts-secret");
+  });
+
   it("uses OpenAI guidance when the selected OpenAI output is not ready", async () => {
     outputState.backend = "openai";
     openAiStatusState.current = {
       ...openAiStatusState.current,
       configured: false,
       unavailableReason:
-        "Configure the OpenAI provider in Berd to use OpenAI voice.",
+        "Add an OpenAI text-to-speech API key in Voice settings.",
     };
     setupState.current = setup(pocketStatus({ parakeetInstalled: true }));
     renderWithProviders(<VoiceSettings />);
 
     expect(
       await screen.findByText(
-        "OpenAI voice is not ready. Configure the OpenAI provider in Berd, then try again.",
+        "OpenAI voice is not ready. Add the required API key below, then try again.",
       ),
     ).toBeInTheDocument();
     expect(

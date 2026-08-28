@@ -1,6 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { getProviderConfig } from "@/features/providers/api/credentials";
 import type { VoiceDeliveryProgress } from "./pocketVoice";
 import type {
   VoiceInterruptionMode,
@@ -23,14 +22,22 @@ export interface OpenAiVoiceStreamEvent {
   delivery?: VoiceDeliveryProgress | null;
 }
 
-export async function getOpenAiVoiceStatus(): Promise<OpenAiVoiceStatus> {
-  const fields = await getProviderConfig("openai");
-  const providerConfigured = fields.some(
-    (field) => field.key === "OPENAI_API_KEY" && field.isSecret && field.isSet,
-  );
-  return invoke<OpenAiVoiceStatus>("get_openai_voice_status", {
-    providerConfigured,
-  });
+export function getOpenAiVoiceStatus(): Promise<OpenAiVoiceStatus> {
+  return invoke<OpenAiVoiceStatus>("get_openai_voice_status");
+}
+
+export function setOpenAiTtsApiKey(apiKey: string): Promise<void> {
+  return invoke("set_openai_tts_api_key", { apiKey });
+}
+
+export function clearOpenAiTtsApiKey(): Promise<void> {
+  return invoke("clear_openai_tts_api_key");
+}
+
+export function listenToOpenAiVoiceSettings(
+  onChanged: () => void,
+): Promise<UnlistenFn> {
+  return listen("openai-voice:settings-changed", onChanged);
 }
 
 export function startOpenAiVoiceStream(

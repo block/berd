@@ -53,7 +53,7 @@ describe("voice setup readiness", () => {
     ).toBe(false);
   });
 
-  it("requires Berd's configured OpenAI credential for OpenAI output", () => {
+  it("requires the dedicated OpenAI text-to-speech key for OpenAI output", () => {
     const configured = { configured: true, ttsAvailable: true } as never;
     expect(
       isVoiceSetupReady(pocket, null, null, "parakeet", "openai", configured),
