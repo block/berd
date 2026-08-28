@@ -38,6 +38,7 @@ use std::time::Instant;
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 const DEFAULT_TTS_MODEL: &str = "gpt-4o-mini-tts";
 const DEFAULT_TTS_VOICE: &str = "marin";
+#[cfg(target_os = "macos")]
 const KEYRING_SERVICE: &str = "berd-openai-voice";
 const TTS_KEYRING_ACCOUNT: &str = "tts-api-key";
 const SETTINGS_CHANGED_EVENT: &str = "openai-voice:settings-changed";
