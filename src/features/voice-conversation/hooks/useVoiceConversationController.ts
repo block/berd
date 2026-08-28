@@ -676,6 +676,11 @@ export function useVoiceConversationController({
     });
     if (routeMount.claimRoute) {
       activeSendRoute = { sessionId, send: onSend };
+    } else if (
+      (!enabled || !isGooseSession || readOnly) &&
+      activeSendRoute?.sessionId === sessionId
+    ) {
+      activeSendRoute = null;
     }
     if (routeMount.drainPending) {
       const routeSessionId = activeSendRoute?.sessionId;
