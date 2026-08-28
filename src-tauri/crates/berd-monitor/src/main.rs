@@ -21,6 +21,7 @@ const MAX_LABEL_CODE_UNITS: usize = 120;
 const MAX_LOCK_CANDIDATES: usize = 8;
 const DELIVERY_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const LAUNCH_TIMEOUT: Duration = Duration::from_secs(10);
+const LAUNCH_TERMINATION_GRACE: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum RunningMode {
@@ -259,10 +260,19 @@ fn spawn_detached(state_key: &str, session_id: &str) -> Result<(), String> {
     let mut process = child
         .spawn()
         .map_err(|error| format!("start detached monitor: {error}"))?;
-    let deadline = Instant::now() + LAUNCH_TIMEOUT;
+    wait_for_launch(&mut process, &paths, &status_path, LAUNCH_TIMEOUT)
+}
+
+fn wait_for_launch(
+    process: &mut std::process::Child,
+    paths: &StatePaths,
+    status_path: &Path,
+    timeout: Duration,
+) -> Result<(), String> {
+    let deadline = Instant::now() + timeout;
     loop {
-        if let Ok(status) = fs::read_to_string(&status_path) {
-            let _ = fs::remove_file(&status_path);
+        if let Ok(status) = fs::read_to_string(status_path) {
+            let _ = fs::remove_file(status_path);
             if status.trim() == "ready" {
                 println!("{} {}", process.id(), paths.root.display());
                 return Ok(());
@@ -273,17 +283,41 @@ fn spawn_detached(state_key: &str, session_id: &str) -> Result<(), String> {
                 .to_owned());
         }
         if Instant::now() >= deadline {
+            terminate_timed_out_launch(process, paths, status_path);
             return Err(format!(
                 "monitor did not become ready within {} seconds; inspect {}",
-                LAUNCH_TIMEOUT.as_secs(),
+                timeout.as_secs_f64(),
                 paths.log.display()
             ));
         }
         if let Ok(Some(status)) = process.try_wait() {
+            let _ = fs::remove_file(status_path);
             return Err(format!("monitor exited before becoming ready ({status})"));
         }
         thread::sleep(Duration::from_millis(50));
     }
+}
+
+fn terminate_timed_out_launch(
+    process: &mut std::process::Child,
+    paths: &StatePaths,
+    status_path: &Path,
+) {
+    let _ = fs::write(&paths.stop, b"stop\n");
+    let deadline = Instant::now() + LAUNCH_TERMINATION_GRACE;
+    while Instant::now() < deadline {
+        match process.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => thread::sleep(Duration::from_millis(50)),
+            Err(_) => break,
+        }
+    }
+    if process.try_wait().ok().flatten().is_none() {
+        let _ = process.kill();
+        let _ = process.wait();
+    }
+    let _ = fs::remove_file(status_path);
+    let _ = fs::remove_file(&paths.stop);
 }
 
 #[cfg(unix)]
@@ -1060,6 +1094,41 @@ fn render_command(command: &[OsString]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn launch_timeout_terminates_and_reaps_the_child() {
+        let key = format!(
+            "launch-timeout-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let paths = StatePaths::for_key(&key, "test-session");
+        ensure_private_directory(&paths.root).unwrap();
+        let status_path = paths.launch_status("never-ready");
+        let mut child = Command::new("sh")
+            .args(["-c", "exec sleep 30"])
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+
+        let error = wait_for_launch(
+            &mut child,
+            &paths,
+            &status_path,
+            Duration::from_millis(100),
+        )
+        .unwrap_err();
+
+        assert!(error.contains("did not become ready"));
+        assert!(!test_process_exists(pid));
+        assert!(!status_path.exists());
+        assert!(!paths.stop.exists());
+        fs::remove_dir_all(paths.root).unwrap();
+    }
 
     #[test]
     fn failed_atomic_replace_preserves_pending_output() {
