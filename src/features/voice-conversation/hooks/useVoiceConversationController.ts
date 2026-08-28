@@ -36,6 +36,7 @@ interface VoiceSendRoute {
 // The backend conversation is process-wide, but voice input remains bound to
 // the chat that started the active lifecycle until that lifecycle terminates.
 let activeSendRoute: VoiceSendRoute | null = null;
+const blockedSendRouteSessions = new Set<string>();
 let deliveryInitialized = false;
 const operationInFlightBySession = new Set<string>();
 let replacementOperationInFlight = false;
@@ -446,6 +447,11 @@ function ensureVoiceEventDeliveryInitialized() {
     const deliveryRevision = event.revision;
     const shouldNotifyFailure = event.deliveryAttempts === 0;
     return enqueueVoiceTranscriptDelivery(event.sessionId, async () => {
+      // Admission blocks invalidate speech captured for the active lifecycle.
+      // Resolve successfully so the native queue acknowledges it instead of
+      // replaying it if the block later clears.
+      if (blockedSendRouteSessions.has(event.sessionId)) return;
+
       const route = activeSendRoute;
       if (!route || route.sessionId !== event.sessionId) {
         const message =
@@ -663,8 +669,14 @@ export function useVoiceConversationController({
 
   useEffect(() => {
     if (enabled && isGooseSession) ensureVoiceEventDeliveryInitialized();
+    if (status.sessionId !== sessionId) {
+      blockedSendRouteSessions.delete(sessionId);
+    } else if (routeBlocked) {
+      blockedSendRouteSessions.add(sessionId);
+    }
+    const routeDiscardedForLifecycle = blockedSendRouteSessions.has(sessionId);
     const routeIsValid =
-      !routeBlocked &&
+      !routeDiscardedForLifecycle &&
       canBindVoiceSendRoute({
         enabled,
         isGooseSession,
@@ -686,8 +698,10 @@ export function useVoiceConversationController({
     ) {
       activeSendRoute = null;
     }
-    if (routeMount.drainPending) {
-      const routeSessionId = activeSendRoute?.sessionId;
+    if (routeMount.drainPending || routeDiscardedForLifecycle) {
+      const routeSessionId = routeDiscardedForLifecycle
+        ? sessionId
+        : activeSendRoute?.sessionId;
       if (!routeSessionId) return;
       void drainPendingTranscripts(
         routeSessionId,
@@ -712,7 +726,7 @@ export function useVoiceConversationController({
     if (
       status.lifecycle !== "running" ||
       status.sessionId !== sessionId ||
-      routeBlocked ||
+      blockedSendRouteSessions.has(sessionId) ||
       !canBindVoiceSendRoute({
         enabled,
         isGooseSession,
@@ -740,7 +754,6 @@ export function useVoiceConversationController({
     enabled,
     isGooseSession,
     readOnly,
-    routeBlocked,
     sessionId,
     status.lifecycle,
     status.sessionId,
