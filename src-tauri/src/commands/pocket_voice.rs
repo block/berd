@@ -514,7 +514,7 @@ fn playback_speed(base: &Path) -> f32 {
     settings(base).playback_speed.clamp(0.75, 2.0)
 }
 
-fn selected_output_device() -> Option<String> {
+pub(crate) fn selected_output_device() -> Option<String> {
     std::env::var("VOICE_CONVERSATION_OUTPUT_DEVICE")
         .ok()
         .filter(|value| !value.is_empty())

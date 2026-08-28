@@ -23,7 +23,8 @@ use super::{
     native_voice::AssistantSpeechGuard,
     pocket_audio_player::PocketAudioPlayer,
     pocket_voice::{
-        effective_output_device_name, playback_latency_safety_duration, should_suppress_capture,
+        effective_output_device_name, playback_latency_safety_duration, selected_output_device,
+        should_suppress_capture,
     },
 };
 use super::{
@@ -54,6 +55,8 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 #[cfg(target_os = "macos")]
 const MAX_TTS_INPUT_CHARS: usize = 4096;
+#[cfg(target_os = "macos")]
+const MAX_FINAL_PLAYBACK_DRAIN: Duration = Duration::from_secs(600);
 
 #[derive(Clone, Debug, Default)]
 pub struct OpenAiVoiceState {
@@ -228,8 +231,8 @@ fn tts_api_key() -> Result<String, String> {
 fn normalize_openai_base_url(raw_url: String, assume_v1: bool) -> Result<String, String> {
     let mut url = reqwest::Url::parse(&raw_url)
         .map_err(|error| format!("OpenAI voice endpoint is invalid: {error}"))?;
-    if !matches!(url.scheme(), "http" | "https") {
-        return Err("OpenAI voice endpoint must use HTTP or HTTPS".to_string());
+    if url.scheme() != "https" {
+        return Err("OpenAI voice endpoint must use HTTPS".to_string());
     }
     let path = url.path().trim_end_matches('/').to_string();
     if assume_v1 || path.is_empty() {
@@ -338,16 +341,23 @@ fn client() -> Result<reqwest::Client, String> {
 }
 
 #[tauri::command]
-pub fn get_openai_voice_status(
+pub async fn get_openai_voice_status(
     state: State<'_, OpenAiVoiceState>,
 ) -> Result<OpenAiVoiceStatus, String> {
-    let configured = stored_api_key(TTS_KEYRING_ACCOUNT)?.is_some();
     let playback_speed = state
         .playback
         .lock()
         .map_err(|_| "OpenAI voice playback state lock was poisoned".to_string())?
         .speed;
     let tts_available = cfg!(target_os = "macos");
+    let configured = if tts_available {
+        tauri::async_runtime::spawn_blocking(|| stored_api_key(TTS_KEYRING_ACCOUNT))
+            .await
+            .map_err(|error| format!("Could not check OpenAI voice credentials: {error}"))??
+            .is_some()
+    } else {
+        false
+    };
     Ok(OpenAiVoiceStatus {
         configured,
         speech_model: speech_model(),
@@ -629,8 +639,9 @@ fn run_openai_voice_stream(
         .enable_all()
         .build()
         .map_err(|error| format!("Could not initialize OpenAI speech runtime: {error}"))?;
-    let player = PocketAudioPlayer::new(TTS_SAMPLE_RATE, 1.0, None)?;
-    let output_device = effective_output_device_name(None);
+    let configured_output_device = selected_output_device();
+    let player = PocketAudioPlayer::new(TTS_SAMPLE_RATE, 1.0, configured_output_device.as_deref())?;
+    let output_device = effective_output_device_name(configured_output_device.as_deref());
     let suppress_capture = should_suppress_capture(interruption_mode, output_device.as_deref());
     let output_latency_grace = playback_latency_safety_duration(output_device.as_deref());
     let mut assistant_speech = None::<AssistantSpeechGuard>;
@@ -644,6 +655,12 @@ fn run_openai_voice_stream(
     let mut last_progress = Instant::now();
 
     loop {
+        if started {
+            player.ensure_healthy().map_err(|error| StreamFailure {
+                error,
+                delivery: Some(snapshot_delivery(&delivery, &player)),
+            })?;
+        }
         update_openai_assistant_speech(
             player.is_empty(),
             &mut assistant_speech,
@@ -731,11 +748,27 @@ fn run_openai_voice_stream(
                     &mut playback_drained_at,
                     output_latency_grace,
                     speed,
-                )?;
+                )
+                .map_err(|error| StreamFailure {
+                    error,
+                    delivery: Some(snapshot_delivery(&delivery, &player)),
+                })?;
+                let drain_started = Instant::now();
                 while active.load(Ordering::SeqCst)
                     && (!player.is_empty() || assistant_speech.is_some())
                 {
-                    player.ensure_healthy()?;
+                    if drain_started.elapsed() >= MAX_FINAL_PLAYBACK_DRAIN {
+                        player.stop();
+                        return Err(StreamFailure {
+                            error: "OpenAI voice playback did not finish within 10 minutes"
+                                .to_string(),
+                            delivery: Some(snapshot_delivery(&delivery, &player)),
+                        });
+                    }
+                    player.ensure_healthy().map_err(|error| StreamFailure {
+                        error,
+                        delivery: Some(snapshot_delivery(&delivery, &player)),
+                    })?;
                     update_openai_assistant_speech(
                         player.is_empty(),
                         &mut assistant_speech,
@@ -1001,6 +1034,15 @@ fn chunk_text(text: &str, max_chars: usize) -> Vec<&str> {
         if end == start {
             end = text.len();
         }
+        if end < text.len() {
+            if let Some((offset, _)) = text[start..end]
+                .char_indices()
+                .rev()
+                .find(|(offset, character)| *offset > 0 && character.is_whitespace())
+            {
+                end = start + offset;
+            }
+        }
         chunks.push(text[start..end].trim());
         start = end;
     }
@@ -1166,6 +1208,15 @@ mod tests {
     }
 
     #[test]
+    fn openai_voice_endpoints_require_https() {
+        assert_eq!(
+            normalize_openai_base_url("http://proxy.example".to_string(), true)
+                .expect_err("plaintext endpoint must be rejected"),
+            "OpenAI voice endpoint must use HTTPS"
+        );
+    }
+
+    #[test]
     fn openai_base_url_preserves_custom_paths_and_query_parameters() {
         assert_eq!(
             normalize_openai_base_url("https://proxy.example".to_string(), false).unwrap(),
@@ -1217,6 +1268,10 @@ mod tests {
     fn chunks_tts_text_on_char_boundaries() {
         assert_eq!(chunk_text("hello", 10), vec!["hello"]);
         assert_eq!(chunk_text("ééé", 3), vec!["é", "é", "é"]);
+        assert_eq!(
+            chunk_text("hello wide world", 8),
+            vec!["hello", "wide", "world"]
+        );
     }
 
     #[cfg(target_os = "macos")]

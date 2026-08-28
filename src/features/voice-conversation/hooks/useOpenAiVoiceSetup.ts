@@ -25,6 +25,7 @@ export function useOpenAiVoiceSetup(enabled = true) {
         },
         (cause) => {
           if (active && generation === refreshGeneration) {
+            setStatus(null);
             setError(cause instanceof Error ? cause.message : String(cause));
           }
         },

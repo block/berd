@@ -23,10 +23,12 @@ vi.mock("../api/openAiVoice", () => ({
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((next) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((next, fail) => {
     resolve = next;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }
 
 function status(configured: boolean): OpenAiVoiceStatus {
@@ -88,5 +90,22 @@ describe("useOpenAiVoiceSetup", () => {
     const { result } = renderHook(() => useOpenAiVoiceSetup());
 
     await waitFor(() => expect(result.current.status?.configured).toBe(true));
+  });
+
+  it("clears stale readiness when a credential refresh fails", async () => {
+    const refresh = deferred<OpenAiVoiceStatus>();
+    mocks.getStatus
+      .mockResolvedValueOnce(status(true))
+      .mockReturnValueOnce(refresh.promise);
+    const { result } = renderHook(() => useOpenAiVoiceSetup());
+    await waitFor(() => expect(mocks.finishListening).not.toBeNull());
+    act(() => mocks.finishListening?.());
+    await waitFor(() => expect(result.current.status?.configured).toBe(true));
+
+    act(() => mocks.settingsChanged?.());
+    refresh.reject(new Error("Keychain unavailable"));
+
+    await waitFor(() => expect(result.current.status).toBeNull());
+    expect(result.current.error).toBe("Keychain unavailable");
   });
 });

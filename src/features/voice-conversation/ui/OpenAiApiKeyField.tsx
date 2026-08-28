@@ -4,14 +4,14 @@ import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
 
 interface OpenAiApiKeyFieldProps {
-  kind: "stt" | "tts";
+  label: string;
   configured: boolean;
   onSave: (apiKey: string) => Promise<void>;
   onClear: () => Promise<void>;
 }
 
 export function OpenAiApiKeyField({
-  kind,
+  label,
   configured,
   onSave,
   onClear,
@@ -21,8 +21,6 @@ export function OpenAiApiKeyField({
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const label =
-    kind === "stt" ? t("voice.openAiSttApiKey") : t("voice.openAiTtsApiKey");
 
   const save = async () => {
     setSaving(true);

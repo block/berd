@@ -83,6 +83,7 @@ export function VoiceSettings() {
   const macSpeechSetup = useMacSpeechSetup();
   const { status: openAiStatus, error: openAiError } = useOpenAiVoiceSetup();
   const [openAiSpeed, setOpenAiSpeed] = useState(1);
+  const [openAiSpeedError, setOpenAiSpeedError] = useState<string | null>(null);
   useEffect(() => {
     if (openAiStatus) setOpenAiSpeed(openAiStatus.playbackSpeed);
   }, [openAiStatus]);
@@ -265,7 +266,7 @@ export function VoiceSettings() {
             output.backend === "openai" ? (
               <div className="space-y-2">
                 <OpenAiApiKeyField
-                  kind="tts"
+                  label={t("voice.openAiTtsApiKey")}
                   configured={openAiStatus?.configured ?? false}
                   onSave={setOpenAiTtsApiKey}
                   onClear={clearOpenAiTtsApiKey}
@@ -284,10 +285,22 @@ export function VoiceSettings() {
                   speed={openAiSpeed}
                   speeds={[0.75, 1, 1.25, 1.5, 2]}
                   onChange={async (speed) => {
-                    await setOpenAiPlaybackSpeed(speed);
-                    setOpenAiSpeed(speed);
+                    setOpenAiSpeedError(null);
+                    try {
+                      await setOpenAiPlaybackSpeed(speed);
+                      setOpenAiSpeed(speed);
+                    } catch (cause) {
+                      setOpenAiSpeedError(
+                        cause instanceof Error ? cause.message : String(cause),
+                      );
+                    }
                   }}
                 />
+                {openAiSpeedError ? (
+                  <p className="text-xs text-destructive" role="alert">
+                    {openAiSpeedError}
+                  </p>
+                ) : null}
               </div>
             ) : output.backend === "siri" ? (
               <SiriVoiceSettings setup={siriSetup} />

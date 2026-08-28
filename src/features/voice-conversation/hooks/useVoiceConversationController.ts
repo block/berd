@@ -880,11 +880,11 @@ export function useVoiceConversationController({
       const onFailure = (text: string, playbackError: unknown) => {
         addErrorNotification(
           sessionId,
-          `Pocket TTS could not speak the assistant response: ${errorText(
+          `Voice playback could not speak the assistant response: ${errorText(
             playbackError,
           )}`,
         );
-        console.error("Native Pocket playback failed", {
+        console.error("Native voice playback failed", {
           sessionId,
           textLength: text.length,
           error: playbackError,
