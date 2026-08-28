@@ -617,20 +617,19 @@ describe("MessageBubble", () => {
     );
   });
 
-  it("shows a named sender for attributed cross-session messages", () => {
+  it("shows a sender descriptor without replacing trusted Berd provenance", () => {
     const message = userMessage("[monitor: PR checks] complete");
     message.metadata = {
       ...message.metadata,
       origin: "berdctl_cross_session",
-      berdSenderLabel: "berd-monitor",
+      berdSenderLabel: "Morgan",
     };
 
     render(<MessageBubble message={message} />);
 
-    expect(screen.getByText("Sent by berd-monitor")).toBeInTheDocument();
     expect(
-      screen.queryByText("Sent by Berd from another session"),
-    ).not.toBeInTheDocument();
+      screen.getByText("Sent by Berd from another session · source: Morgan"),
+    ).toBeInTheDocument();
   });
 
   it("renders provenance and steer labels together", () => {
