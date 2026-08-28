@@ -3,7 +3,7 @@ use fs2::FileExt;
 use std::env;
 use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufRead, BufReader, Read, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -605,24 +605,7 @@ fn run_producer(
     write_launch_status(paths, launch_token, "ready");
     let stdout = child.stdout.take().expect("stdout was piped");
     let (sender, receiver) = mpsc::sync_channel::<Vec<u8>>(1024);
-    thread::spawn(move || {
-        let mut reader = BufReader::new(stdout);
-        loop {
-            let mut line = Vec::new();
-            match reader.read_until(b'\n', &mut line) {
-                Ok(0) => break,
-                Ok(_) => {
-                    if !line.ends_with(b"\n") {
-                        line.push(b'\n');
-                    }
-                    if sender.send(line).is_err() {
-                        break;
-                    }
-                }
-                Err(_) => break,
-            }
-        }
-    });
+    thread::spawn(move || forward_producer_output(stdout, sender));
 
     let mut batch = Vec::new();
     let mut batch_deadline: Option<Instant> = None;
@@ -677,8 +660,34 @@ fn run_producer(
             .min(Duration::from_millis(100));
         match receiver.recv_timeout(timeout) {
             Ok(line) => {
+                if !batch.is_empty() && batch.len() + line.len() > MAX_DELIVERY_BYTES {
+                    append_batch(paths, &mut pending, &mut batch)?;
+                    flush_pending(
+                        paths,
+                        &mut pending,
+                        label,
+                        instructions,
+                        session_id,
+                        if_running,
+                    )?;
+                    retry_deadline = Instant::now() + RETRY_INTERVAL;
+                }
                 batch.extend_from_slice(&line);
-                batch_deadline.get_or_insert(Instant::now() + BATCH_WINDOW);
+                if batch.len() >= MAX_DELIVERY_BYTES {
+                    append_batch(paths, &mut pending, &mut batch)?;
+                    flush_pending(
+                        paths,
+                        &mut pending,
+                        label,
+                        instructions,
+                        session_id,
+                        if_running,
+                    )?;
+                    retry_deadline = Instant::now() + RETRY_INTERVAL;
+                    batch_deadline = None;
+                } else {
+                    batch_deadline.get_or_insert(Instant::now() + BATCH_WINDOW);
+                }
             }
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => receiver_closed = true,
@@ -718,6 +727,33 @@ fn run_producer(
     }
     log_line(paths, &format!("producer exited with status {status}"))?;
     Ok(())
+}
+
+fn forward_producer_output<R: Read>(mut reader: R, sender: mpsc::SyncSender<Vec<u8>>) {
+    let mut read_buffer = [0_u8; 8 * 1024];
+    let mut record = Vec::with_capacity(MAX_DELIVERY_BYTES);
+    loop {
+        let read = match reader.read(&mut read_buffer) {
+            Ok(0) => break,
+            Ok(read) => read,
+            Err(_) => return,
+        };
+        for byte in &read_buffer[..read] {
+            record.push(*byte);
+            if *byte == b'\n' || record.len() == MAX_DELIVERY_BYTES {
+                if sender.send(std::mem::take(&mut record)).is_err() {
+                    return;
+                }
+                record = Vec::with_capacity(MAX_DELIVERY_BYTES);
+            }
+        }
+    }
+    if !record.is_empty() {
+        if !record.ends_with(b"\n") {
+            record.push(b'\n');
+        }
+        let _ = sender.send(record);
+    }
 }
 
 fn append_batch(paths: &StatePaths, pending: &mut Vec<u8>, batch: &mut Vec<u8>) -> io::Result<()> {
@@ -936,6 +972,23 @@ mod tests {
             pending_chunk_end(&input, MAX_DELIVERY_BYTES),
             MAX_DELIVERY_BYTES
         );
+    }
+
+    #[test]
+    fn producer_output_splits_unterminated_records_before_they_can_grow_unbounded() {
+        let input = vec![b'x'; MAX_DELIVERY_BYTES * 3 + 17];
+        let (sender, receiver) = mpsc::sync_channel(8);
+
+        forward_producer_output(io::Cursor::new(&input), sender);
+        let records = receiver.into_iter().collect::<Vec<_>>();
+
+        assert_eq!(records.len(), 4);
+        assert!(records
+            .iter()
+            .all(|record| record.len() <= MAX_DELIVERY_BYTES));
+        let mut output = records.concat();
+        assert_eq!(output.pop(), Some(b'\n'));
+        assert_eq!(output, input);
     }
 
     #[test]
