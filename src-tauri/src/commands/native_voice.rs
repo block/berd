@@ -2655,6 +2655,7 @@ fn deliver_completed_openai_turns(
     committed: &mut VecDeque<OpenAiCommittedTurn>,
     completed: &mut HashMap<String, String>,
     event_tx: &tokio_mpsc::Sender<SttMessage>,
+    current_mute_epoch: u64,
     final_item_id: Option<&str>,
     final_delivery: &mut Option<SyncSender<()>>,
 ) {
@@ -2664,6 +2665,9 @@ fn deliver_completed_openai_turns(
     {
         let turn = committed.pop_front().expect("checked front");
         let text = completed.remove(&turn.item_id).unwrap_or_default();
+        if turn.mute_epoch != current_mute_epoch {
+            continue;
+        }
         let delivered = (Some(turn.item_id.as_str()) == final_item_id)
             .then(|| final_delivery.take())
             .flatten();
@@ -2888,6 +2892,7 @@ fn openai_stt_worker(
                 &mut committed_turns,
                 &mut completed_turns,
                 &event_tx,
+                input_mute_epoch.load(Ordering::Acquire),
                 None,
                 &mut None,
             );
@@ -3034,6 +3039,17 @@ fn openai_stt_worker(
             final_delivered = Some(delivered_rx);
         }
     }
+    if final_delivered.is_none()
+        && (!committed_turns.is_empty() || !pending_commit_epochs.is_empty())
+    {
+        let (delivered_tx, delivered_rx) = mpsc::sync_channel(0);
+        final_item_id = pending_commit_epochs
+            .is_empty()
+            .then(|| committed_turns.back().map(|turn| turn.item_id.clone()))
+            .flatten();
+        final_delivery = Some(delivered_tx);
+        final_delivered = Some(delivered_rx);
+    }
 
     // Keep receiving until the shutdown commit itself completes. Earlier turns
     // are delivered from the queue first, and already committed transcripts are
@@ -3088,6 +3104,7 @@ fn openai_stt_worker(
             &mut committed_turns,
             &mut completed_turns,
             &event_tx,
+            observed_mute_epoch,
             final_item_id.as_deref(),
             &mut final_delivery,
         );
@@ -4660,7 +4677,14 @@ mod tests {
         }
         let (event_tx, mut event_rx) = tokio_mpsc::channel(4);
 
-        deliver_completed_openai_turns(&mut committed, &mut completed, &event_tx, None, &mut None);
+        deliver_completed_openai_turns(
+            &mut committed,
+            &mut completed,
+            &event_tx,
+            7,
+            None,
+            &mut None,
+        );
 
         let texts = [event_rx.try_recv(), event_rx.try_recv()].map(|event| match event {
             Ok(SttMessage::Final { text, .. }) => text,
@@ -4690,6 +4714,29 @@ mod tests {
 
         assert_eq!(turn.mute_epoch, 1);
         assert!(committed.is_empty());
+    }
+
+    #[test]
+    fn openai_transcription_discards_completed_turns_after_mute_changes() {
+        let mut committed = VecDeque::from([OpenAiCommittedTurn {
+            item_id: "stale".to_string(),
+            mute_epoch: 1,
+        }]);
+        let mut completed = HashMap::from([("stale".to_string(), "ignore me".to_string())]);
+        let (event_tx, mut event_rx) = tokio_mpsc::channel(1);
+
+        deliver_completed_openai_turns(
+            &mut committed,
+            &mut completed,
+            &event_tx,
+            2,
+            None,
+            &mut None,
+        );
+
+        assert!(committed.is_empty());
+        assert!(completed.is_empty());
+        assert!(event_rx.try_recv().is_err());
     }
 
     #[test]
@@ -4724,6 +4771,7 @@ mod tests {
             &mut committed,
             &mut completed,
             &event_tx,
+            3,
             Some("final"),
             &mut final_delivery,
         );

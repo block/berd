@@ -10,6 +10,8 @@ export interface OpenAiVoiceStatus {
   sttConfigured: boolean;
   ttsConfigured: boolean;
   ttsConfigurationSource: "default" | "environment";
+  sttUnavailableReason: string | null;
+  ttsUnavailableReason: string | null;
   transcriptionModel: string;
   speechModel: string;
   speechVoice: string;

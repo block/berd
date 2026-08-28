@@ -235,6 +235,7 @@ export function VoiceSettings() {
                 />
                 <p className="text-xs text-muted-foreground">
                   {openAiError ??
+                    openAiStatus?.sttUnavailableReason ??
                     (openAiStatus
                       ? openAiStatus.sttConfigured
                         ? t("voice.openAiSttConfigured", {
@@ -305,6 +306,7 @@ export function VoiceSettings() {
                 />
                 <p className="text-xs text-muted-foreground">
                   {openAiError ??
+                    openAiStatus?.ttsUnavailableReason ??
                     (openAiStatus?.unavailableReason === "unsupportedPlatform"
                       ? t("voice.openAiTtsUnsupportedPlatform")
                       : openAiStatus?.unavailableReason === "missingApiKey"

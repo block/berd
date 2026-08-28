@@ -112,6 +112,8 @@ pub struct OpenAiVoiceStatus {
     stt_configured: bool,
     tts_configured: bool,
     tts_configuration_source: OpenAiVoiceConfigurationSource,
+    stt_unavailable_reason: Option<String>,
+    tts_unavailable_reason: Option<String>,
     transcription_model: String,
     speech_model: String,
     speech_voice: String,
@@ -322,7 +324,7 @@ pub async fn get_openai_voice_status(
         .map_err(|_| "OpenAI voice playback state lock was poisoned".to_string())?
         .speed;
     let tts_available = cfg!(target_os = "macos");
-    let (stt_configured, tts_configured, credential_error) = if tts_available {
+    let (stt_configured, tts_configured, stt_error, tts_error) = if tts_available {
         let (stt_result, tts_result) = tauri::async_runtime::spawn_blocking(|| {
             (
                 openai_voice_credentials::read(OpenAiVoiceCredential::SpeechToText),
@@ -331,27 +333,24 @@ pub async fn get_openai_voice_status(
         })
         .await
         .map_err(|error| format!("Could not check OpenAI voice credentials: {error}"))?;
-        let credential_error = stt_result
-            .as_ref()
-            .err()
-            .or_else(|| tts_result.as_ref().err())
-            .cloned();
+        let stt_error = stt_result.as_ref().err().cloned();
+        let tts_error = tts_result.as_ref().err().cloned();
         (
             stt_result.unwrap_or(None).is_some(),
             tts_result.unwrap_or(None).is_some(),
-            credential_error,
+            stt_error,
+            tts_error,
         )
     } else {
-        (false, false, None)
+        (false, false, None, None)
     };
     state.configured.store(stt_configured, Ordering::Release);
-    if let Some(error) = credential_error {
-        return Err(error);
-    }
     Ok(OpenAiVoiceStatus {
         stt_configured,
         tts_configured,
         tts_configuration_source: tts_configuration_source(),
+        stt_unavailable_reason: stt_error,
+        tts_unavailable_reason: tts_error,
         transcription_model: transcription_model(),
         speech_model: speech_model(),
         speech_voice: speech_voice(),
