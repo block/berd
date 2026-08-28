@@ -92,7 +92,6 @@ struct StatePaths {
     log: PathBuf,
     pending: PathBuf,
     owner: PathBuf,
-    stop: PathBuf,
 }
 
 struct PendingState {
@@ -150,13 +149,19 @@ impl StatePaths {
             log: root.join("watcher.log"),
             pending: root.join("pending.txt"),
             owner: root.join("owner.pid"),
-            stop: root.join("stop-requested"),
             root,
         }
     }
 
     fn launch_status(&self, token: &str) -> PathBuf {
         self.root.join(format!("launch-{token}.status"))
+    }
+
+    fn stop_for(&self, owner_token: &str) -> PathBuf {
+        self.root.join(format!(
+            "stop-{:016x}.requested",
+            stable_hash(owner_token.as_bytes())
+        ))
     }
 }
 
@@ -300,13 +305,21 @@ fn spawn_detached(state_key: &str, session_id: &str) -> Result<(), String> {
     let mut process = child
         .spawn()
         .map_err(|error| format!("start detached monitor: {error}"))?;
-    wait_for_launch(&mut process, &paths, &status_path, LAUNCH_TIMEOUT)
+    let stop_path = paths.stop_for(&token);
+    wait_for_launch(
+        &mut process,
+        &paths,
+        &status_path,
+        &stop_path,
+        LAUNCH_TIMEOUT,
+    )
 }
 
 fn wait_for_launch(
     process: &mut std::process::Child,
     paths: &StatePaths,
     status_path: &Path,
+    stop_path: &Path,
     timeout: Duration,
 ) -> Result<(), String> {
     let deadline = Instant::now() + timeout;
@@ -323,7 +336,7 @@ fn wait_for_launch(
                 .to_owned());
         }
         if Instant::now() >= deadline {
-            terminate_timed_out_launch(process, paths, status_path);
+            terminate_timed_out_launch(process, status_path, stop_path);
             return Err(format!(
                 "monitor did not become ready within {} seconds; inspect {}",
                 timeout.as_secs_f64(),
@@ -340,10 +353,10 @@ fn wait_for_launch(
 
 fn terminate_timed_out_launch(
     process: &mut std::process::Child,
-    paths: &StatePaths,
     status_path: &Path,
+    stop_path: &Path,
 ) {
-    let _ = fs::write(&paths.stop, b"stop\n");
+    let _ = fs::write(stop_path, b"stop\n");
     let deadline = Instant::now() + LAUNCH_TERMINATION_GRACE;
     while Instant::now() < deadline {
         match process.try_wait() {
@@ -357,7 +370,7 @@ fn terminate_timed_out_launch(
         let _ = process.wait();
     }
     let _ = fs::remove_file(status_path);
-    let _ = fs::remove_file(&paths.stop);
+    let _ = fs::remove_file(stop_path);
 }
 
 #[cfg(unix)]
@@ -555,7 +568,7 @@ fn ensure_private_directory(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn claim_owner(paths: &StatePaths) -> io::Result<File> {
+fn claim_owner(paths: &StatePaths, owner_token: &str) -> io::Result<File> {
     let mut owner = OpenOptions::new()
         .create(true)
         .truncate(false)
@@ -569,9 +582,35 @@ fn claim_owner(paths: &StatePaths) -> io::Result<File> {
         )
     })?;
     owner.set_len(0)?;
-    writeln!(owner, "{}", std::process::id())?;
+    writeln!(owner, "{owner_token}")?;
     owner.flush()?;
     Ok(owner)
+}
+
+fn owner_token(paths: &StatePaths) -> io::Result<String> {
+    let token = fs::read_to_string(&paths.owner)?.trim().to_owned();
+    if token.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "monitor owner token is empty",
+        ));
+    }
+    Ok(token)
+}
+
+fn stop_requested(paths: &StatePaths) -> bool {
+    owner_token(paths)
+        .map(|token| paths.stop_for(&token).exists())
+        .unwrap_or(false)
+}
+
+fn remove_active_stop(paths: &StatePaths) -> io::Result<()> {
+    let stop_path = paths.stop_for(&owner_token(paths)?);
+    match fs::remove_file(stop_path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
 }
 
 fn write_launch_status(paths: &StatePaths, token: Option<&str>, status: &str) {
@@ -610,7 +649,8 @@ fn request_stop(state_key: &str, session_id: &str) -> io::Result<()> {
             format!("no monitor found for state key {state_key:?}"),
         ));
     }
-    fs::write(&paths.stop, b"stop\n")?;
+    let token = owner_token(&paths)?;
+    fs::write(paths.stop_for(&token), b"stop\n")?;
     println!("stop requested for {}", paths.root.display());
     Ok(())
 }
@@ -624,17 +664,44 @@ fn run_foreground(
     producer_command: &[OsString],
     launch_token: Option<&str>,
 ) -> io::Result<()> {
+    run_foreground_after_claim(
+        state_key,
+        label,
+        instructions,
+        session_id,
+        if_running,
+        producer_command,
+        launch_token,
+        || {},
+    )
+}
+
+fn run_foreground_after_claim(
+    state_key: &str,
+    label: &str,
+    instructions: &str,
+    session_id: &str,
+    if_running: RunningMode,
+    producer_command: &[OsString],
+    launch_token: Option<&str>,
+    after_claim: impl FnOnce(),
+) -> io::Result<()> {
     let paths = StatePaths::for_key(state_key, session_id);
     ensure_private_directory(&paths.root)?;
-    let _owner = claim_owner(&paths).inspect_err(|error| {
+    let owner_token = launch_token
+        .map(str::to_owned)
+        .unwrap_or_else(next_pending_generation);
+    let _owner = claim_owner(&paths, &owner_token).inspect_err(|error| {
         write_launch_status(&paths, launch_token, &format!("error: {error}"));
     })?;
+    after_claim();
+    if paths.stop_for(&owner_token).exists() {
+        log_line(&paths, "stop requested before producer start")?;
+        write_launch_status(&paths, launch_token, "ready");
+        remove_active_stop(&paths)?;
+        return Ok(());
+    }
     let result = (|| {
-        paths
-            .stop
-            .exists()
-            .then(|| fs::remove_file(&paths.stop))
-            .transpose()?;
         run_producer(
             &paths,
             label,
@@ -713,7 +780,7 @@ fn run_producer(
     let mut termination_requested = false;
 
     loop {
-        if paths.stop.exists() && !termination_requested {
+        if stop_requested(paths) && !termination_requested {
             log_line(paths, "stop requested")?;
             producer.terminate_and_wait();
             termination_requested = true;
@@ -806,7 +873,7 @@ fn run_producer(
         if_running,
     )?;
 
-    while !pending.bytes.is_empty() && !paths.stop.exists() {
+    while !pending.bytes.is_empty() && !stop_requested(paths) {
         thread::sleep(RETRY_INTERVAL);
         flush_pending(
             paths,
@@ -817,12 +884,13 @@ fn run_producer(
             if_running,
         )?;
     }
-    if !pending.bytes.is_empty() && paths.stop.exists() {
+    if !pending.bytes.is_empty() && stop_requested(paths) {
         pending.bytes.clear();
         pending.rotate();
         persist_pending(&paths.pending, &pending)?;
         log_line(paths, "discarded undelivered output after explicit stop")?;
     }
+    remove_active_stop(paths)?;
     log_line(paths, &format!("producer exited with status {status}"))?;
     Ok(())
 }
@@ -946,7 +1014,7 @@ fn deliver_with_candidates(
 ) -> bool {
     for lock in locks {
         for binary in &binaries {
-            if paths.stop.exists() {
+            if stop_requested(paths) {
                 return false;
             }
             let mut child = match Command::new(binary)
@@ -977,7 +1045,7 @@ fn deliver_with_candidates(
             };
             let deadline = Instant::now() + timeout;
             loop {
-                if paths.stop.exists() {
+                if stop_requested(paths) {
                     let _ = child.kill();
                     let _ = child.wait();
                     return false;
@@ -1266,6 +1334,7 @@ mod tests {
         let paths = StatePaths::for_key(&key, "test-session");
         ensure_private_directory(&paths.root).unwrap();
         let status_path = paths.launch_status("never-ready");
+        let stop_path = paths.stop_for("never-ready");
         let mut child = Command::new("sh")
             .args(["-c", "exec sleep 30"])
             .spawn()
@@ -1273,13 +1342,14 @@ mod tests {
         let pid = child.id();
 
         let launch_timeout = Duration::from_millis(100);
-        let launch_result = wait_for_launch(&mut child, &paths, &status_path, launch_timeout);
+        let launch_result =
+            wait_for_launch(&mut child, &paths, &status_path, &stop_path, launch_timeout);
         let error = launch_result.unwrap_err();
 
         assert!(error.contains("did not become ready"));
         assert!(!test_process_exists(pid));
         assert!(!status_path.exists());
-        assert!(!paths.stop.exists());
+        assert!(!stop_path.exists());
         fs::remove_dir_all(paths.root).unwrap();
     }
 
@@ -1499,7 +1569,7 @@ mod tests {
         let session_id = "test-session";
         let paths = StatePaths::for_key(&key, session_id);
         ensure_private_directory(&paths.root).unwrap();
-        let owner = claim_owner(&paths).unwrap();
+        let owner = claim_owner(&paths, "delivery-stop-owner").unwrap();
         let fake_berdctl = paths.root.join("fake-berdctl");
         fs::write(&fake_berdctl, "#!/bin/sh\nexec sleep 30\n").unwrap();
         fs::set_permissions(&fake_berdctl, fs::Permissions::from_mode(0o700)).unwrap();
@@ -1627,13 +1697,13 @@ mod tests {
         );
         let paths = StatePaths::for_key(&key, "test-session");
         ensure_private_directory(&paths.root).unwrap();
-        let owner = claim_owner(&paths).unwrap();
+        let owner = claim_owner(&paths, "owner-a").unwrap();
         assert_eq!(
-            claim_owner(&paths).unwrap_err().kind(),
+            claim_owner(&paths, "owner-b").unwrap_err().kind(),
             io::ErrorKind::WouldBlock
         );
         drop(owner);
-        claim_owner(&paths).unwrap();
+        claim_owner(&paths, "owner-b").unwrap();
         fs::remove_dir_all(&paths.root).unwrap();
     }
 
@@ -1658,7 +1728,7 @@ mod tests {
             let key = key.clone();
             workers.push(thread::spawn(move || {
                 barrier.wait();
-                let owner = claim_owner(&StatePaths::for_key(&key, "test-session"));
+                let owner = claim_owner(&StatePaths::for_key(&key, "test-session"), "race-owner");
                 if owner.is_ok() {
                     thread::sleep(Duration::from_millis(100));
                 }
@@ -1700,6 +1770,46 @@ mod tests {
         assert!(fs::read_to_string(&paths.log)
             .unwrap()
             .contains("monitor failed"));
+        fs::remove_dir_all(&paths.root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stop_after_owner_claim_prevents_producer_start() {
+        let key = format!(
+            "startup-stop-race-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let session_id = "test-session";
+        let paths = StatePaths::for_key(&key, session_id);
+        let producer_started = paths.root.join("producer-started");
+        let command = format!("printf started > '{}'", producer_started.display());
+
+        run_foreground_after_claim(
+            &key,
+            "test",
+            "",
+            session_id,
+            RunningMode::Steer,
+            &[
+                OsString::from("sh"),
+                OsString::from("-c"),
+                OsString::from(command),
+            ],
+            Some("startup-stop-owner"),
+            || request_stop(&key, session_id).unwrap(),
+        )
+        .unwrap();
+
+        assert!(!producer_started.exists());
+        assert!(!paths.stop_for("startup-stop-owner").exists());
+        assert!(fs::read_to_string(&paths.log)
+            .unwrap()
+            .contains("stop requested before producer start"));
         fs::remove_dir_all(&paths.root).unwrap();
     }
 
