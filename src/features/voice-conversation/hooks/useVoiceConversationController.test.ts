@@ -333,7 +333,7 @@ describe("voice transcript delivery coordination", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it("discards transcripts for a lifecycle after admission is blocked", async () => {
+  it("defers transcripts until admission is unblocked", async () => {
     const onSend = vi.fn().mockResolvedValue(true);
     useVoiceConversationStore.setState({
       status: {
@@ -349,7 +349,7 @@ describe("voice transcript delivery coordination", () => {
       hydrated: true,
       init: vi.fn().mockResolvedValue(undefined),
     });
-    const { rerender, unmount } = renderHook(
+    const { rerender } = renderHook(
       ({ routeBlocked }) =>
         useVoiceConversationController({
           sessionId: "session-1",
@@ -375,7 +375,7 @@ describe("voice transcript delivery coordination", () => {
         revision: 1,
         deliveryAttempts: 0,
       }),
-    ).resolves.toBeUndefined();
+    ).rejects.toThrow("waiting for its bound chat");
     expect(onSend).not.toHaveBeenCalled();
 
     rerender({ routeBlocked: false });
@@ -385,19 +385,17 @@ describe("voice transcript delivery coordination", () => {
         sessionId: "session-1",
         lifecycleId: "lifecycle-1",
         id: "utterance-after-admission-block",
-        text: "still do not deliver",
+        text: "deliver after unblock",
         revision: 1,
         deliveryAttempts: 0,
       }),
     ).resolves.toBeUndefined();
-    expect(onSend).not.toHaveBeenCalled();
-
-    act(() => {
-      useVoiceConversationStore.setState((state) => ({
-        status: { ...state.status, lifecycle: "stopped", sessionId: null },
-      }));
-    });
-    unmount();
+    expect(onSend).toHaveBeenCalledWith(
+      "deliver after unblock",
+      undefined,
+      undefined,
+      expect.objectContaining({ displayText: "deliver after unblock" }),
+    );
   });
 
   it("serializes deliveries for the same session and re-evaluates in order", async () => {
