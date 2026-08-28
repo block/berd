@@ -1,7 +1,7 @@
 //! OpenAI realtime transcription configuration and streaming speech playback.
 
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     mpsc, Arc, Mutex,
 };
 #[cfg(any(test, target_os = "macos"))]
@@ -65,6 +65,7 @@ const MAX_FINAL_PLAYBACK_DRAIN: Duration = Duration::from_secs(600);
 pub struct OpenAiVoiceState {
     playback: Arc<Mutex<PlaybackRuntime>>,
     configured: Arc<AtomicBool>,
+    credential_revision: Arc<AtomicU64>,
 }
 
 impl OpenAiVoiceState {
@@ -324,27 +325,27 @@ pub async fn get_openai_voice_status(
         .map_err(|_| "OpenAI voice playback state lock was poisoned".to_string())?
         .speed;
     let tts_available = cfg!(target_os = "macos");
-    let (stt_configured, tts_configured, stt_error, tts_error) = if tts_available {
-        let (stt_result, tts_result) = tauri::async_runtime::spawn_blocking(|| {
-            (
-                openai_voice_credentials::read(OpenAiVoiceCredential::SpeechToText),
-                openai_voice_credentials::read(OpenAiVoiceCredential::TextToSpeech),
-            )
-        })
-        .await
-        .map_err(|error| format!("Could not check OpenAI voice credentials: {error}"))?;
-        let stt_error = stt_result.as_ref().err().cloned();
-        let tts_error = tts_result.as_ref().err().cloned();
+    let credential_revision = state.credential_revision.load(Ordering::Acquire);
+    let (stt_result, tts_result) = tauri::async_runtime::spawn_blocking(move || {
+        let tts_result = if tts_available {
+            openai_voice_credentials::read(OpenAiVoiceCredential::TextToSpeech)
+        } else {
+            Ok(None)
+        };
         (
-            stt_result.unwrap_or(None).is_some(),
-            tts_result.unwrap_or(None).is_some(),
-            stt_error,
-            tts_error,
+            openai_voice_credentials::read(OpenAiVoiceCredential::SpeechToText),
+            tts_result,
         )
-    } else {
-        (false, false, None, None)
-    };
-    state.configured.store(stt_configured, Ordering::Release);
+    })
+    .await
+    .map_err(|error| format!("Could not check OpenAI voice credentials: {error}"))?;
+    let stt_error = stt_result.as_ref().err().cloned();
+    let tts_error = tts_result.as_ref().err().cloned();
+    let stt_configured = stt_result.unwrap_or(None).is_some();
+    let tts_configured = tts_result.unwrap_or(None).is_some();
+    if state.credential_revision.load(Ordering::Acquire) == credential_revision {
+        state.configured.store(stt_configured, Ordering::Release);
+    }
     Ok(OpenAiVoiceStatus {
         stt_configured,
         tts_configured,
@@ -377,6 +378,7 @@ pub fn set_openai_stt_api_key(
         return Err("OpenAI speech-to-text API key cannot be empty".to_string());
     }
     openai_voice_credentials::store(OpenAiVoiceCredential::SpeechToText, api_key)?;
+    state.credential_revision.fetch_add(1, Ordering::AcqRel);
     state.configured.store(true, Ordering::Release);
     app.emit(SETTINGS_CHANGED_EVENT, ())
         .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))?;
@@ -389,6 +391,7 @@ pub fn clear_openai_stt_api_key(
     state: State<'_, OpenAiVoiceState>,
 ) -> Result<(), String> {
     openai_voice_credentials::clear(OpenAiVoiceCredential::SpeechToText)?;
+    state.credential_revision.fetch_add(1, Ordering::AcqRel);
     state.configured.store(false, Ordering::Release);
     app.emit(SETTINGS_CHANGED_EVENT, ())
         .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))?;

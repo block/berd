@@ -43,6 +43,7 @@ const FINAL_TRANSCRIPT_DELIVERY_TIMEOUT: Duration =
     Duration::from_secs(FINAL_TRANSCRIPT_DELIVERY_TIMEOUT_SECONDS);
 const OPENAI_NETWORK_OPERATION_TIMEOUT: Duration = Duration::from_secs(5);
 const OPENAI_FINAL_WRITE_TIMEOUT: Duration = Duration::from_secs(1);
+const OPENAI_STARTUP_TIMEOUT: Duration = Duration::from_secs(12);
 const OPENAI_PRE_ROLL_CHUNKS: usize = 15;
 const STT_WORKER_SHUTDOWN_TIMEOUT_SECONDS: u64 =
     mac_speech::RECOGNITION_FINISH_TIMEOUT_SECONDS + FINAL_TRANSCRIPT_DELIVERY_TIMEOUT_SECONDS + 1;
@@ -840,9 +841,10 @@ impl SttPipeline {
         assistant_speaking: Arc<AtomicBool>,
         assistant_vad_threshold: Arc<AtomicU32>,
         speech_vad_threshold: f32,
-    ) -> Result<(Self, tokio_mpsc::Receiver<SttMessage>), String> {
+    ) -> Result<(Self, tokio_mpsc::Receiver<SttMessage>, mpsc::Receiver<()>), String> {
         let (audio_tx, audio_rx) = mpsc::sync_channel(AUDIO_QUEUE_DEPTH);
         let (event_tx, event_rx) = tokio_mpsc::channel(64);
+        let (startup_tx, startup_rx) = mpsc::sync_channel(0);
         let shutdown = Arc::new(AtomicBool::new(false));
         let discard_on_shutdown = Arc::new(AtomicBool::new(false));
         let shutdown_mute_epoch = Arc::new(AtomicU64::new(0));
@@ -866,6 +868,7 @@ impl SttPipeline {
                     assistant_speaking,
                     assistant_vad_threshold,
                     speech_vad_threshold,
+                    startup_tx,
                 )
             })
             .map_err(|error| format!("start OpenAI speech recognition: {error}"))?;
@@ -881,6 +884,7 @@ impl SttPipeline {
                 thread: Some(thread),
             },
             event_rx,
+            startup_rx,
         ))
     }
 
@@ -1344,14 +1348,36 @@ pub async fn start_native_voice_conversation(
             Arc::clone(&state.assistant_vad_threshold),
             speech_vad_threshold,
         ),
-        VoiceInputBackend::Openai => SttPipeline::new_openai(
-            openai_api_key.expect("OpenAI key resolved for OpenAI input"),
-            Arc::clone(&state.input_muted),
-            Arc::clone(&state.input_mute_epoch),
-            Arc::clone(&state.assistant_speaking),
-            Arc::clone(&state.assistant_vad_threshold),
-            speech_vad_threshold,
-        ),
+        VoiceInputBackend::Openai => {
+            let startup = SttPipeline::new_openai(
+                openai_api_key.expect("OpenAI key resolved for OpenAI input"),
+                Arc::clone(&state.input_muted),
+                Arc::clone(&state.input_mute_epoch),
+                Arc::clone(&state.assistant_speaking),
+                Arc::clone(&state.assistant_vad_threshold),
+                speech_vad_threshold,
+            );
+            match startup {
+                Err(error) => Err(error),
+                Ok((pipeline, events, startup)) => {
+                    let startup_result = tokio::task::spawn_blocking(move || {
+                        startup.recv_timeout(OPENAI_STARTUP_TIMEOUT)
+                    })
+                    .await;
+                    match startup_result {
+                        Ok(Ok(())) => Ok((pipeline, events)),
+                        Ok(Err(error)) => {
+                            drop(pipeline);
+                            Err(format!("OpenAI transcription did not start: {error}"))
+                        }
+                        Err(error) => {
+                            drop(pipeline);
+                            Err(format!("wait for OpenAI transcription startup: {error}"))
+                        }
+                    }
+                }
+            }
+        }
     };
     let (pipeline, mut events) = match pipeline {
         Ok(result) => result,
@@ -2639,7 +2665,25 @@ fn record_openai_transcription_event(
                 }
             }
         }
-        Some("conversation.item.input_audio_transcription.failed") | Some("error") => {
+        Some("conversation.item.input_audio_transcription.failed") => {
+            if value
+                .get("item_id")
+                .and_then(|value| value.as_str())
+                .is_some_and(|item_id| {
+                    !committed.iter().any(|turn| {
+                        turn.item_id == item_id && turn.mute_epoch == current_mute_epoch
+                    })
+                })
+            {
+                return Ok(None);
+            }
+            return Err(value
+                .pointer("/error/message")
+                .and_then(|value| value.as_str())
+                .unwrap_or("OpenAI realtime transcription failed.")
+                .to_string());
+        }
+        Some("error") => {
             return Err(value
                 .pointer("/error/message")
                 .and_then(|value| value.as_str())
@@ -2688,6 +2732,7 @@ fn openai_stt_worker(
     assistant_speaking: Arc<AtomicBool>,
     assistant_vad_threshold: Arc<AtomicU32>,
     speech_vad_threshold: f32,
+    startup_tx: SyncSender<()>,
 ) {
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
     use futures_util::{SinkExt, StreamExt};
@@ -2789,6 +2834,9 @@ fn openai_stt_worker(
             return;
         }
     };
+    if startup_tx.send(()).is_err() {
+        return;
+    }
     let chunk_in = resampler.input_frames_next();
     let mut vad = earshot::Detector::new(earshot::DefaultPredictor::new());
     let mut input_48k = Vec::new();
@@ -2878,15 +2926,33 @@ fn openai_stt_worker(
             let Ok(value) = serde_json::from_str::<serde_json::Value>(&message) else {
                 continue;
             };
-            if let Err(error) = record_openai_transcription_event(
+            let recorded_turn = match record_openai_transcription_event(
                 &value,
                 observed_mute_epoch,
                 &mut pending_commit_epochs,
                 &mut committed_turns,
                 &mut completed_turns,
             ) {
-                let _ = event_tx.blocking_send(SttMessage::Failed(error));
-                return;
+                Ok(turn) => turn,
+                Err(error) => {
+                    let _ = event_tx.blocking_send(SttMessage::Failed(error));
+                    return;
+                }
+            };
+            if let Some(turn) = recorded_turn.filter(|turn| turn.mute_epoch != observed_mute_epoch)
+            {
+                send_openai_stream_message!(
+                    Message::Text(
+                        serde_json::json!({
+                            "type": "conversation.item.delete",
+                            "item_id": turn.item_id,
+                        })
+                        .to_string()
+                        .into()
+                    ),
+                    "discard muted OpenAI transcription turn",
+                    { break 'worker }
+                );
             }
             deliver_completed_openai_turns(
                 &mut committed_turns,
@@ -4754,6 +4820,28 @@ mod tests {
         .expect_err("failure event");
 
         assert_eq!(error, "bad audio");
+    }
+
+    #[test]
+    fn openai_transcription_ignores_failures_for_discarded_turns() {
+        let mut committed = VecDeque::from([OpenAiCommittedTurn {
+            item_id: "current".to_string(),
+            mute_epoch: 2,
+        }]);
+
+        let result = record_openai_transcription_event(
+            &serde_json::json!({
+                "type": "conversation.item.input_audio_transcription.failed",
+                "item_id": "stale",
+                "error": { "message": "discarded turn failed" },
+            }),
+            2,
+            &mut VecDeque::new(),
+            &mut committed,
+            &mut HashMap::new(),
+        );
+
+        assert_eq!(result, Ok(None));
     }
 
     #[test]
