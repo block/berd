@@ -100,6 +100,11 @@ struct PendingState {
     bytes: Vec<u8>,
 }
 
+enum ProducerOutputEvent {
+    Data(Vec<u8>),
+    ReadError(io::Error),
+}
+
 impl PendingState {
     fn empty() -> Self {
         Self {
@@ -769,7 +774,7 @@ fn run_producer(
     }
     write_launch_status(paths, launch_token, "ready");
     let stdout = producer.child.stdout.take().expect("stdout was piped");
-    let (sender, receiver) = mpsc::sync_channel::<Vec<u8>>(1024);
+    let (sender, receiver) = mpsc::sync_channel::<ProducerOutputEvent>(1024);
     thread::spawn(move || forward_producer_output(stdout, sender));
 
     let mut batch = Vec::new();
@@ -778,6 +783,7 @@ fn run_producer(
     let mut producer_status = None;
     let mut receiver_closed = false;
     let mut termination_requested = false;
+    let mut capture_failure = None;
 
     loop {
         if stop_requested(paths) && !termination_requested {
@@ -824,7 +830,7 @@ fn run_producer(
             .unwrap_or(Duration::from_millis(100))
             .min(Duration::from_millis(100));
         match receiver.recv_timeout(timeout) {
-            Ok(line) => {
+            Ok(ProducerOutputEvent::Data(line)) => {
                 if !batch.is_empty() && batch.len() + line.len() > MAX_DELIVERY_BYTES {
                     append_batch(paths, &mut pending, &mut batch)?;
                     flush_pending(
@@ -854,6 +860,10 @@ fn run_producer(
                     batch_deadline.get_or_insert(Instant::now() + BATCH_WINDOW);
                 }
             }
+            Ok(ProducerOutputEvent::ReadError(error)) => {
+                capture_failure = Some(record_capture_failure(paths, &mut producer, error)?);
+                termination_requested = true;
+            }
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => receiver_closed = true,
         }
@@ -862,7 +872,10 @@ fn run_producer(
     producer.terminate_and_wait();
     append_batch(paths, &mut pending, &mut batch)?;
     let status = producer_status.expect("producer has exited");
-    let summary = format!("[monitor] producer exited with status {status}\n");
+    let summary = capture_failure
+        .as_ref()
+        .map(|(_, message)| format!("[monitor] {message}\n"))
+        .unwrap_or_else(|| format!("[monitor] producer exited with status {status}\n"));
     append_pending(&paths.pending, &mut pending, summary.as_bytes())?;
     flush_pending(
         paths,
@@ -891,35 +904,68 @@ fn run_producer(
         log_line(paths, "discarded undelivered output after explicit stop")?;
     }
     remove_active_stop(paths)?;
+    if let Some((kind, message)) = capture_failure {
+        return Err(io::Error::new(kind, message));
+    }
     log_line(paths, &format!("producer exited with status {status}"))?;
     Ok(())
 }
 
-fn forward_producer_output<R: Read>(mut reader: R, sender: mpsc::SyncSender<Vec<u8>>) {
+fn record_capture_failure(
+    paths: &StatePaths,
+    producer: &mut ProducerProcess,
+    error: io::Error,
+) -> io::Result<(io::ErrorKind, String)> {
+    let message = format!("producer stdout capture failed: {error}");
+    log_line(paths, &message)?;
+    producer.terminate_and_wait();
+    Ok((error.kind(), message))
+}
+
+fn forward_producer_output<R: Read>(mut reader: R, sender: mpsc::SyncSender<ProducerOutputEvent>) {
     let mut read_buffer = [0_u8; 8 * 1024];
     let mut record = Vec::with_capacity(MAX_DELIVERY_BYTES);
     loop {
         let read = match reader.read(&mut read_buffer) {
             Ok(0) => break,
             Ok(read) => read,
-            Err(_) => return,
+            Err(error) => {
+                if !send_output_record(&sender, &mut record) {
+                    return;
+                }
+                let _ = sender.send(ProducerOutputEvent::ReadError(error));
+                return;
+            }
         };
         for byte in &read_buffer[..read] {
             record.push(*byte);
             if *byte == b'\n' || record.len() == MAX_DELIVERY_BYTES {
-                if sender.send(std::mem::take(&mut record)).is_err() {
+                if sender
+                    .send(ProducerOutputEvent::Data(std::mem::take(&mut record)))
+                    .is_err()
+                {
                     return;
                 }
                 record = Vec::with_capacity(MAX_DELIVERY_BYTES);
             }
         }
     }
+    let _ = send_output_record(&sender, &mut record);
+}
+
+fn send_output_record(
+    sender: &mpsc::SyncSender<ProducerOutputEvent>,
+    record: &mut Vec<u8>,
+) -> bool {
     if !record.is_empty() {
         if !record.ends_with(b"\n") {
             record.push(b'\n');
         }
-        let _ = sender.send(record);
+        return sender
+            .send(ProducerOutputEvent::Data(std::mem::take(record)))
+            .is_ok();
     }
+    true
 }
 
 fn append_batch(
@@ -1475,7 +1521,15 @@ mod tests {
         let (sender, receiver) = mpsc::sync_channel(8);
 
         forward_producer_output(io::Cursor::new(&input), sender);
-        let records = receiver.into_iter().collect::<Vec<_>>();
+        let records = receiver
+            .into_iter()
+            .map(|event| match event {
+                ProducerOutputEvent::Data(record) => record,
+                ProducerOutputEvent::ReadError(error) => {
+                    panic!("unexpected capture failure: {error}")
+                }
+            })
+            .collect::<Vec<_>>();
 
         assert_eq!(records.len(), 4);
         assert!(records
@@ -1484,6 +1538,92 @@ mod tests {
         let mut output = records.concat();
         assert_eq!(output.pop(), Some(b'\n'));
         assert_eq!(output, input);
+    }
+
+    #[test]
+    fn producer_output_preserves_partial_record_before_read_error() {
+        struct BytesThenError(bool);
+
+        impl Read for BytesThenError {
+            fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+                if self.0 {
+                    return Err(io::Error::other("injected stdout read failure"));
+                }
+                self.0 = true;
+                let bytes = b"partial output";
+                buffer[..bytes.len()].copy_from_slice(bytes);
+                Ok(bytes.len())
+            }
+        }
+
+        let (sender, receiver) = mpsc::sync_channel(2);
+        forward_producer_output(BytesThenError(false), sender);
+        let events = receiver.into_iter().collect::<Vec<_>>();
+
+        assert_eq!(events.len(), 2);
+        assert!(matches!(
+            &events[0],
+            ProducerOutputEvent::Data(bytes) if bytes == b"partial output\n"
+        ));
+        assert!(matches!(
+            &events[1],
+            ProducerOutputEvent::ReadError(error)
+                if error.to_string() == "injected stdout read failure"
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn capture_failure_is_recorded_and_cleans_up_the_process_group() {
+        use std::io::{BufRead, BufReader};
+
+        let key = format!(
+            "capture-failure-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let paths = StatePaths::for_key(&key, "test-session");
+        ensure_private_directory(&paths.root).unwrap();
+        let mut command = Command::new("sh");
+        command
+            .args(["-c", "sleep 30 & child=$!; echo $child; wait"])
+            .stdout(Stdio::piped());
+        configure_producer(&mut command);
+        let child = command.spawn().unwrap();
+        let tree = attach_producer_tree(&child).unwrap();
+        let mut producer = ProducerProcess { child, tree };
+        resume_producer(&producer.child).unwrap();
+        let direct_pid = producer.child.id();
+        let mut descendant = String::new();
+        BufReader::new(producer.child.stdout.take().unwrap())
+            .read_line(&mut descendant)
+            .unwrap();
+        let descendant_pid = descendant.trim().parse::<u32>().unwrap();
+
+        let failure = record_capture_failure(
+            &paths,
+            &mut producer,
+            io::Error::other("injected stdout read failure"),
+        )
+        .unwrap();
+
+        assert_eq!(failure.0, io::ErrorKind::Other);
+        assert!(failure.1.contains("injected stdout read failure"));
+        assert!(fs::read_to_string(&paths.log)
+            .unwrap()
+            .contains("producer stdout capture failed"));
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while (test_process_exists(direct_pid) || test_process_exists(descendant_pid))
+            && Instant::now() < deadline
+        {
+            thread::sleep(Duration::from_millis(25));
+        }
+        assert!(!test_process_exists(direct_pid));
+        assert!(!test_process_exists(descendant_pid));
+        fs::remove_dir_all(paths.root).unwrap();
     }
 
     #[test]
