@@ -50,7 +50,7 @@ const INITIAL_PLAYBACK_BUFFER_FRAMES: usize = TTS_SAMPLE_RATE as usize / 5;
 #[cfg(target_os = "macos")]
 const TTS_EVENT: &str = "openai-voice:stream-event";
 #[cfg(target_os = "macos")]
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 #[cfg(target_os = "macos")]
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 #[cfg(target_os = "macos")]
@@ -335,7 +335,6 @@ fn persist_playback_speed(speed: f32) -> Result<(), String> {
 fn client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
-        .timeout(REQUEST_TIMEOUT)
         .build()
         .map_err(|error| format!("create OpenAI HTTP client: {error}"))
 }
@@ -364,10 +363,10 @@ pub async fn get_openai_voice_status(
         speech_voice: speech_voice(),
         playback_speed,
         tts_available,
-        unavailable_reason: if !tts_configured {
-            Some("Add an OpenAI text-to-speech API key in Voice settings.".to_string())
-        } else if !tts_available {
-            Some("OpenAI voice playback is currently supported on macOS only.".to_string())
+        unavailable_reason: if !tts_available {
+            Some("unsupportedPlatform".to_string())
+        } else if !tts_configured {
+            Some("missingApiKey".to_string())
         } else {
             None
         },
@@ -375,11 +374,16 @@ pub async fn get_openai_voice_status(
 }
 
 #[tauri::command]
-pub fn set_openai_tts_api_key(app: AppHandle, api_key: String) -> Result<(), String> {
+pub fn set_openai_tts_api_key(
+    app: AppHandle,
+    state: State<'_, OpenAiVoiceState>,
+    api_key: String,
+) -> Result<(), String> {
     let api_key = api_key.trim();
     if api_key.is_empty() {
         return Err("OpenAI text-to-speech API key cannot be empty".to_string());
     }
+    stop_openai_voice_inner(&state)?;
     store_api_key(TTS_KEYRING_ACCOUNT, api_key)?;
     app.emit(SETTINGS_CHANGED_EVENT, ())
         .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))?;
@@ -387,7 +391,11 @@ pub fn set_openai_tts_api_key(app: AppHandle, api_key: String) -> Result<(), Str
 }
 
 #[tauri::command]
-pub fn clear_openai_tts_api_key(app: AppHandle) -> Result<(), String> {
+pub fn clear_openai_tts_api_key(
+    app: AppHandle,
+    state: State<'_, OpenAiVoiceState>,
+) -> Result<(), String> {
+    stop_openai_voice_inner(&state)?;
     clear_api_key(TTS_KEYRING_ACCOUNT)?;
     app.emit(SETTINGS_CHANGED_EVENT, ())
         .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))?;
@@ -678,7 +686,7 @@ fn run_openai_voice_stream(
         match receiver.recv_timeout(Duration::from_millis(20)) {
             Ok(OpenAiStreamCommand::Append(text)) => {
                 pending.push_str(&text);
-                if pending.len() >= 24 && pending.trim_end().ends_with(['.', '!', '?', '\n']) {
+                if pending.len() >= 24 && ends_sentence_boundary(&pending) {
                     speak_pending(
                         &runtime,
                         app,
@@ -872,6 +880,7 @@ fn speak_pending(
         };
         let mut pcm_remainder = Vec::<u8>::new();
         let mut initial_samples = Vec::<f32>::new();
+        let mut last_network_data = Instant::now();
         loop {
             update_openai_assistant_speech(
                 player.is_empty(),
@@ -888,12 +897,14 @@ fn speak_pending(
             });
             let Some(item) = (match item {
                 Ok(item) => item,
-                Err(_) => continue,
+                Err(_) if last_network_data.elapsed() < STREAM_IDLE_TIMEOUT => continue,
+                Err(_) => return Err("OpenAI speech audio stream timed out".to_string()),
             }) else {
                 break;
             };
             let item =
                 item.map_err(|error| format_openai_request_error("stream speech audio", error))?;
+            last_network_data = Instant::now();
             if !active.load(Ordering::SeqCst) {
                 return Ok(());
             }
@@ -953,6 +964,17 @@ fn speak_pending(
         upsert_delivery_segment(delivery, chunk, segment_frames, true);
     }
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn ends_sentence_boundary(text: &str) -> bool {
+    if text.trim_end_matches([' ', '\t', '\r']).ends_with('\n') {
+        return true;
+    }
+    let trimmed = text.trim_end();
+    trimmed
+        .trim_end_matches(['"', '\'', '”', '’', ')', ']', '}'])
+        .ends_with(['.', '!', '?'])
 }
 
 #[cfg(target_os = "macos")]
@@ -1272,6 +1294,15 @@ mod tests {
             chunk_text("hello wide world", 8),
             vec!["hello", "wide", "world"]
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn recognizes_sentence_boundaries_before_streaming() {
+        assert!(ends_sentence_boundary("Hello world.\n"));
+        assert!(ends_sentence_boundary("Did it work?” "));
+        assert!(ends_sentence_boundary("It did!)"));
+        assert!(!ends_sentence_boundary("Still speaking,"));
     }
 
     #[cfg(target_os = "macos")]

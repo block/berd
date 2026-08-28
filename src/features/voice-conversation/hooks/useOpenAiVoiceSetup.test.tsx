@@ -38,7 +38,7 @@ function status(configured: boolean): OpenAiVoiceStatus {
     speechVoice: "marin",
     playbackSpeed: 1,
     ttsAvailable: true,
-    unavailableReason: configured ? null : "Configure OpenAI.",
+    unavailableReason: configured ? null : "missingApiKey",
   };
 }
 
@@ -115,5 +115,21 @@ describe("useOpenAiVoiceSetup", () => {
 
     await waitFor(() => expect(result.current.status).toBeNull());
     expect(result.current.error).toBe("Keychain unavailable");
+  });
+
+  it("does not expose cached readiness while disabled", async () => {
+    mocks.listenerError = new Error("listener unavailable");
+    mocks.getStatus.mockResolvedValue(status(true));
+    const { result, rerender } = renderHook(
+      ({ enabled }) => useOpenAiVoiceSetup(enabled),
+      { initialProps: { enabled: true } },
+    );
+    await waitFor(() =>
+      expect(result.current.status?.ttsConfigured).toBe(true),
+    );
+
+    rerender({ enabled: false });
+
+    expect(result.current).toEqual({ status: null, error: null });
   });
 });

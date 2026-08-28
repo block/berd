@@ -48,5 +48,8 @@ export function useOpenAiVoiceSetup(enabled = true) {
     };
   }, [enabled]);
 
-  return { status, error };
+  return {
+    status: enabled ? status : null,
+    error: enabled ? error : null,
+  };
 }

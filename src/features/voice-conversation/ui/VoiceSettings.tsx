@@ -55,7 +55,9 @@ function readinessDescriptionKey(
   if (inputReady && outputReady) return null;
   if (!inputReady && !outputReady) {
     if (backend === "openai") {
-      return "voice.notReadyOpenAi";
+      return inputBackend === "macos"
+        ? "voice.notReadyMacInputAndOpenAiOutput"
+        : "voice.notReadyInputAndOpenAiOutput";
     }
     if (inputBackend === "macos") {
       return backend === "siri"
@@ -273,13 +275,16 @@ export function VoiceSettings() {
                 />
                 <p className="text-xs text-muted-foreground">
                   {openAiError ??
-                    openAiStatus?.unavailableReason ??
-                    (openAiStatus
-                      ? t("voice.openAiTtsConfigured", {
-                          model: openAiStatus.speechModel,
-                          voice: openAiStatus.speechVoice,
-                        })
-                      : t("voice.openAiChecking"))}
+                    (openAiStatus?.unavailableReason === "unsupportedPlatform"
+                      ? t("voice.openAiTtsUnsupportedPlatform")
+                      : openAiStatus?.unavailableReason === "missingApiKey"
+                        ? t("voice.openAiTtsNeedsKey")
+                        : openAiStatus
+                          ? t("voice.openAiTtsConfigured", {
+                              model: openAiStatus.speechModel,
+                              voice: openAiStatus.speechVoice,
+                            })
+                          : t("voice.openAiChecking"))}
                 </p>
                 <PlaybackSpeedRow
                   speed={openAiSpeed}

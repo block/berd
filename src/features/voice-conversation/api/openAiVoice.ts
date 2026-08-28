@@ -12,7 +12,7 @@ export interface OpenAiVoiceStatus {
   speechVoice: string;
   playbackSpeed: number;
   ttsAvailable: boolean;
-  unavailableReason: string | null;
+  unavailableReason: "missingApiKey" | "unsupportedPlatform" | null;
 }
 
 export interface OpenAiVoiceStreamEvent {
