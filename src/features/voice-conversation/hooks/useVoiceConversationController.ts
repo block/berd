@@ -12,6 +12,7 @@ import { steerPromptInSession } from "@/features/chat/lib/steerCore";
 import {
   subscribeToVoiceConversationEvents,
   useVoiceConversationStore,
+  VoiceTranscriptDeferredError,
 } from "../stores/voiceConversationStore";
 import {
   captureNativeAssistantSpeechHistory,
@@ -448,7 +449,7 @@ function ensureVoiceEventDeliveryInitialized() {
     const shouldNotifyFailure = event.deliveryAttempts === 0;
     return enqueueVoiceTranscriptDelivery(event.sessionId, async () => {
       if (blockedSendRouteSessions.has(event.sessionId)) {
-        throw new Error(
+        throw new VoiceTranscriptDeferredError(
           "Voice transcript is waiting for its bound chat to become available.",
         );
       }
@@ -491,7 +492,7 @@ function ensureVoiceEventDeliveryInitialized() {
           event.sessionId,
         );
         if (blockedSendRouteSessions.has(event.sessionId)) {
-          throw new Error(
+          throw new VoiceTranscriptDeferredError(
             "Voice transcript is waiting for its bound chat to become available.",
           );
         }

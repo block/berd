@@ -198,6 +198,33 @@ describe("voice conversation store lifecycle ordering", () => {
     unsubscribe();
   });
 
+  it("defers a blocked transcript without spending its rejection budget", async () => {
+    const transcript = {
+      sessionId: "session-1",
+      lifecycleId: "lifecycle-1",
+      id: "deferred-utterance",
+      text: "Wait for admission",
+      revision: 1,
+      deliveryAttempts: 2,
+    };
+    mocks.drain.mockResolvedValueOnce([transcript]);
+    const module = await import("./voiceConversationStore");
+    const unsubscribe = module.subscribeToVoiceConversationEvents(() =>
+      Promise.reject(new module.VoiceTranscriptDeferredError("blocked")),
+    );
+    await module.useVoiceConversationStore.getState().init();
+
+    await expect(
+      module.useVoiceConversationStore
+        .getState()
+        .drainPendingTranscripts("session-1"),
+    ).resolves.toBeUndefined();
+
+    expect(mocks.reject).not.toHaveBeenCalled();
+    expect(mocks.acknowledge).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
   it("restores prior causal state after terminal transcript rejection", async () => {
     mocks.reject.mockResolvedValueOnce({ attempts: 3, terminal: true });
     const module = await import("./voiceConversationStore");
