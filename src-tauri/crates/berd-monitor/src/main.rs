@@ -18,6 +18,8 @@ const MAX_DELIVERY_BYTES: usize = 40_000;
 const MAX_PROMPT_CODE_UNITS: usize = 49_000;
 const MAX_INSTRUCTIONS_CODE_UNITS: usize = 4_000;
 const MAX_LABEL_CODE_UNITS: usize = 120;
+const MAX_LOCK_CANDIDATES: usize = 8;
+const DELIVERY_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const LAUNCH_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -792,7 +794,7 @@ fn flush_pending(
                 "monitor delivery prompt exceeded its internal size bound",
             ));
         }
-        if !deliver(session_id, &prompt, if_running) {
+        if !deliver(paths, session_id, &prompt, if_running) {
             log_line(paths, "delivery failed; buffered output will be retried")?;
             return Ok(());
         }
@@ -803,10 +805,36 @@ fn flush_pending(
     Ok(())
 }
 
-fn deliver(session_id: &str, prompt: &str, if_running: RunningMode) -> bool {
-    for lock in lock_candidates() {
-        for binary in berdctl_candidates() {
-            let status = Command::new(&binary)
+fn deliver(
+    paths: &StatePaths,
+    session_id: &str,
+    prompt: &str,
+    if_running: RunningMode,
+) -> bool {
+    deliver_with_candidates(
+        paths,
+        session_id,
+        prompt,
+        if_running,
+        lock_candidates(),
+        berdctl_candidates(),
+    )
+}
+
+fn deliver_with_candidates(
+    paths: &StatePaths,
+    session_id: &str,
+    prompt: &str,
+    if_running: RunningMode,
+    locks: Vec<PathBuf>,
+    binaries: Vec<OsString>,
+) -> bool {
+    for lock in locks {
+        for binary in &binaries {
+            if paths.stop.exists() {
+                return false;
+            }
+            let mut child = match Command::new(binary)
                 .arg("--lock-path")
                 .arg(&lock)
                 .arg("--timeout-ms")
@@ -825,9 +853,22 @@ fn deliver(session_id: &str, prompt: &str, if_running: RunningMode) -> bool {
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
-                .status();
-            if status.is_ok_and(|status| status.success()) {
-                return true;
+                .spawn()
+            {
+                Ok(child) => child,
+                Err(_) => continue,
+            };
+            loop {
+                if paths.stop.exists() {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return false;
+                }
+                match child.try_wait() {
+                    Ok(Some(status)) if status.success() => return true,
+                    Ok(Some(_)) | Err(_) => break,
+                    Ok(None) => thread::sleep(DELIVERY_POLL_INTERVAL),
+                }
             }
         }
     }
@@ -838,7 +879,11 @@ fn lock_candidates() -> Vec<PathBuf> {
     let Some(explicit) = env::var_os("BERDCTL_LOCK").map(PathBuf::from) else {
         return Vec::new();
     };
-    let mut candidates = vec![explicit.clone()];
+    lock_candidates_for(&explicit)
+}
+
+fn lock_candidates_for(explicit: &Path) -> Vec<PathBuf> {
+    let mut candidates = vec![explicit.to_path_buf()];
     if let Some(parent) = explicit.parent() {
         let mut siblings = fs::read_dir(parent)
             .into_iter()
@@ -861,7 +906,10 @@ fn lock_candidates() -> Vec<PathBuf> {
             })
             .collect::<Vec<_>>();
         siblings.sort_by(|left, right| right.0.cmp(&left.0));
-        for (_, sibling) in siblings {
+        for (_, sibling) in siblings
+            .into_iter()
+            .take(MAX_LOCK_CANDIDATES.saturating_sub(1))
+        {
             if sibling != explicit {
                 candidates.push(sibling);
             }
@@ -875,11 +923,14 @@ fn berdctl_candidates() -> Vec<OsString> {
     if let Some(explicit) = env::var_os("BERDCTL_BIN") {
         candidates.push(explicit);
     }
-    candidates.push(OsString::from(if cfg!(windows) {
+    let default = OsString::from(if cfg!(windows) {
         "berdctl.exe"
     } else {
         "berdctl"
-    }));
+    });
+    if !candidates.contains(&default) {
+        candidates.push(default);
+    }
     candidates
 }
 
@@ -989,6 +1040,74 @@ mod tests {
         let mut output = records.concat();
         assert_eq!(output.pop(), Some(b'\n'));
         assert_eq!(output, input);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stop_interrupts_a_nonresponsive_delivery_probe() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let key = format!(
+            "delivery-stop-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let session_id = "test-session";
+        let paths = StatePaths::for_key(&key, session_id);
+        ensure_private_directory(&paths.root).unwrap();
+        let owner = claim_owner(&paths).unwrap();
+        let fake_berdctl = paths.root.join("fake-berdctl");
+        fs::write(&fake_berdctl, "#!/bin/sh\nexec sleep 30\n").unwrap();
+        fs::set_permissions(&fake_berdctl, fs::Permissions::from_mode(0o700)).unwrap();
+
+        let worker_key = key.clone();
+        let worker_binary = fake_berdctl.into_os_string();
+        let started = Instant::now();
+        let worker = thread::spawn(move || {
+            let worker_paths = StatePaths::for_key(&worker_key, session_id);
+            deliver_with_candidates(
+                &worker_paths,
+                session_id,
+                "test",
+                RunningMode::Steer,
+                vec![PathBuf::from("stale-a"), PathBuf::from("stale-b")],
+                vec![worker_binary],
+            )
+        });
+        thread::sleep(Duration::from_millis(150));
+        request_stop(&key, session_id).unwrap();
+
+        assert!(!worker.join().unwrap());
+        assert!(started.elapsed() < Duration::from_secs(2));
+        drop(owner);
+        fs::remove_dir_all(&paths.root).unwrap();
+    }
+
+    #[test]
+    fn lock_candidates_keep_the_explicit_lock_and_bound_siblings() {
+        let root = env::temp_dir().join(format!(
+            "berd-monitor-locks-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let explicit = root.join("control-explicit.json");
+        fs::write(&explicit, "{}").unwrap();
+        for index in 0..(MAX_LOCK_CANDIDATES * 2) {
+            fs::write(root.join(format!("control-{index}.json")), "{}").unwrap();
+        }
+
+        let candidates = lock_candidates_for(&explicit);
+
+        assert_eq!(candidates.first(), Some(&explicit));
+        assert_eq!(candidates.len(), MAX_LOCK_CANDIDATES);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
