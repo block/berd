@@ -215,6 +215,11 @@ pub fn run() {
                 app_data_dir.clone(),
                 bundled_runtime_config_path,
             ));
+            app.manage(
+                commands::feedback_survey::SessionFeedbackSurveyCooldownState::new(
+                    app_data_dir.clone(),
+                ),
+            );
             // Construct and register the distro bundle up front (goose serve and
             // runtime-config readiness both depend on it). Seeding its bundled
             // skills/agents is filesystem work and is deferred below.
@@ -552,6 +557,7 @@ pub fn run() {
             commands::doctor::run_doctor_fix,
             #[cfg(feature = "block-feedback")]
             commands::feedback::submit_feedback_issue,
+            commands::feedback_survey::claim_session_feedback_survey_cooldown,
             commands::git::get_git_state,
             commands::git_changes::get_changed_files,
             commands::git::git_switch_branch,

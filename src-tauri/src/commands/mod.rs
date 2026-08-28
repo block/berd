@@ -21,6 +21,7 @@ pub mod distro;
 pub mod doctor;
 #[cfg(feature = "block-feedback")]
 pub mod feedback;
+pub mod feedback_survey;
 pub mod git;
 pub mod git_changes;
 pub mod global_shortcut;

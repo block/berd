@@ -102,9 +102,17 @@ describe("runtimeConfigSchema", () => {
     expect(
       runtimeConfigSchema.parse({
         ...DEFAULT_RUNTIME_CONFIG,
-        feedback: { enabled: true, responseRatingEnabled: true },
+        feedback: {
+          enabled: true,
+          responseRatingEnabled: true,
+          sessionSurveySamplingRateBasisPoints: 250,
+        },
       }).feedback,
-    ).toEqual({ enabled: true, responseRatingEnabled: true });
+    ).toEqual({
+      enabled: true,
+      responseRatingEnabled: true,
+      sessionSurveySamplingRateBasisPoints: 250,
+    });
   });
 
   it("accepts an empty managed-provider list as unrestricted policy", () => {

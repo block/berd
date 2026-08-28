@@ -20,6 +20,7 @@ import { cn } from "@/shared/lib/cn";
 import { useLocaleFormatting } from "@/shared/i18n";
 import type { Message } from "@/shared/types/messages";
 import { selectResponseFeedbackRowIds } from "../response-feedback/responseFeedbackRows";
+import type { ActiveSessionFeedbackSurvey } from "../response-feedback/sessionFeedbackSurveyState";
 import { ASSISTIVE_UX_RULES } from "@/shared/assistive-ux/registry";
 import {
   hasAssistiveMomentBeenShown,
@@ -231,6 +232,7 @@ interface VirtualMessageTimelineProps extends MessageTimelineBubbleCallbacks {
   sessionId: string;
   messages: Message[];
   streamingMessageId?: string | null;
+  sessionFeedbackSurvey?: ActiveSessionFeedbackSurvey | null;
   scrollTargetMessageId?: string | null;
   scrollTargetQuery?: string | null;
   onScrollTargetHandled?: (messageId: string) => void;
@@ -271,6 +273,18 @@ interface LiveStreamingTailSplit {
   historyRows: readonly TranscriptRowDescriptor[];
   liveRows: readonly TranscriptRowDescriptor[];
   startIndex: number;
+}
+
+function rowOwnsSessionFeedbackSurvey(
+  row: TranscriptRowDescriptor,
+  responseFeedbackRowIds: ReadonlySet<string>,
+  survey: ActiveSessionFeedbackSurvey | null | undefined,
+): boolean {
+  return Boolean(
+    survey &&
+      responseFeedbackRowIds.has(row.rowId) &&
+      (row.responseStartMessageId ?? row.messageId) === survey.messageId,
+  );
 }
 
 function formatDateSeparator(
@@ -982,6 +996,7 @@ function VirtualMessageTimelineSession({
   sessionId,
   messages,
   streamingMessageId,
+  sessionFeedbackSurvey,
   scrollTargetMessageId,
   scrollTargetQuery,
   onScrollTargetHandled,
@@ -1112,11 +1127,34 @@ function VirtualMessageTimelineSession({
       sessionEpoch,
     ],
   );
-  const stableRows = useStableTranscriptRows(snapshot.rows);
+  const projectedRows = useStableTranscriptRows(snapshot.rows);
   const responseFeedbackRowIds = useMemo(
-    () => selectResponseFeedbackRowIds(stableRows),
-    [stableRows],
+    () => selectResponseFeedbackRowIds(projectedRows),
+    [projectedRows],
   );
+  const stableRows = useMemo(() => {
+    if (!sessionFeedbackSurvey) {
+      return projectedRows;
+    }
+
+    return projectedRows.map((row) =>
+      rowOwnsSessionFeedbackSurvey(
+        row,
+        responseFeedbackRowIds,
+        sessionFeedbackSurvey,
+      )
+        ? {
+            ...row,
+            heightRevision: `${row.heightRevision}:session-survey:${sessionFeedbackSurvey.appearanceId}:${localeKey}`,
+            measurementPolicy: "measure-real" as const,
+            capabilities: {
+              ...row.capabilities,
+              canOffscreenRenderReal: true,
+            },
+          }
+        : row,
+    );
+  }, [localeKey, projectedRows, responseFeedbackRowIds, sessionFeedbackSurvey]);
   const [settlingAgentWorkMessageId, setSettlingAgentWorkMessageId] = useState<
     string | null
   >(null);
@@ -3495,6 +3533,14 @@ function VirtualMessageTimelineSession({
     ],
   );
 
+  const sessionFeedbackSurveyForRow = (row: TranscriptRowDescriptor) =>
+    rowOwnsSessionFeedbackSurvey(
+      row,
+      responseFeedbackRowIds,
+      sessionFeedbackSurvey,
+    )
+      ? (sessionFeedbackSurvey ?? undefined)
+      : undefined;
   const renderRow = (
     row: TranscriptRowDescriptor,
     index: number,
@@ -3530,6 +3576,7 @@ function VirtualMessageTimelineSession({
       feedbackSessionId={
         responseFeedbackRowIds.has(row.rowId) ? sessionId : undefined
       }
+      sessionFeedbackSurvey={sessionFeedbackSurveyForRow(row)}
       showJumpToResponseStartHint={
         row.messageId === responseStartHintMessageId &&
         responseStartHintIsActive
@@ -3563,6 +3610,10 @@ function VirtualMessageTimelineSession({
       })}
       message={row.messageId ? stableMessageByRowId.get(row.rowId) : undefined}
       isStreaming={false}
+      feedbackSessionId={
+        responseFeedbackRowIds.has(row.rowId) ? sessionId : undefined
+      }
+      sessionFeedbackSurvey={sessionFeedbackSurveyForRow(row)}
       rowStateProvider={
         virtualTimeline.rowStateProvider
           ? {

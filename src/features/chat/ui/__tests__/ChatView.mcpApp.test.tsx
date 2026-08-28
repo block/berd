@@ -16,6 +16,8 @@ import {
 import { TERMINAL_FALLBACK_CWD_STORAGE_KEY } from "@/features/terminal/lib/terminalCwdPreference";
 import type { ChatSession } from "../../stores/chatSessionStore";
 import { useSecurityConfirmationStore } from "@/features/security/stores/securityConfirmationStore";
+import { DEFAULT_RUNTIME_CONFIG } from "@/shared/runtime-config/schema";
+import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import { ChatView } from "../ChatView";
 
 const mocks = vi.hoisted(() => ({
@@ -23,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   chatInputSpy: vi.fn(),
   chatRightRailSpy: vi.fn(),
   voiceControllerSpy: vi.fn(),
+  sessionFeedbackSurveyHook: vi.fn((_options: unknown) => null),
   setRightRailOpen: vi.fn(),
   patchSession: vi.fn(),
   handleSend: vi.fn(() => true),
@@ -111,6 +114,11 @@ vi.mock(
 
 vi.mock("@/shared/artifacts/useResolvedArtifactRoot", () => ({
   useResolvedArtifactRoot: () => null,
+}));
+
+vi.mock("@/features/chat/response-feedback/useSessionFeedbackSurvey", () => ({
+  useSessionFeedbackSurvey: (options: unknown) =>
+    mocks.sessionFeedbackSurveyHook(options),
 }));
 
 // Deterministic find-shortcut modifier across dev machines and CI.
@@ -392,6 +400,7 @@ function chatSessionWithWorkingDir(workingDir: string): ChatSession {
 describe("ChatView MCP app messaging", () => {
   afterEach(() => {
     act(() => cleanup());
+    vi.unstubAllEnvs();
   });
 
   beforeEach(() => {
@@ -399,6 +408,7 @@ describe("ChatView MCP app messaging", () => {
     mocks.chatInputSpy.mockClear();
     mocks.chatRightRailSpy.mockClear();
     mocks.voiceControllerSpy.mockClear();
+    mocks.sessionFeedbackSurveyHook.mockClear();
     mocks.setRightRailOpen.mockClear();
     mocks.patchSession.mockClear();
     mocks.handleSend.mockClear();
@@ -418,6 +428,7 @@ describe("ChatView MCP app messaging", () => {
       mountedSurfaceCountBySessionId: {},
     });
     window.localStorage.clear();
+    useRuntimeConfigStore.setState({ config: DEFAULT_RUNTIME_CONFIG });
     mockMatchMedia(false);
     mocks.useChatSessionController.mockReturnValue({
       messages: [
@@ -509,6 +520,26 @@ describe("ChatView MCP app messaging", () => {
     expect(onForkChat).toHaveBeenCalledWith("session-1", {
       conversationBefore: 1_700_000_003,
     });
+  });
+
+  it("gates session surveys through the dedicated build capability", () => {
+    vi.stubEnv("VITE_FEEDBACK", "0");
+    vi.stubEnv("VITE_FEEDBACK_SURVEYS", "1");
+    useRuntimeConfigStore.setState({
+      config: {
+        ...DEFAULT_RUNTIME_CONFIG,
+        feedback: {
+          ...DEFAULT_RUNTIME_CONFIG.feedback,
+          sessionSurveySamplingRateBasisPoints: 250,
+        },
+      },
+    });
+
+    render(<ChatView sessionId="session-1" />);
+
+    expect(mocks.sessionFeedbackSurveyHook).toHaveBeenLastCalledWith(
+      expect.objectContaining({ samplingRateBasisPoints: 250 }),
+    );
   });
 
   it("keeps full chat automatic and passes the complete transcript", () => {

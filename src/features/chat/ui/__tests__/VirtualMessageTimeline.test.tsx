@@ -63,6 +63,7 @@ vi.mock("../MessageBubble", async () => {
       fragmentRole,
       actionsAlwaysVisible,
       showJumpToResponseStartHint,
+      sessionFeedbackSurvey,
       onEditProject,
       onRunShellCommand,
     }: {
@@ -72,6 +73,10 @@ vi.mock("../MessageBubble", async () => {
       fragmentRole?: string;
       actionsAlwaysVisible?: boolean;
       showJumpToResponseStartHint?: boolean;
+      sessionFeedbackSurvey?: {
+        appearanceId: string;
+        messageId: string;
+      };
       onEditProject?: (projectId: string) => void;
       onRunShellCommand?: (
         command: string,
@@ -96,7 +101,9 @@ vi.mock("../MessageBubble", async () => {
           data-response-start-hint={
             showJumpToResponseStartHint ? "true" : "false"
           }
-          data-mock-row-height={heightMatch?.[1] ?? "144"}
+          data-mock-row-height={
+            sessionFeedbackSurvey ? "240" : (heightMatch?.[1] ?? "144")
+          }
           tabIndex={-1}
           {...rowRootAttributes}
           {...(isPending
@@ -2558,6 +2565,83 @@ describe("VirtualMessageTimeline", () => {
     window.removeEventListener(
       TRANSCRIPT_DIAGNOSTICS_EVENT,
       handleTranscriptDiagnosticsEvent,
+    );
+  });
+
+  it("real-measures an offscreen row before mounting its localized survey", async () => {
+    mockTranscriptElementMeasurements();
+    const messages = Array.from({ length: 80 }, (_, index) =>
+      textMessage(
+        `message-${index}`,
+        index % 2 === 0 ? "user" : "assistant",
+        `Message ${index}`,
+      ),
+    );
+    const { rerender } = renderWithProviders(
+      <VirtualMessageTimeline sessionId="session-1" messages={messages} />,
+    );
+    const list = screen.getByTestId("virtual-message-timeline-list");
+    await waitFor(() =>
+      expect(list).toHaveAttribute(
+        "data-virtual-render-mode",
+        "bounded-controller",
+      ),
+    );
+
+    const shellRows = screen
+      .getByTestId("virtual-offscreen-measurement-host")
+      .querySelectorAll<HTMLElement>(
+        "[data-virtual-row-offscreen-shell-id^='message:message-']",
+      );
+    const targetShellRow = [...shellRows].reverse().find((row) => {
+      const messageId = row
+        .getAttribute("data-virtual-row-offscreen-shell-id")
+        ?.replace("message:", "");
+      const index = Number(messageId?.replace("message-", ""));
+      return index % 2 === 1;
+    });
+    expect(targetShellRow).toBeDefined();
+    const targetMessageId = targetShellRow
+      ?.getAttribute("data-virtual-row-offscreen-shell-id")
+      ?.replace("message:", "");
+    const initialHeightRevision = targetShellRow?.getAttribute(
+      "data-virtual-row-height-revision",
+    );
+    expect(targetMessageId).toBeTruthy();
+
+    rerender(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={messages}
+        sessionFeedbackSurvey={{
+          appearanceId: "appearance-localized",
+          messageId: targetMessageId as string,
+        }}
+      />,
+    );
+
+    const realRow = await waitFor(() => {
+      const row = screen
+        .getByTestId("virtual-offscreen-real-measurement-host")
+        .querySelector<HTMLElement>(
+          `[data-virtual-row-offscreen-real-id='message:${targetMessageId}']`,
+        );
+      expect(row).not.toBeNull();
+      return row as HTMLElement;
+    });
+    expect(realRow).toHaveAttribute(
+      "data-virtual-row-measurement-policy",
+      "measure-real",
+    );
+    expect(realRow.getAttribute("data-virtual-row-height-revision")).not.toBe(
+      initialHeightRevision,
+    );
+    expect(realRow.getAttribute("data-virtual-row-height-revision")).toContain(
+      "session-survey:appearance-localized:en",
+    );
+    expect(realRow.querySelector("[data-mock-row-height]"))?.toHaveAttribute(
+      "data-mock-row-height",
+      "240",
     );
   });
 
