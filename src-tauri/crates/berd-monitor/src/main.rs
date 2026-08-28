@@ -794,7 +794,7 @@ fn flush_pending(
                 "monitor delivery prompt exceeded its internal size bound",
             ));
         }
-        if !deliver(paths, session_id, &prompt, if_running) {
+        if !deliver_to_session(paths, session_id, &prompt, if_running) {
             log_line(paths, "delivery failed; buffered output will be retried")?;
             return Ok(());
         }
@@ -805,7 +805,7 @@ fn flush_pending(
     Ok(())
 }
 
-fn deliver(
+fn deliver_to_session(
     paths: &StatePaths,
     session_id: &str,
     prompt: &str,
