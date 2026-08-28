@@ -24,7 +24,7 @@ export function isVoiceSetupReady(
       : Boolean(pocket?.parakeetInstalled);
   if (!inputReady) return false;
   if (outputBackend === "openai")
-    return Boolean(openAi?.configured && openAi.ttsAvailable);
+    return Boolean(openAi?.ttsConfigured && openAi.ttsAvailable);
   if (outputBackend === "pocket") return Boolean(pocket?.pocketInstalled);
   return Boolean(
     siri?.supported && siri.selectedVoice && siri.selectedVoiceInstalled,

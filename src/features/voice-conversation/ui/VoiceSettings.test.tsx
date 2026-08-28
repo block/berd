@@ -52,7 +52,7 @@ const microphonePermissionState = vi.hoisted(() => ({
 }));
 const openAiStatusState = vi.hoisted(() => ({
   current: {
-    configured: true,
+    ttsConfigured: true,
     speechModel: "gpt-4o-mini-tts",
     speechVoice: "marin",
     playbackSpeed: 1,
@@ -217,7 +217,7 @@ describe("VoiceSettings", () => {
     interruptionState.mode = "automatic";
     siriSetupState.current = siriSetup();
     openAiStatusState.current = {
-      configured: true,
+      ttsConfigured: true,
       speechModel: "gpt-4o-mini-tts",
       speechVoice: "marin",
       playbackSpeed: 1,
@@ -258,7 +258,7 @@ describe("VoiceSettings", () => {
     outputState.backend = "openai";
     openAiStatusState.current = {
       ...openAiStatusState.current,
-      configured: false,
+      ttsConfigured: false,
       unavailableReason:
         "Add an OpenAI text-to-speech API key in Voice settings.",
     };

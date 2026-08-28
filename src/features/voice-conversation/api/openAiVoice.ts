@@ -7,7 +7,7 @@ import type {
 } from "../lib/voiceInterruptionPreference";
 
 export interface OpenAiVoiceStatus {
-  configured: boolean;
+  ttsConfigured: boolean;
   speechModel: string;
   speechVoice: string;
   playbackSpeed: number;

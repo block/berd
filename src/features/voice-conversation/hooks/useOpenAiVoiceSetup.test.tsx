@@ -33,7 +33,7 @@ function deferred<T>() {
 
 function status(configured: boolean): OpenAiVoiceStatus {
   return {
-    configured,
+    ttsConfigured: configured,
     speechModel: "gpt-4o-mini-tts",
     speechVoice: "marin",
     playbackSpeed: 1,
@@ -63,12 +63,14 @@ describe("useOpenAiVoiceSetup", () => {
 
     act(() => mocks.settingsChanged?.());
     refreshed.resolve(status(true));
-    await waitFor(() => expect(result.current.status?.configured).toBe(true));
+    await waitFor(() =>
+      expect(result.current.status?.ttsConfigured).toBe(true),
+    );
 
     initial.resolve(status(false));
     await act(async () => Promise.resolve());
 
-    expect(result.current.status?.configured).toBe(true);
+    expect(result.current.status?.ttsConfigured).toBe(true);
   });
 
   it("refreshes after listener registration captures credential changes", async () => {
@@ -80,7 +82,9 @@ describe("useOpenAiVoiceSetup", () => {
 
     act(() => mocks.finishListening?.());
 
-    await waitFor(() => expect(result.current.status?.configured).toBe(true));
+    await waitFor(() =>
+      expect(result.current.status?.ttsConfigured).toBe(true),
+    );
   });
 
   it("still loads status when listener registration fails", async () => {
@@ -89,7 +93,9 @@ describe("useOpenAiVoiceSetup", () => {
 
     const { result } = renderHook(() => useOpenAiVoiceSetup());
 
-    await waitFor(() => expect(result.current.status?.configured).toBe(true));
+    await waitFor(() =>
+      expect(result.current.status?.ttsConfigured).toBe(true),
+    );
   });
 
   it("clears stale readiness when a credential refresh fails", async () => {
@@ -100,7 +106,9 @@ describe("useOpenAiVoiceSetup", () => {
     const { result } = renderHook(() => useOpenAiVoiceSetup());
     await waitFor(() => expect(mocks.finishListening).not.toBeNull());
     act(() => mocks.finishListening?.());
-    await waitFor(() => expect(result.current.status?.configured).toBe(true));
+    await waitFor(() =>
+      expect(result.current.status?.ttsConfigured).toBe(true),
+    );
 
     act(() => mocks.settingsChanged?.());
     refresh.reject(new Error("Keychain unavailable"));

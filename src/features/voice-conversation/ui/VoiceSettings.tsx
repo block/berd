@@ -111,7 +111,7 @@ export function VoiceSettings() {
       : (setup.status?.parakeetInstalled ?? false);
   const outputReady =
     output.backend === "openai"
-      ? Boolean(openAiStatus?.configured && openAiStatus.ttsAvailable)
+      ? Boolean(openAiStatus?.ttsConfigured && openAiStatus.ttsAvailable)
       : output.backend === "siri"
         ? Boolean(
             siriSetup.status?.supported &&
@@ -267,7 +267,7 @@ export function VoiceSettings() {
               <div className="space-y-2">
                 <OpenAiApiKeyField
                   label={t("voice.openAiTtsApiKey")}
-                  configured={openAiStatus?.configured ?? false}
+                  configured={openAiStatus?.ttsConfigured ?? false}
                   onSave={setOpenAiTtsApiKey}
                   onClear={clearOpenAiTtsApiKey}
                 />

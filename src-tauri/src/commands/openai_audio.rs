@@ -99,7 +99,7 @@ enum OpenAiStreamCommand {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenAiVoiceStatus {
-    configured: bool,
+    tts_configured: bool,
     speech_model: String,
     speech_voice: String,
     playback_speed: f32,
@@ -350,7 +350,7 @@ pub async fn get_openai_voice_status(
         .map_err(|_| "OpenAI voice playback state lock was poisoned".to_string())?
         .speed;
     let tts_available = cfg!(target_os = "macos");
-    let configured = if tts_available {
+    let tts_configured = if tts_available {
         tauri::async_runtime::spawn_blocking(|| stored_api_key(TTS_KEYRING_ACCOUNT))
             .await
             .map_err(|error| format!("Could not check OpenAI voice credentials: {error}"))??
@@ -359,12 +359,12 @@ pub async fn get_openai_voice_status(
         false
     };
     Ok(OpenAiVoiceStatus {
-        configured,
+        tts_configured,
         speech_model: speech_model(),
         speech_voice: speech_voice(),
         playback_speed,
         tts_available,
-        unavailable_reason: if !configured {
+        unavailable_reason: if !tts_configured {
             Some("Add an OpenAI text-to-speech API key in Voice settings.".to_string())
         } else if !tts_available {
             Some("OpenAI voice playback is currently supported on macOS only.".to_string())
