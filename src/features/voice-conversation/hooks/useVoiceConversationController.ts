@@ -33,9 +33,8 @@ interface VoiceSendRoute {
   send: ChatInputSendHandler;
 }
 
-// The backend conversation is process-wide, but voice input is intentionally
-// foreground-chat scoped. The route remains available only while at least one
-// view for its bound session is mounted.
+// The backend conversation is process-wide, but voice input remains bound to
+// the chat that started the active lifecycle until that lifecycle terminates.
 let activeSendRoute: VoiceSendRoute | null = null;
 let deliveryInitialized = false;
 const operationInFlightBySession = new Set<string>();
@@ -677,8 +676,6 @@ export function useVoiceConversationController({
     });
     if (routeMount.claimRoute) {
       activeSendRoute = { sessionId, send: onSend };
-    } else if (!routeIsValid && activeSendRoute?.sessionId === sessionId) {
-      activeSendRoute = null;
     }
     if (routeMount.drainPending) {
       const routeSessionId = activeSendRoute?.sessionId;

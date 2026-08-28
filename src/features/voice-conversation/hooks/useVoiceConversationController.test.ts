@@ -17,6 +17,11 @@ const voiceApiMocks = vi.hoisted(() => ({
 const microphonePermissionMocks = vi.hoisted(() => ({
   getStatus: vi.fn<() => Promise<"authorized" | "denied">>(),
 }));
+const voiceStoreMocks = vi.hoisted(() => ({
+  subscriber: undefined as
+    | ((event: Record<string, unknown>) => void | Promise<void>)
+    | undefined,
+}));
 
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({ label: tauriWindowMocks.label }),
@@ -37,6 +42,18 @@ vi.mock("../api/voiceConversation", async (importOriginal) => ({
 
 vi.mock("../api/microphonePermission", () => ({
   getMicrophonePermissionStatus: microphonePermissionMocks.getStatus,
+}));
+
+vi.mock("../stores/voiceConversationStore", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("../stores/voiceConversationStore")
+  >()),
+  subscribeToVoiceConversationEvents: (
+    subscriber: (event: Record<string, unknown>) => void | Promise<void>,
+  ) => {
+    voiceStoreMocks.subscriber = subscriber;
+    return () => undefined;
+  },
 }));
 
 import {
@@ -216,6 +233,58 @@ describe("voice transcript delivery coordination", () => {
     microphonePermissionMocks.getStatus.mockReset();
     microphonePermissionMocks.getStatus.mockResolvedValue("authorized");
     useChatStore.setState({ messagesBySession: {}, sessionStateById: {} });
+  });
+
+  it("delivers a queued transcript after its chat becomes temporarily ineligible", async () => {
+    const onSend = vi.fn().mockResolvedValue(true);
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-1",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 1,
+      },
+      uiState: "listening",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+    });
+    const { rerender } = renderHook(
+      ({ disabled }) =>
+        useVoiceConversationController({
+          sessionId: "session-1",
+          onSend,
+          enabled: true,
+          isGooseSession: true,
+          pocketReady: true,
+          onPocketSetupRequired: vi.fn(),
+          disabled,
+        }),
+      { initialProps: { disabled: false } },
+    );
+
+    await waitFor(() => expect(voiceStoreMocks.subscriber).toBeDefined());
+    rerender({ disabled: true });
+    await act(async () => {
+      await voiceStoreMocks.subscriber?.({
+        type: "user",
+        sessionId: "session-1",
+        lifecycleId: "lifecycle-1",
+        id: "utterance-1",
+        text: "keep this route",
+        revision: 1,
+        deliveryAttempts: 0,
+      });
+    });
+
+    expect(onSend).toHaveBeenCalledWith(
+      "keep this route",
+      undefined,
+      undefined,
+      expect.objectContaining({ displayText: "keep this route" }),
+    );
   });
   it("serializes deliveries for the same session and re-evaluates in order", async () => {
     const enqueue = createVoiceTranscriptDeliveryQueue();
