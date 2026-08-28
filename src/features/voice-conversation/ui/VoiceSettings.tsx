@@ -57,7 +57,9 @@ function readinessDescriptionKey(
   if (inputReady && outputReady) return null;
   if (!inputReady && !outputReady) {
     if (inputBackend === "openai") {
-      return "voice.notReadyOpenAi";
+      return backend === "openai"
+        ? "voice.notReadyOpenAiSttAndTts"
+        : "voice.notReadyOpenAi";
     }
     if (backend === "openai") {
       return inputBackend === "macos"
@@ -74,12 +76,12 @@ function readinessDescriptionKey(
       : "voice.notReadyInputAndPocketOutput";
   }
   if (!inputReady) {
-    if (inputBackend === "openai") return "voice.notReadyOpenAi";
+    if (inputBackend === "openai") return "voice.notReadyOpenAiStt";
     return inputBackend === "macos"
       ? "voice.notReadyMacInput"
       : "voice.notReadyInput";
   }
-  if (backend === "openai") return "voice.notReadyOpenAi";
+  if (backend === "openai") return "voice.notReadyOpenAiTts";
   return backend === "siri"
     ? "voice.notReadySiriOutput"
     : "voice.notReadyPocketOutput";

@@ -317,7 +317,7 @@ describe("VoiceSettings", () => {
 
     expect(
       await screen.findByText(
-        "OpenAI voice is not ready. Add the required API key below, then try again.",
+        "OpenAI transcription is not ready. Add its speech-to-text API key below, then try again.",
       ),
     ).toBeInTheDocument();
     expect(
@@ -331,8 +331,7 @@ describe("VoiceSettings", () => {
     openAiStatusState.current = {
       ...openAiStatusState.current,
       ttsAvailable: false,
-      unavailableReason:
-        "OpenAI voice playback is currently supported on macOS only.",
+      unavailableReason: "unsupportedPlatform",
     };
     setupState.current = setup(pocketStatus({ pocketInstalled: true }));
     renderWithProviders(<VoiceSettings />);
@@ -356,7 +355,7 @@ describe("VoiceSettings", () => {
 
     expect(
       await screen.findByText(
-        "OpenAI voice is not ready. Add the required API key below, then try again.",
+        "OpenAI voice playback is not ready. Add its text-to-speech API key below, then try again.",
       ),
     ).toBeInTheDocument();
     expect(
