@@ -16,7 +16,7 @@ export function isVoiceSetupReady(
   if (inputBackend === null) return false;
   const inputReady =
     inputBackend === "openai"
-      ? Boolean(openAi?.configured)
+      ? Boolean(openAi?.sttConfigured)
       : inputBackend === "macos"
         ? Boolean(
             macSpeech?.supported &&

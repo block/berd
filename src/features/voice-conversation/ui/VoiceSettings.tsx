@@ -16,7 +16,9 @@ import {
 } from "@/shared/ui/select";
 import { useEffect, useState } from "react";
 import {
+  clearOpenAiSttApiKey,
   clearOpenAiTtsApiKey,
+  setOpenAiSttApiKey,
   setOpenAiPlaybackSpeed,
   setOpenAiTtsApiKey,
 } from "../api/openAiVoice";
@@ -109,7 +111,7 @@ export function VoiceSettings() {
   const interruptionDescriptionId = useId();
   const inputReady =
     input.backend === "openai"
-      ? (openAiStatus?.configured ?? false)
+      ? (openAiStatus?.sttConfigured ?? false)
       : input.backend === "macos"
         ? Boolean(
             macSpeechSetup.status?.supported &&
@@ -224,16 +226,24 @@ export function VoiceSettings() {
           )}
           details={
             input.backend === "openai" ? (
-              <p className="text-xs text-muted-foreground">
-                {openAiError ??
-                  (openAiStatus
-                    ? openAiStatus.configured
-                      ? t("voice.openAiSttConfigured", {
-                          model: openAiStatus.transcriptionModel,
-                        })
-                      : openAiStatus.unavailableReason
-                    : t("voice.openAiChecking"))}
-              </p>
+              <div className="space-y-2">
+                <OpenAiApiKeyField
+                  label={t("voice.openAiSttApiKey")}
+                  configured={openAiStatus?.sttConfigured ?? false}
+                  onSave={setOpenAiSttApiKey}
+                  onClear={clearOpenAiSttApiKey}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {openAiError ??
+                    (openAiStatus
+                      ? openAiStatus.sttConfigured
+                        ? t("voice.openAiSttConfigured", {
+                            model: openAiStatus.transcriptionModel,
+                          })
+                        : t("voice.openAiSttNotConfigured")
+                      : t("voice.openAiChecking"))}
+                </p>
+              </div>
             ) : input.backend === "macos" ? (
               <MacSpeechSettings setup={macSpeechSetup} />
             ) : input.backend === "parakeet" ? (

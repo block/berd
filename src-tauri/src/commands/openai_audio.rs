@@ -40,6 +40,7 @@ const DEFAULT_TRANSCRIPTION_MODEL: &str = "gpt-live-transcribe";
 const DEFAULT_TTS_MODEL: &str = "gpt-4o-mini-tts";
 const DEFAULT_TTS_VOICE: &str = "marin";
 const BASE_URL_ENV: &str = "BERD_OPENAI_VOICE_BASE_URL";
+const STT_MODEL_ENV: &str = "BERD_OPENAI_STT_MODEL";
 const TTS_MODEL_ENV: &str = "BERD_OPENAI_TTS_MODEL";
 const TTS_VOICE_ENV: &str = "BERD_OPENAI_TTS_VOICE";
 const SETTINGS_CHANGED_EVENT: &str = "openai-voice:settings-changed";
@@ -108,6 +109,7 @@ enum OpenAiStreamCommand {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenAiVoiceStatus {
+    stt_configured: bool,
     tts_configured: bool,
     tts_configuration_source: OpenAiVoiceConfigurationSource,
     transcription_model: String,
@@ -226,9 +228,7 @@ pub(crate) fn realtime_endpoint() -> Result<String, String> {
 }
 
 pub(crate) fn transcription_model() -> String {
-    env_trimmed("OPENAI_TRANSCRIPTION_MODEL")
-        .or_else(|| env_trimmed("OPENAI_STT_MODEL"))
-        .unwrap_or_else(|| DEFAULT_TRANSCRIPTION_MODEL.to_string())
+    env_trimmed(STT_MODEL_ENV).unwrap_or_else(|| DEFAULT_TRANSCRIPTION_MODEL.to_string())
 }
 
 fn speech_model() -> String {
@@ -322,18 +322,34 @@ pub async fn get_openai_voice_status(
         .map_err(|_| "OpenAI voice playback state lock was poisoned".to_string())?
         .speed;
     let tts_available = cfg!(target_os = "macos");
-    let tts_configured = if tts_available {
-        tauri::async_runtime::spawn_blocking(|| {
-            openai_voice_credentials::read(OpenAiVoiceCredential::TextToSpeech)
+    let (stt_configured, tts_configured, credential_error) = if tts_available {
+        let (stt_result, tts_result) = tauri::async_runtime::spawn_blocking(|| {
+            (
+                openai_voice_credentials::read(OpenAiVoiceCredential::SpeechToText),
+                openai_voice_credentials::read(OpenAiVoiceCredential::TextToSpeech),
+            )
         })
         .await
-        .map_err(|error| format!("Could not check OpenAI voice credentials: {error}"))??
-        .is_some()
+        .map_err(|error| format!("Could not check OpenAI voice credentials: {error}"))?;
+        let credential_error = stt_result
+            .as_ref()
+            .err()
+            .or_else(|| tts_result.as_ref().err())
+            .cloned();
+        (
+            stt_result.unwrap_or(None).is_some(),
+            tts_result.unwrap_or(None).is_some(),
+            credential_error,
+        )
     } else {
-        false
+        (false, false, None)
     };
-    state.configured.store(configured, Ordering::Release);
+    state.configured.store(stt_configured, Ordering::Release);
+    if let Some(error) = credential_error {
+        return Err(error);
+    }
     Ok(OpenAiVoiceStatus {
+        stt_configured,
         tts_configured,
         tts_configuration_source: tts_configuration_source(),
         transcription_model: transcription_model(),
@@ -349,6 +365,35 @@ pub async fn get_openai_voice_status(
             None
         },
     })
+}
+
+#[tauri::command]
+pub fn set_openai_stt_api_key(
+    app: AppHandle,
+    state: State<'_, OpenAiVoiceState>,
+    api_key: String,
+) -> Result<(), String> {
+    let api_key = api_key.trim();
+    if api_key.is_empty() {
+        return Err("OpenAI speech-to-text API key cannot be empty".to_string());
+    }
+    openai_voice_credentials::store(OpenAiVoiceCredential::SpeechToText, api_key)?;
+    state.configured.store(true, Ordering::Release);
+    app.emit(SETTINGS_CHANGED_EVENT, ())
+        .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn clear_openai_stt_api_key(
+    app: AppHandle,
+    state: State<'_, OpenAiVoiceState>,
+) -> Result<(), String> {
+    openai_voice_credentials::clear(OpenAiVoiceCredential::SpeechToText)?;
+    state.configured.store(false, Ordering::Release);
+    app.emit(SETTINGS_CHANGED_EVENT, ())
+        .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))?;
+    Ok(())
 }
 
 #[tauri::command]

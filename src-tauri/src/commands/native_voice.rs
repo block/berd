@@ -1292,7 +1292,7 @@ pub async fn start_native_voice_conversation(
         );
     }
     let openai_api_key = if input_backend == VoiceInputBackend::Openai {
-        Some(super::openai_audio::api_key()?)
+        Some(super::openai_audio::stt_api_key()?)
     } else {
         None
     };

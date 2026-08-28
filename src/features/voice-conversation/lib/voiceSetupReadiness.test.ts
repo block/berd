@@ -64,7 +64,7 @@ describe("voice setup readiness", () => {
   });
 
   it("allows configured OpenAI input when TTS is unavailable", () => {
-    const configuredStt = { ttsConfigured: true, ttsAvailable: false } as never;
+    const configuredStt = { sttConfigured: true, ttsAvailable: false } as never;
     expect(
       isVoiceSetupReady(pocket, null, null, "openai", "pocket", configuredStt),
     ).toBe(true);

@@ -7,6 +7,7 @@ import type {
 } from "../lib/voiceInterruptionPreference";
 
 export interface OpenAiVoiceStatus {
+  sttConfigured: boolean;
   ttsConfigured: boolean;
   ttsConfigurationSource: "default" | "environment";
   transcriptionModel: string;
@@ -30,6 +31,14 @@ export function getOpenAiVoiceStatus(): Promise<OpenAiVoiceStatus> {
 
 export function setOpenAiTtsApiKey(apiKey: string): Promise<void> {
   return invoke("set_openai_tts_api_key", { apiKey });
+}
+
+export function setOpenAiSttApiKey(apiKey: string): Promise<void> {
+  return invoke("set_openai_stt_api_key", { apiKey });
+}
+
+export function clearOpenAiSttApiKey(): Promise<void> {
+  return invoke("clear_openai_stt_api_key");
 }
 
 export function clearOpenAiTtsApiKey(): Promise<void> {

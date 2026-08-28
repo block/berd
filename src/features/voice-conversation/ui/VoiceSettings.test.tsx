@@ -52,6 +52,7 @@ const microphonePermissionState = vi.hoisted(() => ({
 }));
 const openAiStatusState = vi.hoisted(() => ({
   current: {
+    sttConfigured: true,
     ttsConfigured: true,
     ttsConfigurationSource: "default" as "default" | "environment",
     transcriptionModel: "gpt-live-transcribe",
@@ -63,12 +64,16 @@ const openAiStatusState = vi.hoisted(() => ({
   },
 }));
 const openAiApiMocks = vi.hoisted(() => ({
+  setSttApiKey: vi.fn(() => Promise.resolve()),
+  clearSttApiKey: vi.fn(() => Promise.resolve()),
   setTtsApiKey: vi.fn(() => Promise.resolve()),
   clearTtsApiKey: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock("../api/openAiVoice", () => ({
   setOpenAiPlaybackSpeed: vi.fn(() => Promise.resolve()),
+  setOpenAiSttApiKey: openAiApiMocks.setSttApiKey,
+  clearOpenAiSttApiKey: openAiApiMocks.clearSttApiKey,
   setOpenAiTtsApiKey: openAiApiMocks.setTtsApiKey,
   clearOpenAiTtsApiKey: openAiApiMocks.clearTtsApiKey,
 }));
@@ -219,6 +224,7 @@ describe("VoiceSettings", () => {
     interruptionState.mode = "automatic";
     siriSetupState.current = siriSetup();
     openAiStatusState.current = {
+      sttConfigured: true,
       ttsConfigured: true,
       ttsConfigurationSource: "default",
       transcriptionModel: "gpt-live-transcribe",
@@ -230,6 +236,8 @@ describe("VoiceSettings", () => {
     };
     openAiApiMocks.setTtsApiKey.mockClear();
     openAiApiMocks.clearTtsApiKey.mockClear();
+    openAiApiMocks.setSttApiKey.mockClear();
+    openAiApiMocks.clearSttApiKey.mockClear();
   });
 
   it("renders independently selected OpenAI input and output settings", async () => {
@@ -239,9 +247,7 @@ describe("VoiceSettings", () => {
     renderWithProviders(<VoiceSettings />);
 
     expect(
-      await screen.findByText(
-        "Uses Berd’s configured OpenAI credential with gpt-live-transcribe.",
-      ),
+      await screen.findByText("Uses gpt-live-transcribe."),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/gpt-4o-mini-tts.*marin voice/),
@@ -265,6 +271,21 @@ describe("VoiceSettings", () => {
     ).toBeInTheDocument();
   });
 
+  it("saves a dedicated OpenAI speech-to-text API key", async () => {
+    inputState.backend = "openai";
+    setupState.current = setup(pocketStatus({ pocketInstalled: true }));
+    renderWithProviders(<VoiceSettings />);
+
+    const user = userEvent.setup();
+    await user.type(
+      screen.getByLabelText("OpenAI speech-to-text API key"),
+      "stt-secret",
+    );
+    await user.click(screen.getAllByRole("button", { name: "Save key" })[0]);
+
+    expect(openAiApiMocks.setSttApiKey).toHaveBeenCalledWith("stt-secret");
+  });
+
   it("saves a dedicated OpenAI text-to-speech API key", async () => {
     outputState.backend = "openai";
     setupState.current = setup(pocketStatus({ parakeetInstalled: true }));
@@ -285,16 +306,14 @@ describe("VoiceSettings", () => {
     outputState.backend = "pocket";
     openAiStatusState.current = {
       ...openAiStatusState.current,
-      configured: false,
-      unavailableReason:
-        "Configure the OpenAI provider in Berd to use OpenAI voice.",
+      sttConfigured: false,
     };
     setupState.current = setup(pocketStatus({ pocketInstalled: true }));
     renderWithProviders(<VoiceSettings />);
 
     expect(
       await screen.findByText(
-        "OpenAI voice is not ready. Configure the OpenAI provider in Berd, then try again.",
+        "OpenAI voice is not ready. Add the required API key below, then try again.",
       ),
     ).toBeInTheDocument();
     expect(
@@ -315,9 +334,7 @@ describe("VoiceSettings", () => {
     renderWithProviders(<VoiceSettings />);
 
     expect(
-      await screen.findByText(
-        "Uses Berd’s configured OpenAI credential with gpt-live-transcribe.",
-      ),
+      await screen.findByText("Uses gpt-live-transcribe."),
     ).toBeInTheDocument();
     expect(
       screen.queryByText(/playback is currently supported on macOS only/),
@@ -329,8 +346,6 @@ describe("VoiceSettings", () => {
     openAiStatusState.current = {
       ...openAiStatusState.current,
       ttsConfigured: false,
-      unavailableReason:
-        "Add an OpenAI text-to-speech API key in Voice settings.",
     };
     setupState.current = setup(pocketStatus({ parakeetInstalled: true }));
     renderWithProviders(<VoiceSettings />);
