@@ -73,7 +73,7 @@ describe("sessionFeedbackSurveyState", () => {
     expect(claimCooldown).toHaveBeenCalledTimes(2);
   });
 
-  it("blocks remount presentation while the appeared owner can respond", async () => {
+  it("keeps an appeared survey presentable across virtualized remounts", async () => {
     const survey = await claim("appeared-once");
     expect(survey).not.toBeNull();
     if (!survey) throw new Error("expected survey to be selected");
@@ -81,7 +81,7 @@ describe("sessionFeedbackSurveyState", () => {
 
     expect(
       isSessionFeedbackSurveyPresentable("appeared-once", survey.appearanceId),
-    ).toBe(false);
+    ).toBe(true);
     recordSessionFeedbackSurveyResponse(
       "appeared-once",
       survey.appearanceId,
