@@ -256,6 +256,7 @@ export interface MessageMetadata {
   steeringRequestId?: string;
   origin?: "berdctl_cross_session" | "voice_conversation";
   berdSenderLabel?: string;
+  berdDeliveryId?: string;
   voiceUtteranceId?: string;
   voiceConversationLifecycleId?: string;
   voiceConversationRevision?: number;

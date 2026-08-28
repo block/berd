@@ -49,12 +49,22 @@ const sendSessionSchema = z
       .describe(
         "Optional visible sender label for this message (1-120 chars).",
       ),
+    delivery_id: z
+      .string()
+      .trim()
+      .min(1)
+      .max(200)
+      .regex(/^[^\r\n]*$/, "Delivery id must be a single line.")
+      .optional()
+      .describe(
+        "Optional idempotency id; a repeated id for this session is accepted without creating another user turn (1-200 chars).",
+      ),
   })
   .strict();
 
 interface SendSessionResult {
   session_id: string;
-  send_status: "dispatched" | "steered" | "queued";
+  send_status: "dispatched" | "steered" | "queued" | "deduplicated";
 }
 
 function runningTargetMessage(sessionId: string): string {
@@ -72,14 +82,15 @@ export const sendSessionCommand = defineCommand({
     "by Berd from another session. Running sessions are refused by default; use " +
     "--if-running steer to add context to the active run, or --if-running queue " +
     "to send one follow-up after the current run finishes. Use --from to give " +
-    "the sending session or tool a concise visible label in the transcript.",
+    "the sending session or tool a concise visible label in the transcript. " +
+    "Use --delivery-id when retries must create at most one user turn.",
   helpFooter: `Example:
   berdctl session send --session-id <session-id> \\
     --prompt "Check the latest CI failure" --if-running queue \\
-    --from "the Berd session handling CI" --json
+    --from "the Berd session handling CI" --delivery-id <stable-id> --json
 
 Result:
-  {"session_id": "...", "send_status": "dispatched"|"steered"|"queued"}
+  {"session_id": "...", "send_status": "dispatched"|"steered"|"queued"|"deduplicated"}
   The user's current view does not change.`,
   schema: sendSessionSchema,
   bridgeTimeoutMs: 60_000,
@@ -90,6 +101,7 @@ Result:
       { findProjectOrThrow },
       {
         berdctlCrossSessionSendOptions,
+        hasAcceptedBerdctlDelivery,
         sendPromptToExistingSessionInBackground,
         SessionDispatchContentionError,
         SessionDispatchUnresolvedError,
@@ -102,10 +114,18 @@ Result:
     ]);
     const sendOptions = berdctlCrossSessionSendOptions({
       senderLabel: args.from,
+      deliveryId: args.delivery_id,
     });
 
     await loadSessionForBerdctl(args.session_id);
     const session = requireSession(args.session_id);
+
+    if (
+      args.delivery_id &&
+      hasAcceptedBerdctlDelivery(args.session_id, args.delivery_id)
+    ) {
+      return { session_id: session.id, send_status: "deduplicated" };
+    }
 
     if (useSessionWindowStore.getState().isOpenInWindow(args.session_id)) {
       throw new CommandError(

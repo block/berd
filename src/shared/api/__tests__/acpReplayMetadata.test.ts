@@ -144,12 +144,14 @@ describe("getReplayUserMetadata", () => {
           goose: {
             origin: "berdctl_cross_session",
             berdSenderLabel: "berd-monitor",
+            berdDeliveryId: "monitor-event-1",
           },
         },
       }),
     ).toEqual({
       origin: "berdctl_cross_session",
       berdSenderLabel: "berd-monitor",
+      berdDeliveryId: "monitor-event-1",
     });
   });
 

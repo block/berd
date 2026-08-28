@@ -6,6 +6,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
@@ -23,6 +24,9 @@ const DELIVERY_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const DELIVERY_TIMEOUT: Duration = Duration::from_secs(15);
 const LAUNCH_TIMEOUT: Duration = Duration::from_secs(10);
 const LAUNCH_TERMINATION_GRACE: Duration = Duration::from_secs(1);
+const PENDING_HEADER_PREFIX: &str = "BERD_MONITOR_PENDING_V1 ";
+
+static PENDING_GENERATION_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum RunningMode {
@@ -89,6 +93,41 @@ struct StatePaths {
     pending: PathBuf,
     owner: PathBuf,
     stop: PathBuf,
+}
+
+struct PendingState {
+    generation: String,
+    active_len: usize,
+    bytes: Vec<u8>,
+}
+
+impl PendingState {
+    fn empty() -> Self {
+        Self {
+            generation: next_pending_generation(),
+            active_len: 0,
+            bytes: Vec::new(),
+        }
+    }
+
+    fn delivery_id(&self, paths: &StatePaths) -> String {
+        let state_hash = stable_hash(paths.root.to_string_lossy().as_bytes());
+        format!("berd-monitor-{state_hash:016x}-{}", self.generation)
+    }
+
+    fn rotate(&mut self) {
+        self.generation = next_pending_generation();
+        self.active_len = 0;
+    }
+}
+
+fn next_pending_generation() -> String {
+    let timestamp = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let sequence = PENDING_GENERATION_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("{}-{timestamp}-{sequence}", std::process::id())
 }
 
 impl StatePaths {
@@ -630,7 +669,7 @@ fn run_producer(
         paths,
         &format!("starting producer: {}", render_command(producer_command)),
     )?;
-    let mut pending = read_optional(&paths.pending)?;
+    let mut pending = read_pending(&paths.pending)?;
 
     let mut command = Command::new(&producer_command[0]);
     command
@@ -757,8 +796,7 @@ fn run_producer(
     append_batch(paths, &mut pending, &mut batch)?;
     let status = producer_status.expect("producer has exited");
     let summary = format!("[monitor] producer exited with status {status}\n");
-    pending.extend_from_slice(summary.as_bytes());
-    append_file(&paths.pending, summary.as_bytes())?;
+    append_pending(&paths.pending, &mut pending, summary.as_bytes())?;
     flush_pending(
         paths,
         &mut pending,
@@ -768,7 +806,7 @@ fn run_producer(
         if_running,
     )?;
 
-    while !pending.is_empty() && !paths.stop.exists() {
+    while !pending.bytes.is_empty() && !paths.stop.exists() {
         thread::sleep(RETRY_INTERVAL);
         flush_pending(
             paths,
@@ -779,9 +817,10 @@ fn run_producer(
             if_running,
         )?;
     }
-    if !pending.is_empty() && paths.stop.exists() {
-        pending.clear();
-        atomic_write(&paths.pending, &pending)?;
+    if !pending.bytes.is_empty() && paths.stop.exists() {
+        pending.bytes.clear();
+        pending.rotate();
+        persist_pending(&paths.pending, &pending)?;
         log_line(paths, "discarded undelivered output after explicit stop")?;
     }
     log_line(paths, &format!("producer exited with status {status}"))?;
@@ -815,27 +854,34 @@ fn forward_producer_output<R: Read>(mut reader: R, sender: mpsc::SyncSender<Vec<
     }
 }
 
-fn append_batch(paths: &StatePaths, pending: &mut Vec<u8>, batch: &mut Vec<u8>) -> io::Result<()> {
+fn append_batch(
+    paths: &StatePaths,
+    pending: &mut PendingState,
+    batch: &mut Vec<u8>,
+) -> io::Result<()> {
     if batch.is_empty() {
         return Ok(());
     }
-    pending.extend_from_slice(batch);
-    append_file(&paths.pending, batch)?;
+    append_pending(&paths.pending, pending, batch)?;
     batch.clear();
     Ok(())
 }
 
 fn flush_pending(
     paths: &StatePaths,
-    pending: &mut Vec<u8>,
+    pending: &mut PendingState,
     label: &str,
     instructions: &str,
     session_id: &str,
     if_running: RunningMode,
 ) -> io::Result<()> {
-    while !pending.is_empty() {
-        let end = pending_chunk_end(pending, MAX_DELIVERY_BYTES);
-        let text = String::from_utf8_lossy(&pending[..end]);
+    while !pending.bytes.is_empty() {
+        if pending.active_len == 0 {
+            pending.active_len = pending_chunk_end(&pending.bytes, MAX_DELIVERY_BYTES);
+            persist_pending(&paths.pending, pending)?;
+        }
+        let end = pending.active_len;
+        let text = String::from_utf8_lossy(&pending.bytes[..end]);
         let mut prompt = format!(
             "[monitor: {label} | pid {}]\n{}",
             std::process::id(),
@@ -851,12 +897,14 @@ fn flush_pending(
                 "monitor delivery prompt exceeded its internal size bound",
             ));
         }
-        if !deliver_to_session(paths, session_id, &prompt, if_running) {
+        let delivery_id = pending.delivery_id(paths);
+        if !deliver_to_session(paths, session_id, &prompt, if_running, &delivery_id) {
             log_line(paths, "delivery failed; buffered output will be retried")?;
             return Ok(());
         }
-        pending.drain(..end);
-        atomic_write(&paths.pending, pending)?;
+        pending.bytes.drain(..end);
+        pending.rotate();
+        persist_pending(&paths.pending, pending)?;
         log_line(paths, "delivered one event batch")?;
     }
     Ok(())
@@ -867,12 +915,14 @@ fn deliver_to_session(
     session_id: &str,
     prompt: &str,
     if_running: RunningMode,
+    delivery_id: &str,
 ) -> bool {
     deliver_with_candidates(
         paths,
         session_id,
         prompt,
         if_running,
+        delivery_id,
         lock_candidates(),
         berdctl_candidates(),
         DELIVERY_TIMEOUT,
@@ -884,6 +934,7 @@ fn deliver_with_candidates(
     session_id: &str,
     prompt: &str,
     if_running: RunningMode,
+    delivery_id: &str,
     locks: Vec<PathBuf>,
     binaries: Vec<OsString>,
     timeout: Duration,
@@ -906,6 +957,8 @@ fn deliver_with_candidates(
                 .arg(prompt)
                 .arg("--if-running")
                 .arg(if_running.as_str())
+                .arg("--delivery-id")
+                .arg(delivery_id)
                 .arg("--from")
                 .arg("berd-monitor")
                 .arg("--json")
@@ -1026,6 +1079,74 @@ fn read_optional(path: &Path) -> io::Result<Vec<u8>> {
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
         Err(error) => Err(error),
+    }
+}
+
+fn read_pending(path: &Path) -> io::Result<PendingState> {
+    let contents = read_optional(path)?;
+    if contents.is_empty() {
+        return Ok(PendingState::empty());
+    }
+    if !contents.starts_with(PENDING_HEADER_PREFIX.as_bytes()) {
+        return Ok(PendingState {
+            generation: next_pending_generation(),
+            active_len: 0,
+            bytes: contents,
+        });
+    }
+    let header_end = contents
+        .iter()
+        .position(|byte| *byte == b'\n')
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid pending header"))?;
+    let header = std::str::from_utf8(&contents[PENDING_HEADER_PREFIX.len()..header_end])
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid pending header"))?;
+    let (generation, active_len) = header
+        .split_once(' ')
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid pending header"))?;
+    let active_len = active_len
+        .parse::<usize>()
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid pending length"))?;
+    let bytes = contents[(header_end + 1)..].to_vec();
+    if generation.is_empty() || active_len > bytes.len() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid pending delivery state",
+        ));
+    }
+    Ok(PendingState {
+        generation: generation.to_owned(),
+        active_len,
+        bytes,
+    })
+}
+
+fn persist_pending(path: &Path, pending: &PendingState) -> io::Result<()> {
+    if pending.bytes.is_empty() {
+        return match fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+        };
+    }
+    let mut contents = format!(
+        "{PENDING_HEADER_PREFIX}{} {}\n",
+        pending.generation, pending.active_len
+    )
+    .into_bytes();
+    contents.extend_from_slice(&pending.bytes);
+    atomic_write(path, &contents)
+}
+
+fn append_pending(path: &Path, pending: &mut PendingState, data: &[u8]) -> io::Result<()> {
+    if data.is_empty() {
+        return Ok(());
+    }
+    let existed = path.exists();
+    pending.bytes.extend_from_slice(data);
+    if existed {
+        append_file(path, data)
+    } else {
+        persist_pending(path, pending)
     }
 }
 
@@ -1184,6 +1305,39 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    #[test]
+    fn pending_delivery_id_survives_restart_and_rotates_after_ack() {
+        let key = format!(
+            "pending-id-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let paths = StatePaths::for_key(&key, "test-session");
+        ensure_private_directory(&paths.root).unwrap();
+        let mut pending = PendingState::empty();
+        append_pending(&paths.pending, &mut pending, b"same event\n").unwrap();
+        pending.active_len = pending.bytes.len();
+        persist_pending(&paths.pending, &pending).unwrap();
+        let first_id = pending.delivery_id(&paths);
+
+        let mut restarted = read_pending(&paths.pending).unwrap();
+        assert_eq!(restarted.delivery_id(&paths), first_id);
+        assert_eq!(restarted.active_len, restarted.bytes.len());
+
+        restarted.bytes.clear();
+        restarted.rotate();
+        persist_pending(&paths.pending, &restarted).unwrap();
+        append_pending(&paths.pending, &mut restarted, b"same event\n").unwrap();
+        restarted.active_len = restarted.bytes.len();
+        persist_pending(&paths.pending, &restarted).unwrap();
+
+        assert_ne!(restarted.delivery_id(&paths), first_id);
+        fs::remove_dir_all(paths.root).unwrap();
+    }
+
     #[cfg(unix)]
     fn test_process_exists(pid: u32) -> bool {
         let result = unsafe { libc::kill(pid as i32, 0) };
@@ -1290,6 +1444,7 @@ mod tests {
                 session_id,
                 "test",
                 RunningMode::Steer,
+                "test-delivery",
                 vec![PathBuf::from("stale-a"), PathBuf::from("stale-b")],
                 vec![worker_binary],
                 DELIVERY_TIMEOUT,
@@ -1338,6 +1493,7 @@ mod tests {
             session_id,
             "test",
             RunningMode::Steer,
+            "test-delivery",
             vec![PathBuf::from("stale")],
             vec![fake_berdctl.into_os_string()],
             Duration::from_millis(500),
@@ -1511,8 +1667,8 @@ mod tests {
             thread::sleep(Duration::from_millis(25));
         }
         let child_pid = loop {
-            if let Ok(value) = fs::read_to_string(&paths.pending) {
-                if let Ok(pid) = value.trim().parse::<i32>() {
+            if let Ok(pending) = read_pending(&paths.pending) {
+                if let Ok(pid) = String::from_utf8_lossy(&pending.bytes).trim().parse::<i32>() {
                     break pid;
                 }
             }
@@ -1524,7 +1680,7 @@ mod tests {
         };
         request_stop(&key, session_id).unwrap();
         worker.join().unwrap().unwrap();
-        assert!(fs::read(&paths.pending).unwrap().is_empty());
+        assert!(read_optional(&paths.pending).unwrap().is_empty());
         let child_gone_deadline = Instant::now() + Duration::from_secs(2);
         while test_process_exists(child_pid as u32) && Instant::now() < child_gone_deadline {
             thread::sleep(Duration::from_millis(25));

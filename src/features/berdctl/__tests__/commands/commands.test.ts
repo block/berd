@@ -1709,6 +1709,7 @@ describe("sessions.send", () => {
         prompt: "[monitor: checks] complete",
         if_running: "queue",
         from: "the Berd session handling berd-monitor implementation",
+        delivery_id: "monitor-event-1",
       },
       ctx,
     );
@@ -1722,13 +1723,84 @@ describe("sessions.send", () => {
         origin: "berdctl_cross_session",
         berdSenderLabel:
           "the Berd session handling berd-monitor implementation",
+        berdDeliveryId: "monitor-event-1",
       },
       acpGooseMetadata: {
         origin: "berdctl_cross_session",
         berdSenderLabel:
           "the Berd session handling berd-monitor implementation",
+        berdDeliveryId: "monitor-event-1",
       },
     });
+  });
+
+  it("accepts a repeated delivery id without queueing another user turn", async () => {
+    mockSessionFound();
+    useChatStore.getState().setChatState("session-1", "streaming");
+
+    const first = await dispatchCommand(
+      "sessions",
+      {
+        action: "send",
+        session_id: "session-1",
+        prompt: "monitor event",
+        if_running: "queue",
+        delivery_id: "monitor-event-1",
+      },
+      ctx,
+    );
+    const duplicate = await dispatchCommand(
+      "sessions",
+      {
+        action: "send",
+        session_id: "session-1",
+        prompt: "monitor event retried",
+        if_running: "queue",
+        delivery_id: "monitor-event-1",
+      },
+      ctx,
+    );
+
+    expect(first).toEqual({ session_id: "session-1", send_status: "queued" });
+    expect(duplicate).toEqual({
+      session_id: "session-1",
+      send_status: "deduplicated",
+    });
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-1"],
+    ).toHaveLength(1);
+  });
+
+  it("deduplicates a delivery id restored in the transcript before target guards", async () => {
+    mockSessionFound();
+    const accepted = createUserMessage("monitor event");
+    accepted.metadata = {
+      origin: "berdctl_cross_session",
+      berdDeliveryId: "monitor-event-1",
+    };
+    useChatStore.getState().addMessage("session-1", accepted);
+    useChatStore.getState().setChatState("session-1", "streaming");
+    useSessionWindowStore
+      .getState()
+      .setSnapshot([{ sessionId: "session-1", windowLabel: "session" }]);
+
+    const duplicate = await dispatchCommand(
+      "sessions",
+      {
+        action: "send",
+        session_id: "session-1",
+        prompt: "monitor event retried after restart",
+        delivery_id: "monitor-event-1",
+      },
+      ctx,
+    );
+
+    expect(duplicate).toEqual({
+      session_id: "session-1",
+      send_status: "deduplicated",
+    });
+    expect(mocks.acpSendMessage).not.toHaveBeenCalled();
+    expect(mocks.acpSteerMessage).not.toHaveBeenCalled();
   });
 
   it("rejects multiline sender labels before dispatch", async () => {

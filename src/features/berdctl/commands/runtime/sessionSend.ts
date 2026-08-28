@@ -8,6 +8,7 @@ import {
   SessionDispatchUnresolvedError,
 } from "@/features/chat/lib/queuedSessionSend";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
+import { useChatStore } from "@/features/chat/stores/chatStore";
 export {
   sendQueuedPromptToExistingSessionInBackground,
   SessionDispatchContentionError,
@@ -24,21 +25,43 @@ export const BERDCTL_CROSS_SESSION_ORIGIN =
   "berdctl_cross_session" satisfies NonNullable<MessageMetadata["origin"]>;
 
 export function berdctlCrossSessionSendOptions(
-  options: { senderLabel?: string } = {},
+  options: { senderLabel?: string; deliveryId?: string } = {},
 ): ChatSendOptions {
   const senderMetadata = options.senderLabel
     ? { berdSenderLabel: options.senderLabel }
+    : {};
+  const deliveryMetadata = options.deliveryId
+    ? { berdDeliveryId: options.deliveryId }
     : {};
   return {
     userMessageMetadata: {
       origin: BERDCTL_CROSS_SESSION_ORIGIN,
       ...senderMetadata,
+      ...deliveryMetadata,
     },
     acpGooseMetadata: {
       origin: BERDCTL_CROSS_SESSION_ORIGIN,
       ...senderMetadata,
+      ...deliveryMetadata,
     },
   };
+}
+
+export function hasAcceptedBerdctlDelivery(
+  sessionId: string,
+  deliveryId: string,
+): boolean {
+  const chatStore = useChatStore.getState();
+  return (
+    (chatStore.messagesBySession[sessionId] ?? []).some(
+      (message) => message.metadata?.berdDeliveryId === deliveryId,
+    ) ||
+    (chatStore.queuedMessageBySession[sessionId] ?? []).some(
+      (record) =>
+        record.payload.sendOptions?.userMessageMetadata?.berdDeliveryId ===
+        deliveryId,
+    )
+  );
 }
 
 export async function sendPromptToExistingSessionInBackground(

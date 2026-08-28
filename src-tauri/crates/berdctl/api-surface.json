@@ -102,7 +102,7 @@
           }
         },
         "send": {
-          "description": "Send a prompt into an existing chat session without opening or focusing it. Idle sends are fire-and-forget and visibly add a user message marked as sent by Berd from another session. Running sessions are refused by default; use --if-running steer to add context to the active run, or --if-running queue to send one follow-up after the current run finishes. Use --from to give the sending session or tool a concise visible label in the transcript.",
+          "description": "Send a prompt into an existing chat session without opening or focusing it. Idle sends are fire-and-forget and visibly add a user message marked as sent by Berd from another session. Running sessions are refused by default; use --if-running steer to add context to the active run, or --if-running queue to send one follow-up after the current run finishes. Use --from to give the sending session or tool a concise visible label in the transcript. Use --delivery-id when retries must create at most one user turn.",
           "fields": [
             {
               "name": "session_id",
@@ -140,6 +140,14 @@
               "description": "Optional visible sender label for this message (1-120 chars).",
               "min": 1,
               "max": 120
+            },
+            {
+              "name": "delivery_id",
+              "required": false,
+              "kind": "string",
+              "description": "Optional idempotency id; a repeated id for this session is accepted without creating another user turn (1-200 chars).",
+              "min": 1,
+              "max": 200
             }
           ],
           "schema": {
@@ -173,6 +181,13 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 120,
+                "pattern": "^[^\\r\\n]*$"
+              },
+              "delivery_id": {
+                "description": "Optional idempotency id; a repeated id for this session is accepted without creating another user turn (1-200 chars).",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
                 "pattern": "^[^\\r\\n]*$"
               }
             },
