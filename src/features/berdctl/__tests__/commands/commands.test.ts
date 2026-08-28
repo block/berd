@@ -1771,6 +1771,50 @@ describe("sessions.send", () => {
     ).toHaveLength(1);
   });
 
+  it("serializes concurrent admission of the same delivery id", async () => {
+    const session = makeAcpSession({
+      sessionId: "session-1",
+      providerId: "codex-acp",
+    });
+    let releaseLoads: (() => void) | undefined;
+    const loadsReleased = new Promise<void>((resolve) => {
+      releaseLoads = resolve;
+    });
+    let loadCount = 0;
+    mocks.acpGetSessionInfo.mockImplementation(async () => {
+      loadCount += 1;
+      await loadsReleased;
+      return session;
+    });
+
+    const send = (prompt: string) =>
+      dispatchCommand(
+        "sessions",
+        {
+          action: "send",
+          session_id: "session-1",
+          prompt,
+          if_running: "queue",
+          delivery_id: "monitor-event-1",
+        },
+        ctx,
+      );
+    const first = send("monitor event");
+    const retry = send("monitor event retried concurrently");
+    await vi.waitFor(() => expect(loadCount).toBe(2));
+    releaseLoads?.();
+
+    await expect(Promise.all([first, retry])).resolves.toEqual([
+      { session_id: "session-1", send_status: "dispatched" },
+      { session_id: "session-1", send_status: "deduplicated" },
+    ]);
+    expect(
+      (useChatStore.getState().messagesBySession["session-1"] ?? []).length +
+        (useChatStore.getState().queuedMessageBySession["session-1"]?.length ??
+          0),
+    ).toBe(1);
+  });
+
   it("deduplicates a delivery id restored in the transcript before target guards", async () => {
     mockSessionFound();
     const accepted = createUserMessage("monitor event");

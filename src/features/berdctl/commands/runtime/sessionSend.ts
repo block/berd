@@ -24,6 +24,8 @@ export { isBerdctlCrossSessionQueuedMessage } from "@/features/chat/lib/queuedMe
 export const BERDCTL_CROSS_SESSION_ORIGIN =
   "berdctl_cross_session" satisfies NonNullable<MessageMetadata["origin"]>;
 
+const reservedDeliveryIds = new Set<string>();
+
 export function berdctlCrossSessionSendOptions(
   options: { senderLabel?: string; deliveryId?: string } = {},
 ): ChatSendOptions {
@@ -62,6 +64,26 @@ export function hasAcceptedBerdctlDelivery(
         deliveryId,
     )
   );
+}
+
+export function reserveBerdctlDelivery(
+  sessionId: string,
+  deliveryId: string,
+): (() => void) | null {
+  const key = JSON.stringify([sessionId, deliveryId]);
+  if (
+    reservedDeliveryIds.has(key) ||
+    hasAcceptedBerdctlDelivery(sessionId, deliveryId)
+  ) {
+    return null;
+  }
+  reservedDeliveryIds.add(key);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    reservedDeliveryIds.delete(key);
+  };
 }
 
 export async function sendPromptToExistingSessionInBackground(

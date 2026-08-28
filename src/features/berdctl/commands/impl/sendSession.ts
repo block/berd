@@ -101,7 +101,7 @@ Result:
       { findProjectOrThrow },
       {
         berdctlCrossSessionSendOptions,
-        hasAcceptedBerdctlDelivery,
+        reserveBerdctlDelivery,
         sendPromptToExistingSessionInBackground,
         SessionDispatchContentionError,
         SessionDispatchUnresolvedError,
@@ -120,163 +120,169 @@ Result:
     await loadSessionForBerdctl(args.session_id);
     const session = requireSession(args.session_id);
 
-    if (
-      args.delivery_id &&
-      hasAcceptedBerdctlDelivery(args.session_id, args.delivery_id)
-    ) {
+    const releaseDeliveryReservation = args.delivery_id
+      ? reserveBerdctlDelivery(args.session_id, args.delivery_id)
+      : undefined;
+    if (args.delivery_id && !releaseDeliveryReservation) {
       return { session_id: session.id, send_status: "deduplicated" };
     }
 
-    if (useSessionWindowStore.getState().isOpenInWindow(args.session_id)) {
-      throw new CommandError(
-        "target_session_running",
-        `Refusing to send to session "${args.session_id}" while it is open in a separate window; close that window first or ask the user.`,
-      );
-    }
+    try {
+      if (useSessionWindowStore.getState().isOpenInWindow(args.session_id)) {
+        throw new CommandError(
+          "target_session_running",
+          `Refusing to send to session "${args.session_id}" while it is open in a separate window; close that window first or ask the user.`,
+        );
+      }
 
-    const chatStore = useChatStore.getState();
-    const runtime = chatStore.getSessionRuntime(args.session_id);
-    if (
-      args.startup_name &&
-      ((chatStore.queuedMessageBySession[args.session_id]?.length ?? 0) > 0 ||
-        session.messageCount > 0)
-    ) {
-      throw new CommandError(
-        "invalid_args",
-        "startup_name is only valid for the first send when workspace setup is available.",
+      const chatStore = useChatStore.getState();
+      const runtime = chatStore.getSessionRuntime(args.session_id);
+      if (
+        args.startup_name &&
+        ((chatStore.queuedMessageBySession[args.session_id]?.length ?? 0) > 0 ||
+          session.messageCount > 0)
+      ) {
+        throw new CommandError(
+          "invalid_args",
+          "startup_name is only valid for the first send when workspace setup is available.",
+        );
+      }
+      if (!isQueuedSessionReady(runtime)) {
+        switch (args.if_running) {
+          case "refuse":
+            throw new CommandError(
+              "target_session_running",
+              runningTargetMessage(args.session_id),
+            );
+
+          case "steer":
+            if (runtime.isRunCancellationPending) {
+              throw new CommandError(
+                "target_session_running",
+                `Refusing to steer session "${args.session_id}" while cancellation is pending; use --if-running queue or wait for cancellation to finish.`,
+              );
+            }
+            await steerPromptInSession(
+              args.session_id,
+              args.prompt,
+              undefined,
+              sendOptions,
+              { throwOnError: true },
+            );
+            return { session_id: session.id, send_status: "steered" };
+
+          case "queue":
+            chatStore.enqueueTransportReadyMessage(
+              args.session_id,
+              admitSystemInheritedQueuedMessage({
+                text: args.prompt,
+                sendOptions,
+              }),
+            );
+            return { session_id: session.id, send_status: "queued" };
+
+          default:
+            throw new Error(
+              `Unhandled if_running mode: ${String(args.if_running satisfies never)}`,
+            );
+        }
+      }
+
+      const project = session.projectId
+        ? await findProjectOrThrow(session.projectId)
+        : null;
+      const firstSend = acceptFirstSend(
+        args.session_id,
+        createDeferredQueuedMessagePayload({
+          text: args.prompt,
+          persona: { kind: "inherit" },
+          sendOptions,
+        }),
+        { startupName: args.startup_name, project },
       );
-    }
-    if (!isQueuedSessionReady(runtime)) {
-      switch (args.if_running) {
-        case "refuse":
+      if (firstSend.needsName) {
+        throw new CommandError(
+          "workspace_name_required",
+          "This session needs a workspace startup name before its first send.",
+        );
+      }
+      if (firstSend.accepted) {
+        return { session_id: session.id, send_status: "queued" };
+      }
+      if (
+        (chatStore.queuedMessageBySession[args.session_id]?.length ?? 0) > 0
+      ) {
+        chatStore.enqueueTransportReadyMessage(
+          args.session_id,
+          admitSystemInheritedQueuedMessage({
+            text: args.prompt,
+            sendOptions,
+          }),
+        );
+        return { session_id: session.id, send_status: "queued" };
+      }
+
+      try {
+        await sendPromptToExistingSessionInBackground(
+          args.session_id,
+          args.prompt,
+          () => {
+            const liveChatStore = useChatStore.getState();
+            assertQueuedSessionReady(
+              liveChatStore.getSessionRuntime(args.session_id),
+              (liveChatStore.queuedMessageBySession[args.session_id]?.length ??
+                0) === 0,
+            );
+          },
+          {
+            returnOnDispatch: true,
+            sendOptions,
+          },
+        );
+      } catch (error) {
+        if (error instanceof SessionDispatchContentionError) {
+          if (args.if_running === "queue") {
+            useChatStore.getState().enqueueTransportReadyMessage(
+              args.session_id,
+              admitSystemInheritedQueuedMessage({
+                text: args.prompt,
+                sendOptions,
+              }),
+            );
+            return { session_id: session.id, send_status: "queued" };
+          }
           throw new CommandError(
             "target_session_running",
             runningTargetMessage(args.session_id),
           );
-
-        case "steer":
-          if (runtime.isRunCancellationPending) {
-            throw new CommandError(
-              "target_session_running",
-              `Refusing to steer session "${args.session_id}" while cancellation is pending; use --if-running queue or wait for cancellation to finish.`,
+        }
+        if (error instanceof SessionDispatchUnresolvedError) {
+          throw new CommandError("invalid_args", error.message);
+        }
+        if (error instanceof PreCommitSendRejectedError) {
+          if (args.if_running === "queue") {
+            useChatStore.getState().enqueueTransportReadyMessage(
+              args.session_id,
+              admitSystemInheritedQueuedMessage({
+                text: args.prompt,
+                sendOptions,
+              }),
             );
+            return { session_id: session.id, send_status: "queued" };
           }
-          await steerPromptInSession(
-            args.session_id,
-            args.prompt,
-            undefined,
-            sendOptions,
-            { throwOnError: true },
+          throw new CommandError(
+            "target_session_running",
+            runningTargetMessage(args.session_id),
           );
-          return { session_id: session.id, send_status: "steered" };
-
-        case "queue":
-          chatStore.enqueueTransportReadyMessage(
-            args.session_id,
-            admitSystemInheritedQueuedMessage({
-              text: args.prompt,
-              sendOptions,
-            }),
-          );
-          return { session_id: session.id, send_status: "queued" };
-
-        default:
-          throw new Error(
-            `Unhandled if_running mode: ${String(args.if_running satisfies never)}`,
-          );
-      }
-    }
-
-    const project = session.projectId
-      ? await findProjectOrThrow(session.projectId)
-      : null;
-    const firstSend = acceptFirstSend(
-      args.session_id,
-      createDeferredQueuedMessagePayload({
-        text: args.prompt,
-        persona: { kind: "inherit" },
-        sendOptions,
-      }),
-      { startupName: args.startup_name, project },
-    );
-    if (firstSend.needsName) {
-      throw new CommandError(
-        "workspace_name_required",
-        "This session needs a workspace startup name before its first send.",
-      );
-    }
-    if (firstSend.accepted) {
-      return { session_id: session.id, send_status: "queued" };
-    }
-    if ((chatStore.queuedMessageBySession[args.session_id]?.length ?? 0) > 0) {
-      chatStore.enqueueTransportReadyMessage(
-        args.session_id,
-        admitSystemInheritedQueuedMessage({
-          text: args.prompt,
-          sendOptions,
-        }),
-      );
-      return { session_id: session.id, send_status: "queued" };
-    }
-
-    try {
-      await sendPromptToExistingSessionInBackground(
-        args.session_id,
-        args.prompt,
-        () => {
-          const liveChatStore = useChatStore.getState();
-          assertQueuedSessionReady(
-            liveChatStore.getSessionRuntime(args.session_id),
-            (liveChatStore.queuedMessageBySession[args.session_id]?.length ??
-              0) === 0,
-          );
-        },
-        {
-          returnOnDispatch: true,
-          sendOptions,
-        },
-      );
-    } catch (error) {
-      if (error instanceof SessionDispatchContentionError) {
-        if (args.if_running === "queue") {
-          useChatStore.getState().enqueueTransportReadyMessage(
-            args.session_id,
-            admitSystemInheritedQueuedMessage({
-              text: args.prompt,
-              sendOptions,
-            }),
-          );
-          return { session_id: session.id, send_status: "queued" };
         }
-        throw new CommandError(
-          "target_session_running",
-          runningTargetMessage(args.session_id),
-        );
-      }
-      if (error instanceof SessionDispatchUnresolvedError) {
-        throw new CommandError("invalid_args", error.message);
-      }
-      if (error instanceof PreCommitSendRejectedError) {
-        if (args.if_running === "queue") {
-          useChatStore.getState().enqueueTransportReadyMessage(
-            args.session_id,
-            admitSystemInheritedQueuedMessage({
-              text: args.prompt,
-              sendOptions,
-            }),
-          );
-          return { session_id: session.id, send_status: "queued" };
+        if (error instanceof CommandError) {
+          throw error;
         }
-        throw new CommandError(
-          "target_session_running",
-          runningTargetMessage(args.session_id),
-        );
+        throw new Error(formatAcpErrorMessage(error));
       }
-      if (error instanceof CommandError) {
-        throw error;
-      }
-      throw new Error(formatAcpErrorMessage(error));
+      return { session_id: session.id, send_status: "dispatched" };
+    } finally {
+      releaseDeliveryReservation?.();
     }
-    return { session_id: session.id, send_status: "dispatched" };
   },
 });
