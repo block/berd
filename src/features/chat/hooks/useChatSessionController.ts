@@ -381,6 +381,7 @@ export function useChatSessionController({
   const [pendingPersonaId, setPendingPersonaId] = useState<string | null>();
   const [pendingProjectId, setPendingProjectId] = useState<string | null>();
   const [pendingRemoteHost, setPendingRemoteHost] = useState<string | null>();
+  const remoteSendInFlightRef = useRef(false);
   const [pendingRemoteDir, setPendingRemoteDir] = useState<string | null>();
   const [pendingExecutionTarget, setPendingExecutionTarget] =
     useState<SessionExecutionTarget | null>();
@@ -1509,10 +1510,6 @@ export function useChatSessionController({
     setPendingRemoteHost(host);
     // A chosen directory belongs to one host, so any host change resets it.
     setPendingRemoteDir(undefined);
-    if (host) {
-      // Remote sessions are project-less in v1.
-      setPendingProjectId(null);
-    }
   }, []);
 
   const handleRemoteDirChange = useCallback((dir: string | null) => {
@@ -2613,6 +2610,13 @@ export function useChatSessionController({
           // remote directory is missing; this is a backstop.
           return false;
         }
+        // Creating the remote session takes a moment (ssh connect + ACP
+        // session/new); a re-submit in that window must not create a second
+        // session.
+        if (remoteSendInFlightRef.current) {
+          return false;
+        }
+        remoteSendInFlightRef.current = true;
         const payload = captureSessionSelection({
           text,
           persona: personaIntentFromComposer(personaId, personaName),
@@ -2632,6 +2636,9 @@ export function useChatSessionController({
                 payload.persona.kind === "persona"
                   ? payload.persona.id
                   : (selectedPersonaId ?? undefined),
+              // The project association is local metadata (grouping, sidebar);
+              // the workspace itself lives on the remote host.
+              projectId: effectiveProjectId ?? undefined,
               workingDir: remoteDir,
               remoteHost,
             });
@@ -2643,9 +2650,6 @@ export function useChatSessionController({
             }
             setPendingRemoteHost(undefined);
             setPendingRemoteDir(undefined);
-            if (sessionId) {
-              recordDraftPreservingSubmission(sessionId, text);
-            }
             activateSession(created.id);
             onMessageAccepted?.(created.id);
             return true;
@@ -2655,6 +2659,8 @@ export function useChatSessionController({
               description: formatAcpErrorMessage(error),
             });
             return false;
+          } finally {
+            remoteSendInFlightRef.current = false;
           }
         })();
       }
@@ -2885,6 +2891,7 @@ export function useChatSessionController({
       selectedPersonaId,
       stateSessionId,
       workspaceContextReady,
+      effectiveProjectId,
     ],
   );
 

@@ -500,6 +500,7 @@ function persistRemoteSessionRecordForSession(session: ChatSession): void {
     title: session.title,
     workingDir: session.workingDir ?? "",
     updatedAt: session.updatedAt,
+    ...(session.projectId ? { projectId: session.projectId } : {}),
     ...(session.archivedAt ? { archivedAt: session.archivedAt } : {}),
   });
 }
@@ -950,6 +951,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
         merged.remoteHost &&
         (merged.title !== existing.title ||
           merged.workingDir !== existing.workingDir ||
+          merged.projectId !== existing.projectId ||
           merged.archivedAt !== existing.archivedAt ||
           merged.updatedAt !== existing.updatedAt)
       ) {

@@ -34,8 +34,17 @@ export function RemoteHostSelector({
 }: RemoteHostSelectorProps) {
   const { t } = useTranslation("chat");
   const configHosts = useRemoteHostStore((state) => state.configHosts);
+  const manualHosts = useRemoteHostStore((state) => state.manualHosts);
   const statusByHost = useRemoteHostStore((state) => state.statusByHost);
-  const availableHosts = hosts ?? configHosts;
+  const baseHosts = hosts ?? configHosts;
+  // Hosts added manually (persisted) or connected ad hoc this run don't
+  // appear in ~/.ssh/config — wildcard-only configs like `Host *.blox` rely
+  // on this.
+  const extraHosts = [...manualHosts, ...Object.keys(statusByHost)].filter(
+    (host, index, all) =>
+      !baseHosts.includes(host) && all.indexOf(host) === index,
+  );
+  const availableHosts = [...baseHosts, ...extraHosts];
   // A stale selection (host removed from ~/.ssh/config) still needs a row so
   // the trigger label and check mark stay truthful.
   const listedHosts =

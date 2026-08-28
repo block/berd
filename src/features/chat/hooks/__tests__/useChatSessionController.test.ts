@@ -6697,6 +6697,45 @@ describe("useChatSessionController", () => {
       );
     });
 
+    it("creates exactly one remote session when send fires twice in flight", async () => {
+      // ssh connect + session/new take a moment; a re-submit inside that
+      // window (double Enter, double click) must not create a second session.
+      let releaseConnect: () => void = () => {};
+      mockEnsureRemoteHostConnected.mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseConnect = resolve;
+          }),
+      );
+      mockAcpCreateSession.mockResolvedValue({
+        sessionId: "remote-session-1",
+        configOptionsSnapshot: undefined,
+      });
+
+      const { result } = renderHook(() =>
+        useChatSessionController({ sessionId: "session-1" }),
+      );
+
+      act(() => {
+        result.current.handleRemoteHostChange("devbox");
+        result.current.handleRemoteDirChange("/home/dev/project");
+      });
+
+      let first: boolean | Promise<boolean> = false;
+      let second: boolean | Promise<boolean> = true;
+      act(() => {
+        first = result.current.handleSend("hello remote");
+        second = result.current.handleSend("hello remote");
+      });
+      await act(async () => {
+        releaseConnect();
+        expect(await first).toBe(true);
+        expect(await second).toBe(false);
+      });
+
+      expect(mockAcpCreateSession).toHaveBeenCalledTimes(1);
+    });
+
     it("reports a failed connect and keeps the send unaccepted", async () => {
       mockEnsureRemoteHostConnected.mockRejectedValue({
         kind: "host-unreachable",

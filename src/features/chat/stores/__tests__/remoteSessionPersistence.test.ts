@@ -92,6 +92,22 @@ describe("remoteSessionPersistence", () => {
     expect(window.localStorage.getItem(REMOTE_SESSIONS_STORAGE_KEY)).toBeNull();
   });
 
+  it("round-trips projectId and seeds it on the rehydrated placeholder", async () => {
+    persistRemoteSessionRecord(
+      makeRecord({ sessionId: "ssh:devbox#remote-3", projectId: "proj-1" }),
+    );
+
+    expect(readRemoteSessionRecords()).toEqual([
+      makeRecord({ sessionId: "ssh:devbox#remote-3", projectId: "proj-1" }),
+    ]);
+
+    await rehydrateRemoteSessions();
+    const session = useChatSessionStore
+      .getState()
+      .getSession("ssh:devbox#remote-3");
+    expect(session?.projectId).toBe("proj-1");
+  });
+
   it("upserts by session id", () => {
     persistRemoteSessionRecord(makeRecord());
     persistRemoteSessionRecord(makeRecord({ title: "Renamed" }));
@@ -123,25 +139,60 @@ describe("remoteSessionPersistence", () => {
 
   describe("rehydrateRemoteSessions", () => {
     it("registers backends and seeds sidebar placeholders", async () => {
-      persistRemoteSessionRecord(makeRecord());
+      persistRemoteSessionRecord(
+        makeRecord({ sessionId: "ssh:devbox#remote-1" }),
+      );
 
       await rehydrateRemoteSessions();
 
       expect(mocks.registerSessionBackend).toHaveBeenCalledWith(
-        "remote-1",
+        "ssh:devbox#remote-1",
         "ssh:devbox",
+        "remote-1",
       );
-      const session = useChatSessionStore.getState().getSession("remote-1");
+      const session = useChatSessionStore
+        .getState()
+        .getSession("ssh:devbox#remote-1");
       expect(session).toMatchObject({
-        id: "remote-1",
+        id: "ssh:devbox#remote-1",
         title: "Remote chat",
         remoteHost: "devbox",
         workingDir: "/remote/home/damien/project",
-        clientSessionId: "remote-1",
+        clientSessionId: "ssh:devbox#remote-1",
       });
       // Placeholder must be visible in the sidebar before the remote
       // transcript loads.
       expect(session?.messageCount).toBeGreaterThan(0);
+      // The already-composite record is not rewritten.
+      expect(readRemoteSessionRecords()).toEqual([
+        makeRecord({ sessionId: "ssh:devbox#remote-1" }),
+      ]);
+    });
+
+    it("migrates old-format records (bare wire ids) to composite ids", async () => {
+      persistRemoteSessionRecord(makeRecord({ sessionId: "remote-1" }));
+
+      await rehydrateRemoteSessions();
+
+      expect(mocks.registerSessionBackend).toHaveBeenCalledWith(
+        "ssh:devbox#remote-1",
+        "ssh:devbox",
+        "remote-1",
+      );
+      const session = useChatSessionStore
+        .getState()
+        .getSession("ssh:devbox#remote-1");
+      expect(session).toMatchObject({
+        id: "ssh:devbox#remote-1",
+        remoteHost: "devbox",
+      });
+      expect(
+        useChatSessionStore.getState().getSession("remote-1"),
+      ).toBeUndefined();
+      // The stored record is rewritten under the composite id.
+      expect(readRemoteSessionRecords()).toEqual([
+        makeRecord({ sessionId: "ssh:devbox#remote-1" }),
+      ]);
     });
 
     it("skips archived records", async () => {
@@ -155,14 +206,22 @@ describe("remoteSessionPersistence", () => {
       expect(
         useChatSessionStore.getState().getSession("remote-1"),
       ).toBeUndefined();
+      expect(
+        useChatSessionStore.getState().getSession("ssh:devbox#remote-1"),
+      ).toBeUndefined();
     });
 
     it("does not clobber a session already in the store", async () => {
-      persistRemoteSessionRecord(makeRecord({ title: "Stale title" }));
+      persistRemoteSessionRecord(
+        makeRecord({
+          sessionId: "ssh:devbox#remote-1",
+          title: "Stale title",
+        }),
+      );
       useChatSessionStore.setState({
         sessions: [
           {
-            id: "remote-1",
+            id: "ssh:devbox#remote-1",
             title: "Fresh title",
             remoteHost: "devbox",
             createdAt: "2026-08-03T00:00:00.000Z",
@@ -175,11 +234,12 @@ describe("remoteSessionPersistence", () => {
       await rehydrateRemoteSessions();
 
       expect(mocks.registerSessionBackend).toHaveBeenCalledWith(
-        "remote-1",
+        "ssh:devbox#remote-1",
         "ssh:devbox",
+        "remote-1",
       );
       expect(
-        useChatSessionStore.getState().getSession("remote-1"),
+        useChatSessionStore.getState().getSession("ssh:devbox#remote-1"),
       ).toMatchObject({ title: "Fresh title", messageCount: 4 });
     });
   });

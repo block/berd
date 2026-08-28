@@ -250,6 +250,7 @@ export function SidebarRecentsSection({
                 id={session.id}
                 title={session.title}
                 branchName={session.branchName}
+                remoteHost={session.remoteHost}
                 activityAt={session.activityAt}
                 showLeadingIcon={showChatIcons}
                 quickPinMode={showChatIcons ? "always" : "pinned-only"}

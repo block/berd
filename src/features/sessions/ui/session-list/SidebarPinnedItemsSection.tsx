@@ -265,6 +265,7 @@ export function SidebarPinnedItemsSection({
                       id={item.session.id}
                       title={item.session.title}
                       branchName={item.session.branchName}
+                      remoteHost={item.session.remoteHost}
                       activityAt={item.session.activityAt}
                       isActive={activeSessionId === item.session.id}
                       isRunning={item.session.isRunning ?? false}

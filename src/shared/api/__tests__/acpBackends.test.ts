@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Client, SessionNotification } from "@agentclientprotocol/sdk";
 import {
   LOCAL_BACKEND_ID,
   backendIdForSession,
+  compositeSessionId,
+  isCompositeSessionId,
   remoteHostFromBackendId,
+  splitCompositeSessionId,
   sshBackendId,
 } from "../acpBackendId";
 
@@ -16,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
   connectRemoteHost: vi.fn(),
   createWebSocketStream: vi.fn(),
+  clientCallbackFactories: [] as Array<() => Client>,
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -41,7 +46,8 @@ vi.mock("@aaif/goose-sdk", () => ({
     initialize = vi.fn(async () => {});
     closed: Promise<void>;
     resolveClosed!: () => void;
-    constructor(_callbacks: unknown, _stream: unknown) {
+    constructor(callbacks: () => Client, _stream: unknown) {
+      mocks.clientCallbackFactories.push(callbacks);
       this.closed = new Promise<void>((resolve) => {
         this.resolveClosed = resolve;
       });
@@ -65,6 +71,7 @@ function flushClosedMonitor() {
 beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
+  mocks.clientCallbackFactories.length = 0;
   mocks.invoke.mockResolvedValue("ws://local");
   mocks.connectRemoteHost.mockResolvedValue({
     wsUrl: "ws://remote",
@@ -96,6 +103,44 @@ describe("acpBackendId", () => {
     expect(backendIdForSession({ remoteHost: " dev-box " })).toBe(
       "ssh:dev-box",
     );
+  });
+
+  it("keeps local wire ids unchanged and composes remote ones", () => {
+    expect(compositeSessionId("local", "20260828_2")).toBe("20260828_2");
+    expect(compositeSessionId("ssh:workstation.blox", "20260828_2")).toBe(
+      "ssh:workstation.blox#20260828_2",
+    );
+  });
+
+  it("detects composite ids without false positives", () => {
+    expect(isCompositeSessionId("ssh:workstation.blox#20260828_2")).toBe(true);
+    expect(isCompositeSessionId("20260828_2")).toBe(false);
+    // A bare backend id is not a session id.
+    expect(isCompositeSessionId("ssh:workstation.blox")).toBe(false);
+    // A local id containing '#' is not composite either.
+    expect(isCompositeSessionId("weird#local")).toBe(false);
+  });
+
+  it("splits composite ids, including hosts containing ':'", () => {
+    expect(splitCompositeSessionId("ssh:dev-box#20260828_2")).toEqual({
+      backendId: "ssh:dev-box",
+      wireSessionId: "20260828_2",
+    });
+    expect(splitCompositeSessionId("ssh:user@host:2222#20260828_1")).toEqual({
+      backendId: "ssh:user@host:2222",
+      wireSessionId: "20260828_1",
+    });
+    expect(splitCompositeSessionId("20260828_2")).toBeNull();
+    expect(splitCompositeSessionId("ssh:no-separator")).toBeNull();
+  });
+
+  it("roundtrips composite ids through split", () => {
+    const id = compositeSessionId("ssh:user@host:2222", "20260828_1");
+    expect(id).toBe("ssh:user@host:2222#20260828_1");
+    expect(splitCompositeSessionId(id)).toEqual({
+      backendId: "ssh:user@host:2222",
+      wireSessionId: "20260828_1",
+    });
   });
 });
 
@@ -231,5 +276,176 @@ describe("session backend routing", () => {
     expect(mocks.connectRemoteHost).toHaveBeenCalledWith("dev-box");
     expect(remoteClient).toBe(await conn.getBackendClient("ssh:dev-box"));
     expect(mocks.invoke).not.toHaveBeenCalled();
+  });
+
+  it("returns the registered wire id, defaulting to the session id", async () => {
+    const sessions = await importSessionBackends();
+
+    sessions.registerSessionBackend(
+      "ssh:dev-box#20260828_2",
+      "ssh:dev-box",
+      "20260828_2",
+    );
+    expect(sessions.getWireSessionId("ssh:dev-box#20260828_2")).toBe(
+      "20260828_2",
+    );
+
+    sessions.registerSessionBackend("local-session", "local");
+    expect(sessions.getWireSessionId("local-session")).toBe("local-session");
+    expect(sessions.getWireSessionId("never-registered")).toBe(
+      "never-registered",
+    );
+
+    // Registering a composite id without an explicit wire id derives it from
+    // the id's shape instead of storing the composite as the wire id.
+    sessions.registerSessionBackend("ssh:dev-box#20260828_9", "ssh:dev-box");
+    expect(sessions.getWireSessionId("ssh:dev-box#20260828_9")).toBe(
+      "20260828_9",
+    );
+  });
+
+  it("derives backend and wire id from an unregistered composite id", async () => {
+    const conn = await importConnection();
+    const sessions = await importSessionBackends();
+
+    // Restart safety: a composite id can be consulted before rehydration
+    // re-registers it.
+    expect(sessions.getSessionBackend("ssh:user@host:2222#20260828_1")).toBe(
+      "ssh:user@host:2222",
+    );
+    expect(sessions.getWireSessionId("ssh:user@host:2222#20260828_1")).toBe(
+      "20260828_1",
+    );
+
+    const client = await sessions.getClientForSession(
+      "ssh:user@host:2222#20260828_1",
+    );
+    expect(mocks.connectRemoteHost).toHaveBeenCalledWith("user@host:2222");
+    expect(client).toBe(await conn.getBackendClient("ssh:user@host:2222"));
+  });
+
+  it("transfer keeps the destination's own wire id", async () => {
+    const sessions = await importSessionBackends();
+
+    // Draft flow: the draft's uuid is registered on the remote backend, then
+    // the created composite id (already registered with its wire id) takes
+    // over. The transfer must not clobber the destination's wire id with the
+    // draft uuid.
+    sessions.registerSessionBackend(
+      "ssh:dev-box#20260828_2",
+      "ssh:dev-box",
+      "20260828_2",
+    );
+    sessions.registerSessionBackend("draft-uuid", "ssh:dev-box");
+    sessions.transferSessionBackend("draft-uuid", "ssh:dev-box#20260828_2");
+
+    expect(sessions.getSessionBackend("ssh:dev-box#20260828_2")).toBe(
+      "ssh:dev-box",
+    );
+    expect(sessions.getWireSessionId("ssh:dev-box#20260828_2")).toBe(
+      "20260828_2",
+    );
+
+    // Unregistered composite destination derives its wire id from its shape.
+    sessions.transferSessionBackend("draft-uuid", "ssh:dev-box#20260828_3");
+    expect(sessions.getWireSessionId("ssh:dev-box#20260828_3")).toBe(
+      "20260828_3",
+    );
+  });
+});
+
+describe("inbound session id translation", () => {
+  function sessionUpdatePayload(sessionId: string): SessionNotification {
+    return {
+      sessionId,
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "hello" },
+      },
+    } as SessionNotification;
+  }
+
+  async function latestCallbacks(): Promise<Client> {
+    const factory = mocks.clientCallbackFactories.at(-1);
+    if (!factory) {
+      throw new Error("no GooseClient constructed");
+    }
+    return factory();
+  }
+
+  it("rewrites remote notification session ids to composite ids", async () => {
+    const conn = await importConnection();
+    const received: SessionNotification[] = [];
+    conn.setNotificationHandler({
+      handleSessionNotification: async (notification) => {
+        received.push(notification);
+      },
+    });
+
+    await conn.getBackendClient("ssh:dev-box");
+    const callbacks = await latestCallbacks();
+    await callbacks.sessionUpdate?.(sessionUpdatePayload("20260828_2"));
+
+    expect(received).toHaveLength(1);
+    expect(received[0]?.sessionId).toBe("ssh:dev-box#20260828_2");
+  });
+
+  it("passes local notifications through byte-identical", async () => {
+    const conn = await importConnection();
+    const received: SessionNotification[] = [];
+    conn.setNotificationHandler({
+      handleSessionNotification: async (notification) => {
+        received.push(notification);
+      },
+    });
+
+    await conn.getClient();
+    const callbacks = await latestCallbacks();
+    const payload = sessionUpdatePayload("20260828_2");
+    await callbacks.sessionUpdate?.(payload);
+
+    expect(received).toHaveLength(1);
+    // Local stays a passthrough: the very same object, not a copy.
+    expect(received[0]).toBe(payload);
+  });
+
+  it("interceptors see the composite id for remote notifications", async () => {
+    const conn = await importConnection();
+    const intercepted: string[] = [];
+    const stop = conn.interceptSessionNotifications((notification) => {
+      intercepted.push(notification.sessionId);
+      return true;
+    });
+    const handler = vi.fn();
+    conn.setNotificationHandler({ handleSessionNotification: handler });
+
+    await conn.getBackendClient("ssh:dev-box");
+    const callbacks = await latestCallbacks();
+    await callbacks.sessionUpdate?.(sessionUpdatePayload("20260828_2"));
+
+    expect(intercepted).toEqual(["ssh:dev-box#20260828_2"]);
+    expect(handler).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it("rewrites remote permission request session ids to composite ids", async () => {
+    const conn = await importConnection();
+    const seen: string[] = [];
+    conn.setPermissionHandler(async (request) => {
+      seen.push(request.sessionId);
+      return {
+        outcome: { outcome: "selected", optionId: "approve" },
+      };
+    });
+
+    await conn.getBackendClient("ssh:dev-box");
+    const callbacks = await latestCallbacks();
+    await callbacks.requestPermission?.({
+      sessionId: "20260828_2",
+      options: [],
+      // biome-ignore lint/suspicious/noExplicitAny: minimal fixture
+    } as any);
+
+    expect(seen).toEqual(["ssh:dev-box#20260828_2"]);
   });
 });

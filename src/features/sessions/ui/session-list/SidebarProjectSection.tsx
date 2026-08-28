@@ -50,6 +50,8 @@ export interface SidebarSessionItem {
   id: string;
   title: string;
   branchName?: string;
+  /** SSH host the chat's backend runs on, when remote. */
+  remoteHost?: string;
   activityAt?: string | null;
   updatedAt: string;
   lastMessageAt?: string | null;
@@ -441,6 +443,7 @@ export function SidebarProjectSection({
                   id={session.id}
                   title={session.title}
                   branchName={session.branchName}
+                  remoteHost={session.remoteHost}
                   activityAt={session.activityAt}
                   isActive={isActive}
                   isRunning={session.isRunning ?? false}
@@ -484,6 +487,7 @@ export function SidebarProjectSection({
                       id={session.id}
                       title={session.title}
                       branchName={session.branchName}
+                      remoteHost={session.remoteHost}
                       activityAt={session.activityAt}
                       isActive={isActive}
                       isRunning={session.isRunning ?? false}

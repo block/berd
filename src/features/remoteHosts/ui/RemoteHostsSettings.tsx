@@ -117,6 +117,12 @@ function RemoteHostRow({
   );
   const disconnect = useRemoteHostStore((state) => state.disconnect);
   const runDoctor = useRemoteHostStore((state) => state.runDoctor);
+  const isManualHost = useRemoteHostStore((state) =>
+    state.manualHosts.includes(host),
+  );
+  const removeManualHost = useRemoteHostStore(
+    (state) => state.removeManualHost,
+  );
 
   const state = status?.state ?? "disconnected";
   const isConnected = state === "ready" || state === "reconnecting";
@@ -185,6 +191,16 @@ function RemoteHostRow({
           >
             {t("remoteHosts.actions.check")}
           </Button>
+          {isManualHost && !isConnected ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => removeManualHost(host)}
+            >
+              {t("remoteHosts.actions.forget")}
+            </Button>
+          ) : null}
         </div>
       }
       details={
@@ -211,6 +227,7 @@ export function RemoteHostsSettings() {
     useExperiment(REMOTE_SSH_SESSIONS_EXPERIMENT_ID)?.enabled === true;
 
   const configHosts = useRemoteHostStore((state) => state.configHosts);
+  const manualHosts = useRemoteHostStore((state) => state.manualHosts);
   const statusByHost = useRemoteHostStore((state) => state.statusByHost);
   const ensureHostConnected = useRemoteHostStore(
     (state) => state.ensureHostConnected,
@@ -236,14 +253,15 @@ export function RemoteHostsSettings() {
     void store.syncBackendSnapshot();
   }, [enabled]);
 
-  // Config hosts first, then any ad-hoc hosts we have status for (e.g. from
-  // the free-form connect below), so manual connections stay visible.
+  // Config hosts first, then manually added hosts (persisted across
+  // restarts), then any other ad-hoc hosts we have status for this run.
   const hosts = useMemo(() => {
-    const extra = Object.keys(statusByHost)
-      .filter((host) => !configHosts.includes(host))
-      .sort();
+    const extra = [...manualHosts, ...Object.keys(statusByHost).sort()].filter(
+      (host, index, all) =>
+        !configHosts.includes(host) && all.indexOf(host) === index,
+    );
     return [...configHosts, ...extra];
-  }, [configHosts, statusByHost]);
+  }, [configHosts, manualHosts, statusByHost]);
 
   if (!enabled) return null;
 

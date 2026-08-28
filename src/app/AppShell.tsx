@@ -2260,7 +2260,7 @@ export function AppShell({
         reuseExistingDraft?: boolean;
         executionTarget?: SessionExecutionTarget;
         reasoningEffort?: GlobalComposeOptions["reasoningEffort"];
-        /** SSH host to run the session's backend on; project-less in v1. */
+        /** SSH host to run the session's backend on. */
         remoteHost?: string;
         /** Remote working directory; required alongside remoteHost. */
         remoteWorkingDir?: string;
@@ -2274,9 +2274,11 @@ export function AppShell({
           "createNewTab requires remoteWorkingDir when remoteHost is set.",
         );
       }
-      // Remote sessions are project-less in v1: local project folders are
-      // meaningless on the SSH host, and the working dir is chosen remotely.
-      const sessionProject = remoteHost ? undefined : project;
+      // A remote session may belong to a project: the association is local
+      // grouping metadata. Its working dir still comes from the remote picker,
+      // never from the project's local folders (all cwd sites below guard on
+      // remoteHost).
+      const sessionProject = project;
       const tStart = performance.now();
       perfLog(
         `[perf:newtab] createNewTab start (project=${sessionProject?.id ?? "none"})`,
@@ -2593,7 +2595,9 @@ export function AppShell({
           "createBackgroundDraftChat requires remoteWorkingDir when remoteHost is set.",
         );
       }
-      const sessionProject = remoteHost ? undefined : project;
+      // Project association is local grouping metadata; cwd sites below guard
+      // on remoteHost.
+      const sessionProject = project;
       const tStart = performance.now();
       perfLog(
         `[perf:newtab] createBackgroundDraftChat start (project=${sessionProject?.id ?? "none"})`,
@@ -3023,13 +3027,13 @@ export function AppShell({
         onSettled?: (didStart: boolean) => void;
       },
     ) => {
-      // Remote sessions are project-less in v1, so a remote compose never
-      // routes through the project draft path.
-      const project =
-        options?.projectId && !options.remoteHost
-          ? projects.find((candidate) => candidate.id === options.projectId)
-          : undefined;
+      const project = options?.projectId
+        ? projects.find((candidate) => candidate.id === options.projectId)
+        : undefined;
+      // Project workspace startup (branches/worktrees) is local git machinery;
+      // a remote compose keeps the project association but skips those plans.
       const requiresProjectWorkspaceDraftPlan =
+        !options?.remoteHost &&
         workspaceRepository.mode === "multi" &&
         Boolean(project?.projectWorkspaces.length);
       const shouldRunComposerHandoff =
@@ -3099,9 +3103,13 @@ export function AppShell({
       };
 
       const startChat = async () => {
-        const createChat = project
-          ? createNewProjectDraft(DEFAULT_CHAT_TITLE, project, chatOptions)
-          : createNewTab(DEFAULT_CHAT_TITLE, undefined, chatOptions);
+        // The project-draft route runs local workspace startup; remote project
+        // chats go through createNewTab, which carries the project association
+        // and uses the remote working directory verbatim.
+        const createChat =
+          project && !options?.remoteHost
+            ? createNewProjectDraft(DEFAULT_CHAT_TITLE, project, chatOptions)
+            : createNewTab(DEFAULT_CHAT_TITLE, project, chatOptions);
 
         try {
           const session = await createChat;
@@ -3282,12 +3290,9 @@ export function AppShell({
   const handleGlobalComposerExpand = useCallback(
     (payload: GlobalComposerExpandPayload): Promise<boolean> => {
       const options = payload.options;
-      // Remote sessions are project-less in v1, so a remote compose never
-      // routes through the project draft path.
-      const project =
-        options?.projectId && !options.remoteHost
-          ? projects.find((candidate) => candidate.id === options.projectId)
-          : undefined;
+      const project = options?.projectId
+        ? projects.find((candidate) => candidate.id === options.projectId)
+        : undefined;
       const chatOptions = {
         executionTarget: options?.executionTarget,
         reasoningEffort: options?.reasoningEffort,
@@ -3299,13 +3304,16 @@ export function AppShell({
         globalComposerPlacement === "centered";
 
       const openExpandedDraft = async () => {
-        const session = project
-          ? await createNewProjectDraft(
-              DEFAULT_CHAT_TITLE,
-              project,
-              chatOptions,
-            )
-          : await createNewTab(DEFAULT_CHAT_TITLE, undefined, chatOptions);
+        // Remote project chats skip the local workspace-startup draft route
+        // but keep the project association (see handleGlobalCompose).
+        const session =
+          project && !options?.remoteHost
+            ? await createNewProjectDraft(
+                DEFAULT_CHAT_TITLE,
+                project,
+                chatOptions,
+              )
+            : await createNewTab(DEFAULT_CHAT_TITLE, project, chatOptions);
         if (!session) {
           return false;
         }
@@ -3388,12 +3396,9 @@ export function AppShell({
         });
       }
       const options = payload.options;
-      // Remote sessions are project-less in v1, so a remote compose never
-      // routes through the project draft path.
-      const project =
-        options?.projectId && !options.remoteHost
-          ? projects.find((candidate) => candidate.id === options.projectId)
-          : undefined;
+      const project = options?.projectId
+        ? projects.find((candidate) => candidate.id === options.projectId)
+        : undefined;
       const chatOptions = {
         activate: false,
         reuseExistingDraft: false,

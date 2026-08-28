@@ -702,6 +702,7 @@
       "check": "Comprobar host",
       "connect": "Conectar",
       "disconnect": "Desconectar",
+      "forget": "Olvidar",
       "shutdown": "Detener backend remoto"
     },
     "custom": {

@@ -14,6 +14,7 @@ import {
 import packageJson from "../../../package.json";
 import {
   LOCAL_BACKEND_ID,
+  compositeSessionId,
   remoteHostFromBackendId,
   type AcpBackendId,
 } from "./acpBackendId";
@@ -65,16 +66,30 @@ export function setPermissionHandler(handler: PermissionRequestHandler): void {
 
 // The handler slots above are shared by every backend connection: downstream
 // routing is sessionId-keyed, so notifications from any backend flow through
-// the same callbacks.
-function createClientCallbacks(): () => Client {
+// the same callbacks. Wire session ids are only unique per backend, so each
+// connection rewrites inbound payloads to the composite renderer-side id
+// before they reach the shared handlers; the local backend stays a
+// byte-identical passthrough.
+function createClientCallbacks(backendId: AcpBackendId): () => Client {
+  const toRendererSessionId = <T extends { sessionId: string }>(
+    payload: T,
+  ): T =>
+    backendId === LOCAL_BACKEND_ID
+      ? payload
+      : {
+          ...payload,
+          sessionId: compositeSessionId(backendId, payload.sessionId),
+        };
+
   return () => ({
     requestPermission: async (
       args: RequestPermissionRequest,
     ): Promise<RequestPermissionResponse> => {
+      const request = toRendererSessionId(args);
       if (permissionHandler) {
-        return permissionHandler(args);
+        return permissionHandler(request);
       }
-      const optionId = args.options?.[0]?.optionId ?? "approve";
+      const optionId = request.options?.[0]?.optionId ?? "approve";
       return {
         outcome: {
           outcome: "selected",
@@ -83,7 +98,10 @@ function createClientCallbacks(): () => Client {
       };
     },
 
-    sessionUpdate: async (notification: SessionNotification): Promise<void> => {
+    sessionUpdate: async (
+      wireNotification: SessionNotification,
+    ): Promise<void> => {
+      const notification = toRendererSessionId(wireNotification);
       for (const interceptor of sessionNotificationInterceptors) {
         if (interceptor(notification)) {
           return;
@@ -113,6 +131,7 @@ export interface AcpConnection {
 
 export function createAcpConnection(
   resolveWsUrl: () => Promise<string>,
+  backendId: AcpBackendId = LOCAL_BACKEND_ID,
 ): AcpConnection {
   let clientPromise: Promise<GooseClient> | null = null;
   let resolvedClient: GooseClient | null = null;
@@ -170,7 +189,7 @@ export function createAcpConnection(
     const stream = createWebSocketStream(wsUrl);
     activeStream = stream;
 
-    const client = new GooseClient(createClientCallbacks(), stream);
+    const client = new GooseClient(createClientCallbacks(backendId), stream);
     perfLog(
       `[perf:conn] ws stream + client created in ${(performance.now() - tStream).toFixed(1)}ms`,
     );
@@ -279,7 +298,7 @@ function createBackendConnection(backendId: AcpBackendId): AcpConnection {
     const { connectRemoteHost } = await import("./remoteHosts");
     const remote = await connectRemoteHost(host);
     return remote.wsUrl;
-  });
+  }, backendId);
 }
 
 export function getBackendConnection(backendId: AcpBackendId): AcpConnection {

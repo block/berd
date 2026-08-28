@@ -1,4 +1,8 @@
-import { sshBackendId } from "@/shared/api/acpBackendId";
+import {
+  compositeSessionId,
+  splitCompositeSessionId,
+  sshBackendId,
+} from "@/shared/api/acpBackendId";
 import { registerSessionBackend } from "@/shared/api/acpSessionBackends";
 
 export const REMOTE_SESSIONS_STORAGE_KEY = "goose:remote-sessions:v1";
@@ -10,11 +14,18 @@ export const REMOTE_SESSIONS_STORAGE_KEY = "goose:remote-sessions:v1";
  * the right backend) across app restarts.
  */
 export interface RemoteSessionRecord {
+  /**
+   * Composite renderer-side session id (`ssh:<host>#<wireId>`). Records
+   * written before composite ids existed hold the bare wire id; rehydration
+   * migrates them using `host`.
+   */
   sessionId: string;
   host: string;
   title: string;
   workingDir: string;
   updatedAt: string;
+  /** Project the session belongs to; local grouping metadata. */
+  projectId?: string;
   archivedAt?: string;
 }
 
@@ -45,6 +56,10 @@ function normalizeRemoteSessionRecord(
     workingDir: trimmedString(raw.workingDir) ?? "",
     updatedAt: trimmedString(raw.updatedAt) ?? new Date(0).toISOString(),
   };
+  const projectId = trimmedString(raw.projectId);
+  if (projectId) {
+    record.projectId = projectId;
+  }
   const archivedAt = trimmedString(raw.archivedAt);
   if (archivedAt) {
     record.archivedAt = archivedAt;
@@ -140,16 +155,30 @@ export async function rehydrateRemoteSessions(): Promise<void> {
   );
   const store = useChatSessionStore.getState();
   for (const record of records) {
-    registerSessionBackend(record.sessionId, sshBackendId(record.host));
-    if (store.getSession(record.sessionId)) {
+    const backendId = sshBackendId(record.host);
+    const split = splitCompositeSessionId(record.sessionId);
+    // Old-format records (pre-composite ids) hold the bare wire id; compose
+    // it so it cannot collide with a same-id local session, and migrate the
+    // stored record so the composite id is the stable key from here on.
+    const sessionId = split
+      ? record.sessionId
+      : compositeSessionId(backendId, record.sessionId);
+    const wireSessionId = split?.wireSessionId ?? record.sessionId;
+    registerSessionBackend(sessionId, backendId, wireSessionId);
+    if (sessionId !== record.sessionId) {
+      removeRemoteSessionRecord(record.sessionId);
+      persistRemoteSessionRecord({ ...record, sessionId });
+    }
+    if (store.getSession(sessionId)) {
       continue;
     }
     store.addSession({
-      id: record.sessionId,
+      id: sessionId,
       title: record.title || record.host,
       remoteHost: record.host,
+      projectId: record.projectId,
       workingDir: record.workingDir || undefined,
-      clientSessionId: record.sessionId,
+      clientSessionId: sessionId,
       createdAt: record.updatedAt,
       updatedAt: record.updatedAt,
       // Placeholder: the remote message count is unknown until the session

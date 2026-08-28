@@ -22,7 +22,9 @@ vi.mock("@/shared/api/remoteHosts", async (importOriginal) => {
 
 import {
   initRemoteHostStore,
+  loadPersistedManualHosts,
   loadPersistedRecentDirs,
+  REMOTE_HOST_MANUAL_HOSTS_STORAGE_KEY,
   REMOTE_HOST_RECENT_DIRS_STORAGE_KEY,
   useRemoteHostStore,
 } from "./remoteHostStore";
@@ -39,6 +41,7 @@ const connection: RemoteBackendConnection = {
 function resetStore(): void {
   useRemoteHostStore.setState({
     configHosts: [],
+    manualHosts: [],
     statusByHost: {},
     doctorByHost: {},
     doctorPendingByHost: {},
@@ -357,5 +360,73 @@ describe("initRemoteHostStore", () => {
     });
 
     expect(cleanup).toBe(unlisten);
+  });
+});
+
+describe("manual host persistence", () => {
+  it("remembers a connected host that is not in the ssh config", async () => {
+    mocks.connectRemoteHost.mockResolvedValue(connection);
+    useRemoteHostStore.setState({ configHosts: ["configured"] });
+
+    await useRemoteHostStore.getState().ensureHostConnected("adhoc.blox");
+
+    expect(useRemoteHostStore.getState().manualHosts).toEqual(["adhoc.blox"]);
+    expect(loadPersistedManualHosts()).toEqual(["adhoc.blox"]);
+  });
+
+  it("does not record ssh-config hosts as manual", async () => {
+    mocks.connectRemoteHost.mockResolvedValue(connection);
+    useRemoteHostStore.setState({ configHosts: ["configured"] });
+
+    await useRemoteHostStore.getState().ensureHostConnected("configured");
+
+    expect(useRemoteHostStore.getState().manualHosts).toEqual([]);
+    expect(loadPersistedManualHosts()).toEqual([]);
+  });
+
+  it("does not remember hosts that failed to connect", async () => {
+    mocks.connectRemoteHost.mockRejectedValue({
+      kind: "host-unreachable",
+      message: "no route",
+    });
+
+    await expect(
+      useRemoteHostStore.getState().ensureHostConnected("nope.blox"),
+    ).rejects.toBeTruthy();
+
+    expect(useRemoteHostStore.getState().manualHosts).toEqual([]);
+  });
+
+  it("does not duplicate an already remembered host", async () => {
+    mocks.connectRemoteHost.mockResolvedValue(connection);
+    useRemoteHostStore.setState({ manualHosts: ["adhoc.blox"] });
+
+    await useRemoteHostStore.getState().ensureHostConnected("adhoc.blox");
+
+    expect(useRemoteHostStore.getState().manualHosts).toEqual(["adhoc.blox"]);
+  });
+
+  it("forgets a manual host and persists the removal", async () => {
+    mocks.connectRemoteHost.mockResolvedValue(connection);
+    await useRemoteHostStore.getState().ensureHostConnected("adhoc.blox");
+
+    useRemoteHostStore.getState().removeManualHost("adhoc.blox");
+
+    expect(useRemoteHostStore.getState().manualHosts).toEqual([]);
+    expect(loadPersistedManualHosts()).toEqual([]);
+  });
+
+  it("tolerates corrupted storage when loading manual hosts", () => {
+    window.localStorage.setItem(
+      REMOTE_HOST_MANUAL_HOSTS_STORAGE_KEY,
+      "not-json{",
+    );
+    expect(loadPersistedManualHosts()).toEqual([]);
+
+    window.localStorage.setItem(
+      REMOTE_HOST_MANUAL_HOSTS_STORAGE_KEY,
+      JSON.stringify([42, "", "real.host"]),
+    );
+    expect(loadPersistedManualHosts()).toEqual(["real.host"]);
   });
 });

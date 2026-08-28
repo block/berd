@@ -7,7 +7,7 @@ import {
   type PointerEvent,
 } from "react";
 import { createPortal } from "react-dom";
-import { ExternalLink, MoreHorizontal } from "lucide-react";
+import { ExternalLink, MoreHorizontal, Server } from "lucide-react";
 import { IconCheck, IconGitBranch } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import {
@@ -137,6 +137,8 @@ interface SidebarChatRowProps {
   title: string;
   /** Current Git branch for this chat; only passed when the sidebar branch setting is enabled. */
   branchName?: string;
+  /** SSH host the chat's backend runs on; shows a remote indicator when set. */
+  remoteHost?: string;
   /** Latest visible chat activity. Rendered as a compact relative timestamp on the row's right edge; hidden on hover when the row menu takes its place. */
   activityAt?: string | null;
   showTimestamp?: boolean;
@@ -194,6 +196,7 @@ export function SidebarChatRow({
   id,
   title,
   branchName,
+  remoteHost,
   activityAt,
   showTimestamp = true,
   isActive,
@@ -476,6 +479,17 @@ export function SidebarChatRow({
       aria-pressed={selectionEnabled ? selected : undefined}
     >
       {rowTitleContent}
+      {remoteHost ? (
+        <span
+          data-sidebar-chat-remote-host
+          className="flex size-4 shrink-0 items-center justify-center text-sidebar-foreground/60"
+          role="img"
+          aria-label={t("status.remoteHost", { host: remoteHost })}
+          title={t("status.remoteHost", { host: remoteHost })}
+        >
+          <Server className="size-3" aria-hidden="true" />
+        </span>
+      ) : null}
       {isMultiWindowEnabled && isOpenInWindow ? (
         <span
           className="flex size-4 shrink-0 items-center justify-center text-sidebar-foreground/60"

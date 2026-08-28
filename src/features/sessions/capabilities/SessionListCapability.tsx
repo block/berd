@@ -187,6 +187,7 @@ function toSessionListItem(
     id: session.id,
     title: session.title,
     branchName,
+    remoteHost: session.remoteHost,
     activityAt: sessionActivityAt(session),
     projectId: session.projectId ?? undefined,
     updatedAt: session.updatedAt,

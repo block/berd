@@ -16,8 +16,11 @@ import {
 
 export const REMOTE_HOST_RECENT_DIRS_STORAGE_KEY =
   "goose:remote-host-recent-dirs";
+export const REMOTE_HOST_MANUAL_HOSTS_STORAGE_KEY =
+  "goose:remote-host-manual-hosts";
 
 const MAX_RECENT_DIRS_PER_HOST = 8;
+const MAX_MANUAL_HOSTS = 16;
 
 export interface RemoteHostStatus {
   state: RemoteBackendState;
@@ -74,9 +77,45 @@ function persistRecentDirs(byHost: Record<string, string[]>): void {
   }
 }
 
+/** Hosts the user typed in manually (not in ~/.ssh/config), persisted so
+ *  they survive restarts. Hostnames only — never secrets. */
+export function loadPersistedManualHosts(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const stored = window.localStorage.getItem(
+      REMOTE_HOST_MANUAL_HOSTS_STORAGE_KEY,
+    );
+    if (!stored) return [];
+    const parsed = JSON.parse(stored);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(
+        (host): host is string =>
+          typeof host === "string" && host.trim() !== "",
+      )
+      .slice(0, MAX_MANUAL_HOSTS);
+  } catch {
+    return [];
+  }
+}
+
+function persistManualHosts(hosts: string[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      REMOTE_HOST_MANUAL_HOSTS_STORAGE_KEY,
+      JSON.stringify(hosts),
+    );
+  } catch {
+    // localStorage may be unavailable
+  }
+}
+
 export interface RemoteHostStore {
   /** Concrete Host aliases from ~/.ssh/config. */
   configHosts: string[];
+  /** Hosts the user added manually (persisted across restarts). */
+  manualHosts: string[];
   statusByHost: Record<string, RemoteHostStatus>;
   doctorByHost: Record<string, RemoteToolProbe[] | undefined>;
   doctorPendingByHost: Record<string, boolean>;
@@ -92,10 +131,12 @@ export interface RemoteHostStore {
   shutdownHost: (host: string) => Promise<void>;
   runDoctor: (host: string) => Promise<void>;
   recordRecentDir: (host: string, dir: string) => void;
+  removeManualHost: (host: string) => void;
 }
 
 export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
   configHosts: [],
+  manualHosts: loadPersistedManualHosts(),
   statusByHost: {},
   doctorByHost: {},
   doctorPendingByHost: {},
@@ -159,12 +200,25 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
     }));
     try {
       await connectRemoteHost(host);
-      set((state) => ({
-        statusByHost: {
-          ...state.statusByHost,
-          [host]: { state: "ready" },
-        },
-      }));
+      set((state) => {
+        // A host that connected but isn't in ~/.ssh/config was typed in
+        // manually; remember it across restarts.
+        const isKnown =
+          state.configHosts.includes(host) || state.manualHosts.includes(host);
+        const manualHosts = isKnown
+          ? state.manualHosts
+          : [host, ...state.manualHosts].slice(0, MAX_MANUAL_HOSTS);
+        if (!isKnown) {
+          persistManualHosts(manualHosts);
+        }
+        return {
+          manualHosts,
+          statusByHost: {
+            ...state.statusByHost,
+            [host]: { state: "ready" },
+          },
+        };
+      });
     } catch (error) {
       set((state) => ({
         statusByHost: {
@@ -216,6 +270,17 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
         doctorPendingByHost: { ...state.doctorPendingByHost, [host]: false },
       }));
     }
+  },
+
+  removeManualHost: (host) => {
+    set((state) => {
+      if (!state.manualHosts.includes(host)) return state;
+      const manualHosts = state.manualHosts.filter(
+        (candidate) => candidate !== host,
+      );
+      persistManualHosts(manualHosts);
+      return { manualHosts };
+    });
   },
 
   recordRecentDir: (host, dir) => {

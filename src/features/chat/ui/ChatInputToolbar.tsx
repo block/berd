@@ -129,9 +129,9 @@ export function ChatInputToolbar({
     onCreateProject,
   } = projectPicker;
   const remoteHostPickerEnabled = remoteHostPicker?.enabled === true;
-  const selectedRemoteHost = remoteHostPickerEnabled
-    ? (remoteHostPicker?.selectedHost ?? null)
-    : null;
+  // A started remote session keeps showing its host (selection disabled):
+  // the composer must always tell the user where their commands will run.
+  const selectedRemoteHost = remoteHostPicker?.selectedHost ?? null;
   const {
     contextTokens = 0,
     contextLimit = 0,
@@ -383,13 +383,10 @@ export function ChatInputToolbar({
             onRequestComposerFocus={onRequestComposerFocus}
             modal={false}
             triggerIconOnly={isCompact}
-            // Remote sessions are project-less in v1; local project folders
-            // do not exist on the SSH host.
-            disabled={Boolean(selectedRemoteHost)}
           />
         ) : null}
 
-        {remoteHostPickerEnabled ? (
+        {remoteHostPickerEnabled || selectedRemoteHost ? (
           <RemoteHostSelector
             selectedHost={selectedRemoteHost}
             hosts={remoteHostPicker?.hosts}
@@ -399,6 +396,7 @@ export function ChatInputToolbar({
             onRequestComposerFocus={onRequestComposerFocus}
             modal={false}
             triggerIconOnly={isCompact}
+            disabled={!remoteHostPickerEnabled}
           />
         ) : null}
 

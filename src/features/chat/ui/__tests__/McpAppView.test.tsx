@@ -62,6 +62,7 @@ vi.mock("@mcp-ui/client", () => ({
 
 vi.mock("@/shared/api/acpSessionBackends", () => ({
   getClientForSession: mocks.getClient,
+  getWireSessionId: (sessionId: string) => sessionId,
 }));
 
 vi.mock("@/shared/api/gooseServeHost", () => ({
