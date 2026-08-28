@@ -3455,7 +3455,7 @@ describe("ChatInput", () => {
     );
   });
 
-  it("strips cross-session origin metadata when resending an edited queued message", async () => {
+  it("strips cross-session delivery metadata when resending an edited queued message", async () => {
     const onSend = vi.fn(() => true);
     const user = userEvent.setup();
 
@@ -3468,10 +3468,14 @@ describe("ChatInput", () => {
         sendOptions: {
           acpGooseMetadata: {
             origin: "berdctl_cross_session",
+            berdSenderLabel: "berd-monitor",
+            berdDeliveryId: "event-1",
             threadId: "thread-1",
           },
           userMessageMetadata: {
             origin: "berdctl_cross_session",
+            berdSenderLabel: "berd-monitor",
+            berdDeliveryId: "event-1",
           },
         },
       });

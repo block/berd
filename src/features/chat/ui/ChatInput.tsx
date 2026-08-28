@@ -110,6 +110,7 @@ function stripCrossSessionOrigin<T extends Record<string, unknown>>(
   const {
     origin: _origin,
     berdSenderLabel: _berdSenderLabel,
+    berdDeliveryId: _berdDeliveryId,
     ...rest
   } = metadata;
   return Object.keys(rest).length > 0 ? (rest as T) : undefined;
