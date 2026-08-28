@@ -20,6 +20,7 @@ const MAX_INSTRUCTIONS_CODE_UNITS: usize = 4_000;
 const MAX_LABEL_CODE_UNITS: usize = 120;
 const MAX_LOCK_CANDIDATES: usize = 8;
 const DELIVERY_POLL_INTERVAL: Duration = Duration::from_millis(50);
+const DELIVERY_TIMEOUT: Duration = Duration::from_secs(15);
 const LAUNCH_TIMEOUT: Duration = Duration::from_secs(10);
 const LAUNCH_TERMINATION_GRACE: Duration = Duration::from_secs(1);
 
@@ -874,6 +875,7 @@ fn deliver_to_session(
         if_running,
         lock_candidates(),
         berdctl_candidates(),
+        DELIVERY_TIMEOUT,
     )
 }
 
@@ -884,6 +886,7 @@ fn deliver_with_candidates(
     if_running: RunningMode,
     locks: Vec<PathBuf>,
     binaries: Vec<OsString>,
+    timeout: Duration,
 ) -> bool {
     for lock in locks {
         for binary in &binaries {
@@ -914,11 +917,17 @@ fn deliver_with_candidates(
                 Ok(child) => child,
                 Err(_) => continue,
             };
+            let deadline = Instant::now() + timeout;
             loop {
                 if paths.stop.exists() {
                     let _ = child.kill();
                     let _ = child.wait();
                     return false;
+                }
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    break;
                 }
                 match child.try_wait() {
                     Ok(Some(status)) if status.success() => return true,
@@ -1283,6 +1292,7 @@ mod tests {
                 RunningMode::Steer,
                 vec![PathBuf::from("stale-a"), PathBuf::from("stale-b")],
                 vec![worker_binary],
+                DELIVERY_TIMEOUT,
             )
         });
         thread::sleep(Duration::from_millis(150));
@@ -1292,6 +1302,55 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(2));
         drop(owner);
         fs::remove_dir_all(&paths.root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn delivery_timeout_terminates_and_reaps_the_probe() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let key = format!(
+            "delivery-timeout-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let session_id = "test-session";
+        let paths = StatePaths::for_key(&key, session_id);
+        ensure_private_directory(&paths.root).unwrap();
+        let pid_file = paths.root.join("probe.pid");
+        let fake_berdctl = paths.root.join("fake-berdctl");
+        fs::write(
+            &fake_berdctl,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$$\" > '{}'\nexec sleep 30\n",
+                pid_file.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&fake_berdctl, fs::Permissions::from_mode(0o700)).unwrap();
+
+        let started = Instant::now();
+        assert!(!deliver_with_candidates(
+            &paths,
+            session_id,
+            "test",
+            RunningMode::Steer,
+            vec![PathBuf::from("stale")],
+            vec![fake_berdctl.into_os_string()],
+            Duration::from_millis(500),
+        ));
+
+        let pid = fs::read_to_string(pid_file)
+            .unwrap()
+            .trim()
+            .parse::<u32>()
+            .unwrap();
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(!test_process_exists(pid));
+        fs::remove_dir_all(paths.root).unwrap();
     }
 
     #[test]
