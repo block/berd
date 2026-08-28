@@ -198,11 +198,7 @@ export function isSessionFeedbackSurveyPresentable(
   appearanceId: string,
 ): boolean {
   const record = readSessionRecord(sessionId);
-  return (
-    record?.active?.appearanceId === appearanceId &&
-    !record.appeared &&
-    !record.response
-  );
+  return record?.active?.appearanceId === appearanceId && !record.response;
 }
 
 export function markSessionFeedbackSurveyAppeared(
