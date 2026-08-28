@@ -332,6 +332,53 @@ describe("voice transcript delivery coordination", () => {
     ).rejects.toThrow("bound chat is unavailable");
     expect(onSend).not.toHaveBeenCalled();
   });
+
+  it("releases a retained transcript route when admission is blocked", async () => {
+    const onSend = vi.fn().mockResolvedValue(true);
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-1",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 1,
+      },
+      uiState: "listening",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+    });
+    const { rerender } = renderHook(
+      ({ routeBlocked }) =>
+        useVoiceConversationController({
+          sessionId: "session-1",
+          onSend,
+          enabled: true,
+          isGooseSession: true,
+          pocketReady: true,
+          onPocketSetupRequired: vi.fn(),
+          routeBlocked,
+        }),
+      { initialProps: { routeBlocked: false } },
+    );
+
+    await waitFor(() => expect(voiceStoreMocks.subscriber).toBeDefined());
+    rerender({ routeBlocked: true });
+    await expect(
+      voiceStoreMocks.subscriber?.({
+        type: "user",
+        sessionId: "session-1",
+        lifecycleId: "lifecycle-1",
+        id: "utterance-admission-blocked",
+        text: "do not deliver",
+        revision: 1,
+        deliveryAttempts: 0,
+      }),
+    ).rejects.toThrow("bound chat is unavailable");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
   it("serializes deliveries for the same session and re-evaluates in order", async () => {
     const enqueue = createVoiceTranscriptDeliveryQueue();
     const events: string[] = [];

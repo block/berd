@@ -264,6 +264,7 @@ export function ChatView({
       });
     },
     readOnly: Boolean(readOnlyStatus),
+    routeBlocked: admissionBlocked,
     disabled:
       admissionBlocked ||
       controller.projectMetadataPending ||

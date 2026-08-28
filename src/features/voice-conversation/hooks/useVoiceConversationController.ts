@@ -593,6 +593,7 @@ export interface UseVoiceConversationControllerOptions {
   onPocketSetupRequired: () => void;
   readOnly?: boolean;
   disabled?: boolean;
+  routeBlocked?: boolean;
 }
 
 export function useVoiceConversationController({
@@ -606,6 +607,7 @@ export function useVoiceConversationController({
   onPocketSetupRequired,
   readOnly = false,
   disabled = false,
+  routeBlocked = false,
 }: UseVoiceConversationControllerOptions): ChatInputVoiceConversation {
   const { t } = useTranslation("chat");
   const siriVoiceRef = useRef(siriVoice);
@@ -661,12 +663,14 @@ export function useVoiceConversationController({
 
   useEffect(() => {
     if (enabled && isGooseSession) ensureVoiceEventDeliveryInitialized();
-    const routeIsValid = canBindVoiceSendRoute({
-      enabled,
-      isGooseSession,
-      readOnly,
-      disabled,
-    });
+    const routeIsValid =
+      !routeBlocked &&
+      canBindVoiceSendRoute({
+        enabled,
+        isGooseSession,
+        readOnly,
+        disabled,
+      });
     const activeVoiceSessionId = status.sessionId;
     const routeMount = resolveVoiceRouteMount({
       routeIsValid,
@@ -677,7 +681,7 @@ export function useVoiceConversationController({
     if (routeMount.claimRoute) {
       activeSendRoute = { sessionId, send: onSend };
     } else if (
-      (!enabled || !isGooseSession || readOnly) &&
+      (!enabled || !isGooseSession || readOnly || routeBlocked) &&
       activeSendRoute?.sessionId === sessionId
     ) {
       activeSendRoute = null;
@@ -699,6 +703,7 @@ export function useVoiceConversationController({
     isGooseSession,
     onSend,
     readOnly,
+    routeBlocked,
     sessionId,
     status.sessionId,
   ]);
@@ -707,6 +712,7 @@ export function useVoiceConversationController({
     if (
       status.lifecycle !== "running" ||
       status.sessionId !== sessionId ||
+      routeBlocked ||
       !canBindVoiceSendRoute({
         enabled,
         isGooseSession,
@@ -734,6 +740,7 @@ export function useVoiceConversationController({
     enabled,
     isGooseSession,
     readOnly,
+    routeBlocked,
     sessionId,
     status.lifecycle,
     status.sessionId,
