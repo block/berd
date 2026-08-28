@@ -480,6 +480,24 @@ impl Drop for ProducerTree {
     }
 }
 
+struct ProducerProcess {
+    child: std::process::Child,
+    tree: ProducerTree,
+}
+
+impl ProducerProcess {
+    fn terminate_and_wait(&mut self) {
+        terminate_producer_tree(&mut self.child, &self.tree);
+        let _ = self.child.wait();
+    }
+}
+
+impl Drop for ProducerProcess {
+    fn drop(&mut self) {
+        self.terminate_and_wait();
+    }
+}
+
 fn ensure_private_directory(path: &Path) -> io::Result<()> {
     fs::create_dir_all(path)?;
     #[cfg(unix)]
@@ -613,33 +631,37 @@ fn run_producer(
     )?;
     let mut pending = read_optional(&paths.pending)?;
 
-    let mut producer = Command::new(&producer_command[0]);
-    producer
+    let mut command = Command::new(&producer_command[0]);
+    command
         .args(&producer_command[1..])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::from(diagnostics.try_clone()?));
-    configure_producer(&mut producer);
-    let mut child = producer.spawn()?;
+    configure_producer(&mut command);
+    let mut child = command.spawn()?;
     let producer_tree = match attach_producer_tree(&child) {
         Ok(tree) => tree,
         Err(error) => {
             let _ = child.kill();
+            let _ = child.wait();
             return Err(io::Error::new(
                 error.kind(),
                 format!("attach producer process tree: {error}"),
             ));
         }
     };
-    if let Err(error) = resume_producer(&child) {
-        terminate_producer_tree(&mut child, &producer_tree);
+    let mut producer = ProducerProcess {
+        child,
+        tree: producer_tree,
+    };
+    if let Err(error) = resume_producer(&producer.child) {
         return Err(io::Error::new(
             error.kind(),
             format!("resume producer process: {error}"),
         ));
     }
     write_launch_status(paths, launch_token, "ready");
-    let stdout = child.stdout.take().expect("stdout was piped");
+    let stdout = producer.child.stdout.take().expect("stdout was piped");
     let (sender, receiver) = mpsc::sync_channel::<Vec<u8>>(1024);
     thread::spawn(move || forward_producer_output(stdout, sender));
 
@@ -653,7 +675,7 @@ fn run_producer(
     loop {
         if paths.stop.exists() && !termination_requested {
             log_line(paths, "stop requested")?;
-            terminate_producer_tree(&mut child, &producer_tree);
+            producer.terminate_and_wait();
             termination_requested = true;
         }
 
@@ -684,7 +706,7 @@ fn run_producer(
         }
 
         if producer_status.is_none() {
-            producer_status = child.try_wait()?;
+            producer_status = producer.child.try_wait()?;
         }
         if producer_status.is_some() && receiver_closed {
             break;
@@ -730,7 +752,7 @@ fn run_producer(
         }
     }
 
-    terminate_producer_tree(&mut child, &producer_tree);
+    producer.terminate_and_wait();
     append_batch(paths, &mut pending, &mut batch)?;
     let status = producer_status.expect("producer has exited");
     let summary = format!("[monitor] producer exited with status {status}\n");
@@ -1157,6 +1179,42 @@ mod tests {
     fn test_process_exists(pid: u32) -> bool {
         let result = unsafe { libc::kill(pid as i32, 0) };
         result == 0 || io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn producer_guard_cleans_up_the_process_group_on_error() {
+        use std::io::{BufRead, BufReader};
+
+        let mut observed_pids = None;
+        let result: io::Result<()> = (|| {
+            let mut command = Command::new("sh");
+            command
+                .args(["-c", "sleep 30 & child=$!; echo $child; wait"])
+                .stdout(Stdio::piped());
+            configure_producer(&mut command);
+            let child = command.spawn()?;
+            let tree = attach_producer_tree(&child)?;
+            let mut producer = ProducerProcess { child, tree };
+            resume_producer(&producer.child)?;
+            let direct_pid = producer.child.id();
+            let mut descendant = String::new();
+            BufReader::new(producer.child.stdout.take().unwrap())
+                .read_line(&mut descendant)?;
+            observed_pids = Some((direct_pid, descendant.trim().parse::<u32>().unwrap()));
+            Err(io::Error::other("injected post-spawn failure"))
+        })();
+
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::Other);
+        let (direct_pid, descendant_pid) = observed_pids.unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while (test_process_exists(direct_pid) || test_process_exists(descendant_pid))
+            && Instant::now() < deadline
+        {
+            thread::sleep(Duration::from_millis(25));
+        }
+        assert!(!test_process_exists(direct_pid));
+        assert!(!test_process_exists(descendant_pid));
     }
 
     #[test]
