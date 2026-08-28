@@ -167,6 +167,19 @@
     "errorDescription": "The automation could not be started. Please try again.",
     "started": "Automation started"
   },
+  "localSchedules": {
+    "actionError": "Failed to update local schedule.",
+    "description": "Recipe jobs run by Goose inside Berd on this computer.",
+    "kill": "Stop run",
+    "paused": "Paused",
+    "pause": "Pause",
+    "remove": "Remove schedule",
+    "removeDescription": "Remove local schedule \"{{name}}\"? The saved recipe file is kept.",
+    "removeTitle": "Remove local schedule",
+    "resume": "Resume",
+    "running": "Running",
+    "title": "Local schedules"
+  },
   "list": {
     "ariaLabel": "Automation list",
     "emptyBody": "Create your first automation to schedule recurring work.",

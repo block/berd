@@ -26,6 +26,7 @@ sees there:
                                   move-to-group, send, clear-project,
                                   fork, archive
   project   projects             create, list, get, set-startup-mode, archive
+  schedule  scheduled jobs       list, pause, unpause, kill, remove
   agent     agents (personas)    create, list
   skill     skills (SKILL.md)    create, list, get
   info      read-only lookups    harnesses, models, context
@@ -67,7 +68,7 @@ pub fn build_cli(contract: &Contract) -> Command {
     let mut cmd = Command::new("berdctl")
         .bin_name("berdctl")
         .term_width(HELP_WIDTH)
-        .about("Control the Berd desktop app (sessions, projects, agents, skills) from the command line")
+        .about("Control the Berd desktop app (sessions, projects, schedules, agents, skills) from the command line")
         .long_about(TOP_LEVEL_LONG_ABOUT)
         .after_long_help(TOP_LEVEL_EXAMPLES)
         .subcommand_required(true)
