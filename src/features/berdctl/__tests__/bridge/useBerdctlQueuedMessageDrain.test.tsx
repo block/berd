@@ -558,6 +558,42 @@ describe("useBerdctlQueuedMessageDrain", () => {
     ).toBeUndefined();
   });
 
+  it("preserves a queued delivery id without a sender label", async () => {
+    const sendOptions = {
+      userMessageMetadata: {
+        origin: "berdctl_cross_session" as const,
+        berdDeliveryId: "monitor-event-1",
+      },
+      acpGooseMetadata: {
+        origin: "berdctl_cross_session" as const,
+        berdDeliveryId: "monitor-event-1",
+      },
+    };
+    const chatStore = useChatStore.getState();
+    chatStore.setChatState("session-1", "streaming");
+    chatStore.enqueueTransportReadyMessage("session-1", {
+      persona: { kind: "inherit" },
+      text: "queued delivery",
+      sendOptions,
+    });
+    render(<DrainHarness />);
+
+    act(() => {
+      useChatStore.getState().setChatState("session-1", "idle");
+    });
+
+    await waitFor(() => {
+      expect(
+        mocks.sendPromptToExistingSessionInBackground,
+      ).toHaveBeenCalledWith(
+        "session-1",
+        "queued delivery",
+        expect.any(Function),
+        { returnOnDispatch: true, sendOptions },
+      );
+    });
+  });
+
   it("drains consecutive berdctl records in FIFO order while idle", async () => {
     const chatStore = useChatStore.getState();
     chatStore.enqueueTransportReadyMessage("session-1", {

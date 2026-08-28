@@ -113,7 +113,8 @@ function drainQueuedMessage(queuedSessionId: string, ownerId: string): void {
     {
       returnOnDispatch: true,
       ...(queuedMessage.payload.sendOptions?.userMessageMetadata
-        ?.berdSenderLabel
+        ?.berdSenderLabel ||
+      queuedMessage.payload.sendOptions?.userMessageMetadata?.berdDeliveryId
         ? { sendOptions: queuedMessage.payload.sendOptions }
         : {}),
     },
