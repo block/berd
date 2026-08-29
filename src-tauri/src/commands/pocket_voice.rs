@@ -6,7 +6,7 @@ use std::io::Read;
 #[cfg(target_os = "macos")]
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_os = "macos")]
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -68,8 +68,6 @@ const AIRPLAY_PLAYBACK_LATENCY_SAFETY_DURATION: Duration = Duration::from_secs(2
 const UNKNOWN_PLAYBACK_LATENCY_SAFETY_DURATION: Duration = Duration::from_secs(2);
 #[cfg(any(test, target_os = "macos"))]
 const POCKET_SOURCE_COMPLETION_TIMEOUT: Duration = Duration::from_secs(2);
-#[cfg(any(test, target_os = "macos"))]
-const MIN_POCKET_PLAYBACK_SPEED: f32 = 0.75;
 
 #[cfg(target_os = "macos")]
 fn playback_latency_safety_duration_for_transport(transport: Option<u32>) -> Duration {
@@ -195,14 +193,13 @@ pub struct PocketVoiceState {
 #[derive(Debug, Default)]
 struct PlaybackRuntime {
     active: Option<Arc<AtomicBool>>,
-    playback_rate: Option<Arc<AtomicU32>>,
     #[cfg(target_os = "macos")]
     stream: Option<ActivePocketStream>,
 }
 
 struct PlaybackSession {
     active: Arc<AtomicBool>,
-    playback_rate: Arc<AtomicU32>,
+    playback_rate: f32,
 }
 
 #[cfg(target_os = "macos")]
@@ -812,11 +809,7 @@ pub fn select_pocket_voice(app: AppHandle, voice_id: String) -> Result<(), Strin
 }
 
 #[tauri::command]
-pub fn set_pocket_playback_speed(
-    app: AppHandle,
-    state: State<'_, PocketVoiceState>,
-    speed: f32,
-) -> Result<(), String> {
+pub fn set_pocket_playback_speed(app: AppHandle, speed: f32) -> Result<(), String> {
     if !speed.is_finite() || !(0.75..=2.0).contains(&speed) {
         return Err("Pocket playback speed must be between 0.75 and 2.0".to_string());
     }
@@ -830,19 +823,7 @@ pub fn set_pocket_playback_speed(
     let temporary = base.join("settings.json.tmp");
     fs::write(&temporary, data).map_err(|error| format!("write Pocket settings: {error}"))?;
     fs::rename(&temporary, base.join("settings.json"))
-        .map_err(|error| format!("publish Pocket settings: {error}"))?;
-    update_active_playback_speed(&state, speed)
-}
-
-fn update_active_playback_speed(state: &PocketVoiceState, speed: f32) -> Result<(), String> {
-    let playback = state
-        .playback
-        .lock()
-        .map_err(|_| "Pocket TTS playback state lock was poisoned".to_string())?;
-    if let Some(playback_rate) = playback.playback_rate.as_ref() {
-        playback_rate.store(speed.to_bits(), Ordering::SeqCst);
-    }
-    Ok(())
+        .map_err(|error| format!("publish Pocket settings: {error}"))
 }
 
 #[tauri::command]
@@ -1371,9 +1352,8 @@ fn begin_playback_runtime(
         return Err(already_active.to_string());
     }
     let active = Arc::new(AtomicBool::new(true));
-    let playback_rate = Arc::new(AtomicU32::new(current_playback_speed().to_bits()));
+    let playback_rate = current_playback_speed();
     playback.active = Some(active.clone());
-    playback.playback_rate = Some(playback_rate.clone());
     drop(install);
     Ok(PlaybackSession {
         active,
@@ -1409,7 +1389,6 @@ fn finish_playback(playback: &std::sync::Mutex<PlaybackRuntime>, completed: &Arc
             .is_some_and(|active| Arc::ptr_eq(active, completed))
         {
             playback.active = None;
-            playback.playback_rate = None;
             #[cfg(target_os = "macos")]
             {
                 playback.stream = None;
@@ -2126,20 +2105,15 @@ fn run_pocket_voice_stream(
     voice: PocketVoice,
     output_device: Option<&str>,
     active: Arc<AtomicBool>,
-    playback_rate: Arc<AtomicU32>,
+    playback_rate: f32,
     receiver: mpsc::Receiver<PocketStreamCommand>,
     native_voice: NativeVoiceState,
     interruption_sensitivity: InterruptionSensitivity,
     suppress_capture: bool,
 ) -> Result<PocketStreamOutcome, PocketStreamFailure> {
     let version = base.join(CACHE_VERSION);
-    let mut applied_rate_bits = playback_rate.load(Ordering::SeqCst);
-    let backend = PocketTtsBackend::new(&version, voice.id, f32::from_bits(applied_rate_bits))?;
-    let player = PocketAudioPlayer::new(
-        SAMPLE_RATE,
-        f32::from_bits(applied_rate_bits),
-        output_device,
-    )?;
+    let backend = PocketTtsBackend::new(&version, voice.id, playback_rate)?;
+    let player = PocketAudioPlayer::new(SAMPLE_RATE, playback_rate, output_device)?;
     let mut playback = OutboundPlayback::new(&player, &active, SAMPLE_RATE, 0)?;
     let mut pending = String::new();
     let mut first_chunk_pending = true;
@@ -2149,7 +2123,6 @@ fn run_pocket_voice_stream(
     let mut last_progress_emit = Instant::now();
 
     let result: Result<PocketStreamOutcome, String> = (|| loop {
-        sync_pocket_playback_rate(&player, &playback_rate, &mut applied_rate_bits)?;
         update_pocket_assistant_speech(
             player.is_empty(),
             &mut assistant_speech,
@@ -2172,9 +2145,6 @@ fn run_pocket_voice_stream(
                     stream_id,
                     &backend,
                     &mut playback,
-                    &player,
-                    &playback_rate,
-                    &mut applied_rate_bits,
                     &mut pending,
                     &mut first_chunk_pending,
                     &native_voice,
@@ -2197,9 +2167,6 @@ fn run_pocket_voice_stream(
                     stream_id,
                     &backend,
                     &mut playback,
-                    &player,
-                    &playback_rate,
-                    &mut applied_rate_bits,
                     &mut pending,
                     &mut first_chunk_pending,
                     &native_voice,
@@ -2222,9 +2189,6 @@ fn run_pocket_voice_stream(
                     stream_id,
                     &backend,
                     &mut playback,
-                    &player,
-                    &playback_rate,
-                    &mut applied_rate_bits,
                     &mut pending,
                     &mut first_chunk_pending,
                     &native_voice,
@@ -2250,7 +2214,7 @@ fn run_pocket_voice_stream(
                         .map(|segment| segment.total_frames)
                         .sum(),
                     player.completed_source_frames(),
-                    MIN_POCKET_PLAYBACK_SPEED,
+                    playback_rate,
                 );
                 let post_drain = pocket_assistant_speech_grace_remaining(
                     assistant_speech.is_some(),
@@ -2258,7 +2222,6 @@ fn run_pocket_voice_stream(
                     output_latency_grace,
                     Instant::now(),
                 );
-                let mut completion_timed_out = false;
                 let outcome = playback
                     .finish(
                         DrainPolicy {
@@ -2267,17 +2230,9 @@ fn run_pocket_voice_stream(
                             timeout_outcome: DrainTimeoutOutcome::Complete,
                             post_drain,
                         },
-                        &mut |delivery, forced_complete| {
-                            completion_timed_out |= forced_complete;
-                            sync_pocket_playback_rate_before_timeout(completion_timed_out, || {
-                                sync_pocket_playback_rate(
-                                    &player,
-                                    &playback_rate,
-                                    &mut applied_rate_bits,
-                                )
-                            })?;
+                        &mut |delivery| {
                             update_pocket_assistant_speech(
-                                true,
+                                player.is_empty(),
                                 &mut assistant_speech,
                                 &mut playback_drained_at,
                                 output_latency_grace,
@@ -2297,9 +2252,6 @@ fn run_pocket_voice_stream(
                         },
                     )
                     .map_err(|failure| failure.message)?;
-                if completion_timed_out {
-                    log::warn!("Pocket native buffer completion bookkeeping timed out");
-                }
                 if outcome == OutboundOutcome::Interrupted {
                     return Ok(PocketStreamOutcome {
                         state: PocketStreamEventState::Interrupted,
@@ -2436,32 +2388,6 @@ fn pocket_native_drain_timeout(
         .saturating_add(POCKET_SOURCE_COMPLETION_TIMEOUT)
 }
 
-#[cfg(any(test, target_os = "macos"))]
-fn sync_pocket_playback_rate_before_timeout(
-    completion_timed_out: bool,
-    sync: impl FnOnce() -> Result<(), String>,
-) -> Result<(), String> {
-    if completion_timed_out {
-        Ok(())
-    } else {
-        sync()
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn sync_pocket_playback_rate(
-    player: &PocketAudioPlayer,
-    playback_rate: &AtomicU32,
-    applied_rate_bits: &mut u32,
-) -> Result<(), String> {
-    let requested_rate_bits = playback_rate.load(Ordering::SeqCst);
-    if requested_rate_bits != *applied_rate_bits {
-        player.set_rate(f32::from_bits(requested_rate_bits))?;
-        *applied_rate_bits = requested_rate_bits;
-    }
-    Ok(())
-}
-
 #[cfg(target_os = "macos")]
 #[allow(clippy::too_many_arguments)]
 fn mark_pocket_playback_started(app: &AppHandle, stream_id: &str) -> Result<(), String> {
@@ -2479,9 +2405,6 @@ fn synthesize_pocket_stream_ready(
     stream_id: &str,
     backend: &dyn TtsBackend,
     playback: &mut OutboundPlayback<'_>,
-    player: &PocketAudioPlayer,
-    playback_rate: &AtomicU32,
-    applied_rate_bits: &mut u32,
     pending: &mut String,
     first_chunk_pending: &mut bool,
     native_voice: &NativeVoiceState,
@@ -2502,7 +2425,6 @@ fn synthesize_pocket_stream_ready(
                 backend,
                 &text,
                 &mut |_| {
-                    sync_pocket_playback_rate(player, playback_rate, applied_rate_bits)?;
                     if assistant_speech.is_none() {
                         *assistant_speech = Some(
                             native_voice
@@ -2542,7 +2464,7 @@ fn synthesize_and_stream(
     text: &str,
     output_device: Option<&str>,
     active: Arc<AtomicBool>,
-    playback_rate: Arc<AtomicU32>,
+    playback_rate: f32,
 ) -> Result<(), String> {
     use std::sync::Mutex;
     use std::time::Duration;
@@ -2554,12 +2476,7 @@ fn synthesize_and_stream(
             .ok_or_else(|| "Pocket model path is not valid UTF-8".to_string())?,
     )?;
     let style = load_pocket_voice_style(&version, voice.id)?;
-    let mut applied_rate_bits = playback_rate.load(Ordering::SeqCst);
-    let player = PocketAudioPlayer::new(
-        SAMPLE_RATE,
-        f32::from_bits(applied_rate_bits),
-        output_device,
-    )?;
+    let player = PocketAudioPlayer::new(SAMPLE_RATE, playback_rate, output_device)?;
     let callback_error = Arc::new(Mutex::new(None::<String>));
     let playback_started = Arc::new(AtomicBool::new(false));
     let mut total_source_frames = 0_u64;
@@ -2573,14 +2490,6 @@ fn synthesize_and_stream(
         }
         if samples.is_empty() {
             return true;
-        }
-        if let Err(error) =
-            sync_pocket_playback_rate(&player, &playback_rate, &mut applied_rate_bits)
-        {
-            if let Ok(mut callback_error) = callback_error_slot.lock() {
-                *callback_error = Some(error);
-            }
-            return false;
         }
         if let Err(error) = player.check_health() {
             if let Ok(mut callback_error) = callback_error_slot.lock() {
@@ -2624,11 +2533,10 @@ fn synthesize_and_stream(
     let drain_timeout = pocket_native_drain_timeout(
         total_source_frames,
         player.completed_source_frames(),
-        MIN_POCKET_PLAYBACK_SPEED,
+        playback_rate,
     );
     let drain_started = Instant::now();
     loop {
-        sync_pocket_playback_rate(&player, &playback_rate, &mut applied_rate_bits)?;
         if !active.load(Ordering::SeqCst) {
             player.stop();
             break;
@@ -2659,7 +2567,7 @@ fn synthesize_and_stream(
     _text: &str,
     _output_device: Option<&str>,
     _active: Arc<AtomicBool>,
-    _playback_rate: Arc<AtomicU32>,
+    _playback_rate: f32,
 ) -> Result<(), String> {
     Err("Pocket voice playback is currently supported on macOS only".to_string())
 }
@@ -2670,27 +2578,17 @@ mod tests {
     use berd_voice::DeliverySegment as VoiceDeliverySegment;
 
     #[test]
-    fn active_playback_observes_live_speed_changes() {
+    fn playback_snapshots_speed_when_the_utterance_begins() {
         let state = PocketVoiceState::default();
         let session =
             begin_playback_runtime(&state, "already active", || 1.0).expect("start playback");
-        assert_eq!(
-            f32::from_bits(session.playback_rate.load(Ordering::SeqCst)),
-            1.0
-        );
-
-        update_active_playback_speed(&state, 1.75).expect("update active playback");
-        assert_eq!(
-            f32::from_bits(session.playback_rate.load(Ordering::SeqCst)),
-            1.75
-        );
+        assert_eq!(session.playback_rate, 1.0);
 
         finish_playback(&state.playback, &session.active);
-        update_active_playback_speed(&state, 0.75).expect("ignore completed playback");
-        assert_eq!(
-            f32::from_bits(session.playback_rate.load(Ordering::SeqCst)),
-            1.75
-        );
+        let next =
+            begin_playback_runtime(&state, "already active", || 1.75).expect("next playback");
+        assert_eq!(session.playback_rate, 1.0);
+        assert_eq!(next.playback_rate, 1.75);
     }
 
     #[test]
@@ -3182,6 +3080,36 @@ mod tests {
     }
 
     #[test]
+    fn playback_drain_grace_never_starts_before_output_is_empty() {
+        let started = Instant::now();
+        let grace = Duration::from_millis(100);
+        let mut drained_at = None;
+
+        assert!(!pocket_assistant_speech_grace_elapsed(
+            false,
+            true,
+            &mut drained_at,
+            grace,
+            started + Duration::from_secs(10),
+        ));
+        assert_eq!(drained_at, None);
+        assert!(!pocket_assistant_speech_grace_elapsed(
+            true,
+            true,
+            &mut drained_at,
+            grace,
+            started + Duration::from_secs(10),
+        ));
+        assert!(pocket_assistant_speech_grace_elapsed(
+            true,
+            true,
+            &mut drained_at,
+            grace,
+            started + Duration::from_secs(10) + grace,
+        ));
+    }
+
+    #[test]
     fn native_drain_times_out_after_expected_remaining_audio() {
         let timeout = pocket_native_drain_timeout(72_000, 24_000, 2.0);
         assert_eq!(timeout, Duration::from_secs(3));
@@ -3200,32 +3128,16 @@ mod tests {
     }
 
     #[test]
-    fn native_drain_timeout_covers_a_live_slowdown() {
+    fn native_drain_timeout_uses_the_snapshotted_playback_rate() {
         let fastest_timeout = pocket_native_drain_timeout(72_000, 24_000, 2.0);
-        let live_rate_timeout =
-            pocket_native_drain_timeout(72_000, 24_000, MIN_POCKET_PLAYBACK_SPEED);
-        assert!(live_rate_timeout > fastest_timeout);
+        let snapshotted_rate = 0.75;
+        let snapshotted_timeout = pocket_native_drain_timeout(72_000, 24_000, snapshotted_rate);
+        assert!(snapshotted_timeout > fastest_timeout);
         assert_eq!(
-            live_rate_timeout,
-            Duration::from_secs_f64(2.0 / f64::from(MIN_POCKET_PLAYBACK_SPEED))
+            snapshotted_timeout,
+            Duration::from_secs_f64(2.0 / f64::from(snapshotted_rate))
                 .saturating_add(POCKET_SOURCE_COMPLETION_TIMEOUT)
         );
-    }
-
-    #[test]
-    fn post_timeout_grace_ignores_live_rate_changes() {
-        let mut sync_count = 0;
-        sync_pocket_playback_rate_before_timeout(false, || {
-            sync_count += 1;
-            Ok(())
-        })
-        .expect("sync while native playback is active");
-        sync_pocket_playback_rate_before_timeout(true, || {
-            sync_count += 1;
-            Err("stopped player rejected rate change".to_string())
-        })
-        .expect("ignore rate change after native timeout");
-        assert_eq!(sync_count, 1);
     }
 
     #[test]

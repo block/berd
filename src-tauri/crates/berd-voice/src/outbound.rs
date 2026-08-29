@@ -246,7 +246,7 @@ impl<'a> OutboundPlayback<'a> {
     pub fn finish(
         &mut self,
         policy: DrainPolicy,
-        on_poll: &mut dyn FnMut(&DeliveryProgress, bool) -> Result<(), String>,
+        on_poll: &mut dyn FnMut(&DeliveryProgress) -> Result<(), String>,
     ) -> Result<OutboundOutcome, OutboundFailure> {
         self.ensure_live()?;
         let started_at = Instant::now();
@@ -269,7 +269,7 @@ impl<'a> OutboundPlayback<'a> {
             self.output
                 .check_health()
                 .map_err(|message| self.fail(message))?;
-            on_poll(&self.snapshot(), false).map_err(|message| self.fail(message))?;
+            on_poll(&self.snapshot()).map_err(|message| self.fail(message))?;
             std::thread::sleep(policy.poll_interval);
         }
         if !self.active.load(Ordering::SeqCst) {
@@ -290,7 +290,7 @@ impl<'a> OutboundPlayback<'a> {
                     .check_health()
                     .map_err(|message| self.fail(message))?;
             }
-            on_poll(&self.snapshot(), forced_complete).map_err(|message| self.fail(message))?;
+            on_poll(&self.snapshot()).map_err(|message| self.fail(message))?;
             std::thread::sleep(policy.poll_interval);
         }
         self.terminal = true;
@@ -540,7 +540,7 @@ mod tests {
                     timeout_outcome: DrainTimeoutOutcome::Fail,
                     post_drain: Duration::ZERO,
                 },
-                &mut |_, _| Ok(()),
+                &mut |_| Ok(()),
             )
             .unwrap_err();
         assert!(failure.message.contains("deadline"));
@@ -551,11 +551,94 @@ mod tests {
         let mut playback = OutboundPlayback::new(&output, &active, 10, 0).unwrap();
         assert_eq!(
             playback
-                .finish(DrainPolicy::default(), &mut |_, _| Ok(()))
+                .finish(DrainPolicy::default(), &mut |_| Ok(()))
                 .unwrap_err()
                 .message,
             "fake output failed"
         );
+    }
+
+    #[test]
+    fn forced_complete_snapshots_before_cancel_and_runs_post_drain() {
+        let active = AtomicBool::new(true);
+        let output = FakeOutput::new(usize::MAX);
+        output.played.store(1, Ordering::SeqCst);
+        let backend = FakeTts {
+            chunks: vec![vec![0.1, 0.2]],
+            cancel_after_first: false,
+        };
+        let mut playback = OutboundPlayback::new(&output, &active, 10, 0).unwrap();
+        playback
+            .synthesize_segment(
+                &backend,
+                "forced",
+                &mut |_| Ok(()),
+                &mut || Ok(()),
+                &mut |_| Ok(()),
+            )
+            .unwrap();
+        let mut post_drain_polls = 0;
+        assert_eq!(
+            playback
+                .finish(
+                    DrainPolicy {
+                        poll_interval: Duration::ZERO,
+                        timeout: Some(Duration::ZERO),
+                        timeout_outcome: DrainTimeoutOutcome::Complete,
+                        post_drain: Duration::from_millis(10),
+                    },
+                    &mut |delivery| {
+                        post_drain_polls += 1;
+                        assert_eq!(delivery.segments[0].played_frames, 1);
+                        Ok(())
+                    },
+                )
+                .unwrap(),
+            OutboundOutcome::Completed
+        );
+        assert!(post_drain_polls > 0);
+        assert!(output.cancelled.load(Ordering::SeqCst));
+        assert_eq!(playback.snapshot().segments[0].played_frames, 1);
+    }
+
+    #[test]
+    fn cancellation_during_forced_complete_grace_is_interrupted() {
+        let active = AtomicBool::new(true);
+        let output = FakeOutput::new(usize::MAX);
+        output.played.store(1, Ordering::SeqCst);
+        let backend = FakeTts {
+            chunks: vec![vec![0.1, 0.2]],
+            cancel_after_first: false,
+        };
+        let mut playback = OutboundPlayback::new(&output, &active, 10, 0).unwrap();
+        playback
+            .synthesize_segment(
+                &backend,
+                "forced cancel",
+                &mut |_| Ok(()),
+                &mut || Ok(()),
+                &mut |_| Ok(()),
+            )
+            .unwrap();
+        assert_eq!(
+            playback
+                .finish(
+                    DrainPolicy {
+                        poll_interval: Duration::ZERO,
+                        timeout: Some(Duration::ZERO),
+                        timeout_outcome: DrainTimeoutOutcome::Complete,
+                        post_drain: Duration::from_secs(1),
+                    },
+                    &mut |_| {
+                        active.store(false, Ordering::SeqCst);
+                        Ok(())
+                    },
+                )
+                .unwrap(),
+            OutboundOutcome::Interrupted
+        );
+        assert!(output.cancelled.load(Ordering::SeqCst));
+        assert_eq!(playback.snapshot().segments[0].played_frames, 1);
     }
 
     #[test]
@@ -586,7 +669,7 @@ mod tests {
                         post_drain: Duration::from_secs(1),
                         ..DrainPolicy::default()
                     },
-                    &mut |_, _| {
+                    &mut |_| {
                         polls += 1;
                         active.store(false, Ordering::SeqCst);
                         Ok(())

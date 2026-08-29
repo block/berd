@@ -718,7 +718,6 @@ typedef void (^BerdAudioHandler)(
 - (BOOL)enqueueSamples:(const float *)samples
             frameCount:(AVAudioFrameCount)frameCount
                  error:(NSError **)error;
-- (BOOL)setPlaybackRate:(float)rate error:(NSError **)error;
 - (uint64_t)completedSourceFramesSnapshot;
 - (void)stop;
 @end
@@ -826,22 +825,6 @@ typedef void (^BerdAudioHandler)(
                   }
               }];
     if (!self.player.isPlaying) [self.player play];
-    return YES;
-}
-
-- (BOOL)setPlaybackRate:(float)rate error:(NSError **)error {
-    if (!isfinite(rate) || rate < 0.75f || rate > 2.0f) {
-        if (error) *error = BerdError(38, @"PCM playback speed is invalid.");
-        return NO;
-    }
-    @synchronized (self) {
-        if (self.stopped) {
-            if (error) *error = BerdError(NSUserCancelledError, @"PCM playback stopped.");
-            return NO;
-        }
-        self.timePitch.rate = rate;
-        self.timePitch.bypass = fabsf(rate - 1.0f) <= 0.0001f;
-    }
     return YES;
 }
 
@@ -1591,21 +1574,6 @@ bool berd_pocket_audio_player_enqueue(
             enqueueSamples:samples frameCount:frameCount error:&error];
         if (!enqueued) BerdSetError(errorOut, error ?: BerdError(37, @"Could not queue PCM audio."));
         return enqueued;
-    }
-}
-
-bool berd_pocket_audio_player_set_rate(void *playerValue, float rate, char **errorOut) {
-    @autoreleasepool {
-        if (errorOut) *errorOut = NULL;
-        if (!playerValue) {
-            BerdSetError(errorOut, BerdError(36, @"PCM playback is unavailable."));
-            return false;
-        }
-        NSError *error = nil;
-        BOOL updated = [(__bridge BerdPocketAudioPlayer *)playerValue
-            setPlaybackRate:rate error:&error];
-        if (!updated) BerdSetError(errorOut, error ?: BerdError(38, @"Could not update PCM playback speed."));
-        return updated;
     }
 }
 

@@ -720,7 +720,7 @@ fn run_openai_voice_stream(
                             post_drain,
                             ..DrainPolicy::default()
                         },
-                        &mut |delivery, _| {
+                        &mut |delivery| {
                             update_openai_assistant_speech(
                                 true,
                                 &mut assistant_speech,

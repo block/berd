@@ -19,11 +19,6 @@ unsafe extern "C" {
         frame_count: u32,
         error_out: *mut *mut c_char,
     ) -> bool;
-    fn berd_pocket_audio_player_set_rate(
-        player: *mut c_void,
-        rate: f32,
-        error_out: *mut *mut c_char,
-    ) -> bool;
     fn berd_pocket_audio_player_completed_source_frames(player: *mut c_void) -> u64;
     fn berd_pocket_audio_player_pending_buffers(player: *mut c_void) -> u64;
     fn berd_pocket_audio_player_failed(player: *mut c_void) -> bool;
@@ -63,21 +58,6 @@ impl PocketAudioPlayer {
             raw,
             delivery_safety_frames: delivery_safety_frames(sample_rate, MAX_POCKET_PLAYBACK_SPEED),
         })
-    }
-
-    pub fn set_rate(&self, rate: f32) -> Result<(), String> {
-        let mut error = std::ptr::null_mut();
-        // SAFETY: `self.raw` is a live retained player and the bridge validates
-        // the rate before updating the connected time-pitch unit.
-        let updated = unsafe { berd_pocket_audio_player_set_rate(self.raw, rate, &mut error) };
-        if updated {
-            Ok(())
-        } else {
-            Err(take_error(
-                error,
-                "Could not update native PCM playback speed",
-            ))
-        }
     }
 
     pub fn enqueue(&self, samples: &[f32]) -> Result<(), String> {

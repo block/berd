@@ -1229,7 +1229,7 @@ fn synthesize_to_output(
         return Ok(false);
     }
     playback
-        .finish(DrainPolicy::default(), &mut |_, _| Ok(()))
+        .finish(DrainPolicy::default(), &mut |_| Ok(()))
         .map(|outcome| outcome == OutboundOutcome::Completed)
         .map_err(|failure| failure.message)
 }
