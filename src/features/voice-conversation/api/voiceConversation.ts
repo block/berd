@@ -487,6 +487,56 @@ export interface PendingVoiceTranscript {
   deliveryAttempts: number;
 }
 
+export interface VoiceTranscriptReference {
+  lifecycleId: string;
+  id: string;
+  revision: number;
+}
+
+export type PrepareAssistantSpeechOutcome =
+  | { outcome: "pending" }
+  | { outcome: "notAdmitted" }
+  | { outcome: "admitted"; speechId: number };
+
+export async function prepareVoiceConversationAssistantSpeech(
+  sessionId: string,
+  expectedRevision: number,
+  text: string,
+  acknowledgement: VoiceTranscriptReference | null,
+): Promise<PrepareAssistantSpeechOutcome> {
+  const { rendererId, rendererEpoch } = await getRendererInstance();
+  return invoke<PrepareAssistantSpeechOutcome>(
+    "prepare_native_voice_assistant_speech",
+    {
+      request: {
+        sessionId,
+        expectedRevision,
+        text,
+        acknowledgement,
+        rendererId,
+        rendererEpoch,
+      },
+    },
+  );
+}
+
+export async function cancelVoiceConversationAssistantSpeech(
+  sessionId: string,
+  expectedRevision: number,
+  speechId: number,
+): Promise<boolean> {
+  const { rendererId, rendererEpoch } = await getRendererInstance();
+  return invoke<boolean>("cancel_native_voice_assistant_speech", {
+    request: {
+      sessionId,
+      expectedRevision,
+      speechId,
+      rendererId,
+      rendererEpoch,
+    },
+  });
+}
+
 export interface VoiceTranscriptRejection {
   attempts: number;
   terminal: boolean;

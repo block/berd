@@ -11,6 +11,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
+use tokio::sync::Notify;
 
 use super::mac_speech;
 use super::{
@@ -46,6 +47,43 @@ pub struct AssistantSpeakingRequest {
     session_id: String,
     expected_revision: u64,
     speaking: bool,
+    renderer_id: String,
+    renderer_epoch: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct VoiceTranscriptReference {
+    lifecycle_id: String,
+    id: String,
+    revision: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrepareAssistantSpeechRequest {
+    session_id: String,
+    expected_revision: u64,
+    text: String,
+    acknowledgement: Option<VoiceTranscriptReference>,
+    renderer_id: String,
+    renderer_epoch: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "outcome", rename_all = "camelCase")]
+pub enum PrepareAssistantSpeechOutcome {
+    Pending,
+    NotAdmitted,
+    Admitted { speech_id: u64 },
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelAssistantSpeechRequest {
+    session_id: String,
+    expected_revision: u64,
+    speech_id: u64,
     renderer_id: String,
     renderer_epoch: u64,
 }
@@ -165,6 +203,256 @@ struct Runtime {
     controls_visibility_generation: u64,
     controls_window_revision: Option<u64>,
     native_microphone_mute_control: bool,
+    admission: Option<Arc<BerdAdmissionCoordinator>>,
+}
+
+#[derive(Debug)]
+struct ActiveAdmission {
+    speech_id: u64,
+    playback_active: Option<Arc<AtomicBool>>,
+}
+
+#[derive(Debug, Default)]
+struct BerdAdmissionInner {
+    core: berd_voice::session::SessionCore,
+    next_token: u64,
+    tokens: HashMap<VoiceTranscriptReference, u64>,
+    active: Option<ActiveAdmission>,
+    closed: bool,
+}
+
+#[derive(Debug, Default)]
+struct BerdAdmissionCoordinator {
+    inner: Mutex<BerdAdmissionInner>,
+    changed: Notify,
+}
+
+impl BerdAdmissionCoordinator {
+    fn add_final(&self, reference: VoiceTranscriptReference, text: String) -> Result<u64, String> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|_| "voice admission lock was poisoned".to_string())?;
+        if inner.closed {
+            return Err("The voice conversation is no longer running.".to_string());
+        }
+        let token = inner.next_token.saturating_add(1);
+        inner.core.add_final(token, text)?;
+        inner.next_token = token;
+        inner.tokens.insert(reference, token);
+        Self::interrupt_locked(&mut inner);
+        drop(inner);
+        self.changed.notify_waiters();
+        Ok(token)
+    }
+
+    fn confirm(&self, reference: &VoiceTranscriptReference) -> Result<bool, String> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|_| "voice admission lock was poisoned".to_string())?;
+        let confirmed = inner
+            .tokens
+            .get(reference)
+            .copied()
+            .is_some_and(|token| inner.core.confirm_exact(token));
+        drop(inner);
+        if confirmed {
+            self.changed.notify_waiters();
+        }
+        Ok(confirmed)
+    }
+
+    fn discard(&self, reference: &VoiceTranscriptReference) -> Result<bool, String> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|_| "voice admission lock was poisoned".to_string())?;
+        let discarded = inner
+            .tokens
+            .get(reference)
+            .copied()
+            .is_some_and(|token| inner.core.discard_final(token));
+        if discarded {
+            inner.tokens.remove(reference);
+        }
+        drop(inner);
+        if discarded {
+            self.changed.notify_waiters();
+        }
+        Ok(discarded)
+    }
+
+    fn set_user_speaking(&self, active: bool) {
+        if let Ok(mut inner) = self.inner.lock() {
+            if inner.core.set_user_speaking(active) {
+                Self::interrupt_locked(&mut inner);
+            }
+        }
+        self.changed.notify_waiters();
+    }
+
+    fn set_recognition_pending(&self, active: bool) {
+        if let Ok(mut inner) = self.inner.lock() {
+            if inner.core.set_recognition_pending(active) {
+                Self::interrupt_locked(&mut inner);
+            }
+        }
+        self.changed.notify_waiters();
+    }
+
+    async fn prepare(
+        &self,
+        text: String,
+        acknowledgement: Option<VoiceTranscriptReference>,
+    ) -> Result<PrepareAssistantSpeechOutcome, String> {
+        loop {
+            let notified = self.changed.notified();
+            let outcome = {
+                let mut inner = self
+                    .inner
+                    .lock()
+                    .map_err(|_| "voice admission lock was poisoned".to_string())?;
+                if inner.closed {
+                    return Err("The voice conversation is no longer running.".to_string());
+                }
+                let acknowledgement = match acknowledgement.as_ref() {
+                    Some(reference) => {
+                        let Some(token) = inner.tokens.get(reference).copied() else {
+                            return Ok(PrepareAssistantSpeechOutcome::Pending);
+                        };
+                        Some(token)
+                    }
+                    None => None,
+                };
+                match inner.core.prepare_after_host_confirmation(
+                    berd_voice::session::PrepareRequest {
+                        id: 0,
+                        acknowledgement,
+                        text: text.clone(),
+                    },
+                ) {
+                    berd_voice::session::PrepareOutcome::Hold => None,
+                    berd_voice::session::PrepareOutcome::Pending(_) => {
+                        Some(PrepareAssistantSpeechOutcome::Pending)
+                    }
+                    berd_voice::session::PrepareOutcome::NotAdmitted(_) => {
+                        Some(PrepareAssistantSpeechOutcome::NotAdmitted)
+                    }
+                    berd_voice::session::PrepareOutcome::Admitted { speech_id, .. } => {
+                        inner.active = Some(ActiveAdmission {
+                            speech_id,
+                            playback_active: None,
+                        });
+                        Some(PrepareAssistantSpeechOutcome::Admitted { speech_id })
+                    }
+                }
+            };
+            if let Some(outcome) = outcome {
+                return Ok(outcome);
+            }
+            notified.await;
+        }
+    }
+
+    fn claim(
+        self: &Arc<Self>,
+        speech_id: u64,
+        playback_active: Arc<AtomicBool>,
+    ) -> Result<Option<AdmissionPlaybackGuard>, String> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|_| "voice admission lock was poisoned".to_string())?;
+        let owns_reservation = inner
+            .active
+            .as_ref()
+            .is_some_and(|active| active.speech_id == speech_id);
+        if inner.closed || !owns_reservation || !inner.core.mark_started(speech_id) {
+            return Ok(None);
+        }
+        if let Some(active) = inner.active.as_mut() {
+            active.playback_active = Some(playback_active);
+        }
+        Ok(Some(AdmissionPlaybackGuard {
+            coordinator: Arc::clone(self),
+            speech_id,
+        }))
+    }
+
+    fn cancel(&self, speech_id: u64) -> Result<bool, String> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|_| "voice admission lock was poisoned".to_string())?;
+        let Some(active) = inner.active.as_ref() else {
+            return Ok(false);
+        };
+        if active.speech_id != speech_id {
+            return Ok(false);
+        }
+        if let Some(playback_active) = active.playback_active.as_ref() {
+            playback_active.store(false, Ordering::SeqCst);
+        } else {
+            inner.core.finish(speech_id);
+            inner.active = None;
+        }
+        drop(inner);
+        self.changed.notify_waiters();
+        Ok(true)
+    }
+
+    fn finish(&self, speech_id: u64) {
+        if let Ok(mut inner) = self.inner.lock() {
+            if inner
+                .active
+                .as_ref()
+                .is_some_and(|active| active.speech_id == speech_id)
+            {
+                inner.core.finish(speech_id);
+                inner.active = None;
+            }
+        }
+        self.changed.notify_waiters();
+    }
+
+    fn close(&self) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.closed = true;
+            if let Some(active) = inner.active.take() {
+                if let Some(playback_active) = active.playback_active {
+                    playback_active.store(false, Ordering::SeqCst);
+                }
+                inner.core.finish(active.speech_id);
+            }
+        }
+        self.changed.notify_waiters();
+    }
+
+    fn interrupt_locked(inner: &mut BerdAdmissionInner) {
+        let Some(active) = inner.active.as_ref() else {
+            return;
+        };
+        if let Some(playback_active) = active.playback_active.as_ref() {
+            playback_active.store(false, Ordering::SeqCst);
+        } else {
+            let speech_id = active.speech_id;
+            inner.core.finish(speech_id);
+            inner.active = None;
+        }
+    }
+}
+
+#[must_use = "voice admission remains active until the backend terminal path drops this guard"]
+pub(crate) struct AdmissionPlaybackGuard {
+    coordinator: Arc<BerdAdmissionCoordinator>,
+    speech_id: u64,
+}
+
+impl Drop for AdmissionPlaybackGuard {
+    fn drop(&mut self) {
+        self.coordinator.finish(self.speech_id);
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -243,6 +531,108 @@ pub(crate) struct AssistantSpeechGuard {
 }
 
 impl NativeVoiceState {
+    fn admission_target(
+        &self,
+        caller_window_label: &str,
+        session_id: &str,
+        expected_revision: u64,
+    ) -> Result<Option<Arc<BerdAdmissionCoordinator>>, String> {
+        let runtime = self
+            .runtime
+            .lock()
+            .map_err(|_| "native voice state lock was poisoned".to_string())?;
+        if runtime.session_id.as_deref() != Some(session_id)
+            || runtime.revision != expected_revision
+        {
+            return Ok(None);
+        }
+        if runtime
+            .owner
+            .as_ref()
+            .map(|owner| owner.window_label.as_str())
+            != Some(caller_window_label)
+        {
+            return Err("Only the voice conversation owner can prepare assistant speech.".into());
+        }
+        Ok(runtime.admission.clone())
+    }
+
+    pub(crate) fn claim_assistant_speech(
+        &self,
+        session_id: &str,
+        expected_revision: u64,
+        speech_id: u64,
+        playback_active: Arc<AtomicBool>,
+    ) -> Result<Option<AdmissionPlaybackGuard>, String> {
+        let admission = {
+            let runtime = self
+                .runtime
+                .lock()
+                .map_err(|_| "native voice state lock was poisoned".to_string())?;
+            if runtime.session_id.as_deref() != Some(session_id)
+                || runtime.revision != expected_revision
+            {
+                return Ok(None);
+            }
+            runtime.admission.clone()
+        };
+        admission
+            .ok_or_else(|| "Voice admission is not available.".to_string())?
+            .claim(speech_id, playback_active)
+    }
+
+    fn acknowledge_transcript(
+        &self,
+        session_id: &str,
+        id: &str,
+        revision: u64,
+    ) -> Result<(), String> {
+        let admission = self.runtime.lock().ok().and_then(|runtime| {
+            (runtime.session_id.as_deref() == Some(session_id) && runtime.revision == revision)
+                .then(|| runtime.admission.clone())
+                .flatten()
+        });
+        let mut pending = self
+            .pending
+            .lock()
+            .map_err(|_| "native transcript queue lock was poisoned".to_string())?;
+        if let Some(index) = pending.iter().position(|item| {
+            item.session_id == session_id && item.id == id && item.revision == revision
+        }) {
+            let transcript = &pending[index];
+            if let Some(admission) = admission {
+                let reference = VoiceTranscriptReference {
+                    lifecycle_id: transcript.lifecycle_id.clone(),
+                    id: transcript.id.clone(),
+                    revision,
+                };
+                if !admission.confirm(&reference)? {
+                    return Err("The voice transcript is not tracked by admission.".to_string());
+                }
+            }
+            pending.remove(index);
+        }
+        Ok(())
+    }
+
+    fn reject_transcript(
+        &self,
+        session_id: &str,
+        id: &str,
+        revision: u64,
+    ) -> Result<TranscriptRejection, String> {
+        let admission = self.runtime.lock().ok().and_then(|runtime| {
+            (runtime.session_id.as_deref() == Some(session_id) && runtime.revision == revision)
+                .then(|| runtime.admission.clone())
+                .flatten()
+        });
+        let mut pending = self
+            .pending
+            .lock()
+            .map_err(|_| "native transcript queue lock was poisoned".to_string())?;
+        reject_pending_transcript(&mut pending, session_id, id, revision, admission.as_deref())
+    }
+
     fn block_starts(
         &self,
         session_id: String,
@@ -821,6 +1211,58 @@ pub fn release_native_voice_conversation_start_block(
 }
 
 #[tauri::command]
+pub async fn prepare_native_voice_assistant_speech(
+    state: State<'_, NativeVoiceState>,
+    capture: State<'_, VoiceCaptureState>,
+    webview_window: WebviewWindow,
+    request: PrepareAssistantSpeechRequest,
+) -> Result<PrepareAssistantSpeechOutcome, String> {
+    let admission = capture.with_active_renderer(
+        webview_window.label(),
+        &request.renderer_id,
+        request.renderer_epoch,
+        || {
+            state.admission_target(
+                webview_window.label(),
+                &request.session_id,
+                request.expected_revision,
+            )
+        },
+    )?;
+    let Some(admission) = admission else {
+        return Ok(PrepareAssistantSpeechOutcome::NotAdmitted);
+    };
+    admission
+        .prepare(request.text, request.acknowledgement)
+        .await
+}
+
+#[tauri::command]
+pub fn cancel_native_voice_assistant_speech(
+    state: State<'_, NativeVoiceState>,
+    capture: State<'_, VoiceCaptureState>,
+    webview_window: WebviewWindow,
+    request: CancelAssistantSpeechRequest,
+) -> Result<bool, String> {
+    let admission = capture.with_active_renderer(
+        webview_window.label(),
+        &request.renderer_id,
+        request.renderer_epoch,
+        || {
+            state.admission_target(
+                webview_window.label(),
+                &request.session_id,
+                request.expected_revision,
+            )
+        },
+    )?;
+    match admission {
+        Some(admission) => admission.cancel(request.speech_id),
+        None => Ok(false),
+    }
+}
+
+#[tauri::command]
 pub fn drain_native_voice_conversation_transcripts(
     state: State<'_, NativeVoiceState>,
     session_id: String,
@@ -842,14 +1284,7 @@ pub fn acknowledge_native_voice_conversation_transcript(
     id: String,
     revision: u64,
 ) -> Result<(), String> {
-    state
-        .pending
-        .lock()
-        .map_err(|_| "native transcript queue lock was poisoned".to_string())?
-        .retain(|item| {
-            !(item.session_id == session_id && item.id == id && item.revision == revision)
-        });
-    Ok(())
+    state.acknowledge_transcript(&session_id, &id, revision)
 }
 
 #[tauri::command]
@@ -859,16 +1294,7 @@ pub fn reject_native_voice_conversation_transcript(
     id: String,
     revision: u64,
 ) -> Result<TranscriptRejection, String> {
-    let mut pending = state
-        .pending
-        .lock()
-        .map_err(|_| "native transcript queue lock was poisoned".to_string())?;
-    Ok(reject_pending_transcript(
-        &mut pending,
-        &session_id,
-        &id,
-        revision,
-    ))
+    state.reject_transcript(&session_id, &id, revision)
 }
 
 fn reject_pending_transcript(
@@ -876,23 +1302,35 @@ fn reject_pending_transcript(
     session_id: &str,
     id: &str,
     revision: u64,
-) -> TranscriptRejection {
+    admission: Option<&BerdAdmissionCoordinator>,
+) -> Result<TranscriptRejection, String> {
     let Some(index) = pending.iter().position(|item| {
         item.session_id == session_id && item.id == id && item.revision == revision
     }) else {
-        return TranscriptRejection {
+        return Ok(TranscriptRejection {
             attempts: MAX_TRANSCRIPT_DELIVERY_ATTEMPTS,
             terminal: true,
-        };
+        });
     };
     let attempts = pending[index].delivery_attempts.saturating_add(1);
     let terminal = attempts >= MAX_TRANSCRIPT_DELIVERY_ATTEMPTS;
     if terminal {
+        if let Some(admission) = admission {
+            let transcript = &pending[index];
+            let reference = VoiceTranscriptReference {
+                lifecycle_id: transcript.lifecycle_id.clone(),
+                id: transcript.id.clone(),
+                revision,
+            };
+            if !admission.discard(&reference)? {
+                return Err("The voice transcript is not tracked by admission.".to_string());
+            }
+        }
         pending.remove(index);
     } else {
         pending[index].delivery_attempts = attempts;
     }
-    TranscriptRejection { attempts, terminal }
+    Ok(TranscriptRejection { attempts, terminal })
 }
 
 #[tauri::command]
@@ -1068,6 +1506,7 @@ pub async fn start_native_voice_conversation(
             window_label: window_label.clone(),
         });
         runtime.pipeline = Some(pipeline);
+        runtime.admission = Some(Arc::new(BerdAdmissionCoordinator::default()));
         runtime.controls_ready = false;
         // Voice always starts from its owning session, where the in-session
         // controls are already available. The owner renderer reveals the
@@ -1156,6 +1595,12 @@ pub async fn start_native_voice_conversation(
     let event_window = webview_window.clone();
     let runtime = Arc::clone(&state.runtime);
     let pending = Arc::clone(&state.pending);
+    let admission = state
+        .runtime
+        .lock()
+        .ok()
+        .and_then(|runtime| runtime.admission.clone())
+        .ok_or_else(|| "Voice admission was not initialized.".to_string())?;
     let event_state = state.inner().clone();
     tauri::async_runtime::spawn(async move {
         while let Some(event) = events.recv().await {
@@ -1169,6 +1614,7 @@ pub async fn start_native_voice_conversation(
             match event {
                 berd_voice::input::VoiceInputEvent::Ready => {}
                 berd_voice::input::VoiceInputEvent::SpeakingChanged(speaking) => {
+                    admission.set_user_speaking(speaking);
                     let event = NativeVoiceEvent::Activity {
                         session_id: session_id.clone(),
                         activity: if speaking {
@@ -1181,7 +1627,8 @@ pub async fn start_native_voice_conversation(
                     let _ = event_window.emit(EVENT_NAME, event.clone());
                     super::voice_buddy::emit(&event_app, event);
                 }
-                berd_voice::input::VoiceInputEvent::RecognitionPendingChanged(_) => {
+                berd_voice::input::VoiceInputEvent::RecognitionPendingChanged(pending) => {
+                    admission.set_recognition_pending(pending);
                     // The runtime owns recognition-pending sequencing. Berd's
                     // renderer does not project that state yet.
                 }
@@ -1200,6 +1647,7 @@ pub async fn start_native_voice_conversation(
                     let Ok((accepted, evicted)) = enqueue_transcript_if_active(
                         &runtime,
                         &pending,
+                        &admission,
                         &session_id,
                         revision,
                         transcript.clone(),
@@ -1247,6 +1695,9 @@ pub async fn start_native_voice_conversation(
                         native_input_mute::stop();
                         event_state.input_controls.set_muted(false);
                         current.native_microphone_mute_control = false;
+                        if let Some(admission) = current.admission.take() {
+                            admission.close();
+                        }
                         current.session_id = None;
                         current.lifecycle_id = None;
                         current.owner = None;
@@ -1647,6 +2098,9 @@ impl NativeVoiceState {
                 native_input_mute::stop();
                 self.input_controls.set_muted(false);
                 runtime.native_microphone_mute_control = false;
+                if let Some(admission) = runtime.admission.take() {
+                    admission.close();
+                }
                 runtime.session_id = None;
                 runtime.lifecycle_id = None;
                 runtime.owner = None;
@@ -1699,6 +2153,9 @@ impl NativeVoiceState {
                 native_input_mute::stop();
                 self.input_controls.set_muted(false);
                 runtime.native_microphone_mute_control = false;
+                if let Some(admission) = runtime.admission.take() {
+                    admission.close();
+                }
                 runtime.session_id = None;
                 runtime.lifecycle_id = None;
                 runtime.owner = None;
@@ -1862,6 +2319,9 @@ impl NativeVoiceState {
         self.microphone_muted.store(false, Ordering::SeqCst);
         if let Ok(mut runtime) = self.runtime.lock() {
             if runtime.revision == revision && runtime.session_id == session_id {
+                if let Some(admission) = runtime.admission.take() {
+                    admission.close();
+                }
                 runtime.session_id = None;
                 runtime.lifecycle_id = None;
                 runtime.owner = None;
@@ -1968,6 +2428,7 @@ fn decode_voice_input_frame(bytes: &[u8]) -> Result<berd_voice::input::VoiceInpu
     berd_voice::input::VoiceInputFrame::try_from_samples(&samples)
 }
 
+#[cfg(test)]
 fn enqueue_pending_transcript(
     queue: &mut VecDeque<PendingTranscript>,
     transcript: PendingTranscript,
@@ -1982,6 +2443,7 @@ fn enqueue_pending_transcript(
 fn enqueue_transcript_if_active(
     runtime: &Mutex<Runtime>,
     pending: &Mutex<VecDeque<PendingTranscript>>,
+    admission: &BerdAdmissionCoordinator,
     expected_session_id: &str,
     expected_revision: u64,
     transcript: PendingTranscript,
@@ -1997,13 +2459,237 @@ fn enqueue_transcript_if_active(
     let mut pending = pending
         .lock()
         .map_err(|_| "pending transcript lock was poisoned".to_string())?;
-    let evicted = enqueue_pending_transcript(&mut pending, transcript);
+    let reference = VoiceTranscriptReference {
+        lifecycle_id: transcript.lifecycle_id.clone(),
+        id: transcript.id.clone(),
+        revision: transcript.revision,
+    };
+    let evicted = (pending.len() >= MAX_PENDING_TRANSCRIPTS)
+        .then(|| pending.front().cloned())
+        .flatten();
+    admission.add_final(reference, transcript.text.clone())?;
+    if let Some(evicted) = evicted.as_ref() {
+        let evicted_reference = VoiceTranscriptReference {
+            lifecycle_id: evicted.lifecycle_id.clone(),
+            id: evicted.id.clone(),
+            revision: evicted.revision,
+        };
+        if !admission.discard(&evicted_reference)? {
+            return Err("The evicted voice transcript is not tracked by admission.".to_string());
+        }
+        pending.pop_front();
+    }
+    pending.push_back(transcript);
     Ok((true, evicted))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn transcript_reference(id: &str) -> VoiceTranscriptReference {
+        VoiceTranscriptReference {
+            lifecycle_id: "lifecycle-1".to_string(),
+            id: id.to_string(),
+            revision: 4,
+        }
+    }
+
+    #[tokio::test]
+    async fn admission_holds_without_confirming_then_observes_a_final() {
+        let admission = Arc::new(BerdAdmissionCoordinator::default());
+        let first = transcript_reference("first");
+        admission.add_final(first.clone(), "one".into()).unwrap();
+        admission.set_user_speaking(true);
+
+        let waiting = {
+            let admission = Arc::clone(&admission);
+            let first = first.clone();
+            tokio::spawn(async move { admission.prepare("reply".into(), Some(first)).await })
+        };
+        tokio::task::yield_now().await;
+        assert_eq!(
+            admission.inner.lock().unwrap().core.confirmed_token(),
+            0,
+            "held preparation must not apply its causal acknowledgement"
+        );
+
+        admission
+            .add_final(transcript_reference("second"), "two".into())
+            .unwrap();
+        admission.set_user_speaking(false);
+        assert!(matches!(
+            waiting.await.unwrap().unwrap(),
+            PrepareAssistantSpeechOutcome::Pending
+        ));
+    }
+
+    #[tokio::test]
+    async fn stale_exact_causal_reference_does_not_inherit_global_confirmation() {
+        let admission = BerdAdmissionCoordinator::default();
+        let first = transcript_reference("first");
+        let second = transcript_reference("second");
+        admission.add_final(first.clone(), "one".into()).unwrap();
+        admission.add_final(second.clone(), "two".into()).unwrap();
+        assert!(admission.confirm(&second).unwrap());
+
+        assert!(matches!(
+            admission
+                .prepare("delayed".into(), Some(first))
+                .await
+                .unwrap(),
+            PrepareAssistantSpeechOutcome::Pending
+        ));
+    }
+
+    #[tokio::test]
+    async fn fast_second_delivery_cannot_hide_slow_first_rejection() {
+        let state = NativeVoiceState::default();
+        let admission = Arc::new(BerdAdmissionCoordinator::default());
+        {
+            let mut runtime = state.runtime.lock().unwrap();
+            runtime.session_id = Some("session-1".into());
+            runtime.lifecycle_id = Some("lifecycle-1".into());
+            runtime.revision = 4;
+            runtime.admission = Some(Arc::clone(&admission));
+        }
+        for id in ["first", "second"] {
+            let reference = transcript_reference(id);
+            admission.add_final(reference, id.to_string()).unwrap();
+            state.pending.lock().unwrap().push_back(PendingTranscript {
+                session_id: "session-1".into(),
+                lifecycle_id: "lifecycle-1".into(),
+                id: id.into(),
+                text: id.into(),
+                revision: 4,
+                delivery_attempts: 0,
+            });
+        }
+
+        state
+            .acknowledge_transcript("session-1", "second", 4)
+            .unwrap();
+        assert!(matches!(
+            admission
+                .prepare("reply".into(), Some(transcript_reference("second")))
+                .await
+                .unwrap(),
+            PrepareAssistantSpeechOutcome::Pending
+        ));
+
+        for _ in 0..MAX_TRANSCRIPT_DELIVERY_ATTEMPTS {
+            state.reject_transcript("session-1", "first", 4).unwrap();
+        }
+        assert!(matches!(
+            admission
+                .prepare("reply".into(), Some(transcript_reference("second")))
+                .await
+                .unwrap(),
+            PrepareAssistantSpeechOutcome::Admitted { .. }
+        ));
+    }
+
+    #[test]
+    fn superseded_lifecycle_recovery_can_be_acknowledged_without_admission() {
+        let state = NativeVoiceState::default();
+        state.pending.lock().unwrap().push_back(PendingTranscript {
+            session_id: "old-session".into(),
+            lifecycle_id: "old-lifecycle".into(),
+            id: "old-final".into(),
+            text: "recover me".into(),
+            revision: 3,
+            delivery_attempts: 0,
+        });
+
+        state
+            .acknowledge_transcript("old-session", "old-final", 3)
+            .unwrap();
+
+        assert!(state.pending.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn superseded_lifecycle_recovery_can_be_terminally_rejected_without_admission() {
+        let state = NativeVoiceState::default();
+        state.pending.lock().unwrap().push_back(PendingTranscript {
+            session_id: "old-session".into(),
+            lifecycle_id: "old-lifecycle".into(),
+            id: "old-final".into(),
+            text: "recover me".into(),
+            revision: 3,
+            delivery_attempts: 0,
+        });
+
+        for _ in 0..MAX_TRANSCRIPT_DELIVERY_ATTEMPTS {
+            state
+                .reject_transcript("old-session", "old-final", 3)
+                .unwrap();
+        }
+
+        assert!(state.pending.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn input_after_prepare_invalidates_the_installed_reservation_before_claim() {
+        let admission = Arc::new(BerdAdmissionCoordinator::default());
+        let PrepareAssistantSpeechOutcome::Admitted { speech_id } =
+            admission.prepare("reply".into(), None).await.unwrap()
+        else {
+            panic!("expected admission")
+        };
+
+        admission.set_recognition_pending(true);
+        let playback_active = Arc::new(AtomicBool::new(true));
+        assert!(admission
+            .claim(speech_id, Arc::clone(&playback_active))
+            .unwrap()
+            .is_none());
+        assert!(playback_active.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn input_after_claim_cancels_playback_until_the_terminal_guard_finishes() {
+        let admission = Arc::new(BerdAdmissionCoordinator::default());
+        let PrepareAssistantSpeechOutcome::Admitted { speech_id } =
+            admission.prepare("reply".into(), None).await.unwrap()
+        else {
+            panic!("expected admission")
+        };
+        let playback_active = Arc::new(AtomicBool::new(true));
+        let guard = admission
+            .claim(speech_id, Arc::clone(&playback_active))
+            .unwrap()
+            .expect("claim reservation");
+
+        admission.set_user_speaking(true);
+        assert!(!playback_active.load(Ordering::SeqCst));
+        admission.set_user_speaking(false);
+        assert!(matches!(
+            admission.prepare("next".into(), None).await.unwrap(),
+            PrepareAssistantSpeechOutcome::NotAdmitted
+        ));
+        drop(guard);
+        assert!(matches!(
+            admission.prepare("next".into(), None).await.unwrap(),
+            PrepareAssistantSpeechOutcome::Admitted { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn closing_the_lifecycle_wakes_a_held_prepare() {
+        let admission = Arc::new(BerdAdmissionCoordinator::default());
+        admission.set_user_speaking(true);
+        let waiting = {
+            let admission = Arc::clone(&admission);
+            tokio::spawn(async move { admission.prepare("reply".into(), None).await })
+        };
+        tokio::task::yield_now().await;
+        admission.close();
+        assert_eq!(
+            waiting.await.unwrap().unwrap_err(),
+            "The voice conversation is no longer running."
+        );
+    }
 
     #[tokio::test]
     async fn replacement_revalidates_target_after_waiting_for_stop_serialization() {
@@ -2715,11 +3401,12 @@ mod tests {
 
         let id = pending.front().expect("retained transcript").id.clone();
         for attempts in 1..MAX_TRANSCRIPT_DELIVERY_ATTEMPTS {
-            let outcome = reject_pending_transcript(&mut pending, "session-1", &id, 2);
+            let outcome =
+                reject_pending_transcript(&mut pending, "session-1", &id, 2, None).unwrap();
             assert_eq!(outcome.attempts, attempts);
             assert!(!outcome.terminal);
         }
-        let outcome = reject_pending_transcript(&mut pending, "session-1", &id, 2);
+        let outcome = reject_pending_transcript(&mut pending, "session-1", &id, 2, None).unwrap();
         assert!(outcome.terminal);
         assert!(!pending.iter().any(|item| item.id == id));
     }

@@ -37,6 +37,8 @@ import {
   getVoiceConversationStatus,
   listenToVoiceConversation,
   openVoiceConversationSession,
+  prepareVoiceConversationAssistantSpeech,
+  cancelVoiceConversationAssistantSpeech,
   reconcileVoiceConversationMicrophone,
   releaseNativeVoiceConversationStartBlock,
   resetVoiceConversationForegroundSessionForTest,
@@ -65,6 +67,57 @@ describe("voice conversation API", () => {
     });
     mocks.setMicrophoneMuted.mockReset();
     mocks.stopMicrophone.mockReset();
+  });
+
+  it("prepares and cancels assistant speech through the active renderer", async () => {
+    mocks.invoke
+      .mockResolvedValueOnce({ outcome: "admitted", speechId: 9 })
+      .mockResolvedValueOnce(true);
+    const acknowledgement = {
+      lifecycleId: "lifecycle-1",
+      id: "utterance-1",
+      revision: 4,
+    };
+
+    await expect(
+      prepareVoiceConversationAssistantSpeech(
+        "session-1",
+        4,
+        "hello",
+        acknowledgement,
+      ),
+    ).resolves.toEqual({ outcome: "admitted", speechId: 9 });
+    await expect(
+      cancelVoiceConversationAssistantSpeech("session-1", 4, 9),
+    ).resolves.toBe(true);
+
+    expect(mocks.invoke).toHaveBeenNthCalledWith(
+      1,
+      "prepare_native_voice_assistant_speech",
+      {
+        request: {
+          sessionId: "session-1",
+          expectedRevision: 4,
+          text: "hello",
+          acknowledgement,
+          rendererId: "renderer-test",
+          rendererEpoch: 7,
+        },
+      },
+    );
+    expect(mocks.invoke).toHaveBeenNthCalledWith(
+      2,
+      "cancel_native_voice_assistant_speech",
+      {
+        request: {
+          sessionId: "session-1",
+          expectedRevision: 4,
+          speechId: 9,
+          rendererId: "renderer-test",
+          rendererEpoch: 7,
+        },
+      },
+    );
   });
 
   it("uses the typed native command surface", async () => {

@@ -932,11 +932,14 @@ pub fn start_siri_voice_stream(
     webview_window: tauri::WebviewWindow,
     state: tauri::State<'_, SiriVoiceState>,
     native_voice: tauri::State<'_, NativeVoiceState>,
+    session_id: String,
+    expected_revision: u64,
+    speech_id: u64,
     stream_id: String,
     voice: SiriVoiceSelection,
     interruption_mode: VoiceInterruptionMode,
     interruption_sensitivity: InterruptionSensitivity,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     #[cfg(not(target_os = "macos"))]
     {
         let _ = (
@@ -944,6 +947,9 @@ pub fn start_siri_voice_stream(
             webview_window,
             state,
             native_voice,
+            session_id,
+            expected_revision,
+            speech_id,
             stream_id,
             voice,
             interruption_mode,
@@ -960,6 +966,16 @@ pub fn start_siri_voice_stream(
         let voice = resolve_stream_voice(&voice, || discover_voices(""))?;
         let settings = read_settings(&settings_path(&app)?);
         let active = begin_playback(&state, webview_window.label())?;
+        let Some(admission) = native_voice.claim_assistant_speech(
+            &session_id,
+            expected_revision,
+            speech_id,
+            active.clone(),
+        )?
+        else {
+            finish_playback(state.inner(), &active);
+            return Ok(false);
+        };
         let output_device = selected_output_device();
         let effective_output_device = effective_output_device_name(output_device.as_deref());
         let suppress_capture =
@@ -981,6 +997,7 @@ pub fn start_siri_voice_stream(
         let playback_active = active.clone();
         let native_voice_state = native_voice.inner().clone();
         tauri::async_runtime::spawn_blocking(move || {
+            let admission_guard = admission;
             let result = run_siri_stream(
                 app.clone(),
                 stream_id.clone(),
@@ -1011,9 +1028,10 @@ pub fn start_siri_voice_stream(
             // A terminal event hands stream ownership back to the renderer,
             // which may immediately start a replacement stream. Release the
             // backend playback token before publishing that handoff.
+            drop(admission_guard);
             emit_stream_event(&app, &stream_id, event_state, error, delivery);
         });
-        Ok(())
+        Ok(true)
     }
 }
 

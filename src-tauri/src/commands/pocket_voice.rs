@@ -924,20 +924,27 @@ pub async fn speak_pocket_voice(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri injects three runtime dependencies beside the stream payload.
 pub fn start_pocket_voice_stream(
     app: AppHandle,
     state: State<'_, PocketVoiceState>,
     native_voice: State<'_, NativeVoiceState>,
+    session_id: String,
+    expected_revision: u64,
+    speech_id: u64,
     stream_id: String,
     interruption_mode: VoiceInterruptionMode,
     interruption_sensitivity: InterruptionSensitivity,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     #[cfg(not(target_os = "macos"))]
     {
         let _ = (
             app,
             state,
             native_voice,
+            session_id,
+            expected_revision,
+            speech_id,
             stream_id,
             interruption_mode,
             interruption_sensitivity,
@@ -981,10 +988,21 @@ pub fn start_pocket_voice_stream(
             active,
             playback_rate,
         } = session;
+        let Some(admission) = native_voice.claim_assistant_speech(
+            &session_id,
+            expected_revision,
+            speech_id,
+            active.clone(),
+        )?
+        else {
+            finish_playback(&state.playback, &active);
+            return Ok(false);
+        };
         let playback = state.playback.clone();
         let playback_active = active.clone();
         let native_voice_state = native_voice.inner().clone();
         tauri::async_runtime::spawn_blocking(move || {
+            let admission_guard = admission;
             let result = run_with_playback_cleanup(&playback, &playback_active, || {
                 run_pocket_voice_stream(
                     &app,
@@ -1015,9 +1033,10 @@ pub fn start_pocket_voice_stream(
             // A terminal event hands stream ownership back to the renderer,
             // which may immediately start a replacement stream. Release the
             // backend playback token before publishing that handoff.
+            drop(admission_guard);
             emit_pocket_stream_event(&app, &stream_id, event_state, error, delivery);
         });
-        Ok(())
+        Ok(true)
     }
 }
 

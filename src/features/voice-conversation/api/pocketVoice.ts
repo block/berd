@@ -105,11 +105,17 @@ export function speakPocketVoice(text: string): Promise<void> {
 }
 
 export function startPocketVoiceStream(
+  sessionId: string,
+  expectedRevision: number,
+  speechId: number,
   streamId: string,
   interruptionMode: VoiceInterruptionMode,
   interruptionSensitivity: VoiceInterruptionSensitivity,
-): Promise<void> {
-  return invoke("start_pocket_voice_stream", {
+): Promise<boolean> {
+  return invoke<boolean>("start_pocket_voice_stream", {
+    sessionId,
+    expectedRevision,
+    speechId,
     streamId,
     interruptionMode,
     interruptionSensitivity,

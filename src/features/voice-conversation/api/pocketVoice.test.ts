@@ -88,7 +88,14 @@ describe("Pocket voice API", () => {
   it("uses the streaming utterance commands", async () => {
     mocks.invoke.mockResolvedValue(undefined);
 
-    await startPocketVoiceStream("stream-1", "allowInterruptions", "more");
+    await startPocketVoiceStream(
+      "session-1",
+      4,
+      7,
+      "stream-1",
+      "allowInterruptions",
+      "more",
+    );
     await appendPocketVoiceStream("stream-1", "Hello");
     await flushPocketVoiceStream("stream-1");
     await finishPocketVoiceStream("stream-1");
@@ -97,6 +104,9 @@ describe("Pocket voice API", () => {
       1,
       "start_pocket_voice_stream",
       {
+        sessionId: "session-1",
+        expectedRevision: 4,
+        speechId: 7,
         streamId: "stream-1",
         interruptionMode: "allowInterruptions",
         interruptionSensitivity: "more",

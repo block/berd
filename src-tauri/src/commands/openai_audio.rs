@@ -360,15 +360,19 @@ pub fn get_openai_voice_status(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri injects four runtime dependencies beside the stream payload.
 pub fn start_openai_voice_stream(
     app: AppHandle,
     webview_window: tauri::WebviewWindow,
     state: State<'_, OpenAiVoiceState>,
     native_voice: State<'_, NativeVoiceState>,
+    session_id: String,
+    expected_revision: u64,
+    speech_id: u64,
     stream_id: String,
     interruption_mode: VoiceInterruptionMode,
     interruption_sensitivity: InterruptionSensitivity,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     #[cfg(not(target_os = "macos"))]
     {
         let _ = (
@@ -376,6 +380,9 @@ pub fn start_openai_voice_stream(
             webview_window,
             state,
             native_voice,
+            session_id,
+            expected_revision,
+            speech_id,
             stream_id,
             interruption_mode,
             interruption_sensitivity,
@@ -388,9 +395,18 @@ pub fn start_openai_voice_stream(
         if stream_id.trim().is_empty() {
             return Err("OpenAI voice stream id cannot be empty".to_string());
         }
-        let key = api_key()?;
         let (sender, receiver) = mpsc::channel();
         let active = Arc::new(AtomicBool::new(true));
+        let Some(admission) = native_voice.claim_assistant_speech(
+            &session_id,
+            expected_revision,
+            speech_id,
+            active.clone(),
+        )?
+        else {
+            return Ok(false);
+        };
+        let key = api_key()?;
         {
             let mut playback = state
                 .playback
@@ -417,6 +433,7 @@ pub fn start_openai_voice_stream(
         let playback = state.playback.clone();
         let native_voice = native_voice.inner().clone();
         tauri::async_runtime::spawn_blocking(move || {
+            let admission_guard = admission;
             let result = run_openai_voice_stream(
                 &app,
                 &stream_id,
@@ -449,9 +466,10 @@ pub fn start_openai_voice_stream(
                     failure.delivery,
                 ),
             };
+            drop(admission_guard);
             emit_openai_stream_event(&app, &stream_id, state, error, delivery);
         });
-        Ok(())
+        Ok(true)
     }
 }
 

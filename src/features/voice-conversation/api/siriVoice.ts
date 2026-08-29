@@ -69,12 +69,18 @@ export interface SiriVoiceStreamEvent {
 }
 
 export function startSiriVoiceStream(
+  sessionId: string,
+  expectedRevision: number,
+  speechId: number,
   streamId: string,
   voice: SiriVoiceSelection,
   interruptionMode: VoiceInterruptionMode,
   interruptionSensitivity: VoiceInterruptionSensitivity,
-): Promise<void> {
-  return invoke("start_siri_voice_stream", {
+): Promise<boolean> {
+  return invoke<boolean>("start_siri_voice_stream", {
+    sessionId,
+    expectedRevision,
+    speechId,
     streamId,
     voice,
     interruptionMode,
