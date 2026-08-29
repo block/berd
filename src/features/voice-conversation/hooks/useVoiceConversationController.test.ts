@@ -668,18 +668,22 @@ describe("voice transcript delivery coordination", () => {
       init: vi.fn().mockResolvedValue(undefined),
     });
 
-    const owner = renderHook(() =>
-      useVoiceConversationController({
-        sessionId: "session-unmounted-owner",
-        onSend: ownerSend,
-        enabled: true,
-        isGooseSession: true,
-        pocketReady: true,
-        onPocketSetupRequired: vi.fn(),
-      }),
+    const owner = renderHook(
+      ({ routeBlocked }) =>
+        useVoiceConversationController({
+          sessionId: "session-unmounted-owner",
+          onSend: ownerSend,
+          enabled: true,
+          isGooseSession: true,
+          pocketReady: true,
+          onPocketSetupRequired: vi.fn(),
+          routeBlocked,
+        }),
+      { initialProps: { routeBlocked: false } },
     );
 
     await waitFor(() => expect(voiceStoreMocks.subscriber).toBeDefined());
+    owner.rerender({ routeBlocked: true });
     owner.unmount();
     await expect(
       voiceStoreMocks.subscriber?.({

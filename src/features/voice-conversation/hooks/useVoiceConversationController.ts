@@ -79,8 +79,11 @@ function releaseVoiceSendRoute(
     [...mountedSendRoutes.values()].find(
       (route) => route.sessionId === released?.sessionId && route.canClaim,
     ) ?? null;
-  activeSendRoute =
-    replacement ?? (preserveActiveRoute ? (released ?? null) : null);
+  const preservedRoute =
+    preserveActiveRoute && released
+      ? { ...released, blocked: false, canClaim: false }
+      : null;
+  activeSendRoute = replacement ?? preservedRoute;
   return activeSendRoute;
 }
 
