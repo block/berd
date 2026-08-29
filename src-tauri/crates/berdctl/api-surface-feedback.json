@@ -6,7 +6,7 @@
       "description": "Manage the user's chat sessions: create (fire-and-forget, on any installed agent harness), send, open, list, get, rename, move, move to group, clear project, fork, archive.",
       "actions": {
         "create": {
-          "description": "Create a new chat session on any installed agent harness and send the prompt in it. Fire-and-forget: returns the session id immediately and the session runs in the background without changing what the user sees; the user can open it themselves. Only check on it later (action \"get\") if the user asks.",
+          "description": "Create a new chat session on any installed agent harness and send the prompt in it. Fire-and-forget: returns the session id immediately and the session runs in the background without changing what the user sees; the user can open it themselves. Use --from to give the delegating session or tool a concise visible label on the initial message. Only check on it later (action \"get\") if the user asks.",
           "fields": [
             {
               "name": "prompt",
@@ -47,6 +47,14 @@
               "description": "Branch/worktree name when the project's startup mode is branch or worktree; required for those modes.",
               "min": 1,
               "max": 200
+            },
+            {
+              "name": "from",
+              "required": false,
+              "kind": "string",
+              "description": "Optional visible sender label for the initial message (1-120 chars).",
+              "min": 1,
+              "max": 120
             }
           ],
           "schema": {
@@ -80,6 +88,13 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 200
+              },
+              "from": {
+                "description": "Optional visible sender label for the initial message (1-120 chars).",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120,
+                "pattern": "^[^\\r\\n]*$"
               }
             },
             "required": ["prompt"],
@@ -87,7 +102,7 @@
           }
         },
         "send": {
-          "description": "Send a prompt into an existing chat session without opening or focusing it. Idle sends are fire-and-forget and visibly add a user message marked as sent by Berd from another session. Running sessions are refused by default; use --if-running steer to add context to the active run, or --if-running queue to send one follow-up after the current run finishes.",
+          "description": "Send a prompt into an existing chat session without opening or focusing it. Idle sends are fire-and-forget and visibly add a user message marked as sent by Berd from another session. Running sessions are refused by default; use --if-running steer to add context to the active run, or --if-running queue to send one follow-up after the current run finishes. Use --from to give the sending session or tool a concise visible label in the transcript. Use --delivery-id when retries must create at most one user turn.",
           "fields": [
             {
               "name": "session_id",
@@ -117,6 +132,22 @@
               "kind": "string",
               "description": "What to do if the target session is running: refuse, steer, or queue.",
               "values": ["refuse", "steer", "queue"]
+            },
+            {
+              "name": "from",
+              "required": false,
+              "kind": "string",
+              "description": "Optional visible sender label for this message (1-120 chars).",
+              "min": 1,
+              "max": 120
+            },
+            {
+              "name": "delivery_id",
+              "required": false,
+              "kind": "string",
+              "description": "Optional idempotency id; a repeated id for this session is accepted without creating another user turn (1-200 chars).",
+              "min": 1,
+              "max": 200
             }
           ],
           "schema": {
@@ -144,6 +175,20 @@
                 "description": "What to do if the target session is running: refuse, steer, or queue.",
                 "type": "string",
                 "enum": ["refuse", "steer", "queue"]
+              },
+              "from": {
+                "description": "Optional visible sender label for this message (1-120 chars).",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120,
+                "pattern": "^[^\\r\\n]*$"
+              },
+              "delivery_id": {
+                "description": "Optional idempotency id; a repeated id for this session is accepted without creating another user turn (1-200 chars).",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "pattern": "^[^\\r\\n]*$"
               }
             },
             "required": ["session_id", "prompt"],

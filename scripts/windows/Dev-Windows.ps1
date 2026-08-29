@@ -124,6 +124,13 @@ if (-not (Test-Path $env:BERDCTL_BIN -PathType Leaf)) {
 }
 Write-WindowsDevInfo "Using berdctl CLI: $env:BERDCTL_BIN"
 
+Invoke-CheckedCommand -FilePath "cargo" -ArgumentList @("build", "-p", "berd-monitor") -WorkingDirectory (Join-Path (Get-BerdRepoRoot) "src-tauri") -Label "cargo build berd-monitor"
+$env:BERD_MONITOR_BIN = Join-Path (Join-Path $env:CARGO_TARGET_DIR "debug") "berd-monitor.exe"
+if (-not (Test-Path $env:BERD_MONITOR_BIN -PathType Leaf)) {
+    throw "Expected berd-monitor.exe at $env:BERD_MONITOR_BIN after cargo build."
+}
+Write-WindowsDevInfo "Using berd-monitor CLI: $env:BERD_MONITOR_BIN"
+
 if ([string]::IsNullOrWhiteSpace($env:GOOSE_BIN)) {
     $env:GOOSE_BUILD_PROFILE = "debug"
     $result = Invoke-EnsureLocalGoose -Action Check

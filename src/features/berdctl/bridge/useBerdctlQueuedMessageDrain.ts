@@ -17,6 +17,8 @@ import {
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
 import {
+  BerdctlDeliveryAlreadyAcceptedError,
+  hasAcceptedBerdctlDeliveryInTranscript,
   isBerdctlCrossSessionQueuedMessage,
   sendPromptToExistingSessionInBackground,
 } from "@/features/berdctl/commands/runtime/sessionSend";
@@ -98,6 +100,17 @@ function drainQueuedMessage(queuedSessionId: string, ownerId: string): void {
     return;
   }
 
+  const deliveryId =
+    queuedMessage.payload.sendOptions?.userMessageMetadata?.berdDeliveryId;
+  if (
+    deliveryId &&
+    hasAcceptedBerdctlDeliveryInTranscript(queuedSessionId, deliveryId)
+  ) {
+    dismissQueuedMessageIfCurrent(queuedSessionId, queuedMessage);
+    queueMicrotask(() => drainQueuedMessage(queuedSessionId, ownerId));
+    return;
+  }
+
   drainingSessionIds.add(queuedSessionId);
   const send = sendPromptToExistingSessionInBackground(
     queuedSessionId,
@@ -110,7 +123,28 @@ function drainQueuedMessage(queuedSessionId: string, ownerId: string): void {
       );
       assertQueuedSessionReady(state.getSessionRuntime(queuedSessionId));
     },
-    { returnOnDispatch: true },
+    {
+      returnOnDispatch: true,
+      ...(queuedMessage.payload.sendOptions?.userMessageMetadata
+        ?.berdSenderLabel ||
+      queuedMessage.payload.sendOptions?.userMessageMetadata?.berdDeliveryId
+        ? { sendOptions: queuedMessage.payload.sendOptions }
+        : {}),
+      ...(deliveryId
+        ? {
+            validateHydratedTranscript: () => {
+              if (
+                hasAcceptedBerdctlDeliveryInTranscript(
+                  queuedSessionId,
+                  deliveryId,
+                )
+              ) {
+                throw new BerdctlDeliveryAlreadyAcceptedError();
+              }
+            },
+          }
+        : {}),
+    },
   );
   let sendSucceeded = false;
   let shouldResumeDrain = false;
@@ -118,19 +152,14 @@ function drainQueuedMessage(queuedSessionId: string, ownerId: string): void {
   void send
     .then(() => {
       sendSucceeded = true;
-      const latestQueuedMessage =
-        useChatStore.getState().queuedMessageBySession[queuedSessionId]?.[0];
-      if (
-        latestQueuedMessage?.recordId === queuedMessage.recordId &&
-        latestQueuedMessage.payload === queuedMessage.payload &&
-        !latestQueuedMessage.editing
-      ) {
-        useChatStore
-          .getState()
-          .dismissQueuedMessage(queuedSessionId, queuedMessage.recordId);
-      }
+      dismissQueuedMessageIfCurrent(queuedSessionId, queuedMessage);
     })
     .catch((error) => {
+      if (error instanceof BerdctlDeliveryAlreadyAcceptedError) {
+        dismissQueuedMessageIfCurrent(queuedSessionId, queuedMessage);
+        shouldResumeDrain = true;
+        return;
+      }
       if (error instanceof SessionDispatchContentionError) {
         waitingForContention = true;
         const waiter: ContentionWaiter = {
@@ -172,6 +201,25 @@ function drainQueuedMessage(queuedSessionId: string, ownerId: string): void {
         drainQueuedMessage(queuedSessionId, ownerId);
       }
     });
+}
+
+function dismissQueuedMessageIfCurrent(
+  sessionId: string,
+  queuedMessage: QueuedMessageRecord,
+): boolean {
+  const latestQueuedMessage =
+    useChatStore.getState().queuedMessageBySession[sessionId]?.[0];
+  if (
+    latestQueuedMessage?.recordId !== queuedMessage.recordId ||
+    latestQueuedMessage.payload !== queuedMessage.payload ||
+    latestQueuedMessage.editing
+  ) {
+    return false;
+  }
+  useChatStore
+    .getState()
+    .dismissQueuedMessage(sessionId, queuedMessage.recordId);
+  return true;
 }
 
 function getQueuedSessionIds(

@@ -622,7 +622,9 @@ mod tests {
     const EXPECTED_SESSION_CREATE_HELP: &str = r#"Create a new chat session on any installed agent harness and send the prompt in
 it. Fire-and-forget: returns the session id immediately and the session runs in
 the background without changing what the user sees; the user can open it
-themselves. Only check on it later (action "get") if the user asks.
+themselves. Use --from to give the delegating session or tool a concise visible
+label on the initial message. Only check on it later (action "get") if the user
+asks.
 
 Usage: berdctl session create [OPTIONS] --prompt <PROMPT>
 
@@ -647,6 +649,9 @@ Options:
           Branch/worktree name when the project's startup mode is branch or
           worktree; required for those modes.
 
+      --from <FROM>
+          Optional visible sender label for the initial message (1-120 chars).
+
       --json
           Print the raw JSON result on a single line (default: pretty-printed
           JSON)
@@ -660,7 +665,7 @@ Options:
 
 Examples:
   berdctl session create --prompt "Triage the failing nightly build" \
-    --harness-id claude-acp --json
+    --harness-id claude-acp --from "the release orchestrator" --json
   berdctl session create --prompt "Implement the fix" \
     --project-id <project-id> --startup-name my-feature
 

@@ -1,0 +1,23 @@
+[package]
+name = "berd-monitor"
+version = "0.6.2"
+description = "Detached command monitor for Berd sessions"
+authors = ["Block, Inc."]
+edition = "2021"
+
+[dependencies]
+clap = { version = "4", features = ["derive", "env"] }
+fs2 = "0.4"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }

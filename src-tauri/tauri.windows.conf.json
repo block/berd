@@ -17,7 +17,11 @@
   },
   "bundle": {
     "targets": ["nsis"],
-    "externalBin": ["binaries/goosed", "binaries/berdctl"],
+    "externalBin": [
+      "binaries/goosed",
+      "binaries/berdctl",
+      "binaries/berd-monitor"
+    ],
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper",

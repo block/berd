@@ -707,6 +707,7 @@ describe("sessions.create", () => {
         prompt: "what is 1+1",
         agent_id: "agent-7",
         model_id: "model-9",
+        from: "the test orchestrator",
       },
       ctx,
     );
@@ -733,7 +734,19 @@ describe("sessions.create", () => {
       useChatStore.getState().queuedMessageBySession["session-new"];
     expect(queued?.[0]).toMatchObject({
       kind: "transport-ready",
-      payload: { text: "what is 1+1" },
+      payload: {
+        text: "what is 1+1",
+        sendOptions: {
+          userMessageMetadata: {
+            origin: "berdctl_cross_session",
+            berdSenderLabel: "the test orchestrator",
+          },
+          acpGooseMetadata: {
+            origin: "berdctl_cross_session",
+            berdSenderLabel: "the test orchestrator",
+          },
+        },
+      },
     });
     expect(controller.openSession).not.toHaveBeenCalled();
   });
@@ -1682,6 +1695,212 @@ describe("sessions.send", () => {
           (record) => record.payload.text,
         ),
     ).toEqual(["next prompt", "another prompt"]);
+  });
+
+  it("preserves a visible sender label on queued prompts", async () => {
+    mockSessionFound();
+    useChatStore.getState().setChatState("session-1", "streaming");
+
+    const result = await dispatchCommand(
+      "sessions",
+      {
+        action: "send",
+        session_id: "session-1",
+        prompt: "[monitor: checks] complete",
+        if_running: "queue",
+        from: "the Berd session handling berd-monitor implementation",
+        delivery_id: "monitor-event-1",
+      },
+      ctx,
+    );
+
+    expect(result).toEqual({ session_id: "session-1", send_status: "queued" });
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-1"]?.[0]?.payload
+        .sendOptions,
+    ).toEqual({
+      userMessageMetadata: {
+        origin: "berdctl_cross_session",
+        berdSenderLabel:
+          "the Berd session handling berd-monitor implementation",
+        berdDeliveryId: "monitor-event-1",
+      },
+      acpGooseMetadata: {
+        origin: "berdctl_cross_session",
+        berdSenderLabel:
+          "the Berd session handling berd-monitor implementation",
+        berdDeliveryId: "monitor-event-1",
+      },
+    });
+  });
+
+  it("accepts a repeated delivery id without queueing another user turn", async () => {
+    mockSessionFound();
+    useChatStore.getState().setChatState("session-1", "streaming");
+
+    const first = await dispatchCommand(
+      "sessions",
+      {
+        action: "send",
+        session_id: "session-1",
+        prompt: "monitor event",
+        if_running: "queue",
+        delivery_id: "monitor-event-1",
+      },
+      ctx,
+    );
+    const duplicate = await dispatchCommand(
+      "sessions",
+      {
+        action: "send",
+        session_id: "session-1",
+        prompt: "monitor event retried",
+        if_running: "queue",
+        delivery_id: "monitor-event-1",
+      },
+      ctx,
+    );
+
+    expect(first).toEqual({ session_id: "session-1", send_status: "queued" });
+    expect(duplicate).toEqual({
+      session_id: "session-1",
+      send_status: "deduplicated",
+    });
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-1"],
+    ).toHaveLength(1);
+  });
+
+  it("serializes concurrent admission of the same delivery id", async () => {
+    const session = makeAcpSession({
+      sessionId: "session-1",
+      providerId: "codex-acp",
+    });
+    let releaseLoads: (() => void) | undefined;
+    const loadsReleased = new Promise<void>((resolve) => {
+      releaseLoads = resolve;
+    });
+    let loadCount = 0;
+    mocks.acpGetSessionInfo.mockImplementation(async () => {
+      loadCount += 1;
+      await loadsReleased;
+      return session;
+    });
+
+    const send = (prompt: string) =>
+      dispatchCommand(
+        "sessions",
+        {
+          action: "send",
+          session_id: "session-1",
+          prompt,
+          if_running: "queue",
+          delivery_id: "monitor-event-1",
+        },
+        ctx,
+      );
+    const first = send("monitor event");
+    const retry = send("monitor event retried concurrently");
+    await vi.waitFor(() => expect(loadCount).toBe(2));
+    releaseLoads?.();
+
+    await expect(Promise.all([first, retry])).resolves.toEqual([
+      { session_id: "session-1", send_status: "dispatched" },
+      { session_id: "session-1", send_status: "deduplicated" },
+    ]);
+    expect(
+      (useChatStore.getState().messagesBySession["session-1"] ?? []).length +
+        (useChatStore.getState().queuedMessageBySession["session-1"]?.length ??
+          0),
+    ).toBe(1);
+  });
+
+  it("deduplicates a delivery id restored in the transcript before target guards", async () => {
+    mockSessionFound();
+    const accepted = createUserMessage("monitor event");
+    accepted.metadata = {
+      origin: "berdctl_cross_session",
+      berdDeliveryId: "monitor-event-1",
+    };
+    useChatStore.getState().addMessage("session-1", accepted);
+    useChatStore.getState().setChatState("session-1", "streaming");
+    useSessionWindowStore
+      .getState()
+      .setSnapshot([{ sessionId: "session-1", windowLabel: "session" }]);
+
+    const duplicate = await dispatchCommand(
+      "sessions",
+      {
+        action: "send",
+        session_id: "session-1",
+        prompt: "monitor event retried after restart",
+        delivery_id: "monitor-event-1",
+      },
+      ctx,
+    );
+
+    expect(duplicate).toEqual({
+      session_id: "session-1",
+      send_status: "deduplicated",
+    });
+    expect(mocks.acpSendMessage).not.toHaveBeenCalled();
+    expect(mocks.acpSteerMessage).not.toHaveBeenCalled();
+  });
+
+  it("deduplicates a delivery id restored while hydrating a cold transcript", async () => {
+    mockSessionFound({ providerId: "codex-acp" });
+    mocks.loadSessionMessages.mockImplementationOnce(async () => {
+      const accepted = createUserMessage("monitor event");
+      accepted.metadata = {
+        origin: "berdctl_cross_session",
+        berdDeliveryId: "monitor-event-1",
+      };
+      useChatStore.getState().addMessage("session-1", accepted);
+      return true;
+    });
+
+    const duplicate = await dispatchCommand(
+      "sessions",
+      {
+        action: "send",
+        session_id: "session-1",
+        prompt: "monitor event retried after restart",
+        delivery_id: "monitor-event-1",
+      },
+      ctx,
+    );
+
+    expect(duplicate).toEqual({
+      session_id: "session-1",
+      send_status: "deduplicated",
+    });
+    expect(useChatStore.getState().messagesBySession["session-1"]).toHaveLength(
+      1,
+    );
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-1"],
+    ).toBeUndefined();
+    expect(mocks.acpSendMessage).not.toHaveBeenCalled();
+    expect(mocks.acpSteerMessage).not.toHaveBeenCalled();
+  });
+
+  it("rejects multiline sender labels before dispatch", async () => {
+    const error = await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        {
+          action: "send",
+          session_id: "session-1",
+          prompt: "monitor update",
+          if_running: "queue",
+          from: "first line\nsecond line",
+        },
+        ctx,
+      ),
+      "invalid_args",
+    );
+
+    expect(error.message).toContain("single line");
   });
 });
 

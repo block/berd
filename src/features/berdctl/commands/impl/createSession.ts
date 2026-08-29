@@ -41,6 +41,16 @@ const createSessionSchema = z
       .describe(
         "Branch/worktree name when the project's startup mode is branch or worktree; required for those modes.",
       ),
+    from: z
+      .string()
+      .trim()
+      .min(1)
+      .max(120)
+      .regex(/^[^\r\n]*$/, "Sender label must be a single line.")
+      .optional()
+      .describe(
+        "Optional visible sender label for the initial message (1-120 chars).",
+      ),
   })
   .strict();
 
@@ -65,10 +75,12 @@ export const createSessionCommand = defineCommand({
     "Create a new chat session on any installed agent harness and send the prompt in it. " +
     "Fire-and-forget: returns the session id immediately and the session runs in the " +
     "background without changing what the user sees; the user can open it themselves. " +
+    "Use --from to give the delegating session or tool a concise visible label on " +
+    "the initial message. " +
     'Only check on it later (action "get") if the user asks.',
   helpFooter: `Examples:
   berdctl session create --prompt "Triage the failing nightly build" \\
-    --harness-id claude-acp --json
+    --harness-id claude-acp --from "the release orchestrator" --json
   berdctl session create --prompt "Implement the fix" \\
     --project-id <project-id> --startup-name my-feature
 
@@ -211,7 +223,9 @@ Result:
         persona: persona
           ? { kind: "persona", id: persona.id, name: persona.displayName }
           : { kind: "inherit" },
-        sendOptions: berdctlCrossSessionSendOptions(),
+        sendOptions: berdctlCrossSessionSendOptions({
+          senderLabel: args.from,
+        }),
       }),
       { project, queueReady: true },
     );

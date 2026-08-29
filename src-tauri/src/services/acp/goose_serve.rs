@@ -830,6 +830,7 @@ fn resolve_berdctl_spawn_paths(
     prepend_dirs: &mut Vec<PathBuf>,
 ) -> BerdctlSpawnPaths {
     let berdctl_bin = resolve_berdctl_bin();
+    let berd_monitor_bin = resolve_berd_monitor_bin();
     let app_data_dir = match app_handle.path().app_data_dir() {
         Ok(app_data_dir) => Some(app_data_dir),
         Err(error) => {
@@ -839,14 +840,25 @@ fn resolve_berdctl_spawn_paths(
             None
         }
     };
-    if let (Some(cli_path), Some(app_data_dir)) = (berdctl_bin.as_deref(), app_data_dir.as_deref())
-    {
+    if let Some(app_data_dir) = app_data_dir.as_deref() {
         let shim_dir = app_data_dir.join("bin");
-        match create_berdctl_shim(&shim_dir, cli_path) {
-            // After the distro bin dir so that dir keeps its
-            // pinned PATH-front position.
-            Ok(()) => prepend_dirs.push(shim_dir),
-            Err(error) => log::warn!("Skipping berdctl PATH shim: {error}"),
+        let mut installed_any = false;
+        if let Some(cli_path) = berdctl_bin.as_deref() {
+            match create_berdctl_shim(&shim_dir, cli_path) {
+                Ok(()) => installed_any = true,
+                Err(error) => log::warn!("Skipping berdctl PATH shim: {error}"),
+            }
+        }
+        if let Some(cli_path) = berd_monitor_bin.as_deref() {
+            match create_berd_monitor_shim(&shim_dir, cli_path) {
+                Ok(()) => installed_any = true,
+                Err(error) => log::warn!("Skipping berd-monitor PATH shim: {error}"),
+            }
+        }
+        if installed_any {
+            // After the distro bin dir so that dir keeps its pinned
+            // PATH-front position.
+            prepend_dirs.push(shim_dir);
         }
     }
     BerdctlSpawnPaths {
@@ -890,9 +902,19 @@ fn apply_berdctl_env(
 /// replacing an in-use copied `.exe` can fail.
 #[cfg(feature = "berdctl")]
 fn create_berdctl_shim(shim_dir: &Path, cli_path: &Path) -> Result<(), String> {
+    create_cli_shim(shim_dir, cli_path, berdctl_shim_name())
+}
+
+#[cfg(feature = "berdctl")]
+fn create_berd_monitor_shim(shim_dir: &Path, cli_path: &Path) -> Result<(), String> {
+    create_cli_shim(shim_dir, cli_path, berd_monitor_shim_name())
+}
+
+#[cfg(feature = "berdctl")]
+fn create_cli_shim(shim_dir: &Path, cli_path: &Path, shim_name: &str) -> Result<(), String> {
     if !cli_path.exists() {
         return Err(format!(
-            "berdctl binary not found at {}",
+            "agent CLI binary not found at {}",
             cli_path.display()
         ));
     }
@@ -900,7 +922,7 @@ fn create_berdctl_shim(shim_dir: &Path, cli_path: &Path) -> Result<(), String> {
     std::fs::create_dir_all(shim_dir)
         .map_err(|error| format!("failed to create {}: {error}", shim_dir.display()))?;
 
-    let link = shim_dir.join(berdctl_shim_name());
+    let link = shim_dir.join(shim_name);
     // `remove_file` deletes a symlink itself rather than its target.
     match std::fs::remove_file(&link) {
         Ok(()) => {}
@@ -912,7 +934,7 @@ fn create_berdctl_shim(shim_dir: &Path, cli_path: &Path) -> Result<(), String> {
             ));
         }
     }
-    create_berdctl_shim_file(cli_path, &link)
+    create_cli_shim_file(cli_path, &link)
 }
 
 /// Mirrors `get_goose_command`: explicit env override (exported by `just
@@ -931,11 +953,32 @@ fn resolve_berdctl_bin() -> Option<PathBuf> {
 }
 
 #[cfg(feature = "berdctl")]
+fn resolve_berd_monitor_bin() -> Option<PathBuf> {
+    if let Ok(override_path) = std::env::var("BERD_MONITOR_BIN") {
+        if !override_path.is_empty() {
+            return Some(PathBuf::from(override_path));
+        }
+    }
+
+    let exe = std::env::current_exe().ok()?;
+    Some(exe.parent()?.join(berd_monitor_binary_name()))
+}
+
+#[cfg(feature = "berdctl")]
 fn berdctl_binary_name() -> &'static str {
     if cfg!(windows) {
         "berdctl.exe"
     } else {
         "berdctl"
+    }
+}
+
+#[cfg(feature = "berdctl")]
+fn berd_monitor_binary_name() -> &'static str {
+    if cfg!(windows) {
+        "berd-monitor.exe"
+    } else {
+        "berd-monitor"
     }
 }
 
@@ -948,8 +991,17 @@ fn berdctl_shim_name() -> &'static str {
     }
 }
 
+#[cfg(feature = "berdctl")]
+fn berd_monitor_shim_name() -> &'static str {
+    if cfg!(windows) {
+        "berd-monitor.cmd"
+    } else {
+        berd_monitor_binary_name()
+    }
+}
+
 #[cfg(all(feature = "berdctl", unix))]
-fn create_berdctl_shim_file(cli_path: &Path, link: &Path) -> Result<(), String> {
+fn create_cli_shim_file(cli_path: &Path, link: &Path) -> Result<(), String> {
     std::os::unix::fs::symlink(cli_path, link).map_err(|error| {
         format!(
             "failed to symlink {} -> {}: {error}",
@@ -960,7 +1012,7 @@ fn create_berdctl_shim_file(cli_path: &Path, link: &Path) -> Result<(), String> 
 }
 
 #[cfg(all(feature = "berdctl", windows))]
-fn create_berdctl_shim_file(cli_path: &Path, link: &Path) -> Result<(), String> {
+fn create_cli_shim_file(cli_path: &Path, link: &Path) -> Result<(), String> {
     let content = format!("@echo off\r\n\"{}\" %*\r\n", cli_path.to_string_lossy());
     std::fs::write(link, content).map_err(|error| {
         format!(

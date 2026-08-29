@@ -930,6 +930,9 @@ export const MessageBubble = memo(function MessageBubble({
   const isSteeredMessage = isUser && message.metadata?.delivery === "steer";
   const isBerdctlCrossSessionMessage =
     isUser && message.metadata?.origin === "berdctl_cross_session";
+  const berdSenderLabel = isBerdctlCrossSessionMessage
+    ? message.metadata?.berdSenderLabel
+    : undefined;
   const timestamp = (
     <span
       data-role="message-timestamp"
@@ -1037,7 +1040,11 @@ export const MessageBubble = memo(function MessageBubble({
                   data-role="berdctl-cross-session-message-label"
                   className="leading-4"
                 >
-                  {t("message.berdctlCrossSessionLabel")}
+                  {berdSenderLabel
+                    ? t("message.berdctlCrossSessionNamedLabel", {
+                        sender: berdSenderLabel,
+                      })
+                    : t("message.berdctlCrossSessionLabel")}
                 </span>
               ) : null}
               {isSteeredMessage ? (

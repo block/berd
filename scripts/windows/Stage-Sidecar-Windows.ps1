@@ -71,9 +71,9 @@ Write-WindowsDevInfo "Staged Goose sidecar: $staged"
 $tauriTargetDir = Get-TauriCargoTargetDir
 $env:CARGO_TARGET_DIR = $tauriTargetDir
 $hostTriple = Get-RustHostTriple
-$cargoArgs = @("build", "-p", "berdctl", "--release")
+$cargoArgs = @("build", "-p", "berdctl", "-p", "berd-monitor", "--release")
 if ($env:VITE_FEEDBACK -eq "1") {
-    $cargoArgs += @("--features", "block-feedback")
+    $cargoArgs += @("--features", "berdctl/block-feedback")
 }
 if (-not [string]::IsNullOrWhiteSpace($hostTriple) -and $Triple -ne $hostTriple) {
     $cargoArgs += @("--target", $Triple)
@@ -82,10 +82,15 @@ if (-not [string]::IsNullOrWhiteSpace($hostTriple) -and $Triple -ne $hostTriple)
     $berdctlReleaseDir = Join-Path $tauriTargetDir "release"
 }
 Invoke-CheckedCommand -FilePath "cargo" -ArgumentList $cargoArgs `
-    -WorkingDirectory (Join-Path (Get-BerdRepoRoot) "src-tauri") -Label "cargo build -p berdctl --release"
+    -WorkingDirectory (Join-Path (Get-BerdRepoRoot) "src-tauri") -Label "cargo build -p berdctl -p berd-monitor --release"
 $berdctlSource = Join-Path $berdctlReleaseDir (Get-WindowsExeName "berdctl")
 $staged = Stage-WindowsSidecar -SourcePath $berdctlSource -Triple $Triple -Stem "berdctl" -BinDir $binDir
 Write-WindowsDevInfo "Staged berdctl sidecar: $staged"
+
+# ── berd-monitor ─────────────────────────────────────────────
+$monitorSource = Join-Path $berdctlReleaseDir (Get-WindowsExeName "berd-monitor")
+$staged = Stage-WindowsSidecar -SourcePath $monitorSource -Triple $Triple -Stem "berd-monitor" -BinDir $binDir
+Write-WindowsDevInfo "Staged berd-monitor sidecar: $staged"
 
 # Catch is deliberately not staged on Windows (see header).
 Write-WindowsDevInfo "Skipping Catch sidecar: unsupported on Windows (excluded from externalBin)."

@@ -8,12 +8,12 @@
         "create": {
           "action": "create",
           "about": "Create a new chat session and send a prompt in it (fire-and-forget)",
-          "afterHelp": "Examples:\n  berdctl session create --prompt \"Triage the failing nightly build\" \\\n    --harness-id claude-acp --json\n  berdctl session create --prompt \"Implement the fix\" \\\n    --project-id <project-id> --startup-name my-feature\n\nResult:\n  {\"session_id\": \"...\", \"title\": \"...\", \"harness_id\": \"...\",\n   \"send_status\": \"dispatched\"}\n  The session runs in the background; the user's view does not change. Check\n  progress later with `berdctl session get --session-id <session_id>`."
+          "afterHelp": "Examples:\n  berdctl session create --prompt \"Triage the failing nightly build\" \\\n    --harness-id claude-acp --from \"the release orchestrator\" --json\n  berdctl session create --prompt \"Implement the fix\" \\\n    --project-id <project-id> --startup-name my-feature\n\nResult:\n  {\"session_id\": \"...\", \"title\": \"...\", \"harness_id\": \"...\",\n   \"send_status\": \"dispatched\"}\n  The session runs in the background; the user's view does not change. Check\n  progress later with `berdctl session get --session-id <session_id>`."
         },
         "send": {
           "action": "send",
           "about": "Send a prompt into an existing chat session",
-          "afterHelp": "Example:\n  berdctl session send --session-id <session-id> \\\n    --prompt \"Check the latest CI failure\" --if-running queue --json\n\nResult:\n  {\"session_id\": \"...\", \"send_status\": \"dispatched\"|\"steered\"|\"queued\"}\n  The user's current view does not change."
+          "afterHelp": "Example:\n  berdctl session send --session-id <session-id> \\\n    --prompt \"Check the latest CI failure\" --if-running queue \\\n    --from \"the Berd session handling CI\" --delivery-id <stable-id> --json\n\nResult:\n  {\"session_id\": \"...\", \"send_status\": \"dispatched\"|\"steered\"|\"queued\"|\"deduplicated\"}\n  The user's current view does not change."
         },
         "open": {
           "action": "open",

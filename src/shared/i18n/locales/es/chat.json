@@ -412,6 +412,7 @@
       "anthropicThinkingHistory": "Este chat no puede continuar con un modelo Claude porque su historial de razonamiento previo ya no tiene una forma que Claude acepte. Inicia un chat nuevo o cambia este chat a un modelo que no sea Claude para continuar."
     },
     "berdctlCrossSessionLabel": "Enviado por Berd desde otra sesión",
+    "berdctlCrossSessionNamedLabel": "Enviado por Berd desde otra sesión · fuente: {{sender}}",
     "steerLabel": "Guiado",
     "viewMore": "Ver más",
     "viewLess": "Ver menos",

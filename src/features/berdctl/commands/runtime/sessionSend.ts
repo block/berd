@@ -8,6 +8,7 @@ import {
   SessionDispatchUnresolvedError,
 } from "@/features/chat/lib/queuedSessionSend";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
+import { useChatStore } from "@/features/chat/stores/chatStore";
 export {
   sendQueuedPromptToExistingSessionInBackground,
   SessionDispatchContentionError,
@@ -23,14 +24,79 @@ export { isBerdctlCrossSessionQueuedMessage } from "@/features/chat/lib/queuedMe
 export const BERDCTL_CROSS_SESSION_ORIGIN =
   "berdctl_cross_session" satisfies NonNullable<MessageMetadata["origin"]>;
 
-export function berdctlCrossSessionSendOptions(): ChatSendOptions {
+const reservedDeliveryIds = new Set<string>();
+
+export class BerdctlDeliveryAlreadyAcceptedError extends Error {
+  constructor() {
+    super("The Berd delivery was already accepted.");
+    this.name = "BerdctlDeliveryAlreadyAcceptedError";
+  }
+}
+
+export function berdctlCrossSessionSendOptions(
+  options: { senderLabel?: string; deliveryId?: string } = {},
+): ChatSendOptions {
+  const senderMetadata = options.senderLabel
+    ? { berdSenderLabel: options.senderLabel }
+    : {};
+  const deliveryMetadata = options.deliveryId
+    ? { berdDeliveryId: options.deliveryId }
+    : {};
   return {
     userMessageMetadata: {
       origin: BERDCTL_CROSS_SESSION_ORIGIN,
+      ...senderMetadata,
+      ...deliveryMetadata,
     },
     acpGooseMetadata: {
       origin: BERDCTL_CROSS_SESSION_ORIGIN,
+      ...senderMetadata,
+      ...deliveryMetadata,
     },
+  };
+}
+
+export function hasAcceptedBerdctlDelivery(
+  sessionId: string,
+  deliveryId: string,
+): boolean {
+  const chatStore = useChatStore.getState();
+  return (
+    hasAcceptedBerdctlDeliveryInTranscript(sessionId, deliveryId) ||
+    (chatStore.queuedMessageBySession[sessionId] ?? []).some(
+      (record) =>
+        record.payload.sendOptions?.userMessageMetadata?.berdDeliveryId ===
+        deliveryId,
+    )
+  );
+}
+
+export function hasAcceptedBerdctlDeliveryInTranscript(
+  sessionId: string,
+  deliveryId: string,
+): boolean {
+  return (useChatStore.getState().messagesBySession[sessionId] ?? []).some(
+    (message) => message.metadata?.berdDeliveryId === deliveryId,
+  );
+}
+
+export function reserveBerdctlDelivery(
+  sessionId: string,
+  deliveryId: string,
+): (() => void) | null {
+  const key = JSON.stringify([sessionId, deliveryId]);
+  if (
+    reservedDeliveryIds.has(key) ||
+    hasAcceptedBerdctlDelivery(sessionId, deliveryId)
+  ) {
+    return null;
+  }
+  reservedDeliveryIds.add(key);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    reservedDeliveryIds.delete(key);
   };
 }
 
@@ -38,7 +104,11 @@ export async function sendPromptToExistingSessionInBackground(
   sessionId: string,
   prompt: string,
   beforeUserMessageCommitted?: () => void,
-  options: { returnOnDispatch?: boolean } = {},
+  options: {
+    returnOnDispatch?: boolean;
+    sendOptions?: ChatSendOptions;
+    validateHydratedTranscript?: () => void;
+  } = {},
 ): Promise<void> {
   const acquisition = await acquireExistingSessionForBackgroundSend(sessionId);
   if (acquisition.status === "contended") {
@@ -71,13 +141,14 @@ export async function sendPromptToExistingSessionInBackground(
           dispatchToken: targetLease.token,
         });
       const session = useChatSessionStore.getState().getSession(sessionId);
+      options.validateHydratedTranscript?.();
       await sendPromptInBackground(
         sessionId,
         prompt,
         providerId,
         persona,
         {
-          ...berdctlCrossSessionSendOptions(),
+          ...(options.sendOptions ?? berdctlCrossSessionSendOptions()),
           systemPrompt: session
             ? formatIncludedWorkspacesPrompt(session)
             : undefined,

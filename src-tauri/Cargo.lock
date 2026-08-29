@@ -585,6 +585,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a8241f3ebb85c056b509d4327ad0358fbbba6ffb340bf388f26350aeda225b1"
 
 [[package]]
+name = "berd-monitor"
+version = "0.6.2"
+dependencies = [
+ "clap",
+ "fs2",
+ "libc",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "berd-voice"
 version = "0.1.0"
 dependencies = [
@@ -952,6 +962,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "473c7e07f409a8d772161724aa8db6a765a2532a70f9667eeb7b49d3d02fbdca"
 dependencies = [
  "clap_builder",
+ "clap_derive",
 ]
 
 [[package]]
@@ -965,6 +976,18 @@ dependencies = [
  "clap_lex",
  "strsim",
  "terminal_size",
+]
+
+[[package]]
+name = "clap_derive"
+version = "4.6.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d012d2b9d65aca7f18f4d9878a045bc17899bba951561ba5ec3c2ba1eed9a061"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -2037,6 +2060,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
  "percent-encoding",
+]
+
+[[package]]
+name = "fs2"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
+dependencies = [
+ "libc",
+ "winapi",
 ]
 
 [[package]]

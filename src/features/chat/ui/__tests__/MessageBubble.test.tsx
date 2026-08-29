@@ -617,6 +617,21 @@ describe("MessageBubble", () => {
     );
   });
 
+  it("shows a sender descriptor without replacing trusted Berd provenance", () => {
+    const message = userMessage("[monitor: PR checks] complete");
+    message.metadata = {
+      ...message.metadata,
+      origin: "berdctl_cross_session",
+      berdSenderLabel: "Morgan",
+    };
+
+    render(<MessageBubble message={message} />);
+
+    expect(
+      screen.getByText("Sent by Berd from another session · source: Morgan"),
+    ).toBeInTheDocument();
+  });
+
   it("renders provenance and steer labels together", () => {
     const message = userMessage("steered from another session");
     message.metadata = {

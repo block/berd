@@ -13,6 +13,7 @@ import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import * as queuePersistence from "@/features/chat/stores/queuePersistence";
 import { useBerdctlQueuedMessageDrain } from "@/features/berdctl/bridge/useBerdctlQueuedMessageDrain";
+import { createUserMessage } from "@/shared/types/messages";
 
 const mocks = vi.hoisted(() => ({
   sendPromptToExistingSessionInBackground: vi.fn(),
@@ -556,6 +557,123 @@ describe("useBerdctlQueuedMessageDrain", () => {
     expect(
       useChatStore.getState().queuedMessageBySession["session-1"],
     ).toBeUndefined();
+  });
+
+  it("preserves a queued delivery id without a sender label", async () => {
+    const sendOptions = {
+      userMessageMetadata: {
+        origin: "berdctl_cross_session" as const,
+        berdDeliveryId: "monitor-event-1",
+      },
+      acpGooseMetadata: {
+        origin: "berdctl_cross_session" as const,
+        berdDeliveryId: "monitor-event-1",
+      },
+    };
+    const chatStore = useChatStore.getState();
+    chatStore.setChatState("session-1", "streaming");
+    chatStore.enqueueTransportReadyMessage("session-1", {
+      persona: { kind: "inherit" },
+      text: "queued delivery",
+      sendOptions,
+    });
+    render(<DrainHarness />);
+
+    act(() => {
+      useChatStore.getState().setChatState("session-1", "idle");
+    });
+
+    await waitFor(() => {
+      expect(
+        mocks.sendPromptToExistingSessionInBackground,
+      ).toHaveBeenCalledWith(
+        "session-1",
+        "queued delivery",
+        expect.any(Function),
+        {
+          returnOnDispatch: true,
+          sendOptions,
+          validateHydratedTranscript: expect.any(Function),
+        },
+      );
+    });
+  });
+
+  it("dismisses a stale queued delivery already accepted in the transcript", async () => {
+    const accepted = createUserMessage("queued delivery");
+    accepted.metadata = {
+      origin: "berdctl_cross_session",
+      berdDeliveryId: "monitor-event-1",
+    };
+    const chatStore = useChatStore.getState();
+    chatStore.addMessage("session-1", accepted);
+    chatStore.enqueueTransportReadyMessage("session-1", {
+      persona: { kind: "inherit" },
+      text: "queued delivery",
+      sendOptions: {
+        userMessageMetadata: {
+          origin: "berdctl_cross_session" as const,
+          berdDeliveryId: "monitor-event-1",
+        },
+      },
+    });
+
+    render(<DrainHarness />);
+
+    await waitFor(() => {
+      expect(
+        useChatStore.getState().queuedMessageBySession["session-1"],
+      ).toBeUndefined();
+    });
+    expect(
+      mocks.sendPromptToExistingSessionInBackground,
+    ).not.toHaveBeenCalled();
+    expect(useChatStore.getState().messagesBySession["session-1"]).toHaveLength(
+      1,
+    );
+  });
+
+  it("dismisses a stale queued delivery accepted during cold hydration", async () => {
+    mocks.sendPromptToExistingSessionInBackground.mockImplementationOnce(
+      async (
+        _sessionId: string,
+        _prompt: string,
+        _beforeUserMessageCommitted: () => void,
+        options?: { validateHydratedTranscript?: () => void },
+      ) => {
+        const accepted = createUserMessage("queued delivery");
+        accepted.metadata = {
+          origin: "berdctl_cross_session",
+          berdDeliveryId: "monitor-event-1",
+        };
+        useChatStore.getState().addMessage("session-1", accepted);
+        options?.validateHydratedTranscript?.();
+      },
+    );
+    useChatStore.getState().enqueueTransportReadyMessage("session-1", {
+      persona: { kind: "inherit" },
+      text: "queued delivery",
+      sendOptions: {
+        userMessageMetadata: {
+          origin: "berdctl_cross_session" as const,
+          berdDeliveryId: "monitor-event-1",
+        },
+      },
+    });
+
+    render(<DrainHarness />);
+
+    await waitFor(() => {
+      expect(
+        useChatStore.getState().queuedMessageBySession["session-1"],
+      ).toBeUndefined();
+    });
+    expect(
+      mocks.sendPromptToExistingSessionInBackground,
+    ).toHaveBeenCalledOnce();
+    expect(useChatStore.getState().messagesBySession["session-1"]).toHaveLength(
+      1,
+    );
   });
 
   it("drains consecutive berdctl records in FIFO order while idle", async () => {
