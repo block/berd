@@ -1,5 +1,6 @@
 //! Berd-owned credentials for OpenAI voice services.
 
+#[cfg(target_os = "macos")]
 const KEYCHAIN_SERVICE: &str = "berd-openai-voice";
 
 #[derive(Clone, Copy)]
@@ -8,12 +9,14 @@ pub(crate) enum OpenAiVoiceCredential {
 }
 
 impl OpenAiVoiceCredential {
+    #[cfg(any(test, target_os = "macos"))]
     const fn account(self) -> &'static str {
         match self {
             Self::TextToSpeech => "tts-api-key",
         }
     }
 
+    #[cfg(target_os = "macos")]
     const fn missing_message(self) -> &'static str {
         match self {
             Self::TextToSpeech => {
@@ -72,6 +75,7 @@ pub(crate) fn clear(_credential: OpenAiVoiceCredential) -> Result<(), String> {
     Err("OpenAI voice credentials are unsupported on this platform".to_string())
 }
 
+#[cfg(target_os = "macos")]
 pub(crate) fn require(credential: OpenAiVoiceCredential) -> Result<String, String> {
     read(credential)?.ok_or_else(|| credential.missing_message().to_string())
 }

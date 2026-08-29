@@ -35,6 +35,7 @@ use super::{
 #[cfg(any(test, target_os = "macos"))]
 use std::time::Instant;
 
+#[cfg(target_os = "macos")]
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 const DEFAULT_TTS_MODEL: &str = "gpt-4o-mini-tts";
 const DEFAULT_TTS_VOICE: &str = "marin";
