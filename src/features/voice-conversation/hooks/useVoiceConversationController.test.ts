@@ -227,7 +227,8 @@ describe("voice transcript delivery coordination", () => {
     nativeAssistantSpeechMocks.capture.mockClear();
     nativeAssistantSpeechMocks.start.mockClear();
     nativeAssistantSpeechMocks.stop.mockClear();
-    nativeAssistantSpeechMocks.takeNotices.mockClear();
+    nativeAssistantSpeechMocks.takeNotices.mockReset();
+    nativeAssistantSpeechMocks.takeNotices.mockReturnValue(null);
     voiceApiMocks.confirmForegroundSession.mockReset();
     voiceApiMocks.confirmForegroundSession.mockResolvedValue(1);
     microphonePermissionMocks.getStatus.mockReset();
@@ -304,7 +305,7 @@ describe("voice transcript delivery coordination", () => {
       init: vi.fn().mockResolvedValue(undefined),
     });
     const { rerender } = renderHook(
-      ({ readOnly }) =>
+      ({ readOnly, routeBlocked }) =>
         useVoiceConversationController({
           sessionId: "session-1",
           onSend,
@@ -313,12 +314,13 @@ describe("voice transcript delivery coordination", () => {
           pocketReady: true,
           onPocketSetupRequired: vi.fn(),
           readOnly,
+          routeBlocked,
         }),
-      { initialProps: { readOnly: false } },
+      { initialProps: { readOnly: false, routeBlocked: false } },
     );
 
     await waitFor(() => expect(voiceStoreMocks.subscriber).toBeDefined());
-    rerender({ readOnly: true });
+    rerender({ readOnly: true, routeBlocked: true });
     await expect(
       voiceStoreMocks.subscriber?.({
         type: "user",
@@ -331,6 +333,82 @@ describe("voice transcript delivery coordination", () => {
       }),
     ).rejects.toThrow("bound chat is unavailable");
     expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("defers mid-flight without error UI or consuming playback context", async () => {
+    const onSend = vi.fn().mockResolvedValue(true);
+    nativeAssistantSpeechMocks.takeNotices.mockReturnValue("playback context");
+    useChatStore.getState().setChatState("session-1", "waiting");
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-1",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 1,
+      },
+      uiState: "listening",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+      drainPendingTranscripts: vi.fn().mockResolvedValue(undefined),
+    });
+    const { rerender } = renderHook(
+      ({ routeBlocked }) =>
+        useVoiceConversationController({
+          sessionId: "session-1",
+          onSend,
+          enabled: true,
+          isGooseSession: true,
+          pocketReady: true,
+          onPocketSetupRequired: vi.fn(),
+          routeBlocked,
+        }),
+      { initialProps: { routeBlocked: false } },
+    );
+
+    await waitFor(() => expect(voiceStoreMocks.subscriber).toBeDefined());
+    const transcript = {
+      type: "user",
+      sessionId: "session-1",
+      lifecycleId: "lifecycle-1",
+      id: "utterance-mid-flight",
+      text: "deliver after the block",
+      revision: 1,
+      deliveryAttempts: 0,
+    };
+    const delivery = voiceStoreMocks.subscriber?.(transcript);
+    await waitFor(() =>
+      expect(useVoiceConversationStore.getState().uiState).toBe(
+        "user-speaking",
+      ),
+    );
+
+    rerender({ routeBlocked: true });
+    act(() => useChatStore.getState().setChatState("session-1", "idle"));
+
+    await expect(delivery).rejects.toThrow("waiting for its bound chat");
+    expect(useVoiceConversationStore.getState().uiState).toBe("listening");
+    expect(nativeAssistantSpeechMocks.takeNotices).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(
+      useChatStore.getState().messagesBySession["session-1"] ?? [],
+    ).toEqual([]);
+
+    rerender({ routeBlocked: false });
+    await expect(
+      voiceStoreMocks.subscriber?.(transcript),
+    ).resolves.toBeUndefined();
+    expect(onSend).toHaveBeenCalledWith(
+      "deliver after the block",
+      undefined,
+      undefined,
+      expect.objectContaining({
+        assistantPrompt: "playback context",
+        displayText: "deliver after the block",
+      }),
+    );
   });
 
   it("defers transcripts until admission is unblocked", async () => {

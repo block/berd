@@ -479,12 +479,6 @@ function ensureVoiceEventDeliveryInitialized() {
           voiceConversationRevision: event.revision,
         },
       };
-      const playbackNotice = takeVoicePlaybackNotices(event.sessionId);
-      const displayOptions = {
-        ...sendOptions,
-        ...(playbackNotice ? { assistantPrompt: playbackNotice } : {}),
-        displayText: event.text,
-      };
       try {
         // This runs inside the per-session queue, so a prior send can change
         // the opportunity to steer before the next transcript is evaluated.
@@ -502,6 +496,12 @@ function ensureVoiceEventDeliveryInitialized() {
             "Voice transcript could not be sent because its bound chat is unavailable.",
           );
         }
+        const playbackNotice = takeVoicePlaybackNotices(event.sessionId);
+        const displayOptions = {
+          ...sendOptions,
+          ...(playbackNotice ? { assistantPrompt: playbackNotice } : {}),
+          displayText: event.text,
+        };
         store.setUiState("agent-working");
         const delivered =
           opportunity === "steer"
@@ -542,6 +542,16 @@ function ensureVoiceEventDeliveryInitialized() {
         resetVoiceUiWhenRunSettles(event.sessionId, deliveryRevision);
       } catch (deliveryError) {
         const current = useVoiceConversationStore.getState();
+        if (deliveryError instanceof VoiceTranscriptDeferredError) {
+          if (
+            current.status.lifecycle === "running" &&
+            current.status.sessionId === event.sessionId &&
+            current.status.revision >= deliveryRevision
+          ) {
+            current.setUiState("listening");
+          }
+          throw deliveryError;
+        }
         if (
           current.status.lifecycle === "running" &&
           current.status.sessionId === event.sessionId &&
@@ -654,6 +664,8 @@ export function useVoiceConversationController({
     (state) => state.clearRequestedStart,
   );
   const previousPocketReady = useRef(pocketReady);
+  const deliveryBlocked =
+    routeBlocked && enabled && isGooseSession && !readOnly;
 
   useEffect(() => {
     if (!enabled || !isGooseSession) return;
@@ -676,13 +688,13 @@ export function useVoiceConversationController({
 
   useEffect(() => {
     if (enabled && isGooseSession) ensureVoiceEventDeliveryInitialized();
-    if (routeBlocked) {
+    if (deliveryBlocked) {
       blockedSendRouteSessions.add(sessionId);
     } else {
       blockedSendRouteSessions.delete(sessionId);
     }
     const routeIsValid =
-      !routeBlocked &&
+      !deliveryBlocked &&
       canBindVoiceSendRoute({
         enabled,
         isGooseSession,
@@ -721,7 +733,7 @@ export function useVoiceConversationController({
     isGooseSession,
     onSend,
     readOnly,
-    routeBlocked,
+    deliveryBlocked,
     sessionId,
     status.sessionId,
   ]);
@@ -730,7 +742,7 @@ export function useVoiceConversationController({
     if (
       status.lifecycle !== "running" ||
       status.sessionId !== sessionId ||
-      routeBlocked ||
+      deliveryBlocked ||
       !canBindVoiceSendRoute({
         enabled,
         isGooseSession,
@@ -758,7 +770,7 @@ export function useVoiceConversationController({
     enabled,
     isGooseSession,
     readOnly,
-    routeBlocked,
+    deliveryBlocked,
     sessionId,
     status.lifecycle,
     status.sessionId,
