@@ -30,14 +30,17 @@ import type { VoiceInputBackend } from "../lib/voiceInputPreference";
 import type { SiriVoiceSelection } from "../api/siriVoice";
 
 interface VoiceSendRoute {
+  owner: symbol;
   sessionId: string;
   send: ChatInputSendHandler;
+  blocked: boolean;
+  canClaim: boolean;
 }
 
 // The backend conversation is process-wide, but voice input remains bound to
 // the chat that started the active lifecycle until that lifecycle terminates.
 let activeSendRoute: VoiceSendRoute | null = null;
-const blockedSendRouteSessions = new Set<string>();
+const mountedSendRoutes = new Map<symbol, VoiceSendRoute>();
 let deliveryInitialized = false;
 const operationInFlightBySession = new Set<string>();
 let replacementOperationInFlight = false;
@@ -59,6 +62,22 @@ export function createVoiceTranscriptDeliveryQueue() {
 }
 
 const enqueueVoiceTranscriptDelivery = createVoiceTranscriptDeliveryQueue();
+
+function activeRouteIsBlocked(sessionId: string): boolean {
+  return activeSendRoute?.sessionId === sessionId && activeSendRoute.blocked;
+}
+
+function releaseVoiceSendRoute(owner: symbol): VoiceSendRoute | null {
+  const released = mountedSendRoutes.get(owner);
+  mountedSendRoutes.delete(owner);
+  if (activeSendRoute?.owner !== owner) return activeSendRoute;
+
+  activeSendRoute =
+    [...mountedSendRoutes.values()].find(
+      (route) => route.sessionId === released?.sessionId && route.canClaim,
+    ) ?? null;
+  return activeSendRoute;
+}
 
 export function canBindVoiceSendRoute(options: {
   enabled: boolean;
@@ -448,7 +467,7 @@ function ensureVoiceEventDeliveryInitialized() {
     const deliveryRevision = event.revision;
     const shouldNotifyFailure = event.deliveryAttempts === 0;
     return enqueueVoiceTranscriptDelivery(event.sessionId, async () => {
-      if (blockedSendRouteSessions.has(event.sessionId)) {
+      if (activeRouteIsBlocked(event.sessionId)) {
         throw new VoiceTranscriptDeferredError(
           "Voice transcript is waiting for its bound chat to become available.",
         );
@@ -485,7 +504,7 @@ function ensureVoiceEventDeliveryInitialized() {
         const opportunity = await waitForVoiceDeliveryOpportunity(
           event.sessionId,
         );
-        if (blockedSendRouteSessions.has(event.sessionId)) {
+        if (activeRouteIsBlocked(event.sessionId)) {
           throw new VoiceTranscriptDeferredError(
             "Voice transcript is waiting for its bound chat to become available.",
           );
@@ -666,6 +685,19 @@ export function useVoiceConversationController({
     (state) => state.clearRequestedStart,
   );
   const previousPocketReady = useRef(pocketReady);
+  const routeOwnerRef = useRef<{
+    sessionId: string;
+    owner: symbol;
+  } | null>(null);
+  if (routeOwnerRef.current?.sessionId !== sessionId) {
+    routeOwnerRef.current = {
+      sessionId,
+      owner: Symbol("voice-send-route"),
+    };
+  }
+  const routeOwner = routeOwnerRef.current.owner;
+  const drainPendingTranscriptsRef = useRef(drainPendingTranscripts);
+  drainPendingTranscriptsRef.current = drainPendingTranscripts;
   const deliveryBlocked =
     routeBlocked && enabled && isGooseSession && !readOnly && !routeUnavailable;
 
@@ -690,36 +722,45 @@ export function useVoiceConversationController({
 
   useEffect(() => {
     if (enabled && isGooseSession) ensureVoiceEventDeliveryInitialized();
-    if (deliveryBlocked) {
-      blockedSendRouteSessions.add(sessionId);
-    } else {
-      blockedSendRouteSessions.delete(sessionId);
-    }
-    const routeIsValid =
-      !deliveryBlocked &&
-      !routeUnavailable &&
-      canBindVoiceSendRoute({
-        enabled,
-        isGooseSession,
-        readOnly,
-        disabled,
-      });
+    const routeCanPersist =
+      enabled && isGooseSession && !readOnly && !routeUnavailable;
+    const routeCanClaim =
+      routeCanPersist &&
+      canBindVoiceSendRoute({ enabled, isGooseSession, readOnly, disabled });
+    const registeredRoute: VoiceSendRoute = {
+      owner: routeOwner,
+      sessionId,
+      send: onSend,
+      blocked: deliveryBlocked,
+      canClaim: routeCanClaim,
+    };
+    mountedSendRoutes.set(routeOwner, registeredRoute);
     const activeVoiceSessionId = status.sessionId;
     const routeMount = resolveVoiceRouteMount({
-      routeIsValid,
+      routeIsValid: routeCanClaim,
       activeVoiceSessionId,
       boundRouteSessionId: activeSendRoute?.sessionId ?? null,
       candidateSessionId: sessionId,
     });
-    if (routeMount.claimRoute) {
-      activeSendRoute = { sessionId, send: onSend };
+    if (activeSendRoute?.owner === routeOwner) {
+      if (routeCanPersist) {
+        activeSendRoute = registeredRoute;
+      } else {
+        releaseVoiceSendRoute(routeOwner);
+        mountedSendRoutes.set(routeOwner, registeredRoute);
+      }
     } else if (
-      (!enabled || !isGooseSession || readOnly || routeUnavailable) &&
-      activeSendRoute?.sessionId === sessionId
+      routeMount.claimRoute &&
+      (activeSendRoute === null ||
+        activeSendRoute.sessionId !== activeVoiceSessionId)
     ) {
-      activeSendRoute = null;
+      activeSendRoute = registeredRoute;
     }
-    if (routeMount.drainPending) {
+    if (
+      routeMount.drainPending &&
+      activeSendRoute?.owner === routeOwner &&
+      !activeSendRoute.blocked
+    ) {
       const routeSessionId = activeSendRoute?.sessionId;
       if (!routeSessionId) return;
       void drainPendingTranscripts(
@@ -737,10 +778,24 @@ export function useVoiceConversationController({
     onSend,
     readOnly,
     deliveryBlocked,
+    routeOwner,
     routeUnavailable,
     sessionId,
     status.sessionId,
   ]);
+
+  useEffect(
+    () => () => {
+      const replacement = releaseVoiceSendRoute(routeOwner);
+      if (!replacement || replacement.blocked) return;
+      void drainPendingTranscriptsRef
+        .current(replacement.sessionId, transcriptAlreadyInChat)
+        .catch((drainError) => {
+          addErrorNotification(replacement.sessionId, errorText(drainError));
+        });
+    },
+    [routeOwner],
+  );
 
   useEffect(() => {
     if (
@@ -832,7 +887,14 @@ export function useVoiceConversationController({
     ensureVoiceEventDeliveryInitialized();
     const assistantSpeechHistory =
       captureNativeAssistantSpeechHistory(sessionId);
-    const route = { sessionId, send: onSend };
+    const route: VoiceSendRoute = {
+      owner: routeOwner,
+      sessionId,
+      send: onSend,
+      blocked: deliveryBlocked,
+      canClaim: true,
+    };
+    mountedSendRoutes.set(routeOwner, route);
     activeSendRoute = route;
     try {
       const foregroundGeneration =
@@ -847,8 +909,8 @@ export function useVoiceConversationController({
         backendStatus.sessionId === sessionId &&
         backendStatus.ownerWindowLabel === currentWindowLabel;
       if (isVoiceMicrophoneCaptureError(startError)) {
-        if (activeSendRoute?.sessionId === route.sessionId) {
-          activeSendRoute = null;
+        if (activeSendRoute?.owner === route.owner) {
+          releaseVoiceSendRoute(route.owner);
         }
         addErrorNotification(sessionId, errorText(startError));
         let cleanupError: unknown = null;
@@ -916,16 +978,18 @@ export function useVoiceConversationController({
         }
       }
       if (!conversationStarted) {
-        if (activeSendRoute?.sessionId === route.sessionId) {
-          activeSendRoute = null;
+        if (activeSendRoute?.owner === route.owner) {
+          releaseVoiceSendRoute(route.owner);
         }
         addErrorNotification(sessionId, errorText(startError));
       }
     }
   }, [
     inputBackend,
+    deliveryBlocked,
     onPocketSetupRequired,
     onSend,
+    routeOwner,
     sessionId,
     start,
     startAssistantSpeech,

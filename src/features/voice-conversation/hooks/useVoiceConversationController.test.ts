@@ -523,6 +523,134 @@ describe("voice transcript delivery coordination", () => {
     );
   });
 
+  it("uses blocking state from the mounted route that owns the call", async () => {
+    const ownerSend = vi.fn().mockResolvedValue(true);
+    const duplicateSend = vi.fn().mockResolvedValue(true);
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-multi-view",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 1,
+      },
+      uiState: "listening",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+    });
+
+    renderHook(() =>
+      useVoiceConversationController({
+        sessionId: "session-multi-view",
+        onSend: ownerSend,
+        enabled: true,
+        isGooseSession: true,
+        pocketReady: true,
+        onPocketSetupRequired: vi.fn(),
+        routeBlocked: false,
+      }),
+    );
+    renderHook(() =>
+      useVoiceConversationController({
+        sessionId: "session-multi-view",
+        onSend: duplicateSend,
+        enabled: true,
+        isGooseSession: true,
+        pocketReady: true,
+        onPocketSetupRequired: vi.fn(),
+        routeBlocked: true,
+      }),
+    );
+
+    await waitFor(() => expect(voiceStoreMocks.subscriber).toBeDefined());
+    await expect(
+      voiceStoreMocks.subscriber?.({
+        type: "user",
+        sessionId: "session-multi-view",
+        lifecycleId: "lifecycle-multi-view",
+        id: "utterance-owner-ready",
+        text: "deliver through the owner",
+        revision: 1,
+        deliveryAttempts: 0,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(ownerSend).toHaveBeenCalledOnce();
+    expect(duplicateSend).not.toHaveBeenCalled();
+  });
+
+  it("keeps a blocked owner authoritative until it unmounts", async () => {
+    const ownerSend = vi.fn().mockResolvedValue(true);
+    const replacementSend = vi.fn().mockResolvedValue(true);
+    const drainPendingTranscripts = vi.fn().mockResolvedValue(undefined);
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-owner-blocked",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 1,
+      },
+      uiState: "listening",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+      drainPendingTranscripts,
+    });
+
+    const owner = renderHook(
+      ({ routeBlocked }) =>
+        useVoiceConversationController({
+          sessionId: "session-owner-blocked",
+          onSend: ownerSend,
+          enabled: true,
+          isGooseSession: true,
+          pocketReady: true,
+          onPocketSetupRequired: vi.fn(),
+          routeBlocked,
+        }),
+      { initialProps: { routeBlocked: false } },
+    );
+    owner.rerender({ routeBlocked: true });
+    renderHook(() =>
+      useVoiceConversationController({
+        sessionId: "session-owner-blocked",
+        onSend: replacementSend,
+        enabled: true,
+        isGooseSession: true,
+        pocketReady: true,
+        onPocketSetupRequired: vi.fn(),
+        routeBlocked: false,
+      }),
+    );
+
+    await waitFor(() => expect(voiceStoreMocks.subscriber).toBeDefined());
+    const transcript = {
+      type: "user",
+      sessionId: "session-owner-blocked",
+      lifecycleId: "lifecycle-owner-blocked",
+      id: "utterance-owner-blocked",
+      text: "wait for the owner",
+      revision: 1,
+      deliveryAttempts: 0,
+    };
+    await expect(voiceStoreMocks.subscriber?.(transcript)).rejects.toThrow(
+      "waiting for its bound chat",
+    );
+    expect(ownerSend).not.toHaveBeenCalled();
+    expect(replacementSend).not.toHaveBeenCalled();
+
+    owner.unmount();
+    await waitFor(() => expect(drainPendingTranscripts).toHaveBeenCalled());
+    await expect(
+      voiceStoreMocks.subscriber?.(transcript),
+    ).resolves.toBeUndefined();
+    expect(replacementSend).toHaveBeenCalledOnce();
+  });
+
   it("serializes deliveries for the same session and re-evaluates in order", async () => {
     const enqueue = createVoiceTranscriptDeliveryQueue();
     const events: string[] = [];
