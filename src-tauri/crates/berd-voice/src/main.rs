@@ -1206,42 +1206,25 @@ fn synthesize_to_output(
     active: &AtomicBool,
     sender: &mpsc::Sender<PlaybackEvent>,
 ) -> Result<bool, String> {
-    use berd_voice::{wait_until_drained, TtsOutcome};
+    use berd_voice::{DrainPolicy, OutboundOutcome, OutboundPlayback};
 
     let spec = backend.pcm_spec();
-    let mut initial = Vec::new();
-    let mut started = false;
     let initial_frames = usize::try_from(spec.sample_rate / 5)
         .map_err(|_| "TTS sample rate is too large".to_string())?;
-    let outcome = backend.synthesize(text, active, &mut |samples| {
-        output.check_health()?;
-        if started {
-            output.write(samples)?;
-        } else {
-            initial.extend_from_slice(samples);
-            if initial.len() >= initial_frames {
-                output.write(&initial)?;
-                initial.clear();
-                started = true;
-                let _ = sender.send(PlaybackEvent::Started(speech_id));
-            }
-        }
-        Ok(())
-    })?;
-    if outcome == TtsOutcome::Cancelled || !active.load(Ordering::SeqCst) {
-        output.cancel();
+    let mut playback = OutboundPlayback::new(output, active, spec.sample_rate, initial_frames)?;
+    if playback
+        .synthesize_segment(backend, text, &mut |_| Ok(()), &mut || {
+            let _ = sender.send(PlaybackEvent::Started(speech_id));
+        })
+        .map_err(|failure| failure.message)?
+        == OutboundOutcome::Interrupted
+    {
         return Ok(false);
     }
-    if !initial.is_empty() {
-        output.write(&initial)?;
-        started = true;
-        let _ = sender.send(PlaybackEvent::Started(speech_id));
-    }
-    if !wait_until_drained(output, active, Duration::from_millis(10))? {
-        return Ok(false);
-    }
-    let _ = started;
-    Ok(true)
+    playback
+        .finish(DrainPolicy::default(), &mut |_| Ok(()))
+        .map(|outcome| outcome == OutboundOutcome::Completed)
+        .map_err(|failure| failure.message)
 }
 
 #[cfg(test)]

@@ -11,6 +11,7 @@ pub mod mac_speech;
 mod macos_audio_output;
 pub mod openai;
 pub mod openai_realtime;
+mod outbound;
 mod parakeet;
 mod pocket;
 pub mod protocol;
@@ -22,6 +23,10 @@ mod tts;
 pub use audio_output::{wait_until_drained, PcmAudioOutput};
 #[cfg(target_os = "macos")]
 pub use macos_audio_output::PocketAudioPlayer;
+pub use outbound::{
+    DeliveryProgress, DeliverySegment, DrainPolicy, DrainTimeoutOutcome, OutboundFailure,
+    OutboundOutcome, OutboundPlayback,
+};
 pub use parakeet::ParakeetRecognizer;
 pub use pocket::{
     load_pocket_voice_style, load_text_to_speech, load_voice_style, take_streaming_text_chunks,
