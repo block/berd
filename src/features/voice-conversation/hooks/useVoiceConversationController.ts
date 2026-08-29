@@ -701,6 +701,29 @@ export function useVoiceConversationController({
     };
   }
   const routeOwner = routeOwnerRef.current.owner;
+  const startEligibilityRef = useRef<{
+    routeOwner: symbol;
+    sessionId: string;
+    inputBackend: VoiceInputBackend | null;
+    eligible: boolean;
+  }>({
+    routeOwner,
+    sessionId,
+    inputBackend,
+    eligible: false,
+  });
+  startEligibilityRef.current = {
+    routeOwner,
+    sessionId,
+    inputBackend,
+    eligible:
+      inputBackend !== null &&
+      enabled &&
+      isGooseSession &&
+      !readOnly &&
+      !disabled &&
+      !routeUnavailable,
+  };
   const drainPendingTranscriptsRef = useRef(drainPendingTranscripts);
   drainPendingTranscriptsRef.current = drainPendingTranscripts;
   const deliveryBlocked =
@@ -877,6 +900,16 @@ export function useVoiceConversationController({
 
   const startCurrentConversation = useCallback(async () => {
     if (inputBackend === null) return;
+    const startIsStillEligible = () => {
+      const current = startEligibilityRef.current;
+      return (
+        current.eligible &&
+        current.routeOwner === routeOwner &&
+        current.sessionId === sessionId &&
+        current.inputBackend === inputBackend
+      );
+    };
+    if (!startIsStillEligible()) return;
     try {
       if ((await getMicrophonePermissionStatus()) === "denied") {
         onPocketSetupRequired();
@@ -887,24 +920,27 @@ export function useVoiceConversationController({
       // of truth and provides the recovery path for unsupported platforms,
       // stale permission state, and other audio startup failures.
     }
+    if (!startIsStillEligible()) return;
     // Do not rely on the mount effect racing ahead of the user's first
     // click. The native recognizer can finalize quickly, so its delivery
     // subscriber must exist before the microphone lifecycle starts.
     ensureVoiceEventDeliveryInitialized();
     const assistantSpeechHistory =
       captureNativeAssistantSpeechHistory(sessionId);
-    const route: VoiceSendRoute = {
-      owner: routeOwner,
-      sessionId,
-      send: onSend,
-      blocked: deliveryBlocked,
-      canClaim: true,
-    };
-    mountedSendRoutes.set(routeOwner, route);
-    activeSendRoute = route;
+    let route: VoiceSendRoute | null = null;
     try {
       const foregroundGeneration =
         await confirmVoiceConversationForegroundSession(sessionId);
+      if (!startIsStillEligible()) return;
+      route = {
+        owner: routeOwner,
+        sessionId,
+        send: onSend,
+        blocked: deliveryBlocked,
+        canClaim: true,
+      };
+      mountedSendRoutes.set(routeOwner, route);
+      activeSendRoute = route;
       await start(sessionId, inputBackend, foregroundGeneration);
       startAssistantSpeech(assistantSpeechHistory);
     } catch (startError) {
@@ -915,7 +951,7 @@ export function useVoiceConversationController({
         backendStatus.sessionId === sessionId &&
         backendStatus.ownerWindowLabel === currentWindowLabel;
       if (isVoiceMicrophoneCaptureError(startError)) {
-        if (activeSendRoute?.owner === route.owner) {
+        if (route && activeSendRoute?.owner === route.owner) {
           releaseVoiceSendRoute(route.owner);
         }
         addErrorNotification(sessionId, errorText(startError));
@@ -984,7 +1020,7 @@ export function useVoiceConversationController({
         }
       }
       if (!conversationStarted) {
-        if (activeSendRoute?.owner === route.owner) {
+        if (route && activeSendRoute?.owner === route.owner) {
           releaseVoiceSendRoute(route.owner);
         }
         addErrorNotification(sessionId, errorText(startError));

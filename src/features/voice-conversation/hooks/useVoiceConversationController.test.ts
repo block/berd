@@ -1756,6 +1756,57 @@ describe("voice transcript delivery coordination", () => {
     expect(nativeAssistantSpeechMocks.stop).not.toHaveBeenCalled();
   });
 
+  it("does not start after admission becomes permanently unavailable", async () => {
+    const stopped = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "stopped" as const,
+      sessionId: null,
+      ownerWindowLabel: null,
+      microphoneMuted: false,
+      revision: 1,
+    };
+    const refreshRequest = deferred<typeof stopped>();
+    const start = vi.fn().mockResolvedValue({
+      ...stopped,
+      lifecycle: "starting" as const,
+      sessionId: "session-a",
+      ownerWindowLabel: "main",
+      revision: 2,
+    });
+    useVoiceConversationStore.setState({
+      status: stopped,
+      uiState: "off",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+      refreshStatus: vi.fn().mockReturnValue(refreshRequest.promise),
+      start,
+    });
+    const options = {
+      sessionId: "session-a",
+      onSend: vi.fn().mockResolvedValue(true),
+      enabled: true,
+      isGooseSession: true,
+      pocketReady: true,
+      onPocketSetupRequired: vi.fn(),
+    };
+    const control = renderHook(
+      ({ routeUnavailable }) =>
+        useVoiceConversationController({ ...options, routeUnavailable }),
+      { initialProps: { routeUnavailable: false } },
+    );
+
+    let toggling!: Promise<void>;
+    act(() => {
+      toggling = Promise.resolve(control.result.current.onToggle());
+    });
+    control.rerender({ routeUnavailable: true });
+    refreshRequest.resolve(stopped);
+    await toggling;
+
+    expect(start).not.toHaveBeenCalled();
+  });
+
   it("deduplicates concurrent controls for the same session", async () => {
     const stopped = {
       available: true,
