@@ -28,6 +28,33 @@ bool berd_siri_tts_download_voice(
 
 typedef bool (*BerdSiriTTSShouldStop)(void *context);
 typedef void (*BerdSiriTTSPlaybackStarted)(void *context);
+typedef bool (*BerdSiriTTSPcmFrames)(
+    const float *samples,
+    uint32_t frame_count,
+    void *context
+);
+
+/// Validates that an exact Siri voice is downloaded and usable through
+/// sirittsd. This does not synthesize or play audio.
+bool berd_siri_tts_validate_voice(
+    const char *language,
+    const char *voice_name,
+    char **error_out
+);
+
+/// Synthesizes one utterance and emits normalized 48 kHz mono Float32 PCM.
+/// This call blocks until synthesis and converter flushing complete. It never
+/// opens an audio device. Returning false from `pcm_frames` cancels synthesis.
+bool berd_siri_tts_synthesize_pcm(
+    const char *text,
+    const char *language,
+    const char *voice_name,
+    float rate,
+    BerdSiriTTSShouldStop should_stop,
+    BerdSiriTTSPcmFrames pcm_frames,
+    void *context,
+    char **error_out
+);
 
 /// Plays the small per-voice sample bundled with macOS. This works before the
 /// full Siri voice has been downloaded.

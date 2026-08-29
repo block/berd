@@ -21,8 +21,6 @@ let package = Package(
             dependencies: ["BerdObjCExceptionCatch"],
             linkerSettings: [
                 .linkedFramework("AVFAudio"),
-                .linkedFramework("AVFoundation"),
-                .linkedFramework("Speech"),
             ]
         )
     ]

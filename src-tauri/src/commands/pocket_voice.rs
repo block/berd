@@ -15,7 +15,7 @@ use std::time::{Duration, Instant, SystemTime};
 #[cfg(target_os = "macos")]
 use berd_voice::SAMPLE_RATE;
 #[cfg(target_os = "macos")]
-use berd_voice::{load_text_to_speech, load_voice_style, PocketTts, VoiceStyle};
+use berd_voice::{load_pocket_voice_style, load_text_to_speech, PocketTts, VoiceStyle};
 use futures_util::StreamExt;
 #[cfg(target_os = "macos")]
 use objc2_core_audio::{
@@ -32,12 +32,12 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 #[cfg(target_os = "macos")]
 use super::native_voice::AssistantSpeechGuard;
-#[cfg(target_os = "macos")]
-use super::pocket_audio_player::PocketAudioPlayer;
 use super::{
     native_voice::{InterruptionSensitivity, NativeVoiceState},
     voice_capture::VoiceCaptureState,
 };
+#[cfg(target_os = "macos")]
+use berd_voice::PocketAudioPlayer;
 use tokio::io::AsyncWriteExt;
 
 const CACHE_VERSION: &str = "native-voice-v2";
@@ -2215,7 +2215,7 @@ fn run_pocket_voice_stream(
             .to_str()
             .ok_or_else(|| "Pocket model path is not valid UTF-8".to_string())?,
     )?;
-    let style = load_voice_style(&version.join("voices").join(voice.filename))?;
+    let style = load_pocket_voice_style(&version, voice.id)?;
     let mut applied_rate_bits = playback_rate.load(Ordering::SeqCst);
     let player = PocketAudioPlayer::new(
         SAMPLE_RATE,
@@ -2248,7 +2248,7 @@ fn run_pocket_voice_stream(
                 delivery: Some(delivery),
             });
         }
-        player.ensure_healthy()?;
+        player.check_health()?;
         let command = receiver.recv_timeout(Duration::from_millis(20));
         match command {
             Ok(PocketStreamCommand::Append(text)) => {
@@ -2369,7 +2369,7 @@ fn run_pocket_voice_stream(
                         sync_pocket_playback_rate(&player, &playback_rate, &mut applied_rate_bits)
                     })?;
                     if !completion_timed_out {
-                        player.ensure_healthy()?;
+                        player.check_health()?;
                         match pocket_native_drain_status(
                             player.is_empty(),
                             drain_started.elapsed(),
@@ -2377,7 +2377,7 @@ fn run_pocket_voice_stream(
                         ) {
                             PocketNativeDrainStatus::Waiting => {}
                             PocketNativeDrainStatus::Drained => {
-                                player.ensure_healthy()?;
+                                player.check_health()?;
                             }
                             PocketNativeDrainStatus::TimedOut => {
                                 log::warn!("Pocket native buffer completion bookkeeping timed out");
@@ -2637,7 +2637,7 @@ fn synthesize_pocket_stream_ready(
                     callback_error = Some(error);
                     return false;
                 }
-                if let Err(error) = player.ensure_healthy() {
+                if let Err(error) = player.check_health() {
                     callback_error = Some(error);
                     return false;
                 }
@@ -2701,7 +2701,7 @@ fn synthesize_and_stream(
             .to_str()
             .ok_or_else(|| "Pocket model path is not valid UTF-8".to_string())?,
     )?;
-    let style = load_voice_style(&version.join("voices").join(voice.filename))?;
+    let style = load_pocket_voice_style(&version, voice.id)?;
     let mut applied_rate_bits = playback_rate.load(Ordering::SeqCst);
     let player = PocketAudioPlayer::new(
         SAMPLE_RATE,
@@ -2730,7 +2730,7 @@ fn synthesize_and_stream(
             }
             return false;
         }
-        if let Err(error) = player.ensure_healthy() {
+        if let Err(error) = player.check_health() {
             if let Ok(mut callback_error) = callback_error_slot.lock() {
                 *callback_error = Some(error);
             }
@@ -2781,12 +2781,12 @@ fn synthesize_and_stream(
             player.stop();
             break;
         }
-        player.ensure_healthy()?;
+        player.check_health()?;
         match pocket_native_drain_status(player.is_empty(), drain_started.elapsed(), drain_timeout)
         {
             PocketNativeDrainStatus::Waiting => {}
             PocketNativeDrainStatus::Drained => {
-                player.ensure_healthy()?;
+                player.check_health()?;
                 break;
             }
             PocketNativeDrainStatus::TimedOut => {

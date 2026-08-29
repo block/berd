@@ -1,37 +1,33 @@
 //! OpenAI realtime transcription configuration and streaming speech playback.
 
 use std::sync::{
-    atomic::{AtomicBool, AtomicU64, Ordering},
+    atomic::{AtomicBool, Ordering},
     mpsc, Arc, Mutex,
 };
 #[cfg(any(test, target_os = "macos"))]
 use std::time::Duration;
 
 #[cfg(target_os = "macos")]
-use futures_util::StreamExt;
-#[cfg(target_os = "macos")]
-use reqwest::header::CONTENT_TYPE;
-#[cfg(target_os = "macos")]
-use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
+use berd_voice::{
+    openai::{stream_openai_pcm, OpenAiPcmOutcome, OpenAiSpeechConfig},
+    PcmAudioOutput, PocketAudioPlayer,
+};
 use serde::Serialize;
 use serde_json::json;
+#[cfg(target_os = "macos")]
 use tauri::Emitter;
 use tauri::{AppHandle, State};
 
 #[cfg(target_os = "macos")]
 use super::{
     native_voice::AssistantSpeechGuard,
-    pocket_audio_player::PocketAudioPlayer,
     pocket_voice::{
-        effective_output_device_name, playback_latency_safety_duration, selected_output_device,
-        should_suppress_capture,
+        effective_output_device_name, playback_latency_safety_duration, should_suppress_capture,
     },
 };
 use super::{
     native_voice::{InterruptionSensitivity, NativeVoiceState},
-    openai_voice_credentials::{self, OpenAiVoiceCredential},
     pocket_voice::VoiceInterruptionMode,
-    voice_capture::VoiceCaptureState,
 };
 #[cfg(any(test, target_os = "macos"))]
 use std::time::Instant;
@@ -40,11 +36,6 @@ const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 const DEFAULT_TRANSCRIPTION_MODEL: &str = "gpt-live-transcribe";
 const DEFAULT_TTS_MODEL: &str = "gpt-4o-mini-tts";
 const DEFAULT_TTS_VOICE: &str = "marin";
-const BASE_URL_ENV: &str = "BERD_OPENAI_VOICE_BASE_URL";
-const STT_MODEL_ENV: &str = "BERD_OPENAI_STT_MODEL";
-const TTS_MODEL_ENV: &str = "BERD_OPENAI_TTS_MODEL";
-const TTS_VOICE_ENV: &str = "BERD_OPENAI_TTS_VOICE";
-const SETTINGS_CHANGED_EVENT: &str = "openai-voice:settings-changed";
 #[cfg(target_os = "macos")]
 const TTS_SAMPLE_RATE: u32 = 24_000;
 // Avoid starting the audio device from a tiny first network chunk that can drain
@@ -54,19 +45,16 @@ const INITIAL_PLAYBACK_BUFFER_FRAMES: usize = TTS_SAMPLE_RATE as usize / 5;
 #[cfg(target_os = "macos")]
 const TTS_EVENT: &str = "openai-voice:stream-event";
 #[cfg(target_os = "macos")]
-const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 #[cfg(target_os = "macos")]
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 #[cfg(target_os = "macos")]
 const MAX_TTS_INPUT_CHARS: usize = 4096;
-#[cfg(target_os = "macos")]
-const MAX_FINAL_PLAYBACK_DRAIN: Duration = Duration::from_secs(600);
 
 #[derive(Clone, Debug, Default)]
 pub struct OpenAiVoiceState {
     playback: Arc<Mutex<PlaybackRuntime>>,
     configured: Arc<AtomicBool>,
-    credential_revision: Arc<AtomicU64>,
 }
 
 impl OpenAiVoiceState {
@@ -111,25 +99,13 @@ enum OpenAiStreamCommand {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenAiVoiceStatus {
-    stt_configured: bool,
-    tts_configured: bool,
-    stt_configuration_source: OpenAiVoiceConfigurationSource,
-    tts_configuration_source: OpenAiVoiceConfigurationSource,
-    stt_unavailable_reason: Option<String>,
-    tts_unavailable_reason: Option<String>,
+    configured: bool,
     transcription_model: String,
     speech_model: String,
     speech_voice: String,
     playback_speed: f32,
     tts_available: bool,
     unavailable_reason: Option<String>,
-}
-
-#[derive(Clone, Copy, Serialize)]
-#[serde(rename_all = "camelCase")]
-enum OpenAiVoiceConfigurationSource {
-    Default,
-    Environment,
 }
 
 #[cfg(target_os = "macos")]
@@ -178,23 +154,90 @@ fn env_trimmed(name: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-#[cfg(target_os = "macos")]
-fn tts_api_key() -> Result<String, String> {
-    openai_voice_credentials::require(OpenAiVoiceCredential::TextToSpeech)
+fn goose_yaml_value(path: &std::path::Path, name: &str) -> Result<Option<String>, String> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let payload = std::fs::read_to_string(path)
+        .map_err(|error| format!("Could not read Goose configuration: {error}"))?;
+    let values: serde_json::Value = yaml_serde::from_str(&payload)
+        .map_err(|error| format!("Goose configuration is invalid: {error}"))?;
+    Ok(values
+        .get(name)
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string))
 }
 
-pub(crate) fn stt_api_key() -> Result<String, String> {
-    openai_voice_credentials::require(OpenAiVoiceCredential::SpeechToText)
+fn goose_openai_api_key() -> Result<Option<String>, String> {
+    if let Some(value) = env_trimmed("OPENAI_API_KEY") {
+        return Ok(Some(value));
+    }
+    let mut secure_store_error = None;
+    {
+        match keyring::Entry::new("goose", "secrets") {
+            Ok(entry) => match entry.get_password() {
+                Ok(payload) => match serde_json::from_str::<serde_json::Value>(&payload) {
+                    Ok(secrets) => {
+                        if let Some(key) = secrets
+                            .get("OPENAI_API_KEY")
+                            .and_then(serde_json::Value::as_str)
+                            .map(str::trim)
+                            .filter(|value| !value.is_empty())
+                        {
+                            return Ok(Some(key.to_string()));
+                        }
+                    }
+                    Err(error) => {
+                        secure_store_error = Some(format!(
+                            "Goose's secure credential store is not valid JSON: {error}"
+                        ));
+                    }
+                },
+                Err(keyring::Error::NoEntry) => {}
+                Err(error) => {
+                    secure_store_error = Some(format!(
+                        "Could not read Goose's OpenAI credential from secure storage: {error}"
+                    ));
+                }
+            },
+            Err(error) => {
+                secure_store_error = Some(format!(
+                    "Could not access Goose's secure credential store: {error}"
+                ));
+            }
+        }
+    }
+    let config_path = crate::services::goose_config::config_path()?;
+    let secrets_path = config_path
+        .parent()
+        .ok_or_else(|| "Could not resolve Goose's credential directory".to_string())?
+        .join("secrets.yaml");
+    if let Some(key) = goose_yaml_value(&secrets_path, "OPENAI_API_KEY")? {
+        return Ok(Some(key));
+    }
+    if let Some(error) = secure_store_error {
+        return Err(error);
+    }
+    Ok(None)
 }
 
-fn normalize_openai_base_url(raw_url: String) -> Result<String, String> {
+pub(crate) fn api_key() -> Result<String, String> {
+    goose_openai_api_key()?.ok_or_else(|| {
+        "OpenAI voice is not configured. Configure the OpenAI provider in Berd, then try again."
+            .to_string()
+    })
+}
+
+fn normalize_openai_base_url(raw_url: String, assume_v1: bool) -> Result<String, String> {
     let mut url = reqwest::Url::parse(&raw_url)
         .map_err(|error| format!("OpenAI voice endpoint is invalid: {error}"))?;
-    if url.scheme() != "https" {
-        return Err("OpenAI voice endpoint must use HTTPS".to_string());
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err("OpenAI voice endpoint must use HTTP or HTTPS".to_string());
     }
     let path = url.path().trim_end_matches('/').to_string();
-    if path.is_empty() {
+    if assume_v1 || path.is_empty() {
         let path = if path.ends_with("/v1") {
             path
         } else {
@@ -209,8 +252,18 @@ fn normalize_openai_base_url(raw_url: String) -> Result<String, String> {
 }
 
 fn base_url() -> Result<String, String> {
-    if let Some(base_url) = env_trimmed(BASE_URL_ENV) {
-        return normalize_openai_base_url(base_url);
+    if let Some(host) = env_trimmed("OPENAI_HOST") {
+        return normalize_openai_base_url(host, true);
+    }
+    if let Some(base_url) = env_trimmed("OPENAI_BASE_URL") {
+        return normalize_openai_base_url(base_url, false);
+    }
+    let config_path = crate::services::goose_config::config_path()?;
+    if let Some(base_url) = goose_yaml_value(&config_path, "OPENAI_BASE_URL")? {
+        return normalize_openai_base_url(base_url, false);
+    }
+    if let Some(host) = goose_yaml_value(&config_path, "OPENAI_HOST")? {
+        return normalize_openai_base_url(host, true);
     }
     Ok(DEFAULT_BASE_URL.to_string())
 }
@@ -233,37 +286,17 @@ pub(crate) fn realtime_endpoint() -> Result<String, String> {
 }
 
 pub(crate) fn transcription_model() -> String {
-    env_trimmed(STT_MODEL_ENV).unwrap_or_else(|| DEFAULT_TRANSCRIPTION_MODEL.to_string())
+    env_trimmed("OPENAI_TRANSCRIPTION_MODEL")
+        .or_else(|| env_trimmed("OPENAI_STT_MODEL"))
+        .unwrap_or_else(|| DEFAULT_TRANSCRIPTION_MODEL.to_string())
 }
 
 fn speech_model() -> String {
-    env_trimmed(TTS_MODEL_ENV).unwrap_or_else(|| DEFAULT_TTS_MODEL.to_string())
+    env_trimmed("OPENAI_TTS_MODEL").unwrap_or_else(|| DEFAULT_TTS_MODEL.to_string())
 }
 
 fn speech_voice() -> String {
-    env_trimmed(TTS_VOICE_ENV).unwrap_or_else(|| DEFAULT_TTS_VOICE.to_string())
-}
-
-fn tts_configuration_source() -> OpenAiVoiceConfigurationSource {
-    if [BASE_URL_ENV, TTS_MODEL_ENV, TTS_VOICE_ENV]
-        .iter()
-        .any(|name| env_trimmed(name).is_some())
-    {
-        OpenAiVoiceConfigurationSource::Environment
-    } else {
-        OpenAiVoiceConfigurationSource::Default
-    }
-}
-
-fn stt_configuration_source() -> OpenAiVoiceConfigurationSource {
-    if [BASE_URL_ENV, STT_MODEL_ENV]
-        .iter()
-        .any(|name| env_trimmed(name).is_some())
-    {
-        OpenAiVoiceConfigurationSource::Environment
-    } else {
-        OpenAiVoiceConfigurationSource::Default
-    }
+    env_trimmed("OPENAI_TTS_VOICE").unwrap_or_else(|| DEFAULT_TTS_VOICE.to_string())
 }
 
 fn endpoint(path: &str) -> Result<String, String> {
@@ -278,15 +311,8 @@ fn endpoint_for_base_url(base_url: &str, path: &str) -> Result<String, String> {
     Ok(url.to_string())
 }
 
-#[cfg(target_os = "macos")]
-fn authorized_headers(key: &str) -> Result<HeaderMap, String> {
-    let mut headers = HeaderMap::new();
-    let bearer = format!("Bearer {key}");
-    headers.insert(
-        AUTHORIZATION,
-        HeaderValue::from_str(&bearer).map_err(|_| "OpenAI API key is not a valid header value")?,
-    );
-    Ok(headers)
+fn openai_voice_configured(provider_configured: bool, environment_key: Option<&str>) -> bool {
+    provider_configured || environment_key.is_some_and(|key| !key.trim().is_empty())
 }
 
 fn speed_settings_path() -> Result<std::path::PathBuf, String> {
@@ -324,140 +350,43 @@ fn persist_playback_speed(speed: f32) -> Result<(), String> {
 fn client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
+        .timeout(REQUEST_TIMEOUT)
         .build()
         .map_err(|error| format!("create OpenAI HTTP client: {error}"))
 }
 
 #[tauri::command]
-pub async fn get_openai_voice_status(
+pub fn get_openai_voice_status(
     state: State<'_, OpenAiVoiceState>,
+    provider_configured: bool,
 ) -> Result<OpenAiVoiceStatus, String> {
+    // Provider metadata avoids a passive Keychain read; the environment is
+    // safe to inspect directly and has the same highest-priority semantics as
+    // the credential resolver used when a stream starts.
+    let environment_key = env_trimmed("OPENAI_API_KEY");
+    let configured = openai_voice_configured(provider_configured, environment_key.as_deref());
+    state.configured.store(configured, Ordering::Release);
     let playback_speed = state
         .playback
         .lock()
         .map_err(|_| "OpenAI voice playback state lock was poisoned".to_string())?
         .speed;
     let tts_available = cfg!(target_os = "macos");
-    let credential_revision = state.credential_revision.load(Ordering::Acquire);
-    let credential_result = tauri::async_runtime::spawn_blocking(move || {
-        openai_voice_credentials::read(OpenAiVoiceCredential::SpeechToText)
-    })
-    .await
-    .map_err(|error| format!("Could not check OpenAI voice credentials: {error}"))?;
-    let credential_error = credential_result.as_ref().err().cloned();
-    let stt_error = credential_error.clone();
-    let tts_error = tts_available.then_some(credential_error).flatten();
-    let stt_configured = credential_result.unwrap_or(None).is_some();
-    let tts_configured = tts_available && stt_configured;
-    if state.credential_revision.load(Ordering::Acquire) == credential_revision {
-        state.configured.store(stt_configured, Ordering::Release);
-    }
     Ok(OpenAiVoiceStatus {
-        stt_configured,
-        tts_configured,
-        stt_configuration_source: stt_configuration_source(),
-        tts_configuration_source: tts_configuration_source(),
-        stt_unavailable_reason: stt_error,
-        tts_unavailable_reason: tts_error,
+        configured,
         transcription_model: transcription_model(),
         speech_model: speech_model(),
         speech_voice: speech_voice(),
         playback_speed,
         tts_available,
-        unavailable_reason: if !tts_available {
-            Some("unsupportedPlatform".to_string())
-        } else if !tts_configured {
-            Some("missingApiKey".to_string())
+        unavailable_reason: if !configured {
+            Some("Configure the OpenAI provider in Berd to use OpenAI voice.".to_string())
+        } else if !tts_available {
+            Some("OpenAI voice playback is currently supported on macOS only.".to_string())
         } else {
             None
         },
     })
-}
-
-#[tauri::command]
-pub async fn set_openai_stt_api_key(
-    app: AppHandle,
-    state: State<'_, OpenAiVoiceState>,
-    native_voice: State<'_, NativeVoiceState>,
-    capture: State<'_, VoiceCaptureState>,
-    api_key: String,
-) -> Result<(), String> {
-    let api_key = api_key.trim();
-    if api_key.is_empty() {
-        return Err("OpenAI speech-to-text API key cannot be empty".to_string());
-    }
-    native_voice
-        .stop_active_then(&app, &capture, || {
-            stop_openai_voice_inner(&state)?;
-            openai_voice_credentials::store(OpenAiVoiceCredential::SpeechToText, api_key)?;
-            state.credential_revision.fetch_add(1, Ordering::AcqRel);
-            state.configured.store(true, Ordering::Release);
-            app.emit(SETTINGS_CHANGED_EVENT, ())
-                .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))
-        })
-        .await
-}
-
-#[tauri::command]
-pub async fn clear_openai_stt_api_key(
-    app: AppHandle,
-    state: State<'_, OpenAiVoiceState>,
-    native_voice: State<'_, NativeVoiceState>,
-    capture: State<'_, VoiceCaptureState>,
-) -> Result<(), String> {
-    native_voice
-        .stop_active_then(&app, &capture, || {
-            stop_openai_voice_inner(&state)?;
-            openai_voice_credentials::clear(OpenAiVoiceCredential::SpeechToText)?;
-            state.credential_revision.fetch_add(1, Ordering::AcqRel);
-            state.configured.store(false, Ordering::Release);
-            app.emit(SETTINGS_CHANGED_EVENT, ())
-                .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))
-        })
-        .await
-}
-
-#[tauri::command]
-pub async fn set_openai_tts_api_key(
-    app: AppHandle,
-    state: State<'_, OpenAiVoiceState>,
-    native_voice: State<'_, NativeVoiceState>,
-    capture: State<'_, VoiceCaptureState>,
-    api_key: String,
-) -> Result<(), String> {
-    let api_key = api_key.trim();
-    if api_key.is_empty() {
-        return Err("OpenAI text-to-speech API key cannot be empty".to_string());
-    }
-    native_voice
-        .stop_active_then(&app, &capture, || {
-            stop_openai_voice_inner(&state)?;
-            openai_voice_credentials::store(OpenAiVoiceCredential::TextToSpeech, api_key)?;
-            state.credential_revision.fetch_add(1, Ordering::AcqRel);
-            state.configured.store(true, Ordering::Release);
-            app.emit(SETTINGS_CHANGED_EVENT, ())
-                .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))
-        })
-        .await
-}
-
-#[tauri::command]
-pub async fn clear_openai_tts_api_key(
-    app: AppHandle,
-    state: State<'_, OpenAiVoiceState>,
-    native_voice: State<'_, NativeVoiceState>,
-    capture: State<'_, VoiceCaptureState>,
-) -> Result<(), String> {
-    native_voice
-        .stop_active_then(&app, &capture, || {
-            stop_openai_voice_inner(&state)?;
-            openai_voice_credentials::clear(OpenAiVoiceCredential::TextToSpeech)?;
-            state.credential_revision.fetch_add(1, Ordering::AcqRel);
-            state.configured.store(false, Ordering::Release);
-            app.emit(SETTINGS_CHANGED_EVENT, ())
-                .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))
-        })
-        .await
 }
 
 #[tauri::command]
@@ -489,7 +418,7 @@ pub fn start_openai_voice_stream(
         if stream_id.trim().is_empty() {
             return Err("OpenAI voice stream id cannot be empty".to_string());
         }
-        let key = tts_api_key()?;
+        let key = api_key()?;
         let (sender, receiver) = mpsc::channel();
         let active = Arc::new(AtomicBool::new(true));
         {
@@ -705,9 +634,9 @@ fn run_openai_voice_stream(
         .enable_all()
         .build()
         .map_err(|error| format!("Could not initialize OpenAI speech runtime: {error}"))?;
-    let configured_output_device = selected_output_device();
-    let player = PocketAudioPlayer::new(TTS_SAMPLE_RATE, 1.0, configured_output_device.as_deref())?;
-    let output_device = effective_output_device_name(configured_output_device.as_deref());
+    let player = PocketAudioPlayer::new(TTS_SAMPLE_RATE, 1.0, None)?;
+    let output: &dyn PcmAudioOutput = &player;
+    let output_device = effective_output_device_name(None);
     let suppress_capture = should_suppress_capture(interruption_mode, output_device.as_deref());
     let output_latency_grace = playback_latency_safety_duration(output_device.as_deref());
     let mut assistant_speech = None::<AssistantSpeechGuard>;
@@ -721,30 +650,24 @@ fn run_openai_voice_stream(
     let mut last_progress = Instant::now();
 
     loop {
-        if started {
-            player.ensure_healthy().map_err(|error| StreamFailure {
-                error,
-                delivery: Some(snapshot_delivery(&delivery, &player)),
-            })?;
-        }
         update_openai_assistant_speech(
-            player.is_empty(),
+            output.is_drained(),
             &mut assistant_speech,
             &mut playback_drained_at,
             output_latency_grace,
             Instant::now(),
         );
         if !active.load(Ordering::SeqCst) {
-            player.stop();
+            output.cancel();
             return Ok(StreamOutcome {
                 state: OpenAiStreamEventState::Interrupted,
-                delivery: Some(snapshot_delivery(&delivery, &player)),
+                delivery: Some(snapshot_delivery(&delivery, output)),
             });
         }
         match receiver.recv_timeout(Duration::from_millis(20)) {
             Ok(OpenAiStreamCommand::Append(text)) => {
                 pending.push_str(&text);
-                if pending.len() >= 24 && ends_sentence_boundary(&pending) {
+                if pending.len() >= 24 && pending.trim_end().ends_with(['.', '!', '?', '\n']) {
                     speak_pending(
                         &runtime,
                         app,
@@ -752,7 +675,7 @@ fn run_openai_voice_stream(
                         &client,
                         &key,
                         &active,
-                        &player,
+                        output,
                         &mut pending,
                         &mut delivery,
                         &mut started,
@@ -766,7 +689,7 @@ fn run_openai_voice_stream(
                     )
                     .map_err(|error| StreamFailure {
                         error,
-                        delivery: Some(snapshot_delivery(&delivery, &player)),
+                        delivery: Some(snapshot_delivery(&delivery, output)),
                     })?;
                 }
             }
@@ -778,7 +701,7 @@ fn run_openai_voice_stream(
                     &client,
                     &key,
                     &active,
-                    &player,
+                    output,
                     &mut pending,
                     &mut delivery,
                     &mut started,
@@ -792,7 +715,7 @@ fn run_openai_voice_stream(
                 )
                 .map_err(|error| StreamFailure {
                     error,
-                    delivery: Some(snapshot_delivery(&delivery, &player)),
+                    delivery: Some(snapshot_delivery(&delivery, output)),
                 })?;
             }
             Ok(OpenAiStreamCommand::Finish) => {
@@ -803,7 +726,7 @@ fn run_openai_voice_stream(
                     &client,
                     &key,
                     &active,
-                    &player,
+                    output,
                     &mut pending,
                     &mut delivery,
                     &mut started,
@@ -814,29 +737,13 @@ fn run_openai_voice_stream(
                     &mut playback_drained_at,
                     output_latency_grace,
                     speed,
-                )
-                .map_err(|error| StreamFailure {
-                    error,
-                    delivery: Some(snapshot_delivery(&delivery, &player)),
-                })?;
-                let drain_started = Instant::now();
+                )?;
                 while active.load(Ordering::SeqCst)
-                    && (!player.is_empty() || assistant_speech.is_some())
+                    && (!output.is_drained() || assistant_speech.is_some())
                 {
-                    if drain_started.elapsed() >= MAX_FINAL_PLAYBACK_DRAIN {
-                        player.stop();
-                        return Err(StreamFailure {
-                            error: "OpenAI voice playback did not finish within 10 minutes"
-                                .to_string(),
-                            delivery: Some(snapshot_delivery(&delivery, &player)),
-                        });
-                    }
-                    player.ensure_healthy().map_err(|error| StreamFailure {
-                        error,
-                        delivery: Some(snapshot_delivery(&delivery, &player)),
-                    })?;
+                    output.check_health()?;
                     update_openai_assistant_speech(
-                        player.is_empty(),
+                        output.is_drained(),
                         &mut assistant_speech,
                         &mut playback_drained_at,
                         output_latency_grace,
@@ -848,17 +755,17 @@ fn run_openai_voice_stream(
                             stream_id,
                             OpenAiStreamEventState::Progress,
                             None,
-                            Some(snapshot_delivery(&delivery, &player)),
+                            Some(snapshot_delivery(&delivery, output)),
                         );
                         last_progress = Instant::now();
                     }
                     std::thread::sleep(Duration::from_millis(20));
                 }
                 if !active.load(Ordering::SeqCst) {
-                    player.stop();
+                    output.cancel();
                     return Ok(StreamOutcome {
                         state: OpenAiStreamEventState::Interrupted,
-                        delivery: Some(snapshot_delivery(&delivery, &player)),
+                        delivery: Some(snapshot_delivery(&delivery, output)),
                     });
                 }
                 return Ok(StreamOutcome {
@@ -868,10 +775,10 @@ fn run_openai_voice_stream(
             }
             Ok(OpenAiStreamCommand::Stop) | Err(mpsc::RecvTimeoutError::Disconnected) => {
                 active.store(false, Ordering::SeqCst);
-                player.stop();
+                output.cancel();
                 return Ok(StreamOutcome {
                     state: OpenAiStreamEventState::Interrupted,
-                    delivery: Some(snapshot_delivery(&delivery, &player)),
+                    delivery: Some(snapshot_delivery(&delivery, output)),
                 });
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -881,7 +788,7 @@ fn run_openai_voice_stream(
                         stream_id,
                         OpenAiStreamEventState::Progress,
                         None,
-                        Some(snapshot_delivery(&delivery, &player)),
+                        Some(snapshot_delivery(&delivery, output)),
                     );
                     last_progress = Instant::now();
                 }
@@ -899,7 +806,7 @@ fn speak_pending(
     client: &reqwest::Client,
     key: &str,
     active: &AtomicBool,
-    player: &PocketAudioPlayer,
+    output: &dyn PcmAudioOutput,
     pending: &mut String,
     delivery: &mut VoiceDeliveryProgress,
     started: &mut bool,
@@ -926,88 +833,72 @@ fn speak_pending(
             total_frames: 0,
             synthesis_complete: false,
         });
-        let Some(mut bytes) = runtime.block_on(openai_speech_stream_cancellable(
-            client,
-            key,
-            chunk.to_string(),
-            speed,
-            active,
-        ))?
-        else {
-            return Ok(());
-        };
-        let mut pcm_remainder = Vec::<u8>::new();
         let mut initial_samples = Vec::<f32>::new();
-        let mut last_network_data = Instant::now();
-        loop {
-            update_openai_assistant_speech(
-                player.is_empty(),
-                assistant_speech,
-                playback_drained_at,
-                output_latency_grace,
-                Instant::now(),
-            );
-            if !active.load(Ordering::SeqCst) {
-                return Ok(());
-            }
-            let item = runtime.block_on(async {
-                tokio::time::timeout(Duration::from_millis(50), bytes.next()).await
-            });
-            let Some(item) = (match item {
-                Ok(item) => item,
-                Err(_) if last_network_data.elapsed() < STREAM_IDLE_TIMEOUT => continue,
-                Err(_) => return Err("OpenAI speech audio stream timed out".to_string()),
-            }) else {
-                break;
-            };
-            let item =
-                item.map_err(|error| format_openai_request_error("stream speech audio", error))?;
-            last_network_data = Instant::now();
-            if !active.load(Ordering::SeqCst) {
-                return Ok(());
-            }
-            pcm_remainder.extend_from_slice(&item);
-            let sample_bytes = pcm_remainder.len() / 2 * 2;
-            let samples = pcm16le_to_f32(&pcm_remainder[..sample_bytes]);
-            pcm_remainder.drain(..sample_bytes);
-            if *started {
-                assistant_speech.get_or_insert_with(|| {
-                    native_voice.begin_assistant_speech(interruption_sensitivity, suppress_capture)
-                });
-                *playback_drained_at = None;
-                player.enqueue(&samples)?;
-            } else {
-                initial_samples.extend_from_slice(&samples);
-                if initial_samples.len() >= INITIAL_PLAYBACK_BUFFER_FRAMES {
+        let config = OpenAiSpeechConfig {
+            endpoint: endpoint("audio/speech")?,
+            api_key: key.to_string(),
+            model: speech_model(),
+            voice: speech_voice(),
+            speed,
+        };
+        let outcome = runtime.block_on(stream_openai_pcm(
+            client,
+            &config,
+            chunk,
+            active,
+            |samples| {
+                update_openai_assistant_speech(
+                    output.is_drained(),
+                    assistant_speech,
+                    playback_drained_at,
+                    output_latency_grace,
+                    Instant::now(),
+                );
+                if !active.load(Ordering::SeqCst) {
+                    return Ok(());
+                }
+                if !mark_openai_pcm_activity(samples, playback_drained_at) {
+                    return Ok(());
+                }
+                if *started {
                     assistant_speech.get_or_insert_with(|| {
                         native_voice
                             .begin_assistant_speech(interruption_sensitivity, suppress_capture)
                     });
-                    *playback_drained_at = None;
-                    player.enqueue(&initial_samples)?;
-                    initial_samples.clear();
-                    *started = true;
-                    emit_openai_stream_event(
-                        app,
-                        stream_id,
-                        OpenAiStreamEventState::Started,
-                        None,
-                        None,
-                    );
+                    output.write(samples)?;
+                } else {
+                    initial_samples.extend_from_slice(samples);
+                    if initial_samples.len() >= INITIAL_PLAYBACK_BUFFER_FRAMES {
+                        assistant_speech.get_or_insert_with(|| {
+                            native_voice
+                                .begin_assistant_speech(interruption_sensitivity, suppress_capture)
+                        });
+                        output.write(&initial_samples)?;
+                        initial_samples.clear();
+                        *started = true;
+                        emit_openai_stream_event(
+                            app,
+                            stream_id,
+                            OpenAiStreamEventState::Started,
+                            None,
+                            None,
+                        );
+                    }
                 }
-            }
-            segment_frames = segment_frames.saturating_add(samples.len() as u64);
-            upsert_delivery_segment(delivery, chunk, segment_frames, false);
-        }
-        if !pcm_remainder.is_empty() {
-            return Err("OpenAI speech returned an incomplete PCM sample".to_string());
+                segment_frames = segment_frames.saturating_add(samples.len() as u64);
+                upsert_delivery_segment(delivery, chunk, segment_frames, false);
+                Ok(())
+            },
+        ))?;
+        if outcome == OpenAiPcmOutcome::Cancelled || !active.load(Ordering::SeqCst) {
+            return Ok(());
         }
         if !initial_samples.is_empty() {
             assistant_speech.get_or_insert_with(|| {
                 native_voice.begin_assistant_speech(interruption_sensitivity, suppress_capture)
             });
             *playback_drained_at = None;
-            player.enqueue(&initial_samples)?;
+            output.write(&initial_samples)?;
             if !*started {
                 *started = true;
                 emit_openai_stream_event(
@@ -1024,18 +915,16 @@ fn speak_pending(
     Ok(())
 }
 
-#[cfg(target_os = "macos")]
-fn ends_sentence_boundary(text: &str) -> bool {
-    if text.trim_end_matches([' ', '\t', '\r']).ends_with('\n') {
-        return true;
+#[cfg(any(test, target_os = "macos"))]
+fn mark_openai_pcm_activity(samples: &[f32], playback_drained_at: &mut Option<Instant>) -> bool {
+    if samples.is_empty() {
+        return false;
     }
-    let trimmed = text.trim_end();
-    trimmed
-        .trim_end_matches(['"', '\'', '”', '’', ')', ']', '}'])
-        .ends_with(['.', '!', '?'])
+    *playback_drained_at = None;
+    true
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(test)]
 async fn run_while_active<F: std::future::Future>(
     future: F,
     active: &AtomicBool,
@@ -1054,55 +943,6 @@ async fn run_while_active<F: std::future::Future>(
 }
 
 #[cfg(target_os = "macos")]
-async fn openai_speech_stream_cancellable(
-    client: &reqwest::Client,
-    key: &str,
-    input: String,
-    speed: f32,
-    active: &AtomicBool,
-) -> Result<Option<impl futures_util::Stream<Item = Result<bytes::Bytes, reqwest::Error>>>, String>
-{
-    match run_while_active(openai_speech_stream(client, key, input, speed), active).await {
-        Some(result) => result.map(Some),
-        None => Ok(None),
-    }
-}
-
-#[cfg(target_os = "macos")]
-async fn openai_speech_stream(
-    client: &reqwest::Client,
-    key: &str,
-    input: String,
-    speed: f32,
-) -> Result<impl futures_util::Stream<Item = Result<bytes::Bytes, reqwest::Error>>, String> {
-    let response = client
-        .post(endpoint("audio/speech")?)
-        .headers(authorized_headers(key)?)
-        .header(CONTENT_TYPE, "application/json")
-        .json(&json!({
-            "model": speech_model(),
-            "voice": speech_voice(),
-            "input": input,
-            "speed": speed,
-            "response_format": "pcm",
-            "stream_format": "audio"
-        }))
-        .send()
-        .await
-        .map_err(|error| format_openai_request_error("start speech audio", error))?;
-    let status = response.status();
-    if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        return Err(format_openai_response_error(
-            "start speech audio",
-            status,
-            &body,
-        ));
-    }
-    Ok(response.bytes_stream())
-}
-
-#[cfg(target_os = "macos")]
 fn chunk_text(text: &str, max_chars: usize) -> Vec<&str> {
     let mut chunks = Vec::new();
     let mut start = 0;
@@ -1114,29 +954,12 @@ fn chunk_text(text: &str, max_chars: usize) -> Vec<&str> {
         if end == start {
             end = text.len();
         }
-        if end < text.len() {
-            if let Some((offset, _)) = text[start..end]
-                .char_indices()
-                .rev()
-                .find(|(offset, character)| *offset > 0 && character.is_whitespace())
-            {
-                end = start + offset;
-            }
-        }
         chunks.push(text[start..end].trim());
         start = end;
     }
     chunks
         .into_iter()
         .filter(|chunk| !chunk.is_empty())
-        .collect()
-}
-
-#[cfg(target_os = "macos")]
-fn pcm16le_to_f32(bytes: &[u8]) -> Vec<f32> {
-    bytes
-        .chunks_exact(2)
-        .map(|sample| i16::from_le_bytes([sample[0], sample[1]]) as f32 / i16::MAX as f32)
         .collect()
 }
 
@@ -1191,9 +1014,9 @@ fn upsert_delivery_segment(
 #[cfg(target_os = "macos")]
 fn snapshot_delivery(
     delivery: &VoiceDeliveryProgress,
-    player: &PocketAudioPlayer,
+    output: &dyn PcmAudioOutput,
 ) -> VoiceDeliveryProgress {
-    let mut remaining_played = player.played_frames();
+    let mut remaining_played = output.played_frames();
     let segments = delivery
         .segments
         .iter()
@@ -1233,26 +1056,35 @@ fn emit_openai_stream_event(
     );
 }
 
-#[cfg(target_os = "macos")]
-fn format_openai_request_error(action: &str, error: reqwest::Error) -> String {
-    if error.is_timeout() {
-        format!("OpenAI voice could not {action}: the request timed out")
-    } else if error.is_connect() {
-        format!("OpenAI voice could not {action}: check your network connection")
-    } else {
-        format!("OpenAI voice could not {action}: {error}")
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn format_openai_response_error(action: &str, status: reqwest::StatusCode, body: &str) -> String {
-    let preview: String = body.chars().take(500).collect();
-    format!("OpenAI voice could not {action}: HTTP {status}: {preview}")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    struct FakePcmOutput {
+        played_frames: u64,
+    }
+
+    #[cfg(target_os = "macos")]
+    impl PcmAudioOutput for FakePcmOutput {
+        fn write(&self, _samples: &[f32]) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn cancel(&self) {}
+
+        fn is_drained(&self) -> bool {
+            true
+        }
+
+        fn check_health(&self) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn played_frames(&self) -> u64 {
+            self.played_frames
+        }
+    }
 
     #[test]
     fn destroyed_window_only_stops_its_openai_stream() {
@@ -1276,34 +1108,26 @@ mod tests {
     }
 
     #[test]
-    fn voice_base_url_configuration_resolves_to_the_v1_api_root() {
+    fn openai_host_configuration_resolves_to_the_v1_api_root() {
         assert_eq!(
-            normalize_openai_base_url("https://proxy.example".to_string()).unwrap(),
+            normalize_openai_base_url("https://proxy.example".to_string(), true).unwrap(),
             "https://proxy.example/v1"
         );
         assert_eq!(
-            normalize_openai_base_url("https://proxy.example/v1/".to_string()).unwrap(),
+            normalize_openai_base_url("https://proxy.example/v1/".to_string(), true).unwrap(),
             "https://proxy.example/v1"
-        );
-    }
-
-    #[test]
-    fn openai_voice_endpoints_require_https() {
-        assert_eq!(
-            normalize_openai_base_url("http://proxy.example".to_string())
-                .expect_err("plaintext endpoint must be rejected"),
-            "OpenAI voice endpoint must use HTTPS"
         );
     }
 
     #[test]
     fn openai_base_url_preserves_custom_paths_and_query_parameters() {
         assert_eq!(
-            normalize_openai_base_url("https://proxy.example".to_string()).unwrap(),
+            normalize_openai_base_url("https://proxy.example".to_string(), false).unwrap(),
             "https://proxy.example/v1"
         );
         let base = normalize_openai_base_url(
             "https://proxy.example/openai?api-version=2026-01-01".to_string(),
+            false,
         )
         .unwrap();
         assert_eq!(
@@ -1313,11 +1137,10 @@ mod tests {
     }
 
     #[test]
-    fn voice_configuration_uses_berd_scoped_environment_names() {
-        assert_eq!(BASE_URL_ENV, "BERD_OPENAI_VOICE_BASE_URL");
-        assert_eq!(STT_MODEL_ENV, "BERD_OPENAI_STT_MODEL");
-        assert_eq!(TTS_MODEL_ENV, "BERD_OPENAI_TTS_MODEL");
-        assert_eq!(TTS_VOICE_ENV, "BERD_OPENAI_TTS_VOICE");
+    fn environment_credential_makes_openai_voice_ready() {
+        assert!(openai_voice_configured(false, Some("environment-key")));
+        assert!(!openai_voice_configured(false, None));
+        assert!(!openai_voice_configured(false, Some("  ")));
     }
 
     #[test]
@@ -1351,6 +1174,24 @@ mod tests {
     }
 
     #[test]
+    fn stalled_stream_ticks_do_not_restart_playback_drain_grace() {
+        let started = Instant::now();
+        let mut drained_at = Some(started);
+        assert!(!mark_openai_pcm_activity(&[], &mut drained_at));
+        assert_eq!(drained_at, Some(started));
+        assert!(openai_assistant_speech_grace_elapsed(
+            true,
+            true,
+            &mut drained_at,
+            Duration::from_millis(100),
+            started + Duration::from_millis(100),
+        ));
+
+        assert!(mark_openai_pcm_activity(&[0.0], &mut drained_at));
+        assert_eq!(drained_at, None);
+    }
+
+    #[test]
     fn configured_readiness_does_not_require_reading_the_secret() {
         let state = OpenAiVoiceState::default();
         assert!(!state.is_configured());
@@ -1365,19 +1206,6 @@ mod tests {
     fn chunks_tts_text_on_char_boundaries() {
         assert_eq!(chunk_text("hello", 10), vec!["hello"]);
         assert_eq!(chunk_text("ééé", 3), vec!["é", "é", "é"]);
-        assert_eq!(
-            chunk_text("hello wide world", 8),
-            vec!["hello", "wide", "world"]
-        );
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn recognizes_sentence_boundaries_before_streaming() {
-        assert!(ends_sentence_boundary("Hello world.\n"));
-        assert!(ends_sentence_boundary("Did it work?” "));
-        assert!(ends_sentence_boundary("It did!)"));
-        assert!(!ends_sentence_boundary("Still speaking,"));
     }
 
     #[cfg(target_os = "macos")]
@@ -1401,5 +1229,31 @@ mod tests {
 
         cancellation.join().expect("cancellation thread");
         assert_eq!(result, None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn delivery_snapshot_uses_output_played_frames() {
+        let output = FakePcmOutput { played_frames: 3 };
+        let delivery = VoiceDeliveryProgress {
+            sample_rate: TTS_SAMPLE_RATE,
+            segments: vec![
+                VoiceDeliverySegment {
+                    text: "one".to_string(),
+                    played_frames: 0,
+                    total_frames: 2,
+                    synthesis_complete: true,
+                },
+                VoiceDeliverySegment {
+                    text: "two".to_string(),
+                    played_frames: 0,
+                    total_frames: 2,
+                    synthesis_complete: true,
+                },
+            ],
+        };
+        let snapshot = snapshot_delivery(&delivery, &output);
+        assert_eq!(snapshot.segments[0].played_frames, 2);
+        assert_eq!(snapshot.segments[1].played_frames, 1);
     }
 }

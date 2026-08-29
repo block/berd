@@ -124,6 +124,27 @@ pub fn load_voice_style(path: &Path) -> Result<VoiceStyle, String> {
     })
 }
 
+/// Resolve and load an exact Pocket voice ID from a self-contained model
+/// bundle. Voice IDs are deliberately path-safe; callers choose the bundle
+/// root and this function owns the stable `voices/<id>.wav` layout.
+pub fn load_pocket_voice_style(model_dir: &Path, voice_id: &str) -> Result<VoiceStyle, String> {
+    if voice_id.is_empty()
+        || !voice_id
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    {
+        return Err(format!("invalid Pocket voice ID: {voice_id}"));
+    }
+    let path = model_dir.join("voices").join(format!("{voice_id}.wav"));
+    if !path.is_file() {
+        return Err(format!(
+            "Pocket voice {voice_id} is not installed at {}",
+            path.display()
+        ));
+    }
+    load_voice_style(&path)
+}
+
 /// Resident April INT8 Pocket TTS engine.
 pub struct PocketTts {
     inner: Mutex<AprilPocketTts>,
@@ -255,5 +276,16 @@ mod tests {
             callback_allows_audio(&mut callback, Vec::new()).unwrap_err(),
             "Pocket TTS synthesis callback panicked"
         );
+    }
+
+    #[test]
+    fn pocket_voice_ids_cannot_escape_the_bundle() {
+        let root = Path::new("/tmp/model");
+        assert!(load_pocket_voice_style(root, "../mary").is_err());
+        assert!(load_pocket_voice_style(root, "Mary").is_err());
+        assert!(load_pocket_voice_style(root, "").is_err());
+        assert!(load_pocket_voice_style(root, "mary")
+            .unwrap_err()
+            .contains("is not installed"));
     }
 }
