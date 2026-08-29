@@ -2245,7 +2245,7 @@ describe("voice transcript delivery coordination", () => {
           finishStop = resolve;
         }),
     );
-    const start = vi.fn().mockResolvedValue(undefined);
+    const start = vi.fn().mockResolvedValue(true);
 
     const replacement = replaceActiveVoiceConversation({ stop, start });
     await Promise.resolve();
@@ -2267,6 +2267,7 @@ describe("voice transcript delivery coordination", () => {
     });
     const start = vi.fn(async () => {
       order.push("start");
+      return true;
     });
 
     await expect(
@@ -2276,7 +2277,7 @@ describe("voice transcript delivery coordination", () => {
   });
 
   it("does not start when the target changes after stopping", async () => {
-    const start = vi.fn().mockResolvedValue(undefined);
+    const start = vi.fn().mockResolvedValue(true);
 
     await expect(
       replaceActiveVoiceConversation({
@@ -2296,7 +2297,7 @@ describe("voice transcript delivery coordination", () => {
   });
 
   it("does not start a replacement when the active call remains running", async () => {
-    const start = vi.fn().mockResolvedValue(undefined);
+    const start = vi.fn().mockResolvedValue(true);
 
     await expect(
       replaceActiveVoiceConversation({
@@ -2311,7 +2312,7 @@ describe("voice transcript delivery coordination", () => {
   });
 
   it("does not start a replacement when stopping the active call fails", async () => {
-    const start = vi.fn().mockResolvedValue(undefined);
+    const start = vi.fn().mockResolvedValue(true);
 
     await expect(
       replaceActiveVoiceConversation({
@@ -2320,6 +2321,18 @@ describe("voice transcript delivery coordination", () => {
       }),
     ).rejects.toThrow("stop failed");
     expect(start).not.toHaveBeenCalled();
+  });
+
+  it("reports when replacement admission blocks the new start", async () => {
+    await expect(
+      replaceActiveVoiceConversation({
+        stop: vi.fn().mockResolvedValue({
+          lifecycle: "stopped",
+          sessionId: null,
+        }),
+        start: vi.fn().mockResolvedValue(false),
+      }),
+    ).resolves.toBe(false);
   });
 
   it("drains retained transcripts without stealing a stopped session route", () => {

@@ -127,7 +127,7 @@ export function shouldShowVoiceConversationControl(options: {
 export async function replaceActiveVoiceConversation(options: {
   stop: () => Promise<{ lifecycle: string; sessionId: string | null }>;
   confirmTarget?: () => Promise<unknown>;
-  start: () => Promise<void>;
+  start: () => Promise<boolean>;
 }): Promise<boolean> {
   const stopped = await options.stop();
   if (
@@ -137,8 +137,7 @@ export async function replaceActiveVoiceConversation(options: {
     return false;
   }
   await options.confirmTarget?.();
-  await options.start();
-  return true;
+  return options.start();
 }
 
 export function shouldSuppressVoiceConversationControls(options: {
@@ -901,7 +900,7 @@ export function useVoiceConversationController({
   );
 
   const startCurrentConversation = useCallback(async () => {
-    if (inputBackend === null) return;
+    if (inputBackend === null) return false;
     const readCurrentStartEligibility = () => {
       const current = startEligibilityRef.current;
       const stillEligible =
@@ -917,18 +916,18 @@ export function useVoiceConversationController({
     };
     const startedCaptureMayContinue = () =>
       readCurrentStartEligibility().stillEligible;
-    if (!startCanStillBegin()) return;
+    if (!startCanStillBegin()) return false;
     try {
       if ((await getMicrophonePermissionStatus()) === "denied") {
         onPocketSetupRequired();
-        return;
+        return false;
       }
     } catch {
       // Permission inspection is an optimization. Capture remains the source
       // of truth and provides the recovery path for unsupported platforms,
       // stale permission state, and other audio startup failures.
     }
-    if (!startCanStillBegin()) return;
+    if (!startCanStillBegin()) return false;
     // Do not rely on the mount effect racing ahead of the user's first
     // click. The native recognizer can finalize quickly, so its delivery
     // subscriber must exist before the microphone lifecycle starts.
@@ -939,7 +938,7 @@ export function useVoiceConversationController({
     try {
       const foregroundGeneration =
         await confirmVoiceConversationForegroundSession(sessionId);
-      if (!startCanStillBegin()) return;
+      if (!startCanStillBegin()) return false;
       const { current: currentStartEligibility } =
         readCurrentStartEligibility();
       route = {
@@ -980,9 +979,10 @@ export function useVoiceConversationController({
             }
           }
         }
-        return;
+        return false;
       }
       startAssistantSpeech(assistantSpeechHistory);
+      return true;
     } catch (startError) {
       const backendStatus = useVoiceConversationStore.getState().status;
       const currentWindowLabel = getCurrentWindow().label;
@@ -1019,7 +1019,7 @@ export function useVoiceConversationController({
           addErrorNotification(sessionId, errorText(cleanupError));
         }
         onPocketSetupRequired();
-        return;
+        return false;
       }
       let conversationStarted = false;
       if (exactOwnerLifecycleSurvived) {
@@ -1065,6 +1065,7 @@ export function useVoiceConversationController({
         }
         addErrorNotification(sessionId, errorText(startError));
       }
+      return conversationStarted;
     }
   }, [
     inputBackend,
