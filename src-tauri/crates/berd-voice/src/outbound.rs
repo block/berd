@@ -38,6 +38,9 @@ pub struct DrainPolicy {
     pub poll_interval: Duration,
     pub timeout: Option<Duration>,
     pub timeout_outcome: DrainTimeoutOutcome,
+    /// Keeps cancellation and health polling active after native source-frame
+    /// completion while downstream route latency can still be audible.
+    pub post_drain: Duration,
 }
 
 impl Default for DrainPolicy {
@@ -46,6 +49,7 @@ impl Default for DrainPolicy {
             poll_interval: Duration::from_millis(10),
             timeout: None,
             timeout_outcome: DrainTimeoutOutcome::Fail,
+            post_drain: Duration::ZERO,
         }
     }
 }
@@ -240,6 +244,7 @@ impl<'a> OutboundPlayback<'a> {
     ) -> Result<OutboundOutcome, OutboundFailure> {
         self.ensure_live()?;
         let started_at = Instant::now();
+        let mut forced_complete = false;
         while !self.output.is_drained() {
             if !self.active.load(Ordering::SeqCst) {
                 return Ok(self.interrupt());
@@ -250,8 +255,8 @@ impl<'a> OutboundPlayback<'a> {
             {
                 if policy.timeout_outcome == DrainTimeoutOutcome::Complete {
                     self.remember_delivery_and_cancel();
-                    self.terminal = true;
-                    return Ok(OutboundOutcome::Completed);
+                    forced_complete = true;
+                    break;
                 }
                 return Err(self.fail("TTS playback did not drain before its deadline".into()));
             }
@@ -264,9 +269,24 @@ impl<'a> OutboundPlayback<'a> {
         if !self.active.load(Ordering::SeqCst) {
             return Ok(self.interrupt());
         }
-        self.output
-            .check_health()
-            .map_err(|message| self.fail(message))?;
+        if !forced_complete {
+            self.output
+                .check_health()
+                .map_err(|message| self.fail(message))?;
+        }
+        let post_drain_started = Instant::now();
+        while post_drain_started.elapsed() < policy.post_drain {
+            if !self.active.load(Ordering::SeqCst) {
+                return Ok(self.interrupt());
+            }
+            if !forced_complete {
+                self.output
+                    .check_health()
+                    .map_err(|message| self.fail(message))?;
+            }
+            on_poll(&self.snapshot()).map_err(|message| self.fail(message))?;
+            std::thread::sleep(policy.poll_interval);
+        }
         self.terminal = true;
         Ok(OutboundOutcome::Completed)
     }
@@ -494,6 +514,7 @@ mod tests {
                     poll_interval: Duration::ZERO,
                     timeout: Some(Duration::ZERO),
                     timeout_outcome: DrainTimeoutOutcome::Fail,
+                    post_drain: Duration::ZERO,
                 },
                 &mut |_| Ok(()),
             )
@@ -511,5 +532,41 @@ mod tests {
                 .message,
             "fake output failed"
         );
+    }
+
+    #[test]
+    fn cancellation_during_post_drain_is_interrupted_and_keeps_delivery() {
+        let active = AtomicBool::new(true);
+        let output = FakeOutput::new(0);
+        output.played.store(1, Ordering::SeqCst);
+        let backend = FakeTts {
+            chunks: vec![vec![0.1, 0.2]],
+            cancel_after_first: false,
+        };
+        let mut playback = OutboundPlayback::new(&output, &active, 10, 0).unwrap();
+        playback
+            .synthesize_segment(&backend, "tail", &mut |_| Ok(()), &mut || {})
+            .unwrap();
+        let mut polls = 0;
+        assert_eq!(
+            playback
+                .finish(
+                    DrainPolicy {
+                        poll_interval: Duration::ZERO,
+                        post_drain: Duration::from_secs(1),
+                        ..DrainPolicy::default()
+                    },
+                    &mut |_| {
+                        polls += 1;
+                        active.store(false, Ordering::SeqCst);
+                        Ok(())
+                    },
+                )
+                .unwrap(),
+            OutboundOutcome::Interrupted
+        );
+        assert_eq!(polls, 1);
+        assert!(output.cancelled.load(Ordering::SeqCst));
+        assert_eq!(playback.snapshot().segments[0].played_frames, 1);
     }
 }

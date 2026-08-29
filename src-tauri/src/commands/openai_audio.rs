@@ -9,8 +9,8 @@ use std::time::Duration;
 
 #[cfg(target_os = "macos")]
 use berd_voice::{
-    openai::{stream_openai_pcm, OpenAiPcmOutcome, OpenAiSpeechConfig},
-    PcmAudioOutput, PocketAudioPlayer,
+    openai::OpenAiSpeechConfig, DeliveryProgress as VoiceDeliveryProgress, DrainPolicy, OpenAiTts,
+    OutboundFailure, OutboundOutcome, OutboundPlayback, PocketAudioPlayer, TtsBackend,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -22,7 +22,8 @@ use tauri::{AppHandle, State};
 use super::{
     native_voice::AssistantSpeechGuard,
     pocket_voice::{
-        effective_output_device_name, playback_latency_safety_duration, should_suppress_capture,
+        effective_output_device_name, playback_latency_safety_duration, selected_output_device,
+        should_suppress_capture,
     },
 };
 use super::{
@@ -44,10 +45,6 @@ const TTS_SAMPLE_RATE: u32 = 24_000;
 const INITIAL_PLAYBACK_BUFFER_FRAMES: usize = TTS_SAMPLE_RATE as usize / 5;
 #[cfg(target_os = "macos")]
 const TTS_EVENT: &str = "openai-voice:stream-event";
-#[cfg(target_os = "macos")]
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
-#[cfg(target_os = "macos")]
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 #[cfg(target_os = "macos")]
 const MAX_TTS_INPUT_CHARS: usize = 4096;
 
@@ -127,24 +124,6 @@ enum OpenAiStreamEventState {
     Completed,
     Interrupted,
     Failed,
-}
-
-#[cfg(target_os = "macos")]
-#[derive(Clone, Debug, Default, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct VoiceDeliveryProgress {
-    sample_rate: u32,
-    segments: Vec<VoiceDeliverySegment>,
-}
-
-#[cfg(target_os = "macos")]
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct VoiceDeliverySegment {
-    text: String,
-    played_frames: u64,
-    total_frames: u64,
-    synthesis_complete: bool,
 }
 
 fn env_trimmed(name: &str) -> Option<String> {
@@ -344,15 +323,6 @@ fn persist_playback_speed(speed: f32) -> Result<(), String> {
         serde_json::to_vec_pretty(&json!({ "playbackSpeed": speed })).unwrap(),
     )
     .map_err(|error| format!("write OpenAI voice settings: {error}"))
-}
-
-#[cfg(target_os = "macos")]
-fn client() -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
-        .connect_timeout(CONNECT_TIMEOUT)
-        .timeout(REQUEST_TIMEOUT)
-        .build()
-        .map_err(|error| format!("create OpenAI HTTP client: {error}"))
 }
 
 #[tauri::command]
@@ -629,145 +599,156 @@ fn run_openai_voice_stream(
     interruption_sensitivity: InterruptionSensitivity,
     speed: f32,
 ) -> Result<StreamOutcome, StreamFailure> {
-    let client = client()?;
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| format!("Could not initialize OpenAI speech runtime: {error}"))?;
-    let player = PocketAudioPlayer::new(TTS_SAMPLE_RATE, 1.0, None)?;
-    let output: &dyn PcmAudioOutput = &player;
-    let output_device = effective_output_device_name(None);
-    let suppress_capture = should_suppress_capture(interruption_mode, output_device.as_deref());
-    let output_latency_grace = playback_latency_safety_duration(output_device.as_deref());
+    let backend = OpenAiTts::new(OpenAiSpeechConfig {
+        endpoint: endpoint("audio/speech")?,
+        api_key: key,
+        model: speech_model(),
+        voice: speech_voice(),
+        speed,
+    })?;
+    let output_device = selected_output_device();
+    let effective_output_device = effective_output_device_name(output_device.as_deref());
+    let player = PocketAudioPlayer::new(TTS_SAMPLE_RATE, 1.0, output_device.as_deref())?;
+    let mut playback = OutboundPlayback::new(
+        &player,
+        &active,
+        TTS_SAMPLE_RATE,
+        INITIAL_PLAYBACK_BUFFER_FRAMES,
+    )?;
+    let suppress_capture =
+        should_suppress_capture(interruption_mode, effective_output_device.as_deref());
+    let output_latency_grace = playback_latency_safety_duration(effective_output_device.as_deref());
     let mut assistant_speech = None::<AssistantSpeechGuard>;
     let mut playback_drained_at = None::<Instant>;
     let mut pending = String::new();
-    let mut delivery = VoiceDeliveryProgress {
-        sample_rate: TTS_SAMPLE_RATE,
-        segments: Vec::new(),
-    };
-    let mut started = false;
     let mut last_progress = Instant::now();
 
     loop {
         update_openai_assistant_speech(
-            output.is_drained(),
+            player.is_empty(),
             &mut assistant_speech,
             &mut playback_drained_at,
             output_latency_grace,
             Instant::now(),
         );
-        if !active.load(Ordering::SeqCst) {
-            output.cancel();
+        if !playback.poll().map_err(openai_playback_failure)? {
             return Ok(StreamOutcome {
                 state: OpenAiStreamEventState::Interrupted,
-                delivery: Some(snapshot_delivery(&delivery, output)),
+                delivery: Some(playback.snapshot()),
             });
         }
         match receiver.recv_timeout(Duration::from_millis(20)) {
             Ok(OpenAiStreamCommand::Append(text)) => {
                 pending.push_str(&text);
                 if pending.len() >= 24 && pending.trim_end().ends_with(['.', '!', '?', '\n']) {
-                    speak_pending(
-                        &runtime,
+                    match speak_pending(
                         app,
                         stream_id,
-                        &client,
-                        &key,
-                        &active,
-                        output,
+                        &backend,
+                        &mut playback,
                         &mut pending,
-                        &mut delivery,
-                        &mut started,
                         &native_voice,
                         interruption_sensitivity,
                         suppress_capture,
                         &mut assistant_speech,
                         &mut playback_drained_at,
-                        output_latency_grace,
-                        speed,
                     )
-                    .map_err(|error| StreamFailure {
-                        error,
-                        delivery: Some(snapshot_delivery(&delivery, output)),
-                    })?;
+                    .map_err(openai_playback_failure)?
+                    {
+                        OutboundOutcome::Interrupted => {
+                            return Ok(StreamOutcome {
+                                state: OpenAiStreamEventState::Interrupted,
+                                delivery: Some(playback.snapshot()),
+                            })
+                        }
+                        OutboundOutcome::Completed => {}
+                    }
                 }
             }
             Ok(OpenAiStreamCommand::Flush) => {
-                speak_pending(
-                    &runtime,
+                if speak_pending(
                     app,
                     stream_id,
-                    &client,
-                    &key,
-                    &active,
-                    output,
+                    &backend,
+                    &mut playback,
                     &mut pending,
-                    &mut delivery,
-                    &mut started,
                     &native_voice,
                     interruption_sensitivity,
                     suppress_capture,
                     &mut assistant_speech,
                     &mut playback_drained_at,
-                    output_latency_grace,
-                    speed,
                 )
-                .map_err(|error| StreamFailure {
-                    error,
-                    delivery: Some(snapshot_delivery(&delivery, output)),
-                })?;
-            }
-            Ok(OpenAiStreamCommand::Finish) => {
-                speak_pending(
-                    &runtime,
-                    app,
-                    stream_id,
-                    &client,
-                    &key,
-                    &active,
-                    output,
-                    &mut pending,
-                    &mut delivery,
-                    &mut started,
-                    &native_voice,
-                    interruption_sensitivity,
-                    suppress_capture,
-                    &mut assistant_speech,
-                    &mut playback_drained_at,
-                    output_latency_grace,
-                    speed,
-                )?;
-                while active.load(Ordering::SeqCst)
-                    && (!output.is_drained() || assistant_speech.is_some())
+                .map_err(openai_playback_failure)?
+                    == OutboundOutcome::Interrupted
                 {
-                    output.check_health()?;
-                    update_openai_assistant_speech(
-                        output.is_drained(),
-                        &mut assistant_speech,
-                        &mut playback_drained_at,
-                        output_latency_grace,
-                        Instant::now(),
-                    );
-                    if last_progress.elapsed() >= Duration::from_millis(100) {
-                        emit_openai_stream_event(
-                            app,
-                            stream_id,
-                            OpenAiStreamEventState::Progress,
-                            None,
-                            Some(snapshot_delivery(&delivery, output)),
-                        );
-                        last_progress = Instant::now();
-                    }
-                    std::thread::sleep(Duration::from_millis(20));
-                }
-                if !active.load(Ordering::SeqCst) {
-                    output.cancel();
                     return Ok(StreamOutcome {
                         state: OpenAiStreamEventState::Interrupted,
-                        delivery: Some(snapshot_delivery(&delivery, output)),
+                        delivery: Some(playback.snapshot()),
                     });
                 }
+            }
+            Ok(OpenAiStreamCommand::Finish) => {
+                if speak_pending(
+                    app,
+                    stream_id,
+                    &backend,
+                    &mut playback,
+                    &mut pending,
+                    &native_voice,
+                    interruption_sensitivity,
+                    suppress_capture,
+                    &mut assistant_speech,
+                    &mut playback_drained_at,
+                )
+                .map_err(openai_playback_failure)?
+                    == OutboundOutcome::Interrupted
+                {
+                    return Ok(StreamOutcome {
+                        state: OpenAiStreamEventState::Interrupted,
+                        delivery: Some(playback.snapshot()),
+                    });
+                }
+                let post_drain = openai_assistant_speech_grace_remaining(
+                    assistant_speech.is_some(),
+                    playback_drained_at,
+                    output_latency_grace,
+                    Instant::now(),
+                );
+                let outcome = playback
+                    .finish(
+                        DrainPolicy {
+                            post_drain,
+                            ..DrainPolicy::default()
+                        },
+                        &mut |delivery| {
+                            update_openai_assistant_speech(
+                                true,
+                                &mut assistant_speech,
+                                &mut playback_drained_at,
+                                output_latency_grace,
+                                Instant::now(),
+                            );
+                            if last_progress.elapsed() >= Duration::from_millis(100) {
+                                emit_openai_stream_event(
+                                    app,
+                                    stream_id,
+                                    OpenAiStreamEventState::Progress,
+                                    None,
+                                    Some(delivery.clone()),
+                                );
+                                last_progress = Instant::now();
+                            }
+                            Ok(())
+                        },
+                    )
+                    .map_err(openai_playback_failure)?;
+                if outcome == OutboundOutcome::Interrupted {
+                    return Ok(StreamOutcome {
+                        state: OpenAiStreamEventState::Interrupted,
+                        delivery: Some(playback.snapshot()),
+                    });
+                }
+                assistant_speech.take();
                 return Ok(StreamOutcome {
                     state: OpenAiStreamEventState::Completed,
                     delivery: None,
@@ -775,20 +756,20 @@ fn run_openai_voice_stream(
             }
             Ok(OpenAiStreamCommand::Stop) | Err(mpsc::RecvTimeoutError::Disconnected) => {
                 active.store(false, Ordering::SeqCst);
-                output.cancel();
+                playback.interrupt();
                 return Ok(StreamOutcome {
                     state: OpenAiStreamEventState::Interrupted,
-                    delivery: Some(snapshot_delivery(&delivery, output)),
+                    delivery: Some(playback.snapshot()),
                 });
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                if started && last_progress.elapsed() >= Duration::from_millis(100) {
+                if playback.started() && last_progress.elapsed() >= Duration::from_millis(100) {
                     emit_openai_stream_event(
                         app,
                         stream_id,
                         OpenAiStreamEventState::Progress,
                         None,
-                        Some(snapshot_delivery(&delivery, output)),
+                        Some(playback.snapshot()),
                     );
                     last_progress = Instant::now();
                 }
@@ -800,107 +781,36 @@ fn run_openai_voice_stream(
 #[cfg(target_os = "macos")]
 #[allow(clippy::too_many_arguments)]
 fn speak_pending(
-    runtime: &tokio::runtime::Runtime,
     app: &AppHandle,
     stream_id: &str,
-    client: &reqwest::Client,
-    key: &str,
-    active: &AtomicBool,
-    output: &dyn PcmAudioOutput,
+    backend: &dyn TtsBackend,
+    playback: &mut OutboundPlayback<'_>,
     pending: &mut String,
-    delivery: &mut VoiceDeliveryProgress,
-    started: &mut bool,
     native_voice: &NativeVoiceState,
     interruption_sensitivity: InterruptionSensitivity,
     suppress_capture: bool,
     assistant_speech: &mut Option<AssistantSpeechGuard>,
     playback_drained_at: &mut Option<Instant>,
-    output_latency_grace: Duration,
-    speed: f32,
-) -> Result<(), String> {
+) -> Result<OutboundOutcome, OutboundFailure> {
     let text = std::mem::take(pending).trim().to_string();
     if text.is_empty() {
-        return Ok(());
+        return Ok(OutboundOutcome::Completed);
     }
     for chunk in chunk_text(&text, MAX_TTS_INPUT_CHARS) {
-        if !active.load(Ordering::SeqCst) {
-            return Ok(());
-        }
-        let mut segment_frames = 0_u64;
-        delivery.segments.push(VoiceDeliverySegment {
-            text: chunk.to_string(),
-            played_frames: 0,
-            total_frames: 0,
-            synthesis_complete: false,
-        });
-        let mut initial_samples = Vec::<f32>::new();
-        let config = OpenAiSpeechConfig {
-            endpoint: endpoint("audio/speech")?,
-            api_key: key.to_string(),
-            model: speech_model(),
-            voice: speech_voice(),
-            speed,
-        };
-        let outcome = runtime.block_on(stream_openai_pcm(
-            client,
-            &config,
+        let outcome = playback.synthesize_segment(
+            backend,
             chunk,
-            active,
-            |samples| {
-                update_openai_assistant_speech(
-                    output.is_drained(),
-                    assistant_speech,
-                    playback_drained_at,
-                    output_latency_grace,
-                    Instant::now(),
-                );
-                if !active.load(Ordering::SeqCst) {
-                    return Ok(());
-                }
-                if !mark_openai_pcm_activity(samples, playback_drained_at) {
-                    return Ok(());
-                }
-                if *started {
-                    assistant_speech.get_or_insert_with(|| {
+            &mut |_| {
+                *playback_drained_at = None;
+                if assistant_speech.is_none() {
+                    *assistant_speech = Some(
                         native_voice
-                            .begin_assistant_speech(interruption_sensitivity, suppress_capture)
-                    });
-                    output.write(samples)?;
-                } else {
-                    initial_samples.extend_from_slice(samples);
-                    if initial_samples.len() >= INITIAL_PLAYBACK_BUFFER_FRAMES {
-                        assistant_speech.get_or_insert_with(|| {
-                            native_voice
-                                .begin_assistant_speech(interruption_sensitivity, suppress_capture)
-                        });
-                        output.write(&initial_samples)?;
-                        initial_samples.clear();
-                        *started = true;
-                        emit_openai_stream_event(
-                            app,
-                            stream_id,
-                            OpenAiStreamEventState::Started,
-                            None,
-                            None,
-                        );
-                    }
+                            .begin_assistant_speech(interruption_sensitivity, suppress_capture),
+                    );
                 }
-                segment_frames = segment_frames.saturating_add(samples.len() as u64);
-                upsert_delivery_segment(delivery, chunk, segment_frames, false);
                 Ok(())
             },
-        ))?;
-        if outcome == OpenAiPcmOutcome::Cancelled || !active.load(Ordering::SeqCst) {
-            return Ok(());
-        }
-        if !initial_samples.is_empty() {
-            assistant_speech.get_or_insert_with(|| {
-                native_voice.begin_assistant_speech(interruption_sensitivity, suppress_capture)
-            });
-            *playback_drained_at = None;
-            output.write(&initial_samples)?;
-            if !*started {
-                *started = true;
+            &mut || {
                 emit_openai_stream_event(
                     app,
                     stream_id,
@@ -908,37 +818,20 @@ fn speak_pending(
                     None,
                     None,
                 );
-            }
+            },
+        )?;
+        if outcome == OutboundOutcome::Interrupted {
+            return Ok(outcome);
         }
-        upsert_delivery_segment(delivery, chunk, segment_frames, true);
     }
-    Ok(())
+    Ok(OutboundOutcome::Completed)
 }
 
-#[cfg(any(test, target_os = "macos"))]
-fn mark_openai_pcm_activity(samples: &[f32], playback_drained_at: &mut Option<Instant>) -> bool {
-    if samples.is_empty() {
-        return false;
-    }
-    *playback_drained_at = None;
-    true
-}
-
-#[cfg(test)]
-async fn run_while_active<F: std::future::Future>(
-    future: F,
-    active: &AtomicBool,
-) -> Option<F::Output> {
-    tokio::pin!(future);
-    loop {
-        tokio::select! {
-            result = &mut future => return Some(result),
-            _ = tokio::time::sleep(Duration::from_millis(20)) => {
-                if !active.load(Ordering::SeqCst) {
-                    return None;
-                }
-            }
-        }
+#[cfg(target_os = "macos")]
+fn openai_playback_failure(failure: OutboundFailure) -> StreamFailure {
+    StreamFailure {
+        error: failure.message,
+        delivery: Some(failure.delivery),
     }
 }
 
@@ -998,43 +891,19 @@ fn update_openai_assistant_speech(
     }
 }
 
-#[cfg(target_os = "macos")]
-fn upsert_delivery_segment(
-    delivery: &mut VoiceDeliveryProgress,
-    _text: &str,
-    total_frames: u64,
-    synthesis_complete: bool,
-) {
-    if let Some(segment) = delivery.segments.last_mut() {
-        segment.total_frames = total_frames;
-        segment.synthesis_complete = synthesis_complete;
+#[cfg(any(test, target_os = "macos"))]
+fn openai_assistant_speech_grace_remaining(
+    guard_active: bool,
+    playback_drained_at: Option<Instant>,
+    output_latency_grace: Duration,
+    now: Instant,
+) -> Duration {
+    if !guard_active {
+        return Duration::ZERO;
     }
-}
-
-#[cfg(target_os = "macos")]
-fn snapshot_delivery(
-    delivery: &VoiceDeliveryProgress,
-    output: &dyn PcmAudioOutput,
-) -> VoiceDeliveryProgress {
-    let mut remaining_played = output.played_frames();
-    let segments = delivery
-        .segments
-        .iter()
-        .map(|segment| {
-            let played_frames = remaining_played.min(segment.total_frames);
-            remaining_played = remaining_played.saturating_sub(played_frames);
-            VoiceDeliverySegment {
-                text: segment.text.clone(),
-                played_frames,
-                total_frames: segment.total_frames,
-                synthesis_complete: segment.synthesis_complete,
-            }
-        })
-        .collect();
-    VoiceDeliveryProgress {
-        sample_rate: delivery.sample_rate,
-        segments,
-    }
+    playback_drained_at.map_or(output_latency_grace, |drained_at| {
+        output_latency_grace.saturating_sub(now.saturating_duration_since(drained_at))
+    })
 }
 
 #[cfg(target_os = "macos")]
@@ -1059,32 +928,6 @@ fn emit_openai_stream_event(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[cfg(target_os = "macos")]
-    struct FakePcmOutput {
-        played_frames: u64,
-    }
-
-    #[cfg(target_os = "macos")]
-    impl PcmAudioOutput for FakePcmOutput {
-        fn write(&self, _samples: &[f32]) -> Result<(), String> {
-            Ok(())
-        }
-
-        fn cancel(&self) {}
-
-        fn is_drained(&self) -> bool {
-            true
-        }
-
-        fn check_health(&self) -> Result<(), String> {
-            Ok(())
-        }
-
-        fn played_frames(&self) -> u64 {
-            self.played_frames
-        }
-    }
 
     #[test]
     fn destroyed_window_only_stops_its_openai_stream() {
@@ -1171,24 +1014,19 @@ mod tests {
             started + grace,
         ));
         assert_eq!(drained_at, None);
-    }
-
-    #[test]
-    fn stalled_stream_ticks_do_not_restart_playback_drain_grace() {
-        let started = Instant::now();
-        let mut drained_at = Some(started);
-        assert!(!mark_openai_pcm_activity(&[], &mut drained_at));
-        assert_eq!(drained_at, Some(started));
-        assert!(openai_assistant_speech_grace_elapsed(
-            true,
-            true,
-            &mut drained_at,
-            Duration::from_millis(100),
-            started + Duration::from_millis(100),
-        ));
-
-        assert!(mark_openai_pcm_activity(&[0.0], &mut drained_at));
-        assert_eq!(drained_at, None);
+        assert_eq!(
+            openai_assistant_speech_grace_remaining(
+                true,
+                Some(started),
+                grace,
+                started + Duration::from_millis(40),
+            ),
+            Duration::from_millis(60)
+        );
+        assert_eq!(
+            openai_assistant_speech_grace_remaining(false, Some(started), grace, started),
+            Duration::ZERO
+        );
     }
 
     #[test]
@@ -1206,54 +1044,5 @@ mod tests {
     fn chunks_tts_text_on_char_boundaries() {
         assert_eq!(chunk_text("hello", 10), vec!["hello"]);
         assert_eq!(chunk_text("ééé", 3), vec!["é", "é", "é"]);
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn cancels_a_stalled_speech_request() {
-        let active = Arc::new(AtomicBool::new(true));
-        let active_for_thread = active.clone();
-        let cancellation = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(30));
-            active_for_thread.store(false, Ordering::SeqCst);
-        });
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_time()
-            .build()
-            .expect("runtime");
-
-        let result = runtime.block_on(run_while_active(
-            std::future::pending::<()>(),
-            active.as_ref(),
-        ));
-
-        cancellation.join().expect("cancellation thread");
-        assert_eq!(result, None);
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn delivery_snapshot_uses_output_played_frames() {
-        let output = FakePcmOutput { played_frames: 3 };
-        let delivery = VoiceDeliveryProgress {
-            sample_rate: TTS_SAMPLE_RATE,
-            segments: vec![
-                VoiceDeliverySegment {
-                    text: "one".to_string(),
-                    played_frames: 0,
-                    total_frames: 2,
-                    synthesis_complete: true,
-                },
-                VoiceDeliverySegment {
-                    text: "two".to_string(),
-                    played_frames: 0,
-                    total_frames: 2,
-                    synthesis_complete: true,
-                },
-            ],
-        };
-        let snapshot = snapshot_delivery(&delivery, &output);
-        assert_eq!(snapshot.segments[0].played_frames, 2);
-        assert_eq!(snapshot.segments[1].played_frames, 1);
     }
 }
