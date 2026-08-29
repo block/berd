@@ -721,7 +721,6 @@ export function useVoiceConversationController({
       enabled &&
       isGooseSession &&
       !readOnly &&
-      !disabled &&
       !routeUnavailable,
   };
   const drainPendingTranscriptsRef = useRef(drainPendingTranscripts);
@@ -955,10 +954,19 @@ export function useVoiceConversationController({
           startedStatus.lifecycle !== "stopped" &&
           startedStatus.lifecycle !== "unavailable"
         ) {
-          try {
-            await stop();
-          } catch (stopError) {
-            addErrorNotification(sessionId, errorText(stopError));
+          const currentStatus = useVoiceConversationStore.getState().status;
+          const staleLifecycleIsStillCurrent =
+            currentStatus.sessionId === startedStatus.sessionId &&
+            currentStatus.ownerWindowLabel === startedStatus.ownerWindowLabel &&
+            currentStatus.revision === startedStatus.revision &&
+            currentStatus.lifecycle !== "stopped" &&
+            currentStatus.lifecycle !== "unavailable";
+          if (staleLifecycleIsStillCurrent) {
+            try {
+              await stop();
+            } catch (stopError) {
+              addErrorNotification(sessionId, errorText(stopError));
+            }
           }
         }
         return;
