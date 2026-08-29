@@ -49,27 +49,42 @@ device. It emits one JSON report on stdout and diagnostics on stderr:
 
 ```text
 berd-voice benchmark tts --tts-backend siri --voice Aaron --language en-US \
-  --text "The quick brown fox jumps over the lazy dog." --runs 3 --mode cold
+  --prompt-manifest english-short-v1 --mode fresh-backend
 berd-voice benchmark tts --tts-backend pocket \
   --model-dir /path/to/native-voice-v2 --voice mary \
-  --text "The quick brown fox jumps over the lazy dog." --runs 3 --mode warm
+  --prompt-manifest english-short-v1 --mode warm
 ```
 
-Cold mode constructs a backend for every measured run. Warm mode constructs
-one backend, records one unmeasured warm-up synthesis, then reuses it for the
-requested measured runs. “Cold” is scoped to the backend instance in the
-current process; provider, native-framework, model-file, and operating-system
-caches may remain warm. In particular, warm OpenAI mode performs one additional
-billable warm-up request.
+The built-in `english-short-v1` manifest has one separate warm-up prompt and
+five distinct, similarly sized measured prompts. `fresh-backend` constructs a
+backend for each measured prompt. `warm` constructs one backend, synthesizes the
+separate unmeasured prompt, then reuses that backend for the five measured
+prompts. Neither mode promises a fresh process, provider daemon, native
+framework, model-file cache, or operating-system cache. Warm OpenAI mode makes
+one additional billable warm-up request.
+
+An explicit `--text TEXT --runs COUNT` remains available for intentional
+exact-prompt cache experiments. Reports label that scenario
+`exact_prompt_repeat`; the manifest path is labeled
+`distinct_prompt_manifest`. This distinction matters for Siri: exact repeats
+have been observed to return decoded PCM within a few milliseconds, likely
+benefiting from hot system or daemon state. That does not measure novel
+synthesis or audible onset; the private sirittsd implementation does not let us
+attribute the effect to a particular internal cache.
 
 Each run reports initialization time when applicable, time to first nonempty
 PCM, total synthesis time, mono PCM frame count and sample rate, PCM audio
 duration, real-time factor (`synthesis duration / PCM audio duration`), and a
 structured outcome or error stage. `playback_rate` is metadata only: benchmarks
 measure generated PCM duration and never playback or output-device drain.
-Reports identify the exact input with its UTF-8 byte count and SHA-256 without
-printing the prompt itself. `planned_workload` includes the warm-up when present;
-individual results show what actually ran.
+Every run identifies its prompt ID, UTF-8 byte count, and SHA-256 without
+printing the prompt itself. Manifest reports include its stable ID, language,
+and pinned content hash. Prompts are distinct within a manifest invocation, but
+`prior_cache_state` remains explicitly uncontrolled because provider and system
+caches can survive earlier processes. `planned_workload` includes the warm-up
+when present; individual results show what actually ran. OpenAI reports whether
+its endpoint came from the built-in default or the `OPENAI_BASE_URL`
+environment, but never includes the URL.
 
 OpenAI benchmarking is disabled unless the command includes
 `--allow-paid-openai`. The CLI preflights the full workload, including the warm

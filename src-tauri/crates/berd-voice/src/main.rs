@@ -9,8 +9,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use berd_voice::benchmark::{
-    benchmark_stt, benchmark_tts, load_bundled_stt_fixture_pack, SttBenchmarkEnvironment,
-    SttBenchmarkMode, SttBenchmarkTarget, TtsBenchmarkMode, TtsBenchmarkTarget,
+    benchmark_stt, benchmark_tts, benchmark_tts_manifest, load_bundled_stt_fixture_pack,
+    load_bundled_tts_prompt_manifest, SttBenchmarkEnvironment, SttBenchmarkMode,
+    SttBenchmarkTarget, TtsBenchmarkMode, TtsBenchmarkPromptManifest, TtsBenchmarkTarget,
 };
 use berd_voice::input::{
     AssistantActivityGuard, VoiceInputConfig, VoiceInputControls, VoiceInputEngineConfig,
@@ -93,9 +94,14 @@ struct SessionConfig {
 #[derive(Clone, Debug, PartialEq)]
 struct TtsBenchmarkConfig {
     tts: TtsBackendConfig,
-    text: String,
-    runs: usize,
+    prompts: TtsBenchmarkPrompts,
     mode: TtsBenchmarkMode,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum TtsBenchmarkPrompts {
+    ExactRepeat { text: String, runs: usize },
+    Manifest(TtsBenchmarkPromptManifest),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -144,7 +150,8 @@ fn usage_error(error: &str) -> ! {
          [--stt-backend macos|parakeet|openai] [--stt-model-dir PATH]\n  \
          berd-voice benchmark tts --tts-backend openai|siri|pocket \
          [--model-dir PATH] [--voice ID] [--language BCP47] [--rate FLOAT] \
-         --text TEXT --runs COUNT --mode cold|warm [--allow-paid-openai]\n  \
+         (--text TEXT --runs COUNT | --prompt-manifest english-short-v1) \
+         --mode fresh-backend|warm [--allow-paid-openai]\n  \
          berd-voice benchmark stt --stt-backend macos|parakeet|openai \
          [--stt-model-dir PATH] --runs COUNT --mode cold|warm \
          [--allow-paid-openai]"
@@ -613,6 +620,7 @@ fn parse_tts_benchmark_args(args: &[String]) -> Result<TtsBenchmarkConfig, Strin
     let mut model_dir = None;
     let mut rate = None;
     let mut text = None;
+    let mut prompt_manifest = None;
     let mut runs = None;
     let mut mode = None;
     let mut allow_paid_openai = false;
@@ -640,6 +648,7 @@ fn parse_tts_benchmark_args(args: &[String]) -> Result<TtsBenchmarkConfig, Strin
                 )
             }
             "--text" => text = Some(value.clone()),
+            "--prompt-manifest" => prompt_manifest = Some(value.clone()),
             "--runs" => {
                 let parsed = value
                     .parse::<usize>()
@@ -651,23 +660,38 @@ fn parse_tts_benchmark_args(args: &[String]) -> Result<TtsBenchmarkConfig, Strin
             }
             "--mode" => {
                 mode = Some(match value.as_str() {
-                    "cold" => TtsBenchmarkMode::Cold,
+                    "fresh-backend" => TtsBenchmarkMode::FreshBackend,
                     "warm" => TtsBenchmarkMode::Warm,
-                    _ => return Err("--mode must be cold or warm".into()),
+                    _ => return Err("--mode must be fresh-backend or warm".into()),
                 })
             }
             _ => return Err(format!("unknown argument: {flag}")),
         }
         index += 2;
     }
-    let text = text
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| "--text is required and must be nonempty".to_string())?;
-    if text.len() > MAX_SPEAK_TEXT_BYTES {
-        return Err(format!("--text exceeds {MAX_SPEAK_TEXT_BYTES} UTF-8 bytes"));
-    }
-    let runs = runs.ok_or_else(|| "--runs is required".to_string())?;
     let mode = mode.ok_or_else(|| "--mode is required".to_string())?;
+    let prompts = match (text, prompt_manifest, runs) {
+        (Some(text), None, Some(runs)) => {
+            if text.trim().is_empty() {
+                return Err("--text must be nonempty".into());
+            }
+            if text.len() > MAX_SPEAK_TEXT_BYTES {
+                return Err(format!("--text exceeds {MAX_SPEAK_TEXT_BYTES} UTF-8 bytes"));
+            }
+            TtsBenchmarkPrompts::ExactRepeat { text, runs }
+        }
+        (None, Some(id), None) => {
+            TtsBenchmarkPrompts::Manifest(load_bundled_tts_prompt_manifest(&id)?)
+        }
+        (Some(_), Some(_), _) => {
+            return Err("--text and --prompt-manifest are mutually exclusive".into())
+        }
+        (None, Some(_), Some(_)) => {
+            return Err("--runs is fixed by --prompt-manifest and must be omitted".into())
+        }
+        (Some(_), None, None) => return Err("--runs is required with --text".into()),
+        (None, None, _) => return Err("either --text or --prompt-manifest is required".into()),
+    };
     let tts = build_tts_backend_config(
         backend.ok_or_else(|| "--tts-backend is required".to_string())?,
         voice,
@@ -675,20 +699,51 @@ fn parse_tts_benchmark_args(args: &[String]) -> Result<TtsBenchmarkConfig, Strin
         model_dir,
         rate,
     )?;
+    if let (TtsBackendConfig::Siri { language, .. }, TtsBenchmarkPrompts::Manifest(manifest)) =
+        (&tts, &prompts)
+    {
+        if language != &manifest.language {
+            return Err(format!(
+                "TTS prompt manifest {} requires Siri language {}",
+                manifest.id, manifest.language
+            ));
+        }
+    }
+    let (request_count, total_text_bytes) = match &prompts {
+        TtsBenchmarkPrompts::ExactRepeat { text, runs } => {
+            let requests = runs.saturating_add(usize::from(mode == TtsBenchmarkMode::Warm));
+            let bytes = text
+                .len()
+                .checked_mul(requests)
+                .ok_or_else(|| "TTS benchmark workload is too large".to_string())?;
+            (requests, bytes)
+        }
+        TtsBenchmarkPrompts::Manifest(manifest) => {
+            let requests = manifest.prompts.len() + usize::from(mode == TtsBenchmarkMode::Warm);
+            let measured_bytes = manifest.prompts.iter().try_fold(0_usize, |total, prompt| {
+                total.checked_add(prompt.text.len())
+            });
+            let bytes = measured_bytes
+                .and_then(|total| {
+                    total.checked_add(if mode == TtsBenchmarkMode::Warm {
+                        manifest.warmup.text.len()
+                    } else {
+                        0
+                    })
+                })
+                .ok_or_else(|| "TTS benchmark workload is too large".to_string())?;
+            (requests, bytes)
+        }
+    };
     if matches!(tts, TtsBackendConfig::OpenAi) {
         if !allow_paid_openai {
             return Err("OpenAI benchmarks require explicit --allow-paid-openai consent".into());
         }
-        let request_count = runs.saturating_add(usize::from(mode == TtsBenchmarkMode::Warm));
         if request_count > MAX_OPENAI_BENCHMARK_REQUESTS {
             return Err(format!(
                 "OpenAI benchmark would make {request_count} requests; maximum is {MAX_OPENAI_BENCHMARK_REQUESTS}"
             ));
         }
-        let total_text_bytes = text
-            .len()
-            .checked_mul(request_count)
-            .ok_or_else(|| "OpenAI benchmark workload is too large".to_string())?;
         if total_text_bytes > MAX_OPENAI_BENCHMARK_TEXT_BYTES {
             return Err(format!(
                 "OpenAI benchmark would submit {total_text_bytes} total UTF-8 text bytes; maximum is {MAX_OPENAI_BENCHMARK_TEXT_BYTES}"
@@ -697,16 +752,38 @@ fn parse_tts_benchmark_args(args: &[String]) -> Result<TtsBenchmarkConfig, Strin
     } else if allow_paid_openai {
         return Err("--allow-paid-openai is only valid with OpenAI".into());
     }
-    Ok(TtsBenchmarkConfig {
-        tts,
-        text,
-        runs,
-        mode,
-    })
+    Ok(TtsBenchmarkConfig { tts, prompts, mode })
 }
 
 fn run_tts_benchmark(config: TtsBenchmarkConfig) -> Result<(), String> {
-    let target = match &config.tts {
+    let target = tts_benchmark_target(&config.tts, std::env::var_os("OPENAI_BASE_URL").is_some());
+    let report = match &config.prompts {
+        TtsBenchmarkPrompts::ExactRepeat { text, runs } => {
+            benchmark_tts(target, text, *runs, config.mode, || {
+                create_tts_backend(&config.tts)
+            })
+        }
+        TtsBenchmarkPrompts::Manifest(manifest) => {
+            benchmark_tts_manifest(target, manifest, config.mode, || {
+                create_tts_backend(&config.tts)
+            })
+        }
+    };
+    let succeeded = report.succeeded();
+    serde_json::to_writer(io::stdout().lock(), &report).map_err(|error| error.to_string())?;
+    println!();
+    if succeeded {
+        Ok(())
+    } else {
+        Err("one or more benchmark runs failed; see JSON output".into())
+    }
+}
+
+fn tts_benchmark_target(
+    config: &TtsBackendConfig,
+    openai_endpoint_from_environment: bool,
+) -> TtsBenchmarkTarget {
+    match config {
         TtsBackendConfig::OpenAi => TtsBenchmarkTarget {
             backend: "openai".into(),
             model: Some(
@@ -715,6 +792,14 @@ fn run_tts_benchmark(config: TtsBenchmarkConfig) -> Result<(), String> {
             voice: Some(std::env::var("OPENAI_TTS_VOICE").unwrap_or_else(|_| "marin".into())),
             language: None,
             rate: Some(1.0),
+            endpoint_source: Some(
+                if openai_endpoint_from_environment {
+                    "OPENAI_BASE_URL_environment"
+                } else {
+                    "built_in_default"
+                }
+                .into(),
+            ),
         },
         TtsBackendConfig::Siri {
             voice,
@@ -726,6 +811,7 @@ fn run_tts_benchmark(config: TtsBenchmarkConfig) -> Result<(), String> {
             voice: Some(voice.clone()),
             language: Some(language.clone()),
             rate: Some(*rate),
+            endpoint_source: None,
         },
         TtsBackendConfig::Pocket {
             model_dir,
@@ -739,18 +825,8 @@ fn run_tts_benchmark(config: TtsBenchmarkConfig) -> Result<(), String> {
             voice: Some(voice.clone()),
             language: None,
             rate: Some(*rate),
+            endpoint_source: None,
         },
-    };
-    let report = benchmark_tts(target, &config.text, config.runs, config.mode, || {
-        create_tts_backend(&config.tts)
-    });
-    let succeeded = report.succeeded();
-    serde_json::to_writer(io::stdout().lock(), &report).map_err(|error| error.to_string())?;
-    println!();
-    if succeeded {
-        Ok(())
-    } else {
-        Err("one or more benchmark runs failed; see JSON output".into())
     }
 }
 
@@ -1948,8 +2024,10 @@ mod tests {
                     language: "en-US".into(),
                     rate: 1.0,
                 },
-                text: "A fixed benchmark sentence.".into(),
-                runs: 3,
+                prompts: TtsBenchmarkPrompts::ExactRepeat {
+                    text: "A fixed benchmark sentence.".into(),
+                    runs: 3,
+                },
                 mode: TtsBenchmarkMode::Warm,
             }
         );
@@ -1962,7 +2040,7 @@ mod tests {
             "--text",
             "hello",
             "--mode",
-            "cold"
+            "fresh-backend"
         ]))
         .unwrap_err()
         .contains("--runs is required"));
@@ -1977,7 +2055,7 @@ mod tests {
             "--runs",
             "0",
             "--mode",
-            "cold"
+            "fresh-backend"
         ]))
         .unwrap_err()
         .contains("between 1 and 100"));
@@ -2000,7 +2078,7 @@ mod tests {
             "--runs",
             "1",
             "--mode",
-            "cold"
+            "fresh-backend"
         ]))
         .unwrap_err()
         .contains("absolute path"));
@@ -2015,12 +2093,90 @@ mod tests {
             "--runs",
             "1",
             "--mode",
-            "cold",
+            "fresh-backend",
             "--stt-backend",
             "macos"
         ]))
         .unwrap_err()
         .contains("unknown argument"));
+    }
+
+    #[test]
+    fn benchmark_cli_selects_fixed_distinct_prompt_manifest() {
+        let config = parse_tts_benchmark_args(&args(&[
+            "berd-voice",
+            "benchmark",
+            "tts",
+            "--tts-backend",
+            "siri",
+            "--voice",
+            "Aaron",
+            "--language",
+            "en-US",
+            "--prompt-manifest",
+            "english-short-v1",
+            "--mode",
+            "warm",
+        ]))
+        .unwrap();
+        let TtsBenchmarkPrompts::Manifest(manifest) = config.prompts else {
+            panic!("expected prompt manifest")
+        };
+        assert_eq!(manifest.id, "english-short-v1");
+        assert_eq!(manifest.prompts.len(), 5);
+
+        assert!(parse_tts_benchmark_args(&args(&[
+            "berd-voice",
+            "benchmark",
+            "tts",
+            "--tts-backend",
+            "siri",
+            "--voice",
+            "Aaron",
+            "--language",
+            "en-CA",
+            "--prompt-manifest",
+            "english-short-v1",
+            "--mode",
+            "warm",
+        ]))
+        .unwrap_err()
+        .contains("requires Siri language en-US"));
+        assert!(parse_tts_benchmark_args(&args(&[
+            "berd-voice",
+            "benchmark",
+            "tts",
+            "--tts-backend",
+            "siri",
+            "--voice",
+            "Aaron",
+            "--language",
+            "en-US",
+            "--prompt-manifest",
+            "english-short-v1",
+            "--runs",
+            "5",
+            "--mode",
+            "warm",
+        ]))
+        .unwrap_err()
+        .contains("fixed by --prompt-manifest"));
+    }
+
+    #[test]
+    fn openai_tts_target_reports_only_endpoint_source() {
+        assert_eq!(
+            tts_benchmark_target(&TtsBackendConfig::OpenAi, false)
+                .endpoint_source
+                .as_deref(),
+            Some("built_in_default")
+        );
+        assert_eq!(
+            tts_benchmark_target(&TtsBackendConfig::OpenAi, true)
+                .endpoint_source
+                .as_deref(),
+            Some("OPENAI_BASE_URL_environment")
+        );
     }
 
     #[test]
@@ -2036,7 +2192,7 @@ mod tests {
             "--runs",
             "1",
             "--mode",
-            "cold",
+            "fresh-backend",
         ];
         assert!(parse_tts_benchmark_args(&args(&base))
             .unwrap_err()
@@ -2076,7 +2232,7 @@ mod tests {
             "--runs".into(),
             "20".into(),
             "--mode".into(),
-            "cold".into(),
+            "fresh-backend".into(),
             "--allow-paid-openai".into(),
         ];
         assert!(parse_tts_benchmark_args(&oversized_workload)

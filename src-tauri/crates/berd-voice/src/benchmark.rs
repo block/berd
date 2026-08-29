@@ -2,7 +2,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{TtsBackend, TtsOutcome, TtsSynthesisEvent};
@@ -14,11 +14,45 @@ pub use stt::{
     SttBenchmarkReport, SttBenchmarkTarget, SttBenchmarkWorkload, SttFixturePack,
 };
 
+const TTS_PROMPT_MANIFEST_ENGLISH_SHORT_V1: &str =
+    include_str!("../fixtures/tts/english-short-v1.json");
+const MAX_TTS_PROMPT_BYTES: usize = 16 * 1024;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TtsBenchmarkMode {
-    Cold,
+    FreshBackend,
     Warm,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TtsBenchmarkScenario {
+    ExactPromptRepeat,
+    DistinctPromptManifest,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct TtsBenchmarkPrompt {
+    pub id: String,
+    pub text: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TtsBenchmarkPromptManifest {
+    pub id: String,
+    pub language: String,
+    pub sha256: String,
+    pub warmup: TtsBenchmarkPrompt,
+    pub prompts: Vec<TtsBenchmarkPrompt>,
+}
+
+#[derive(Deserialize)]
+struct RawTtsBenchmarkPromptManifest {
+    id: String,
+    language: String,
+    warmup: TtsBenchmarkPrompt,
+    prompts: Vec<TtsBenchmarkPrompt>,
 }
 
 #[derive(Debug, Serialize)]
@@ -26,13 +60,22 @@ pub struct TtsBenchmarkReport {
     pub schema_version: u32,
     pub target: TtsBenchmarkTarget,
     pub mode: TtsBenchmarkMode,
-    pub text_bytes: usize,
-    pub text_sha256: String,
+    pub scenario: TtsBenchmarkScenario,
+    pub prior_cache_state: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_manifest: Option<TtsBenchmarkPromptManifestReport>,
     pub requested_runs: usize,
     pub planned_workload: TtsBenchmarkWorkload,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub warmup: Option<TtsBenchmarkRun>,
     pub runs: Vec<TtsBenchmarkRun>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TtsBenchmarkPromptManifestReport {
+    pub id: String,
+    pub language: String,
+    pub sha256: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -52,6 +95,8 @@ pub struct TtsBenchmarkTarget {
     pub language: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rate: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub endpoint_source: Option<String>,
 }
 
 impl TtsBenchmarkReport {
@@ -74,6 +119,9 @@ pub enum TtsOutcomeLabel {
 pub struct TtsBenchmarkRun {
     pub run: usize,
     pub measured: bool,
+    pub prompt_id: String,
+    pub text_bytes: usize,
+    pub text_sha256: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub initialization_ms: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -98,10 +146,19 @@ pub struct TtsBenchmarkRun {
 }
 
 impl TtsBenchmarkRun {
-    fn initialization_error(run: usize, measured: bool, elapsed: Duration, error: String) -> Self {
+    fn initialization_error(
+        run: usize,
+        measured: bool,
+        prompt: &TtsBenchmarkPrompt,
+        elapsed: Duration,
+        error: String,
+    ) -> Self {
         Self {
             run,
             measured,
+            prompt_id: prompt.id.clone(),
+            text_bytes: prompt.text.len(),
+            text_sha256: text_sha256(&prompt.text),
             initialization_ms: Some(milliseconds(elapsed)),
             time_to_first_pcm_ms: None,
             synthesis_ms: None,
@@ -117,51 +174,137 @@ impl TtsBenchmarkRun {
     }
 }
 
-/// Benchmarks synthesis without constructing or writing to an audio output.
-///
-/// Cold mode creates a fresh backend for every measured run. Warm mode creates
-/// one backend, records one unmeasured warm-up synthesis, then reuses that
-/// instance for every measured run. Process-wide provider, native, and OS caches
-/// are intentionally outside the meaning of "cold" here.
+pub fn load_bundled_tts_prompt_manifest(id: &str) -> Result<TtsBenchmarkPromptManifest, String> {
+    if id != "english-short-v1" {
+        return Err(format!("unsupported TTS prompt manifest: {id}"));
+    }
+    let raw: RawTtsBenchmarkPromptManifest =
+        serde_json::from_str(TTS_PROMPT_MANIFEST_ENGLISH_SHORT_V1)
+            .map_err(|error| format!("invalid bundled TTS prompt manifest: {error}"))?;
+    if raw.id != id || raw.language.trim().is_empty() {
+        return Err("bundled TTS prompt manifest identity is invalid".into());
+    }
+    if !(5..=10).contains(&raw.prompts.len()) {
+        return Err("bundled TTS prompt manifest must contain 5 to 10 measured prompts".into());
+    }
+    let all = std::iter::once(&raw.warmup).chain(raw.prompts.iter());
+    let mut ids = std::collections::HashSet::new();
+    let mut texts = std::collections::HashSet::new();
+    for prompt in all {
+        if prompt.id.trim().is_empty()
+            || prompt.text.trim().is_empty()
+            || prompt.text.len() > MAX_TTS_PROMPT_BYTES
+        {
+            return Err("bundled TTS prompt is empty or oversized".into());
+        }
+        if !ids.insert(prompt.id.as_str()) || !texts.insert(prompt.text.as_str()) {
+            return Err("bundled TTS prompt IDs and texts must be distinct".into());
+        }
+    }
+    Ok(TtsBenchmarkPromptManifest {
+        id: raw.id,
+        language: raw.language,
+        sha256: text_sha256(TTS_PROMPT_MANIFEST_ENGLISH_SHORT_V1),
+        warmup: raw.warmup,
+        prompts: raw.prompts,
+    })
+}
+
+/// Benchmarks exact-prompt cache reuse without constructing an audio output.
 pub fn benchmark_tts(
     target: TtsBenchmarkTarget,
     text: &str,
     requested_runs: usize,
     mode: TtsBenchmarkMode,
+    create_backend: impl FnMut() -> Result<Arc<dyn TtsBackend>, String>,
+) -> TtsBenchmarkReport {
+    let prompt = TtsBenchmarkPrompt {
+        id: "repeated".into(),
+        text: text.into(),
+    };
+    let warmup = (mode == TtsBenchmarkMode::Warm).then_some(&prompt);
+    let prompts = std::iter::repeat_n(prompt.clone(), requested_runs).collect::<Vec<_>>();
+    benchmark_tts_prompts(
+        target,
+        TtsBenchmarkScenario::ExactPromptRepeat,
+        None,
+        warmup,
+        &prompts,
+        mode,
+        create_backend,
+    )
+}
+
+/// Benchmarks prompts that are distinct within this invocation from a fixed
+/// manifest, without constructing an audio output. Provider and system cache
+/// state from earlier invocations remains uncontrolled.
+pub fn benchmark_tts_manifest(
+    target: TtsBenchmarkTarget,
+    manifest: &TtsBenchmarkPromptManifest,
+    mode: TtsBenchmarkMode,
+    create_backend: impl FnMut() -> Result<Arc<dyn TtsBackend>, String>,
+) -> TtsBenchmarkReport {
+    let warmup = (mode == TtsBenchmarkMode::Warm).then_some(&manifest.warmup);
+    benchmark_tts_prompts(
+        target,
+        TtsBenchmarkScenario::DistinctPromptManifest,
+        Some(TtsBenchmarkPromptManifestReport {
+            id: manifest.id.clone(),
+            language: manifest.language.clone(),
+            sha256: manifest.sha256.clone(),
+        }),
+        warmup,
+        &manifest.prompts,
+        mode,
+        create_backend,
+    )
+}
+
+fn benchmark_tts_prompts(
+    target: TtsBenchmarkTarget,
+    scenario: TtsBenchmarkScenario,
+    prompt_manifest: Option<TtsBenchmarkPromptManifestReport>,
+    warmup_prompt: Option<&TtsBenchmarkPrompt>,
+    prompts: &[TtsBenchmarkPrompt],
+    mode: TtsBenchmarkMode,
     mut create_backend: impl FnMut() -> Result<Arc<dyn TtsBackend>, String>,
 ) -> TtsBenchmarkReport {
-    let synthesis_requests =
-        requested_runs.saturating_add(usize::from(mode == TtsBenchmarkMode::Warm));
+    let synthesis_requests = prompts.len() + usize::from(warmup_prompt.is_some());
+    let total_text_bytes = prompts.iter().fold(0_usize, |total, prompt| {
+        total.saturating_add(prompt.text.len())
+    }) + warmup_prompt.map_or(0, |prompt| prompt.text.len());
     let mut report = TtsBenchmarkReport {
-        schema_version: 1,
+        schema_version: 2,
         target,
         mode,
-        text_bytes: text.len(),
-        text_sha256: format!("{:x}", Sha256::digest(text.as_bytes())),
-        requested_runs,
+        scenario,
+        prior_cache_state: "uncontrolled_system_and_provider_state",
+        prompt_manifest,
+        requested_runs: prompts.len(),
         planned_workload: TtsBenchmarkWorkload {
             synthesis_requests,
-            total_text_bytes: text.len().saturating_mul(synthesis_requests),
+            total_text_bytes,
         },
         warmup: None,
-        runs: Vec::with_capacity(requested_runs),
+        runs: Vec::with_capacity(prompts.len()),
     };
 
     match mode {
-        TtsBenchmarkMode::Cold => {
-            for run in 1..=requested_runs {
+        TtsBenchmarkMode::FreshBackend => {
+            for (index, prompt) in prompts.iter().enumerate() {
                 let started = Instant::now();
                 match create_backend() {
                     Ok(backend) => report.runs.push(run_synthesis(
-                        run,
+                        index + 1,
                         true,
                         Some(started.elapsed()),
                         backend.as_ref(),
-                        text,
+                        prompt,
                     )),
                     Err(error) => report.runs.push(TtsBenchmarkRun::initialization_error(
-                        run,
+                        index + 1,
                         true,
+                        prompt,
                         started.elapsed(),
                         error,
                     )),
@@ -169,6 +312,7 @@ pub fn benchmark_tts(
             }
         }
         TtsBenchmarkMode::Warm => {
+            let prompt = warmup_prompt.expect("warm benchmark always provides a warm-up prompt");
             let started = Instant::now();
             match create_backend() {
                 Ok(backend) => {
@@ -177,18 +321,18 @@ pub fn benchmark_tts(
                         false,
                         Some(started.elapsed()),
                         backend.as_ref(),
-                        text,
+                        prompt,
                     ));
                     if report.warmup.as_ref().is_some_and(|run| {
                         run.error.is_none() && run.outcome == Some(TtsOutcomeLabel::Completed)
                     }) {
-                        for run in 1..=requested_runs {
+                        for (index, prompt) in prompts.iter().enumerate() {
                             report.runs.push(run_synthesis(
-                                run,
+                                index + 1,
                                 true,
                                 None,
                                 backend.as_ref(),
-                                text,
+                                prompt,
                             ));
                         }
                     }
@@ -197,6 +341,7 @@ pub fn benchmark_tts(
                     report.warmup = Some(TtsBenchmarkRun::initialization_error(
                         0,
                         false,
+                        prompt,
                         started.elapsed(),
                         error,
                     ));
@@ -212,14 +357,14 @@ fn run_synthesis(
     measured: bool,
     initialization: Option<Duration>,
     backend: &dyn TtsBackend,
-    text: &str,
+    prompt: &TtsBenchmarkPrompt,
 ) -> TtsBenchmarkRun {
     let spec = backend.pcm_spec();
     let active = AtomicBool::new(true);
     let started = Instant::now();
     let mut first_pcm = None;
     let mut pcm_frames = 0_u64;
-    let result = backend.synthesize_with_poll(text, &active, &mut |event| {
+    let result = backend.synthesize_with_poll(&prompt.text, &active, &mut |event| {
         if let TtsSynthesisEvent::Frames(frames) = event {
             if !frames.is_empty() && first_pcm.is_none() {
                 first_pcm = Some(started.elapsed());
@@ -252,6 +397,9 @@ fn run_synthesis(
     TtsBenchmarkRun {
         run,
         measured,
+        prompt_id: prompt.id.clone(),
+        text_bytes: prompt.text.len(),
+        text_sha256: text_sha256(&prompt.text),
         initialization_ms: initialization.map(milliseconds),
         time_to_first_pcm_ms: first_pcm.map(milliseconds),
         synthesis_ms: Some(milliseconds(synthesis)),
@@ -266,13 +414,20 @@ fn run_synthesis(
     }
 }
 
+fn text_sha256(text: &str) -> String {
+    format!("{:x}", Sha256::digest(text.as_bytes()))
+}
+
 fn milliseconds(duration: Duration) -> f64 {
     duration.as_secs_f64() * 1_000.0
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{benchmark_tts, TtsBenchmarkMode, TtsBenchmarkTarget, TtsOutcomeLabel};
+    use super::{
+        benchmark_tts, benchmark_tts_manifest, load_bundled_tts_prompt_manifest, TtsBenchmarkMode,
+        TtsBenchmarkScenario, TtsBenchmarkTarget, TtsOutcomeLabel,
+    };
     use crate::{TtsBackend, TtsOutcome, TtsPcmSpec};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
@@ -296,6 +451,7 @@ mod tests {
             voice: Some("test".into()),
             language: None,
             rate: Some(1.0),
+            endpoint_source: None,
         }
     }
 
@@ -414,15 +570,16 @@ mod tests {
     }
 
     #[test]
-    fn cold_mode_constructs_each_run_and_reports_pcm_metrics() {
+    fn fresh_backend_mode_constructs_each_run_and_reports_pcm_metrics() {
         let constructions = AtomicUsize::new(0);
-        let report = benchmark_tts(target(), "hello", 2, TtsBenchmarkMode::Cold, || {
+        let report = benchmark_tts(target(), "hello", 2, TtsBenchmarkMode::FreshBackend, || {
             constructions.fetch_add(1, Ordering::SeqCst);
             Ok(Arc::new(FakeTts))
         });
 
         assert_eq!(constructions.load(Ordering::SeqCst), 2);
         assert!(report.warmup.is_none());
+        assert_eq!(report.scenario, TtsBenchmarkScenario::ExactPromptRepeat);
         assert_eq!(report.runs.len(), 2);
         for run in report.runs {
             assert!(run.measured);
@@ -455,7 +612,7 @@ mod tests {
 
     #[test]
     fn initialization_errors_remain_structured() {
-        let report = benchmark_tts(target(), "hello", 2, TtsBenchmarkMode::Cold, || {
+        let report = benchmark_tts(target(), "hello", 2, TtsBenchmarkMode::FreshBackend, || {
             Err("missing model".into())
         });
 
@@ -467,7 +624,7 @@ mod tests {
 
     #[test]
     fn completed_synthesis_without_pcm_is_an_error() {
-        let report = benchmark_tts(target(), "hello", 1, TtsBenchmarkMode::Cold, || {
+        let report = benchmark_tts(target(), "hello", 1, TtsBenchmarkMode::FreshBackend, || {
             Ok(Arc::new(EmptyTts))
         });
 
@@ -481,7 +638,7 @@ mod tests {
 
     #[test]
     fn poll_is_not_pcm_and_partial_errors_keep_measurements() {
-        let polled = benchmark_tts(target(), "hello", 1, TtsBenchmarkMode::Cold, || {
+        let polled = benchmark_tts(target(), "hello", 1, TtsBenchmarkMode::FreshBackend, || {
             Ok(Arc::new(PollingTts))
         });
         assert_eq!(polled.runs[0].pcm_frames, 25);
@@ -489,7 +646,7 @@ mod tests {
         assert!(polled.runs[0].realtime_factor.is_some());
         assert_eq!(polled.runs[0].outcome, Some(TtsOutcomeLabel::Completed));
 
-        let failed = benchmark_tts(target(), "hello", 1, TtsBenchmarkMode::Cold, || {
+        let failed = benchmark_tts(target(), "hello", 1, TtsBenchmarkMode::FreshBackend, || {
             Ok(Arc::new(PartialErrorTts))
         });
         assert_eq!(failed.runs[0].pcm_frames, 20);
@@ -505,13 +662,13 @@ mod tests {
 
     #[test]
     fn cancellation_and_invalid_sample_rate_are_terminal_results() {
-        let cancelled = benchmark_tts(target(), "hello", 1, TtsBenchmarkMode::Cold, || {
+        let cancelled = benchmark_tts(target(), "hello", 1, TtsBenchmarkMode::FreshBackend, || {
             Ok(Arc::new(CancelledTts))
         });
         assert_eq!(cancelled.runs[0].outcome, Some(TtsOutcomeLabel::Cancelled));
         assert!(!cancelled.succeeded());
 
-        let invalid = benchmark_tts(target(), "hello", 1, TtsBenchmarkMode::Cold, || {
+        let invalid = benchmark_tts(target(), "hello", 1, TtsBenchmarkMode::FreshBackend, || {
             Ok(Arc::new(ZeroRateTts))
         });
         assert_eq!(invalid.runs[0].error_stage, Some("synthesis"));
@@ -525,31 +682,70 @@ mod tests {
 
     #[test]
     fn report_is_stable_structured_json() {
-        let report = benchmark_tts(target(), "hello", 1, TtsBenchmarkMode::Cold, || {
+        let report = benchmark_tts(target(), "hello", 1, TtsBenchmarkMode::FreshBackend, || {
             Ok(Arc::new(FakeTts))
         });
         let value = serde_json::to_value(report).unwrap();
 
-        assert_eq!(value["schema_version"], 1);
+        assert_eq!(value["schema_version"], 2);
         assert_eq!(value["target"]["backend"], "fake");
         assert_eq!(value["target"]["voice"], "test");
-        assert_eq!(value["mode"], "cold");
+        assert_eq!(value["mode"], "fresh_backend");
+        assert_eq!(value["scenario"], "exact_prompt_repeat");
         assert_eq!(
-            value["text_sha256"],
+            value["prior_cache_state"],
+            "uncontrolled_system_and_provider_state"
+        );
+        assert_eq!(
+            value["runs"][0]["text_sha256"],
             "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
         );
+        assert_eq!(value["runs"][0]["prompt_id"], "repeated");
         assert_eq!(value["requested_runs"], 1);
         assert_eq!(value["planned_workload"]["synthesis_requests"], 1);
         assert_eq!(value["planned_workload"]["total_text_bytes"], 5);
         assert_eq!(value["runs"][0]["pcm_frames"], 100);
         assert_eq!(value["runs"][0]["outcome"], "completed");
 
-        let changed = benchmark_tts(target(), "jello", 1, TtsBenchmarkMode::Cold, || {
+        let changed = benchmark_tts(target(), "jello", 1, TtsBenchmarkMode::FreshBackend, || {
             Ok(Arc::new(FakeTts))
         });
         assert_ne!(
-            value["text_sha256"],
-            serde_json::to_value(changed).unwrap()["text_sha256"]
+            value["runs"][0]["text_sha256"],
+            serde_json::to_value(changed).unwrap()["runs"][0]["text_sha256"]
+        );
+    }
+
+    #[test]
+    fn bundled_manifest_is_fixed_distinct_and_uses_separate_warmup() {
+        let manifest = load_bundled_tts_prompt_manifest("english-short-v1").unwrap();
+        assert_eq!(
+            manifest.sha256,
+            "ab41a51ef214f0a632f517b1c3dca288505a9edafe70f7d58b2c4b4782594e0d"
+        );
+        assert_eq!(manifest.prompts.len(), 5);
+        assert!(manifest
+            .prompts
+            .iter()
+            .all(|prompt| prompt.text != manifest.warmup.text));
+
+        let report = benchmark_tts_manifest(target(), &manifest, TtsBenchmarkMode::Warm, || {
+            Ok(Arc::new(FakeTts))
+        });
+        assert_eq!(
+            report.scenario,
+            TtsBenchmarkScenario::DistinctPromptManifest
+        );
+        assert_eq!(report.warmup.as_ref().unwrap().prompt_id, "warmup");
+        assert_eq!(report.runs.len(), 5);
+        assert!(report
+            .runs
+            .iter()
+            .all(|run| run.text_sha256 != report.warmup.as_ref().unwrap().text_sha256));
+        assert_eq!(report.planned_workload.synthesis_requests, 6);
+        assert_eq!(
+            report.prompt_manifest.as_ref().unwrap().id,
+            "english-short-v1"
         );
     }
 }
