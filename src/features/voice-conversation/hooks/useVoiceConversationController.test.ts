@@ -668,22 +668,18 @@ describe("voice transcript delivery coordination", () => {
       init: vi.fn().mockResolvedValue(undefined),
     });
 
-    const owner = renderHook(
-      ({ routeBlocked }) =>
-        useVoiceConversationController({
-          sessionId: "session-unmounted-owner",
-          onSend: ownerSend,
-          enabled: true,
-          isGooseSession: true,
-          pocketReady: true,
-          onPocketSetupRequired: vi.fn(),
-          routeBlocked,
-        }),
-      { initialProps: { routeBlocked: false } },
+    const owner = renderHook(() =>
+      useVoiceConversationController({
+        sessionId: "session-unmounted-owner",
+        onSend: ownerSend,
+        enabled: true,
+        isGooseSession: true,
+        pocketReady: true,
+        onPocketSetupRequired: vi.fn(),
+      }),
     );
 
     await waitFor(() => expect(voiceStoreMocks.subscriber).toBeDefined());
-    owner.rerender({ routeBlocked: true });
     owner.unmount();
     await expect(
       voiceStoreMocks.subscriber?.({
@@ -698,6 +694,70 @@ describe("voice transcript delivery coordination", () => {
     ).resolves.toBeUndefined();
 
     expect(ownerSend).toHaveBeenCalledOnce();
+  });
+
+  it("keeps an unmounted blocked route deferred until a replacement mounts", async () => {
+    const ownerSend = vi.fn().mockResolvedValue(true);
+    const replacementSend = vi.fn().mockResolvedValue(true);
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-unmounted-blocked",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 1,
+      },
+      uiState: "listening",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+    });
+    const owner = renderHook(
+      ({ routeBlocked }) =>
+        useVoiceConversationController({
+          sessionId: "session-unmounted-blocked",
+          onSend: ownerSend,
+          enabled: true,
+          isGooseSession: true,
+          pocketReady: true,
+          onPocketSetupRequired: vi.fn(),
+          routeBlocked,
+        }),
+      { initialProps: { routeBlocked: false } },
+    );
+
+    await waitFor(() => expect(voiceStoreMocks.subscriber).toBeDefined());
+    owner.rerender({ routeBlocked: true });
+    owner.unmount();
+    const transcript = {
+      type: "user",
+      sessionId: "session-unmounted-blocked",
+      lifecycleId: "lifecycle-unmounted-blocked",
+      id: "utterance-unmounted-blocked",
+      text: "wait for a safe route",
+      revision: 1,
+      deliveryAttempts: 0,
+    };
+    await expect(voiceStoreMocks.subscriber?.(transcript)).rejects.toThrow(
+      "waiting for its bound chat",
+    );
+    expect(ownerSend).not.toHaveBeenCalled();
+
+    renderHook(() =>
+      useVoiceConversationController({
+        sessionId: "session-unmounted-blocked",
+        onSend: replacementSend,
+        enabled: true,
+        isGooseSession: true,
+        pocketReady: true,
+        onPocketSetupRequired: vi.fn(),
+      }),
+    );
+    await expect(
+      voiceStoreMocks.subscriber?.(transcript),
+    ).resolves.toBeUndefined();
+    expect(replacementSend).toHaveBeenCalledOnce();
   });
 
   it("serializes deliveries for the same session and re-evaluates in order", async () => {
