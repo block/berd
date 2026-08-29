@@ -76,3 +76,53 @@ OpenAI benchmarking is disabled unless the command includes
 mode's extra request, and rejects more than 20 requests or 65,536 total prompt
 bytes before constructing the backend. A missing `OPENAI_API_KEY` still fails as
 a structured initialization error without making a request.
+
+## STT benchmarks
+
+`benchmark stt` feeds a small, immutable LibriSpeech `test-clean` fixture pack
+through the same `VoiceInputRuntime` used by Berd and the voice session. It does
+not open an input device:
+
+```text
+berd-voice benchmark stt --stt-backend macos --runs 1 --mode cold
+berd-voice benchmark stt --stt-backend parakeet \
+  --stt-model-dir /path/to/parakeet --runs 3 --mode warm
+```
+
+The checked-in pack contains three unmodified 16 kHz mono FLAC utterances from
+OpenSLR SLR12. Its manifest records the official archive URL and MD5, CC BY 4.0
+license, exact transcripts, decoded stream metadata, and per-file SHA-256.
+Benchmark startup verifies those hashes and metadata, decodes the audio, and
+uses deterministic linear interpolation to convert it to the runtime's 48 kHz
+mono Float32 contract. The report records that conversion and embeds the full
+fixture attribution notice, so standalone binaries and packaged applications
+retain the notice. Rust sources remain Apache 2.0; the embedded corpus files are
+CC BY 4.0, as reflected by the crate's aggregate package-license metadata.
+
+Input is paced in real time as exact 960-sample frames every 20 ms. Each clip
+has one second of leading silence and 6.5 seconds of trailing silence. The long
+tail deliberately keeps continuous recognizers supplied with capture-like PCM
+through VAD settlement and the runtime's five-second live no-result bound; it
+is included in the reported workload. A final transcript is validated and
+stored in its per-utterance result before its storage receipt is acknowledged,
+and the next clip does not begin until authoritative speaking and
+recognition-pending state are both idle.
+
+Cold mode creates a fresh `VoiceInputRuntime` for each measured run. It does not
+start a fresh process, so operating-system, provider, and model-file caches may
+remain warm. Warm mode creates one runtime, records one unmeasured fixture-pack
+warm-up, then reuses that resident runtime for the measured runs.
+
+Reports contain fixture provenance, sanitized engine/environment metadata,
+planned recognition commits and streamed duration, initialization and turn
+timings, hypotheses, and aggregate word error rate. WER normalization retains
+ASCII letters, digits, and apostrophes, converts them to uppercase, maps other
+punctuation to whitespace, and reports substitutions, deletions, and insertions
+alongside the aggregate rate.
+
+OpenAI STT benchmarking requires `--allow-paid-openai` and reads its key only
+from `OPENAI_API_KEY`. Before resolving credentials or connecting, the CLI
+rejects a warmup-inclusive workload above 20 recognition commits or 120 seconds
+of streamed PCM. Endpoint and model overrides use the same environment variables
+as the session; reports record only which source supplied them and never include
+the key or endpoint value.

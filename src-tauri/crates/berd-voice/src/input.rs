@@ -26,7 +26,7 @@ use crate::{
     ParakeetRecognizer,
 };
 
-const INPUT_SAMPLE_RATE: usize = 48_000;
+pub const INPUT_SAMPLE_RATE: usize = 48_000;
 pub const INPUT_FRAME_SAMPLES: usize = 960;
 const INPUT_FRAME_DURATION: Duration = Duration::from_millis(20);
 const INPUT_QUEUE_FRAMES: usize = 50;
@@ -99,6 +99,15 @@ impl FinalTranscriptStorageReceipt {
         if let Some(sender) = self.0.take() {
             let _ = sender.send(());
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_pair() -> (Self, mpsc::Receiver<()>) {
+        // A single buffered acknowledgement lets unit tests inspect receipt
+        // ordering without introducing a helper thread. Production receipts
+        // remain rendezvous channels created by `send_final`.
+        let (sender, receiver) = mpsc::sync_channel(1);
+        (Self(Some(sender)), receiver)
     }
 }
 

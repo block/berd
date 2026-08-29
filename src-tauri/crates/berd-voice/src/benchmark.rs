@@ -7,6 +7,13 @@ use sha2::{Digest, Sha256};
 
 use crate::{TtsBackend, TtsOutcome, TtsSynthesisEvent};
 
+mod stt;
+
+pub use stt::{
+    benchmark_stt, load_bundled_stt_fixture_pack, SttBenchmarkEnvironment, SttBenchmarkMode,
+    SttBenchmarkReport, SttBenchmarkTarget, SttBenchmarkWorkload, SttFixturePack,
+};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TtsBenchmarkMode {

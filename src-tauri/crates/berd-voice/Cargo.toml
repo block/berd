@@ -2,7 +2,9 @@
 name = "berd-voice"
 version = "0.1.0"
 edition = "2021"
-license = "Apache-2.0"
+# Rust sources are Apache-2.0; the embedded LibriSpeech benchmark fixture is
+# CC-BY-4.0 and carries its attribution notice in every benchmark report.
+license = "Apache-2.0 AND CC-BY-4.0"
 repository = "https://github.com/block/berd"
 description = "Device-local voice primitives for Berd"
 
@@ -14,6 +16,7 @@ shared = ["sherpa-onnx/shared"]
 [dependencies]
 audioadapter-buffers = "3.0"
 base64 = "0.22"
+claxon = "0.4.3"
 earshot = "1.0"
 futures-util = "0.3"
 ort = { version = "=2.0.0-rc.12", default-features = false, features = ["api-24", "ndarray", "std"] }

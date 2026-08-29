@@ -8,7 +8,10 @@ use std::sync::{
 use std::thread;
 use std::time::{Duration, Instant};
 
-use berd_voice::benchmark::{benchmark_tts, TtsBenchmarkMode, TtsBenchmarkTarget};
+use berd_voice::benchmark::{
+    benchmark_stt, benchmark_tts, load_bundled_stt_fixture_pack, SttBenchmarkEnvironment,
+    SttBenchmarkMode, SttBenchmarkTarget, TtsBenchmarkMode, TtsBenchmarkTarget,
+};
 use berd_voice::input::{
     AssistantActivityGuard, VoiceInputConfig, VoiceInputControls, VoiceInputEngineConfig,
     VoiceInputEvent, VoiceInputFrame, VoiceInputRuntime, INPUT_FRAME_SAMPLES,
@@ -32,6 +35,7 @@ const INPUT_QUEUE_CAPACITY: usize = 32;
 const SHUTDOWN_PLAYBACK_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_OPENAI_BENCHMARK_REQUESTS: usize = 20;
 const MAX_OPENAI_BENCHMARK_TEXT_BYTES: usize = 64 * 1024;
+const MAX_OPENAI_STT_BENCHMARK_SECONDS: f64 = 120.0;
 
 enum Input {
     Request(SessionRequest),
@@ -94,6 +98,14 @@ struct TtsBenchmarkConfig {
     mode: TtsBenchmarkMode,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct SttBenchmarkConfig {
+    stt: SttBackendConfig,
+    runs: usize,
+    mode: SttBenchmarkMode,
+    allow_paid_openai: bool,
+}
+
 fn main() {
     let args: Vec<_> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
@@ -112,7 +124,15 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        _ => usage_error("supported commands are session and benchmark tts"),
+        Some("benchmark") if args.get(2).map(String::as_str) == Some("stt") => {
+            let config =
+                parse_stt_benchmark_args(&args).unwrap_or_else(|error| usage_error(&error));
+            if let Err(error) = run_stt_benchmark(config) {
+                eprintln!("berd-voice benchmark stt failed: {error}");
+                std::process::exit(1);
+            }
+        }
+        _ => usage_error("supported commands are session, benchmark tts, and benchmark stt"),
     }
 }
 
@@ -124,7 +144,10 @@ fn usage_error(error: &str) -> ! {
          [--stt-backend macos|parakeet|openai] [--stt-model-dir PATH]\n  \
          berd-voice benchmark tts --tts-backend openai|siri|pocket \
          [--model-dir PATH] [--voice ID] [--language BCP47] [--rate FLOAT] \
-         --text TEXT --runs COUNT --mode cold|warm [--allow-paid-openai]"
+         --text TEXT --runs COUNT --mode cold|warm [--allow-paid-openai]\n  \
+         berd-voice benchmark stt --stt-backend macos|parakeet|openai \
+         [--stt-model-dir PATH] --runs COUNT --mode cold|warm \
+         [--allow-paid-openai]"
     );
     std::process::exit(2);
 }
@@ -480,12 +503,20 @@ fn parse_args(args: &[String]) -> Result<SessionConfig, String> {
         index += 2;
     }
     let tts = build_tts_backend_config(backend, voice, language, model_dir, rate)?;
-    let stt = match stt_backend {
+    let stt = build_stt_backend_config(stt_backend, stt_model_dir)?;
+    Ok(SessionConfig { tts, stt })
+}
+
+fn build_stt_backend_config(
+    stt_backend: &str,
+    stt_model_dir: Option<PathBuf>,
+) -> Result<SttBackendConfig, String> {
+    match stt_backend {
         "macos" => {
             if stt_model_dir.is_some() {
                 return Err("--stt-model-dir is only valid with Parakeet STT".into());
             }
-            SttBackendConfig::Macos
+            Ok(SttBackendConfig::Macos)
         }
         "parakeet" => {
             let model_dir = stt_model_dir
@@ -494,17 +525,16 @@ fn parse_args(args: &[String]) -> Result<SessionConfig, String> {
             if !model_dir.is_absolute() {
                 return Err("--stt-model-dir must be an absolute path".into());
             }
-            SttBackendConfig::Parakeet { model_dir }
+            Ok(SttBackendConfig::Parakeet { model_dir })
         }
         "openai" => {
             if stt_model_dir.is_some() {
                 return Err("--stt-model-dir is only valid with Parakeet STT".into());
             }
-            SttBackendConfig::OpenAi
+            Ok(SttBackendConfig::OpenAi)
         }
-        value => return Err(format!("unsupported STT backend: {value}")),
-    };
-    Ok(SessionConfig { tts, stt })
+        value => Err(format!("unsupported STT backend: {value}")),
+    }
 }
 
 fn build_tts_backend_config(
@@ -721,6 +751,192 @@ fn run_tts_benchmark(config: TtsBenchmarkConfig) -> Result<(), String> {
         Ok(())
     } else {
         Err("one or more benchmark runs failed; see JSON output".into())
+    }
+}
+
+fn parse_stt_benchmark_args(args: &[String]) -> Result<SttBenchmarkConfig, String> {
+    if args.get(1).map(String::as_str) != Some("benchmark")
+        || args.get(2).map(String::as_str) != Some("stt")
+    {
+        return Err("expected benchmark stt".into());
+    }
+    let mut backend = None;
+    let mut model_dir = None;
+    let mut runs = None;
+    let mut mode = None;
+    let mut allow_paid_openai = false;
+    let mut index = 3;
+    while index < args.len() {
+        let flag = args[index].as_str();
+        if flag == "--allow-paid-openai" {
+            allow_paid_openai = true;
+            index += 1;
+            continue;
+        }
+        let value = args
+            .get(index + 1)
+            .ok_or_else(|| format!("{flag} requires a value"))?;
+        match flag {
+            "--stt-backend" => backend = Some(value.as_str()),
+            "--stt-model-dir" => model_dir = Some(PathBuf::from(value)),
+            "--runs" => {
+                let parsed = value
+                    .parse::<usize>()
+                    .map_err(|_| "--runs must be a positive integer".to_string())?;
+                if !(1..=100).contains(&parsed) {
+                    return Err("--runs must be between 1 and 100".into());
+                }
+                runs = Some(parsed);
+            }
+            "--mode" => {
+                mode = Some(match value.as_str() {
+                    "cold" => SttBenchmarkMode::Cold,
+                    "warm" => SttBenchmarkMode::Warm,
+                    _ => return Err("--mode must be cold or warm".into()),
+                })
+            }
+            _ => return Err(format!("unknown argument: {flag}")),
+        }
+        index += 2;
+    }
+    let stt = build_stt_backend_config(
+        backend.ok_or_else(|| "--stt-backend is required".to_string())?,
+        model_dir,
+    )?;
+    let runs = runs.ok_or_else(|| "--runs is required".to_string())?;
+    let mode = mode.ok_or_else(|| "--mode is required".to_string())?;
+    if matches!(stt, SttBackendConfig::OpenAi) && !allow_paid_openai {
+        return Err("OpenAI benchmarks require explicit --allow-paid-openai consent".into());
+    }
+    if !matches!(stt, SttBackendConfig::OpenAi) && allow_paid_openai {
+        return Err("--allow-paid-openai is only valid with OpenAI".into());
+    }
+    Ok(SttBenchmarkConfig {
+        stt,
+        runs,
+        mode,
+        allow_paid_openai,
+    })
+}
+
+fn validate_stt_benchmark_workload(
+    config: &SttBenchmarkConfig,
+    workload: &berd_voice::benchmark::SttBenchmarkWorkload,
+) -> Result<(), String> {
+    if !matches!(config.stt, SttBackendConfig::OpenAi) {
+        return Ok(());
+    }
+    debug_assert!(config.allow_paid_openai);
+    if workload.recognition_commits > MAX_OPENAI_BENCHMARK_REQUESTS {
+        return Err(format!(
+            "OpenAI benchmark would make {} recognition commits; maximum is {MAX_OPENAI_BENCHMARK_REQUESTS}",
+            workload.recognition_commits
+        ));
+    }
+    if workload.streamed_audio_seconds > MAX_OPENAI_STT_BENCHMARK_SECONDS {
+        return Err(format!(
+            "OpenAI benchmark would stream {:.2} seconds of audio; maximum is {MAX_OPENAI_STT_BENCHMARK_SECONDS:.0}",
+            workload.streamed_audio_seconds
+        ));
+    }
+    Ok(())
+}
+
+fn run_stt_benchmark(config: SttBenchmarkConfig) -> Result<(), String> {
+    let report = create_stt_benchmark_report(&config)?;
+    let succeeded = report.succeeded();
+    serde_json::to_writer(io::stdout().lock(), &report).map_err(|error| error.to_string())?;
+    println!();
+    if succeeded {
+        Ok(())
+    } else {
+        Err("one or more benchmark runs failed; see JSON output".into())
+    }
+}
+
+fn create_stt_benchmark_report(
+    config: &SttBenchmarkConfig,
+) -> Result<berd_voice::benchmark::SttBenchmarkReport, String> {
+    let pack = load_bundled_stt_fixture_pack()?;
+    let workload = pack.workload(config.runs, config.mode);
+    validate_stt_benchmark_workload(config, &workload)?;
+    let target = stt_benchmark_target(&config.stt)?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| format!("initialize STT benchmark runtime: {error}"))?;
+    Ok(runtime.block_on(benchmark_stt(
+        target,
+        SttBenchmarkEnvironment::default(),
+        &pack,
+        config.runs,
+        config.mode,
+        || create_input_runtime(&config.stt),
+    )))
+}
+
+fn stt_benchmark_target(config: &SttBackendConfig) -> Result<SttBenchmarkTarget, String> {
+    match config {
+        SttBackendConfig::Parakeet { model_dir } => Ok(SttBenchmarkTarget {
+            backend: "parakeet".into(),
+            model: model_dir
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned()),
+            locale: None,
+            vad_threshold: 0.5,
+            endpoint_source: None,
+            model_source: Some("explicit --stt-model-dir".into()),
+            credential_source: None,
+        }),
+        SttBackendConfig::Macos => {
+            #[cfg(target_os = "macos")]
+            {
+                let status = berd_voice::mac_speech::mac_speech_status()?;
+                Ok(SttBenchmarkTarget {
+                    backend: "macos".into(),
+                    model: Some(status.model_status),
+                    locale: status.locale,
+                    vad_threshold: 0.5,
+                    endpoint_source: None,
+                    model_source: Some("installed current-locale model".into()),
+                    credential_source: None,
+                })
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                Err("macOS speech recognition is only available on macOS".into())
+            }
+        }
+        SttBackendConfig::OpenAi => {
+            let (model, model_source) = if let Some(model) =
+                std::env::var("OPENAI_TRANSCRIPTION_MODEL")
+                    .ok()
+                    .filter(|value| !value.trim().is_empty())
+            {
+                (model, "OPENAI_TRANSCRIPTION_MODEL environment variable")
+            } else if let Some(model) = std::env::var("OPENAI_STT_MODEL")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+            {
+                (model, "OPENAI_STT_MODEL environment variable")
+            } else {
+                ("gpt-live-transcribe".into(), "built-in default")
+            };
+            let endpoint_source = std::env::var("OPENAI_REALTIME_ENDPOINT")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .map(|_| "OPENAI_REALTIME_ENDPOINT environment variable")
+                .unwrap_or("built-in default");
+            Ok(SttBenchmarkTarget {
+                backend: "openai".into(),
+                model: Some(model),
+                locale: None,
+                vad_threshold: 0.5,
+                endpoint_source: Some(endpoint_source.into()),
+                model_source: Some(model_source.into()),
+                credential_source: Some("OPENAI_API_KEY environment variable".into()),
+            })
+        }
     }
 }
 
@@ -1866,6 +2082,147 @@ mod tests {
         assert!(parse_tts_benchmark_args(&oversized_workload)
             .unwrap_err()
             .contains("80000 total UTF-8 text bytes"));
+    }
+
+    #[test]
+    fn stt_benchmark_cli_is_explicit_and_reuses_engine_validation() {
+        assert_eq!(
+            parse_stt_benchmark_args(&args(&[
+                "berd-voice",
+                "benchmark",
+                "stt",
+                "--stt-backend",
+                "macos",
+                "--runs",
+                "2",
+                "--mode",
+                "cold",
+            ]))
+            .unwrap(),
+            SttBenchmarkConfig {
+                stt: SttBackendConfig::Macos,
+                runs: 2,
+                mode: SttBenchmarkMode::Cold,
+                allow_paid_openai: false,
+            }
+        );
+        assert!(parse_stt_benchmark_args(&args(&[
+            "berd-voice",
+            "benchmark",
+            "stt",
+            "--stt-backend",
+            "parakeet",
+            "--runs",
+            "1",
+            "--mode",
+            "warm",
+        ]))
+        .unwrap_err()
+        .contains("--stt-model-dir is required"));
+        assert!(parse_stt_benchmark_args(&args(&[
+            "berd-voice",
+            "benchmark",
+            "stt",
+            "--stt-backend",
+            "parakeet",
+            "--stt-model-dir",
+            "relative",
+            "--runs",
+            "1",
+            "--mode",
+            "warm",
+        ]))
+        .unwrap_err()
+        .contains("absolute path"));
+    }
+
+    #[test]
+    fn stt_benchmark_paid_openai_consent_bounds_full_streamed_workload() {
+        let base = [
+            "berd-voice",
+            "benchmark",
+            "stt",
+            "--stt-backend",
+            "openai",
+            "--runs",
+            "1",
+            "--mode",
+            "cold",
+        ];
+        assert!(parse_stt_benchmark_args(&args(&base))
+            .unwrap_err()
+            .contains("--allow-paid-openai"));
+
+        let pack = load_bundled_stt_fixture_pack().unwrap();
+        let allowed = parse_stt_benchmark_args(&args(&[
+            "berd-voice",
+            "benchmark",
+            "stt",
+            "--stt-backend",
+            "openai",
+            "--runs",
+            "2",
+            "--mode",
+            "warm",
+            "--allow-paid-openai",
+        ]))
+        .unwrap();
+        validate_stt_benchmark_workload(&allowed, &pack.workload(2, SttBenchmarkMode::Warm))
+            .unwrap();
+
+        let too_many_seconds = SttBenchmarkConfig {
+            runs: 6,
+            mode: SttBenchmarkMode::Cold,
+            ..allowed.clone()
+        };
+        assert!(validate_stt_benchmark_workload(
+            &too_many_seconds,
+            &pack.workload(6, SttBenchmarkMode::Cold)
+        )
+        .unwrap_err()
+        .contains("232.92 seconds"));
+
+        let too_many_commits = SttBenchmarkConfig {
+            runs: 7,
+            mode: SttBenchmarkMode::Cold,
+            ..allowed
+        };
+        assert!(validate_stt_benchmark_workload(
+            &too_many_commits,
+            &pack.workload(7, SttBenchmarkMode::Cold)
+        )
+        .unwrap_err()
+        .contains("21 recognition commits"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "requires the installed current-locale macOS SpeechTranscriber model"]
+    fn local_macos_stt_benchmark_uses_the_production_runtime() {
+        let report = create_stt_benchmark_report(&SttBenchmarkConfig {
+            stt: SttBackendConfig::Macos,
+            runs: 1,
+            mode: SttBenchmarkMode::Cold,
+            allow_paid_openai: false,
+        })
+        .unwrap();
+        assert!(report.succeeded());
+        assert_eq!(report.runs[0].utterances.len(), 3);
+    }
+
+    #[test]
+    #[ignore = "requires BERD_PARAKEET_TEST_MODEL_DIR with a complete Parakeet bundle"]
+    fn local_parakeet_stt_benchmark_uses_the_production_runtime() {
+        let model_dir = PathBuf::from(std::env::var("BERD_PARAKEET_TEST_MODEL_DIR").unwrap());
+        let report = create_stt_benchmark_report(&SttBenchmarkConfig {
+            stt: SttBackendConfig::Parakeet { model_dir },
+            runs: 1,
+            mode: SttBenchmarkMode::Cold,
+            allow_paid_openai: false,
+        })
+        .unwrap();
+        assert!(report.succeeded());
+        assert_eq!(report.runs[0].utterances.len(), 3);
     }
 
     #[test]
