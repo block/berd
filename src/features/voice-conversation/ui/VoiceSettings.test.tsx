@@ -257,6 +257,26 @@ describe("VoiceSettings", () => {
       screen.getByText(/gpt-4o-mini-tts.*marin voice/),
     ).toBeInTheDocument();
     expect(screen.getByText("Playback speed")).toBeInTheDocument();
+    expect(
+      screen.getAllByText(
+        "Saved securely and shared by OpenAI transcription and voice playback.",
+      ),
+    ).toHaveLength(2);
+  });
+
+  it("saves the shared OpenAI voice key from the speech-to-text settings", async () => {
+    inputState.backend = "openai";
+    setupState.current = setup(pocketStatus({ pocketInstalled: true }));
+    renderWithProviders(<VoiceSettings />);
+
+    const user = userEvent.setup();
+    await user.type(
+      screen.getByLabelText("OpenAI speech-to-text API key"),
+      "stt-secret",
+    );
+    await user.click(screen.getAllByRole("button", { name: "Save key" })[0]);
+
+    expect(openAiApiMocks.setSttApiKey).toHaveBeenCalledWith("stt-secret");
   });
 
   it("labels purpose-specific environment overrides", async () => {
@@ -290,7 +310,7 @@ describe("VoiceSettings", () => {
     expect(openAiApiMocks.setSttApiKey).toHaveBeenCalledWith("stt-secret");
   });
 
-  it("saves a dedicated OpenAI text-to-speech API key", async () => {
+  it("saves the shared OpenAI voice key from the text-to-speech settings", async () => {
     outputState.backend = "openai";
     setupState.current = setup(pocketStatus({ parakeetInstalled: true }));
     renderWithProviders(<VoiceSettings />);
@@ -317,7 +337,7 @@ describe("VoiceSettings", () => {
 
     expect(
       await screen.findByText(
-        "OpenAI transcription is not ready. Add its speech-to-text API key below, then try again.",
+        "OpenAI transcription is not ready. Add the shared OpenAI voice API key below, then try again.",
       ),
     ).toBeInTheDocument();
     expect(
@@ -338,7 +358,7 @@ describe("VoiceSettings", () => {
 
     expect(
       await screen.findByText(
-        "The OpenAI speech-to-text key is missing, and Pocket TTS is not installed. Complete both steps below to use Voice Conversation.",
+        "The shared OpenAI voice API key is missing, and Pocket TTS is not installed. Complete both steps below to use Voice Conversation.",
       ),
     ).toBeInTheDocument();
   });
@@ -366,7 +386,7 @@ describe("VoiceSettings", () => {
 
     expect(
       await screen.findByText(
-        "The OpenAI speech-to-text key is missing, and no installed Siri voice is selected. Complete both steps below to use Voice Conversation.",
+        "The shared OpenAI voice API key is missing, and no installed Siri voice is selected. Complete both steps below to use Voice Conversation.",
       ),
     ).toBeInTheDocument();
   });
@@ -401,7 +421,7 @@ describe("VoiceSettings", () => {
 
     expect(
       await screen.findByText(
-        "OpenAI voice playback is not ready. Add its text-to-speech API key below, then try again.",
+        "OpenAI voice playback is not ready. Add the shared OpenAI voice API key below, then try again.",
       ),
     ).toBeInTheDocument();
     expect(

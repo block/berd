@@ -327,23 +327,16 @@ pub async fn get_openai_voice_status(
         .speed;
     let tts_available = cfg!(target_os = "macos");
     let credential_revision = state.credential_revision.load(Ordering::Acquire);
-    let (stt_result, tts_result) = tauri::async_runtime::spawn_blocking(move || {
-        let tts_result = if tts_available {
-            openai_voice_credentials::read(OpenAiVoiceCredential::TextToSpeech)
-        } else {
-            Ok(None)
-        };
-        (
-            openai_voice_credentials::read(OpenAiVoiceCredential::SpeechToText),
-            tts_result,
-        )
+    let credential_result = tauri::async_runtime::spawn_blocking(move || {
+        openai_voice_credentials::read(OpenAiVoiceCredential::SpeechToText)
     })
     .await
     .map_err(|error| format!("Could not check OpenAI voice credentials: {error}"))?;
-    let stt_error = stt_result.as_ref().err().cloned();
-    let tts_error = tts_result.as_ref().err().cloned();
-    let stt_configured = stt_result.unwrap_or(None).is_some();
-    let tts_configured = tts_result.unwrap_or(None).is_some();
+    let credential_error = credential_result.as_ref().err().cloned();
+    let stt_error = credential_error.clone();
+    let tts_error = tts_available.then_some(credential_error).flatten();
+    let stt_configured = credential_result.unwrap_or(None).is_some();
+    let tts_configured = tts_available && stt_configured;
     if state.credential_revision.load(Ordering::Acquire) == credential_revision {
         state.configured.store(stt_configured, Ordering::Release);
     }
@@ -382,6 +375,7 @@ pub async fn set_openai_stt_api_key(
     }
     native_voice
         .stop_active_then(&app, &capture, || {
+            stop_openai_voice_inner(&state)?;
             openai_voice_credentials::store(OpenAiVoiceCredential::SpeechToText, api_key)?;
             state.credential_revision.fetch_add(1, Ordering::AcqRel);
             state.configured.store(true, Ordering::Release);
@@ -400,6 +394,7 @@ pub async fn clear_openai_stt_api_key(
 ) -> Result<(), String> {
     native_voice
         .stop_active_then(&app, &capture, || {
+            stop_openai_voice_inner(&state)?;
             openai_voice_credentials::clear(OpenAiVoiceCredential::SpeechToText)?;
             state.credential_revision.fetch_add(1, Ordering::AcqRel);
             state.configured.store(false, Ordering::Release);
@@ -410,32 +405,46 @@ pub async fn clear_openai_stt_api_key(
 }
 
 #[tauri::command]
-pub fn set_openai_tts_api_key(
+pub async fn set_openai_tts_api_key(
     app: AppHandle,
     state: State<'_, OpenAiVoiceState>,
+    native_voice: State<'_, NativeVoiceState>,
+    capture: State<'_, VoiceCaptureState>,
     api_key: String,
 ) -> Result<(), String> {
     let api_key = api_key.trim();
     if api_key.is_empty() {
         return Err("OpenAI text-to-speech API key cannot be empty".to_string());
     }
-    stop_openai_voice_inner(&state)?;
-    openai_voice_credentials::store(OpenAiVoiceCredential::TextToSpeech, api_key)?;
-    app.emit(SETTINGS_CHANGED_EVENT, ())
-        .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))?;
-    Ok(())
+    native_voice
+        .stop_active_then(&app, &capture, || {
+            stop_openai_voice_inner(&state)?;
+            openai_voice_credentials::store(OpenAiVoiceCredential::TextToSpeech, api_key)?;
+            state.credential_revision.fetch_add(1, Ordering::AcqRel);
+            state.configured.store(true, Ordering::Release);
+            app.emit(SETTINGS_CHANGED_EVENT, ())
+                .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))
+        })
+        .await
 }
 
 #[tauri::command]
-pub fn clear_openai_tts_api_key(
+pub async fn clear_openai_tts_api_key(
     app: AppHandle,
     state: State<'_, OpenAiVoiceState>,
+    native_voice: State<'_, NativeVoiceState>,
+    capture: State<'_, VoiceCaptureState>,
 ) -> Result<(), String> {
-    stop_openai_voice_inner(&state)?;
-    openai_voice_credentials::clear(OpenAiVoiceCredential::TextToSpeech)?;
-    app.emit(SETTINGS_CHANGED_EVENT, ())
-        .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))?;
-    Ok(())
+    native_voice
+        .stop_active_then(&app, &capture, || {
+            stop_openai_voice_inner(&state)?;
+            openai_voice_credentials::clear(OpenAiVoiceCredential::TextToSpeech)?;
+            state.credential_revision.fetch_add(1, Ordering::AcqRel);
+            state.configured.store(false, Ordering::Release);
+            app.emit(SETTINGS_CHANGED_EVENT, ())
+                .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))
+        })
+        .await
 }
 
 #[tauri::command]
