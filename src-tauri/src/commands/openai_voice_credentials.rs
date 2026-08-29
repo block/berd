@@ -2,6 +2,10 @@
 
 #[cfg(target_os = "macos")]
 const KEYCHAIN_SERVICE: &str = "berd-openai-voice";
+#[cfg(any(test, target_os = "macos"))]
+const KEYCHAIN_ACCOUNT: &str = "api-key";
+#[cfg(target_os = "macos")]
+const LEGACY_TTS_KEYCHAIN_ACCOUNT: &str = "tts-api-key";
 
 #[derive(Clone, Copy)]
 pub(crate) enum OpenAiVoiceCredential {
@@ -12,7 +16,7 @@ impl OpenAiVoiceCredential {
     #[cfg(any(test, target_os = "macos"))]
     const fn account(self) -> &'static str {
         match self {
-            Self::TextToSpeech => "tts-api-key",
+            Self::TextToSpeech => KEYCHAIN_ACCOUNT,
         }
     }
 
@@ -27,9 +31,14 @@ impl OpenAiVoiceCredential {
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn read(credential: OpenAiVoiceCredential) -> Result<Option<String>, String> {
-    let entry = keyring::Entry::new(KEYCHAIN_SERVICE, credential.account())
-        .map_err(|error| format!("Could not access Berd's OpenAI voice credentials: {error}"))?;
+fn entry(account: &str) -> Result<keyring::Entry, String> {
+    keyring::Entry::new(KEYCHAIN_SERVICE, account)
+        .map_err(|error| format!("Could not access Berd's OpenAI voice credentials: {error}"))
+}
+
+#[cfg(target_os = "macos")]
+fn read_account(account: &str) -> Result<Option<String>, String> {
+    let entry = entry(account)?;
     match entry.get_password() {
         Ok(value) => Ok(Some(value)),
         Err(keyring::Error::NoEntry) => Ok(None),
@@ -39,6 +48,29 @@ pub(crate) fn read(credential: OpenAiVoiceCredential) -> Result<Option<String>, 
     }
 }
 
+#[cfg(target_os = "macos")]
+fn clear_account(account: &str) -> Result<(), String> {
+    let entry = entry(account)?;
+    match entry.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(error) => Err(format!(
+            "Could not remove Berd's OpenAI voice credential: {error}"
+        )),
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn read(credential: OpenAiVoiceCredential) -> Result<Option<String>, String> {
+    if let Some(api_key) = read_account(credential.account())? {
+        return Ok(Some(api_key));
+    }
+    let Some(api_key) = read_account(LEGACY_TTS_KEYCHAIN_ACCOUNT)? else {
+        return Ok(None);
+    };
+    store(credential, &api_key)?;
+    Ok(Some(api_key))
+}
+
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn read(_credential: OpenAiVoiceCredential) -> Result<Option<String>, String> {
     Ok(None)
@@ -46,11 +78,11 @@ pub(crate) fn read(_credential: OpenAiVoiceCredential) -> Result<Option<String>,
 
 #[cfg(target_os = "macos")]
 pub(crate) fn store(credential: OpenAiVoiceCredential, api_key: &str) -> Result<(), String> {
-    let entry = keyring::Entry::new(KEYCHAIN_SERVICE, credential.account())
-        .map_err(|error| format!("Could not access Berd's OpenAI voice credentials: {error}"))?;
+    let entry = entry(credential.account())?;
     entry
         .set_password(api_key)
-        .map_err(|error| format!("Could not save Berd's OpenAI voice credential: {error}"))
+        .map_err(|error| format!("Could not save Berd's OpenAI voice credential: {error}"))?;
+    clear_account(LEGACY_TTS_KEYCHAIN_ACCOUNT)
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -60,14 +92,8 @@ pub(crate) fn store(_credential: OpenAiVoiceCredential, _api_key: &str) -> Resul
 
 #[cfg(target_os = "macos")]
 pub(crate) fn clear(credential: OpenAiVoiceCredential) -> Result<(), String> {
-    let entry = keyring::Entry::new(KEYCHAIN_SERVICE, credential.account())
-        .map_err(|error| format!("Could not access Berd's OpenAI voice credentials: {error}"))?;
-    match entry.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(error) => Err(format!(
-            "Could not remove Berd's OpenAI voice credential: {error}"
-        )),
-    }
+    clear_account(credential.account())?;
+    clear_account(LEGACY_TTS_KEYCHAIN_ACCOUNT)
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -85,7 +111,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn text_to_speech_uses_the_stable_voice_keychain_account() {
-        assert_eq!(OpenAiVoiceCredential::TextToSpeech.account(), "tts-api-key");
+    fn text_to_speech_uses_the_shared_voice_keychain_account() {
+        assert_eq!(OpenAiVoiceCredential::TextToSpeech.account(), "api-key");
     }
 }
