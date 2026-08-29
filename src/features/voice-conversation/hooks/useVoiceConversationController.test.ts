@@ -335,6 +335,53 @@ describe("voice transcript delivery coordination", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it("releases a retained transcript route after permanent admission failure", async () => {
+    const onSend = vi.fn().mockResolvedValue(true);
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-1",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 1,
+      },
+      uiState: "listening",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+    });
+    const { rerender } = renderHook(
+      ({ disabled, routeUnavailable }) =>
+        useVoiceConversationController({
+          sessionId: "session-1",
+          onSend,
+          enabled: true,
+          isGooseSession: true,
+          pocketReady: true,
+          onPocketSetupRequired: vi.fn(),
+          disabled,
+          routeUnavailable,
+        }),
+      { initialProps: { disabled: false, routeUnavailable: false } },
+    );
+
+    await waitFor(() => expect(voiceStoreMocks.subscriber).toBeDefined());
+    rerender({ disabled: true, routeUnavailable: true });
+    await expect(
+      voiceStoreMocks.subscriber?.({
+        type: "user",
+        sessionId: "session-1",
+        lifecycleId: "lifecycle-1",
+        id: "utterance-admission-failed",
+        text: "do not deliver",
+        revision: 1,
+        deliveryAttempts: 0,
+      }),
+    ).rejects.toThrow("bound chat is unavailable");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
   it("defers mid-flight without error UI or consuming playback context", async () => {
     const onSend = vi.fn().mockResolvedValue(true);
     nativeAssistantSpeechMocks.takeNotices.mockReturnValue("playback context");

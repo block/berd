@@ -617,6 +617,7 @@ export interface UseVoiceConversationControllerOptions {
   readOnly?: boolean;
   disabled?: boolean;
   routeBlocked?: boolean;
+  routeUnavailable?: boolean;
 }
 
 export function useVoiceConversationController({
@@ -631,6 +632,7 @@ export function useVoiceConversationController({
   readOnly = false,
   disabled = false,
   routeBlocked = false,
+  routeUnavailable = false,
 }: UseVoiceConversationControllerOptions): ChatInputVoiceConversation {
   const { t } = useTranslation("chat");
   const siriVoiceRef = useRef(siriVoice);
@@ -665,7 +667,7 @@ export function useVoiceConversationController({
   );
   const previousPocketReady = useRef(pocketReady);
   const deliveryBlocked =
-    routeBlocked && enabled && isGooseSession && !readOnly;
+    routeBlocked && enabled && isGooseSession && !readOnly && !routeUnavailable;
 
   useEffect(() => {
     if (!enabled || !isGooseSession) return;
@@ -695,6 +697,7 @@ export function useVoiceConversationController({
     }
     const routeIsValid =
       !deliveryBlocked &&
+      !routeUnavailable &&
       canBindVoiceSendRoute({
         enabled,
         isGooseSession,
@@ -711,7 +714,7 @@ export function useVoiceConversationController({
     if (routeMount.claimRoute) {
       activeSendRoute = { sessionId, send: onSend };
     } else if (
-      (!enabled || !isGooseSession || readOnly) &&
+      (!enabled || !isGooseSession || readOnly || routeUnavailable) &&
       activeSendRoute?.sessionId === sessionId
     ) {
       activeSendRoute = null;
@@ -734,6 +737,7 @@ export function useVoiceConversationController({
     onSend,
     readOnly,
     deliveryBlocked,
+    routeUnavailable,
     sessionId,
     status.sessionId,
   ]);
@@ -743,6 +747,7 @@ export function useVoiceConversationController({
       status.lifecycle !== "running" ||
       status.sessionId !== sessionId ||
       deliveryBlocked ||
+      routeUnavailable ||
       !canBindVoiceSendRoute({
         enabled,
         isGooseSession,
@@ -771,6 +776,7 @@ export function useVoiceConversationController({
     isGooseSession,
     readOnly,
     deliveryBlocked,
+    routeUnavailable,
     sessionId,
     status.lifecycle,
     status.sessionId,
@@ -1032,7 +1038,8 @@ export function useVoiceConversationController({
   ]);
 
   const isActive = status.sessionId !== null && status.lifecycle !== "stopped";
-  const sessionEligible = enabled && isGooseSession && !readOnly && !disabled;
+  const sessionEligible =
+    enabled && isGooseSession && !readOnly && !disabled && !routeUnavailable;
   const canToggle = sessionEligible && (!pocketReady || status.available);
 
   const toggle = useCallback(async () => {

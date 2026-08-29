@@ -277,6 +277,7 @@ export function ChatView({
     },
     readOnly: Boolean(readOnlyStatus),
     routeBlocked: voiceDeliveryTemporarilyBlocked,
+    routeUnavailable: voiceAdmissionPermanentlyBlocked,
     disabled: admissionBlocked || voiceDeliveryTemporarilyBlocked,
   });
   const isAgentBuilderOpen = agentBuilderOpenForLayout;

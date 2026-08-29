@@ -689,9 +689,11 @@ describe("ChatView MCP app messaging", () => {
       onSend: (text: string) => boolean;
       disabled: boolean;
       routeBlocked: boolean;
+      routeUnavailable: boolean;
     };
     expect(voiceOptions.disabled).toBe(true);
     expect(voiceOptions.routeBlocked).toBe(true);
+    expect(voiceOptions.routeUnavailable).toBe(false);
     expect(voiceOptions.onSend("blocked voice")).toBe(false);
     expect(mocks.handleSend).not.toHaveBeenCalled();
   });
@@ -1393,9 +1395,11 @@ describe("ChatView MCP app messaging", () => {
       onSend: (text: string) => boolean;
       disabled: boolean;
       routeBlocked: boolean;
+      routeUnavailable: boolean;
     };
     expect(voiceOptions.disabled).toBe(true);
     expect(voiceOptions.routeBlocked).toBe(false);
+    expect(voiceOptions.routeUnavailable).toBe(true);
     expect(voiceOptions.onSend("blocked voice")).toBe(false);
     expect(mocks.handleSend).not.toHaveBeenCalled();
   });
