@@ -612,6 +612,7 @@ impl NativeVoiceState {
             let previous_software_muted =
                 self.microphone_muted.swap(software_muted, Ordering::SeqCst);
             if !native_microphone_mute_control && previous_software_muted != software_muted {
+                self.input_muted.store(software_muted, Ordering::Release);
                 self.input_mute_epoch.fetch_add(1, Ordering::AcqRel);
             }
             owner_window_label
@@ -4098,10 +4099,12 @@ mod tests {
         state
             .set_microphone_muted_target("main", "session-1", 4, true)
             .expect("mute");
+        assert!(state.input_muted.load(Ordering::Acquire));
         assert_eq!(state.input_mute_epoch.load(Ordering::Acquire), 1);
         state
             .set_microphone_muted_target("main", "session-1", 4, false)
             .expect("unmute");
+        assert!(!state.input_muted.load(Ordering::Acquire));
         assert_eq!(state.input_mute_epoch.load(Ordering::Acquire), 2);
     }
 

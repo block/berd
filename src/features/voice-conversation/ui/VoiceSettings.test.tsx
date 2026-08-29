@@ -325,6 +325,52 @@ describe("VoiceSettings", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("reports missing OpenAI input and Pocket output together", async () => {
+    inputState.backend = "openai";
+    outputState.backend = "pocket";
+    openAiStatusState.current = {
+      ...openAiStatusState.current,
+      sttConfigured: false,
+    };
+    setupState.current = setup(pocketStatus({ pocketInstalled: false }));
+
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      await screen.findByText(
+        "The OpenAI speech-to-text key is missing, and Pocket TTS is not installed. Complete both steps below to use Voice Conversation.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("reports missing OpenAI input and Siri output together", async () => {
+    inputState.backend = "openai";
+    outputState.backend = "siri";
+    openAiStatusState.current = {
+      ...openAiStatusState.current,
+      sttConfigured: false,
+    };
+    const current = siriSetup();
+    siriSetupState.current = {
+      ...current,
+      status: current.status
+        ? {
+            ...current.status,
+            selectedVoice: null,
+            selectedVoiceInstalled: false,
+          }
+        : null,
+    };
+
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      await screen.findByText(
+        "The OpenAI speech-to-text key is missing, and no installed Siri voice is selected. Complete both steps below to use Voice Conversation.",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("does not show the TTS platform restriction for configured OpenAI input", async () => {
     inputState.backend = "openai";
     outputState.backend = "pocket";

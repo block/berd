@@ -31,6 +31,7 @@ use super::{
     native_voice::{InterruptionSensitivity, NativeVoiceState},
     openai_voice_credentials::{self, OpenAiVoiceCredential},
     pocket_voice::VoiceInterruptionMode,
+    voice_capture::VoiceCaptureState,
 };
 #[cfg(any(test, target_os = "macos"))]
 use std::time::Instant;
@@ -368,15 +369,18 @@ pub async fn get_openai_voice_status(
 }
 
 #[tauri::command]
-pub fn set_openai_stt_api_key(
+pub async fn set_openai_stt_api_key(
     app: AppHandle,
     state: State<'_, OpenAiVoiceState>,
+    native_voice: State<'_, NativeVoiceState>,
+    capture: State<'_, VoiceCaptureState>,
     api_key: String,
 ) -> Result<(), String> {
     let api_key = api_key.trim();
     if api_key.is_empty() {
         return Err("OpenAI speech-to-text API key cannot be empty".to_string());
     }
+    native_voice.stop_active(&app, &capture).await?;
     openai_voice_credentials::store(OpenAiVoiceCredential::SpeechToText, api_key)?;
     state.credential_revision.fetch_add(1, Ordering::AcqRel);
     state.configured.store(true, Ordering::Release);
@@ -386,10 +390,13 @@ pub fn set_openai_stt_api_key(
 }
 
 #[tauri::command]
-pub fn clear_openai_stt_api_key(
+pub async fn clear_openai_stt_api_key(
     app: AppHandle,
     state: State<'_, OpenAiVoiceState>,
+    native_voice: State<'_, NativeVoiceState>,
+    capture: State<'_, VoiceCaptureState>,
 ) -> Result<(), String> {
+    native_voice.stop_active(&app, &capture).await?;
     openai_voice_credentials::clear(OpenAiVoiceCredential::SpeechToText)?;
     state.credential_revision.fetch_add(1, Ordering::AcqRel);
     state.configured.store(false, Ordering::Release);

@@ -57,9 +57,10 @@ function readinessDescriptionKey(
   if (inputReady && outputReady) return null;
   if (!inputReady && !outputReady) {
     if (inputBackend === "openai") {
-      return backend === "openai"
-        ? "voice.notReadyOpenAiSttAndTts"
-        : "voice.notReadyOpenAi";
+      if (backend === "openai") return "voice.notReadyOpenAiSttAndTts";
+      return backend === "siri"
+        ? "voice.notReadyOpenAiSttAndSiriOutput"
+        : "voice.notReadyOpenAiSttAndPocketOutput";
     }
     if (backend === "openai") {
       return inputBackend === "macos"
