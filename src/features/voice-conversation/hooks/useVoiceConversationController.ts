@@ -67,15 +67,20 @@ function activeRouteIsBlocked(sessionId: string): boolean {
   return activeSendRoute?.sessionId === sessionId && activeSendRoute.blocked;
 }
 
-function releaseVoiceSendRoute(owner: symbol): VoiceSendRoute | null {
+function releaseVoiceSendRoute(
+  owner: symbol,
+  preserveActiveRoute = false,
+): VoiceSendRoute | null {
   const released = mountedSendRoutes.get(owner);
   mountedSendRoutes.delete(owner);
   if (activeSendRoute?.owner !== owner) return activeSendRoute;
 
-  activeSendRoute =
+  const replacement =
     [...mountedSendRoutes.values()].find(
       (route) => route.sessionId === released?.sessionId && route.canClaim,
     ) ?? null;
+  activeSendRoute =
+    replacement ?? (preserveActiveRoute ? (released ?? null) : null);
   return activeSendRoute;
 }
 
@@ -752,7 +757,8 @@ export function useVoiceConversationController({
     } else if (
       routeMount.claimRoute &&
       (activeSendRoute === null ||
-        activeSendRoute.sessionId !== activeVoiceSessionId)
+        activeSendRoute.sessionId !== activeVoiceSessionId ||
+        !mountedSendRoutes.has(activeSendRoute.owner))
     ) {
       activeSendRoute = registeredRoute;
     }
@@ -786,7 +792,7 @@ export function useVoiceConversationController({
 
   useEffect(
     () => () => {
-      const replacement = releaseVoiceSendRoute(routeOwner);
+      const replacement = releaseVoiceSendRoute(routeOwner, true);
       if (!replacement || replacement.blocked) return;
       void drainPendingTranscriptsRef
         .current(replacement.sessionId, transcriptAlreadyInChat)

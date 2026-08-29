@@ -651,6 +651,51 @@ describe("voice transcript delivery coordination", () => {
     expect(replacementSend).toHaveBeenCalledOnce();
   });
 
+  it("preserves the active route while its view is unmounted", async () => {
+    const ownerSend = vi.fn().mockResolvedValue(true);
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-unmounted-owner",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 1,
+      },
+      uiState: "listening",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+    });
+
+    const owner = renderHook(() =>
+      useVoiceConversationController({
+        sessionId: "session-unmounted-owner",
+        onSend: ownerSend,
+        enabled: true,
+        isGooseSession: true,
+        pocketReady: true,
+        onPocketSetupRequired: vi.fn(),
+      }),
+    );
+
+    await waitFor(() => expect(voiceStoreMocks.subscriber).toBeDefined());
+    owner.unmount();
+    await expect(
+      voiceStoreMocks.subscriber?.({
+        type: "user",
+        sessionId: "session-unmounted-owner",
+        lifecycleId: "lifecycle-unmounted-owner",
+        id: "utterance-after-navigation",
+        text: "keep listening after navigation",
+        revision: 1,
+        deliveryAttempts: 0,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(ownerSend).toHaveBeenCalledOnce();
+  });
+
   it("serializes deliveries for the same session and re-evaluates in order", async () => {
     const enqueue = createVoiceTranscriptDeliveryQueue();
     const events: string[] = [];
