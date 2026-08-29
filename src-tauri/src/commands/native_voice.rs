@@ -1306,12 +1306,7 @@ pub async fn start_native_voice_conversation(
             "Download the macOS speech recognition model before starting a call.".to_string(),
         );
     }
-    let openai_api_key = if input_backend == VoiceInputBackend::Openai {
-        Some(super::openai_audio::stt_api_key()?)
-    } else {
-        None
-    };
-    if openai_api_key.is_some() {
+    if input_backend == VoiceInputBackend::Openai {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
         while !webview_window.is_focused().unwrap_or(false)
             && tokio::time::Instant::now() < deadline
@@ -1334,6 +1329,11 @@ pub async fn start_native_voice_conversation(
             )
         })
         .await?;
+    let openai_api_key = if input_backend == VoiceInputBackend::Openai {
+        Some(super::openai_audio::stt_api_key()?)
+    } else {
+        None
+    };
     let mut microphone_claimed = capture.claim_microphone(
         window_label.clone(),
         renderer_id.clone(),
