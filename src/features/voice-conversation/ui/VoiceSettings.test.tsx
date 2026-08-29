@@ -54,6 +54,7 @@ const openAiStatusState = vi.hoisted(() => ({
   current: {
     sttConfigured: true,
     ttsConfigured: true,
+    sttConfigurationSource: "default" as "default" | "environment",
     ttsConfigurationSource: "default" as "default" | "environment",
     sttUnavailableReason: null,
     ttsUnavailableReason: null,
@@ -228,6 +229,7 @@ describe("VoiceSettings", () => {
     openAiStatusState.current = {
       sttConfigured: true,
       ttsConfigured: true,
+      sttConfigurationSource: "default",
       ttsConfigurationSource: "default",
       sttUnavailableReason: null,
       ttsUnavailableReason: null,
@@ -295,19 +297,20 @@ describe("VoiceSettings", () => {
     ).toBeInTheDocument();
   });
 
-  it("saves a dedicated OpenAI speech-to-text API key", async () => {
+  it("labels speech-to-text environment overrides", async () => {
     inputState.backend = "openai";
-    setupState.current = setup(pocketStatus({ pocketInstalled: true }));
+    openAiStatusState.current = {
+      ...openAiStatusState.current,
+      sttConfigurationSource: "environment",
+    };
+    setupState.current = setup(pocketStatus());
     renderWithProviders(<VoiceSettings />);
 
-    const user = userEvent.setup();
-    await user.type(
-      screen.getByLabelText("OpenAI speech-to-text API key"),
-      "stt-secret",
-    );
-    await user.click(screen.getAllByRole("button", { name: "Save key" })[0]);
-
-    expect(openAiApiMocks.setSttApiKey).toHaveBeenCalledWith("stt-secret");
+    expect(
+      await screen.findByText(
+        "Development configuration is overridden by the Berd process environment.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("saves the shared OpenAI voice key from the text-to-speech settings", async () => {

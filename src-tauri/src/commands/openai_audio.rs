@@ -113,6 +113,7 @@ enum OpenAiStreamCommand {
 pub struct OpenAiVoiceStatus {
     stt_configured: bool,
     tts_configured: bool,
+    stt_configuration_source: OpenAiVoiceConfigurationSource,
     tts_configuration_source: OpenAiVoiceConfigurationSource,
     stt_unavailable_reason: Option<String>,
     tts_unavailable_reason: Option<String>,
@@ -254,6 +255,17 @@ fn tts_configuration_source() -> OpenAiVoiceConfigurationSource {
     }
 }
 
+fn stt_configuration_source() -> OpenAiVoiceConfigurationSource {
+    if [BASE_URL_ENV, STT_MODEL_ENV]
+        .iter()
+        .any(|name| env_trimmed(name).is_some())
+    {
+        OpenAiVoiceConfigurationSource::Environment
+    } else {
+        OpenAiVoiceConfigurationSource::Default
+    }
+}
+
 fn endpoint(path: &str) -> Result<String, String> {
     endpoint_for_base_url(&base_url()?, path)
 }
@@ -343,6 +355,7 @@ pub async fn get_openai_voice_status(
     Ok(OpenAiVoiceStatus {
         stt_configured,
         tts_configured,
+        stt_configuration_source: stt_configuration_source(),
         tts_configuration_source: tts_configuration_source(),
         stt_unavailable_reason: stt_error,
         tts_unavailable_reason: tts_error,
@@ -1302,6 +1315,7 @@ mod tests {
     #[test]
     fn voice_configuration_uses_berd_scoped_environment_names() {
         assert_eq!(BASE_URL_ENV, "BERD_OPENAI_VOICE_BASE_URL");
+        assert_eq!(STT_MODEL_ENV, "BERD_OPENAI_STT_MODEL");
         assert_eq!(TTS_MODEL_ENV, "BERD_OPENAI_TTS_MODEL");
         assert_eq!(TTS_VOICE_ENV, "BERD_OPENAI_TTS_VOICE");
     }

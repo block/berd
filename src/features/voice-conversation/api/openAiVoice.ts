@@ -9,6 +9,7 @@ import type {
 export interface OpenAiVoiceStatus {
   sttConfigured: boolean;
   ttsConfigured: boolean;
+  sttConfigurationSource: "default" | "environment";
   ttsConfigurationSource: "default" | "environment";
   sttUnavailableReason: string | null;
   ttsUnavailableReason: string | null;

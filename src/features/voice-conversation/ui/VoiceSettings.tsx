@@ -247,6 +247,11 @@ export function VoiceSettings() {
                         : t("voice.openAiSttNotConfigured")
                       : t("voice.openAiChecking"))}
                 </p>
+                {openAiStatus?.sttConfigurationSource === "environment" ? (
+                  <p className="text-xs text-muted-foreground">
+                    {t("voice.openAiEnvironmentOverride")}
+                  </p>
+                ) : null}
               </div>
             ) : input.backend === "macos" ? (
               <MacSpeechSettings setup={macSpeechSetup} />

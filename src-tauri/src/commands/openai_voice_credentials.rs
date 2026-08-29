@@ -95,6 +95,7 @@ pub(crate) fn clear(credential: OpenAiVoiceCredential) -> Result<(), String> {
         || clear_account(LEGACY_TTS_KEYCHAIN_ACCOUNT),
     )
 }
+
 pub(crate) fn require(credential: OpenAiVoiceCredential) -> Result<String, String> {
     read(credential)?.ok_or_else(|| credential.missing_message().to_string())
 }
