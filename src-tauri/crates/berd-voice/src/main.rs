@@ -8,6 +8,7 @@ use std::sync::{
 use std::thread;
 use std::time::{Duration, Instant};
 
+use berd_voice::benchmark::{benchmark_tts, TtsBenchmarkMode, TtsBenchmarkTarget};
 use berd_voice::input::{
     AssistantActivityGuard, VoiceInputConfig, VoiceInputControls, VoiceInputEngineConfig,
     VoiceInputEvent, VoiceInputFrame, VoiceInputRuntime, INPUT_FRAME_SAMPLES,
@@ -29,6 +30,8 @@ const MAX_FINAL_TEXT_BYTES: usize = 64 * 1024;
 const MAX_SPEAK_TEXT_BYTES: usize = 16 * 1024;
 const INPUT_QUEUE_CAPACITY: usize = 32;
 const SHUTDOWN_PLAYBACK_TIMEOUT: Duration = Duration::from_secs(2);
+const MAX_OPENAI_BENCHMARK_REQUESTS: usize = 20;
+const MAX_OPENAI_BENCHMARK_TEXT_BYTES: usize = 64 * 1024;
 
 enum Input {
     Request(SessionRequest),
@@ -83,21 +86,47 @@ struct SessionConfig {
     stt: SttBackendConfig,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct TtsBenchmarkConfig {
+    tts: TtsBackendConfig,
+    text: String,
+    runs: usize,
+    mode: TtsBenchmarkMode,
+}
+
 fn main() {
     let args: Vec<_> = std::env::args().collect();
-    let config = parse_args(&args).unwrap_or_else(|error| {
-        eprintln!("{error}");
-        eprintln!(
-            "usage: berd-voice session [--tts-backend openai|siri|pocket] \
-             [--model-dir PATH] [--voice ID] [--language BCP47] [--rate FLOAT] \
-             [--stt-backend macos|parakeet|openai] [--stt-model-dir PATH]"
-        );
-        std::process::exit(2);
-    });
-    if let Err(error) = run_session(config) {
-        eprintln!("berd-voice session failed: {error}");
-        std::process::exit(1);
+    match args.get(1).map(String::as_str) {
+        Some("session") => {
+            let config = parse_args(&args).unwrap_or_else(|error| usage_error(&error));
+            if let Err(error) = run_session(config) {
+                eprintln!("berd-voice session failed: {error}");
+                std::process::exit(1);
+            }
+        }
+        Some("benchmark") if args.get(2).map(String::as_str) == Some("tts") => {
+            let config =
+                parse_tts_benchmark_args(&args).unwrap_or_else(|error| usage_error(&error));
+            if let Err(error) = run_tts_benchmark(config) {
+                eprintln!("berd-voice benchmark tts failed: {error}");
+                std::process::exit(1);
+            }
+        }
+        _ => usage_error("supported commands are session and benchmark tts"),
     }
+}
+
+fn usage_error(error: &str) -> ! {
+    eprintln!("{error}");
+    eprintln!(
+        "usage:\n  berd-voice session [--tts-backend openai|siri|pocket] \
+         [--model-dir PATH] [--voice ID] [--language BCP47] [--rate FLOAT] \
+         [--stt-backend macos|parakeet|openai] [--stt-model-dir PATH]\n  \
+         berd-voice benchmark tts --tts-backend openai|siri|pocket \
+         [--model-dir PATH] [--voice ID] [--language BCP47] [--rate FLOAT] \
+         --text TEXT --runs COUNT --mode cold|warm [--allow-paid-openai]"
+    );
+    std::process::exit(2);
 }
 
 fn run_session(config: SessionConfig) -> Result<(), String> {
@@ -450,61 +479,7 @@ fn parse_args(args: &[String]) -> Result<SessionConfig, String> {
         }
         index += 2;
     }
-    let tts = match backend {
-        "openai" => {
-            if voice.is_some() || language.is_some() || model_dir.is_some() || rate.is_some() {
-                return Err(
-                    "--voice, --language, --model-dir, and --rate require a non-OpenAI backend"
-                        .into(),
-                );
-            }
-            TtsBackendConfig::OpenAi
-        }
-        "siri" => {
-            if model_dir.is_some() {
-                return Err("--model-dir is only valid with Pocket".into());
-            }
-            let voice = voice
-                .filter(|value| !value.trim().is_empty())
-                .ok_or_else(|| "--voice is required with Siri".to_string())?;
-            let language = language
-                .filter(|value| !value.trim().is_empty())
-                .ok_or_else(|| "--language is required with Siri".to_string())?;
-            let rate = rate.unwrap_or(1.0);
-            if !rate.is_finite() || !(0.5..=2.0).contains(&rate) {
-                return Err("--rate must be between 0.5 and 2.0".into());
-            }
-            TtsBackendConfig::Siri {
-                voice,
-                language,
-                rate,
-            }
-        }
-        "pocket" => {
-            if language.is_some() {
-                return Err("--language is only valid with Siri".into());
-            }
-            let model_dir = model_dir
-                .filter(|value| !value.as_os_str().is_empty())
-                .ok_or_else(|| "--model-dir is required with Pocket".to_string())?;
-            if !model_dir.is_absolute() {
-                return Err("--model-dir must be an absolute path".into());
-            }
-            let voice = voice
-                .filter(|value| !value.trim().is_empty())
-                .ok_or_else(|| "--voice is required with Pocket".to_string())?;
-            let rate = rate.unwrap_or(1.0);
-            if !rate.is_finite() || !(0.75..=2.0).contains(&rate) {
-                return Err("--rate must be between 0.75 and 2.0 for Pocket".into());
-            }
-            TtsBackendConfig::Pocket {
-                model_dir,
-                voice,
-                rate,
-            }
-        }
-        value => return Err(format!("unsupported TTS backend: {value}")),
-    };
+    let tts = build_tts_backend_config(backend, voice, language, model_dir, rate)?;
     let stt = match stt_backend {
         "macos" => {
             if stt_model_dir.is_some() {
@@ -530,6 +505,223 @@ fn parse_args(args: &[String]) -> Result<SessionConfig, String> {
         value => return Err(format!("unsupported STT backend: {value}")),
     };
     Ok(SessionConfig { tts, stt })
+}
+
+fn build_tts_backend_config(
+    backend: &str,
+    voice: Option<String>,
+    language: Option<String>,
+    model_dir: Option<PathBuf>,
+    rate: Option<f32>,
+) -> Result<TtsBackendConfig, String> {
+    match backend {
+        "openai" => {
+            if voice.is_some() || language.is_some() || model_dir.is_some() || rate.is_some() {
+                return Err(
+                    "--voice, --language, --model-dir, and --rate require a non-OpenAI backend"
+                        .into(),
+                );
+            }
+            Ok(TtsBackendConfig::OpenAi)
+        }
+        "siri" => {
+            if model_dir.is_some() {
+                return Err("--model-dir is only valid with Pocket".into());
+            }
+            let voice = voice
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| "--voice is required with Siri".to_string())?;
+            let language = language
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| "--language is required with Siri".to_string())?;
+            let rate = rate.unwrap_or(1.0);
+            if !rate.is_finite() || !(0.5..=2.0).contains(&rate) {
+                return Err("--rate must be between 0.5 and 2.0".into());
+            }
+            Ok(TtsBackendConfig::Siri {
+                voice,
+                language,
+                rate,
+            })
+        }
+        "pocket" => {
+            if language.is_some() {
+                return Err("--language is only valid with Siri".into());
+            }
+            let model_dir = model_dir
+                .filter(|value| !value.as_os_str().is_empty())
+                .ok_or_else(|| "--model-dir is required with Pocket".to_string())?;
+            if !model_dir.is_absolute() {
+                return Err("--model-dir must be an absolute path".into());
+            }
+            let voice = voice
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| "--voice is required with Pocket".to_string())?;
+            let rate = rate.unwrap_or(1.0);
+            if !rate.is_finite() || !(0.75..=2.0).contains(&rate) {
+                return Err("--rate must be between 0.75 and 2.0 for Pocket".into());
+            }
+            Ok(TtsBackendConfig::Pocket {
+                model_dir,
+                voice,
+                rate,
+            })
+        }
+        value => Err(format!("unsupported TTS backend: {value}")),
+    }
+}
+
+fn parse_tts_benchmark_args(args: &[String]) -> Result<TtsBenchmarkConfig, String> {
+    if args.get(1).map(String::as_str) != Some("benchmark")
+        || args.get(2).map(String::as_str) != Some("tts")
+    {
+        return Err("expected benchmark tts".into());
+    }
+    let mut backend = None;
+    let mut voice = None;
+    let mut language = None;
+    let mut model_dir = None;
+    let mut rate = None;
+    let mut text = None;
+    let mut runs = None;
+    let mut mode = None;
+    let mut allow_paid_openai = false;
+    let mut index = 3;
+    while index < args.len() {
+        let flag = args[index].as_str();
+        if flag == "--allow-paid-openai" {
+            allow_paid_openai = true;
+            index += 1;
+            continue;
+        }
+        let value = args
+            .get(index + 1)
+            .ok_or_else(|| format!("{flag} requires a value"))?;
+        match flag {
+            "--tts-backend" => backend = Some(value.as_str()),
+            "--voice" => voice = Some(value.clone()),
+            "--language" => language = Some(value.clone()),
+            "--model-dir" => model_dir = Some(PathBuf::from(value)),
+            "--rate" => {
+                rate = Some(
+                    value
+                        .parse::<f32>()
+                        .map_err(|_| "--rate must be a number".to_string())?,
+                )
+            }
+            "--text" => text = Some(value.clone()),
+            "--runs" => {
+                let parsed = value
+                    .parse::<usize>()
+                    .map_err(|_| "--runs must be a positive integer".to_string())?;
+                if !(1..=100).contains(&parsed) {
+                    return Err("--runs must be between 1 and 100".into());
+                }
+                runs = Some(parsed);
+            }
+            "--mode" => {
+                mode = Some(match value.as_str() {
+                    "cold" => TtsBenchmarkMode::Cold,
+                    "warm" => TtsBenchmarkMode::Warm,
+                    _ => return Err("--mode must be cold or warm".into()),
+                })
+            }
+            _ => return Err(format!("unknown argument: {flag}")),
+        }
+        index += 2;
+    }
+    let text = text
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "--text is required and must be nonempty".to_string())?;
+    if text.len() > MAX_SPEAK_TEXT_BYTES {
+        return Err(format!("--text exceeds {MAX_SPEAK_TEXT_BYTES} UTF-8 bytes"));
+    }
+    let runs = runs.ok_or_else(|| "--runs is required".to_string())?;
+    let mode = mode.ok_or_else(|| "--mode is required".to_string())?;
+    let tts = build_tts_backend_config(
+        backend.ok_or_else(|| "--tts-backend is required".to_string())?,
+        voice,
+        language,
+        model_dir,
+        rate,
+    )?;
+    if matches!(tts, TtsBackendConfig::OpenAi) {
+        if !allow_paid_openai {
+            return Err("OpenAI benchmarks require explicit --allow-paid-openai consent".into());
+        }
+        let request_count = runs.saturating_add(usize::from(mode == TtsBenchmarkMode::Warm));
+        if request_count > MAX_OPENAI_BENCHMARK_REQUESTS {
+            return Err(format!(
+                "OpenAI benchmark would make {request_count} requests; maximum is {MAX_OPENAI_BENCHMARK_REQUESTS}"
+            ));
+        }
+        let total_text_bytes = text
+            .len()
+            .checked_mul(request_count)
+            .ok_or_else(|| "OpenAI benchmark workload is too large".to_string())?;
+        if total_text_bytes > MAX_OPENAI_BENCHMARK_TEXT_BYTES {
+            return Err(format!(
+                "OpenAI benchmark would submit {total_text_bytes} total UTF-8 text bytes; maximum is {MAX_OPENAI_BENCHMARK_TEXT_BYTES}"
+            ));
+        }
+    } else if allow_paid_openai {
+        return Err("--allow-paid-openai is only valid with OpenAI".into());
+    }
+    Ok(TtsBenchmarkConfig {
+        tts,
+        text,
+        runs,
+        mode,
+    })
+}
+
+fn run_tts_benchmark(config: TtsBenchmarkConfig) -> Result<(), String> {
+    let target = match &config.tts {
+        TtsBackendConfig::OpenAi => TtsBenchmarkTarget {
+            backend: "openai".into(),
+            model: Some(
+                std::env::var("OPENAI_TTS_MODEL").unwrap_or_else(|_| "gpt-4o-mini-tts".into()),
+            ),
+            voice: Some(std::env::var("OPENAI_TTS_VOICE").unwrap_or_else(|_| "marin".into())),
+            language: None,
+            rate: Some(1.0),
+        },
+        TtsBackendConfig::Siri {
+            voice,
+            language,
+            rate,
+        } => TtsBenchmarkTarget {
+            backend: "siri".into(),
+            model: None,
+            voice: Some(voice.clone()),
+            language: Some(language.clone()),
+            rate: Some(*rate),
+        },
+        TtsBackendConfig::Pocket {
+            model_dir,
+            voice,
+            rate,
+        } => TtsBenchmarkTarget {
+            backend: "pocket".into(),
+            model: model_dir
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned()),
+            voice: Some(voice.clone()),
+            language: None,
+            rate: Some(*rate),
+        },
+    };
+    let report = benchmark_tts(target, &config.text, config.runs, config.mode, || {
+        create_tts_backend(&config.tts)
+    });
+    let succeeded = report.succeeded();
+    serde_json::to_writer(io::stdout().lock(), &report).map_err(|error| error.to_string())?;
+    println!();
+    if succeeded {
+        Ok(())
+    } else {
+        Err("one or more benchmark runs failed; see JSON output".into())
+    }
 }
 
 fn create_tts_backend(config: &TtsBackendConfig) -> Result<Arc<dyn TtsBackend>, String> {
@@ -1511,6 +1703,169 @@ mod tests {
         ]))
         .unwrap_err()
         .contains("absolute path"));
+    }
+
+    #[test]
+    fn benchmark_cli_requires_explicit_comparable_inputs() {
+        assert_eq!(
+            parse_tts_benchmark_args(&args(&[
+                "berd-voice",
+                "benchmark",
+                "tts",
+                "--tts-backend",
+                "siri",
+                "--voice",
+                "Aaron",
+                "--language",
+                "en-US",
+                "--text",
+                "A fixed benchmark sentence.",
+                "--runs",
+                "3",
+                "--mode",
+                "warm"
+            ]))
+            .unwrap(),
+            TtsBenchmarkConfig {
+                tts: TtsBackendConfig::Siri {
+                    voice: "Aaron".into(),
+                    language: "en-US".into(),
+                    rate: 1.0,
+                },
+                text: "A fixed benchmark sentence.".into(),
+                runs: 3,
+                mode: TtsBenchmarkMode::Warm,
+            }
+        );
+        assert!(parse_tts_benchmark_args(&args(&[
+            "berd-voice",
+            "benchmark",
+            "tts",
+            "--tts-backend",
+            "openai",
+            "--text",
+            "hello",
+            "--mode",
+            "cold"
+        ]))
+        .unwrap_err()
+        .contains("--runs is required"));
+        assert!(parse_tts_benchmark_args(&args(&[
+            "berd-voice",
+            "benchmark",
+            "tts",
+            "--tts-backend",
+            "openai",
+            "--text",
+            "hello",
+            "--runs",
+            "0",
+            "--mode",
+            "cold"
+        ]))
+        .unwrap_err()
+        .contains("between 1 and 100"));
+    }
+
+    #[test]
+    fn benchmark_cli_reuses_backend_specific_validation() {
+        assert!(parse_tts_benchmark_args(&args(&[
+            "berd-voice",
+            "benchmark",
+            "tts",
+            "--tts-backend",
+            "pocket",
+            "--model-dir",
+            "relative",
+            "--voice",
+            "mary",
+            "--text",
+            "hello",
+            "--runs",
+            "1",
+            "--mode",
+            "cold"
+        ]))
+        .unwrap_err()
+        .contains("absolute path"));
+        assert!(parse_tts_benchmark_args(&args(&[
+            "berd-voice",
+            "benchmark",
+            "tts",
+            "--tts-backend",
+            "openai",
+            "--text",
+            "hello",
+            "--runs",
+            "1",
+            "--mode",
+            "cold",
+            "--stt-backend",
+            "macos"
+        ]))
+        .unwrap_err()
+        .contains("unknown argument"));
+    }
+
+    #[test]
+    fn benchmark_cli_requires_and_bounds_paid_openai_consent() {
+        let base = [
+            "berd-voice",
+            "benchmark",
+            "tts",
+            "--tts-backend",
+            "openai",
+            "--text",
+            "hello",
+            "--runs",
+            "1",
+            "--mode",
+            "cold",
+        ];
+        assert!(parse_tts_benchmark_args(&args(&base))
+            .unwrap_err()
+            .contains("--allow-paid-openai"));
+
+        let mut consented = args(&base);
+        consented.push("--allow-paid-openai".into());
+        assert!(parse_tts_benchmark_args(&consented).is_ok());
+
+        let warm_limit = args(&[
+            "berd-voice",
+            "benchmark",
+            "tts",
+            "--tts-backend",
+            "openai",
+            "--text",
+            "hello",
+            "--runs",
+            "20",
+            "--mode",
+            "warm",
+            "--allow-paid-openai",
+        ]);
+        assert!(parse_tts_benchmark_args(&warm_limit)
+            .unwrap_err()
+            .contains("21 requests"));
+
+        let oversized_text = "a".repeat(4_000);
+        let oversized_workload = vec![
+            "berd-voice".into(),
+            "benchmark".into(),
+            "tts".into(),
+            "--tts-backend".into(),
+            "openai".into(),
+            "--text".into(),
+            oversized_text,
+            "--runs".into(),
+            "20".into(),
+            "--mode".into(),
+            "cold".into(),
+            "--allow-paid-openai".into(),
+        ];
+        assert!(parse_tts_benchmark_args(&oversized_workload)
+            .unwrap_err()
+            .contains("80000 total UTF-8 text bytes"));
     }
 
     #[test]

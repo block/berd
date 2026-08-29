@@ -4,6 +4,7 @@
 pub const MAC_SPEECH_RECOGNITION_FINISH_TIMEOUT_SECONDS: u64 = 5;
 
 mod audio_output;
+pub mod benchmark;
 pub mod input;
 #[cfg(target_os = "macos")]
 pub mod mac_speech;

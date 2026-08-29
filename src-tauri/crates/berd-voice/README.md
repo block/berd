@@ -41,3 +41,38 @@ root. The CLI resolves an exact voice ID through the shared
 `voices/<id>.wav` bundle layout and validates both model and voice before
 `ready`; callers may point it at a Berd-downloaded bundle explicitly, but no
 application-specific cache path is assumed.
+
+## TTS benchmarks
+
+`benchmark tts` exercises the same backend PCM source without opening an audio
+device. It emits one JSON report on stdout and diagnostics on stderr:
+
+```text
+berd-voice benchmark tts --tts-backend siri --voice Aaron --language en-US \
+  --text "The quick brown fox jumps over the lazy dog." --runs 3 --mode cold
+berd-voice benchmark tts --tts-backend pocket \
+  --model-dir /path/to/native-voice-v2 --voice mary \
+  --text "The quick brown fox jumps over the lazy dog." --runs 3 --mode warm
+```
+
+Cold mode constructs a backend for every measured run. Warm mode constructs
+one backend, records one unmeasured warm-up synthesis, then reuses it for the
+requested measured runs. “Cold” is scoped to the backend instance in the
+current process; provider, native-framework, model-file, and operating-system
+caches may remain warm. In particular, warm OpenAI mode performs one additional
+billable warm-up request.
+
+Each run reports initialization time when applicable, time to first nonempty
+PCM, total synthesis time, mono PCM frame count and sample rate, PCM audio
+duration, real-time factor (`synthesis duration / PCM audio duration`), and a
+structured outcome or error stage. `playback_rate` is metadata only: benchmarks
+measure generated PCM duration and never playback or output-device drain.
+Reports identify the exact input with its UTF-8 byte count and SHA-256 without
+printing the prompt itself. `planned_workload` includes the warm-up when present;
+individual results show what actually ran.
+
+OpenAI benchmarking is disabled unless the command includes
+`--allow-paid-openai`. The CLI preflights the full workload, including the warm
+mode's extra request, and rejects more than 20 requests or 65,536 total prompt
+bytes before constructing the backend. A missing `OPENAI_API_KEY` still fails as
+a structured initialization error without making a request.
