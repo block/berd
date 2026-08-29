@@ -517,11 +517,10 @@ export async function updateSkill(
 export async function exportSkill(
   path: string,
 ): Promise<{ json: string; filename: string }> {
-  const client = await getClient();
-  const response = await client.goose.GooseUnstableSourcesExport({
-    type: SKILL_SOURCE_TYPE,
-    path,
-  });
+  const response = await invoke<{ json: string; filename: string }>(
+    "export_skill_source",
+    { path },
+  );
   return { json: response.json, filename: response.filename };
 }
 
@@ -541,11 +540,10 @@ export async function importSkills(
   }
 
   const data = new TextDecoder().decode(new Uint8Array(fileBytes));
-  const client = await getClient();
-  const response = await client.goose.GooseUnstableSourcesImport({
-    data,
-    target: { scope: "global" },
-  });
+  const response = await invoke<{ sources: SourceEntry[] }>(
+    "import_skill_source",
+    { data },
+  );
 
   emitSkillsChanged();
 

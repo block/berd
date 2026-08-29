@@ -5,7 +5,6 @@ const mockGooseSourcesList = vi.fn();
 const mockGooseSourcesCreate = vi.fn();
 const mockGooseSourcesDelete = vi.fn();
 const mockGooseSourcesUpdate = vi.fn();
-const mockGooseSourcesImport = vi.fn();
 const mockInvoke = vi.fn();
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -23,8 +22,6 @@ vi.mock("@/shared/api/acpConnection", () => ({
         mockGooseSourcesDelete(...args),
       GooseUnstableSourcesUpdate: (...args: unknown[]) =>
         mockGooseSourcesUpdate(...args),
-      GooseUnstableSourcesImport: (...args: unknown[]) =>
-        mockGooseSourcesImport(...args),
     },
   }),
 }));
@@ -180,7 +177,7 @@ describe("skill mutation events", () => {
       },
     });
     mockGooseSourcesDelete.mockResolvedValue({});
-    mockGooseSourcesImport.mockResolvedValue({
+    mockInvoke.mockResolvedValue({
       sources: [
         {
           type: "skill",
@@ -210,9 +207,27 @@ describe("skill mutation events", () => {
       await importSkills([123, 125], "IMPORTED.SKILL.JSON");
 
       expect(listener).toHaveBeenCalledTimes(3);
+      expect(mockInvoke).toHaveBeenCalledWith("import_skill_source", {
+        data: "{}",
+      });
     } finally {
       window.removeEventListener(SKILLS_CHANGED_EVENT, listener);
     }
+  });
+
+  it("exports skills through the dedicated native command", async () => {
+    mockInvoke.mockResolvedValue({
+      json: '{"version":1,"type":"skill"}',
+      filename: "test-writer.skill.json",
+    });
+    const { exportSkill } = await import("./skills");
+
+    const result = await exportSkill("/Users/test/.agents/skills/test-writer");
+
+    expect(mockInvoke).toHaveBeenCalledWith("export_skill_source", {
+      path: "/Users/test/.agents/skills/test-writer",
+    });
+    expect(result.filename).toBe("test-writer.skill.json");
   });
 
   it("does not emit the skills changed event when a mutation fails", async () => {

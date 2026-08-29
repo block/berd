@@ -51,6 +51,7 @@ pub mod runtime_config;
 pub mod security_threshold;
 pub mod siri_voice;
 pub mod skill_marketplace;
+pub mod source_transfer;
 pub mod system;
 pub mod telemetry;
 pub mod terminal;

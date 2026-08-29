@@ -472,6 +472,9 @@ pub fn run() {
             commands::agents::read_import_agent_image,
             commands::agents::read_agent_source_file,
             commands::agents::repair_bundled_agent,
+            commands::source_transfer::export_skill_source,
+            commands::source_transfer::import_skill_source,
+            commands::source_transfer::import_agent_source,
             #[cfg(feature = "block-builderbot")]
             commands::auth::auth_status,
             #[cfg(feature = "block-builderbot")]

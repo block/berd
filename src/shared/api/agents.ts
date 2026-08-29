@@ -481,7 +481,6 @@ function legacyPersonaToCreateRequest(parsed: Record<string, unknown>) {
 
 function sanitizedNativeAgentImport(parsed: Record<string, unknown>): {
   data: string;
-  avatar?: string;
 } {
   const sanitized = { ...parsed };
   const properties = propertyToRecord(parsed.properties);
@@ -531,7 +530,6 @@ function sanitizedNativeAgentImport(parsed: Record<string, unknown>): {
 
   return {
     data: JSON.stringify(sanitized),
-    avatar,
   };
 }
 
@@ -702,40 +700,6 @@ function requireAgentSource(source: SourceEntry): AgentSourceEntry {
   }
 
   return source;
-}
-
-async function preserveImportedAvatar(
-  source: AgentSourceEntry,
-  avatar: string | undefined,
-): Promise<AgentSourceEntry> {
-  if (!avatar || normalizeAvatarUrl(source.properties?.avatar) === avatar) {
-    return source;
-  }
-
-  const properties = {
-    ...(source.properties ?? {}),
-    avatar,
-  };
-
-  try {
-    const client = await getClient();
-    const response = await client.goose.GooseUnstableSourcesUpdate({
-      type: AGENT_SOURCE_TYPE,
-      path: source.path,
-      name: source.name,
-      description: source.description,
-      content: source.content,
-      properties,
-    });
-
-    return requireAgentSource(response.source);
-  } catch (error) {
-    console.warn("Failed to preserve imported agent avatar:", error);
-    return {
-      ...source,
-      properties,
-    };
-  }
 }
 
 async function findPersonaSource(path: string): Promise<AgentSourceEntry> {
@@ -1062,9 +1026,8 @@ export async function importPersonas(
     );
   }
 
-  const client = await getClient();
-
   if (isPersonaMarkdownFile(fileName)) {
+    const client = await getClient();
     const response = await client.goose.GooseUnstableSourcesCreate(
       personaMarkdownToCreateRequest(fileContents),
     );
@@ -1080,18 +1043,14 @@ export async function importPersonas(
 
   if (parsed.type === AGENT_SOURCE_TYPE) {
     const nativeImport = sanitizedNativeAgentImport(parsed);
-    const response = await client.goose.GooseUnstableSourcesImport({
-      data: nativeImport.data,
-      target: { scope: "global" },
-    });
-    const sources = await Promise.all(
-      response.sources
-        .filter(isAgentSource)
-        .map((source) => preserveImportedAvatar(source, nativeImport.avatar)),
+    const response = await invoke<{ sources: SourceEntry[] }>(
+      "import_agent_source",
+      { data: nativeImport.data },
     );
-    return sources.map(agentSourceToPersona);
+    return response.sources.filter(isAgentSource).map(agentSourceToPersona);
   }
 
+  const client = await getClient();
   const response = await client.goose.GooseUnstableSourcesCreate(
     legacyPersonaToCreateRequest(parsed),
   );

@@ -7,7 +7,6 @@ const mockGooseSourcesCreate = vi.fn();
 const mockGooseSourcesUpdate = vi.fn();
 const mockGooseSourcesDelete = vi.fn();
 const mockGooseSourcesExport = vi.fn();
-const mockGooseSourcesImport = vi.fn();
 const appAvatarRef = "app-avatar:gloopy-1";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -27,8 +26,6 @@ vi.mock("@/shared/api/acpConnection", () => ({
         mockGooseSourcesDelete(...args),
       GooseUnstableSourcesExport: (...args: unknown[]) =>
         mockGooseSourcesExport(...args),
-      GooseUnstableSourcesImport: (...args: unknown[]) =>
-        mockGooseSourcesImport(...args),
     },
   }),
 }));
@@ -74,7 +71,6 @@ describe("agents API", () => {
     mockGooseSourcesUpdate.mockReset();
     mockGooseSourcesDelete.mockReset();
     mockGooseSourcesExport.mockReset();
-    mockGooseSourcesImport.mockReset();
     mockedInvoke.mockReset();
   });
 
@@ -1037,7 +1033,7 @@ describe("agents API", () => {
         avatar: "https://example.test/scout.png",
       },
     });
-    expect(mockGooseSourcesImport).not.toHaveBeenCalled();
+    expect(mockedInvoke).not.toHaveBeenCalled();
     expect(result).toHaveLength(1);
   });
 
@@ -1086,7 +1082,7 @@ Research carefully.
         },
       },
     });
-    expect(mockGooseSourcesImport).not.toHaveBeenCalled();
+    expect(mockedInvoke).not.toHaveBeenCalled();
     expect(result).toHaveLength(1);
   });
 
@@ -1146,7 +1142,7 @@ Research carefully.
         },
       },
     });
-    expect(mockGooseSourcesImport).not.toHaveBeenCalled();
+    expect(mockedInvoke).not.toHaveBeenCalled();
   });
 
   it("imports app avatar refs from legacy persona JSON", async () => {
@@ -1301,8 +1297,8 @@ Research carefully.
     });
   });
 
-  it("imports native agent JSON through ACP source import", async () => {
-    mockGooseSourcesImport.mockResolvedValue({ sources: [agentSource] });
+  it("imports native agent JSON through the dedicated native command", async () => {
+    mockedInvoke.mockResolvedValue({ sources: [agentSource] });
 
     const { importPersonas } = await import("../agents");
     const raw = JSON.stringify({
@@ -1315,15 +1311,15 @@ Research carefully.
 
     await importPersonas(raw, "scout.agent.json");
 
-    expect(mockGooseSourcesImport).toHaveBeenCalledWith({
+    expect(mockedInvoke).toHaveBeenCalledWith("import_agent_source", {
       data: raw,
-      target: { scope: "global" },
     });
     expect(mockGooseSourcesCreate).not.toHaveBeenCalled();
+    expect(mockGooseSourcesUpdate).not.toHaveBeenCalled();
   });
 
   it("drops legacy trait metadata from native agent imports", async () => {
-    mockGooseSourcesImport.mockResolvedValue({ sources: [agentSource] });
+    mockedInvoke.mockResolvedValue({ sources: [agentSource] });
     const { importPersonas } = await import("../agents");
     await importPersonas(
       JSON.stringify({
@@ -1348,7 +1344,7 @@ Research carefully.
       "scout.agent.json",
     );
 
-    const importRequest = mockGooseSourcesImport.mock.calls[0]?.[0] as {
+    const importRequest = mockedInvoke.mock.calls[0]?.[1] as {
       data: string;
     };
     expect(JSON.parse(importRequest.data)).toMatchObject({
@@ -1357,23 +1353,16 @@ Research carefully.
     });
   });
 
-  it("preserves native agent JSON app avatar refs when ACP import omits them", async () => {
+  it("preserves native agent JSON app avatar refs without a follow-up update", async () => {
     const importedSource = {
       ...agentSource,
       path: "/Users/test/.agents/agents/scout-imported.md",
       properties: {
         color: "blue",
-      },
-    };
-    const updatedSource = {
-      ...importedSource,
-      properties: {
-        color: "blue",
         avatar: appAvatarRef,
       },
     };
-    mockGooseSourcesImport.mockResolvedValue({ sources: [importedSource] });
-    mockGooseSourcesUpdate.mockResolvedValue({ source: updatedSource });
+    mockedInvoke.mockResolvedValue({ sources: [importedSource] });
 
     const { importPersonas } = await import("../agents");
     const raw = JSON.stringify({
@@ -1389,7 +1378,7 @@ Research carefully.
     });
 
     const [persona] = await importPersonas(raw, "scout.agent.json");
-    const importRequest = mockGooseSourcesImport.mock.calls[0]?.[0] as {
+    const importRequest = mockedInvoke.mock.calls[0]?.[1] as {
       data: string;
     };
 
@@ -1399,61 +1388,13 @@ Research carefully.
         avatar: appAvatarRef,
       },
     });
-    expect(mockGooseSourcesUpdate).toHaveBeenCalledWith({
-      type: "agent",
-      path: importedSource.path,
-      name: "Scout",
-      description: "Agent",
-      content: "Research carefully.",
-      properties: {
-        color: "blue",
-        avatar: appAvatarRef,
-      },
-    });
+    expect(mockGooseSourcesUpdate).not.toHaveBeenCalled();
     expect(persona.avatar).toBe(appAvatarRef);
     expect(persona.sourceProperties?.avatar).toBe(appAvatarRef);
   });
 
-  it("keeps native agent JSON imports successful when avatar repair fails", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const importedSource = {
-      ...agentSource,
-      path: "/Users/test/.agents/agents/scout-imported.md",
-      properties: {
-        color: "blue",
-      },
-    };
-    mockGooseSourcesImport.mockResolvedValue({ sources: [importedSource] });
-    mockGooseSourcesUpdate.mockRejectedValue(new Error("update failed"));
-
-    const { importPersonas } = await import("../agents");
-    const raw = JSON.stringify({
-      version: 1,
-      type: "agent",
-      name: "Scout",
-      description: "Agent",
-      content: "Research carefully.",
-      properties: {
-        avatar: appAvatarRef,
-      },
-    });
-
-    const [persona] = await importPersonas(raw, "scout.agent.json");
-
-    expect(persona.avatar).toBe(appAvatarRef);
-    expect(persona.sourceProperties).toEqual({
-      color: "blue",
-      avatar: appAvatarRef,
-    });
-    expect(warnSpy).toHaveBeenCalledWith(
-      "Failed to preserve imported agent avatar:",
-      expect.any(Error),
-    );
-    warnSpy.mockRestore();
-  });
-
-  it("strips unsafe native agent JSON avatar values before ACP import", async () => {
-    mockGooseSourcesImport.mockResolvedValue({
+  it("strips unsafe native agent JSON avatar values before native import", async () => {
+    mockedInvoke.mockResolvedValue({
       sources: [
         {
           ...agentSource,
@@ -1483,7 +1424,7 @@ Research carefully.
     });
 
     const [persona] = await importPersonas(raw, "scout.agent.json");
-    const importRequest = mockGooseSourcesImport.mock.calls[0]?.[0] as {
+    const importRequest = mockedInvoke.mock.calls[0]?.[1] as {
       data: string;
     };
     const importedPayload = JSON.parse(importRequest.data);
@@ -1515,7 +1456,7 @@ Research carefully.
       "Unsupported persona format version 2",
     );
     expect(mockGooseSourcesCreate).not.toHaveBeenCalled();
-    expect(mockGooseSourcesImport).not.toHaveBeenCalled();
+    expect(mockedInvoke).not.toHaveBeenCalled();
   });
 
   it("validates malformed legacy content loaded from a .json file", async () => {
@@ -1525,7 +1466,7 @@ Research carefully.
       "Unsupported persona format version undefined",
     );
     expect(mockGooseSourcesCreate).not.toHaveBeenCalled();
-    expect(mockGooseSourcesImport).not.toHaveBeenCalled();
+    expect(mockedInvoke).not.toHaveBeenCalled();
   });
 
   it("keeps native import file reads on the Tauri command", async () => {
