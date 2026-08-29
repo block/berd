@@ -583,6 +583,7 @@ pub fn run() {
             commands::migration::mark_migration_complete,
             commands::migration::mark_legacy_extension_cleanup_complete,
             commands::migration::dismiss_migration_banner,
+            commands::onboarding_import::prepare_onboarding_import,
             commands::message_queues::load_message_queues,
             commands::message_queues::persist_message_queues,
             commands::message_queues::persist_message_queue_updates,

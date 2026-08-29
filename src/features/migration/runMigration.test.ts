@@ -1,8 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mockGooseOnboardingImportScan = vi.fn();
-const mockGooseOnboardingImportApply = vi.fn();
+const mockLegacyOnboardingImportScan = vi.fn();
+const mockLegacyOnboardingImportApply = vi.fn();
 const mockGooseDefaultsSave = vi.fn();
 const mockGooseConfigExtensionsToggle = vi.fn();
 const mockListExtensions = vi.fn();
@@ -18,9 +18,9 @@ vi.mock("@/shared/api/acpConnection", () => ({
   getClient: async () => ({
     goose: {
       GooseUnstableOnboardingImportScan: (...args: unknown[]) =>
-        mockGooseOnboardingImportScan(...args),
+        mockLegacyOnboardingImportScan(...args),
       GooseUnstableOnboardingImportApply: (...args: unknown[]) =>
-        mockGooseOnboardingImportApply(...args),
+        mockLegacyOnboardingImportApply(...args),
       GooseUnstableDefaultsSave: (...args: unknown[]) =>
         mockGooseDefaultsSave(...args),
       GooseUnstableConfigExtensionsToggle: (...args: unknown[]) =>
@@ -58,16 +58,22 @@ vi.mock("@/features/runtime-config/defaults", () => ({
 }));
 
 const mockedInvoke = vi.mocked(invoke);
+const emptyImportPlan = {
+  importedSkills: 0,
+  skippedSkills: 0,
+  warnings: [],
+};
 
 describe("runMigration", () => {
   let consoleError: ReturnType<typeof vi.spyOn>;
+  let consoleWarn: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockedInvoke.mockReset();
     mockGetStoredModelPreference.mockReturnValue(null);
     consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-    // Default: backup_goose_config returns a backup path.
+    consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
     mockedInvoke.mockImplementation(async (command: string) => {
       if (command === "backup_goose_config") {
         return {
@@ -77,10 +83,11 @@ describe("runMigration", () => {
             "/home/test/.config/goose/config.yaml.backup-2026-05-19T12-00-00Z",
         };
       }
+      if (command === "prepare_onboarding_import") {
+        return emptyImportPlan;
+      }
       throw new Error(`Unexpected invoke: ${command}`);
     });
-    mockGooseOnboardingImportScan.mockResolvedValue({ candidates: [] });
-    mockGooseOnboardingImportApply.mockResolvedValue(undefined);
     mockGooseDefaultsSave.mockResolvedValue(undefined);
     mockGooseConfigExtensionsToggle.mockResolvedValue(undefined);
     mockListExtensions.mockResolvedValue([]);
@@ -88,42 +95,87 @@ describe("runMigration", () => {
 
   afterEach(() => {
     consoleError.mockRestore();
+    consoleWarn.mockRestore();
   });
 
-  it("runs backup before issuing the ACP import scan", async () => {
-    mockGooseOnboardingImportScan.mockResolvedValue({
-      candidates: [{ id: "cand-1" }],
+  it("backs up before native preparation and waits for it before defaults", async () => {
+    let finishPreparation: (() => void) | undefined;
+    const preparation = new Promise<void>((resolve) => {
+      finishPreparation = resolve;
+    });
+    mockedInvoke.mockImplementation(async (command: string) => {
+      if (command === "backup_goose_config") {
+        return {
+          backedUp: true,
+          sourcePath: "/home/test/.config/goose/config.yaml",
+        };
+      }
+      if (command === "prepare_onboarding_import") {
+        await preparation;
+        return emptyImportPlan;
+      }
+      throw new Error(`Unexpected invoke: ${command}`);
     });
 
     const { runMigration } = await import("./runMigration");
-    await runMigration();
+    const migration = runMigration();
 
-    expect(mockedInvoke).toHaveBeenCalledWith("backup_goose_config");
+    await vi.waitFor(() => {
+      expect(mockedInvoke).toHaveBeenCalledWith("prepare_onboarding_import");
+    });
+    expect(mockGooseDefaultsSave).not.toHaveBeenCalled();
+    finishPreparation?.();
+    await migration;
+
     const backupOrder = mockedInvoke.mock.invocationCallOrder[0];
-    const importScanOrder =
-      mockGooseOnboardingImportScan.mock.invocationCallOrder[0];
-    const importApplyOrder =
-      mockGooseOnboardingImportApply.mock.invocationCallOrder[0];
-
-    expect(backupOrder).toBeDefined();
-    expect(importScanOrder).toBeDefined();
-    expect(importApplyOrder).toBeDefined();
-    expect(backupOrder).toBeLessThan(importScanOrder);
-    expect(backupOrder).toBeLessThan(importApplyOrder);
+    const prepareOrder = mockedInvoke.mock.invocationCallOrder[1];
+    const defaultsOrder = mockGooseDefaultsSave.mock.invocationCallOrder[0];
+    expect(backupOrder).toBeLessThan(prepareOrder);
+    expect(prepareOrder).toBeLessThan(defaultsOrder);
   });
 
-  it("skips import apply when there are no candidates", async () => {
-    mockGooseOnboardingImportScan.mockResolvedValue({ candidates: [] });
-
+  it("uses native preparation and never calls the removed onboarding endpoints", async () => {
     const { runMigration } = await import("./runMigration");
     await runMigration();
 
-    expect(mockGooseOnboardingImportApply).not.toHaveBeenCalled();
+    expect(mockedInvoke).toHaveBeenCalledWith("prepare_onboarding_import");
+    expect(mockLegacyOnboardingImportScan).not.toHaveBeenCalled();
+    expect(mockLegacyOnboardingImportApply).not.toHaveBeenCalled();
   });
 
-  it("toggles every extension whose config_key is not in KEEP_ENABLED", async () => {
+  it("applies imported provider defaults after native preparation", async () => {
+    mockedInvoke.mockImplementation(async (command: string) => {
+      if (command === "backup_goose_config") {
+        return {
+          backedUp: false,
+          sourcePath: "/home/test/.config/goose/config.yaml",
+        };
+      }
+      if (command === "prepare_onboarding_import") {
+        return {
+          providerDefaults: { providerId: "openai", modelId: "gpt-5.1" },
+          importedSkills: 1,
+          skippedSkills: 0,
+          warnings: ["A malformed extension was skipped."],
+        };
+      }
+      throw new Error(`Unexpected invoke: ${command}`);
+    });
+    const { runMigration } = await import("./runMigration");
+    await runMigration();
+
+    expect(mockGooseDefaultsSave.mock.calls).toEqual([
+      [{ providerId: "openai", modelId: "gpt-5.1" }],
+      [{ providerId: "databricks_v2", modelId: "goose-gpt-5-5" }],
+    ]);
+    expect(consoleWarn).toHaveBeenCalledWith(
+      "Some onboarding imports were skipped:",
+      ["A malformed extension was skipped."],
+    );
+  });
+
+  it("toggles every enabled extension not in KEEP_ENABLED", async () => {
     mockListExtensions.mockResolvedValue([
-      // Kept by default — should not be toggled.
       {
         type: "builtin",
         name: "developer",
@@ -148,7 +200,6 @@ describe("runMigration", () => {
         config_key: "summon",
         enabled: true,
       },
-      // Imported, not in keep list — should be toggled off.
       {
         type: "stdio",
         name: "github",
@@ -166,7 +217,6 @@ describe("runMigration", () => {
         config_key: "summarize",
         enabled: true,
       },
-      // Already disabled — skip silently (still not in the banner list).
       {
         type: "stdio",
         name: "slack",
@@ -213,8 +263,6 @@ describe("runMigration", () => {
     const { runMigration } = await import("./runMigration");
     const result = await runMigration();
 
-    // The orchestrator hands these to the caller, which is what
-    // `mark_migration_complete` is invoked with by `useMigrationGate`.
     expect(result).toEqual({
       disabledExtensions: [{ configKey: "github", name: "github" }],
       backupPath:
@@ -223,9 +271,6 @@ describe("runMigration", () => {
   });
 
   it("saves the configured Databricks default model and seeds the frontend preference", async () => {
-    // Locks in the shape sent to `_goose/unstable/defaults/save` and the per-agent
-    // preference. If the shipped runtime default changes, this test should
-    // change with it.
     const { runMigration } = await import("./runMigration");
     await runMigration();
 
@@ -284,6 +329,9 @@ describe("runMigration", () => {
           backedUp: false,
           sourcePath: "/home/test/.config/goose/config.yaml",
         };
+      }
+      if (command === "prepare_onboarding_import") {
+        return emptyImportPlan;
       }
       throw new Error(`Unexpected invoke: ${command}`);
     });

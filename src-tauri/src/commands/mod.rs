@@ -37,6 +37,7 @@ pub mod model_setup;
 mod native_input_mute;
 pub mod native_voice;
 pub mod notifications;
+pub mod onboarding_import;
 #[cfg(feature = "block-voice-dictation")]
 pub mod openai_realtime;
 pub mod path_resolver;
