@@ -933,6 +933,7 @@
     "openAiApiKeyNotConfigured": "This key is separate from provider credentials used by Goose.",
     "openAiApiKeySaved": "API key saved",
     "openAiChecking": "Checking OpenAI voice settings…",
+    "openAiEnvironmentOverride": "Development configuration is overridden by the Berd process environment.",
     "openAiTtsApiKey": "OpenAI text-to-speech API key",
     "openAiTtsConfigured": "Uses {{model}} and the {{voice}} voice. OpenAI voices are AI-generated.",
     "openAiTtsNeedsKey": "Add an OpenAI text-to-speech API key to use this voice.",

@@ -29,18 +29,18 @@ use super::{
 };
 use super::{
     native_voice::{InterruptionSensitivity, NativeVoiceState},
+    openai_voice_credentials::{self, OpenAiVoiceCredential},
     pocket_voice::VoiceInterruptionMode,
 };
 #[cfg(any(test, target_os = "macos"))]
 use std::time::Instant;
 
-#[cfg(target_os = "macos")]
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 const DEFAULT_TTS_MODEL: &str = "gpt-4o-mini-tts";
 const DEFAULT_TTS_VOICE: &str = "marin";
-#[cfg(target_os = "macos")]
-const KEYRING_SERVICE: &str = "berd-openai-voice";
-const TTS_KEYRING_ACCOUNT: &str = "tts-api-key";
+const BASE_URL_ENV: &str = "BERD_OPENAI_VOICE_BASE_URL";
+const TTS_MODEL_ENV: &str = "BERD_OPENAI_TTS_MODEL";
+const TTS_VOICE_ENV: &str = "BERD_OPENAI_TTS_VOICE";
 const SETTINGS_CHANGED_EVENT: &str = "openai-voice:settings-changed";
 #[cfg(target_os = "macos")]
 const TTS_SAMPLE_RATE: u32 = 24_000;
@@ -101,11 +101,19 @@ enum OpenAiStreamCommand {
 #[serde(rename_all = "camelCase")]
 pub struct OpenAiVoiceStatus {
     tts_configured: bool,
+    tts_configuration_source: OpenAiVoiceConfigurationSource,
     speech_model: String,
     speech_voice: String,
     playback_speed: f32,
     tts_available: bool,
     unavailable_reason: Option<String>,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum OpenAiVoiceConfigurationSource {
+    Default,
+    Environment,
 }
 
 #[cfg(target_os = "macos")]
@@ -155,88 +163,19 @@ fn env_trimmed(name: &str) -> Option<String> {
 }
 
 #[cfg(target_os = "macos")]
-fn goose_yaml_value(path: &std::path::Path, name: &str) -> Result<Option<String>, String> {
-    if !path.exists() {
-        return Ok(None);
-    }
-    let payload = std::fs::read_to_string(path)
-        .map_err(|error| format!("Could not read Goose configuration: {error}"))?;
-    let values: serde_json::Value = yaml_serde::from_str(&payload)
-        .map_err(|error| format!("Goose configuration is invalid: {error}"))?;
-    Ok(values
-        .get(name)
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string))
-}
-
-#[cfg(target_os = "macos")]
-fn stored_api_key(account: &str) -> Result<Option<String>, String> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, account)
-        .map_err(|error| format!("Could not access Berd's OpenAI voice credentials: {error}"))?;
-    match entry.get_password() {
-        Ok(value) => Ok(Some(value)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(error) => Err(format!(
-            "Could not read Berd's OpenAI voice credential: {error}"
-        )),
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn stored_api_key(_account: &str) -> Result<Option<String>, String> {
-    Ok(None)
-}
-
-#[cfg(target_os = "macos")]
-fn store_api_key(account: &str, api_key: &str) -> Result<(), String> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, account)
-        .map_err(|error| format!("Could not access Berd's OpenAI voice credentials: {error}"))?;
-    entry
-        .set_password(api_key)
-        .map_err(|error| format!("Could not save Berd's OpenAI voice credential: {error}"))
-}
-
-#[cfg(not(target_os = "macos"))]
-fn store_api_key(_account: &str, _api_key: &str) -> Result<(), String> {
-    Err("OpenAI voice credentials are unsupported on this platform".to_string())
-}
-
-#[cfg(target_os = "macos")]
-fn clear_api_key(account: &str) -> Result<(), String> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, account)
-        .map_err(|error| format!("Could not access Berd's OpenAI voice credentials: {error}"))?;
-    match entry.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(error) => Err(format!(
-            "Could not remove Berd's OpenAI voice credential: {error}"
-        )),
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn clear_api_key(_account: &str) -> Result<(), String> {
-    Err("OpenAI voice credentials are unsupported on this platform".to_string())
-}
-
-#[cfg(target_os = "macos")]
 fn tts_api_key() -> Result<String, String> {
-    stored_api_key(TTS_KEYRING_ACCOUNT)?.ok_or_else(|| {
-        "OpenAI text-to-speech is not configured. Add its API key in Voice settings, then try again."
-            .to_string()
-    })
+    openai_voice_credentials::require(OpenAiVoiceCredential::TextToSpeech)
 }
 
 #[cfg(any(test, target_os = "macos"))]
-fn normalize_openai_base_url(raw_url: String, assume_v1: bool) -> Result<String, String> {
+fn normalize_openai_base_url(raw_url: String) -> Result<String, String> {
     let mut url = reqwest::Url::parse(&raw_url)
         .map_err(|error| format!("OpenAI voice endpoint is invalid: {error}"))?;
     if url.scheme() != "https" {
         return Err("OpenAI voice endpoint must use HTTPS".to_string());
     }
     let path = url.path().trim_end_matches('/').to_string();
-    if assume_v1 || path.is_empty() {
+    if path.is_empty() {
         let path = if path.ends_with("/v1") {
             path
         } else {
@@ -252,28 +191,29 @@ fn normalize_openai_base_url(raw_url: String, assume_v1: bool) -> Result<String,
 
 #[cfg(target_os = "macos")]
 fn base_url() -> Result<String, String> {
-    if let Some(host) = env_trimmed("OPENAI_HOST") {
-        return normalize_openai_base_url(host, true);
-    }
-    if let Some(base_url) = env_trimmed("OPENAI_BASE_URL") {
-        return normalize_openai_base_url(base_url, false);
-    }
-    let config_path = crate::services::goose_config::config_path()?;
-    if let Some(base_url) = goose_yaml_value(&config_path, "OPENAI_BASE_URL")? {
-        return normalize_openai_base_url(base_url, false);
-    }
-    if let Some(host) = goose_yaml_value(&config_path, "OPENAI_HOST")? {
-        return normalize_openai_base_url(host, true);
+    if let Some(base_url) = env_trimmed(BASE_URL_ENV) {
+        return normalize_openai_base_url(base_url);
     }
     Ok(DEFAULT_BASE_URL.to_string())
 }
 
 fn speech_model() -> String {
-    env_trimmed("OPENAI_TTS_MODEL").unwrap_or_else(|| DEFAULT_TTS_MODEL.to_string())
+    env_trimmed(TTS_MODEL_ENV).unwrap_or_else(|| DEFAULT_TTS_MODEL.to_string())
 }
 
 fn speech_voice() -> String {
-    env_trimmed("OPENAI_TTS_VOICE").unwrap_or_else(|| DEFAULT_TTS_VOICE.to_string())
+    env_trimmed(TTS_VOICE_ENV).unwrap_or_else(|| DEFAULT_TTS_VOICE.to_string())
+}
+
+fn tts_configuration_source() -> OpenAiVoiceConfigurationSource {
+    if [BASE_URL_ENV, TTS_MODEL_ENV, TTS_VOICE_ENV]
+        .iter()
+        .any(|name| env_trimmed(name).is_some())
+    {
+        OpenAiVoiceConfigurationSource::Environment
+    } else {
+        OpenAiVoiceConfigurationSource::Default
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -351,15 +291,18 @@ pub async fn get_openai_voice_status(
         .speed;
     let tts_available = cfg!(target_os = "macos");
     let tts_configured = if tts_available {
-        tauri::async_runtime::spawn_blocking(|| stored_api_key(TTS_KEYRING_ACCOUNT))
-            .await
-            .map_err(|error| format!("Could not check OpenAI voice credentials: {error}"))??
-            .is_some()
+        tauri::async_runtime::spawn_blocking(|| {
+            openai_voice_credentials::read(OpenAiVoiceCredential::TextToSpeech)
+        })
+        .await
+        .map_err(|error| format!("Could not check OpenAI voice credentials: {error}"))??
+        .is_some()
     } else {
         false
     };
     Ok(OpenAiVoiceStatus {
         tts_configured,
+        tts_configuration_source: tts_configuration_source(),
         speech_model: speech_model(),
         speech_voice: speech_voice(),
         playback_speed,
@@ -385,7 +328,7 @@ pub fn set_openai_tts_api_key(
         return Err("OpenAI text-to-speech API key cannot be empty".to_string());
     }
     stop_openai_voice_inner(&state)?;
-    store_api_key(TTS_KEYRING_ACCOUNT, api_key)?;
+    openai_voice_credentials::store(OpenAiVoiceCredential::TextToSpeech, api_key)?;
     app.emit(SETTINGS_CHANGED_EVENT, ())
         .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))?;
     Ok(())
@@ -397,7 +340,7 @@ pub fn clear_openai_tts_api_key(
     state: State<'_, OpenAiVoiceState>,
 ) -> Result<(), String> {
     stop_openai_voice_inner(&state)?;
-    clear_api_key(TTS_KEYRING_ACCOUNT)?;
+    openai_voice_credentials::clear(OpenAiVoiceCredential::TextToSpeech)?;
     app.emit(SETTINGS_CHANGED_EVENT, ())
         .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))?;
     Ok(())
@@ -1219,13 +1162,13 @@ mod tests {
     }
 
     #[test]
-    fn openai_host_configuration_resolves_to_the_v1_api_root() {
+    fn voice_base_url_configuration_resolves_to_the_v1_api_root() {
         assert_eq!(
-            normalize_openai_base_url("https://proxy.example".to_string(), true).unwrap(),
+            normalize_openai_base_url("https://proxy.example".to_string()).unwrap(),
             "https://proxy.example/v1"
         );
         assert_eq!(
-            normalize_openai_base_url("https://proxy.example/v1/".to_string(), true).unwrap(),
+            normalize_openai_base_url("https://proxy.example/v1/".to_string()).unwrap(),
             "https://proxy.example/v1"
         );
     }
@@ -1233,7 +1176,7 @@ mod tests {
     #[test]
     fn openai_voice_endpoints_require_https() {
         assert_eq!(
-            normalize_openai_base_url("http://proxy.example".to_string(), true)
+            normalize_openai_base_url("http://proxy.example".to_string())
                 .expect_err("plaintext endpoint must be rejected"),
             "OpenAI voice endpoint must use HTTPS"
         );
@@ -1242,18 +1185,24 @@ mod tests {
     #[test]
     fn openai_base_url_preserves_custom_paths_and_query_parameters() {
         assert_eq!(
-            normalize_openai_base_url("https://proxy.example".to_string(), false).unwrap(),
+            normalize_openai_base_url("https://proxy.example".to_string()).unwrap(),
             "https://proxy.example/v1"
         );
         let base = normalize_openai_base_url(
             "https://proxy.example/openai?api-version=2026-01-01".to_string(),
-            false,
         )
         .unwrap();
         assert_eq!(
             endpoint_for_base_url(&base, "audio/speech").unwrap(),
             "https://proxy.example/openai/audio/speech?api-version=2026-01-01"
         );
+    }
+
+    #[test]
+    fn voice_configuration_uses_berd_scoped_environment_names() {
+        assert_eq!(BASE_URL_ENV, "BERD_OPENAI_VOICE_BASE_URL");
+        assert_eq!(TTS_MODEL_ENV, "BERD_OPENAI_TTS_MODEL");
+        assert_eq!(TTS_VOICE_ENV, "BERD_OPENAI_TTS_VOICE");
     }
 
     #[test]

@@ -53,6 +53,7 @@ const microphonePermissionState = vi.hoisted(() => ({
 const openAiStatusState = vi.hoisted(() => ({
   current: {
     ttsConfigured: true,
+    ttsConfigurationSource: "default" as "default" | "environment",
     speechModel: "gpt-4o-mini-tts",
     speechVoice: "marin",
     playbackSpeed: 1,
@@ -218,6 +219,7 @@ describe("VoiceSettings", () => {
     siriSetupState.current = siriSetup();
     openAiStatusState.current = {
       ttsConfigured: true,
+      ttsConfigurationSource: "default",
       speechModel: "gpt-4o-mini-tts",
       speechVoice: "marin",
       playbackSpeed: 1,
@@ -237,6 +239,22 @@ describe("VoiceSettings", () => {
       await screen.findByText(/gpt-4o-mini-tts.*marin voice/),
     ).toBeInTheDocument();
     expect(screen.getByText("Playback speed")).toBeInTheDocument();
+  });
+
+  it("labels purpose-specific environment overrides", async () => {
+    outputState.backend = "openai";
+    openAiStatusState.current = {
+      ...openAiStatusState.current,
+      ttsConfigurationSource: "environment",
+    };
+    setupState.current = setup(pocketStatus());
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      await screen.findByText(
+        "Development configuration is overridden by the Berd process environment.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("saves a dedicated OpenAI text-to-speech API key", async () => {

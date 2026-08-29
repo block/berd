@@ -286,6 +286,11 @@ export function VoiceSettings() {
                             })
                           : t("voice.openAiChecking"))}
                 </p>
+                {openAiStatus?.ttsConfigurationSource === "environment" ? (
+                  <p className="text-xs text-muted-foreground">
+                    {t("voice.openAiEnvironmentOverride")}
+                  </p>
+                ) : null}
                 <PlaybackSpeedRow
                   speed={openAiSpeed}
                   speeds={[0.75, 1, 1.25, 1.5, 2]}

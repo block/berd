@@ -936,6 +936,7 @@
     "openAiApiKeyNotConfigured": "Esta clave es independiente de las credenciales de proveedor que usa Goose.",
     "openAiApiKeySaved": "Clave API guardada",
     "openAiChecking": "Comprobando los ajustes de voz de OpenAI…",
+    "openAiEnvironmentOverride": "La configuración de desarrollo está reemplazada por el entorno del proceso de Berd.",
     "openAiTtsApiKey": "Clave API de texto a voz de OpenAI",
     "openAiTtsConfigured": "Usa {{model}} y la voz {{voice}}. Las voces de OpenAI son generadas por IA.",
     "openAiTtsNeedsKey": "Añade una clave API de texto a voz de OpenAI para usar esta voz.",
