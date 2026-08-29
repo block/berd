@@ -1093,6 +1093,17 @@ where
     })
 }
 
+fn block_on_openai_timeout<F>(
+    runtime: &tokio::runtime::Runtime,
+    timeout: Duration,
+    future: F,
+) -> Result<F::Output, tokio::time::error::Elapsed>
+where
+    F: std::future::Future,
+{
+    runtime.block_on(async { tokio::time::timeout(timeout, future).await })
+}
+
 fn record_openai_event(
     event: OpenAiRealtimeTranscriptionEvent,
     current_epoch: u64,
@@ -1316,10 +1327,9 @@ fn openai_worker(
             });
         }
 
-        while let Ok(event) = runtime.block_on(tokio::time::timeout(
-            Duration::from_millis(1),
-            client.next_event(),
-        )) {
+        while let Ok(event) =
+            block_on_openai_timeout(&runtime, Duration::from_millis(1), client.next_event())
+        {
             let (shutting_down, current_epoch) =
                 effective_mute_epoch(&controls, &shutdown, &shutdown_mute_epoch);
             if shutting_down {
@@ -1460,10 +1470,8 @@ fn openai_worker(
         if pending.begin(&events).is_err() {
             return;
         }
-        let final_write = runtime.block_on(tokio::time::timeout(
-            OPENAI_FINAL_WRITE_TIMEOUT,
-            client.commit(),
-        ));
+        let final_write =
+            block_on_openai_timeout(&runtime, OPENAI_FINAL_WRITE_TIMEOUT, client.commit());
         if matches!(final_write, Ok(Ok(()))) {
             track_openai_commit(&mut pending_commits, observed_epoch);
         } else {
@@ -1475,10 +1483,9 @@ fn openai_worker(
         if committed.is_empty() && pending_commits.is_empty() && pending.count == 0 {
             break;
         }
-        let Ok(event) = runtime.block_on(tokio::time::timeout(
-            Duration::from_millis(50),
-            client.next_event(),
-        )) else {
+        let Ok(event) =
+            block_on_openai_timeout(&runtime, Duration::from_millis(50), client.next_event())
+        else {
             continue;
         };
         let event = match event {
@@ -2209,6 +2216,19 @@ mod tests {
 
         signal.join().expect("shutdown signal");
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn openai_timeout_constructs_its_timer_inside_the_worker_runtime() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .expect("runtime");
+
+        let result =
+            block_on_openai_timeout(&runtime, Duration::from_millis(10), std::future::ready(42));
+
+        assert_eq!(result, Ok(42));
     }
 
     #[test]
