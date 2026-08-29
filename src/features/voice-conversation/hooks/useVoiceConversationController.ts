@@ -944,7 +944,28 @@ export function useVoiceConversationController({
       };
       mountedSendRoutes.set(routeOwner, route);
       activeSendRoute = route;
-      await start(sessionId, inputBackend, foregroundGeneration);
+      const startedStatus = await start(
+        sessionId,
+        inputBackend,
+        foregroundGeneration,
+      );
+      if (!startIsStillEligible()) {
+        if (activeSendRoute?.owner === route.owner) {
+          releaseVoiceSendRoute(route.owner);
+        }
+        if (
+          startedStatus.sessionId === sessionId &&
+          startedStatus.lifecycle !== "stopped" &&
+          startedStatus.lifecycle !== "unavailable"
+        ) {
+          try {
+            await stop();
+          } catch (stopError) {
+            addErrorNotification(sessionId, errorText(stopError));
+          }
+        }
+        return;
+      }
       startAssistantSpeech(assistantSpeechHistory);
     } catch (startError) {
       const backendStatus = useVoiceConversationStore.getState().status;
