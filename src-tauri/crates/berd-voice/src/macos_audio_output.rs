@@ -4,8 +4,6 @@ use std::ffi::{c_char, c_void, CStr};
 
 use crate::PcmAudioOutput;
 
-const MAX_POCKET_PLAYBACK_SPEED: f32 = 2.0;
-
 unsafe extern "C" {
     fn berd_pocket_audio_player_create(
         sample_rate: u32,
@@ -56,7 +54,7 @@ impl PocketAudioPlayer {
         }
         Ok(Self {
             raw,
-            delivery_safety_frames: delivery_safety_frames(sample_rate, MAX_POCKET_PLAYBACK_SPEED),
+            delivery_safety_frames: delivery_safety_frames(sample_rate, rate),
         })
     }
 
@@ -168,7 +166,6 @@ fn take_error(error: *mut c_char, fallback: &str) -> String {
 mod tests {
     use super::{
         apply_delivery_safety, delivery_safety_frames, playback_health, PocketAudioPlayer,
-        MAX_POCKET_PLAYBACK_SPEED,
     };
     use crate::wait_until_drained;
     use std::{
@@ -197,13 +194,6 @@ mod tests {
             apply_delivery_safety(second_buffer_completed, safety),
             7_200
         );
-    }
-
-    #[test]
-    fn live_rate_changes_reserve_maximum_delivery_safety() {
-        let safety = delivery_safety_frames(24_000, MAX_POCKET_PLAYBACK_SPEED);
-        assert_eq!(safety, 4_800);
-        assert_eq!(apply_delivery_safety(10_000, safety), 5_200);
     }
 
     #[test]

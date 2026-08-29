@@ -34,4 +34,4 @@ pub use pocket::{
 };
 #[cfg(target_os = "macos")]
 pub use siri::SiriTts;
-pub use tts::{OpenAiTts, PocketTtsBackend, TtsBackend, TtsOutcome, TtsPcmSpec};
+pub use tts::{OpenAiTts, PocketTtsBackend, TtsBackend, TtsOutcome, TtsPcmSpec, TtsSynthesisEvent};

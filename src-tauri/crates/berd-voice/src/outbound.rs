@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
-use crate::{PcmAudioOutput, TtsBackend, TtsOutcome};
+use crate::{PcmAudioOutput, TtsBackend, TtsOutcome, TtsSynthesisEvent};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -201,27 +201,36 @@ impl<'a> OutboundPlayback<'a> {
             return Ok(self.interrupt());
         }
         self.ledger.begin_segment(text.to_string());
-        let outcome = backend.synthesize(text, self.active, &mut |samples| {
-            if samples.is_empty() {
-                return Ok(());
-            }
-            if !self.active.load(Ordering::SeqCst) {
-                return Ok(());
-            }
-            self.output.check_health()?;
-            self.ledger.append_frames(samples.len());
-            if self.started {
-                before_write(false)?;
-                self.output.write(samples)?;
-                on_progress(&self.snapshot())
-            } else {
-                self.initial.extend_from_slice(samples);
-                if self.initial.len() >= self.initial_buffer_frames.max(1) {
-                    self.flush_initial(before_write, on_started)?;
+        let outcome = backend.synthesize_with_poll(text, self.active, &mut |event| match event {
+            TtsSynthesisEvent::Frames(samples) => {
+                if samples.is_empty() {
+                    return Ok(());
+                }
+                if !self.active.load(Ordering::SeqCst) {
+                    return Ok(());
+                }
+                self.output.check_health()?;
+                self.ledger.append_frames(samples.len());
+                if self.started {
+                    before_write(false)?;
+                    self.output.write(samples)?;
                     on_progress(&self.snapshot())
                 } else {
-                    Ok(())
+                    self.initial.extend_from_slice(samples);
+                    if self.initial.len() >= self.initial_buffer_frames.max(1) {
+                        self.flush_initial(before_write, on_started)?;
+                        on_progress(&self.snapshot())
+                    } else {
+                        Ok(())
+                    }
                 }
+            }
+            TtsSynthesisEvent::Poll => {
+                if self.active.load(Ordering::SeqCst) {
+                    self.output.check_health()?;
+                    on_progress(&self.snapshot())?;
+                }
+                Ok(())
             }
         });
         let outcome = match outcome {
@@ -358,6 +367,37 @@ mod tests {
         cancel_after_first: bool,
     }
 
+    struct PollThenFramesTts;
+
+    impl TtsBackend for PollThenFramesTts {
+        fn pcm_spec(&self) -> TtsPcmSpec {
+            TtsPcmSpec {
+                sample_rate: 10,
+                playback_rate: 1.0,
+            }
+        }
+
+        fn synthesize(
+            &self,
+            _text: &str,
+            _active: &AtomicBool,
+            _on_frames: &mut dyn FnMut(&[f32]) -> Result<(), String>,
+        ) -> Result<TtsOutcome, String> {
+            unreachable!("test backend exercises the polling synthesis seam")
+        }
+
+        fn synthesize_with_poll(
+            &self,
+            _text: &str,
+            _active: &AtomicBool,
+            on_event: &mut dyn FnMut(TtsSynthesisEvent<'_>) -> Result<(), String>,
+        ) -> Result<TtsOutcome, String> {
+            on_event(TtsSynthesisEvent::Poll)?;
+            on_event(TtsSynthesisEvent::Frames(&[0.3]))?;
+            Ok(TtsOutcome::Completed)
+        }
+    }
+
     impl TtsBackend for FakeTts {
         fn pcm_spec(&self) -> TtsPcmSpec {
             TtsPcmSpec {
@@ -387,7 +427,7 @@ mod tests {
         writes: Mutex<Vec<Vec<f32>>>,
         played: AtomicU64,
         drain_polls: AtomicUsize,
-        drain_after: usize,
+        drain_after: AtomicUsize,
         cancelled: AtomicBool,
         fail_health: AtomicBool,
     }
@@ -398,7 +438,7 @@ mod tests {
                 writes: Mutex::new(Vec::new()),
                 played: AtomicU64::new(0),
                 drain_polls: AtomicUsize::new(0),
-                drain_after,
+                drain_after: AtomicUsize::new(drain_after),
                 cancelled: AtomicBool::new(false),
                 fail_health: AtomicBool::new(false),
             }
@@ -415,7 +455,8 @@ mod tests {
             self.played.store(0, Ordering::SeqCst);
         }
         fn is_drained(&self) -> bool {
-            self.drain_polls.fetch_add(1, Ordering::SeqCst) >= self.drain_after
+            self.drain_polls.fetch_add(1, Ordering::SeqCst)
+                >= self.drain_after.load(Ordering::SeqCst)
         }
         fn check_health(&self) -> Result<(), String> {
             if self.fail_health.load(Ordering::SeqCst) {
@@ -490,6 +531,58 @@ mod tests {
             .segments
             .iter()
             .all(|segment| segment.synthesis_complete));
+    }
+
+    #[test]
+    fn synthesis_poll_can_release_and_next_pcm_reacquires_host_guard() {
+        use std::cell::{Cell, RefCell};
+
+        let active = AtomicBool::new(true);
+        let output = FakeOutput::new(0);
+        let first = FakeTts {
+            chunks: vec![vec![0.1, 0.2]],
+            cancel_after_first: false,
+        };
+        let mut playback = OutboundPlayback::new(&output, &active, 10, 0).unwrap();
+        let guard_active = Cell::new(false);
+        let lifecycle = RefCell::new(Vec::new());
+        playback
+            .synthesize_segment(
+                &first,
+                "first",
+                &mut |_| {
+                    guard_active.set(true);
+                    Ok(())
+                },
+                &mut || Ok(()),
+                &mut |_| Ok(()),
+            )
+            .unwrap();
+        assert!(guard_active.get());
+
+        playback
+            .synthesize_segment(
+                &PollThenFramesTts,
+                "second",
+                &mut |_| {
+                    if !guard_active.replace(true) {
+                        lifecycle.borrow_mut().push("reacquired");
+                    }
+                    output.drain_after.store(usize::MAX, Ordering::SeqCst);
+                    Ok(())
+                },
+                &mut || Ok(()),
+                &mut |_| {
+                    if output.is_drained() && guard_active.replace(false) {
+                        lifecycle.borrow_mut().push("released");
+                    }
+                    Ok(())
+                },
+            )
+            .unwrap();
+
+        assert_eq!(&*lifecycle.borrow(), &["released", "reacquired"]);
+        assert!(guard_active.get());
     }
 
     #[test]

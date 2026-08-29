@@ -17,6 +17,13 @@ pub enum TtsOutcome {
     Cancelled,
 }
 
+pub enum TtsSynthesisEvent<'a> {
+    Frames(&'a [f32]),
+    /// A lifecycle polling opportunity while synthesis is blocked waiting for
+    /// more PCM or a terminal provider result.
+    Poll,
+}
+
 /// A backend-neutral source of normalized mono, unit-scale Float32 PCM.
 ///
 /// Turn admission, output-device ownership, buffering, playback, and delivery
@@ -30,6 +37,20 @@ pub trait TtsBackend: Send + Sync {
         active: &AtomicBool,
         on_frames: &mut dyn FnMut(&[f32]) -> Result<(), String>,
     ) -> Result<TtsOutcome, String>;
+
+    /// Synthesizes while allowing backends with blocking waits to yield host
+    /// lifecycle polling. Backends without such waits keep the simple source
+    /// contract and use the default implementation.
+    fn synthesize_with_poll(
+        &self,
+        text: &str,
+        active: &AtomicBool,
+        on_event: &mut dyn FnMut(TtsSynthesisEvent<'_>) -> Result<(), String>,
+    ) -> Result<TtsOutcome, String> {
+        self.synthesize(text, active, &mut |frames| {
+            on_event(TtsSynthesisEvent::Frames(frames))
+        })
+    }
 }
 
 pub struct OpenAiTts {

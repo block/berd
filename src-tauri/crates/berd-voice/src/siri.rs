@@ -3,11 +3,14 @@
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
+use std::time::Duration;
 
-use crate::{TtsBackend, TtsOutcome, TtsPcmSpec};
+use crate::{TtsBackend, TtsOutcome, TtsPcmSpec, TtsSynthesisEvent};
 
 const SIRI_PCM_SAMPLE_RATE: u32 = 48_000;
 const PCM_CHANNEL_CAPACITY: usize = 8;
+const SYNTHESIS_POLL_INTERVAL: Duration = Duration::from_millis(10);
+const SIRI_SYNTHESIS_STALL_TIMEOUT: Duration = Duration::from_secs(60);
 
 unsafe extern "C" {
     fn berd_siri_tts_validate_voice(
@@ -98,6 +101,18 @@ impl TtsBackend for SiriTts {
         active: &AtomicBool,
         on_frames: &mut dyn FnMut(&[f32]) -> Result<(), String>,
     ) -> Result<TtsOutcome, String> {
+        self.synthesize_with_poll(text, active, &mut |event| match event {
+            TtsSynthesisEvent::Frames(frames) => on_frames(frames),
+            TtsSynthesisEvent::Poll => Ok(()),
+        })
+    }
+
+    fn synthesize_with_poll(
+        &self,
+        text: &str,
+        active: &AtomicBool,
+        on_event: &mut dyn FnMut(TtsSynthesisEvent<'_>) -> Result<(), String>,
+    ) -> Result<TtsOutcome, String> {
         if !active.load(Ordering::SeqCst) {
             return Ok(TtsOutcome::Cancelled);
         }
@@ -135,23 +150,17 @@ impl TtsBackend for SiriTts {
                     Err(take_error(error, "Siri synthesis failed"))
                 }
             });
-            let mut callback_error = None;
-            while let Ok(frames) = receiver.recv() {
-                if callback_error.is_none() {
-                    if let Err(error) = on_frames(&frames) {
-                        callback_error = Some(error);
-                        callback_cancelled.store(true, Ordering::SeqCst);
-                    }
-                }
-            }
+            let receive_result = receive_pcm_until_complete(
+                receiver,
+                &callback_cancelled,
+                SYNTHESIS_POLL_INTERVAL,
+                SIRI_SYNTHESIS_STALL_TIMEOUT,
+                on_event,
+            );
             let native = native
                 .join()
                 .map_err(|_| "Siri synthesis thread panicked".to_string())?;
-            if let Some(error) = callback_error {
-                Err(error)
-            } else {
-                native
-            }
+            receive_result.and(native)
         });
         result?;
         Ok(if active.load(Ordering::SeqCst) {
@@ -159,6 +168,38 @@ impl TtsBackend for SiriTts {
         } else {
             TtsOutcome::Cancelled
         })
+    }
+}
+
+fn receive_pcm_until_complete(
+    receiver: mpsc::Receiver<Vec<f32>>,
+    callback_cancelled: &AtomicBool,
+    poll_interval: Duration,
+    stall_timeout: Duration,
+    on_event: &mut dyn FnMut(TtsSynthesisEvent<'_>) -> Result<(), String>,
+) -> Result<(), String> {
+    let mut last_progress_at = std::time::Instant::now();
+    loop {
+        match receiver.recv_timeout(poll_interval) {
+            Ok(frames) => {
+                last_progress_at = std::time::Instant::now();
+                if let Err(error) = on_event(TtsSynthesisEvent::Frames(&frames)) {
+                    callback_cancelled.store(true, Ordering::SeqCst);
+                    return Err(error);
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                if let Err(error) = on_event(TtsSynthesisEvent::Poll) {
+                    callback_cancelled.store(true, Ordering::SeqCst);
+                    return Err(error);
+                }
+                if last_progress_at.elapsed() >= stall_timeout {
+                    callback_cancelled.store(true, Ordering::SeqCst);
+                    return Err("Siri synthesis stopped making progress".into());
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(()),
+        }
     }
 }
 
@@ -176,10 +217,55 @@ fn take_error(error: *mut c_char, fallback: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::SiriTts;
-    use crate::{TtsBackend, TtsOutcome};
+    use super::{receive_pcm_until_complete, SiriTts};
+    use crate::{TtsBackend, TtsOutcome, TtsSynthesisEvent};
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn pcm_receive_loop_resets_progress_deadline_and_cancels_a_stall() {
+        let callback_cancelled = AtomicBool::new(false);
+        let (sender, receiver) = mpsc::channel();
+        let producer = std::thread::spawn(move || {
+            for sample in [0.1, 0.2] {
+                std::thread::sleep(Duration::from_millis(5));
+                sender.send(vec![sample]).unwrap();
+            }
+        });
+        let mut samples = Vec::new();
+        let mut idle_polls = 0;
+        receive_pcm_until_complete(
+            receiver,
+            &callback_cancelled,
+            Duration::from_millis(2),
+            Duration::from_secs(1),
+            &mut |event| {
+                match event {
+                    TtsSynthesisEvent::Frames(frames) => samples.extend_from_slice(frames),
+                    TtsSynthesisEvent::Poll => idle_polls += 1,
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+        producer.join().unwrap();
+        assert_eq!(samples, [0.1, 0.2]);
+        assert!(idle_polls > 0);
+        assert!(!callback_cancelled.load(Ordering::SeqCst));
+
+        let (_sender, receiver) = mpsc::channel();
+        let error = receive_pcm_until_complete(
+            receiver,
+            &callback_cancelled,
+            Duration::from_millis(1),
+            Duration::from_millis(5),
+            &mut |_| Ok(()),
+        )
+        .unwrap_err();
+        assert_eq!(error, "Siri synthesis stopped making progress");
+        assert!(callback_cancelled.load(Ordering::SeqCst));
+    }
 
     #[test]
     fn exact_uninstalled_voice_is_rejected_without_synthesis() {
