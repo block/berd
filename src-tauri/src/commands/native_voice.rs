@@ -782,6 +782,12 @@ struct AudioBatch {
     mute_epoch: u64,
 }
 
+type OpenAiSttPipelineStart = (
+    SttPipeline,
+    tokio_mpsc::Receiver<SttMessage>,
+    mpsc::Receiver<Result<(), String>>,
+);
+
 impl SttPipeline {
     fn new_parakeet(
         model_dir: PathBuf,
@@ -841,10 +847,12 @@ impl SttPipeline {
         assistant_speaking: Arc<AtomicBool>,
         assistant_vad_threshold: Arc<AtomicU32>,
         speech_vad_threshold: f32,
-    ) -> Result<(Self, tokio_mpsc::Receiver<SttMessage>, mpsc::Receiver<()>), String> {
+    ) -> Result<OpenAiSttPipelineStart, String> {
         let (audio_tx, audio_rx) = mpsc::sync_channel(AUDIO_QUEUE_DEPTH);
         let (event_tx, event_rx) = tokio_mpsc::channel(64);
         let (startup_tx, startup_rx) = mpsc::sync_channel(0);
+        let endpoint = super::openai_audio::realtime_endpoint()?;
+        let model = super::openai_audio::transcription_model();
         let shutdown = Arc::new(AtomicBool::new(false));
         let discard_on_shutdown = Arc::new(AtomicBool::new(false));
         let shutdown_mute_epoch = Arc::new(AtomicU64::new(0));
@@ -858,6 +866,8 @@ impl SttPipeline {
             .spawn(move || {
                 openai_stt_worker(
                     api_key,
+                    endpoint,
+                    model,
                     audio_rx,
                     event_tx,
                     worker_shutdown,
@@ -1365,7 +1375,11 @@ pub async fn start_native_voice_conversation(
                     })
                     .await;
                     match startup_result {
-                        Ok(Ok(())) => Ok((pipeline, events)),
+                        Ok(Ok(Ok(()))) => Ok((pipeline, events)),
+                        Ok(Ok(Err(error))) => {
+                            drop(pipeline);
+                            Err(error)
+                        }
                         Ok(Err(error)) => {
                             drop(pipeline);
                             Err(format!("OpenAI transcription did not start: {error}"))
@@ -2615,6 +2629,47 @@ where
     })
 }
 
+async fn wait_for_openai_transcription_ready<S, E>(socket: &mut S) -> Result<(), String>
+where
+    S: futures_util::Stream<Item = Result<tokio_tungstenite::tungstenite::Message, E>> + Unpin,
+    E: std::fmt::Display,
+{
+    use futures_util::StreamExt;
+    use tokio_tungstenite::tungstenite::Message;
+
+    loop {
+        match socket.next().await {
+            Some(Ok(Message::Text(text))) => {
+                let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+                    continue;
+                };
+                match value.get("type").and_then(|value| value.as_str()) {
+                    Some("session.updated") => return Ok(()),
+                    Some("error") => {
+                        return Err(value
+                            .pointer("/error/message")
+                            .and_then(|value| value.as_str())
+                            .unwrap_or("OpenAI rejected the transcription session configuration.")
+                            .to_string());
+                    }
+                    _ => {}
+                }
+            }
+            Some(Ok(Message::Close(_))) | None => {
+                return Err(
+                    "OpenAI realtime transcription disconnected before it was ready.".to_string(),
+                );
+            }
+            Some(Ok(_)) => {}
+            Some(Err(error)) => {
+                return Err(format!(
+                    "OpenAI realtime transcription failed before it was ready: {error}"
+                ));
+            }
+        }
+    }
+}
+
 fn push_openai_pre_roll(pre_roll: &mut VecDeque<Vec<u8>>, pcm: Vec<u8>) {
     pre_roll.push_back(pcm);
     while pre_roll.len() > OPENAI_PRE_ROLL_CHUNKS {
@@ -2722,6 +2777,8 @@ fn deliver_completed_openai_turns(
 #[allow(clippy::too_many_arguments)] // Worker boundary keeps channel and mute lifecycle inputs explicit.
 fn openai_stt_worker(
     key: String,
+    endpoint: String,
+    model: String,
     audio_rx: Receiver<AudioBatch>,
     event_tx: tokio_mpsc::Sender<SttMessage>,
     shutdown: Arc<AtomicBool>,
@@ -2732,12 +2789,21 @@ fn openai_stt_worker(
     assistant_speaking: Arc<AtomicBool>,
     assistant_vad_threshold: Arc<AtomicU32>,
     speech_vad_threshold: f32,
-    startup_tx: SyncSender<()>,
+    startup_tx: SyncSender<Result<(), String>>,
 ) {
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
     use futures_util::{SinkExt, StreamExt};
     use rubato::{Fft, FixedSync, Resampler};
     use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
+
+    macro_rules! fail_openai_startup {
+        ($error:expr) => {{
+            let error = $error;
+            let _ = startup_tx.send(Err(error.clone()));
+            let _ = event_tx.blocking_send(SttMessage::Failed(error));
+            return;
+        }};
+    }
 
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -2745,18 +2811,9 @@ fn openai_stt_worker(
     {
         Ok(runtime) => runtime,
         Err(error) => {
-            let _ = event_tx.blocking_send(SttMessage::Failed(format!(
+            fail_openai_startup!(format!(
                 "Could not initialize OpenAI realtime transcription: {error}"
-            )));
-            return;
-        }
-    };
-    let model = super::openai_audio::transcription_model();
-    let endpoint = match super::openai_audio::realtime_endpoint() {
-        Ok(endpoint) => endpoint,
-        Err(error) => {
-            let _ = event_tx.blocking_send(SttMessage::Failed(error));
-            return;
+            ));
         }
     };
     if let Err(existing) = rustls::crypto::aws_lc_rs::default_provider().install_default() {
@@ -2766,19 +2823,13 @@ fn openai_stt_worker(
     let mut request = match endpoint.into_client_request() {
         Ok(request) => request,
         Err(error) => {
-            let _ = event_tx.blocking_send(SttMessage::Failed(format!(
-                "prepare OpenAI realtime connection: {error}"
-            )));
-            return;
+            fail_openai_startup!(format!("prepare OpenAI realtime connection: {error}"));
         }
     };
     let authorization = match format!("Bearer {key}").parse() {
         Ok(authorization) => authorization,
         Err(_) => {
-            let _ = event_tx.blocking_send(SttMessage::Failed(
-                "OpenAI API key is not a valid header value".to_string(),
-            ));
-            return;
+            fail_openai_startup!("OpenAI API key is not a valid header value".to_string());
         }
     };
     request.headers_mut().insert("Authorization", authorization);
@@ -2792,8 +2843,7 @@ fn openai_stt_worker(
         Ok(Some((socket, _))) => socket,
         Ok(None) => return,
         Err(error) => {
-            let _ = event_tx.blocking_send(SttMessage::Failed(error));
-            return;
+            fail_openai_startup!(error);
         }
     };
 
@@ -2803,8 +2853,7 @@ fn openai_stt_worker(
                 Ok(Some(())) => {}
                 Ok(None) => return,
                 Err(error) => {
-                    let _ = event_tx.blocking_send(SttMessage::Failed(error));
-                    return;
+                    fail_openai_startup!(error);
                 }
             }
         };
@@ -2828,13 +2877,23 @@ fn openai_stt_worker(
     let mut resampler = match Fft::<f32>::new(48_000, 24_000, 960, 2, 1, FixedSync::Input) {
         Ok(resampler) => resampler,
         Err(error) => {
-            let _ = event_tx.blocking_send(SttMessage::Failed(format!(
+            fail_openai_startup!(format!(
                 "Could not initialize OpenAI audio resampling: {error}"
-            )));
-            return;
+            ));
         }
     };
-    if startup_tx.send(()).is_err() {
+    let readiness = block_on_openai_operation(
+        &runtime,
+        &shutdown,
+        wait_for_openai_transcription_ready(&mut socket),
+        "wait for OpenAI realtime transcription readiness",
+    );
+    match readiness {
+        Ok(Some(())) => {}
+        Ok(None) => return,
+        Err(error) => fail_openai_startup!(error),
+    }
+    if startup_tx.send(Ok(())).is_err() {
         return;
     }
     let chunk_in = resampler.input_frames_next();
@@ -4707,6 +4766,189 @@ mod tests {
         deliver_recognition_result(String::new(), &event_tx, Some(delivered_tx));
 
         assert!(delivered_rx.try_recv().is_ok());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn openai_startup_waits_for_session_updated_before_consuming_audio() {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio::net::TcpListener;
+        use tokio::sync::oneshot;
+        use tokio_tungstenite::{accept_async, tungstenite::Message};
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let endpoint = format!(
+            "ws://{}/v1/realtime?intent=transcription",
+            listener.local_addr().unwrap()
+        );
+        let (update_seen_tx, update_seen_rx) = oneshot::channel();
+        let (ack_tx, ack_rx) = oneshot::channel();
+        let (finish_tx, finish_rx) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept");
+            let mut socket = accept_async(stream).await.expect("websocket");
+            let update = socket
+                .next()
+                .await
+                .expect("session update")
+                .expect("session update frame");
+            let Message::Text(update) = update else {
+                panic!("expected text session update");
+            };
+            let value: serde_json::Value = serde_json::from_str(&update).expect("json update");
+            assert_eq!(
+                value.get("type").and_then(|value| value.as_str()),
+                Some("session.update")
+            );
+            update_seen_tx.send(()).expect("report update");
+            ack_rx.await.expect("release acknowledgement");
+            socket
+                .send(Message::Text(
+                    serde_json::json!({"type":"session.updated"})
+                        .to_string()
+                        .into(),
+                ))
+                .await
+                .expect("send acknowledgement");
+            let _ = finish_rx.await;
+        });
+
+        let (audio_tx, audio_rx) = mpsc::sync_channel(1);
+        audio_tx
+            .try_send(AudioBatch {
+                bytes: vec![0; 4],
+                mute_epoch: 0,
+            })
+            .expect("queue initial audio");
+        let (event_tx, _event_rx) = tokio_mpsc::channel(4);
+        let (startup_tx, startup_rx) = mpsc::sync_channel(0);
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let worker_shutdown = Arc::clone(&shutdown);
+        let worker = thread::spawn(move || {
+            openai_stt_worker(
+                "test-key".to_string(),
+                endpoint,
+                "gpt-live-transcribe".to_string(),
+                audio_rx,
+                event_tx,
+                worker_shutdown,
+                Arc::new(AtomicBool::new(false)),
+                Arc::new(AtomicBool::new(false)),
+                Arc::new(AtomicU64::new(0)),
+                Arc::new(AtomicU64::new(0)),
+                Arc::new(AtomicBool::new(false)),
+                Arc::new(AtomicU32::new(VAD_THRESHOLD.to_bits())),
+                VAD_THRESHOLD,
+                startup_tx,
+            );
+        });
+
+        tokio::time::timeout(Duration::from_secs(2), update_seen_rx)
+            .await
+            .expect("session update timeout")
+            .expect("session update signal");
+        assert!(matches!(
+            startup_rx.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        assert!(matches!(
+            audio_tx.try_send(AudioBatch {
+                bytes: vec![0; 4],
+                mute_epoch: 0,
+            }),
+            Err(TrySendError::Full(_))
+        ));
+
+        ack_tx.send(()).expect("release acknowledgement");
+        let startup =
+            tokio::task::spawn_blocking(move || startup_rx.recv_timeout(Duration::from_secs(2)))
+                .await
+                .expect("join startup wait")
+                .expect("startup signal");
+        assert_eq!(startup, Ok(()));
+
+        shutdown.store(true, Ordering::Release);
+        let _ = finish_tx.send(());
+        drop(audio_tx);
+        tokio::task::spawn_blocking(move || worker.join().expect("worker"))
+            .await
+            .expect("join worker task");
+        server.await.expect("server");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn openai_startup_surfaces_error_before_session_updated() {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio::net::TcpListener;
+        use tokio_tungstenite::{accept_async, tungstenite::Message};
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let endpoint = format!(
+            "ws://{}/v1/realtime?intent=transcription",
+            listener.local_addr().unwrap()
+        );
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept");
+            let mut socket = accept_async(stream).await.expect("websocket");
+            let update = socket.next().await.expect("session update").expect("frame");
+            assert!(matches!(update, Message::Text(_)));
+            socket
+                .send(Message::Text(
+                    serde_json::json!({
+                        "type":"error",
+                        "error":{"message":"model rejected"}
+                    })
+                    .to_string()
+                    .into(),
+                ))
+                .await
+                .expect("send error");
+        });
+
+        let (audio_tx, audio_rx) = mpsc::sync_channel(1);
+        audio_tx
+            .try_send(AudioBatch {
+                bytes: vec![0; 4],
+                mute_epoch: 0,
+            })
+            .expect("queue initial audio");
+        let (event_tx, mut event_rx) = tokio_mpsc::channel(4);
+        let (startup_tx, startup_rx) = mpsc::sync_channel(0);
+        let worker = thread::spawn(move || {
+            openai_stt_worker(
+                "test-key".to_string(),
+                endpoint,
+                "bad-model".to_string(),
+                audio_rx,
+                event_tx,
+                Arc::new(AtomicBool::new(false)),
+                Arc::new(AtomicBool::new(false)),
+                Arc::new(AtomicBool::new(false)),
+                Arc::new(AtomicU64::new(0)),
+                Arc::new(AtomicU64::new(0)),
+                Arc::new(AtomicBool::new(false)),
+                Arc::new(AtomicU32::new(VAD_THRESHOLD.to_bits())),
+                VAD_THRESHOLD,
+                startup_tx,
+            );
+        });
+
+        let startup =
+            tokio::task::spawn_blocking(move || startup_rx.recv_timeout(Duration::from_secs(2)))
+                .await
+                .expect("join startup wait")
+                .expect("startup signal")
+                .expect_err("startup must fail");
+        assert!(startup.contains("model rejected"));
+        match event_rx.recv().await.expect("failure event") {
+            SttMessage::Failed(error) => assert!(error.contains("model rejected")),
+            _ => panic!("expected startup failure event"),
+        }
+
+        drop(audio_tx);
+        tokio::task::spawn_blocking(move || worker.join().expect("worker"))
+            .await
+            .expect("join worker task");
+        server.await.expect("server");
     }
 
     #[test]
