@@ -1917,6 +1917,20 @@ impl NativeVoiceState {
         self.stop_active_inner(app, capture, None).await.map(|_| ())
     }
 
+    pub(crate) async fn stop_active_then<T, F>(
+        &self,
+        app: &AppHandle,
+        capture: &VoiceCaptureState,
+        action: F,
+    ) -> Result<T, String>
+    where
+        F: FnOnce() -> Result<T, String>,
+    {
+        let _stop_guard = self.stop_serial.lock().await;
+        self.stop_active_inner_locked(app, capture, None).await?;
+        action()
+    }
+
     pub async fn stop_active_for_lifecycle(
         &self,
         app: &AppHandle,

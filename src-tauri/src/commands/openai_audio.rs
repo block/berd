@@ -380,13 +380,15 @@ pub async fn set_openai_stt_api_key(
     if api_key.is_empty() {
         return Err("OpenAI speech-to-text API key cannot be empty".to_string());
     }
-    native_voice.stop_active(&app, &capture).await?;
-    openai_voice_credentials::store(OpenAiVoiceCredential::SpeechToText, api_key)?;
-    state.credential_revision.fetch_add(1, Ordering::AcqRel);
-    state.configured.store(true, Ordering::Release);
-    app.emit(SETTINGS_CHANGED_EVENT, ())
-        .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))?;
-    Ok(())
+    native_voice
+        .stop_active_then(&app, &capture, || {
+            openai_voice_credentials::store(OpenAiVoiceCredential::SpeechToText, api_key)?;
+            state.credential_revision.fetch_add(1, Ordering::AcqRel);
+            state.configured.store(true, Ordering::Release);
+            app.emit(SETTINGS_CHANGED_EVENT, ())
+                .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))
+        })
+        .await
 }
 
 #[tauri::command]
@@ -396,13 +398,15 @@ pub async fn clear_openai_stt_api_key(
     native_voice: State<'_, NativeVoiceState>,
     capture: State<'_, VoiceCaptureState>,
 ) -> Result<(), String> {
-    native_voice.stop_active(&app, &capture).await?;
-    openai_voice_credentials::clear(OpenAiVoiceCredential::SpeechToText)?;
-    state.credential_revision.fetch_add(1, Ordering::AcqRel);
-    state.configured.store(false, Ordering::Release);
-    app.emit(SETTINGS_CHANGED_EVENT, ())
-        .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))?;
-    Ok(())
+    native_voice
+        .stop_active_then(&app, &capture, || {
+            openai_voice_credentials::clear(OpenAiVoiceCredential::SpeechToText)?;
+            state.credential_revision.fetch_add(1, Ordering::AcqRel);
+            state.configured.store(false, Ordering::Release);
+            app.emit(SETTINGS_CHANGED_EVENT, ())
+                .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))
+        })
+        .await
 }
 
 #[tauri::command]
