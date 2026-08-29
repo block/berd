@@ -701,16 +701,20 @@ export function useVoiceConversationController({
     };
   }
   const routeOwner = routeOwnerRef.current.owner;
+  const deliveryBlocked =
+    routeBlocked && enabled && isGooseSession && !readOnly && !routeUnavailable;
   const startEligibilityRef = useRef<{
     routeOwner: symbol;
     sessionId: string;
     inputBackend: VoiceInputBackend | null;
     eligible: boolean;
+    deliveryBlocked: boolean;
   }>({
     routeOwner,
     sessionId,
     inputBackend,
     eligible: false,
+    deliveryBlocked: false,
   });
   startEligibilityRef.current = {
     routeOwner,
@@ -722,11 +726,10 @@ export function useVoiceConversationController({
       isGooseSession &&
       !readOnly &&
       !routeUnavailable,
+    deliveryBlocked,
   };
   const drainPendingTranscriptsRef = useRef(drainPendingTranscripts);
   drainPendingTranscriptsRef.current = drainPendingTranscripts;
-  const deliveryBlocked =
-    routeBlocked && enabled && isGooseSession && !readOnly && !routeUnavailable;
 
   useEffect(() => {
     if (!enabled || !isGooseSession) return;
@@ -899,16 +902,22 @@ export function useVoiceConversationController({
 
   const startCurrentConversation = useCallback(async () => {
     if (inputBackend === null) return;
-    const startIsStillEligible = () => {
+    const readCurrentStartEligibility = () => {
       const current = startEligibilityRef.current;
-      return (
+      const stillEligible =
         current.eligible &&
         current.routeOwner === routeOwner &&
         current.sessionId === sessionId &&
-        current.inputBackend === inputBackend
-      );
+        current.inputBackend === inputBackend;
+      return { current, stillEligible };
     };
-    if (!startIsStillEligible()) return;
+    const startCanStillBegin = () => {
+      const { current, stillEligible } = readCurrentStartEligibility();
+      return stillEligible && !current.deliveryBlocked;
+    };
+    const startedCaptureMayContinue = () =>
+      readCurrentStartEligibility().stillEligible;
+    if (!startCanStillBegin()) return;
     try {
       if ((await getMicrophonePermissionStatus()) === "denied") {
         onPocketSetupRequired();
@@ -919,7 +928,7 @@ export function useVoiceConversationController({
       // of truth and provides the recovery path for unsupported platforms,
       // stale permission state, and other audio startup failures.
     }
-    if (!startIsStillEligible()) return;
+    if (!startCanStillBegin()) return;
     // Do not rely on the mount effect racing ahead of the user's first
     // click. The native recognizer can finalize quickly, so its delivery
     // subscriber must exist before the microphone lifecycle starts.
@@ -930,12 +939,14 @@ export function useVoiceConversationController({
     try {
       const foregroundGeneration =
         await confirmVoiceConversationForegroundSession(sessionId);
-      if (!startIsStillEligible()) return;
+      if (!startCanStillBegin()) return;
+      const { current: currentStartEligibility } =
+        readCurrentStartEligibility();
       route = {
         owner: routeOwner,
         sessionId,
         send: onSend,
-        blocked: deliveryBlocked,
+        blocked: currentStartEligibility.deliveryBlocked,
         canClaim: true,
       };
       mountedSendRoutes.set(routeOwner, route);
@@ -945,7 +956,7 @@ export function useVoiceConversationController({
         inputBackend,
         foregroundGeneration,
       );
-      if (!startIsStillEligible()) {
+      if (!startedCaptureMayContinue()) {
         if (activeSendRoute?.owner === route.owner) {
           releaseVoiceSendRoute(route.owner);
         }
@@ -1057,7 +1068,6 @@ export function useVoiceConversationController({
     }
   }, [
     inputBackend,
-    deliveryBlocked,
     onPocketSetupRequired,
     onSend,
     routeOwner,

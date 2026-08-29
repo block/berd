@@ -1871,6 +1871,72 @@ describe("voice transcript delivery coordination", () => {
     expect(start).not.toHaveBeenCalled();
   });
 
+  it("does not start after admission becomes temporarily blocked", async () => {
+    const stopped = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "stopped" as const,
+      sessionId: null,
+      ownerWindowLabel: null,
+      microphoneMuted: false,
+      revision: 1,
+    };
+    const foregroundRequest = deferred<number>();
+    const start = vi.fn().mockResolvedValue({
+      ...stopped,
+      lifecycle: "starting" as const,
+      sessionId: "session-a",
+      ownerWindowLabel: "main",
+      revision: 2,
+    });
+    voiceApiMocks.confirmForegroundSession.mockReturnValue(
+      foregroundRequest.promise,
+    );
+    useVoiceConversationStore.setState({
+      status: stopped,
+      uiState: "off",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+      refreshStatus: vi.fn().mockResolvedValue(stopped),
+      start,
+    });
+    const options = {
+      sessionId: "session-a",
+      onSend: vi.fn().mockResolvedValue(true),
+      enabled: true,
+      isGooseSession: true,
+      pocketReady: true,
+      onPocketSetupRequired: vi.fn(),
+    };
+    const control = renderHook(
+      ({ routeBlocked }) =>
+        useVoiceConversationController({
+          ...options,
+          routeBlocked,
+          disabled: routeBlocked,
+        }),
+      { initialProps: { routeBlocked: false } },
+    );
+
+    let toggling!: Promise<void>;
+    act(() => {
+      toggling = Promise.resolve(control.result.current.onToggle());
+    });
+    await vi.waitFor(() =>
+      expect(voiceApiMocks.confirmForegroundSession).toHaveBeenCalledOnce(),
+    );
+    act(() => {
+      control.rerender({ routeBlocked: true });
+    });
+    await act(async () => {
+      foregroundRequest.resolve(1);
+      await toggling;
+    });
+
+    expect(start).not.toHaveBeenCalled();
+    expect(nativeAssistantSpeechMocks.start).not.toHaveBeenCalled();
+  });
+
   it("stops a native start when admission becomes unavailable in flight", async () => {
     const stopped = {
       available: true,
