@@ -720,7 +720,7 @@ fn run_openai_voice_stream(
                             post_drain,
                             ..DrainPolicy::default()
                         },
-                        &mut |delivery| {
+                        &mut |delivery, _| {
                             update_openai_assistant_speech(
                                 true,
                                 &mut assistant_speech,
@@ -818,7 +818,9 @@ fn speak_pending(
                     None,
                     None,
                 );
+                Ok(())
             },
+            &mut |_| Ok(()),
         )?;
         if outcome == OutboundOutcome::Interrupted {
             return Ok(outcome);

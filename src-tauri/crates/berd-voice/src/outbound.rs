@@ -193,7 +193,8 @@ impl<'a> OutboundPlayback<'a> {
         backend: &dyn TtsBackend,
         text: &str,
         before_write: &mut dyn FnMut(bool) -> Result<(), String>,
-        on_started: &mut dyn FnMut(),
+        on_started: &mut dyn FnMut() -> Result<(), String>,
+        on_progress: &mut dyn FnMut(&DeliveryProgress) -> Result<(), String>,
     ) -> Result<OutboundOutcome, OutboundFailure> {
         self.ensure_live()?;
         if !self.active.load(Ordering::SeqCst) {
@@ -211,11 +212,13 @@ impl<'a> OutboundPlayback<'a> {
             self.ledger.append_frames(samples.len());
             if self.started {
                 before_write(false)?;
-                self.output.write(samples)
+                self.output.write(samples)?;
+                on_progress(&self.snapshot())
             } else {
                 self.initial.extend_from_slice(samples);
                 if self.initial.len() >= self.initial_buffer_frames.max(1) {
-                    self.flush_initial(before_write, on_started)
+                    self.flush_initial(before_write, on_started)?;
+                    on_progress(&self.snapshot())
                 } else {
                     Ok(())
                 }
@@ -233,6 +236,9 @@ impl<'a> OutboundPlayback<'a> {
             if let Err(message) = self.flush_initial(before_write, on_started) {
                 return Err(self.fail(message));
             }
+            if let Err(message) = on_progress(&self.snapshot()) {
+                return Err(self.fail(message));
+            }
         }
         Ok(OutboundOutcome::Completed)
     }
@@ -240,7 +246,7 @@ impl<'a> OutboundPlayback<'a> {
     pub fn finish(
         &mut self,
         policy: DrainPolicy,
-        on_poll: &mut dyn FnMut(&DeliveryProgress) -> Result<(), String>,
+        on_poll: &mut dyn FnMut(&DeliveryProgress, bool) -> Result<(), String>,
     ) -> Result<OutboundOutcome, OutboundFailure> {
         self.ensure_live()?;
         let started_at = Instant::now();
@@ -263,7 +269,7 @@ impl<'a> OutboundPlayback<'a> {
             self.output
                 .check_health()
                 .map_err(|message| self.fail(message))?;
-            on_poll(&self.snapshot()).map_err(|message| self.fail(message))?;
+            on_poll(&self.snapshot(), false).map_err(|message| self.fail(message))?;
             std::thread::sleep(policy.poll_interval);
         }
         if !self.active.load(Ordering::SeqCst) {
@@ -284,7 +290,7 @@ impl<'a> OutboundPlayback<'a> {
                     .check_health()
                     .map_err(|message| self.fail(message))?;
             }
-            on_poll(&self.snapshot()).map_err(|message| self.fail(message))?;
+            on_poll(&self.snapshot(), forced_complete).map_err(|message| self.fail(message))?;
             std::thread::sleep(policy.poll_interval);
         }
         self.terminal = true;
@@ -302,7 +308,7 @@ impl<'a> OutboundPlayback<'a> {
     fn flush_initial(
         &mut self,
         before_write: &mut dyn FnMut(bool) -> Result<(), String>,
-        on_started: &mut dyn FnMut(),
+        on_started: &mut dyn FnMut() -> Result<(), String>,
     ) -> Result<(), String> {
         if self.initial.is_empty() {
             return Ok(());
@@ -311,7 +317,7 @@ impl<'a> OutboundPlayback<'a> {
         self.output.write(&self.initial)?;
         self.initial.clear();
         self.started = true;
-        on_started();
+        on_started()?;
         Ok(())
     }
 
@@ -443,7 +449,11 @@ mod tests {
                         starting += usize::from(first);
                         Ok(())
                     },
-                    &mut || started += 1,
+                    &mut || {
+                        started += 1;
+                        Ok(())
+                    },
+                    &mut |_| Ok(()),
                 )
                 .unwrap(),
             OutboundOutcome::Completed
@@ -467,7 +477,9 @@ mod tests {
         let mut playback = OutboundPlayback::new(&output, &active, 10, 0).unwrap();
         for text in ["one", "two"] {
             playback
-                .synthesize_segment(&backend, text, &mut |_| Ok(()), &mut || {})
+                .synthesize_segment(&backend, text, &mut |_| Ok(()), &mut || Ok(()), &mut |_| {
+                    Ok(())
+                })
                 .unwrap();
         }
         output.played.store(4, Ordering::SeqCst);
@@ -492,14 +504,26 @@ mod tests {
         let mut playback = OutboundPlayback::new(&output, &active, 10, 0).unwrap();
         assert_eq!(
             playback
-                .synthesize_segment(&backend, "cancel", &mut |_| Ok(()), &mut || {})
+                .synthesize_segment(
+                    &backend,
+                    "cancel",
+                    &mut |_| Ok(()),
+                    &mut || Ok(()),
+                    &mut |_| Ok(()),
+                )
                 .unwrap(),
             OutboundOutcome::Interrupted
         );
         assert!(output.cancelled.load(Ordering::SeqCst));
         assert_eq!(playback.snapshot().segments[0].played_frames, 1);
         assert!(playback
-            .synthesize_segment(&backend, "again", &mut |_| Ok(()), &mut || {})
+            .synthesize_segment(
+                &backend,
+                "again",
+                &mut |_| Ok(()),
+                &mut || Ok(()),
+                &mut |_| Ok(()),
+            )
             .is_err());
     }
 
@@ -516,7 +540,7 @@ mod tests {
                     timeout_outcome: DrainTimeoutOutcome::Fail,
                     post_drain: Duration::ZERO,
                 },
-                &mut |_| Ok(()),
+                &mut |_, _| Ok(()),
             )
             .unwrap_err();
         assert!(failure.message.contains("deadline"));
@@ -527,7 +551,7 @@ mod tests {
         let mut playback = OutboundPlayback::new(&output, &active, 10, 0).unwrap();
         assert_eq!(
             playback
-                .finish(DrainPolicy::default(), &mut |_| Ok(()))
+                .finish(DrainPolicy::default(), &mut |_, _| Ok(()))
                 .unwrap_err()
                 .message,
             "fake output failed"
@@ -545,7 +569,13 @@ mod tests {
         };
         let mut playback = OutboundPlayback::new(&output, &active, 10, 0).unwrap();
         playback
-            .synthesize_segment(&backend, "tail", &mut |_| Ok(()), &mut || {})
+            .synthesize_segment(
+                &backend,
+                "tail",
+                &mut |_| Ok(()),
+                &mut || Ok(()),
+                &mut |_| Ok(()),
+            )
             .unwrap();
         let mut polls = 0;
         assert_eq!(
@@ -556,7 +586,7 @@ mod tests {
                         post_drain: Duration::from_secs(1),
                         ..DrainPolicy::default()
                     },
-                    &mut |_| {
+                    &mut |_, _| {
                         polls += 1;
                         active.store(false, Ordering::SeqCst);
                         Ok(())

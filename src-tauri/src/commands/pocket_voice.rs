@@ -15,7 +15,11 @@ use std::time::{Duration, Instant, SystemTime};
 #[cfg(target_os = "macos")]
 use berd_voice::SAMPLE_RATE;
 #[cfg(target_os = "macos")]
-use berd_voice::{load_pocket_voice_style, load_text_to_speech, PocketTts, VoiceStyle};
+use berd_voice::{
+    load_pocket_voice_style, load_text_to_speech, DeliveryProgress as VoiceDeliveryProgress,
+    DrainPolicy, DrainTimeoutOutcome, OutboundFailure, OutboundOutcome, OutboundPlayback,
+    PocketTtsBackend, TtsBackend,
+};
 use futures_util::StreamExt;
 #[cfg(target_os = "macos")]
 use objc2_core_audio::{
@@ -236,87 +240,6 @@ struct PocketStreamEvent {
     state: PocketStreamEventState,
     error: Option<String>,
     delivery: Option<VoiceDeliveryProgress>,
-}
-
-#[cfg(any(test, target_os = "macos"))]
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct VoiceDeliverySegment {
-    text: String,
-    played_frames: u64,
-    total_frames: u64,
-    synthesis_complete: bool,
-}
-
-#[cfg(any(test, target_os = "macos"))]
-#[derive(Clone, Debug, Serialize)]
-struct VoiceDeliveryProgress {
-    #[serde(rename = "sampleRate")]
-    sample_rate: u32,
-    segments: Vec<VoiceDeliverySegment>,
-}
-
-#[cfg(any(test, target_os = "macos"))]
-#[derive(Debug, Default)]
-struct PlaybackDeliveryLedger {
-    segments: Vec<(String, u64, bool)>,
-}
-
-#[cfg(any(test, target_os = "macos"))]
-impl PlaybackDeliveryLedger {
-    fn begin_segment(&mut self, text: String) {
-        self.segments.push((text, 0, false));
-    }
-
-    fn append_frames(&mut self, frames: usize) {
-        let frames = frames as u64;
-        if frames == 0 {
-            return;
-        }
-        if let Some((_, total, synthesis_complete)) = self.segments.last_mut() {
-            if !*synthesis_complete {
-                *total = total.saturating_add(frames);
-            }
-        }
-    }
-
-    fn complete_segment(&mut self, final_total_frames: u64) {
-        if let Some((_, total, synthesis_complete)) = self.segments.last_mut() {
-            *total = (*total).max(final_total_frames);
-            *synthesis_complete = true;
-        }
-    }
-
-    fn total_frames(&self) -> u64 {
-        self.segments
-            .iter()
-            .map(|(_, total_frames, _)| *total_frames)
-            .sum()
-    }
-
-    fn snapshot_consumed_frames(&self, consumed_frames: u64) -> VoiceDeliveryProgress {
-        let mut segment_start = 0_u64;
-        let segments = self
-            .segments
-            .iter()
-            .map(|(text, total_frames, synthesis_complete)| {
-                let played_frames = consumed_frames
-                    .saturating_sub(segment_start)
-                    .min(*total_frames);
-                segment_start = segment_start.saturating_add(*total_frames);
-                VoiceDeliverySegment {
-                    text: text.clone(),
-                    played_frames,
-                    total_frames: *total_frames,
-                    synthesis_complete: *synthesis_complete,
-                }
-            })
-            .collect();
-        VoiceDeliveryProgress {
-            sample_rate: berd_voice::SAMPLE_RATE,
-            segments,
-        }
-    }
 }
 
 #[cfg(target_os = "macos")]
@@ -2210,25 +2133,19 @@ fn run_pocket_voice_stream(
     suppress_capture: bool,
 ) -> Result<PocketStreamOutcome, PocketStreamFailure> {
     let version = base.join(CACHE_VERSION);
-    let engine = load_text_to_speech(
-        version
-            .to_str()
-            .ok_or_else(|| "Pocket model path is not valid UTF-8".to_string())?,
-    )?;
-    let style = load_pocket_voice_style(&version, voice.id)?;
     let mut applied_rate_bits = playback_rate.load(Ordering::SeqCst);
+    let backend = PocketTtsBackend::new(&version, voice.id, f32::from_bits(applied_rate_bits))?;
     let player = PocketAudioPlayer::new(
         SAMPLE_RATE,
         f32::from_bits(applied_rate_bits),
         output_device,
     )?;
+    let mut playback = OutboundPlayback::new(&player, &active, SAMPLE_RATE, 0)?;
     let mut pending = String::new();
     let mut first_chunk_pending = true;
-    let mut playback_started = false;
     let mut assistant_speech = None::<AssistantSpeechGuard>;
     let mut playback_drained_at = None;
     let output_latency_grace = playback_latency_safety_duration(output_device);
-    let mut delivery_ledger = PlaybackDeliveryLedger::default();
     let mut last_progress_emit = Instant::now();
 
     let result: Result<PocketStreamOutcome, String> = (|| loop {
@@ -2240,15 +2157,12 @@ fn run_pocket_voice_stream(
             output_latency_grace,
             Instant::now(),
         );
-        if !active.load(Ordering::SeqCst) {
-            let delivery = pocket_delivery_snapshot(&delivery_ledger, &player);
-            player.stop();
+        if !playback.poll().map_err(|failure| failure.message)? {
             return Ok(PocketStreamOutcome {
                 state: PocketStreamEventState::Interrupted,
-                delivery: Some(delivery),
+                delivery: Some(playback.snapshot()),
             });
         }
-        player.check_health()?;
         let command = receiver.recv_timeout(Duration::from_millis(20));
         match command {
             Ok(PocketStreamCommand::Append(text)) => {
@@ -2256,31 +2170,24 @@ fn run_pocket_voice_stream(
                 if !synthesize_pocket_stream_ready(
                     app,
                     stream_id,
-                    &engine,
-                    &style,
-                    &active,
+                    &backend,
+                    &mut playback,
                     &player,
                     &playback_rate,
                     &mut applied_rate_bits,
                     &mut pending,
                     &mut first_chunk_pending,
-                    &mut playback_started,
                     &native_voice,
                     interruption_sensitivity,
                     suppress_capture,
                     &mut assistant_speech,
                     &mut playback_drained_at,
-                    &mut delivery_ledger,
                     &mut last_progress_emit,
                     false,
                 )? {
-                    let delivery = capture_before_stop(
-                        || pocket_delivery_snapshot(&delivery_ledger, &player),
-                        || player.stop(),
-                    );
                     return Ok(PocketStreamOutcome {
                         state: PocketStreamEventState::Interrupted,
-                        delivery: Some(delivery),
+                        delivery: Some(playback.snapshot()),
                     });
                 }
             }
@@ -2288,31 +2195,24 @@ fn run_pocket_voice_stream(
                 if !synthesize_pocket_stream_ready(
                     app,
                     stream_id,
-                    &engine,
-                    &style,
-                    &active,
+                    &backend,
+                    &mut playback,
                     &player,
                     &playback_rate,
                     &mut applied_rate_bits,
                     &mut pending,
                     &mut first_chunk_pending,
-                    &mut playback_started,
                     &native_voice,
                     interruption_sensitivity,
                     suppress_capture,
                     &mut assistant_speech,
                     &mut playback_drained_at,
-                    &mut delivery_ledger,
                     &mut last_progress_emit,
                     true,
                 )? {
-                    let delivery = capture_before_stop(
-                        || pocket_delivery_snapshot(&delivery_ledger, &player),
-                        || player.stop(),
-                    );
                     return Ok(PocketStreamOutcome {
                         state: PocketStreamEventState::Interrupted,
-                        delivery: Some(delivery),
+                        delivery: Some(playback.snapshot()),
                     });
                 }
             }
@@ -2320,104 +2220,108 @@ fn run_pocket_voice_stream(
                 if !synthesize_pocket_stream_ready(
                     app,
                     stream_id,
-                    &engine,
-                    &style,
-                    &active,
+                    &backend,
+                    &mut playback,
                     &player,
                     &playback_rate,
                     &mut applied_rate_bits,
                     &mut pending,
                     &mut first_chunk_pending,
-                    &mut playback_started,
                     &native_voice,
                     interruption_sensitivity,
                     suppress_capture,
                     &mut assistant_speech,
                     &mut playback_drained_at,
-                    &mut delivery_ledger,
                     &mut last_progress_emit,
                     true,
                 )? {
-                    let delivery = capture_before_stop(
-                        || pocket_delivery_snapshot(&delivery_ledger, &player),
-                        || player.stop(),
-                    );
                     return Ok(PocketStreamOutcome {
                         state: PocketStreamEventState::Interrupted,
-                        delivery: Some(delivery),
+                        delivery: Some(playback.snapshot()),
                     });
                 }
                 // Playback speed can change while buffers drain. Use the slowest
                 // supported rate so a later slowdown cannot truncate valid audio.
                 let drain_timeout = pocket_native_drain_timeout(
-                    delivery_ledger.total_frames(),
+                    playback
+                        .snapshot()
+                        .segments
+                        .iter()
+                        .map(|segment| segment.total_frames)
+                        .sum(),
                     player.completed_source_frames(),
                     MIN_POCKET_PLAYBACK_SPEED,
                 );
-                let drain_started = Instant::now();
+                let post_drain = pocket_assistant_speech_grace_remaining(
+                    assistant_speech.is_some(),
+                    playback_drained_at,
+                    output_latency_grace,
+                    Instant::now(),
+                );
                 let mut completion_timed_out = false;
-                loop {
-                    if !active.load(Ordering::SeqCst) {
-                        let delivery = pocket_delivery_snapshot(&delivery_ledger, &player);
-                        player.stop();
-                        return Ok(PocketStreamOutcome {
-                            state: PocketStreamEventState::Interrupted,
-                            delivery: Some(delivery),
-                        });
-                    }
-                    sync_pocket_playback_rate_before_timeout(completion_timed_out, || {
-                        sync_pocket_playback_rate(&player, &playback_rate, &mut applied_rate_bits)
-                    })?;
-                    if !completion_timed_out {
-                        player.check_health()?;
-                        match pocket_native_drain_status(
-                            player.is_empty(),
-                            drain_started.elapsed(),
-                            drain_timeout,
-                        ) {
-                            PocketNativeDrainStatus::Waiting => {}
-                            PocketNativeDrainStatus::Drained => {
-                                player.check_health()?;
+                let outcome = playback
+                    .finish(
+                        DrainPolicy {
+                            poll_interval: Duration::from_millis(10),
+                            timeout: Some(drain_timeout),
+                            timeout_outcome: DrainTimeoutOutcome::Complete,
+                            post_drain,
+                        },
+                        &mut |delivery, forced_complete| {
+                            completion_timed_out |= forced_complete;
+                            sync_pocket_playback_rate_before_timeout(completion_timed_out, || {
+                                sync_pocket_playback_rate(
+                                    &player,
+                                    &playback_rate,
+                                    &mut applied_rate_bits,
+                                )
+                            })?;
+                            update_pocket_assistant_speech(
+                                true,
+                                &mut assistant_speech,
+                                &mut playback_drained_at,
+                                output_latency_grace,
+                                Instant::now(),
+                            );
+                            if last_progress_emit.elapsed() >= PLAYBACK_PROGRESS_EMIT_INTERVAL {
+                                emit_pocket_stream_event(
+                                    app,
+                                    stream_id,
+                                    PocketStreamEventState::Progress,
+                                    None,
+                                    Some(delivery.clone()),
+                                );
+                                last_progress_emit = Instant::now();
                             }
-                            PocketNativeDrainStatus::TimedOut => {
-                                log::warn!("Pocket native buffer completion bookkeeping timed out");
-                                player.stop();
-                                reset_pocket_drain_grace(&mut playback_drained_at);
-                                completion_timed_out = true;
-                            }
-                        }
-                    }
-                    let playback_drained = completion_timed_out || player.is_empty();
-                    if playback_drained {
-                        update_pocket_assistant_speech(
-                            playback_drained,
-                            &mut assistant_speech,
-                            &mut playback_drained_at,
-                            output_latency_grace,
-                            Instant::now(),
-                        );
-                        if assistant_speech.is_none() {
-                            break;
-                        }
-                    }
-                    std::thread::sleep(Duration::from_millis(10));
+                            Ok(())
+                        },
+                    )
+                    .map_err(|failure| failure.message)?;
+                if completion_timed_out {
+                    log::warn!("Pocket native buffer completion bookkeeping timed out");
                 }
+                if outcome == OutboundOutcome::Interrupted {
+                    return Ok(PocketStreamOutcome {
+                        state: PocketStreamEventState::Interrupted,
+                        delivery: Some(playback.snapshot()),
+                    });
+                }
+                assistant_speech.take();
                 return Ok(PocketStreamOutcome {
                     state: PocketStreamEventState::Completed,
                     delivery: None,
                 });
             }
             Ok(PocketStreamCommand::Stop) | Err(mpsc::RecvTimeoutError::Disconnected) => {
-                let delivery = pocket_delivery_snapshot(&delivery_ledger, &player);
                 active.store(false, Ordering::SeqCst);
-                player.stop();
+                playback.interrupt();
                 return Ok(PocketStreamOutcome {
                     state: PocketStreamEventState::Interrupted,
-                    delivery: Some(delivery),
+                    delivery: Some(playback.snapshot()),
                 });
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                if playback_started
+                if playback.started()
                     && last_progress_emit.elapsed() >= PLAYBACK_PROGRESS_EMIT_INTERVAL
                 {
                     emit_pocket_stream_event(
@@ -2425,7 +2329,7 @@ fn run_pocket_voice_stream(
                         stream_id,
                         PocketStreamEventState::Progress,
                         None,
-                        Some(pocket_delivery_snapshot(&delivery_ledger, &player)),
+                        Some(playback.snapshot()),
                     );
                     last_progress_emit = Instant::now();
                 }
@@ -2435,30 +2339,10 @@ fn run_pocket_voice_stream(
 
     assistant_speech.take();
     result.map_err(|error| {
-        let delivery = delivery_with_played_audio(capture_before_stop(
-            || pocket_delivery_snapshot(&delivery_ledger, &player),
-            || player.stop(),
-        ));
+        let delivery = delivery_with_played_audio(playback.snapshot());
+        playback.interrupt();
         PocketStreamFailure { error, delivery }
     })
-}
-
-#[cfg(target_os = "macos")]
-fn pocket_delivery_snapshot(
-    ledger: &PlaybackDeliveryLedger,
-    player: &PocketAudioPlayer,
-) -> VoiceDeliveryProgress {
-    ledger.snapshot_consumed_frames(player.played_frames())
-}
-
-#[cfg(any(test, target_os = "macos"))]
-fn capture_before_stop(
-    snapshot: impl FnOnce() -> VoiceDeliveryProgress,
-    stop: impl FnOnce(),
-) -> VoiceDeliveryProgress {
-    let delivery = snapshot();
-    stop();
-    delivery
 }
 
 #[cfg(target_os = "macos")]
@@ -2494,6 +2378,21 @@ fn pocket_assistant_speech_grace_elapsed(
     }
     let drained_at = *playback_drained_at.get_or_insert(now);
     now.saturating_duration_since(drained_at) >= output_latency_grace
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn pocket_assistant_speech_grace_remaining(
+    guard_active: bool,
+    playback_drained_at: Option<Instant>,
+    output_latency_grace: Duration,
+    now: Instant,
+) -> Duration {
+    if !guard_active {
+        return Duration::ZERO;
+    }
+    playback_drained_at.map_or(output_latency_grace, |drained_at| {
+        output_latency_grace.saturating_sub(now.saturating_duration_since(drained_at))
+    })
 }
 
 #[cfg(any(test, target_os = "macos"))]
@@ -2565,28 +2464,12 @@ fn sync_pocket_playback_rate(
 
 #[cfg(target_os = "macos")]
 #[allow(clippy::too_many_arguments)]
-fn mark_pocket_playback_started(
-    app: &AppHandle,
-    stream_id: &str,
-    native_voice: &NativeVoiceState,
-    interruption_sensitivity: InterruptionSensitivity,
-    suppress_capture: bool,
-    playback_started: &mut bool,
-    assistant_speech: &mut Option<AssistantSpeechGuard>,
-) -> Result<(), String> {
-    if assistant_speech.is_none() {
-        *assistant_speech =
-            Some(native_voice.begin_assistant_speech(interruption_sensitivity, suppress_capture));
-    }
-    if !*playback_started {
-        *playback_started = true;
-        emit_pocket_stream_event(app, stream_id, PocketStreamEventState::Started, None, None);
-        println!("VOICE_CONVERSATION_PLAYBACK_STARTED");
-        std::io::stdout()
-            .flush()
-            .map_err(|error| format!("signal Pocket playback start: {error}"))?;
-    }
-    Ok(())
+fn mark_pocket_playback_started(app: &AppHandle, stream_id: &str) -> Result<(), String> {
+    emit_pocket_stream_event(app, stream_id, PocketStreamEventState::Started, None, None);
+    println!("VOICE_CONVERSATION_PLAYBACK_STARTED");
+    std::io::stdout()
+        .flush()
+        .map_err(|error| format!("signal Pocket playback start: {error}"))
 }
 
 #[cfg(target_os = "macos")]
@@ -2594,91 +2477,60 @@ fn mark_pocket_playback_started(
 fn synthesize_pocket_stream_ready(
     app: &AppHandle,
     stream_id: &str,
-    engine: &PocketTts,
-    style: &VoiceStyle,
-    active: &Arc<AtomicBool>,
+    backend: &dyn TtsBackend,
+    playback: &mut OutboundPlayback<'_>,
     player: &PocketAudioPlayer,
     playback_rate: &AtomicU32,
     applied_rate_bits: &mut u32,
     pending: &mut String,
     first_chunk_pending: &mut bool,
-    playback_started: &mut bool,
     native_voice: &NativeVoiceState,
     interruption_sensitivity: InterruptionSensitivity,
     suppress_capture: bool,
     assistant_speech: &mut Option<AssistantSpeechGuard>,
     playback_drained_at: &mut Option<Instant>,
-    delivery_ledger: &mut PlaybackDeliveryLedger,
     last_progress_emit: &mut Instant,
     flush: bool,
 ) -> Result<bool, String> {
-    let split = engine.take_streaming_text_chunks(pending, *first_chunk_pending, flush)?;
+    let split = berd_voice::take_streaming_text_chunks(pending, *first_chunk_pending, flush)?;
     *pending = split.pending;
     *first_chunk_pending = split.first_chunk_pending;
     for text in split.ready {
-        if !active.load(Ordering::SeqCst) {
-            return Ok(false);
-        }
         let text = text.trim().to_string();
-        delivery_ledger.begin_segment(text.clone());
-        let mut segment_frames = 0_u64;
-        let mut callback_error = None;
-        let completed =
-            engine.synth_chunk_streaming(&text, style, STREAMING_EMIT_FRAMES, &mut |samples| {
-                if !active.load(Ordering::SeqCst) {
-                    return false;
-                }
-                if samples.is_empty() {
-                    return true;
-                }
-                if let Err(error) =
-                    sync_pocket_playback_rate(player, playback_rate, applied_rate_bits)
-                {
-                    callback_error = Some(error);
-                    return false;
-                }
-                if let Err(error) = player.check_health() {
-                    callback_error = Some(error);
-                    return false;
-                }
-                if let Err(error) = mark_pocket_playback_started(
-                    app,
-                    stream_id,
-                    native_voice,
-                    interruption_sensitivity,
-                    suppress_capture,
-                    playback_started,
-                    assistant_speech,
-                ) {
-                    callback_error = Some(error);
-                    return false;
-                }
-                if let Err(error) = player.enqueue(&samples) {
-                    callback_error = Some(error);
-                    return false;
-                }
-                reset_pocket_drain_grace(playback_drained_at);
-                segment_frames = segment_frames.saturating_add(samples.len() as u64);
-                delivery_ledger.append_frames(samples.len());
-                if last_progress_emit.elapsed() >= PLAYBACK_PROGRESS_EMIT_INTERVAL {
-                    emit_pocket_stream_event(
-                        app,
-                        stream_id,
-                        PocketStreamEventState::Progress,
-                        None,
-                        Some(pocket_delivery_snapshot(delivery_ledger, player)),
-                    );
-                    *last_progress_emit = Instant::now();
-                }
-                true
-            })?;
-        if let Some(error) = callback_error {
-            return Err(error);
-        }
-        if !completed {
+        let outcome = playback
+            .synthesize_segment(
+                backend,
+                &text,
+                &mut |_| {
+                    sync_pocket_playback_rate(player, playback_rate, applied_rate_bits)?;
+                    if assistant_speech.is_none() {
+                        *assistant_speech = Some(
+                            native_voice
+                                .begin_assistant_speech(interruption_sensitivity, suppress_capture),
+                        );
+                    }
+                    reset_pocket_drain_grace(playback_drained_at);
+                    Ok(())
+                },
+                &mut || mark_pocket_playback_started(app, stream_id),
+                &mut |delivery| {
+                    if last_progress_emit.elapsed() >= PLAYBACK_PROGRESS_EMIT_INTERVAL {
+                        emit_pocket_stream_event(
+                            app,
+                            stream_id,
+                            PocketStreamEventState::Progress,
+                            None,
+                            Some(delivery.clone()),
+                        );
+                        *last_progress_emit = Instant::now();
+                    }
+                    Ok(())
+                },
+            )
+            .map_err(|failure: OutboundFailure| failure.message)?;
+        if outcome == OutboundOutcome::Interrupted {
             return Ok(false);
         }
-        delivery_ledger.complete_segment(segment_frames);
     }
     Ok(true)
 }
@@ -2815,6 +2667,7 @@ fn synthesize_and_stream(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use berd_voice::DeliverySegment as VoiceDeliverySegment;
 
     #[test]
     fn active_playback_observes_live_speed_changes() {
@@ -2838,68 +2691,6 @@ mod tests {
             f32::from_bits(session.playback_rate.load(Ordering::SeqCst)),
             1.75
         );
-    }
-
-    #[test]
-    fn playback_ledger_maps_consumed_frames_to_text_segments_conservatively() {
-        let mut ledger = PlaybackDeliveryLedger::default();
-        ledger.begin_segment("First sentence.".to_string());
-        ledger.append_frames(4_800);
-        assert!(!ledger.snapshot_consumed_frames(0).segments[0].synthesis_complete);
-        ledger.complete_segment(4_800);
-        ledger.begin_segment("Second sentence.".to_string());
-        ledger.append_frames(4_800);
-        ledger.complete_segment(4_800);
-
-        let progress = ledger.snapshot_consumed_frames(3_600);
-        assert_eq!(progress.segments[0].played_frames, 3_600);
-        assert_eq!(progress.segments[0].total_frames, 4_800);
-        assert!(progress.segments[0].synthesis_complete);
-        assert_eq!(progress.segments[1].played_frames, 0);
-        assert_eq!(progress.segments[1].total_frames, 4_800);
-        assert!(progress.segments[1].synthesis_complete);
-    }
-
-    #[test]
-    fn playback_ledger_maps_native_consumed_frames_across_segments() {
-        let mut ledger = PlaybackDeliveryLedger::default();
-        ledger.begin_segment("First sentence.".to_string());
-        ledger.append_frames(4_800);
-        ledger.complete_segment(4_800);
-        ledger.begin_segment("Second sentence.".to_string());
-        ledger.append_frames(4_800);
-        ledger.complete_segment(4_800);
-
-        let progress = ledger.snapshot_consumed_frames(7_200);
-        assert_eq!(progress.segments[0].played_frames, 4_800);
-        assert_eq!(progress.segments[1].played_frames, 2_400);
-    }
-
-    #[test]
-    fn interruption_and_failure_capture_delivery_before_stopping_playback() {
-        use std::cell::RefCell;
-
-        let mut ledger = PlaybackDeliveryLedger::default();
-        ledger.begin_segment("Played piece.".to_string());
-        ledger.append_frames(4_800);
-        ledger.complete_segment(4_800);
-        ledger.begin_segment("Queued audio.".to_string());
-        ledger.append_frames(4_800);
-        ledger.append_frames(4_800);
-        ledger.complete_segment(9_600);
-        let calls = RefCell::new(Vec::new());
-
-        let delivery = capture_before_stop(
-            || {
-                calls.borrow_mut().push("snapshot");
-                ledger.snapshot_consumed_frames(3_600)
-            },
-            || calls.borrow_mut().push("stop"),
-        );
-
-        assert_eq!(&*calls.borrow(), &["snapshot", "stop"]);
-        assert_eq!(delivery.segments[0].played_frames, 3_600);
-        assert_eq!(delivery.segments[1].played_frames, 0);
     }
 
     #[test]
@@ -3437,38 +3228,37 @@ mod tests {
         assert_eq!(sync_count, 1);
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
-    fn native_drain_timeout_releases_guard_after_route_grace() {
-        let native_voice = NativeVoiceState::default();
-        let mut assistant_speech =
-            Some(native_voice.begin_assistant_speech(InterruptionSensitivity::More, false));
-        let mut drained_at = Some(Instant::now());
+    fn native_drain_timeout_preserves_remaining_route_grace() {
         let timed_out_at = Instant::now();
         let route_grace = Duration::from_millis(500);
 
-        reset_pocket_drain_grace(&mut drained_at);
-        update_pocket_assistant_speech(
-            true,
-            &mut assistant_speech,
-            &mut drained_at,
-            route_grace,
-            timed_out_at,
+        assert_eq!(
+            pocket_assistant_speech_grace_remaining(true, None, route_grace, timed_out_at,),
+            route_grace
         );
-        assert!(assistant_speech.is_some());
-
-        update_pocket_assistant_speech(
-            true,
-            &mut assistant_speech,
-            &mut drained_at,
-            route_grace,
-            timed_out_at + route_grace,
+        assert_eq!(
+            pocket_assistant_speech_grace_remaining(
+                true,
+                Some(timed_out_at - Duration::from_millis(200)),
+                route_grace,
+                timed_out_at,
+            ),
+            Duration::from_millis(300)
         );
-        assert!(assistant_speech.is_none());
-
-        assistant_speech =
-            Some(native_voice.begin_assistant_speech(InterruptionSensitivity::More, false));
-        assert!(assistant_speech.is_some());
+        assert_eq!(
+            pocket_assistant_speech_grace_remaining(
+                true,
+                Some(timed_out_at - route_grace),
+                route_grace,
+                timed_out_at,
+            ),
+            Duration::ZERO
+        );
+        assert_eq!(
+            pocket_assistant_speech_grace_remaining(false, None, route_grace, timed_out_at,),
+            Duration::ZERO
+        );
     }
 
     #[test]

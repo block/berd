@@ -1213,16 +1213,23 @@ fn synthesize_to_output(
         .map_err(|_| "TTS sample rate is too large".to_string())?;
     let mut playback = OutboundPlayback::new(output, active, spec.sample_rate, initial_frames)?;
     if playback
-        .synthesize_segment(backend, text, &mut |_| Ok(()), &mut || {
-            let _ = sender.send(PlaybackEvent::Started(speech_id));
-        })
+        .synthesize_segment(
+            backend,
+            text,
+            &mut |_| Ok(()),
+            &mut || {
+                let _ = sender.send(PlaybackEvent::Started(speech_id));
+                Ok(())
+            },
+            &mut |_| Ok(()),
+        )
         .map_err(|failure| failure.message)?
         == OutboundOutcome::Interrupted
     {
         return Ok(false);
     }
     playback
-        .finish(DrainPolicy::default(), &mut |_| Ok(()))
+        .finish(DrainPolicy::default(), &mut |_, _| Ok(()))
         .map(|outcome| outcome == OutboundOutcome::Completed)
         .map_err(|failure| failure.message)
 }
