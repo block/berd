@@ -2245,14 +2245,14 @@ describe("voice transcript delivery coordination", () => {
           finishStop = resolve;
         }),
     );
-    const start = vi.fn().mockResolvedValue(true);
+    const start = vi.fn().mockResolvedValue("completed" as const);
 
     const replacement = replaceActiveVoiceConversation({ stop, start });
     await Promise.resolve();
     expect(start).not.toHaveBeenCalled();
 
     finishStop?.({ lifecycle: "stopped", sessionId: null });
-    await expect(replacement).resolves.toBe(true);
+    await expect(replacement).resolves.toBe("completed");
     expect(start).toHaveBeenCalledOnce();
   });
 
@@ -2267,17 +2267,17 @@ describe("voice transcript delivery coordination", () => {
     });
     const start = vi.fn(async () => {
       order.push("start");
-      return true;
+      return "completed" as const;
     });
 
     await expect(
       replaceActiveVoiceConversation({ stop, confirmTarget, start }),
-    ).resolves.toBe(true);
+    ).resolves.toBe("completed");
     expect(order).toEqual(["stop", "confirm", "start"]);
   });
 
   it("does not start when the target changes after stopping", async () => {
-    const start = vi.fn().mockResolvedValue(true);
+    const start = vi.fn().mockResolvedValue("completed" as const);
 
     await expect(
       replaceActiveVoiceConversation({
@@ -2297,7 +2297,7 @@ describe("voice transcript delivery coordination", () => {
   });
 
   it("does not start a replacement when the active call remains running", async () => {
-    const start = vi.fn().mockResolvedValue(true);
+    const start = vi.fn().mockResolvedValue("completed" as const);
 
     await expect(
       replaceActiveVoiceConversation({
@@ -2307,12 +2307,12 @@ describe("voice transcript delivery coordination", () => {
         }),
         start,
       }),
-    ).resolves.toBe(false);
+    ).resolves.toBe("not-completed");
     expect(start).not.toHaveBeenCalled();
   });
 
   it("does not start a replacement when stopping the active call fails", async () => {
-    const start = vi.fn().mockResolvedValue(true);
+    const start = vi.fn().mockResolvedValue("completed" as const);
 
     await expect(
       replaceActiveVoiceConversation({
@@ -2330,9 +2330,21 @@ describe("voice transcript delivery coordination", () => {
           lifecycle: "stopped",
           sessionId: null,
         }),
-        start: vi.fn().mockResolvedValue(false),
+        start: vi.fn().mockResolvedValue("not-completed"),
       }),
-    ).resolves.toBe(false);
+    ).resolves.toBe("not-completed");
+  });
+
+  it("preserves replacement failures that were already reported", async () => {
+    await expect(
+      replaceActiveVoiceConversation({
+        stop: vi.fn().mockResolvedValue({
+          lifecycle: "stopped",
+          sessionId: null,
+        }),
+        start: vi.fn().mockResolvedValue("failure-reported"),
+      }),
+    ).resolves.toBe("failure-reported");
   });
 
   it("drains retained transcripts without stealing a stopped session route", () => {

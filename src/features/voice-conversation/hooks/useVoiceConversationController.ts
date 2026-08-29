@@ -124,17 +124,22 @@ export function shouldShowVoiceConversationControl(options: {
     : options.voiceEnabled && options.isGooseSession;
 }
 
+export type VoiceConversationTransitionOutcome =
+  | "completed"
+  | "not-completed"
+  | "failure-reported";
+
 export async function replaceActiveVoiceConversation(options: {
   stop: () => Promise<{ lifecycle: string; sessionId: string | null }>;
   confirmTarget?: () => Promise<unknown>;
-  start: () => Promise<boolean>;
-}): Promise<boolean> {
+  start: () => Promise<VoiceConversationTransitionOutcome>;
+}): Promise<VoiceConversationTransitionOutcome> {
   const stopped = await options.stop();
   if (
     stopped.sessionId !== null ||
     (stopped.lifecycle !== "stopped" && stopped.lifecycle !== "unavailable")
   ) {
-    return false;
+    return "not-completed";
   }
   await options.confirmTarget?.();
   return options.start();
@@ -900,7 +905,7 @@ export function useVoiceConversationController({
   );
 
   const startCurrentConversation = useCallback(async () => {
-    if (inputBackend === null) return false;
+    if (inputBackend === null) return "not-completed";
     const readCurrentStartEligibility = () => {
       const current = startEligibilityRef.current;
       const stillEligible =
@@ -916,18 +921,18 @@ export function useVoiceConversationController({
     };
     const startedCaptureMayContinue = () =>
       readCurrentStartEligibility().stillEligible;
-    if (!startCanStillBegin()) return false;
+    if (!startCanStillBegin()) return "not-completed";
     try {
       if ((await getMicrophonePermissionStatus()) === "denied") {
         onPocketSetupRequired();
-        return false;
+        return "failure-reported";
       }
     } catch {
       // Permission inspection is an optimization. Capture remains the source
       // of truth and provides the recovery path for unsupported platforms,
       // stale permission state, and other audio startup failures.
     }
-    if (!startCanStillBegin()) return false;
+    if (!startCanStillBegin()) return "not-completed";
     // Do not rely on the mount effect racing ahead of the user's first
     // click. The native recognizer can finalize quickly, so its delivery
     // subscriber must exist before the microphone lifecycle starts.
@@ -938,7 +943,7 @@ export function useVoiceConversationController({
     try {
       const foregroundGeneration =
         await confirmVoiceConversationForegroundSession(sessionId);
-      if (!startCanStillBegin()) return false;
+      if (!startCanStillBegin()) return "not-completed";
       const { current: currentStartEligibility } =
         readCurrentStartEligibility();
       route = {
@@ -979,10 +984,10 @@ export function useVoiceConversationController({
             }
           }
         }
-        return false;
+        return "not-completed";
       }
       startAssistantSpeech(assistantSpeechHistory);
-      return true;
+      return "completed";
     } catch (startError) {
       const backendStatus = useVoiceConversationStore.getState().status;
       const currentWindowLabel = getCurrentWindow().label;
@@ -1019,7 +1024,7 @@ export function useVoiceConversationController({
           addErrorNotification(sessionId, errorText(cleanupError));
         }
         onPocketSetupRequired();
-        return false;
+        return "failure-reported";
       }
       let conversationStarted = false;
       if (exactOwnerLifecycleSurvived) {
@@ -1065,7 +1070,7 @@ export function useVoiceConversationController({
         }
         addErrorNotification(sessionId, errorText(startError));
       }
-      return conversationStarted;
+      return conversationStarted ? "completed" : "failure-reported";
     }
   }, [
     inputBackend,
@@ -1236,7 +1241,7 @@ export function useVoiceConversationController({
                 confirmVoiceConversationForegroundSession(sessionId),
               start: startCurrentConversation,
             });
-            if (!replaced) {
+            if (replaced === "not-completed") {
               addErrorNotification(
                 sessionId,
                 t("toolbar.voiceConversation.buddy.errors.stop"),
