@@ -43,6 +43,7 @@ const MASTER_HANDOFF_LABEL = "Master → Emissary";
 const MASTER_ENDED_LABEL = "Master ended turn";
 const EMISSARY_SPOKEN_LABEL = "Emissary\nSpoken";
 const EMISSARY_INTERRUPTED_LABEL = "Emissary\nInterrupted";
+const MISSING_ACTIVE_RUN_ERROR = "no active run to steer";
 
 function countOccurrences(text: string, needle: string): number {
   return text.split(needle).length - 1;
@@ -167,6 +168,25 @@ function expectCompletedTurnOrdering(
   }
 }
 
+function expectVisibleMasterWork(
+  transcript: string,
+  question: string,
+  searchFrom = 0,
+): void {
+  const questionIndex = transcript.indexOf(question, searchFrom);
+  const endedIndex = transcript.indexOf(MASTER_ENDED_LABEL, questionIndex);
+  const turnTranscript = transcript.slice(questionIndex, endedIndex);
+  // This evaluation deliberately asks about the local filesystem, so the
+  // Master must visibly use its ordinary Berd tool surface. Coordination
+  // bubbles are additive and must not replace the normal Command/Result work.
+  expect(turnTranscript).toContain("Command");
+  expect(turnTranscript).toContain("Result");
+}
+
+function expectNoMasterDeliveryErrors(transcript: string): void {
+  expect(transcript.toLowerCase()).not.toContain(MISSING_ACTIVE_RUN_ERROR);
+}
+
 function expectAcceptableSpeechCount(
   finalizedSpeechCount: number,
   priorSpeechCount: number,
@@ -265,6 +285,8 @@ describe.skipIf(!liveEvalEnabled)(
         await sendTypedTurn(driver, FIRST_QUESTION);
         const firstTurn = await waitForSettledTurn(driver, initial);
         expectCompletedTurnOrdering(firstTurn.transcript, FIRST_QUESTION);
+        expectVisibleMasterWork(firstTurn.transcript, FIRST_QUESTION);
+        expectNoMasterDeliveryErrors(firstTurn.transcript);
         expectAcceptableSpeechCount(
           firstTurn.finalizedSpeechCount,
           initial.finalizedSpeechCount,
@@ -282,6 +304,12 @@ describe.skipIf(!liveEvalEnabled)(
           SECOND_QUESTION,
           firstIndex + FIRST_QUESTION.length,
         );
+        expectVisibleMasterWork(
+          secondTurn.transcript,
+          SECOND_QUESTION,
+          firstIndex + FIRST_QUESTION.length,
+        );
+        expectNoMasterDeliveryErrors(secondTurn.transcript);
         expectAcceptableSpeechCount(
           secondTurn.finalizedSpeechCount,
           firstTurn.finalizedSpeechCount,

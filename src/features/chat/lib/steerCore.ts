@@ -37,7 +37,10 @@ export async function steerPromptInSession(
   text: string,
   attachments?: ChatAttachmentDraft[],
   sendOptions?: ChatSendOptions,
-  options: { throwOnError?: boolean } = {},
+  options: {
+    throwOnError?: boolean;
+    reportErrorInTranscript?: boolean;
+  } = {},
 ): Promise<boolean> {
   const sessionRunsRemotely = Boolean(
     useChatSessionStore.getState().getSession(sessionId)?.remoteHost,
@@ -220,10 +223,12 @@ export async function steerPromptInSession(
       ) {
         liveStore.setPendingInterventionBoundary(sessionId, null);
       }
-      liveStore.addMessage(
-        sessionId,
-        createSystemNotificationMessage(errorMessage, "error"),
-      );
+      if (options.reportErrorInTranscript !== false) {
+        liveStore.addMessage(
+          sessionId,
+          createSystemNotificationMessage(errorMessage, "error"),
+        );
+      }
       if (options.throwOnError) {
         throw new Error(errorMessage);
       }

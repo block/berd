@@ -150,6 +150,24 @@ describe("steerPromptInSession commit callback", () => {
     expect(messages.some((message) => message.role === "user")).toBe(false);
   });
 
+  it("can return a recoverable steer rejection without leaking an error row", async () => {
+    mockAcpSteerMessage.mockRejectedValue(new Error("no active run to steer"));
+
+    await expect(
+      steerPromptInSession(
+        "session-1",
+        "follow-up voice transcript",
+        undefined,
+        { userMessageMetadata: { origin: "voice_conversation" } },
+        { throwOnError: true, reportErrorInTranscript: false },
+      ),
+    ).rejects.toThrow("no active run to steer");
+
+    expect(
+      useChatStore.getState().messagesBySession["session-1"] ?? [],
+    ).toEqual([]);
+  });
+
   it("fires when delivery was established despite an acknowledgement error", async () => {
     const onUserMessageCommitted = vi.fn();
     mockAcpSteerMessage.mockImplementation(async () => {

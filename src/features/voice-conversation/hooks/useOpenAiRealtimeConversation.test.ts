@@ -640,6 +640,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     await act(async () => owner.result.current.onToggle());
     await waitFor(() => expect(owner.result.current.state).toBe("listening"));
     useChatStore.getState().setChatState("session-a", "thinking");
+    useChatStore.getState().setActiveRunId("session-a", "run-1");
 
     act(() => {
       channel.dispatchEvent(
@@ -664,6 +665,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     await act(async () => owner.result.current.onToggle());
     await waitFor(() => expect(owner.result.current.state).toBe("listening"));
     useChatStore.getState().setChatState("session-a", "thinking");
+    useChatStore.getState().setActiveRunId("session-a", "run-1");
 
     act(() => {
       channel.dispatchEvent(
@@ -675,6 +677,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
 
     await waitFor(() => expect(mocks.steerPrompt).toHaveBeenCalledOnce());
     act(() => {
+      useChatStore.getState().setActiveRunId("session-a", null);
       useChatStore.getState().setChatState("session-a", "idle");
     });
     await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
@@ -684,6 +687,57 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       undefined,
       expect.objectContaining({ displayText: "hello master" }),
     );
+    expect(mocks.steerPrompt).toHaveBeenCalledWith(
+      "session-a",
+      "[Voice transcript] User said: hello master",
+      undefined,
+      expect.anything(),
+      {
+        throwOnError: true,
+        reportErrorInTranscript: false,
+      },
+    );
+
+    expect(
+      (useChatStore.getState().messagesBySession["session-a"] ?? []).some(
+        (message) =>
+          message.role === "system" &&
+          message.content.some(
+            (content) =>
+              content.type === "text" &&
+              content.text.includes("no active run to steer"),
+          ),
+      ),
+    ).toBe(false);
+
+    await act(async () => owner.result.current.onToggle());
+  });
+
+  it("waits for a real run id instead of steering from chat state alone", async () => {
+    const onSend = vi.fn().mockResolvedValue(true);
+    mocks.steerPrompt.mockResolvedValue(true);
+    const owner = renderConversation("session-a", onSend);
+    await act(async () => owner.result.current.onToggle());
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+    useChatStore.getState().setChatState("session-a", "thinking");
+
+    act(() => {
+      channel.dispatchEvent(
+        new MessageEvent("message", {
+          data: JSON.stringify({ type: "test.transcript" }),
+        }),
+      );
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mocks.steerPrompt).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+
+    act(() => {
+      useChatStore.getState().setChatState("session-a", "idle");
+    });
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+    expect(mocks.steerPrompt).not.toHaveBeenCalled();
 
     await act(async () => owner.result.current.onToggle());
   });
@@ -882,6 +936,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
         }),
       );
       useChatStore.getState().setChatState("session-a", "thinking");
+      useChatStore.getState().setActiveRunId("session-a", "run-typed");
     });
 
     act(() => {
@@ -908,7 +963,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
           userVisible: false,
         },
       }),
-      { throwOnError: true },
+      { throwOnError: true, reportErrorInTranscript: false },
     );
 
     await act(async () => owner.result.current.onToggle());
@@ -992,6 +1047,9 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       "[Voice transcript] User said: how many repos are in my development folder?",
     );
     act(() => useChatStore.getState().setChatState("session-a", "thinking"));
+    act(() =>
+      useChatStore.getState().setActiveRunId("session-a", "run-repository"),
+    );
 
     act(() => {
       channel.dispatchEvent(
@@ -1029,6 +1087,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     expect(onSend).toHaveBeenCalledOnce();
 
     act(() => {
+      useChatStore.getState().setActiveRunId("session-a", null);
       useChatStore.getState().setChatState("session-a", "idle");
       channel.dispatchEvent(
         new MessageEvent("message", {
@@ -1043,6 +1102,9 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
         "[Voice transcript] User said: are any of them symbolic links?",
     );
     act(() => useChatStore.getState().setChatState("session-a", "thinking"));
+    act(() =>
+      useChatStore.getState().setActiveRunId("session-a", "run-followup"),
+    );
 
     act(() => {
       channel.dispatchEvent(
@@ -1229,6 +1291,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     await act(async () => owner.result.current.onToggle());
     await waitFor(() => expect(owner.result.current.state).toBe("listening"));
     useChatStore.getState().setChatState("session-a", "thinking");
+    useChatStore.getState().setActiveRunId("session-a", "run-1");
 
     act(() => {
       channel.dispatchEvent(
@@ -1262,6 +1325,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     });
     await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
     act(() => useChatStore.getState().setChatState("session-a", "thinking"));
+    act(() => useChatStore.getState().setActiveRunId("session-a", "run-1"));
 
     act(() => {
       channel.dispatchEvent(

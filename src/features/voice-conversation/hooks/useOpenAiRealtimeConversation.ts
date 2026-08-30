@@ -91,6 +91,58 @@ function waitForMasterIdle(sessionId: string): Promise<void> {
   });
 }
 
+type MasterDeliveryOpportunity = "send" | "steer";
+
+function masterDeliveryOpportunity(
+  sessionId: string,
+): MasterDeliveryOpportunity | null {
+  const runtime = useChatStore.getState().getSessionRuntime(sessionId);
+  if (runtime.isRunCancellationPending) return null;
+  // A chat state can cross the run boundary before activeRunId catches up.
+  // Only an actual run id is sufficient proof that ACP can accept a steer.
+  if (runtime.activeRunId !== null) return "steer";
+  if (!isSessionRunning(runtime.chatState)) return "send";
+  return null;
+}
+
+function waitForMasterDeliveryOpportunity(
+  sessionId: string,
+): Promise<MasterDeliveryOpportunity> {
+  const available = masterDeliveryOpportunity(sessionId);
+  if (available) return Promise.resolve(available);
+
+  return new Promise((resolve) => {
+    const unsubscribe = useChatStore.subscribe(() => {
+      const opportunity = masterDeliveryOpportunity(sessionId);
+      if (!opportunity) return;
+      unsubscribe();
+      resolve(opportunity);
+    });
+  });
+}
+
+function waitForMasterRunBoundary(
+  sessionId: string,
+  rejectedRunId: string | null,
+): Promise<void> {
+  const crossedBoundary = () => {
+    const runtime = useChatStore.getState().getSessionRuntime(sessionId);
+    return (
+      runtime.activeRunId !== rejectedRunId ||
+      (runtime.activeRunId === null && !isSessionRunning(runtime.chatState))
+    );
+  };
+  if (crossedBoundary()) return Promise.resolve();
+
+  return new Promise((resolve) => {
+    const unsubscribe = useChatStore.subscribe(() => {
+      if (!crossedBoundary()) return;
+      unsubscribe();
+      resolve();
+    });
+  });
+}
+
 function createEmissaryTranscriptMessage(
   text: string,
   interrupted: boolean,
@@ -798,7 +850,6 @@ class OpenAiRealtimeConversationRuntime {
         if (queueUntilIdle) await waitForMasterIdle(sessionId);
         if (this.snapshot.boundSessionId !== sessionId || !this.boundOnSend)
           throw new Error("The realtime voice owner is no longer available.");
-        const runtime = useChatStore.getState().getSessionRuntime(sessionId);
         const sendOptions = {
           displayText,
           userMessageMetadata: {
@@ -821,30 +872,38 @@ class OpenAiRealtimeConversationRuntime {
             );
         };
         this.setSnapshot({ ...this.snapshot, state: "agent-working" });
-        if (
-          runtime.activeRunId !== null ||
-          isSessionRunning(runtime.chatState)
-        ) {
+        for (;;) {
+          const opportunity = await waitForMasterDeliveryOpportunity(sessionId);
+          if (opportunity === "send") {
+            await sendAsPrompt();
+            break;
+          }
+          const rejectedRunId = useChatStore
+            .getState()
+            .getSessionRuntime(sessionId).activeRunId;
           try {
             await steerPromptInSession(
               sessionId,
               text,
               undefined,
               sendOptions,
-              { throwOnError: true },
+              {
+                throwOnError: true,
+                // A run can end after the opportunity check but before ACP
+                // admits the steer. The bridge retries that boundary as a
+                // fresh prompt, so the transient rejection is not a user
+                // error and must not leak into the durable transcript.
+                reportErrorInTranscript: false,
+              },
             );
+            break;
           } catch (error) {
-            // The Master can finish between the runtime snapshot above and
-            // steer admission. That is an ordinary boundary race: retry as a
-            // new prompt after local completion catches up, so the transcript
-            // or coordination message is not dropped and the new run receives
-            // the same live-notification ownership as an ordinary send.
             if (!isMissingActiveRun(error)) throw error;
-            await waitForMasterIdle(sessionId);
-            await sendAsPrompt();
+            // Re-evaluate instead of assuming send: local run state may still
+            // be publishing completion, or a newer run may already own the
+            // session. Either transition yields the next safe opportunity.
+            await waitForMasterRunBoundary(sessionId, rejectedRunId);
           }
-        } else {
-          await sendAsPrompt();
         }
         onDelivered?.();
         if (this.snapshot.boundSessionId === sessionId)
