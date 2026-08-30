@@ -59,6 +59,18 @@ fn clear_account(account: &str) -> Result<(), String> {
     }
 }
 
+#[cfg(any(test, target_os = "macos"))]
+fn canonical_mutation_with_legacy_cleanup<T>(
+    canonical_mutation: impl FnOnce() -> Result<T, String>,
+    legacy_cleanup: impl FnOnce() -> Result<(), String>,
+) -> Result<T, String> {
+    let value = canonical_mutation()?;
+    if let Err(error) = legacy_cleanup() {
+        log::warn!("Could not remove Berd's legacy OpenAI voice credential: {error}");
+    }
+    Ok(value)
+}
+
 #[cfg(target_os = "macos")]
 pub(crate) fn read(credential: OpenAiVoiceCredential) -> Result<Option<String>, String> {
     if let Some(api_key) = read_account(credential.account())? {
@@ -79,10 +91,14 @@ pub(crate) fn read(_credential: OpenAiVoiceCredential) -> Result<Option<String>,
 #[cfg(target_os = "macos")]
 pub(crate) fn store(credential: OpenAiVoiceCredential, api_key: &str) -> Result<(), String> {
     let entry = entry(credential.account())?;
-    entry
-        .set_password(api_key)
-        .map_err(|error| format!("Could not save Berd's OpenAI voice credential: {error}"))?;
-    clear_account(LEGACY_TTS_KEYCHAIN_ACCOUNT)
+    canonical_mutation_with_legacy_cleanup(
+        || {
+            entry
+                .set_password(api_key)
+                .map_err(|error| format!("Could not save Berd's OpenAI voice credential: {error}"))
+        },
+        || clear_account(LEGACY_TTS_KEYCHAIN_ACCOUNT),
+    )
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -92,8 +108,10 @@ pub(crate) fn store(_credential: OpenAiVoiceCredential, _api_key: &str) -> Resul
 
 #[cfg(target_os = "macos")]
 pub(crate) fn clear(credential: OpenAiVoiceCredential) -> Result<(), String> {
-    clear_account(credential.account())?;
-    clear_account(LEGACY_TTS_KEYCHAIN_ACCOUNT)
+    canonical_mutation_with_legacy_cleanup(
+        || clear_account(credential.account()),
+        || clear_account(LEGACY_TTS_KEYCHAIN_ACCOUNT),
+    )
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -109,9 +127,34 @@ pub(crate) fn require(credential: OpenAiVoiceCredential) -> Result<String, Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
 
     #[test]
     fn text_to_speech_uses_the_shared_voice_keychain_account() {
         assert_eq!(OpenAiVoiceCredential::TextToSpeech.account(), "api-key");
+    }
+
+    #[test]
+    fn legacy_cleanup_failure_does_not_change_canonical_mutation_result() {
+        let credential = RefCell::new(None);
+        let save = canonical_mutation_with_legacy_cleanup(
+            || {
+                credential.replace(Some("shared-key"));
+                Ok(())
+            },
+            || Err("legacy cleanup failed".to_string()),
+        );
+        assert_eq!(save, Ok(()));
+        assert_eq!(*credential.borrow(), Some("shared-key"));
+
+        let clear = canonical_mutation_with_legacy_cleanup(
+            || {
+                credential.replace(None);
+                Ok(())
+            },
+            || Err("legacy cleanup failed".to_string()),
+        );
+        assert_eq!(clear, Ok(()));
+        assert_eq!(*credential.borrow(), None);
     }
 }
