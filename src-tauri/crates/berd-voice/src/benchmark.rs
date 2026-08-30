@@ -17,6 +17,14 @@ pub use stt::{
 const TTS_PROMPT_MANIFEST_ENGLISH_SHORT_V1: &str =
     include_str!("../fixtures/tts/english-short-v1.json");
 const MAX_TTS_PROMPT_BYTES: usize = 16 * 1024;
+const SIGNAL_WINDOW_MS: u32 = 20;
+const SIGNAL_HOP_MS: u32 = 10;
+const SIGNAL_RELATIVE_THRESHOLD_DB: f64 = -40.0;
+const SIGNAL_RELATIVE_THRESHOLD_RATIO: f64 = 0.01;
+const SIGNAL_RMS_FLOOR: f64 = 1.0e-6;
+const SIGNAL_CONSECUTIVE_WINDOWS: usize = 3;
+const SIGNAL_PLAYOUT_ASSUMPTION: &str =
+    "immediate_playout_zero_device_latency_with_underrun_stalls";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -62,6 +70,7 @@ pub struct TtsBenchmarkReport {
     pub mode: TtsBenchmarkMode,
     pub scenario: TtsBenchmarkScenario,
     pub prior_cache_state: &'static str,
+    pub signal_onset_method: TtsSignalOnsetMethod,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_manifest: Option<TtsBenchmarkPromptManifestReport>,
     pub requested_runs: usize,
@@ -69,6 +78,31 @@ pub struct TtsBenchmarkReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub warmup: Option<TtsBenchmarkRun>,
     pub runs: Vec<TtsBenchmarkRun>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TtsSignalOnsetMethod {
+    pub algorithm: &'static str,
+    pub window_ms: u32,
+    pub hop_ms: u32,
+    pub relative_threshold_db: f64,
+    pub rms_floor: f64,
+    pub consecutive_windows: usize,
+    pub playout_assumption: &'static str,
+}
+
+impl Default for TtsSignalOnsetMethod {
+    fn default() -> Self {
+        Self {
+            algorithm: "relative_rms_v1",
+            window_ms: SIGNAL_WINDOW_MS,
+            hop_ms: SIGNAL_HOP_MS,
+            relative_threshold_db: SIGNAL_RELATIVE_THRESHOLD_DB,
+            rms_floor: SIGNAL_RMS_FLOOR,
+            consecutive_windows: SIGNAL_CONSECUTIVE_WINDOWS,
+            playout_assumption: SIGNAL_PLAYOUT_ASSUMPTION,
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -133,6 +167,22 @@ pub struct TtsBenchmarkRun {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub playback_rate: Option<f32>,
     pub pcm_frames: u64,
+    pub finite_pcm_frames: u64,
+    pub nonfinite_pcm_frames: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub peak_abs_amplitude: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub global_rms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub peak_window_rms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub onset_threshold_rms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub leading_sustained_signal_offset_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_sustained_signal_callback_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub estimated_earliest_realtime_signal_ms: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub audio_duration_ms: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -165,6 +215,15 @@ impl TtsBenchmarkRun {
             sample_rate_hz: None,
             playback_rate: None,
             pcm_frames: 0,
+            finite_pcm_frames: 0,
+            nonfinite_pcm_frames: 0,
+            peak_abs_amplitude: None,
+            global_rms: None,
+            peak_window_rms: None,
+            onset_threshold_rms: None,
+            leading_sustained_signal_offset_ms: None,
+            first_sustained_signal_callback_ms: None,
+            estimated_earliest_realtime_signal_ms: None,
             audio_duration_ms: None,
             realtime_factor: None,
             outcome: None,
@@ -274,11 +333,12 @@ fn benchmark_tts_prompts(
         total.saturating_add(prompt.text.len())
     }) + warmup_prompt.map_or(0, |prompt| prompt.text.len());
     let mut report = TtsBenchmarkReport {
-        schema_version: 2,
+        schema_version: 3,
         target,
         mode,
         scenario,
         prior_cache_state: "uncontrolled_system_and_provider_state",
+        signal_onset_method: TtsSignalOnsetMethod::default(),
         prompt_manifest,
         requested_runs: prompts.len(),
         planned_workload: TtsBenchmarkWorkload {
@@ -352,6 +412,180 @@ fn benchmark_tts_prompts(
     report
 }
 
+#[derive(Clone, Copy, Debug)]
+struct PcmChunkTiming {
+    source_start_frame: u64,
+    frame_count: u64,
+    callback_elapsed: Duration,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SignalWindow {
+    source_start_frame: u64,
+    rms: f64,
+}
+
+#[derive(Debug, Default)]
+struct SignalAnalysis {
+    finite_pcm_frames: u64,
+    nonfinite_pcm_frames: u64,
+    peak_abs_amplitude: Option<f64>,
+    global_rms: Option<f64>,
+    peak_window_rms: Option<f64>,
+    onset_threshold_rms: Option<f64>,
+    leading_sustained_signal_offset_ms: Option<f64>,
+    first_sustained_signal_callback_ms: Option<f64>,
+    estimated_earliest_realtime_signal_ms: Option<f64>,
+}
+
+struct PcmSignalAnalyzer {
+    sample_rate: u32,
+    window_frames: usize,
+    hop_frames: usize,
+    frames_seen: u64,
+    finite_frames: u64,
+    nonfinite_frames: u64,
+    finite_square_sum: f64,
+    peak_abs: f64,
+    rolling_squares: std::collections::VecDeque<f64>,
+    rolling_square_sum: f64,
+    windows: Vec<SignalWindow>,
+    chunks: Vec<PcmChunkTiming>,
+}
+
+impl PcmSignalAnalyzer {
+    fn new(sample_rate: u32) -> Self {
+        let window_frames = frames_for_milliseconds(sample_rate, SIGNAL_WINDOW_MS);
+        let hop_frames = frames_for_milliseconds(sample_rate, SIGNAL_HOP_MS);
+        Self {
+            sample_rate,
+            window_frames,
+            hop_frames,
+            frames_seen: 0,
+            finite_frames: 0,
+            nonfinite_frames: 0,
+            finite_square_sum: 0.0,
+            peak_abs: 0.0,
+            rolling_squares: std::collections::VecDeque::with_capacity(window_frames),
+            rolling_square_sum: 0.0,
+            windows: Vec::new(),
+            chunks: Vec::new(),
+        }
+    }
+
+    fn observe(&mut self, frames: &[f32], callback_elapsed: Duration) {
+        if frames.is_empty() {
+            return;
+        }
+        self.chunks.push(PcmChunkTiming {
+            source_start_frame: self.frames_seen,
+            frame_count: frames.len() as u64,
+            callback_elapsed,
+        });
+        for &sample in frames {
+            let square = if sample.is_finite() {
+                let sample = f64::from(sample);
+                let square = sample * sample;
+                self.finite_frames += 1;
+                self.finite_square_sum += square;
+                self.peak_abs = self.peak_abs.max(sample.abs());
+                square
+            } else {
+                self.nonfinite_frames += 1;
+                0.0
+            };
+            self.rolling_squares.push_back(square);
+            self.rolling_square_sum += square;
+            if self.rolling_squares.len() > self.window_frames {
+                self.rolling_square_sum -= self.rolling_squares.pop_front().unwrap_or_default();
+            }
+            self.frames_seen += 1;
+            if self.window_frames > 0
+                && self.hop_frames > 0
+                && self.rolling_squares.len() == self.window_frames
+                && (self.frames_seen - self.window_frames as u64)
+                    .is_multiple_of(self.hop_frames as u64)
+            {
+                self.windows.push(SignalWindow {
+                    source_start_frame: self.frames_seen - self.window_frames as u64,
+                    rms: (self.rolling_square_sum / self.window_frames as f64).sqrt(),
+                });
+            }
+        }
+    }
+
+    fn finish(&self) -> SignalAnalysis {
+        let peak_window_rms = self
+            .windows
+            .iter()
+            .map(|window| window.rms)
+            .reduce(f64::max);
+        let onset_threshold_rms = peak_window_rms
+            .map(|peak| SIGNAL_RMS_FLOOR.max(peak * SIGNAL_RELATIVE_THRESHOLD_RATIO));
+        let onset_frame = onset_threshold_rms.and_then(|threshold| {
+            let mut qualifying = 0_usize;
+            for (index, window) in self.windows.iter().enumerate() {
+                if window.rms >= threshold {
+                    qualifying += 1;
+                    if qualifying == SIGNAL_CONSECUTIVE_WINDOWS {
+                        return Some(
+                            self.windows[index + 1 - SIGNAL_CONSECUTIVE_WINDOWS].source_start_frame,
+                        );
+                    }
+                } else {
+                    qualifying = 0;
+                }
+            }
+            None
+        });
+        let onset_chunk = onset_frame.and_then(|frame| {
+            self.chunks.iter().position(|chunk| {
+                frame >= chunk.source_start_frame
+                    && frame < chunk.source_start_frame + chunk.frame_count
+            })
+        });
+        let estimated_earliest_realtime_signal_ms = onset_chunk.map(|onset_chunk| {
+            let mut playout_ms = milliseconds(self.chunks[0].callback_elapsed);
+            for index in 1..=onset_chunk {
+                let previous = self.chunks[index - 1];
+                let previous_end_ms =
+                    playout_ms + frames_to_milliseconds(previous.frame_count, self.sample_rate);
+                playout_ms = previous_end_ms.max(milliseconds(self.chunks[index].callback_elapsed));
+            }
+            playout_ms
+                + frames_to_milliseconds(
+                    onset_frame.unwrap_or_default() - self.chunks[onset_chunk].source_start_frame,
+                    self.sample_rate,
+                )
+        });
+        SignalAnalysis {
+            finite_pcm_frames: self.finite_frames,
+            nonfinite_pcm_frames: self.nonfinite_frames,
+            peak_abs_amplitude: (self.finite_frames > 0).then_some(self.peak_abs),
+            global_rms: (self.finite_frames > 0)
+                .then(|| (self.finite_square_sum / self.finite_frames as f64).sqrt()),
+            peak_window_rms,
+            onset_threshold_rms,
+            leading_sustained_signal_offset_ms: onset_frame
+                .map(|frame| frames_to_milliseconds(frame, self.sample_rate)),
+            first_sustained_signal_callback_ms: onset_chunk
+                .map(|index| milliseconds(self.chunks[index].callback_elapsed)),
+            estimated_earliest_realtime_signal_ms,
+        }
+    }
+}
+
+fn frames_for_milliseconds(sample_rate: u32, duration_ms: u32) -> usize {
+    ((u64::from(sample_rate) * u64::from(duration_ms)) / 1_000) as usize
+}
+
+fn frames_to_milliseconds(frames: u64, sample_rate: u32) -> f64 {
+    if sample_rate == 0 {
+        return 0.0;
+    }
+    frames as f64 * 1_000.0 / f64::from(sample_rate)
+}
+
 fn run_synthesis(
     run: usize,
     measured: bool,
@@ -364,16 +598,20 @@ fn run_synthesis(
     let started = Instant::now();
     let mut first_pcm = None;
     let mut pcm_frames = 0_u64;
+    let mut signal = PcmSignalAnalyzer::new(spec.sample_rate);
     let result = backend.synthesize_with_poll(&prompt.text, &active, &mut |event| {
         if let TtsSynthesisEvent::Frames(frames) = event {
+            let callback_elapsed = started.elapsed();
             if !frames.is_empty() && first_pcm.is_none() {
-                first_pcm = Some(started.elapsed());
+                first_pcm = Some(callback_elapsed);
             }
             pcm_frames = pcm_frames.saturating_add(frames.len() as u64);
+            signal.observe(frames, callback_elapsed);
         }
         Ok(())
     });
     let synthesis = started.elapsed();
+    let signal = signal.finish();
     let audio_duration = (spec.sample_rate > 0)
         .then(|| Duration::from_secs_f64(pcm_frames as f64 / f64::from(spec.sample_rate)));
     let realtime_factor = audio_duration
@@ -389,6 +627,16 @@ fn run_synthesis(
             None,
             Some("synthesis"),
             Some("synthesis completed without PCM".into()),
+        ),
+        Ok(TtsOutcome::Completed) if signal.nonfinite_pcm_frames > 0 => (
+            None,
+            Some("synthesis"),
+            Some("synthesis produced non-finite PCM".into()),
+        ),
+        Ok(TtsOutcome::Completed) if signal.leading_sustained_signal_offset_ms.is_none() => (
+            None,
+            Some("synthesis"),
+            Some("synthesis completed without sustained PCM signal".into()),
         ),
         Ok(TtsOutcome::Completed) => (Some(TtsOutcomeLabel::Completed), None, None),
         Ok(TtsOutcome::Cancelled) => (Some(TtsOutcomeLabel::Cancelled), None, None),
@@ -406,6 +654,15 @@ fn run_synthesis(
         sample_rate_hz: Some(spec.sample_rate),
         playback_rate: Some(spec.playback_rate),
         pcm_frames,
+        finite_pcm_frames: signal.finite_pcm_frames,
+        nonfinite_pcm_frames: signal.nonfinite_pcm_frames,
+        peak_abs_amplitude: signal.peak_abs_amplitude,
+        global_rms: signal.global_rms,
+        peak_window_rms: signal.peak_window_rms,
+        onset_threshold_rms: signal.onset_threshold_rms,
+        leading_sustained_signal_offset_ms: signal.leading_sustained_signal_offset_ms,
+        first_sustained_signal_callback_ms: signal.first_sustained_signal_callback_ms,
+        estimated_earliest_realtime_signal_ms: signal.estimated_earliest_realtime_signal_ms,
         audio_duration_ms: audio_duration.map(milliseconds),
         realtime_factor,
         outcome,
@@ -425,12 +682,13 @@ fn milliseconds(duration: Duration) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        benchmark_tts, benchmark_tts_manifest, load_bundled_tts_prompt_manifest, TtsBenchmarkMode,
-        TtsBenchmarkScenario, TtsBenchmarkTarget, TtsOutcomeLabel,
+        benchmark_tts, benchmark_tts_manifest, load_bundled_tts_prompt_manifest, PcmSignalAnalyzer,
+        TtsBenchmarkMode, TtsBenchmarkScenario, TtsBenchmarkTarget, TtsOutcomeLabel,
     };
     use crate::{TtsBackend, TtsOutcome, TtsPcmSpec};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::time::Duration;
 
     struct FakeTts;
 
@@ -443,6 +701,10 @@ mod tests {
     struct CancelledTts;
 
     struct PollingTts;
+
+    struct SilentTts;
+
+    struct NonfiniteTts;
 
     fn target() -> TtsBenchmarkTarget {
         TtsBenchmarkTarget {
@@ -470,7 +732,7 @@ mod tests {
             on_frames: &mut dyn FnMut(&[f32]) -> Result<(), String>,
         ) -> Result<TtsOutcome, String> {
             on_frames(&[])?;
-            on_frames(&[0.0; 100])?;
+            on_frames(&[0.25; 100])?;
             Ok(TtsOutcome::Completed)
         }
     }
@@ -564,7 +826,42 @@ mod tests {
             on_event: &mut dyn FnMut(crate::TtsSynthesisEvent<'_>) -> Result<(), String>,
         ) -> Result<TtsOutcome, String> {
             on_event(crate::TtsSynthesisEvent::Poll)?;
-            on_event(crate::TtsSynthesisEvent::Frames(&[0.0; 25]))?;
+            on_event(crate::TtsSynthesisEvent::Frames(&[0.25; 40]))?;
+            Ok(TtsOutcome::Completed)
+        }
+    }
+
+    impl TtsBackend for SilentTts {
+        fn pcm_spec(&self) -> TtsPcmSpec {
+            FakeTts.pcm_spec()
+        }
+
+        fn synthesize(
+            &self,
+            _text: &str,
+            _active: &AtomicBool,
+            on_frames: &mut dyn FnMut(&[f32]) -> Result<(), String>,
+        ) -> Result<TtsOutcome, String> {
+            on_frames(&[0.0; 100])?;
+            Ok(TtsOutcome::Completed)
+        }
+    }
+
+    impl TtsBackend for NonfiniteTts {
+        fn pcm_spec(&self) -> TtsPcmSpec {
+            FakeTts.pcm_spec()
+        }
+
+        fn synthesize(
+            &self,
+            _text: &str,
+            _active: &AtomicBool,
+            on_frames: &mut dyn FnMut(&[f32]) -> Result<(), String>,
+        ) -> Result<TtsOutcome, String> {
+            let mut frames = [0.25; 100];
+            frames[30] = f32::NAN;
+            frames[70] = f32::INFINITY;
+            on_frames(&frames)?;
             Ok(TtsOutcome::Completed)
         }
     }
@@ -641,8 +938,8 @@ mod tests {
         let polled = benchmark_tts(target(), "hello", 1, TtsBenchmarkMode::FreshBackend, || {
             Ok(Arc::new(PollingTts))
         });
-        assert_eq!(polled.runs[0].pcm_frames, 25);
-        assert_eq!(polled.runs[0].audio_duration_ms, Some(25.0));
+        assert_eq!(polled.runs[0].pcm_frames, 40);
+        assert_eq!(polled.runs[0].audio_duration_ms, Some(40.0));
         assert!(polled.runs[0].realtime_factor.is_some());
         assert_eq!(polled.runs[0].outcome, Some(TtsOutcomeLabel::Completed));
 
@@ -681,13 +978,127 @@ mod tests {
     }
 
     #[test]
+    fn completed_silence_and_nonfinite_pcm_are_terminal_errors() {
+        let silent = benchmark_tts(target(), "hello", 1, TtsBenchmarkMode::FreshBackend, || {
+            Ok(Arc::new(SilentTts))
+        });
+        assert_eq!(silent.runs[0].peak_abs_amplitude, Some(0.0));
+        assert_eq!(silent.runs[0].global_rms, Some(0.0));
+        assert_eq!(silent.runs[0].leading_sustained_signal_offset_ms, None);
+        assert_eq!(
+            silent.runs[0].error.as_deref(),
+            Some("synthesis completed without sustained PCM signal")
+        );
+
+        let nonfinite = benchmark_tts(target(), "hello", 1, TtsBenchmarkMode::FreshBackend, || {
+            Ok(Arc::new(NonfiniteTts))
+        });
+        assert_eq!(nonfinite.runs[0].nonfinite_pcm_frames, 2);
+        assert_eq!(
+            nonfinite.runs[0].error.as_deref(),
+            Some("synthesis produced non-finite PCM")
+        );
+        assert!(!nonfinite.succeeded());
+    }
+
+    fn signal_with_leading(
+        sample_rate: u32,
+        leading_ms: usize,
+        signal_ms: usize,
+        amplitude: f32,
+    ) -> Vec<f32> {
+        let mut samples = vec![0.0; sample_rate as usize * leading_ms / 1_000];
+        samples.extend(vec![amplitude; sample_rate as usize * signal_ms / 1_000]);
+        samples
+    }
+
+    #[test]
+    fn sustained_signal_detection_is_scaled_and_sample_rate_independent() {
+        for sample_rate in [24_000, 48_000] {
+            let samples = signal_with_leading(sample_rate, 50, 100, 0.2);
+            let mut analyzer = PcmSignalAnalyzer::new(sample_rate);
+            analyzer.observe(&samples, Duration::from_millis(7));
+            let analysis = analyzer.finish();
+            assert_eq!(analysis.nonfinite_pcm_frames, 0);
+            assert!((analysis.peak_abs_amplitude.unwrap() - 0.2).abs() < 1.0e-6);
+            assert!((analysis.peak_window_rms.unwrap() - 0.2).abs() < 1.0e-6);
+            assert!((analysis.onset_threshold_rms.unwrap() - 0.002).abs() < 1.0e-6);
+            // A 20 ms window can backdate the sustained transition by at most
+            // one hop for this aligned fixture.
+            assert_eq!(analysis.leading_sustained_signal_offset_ms, Some(40.0));
+            assert_eq!(analysis.first_sustained_signal_callback_ms, Some(7.0));
+            assert_eq!(analysis.estimated_earliest_realtime_signal_ms, Some(47.0));
+        }
+
+        let quiet = signal_with_leading(48_000, 50, 100, 0.0001);
+        let mut analyzer = PcmSignalAnalyzer::new(48_000);
+        analyzer.observe(&quiet, Duration::from_millis(3));
+        let analysis = analyzer.finish();
+        assert_eq!(analysis.onset_threshold_rms, Some(1.0e-6));
+        assert_eq!(analysis.leading_sustained_signal_offset_ms, Some(40.0));
+    }
+
+    #[test]
+    fn detector_crosses_callbacks_ignores_low_noise_and_rejects_a_click() {
+        let mut samples = vec![0.0005; 60];
+        samples.extend([0.1; 100]);
+        let mut contiguous = PcmSignalAnalyzer::new(1_000);
+        contiguous.observe(&samples, Duration::from_millis(5));
+        let contiguous = contiguous.finish();
+
+        let mut split = PcmSignalAnalyzer::new(1_000);
+        let mut start = 0;
+        for (end, arrival) in [(7, 1), (23, 2), (61, 3), (104, 4), (160, 5)] {
+            split.observe(&samples[start..end], Duration::from_millis(arrival));
+            start = end;
+        }
+        let split = split.finish();
+        assert_eq!(
+            split.leading_sustained_signal_offset_ms,
+            contiguous.leading_sustained_signal_offset_ms
+        );
+        assert_eq!(split.peak_abs_amplitude, contiguous.peak_abs_amplitude);
+        assert_eq!(split.global_rms, contiguous.global_rms);
+        assert_eq!(split.peak_window_rms, contiguous.peak_window_rms);
+        assert_eq!(split.leading_sustained_signal_offset_ms, Some(50.0));
+
+        let mut click = PcmSignalAnalyzer::new(1_000);
+        let mut samples = vec![0.0; 100];
+        samples[50] = 1.0;
+        click.observe(&samples, Duration::ZERO);
+        let click = click.finish();
+        assert!(click.peak_window_rms.unwrap() > 0.0);
+        assert_eq!(click.leading_sustained_signal_offset_ms, None);
+    }
+
+    #[test]
+    fn estimated_realtime_signal_accounts_for_late_chunks_and_underruns() {
+        let mut analyzer = PcmSignalAnalyzer::new(1_000);
+        analyzer.observe(&[0.0; 40], Duration::from_millis(10));
+        let mut remainder = vec![0.0; 20];
+        remainder.extend([0.25; 100]);
+        analyzer.observe(&remainder, Duration::from_millis(200));
+        let analysis = analyzer.finish();
+        assert_eq!(analysis.leading_sustained_signal_offset_ms, Some(50.0));
+        assert_eq!(analysis.first_sustained_signal_callback_ms, Some(200.0));
+        assert_eq!(analysis.estimated_earliest_realtime_signal_ms, Some(210.0));
+
+        let all = signal_with_leading(1_000, 50, 100, 0.25);
+        let mut batched = PcmSignalAnalyzer::new(1_000);
+        batched.observe(&all, Duration::from_millis(10));
+        let batched = batched.finish();
+        assert_eq!(batched.leading_sustained_signal_offset_ms, Some(40.0));
+        assert_eq!(batched.estimated_earliest_realtime_signal_ms, Some(50.0));
+    }
+
+    #[test]
     fn report_is_stable_structured_json() {
         let report = benchmark_tts(target(), "hello", 1, TtsBenchmarkMode::FreshBackend, || {
             Ok(Arc::new(FakeTts))
         });
         let value = serde_json::to_value(report).unwrap();
 
-        assert_eq!(value["schema_version"], 2);
+        assert_eq!(value["schema_version"], 3);
         assert_eq!(value["target"]["backend"], "fake");
         assert_eq!(value["target"]["voice"], "test");
         assert_eq!(value["mode"], "fresh_backend");
@@ -705,6 +1116,15 @@ mod tests {
         assert_eq!(value["planned_workload"]["synthesis_requests"], 1);
         assert_eq!(value["planned_workload"]["total_text_bytes"], 5);
         assert_eq!(value["runs"][0]["pcm_frames"], 100);
+        assert_eq!(value["runs"][0]["finite_pcm_frames"], 100);
+        assert_eq!(value["signal_onset_method"]["algorithm"], "relative_rms_v1");
+        assert_eq!(
+            value["signal_onset_method"]["playout_assumption"],
+            "immediate_playout_zero_device_latency_with_underrun_stalls"
+        );
+        assert_eq!(value["runs"][0]["nonfinite_pcm_frames"], 0);
+        assert_eq!(value["runs"][0]["leading_sustained_signal_offset_ms"], 0.0);
+        assert!(value["runs"][0]["estimated_earliest_realtime_signal_ms"].is_number());
         assert_eq!(value["runs"][0]["outcome"], "completed");
 
         let changed = benchmark_tts(target(), "jello", 1, TtsBenchmarkMode::FreshBackend, || {

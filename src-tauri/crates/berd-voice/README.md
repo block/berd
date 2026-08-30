@@ -73,10 +73,22 @@ synthesis or audible onset; the private sirittsd implementation does not let us
 attribute the effect to a particular internal cache.
 
 Each run reports initialization time when applicable, time to first nonempty
-PCM, total synthesis time, mono PCM frame count and sample rate, PCM audio
-duration, real-time factor (`synthesis duration / PCM audio duration`), and a
-structured outcome or error stage. `playback_rate` is metadata only: benchmarks
+PCM, total synthesis time, mono PCM frame count and sample rate, finite and
+nonfinite frame counts, peak amplitude, global RMS, PCM audio duration,
+real-time factor (`synthesis duration / PCM audio duration`), and a structured
+outcome or error stage. Completed output containing nonfinite PCM or no
+sustained signal is an error. `playback_rate` is metadata only: benchmarks
 measure generated PCM duration and never playback or output-device drain.
+
+Signal onset uses 20 ms RMS windows with a 10 ms hop and requires three
+consecutive windows at or above `max(1e-6, peak_window_rms * 0.01)`. Reports
+include the threshold, the source-timeline offset of the first qualifying
+window, and the callback time that supplied that source frame. They also
+simulate immediate zero-device-latency PCM playout, stalling the source timeline
+when a callback arrives too late, as
+`estimated_earliest_realtime_signal_ms`. This is a device-free PCM scheduling
+estimate, not actual or audible onset: it excludes player buffering, operating
+system scheduling, output devices, transducers, volume, and hearing.
 Every run identifies its prompt ID, UTF-8 byte count, and SHA-256 without
 printing the prompt itself. Manifest reports include its stable ID, language,
 and pinned content hash. Prompts are distinct within a manifest invocation, but
