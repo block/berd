@@ -454,6 +454,7 @@ describe("ChatView MCP app messaging", () => {
       projectMetadataPending: false,
       isCompactingContext: false,
       workspaceSetupInProgress: false,
+      workspaceContextReady: true,
       queue: { queuedMessage: null, dismiss: vi.fn() },
       draftValue: "",
       handleDraftChange: mocks.handleDraftChange,
@@ -687,8 +688,12 @@ describe("ChatView MCP app messaging", () => {
     const voiceOptions = mocks.voiceControllerSpy.mock.calls.at(-1)?.[0] as {
       onSend: (text: string) => boolean;
       disabled: boolean;
+      routeBlocked: boolean;
+      routeUnavailable: boolean;
     };
     expect(voiceOptions.disabled).toBe(true);
+    expect(voiceOptions.routeBlocked).toBe(true);
+    expect(voiceOptions.routeUnavailable).toBe(false);
     expect(voiceOptions.onSend("blocked voice")).toBe(false);
     expect(mocks.handleSend).not.toHaveBeenCalled();
   });
@@ -1389,8 +1394,12 @@ describe("ChatView MCP app messaging", () => {
     const voiceOptions = mocks.voiceControllerSpy.mock.calls.at(-1)?.[0] as {
       onSend: (text: string) => boolean;
       disabled: boolean;
+      routeBlocked: boolean;
+      routeUnavailable: boolean;
     };
     expect(voiceOptions.disabled).toBe(true);
+    expect(voiceOptions.routeBlocked).toBe(false);
+    expect(voiceOptions.routeUnavailable).toBe(true);
     expect(voiceOptions.onSend("blocked voice")).toBe(false);
     expect(mocks.handleSend).not.toHaveBeenCalled();
   });

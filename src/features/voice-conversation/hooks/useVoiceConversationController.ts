@@ -12,6 +12,7 @@ import { steerPromptInSession } from "@/features/chat/lib/steerCore";
 import {
   subscribeToVoiceConversationEvents,
   useVoiceConversationStore,
+  VoiceTranscriptDeferredError,
 } from "../stores/voiceConversationStore";
 import {
   captureNativeAssistantSpeechHistory,
@@ -29,14 +30,17 @@ import type { VoiceInputBackend } from "../lib/voiceInputPreference";
 import type { SiriVoiceSelection } from "../api/siriVoice";
 
 interface VoiceSendRoute {
+  owner: symbol;
   sessionId: string;
   send: ChatInputSendHandler;
+  blocked: boolean;
+  canClaim: boolean;
 }
 
-// The backend conversation is process-wide, but voice input is intentionally
-// foreground-chat scoped. The route remains available only while at least one
-// view for its bound session is mounted.
+// The backend conversation is process-wide, but voice input remains bound to
+// the chat that started the active lifecycle until that lifecycle terminates.
 let activeSendRoute: VoiceSendRoute | null = null;
+const mountedSendRoutes = new Map<symbol, VoiceSendRoute>();
 let deliveryInitialized = false;
 const operationInFlightBySession = new Set<string>();
 let replacementOperationInFlight = false;
@@ -58,6 +62,27 @@ export function createVoiceTranscriptDeliveryQueue() {
 }
 
 const enqueueVoiceTranscriptDelivery = createVoiceTranscriptDeliveryQueue();
+
+function activeRouteIsBlocked(sessionId: string): boolean {
+  return activeSendRoute?.sessionId === sessionId && activeSendRoute.blocked;
+}
+
+function releaseVoiceSendRoute(
+  owner: symbol,
+  preserveActiveRoute = false,
+): VoiceSendRoute | null {
+  const released = mountedSendRoutes.get(owner);
+  mountedSendRoutes.delete(owner);
+  if (activeSendRoute?.owner !== owner) return activeSendRoute;
+
+  const replacement =
+    [...mountedSendRoutes.values()].find(
+      (route) => route.sessionId === released?.sessionId && route.canClaim,
+    ) ?? null;
+  activeSendRoute =
+    replacement ?? (preserveActiveRoute ? (released ?? null) : null);
+  return activeSendRoute;
+}
 
 export function canBindVoiceSendRoute(options: {
   enabled: boolean;
@@ -99,21 +124,25 @@ export function shouldShowVoiceConversationControl(options: {
     : options.voiceEnabled && options.isGooseSession;
 }
 
+export type VoiceConversationTransitionOutcome =
+  | "completed"
+  | "not-completed"
+  | "failure-reported";
+
 export async function replaceActiveVoiceConversation(options: {
   stop: () => Promise<{ lifecycle: string; sessionId: string | null }>;
   confirmTarget?: () => Promise<unknown>;
-  start: () => Promise<void>;
-}): Promise<boolean> {
+  start: () => Promise<VoiceConversationTransitionOutcome>;
+}): Promise<VoiceConversationTransitionOutcome> {
   const stopped = await options.stop();
   if (
     stopped.sessionId !== null ||
     (stopped.lifecycle !== "stopped" && stopped.lifecycle !== "unavailable")
   ) {
-    return false;
+    return "not-completed";
   }
   await options.confirmTarget?.();
-  await options.start();
-  return true;
+  return options.start();
 }
 
 export function shouldSuppressVoiceConversationControls(options: {
@@ -447,6 +476,12 @@ function ensureVoiceEventDeliveryInitialized() {
     const deliveryRevision = event.revision;
     const shouldNotifyFailure = event.deliveryAttempts === 0;
     return enqueueVoiceTranscriptDelivery(event.sessionId, async () => {
+      if (activeRouteIsBlocked(event.sessionId)) {
+        throw new VoiceTranscriptDeferredError(
+          "Voice transcript is waiting for its bound chat to become available.",
+        );
+      }
+
       const route = activeSendRoute;
       if (!route || route.sessionId !== event.sessionId) {
         const message =
@@ -472,24 +507,29 @@ function ensureVoiceEventDeliveryInitialized() {
           voiceConversationRevision: event.revision,
         },
       };
-      const playbackNotice = takeVoicePlaybackNotices(event.sessionId);
-      const displayOptions = {
-        ...sendOptions,
-        ...(playbackNotice ? { assistantPrompt: playbackNotice } : {}),
-        displayText: event.text,
-      };
       try {
         // This runs inside the per-session queue, so a prior send can change
         // the opportunity to steer before the next transcript is evaluated.
         const opportunity = await waitForVoiceDeliveryOpportunity(
           event.sessionId,
         );
+        if (activeRouteIsBlocked(event.sessionId)) {
+          throw new VoiceTranscriptDeferredError(
+            "Voice transcript is waiting for its bound chat to become available.",
+          );
+        }
         const currentRoute = activeSendRoute;
         if (!currentRoute || currentRoute.sessionId !== event.sessionId) {
           throw new Error(
             "Voice transcript could not be sent because its bound chat is unavailable.",
           );
         }
+        const playbackNotice = takeVoicePlaybackNotices(event.sessionId);
+        const displayOptions = {
+          ...sendOptions,
+          ...(playbackNotice ? { assistantPrompt: playbackNotice } : {}),
+          displayText: event.text,
+        };
         store.setUiState("agent-working");
         const delivered =
           opportunity === "steer"
@@ -530,6 +570,16 @@ function ensureVoiceEventDeliveryInitialized() {
         resetVoiceUiWhenRunSettles(event.sessionId, deliveryRevision);
       } catch (deliveryError) {
         const current = useVoiceConversationStore.getState();
+        if (deliveryError instanceof VoiceTranscriptDeferredError) {
+          if (
+            current.status.lifecycle === "running" &&
+            current.status.sessionId === event.sessionId &&
+            current.status.revision >= deliveryRevision
+          ) {
+            current.setUiState("listening");
+          }
+          throw deliveryError;
+        }
         if (
           current.status.lifecycle === "running" &&
           current.status.sessionId === event.sessionId &&
@@ -594,6 +644,8 @@ export interface UseVoiceConversationControllerOptions {
   onPocketSetupRequired: () => void;
   readOnly?: boolean;
   disabled?: boolean;
+  routeBlocked?: boolean;
+  routeUnavailable?: boolean;
 }
 
 export function useVoiceConversationController({
@@ -607,6 +659,8 @@ export function useVoiceConversationController({
   onPocketSetupRequired,
   readOnly = false,
   disabled = false,
+  routeBlocked = false,
+  routeUnavailable = false,
 }: UseVoiceConversationControllerOptions): ChatInputVoiceConversation {
   const { t } = useTranslation("chat");
   const siriVoiceRef = useRef(siriVoice);
@@ -640,6 +694,46 @@ export function useVoiceConversationController({
     (state) => state.clearRequestedStart,
   );
   const previousPocketReady = useRef(pocketReady);
+  const routeOwnerRef = useRef<{
+    sessionId: string;
+    owner: symbol;
+  } | null>(null);
+  if (routeOwnerRef.current?.sessionId !== sessionId) {
+    routeOwnerRef.current = {
+      sessionId,
+      owner: Symbol("voice-send-route"),
+    };
+  }
+  const routeOwner = routeOwnerRef.current.owner;
+  const deliveryBlocked =
+    routeBlocked && enabled && isGooseSession && !readOnly && !routeUnavailable;
+  const startEligibilityRef = useRef<{
+    routeOwner: symbol;
+    sessionId: string;
+    inputBackend: VoiceInputBackend | null;
+    eligible: boolean;
+    deliveryBlocked: boolean;
+  }>({
+    routeOwner,
+    sessionId,
+    inputBackend,
+    eligible: false,
+    deliveryBlocked: false,
+  });
+  startEligibilityRef.current = {
+    routeOwner,
+    sessionId,
+    inputBackend,
+    eligible:
+      inputBackend !== null &&
+      enabled &&
+      isGooseSession &&
+      !readOnly &&
+      !routeUnavailable,
+    deliveryBlocked,
+  };
+  const drainPendingTranscriptsRef = useRef(drainPendingTranscripts);
+  drainPendingTranscriptsRef.current = drainPendingTranscripts;
 
   useEffect(() => {
     if (!enabled || !isGooseSession) return;
@@ -662,25 +756,46 @@ export function useVoiceConversationController({
 
   useEffect(() => {
     if (enabled && isGooseSession) ensureVoiceEventDeliveryInitialized();
-    const routeIsValid = canBindVoiceSendRoute({
-      enabled,
-      isGooseSession,
-      readOnly,
-      disabled,
-    });
+    const routeCanPersist =
+      enabled && isGooseSession && !readOnly && !routeUnavailable;
+    const routeCanClaim =
+      routeCanPersist &&
+      canBindVoiceSendRoute({ enabled, isGooseSession, readOnly, disabled });
+    const registeredRoute: VoiceSendRoute = {
+      owner: routeOwner,
+      sessionId,
+      send: onSend,
+      blocked: deliveryBlocked,
+      canClaim: routeCanClaim,
+    };
+    mountedSendRoutes.set(routeOwner, registeredRoute);
     const activeVoiceSessionId = status.sessionId;
     const routeMount = resolveVoiceRouteMount({
-      routeIsValid,
+      routeIsValid: routeCanClaim,
       activeVoiceSessionId,
       boundRouteSessionId: activeSendRoute?.sessionId ?? null,
       candidateSessionId: sessionId,
     });
-    if (routeMount.claimRoute) {
-      activeSendRoute = { sessionId, send: onSend };
-    } else if (!routeIsValid && activeSendRoute?.sessionId === sessionId) {
-      activeSendRoute = null;
+    if (activeSendRoute?.owner === routeOwner) {
+      if (routeCanPersist) {
+        activeSendRoute = registeredRoute;
+      } else {
+        releaseVoiceSendRoute(routeOwner);
+        mountedSendRoutes.set(routeOwner, registeredRoute);
+      }
+    } else if (
+      routeMount.claimRoute &&
+      (activeSendRoute === null ||
+        activeSendRoute.sessionId !== activeVoiceSessionId ||
+        !mountedSendRoutes.has(activeSendRoute.owner))
+    ) {
+      activeSendRoute = registeredRoute;
     }
-    if (routeMount.drainPending) {
+    if (
+      routeMount.drainPending &&
+      activeSendRoute?.owner === routeOwner &&
+      !activeSendRoute.blocked
+    ) {
       const routeSessionId = activeSendRoute?.sessionId;
       if (!routeSessionId) return;
       void drainPendingTranscripts(
@@ -697,14 +812,32 @@ export function useVoiceConversationController({
     isGooseSession,
     onSend,
     readOnly,
+    deliveryBlocked,
+    routeOwner,
+    routeUnavailable,
     sessionId,
     status.sessionId,
   ]);
+
+  useEffect(
+    () => () => {
+      const replacement = releaseVoiceSendRoute(routeOwner, true);
+      if (!replacement || replacement.blocked) return;
+      void drainPendingTranscriptsRef
+        .current(replacement.sessionId, transcriptAlreadyInChat)
+        .catch((drainError) => {
+          addErrorNotification(replacement.sessionId, errorText(drainError));
+        });
+    },
+    [routeOwner],
+  );
 
   useEffect(() => {
     if (
       status.lifecycle !== "running" ||
       status.sessionId !== sessionId ||
+      deliveryBlocked ||
+      routeUnavailable ||
       !canBindVoiceSendRoute({
         enabled,
         isGooseSession,
@@ -732,6 +865,8 @@ export function useVoiceConversationController({
     enabled,
     isGooseSession,
     readOnly,
+    deliveryBlocked,
+    routeUnavailable,
     sessionId,
     status.lifecycle,
     status.sessionId,
@@ -770,30 +905,89 @@ export function useVoiceConversationController({
   );
 
   const startCurrentConversation = useCallback(async () => {
-    if (inputBackend === null) return;
+    if (inputBackend === null) return "not-completed";
+    const readCurrentStartEligibility = () => {
+      const current = startEligibilityRef.current;
+      const stillEligible =
+        current.eligible &&
+        current.routeOwner === routeOwner &&
+        current.sessionId === sessionId &&
+        current.inputBackend === inputBackend;
+      return { current, stillEligible };
+    };
+    const startCanStillBegin = () => {
+      const { current, stillEligible } = readCurrentStartEligibility();
+      return stillEligible && !current.deliveryBlocked;
+    };
+    const startedCaptureMayContinue = () =>
+      readCurrentStartEligibility().stillEligible;
+    if (!startCanStillBegin()) return "not-completed";
     try {
       if ((await getMicrophonePermissionStatus()) === "denied") {
         onPocketSetupRequired();
-        return;
+        return "failure-reported";
       }
     } catch {
       // Permission inspection is an optimization. Capture remains the source
       // of truth and provides the recovery path for unsupported platforms,
       // stale permission state, and other audio startup failures.
     }
+    if (!startCanStillBegin()) return "not-completed";
     // Do not rely on the mount effect racing ahead of the user's first
     // click. The native recognizer can finalize quickly, so its delivery
     // subscriber must exist before the microphone lifecycle starts.
     ensureVoiceEventDeliveryInitialized();
     const assistantSpeechHistory =
       captureNativeAssistantSpeechHistory(sessionId);
-    const route = { sessionId, send: onSend };
-    activeSendRoute = route;
+    let route: VoiceSendRoute | null = null;
     try {
       const foregroundGeneration =
         await confirmVoiceConversationForegroundSession(sessionId);
-      await start(sessionId, inputBackend, foregroundGeneration);
+      if (!startCanStillBegin()) return "not-completed";
+      const { current: currentStartEligibility } =
+        readCurrentStartEligibility();
+      route = {
+        owner: routeOwner,
+        sessionId,
+        send: onSend,
+        blocked: currentStartEligibility.deliveryBlocked,
+        canClaim: true,
+      };
+      mountedSendRoutes.set(routeOwner, route);
+      activeSendRoute = route;
+      const startedStatus = await start(
+        sessionId,
+        inputBackend,
+        foregroundGeneration,
+      );
+      if (!startedCaptureMayContinue()) {
+        if (activeSendRoute?.owner === route.owner) {
+          releaseVoiceSendRoute(route.owner);
+        }
+        if (
+          startedStatus.sessionId === sessionId &&
+          startedStatus.lifecycle !== "stopped" &&
+          startedStatus.lifecycle !== "unavailable"
+        ) {
+          const currentStatus = useVoiceConversationStore.getState().status;
+          const staleLifecycleIsStillCurrent =
+            currentStatus.sessionId === startedStatus.sessionId &&
+            currentStatus.ownerWindowLabel === startedStatus.ownerWindowLabel &&
+            currentStatus.revision === startedStatus.revision &&
+            currentStatus.lifecycle !== "stopped" &&
+            currentStatus.lifecycle !== "unavailable";
+          if (staleLifecycleIsStillCurrent) {
+            try {
+              await stop();
+            } catch (stopError) {
+              addErrorNotification(sessionId, errorText(stopError));
+            }
+          }
+        }
+        return "not-completed";
+      }
       startAssistantSpeech(assistantSpeechHistory);
+      return "completed";
     } catch (startError) {
       const backendStatus = useVoiceConversationStore.getState().status;
       const currentWindowLabel = getCurrentWindow().label;
@@ -802,8 +996,8 @@ export function useVoiceConversationController({
         backendStatus.sessionId === sessionId &&
         backendStatus.ownerWindowLabel === currentWindowLabel;
       if (isVoiceMicrophoneCaptureError(startError)) {
-        if (activeSendRoute?.sessionId === route.sessionId) {
-          activeSendRoute = null;
+        if (route && activeSendRoute?.owner === route.owner) {
+          releaseVoiceSendRoute(route.owner);
         }
         addErrorNotification(sessionId, errorText(startError));
         let cleanupError: unknown = null;
@@ -830,7 +1024,7 @@ export function useVoiceConversationController({
           addErrorNotification(sessionId, errorText(cleanupError));
         }
         onPocketSetupRequired();
-        return;
+        return "failure-reported";
       }
       let conversationStarted = false;
       if (exactOwnerLifecycleSurvived) {
@@ -871,16 +1065,18 @@ export function useVoiceConversationController({
         }
       }
       if (!conversationStarted) {
-        if (activeSendRoute?.sessionId === route.sessionId) {
-          activeSendRoute = null;
+        if (route && activeSendRoute?.owner === route.owner) {
+          releaseVoiceSendRoute(route.owner);
         }
         addErrorNotification(sessionId, errorText(startError));
       }
+      return conversationStarted ? "completed" : "failure-reported";
     }
   }, [
     inputBackend,
     onPocketSetupRequired,
     onSend,
+    routeOwner,
     sessionId,
     start,
     startAssistantSpeech,
@@ -993,7 +1189,8 @@ export function useVoiceConversationController({
   ]);
 
   const isActive = status.sessionId !== null && status.lifecycle !== "stopped";
-  const sessionEligible = enabled && isGooseSession && !readOnly && !disabled;
+  const sessionEligible =
+    enabled && isGooseSession && !readOnly && !disabled && !routeUnavailable;
   const canToggle = sessionEligible && (!pocketReady || status.available);
 
   const toggle = useCallback(async () => {
@@ -1044,7 +1241,7 @@ export function useVoiceConversationController({
                 confirmVoiceConversationForegroundSession(sessionId),
               start: startCurrentConversation,
             });
-            if (!replaced) {
+            if (replaced === "not-completed") {
               addErrorNotification(
                 sessionId,
                 t("toolbar.voiceConversation.buddy.errors.stop"),

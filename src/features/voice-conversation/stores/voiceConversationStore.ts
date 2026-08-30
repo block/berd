@@ -87,7 +87,11 @@ const voiceStartsInFlight = new Map<string, Promise<VoiceConversationStatus>>();
 const eventSubscribers = new Set<
   (event: VoiceConversationEvent) => void | Promise<void>
 >();
-const transcriptDeliveries = new Map<string, Promise<boolean>>();
+type TranscriptDeliveryOutcome = "accepted" | "deferred" | "rejected";
+const transcriptDeliveries = new Map<
+  string,
+  Promise<TranscriptDeliveryOutcome>
+>();
 const deliveredTranscripts = new Set<string>();
 const deliveredTranscriptOrder: string[] = [];
 const MAX_DELIVERED_TRANSCRIPT_KEYS = 256;
@@ -111,6 +115,8 @@ export function subscribeToVoiceConversationEvents(
   eventSubscribers.add(subscriber);
   return () => eventSubscribers.delete(subscriber);
 }
+
+export class VoiceTranscriptDeferredError extends Error {}
 
 export async function blockVoiceConversationStarts(
   sessionId: string,
@@ -161,12 +167,12 @@ function rememberDeliveredTranscript(key: string) {
 
 async function deliverTranscriptOnce(
   transcript: PendingVoiceTranscript,
-): Promise<boolean> {
+): Promise<TranscriptDeliveryOutcome> {
   const key = transcriptKey(transcript);
   if (deliveredTranscripts.has(key)) {
     await acknowledgeVoiceConversationTranscript(transcript);
     priorFinalizedTranscriptKeys.delete(key);
-    return true;
+    return "accepted";
   }
 
   const existing = transcriptDeliveries.get(key);
@@ -175,17 +181,22 @@ async function deliverTranscriptOnce(
   const event = { type: "user" as const, ...transcript };
   const finalizedKey = finalizedTranscriptKey(transcript);
   const subscribers = [...eventSubscribers];
-  if (subscribers.length === 0) return false;
+  if (subscribers.length === 0) return "rejected";
   const delivery = (async () => {
     const results = await Promise.allSettled(
       subscribers.map((subscriber) => subscriber(event)),
     );
     const accepted = results.some((result) => result.status === "fulfilled");
+    const deferred = results.some(
+      (result) =>
+        result.status === "rejected" &&
+        result.reason instanceof VoiceTranscriptDeferredError,
+    );
     if (accepted) {
       rememberDeliveredTranscript(key);
       await acknowledgeVoiceConversationTranscript(transcript);
       priorFinalizedTranscriptKeys.delete(key);
-    } else {
+    } else if (!deferred) {
       const rejection = await rejectVoiceConversationTranscript(transcript);
       if (rejection.terminal) {
         const priorKey = priorFinalizedTranscriptKeys.get(key) ?? null;
@@ -205,7 +216,7 @@ async function deliverTranscriptOnce(
         );
       }
     }
-    return accepted;
+    return accepted ? "accepted" : deferred ? "deferred" : "rejected";
   })().finally(() => transcriptDeliveries.delete(key));
 
   transcriptDeliveries.set(key, delivery);
@@ -978,7 +989,9 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
         if (!alreadyDelivered || current === null || current === key) {
           observeFinalizedTranscript(transcript);
         }
-        if (!(await deliverTranscriptOnce(transcript))) {
+        const outcome = await deliverTranscriptOnce(transcript);
+        if (outcome === "deferred") return;
+        if (outcome === "rejected") {
           throw new Error("Voice transcript delivery was rejected.");
         }
       }

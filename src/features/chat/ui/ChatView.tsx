@@ -244,6 +244,18 @@ export function ChatView({
     voiceInput.backend,
     voiceOutput.backend,
   );
+  const voiceAdmissionPermanentlyBlocked =
+    composerBinding.target.kind === "existingSession" &&
+    Boolean(composerBinding.target.admission.blockingReason);
+  const voiceDeliveryTemporarilyBlocked =
+    !voiceAdmissionPermanentlyBlocked &&
+    ((composerBinding.target.kind === "existingSession" &&
+      composerBinding.target.admission.securityConfirmationPending) ||
+      controller.projectMetadataPending ||
+      controller.isCompactingContext ||
+      controller.isLoadingHistory ||
+      !controller.workspaceContextReady ||
+      controller.queue.queuedMessage !== null);
   const voiceConversation = useVoiceConversationController({
     sessionId,
     // Voice delivery only needs to wait for admission. Holding its per-session
@@ -264,13 +276,9 @@ export function ChatView({
       });
     },
     readOnly: Boolean(readOnlyStatus),
-    disabled:
-      admissionBlocked ||
-      controller.projectMetadataPending ||
-      controller.isCompactingContext ||
-      controller.isLoadingHistory ||
-      !controller.workspaceContextReady ||
-      controller.queue.queuedMessage !== null,
+    routeBlocked: voiceDeliveryTemporarilyBlocked,
+    routeUnavailable: voiceAdmissionPermanentlyBlocked,
+    disabled: admissionBlocked || voiceDeliveryTemporarilyBlocked,
   });
   const isAgentBuilderOpen = agentBuilderOpenForLayout;
   const patchSession = useChatSessionStore((s) => s.patchSession);

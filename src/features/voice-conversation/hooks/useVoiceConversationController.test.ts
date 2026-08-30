@@ -17,6 +17,11 @@ const voiceApiMocks = vi.hoisted(() => ({
 const microphonePermissionMocks = vi.hoisted(() => ({
   getStatus: vi.fn<() => Promise<"authorized" | "denied">>(),
 }));
+const voiceStoreMocks = vi.hoisted(() => ({
+  subscriber: undefined as
+    | ((event: Record<string, unknown>) => void | Promise<void>)
+    | undefined,
+}));
 
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({ label: tauriWindowMocks.label }),
@@ -37,6 +42,18 @@ vi.mock("../api/voiceConversation", async (importOriginal) => ({
 
 vi.mock("../api/microphonePermission", () => ({
   getMicrophonePermissionStatus: microphonePermissionMocks.getStatus,
+}));
+
+vi.mock("../stores/voiceConversationStore", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("../stores/voiceConversationStore")
+  >()),
+  subscribeToVoiceConversationEvents: (
+    subscriber: (event: Record<string, unknown>) => void | Promise<void>,
+  ) => {
+    voiceStoreMocks.subscriber = subscriber;
+    return () => undefined;
+  },
 }));
 
 import {
@@ -210,13 +227,539 @@ describe("voice transcript delivery coordination", () => {
     nativeAssistantSpeechMocks.capture.mockClear();
     nativeAssistantSpeechMocks.start.mockClear();
     nativeAssistantSpeechMocks.stop.mockClear();
-    nativeAssistantSpeechMocks.takeNotices.mockClear();
+    nativeAssistantSpeechMocks.takeNotices.mockReset();
+    nativeAssistantSpeechMocks.takeNotices.mockReturnValue(null);
     voiceApiMocks.confirmForegroundSession.mockReset();
     voiceApiMocks.confirmForegroundSession.mockResolvedValue(1);
     microphonePermissionMocks.getStatus.mockReset();
     microphonePermissionMocks.getStatus.mockResolvedValue("authorized");
     useChatStore.setState({ messagesBySession: {}, sessionStateById: {} });
   });
+
+  it("delivers a queued transcript after its chat becomes temporarily ineligible", async () => {
+    const onSend = vi.fn().mockResolvedValue(true);
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-1",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 1,
+      },
+      uiState: "listening",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+    });
+    const { rerender } = renderHook(
+      ({ disabled }) =>
+        useVoiceConversationController({
+          sessionId: "session-1",
+          onSend,
+          enabled: true,
+          isGooseSession: true,
+          pocketReady: true,
+          onPocketSetupRequired: vi.fn(),
+          disabled,
+        }),
+      { initialProps: { disabled: false } },
+    );
+
+    await waitFor(() => expect(voiceStoreMocks.subscriber).toBeDefined());
+    rerender({ disabled: true });
+    await act(async () => {
+      await voiceStoreMocks.subscriber?.({
+        type: "user",
+        sessionId: "session-1",
+        lifecycleId: "lifecycle-1",
+        id: "utterance-1",
+        text: "keep this route",
+        revision: 1,
+        deliveryAttempts: 0,
+      });
+    });
+
+    expect(onSend).toHaveBeenCalledWith(
+      "keep this route",
+      undefined,
+      undefined,
+      expect.objectContaining({ displayText: "keep this route" }),
+    );
+  });
+
+  it("releases a retained transcript route when the chat becomes read-only", async () => {
+    const onSend = vi.fn().mockResolvedValue(true);
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-1",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 1,
+      },
+      uiState: "listening",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+    });
+    const { rerender } = renderHook(
+      ({ readOnly, routeBlocked }) =>
+        useVoiceConversationController({
+          sessionId: "session-1",
+          onSend,
+          enabled: true,
+          isGooseSession: true,
+          pocketReady: true,
+          onPocketSetupRequired: vi.fn(),
+          readOnly,
+          routeBlocked,
+        }),
+      { initialProps: { readOnly: false, routeBlocked: false } },
+    );
+
+    await waitFor(() => expect(voiceStoreMocks.subscriber).toBeDefined());
+    rerender({ readOnly: true, routeBlocked: true });
+    await expect(
+      voiceStoreMocks.subscriber?.({
+        type: "user",
+        sessionId: "session-1",
+        lifecycleId: "lifecycle-1",
+        id: "utterance-read-only",
+        text: "do not deliver",
+        revision: 1,
+        deliveryAttempts: 0,
+      }),
+    ).rejects.toThrow("bound chat is unavailable");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("releases a retained transcript route after permanent admission failure", async () => {
+    const onSend = vi.fn().mockResolvedValue(true);
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-1",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 1,
+      },
+      uiState: "listening",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+    });
+    const { rerender } = renderHook(
+      ({ disabled, routeUnavailable }) =>
+        useVoiceConversationController({
+          sessionId: "session-1",
+          onSend,
+          enabled: true,
+          isGooseSession: true,
+          pocketReady: true,
+          onPocketSetupRequired: vi.fn(),
+          disabled,
+          routeUnavailable,
+        }),
+      { initialProps: { disabled: false, routeUnavailable: false } },
+    );
+
+    await waitFor(() => expect(voiceStoreMocks.subscriber).toBeDefined());
+    rerender({ disabled: true, routeUnavailable: true });
+    await expect(
+      voiceStoreMocks.subscriber?.({
+        type: "user",
+        sessionId: "session-1",
+        lifecycleId: "lifecycle-1",
+        id: "utterance-admission-failed",
+        text: "do not deliver",
+        revision: 1,
+        deliveryAttempts: 0,
+      }),
+    ).rejects.toThrow("bound chat is unavailable");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("defers mid-flight without error UI or consuming playback context", async () => {
+    const onSend = vi.fn().mockResolvedValue(true);
+    nativeAssistantSpeechMocks.takeNotices.mockReturnValue("playback context");
+    useChatStore.getState().setChatState("session-1", "waiting");
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-1",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 1,
+      },
+      uiState: "listening",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+      drainPendingTranscripts: vi.fn().mockResolvedValue(undefined),
+    });
+    const { rerender } = renderHook(
+      ({ routeBlocked }) =>
+        useVoiceConversationController({
+          sessionId: "session-1",
+          onSend,
+          enabled: true,
+          isGooseSession: true,
+          pocketReady: true,
+          onPocketSetupRequired: vi.fn(),
+          routeBlocked,
+        }),
+      { initialProps: { routeBlocked: false } },
+    );
+
+    await waitFor(() => expect(voiceStoreMocks.subscriber).toBeDefined());
+    const transcript = {
+      type: "user",
+      sessionId: "session-1",
+      lifecycleId: "lifecycle-1",
+      id: "utterance-mid-flight",
+      text: "deliver after the block",
+      revision: 1,
+      deliveryAttempts: 0,
+    };
+    const delivery = voiceStoreMocks.subscriber?.(transcript);
+    await waitFor(() =>
+      expect(useVoiceConversationStore.getState().uiState).toBe(
+        "user-speaking",
+      ),
+    );
+
+    rerender({ routeBlocked: true });
+    act(() => useChatStore.getState().setChatState("session-1", "idle"));
+
+    await expect(delivery).rejects.toThrow("waiting for its bound chat");
+    expect(useVoiceConversationStore.getState().uiState).toBe("listening");
+    expect(nativeAssistantSpeechMocks.takeNotices).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(
+      useChatStore.getState().messagesBySession["session-1"] ?? [],
+    ).toEqual([]);
+
+    rerender({ routeBlocked: false });
+    await expect(
+      voiceStoreMocks.subscriber?.(transcript),
+    ).resolves.toBeUndefined();
+    expect(onSend).toHaveBeenCalledWith(
+      "deliver after the block",
+      undefined,
+      undefined,
+      expect.objectContaining({
+        assistantPrompt: "playback context",
+        displayText: "deliver after the block",
+      }),
+    );
+  });
+
+  it("defers transcripts until admission is unblocked", async () => {
+    const onSend = vi.fn().mockResolvedValue(true);
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-1",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 1,
+      },
+      uiState: "listening",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+    });
+    const { rerender } = renderHook(
+      ({ routeBlocked }) =>
+        useVoiceConversationController({
+          sessionId: "session-1",
+          onSend,
+          enabled: true,
+          isGooseSession: true,
+          pocketReady: true,
+          onPocketSetupRequired: vi.fn(),
+          routeBlocked,
+        }),
+      { initialProps: { routeBlocked: false } },
+    );
+
+    await waitFor(() => expect(voiceStoreMocks.subscriber).toBeDefined());
+    rerender({ routeBlocked: true });
+    await expect(
+      voiceStoreMocks.subscriber?.({
+        type: "user",
+        sessionId: "session-1",
+        lifecycleId: "lifecycle-1",
+        id: "utterance-admission-blocked",
+        text: "do not deliver",
+        revision: 1,
+        deliveryAttempts: 0,
+      }),
+    ).rejects.toThrow("waiting for its bound chat");
+    expect(onSend).not.toHaveBeenCalled();
+
+    rerender({ routeBlocked: false });
+    await expect(
+      voiceStoreMocks.subscriber?.({
+        type: "user",
+        sessionId: "session-1",
+        lifecycleId: "lifecycle-1",
+        id: "utterance-after-admission-block",
+        text: "deliver after unblock",
+        revision: 1,
+        deliveryAttempts: 0,
+      }),
+    ).resolves.toBeUndefined();
+    expect(onSend).toHaveBeenCalledWith(
+      "deliver after unblock",
+      undefined,
+      undefined,
+      expect.objectContaining({ displayText: "deliver after unblock" }),
+    );
+  });
+
+  it("uses blocking state from the mounted route that owns the call", async () => {
+    const ownerSend = vi.fn().mockResolvedValue(true);
+    const duplicateSend = vi.fn().mockResolvedValue(true);
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-multi-view",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 1,
+      },
+      uiState: "listening",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+    });
+
+    renderHook(() =>
+      useVoiceConversationController({
+        sessionId: "session-multi-view",
+        onSend: ownerSend,
+        enabled: true,
+        isGooseSession: true,
+        pocketReady: true,
+        onPocketSetupRequired: vi.fn(),
+        routeBlocked: false,
+      }),
+    );
+    renderHook(() =>
+      useVoiceConversationController({
+        sessionId: "session-multi-view",
+        onSend: duplicateSend,
+        enabled: true,
+        isGooseSession: true,
+        pocketReady: true,
+        onPocketSetupRequired: vi.fn(),
+        routeBlocked: true,
+      }),
+    );
+
+    await waitFor(() => expect(voiceStoreMocks.subscriber).toBeDefined());
+    await expect(
+      voiceStoreMocks.subscriber?.({
+        type: "user",
+        sessionId: "session-multi-view",
+        lifecycleId: "lifecycle-multi-view",
+        id: "utterance-owner-ready",
+        text: "deliver through the owner",
+        revision: 1,
+        deliveryAttempts: 0,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(ownerSend).toHaveBeenCalledOnce();
+    expect(duplicateSend).not.toHaveBeenCalled();
+  });
+
+  it("keeps a blocked owner authoritative until it unmounts", async () => {
+    const ownerSend = vi.fn().mockResolvedValue(true);
+    const replacementSend = vi.fn().mockResolvedValue(true);
+    const drainPendingTranscripts = vi.fn().mockResolvedValue(undefined);
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-owner-blocked",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 1,
+      },
+      uiState: "listening",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+      drainPendingTranscripts,
+    });
+
+    const owner = renderHook(
+      ({ routeBlocked }) =>
+        useVoiceConversationController({
+          sessionId: "session-owner-blocked",
+          onSend: ownerSend,
+          enabled: true,
+          isGooseSession: true,
+          pocketReady: true,
+          onPocketSetupRequired: vi.fn(),
+          routeBlocked,
+        }),
+      { initialProps: { routeBlocked: false } },
+    );
+    owner.rerender({ routeBlocked: true });
+    renderHook(() =>
+      useVoiceConversationController({
+        sessionId: "session-owner-blocked",
+        onSend: replacementSend,
+        enabled: true,
+        isGooseSession: true,
+        pocketReady: true,
+        onPocketSetupRequired: vi.fn(),
+        routeBlocked: false,
+      }),
+    );
+
+    await waitFor(() => expect(voiceStoreMocks.subscriber).toBeDefined());
+    const transcript = {
+      type: "user",
+      sessionId: "session-owner-blocked",
+      lifecycleId: "lifecycle-owner-blocked",
+      id: "utterance-owner-blocked",
+      text: "wait for the owner",
+      revision: 1,
+      deliveryAttempts: 0,
+    };
+    await expect(voiceStoreMocks.subscriber?.(transcript)).rejects.toThrow(
+      "waiting for its bound chat",
+    );
+    expect(ownerSend).not.toHaveBeenCalled();
+    expect(replacementSend).not.toHaveBeenCalled();
+
+    owner.unmount();
+    await waitFor(() => expect(drainPendingTranscripts).toHaveBeenCalled());
+    await expect(
+      voiceStoreMocks.subscriber?.(transcript),
+    ).resolves.toBeUndefined();
+    expect(replacementSend).toHaveBeenCalledOnce();
+  });
+
+  it("preserves the active route while its view is unmounted", async () => {
+    const ownerSend = vi.fn().mockResolvedValue(true);
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-unmounted-owner",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 1,
+      },
+      uiState: "listening",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+    });
+
+    const owner = renderHook(() =>
+      useVoiceConversationController({
+        sessionId: "session-unmounted-owner",
+        onSend: ownerSend,
+        enabled: true,
+        isGooseSession: true,
+        pocketReady: true,
+        onPocketSetupRequired: vi.fn(),
+      }),
+    );
+
+    await waitFor(() => expect(voiceStoreMocks.subscriber).toBeDefined());
+    owner.unmount();
+    await expect(
+      voiceStoreMocks.subscriber?.({
+        type: "user",
+        sessionId: "session-unmounted-owner",
+        lifecycleId: "lifecycle-unmounted-owner",
+        id: "utterance-after-navigation",
+        text: "keep listening after navigation",
+        revision: 1,
+        deliveryAttempts: 0,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(ownerSend).toHaveBeenCalledOnce();
+  });
+
+  it("keeps an unmounted blocked route deferred until a replacement mounts", async () => {
+    const ownerSend = vi.fn().mockResolvedValue(true);
+    const replacementSend = vi.fn().mockResolvedValue(true);
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-unmounted-blocked",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 1,
+      },
+      uiState: "listening",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+    });
+    const owner = renderHook(
+      ({ routeBlocked }) =>
+        useVoiceConversationController({
+          sessionId: "session-unmounted-blocked",
+          onSend: ownerSend,
+          enabled: true,
+          isGooseSession: true,
+          pocketReady: true,
+          onPocketSetupRequired: vi.fn(),
+          routeBlocked,
+        }),
+      { initialProps: { routeBlocked: false } },
+    );
+
+    await waitFor(() => expect(voiceStoreMocks.subscriber).toBeDefined());
+    owner.rerender({ routeBlocked: true });
+    owner.unmount();
+    const transcript = {
+      type: "user",
+      sessionId: "session-unmounted-blocked",
+      lifecycleId: "lifecycle-unmounted-blocked",
+      id: "utterance-unmounted-blocked",
+      text: "wait for a safe route",
+      revision: 1,
+      deliveryAttempts: 0,
+    };
+    await expect(voiceStoreMocks.subscriber?.(transcript)).rejects.toThrow(
+      "waiting for its bound chat",
+    );
+    expect(ownerSend).not.toHaveBeenCalled();
+
+    renderHook(() =>
+      useVoiceConversationController({
+        sessionId: "session-unmounted-blocked",
+        onSend: replacementSend,
+        enabled: true,
+        isGooseSession: true,
+        pocketReady: true,
+        onPocketSetupRequired: vi.fn(),
+      }),
+    );
+    await expect(
+      voiceStoreMocks.subscriber?.(transcript),
+    ).resolves.toBeUndefined();
+    expect(replacementSend).toHaveBeenCalledOnce();
+  });
+
   it("serializes deliveries for the same session and re-evaluates in order", async () => {
     const enqueue = createVoiceTranscriptDeliveryQueue();
     const events: string[] = [];
@@ -1277,6 +1820,323 @@ describe("voice transcript delivery coordination", () => {
     expect(nativeAssistantSpeechMocks.stop).not.toHaveBeenCalled();
   });
 
+  it("does not start after admission becomes permanently unavailable", async () => {
+    const stopped = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "stopped" as const,
+      sessionId: null,
+      ownerWindowLabel: null,
+      microphoneMuted: false,
+      revision: 1,
+    };
+    const refreshRequest = deferred<typeof stopped>();
+    const start = vi.fn().mockResolvedValue({
+      ...stopped,
+      lifecycle: "starting" as const,
+      sessionId: "session-a",
+      ownerWindowLabel: "main",
+      revision: 2,
+    });
+    useVoiceConversationStore.setState({
+      status: stopped,
+      uiState: "off",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+      refreshStatus: vi.fn().mockReturnValue(refreshRequest.promise),
+      start,
+    });
+    const options = {
+      sessionId: "session-a",
+      onSend: vi.fn().mockResolvedValue(true),
+      enabled: true,
+      isGooseSession: true,
+      pocketReady: true,
+      onPocketSetupRequired: vi.fn(),
+    };
+    const control = renderHook(
+      ({ routeUnavailable }) =>
+        useVoiceConversationController({ ...options, routeUnavailable }),
+      { initialProps: { routeUnavailable: false } },
+    );
+
+    let toggling!: Promise<void>;
+    act(() => {
+      toggling = Promise.resolve(control.result.current.onToggle());
+    });
+    control.rerender({ routeUnavailable: true });
+    refreshRequest.resolve(stopped);
+    await toggling;
+
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it("does not start after admission becomes temporarily blocked", async () => {
+    const stopped = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "stopped" as const,
+      sessionId: null,
+      ownerWindowLabel: null,
+      microphoneMuted: false,
+      revision: 1,
+    };
+    const foregroundRequest = deferred<number>();
+    const start = vi.fn().mockResolvedValue({
+      ...stopped,
+      lifecycle: "starting" as const,
+      sessionId: "session-a",
+      ownerWindowLabel: "main",
+      revision: 2,
+    });
+    voiceApiMocks.confirmForegroundSession.mockReturnValue(
+      foregroundRequest.promise,
+    );
+    useVoiceConversationStore.setState({
+      status: stopped,
+      uiState: "off",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+      refreshStatus: vi.fn().mockResolvedValue(stopped),
+      start,
+    });
+    const options = {
+      sessionId: "session-a",
+      onSend: vi.fn().mockResolvedValue(true),
+      enabled: true,
+      isGooseSession: true,
+      pocketReady: true,
+      onPocketSetupRequired: vi.fn(),
+    };
+    const control = renderHook(
+      ({ routeBlocked }) =>
+        useVoiceConversationController({
+          ...options,
+          routeBlocked,
+          disabled: routeBlocked,
+        }),
+      { initialProps: { routeBlocked: false } },
+    );
+
+    let toggling!: Promise<void>;
+    act(() => {
+      toggling = Promise.resolve(control.result.current.onToggle());
+    });
+    await vi.waitFor(() =>
+      expect(voiceApiMocks.confirmForegroundSession).toHaveBeenCalledOnce(),
+    );
+    act(() => {
+      control.rerender({ routeBlocked: true });
+    });
+    await act(async () => {
+      foregroundRequest.resolve(1);
+      await toggling;
+    });
+
+    expect(start).not.toHaveBeenCalled();
+    expect(nativeAssistantSpeechMocks.start).not.toHaveBeenCalled();
+  });
+
+  it("stops a native start when admission becomes unavailable in flight", async () => {
+    const stopped = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "stopped" as const,
+      sessionId: null,
+      ownerWindowLabel: null,
+      microphoneMuted: false,
+      revision: 1,
+    };
+    const starting = {
+      ...stopped,
+      lifecycle: "starting" as const,
+      sessionId: "session-a",
+      ownerWindowLabel: "main",
+      revision: 2,
+    };
+    const startRequest = deferred<typeof starting>();
+    const start = vi.fn().mockImplementation(async () => {
+      const status = await startRequest.promise;
+      useVoiceConversationStore.setState({ status, uiState: "starting" });
+      return status;
+    });
+    const stop = vi.fn().mockResolvedValue(stopped);
+    useVoiceConversationStore.setState({
+      status: stopped,
+      uiState: "off",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+      refreshStatus: vi.fn().mockResolvedValue(stopped),
+      start,
+      stop,
+    });
+    const options = {
+      sessionId: "session-a",
+      onSend: vi.fn().mockResolvedValue(true),
+      enabled: true,
+      isGooseSession: true,
+      pocketReady: true,
+      onPocketSetupRequired: vi.fn(),
+    };
+    const control = renderHook(
+      ({ routeUnavailable }) =>
+        useVoiceConversationController({ ...options, routeUnavailable }),
+      { initialProps: { routeUnavailable: false } },
+    );
+
+    let toggling!: Promise<void>;
+    act(() => {
+      toggling = Promise.resolve(control.result.current.onToggle());
+    });
+    await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
+    await act(async () => {
+      control.rerender({ routeUnavailable: true });
+      startRequest.resolve(starting);
+      await toggling;
+    });
+
+    expect(stop).toHaveBeenCalledOnce();
+    expect(nativeAssistantSpeechMocks.start).not.toHaveBeenCalled();
+  });
+
+  it("keeps a native start alive through a temporary delivery block", async () => {
+    const stopped = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "stopped" as const,
+      sessionId: null,
+      ownerWindowLabel: null,
+      microphoneMuted: false,
+      revision: 1,
+    };
+    const starting = {
+      ...stopped,
+      lifecycle: "starting" as const,
+      sessionId: "session-a",
+      ownerWindowLabel: "main",
+      revision: 2,
+    };
+    const startRequest = deferred<typeof starting>();
+    const start = vi.fn().mockImplementation(async () => {
+      const status = await startRequest.promise;
+      useVoiceConversationStore.setState({ status, uiState: "starting" });
+      return status;
+    });
+    const stop = vi.fn().mockResolvedValue(stopped);
+    useVoiceConversationStore.setState({
+      status: stopped,
+      uiState: "off",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+      refreshStatus: vi.fn().mockResolvedValue(stopped),
+      start,
+      stop,
+    });
+    const options = {
+      sessionId: "session-a",
+      onSend: vi.fn().mockResolvedValue(true),
+      enabled: true,
+      isGooseSession: true,
+      pocketReady: true,
+      onPocketSetupRequired: vi.fn(),
+    };
+    const control = renderHook(
+      ({ routeBlocked }) =>
+        useVoiceConversationController({
+          ...options,
+          routeBlocked,
+          disabled: routeBlocked,
+        }),
+      { initialProps: { routeBlocked: false } },
+    );
+
+    let toggling!: Promise<void>;
+    act(() => {
+      toggling = Promise.resolve(control.result.current.onToggle());
+    });
+    await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
+    await act(async () => {
+      control.rerender({ routeBlocked: true });
+      startRequest.resolve(starting);
+      await toggling;
+    });
+
+    expect(stop).not.toHaveBeenCalled();
+    expect(nativeAssistantSpeechMocks.start).toHaveBeenCalledOnce();
+  });
+
+  it("does not stop a replacement lifecycle after a stale start returns", async () => {
+    const stopped = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "stopped" as const,
+      sessionId: null,
+      ownerWindowLabel: null,
+      microphoneMuted: false,
+      revision: 1,
+    };
+    const staleStarting = {
+      ...stopped,
+      lifecycle: "starting" as const,
+      sessionId: "session-a",
+      ownerWindowLabel: "main",
+      revision: 2,
+    };
+    const replacement = {
+      ...staleStarting,
+      lifecycle: "running" as const,
+      sessionId: "session-b",
+      ownerWindowLabel: "session-window",
+      revision: 3,
+    };
+    const startRequest = deferred<typeof staleStarting>();
+    const start = vi.fn().mockImplementation(async () => {
+      const status = await startRequest.promise;
+      useVoiceConversationStore.setState({
+        status: replacement,
+        uiState: "listening",
+      });
+      return status;
+    });
+    const stop = vi.fn().mockResolvedValue(stopped);
+    useVoiceConversationStore.setState({
+      status: stopped,
+      uiState: "off",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+      refreshStatus: vi.fn().mockResolvedValue(stopped),
+      start,
+      stop,
+    });
+    const options = {
+      sessionId: "session-a",
+      onSend: vi.fn().mockResolvedValue(true),
+      enabled: true,
+      isGooseSession: true,
+      pocketReady: true,
+      onPocketSetupRequired: vi.fn(),
+    };
+    const control = renderHook(
+      ({ routeUnavailable }) =>
+        useVoiceConversationController({ ...options, routeUnavailable }),
+      { initialProps: { routeUnavailable: false } },
+    );
+
+    let toggling!: Promise<void>;
+    act(() => {
+      toggling = Promise.resolve(control.result.current.onToggle());
+    });
+    await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
+    await act(async () => {
+      control.rerender({ routeUnavailable: true });
+      startRequest.resolve(staleStarting);
+      await toggling;
+    });
+
+    expect(stop).not.toHaveBeenCalled();
+    expect(nativeAssistantSpeechMocks.start).not.toHaveBeenCalled();
+  });
+
   it("deduplicates concurrent controls for the same session", async () => {
     const stopped = {
       available: true,
@@ -1385,14 +2245,14 @@ describe("voice transcript delivery coordination", () => {
           finishStop = resolve;
         }),
     );
-    const start = vi.fn().mockResolvedValue(undefined);
+    const start = vi.fn().mockResolvedValue("completed" as const);
 
     const replacement = replaceActiveVoiceConversation({ stop, start });
     await Promise.resolve();
     expect(start).not.toHaveBeenCalled();
 
     finishStop?.({ lifecycle: "stopped", sessionId: null });
-    await expect(replacement).resolves.toBe(true);
+    await expect(replacement).resolves.toBe("completed");
     expect(start).toHaveBeenCalledOnce();
   });
 
@@ -1407,16 +2267,17 @@ describe("voice transcript delivery coordination", () => {
     });
     const start = vi.fn(async () => {
       order.push("start");
+      return "completed" as const;
     });
 
     await expect(
       replaceActiveVoiceConversation({ stop, confirmTarget, start }),
-    ).resolves.toBe(true);
+    ).resolves.toBe("completed");
     expect(order).toEqual(["stop", "confirm", "start"]);
   });
 
   it("does not start when the target changes after stopping", async () => {
-    const start = vi.fn().mockResolvedValue(undefined);
+    const start = vi.fn().mockResolvedValue("completed" as const);
 
     await expect(
       replaceActiveVoiceConversation({
@@ -1436,7 +2297,7 @@ describe("voice transcript delivery coordination", () => {
   });
 
   it("does not start a replacement when the active call remains running", async () => {
-    const start = vi.fn().mockResolvedValue(undefined);
+    const start = vi.fn().mockResolvedValue("completed" as const);
 
     await expect(
       replaceActiveVoiceConversation({
@@ -1446,12 +2307,12 @@ describe("voice transcript delivery coordination", () => {
         }),
         start,
       }),
-    ).resolves.toBe(false);
+    ).resolves.toBe("not-completed");
     expect(start).not.toHaveBeenCalled();
   });
 
   it("does not start a replacement when stopping the active call fails", async () => {
-    const start = vi.fn().mockResolvedValue(undefined);
+    const start = vi.fn().mockResolvedValue("completed" as const);
 
     await expect(
       replaceActiveVoiceConversation({
@@ -1460,6 +2321,30 @@ describe("voice transcript delivery coordination", () => {
       }),
     ).rejects.toThrow("stop failed");
     expect(start).not.toHaveBeenCalled();
+  });
+
+  it("reports when replacement admission blocks the new start", async () => {
+    await expect(
+      replaceActiveVoiceConversation({
+        stop: vi.fn().mockResolvedValue({
+          lifecycle: "stopped",
+          sessionId: null,
+        }),
+        start: vi.fn().mockResolvedValue("not-completed"),
+      }),
+    ).resolves.toBe("not-completed");
+  });
+
+  it("preserves replacement failures that were already reported", async () => {
+    await expect(
+      replaceActiveVoiceConversation({
+        stop: vi.fn().mockResolvedValue({
+          lifecycle: "stopped",
+          sessionId: null,
+        }),
+        start: vi.fn().mockResolvedValue("failure-reported"),
+      }),
+    ).resolves.toBe("failure-reported");
   });
 
   it("drains retained transcripts without stealing a stopped session route", () => {
