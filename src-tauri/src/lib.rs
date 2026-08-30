@@ -656,6 +656,8 @@ pub fn run() {
             commands::pocket_voice::stop_pocket_voice,
             commands::pocket_voice::remove_voice_model,
             commands::openai_audio::get_openai_voice_status,
+            commands::openai_audio::set_openai_stt_api_key,
+            commands::openai_audio::clear_openai_stt_api_key,
             commands::openai_audio::set_openai_tts_api_key,
             commands::openai_audio::clear_openai_tts_api_key,
             commands::openai_audio::start_openai_voice_stream,

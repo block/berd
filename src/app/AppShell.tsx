@@ -745,7 +745,9 @@ export function AppShell({
   );
   const globalVoiceOutput = useVoiceOutputPreference();
   const globalOpenAiVoiceSetup = useOpenAiVoiceSetup(
-    capabilities.voiceConversation && globalVoiceOutput.backend === "openai",
+    capabilities.voiceConversation &&
+      (globalVoiceInput.backend === "openai" ||
+        globalVoiceOutput.backend === "openai"),
   );
   const globalSiriVoiceSetup = useSiriVoiceSetup(
     capabilities.voiceConversation && globalVoiceOutput.backend === "siri",

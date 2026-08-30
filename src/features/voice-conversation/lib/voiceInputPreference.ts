@@ -1,14 +1,16 @@
 import { useCallback, useSyncExternalStore } from "react";
 import type { MacSpeechStatus } from "../api/macSpeech";
 
-export type VoiceInputBackend = "parakeet" | "macos";
+export type VoiceInputBackend = "parakeet" | "macos" | "openai";
 
 const STORAGE_KEY = "goose:voice-input-backend";
 const CHANGED_EVENT = "goose:voice-input-backend-changed";
 let inMemoryBackend: VoiceInputBackend | null = null;
 
 function normalizeStored(value: unknown): VoiceInputBackend | null {
-  return value === "parakeet" || value === "macos" ? value : null;
+  return value === "parakeet" || value === "macos" || value === "openai"
+    ? value
+    : null;
 }
 
 export function getStoredVoiceInputBackend(): VoiceInputBackend | null {
@@ -28,6 +30,7 @@ export function resolveVoiceInputBackend(
 ): VoiceInputBackend | null {
   if (macSpeechAvailable === null) return null;
   if (stored === "parakeet") return "parakeet";
+  if (stored === "openai") return "openai";
   if (stored === "macos" && macSpeechAvailable) return "macos";
   return macSpeechAvailable ? "macos" : "parakeet";
 }

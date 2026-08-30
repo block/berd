@@ -1,7 +1,7 @@
-//! OpenAI streaming speech playback for voice conversations.
+//! OpenAI realtime transcription configuration and streaming speech playback.
 
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     mpsc, Arc, Mutex,
 };
 #[cfg(any(test, target_os = "macos"))]
@@ -31,15 +31,17 @@ use super::{
     native_voice::{InterruptionSensitivity, NativeVoiceState},
     openai_voice_credentials::{self, OpenAiVoiceCredential},
     pocket_voice::VoiceInterruptionMode,
+    voice_capture::VoiceCaptureState,
 };
 #[cfg(any(test, target_os = "macos"))]
 use std::time::Instant;
 
-#[cfg(target_os = "macos")]
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
+const DEFAULT_TRANSCRIPTION_MODEL: &str = "gpt-live-transcribe";
 const DEFAULT_TTS_MODEL: &str = "gpt-4o-mini-tts";
 const DEFAULT_TTS_VOICE: &str = "marin";
 const BASE_URL_ENV: &str = "BERD_OPENAI_VOICE_BASE_URL";
+const STT_MODEL_ENV: &str = "BERD_OPENAI_STT_MODEL";
 const TTS_MODEL_ENV: &str = "BERD_OPENAI_TTS_MODEL";
 const TTS_VOICE_ENV: &str = "BERD_OPENAI_TTS_VOICE";
 const SETTINGS_CHANGED_EVENT: &str = "openai-voice:settings-changed";
@@ -63,6 +65,14 @@ const MAX_FINAL_PLAYBACK_DRAIN: Duration = Duration::from_secs(600);
 #[derive(Clone, Debug, Default)]
 pub struct OpenAiVoiceState {
     playback: Arc<Mutex<PlaybackRuntime>>,
+    configured: Arc<AtomicBool>,
+    credential_revision: Arc<AtomicU64>,
+}
+
+impl OpenAiVoiceState {
+    pub(crate) fn is_configured(&self) -> bool {
+        self.configured.load(Ordering::Acquire)
+    }
 }
 
 #[derive(Debug)]
@@ -101,8 +111,13 @@ enum OpenAiStreamCommand {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenAiVoiceStatus {
+    stt_configured: bool,
     tts_configured: bool,
+    stt_configuration_source: OpenAiVoiceConfigurationSource,
     tts_configuration_source: OpenAiVoiceConfigurationSource,
+    stt_unavailable_reason: Option<String>,
+    tts_unavailable_reason: Option<String>,
+    transcription_model: String,
     speech_model: String,
     speech_voice: String,
     playback_speed: f32,
@@ -168,7 +183,10 @@ fn tts_api_key() -> Result<String, String> {
     openai_voice_credentials::require(OpenAiVoiceCredential::TextToSpeech)
 }
 
-#[cfg(any(test, target_os = "macos"))]
+pub(crate) fn stt_api_key() -> Result<String, String> {
+    openai_voice_credentials::require(OpenAiVoiceCredential::SpeechToText)
+}
+
 fn normalize_openai_base_url(raw_url: String) -> Result<String, String> {
     let mut url = reqwest::Url::parse(&raw_url)
         .map_err(|error| format!("OpenAI voice endpoint is invalid: {error}"))?;
@@ -190,12 +208,32 @@ fn normalize_openai_base_url(raw_url: String) -> Result<String, String> {
     Ok(url.to_string().trim_end_matches('/').to_string())
 }
 
-#[cfg(target_os = "macos")]
 fn base_url() -> Result<String, String> {
     if let Some(base_url) = env_trimmed(BASE_URL_ENV) {
         return normalize_openai_base_url(base_url);
     }
     Ok(DEFAULT_BASE_URL.to_string())
+}
+
+pub(crate) fn realtime_endpoint() -> Result<String, String> {
+    let mut url = reqwest::Url::parse(&endpoint("realtime")?)
+        .map_err(|error| format!("OpenAI realtime endpoint is invalid: {error}"))?;
+    url.query_pairs_mut().append_pair("intent", "transcription");
+    match url.scheme() {
+        "http" => url.set_scheme("ws").expect("compatible scheme"),
+        "https" => url.set_scheme("wss").expect("compatible scheme"),
+        "ws" | "wss" => {}
+        scheme => {
+            return Err(format!(
+                "OpenAI realtime endpoint has unsupported scheme: {scheme}"
+            ))
+        }
+    }
+    Ok(url.to_string())
+}
+
+pub(crate) fn transcription_model() -> String {
+    env_trimmed(STT_MODEL_ENV).unwrap_or_else(|| DEFAULT_TRANSCRIPTION_MODEL.to_string())
 }
 
 fn speech_model() -> String {
@@ -217,12 +255,21 @@ fn tts_configuration_source() -> OpenAiVoiceConfigurationSource {
     }
 }
 
-#[cfg(target_os = "macos")]
+fn stt_configuration_source() -> OpenAiVoiceConfigurationSource {
+    if [BASE_URL_ENV, STT_MODEL_ENV]
+        .iter()
+        .any(|name| env_trimmed(name).is_some())
+    {
+        OpenAiVoiceConfigurationSource::Environment
+    } else {
+        OpenAiVoiceConfigurationSource::Default
+    }
+}
+
 fn endpoint(path: &str) -> Result<String, String> {
     endpoint_for_base_url(&base_url()?, path)
 }
 
-#[cfg(any(test, target_os = "macos"))]
 fn endpoint_for_base_url(base_url: &str, path: &str) -> Result<String, String> {
     let mut url = reqwest::Url::parse(base_url)
         .map_err(|error| format!("OpenAI voice endpoint is invalid: {error}"))?;
@@ -291,19 +338,28 @@ pub async fn get_openai_voice_status(
         .map_err(|_| "OpenAI voice playback state lock was poisoned".to_string())?
         .speed;
     let tts_available = cfg!(target_os = "macos");
-    let tts_configured = if tts_available {
-        tauri::async_runtime::spawn_blocking(|| {
-            openai_voice_credentials::read(OpenAiVoiceCredential::TextToSpeech)
-        })
-        .await
-        .map_err(|error| format!("Could not check OpenAI voice credentials: {error}"))??
-        .is_some()
-    } else {
-        false
-    };
+    let credential_revision = state.credential_revision.load(Ordering::Acquire);
+    let credential_result = tauri::async_runtime::spawn_blocking(move || {
+        openai_voice_credentials::read(OpenAiVoiceCredential::SpeechToText)
+    })
+    .await
+    .map_err(|error| format!("Could not check OpenAI voice credentials: {error}"))?;
+    let credential_error = credential_result.as_ref().err().cloned();
+    let stt_error = credential_error.clone();
+    let tts_error = tts_available.then_some(credential_error).flatten();
+    let stt_configured = credential_result.unwrap_or(None).is_some();
+    let tts_configured = tts_available && stt_configured;
+    if state.credential_revision.load(Ordering::Acquire) == credential_revision {
+        state.configured.store(stt_configured, Ordering::Release);
+    }
     Ok(OpenAiVoiceStatus {
+        stt_configured,
         tts_configured,
+        stt_configuration_source: stt_configuration_source(),
         tts_configuration_source: tts_configuration_source(),
+        stt_unavailable_reason: stt_error,
+        tts_unavailable_reason: tts_error,
+        transcription_model: transcription_model(),
         speech_model: speech_model(),
         speech_voice: speech_voice(),
         playback_speed,
@@ -319,32 +375,89 @@ pub async fn get_openai_voice_status(
 }
 
 #[tauri::command]
-pub fn set_openai_tts_api_key(
+pub async fn set_openai_stt_api_key(
     app: AppHandle,
     state: State<'_, OpenAiVoiceState>,
+    native_voice: State<'_, NativeVoiceState>,
+    capture: State<'_, VoiceCaptureState>,
+    api_key: String,
+) -> Result<(), String> {
+    let api_key = api_key.trim();
+    if api_key.is_empty() {
+        return Err("OpenAI speech-to-text API key cannot be empty".to_string());
+    }
+    native_voice
+        .stop_active_then(&app, &capture, || {
+            stop_openai_voice_inner(&state)?;
+            openai_voice_credentials::store(OpenAiVoiceCredential::SpeechToText, api_key)?;
+            state.credential_revision.fetch_add(1, Ordering::AcqRel);
+            state.configured.store(true, Ordering::Release);
+            app.emit(SETTINGS_CHANGED_EVENT, ())
+                .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))
+        })
+        .await
+}
+
+#[tauri::command]
+pub async fn clear_openai_stt_api_key(
+    app: AppHandle,
+    state: State<'_, OpenAiVoiceState>,
+    native_voice: State<'_, NativeVoiceState>,
+    capture: State<'_, VoiceCaptureState>,
+) -> Result<(), String> {
+    native_voice
+        .stop_active_then(&app, &capture, || {
+            stop_openai_voice_inner(&state)?;
+            openai_voice_credentials::clear(OpenAiVoiceCredential::SpeechToText)?;
+            state.credential_revision.fetch_add(1, Ordering::AcqRel);
+            state.configured.store(false, Ordering::Release);
+            app.emit(SETTINGS_CHANGED_EVENT, ())
+                .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))
+        })
+        .await
+}
+
+#[tauri::command]
+pub async fn set_openai_tts_api_key(
+    app: AppHandle,
+    state: State<'_, OpenAiVoiceState>,
+    native_voice: State<'_, NativeVoiceState>,
+    capture: State<'_, VoiceCaptureState>,
     api_key: String,
 ) -> Result<(), String> {
     let api_key = api_key.trim();
     if api_key.is_empty() {
         return Err("OpenAI text-to-speech API key cannot be empty".to_string());
     }
-    stop_openai_voice_inner(&state)?;
-    openai_voice_credentials::store(OpenAiVoiceCredential::TextToSpeech, api_key)?;
-    app.emit(SETTINGS_CHANGED_EVENT, ())
-        .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))?;
-    Ok(())
+    native_voice
+        .stop_active_then(&app, &capture, || {
+            stop_openai_voice_inner(&state)?;
+            openai_voice_credentials::store(OpenAiVoiceCredential::TextToSpeech, api_key)?;
+            state.credential_revision.fetch_add(1, Ordering::AcqRel);
+            state.configured.store(true, Ordering::Release);
+            app.emit(SETTINGS_CHANGED_EVENT, ())
+                .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))
+        })
+        .await
 }
 
 #[tauri::command]
-pub fn clear_openai_tts_api_key(
+pub async fn clear_openai_tts_api_key(
     app: AppHandle,
     state: State<'_, OpenAiVoiceState>,
+    native_voice: State<'_, NativeVoiceState>,
+    capture: State<'_, VoiceCaptureState>,
 ) -> Result<(), String> {
-    stop_openai_voice_inner(&state)?;
-    openai_voice_credentials::clear(OpenAiVoiceCredential::TextToSpeech)?;
-    app.emit(SETTINGS_CHANGED_EVENT, ())
-        .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))?;
-    Ok(())
+    native_voice
+        .stop_active_then(&app, &capture, || {
+            stop_openai_voice_inner(&state)?;
+            openai_voice_credentials::clear(OpenAiVoiceCredential::TextToSpeech)?;
+            state.credential_revision.fetch_add(1, Ordering::AcqRel);
+            state.configured.store(false, Ordering::Release);
+            app.emit(SETTINGS_CHANGED_EVENT, ())
+                .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))
+        })
+        .await
 }
 
 #[tauri::command]
@@ -1202,6 +1315,7 @@ mod tests {
     #[test]
     fn voice_configuration_uses_berd_scoped_environment_names() {
         assert_eq!(BASE_URL_ENV, "BERD_OPENAI_VOICE_BASE_URL");
+        assert_eq!(STT_MODEL_ENV, "BERD_OPENAI_STT_MODEL");
         assert_eq!(TTS_MODEL_ENV, "BERD_OPENAI_TTS_MODEL");
         assert_eq!(TTS_VOICE_ENV, "BERD_OPENAI_TTS_VOICE");
     }
@@ -1234,6 +1348,16 @@ mod tests {
             started + grace,
         ));
         assert_eq!(drained_at, None);
+    }
+
+    #[test]
+    fn configured_readiness_does_not_require_reading_the_secret() {
+        let state = OpenAiVoiceState::default();
+        assert!(!state.is_configured());
+
+        state.configured.store(true, Ordering::Release);
+
+        assert!(state.is_configured());
     }
 
     #[cfg(target_os = "macos")]

@@ -33,8 +33,13 @@ function deferred<T>() {
 
 function status(configured: boolean): OpenAiVoiceStatus {
   return {
+    sttConfigured: configured,
     ttsConfigured: configured,
+    sttConfigurationSource: "default",
     ttsConfigurationSource: "default",
+    sttUnavailableReason: null,
+    ttsUnavailableReason: null,
+    transcriptionModel: "gpt-live-transcribe",
     speechModel: "gpt-4o-mini-tts",
     speechVoice: "marin",
     playbackSpeed: 1,
@@ -65,13 +70,13 @@ describe("useOpenAiVoiceSetup", () => {
     act(() => mocks.settingsChanged?.());
     refreshed.resolve(status(true));
     await waitFor(() =>
-      expect(result.current.status?.ttsConfigured).toBe(true),
+      expect(result.current.status?.sttConfigured).toBe(true),
     );
 
     initial.resolve(status(false));
     await act(async () => Promise.resolve());
 
-    expect(result.current.status?.ttsConfigured).toBe(true);
+    expect(result.current.status?.sttConfigured).toBe(true);
   });
 
   it("refreshes after listener registration captures credential changes", async () => {
@@ -84,7 +89,7 @@ describe("useOpenAiVoiceSetup", () => {
     act(() => mocks.finishListening?.());
 
     await waitFor(() =>
-      expect(result.current.status?.ttsConfigured).toBe(true),
+      expect(result.current.status?.sttConfigured).toBe(true),
     );
   });
 
@@ -95,7 +100,7 @@ describe("useOpenAiVoiceSetup", () => {
     const { result } = renderHook(() => useOpenAiVoiceSetup());
 
     await waitFor(() =>
-      expect(result.current.status?.ttsConfigured).toBe(true),
+      expect(result.current.status?.sttConfigured).toBe(true),
     );
   });
 

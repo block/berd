@@ -236,7 +236,8 @@ export function ChatView({
   );
   const voiceOutput = useVoiceOutputPreference();
   const openAiVoiceSetup = useOpenAiVoiceSetup(
-    capabilities.voiceConversation && voiceOutput.backend === "openai",
+    capabilities.voiceConversation &&
+      (voiceInput.backend === "openai" || voiceOutput.backend === "openai"),
   );
   const siriVoiceSetup = useSiriVoiceSetup(
     capabilities.voiceConversation && voiceOutput.backend === "siri",

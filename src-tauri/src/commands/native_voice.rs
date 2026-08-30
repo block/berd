@@ -41,6 +41,10 @@ const SILENCE_FLUSH_FRAMES: usize = 75;
 const FINAL_TRANSCRIPT_DELIVERY_TIMEOUT_SECONDS: u64 = 5;
 const FINAL_TRANSCRIPT_DELIVERY_TIMEOUT: Duration =
     Duration::from_secs(FINAL_TRANSCRIPT_DELIVERY_TIMEOUT_SECONDS);
+const OPENAI_NETWORK_OPERATION_TIMEOUT: Duration = Duration::from_secs(5);
+const OPENAI_FINAL_WRITE_TIMEOUT: Duration = Duration::from_secs(1);
+const OPENAI_STARTUP_TIMEOUT: Duration = Duration::from_secs(12);
+const OPENAI_PRE_ROLL_CHUNKS: usize = 15;
 const STT_WORKER_SHUTDOWN_TIMEOUT_SECONDS: u64 =
     mac_speech::RECOGNITION_FINISH_TIMEOUT_SECONDS + FINAL_TRANSCRIPT_DELIVERY_TIMEOUT_SECONDS + 1;
 
@@ -49,6 +53,7 @@ const STT_WORKER_SHUTDOWN_TIMEOUT_SECONDS: u64 =
 pub enum VoiceInputBackend {
     Parakeet,
     Macos,
+    Openai,
 }
 
 fn active_vad_threshold_for_speech(
@@ -603,10 +608,13 @@ impl NativeVoiceState {
             }
             // Native input mute is authoritative when installed so a hardware
             // unmute cannot be masked by a stale renderer fallback latch.
-            self.microphone_muted.store(
-                software_microphone_mute(native_microphone_mute_control, muted),
-                Ordering::SeqCst,
-            );
+            let software_muted = software_microphone_mute(native_microphone_mute_control, muted);
+            let previous_software_muted =
+                self.microphone_muted.swap(software_muted, Ordering::SeqCst);
+            if !native_microphone_mute_control && previous_software_muted != software_muted {
+                self.input_muted.store(software_muted, Ordering::Release);
+                self.input_mute_epoch.fetch_add(1, Ordering::AcqRel);
+            }
             owner_window_label
         };
         Ok(Some(owner_window_label))
@@ -775,6 +783,12 @@ struct AudioBatch {
     mute_epoch: u64,
 }
 
+type OpenAiSttPipelineStart = (
+    SttPipeline,
+    tokio_mpsc::Receiver<SttMessage>,
+    mpsc::Receiver<Result<(), String>>,
+);
+
 impl SttPipeline {
     fn new_parakeet(
         model_dir: PathBuf,
@@ -824,6 +838,64 @@ impl SttPipeline {
                 thread: Some(thread),
             },
             event_rx,
+        ))
+    }
+
+    fn new_openai(
+        api_key: String,
+        input_muted: Arc<AtomicBool>,
+        input_mute_epoch: Arc<AtomicU64>,
+        assistant_speaking: Arc<AtomicBool>,
+        assistant_vad_threshold: Arc<AtomicU32>,
+        speech_vad_threshold: f32,
+    ) -> Result<OpenAiSttPipelineStart, String> {
+        let (audio_tx, audio_rx) = mpsc::sync_channel(AUDIO_QUEUE_DEPTH);
+        let (event_tx, event_rx) = tokio_mpsc::channel(64);
+        let (startup_tx, startup_rx) = mpsc::sync_channel(0);
+        let endpoint = super::openai_audio::realtime_endpoint()?;
+        let model = super::openai_audio::transcription_model();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let discard_on_shutdown = Arc::new(AtomicBool::new(false));
+        let shutdown_mute_epoch = Arc::new(AtomicU64::new(0));
+        let worker_shutdown = Arc::clone(&shutdown);
+        let worker_discard_on_shutdown = Arc::clone(&discard_on_shutdown);
+        let worker_input_muted = Arc::clone(&input_muted);
+        let worker_input_mute_epoch = Arc::clone(&input_mute_epoch);
+        let worker_shutdown_mute_epoch = Arc::clone(&shutdown_mute_epoch);
+        let thread = thread::Builder::new()
+            .name("berd-openai-stt".into())
+            .spawn(move || {
+                openai_stt_worker(
+                    api_key,
+                    endpoint,
+                    model,
+                    audio_rx,
+                    event_tx,
+                    worker_shutdown,
+                    worker_discard_on_shutdown,
+                    worker_input_muted,
+                    worker_input_mute_epoch,
+                    worker_shutdown_mute_epoch,
+                    assistant_speaking,
+                    assistant_vad_threshold,
+                    speech_vad_threshold,
+                    startup_tx,
+                )
+            })
+            .map_err(|error| format!("start OpenAI speech recognition: {error}"))?;
+        Ok((
+            Self {
+                audio_tx,
+                audio_seen: AtomicBool::new(false),
+                shutdown,
+                discard_on_shutdown,
+                input_muted,
+                input_mute_epoch,
+                shutdown_mute_epoch,
+                thread: Some(thread),
+            },
+            event_rx,
+            startup_rx,
         ))
     }
 
@@ -1073,7 +1145,10 @@ where
 }
 
 async fn status(app: &AppHandle, state: &NativeVoiceState) -> NativeVoiceStatus {
-    let parakeet_available = parakeet_model_dir(app).is_ok();
+    let parakeet_available = parakeet_model_dir(app).is_ok()
+        || app
+            .state::<super::openai_audio::OpenAiVoiceState>()
+            .is_configured();
     #[cfg(target_os = "macos")]
     let macos_status = || async {
         mac_speech::status_async()
@@ -1231,6 +1306,14 @@ pub async fn start_native_voice_conversation(
             "Download the macOS speech recognition model before starting a call.".to_string(),
         );
     }
+    if input_backend == VoiceInputBackend::Openai {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+        while !webview_window.is_focused().unwrap_or(false)
+            && tokio::time::Instant::now() < deadline
+        {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    }
     let window_label = webview_window.label().to_string();
     let owner_id = native_owner_id(&session_id);
     let lifecycle_guard = state
@@ -1246,6 +1329,11 @@ pub async fn start_native_voice_conversation(
             )
         })
         .await?;
+    let openai_api_key = if input_backend == VoiceInputBackend::Openai {
+        Some(super::openai_audio::stt_api_key()?)
+    } else {
+        None
+    };
     let mut microphone_claimed = capture.claim_microphone(
         window_label.clone(),
         renderer_id.clone(),
@@ -1271,6 +1359,40 @@ pub async fn start_native_voice_conversation(
             Arc::clone(&state.assistant_vad_threshold),
             speech_vad_threshold,
         ),
+        VoiceInputBackend::Openai => {
+            let startup = SttPipeline::new_openai(
+                openai_api_key.expect("OpenAI key resolved for OpenAI input"),
+                Arc::clone(&state.input_muted),
+                Arc::clone(&state.input_mute_epoch),
+                Arc::clone(&state.assistant_speaking),
+                Arc::clone(&state.assistant_vad_threshold),
+                speech_vad_threshold,
+            );
+            match startup {
+                Err(error) => Err(error),
+                Ok((pipeline, events, startup)) => {
+                    let startup_result = tokio::task::spawn_blocking(move || {
+                        startup.recv_timeout(OPENAI_STARTUP_TIMEOUT)
+                    })
+                    .await;
+                    match startup_result {
+                        Ok(Ok(Ok(()))) => Ok((pipeline, events)),
+                        Ok(Ok(Err(error))) => {
+                            drop(pipeline);
+                            Err(error)
+                        }
+                        Ok(Err(error)) => {
+                            drop(pipeline);
+                            Err(format!("OpenAI transcription did not start: {error}"))
+                        }
+                        Err(error) => {
+                            drop(pipeline);
+                            Err(format!("wait for OpenAI transcription startup: {error}"))
+                        }
+                    }
+                }
+            }
+        }
     };
     let (pipeline, mut events) = match pipeline {
         Ok(result) => result,
@@ -1793,6 +1915,20 @@ impl NativeVoiceState {
         capture: &VoiceCaptureState,
     ) -> Result<(), String> {
         self.stop_active_inner(app, capture, None).await.map(|_| ())
+    }
+
+    pub(crate) async fn stop_active_then<T, F>(
+        &self,
+        app: &AppHandle,
+        capture: &VoiceCaptureState,
+        action: F,
+    ) -> Result<T, String>
+    where
+        F: FnOnce() -> Result<T, String>,
+    {
+        let _stop_guard = self.stop_serial.lock().await;
+        self.stop_active_inner_locked(app, capture, None).await?;
+        action()
     }
 
     pub async fn stop_active_for_lifecycle(
@@ -2471,6 +2607,658 @@ fn macos_stt_worker(
     }
     let delivery_deadline = Instant::now() + FINAL_TRANSCRIPT_DELIVERY_TIMEOUT;
     let _ = forward_macos_events(&mut recognition_events, &event_tx, Some(delivery_deadline));
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct OpenAiCommittedTurn {
+    item_id: String,
+    mute_epoch: u64,
+}
+
+fn block_on_openai_operation<F, T, E>(
+    runtime: &tokio::runtime::Runtime,
+    shutdown: &AtomicBool,
+    future: F,
+    action: &str,
+) -> Result<Option<T>, String>
+where
+    F: std::future::Future<Output = Result<T, E>>,
+    E: std::fmt::Display,
+{
+    runtime.block_on(async {
+        let wait_for_shutdown = async {
+            while !shutdown.load(Ordering::Acquire) {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        };
+        tokio::select! {
+            result = tokio::time::timeout(OPENAI_NETWORK_OPERATION_TIMEOUT, future) => {
+                match result {
+                    Ok(Ok(value)) => Ok(Some(value)),
+                    Ok(Err(error)) => Err(format!("{action}: {error}")),
+                    Err(_) => Err(format!("{action}: operation timed out")),
+                }
+            }
+            () = wait_for_shutdown => Ok(None),
+        }
+    })
+}
+
+async fn wait_for_openai_transcription_ready<S, E>(socket: &mut S) -> Result<(), String>
+where
+    S: futures_util::Stream<Item = Result<tokio_tungstenite::tungstenite::Message, E>> + Unpin,
+    E: std::fmt::Display,
+{
+    use futures_util::StreamExt;
+    use tokio_tungstenite::tungstenite::Message;
+
+    loop {
+        match socket.next().await {
+            Some(Ok(Message::Text(text))) => {
+                let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+                    continue;
+                };
+                match value.get("type").and_then(|value| value.as_str()) {
+                    Some("session.updated") => return Ok(()),
+                    Some("error") => {
+                        return Err(value
+                            .pointer("/error/message")
+                            .and_then(|value| value.as_str())
+                            .unwrap_or("OpenAI rejected the transcription session configuration.")
+                            .to_string());
+                    }
+                    _ => {}
+                }
+            }
+            Some(Ok(Message::Close(_))) | None => {
+                return Err(
+                    "OpenAI realtime transcription disconnected before it was ready.".to_string(),
+                );
+            }
+            Some(Ok(_)) => {}
+            Some(Err(error)) => {
+                return Err(format!(
+                    "OpenAI realtime transcription failed before it was ready: {error}"
+                ));
+            }
+        }
+    }
+}
+
+fn push_openai_pre_roll(pre_roll: &mut VecDeque<Vec<u8>>, pcm: Vec<u8>) {
+    pre_roll.push_back(pcm);
+    while pre_roll.len() > OPENAI_PRE_ROLL_CHUNKS {
+        pre_roll.pop_front();
+    }
+}
+
+fn openai_turn_reached_limit(samples_16k: usize) -> bool {
+    samples_16k >= MAX_SPEECH_SAMPLES
+}
+
+fn record_openai_transcription_event(
+    value: &serde_json::Value,
+    current_mute_epoch: u64,
+    pending_commit_epochs: &mut VecDeque<u64>,
+    committed: &mut VecDeque<OpenAiCommittedTurn>,
+    completed: &mut HashMap<String, String>,
+) -> Result<Option<OpenAiCommittedTurn>, String> {
+    let mut newly_committed = None;
+    match value.get("type").and_then(|value| value.as_str()) {
+        Some("input_audio_buffer.committed") => {
+            if let Some(item_id) = value.get("item_id").and_then(|value| value.as_str()) {
+                let turn = OpenAiCommittedTurn {
+                    item_id: item_id.to_string(),
+                    mute_epoch: pending_commit_epochs
+                        .pop_front()
+                        .unwrap_or(current_mute_epoch),
+                };
+                if turn.mute_epoch == current_mute_epoch {
+                    committed.push_back(OpenAiCommittedTurn {
+                        item_id: turn.item_id.clone(),
+                        mute_epoch: turn.mute_epoch,
+                    });
+                }
+                newly_committed = Some(turn);
+            }
+        }
+        Some("conversation.item.input_audio_transcription.completed") => {
+            if let (Some(item_id), Some(transcript)) = (
+                value.get("item_id").and_then(|value| value.as_str()),
+                value.get("transcript").and_then(|value| value.as_str()),
+            ) {
+                if committed
+                    .iter()
+                    .any(|turn| turn.item_id == item_id && turn.mute_epoch == current_mute_epoch)
+                {
+                    completed.insert(item_id.to_string(), transcript.trim().to_string());
+                }
+            }
+        }
+        Some("conversation.item.input_audio_transcription.failed") => {
+            if value
+                .get("item_id")
+                .and_then(|value| value.as_str())
+                .is_some_and(|item_id| {
+                    !committed.iter().any(|turn| {
+                        turn.item_id == item_id && turn.mute_epoch == current_mute_epoch
+                    })
+                })
+            {
+                return Ok(None);
+            }
+            return Err(value
+                .pointer("/error/message")
+                .and_then(|value| value.as_str())
+                .unwrap_or("OpenAI realtime transcription failed.")
+                .to_string());
+        }
+        Some("error") => {
+            return Err(value
+                .pointer("/error/message")
+                .and_then(|value| value.as_str())
+                .unwrap_or("OpenAI realtime transcription failed.")
+                .to_string());
+        }
+        _ => {}
+    }
+    Ok(newly_committed)
+}
+
+fn deliver_completed_openai_turns(
+    committed: &mut VecDeque<OpenAiCommittedTurn>,
+    completed: &mut HashMap<String, String>,
+    event_tx: &tokio_mpsc::Sender<SttMessage>,
+    current_mute_epoch: u64,
+    final_item_id: Option<&str>,
+    final_delivery: &mut Option<SyncSender<()>>,
+) {
+    while committed
+        .front()
+        .is_some_and(|turn| completed.contains_key(&turn.item_id))
+    {
+        let turn = committed.pop_front().expect("checked front");
+        let text = completed.remove(&turn.item_id).unwrap_or_default();
+        if turn.mute_epoch != current_mute_epoch {
+            continue;
+        }
+        let delivered = (Some(turn.item_id.as_str()) == final_item_id)
+            .then(|| final_delivery.take())
+            .flatten();
+        deliver_recognition_result(text, event_tx, delivered);
+    }
+}
+
+#[allow(clippy::too_many_arguments)] // Worker boundary keeps channel and mute lifecycle inputs explicit.
+fn openai_stt_worker(
+    key: String,
+    endpoint: String,
+    model: String,
+    audio_rx: Receiver<AudioBatch>,
+    event_tx: tokio_mpsc::Sender<SttMessage>,
+    shutdown: Arc<AtomicBool>,
+    discard_on_shutdown: Arc<AtomicBool>,
+    input_muted: Arc<AtomicBool>,
+    input_mute_epoch: Arc<AtomicU64>,
+    shutdown_mute_epoch: Arc<AtomicU64>,
+    assistant_speaking: Arc<AtomicBool>,
+    assistant_vad_threshold: Arc<AtomicU32>,
+    speech_vad_threshold: f32,
+    startup_tx: SyncSender<Result<(), String>>,
+) {
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+    use futures_util::{SinkExt, StreamExt};
+    use rubato::{Fft, FixedSync, Resampler};
+    use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
+
+    macro_rules! fail_openai_startup {
+        ($error:expr) => {{
+            let error = $error;
+            let _ = startup_tx.send(Err(error.clone()));
+            let _ = event_tx.blocking_send(SttMessage::Failed(error));
+            return;
+        }};
+    }
+
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            fail_openai_startup!(format!(
+                "Could not initialize OpenAI realtime transcription: {error}"
+            ));
+        }
+    };
+    if let Err(existing) = rustls::crypto::aws_lc_rs::default_provider().install_default() {
+        // Another dependency may have installed the same process-wide provider first.
+        drop(existing);
+    }
+    let mut request = match endpoint.into_client_request() {
+        Ok(request) => request,
+        Err(error) => {
+            fail_openai_startup!(format!("prepare OpenAI realtime connection: {error}"));
+        }
+    };
+    let authorization = match format!("Bearer {key}").parse() {
+        Ok(authorization) => authorization,
+        Err(_) => {
+            fail_openai_startup!("OpenAI API key is not a valid header value".to_string());
+        }
+    };
+    request.headers_mut().insert("Authorization", authorization);
+    let connection = block_on_openai_operation(
+        &runtime,
+        &shutdown,
+        tokio_tungstenite::connect_async(request),
+        "connect to OpenAI realtime transcription",
+    );
+    let mut socket = match connection {
+        Ok(Some((socket, _))) => socket,
+        Ok(None) => return,
+        Err(error) => {
+            fail_openai_startup!(error);
+        }
+    };
+
+    macro_rules! send_openai_startup_message {
+        ($message:expr, $action:literal) => {
+            match block_on_openai_operation(&runtime, &shutdown, socket.send($message), $action) {
+                Ok(Some(())) => {}
+                Ok(None) => return,
+                Err(error) => {
+                    fail_openai_startup!(error);
+                }
+            }
+        };
+    }
+    let session_update = serde_json::json!({
+        "type": "session.update",
+        "session": {
+            "type": "transcription",
+            "audio": { "input": {
+                "format": { "type": "audio/pcm", "rate": 24000 },
+                "transcription": { "model": model, "delay": "low" },
+                "turn_detection": null
+            }}
+        }
+    });
+    send_openai_startup_message!(
+        Message::Text(session_update.to_string().into()),
+        "configure OpenAI realtime transcription"
+    );
+
+    let mut resampler = match Fft::<f32>::new(48_000, 24_000, 960, 2, 1, FixedSync::Input) {
+        Ok(resampler) => resampler,
+        Err(error) => {
+            fail_openai_startup!(format!(
+                "Could not initialize OpenAI audio resampling: {error}"
+            ));
+        }
+    };
+    let readiness = block_on_openai_operation(
+        &runtime,
+        &shutdown,
+        wait_for_openai_transcription_ready(&mut socket),
+        "wait for OpenAI realtime transcription readiness",
+    );
+    match readiness {
+        Ok(Some(())) => {}
+        Ok(None) => return,
+        Err(error) => fail_openai_startup!(error),
+    }
+    if startup_tx.send(Ok(())).is_err() {
+        return;
+    }
+    let chunk_in = resampler.input_frames_next();
+    let mut vad = earshot::Detector::new(earshot::DefaultPredictor::new());
+    let mut input_48k = Vec::new();
+    let mut vad_16k = Vec::new();
+    let mut silence_frames = 0_usize;
+    let mut in_speech = false;
+    let mut turn_has_audio = false;
+    let mut turn_samples_16k = 0_usize;
+    let mut pre_roll = VecDeque::<Vec<u8>>::new();
+    let mut observed_mute_epoch = input_mute_epoch.load(Ordering::Acquire);
+    let mut pending_commit_epochs = VecDeque::<u64>::new();
+    let mut committed_turns = VecDeque::<OpenAiCommittedTurn>::new();
+    let mut completed_turns = HashMap::<String, String>::new();
+
+    macro_rules! send_openai_stream_message {
+        ($message:expr, $action:literal, $on_shutdown:block) => {
+            match block_on_openai_operation(&runtime, &shutdown, socket.send($message), $action) {
+                Ok(Some(())) => {}
+                Ok(None) => $on_shutdown
+                Err(error) => {
+                    let _ = event_tx.blocking_send(SttMessage::Failed(error));
+                    return;
+                }
+            }
+        };
+    }
+
+    'worker: loop {
+        let (shutting_down, current_mute_epoch) =
+            sample_effective_mute_epoch(&input_mute_epoch, &shutdown, &shutdown_mute_epoch);
+        if shutting_down {
+            break;
+        }
+        if current_mute_epoch != observed_mute_epoch {
+            observed_mute_epoch = current_mute_epoch;
+            input_48k.clear();
+            vad_16k.clear();
+            silence_frames = 0;
+            turn_has_audio = false;
+            turn_samples_16k = 0;
+            pre_roll.clear();
+            committed_turns.clear();
+            completed_turns.clear();
+            if std::mem::take(&mut in_speech) {
+                let _ = event_tx.blocking_send(SttMessage::Speaking(false));
+            }
+            send_openai_stream_message!(
+                Message::Text(
+                    serde_json::json!({"type":"input_audio_buffer.clear"})
+                        .to_string()
+                        .into()
+                ),
+                "clear muted OpenAI transcription audio",
+                { break 'worker }
+            );
+        }
+        while let Some(event) = runtime.block_on(async {
+            tokio::time::timeout(Duration::from_millis(1), socket.next())
+                .await
+                .ok()
+                .flatten()
+        }) {
+            let (shutting_down, current_mute_epoch) =
+                sample_effective_mute_epoch(&input_mute_epoch, &shutdown, &shutdown_mute_epoch);
+            if shutting_down {
+                break 'worker;
+            }
+            if current_mute_epoch != observed_mute_epoch {
+                continue 'worker;
+            }
+            let message = match event {
+                Ok(Message::Text(text)) => text,
+                Ok(Message::Close(_)) => {
+                    let _ = event_tx.blocking_send(SttMessage::Failed(
+                        "OpenAI realtime transcription disconnected.".to_string(),
+                    ));
+                    return;
+                }
+                Ok(_) => continue,
+                Err(error) => {
+                    let _ = event_tx.blocking_send(SttMessage::Failed(format!(
+                        "OpenAI realtime transcription failed: {error}"
+                    )));
+                    return;
+                }
+            };
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(&message) else {
+                continue;
+            };
+            let recorded_turn = match record_openai_transcription_event(
+                &value,
+                observed_mute_epoch,
+                &mut pending_commit_epochs,
+                &mut committed_turns,
+                &mut completed_turns,
+            ) {
+                Ok(turn) => turn,
+                Err(error) => {
+                    let _ = event_tx.blocking_send(SttMessage::Failed(error));
+                    return;
+                }
+            };
+            if let Some(turn) = recorded_turn.filter(|turn| turn.mute_epoch != observed_mute_epoch)
+            {
+                send_openai_stream_message!(
+                    Message::Text(
+                        serde_json::json!({
+                            "type": "conversation.item.delete",
+                            "item_id": turn.item_id,
+                        })
+                        .to_string()
+                        .into()
+                    ),
+                    "discard muted OpenAI transcription turn",
+                    { break 'worker }
+                );
+            }
+            deliver_completed_openai_turns(
+                &mut committed_turns,
+                &mut completed_turns,
+                &event_tx,
+                input_mute_epoch.load(Ordering::Acquire),
+                None,
+                &mut None,
+            );
+        }
+
+        let batch = match audio_rx.recv_timeout(Duration::from_millis(20)) {
+            Ok(batch) => Some(batch),
+            Err(mpsc::RecvTimeoutError::Timeout) => None,
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        };
+        let (shutting_down, current_mute_epoch) =
+            sample_effective_mute_epoch(&input_mute_epoch, &shutdown, &shutdown_mute_epoch);
+        // Stop consuming queued microphone batches as soon as shutdown begins.
+        // The bounded finalization below commits only audio already accepted by
+        // this worker, so network backpressure cannot extend the owner timeout.
+        if shutting_down {
+            break;
+        }
+        if current_mute_epoch != observed_mute_epoch {
+            continue 'worker;
+        }
+        if input_muted.load(Ordering::Acquire) {
+            continue;
+        }
+        let Some(batch) = batch else { continue };
+        if batch.mute_epoch != observed_mute_epoch {
+            continue;
+        }
+        input_48k.extend(
+            batch
+                .bytes
+                .chunks_exact(4)
+                .map(|sample| f32::from_le_bytes([sample[0], sample[1], sample[2], sample[3]])),
+        );
+        while input_48k.len() >= chunk_in {
+            let chunk: Vec<f32> = input_48k.drain(..chunk_in).collect();
+            let pcm_24k = resample(&mut resampler, &chunk);
+            let pcm_bytes: Vec<u8> = pcm_24k
+                .iter()
+                .flat_map(|sample| {
+                    ((sample.clamp(-1.0, 1.0) * i16::MAX as f32).round() as i16).to_le_bytes()
+                })
+                .collect();
+            // Earshot requires 16 kHz; use every third 48 kHz source sample for activity only.
+            vad_16k.extend(chunk.iter().step_by(3).copied());
+            let mut speech_started = false;
+            let mut should_commit = false;
+            while vad_16k.len() >= VAD_FRAME_SAMPLES {
+                let frame: Vec<f32> = vad_16k.drain(..VAD_FRAME_SAMPLES).collect();
+                let threshold = active_vad_threshold_for_speech(
+                    &assistant_speaking,
+                    &assistant_vad_threshold,
+                    speech_vad_threshold,
+                );
+                if vad.predict_f32(&frame) > threshold {
+                    silence_frames = 0;
+                    if !in_speech {
+                        in_speech = true;
+                        speech_started = true;
+                        let _ = event_tx.blocking_send(SttMessage::Speaking(true));
+                    }
+                } else if in_speech {
+                    silence_frames += 1;
+                    if silence_frames >= SILENCE_FLUSH_FRAMES {
+                        should_commit = true;
+                        silence_frames = 0;
+                        in_speech = false;
+                    }
+                }
+            }
+
+            if speech_started {
+                while let Some(pre_roll_bytes) = pre_roll.pop_front() {
+                    send_openai_stream_message!(
+                        Message::Text(
+                            serde_json::json!({
+                                "type": "input_audio_buffer.append",
+                                "audio": BASE64.encode(pre_roll_bytes)
+                            })
+                            .to_string()
+                            .into()
+                        ),
+                        "stream OpenAI transcription pre-roll",
+                        { break 'worker }
+                    );
+                }
+            }
+
+            if speech_started || in_speech || should_commit {
+                send_openai_stream_message!(
+                    Message::Text(
+                        serde_json::json!({
+                            "type": "input_audio_buffer.append",
+                            "audio": BASE64.encode(pcm_bytes)
+                        })
+                        .to_string()
+                        .into()
+                    ),
+                    "stream audio to OpenAI realtime transcription",
+                    { break 'worker }
+                );
+                turn_has_audio = true;
+                turn_samples_16k = turn_samples_16k.saturating_add(chunk.len() / 3);
+            } else {
+                push_openai_pre_roll(&mut pre_roll, pcm_bytes);
+            }
+
+            if should_commit || openai_turn_reached_limit(turn_samples_16k) {
+                send_openai_stream_message!(
+                    Message::Text(
+                        serde_json::json!({"type":"input_audio_buffer.commit"})
+                            .to_string()
+                            .into()
+                    ),
+                    "commit OpenAI transcription turn",
+                    { break 'worker }
+                );
+                pending_commit_epochs.push_back(observed_mute_epoch);
+                turn_has_audio = false;
+                turn_samples_16k = 0;
+                silence_frames = 0;
+                if std::mem::take(&mut in_speech) || should_commit {
+                    let _ = event_tx.blocking_send(SttMessage::Speaking(false));
+                }
+            }
+        }
+    }
+    if discard_on_shutdown.load(Ordering::Acquire) {
+        return;
+    }
+    let mut final_item_id = None::<String>;
+    let mut final_delivery = None::<SyncSender<()>>;
+    let mut final_delivered = None::<mpsc::Receiver<()>>;
+    if turn_has_audio {
+        let (delivered_tx, delivered_rx) = mpsc::sync_channel(0);
+        let commit = serde_json::json!({"type":"input_audio_buffer.commit"});
+        let final_write = runtime.block_on(tokio::time::timeout(
+            OPENAI_FINAL_WRITE_TIMEOUT,
+            socket.send(Message::Text(commit.to_string().into())),
+        ));
+        if matches!(final_write, Ok(Ok(()))) {
+            pending_commit_epochs.push_back(observed_mute_epoch);
+            final_delivery = Some(delivered_tx);
+            final_delivered = Some(delivered_rx);
+        }
+    }
+    if final_delivered.is_none()
+        && (!committed_turns.is_empty() || !pending_commit_epochs.is_empty())
+    {
+        let (delivered_tx, delivered_rx) = mpsc::sync_channel(0);
+        final_item_id = pending_commit_epochs
+            .is_empty()
+            .then(|| committed_turns.back().map(|turn| turn.item_id.clone()))
+            .flatten();
+        final_delivery = Some(delivered_tx);
+        final_delivered = Some(delivered_rx);
+    }
+
+    // Keep receiving until the shutdown commit itself completes. Earlier turns
+    // are delivered from the queue first, and already committed transcripts are
+    // drained even when there was no partial turn to commit at shutdown.
+    let deadline = std::time::Instant::now() + FINAL_TRANSCRIPT_DELIVERY_TIMEOUT;
+    while std::time::Instant::now() < deadline {
+        if final_delivered
+            .as_ref()
+            .is_some_and(|receiver| receiver.try_recv().is_ok())
+            || (final_delivered.is_none()
+                && committed_turns.is_empty()
+                && pending_commit_epochs.is_empty())
+        {
+            break;
+        }
+        let Some(message) = runtime.block_on(async {
+            tokio::time::timeout(Duration::from_millis(50), socket.next())
+                .await
+                .ok()
+                .flatten()
+        }) else {
+            continue;
+        };
+        let Ok(Message::Text(text)) = message else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+            continue;
+        };
+        let event_type = value.get("type").and_then(|value| value.as_str());
+        match record_openai_transcription_event(
+            &value,
+            observed_mute_epoch,
+            &mut pending_commit_epochs,
+            &mut committed_turns,
+            &mut completed_turns,
+        ) {
+            Ok(Some(turn))
+                if turn.mute_epoch == observed_mute_epoch
+                    && pending_commit_epochs.is_empty()
+                    && final_delivered.is_some() =>
+            {
+                final_item_id = Some(turn.item_id);
+            }
+            Ok(_) => {}
+            Err(error) => {
+                let _ = event_tx.blocking_send(SttMessage::Failed(error));
+                break;
+            }
+        }
+        deliver_completed_openai_turns(
+            &mut committed_turns,
+            &mut completed_turns,
+            &event_tx,
+            observed_mute_epoch,
+            final_item_id.as_deref(),
+            &mut final_delivery,
+        );
+        if event_type == Some("conversation.item.input_audio_transcription.completed")
+            && final_item_id.as_deref() == value.get("item_id").and_then(|value| value.as_str())
+            && final_delivery.is_none()
+        {
+            break;
+        }
+    }
+    // Do not await the peer's WebSocket close handshake here. OpenAI may leave
+    // it pending beyond the bounded voice-stop window; dropping the socket
+    // closes the connection after final transcript delivery has been drained.
+    drop(socket);
 }
 
 #[allow(clippy::too_many_arguments)] // Worker boundary keeps channel and mute lifecycle inputs explicit.
@@ -3309,6 +4097,32 @@ mod tests {
     }
 
     #[test]
+    fn software_microphone_mute_advances_the_audio_epoch() {
+        let state = NativeVoiceState::default();
+        {
+            let mut runtime = state.runtime.lock().expect("lock native runtime");
+            runtime.session_id = Some("session-1".to_string());
+            runtime.revision = 4;
+            runtime.owner = Some(RuntimeOwner {
+                window_label: "main".to_string(),
+            });
+            runtime.native_microphone_mute_control = false;
+        }
+
+        assert_eq!(state.input_mute_epoch.load(Ordering::Acquire), 0);
+        state
+            .set_microphone_muted_target("main", "session-1", 4, true)
+            .expect("mute");
+        assert!(state.input_muted.load(Ordering::Acquire));
+        assert_eq!(state.input_mute_epoch.load(Ordering::Acquire), 1);
+        state
+            .set_microphone_muted_target("main", "session-1", 4, false)
+            .expect("unmute");
+        assert!(!state.input_muted.load(Ordering::Acquire));
+        assert_eq!(state.input_mute_epoch.load(Ordering::Acquire), 2);
+    }
+
+    #[test]
     fn owner_stop_authorization_is_lifecycle_bound() {
         let state = NativeVoiceState::default();
         {
@@ -3971,6 +4785,393 @@ mod tests {
         assert!(delivered_rx.try_recv().is_ok());
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn openai_startup_waits_for_session_updated_before_consuming_audio() {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio::net::TcpListener;
+        use tokio::sync::oneshot;
+        use tokio_tungstenite::{accept_async, tungstenite::Message};
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let endpoint = format!(
+            "ws://{}/v1/realtime?intent=transcription",
+            listener.local_addr().unwrap()
+        );
+        let (update_seen_tx, update_seen_rx) = oneshot::channel();
+        let (ack_tx, ack_rx) = oneshot::channel();
+        let (finish_tx, finish_rx) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept");
+            let mut socket = accept_async(stream).await.expect("websocket");
+            let update = socket
+                .next()
+                .await
+                .expect("session update")
+                .expect("session update frame");
+            let Message::Text(update) = update else {
+                panic!("expected text session update");
+            };
+            let value: serde_json::Value = serde_json::from_str(&update).expect("json update");
+            assert_eq!(
+                value.get("type").and_then(|value| value.as_str()),
+                Some("session.update")
+            );
+            update_seen_tx.send(()).expect("report update");
+            ack_rx.await.expect("release acknowledgement");
+            socket
+                .send(Message::Text(
+                    serde_json::json!({"type":"session.updated"})
+                        .to_string()
+                        .into(),
+                ))
+                .await
+                .expect("send acknowledgement");
+            let _ = finish_rx.await;
+        });
+
+        let (audio_tx, audio_rx) = mpsc::sync_channel(1);
+        audio_tx
+            .try_send(AudioBatch {
+                bytes: vec![0; 4],
+                mute_epoch: 0,
+            })
+            .expect("queue initial audio");
+        let (event_tx, _event_rx) = tokio_mpsc::channel(4);
+        let (startup_tx, startup_rx) = mpsc::sync_channel(0);
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let worker_shutdown = Arc::clone(&shutdown);
+        let worker = thread::spawn(move || {
+            openai_stt_worker(
+                "test-key".to_string(),
+                endpoint,
+                "gpt-live-transcribe".to_string(),
+                audio_rx,
+                event_tx,
+                worker_shutdown,
+                Arc::new(AtomicBool::new(false)),
+                Arc::new(AtomicBool::new(false)),
+                Arc::new(AtomicU64::new(0)),
+                Arc::new(AtomicU64::new(0)),
+                Arc::new(AtomicBool::new(false)),
+                Arc::new(AtomicU32::new(VAD_THRESHOLD.to_bits())),
+                VAD_THRESHOLD,
+                startup_tx,
+            );
+        });
+
+        tokio::time::timeout(Duration::from_secs(2), update_seen_rx)
+            .await
+            .expect("session update timeout")
+            .expect("session update signal");
+        assert!(matches!(
+            startup_rx.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        assert!(matches!(
+            audio_tx.try_send(AudioBatch {
+                bytes: vec![0; 4],
+                mute_epoch: 0,
+            }),
+            Err(TrySendError::Full(_))
+        ));
+
+        ack_tx.send(()).expect("release acknowledgement");
+        let startup =
+            tokio::task::spawn_blocking(move || startup_rx.recv_timeout(Duration::from_secs(2)))
+                .await
+                .expect("join startup wait")
+                .expect("startup signal");
+        assert_eq!(startup, Ok(()));
+
+        shutdown.store(true, Ordering::Release);
+        let _ = finish_tx.send(());
+        drop(audio_tx);
+        tokio::task::spawn_blocking(move || worker.join().expect("worker"))
+            .await
+            .expect("join worker task");
+        server.await.expect("server");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn openai_startup_surfaces_error_before_session_updated() {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio::net::TcpListener;
+        use tokio_tungstenite::{accept_async, tungstenite::Message};
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let endpoint = format!(
+            "ws://{}/v1/realtime?intent=transcription",
+            listener.local_addr().unwrap()
+        );
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept");
+            let mut socket = accept_async(stream).await.expect("websocket");
+            let update = socket.next().await.expect("session update").expect("frame");
+            assert!(matches!(update, Message::Text(_)));
+            socket
+                .send(Message::Text(
+                    serde_json::json!({
+                        "type":"error",
+                        "error":{"message":"model rejected"}
+                    })
+                    .to_string()
+                    .into(),
+                ))
+                .await
+                .expect("send error");
+        });
+
+        let (audio_tx, audio_rx) = mpsc::sync_channel(1);
+        audio_tx
+            .try_send(AudioBatch {
+                bytes: vec![0; 4],
+                mute_epoch: 0,
+            })
+            .expect("queue initial audio");
+        let (event_tx, mut event_rx) = tokio_mpsc::channel(4);
+        let (startup_tx, startup_rx) = mpsc::sync_channel(0);
+        let worker = thread::spawn(move || {
+            openai_stt_worker(
+                "test-key".to_string(),
+                endpoint,
+                "bad-model".to_string(),
+                audio_rx,
+                event_tx,
+                Arc::new(AtomicBool::new(false)),
+                Arc::new(AtomicBool::new(false)),
+                Arc::new(AtomicBool::new(false)),
+                Arc::new(AtomicU64::new(0)),
+                Arc::new(AtomicU64::new(0)),
+                Arc::new(AtomicBool::new(false)),
+                Arc::new(AtomicU32::new(VAD_THRESHOLD.to_bits())),
+                VAD_THRESHOLD,
+                startup_tx,
+            );
+        });
+
+        let startup =
+            tokio::task::spawn_blocking(move || startup_rx.recv_timeout(Duration::from_secs(2)))
+                .await
+                .expect("join startup wait")
+                .expect("startup signal")
+                .expect_err("startup must fail");
+        assert!(startup.contains("model rejected"));
+        match event_rx.recv().await.expect("failure event") {
+            SttMessage::Failed(error) => assert!(error.contains("model rejected")),
+            _ => panic!("expected startup failure event"),
+        }
+
+        drop(audio_tx);
+        tokio::task::spawn_blocking(move || worker.join().expect("worker"))
+            .await
+            .expect("join worker task");
+        server.await.expect("server");
+    }
+
+    #[test]
+    fn openai_transcripts_are_delivered_in_commit_order() {
+        let mut pending_epochs = VecDeque::from([7, 7]);
+        let mut committed = VecDeque::new();
+        let mut completed = HashMap::new();
+        for item_id in ["first", "second"] {
+            record_openai_transcription_event(
+                &serde_json::json!({
+                    "type": "input_audio_buffer.committed",
+                    "item_id": item_id,
+                }),
+                7,
+                &mut pending_epochs,
+                &mut committed,
+                &mut completed,
+            )
+            .expect("commit event");
+        }
+        for (item_id, transcript) in [("second", "two"), ("first", "one")] {
+            record_openai_transcription_event(
+                &serde_json::json!({
+                    "type": "conversation.item.input_audio_transcription.completed",
+                    "item_id": item_id,
+                    "transcript": transcript,
+                }),
+                7,
+                &mut pending_epochs,
+                &mut committed,
+                &mut completed,
+            )
+            .expect("completion event");
+        }
+        let (event_tx, mut event_rx) = tokio_mpsc::channel(4);
+
+        deliver_completed_openai_turns(
+            &mut committed,
+            &mut completed,
+            &event_tx,
+            7,
+            None,
+            &mut None,
+        );
+
+        let texts = [event_rx.try_recv(), event_rx.try_recv()].map(|event| match event {
+            Ok(SttMessage::Final { text, .. }) => text,
+            _ => panic!("expected finalized transcript"),
+        });
+        assert_eq!(texts, ["one", "two"]);
+    }
+
+    #[test]
+    fn openai_transcription_ignores_commits_from_stale_mute_epochs() {
+        let mut pending_epochs = VecDeque::from([1]);
+        let mut committed = VecDeque::new();
+        let mut completed = HashMap::new();
+
+        let turn = record_openai_transcription_event(
+            &serde_json::json!({
+                "type": "input_audio_buffer.committed",
+                "item_id": "stale",
+            }),
+            2,
+            &mut pending_epochs,
+            &mut committed,
+            &mut completed,
+        )
+        .expect("commit event")
+        .expect("recorded commit");
+
+        assert_eq!(turn.mute_epoch, 1);
+        assert!(committed.is_empty());
+    }
+
+    #[test]
+    fn openai_transcription_discards_completed_turns_after_mute_changes() {
+        let mut committed = VecDeque::from([OpenAiCommittedTurn {
+            item_id: "stale".to_string(),
+            mute_epoch: 1,
+        }]);
+        let mut completed = HashMap::from([("stale".to_string(), "ignore me".to_string())]);
+        let (event_tx, mut event_rx) = tokio_mpsc::channel(1);
+
+        deliver_completed_openai_turns(
+            &mut committed,
+            &mut completed,
+            &event_tx,
+            2,
+            None,
+            &mut None,
+        );
+
+        assert!(committed.is_empty());
+        assert!(completed.is_empty());
+        assert!(event_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn openai_transcription_surfaces_protocol_failures() {
+        let error = record_openai_transcription_event(
+            &serde_json::json!({
+                "type": "conversation.item.input_audio_transcription.failed",
+                "error": { "message": "bad audio" },
+            }),
+            0,
+            &mut VecDeque::new(),
+            &mut VecDeque::new(),
+            &mut HashMap::new(),
+        )
+        .expect_err("failure event");
+
+        assert_eq!(error, "bad audio");
+    }
+
+    #[test]
+    fn openai_transcription_ignores_failures_for_discarded_turns() {
+        let mut committed = VecDeque::from([OpenAiCommittedTurn {
+            item_id: "current".to_string(),
+            mute_epoch: 2,
+        }]);
+
+        let result = record_openai_transcription_event(
+            &serde_json::json!({
+                "type": "conversation.item.input_audio_transcription.failed",
+                "item_id": "stale",
+                "error": { "message": "discarded turn failed" },
+            }),
+            2,
+            &mut VecDeque::new(),
+            &mut committed,
+            &mut HashMap::new(),
+        );
+
+        assert_eq!(result, Ok(None));
+    }
+
+    #[test]
+    fn empty_openai_final_acknowledges_shutdown_delivery() {
+        let mut committed = VecDeque::from([OpenAiCommittedTurn {
+            item_id: "final".to_string(),
+            mute_epoch: 3,
+        }]);
+        let mut completed = HashMap::from([("final".to_string(), String::new())]);
+        let (event_tx, mut event_rx) = tokio_mpsc::channel(1);
+        let (delivered_tx, delivered_rx) = mpsc::sync_channel(1);
+        let mut final_delivery = Some(delivered_tx);
+
+        deliver_completed_openai_turns(
+            &mut committed,
+            &mut completed,
+            &event_tx,
+            3,
+            Some("final"),
+            &mut final_delivery,
+        );
+
+        assert!(delivered_rx.try_recv().is_ok());
+        assert!(event_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn stalled_openai_operation_observes_shutdown() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .expect("runtime");
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let shutdown_for_thread = shutdown.clone();
+        let signal = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(30));
+            shutdown_for_thread.store(true, Ordering::Release);
+        });
+
+        let result = block_on_openai_operation(
+            &runtime,
+            shutdown.as_ref(),
+            std::future::pending::<Result<(), std::io::Error>>(),
+            "stalled operation",
+        )
+        .expect("shutdown is not an error");
+
+        signal.join().expect("shutdown signal");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn openai_idle_audio_keeps_only_bounded_pre_roll() {
+        let mut pre_roll = VecDeque::new();
+        for index in 0..(OPENAI_PRE_ROLL_CHUNKS * 4) {
+            push_openai_pre_roll(&mut pre_roll, vec![index as u8]);
+        }
+
+        assert_eq!(pre_roll.len(), OPENAI_PRE_ROLL_CHUNKS);
+        assert_eq!(
+            pre_roll.front(),
+            Some(&vec![(OPENAI_PRE_ROLL_CHUNKS * 3) as u8])
+        );
+    }
+
+    #[test]
+    fn openai_continuous_speech_has_a_turn_limit() {
+        assert!(!openai_turn_reached_limit(MAX_SPEECH_SAMPLES - 1));
+        assert!(openai_turn_reached_limit(MAX_SPEECH_SAMPLES));
+    }
+
     #[test]
     fn native_voice_events_use_renderer_field_names() {
         let event = NativeVoiceEvent::User {
@@ -4016,6 +5217,11 @@ mod tests {
             serde_json::from_str::<VoiceInputBackend>("\"macos\"")
                 .expect("deserialize macOS backend"),
             VoiceInputBackend::Macos,
+        );
+        assert_eq!(
+            serde_json::from_str::<VoiceInputBackend>("\"openai\"")
+                .expect("deserialize OpenAI backend"),
+            VoiceInputBackend::Openai,
         );
     }
 }

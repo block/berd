@@ -1,42 +1,39 @@
 //! Berd-owned credentials for OpenAI voice services.
 
-#[cfg(target_os = "macos")]
 const KEYCHAIN_SERVICE: &str = "berd-openai-voice";
-#[cfg(any(test, target_os = "macos"))]
 const KEYCHAIN_ACCOUNT: &str = "api-key";
-#[cfg(target_os = "macos")]
 const LEGACY_TTS_KEYCHAIN_ACCOUNT: &str = "tts-api-key";
 
 #[derive(Clone, Copy)]
 pub(crate) enum OpenAiVoiceCredential {
+    SpeechToText,
     TextToSpeech,
 }
 
 impl OpenAiVoiceCredential {
-    #[cfg(any(test, target_os = "macos"))]
     const fn account(self) -> &'static str {
         match self {
-            Self::TextToSpeech => KEYCHAIN_ACCOUNT,
+            Self::SpeechToText | Self::TextToSpeech => KEYCHAIN_ACCOUNT,
         }
     }
 
-    #[cfg(target_os = "macos")]
     const fn missing_message(self) -> &'static str {
         match self {
+            Self::SpeechToText => {
+                "OpenAI speech-to-text is not configured. Add the shared OpenAI voice API key in Voice settings, then try again."
+            }
             Self::TextToSpeech => {
-                "OpenAI text-to-speech is not configured. Add its API key in Voice settings, then try again."
+                "OpenAI text-to-speech is not configured. Add the shared OpenAI voice API key in Voice settings, then try again."
             }
         }
     }
 }
 
-#[cfg(target_os = "macos")]
 fn entry(account: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new(KEYCHAIN_SERVICE, account)
         .map_err(|error| format!("Could not access Berd's OpenAI voice credentials: {error}"))
 }
 
-#[cfg(target_os = "macos")]
 fn read_account(account: &str) -> Result<Option<String>, String> {
     let entry = entry(account)?;
     match entry.get_password() {
@@ -48,7 +45,6 @@ fn read_account(account: &str) -> Result<Option<String>, String> {
     }
 }
 
-#[cfg(target_os = "macos")]
 fn clear_account(account: &str) -> Result<(), String> {
     let entry = entry(account)?;
     match entry.delete_credential() {
@@ -59,7 +55,6 @@ fn clear_account(account: &str) -> Result<(), String> {
     }
 }
 
-#[cfg(any(test, target_os = "macos"))]
 fn canonical_mutation_with_legacy_cleanup<T>(
     canonical_mutation: impl FnOnce() -> Result<T, String>,
     legacy_cleanup: impl FnOnce() -> Result<(), String>,
@@ -71,7 +66,6 @@ fn canonical_mutation_with_legacy_cleanup<T>(
     Ok(value)
 }
 
-#[cfg(target_os = "macos")]
 pub(crate) fn read(credential: OpenAiVoiceCredential) -> Result<Option<String>, String> {
     if let Some(api_key) = read_account(credential.account())? {
         return Ok(Some(api_key));
@@ -83,12 +77,6 @@ pub(crate) fn read(credential: OpenAiVoiceCredential) -> Result<Option<String>, 
     Ok(Some(api_key))
 }
 
-#[cfg(not(target_os = "macos"))]
-pub(crate) fn read(_credential: OpenAiVoiceCredential) -> Result<Option<String>, String> {
-    Ok(None)
-}
-
-#[cfg(target_os = "macos")]
 pub(crate) fn store(credential: OpenAiVoiceCredential, api_key: &str) -> Result<(), String> {
     let entry = entry(credential.account())?;
     canonical_mutation_with_legacy_cleanup(
@@ -101,12 +89,6 @@ pub(crate) fn store(credential: OpenAiVoiceCredential, api_key: &str) -> Result<
     )
 }
 
-#[cfg(not(target_os = "macos"))]
-pub(crate) fn store(_credential: OpenAiVoiceCredential, _api_key: &str) -> Result<(), String> {
-    Err("OpenAI voice credentials are unsupported on this platform".to_string())
-}
-
-#[cfg(target_os = "macos")]
 pub(crate) fn clear(credential: OpenAiVoiceCredential) -> Result<(), String> {
     canonical_mutation_with_legacy_cleanup(
         || clear_account(credential.account()),
@@ -114,12 +96,6 @@ pub(crate) fn clear(credential: OpenAiVoiceCredential) -> Result<(), String> {
     )
 }
 
-#[cfg(not(target_os = "macos"))]
-pub(crate) fn clear(_credential: OpenAiVoiceCredential) -> Result<(), String> {
-    Err("OpenAI voice credentials are unsupported on this platform".to_string())
-}
-
-#[cfg(target_os = "macos")]
 pub(crate) fn require(credential: OpenAiVoiceCredential) -> Result<String, String> {
     read(credential)?.ok_or_else(|| credential.missing_message().to_string())
 }
@@ -130,7 +106,8 @@ mod tests {
     use std::cell::RefCell;
 
     #[test]
-    fn text_to_speech_uses_the_shared_voice_keychain_account() {
+    fn speech_services_use_the_shared_voice_keychain_account() {
+        assert_eq!(OpenAiVoiceCredential::SpeechToText.account(), "api-key");
         assert_eq!(OpenAiVoiceCredential::TextToSpeech.account(), "api-key");
     }
 

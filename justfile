@@ -228,6 +228,8 @@ test-siri-tts-stream-regression:
 
 [unix]
 _tauri-test-unix:
+    # rust-cache can restore Sherpa's generated cache directory without its native libraries.
+    if [ "$(uname -s)" = "Linux" ]; then rm -rf src-tauri/target/sherpa-onnx-prebuilt; fi
     just _tauri-cargo-unix test -p tauri-plugin-berdctl --features server
     just _tauri-cargo-unix test -p berdctl
     just _tauri-cargo-unix test --lib telemetry

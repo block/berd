@@ -16,7 +16,9 @@ import {
 } from "@/shared/ui/select";
 import { useEffect, useState } from "react";
 import {
+  clearOpenAiSttApiKey,
   clearOpenAiTtsApiKey,
+  setOpenAiSttApiKey,
   setOpenAiPlaybackSpeed,
   setOpenAiTtsApiKey,
 } from "../api/openAiVoice";
@@ -54,6 +56,12 @@ function readinessDescriptionKey(
 ): string | null {
   if (inputReady && outputReady) return null;
   if (!inputReady && !outputReady) {
+    if (inputBackend === "openai") {
+      if (backend === "openai") return "voice.notReadyOpenAiSttAndTts";
+      return backend === "siri"
+        ? "voice.notReadyOpenAiSttAndSiriOutput"
+        : "voice.notReadyOpenAiSttAndPocketOutput";
+    }
     if (backend === "openai") {
       return inputBackend === "macos"
         ? "voice.notReadyMacInputAndOpenAiOutput"
@@ -69,11 +77,12 @@ function readinessDescriptionKey(
       : "voice.notReadyInputAndPocketOutput";
   }
   if (!inputReady) {
+    if (inputBackend === "openai") return "voice.notReadyOpenAiStt";
     return inputBackend === "macos"
       ? "voice.notReadyMacInput"
       : "voice.notReadyInput";
   }
-  if (backend === "openai") return "voice.notReadyOpenAi";
+  if (backend === "openai") return "voice.notReadyOpenAiTts";
   return backend === "siri"
     ? "voice.notReadySiriOutput"
     : "voice.notReadyPocketOutput";
@@ -104,13 +113,15 @@ export function VoiceSettings() {
   const interruptionHeadingId = useId();
   const interruptionDescriptionId = useId();
   const inputReady =
-    input.backend === "macos"
-      ? Boolean(
-          macSpeechSetup.status?.supported &&
-            macSpeechSetup.status.localeSupported &&
-            macSpeechSetup.status.modelInstalled,
-        )
-      : (setup.status?.parakeetInstalled ?? false);
+    input.backend === "openai"
+      ? (openAiStatus?.sttConfigured ?? false)
+      : input.backend === "macos"
+        ? Boolean(
+            macSpeechSetup.status?.supported &&
+              macSpeechSetup.status.localeSupported &&
+              macSpeechSetup.status.modelInstalled,
+          )
+        : (setup.status?.parakeetInstalled ?? false);
   const outputReady =
     output.backend === "openai"
       ? Boolean(openAiStatus?.ttsConfigured && openAiStatus.ttsAvailable)
@@ -204,6 +215,9 @@ export function VoiceSettings() {
                 <SelectItem value="parakeet">
                   {t("voice.backendParakeet")}
                 </SelectItem>
+                <SelectItem value="openai">
+                  {t("voice.backendOpenAiStt")}
+                </SelectItem>
                 {macSpeechSetup.status?.supported &&
                 macSpeechSetup.status.localeSupported ? (
                   <SelectItem value="macos">
@@ -214,7 +228,32 @@ export function VoiceSettings() {
             </Select>
           )}
           details={
-            input.backend === "macos" ? (
+            input.backend === "openai" ? (
+              <div className="space-y-2">
+                <OpenAiApiKeyField
+                  label={t("voice.openAiSttApiKey")}
+                  configured={openAiStatus?.sttConfigured ?? false}
+                  onSave={setOpenAiSttApiKey}
+                  onClear={clearOpenAiSttApiKey}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {openAiError ??
+                    openAiStatus?.sttUnavailableReason ??
+                    (openAiStatus
+                      ? openAiStatus.sttConfigured
+                        ? t("voice.openAiSttConfigured", {
+                            model: openAiStatus.transcriptionModel,
+                          })
+                        : t("voice.openAiSttNotConfigured")
+                      : t("voice.openAiChecking"))}
+                </p>
+                {openAiStatus?.sttConfigurationSource === "environment" ? (
+                  <p className="text-xs text-muted-foreground">
+                    {t("voice.openAiEnvironmentOverride")}
+                  </p>
+                ) : null}
+              </div>
+            ) : input.backend === "macos" ? (
               <MacSpeechSettings setup={macSpeechSetup} />
             ) : input.backend === "parakeet" ? (
               <PocketVoiceSetupContent
@@ -275,6 +314,7 @@ export function VoiceSettings() {
                 />
                 <p className="text-xs text-muted-foreground">
                   {openAiError ??
+                    openAiStatus?.ttsUnavailableReason ??
                     (openAiStatus?.unavailableReason === "unsupportedPlatform"
                       ? t("voice.openAiTtsUnsupportedPlatform")
                       : openAiStatus?.unavailableReason === "missingApiKey"
