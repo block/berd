@@ -7,16 +7,19 @@ import { dispatchPrompt } from "./sendCore";
 import { registerRealtimeEmissary } from "@/features/voice-conversation/lib/realtimeEmissaryBridge";
 
 const mocks = vi.hoisted(() => ({
+  acpExportSession: vi.fn(),
   acpSendMessage: vi.fn(),
 }));
 
 vi.mock("@/shared/api/acp", () => ({
+  acpExportSession: (...args: unknown[]) => mocks.acpExportSession(...args),
   acpSendMessage: (...args: unknown[]) => mocks.acpSendMessage(...args),
 }));
 
 describe("dispatchPrompt pre-commit rejection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.acpExportSession.mockResolvedValue("{}");
     useChatStore.setState({
       messagesBySession: {},
       sessionStateById: {},
@@ -125,6 +128,7 @@ describe("dispatchPrompt voice conversation no-op", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.acpExportSession.mockResolvedValue("{}");
     useChatStore.setState({
       messagesBySession: {},
       sessionStateById: {},
@@ -254,6 +258,7 @@ describe("dispatchPrompt voice conversation no-op", () => {
 describe("dispatchPrompt realtime Master turn lifecycle", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.acpExportSession.mockResolvedValue("{}");
     useChatStore.setState({
       messagesBySession: {},
       sessionStateById: {},
@@ -401,6 +406,158 @@ describe("dispatchPrompt realtime Master turn lifecycle", () => {
       turnId: expect.any(String),
       status: "completed",
       finalText: "The late final answer.",
+    });
+    release();
+  });
+
+  it("keeps a new-session Master turn owned until hydration publishes its final text", async () => {
+    const endMasterTurn = vi.fn();
+    const release = registerRealtimeEmissary({
+      sessionId: "session-1",
+      beginMasterTurn: vi.fn(),
+      endMasterTurn,
+      sendMasterMessage: vi.fn(),
+    });
+    useChatStore.getState().setSessionLoading("session-1", true);
+    mocks.acpSendMessage.mockImplementationOnce(
+      (
+        sessionId: string,
+        _prompt: string,
+        options: {
+          onPromptDispatching(): void;
+          onPromptDispatched(): void;
+        },
+      ) => {
+        options.onPromptDispatching();
+        options.onPromptDispatched();
+        window.setTimeout(() => {
+          useChatStore.getState().addMessage(sessionId, {
+            id: "hydrating-master-final",
+            role: "assistant",
+            created: Date.now(),
+            content: [{ type: "text", text: "The hydrated final answer." }],
+            metadata: {
+              agentVisible: true,
+              userVisible: true,
+              completionStatus: "completed",
+            },
+          });
+          useChatStore.getState().setSessionLoading(sessionId, false);
+        }, 20);
+        return Promise.resolve();
+      },
+    );
+
+    await dispatchPrompt("session-1", "Check the answer", {});
+
+    expect(endMasterTurn).toHaveBeenCalledWith({
+      turnId: expect.any(String),
+      status: "completed",
+      finalText: "The hydrated final answer.",
+    });
+    release();
+  });
+
+  it("recovers missed Master thinking, tools, and final text from the durable turn", async () => {
+    const endMasterTurn = vi.fn();
+    const release = registerRealtimeEmissary({
+      sessionId: "session-1",
+      beginMasterTurn: vi.fn(),
+      endMasterTurn,
+      sendMasterMessage: vi.fn(),
+    });
+    mocks.acpExportSession.mockResolvedValue(
+      JSON.stringify({
+        conversation: [
+          {
+            id: "master-user",
+            role: "user",
+            created: 1_788_111_502,
+            content: [{ type: "text", text: "Count repositories" }],
+          },
+          {
+            id: "master-work",
+            role: "assistant",
+            created: 1_788_111_505,
+            content: [
+              { type: "thinking", thinking: "I should inspect the disk." },
+              {
+                type: "toolRequest",
+                id: "tool-1",
+                toolCall: {
+                  status: "success",
+                  value: { name: "shell", arguments: { command: "find" } },
+                },
+              },
+            ],
+          },
+          {
+            id: "master-tool-result",
+            role: "user",
+            created: 1_788_111_505,
+            content: [
+              {
+                type: "toolResponse",
+                id: "tool-1",
+                toolResult: {
+                  status: "success",
+                  value: {
+                    content: [{ type: "text", text: "21" }],
+                    isError: false,
+                  },
+                },
+              },
+            ],
+          },
+          {
+            id: "master-final",
+            role: "assistant",
+            created: 1_788_111_506,
+            content: [{ type: "text", text: "There are 21 repositories." }],
+          },
+        ],
+      }),
+    );
+    mocks.acpSendMessage.mockImplementationOnce(
+      (
+        _sessionId: string,
+        _prompt: string,
+        options: {
+          onPromptDispatching(): void;
+          onPromptDispatched(): void;
+        },
+      ) => {
+        options.onPromptDispatching();
+        options.onPromptDispatched();
+        return Promise.resolve();
+      },
+    );
+
+    await dispatchPrompt("session-1", "Count repositories", {});
+
+    const recovered = useChatStore
+      .getState()
+      .messagesBySession["session-1"]?.filter(
+        (message) => message.role === "assistant",
+      );
+    expect(recovered).toMatchObject([
+      {
+        id: "master-work",
+        content: [
+          { type: "thinking", text: "I should inspect the disk." },
+          { type: "toolRequest", id: "tool-1", status: "completed" },
+          { type: "toolResponse", id: "tool-1", result: "21" },
+        ],
+      },
+      {
+        id: "master-final",
+        content: [{ type: "text", text: "There are 21 repositories." }],
+      },
+    ]);
+    expect(endMasterTurn).toHaveBeenCalledWith({
+      turnId: expect.any(String),
+      status: "completed",
+      finalText: "There are 21 repositories.",
     });
     release();
   });

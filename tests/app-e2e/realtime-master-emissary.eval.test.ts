@@ -168,7 +168,7 @@ function expectCompletedTurnOrdering(
   }
 }
 
-function expectVisibleMasterWork(
+function expectVisibleMasterResult(
   transcript: string,
   question: string,
   searchFrom = 0,
@@ -176,11 +176,12 @@ function expectVisibleMasterWork(
   const questionIndex = transcript.indexOf(question, searchFrom);
   const endedIndex = transcript.indexOf(MASTER_ENDED_LABEL, questionIndex);
   const turnTranscript = transcript.slice(questionIndex, endedIndex);
-  // This evaluation deliberately asks about the local filesystem, so the
-  // Master must visibly use its ordinary Berd tool surface. Coordination
-  // bubbles are additive and must not replace the normal Command/Result work.
-  expect(turnTranscript).toContain("Command");
-  expect(turnTranscript).toContain("Result");
+  // The ordinary Master result must remain in the durable Berd transcript;
+  // coordination bubbles are additive and must not replace it. This scenario
+  // has a numeric repository answer, while the question and acknowledgements
+  // do not, making the result discriminating without requiring a specific
+  // tool implementation.
+  expect(turnTranscript).toMatch(/\b\d+\s+(?:Git\s+)?repositories\b/i);
 }
 
 function expectNoMasterDeliveryErrors(transcript: string): void {
@@ -193,9 +194,10 @@ function expectAcceptableSpeechCount(
 ): void {
   const utterances = finalizedSpeechCount - priorSpeechCount;
   // A turn may be one answer, or a short acknowledgement followed by the
-  // Master-informed answer. More than two is evidence of a coordination loop.
+  // The Emissary may acknowledge, give one waiting update, and then provide the
+  // Master-informed answer. More than three is evidence of a coordination loop.
   expect(utterances).toBeGreaterThanOrEqual(1);
-  expect(utterances).toBeLessThanOrEqual(2);
+  expect(utterances).toBeLessThanOrEqual(3);
 }
 
 async function sendTypedTurn(driver: TestDriver, text: string): Promise<void> {
@@ -285,7 +287,7 @@ describe.skipIf(!liveEvalEnabled)(
         await sendTypedTurn(driver, FIRST_QUESTION);
         const firstTurn = await waitForSettledTurn(driver, initial);
         expectCompletedTurnOrdering(firstTurn.transcript, FIRST_QUESTION);
-        expectVisibleMasterWork(firstTurn.transcript, FIRST_QUESTION);
+        expectVisibleMasterResult(firstTurn.transcript, FIRST_QUESTION);
         expectNoMasterDeliveryErrors(firstTurn.transcript);
         expectAcceptableSpeechCount(
           firstTurn.finalizedSpeechCount,
@@ -304,7 +306,7 @@ describe.skipIf(!liveEvalEnabled)(
           SECOND_QUESTION,
           firstIndex + FIRST_QUESTION.length,
         );
-        expectVisibleMasterWork(
+        expectVisibleMasterResult(
           secondTurn.transcript,
           SECOND_QUESTION,
           firstIndex + FIRST_QUESTION.length,
