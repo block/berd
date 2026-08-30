@@ -19,7 +19,6 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/shared/api/acpConnection", () => ({
   getClient: () => mocks.getClient(),
 }));
-
 describe("provider credential API", () => {
   beforeEach(() => {
     vi.clearAllMocks();

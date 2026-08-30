@@ -233,6 +233,7 @@ pub fn run() {
             app.manage(commands::model_setup::ModelSetupRegistry::default());
             app.manage(commands::pocket_voice::PocketVoiceState::default());
             app.manage(commands::siri_voice::SiriVoiceState::default());
+            app.manage(commands::openai_audio::OpenAiVoiceState::default());
             app.manage(commands::native_voice::NativeVoiceState::default());
             app.manage(commands::voice_capture::VoiceCaptureState::default());
             app.manage(commands::telemetry::TelemetryAuthState::new(
@@ -654,6 +655,15 @@ pub fn run() {
             commands::pocket_voice::finish_pocket_voice_stream,
             commands::pocket_voice::stop_pocket_voice,
             commands::pocket_voice::remove_voice_model,
+            commands::openai_audio::get_openai_voice_status,
+            commands::openai_audio::set_openai_tts_api_key,
+            commands::openai_audio::clear_openai_tts_api_key,
+            commands::openai_audio::start_openai_voice_stream,
+            commands::openai_audio::append_openai_voice_stream,
+            commands::openai_audio::flush_openai_voice_stream,
+            commands::openai_audio::finish_openai_voice_stream,
+            commands::openai_audio::stop_openai_voice,
+            commands::openai_audio::set_openai_playback_speed,
             commands::siri_voice::get_siri_voice_status,
             commands::siri_voice::select_siri_voice,
             commands::siri_voice::download_siri_voice,

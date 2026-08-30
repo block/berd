@@ -5,7 +5,7 @@ import { useVoiceConversationStore } from "../stores/voiceConversationStore";
 import type { PocketVoiceStreamEvent } from "../api/pocketVoice";
 
 const mocks = vi.hoisted(() => ({
-  backend: "pocket" as "pocket" | "siri",
+  backend: "pocket" as "pocket" | "siri" | "openai",
   interruptionMode: "automatic" as
     | "automatic"
     | "allowInterruptions"
@@ -51,6 +51,22 @@ const mocks = vi.hoisted(() => ({
   siriFinish: vi.fn<(streamId: string) => Promise<void>>(),
   siriStop: vi.fn<() => Promise<boolean>>(),
   siriStreamHandler: null as ((event: PocketVoiceStreamEvent) => void) | null,
+  openAiStart:
+    vi.fn<
+      (
+        streamId: string,
+        interruptionMode:
+          | "automatic"
+          | "allowInterruptions"
+          | "preventFeedback",
+        interruptionSensitivity: "less" | "balanced" | "more",
+      ) => Promise<void>
+    >(),
+  openAiAppend: vi.fn<(streamId: string, text: string) => Promise<void>>(),
+  openAiFlush: vi.fn<(streamId: string) => Promise<void>>(),
+  openAiFinish: vi.fn<(streamId: string) => Promise<void>>(),
+  openAiStop: vi.fn<() => Promise<boolean>>(),
+  openAiStreamHandler: null as ((event: PocketVoiceStreamEvent) => void) | null,
 }));
 vi.mock("../api/voiceConversation", () => ({
   setVoiceConversationAssistantSpeaking: mocks.setAssistantSpeaking,
@@ -71,6 +87,25 @@ vi.mock("../api/pocketVoice", () => ({
     handler: (event: PocketVoiceStreamEvent) => void,
   ) => {
     mocks.streamHandler = handler;
+    return vi.fn();
+  },
+}));
+
+vi.mock("../api/openAiVoice", () => ({
+  startOpenAiVoiceStream: (
+    streamId: string,
+    interruptionMode: typeof mocks.interruptionMode,
+    interruptionSensitivity: "less" | "balanced" | "more",
+  ) => mocks.openAiStart(streamId, interruptionMode, interruptionSensitivity),
+  appendOpenAiVoiceStream: (streamId: string, text: string) =>
+    mocks.openAiAppend(streamId, text),
+  flushOpenAiVoiceStream: (streamId: string) => mocks.openAiFlush(streamId),
+  finishOpenAiVoiceStream: (streamId: string) => mocks.openAiFinish(streamId),
+  stopOpenAiVoice: () => mocks.openAiStop(),
+  listenToOpenAiVoiceStream: async (
+    handler: (event: PocketVoiceStreamEvent) => void,
+  ) => {
+    mocks.openAiStreamHandler = handler;
     return vi.fn();
   },
 }));
@@ -181,6 +216,12 @@ describe("native assistant speech stream", () => {
     mocks.siriFinish.mockReset().mockResolvedValue();
     mocks.siriStop.mockReset().mockResolvedValue(true);
     mocks.siriStreamHandler = null;
+    mocks.openAiStart.mockReset().mockResolvedValue();
+    mocks.openAiAppend.mockReset().mockResolvedValue();
+    mocks.openAiFlush.mockReset().mockResolvedValue();
+    mocks.openAiFinish.mockReset().mockResolvedValue();
+    mocks.openAiStop.mockReset().mockResolvedValue(true);
+    mocks.openAiStreamHandler = null;
     useChatStore.setState({
       messagesBySession: {},
       sessionStateById: {},
@@ -240,6 +281,34 @@ describe("native assistant speech stream", () => {
         " text.",
       );
     });
+  });
+
+  it("routes ordering and cancellation through OpenAI when selected", async () => {
+    mocks.backend = "openai";
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "Hello from OpenAI." }], "completed"),
+      ]);
+
+    await vi.waitFor(() => {
+      expect(mocks.openAiStart).toHaveBeenCalledWith(
+        expect.any(String),
+        "automatic",
+        "less",
+      );
+      expect(mocks.openAiAppend).toHaveBeenCalledWith(
+        mocks.openAiStart.mock.calls[0]?.[0],
+        "Hello from OpenAI.",
+      );
+      expect(mocks.openAiFinish).toHaveBeenCalledTimes(1);
+    });
+    expect(mocks.openAiStart.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.openAiAppend.mock.invocationCallOrder[0] ?? 0,
+    );
+    stopNativeAssistantSpeech();
+    await vi.waitFor(() => expect(mocks.openAiStop).toHaveBeenCalled());
   });
 
   it("routes the complete utterance stream through Siri when selected", async () => {

@@ -37,8 +37,10 @@ pub mod model_setup;
 mod native_input_mute;
 pub mod native_voice;
 pub mod notifications;
+pub mod openai_audio;
 #[cfg(feature = "block-voice-dictation")]
 pub mod openai_realtime;
+mod openai_voice_credentials;
 pub mod path_resolver;
 #[cfg(target_os = "macos")]
 mod pocket_audio_player;

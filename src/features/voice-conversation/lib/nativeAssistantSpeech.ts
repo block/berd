@@ -15,6 +15,15 @@ import {
   type PocketVoiceStreamEvent,
 } from "../api/pocketVoice";
 import {
+  appendOpenAiVoiceStream,
+  finishOpenAiVoiceStream,
+  flushOpenAiVoiceStream,
+  listenToOpenAiVoiceStream,
+  startOpenAiVoiceStream,
+  stopOpenAiVoice,
+  type OpenAiVoiceStreamEvent,
+} from "../api/openAiVoice";
+import {
   appendSiriVoiceStream,
   finishSiriVoiceStream,
   flushSiriVoiceStream,
@@ -671,7 +680,7 @@ function queueStreamCommand(
 }
 
 function handleStreamEvent(
-  event: PocketVoiceStreamEvent | SiriVoiceStreamEvent,
+  event: PocketVoiceStreamEvent | SiriVoiceStreamEvent | OpenAiVoiceStreamEvent,
 ) {
   const utterance = activeUtterance;
   if (!utterance || utterance.id !== event.streamId) return;
@@ -865,8 +874,9 @@ export function startNativeAssistantSpeech(
   activeSpeechSessionId = sessionId;
   activeSpeechRevision = useVoiceConversationStore.getState().status.revision;
   const activeGeneration = generation;
+  const outputBackend = getVoiceOutputBackend();
   const streamBackend =
-    getVoiceOutputBackend() === "siri"
+    outputBackend === "siri"
       ? {
           start: (
             streamId: string,
@@ -891,14 +901,23 @@ export function startNativeAssistantSpeech(
           stop: stopSiriVoice,
           listen: listenToSiriVoiceStream,
         }
-      : {
-          start: startPocketVoiceStream,
-          append: appendPocketVoiceStream,
-          flush: flushPocketVoiceStream,
-          finish: finishPocketVoiceStream,
-          stop: stopPocketVoice,
-          listen: listenToPocketVoiceStream,
-        };
+      : outputBackend === "openai"
+        ? {
+            start: startOpenAiVoiceStream,
+            append: appendOpenAiVoiceStream,
+            flush: flushOpenAiVoiceStream,
+            finish: finishOpenAiVoiceStream,
+            stop: stopOpenAiVoice,
+            listen: listenToOpenAiVoiceStream,
+          }
+        : {
+            start: startPocketVoiceStream,
+            append: appendPocketVoiceStream,
+            flush: flushPocketVoiceStream,
+            finish: finishPocketVoiceStream,
+            stop: stopPocketVoice,
+            listen: listenToPocketVoiceStream,
+          };
   stopActiveVoice = streamBackend.stop;
   streamListenerReady = streamBackend
     .listen(handleStreamEvent)

@@ -1,7 +1,7 @@
 import { useCallback, useSyncExternalStore } from "react";
 import { getPlatform } from "@/shared/lib/platform";
 
-export type VoiceOutputBackend = "pocket" | "siri";
+export type VoiceOutputBackend = "pocket" | "siri" | "openai";
 
 const STORAGE_KEY = "goose:voice-output-backend";
 const CHANGED_EVENT = "goose:voice-output-backend-changed";
@@ -14,6 +14,7 @@ function normalize(value: unknown): VoiceOutputBackend {
   if (value === "siri") {
     return getPlatform() === "mac" ? "siri" : "pocket";
   }
+  if (value === "openai") return "openai";
   return value === "pocket" ? value : getDefaultVoiceOutputBackend();
 }
 

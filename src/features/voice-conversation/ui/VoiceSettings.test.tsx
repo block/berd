@@ -50,7 +50,33 @@ const microphonePermissionState = vi.hoisted(() => ({
   openSettingsError: false,
   openSettings: vi.fn(),
 }));
+const openAiStatusState = vi.hoisted(() => ({
+  current: {
+    ttsConfigured: true,
+    ttsConfigurationSource: "default" as "default" | "environment",
+    speechModel: "gpt-4o-mini-tts",
+    speechVoice: "marin",
+    playbackSpeed: 1,
+    ttsAvailable: true,
+    unavailableReason: null as string | null,
+  },
+}));
+const openAiApiMocks = vi.hoisted(() => ({
+  setTtsApiKey: vi.fn(() => Promise.resolve()),
+  clearTtsApiKey: vi.fn(() => Promise.resolve()),
+}));
 
+vi.mock("../api/openAiVoice", () => ({
+  setOpenAiPlaybackSpeed: vi.fn(() => Promise.resolve()),
+  setOpenAiTtsApiKey: openAiApiMocks.setTtsApiKey,
+  clearOpenAiTtsApiKey: openAiApiMocks.clearTtsApiKey,
+}));
+vi.mock("../hooks/useOpenAiVoiceSetup", () => ({
+  useOpenAiVoiceSetup: () => ({
+    status: openAiStatusState.current,
+    error: null,
+  }),
+}));
 vi.mock("../hooks/usePocketVoiceSetup", () => ({
   usePocketVoiceSetup: () => setupState.current,
 }));
@@ -191,6 +217,80 @@ describe("VoiceSettings", () => {
     };
     interruptionState.mode = "automatic";
     siriSetupState.current = siriSetup();
+    openAiStatusState.current = {
+      ttsConfigured: true,
+      ttsConfigurationSource: "default",
+      speechModel: "gpt-4o-mini-tts",
+      speechVoice: "marin",
+      playbackSpeed: 1,
+      ttsAvailable: true,
+      unavailableReason: null,
+    };
+    openAiApiMocks.setTtsApiKey.mockClear();
+    openAiApiMocks.clearTtsApiKey.mockClear();
+  });
+
+  it("renders selected OpenAI output settings", async () => {
+    outputState.backend = "openai";
+    setupState.current = setup(pocketStatus());
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      await screen.findByText(/gpt-4o-mini-tts.*marin voice/),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Playback speed")).toBeInTheDocument();
+  });
+
+  it("labels purpose-specific environment overrides", async () => {
+    outputState.backend = "openai";
+    openAiStatusState.current = {
+      ...openAiStatusState.current,
+      ttsConfigurationSource: "environment",
+    };
+    setupState.current = setup(pocketStatus());
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      await screen.findByText(
+        "Development configuration is overridden by the Berd process environment.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("saves a dedicated OpenAI text-to-speech API key", async () => {
+    outputState.backend = "openai";
+    setupState.current = setup(pocketStatus({ parakeetInstalled: true }));
+    renderWithProviders(<VoiceSettings />);
+
+    const user = userEvent.setup();
+    await user.type(
+      screen.getByLabelText("OpenAI text-to-speech API key"),
+      "tts-secret",
+    );
+    await user.click(screen.getByRole("button", { name: "Save key" }));
+
+    expect(openAiApiMocks.setTtsApiKey).toHaveBeenCalledWith("tts-secret");
+  });
+
+  it("uses OpenAI guidance when the selected OpenAI output is not ready", async () => {
+    outputState.backend = "openai";
+    openAiStatusState.current = {
+      ...openAiStatusState.current,
+      ttsConfigured: false,
+      unavailableReason:
+        "Add an OpenAI text-to-speech API key in Voice settings.",
+    };
+    setupState.current = setup(pocketStatus({ parakeetInstalled: true }));
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      await screen.findByText(
+        "OpenAI voice is not ready. Add the required API key below, then try again.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Pocket TTS is not installed/),
+    ).not.toBeInTheDocument();
   });
 
   it("shows interruption modes without VAD controls", () => {

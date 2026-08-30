@@ -65,6 +65,7 @@ import type { GlobalComposerHandoffRect } from "@/shared/ui/GlobalComposerPill";
 import { useVoiceConversationController } from "@/features/voice-conversation/hooks/useVoiceConversationController";
 import { usePocketVoiceSetup } from "@/features/voice-conversation/hooks/usePocketVoiceSetup";
 import { useMacSpeechSetup } from "@/features/voice-conversation/hooks/useMacSpeechSetup";
+import { useOpenAiVoiceSetup } from "@/features/voice-conversation/hooks/useOpenAiVoiceSetup";
 import { useSiriVoiceSetup } from "@/features/voice-conversation/hooks/useSiriVoiceSetup";
 import {
   isMacSpeechAvailable,
@@ -234,6 +235,9 @@ export function ChatView({
     isMacSpeechAvailable(macSpeechSetup.status, macSpeechSetup.loading),
   );
   const voiceOutput = useVoiceOutputPreference();
+  const openAiVoiceSetup = useOpenAiVoiceSetup(
+    capabilities.voiceConversation && voiceOutput.backend === "openai",
+  );
   const siriVoiceSetup = useSiriVoiceSetup(
     capabilities.voiceConversation && voiceOutput.backend === "siri",
   );
@@ -243,6 +247,7 @@ export function ChatView({
     siriVoiceSetup.status,
     voiceInput.backend,
     voiceOutput.backend,
+    openAiVoiceSetup.status,
   );
   const voiceAdmissionPermanentlyBlocked =
     composerBinding.target.kind === "existingSession" &&
