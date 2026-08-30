@@ -122,7 +122,48 @@ export interface TestDriver {
   ) => Promise<string>;
   scroll: (direction?: string) => Promise<string>;
   screenshot: (path?: string) => Promise<string>;
+  /** Wait until the driver accepts a fresh connection. Never replays a command. */
+  reconnect: () => Promise<void>;
   close: () => void;
+}
+
+export function isTestDriverConnectionError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message.includes("Test driver socket") ||
+    message.includes("socket closed before response") ||
+    message.includes("Cannot connect to test driver") ||
+    message.includes("ECONNRESET") ||
+    message.includes("EPIPE")
+  );
+}
+
+export async function reconnectTestDriverUntilElement(
+  driver: TestDriver,
+  selector: string,
+  {
+    timeout = READY_TIMEOUT_MS,
+    stableMs = 500,
+  }: { timeout?: number; stableMs?: number } = {},
+): Promise<void> {
+  const deadline = Date.now() + timeout;
+  let lastError: unknown;
+  while (Date.now() < deadline) {
+    try {
+      await driver.reconnect();
+      if ((await driver.count(selector)) > 0) {
+        await new Promise((resolve) => setTimeout(resolve, stableMs));
+        if ((await driver.count(selector)) > 0) return;
+      }
+    } catch (error) {
+      if (!isTestDriverConnectionError(error)) throw error;
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, READY_POLL_INTERVAL_MS));
+  }
+  throw new Error(
+    `Timed out waiting for the test driver to reconnect with ${selector}${lastError ? `: ${String(lastError)}` : ""}`,
+  );
 }
 
 function send(socket: net.Socket, command: TestDriverCommand): Promise<string> {
@@ -190,26 +231,62 @@ export async function createTestDriver({
     );
   }
   const resolvedPort = await resolveDriverPort({ port, runRoot });
-  const socket = net.createConnection({
-    port: resolvedPort,
-    host: "127.0.0.1",
-  });
-
-  await new Promise<void>((resolve, reject) => {
-    socket.on("connect", resolve);
-    socket.on("error", (err) => {
-      reject(
-        new Error(
-          `Cannot connect to test driver on port ${resolvedPort}. ` +
-            `Is the Tauri app running with --features app-test-driver? (${err.message})`,
-        ),
-      );
+  const connect = () =>
+    new Promise<net.Socket>((resolve, reject) => {
+      const nextSocket = net.createConnection({
+        port: resolvedPort,
+        host: "127.0.0.1",
+      });
+      const onConnect = () => {
+        nextSocket.removeListener("error", onError);
+        resolve(nextSocket);
+      };
+      const onError = (err: Error) => {
+        nextSocket.removeListener("connect", onConnect);
+        nextSocket.destroy();
+        reject(
+          new Error(
+            `Cannot connect to test driver on port ${resolvedPort}. ` +
+              `Is the Tauri app running with --features app-test-driver? (${err.message})`,
+          ),
+        );
+      };
+      nextSocket.once("connect", onConnect);
+      nextSocket.once("error", onError);
     });
-  });
+  const waitForConnection = async () => {
+    const deadline = Date.now() + READY_TIMEOUT_MS;
+    let lastError: unknown;
+    while (Date.now() < deadline) {
+      try {
+        const socket = await connect();
+        socket.destroy();
+        return;
+      } catch (error) {
+        lastError = error;
+        await new Promise((resolve) =>
+          setTimeout(resolve, READY_POLL_INTERVAL_MS),
+        );
+      }
+    }
+    throw new Error(
+      `Timed out reconnecting to test driver on port ${resolvedPort}: ${String(lastError)}`,
+    );
+  };
+  await waitForConnection();
+  let closed = false;
 
-  const authenticatedSend = (
+  const authenticatedSend = async (
     command: Omit<TestDriverCommand, "token">,
-  ): Promise<string> => send(socket, { ...command, token });
+  ): Promise<string> => {
+    if (closed) throw new Error("Test driver client is closed");
+    const socket = await connect();
+    try {
+      return await send(socket, { ...command, token });
+    } finally {
+      socket.destroy();
+    }
+  };
 
   return {
     snapshot() {
@@ -265,8 +342,12 @@ export async function createTestDriver({
     screenshot(path?: string) {
       return authenticatedSend({ action: "screenshot", value: path });
     },
+    async reconnect() {
+      if (closed) throw new Error("Test driver client is closed");
+      await waitForConnection();
+    },
     close() {
-      socket.end();
+      closed = true;
     },
   };
 }

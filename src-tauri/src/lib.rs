@@ -602,13 +602,11 @@ pub fn run() {
             commands::model_setup::list_model_setup_status,
             commands::model_setup::clear_model_setup_status,
             commands::notifications::show_completion_notification,
-            #[cfg(feature = "block-voice-dictation")]
             commands::openai_realtime::get_openai_realtime_status,
-            #[cfg(feature = "block-voice-dictation")]
             commands::openai_realtime::create_openai_realtime_session,
-            #[cfg(feature = "block-voice-dictation")]
+            commands::openai_realtime::create_openai_realtime_voice_session,
+            commands::openai_realtime::save_openai_realtime_api_key,
             commands::openai_realtime::claim_voice_dictation_microphone,
-            #[cfg(feature = "block-voice-dictation")]
             commands::openai_realtime::release_voice_dictation_microphone,
             commands::agent_setup::start_agent_setup,
             commands::agent_setup::get_agent_setup_status,

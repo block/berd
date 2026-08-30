@@ -1,11 +1,13 @@
-import type {
-  Message,
-  MessageContent,
-  MessageMetadata,
-  ReasoningContent,
-  TextContent,
-  ThinkingContent,
+import {
+  getTextContent,
+  type Message,
+  type MessageContent,
+  type MessageMetadata,
+  type ReasoningContent,
+  type TextContent,
+  type ThinkingContent,
 } from "@/shared/types/messages";
+import { isVoiceConversationEmptyResponse } from "@/features/chat/lib/voiceConversationNoop";
 import {
   classifyTranscriptMeasurementPolicy,
   type TranscriptMeasurementPolicyDecision,
@@ -125,11 +127,7 @@ export function buildTranscriptItems({
   // of the assistant's work turn, so they should not reset this set.
   let displayedReasoningSignatures = new Set<string>();
 
-  for (const message of messages) {
-    if (!isVisibleTranscriptMessage(message)) {
-      continue;
-    }
-
+  for (const message of getVisibleTranscriptMessages(messages)) {
     const visibleContent = expandReasoningContentSections(
       getUserVisibleMessageContent(message.content),
     );
@@ -1764,7 +1762,34 @@ function getAssistantFragmentChromeEstimate(
 export function getVisibleTranscriptMessages(
   messages: readonly Message[],
 ): readonly Message[] {
-  return messages.filter(isVisibleTranscriptMessage);
+  return messages.filter((message, index) => {
+    if (!isVisibleTranscriptMessage(message)) return false;
+    const isEmptyResponseFallback =
+      (message.role === "assistant" &&
+        isVoiceConversationEmptyResponse(getTextContent(message))) ||
+      message.content.some(
+        (content) =>
+          content.type === "systemNotification" &&
+          isVoiceConversationEmptyResponse(content.text),
+      );
+    if (!isEmptyResponseFallback) {
+      return true;
+    }
+
+    for (let prior = index - 1; prior >= 0; prior -= 1) {
+      const priorMessage = messages[prior];
+      if (priorMessage?.role !== "user") continue;
+      return !isVoiceConversationUserTurn(priorMessage);
+    }
+    return true;
+  });
+}
+
+function isVoiceConversationUserTurn(message: Message): boolean {
+  return (
+    message.metadata?.origin === "voice_conversation" ||
+    getTextContent(message).trimStart().startsWith("[Voice transcript] ")
+  );
 }
 
 function isVisibleTranscriptMessage(message: Message): boolean {

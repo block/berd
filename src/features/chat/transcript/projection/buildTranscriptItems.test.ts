@@ -1,0 +1,104 @@
+import { describe, expect, it } from "vitest";
+import type { Message } from "@/shared/types/messages";
+import { VOICE_CONVERSATION_EMPTY_RESPONSE } from "@/features/chat/lib/voiceConversationNoop";
+import { getVisibleTranscriptMessages } from "./buildTranscriptItems";
+
+function message(
+  id: string,
+  role: Message["role"],
+  text: string,
+  origin?: "voice_conversation",
+): Message {
+  return {
+    id,
+    role,
+    created: 1,
+    content: [{ type: "text", text }],
+    metadata: origin ? { origin } : undefined,
+  };
+}
+
+describe("getVisibleTranscriptMessages voice no-op", () => {
+  it("hides the backend empty-response fallback after a voice turn", () => {
+    const voice = message(
+      "voice",
+      "user",
+      "Emissary said: Hello",
+      "voice_conversation",
+    );
+    const fallback = message(
+      "fallback",
+      "assistant",
+      VOICE_CONVERSATION_EMPTY_RESPONSE,
+    );
+
+    expect(getVisibleTranscriptMessages([voice, fallback])).toEqual([voice]);
+  });
+
+  it("hides an empty-response system notification after a voice turn", () => {
+    const voice = message(
+      "voice",
+      "user",
+      "Emissary said: Hello",
+      "voice_conversation",
+    );
+    const fallback: Message = {
+      id: "fallback",
+      role: "system",
+      created: 1,
+      content: [
+        {
+          type: "systemNotification",
+          notificationType: "error",
+          text: VOICE_CONVERSATION_EMPTY_RESPONSE,
+        },
+      ],
+    };
+
+    expect(getVisibleTranscriptMessages([voice, fallback])).toEqual([voice]);
+  });
+
+  it("hides replayed and localized empty-response fallbacks after a voice transcript", () => {
+    const voice = message(
+      "voice",
+      "user",
+      "[Voice transcript] Emissary said: Bonjour",
+    );
+    const fallback = message(
+      "fallback",
+      "assistant",
+      "Le modèle a renvoyé une réponse vide. Veuillez renvoyer votre message pour continuer.",
+    );
+
+    expect(getVisibleTranscriptMessages([voice, fallback])).toEqual([voice]);
+  });
+
+  it("keeps the same fallback visible after a normal chat turn", () => {
+    const user = message("user", "user", "Hello");
+    const fallback = message(
+      "fallback",
+      "assistant",
+      VOICE_CONVERSATION_EMPTY_RESPONSE,
+    );
+
+    expect(getVisibleTranscriptMessages([user, fallback])).toEqual([
+      user,
+      fallback,
+    ]);
+  });
+
+  it("keeps real assistant errors visible after a voice turn", () => {
+    const voice = message(
+      "voice",
+      "user",
+      "User said: Hello",
+      "voice_conversation",
+    );
+    const error = message("error", "assistant", "Authentication failed");
+
+    expect(getVisibleTranscriptMessages([voice, error])).toEqual([
+      voice,
+      error,
+    ]);
+  });
+});

@@ -600,6 +600,11 @@ describe("action schemas", () => {
     const validArgs: Record<string, Record<string, unknown>> = {
       "sessions.create": { prompt: "hi" },
       "sessions.send": { session_id: "s1", prompt: "hi" },
+      "sessions.send_to_emissary": {
+        session_id: "s1",
+        cursor: 0,
+        message: "Status update",
+      },
       "sessions.open": { session_id: "s1" },
       "sessions.list": {},
       "sessions.get": { session_id: "s1" },

@@ -3,7 +3,7 @@
   "nouns": {
     "session": {
       "group": "sessions",
-      "about": "Manage chat sessions: create, send, open, list, get, rename, move, move to group, clear project, fork, archive",
+      "about": "Manage chat sessions: create, send, open, list, get, rename, move, move to group, clear project, send to emissary, fork, archive",
       "verbs": {
         "create": {
           "action": "create",
@@ -49,6 +49,11 @@
           "action": "clear_project",
           "about": "Move a chat session out of any project",
           "afterHelp": "Example:\n  berdctl session clear-project --session-id <session-id>\n\nResult:\n  {\"ok\": true} — the app's session list regroups immediately."
+        },
+        "send-to-emissary": {
+          "action": "send_to_emissary",
+          "about": "Send private guidance to a session's live voice emissary",
+          "afterHelp": "Example:\n  berdctl session send-to-emissary --session-id <session-id> --cursor 0 \\\n    --message \"The build failed because the signing certificate expired.\" --json\n\nResult:\n  {\"session_id\":\"...\",\"cursor\":0,\"delivery_status\":\"sent\"|\"interrupting\"|\"queued\"}\n\nA send while the pipe is carrying emissary-to-master coordination fails with\nreason \"pipe_busy\" without consuming that pending message. Wait for Berd to\ndeliver it normally, then retry with the cursor included in that message."
         },
         "fork": {
           "action": "fork",

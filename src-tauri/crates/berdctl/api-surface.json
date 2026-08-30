@@ -3,7 +3,7 @@
   "protocolVersion": 4,
   "groups": {
     "sessions": {
-      "description": "Manage the user's chat sessions: create (fire-and-forget, on any installed agent harness), send, open, list, get, rename, move, move to group, clear project, fork, archive.",
+      "description": "Manage the user's chat sessions: create (fire-and-forget, on any installed agent harness), send, open, list, get, rename, move, move to group, clear project, send to a live voice emissary, fork, archive.",
       "actions": {
         "create": {
           "description": "Create a new chat session on any installed agent harness and send the prompt in it. Fire-and-forget: returns the session id immediately and the session runs in the background without changing what the user sees; the user can open it themselves. Use --from to give the delegating session or tool a concise visible label on the initial message. Only check on it later (action \"get\") if the user asks.",
@@ -424,6 +424,59 @@
               }
             },
             "required": ["session_id"],
+            "additionalProperties": false
+          }
+        },
+        "send_to_emissary": {
+          "description": "Inject a private coordination message into the OpenAI Realtime voice emissary owned by an existing Berd session. The emissary receives the message immediately and starts a response; active speech may be interrupted. The command fails when the target session has no live Realtime voice conversation.",
+          "fields": [
+            {
+              "name": "session_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the session that owns the live Realtime emissary.",
+              "min": 1
+            },
+            {
+              "name": "message",
+              "required": true,
+              "kind": "string",
+              "description": "Private coordination message to inject into the emissary.",
+              "min": 1,
+              "max": 20000
+            },
+            {
+              "name": "cursor",
+              "required": true,
+              "kind": "number",
+              "description": "Latest direct-message cursor returned by the voice bridge.",
+              "min": 0,
+              "max": 4294967295
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "session_id": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Id of the session that owns the live Realtime emissary."
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 20000,
+                "description": "Private coordination message to inject into the emissary."
+              },
+              "cursor": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295,
+                "description": "Latest direct-message cursor returned by the voice bridge."
+              }
+            },
+            "required": ["session_id", "message", "cursor"],
             "additionalProperties": false
           }
         },

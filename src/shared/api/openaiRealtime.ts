@@ -4,7 +4,20 @@ import { shareInFlight } from "@/shared/lib/shareInFlight";
 
 export interface OpenAiRealtimeStatus {
   configured: boolean;
+  voiceConfigured: boolean;
   transcriptionModel: string;
+}
+
+export async function saveOpenAiRealtimeApiKey(apiKey: string): Promise<void> {
+  return invoke("save_openai_realtime_api_key", {
+    request: { apiKey },
+  });
+}
+
+export async function createOpenAiRealtimeVoiceSession(
+  model?: string,
+): Promise<OpenAiRealtimeSession> {
+  return invoke("create_openai_realtime_voice_session", { model });
 }
 
 export interface OpenAiRealtimeSession {

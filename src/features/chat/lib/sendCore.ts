@@ -33,6 +33,11 @@ import {
 } from "@/features/chat/lib/sessionPromptOwnership";
 import { perfLog } from "@/shared/lib/perfLog";
 import { completeAssistantMessage } from "@/features/chat/lib/messageCompletion";
+import { isVoiceConversationEmptyResponse } from "@/features/chat/lib/voiceConversationNoop";
+import {
+  beginActiveRealtimeMasterTurn,
+  endActiveRealtimeMasterTurn,
+} from "@/features/voice-conversation/lib/realtimeEmissaryBridge";
 import {
   type ChatAttachmentDraft,
   type MessageMetadata,
@@ -55,6 +60,8 @@ export interface SendCoreOptions {
   assistantPrompt?: string;
   /** Text shown in the transcript when it differs from the prompt sent. */
   displayText?: string;
+  /** Reuses a provisional local transcript row when the send commits. */
+  userMessageId?: string;
   /** User-visible chips stored on the user message's metadata. */
   chips?: MessageChip[];
   /** Extra renderer-only metadata to stamp on the local user message. */
@@ -96,6 +103,58 @@ function throwIfAborted(signal?: AbortSignal): void {
   }
 
   throw new DOMException("The operation was aborted.", "AbortError");
+}
+
+function finalMasterTextSince(
+  sessionId: string,
+  existingAssistantTextById: ReadonlyMap<string, string>,
+): string | undefined {
+  const messages = useChatStore.getState().messagesBySession[sessionId] ?? [];
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (
+      !message ||
+      message.role !== "assistant" ||
+      message.metadata?.origin === "voice_conversation" ||
+      message.metadata?.agentVisible === false
+    ) {
+      continue;
+    }
+    const text = message.content
+      .flatMap((content) => (content.type === "text" ? [content.text] : []))
+      .join("\n")
+      .trim();
+    if (isVoiceConversationEmptyResponse(text)) continue;
+    if (text && existingAssistantTextById.get(message.id) !== text) return text;
+  }
+  return undefined;
+}
+
+function assistantTextSnapshot(sessionId: string): ReadonlyMap<string, string> {
+  const messages = useChatStore.getState().messagesBySession[sessionId] ?? [];
+  return new Map(
+    messages
+      .filter(
+        (message) =>
+          message.role === "assistant" &&
+          message.metadata?.origin !== "voice_conversation" &&
+          message.metadata?.agentVisible !== false,
+      )
+      .map((message) => [
+        message.id,
+        message.content
+          .flatMap((content) => (content.type === "text" ? [content.text] : []))
+          .join("\n")
+          .trim(),
+      ]),
+  );
+}
+
+async function settleMasterTranscriptNotifications(): Promise<void> {
+  // ACP may resolve session/prompt immediately before dispatching the final
+  // session/update already read from the same transport. Yield one macrotask
+  // so the terminal Master notification sees that last visible text block.
+  await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
 }
 
 type AssistantPromptOutcome = "completed" | "error";
@@ -211,6 +270,7 @@ export async function dispatchPrompt(
     signal,
     systemPrompt,
     userMessageMetadata,
+    userMessageId,
   } = opts;
   const sessionRunsRemotely = Boolean(
     useChatSessionStore.getState().getSession(sessionId)?.remoteHost,
@@ -232,6 +292,21 @@ export async function dispatchPrompt(
   }
 
   const promptOwner = claimSessionPrompt(sessionId);
+  const realtimeMasterTurnId = crypto.randomUUID();
+  const assistantTextBeforeTurn = assistantTextSnapshot(sessionId);
+  let realtimeMasterTurnStarted = false;
+  let realtimeMasterTurnEnded = false;
+  const endRealtimeMasterTurn = (
+    status: "completed" | "cancelled" | "failed",
+  ) => {
+    if (!realtimeMasterTurnStarted || realtimeMasterTurnEnded) return;
+    realtimeMasterTurnEnded = true;
+    endActiveRealtimeMasterTurn(sessionId, {
+      turnId: realtimeMasterTurnId,
+      status,
+      finalText: finalMasterTextSince(sessionId, assistantTextBeforeTurn),
+    });
+  };
   const isCurrent = () => ownsSessionPrompt(sessionId, promptOwner);
   let userMessageCommitted = false;
   let preCommitRejected = false;
@@ -244,6 +319,29 @@ export async function dispatchPrompt(
 
   setPendingAssistantProvider(sessionId, pendingAssistantProvider);
   clearLiveSubtitleUpdate(sessionId);
+
+  const finishPromptSuccessfully = () => {
+    const cancellationRace = assistantCancellationRaces.get(promptOwner);
+    if (cancellationRace) {
+      flushBufferedStreamingUpdatesForSession(sessionId, {
+        flushSubtitle: true,
+        owner: promptOwner,
+      });
+      recordAssistantPromptOutcome(promptOwner, "completed");
+    } else if (isCurrent()) {
+      const ownedStreamingMessageId = useChatStore
+        .getState()
+        .getSessionRuntime(sessionId).streamingMessageId;
+      flushBufferedStreamingUpdatesForSession(sessionId, {
+        flushSubtitle: true,
+        owner: promptOwner,
+      });
+      completeAssistantMessageById(sessionId, ownedStreamingMessageId);
+      if (isCurrent()) {
+        setChatState(sessionId, "idle");
+      }
+    }
+  };
 
   try {
     // Preparation can be superseded or aborted. Complete it before committing
@@ -261,6 +359,7 @@ export async function dispatchPrompt(
         buildMessageAttachments(dispatchAttachments),
         chips,
       );
+      if (userMessageId) userMessage.id = userMessageId;
       if (persona) {
         userMessage.metadata = {
           ...userMessage.metadata,
@@ -284,7 +383,23 @@ export async function dispatchPrompt(
           });
         }
       }
-      addMessage(sessionId, userMessage);
+      const provisionalMessage = userMessageId
+        ? useChatStore
+            .getState()
+            .messagesBySession[sessionId]?.some(
+              (message) => message.id === userMessageId,
+            )
+        : false;
+      if (provisionalMessage) {
+        useChatStore
+          .getState()
+          .updateMessage(sessionId, userMessage.id, (existing) => ({
+            ...userMessage,
+            created: existing.created,
+          }));
+      } else {
+        addMessage(sessionId, userMessage);
+      }
       userMessageCommitted = true;
       setChatState(sessionId, "thinking");
       setError(sessionId, null);
@@ -329,7 +444,13 @@ export async function dispatchPrompt(
         (img) => [img.base64, img.mimeType] as [string, string],
       ),
       onPromptDispatching: commitUserMessage,
-      onPromptDispatched,
+      onPromptDispatched: () => {
+        realtimeMasterTurnStarted = beginActiveRealtimeMasterTurn(
+          sessionId,
+          realtimeMasterTurnId,
+        );
+        onPromptDispatched?.();
+      },
     });
     await promptPromise;
     if (!background) {
@@ -338,27 +459,29 @@ export async function dispatchPrompt(
       );
     }
 
-    const cancellationRace = assistantCancellationRaces.get(promptOwner);
-    if (cancellationRace) {
-      flushBufferedStreamingUpdatesForSession(sessionId, {
-        flushSubtitle: true,
-        owner: promptOwner,
-      });
-      recordAssistantPromptOutcome(promptOwner, "completed");
-    } else if (isCurrent()) {
-      const ownedStreamingMessageId = useChatStore
-        .getState()
-        .getSessionRuntime(sessionId).streamingMessageId;
-      flushBufferedStreamingUpdatesForSession(sessionId, {
-        flushSubtitle: true,
-        owner: promptOwner,
-      });
-      completeAssistantMessageById(sessionId, ownedStreamingMessageId);
-      if (isCurrent()) {
-        setChatState(sessionId, "idle");
-      }
-    }
+    finishPromptSuccessfully();
+    await settleMasterTranscriptNotifications();
+    endRealtimeMasterTurn("completed");
   } catch (err) {
+    const isVoiceConversationNoop =
+      userMessageCommitted &&
+      userMessageMetadata?.origin === "voice_conversation" &&
+      isVoiceConversationEmptyResponse(formatAcpErrorMessage(err));
+    if (isVoiceConversationNoop) {
+      finishPromptSuccessfully();
+      await settleMasterTranscriptNotifications();
+      endRealtimeMasterTurn("completed");
+      if (isCurrent()) {
+        setError(sessionId, null);
+        setPendingAssistantProvider(sessionId, null);
+      }
+      return;
+    }
+    endRealtimeMasterTurn(
+      err instanceof DOMException && err.name === "AbortError"
+        ? "cancelled"
+        : "failed",
+    );
     preCommitRejected = err instanceof PreCommitSendRejectedError;
     if (!preCommitRejected) {
       const cancellationRace = assistantCancellationRaces.get(promptOwner);

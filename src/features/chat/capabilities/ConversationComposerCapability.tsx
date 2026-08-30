@@ -143,6 +143,7 @@ interface ConversationComposerCapabilityProps {
   onRecallLastUserMessage?: () => string | null;
   attachmentDropTargetRef?: RefObject<HTMLDivElement | null>;
   onAttachmentDragOverChange?: (isDragOver: boolean) => void;
+  onUserTextCommitted?: (text: string) => void;
 }
 
 export function ConversationComposerCapability({
@@ -152,6 +153,7 @@ export function ConversationComposerCapability({
   onRecallLastUserMessage,
   attachmentDropTargetRef,
   onAttachmentDragOverChange,
+  onUserTextCommitted,
 }: ConversationComposerCapabilityProps) {
   const { t } = useTranslation("chat");
   const {
@@ -179,6 +181,19 @@ export function ConversationComposerCapability({
       : undefined;
   const isReadOnly = Boolean(readOnlyReason);
   const lifecycle = renderingPolicy.lifecycleConstraints;
+  const sendWithCommitNotification = useCallback(
+    (...args: Parameters<typeof onSend>) => {
+      const [text, personaId, attachments, options] = args;
+      return onSend(text, personaId, attachments, {
+        ...options,
+        onUserMessageCommitted: () => {
+          options?.onUserMessageCommitted?.();
+          onUserTextCommitted?.(text);
+        },
+      });
+    },
+    [onSend, onUserTextCommitted],
+  );
   const securityConfirmationPending =
     target.kind === "existingSession" &&
     target.admission.securityConfirmationPending;
@@ -260,7 +275,7 @@ export function ConversationComposerCapability({
         isPendingConversation ? undefined : controller.selectedProvider
       }
       composerActions={{
-        onSend,
+        onSend: onUserTextCommitted ? sendWithCommitNotification : onSend,
         onSteerMessage:
           isPendingConversation || admissionBlocked
             ? undefined
@@ -269,7 +284,15 @@ export function ConversationComposerCapability({
                   text,
                   personaId ?? undefined,
                   attachments,
-                  options,
+                  onUserTextCommitted
+                    ? {
+                        ...options,
+                        onUserMessageCommitted: () => {
+                          options?.onUserMessageCommitted?.();
+                          onUserTextCommitted(text);
+                        },
+                      }
+                    : options,
                 ),
         canSteerMessage:
           isPendingConversation || admissionBlocked
