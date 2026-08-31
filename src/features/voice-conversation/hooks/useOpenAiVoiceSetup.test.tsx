@@ -71,6 +71,7 @@ describe("useOpenAiVoiceSetup", () => {
     expect(mocks.getStatus).toHaveBeenLastCalledWith({ coalesce: true });
 
     act(() => mocks.settingsChanged?.());
+    expect(mocks.getStatus).toHaveBeenLastCalledWith(undefined);
     refreshed.resolve(status(true));
     await waitFor(() =>
       expect(result.current.status?.sttConfigured).toBe(true),

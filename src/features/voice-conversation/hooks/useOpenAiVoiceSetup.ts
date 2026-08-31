@@ -14,9 +14,9 @@ export function useOpenAiVoiceSetup(enabled = true) {
     let active = true;
     let refreshGeneration = 0;
     let unsubscribe: (() => void) | null = null;
-    const refresh = () => {
+    const refresh = (coalesce = false) => {
       const generation = ++refreshGeneration;
-      void getOpenAiVoiceStatus({ coalesce: true }).then(
+      void getOpenAiVoiceStatus(coalesce ? { coalesce: true } : undefined).then(
         (next) => {
           if (active && generation === refreshGeneration) {
             setStatus(next);
@@ -35,7 +35,7 @@ export function useOpenAiVoiceSetup(enabled = true) {
       (nextUnsubscribe) => {
         if (active) {
           unsubscribe = nextUnsubscribe;
-          refresh();
+          refresh(true);
         } else nextUnsubscribe();
       },
       () => {
