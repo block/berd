@@ -345,6 +345,21 @@ export function ensureHostConnected(host: string): Promise<void> {
   return useRemoteHostStore.getState().ensureHostConnected(host);
 }
 
+let remoteHostStoreInitStarted = false;
+
+/**
+ * Start the live-status subscription and store seeding once per app lifetime.
+ * Returns true when this call started it, false when it was already running —
+ * callers that want fresher data on later invocations refresh explicitly.
+ * Callers gate this behind the remote-ssh-sessions experiment.
+ */
+export function ensureRemoteHostStoreInitialized(): boolean {
+  if (remoteHostStoreInitStarted) return false;
+  remoteHostStoreInitStarted = true;
+  void initRemoteHostStore();
+  return true;
+}
+
 /**
  * Subscribe to remote backend status events and seed the store from the
  * backend snapshot and the SSH config. Returns an unsubscribe function.

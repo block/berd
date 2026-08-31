@@ -11,6 +11,7 @@ import { IconLayoutSidebarLeftCollapse } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { ChatSearchBar } from "./ChatSearchBar";
 import { ChatTranscriptSurface } from "./ChatTranscriptSurface";
+import { RemoteHostConnectionBanner } from "./RemoteHostConnectionBanner";
 import { LoadingBerd } from "./LoadingBerd";
 import { ChatRightRail } from "./ChatRightRail";
 import {
@@ -691,6 +692,14 @@ export function ChatView({
           composerHandoffActive && "invisible pointer-events-none",
         )}
       >
+        {sessionIsRemote &&
+        effectiveSession?.remoteHost &&
+        !effectiveSession.creationState ? (
+          <RemoteHostConnectionBanner
+            host={effectiveSession.remoteHost}
+            sessionId={effectiveSession.id}
+          />
+        ) : null}
         <SecurityConfirmationPanel sessionId={sessionId} />
         <ConversationComposerCapability
           binding={composerBinding}

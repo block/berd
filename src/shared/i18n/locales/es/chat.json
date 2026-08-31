@@ -555,6 +555,13 @@
         "loading": "Cargando...",
         "recents": "Carpetas recientes",
         "use": "Usar esta carpeta"
+      },
+      "banner": {
+        "disconnected": "Desconectado de {{host}}",
+        "failed": "No se pudo conectar con {{host}}",
+        "connecting": "Conectando con {{host}}...",
+        "reconnecting": "Reconectando con {{host}}...",
+        "reconnect": "Reconectar"
       }
     },
     "selectModel": "Seleccionar modelo",

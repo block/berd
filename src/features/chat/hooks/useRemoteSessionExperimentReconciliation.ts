@@ -14,6 +14,15 @@ export function useRemoteSessionExperimentReconciliation(): boolean {
       .catch(() => undefined)
       .then(async () => {
         await runChatRuntimeStartup();
+        if (enabled) {
+          // Live host statuses feed the sidebar indicator and the chat
+          // disconnected banner, so the subscription must not wait for the
+          // settings card to mount.
+          const { ensureRemoteHostStoreInitialized } = await import(
+            "@/features/remoteHosts/stores/remoteHostStore"
+          );
+          ensureRemoteHostStoreInitialized();
+        }
         const { reconcileRemoteSessionsForExperiment } = await import(
           "@/features/chat/stores/remoteSessionPersistence"
         );

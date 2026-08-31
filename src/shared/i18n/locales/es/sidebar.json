@@ -81,7 +81,8 @@
     "chatActive": "Chat activo",
     "pinnedChat": "Chat fijado",
     "unreadMessages": "Mensajes no leídos",
-    "remoteHost": "Chat remoto en {{host}}"
+    "remoteHost": "Chat remoto en {{host}}",
+    "remoteHostDisconnected": "Chat remoto en {{host}} — desconectado"
   },
   "showLess": "Mostrar menos",
   "viewMoreChats": "Ver más",

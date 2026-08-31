@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { REMOTE_SSH_SESSIONS_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { useExperiment } from "@/features/experiments/experimentPreferences";
 import {
-  initRemoteHostStore,
+  ensureRemoteHostStoreInitialized,
   useRemoteHostStore,
   type RemoteHostStatus,
 } from "@/features/remoteHosts/stores/remoteHostStore";
@@ -18,11 +18,6 @@ import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
 import { Input } from "@/shared/ui/input";
 import { SettingsRow } from "@/shared/ui/settings-row";
 import { SettingsSection } from "@/shared/ui/settings-section";
-
-// One live-status subscription per app lifetime. `initRemoteHostStore` also
-// seeds the store (backend snapshot + SSH config hosts), so the first mount
-// gets its refresh from init; later mounts re-refresh explicitly below.
-let remoteHostStoreInitStarted = false;
 
 function StatusPill({ status }: { status: RemoteHostStatus | undefined }) {
   const { t } = useTranslation("settings");
@@ -328,15 +323,14 @@ export function RemoteHostsSettings() {
 
   useEffect(() => {
     if (!enabled) return;
-    if (!remoteHostStoreInitStarted) {
-      remoteHostStoreInitStarted = true;
-      // Subscribes to live status events and seeds snapshot + config hosts.
-      void initRemoteHostStore();
-      return;
+    // Init subscribes to live status events and seeds snapshot + config
+    // hosts; when it already ran (startup or an earlier mount), re-refresh so
+    // this mount shows current data.
+    if (!ensureRemoteHostStoreInitialized()) {
+      const store = useRemoteHostStore.getState();
+      void store.refreshConfigHosts();
+      void store.syncBackendSnapshot();
     }
-    const store = useRemoteHostStore.getState();
-    void store.refreshConfigHosts();
-    void store.syncBackendSnapshot();
   }, [enabled]);
 
   // Config hosts first, then manually added hosts (persisted across
