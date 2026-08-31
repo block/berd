@@ -6,7 +6,7 @@ use super::openai_voice_credentials::{self, OpenAiVoiceCredential};
 use super::voice_capture::VoiceCaptureState;
 
 const DEFAULT_TRANSCRIPTION_MODEL: &str = "gpt-realtime-whisper";
-const DEFAULT_REALTIME_MODEL: &str = "gpt-realtime";
+const DEFAULT_REALTIME_MODEL: &str = "gpt-realtime-2.1";
 const OPENAI_REALTIME_CLIENT_SECRETS_URL: &str =
     "https://api.openai.com/v1/realtime/client_secrets";
 

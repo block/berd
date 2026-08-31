@@ -24,6 +24,19 @@ describe("Realtime emissary session configuration", () => {
     expect(event.session.type).toBe("realtime");
     expect(event.session.output_modalities).toEqual(["audio"]);
     expect(event.session.audio.output.speed).toBe(1);
+    expect(event.session.audio.input).toMatchObject({
+      noise_reduction: null,
+      transcription: { model: "gpt-realtime-whisper" },
+      turn_detection: {
+        type: "server_vad",
+        threshold: 0.5,
+        prefix_padding_ms: 300,
+        silence_duration_ms: 500,
+        create_response: true,
+        interrupt_response: true,
+      },
+    });
+    expect(event.session.max_output_tokens).toBe("inf");
     expect(event.session.instructions).toBe(REALTIME_EMISSARY_INSTRUCTIONS);
     expect(event.session.instructions).toContain(
       "automatically sends the master every finalized",
@@ -79,7 +92,7 @@ describe("Realtime emissary session configuration", () => {
     expect(event.session).toMatchObject({
       max_output_tokens: 512,
       audio: {
-        input: { transcription: { model: "gpt-4o-mini-transcribe" } },
+        input: { transcription: { model: "gpt-realtime-whisper" } },
         output: { voice: "marin", speed: 1.25 },
       },
       instructions: expect.stringContaining(
@@ -91,6 +104,75 @@ describe("Realtime emissary session configuration", () => {
         expect.objectContaining({ name: "look_up_status" }),
       ],
     });
+  });
+
+  it("maps semantic turn detection and advanced controls to the Realtime session", () => {
+    const event = createRealtimeEmissarySessionUpdate({
+      transcriptionModel: "gpt-live-transcribe",
+      transcriptionLanguage: "en",
+      transcriptionPrompt: "Berd, Tauri, emissary",
+      turnDetection: "semantic_vad",
+      eagerness: "high",
+      interruptResponse: false,
+      createResponse: false,
+      noiseReduction: "far_field",
+      reasoningEffort: "low",
+      maxOutputTokens: 512,
+    });
+
+    expect(event.session).toMatchObject({
+      reasoning: { effort: "low" },
+      max_output_tokens: 512,
+      audio: {
+        input: {
+          transcription: {
+            model: "gpt-live-transcribe",
+            language: "en",
+            prompt: "Berd, Tauri, emissary",
+          },
+          noise_reduction: { type: "far_field" },
+          turn_detection: {
+            type: "semantic_vad",
+            eagerness: "high",
+            create_response: false,
+            interrupt_response: false,
+          },
+        },
+      },
+    });
+  });
+
+  it("maps server VAD timing controls to the Realtime session", () => {
+    const event = createRealtimeEmissarySessionUpdate({
+      turnDetection: "server_vad",
+      vadThreshold: 0.7,
+      prefixPaddingMs: 450,
+      silenceDurationMs: 850,
+      idleTimeoutMs: 10_000,
+    });
+
+    expect(event.session).toMatchObject({
+      audio: {
+        input: {
+          turn_detection: {
+            type: "server_vad",
+            threshold: 0.7,
+            prefix_padding_ms: 450,
+            silence_duration_ms: 850,
+            idle_timeout_ms: 10_000,
+          },
+        },
+      },
+    });
+  });
+
+  it("does not send configurable reasoning to older Realtime models", () => {
+    const event = createRealtimeEmissarySessionUpdate({
+      model: "gpt-realtime-1.5",
+      reasoningEffort: "high",
+    });
+
+    expect(event.session).not.toHaveProperty("reasoning");
   });
 
   it("rejects overrides that weaken protected bridge configuration", () => {

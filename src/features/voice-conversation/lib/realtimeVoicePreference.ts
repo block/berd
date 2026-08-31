@@ -1,19 +1,55 @@
 import { useCallback, useSyncExternalStore } from "react";
 import type { RealtimeSessionOverrides } from "./realtimeEmissaryProtocol";
 
+export type RealtimeTurnDetection = "server_vad" | "semantic_vad";
+export type RealtimeEagerness = "low" | "medium" | "high" | "auto";
+export type RealtimeNoiseReduction = "off" | "near_field" | "far_field";
+export type RealtimeReasoningEffort =
+  | "default"
+  | "none"
+  | "low"
+  | "medium"
+  | "high";
+
 export interface RealtimeVoicePreference {
   model: string;
   transcriptionModel: string;
   voice: string;
   speed: number;
+  turnDetection: RealtimeTurnDetection;
+  eagerness: RealtimeEagerness;
+  interruptResponse: boolean;
+  createResponse: boolean;
+  vadThreshold: number;
+  prefixPaddingMs: number;
+  silenceDurationMs: number;
+  idleTimeoutMs: number | null;
+  noiseReduction: RealtimeNoiseReduction;
+  transcriptionLanguage: string;
+  transcriptionPrompt: string;
+  reasoningEffort: RealtimeReasoningEffort;
+  maxOutputTokens: number | null;
   sessionOverridesText: string;
 }
 
 const DEFAULT_PREFERENCE: RealtimeVoicePreference = {
-  model: "gpt-realtime",
-  transcriptionModel: "gpt-4o-mini-transcribe",
+  model: "gpt-realtime-2.1",
+  transcriptionModel: "gpt-realtime-whisper",
   voice: "marin",
   speed: 1,
+  turnDetection: "server_vad",
+  eagerness: "auto",
+  interruptResponse: true,
+  createResponse: true,
+  vadThreshold: 0.5,
+  prefixPaddingMs: 300,
+  silenceDurationMs: 500,
+  idleTimeoutMs: null,
+  noiseReduction: "off",
+  transcriptionLanguage: "",
+  transcriptionPrompt: "",
+  reasoningEffort: "default",
+  maxOutputTokens: null,
   sessionOverridesText: "{}",
 };
 const STORAGE_KEY = "goose:openai-realtime-voice-options";
@@ -22,6 +58,47 @@ const listeners = new Set<() => void>();
 let cachedRaw: string | null | undefined;
 let cachedPreference = DEFAULT_PREFERENCE;
 
+function stringPreference(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+function enumPreference<T extends string>(
+  value: unknown,
+  values: readonly T[],
+  fallback: T,
+): T {
+  return typeof value === "string" && values.includes(value as T)
+    ? (value as T)
+    : fallback;
+}
+
+function numberPreference(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+  fallback: number,
+): number {
+  return typeof value === "number" &&
+    Number.isFinite(value) &&
+    value >= minimum &&
+    value <= maximum
+    ? value
+    : fallback;
+}
+
+function optionalIntegerPreference(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+): number | null {
+  return typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= minimum &&
+    value <= maximum
+    ? value
+    : null;
+}
+
 export function getRealtimeVoicePreference(): RealtimeVoicePreference {
   if (typeof window === "undefined") return DEFAULT_PREFERENCE;
   try {
@@ -29,27 +106,77 @@ export function getRealtimeVoicePreference(): RealtimeVoicePreference {
     if (raw === cachedRaw) return cachedPreference;
     const parsed = JSON.parse(raw ?? "{}");
     cachedRaw = raw;
+    const storedModel = stringPreference(
+      parsed.model,
+      DEFAULT_PREFERENCE.model,
+    );
+    const storedTranscriptionModel = stringPreference(
+      parsed.transcriptionModel,
+      DEFAULT_PREFERENCE.transcriptionModel,
+    );
     cachedPreference = {
       model:
-        typeof parsed.model === "string" && parsed.model.trim()
-          ? parsed.model
-          : DEFAULT_PREFERENCE.model,
+        storedModel === "gpt-realtime" ? DEFAULT_PREFERENCE.model : storedModel,
       transcriptionModel:
-        typeof parsed.transcriptionModel === "string" &&
-        parsed.transcriptionModel.trim()
-          ? parsed.transcriptionModel
-          : DEFAULT_PREFERENCE.transcriptionModel,
-      voice:
-        typeof parsed.voice === "string" && parsed.voice.trim()
-          ? parsed.voice
-          : DEFAULT_PREFERENCE.voice,
-      speed:
-        typeof parsed.speed === "number" &&
-        Number.isFinite(parsed.speed) &&
-        parsed.speed >= 0.25 &&
-        parsed.speed <= 1.5
-          ? parsed.speed
-          : DEFAULT_PREFERENCE.speed,
+        storedTranscriptionModel === "gpt-4o-mini-transcribe"
+          ? DEFAULT_PREFERENCE.transcriptionModel
+          : storedTranscriptionModel,
+      voice: stringPreference(parsed.voice, DEFAULT_PREFERENCE.voice),
+      speed: numberPreference(parsed.speed, 0.25, 1.5, 1),
+      turnDetection: enumPreference(
+        parsed.turnDetection,
+        ["server_vad", "semantic_vad"],
+        DEFAULT_PREFERENCE.turnDetection,
+      ),
+      eagerness: enumPreference(
+        parsed.eagerness,
+        ["low", "medium", "high", "auto"],
+        DEFAULT_PREFERENCE.eagerness,
+      ),
+      interruptResponse:
+        typeof parsed.interruptResponse === "boolean"
+          ? parsed.interruptResponse
+          : DEFAULT_PREFERENCE.interruptResponse,
+      createResponse:
+        typeof parsed.createResponse === "boolean"
+          ? parsed.createResponse
+          : DEFAULT_PREFERENCE.createResponse,
+      vadThreshold: numberPreference(parsed.vadThreshold, 0, 1, 0.5),
+      prefixPaddingMs: numberPreference(parsed.prefixPaddingMs, 0, 2_000, 300),
+      silenceDurationMs: numberPreference(
+        parsed.silenceDurationMs,
+        100,
+        3_000,
+        500,
+      ),
+      idleTimeoutMs: optionalIntegerPreference(
+        parsed.idleTimeoutMs,
+        1_000,
+        120_000,
+      ),
+      noiseReduction: enumPreference(
+        parsed.noiseReduction,
+        ["off", "near_field", "far_field"],
+        DEFAULT_PREFERENCE.noiseReduction,
+      ),
+      transcriptionLanguage:
+        typeof parsed.transcriptionLanguage === "string"
+          ? parsed.transcriptionLanguage
+          : "",
+      transcriptionPrompt:
+        typeof parsed.transcriptionPrompt === "string"
+          ? parsed.transcriptionPrompt
+          : "",
+      reasoningEffort: enumPreference(
+        parsed.reasoningEffort,
+        ["default", "none", "low", "medium", "high"],
+        DEFAULT_PREFERENCE.reasoningEffort,
+      ),
+      maxOutputTokens: optionalIntegerPreference(
+        parsed.maxOutputTokens,
+        1,
+        4_096,
+      ),
       sessionOverridesText:
         typeof parsed.sessionOverridesText === "string"
           ? parsed.sessionOverridesText

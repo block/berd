@@ -65,11 +65,24 @@ vi.mock("../lib/realtimeEmissaryBridge", () => ({
 
 vi.mock("../lib/realtimeVoicePreference", () => ({
   getRealtimeVoicePreference: () => ({
-    model: "gpt-realtime",
+    model: "gpt-realtime-2.1",
     sessionOverridesText: "{}",
     speed: 1,
-    transcriptionModel: "gpt-4o-mini-transcribe",
+    transcriptionModel: "gpt-realtime-whisper",
     voice: "marin",
+    turnDetection: "server_vad",
+    eagerness: "auto",
+    interruptResponse: true,
+    createResponse: true,
+    vadThreshold: 0.5,
+    prefixPaddingMs: 300,
+    silenceDurationMs: 500,
+    idleTimeoutMs: null,
+    noiseReduction: "off",
+    transcriptionLanguage: "",
+    transcriptionPrompt: "",
+    reasoningEffort: "default",
+    maxOutputTokens: null,
   }),
   parseRealtimeSessionOverrides: () => ({}),
 }));

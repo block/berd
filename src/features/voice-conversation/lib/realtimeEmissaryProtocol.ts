@@ -44,9 +44,24 @@ export interface RealtimeEventTransport {
 export interface RealtimeEmissarySessionOptions {
   /** Appended after the non-replaceable master/emissary contract. */
   additionalInstructions?: string;
+  /** Used to avoid sending model-specific session fields to older models. */
+  model?: string;
   transcriptionModel?: string;
+  transcriptionLanguage?: string;
+  transcriptionPrompt?: string;
   voice?: string;
   speed?: number;
+  turnDetection?: "server_vad" | "semantic_vad";
+  eagerness?: "low" | "medium" | "high" | "auto";
+  interruptResponse?: boolean;
+  createResponse?: boolean;
+  vadThreshold?: number;
+  prefixPaddingMs?: number;
+  silenceDurationMs?: number;
+  idleTimeoutMs?: number | null;
+  noiseReduction?: "off" | "near_field" | "far_field";
+  reasoningEffort?: "default" | "none" | "low" | "medium" | "high";
+  maxOutputTokens?: number | null;
   /**
    * Additional Realtime session fields. This deliberately remains an
    * extensible JSON object so new API options do not require transport or
@@ -151,9 +166,38 @@ export function createRealtimeEmissarySessionUpdate(
   delete mergeableOverrides.tools;
 
   const additionalInstructions = options.additionalInstructions?.trim();
+  const transcriptionLanguage = options.transcriptionLanguage?.trim();
+  const transcriptionPrompt = options.transcriptionPrompt?.trim();
+  const supportsReasoning =
+    !options.model || options.model.startsWith("gpt-realtime-2.1");
+  const turnDetection =
+    options.turnDetection === "semantic_vad"
+      ? {
+          type: "semantic_vad",
+          eagerness: options.eagerness ?? "auto",
+          create_response: options.createResponse ?? true,
+          interrupt_response: options.interruptResponse ?? true,
+        }
+      : {
+          type: "server_vad",
+          threshold: options.vadThreshold ?? 0.5,
+          prefix_padding_ms: options.prefixPaddingMs ?? 300,
+          silence_duration_ms: options.silenceDurationMs ?? 500,
+          ...(options.idleTimeoutMs
+            ? { idle_timeout_ms: options.idleTimeoutMs }
+            : {}),
+          create_response: options.createResponse ?? true,
+          interrupt_response: options.interruptResponse ?? true,
+        };
   const defaults = {
     type: "realtime",
     output_modalities: ["audio"],
+    ...(supportsReasoning &&
+    options.reasoningEffort &&
+    options.reasoningEffort !== "default"
+      ? { reasoning: { effort: options.reasoningEffort } }
+      : {}),
+    max_output_tokens: options.maxOutputTokens ?? "inf",
     instructions: additionalInstructions
       ? `${REALTIME_EMISSARY_INSTRUCTIONS}\n\n${additionalInstructions}`
       : REALTIME_EMISSARY_INSTRUCTIONS,
@@ -161,16 +205,15 @@ export function createRealtimeEmissarySessionUpdate(
       input: {
         format: { type: "audio/pcm", rate: 24_000 },
         transcription: {
-          model: options.transcriptionModel ?? "gpt-4o-mini-transcribe",
+          model: options.transcriptionModel ?? "gpt-realtime-whisper",
+          ...(transcriptionLanguage ? { language: transcriptionLanguage } : {}),
+          ...(transcriptionPrompt ? { prompt: transcriptionPrompt } : {}),
         },
-        turn_detection: {
-          type: "server_vad",
-          threshold: 0.5,
-          prefix_padding_ms: 300,
-          silence_duration_ms: 500,
-          create_response: true,
-          interrupt_response: true,
-        },
+        noise_reduction:
+          options.noiseReduction && options.noiseReduction !== "off"
+            ? { type: options.noiseReduction }
+            : null,
+        turn_detection: turnDetection,
       },
       output: {
         format: { type: "audio/pcm", rate: 24_000 },

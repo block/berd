@@ -676,9 +676,23 @@ class OpenAiRealtimeConversationRuntime {
       await waitForDataChannelOpen(channel);
       if (isStale()) return;
       configureRealtimeEmissarySession(transport, {
+        model: preference.model,
         transcriptionModel: preference.transcriptionModel,
+        transcriptionLanguage: preference.transcriptionLanguage,
+        transcriptionPrompt: preference.transcriptionPrompt,
         voice: preference.voice,
         speed: preference.speed,
+        turnDetection: preference.turnDetection,
+        eagerness: preference.eagerness,
+        interruptResponse: preference.interruptResponse,
+        createResponse: preference.createResponse,
+        vadThreshold: preference.vadThreshold,
+        prefixPaddingMs: preference.prefixPaddingMs,
+        silenceDurationMs: preference.silenceDurationMs,
+        idleTimeoutMs: preference.idleTimeoutMs,
+        noiseReduction: preference.noiseReduction,
+        reasoningEffort: preference.reasoningEffort,
+        maxOutputTokens: preference.maxOutputTokens,
         sessionOverrides: parseRealtimeSessionOverrides(
           preference.sessionOverridesText,
         ),

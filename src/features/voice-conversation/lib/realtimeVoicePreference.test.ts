@@ -11,18 +11,25 @@ describe("realtime voice preferences", () => {
   it("returns a stable default snapshot", () => {
     expect(getRealtimeVoicePreference()).toBe(getRealtimeVoicePreference());
     expect(getRealtimeVoicePreference()).toMatchObject({
-      model: "gpt-realtime",
+      model: "gpt-realtime-2.1",
+      transcriptionModel: "gpt-realtime-whisper",
       voice: "marin",
       speed: 1,
+      turnDetection: "server_vad",
+      interruptResponse: true,
+      createResponse: true,
     });
   });
 
   it("persists an updated configuration without storing a secret", () => {
     const preference = {
+      ...getRealtimeVoicePreference(),
       model: "gpt-realtime-2.1",
-      transcriptionModel: "gpt-4o-mini-transcribe",
+      transcriptionModel: "gpt-live-transcribe",
       voice: "cedar",
       speed: 1.25,
+      turnDetection: "semantic_vad" as const,
+      eagerness: "high" as const,
       sessionOverridesText: '{"audio":{"input":{"turn_detection":null}}}',
     };
     setRealtimeVoicePreference(preference);
@@ -30,6 +37,21 @@ describe("realtime voice preferences", () => {
     expect(
       window.localStorage.getItem("goose:openai-realtime-voice-options"),
     ).not.toContain("apiKey");
+  });
+
+  it("migrates the former default model selections", () => {
+    window.localStorage.setItem(
+      "goose:openai-realtime-voice-options",
+      JSON.stringify({
+        model: "gpt-realtime",
+        transcriptionModel: "gpt-4o-mini-transcribe",
+      }),
+    );
+
+    expect(getRealtimeVoicePreference()).toMatchObject({
+      model: "gpt-realtime-2.1",
+      transcriptionModel: "gpt-realtime-whisper",
+    });
   });
 
   it("falls back to normal speed when persisted speed is out of range", () => {
