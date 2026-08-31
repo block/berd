@@ -51,6 +51,7 @@ const microphonePermissionState = vi.hoisted(() => ({
   openSettings: vi.fn(),
 }));
 const openAiStatusState = vi.hoisted(() => ({
+  enabled: null as boolean | null,
   current: {
     sttConfigured: true,
     ttsConfigured: true,
@@ -81,10 +82,13 @@ vi.mock("../api/openAiVoice", () => ({
   clearOpenAiTtsApiKey: openAiApiMocks.clearTtsApiKey,
 }));
 vi.mock("../hooks/useOpenAiVoiceSetup", () => ({
-  useOpenAiVoiceSetup: () => ({
-    status: openAiStatusState.current,
-    error: null,
-  }),
+  useOpenAiVoiceSetup: (enabled: boolean) => {
+    openAiStatusState.enabled = enabled;
+    return {
+      status: enabled ? openAiStatusState.current : null,
+      error: null,
+    };
+  },
 }));
 vi.mock("../hooks/usePocketVoiceSetup", () => ({
   usePocketVoiceSetup: () => setupState.current,
@@ -244,6 +248,28 @@ describe("VoiceSettings", () => {
     openAiApiMocks.clearTtsApiKey.mockClear();
     openAiApiMocks.setSttApiKey.mockClear();
     openAiApiMocks.clearSttApiKey.mockClear();
+  });
+
+  it("does not inspect OpenAI credentials for Apple speech input and output", () => {
+    inputState.backend = "macos";
+    outputState.backend = "siri";
+
+    renderWithProviders(<VoiceSettings />);
+
+    expect(openAiStatusState.enabled).toBe(false);
+  });
+
+  it.each([
+    ["openai", "siri"],
+    ["macos", "openai"],
+    ["openai", "openai"],
+  ] as const)("inspects OpenAI credentials for %s speech input and %s speech output", (inputBackend, outputBackend) => {
+    inputState.backend = inputBackend;
+    outputState.backend = outputBackend;
+
+    renderWithProviders(<VoiceSettings />);
+
+    expect(openAiStatusState.enabled).toBe(true);
   });
 
   it("renders independently selected OpenAI input and output settings", async () => {

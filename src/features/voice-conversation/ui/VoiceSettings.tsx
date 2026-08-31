@@ -95,16 +95,18 @@ export function VoiceSettings() {
   const { t } = useTranslation("settings");
   const setup = usePocketVoiceSetup();
   const macSpeechSetup = useMacSpeechSetup();
-  const { status: openAiStatus, error: openAiError } = useOpenAiVoiceSetup();
   const [openAiSpeed, setOpenAiSpeed] = useState(1);
   const [openAiSpeedError, setOpenAiSpeedError] = useState<string | null>(null);
-  useEffect(() => {
-    if (openAiStatus) setOpenAiSpeed(openAiStatus.playbackSpeed);
-  }, [openAiStatus]);
   const input = useVoiceInputPreference(
     isMacSpeechAvailable(macSpeechSetup.status, macSpeechSetup.loading),
   );
   const output = useVoiceOutputPreference();
+  const { status: openAiStatus, error: openAiError } = useOpenAiVoiceSetup(
+    input.backend === "openai" || output.backend === "openai",
+  );
+  useEffect(() => {
+    if (openAiStatus) setOpenAiSpeed(openAiStatus.playbackSpeed);
+  }, [openAiStatus]);
   const interruption = useVoiceInterruptionPreference();
   const mode = useVoiceConversationModePreference();
   const siriSetup = useSiriVoiceSetup(output.backend === "siri");
