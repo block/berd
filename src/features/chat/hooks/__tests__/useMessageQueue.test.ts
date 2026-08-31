@@ -1501,6 +1501,41 @@ describe("useMessageQueue", () => {
     vi.useRealTimers();
   });
 
+  it("keeps transport-only voice coordination hidden while queued", () => {
+    const sendMessage = vi.fn().mockReturnValue(true);
+    const { result } = renderHook(() =>
+      useMessageQueue("s1", "streaming", sendMessage),
+    );
+
+    act(() => {
+      expect(
+        result.current.enqueue(
+          "[Direct message from emissary; cursor 3] Check the result",
+          undefined,
+          undefined,
+          {
+            userMessageMetadata: {
+              origin: "voice_conversation",
+              userVisible: false,
+            },
+          },
+        ),
+      ).toBe(true);
+    });
+
+    expect(
+      useChatStore.getState().queuedMessageBySession.s1?.[0]?.payload,
+    ).toMatchObject({
+      showInComposer: false,
+      sendOptions: {
+        userMessageMetadata: {
+          origin: "voice_conversation",
+          userVisible: false,
+        },
+      },
+    });
+  });
+
   it("retries the same failed head on every later readiness transition", () => {
     const sendMessage = vi.fn().mockReturnValue(false);
     useChatStore.getState().enqueueTransportReadyMessage("s1", {

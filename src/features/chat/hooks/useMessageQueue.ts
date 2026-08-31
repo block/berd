@@ -290,7 +290,10 @@ export function useMessageQueue(
 
         if (accepted === false) {
           let retryPayload = latestQueuedMessage.payload;
-          if (retryPayload.showInComposer === false) {
+          if (
+            retryPayload.showInComposer === false &&
+            retryPayload.sendOptions?.userMessageMetadata?.userVisible !== false
+          ) {
             retryPayload = {
               ...retryPayload,
               showInComposer: true,
@@ -589,6 +592,13 @@ export function useMessageQueue(
           personaName,
           attachments,
           sendOptions,
+          // Transport-only messages (including Emissary → Master
+          // coordination) may briefly use the reliable queue at a run
+          // boundary, but they must never leak into the user's composer.
+          showInComposer:
+            sendOptions?.userMessageMetadata?.userVisible === false
+              ? false
+              : undefined,
         }),
       );
     },
