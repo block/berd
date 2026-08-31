@@ -17,16 +17,24 @@ Siri bridge emits normalized 48 kHz mono Float32 PCM without opening an audio
 device; the existing Berd Siri player and the CLI use the same decoder.
 
 `berd-voice session` exposes the development voice-session protocol documented
-in [PROTOCOL.md](PROTOCOL.md). OpenAI remains the default backend:
+in [PROTOCOL.md](PROTOCOL.md). Siri TTS and macOS speech recognition are the
+defaults:
 
 ```text
-berd-voice session
-berd-voice session --tts-backend siri --voice Aaron --language en-US --rate 1.0
+berd-voice session --voice Aaron --language en-US --rate 1.0
+berd-voice session --tts-backend openai
 berd-voice session --tts-backend pocket --model-dir /path/to/native-voice-v2 --voice george --rate 1.0
-berd-voice session # macOS speech recognition is the default
 berd-voice session --stt-backend parakeet --stt-model-dir /path/to/parakeet
 berd-voice session --stt-backend openai
 ```
+
+The default Siri backend still requires an exact installed voice name and
+language. Missing or unavailable Siri voice configuration and an unavailable
+current-locale macOS speech model fail startup with setup guidance. The session
+never silently falls back to OpenAI or another cloud engine.
+Siri preflight validates the exact case-sensitive installed name, normalized
+BCP-47 language, and a responsive sirittsd availability query; later synthesis
+can still fail and is reported through the normal terminal speech lifecycle.
 
 The host selects an optional output device in the protocol `hello`; the TTS
 backend only produces PCM and does not own device persistence. Stdin is one

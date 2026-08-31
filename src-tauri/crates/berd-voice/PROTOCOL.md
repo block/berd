@@ -11,8 +11,8 @@ stdout. Diagnostics go only to stderr.
 The child selects closed TTS and STT backends at startup:
 
 ```text
-berd-voice session [--tts-backend openai]
-berd-voice session --tts-backend siri --voice NAME --language BCP47 [--rate 0.5..2.0]
+berd-voice session [--tts-backend siri] --voice NAME --language BCP47 [--rate 0.5..2.0]
+berd-voice session --tts-backend openai
 berd-voice session --tts-backend pocket --model-dir ABS --voice ID [--rate 0.75..2.0]
 
 berd-voice session [--stt-backend macos]
@@ -20,14 +20,22 @@ berd-voice session --stt-backend parakeet --stt-model-dir ABS
 berd-voice session --stt-backend openai
 ```
 
-OpenAI TTS and macOS STT are the defaults. Siri selection is exact and requires
-an installed sirittsd voice. Pocket requires an explicit self-contained bundle
+Siri TTS and macOS STT are the defaults. Siri selection is exact and requires
+an installed sirittsd voice; omitting its voice or language fails startup with
+setup guidance. There is no fallback to OpenAI or another cloud engine. Pocket
+requires an explicit self-contained bundle
 containing its ONNX/tokenizer assets and `voices/<id>.wav`; it never searches a
 Berd cache. macOS STT uses the current locale and requires its model to be
-installed before startup. Parakeet requires an explicit self-contained bundle.
+installed before startup; an unavailable model fails startup with installation
+guidance. Parakeet requires an explicit self-contained bundle.
 OpenAI credentials and optional endpoint/model configuration come only from the
 child environment, never arguments or wire messages. TTS and STT validation and
 initialization finish before `ready`.
+
+Siri startup preflight validates the exact case-sensitive installed name,
+normalized BCP-47 language, and a responsive sirittsd availability query. It
+does not guarantee that a later synthesis request cannot fail; those failures
+remain terminal speech events.
 
 The first request must be `hello`. Its optional `output_device` is an exact
 CoreAudio output name selected by the parent:

@@ -145,7 +145,7 @@ fn main() {
 fn usage_error(error: &str) -> ! {
     eprintln!("{error}");
     eprintln!(
-        "usage:\n  berd-voice session [--tts-backend openai|siri|pocket] \
+        "usage:\n  berd-voice session [--tts-backend siri|openai|pocket] \
          [--model-dir PATH] [--voice ID] [--language BCP47] [--rate FLOAT] \
          [--stt-backend macos|parakeet|openai] [--stt-model-dir PATH]\n  \
          berd-voice benchmark tts --tts-backend openai|siri|pocket \
@@ -478,7 +478,7 @@ fn parse_args(args: &[String]) -> Result<SessionConfig, String> {
     if args.get(1).map(String::as_str) != Some("session") {
         return Err("the only supported command is session".into());
     }
-    let mut backend = "openai";
+    let mut backend = "siri";
     let mut voice = None;
     let mut language = None;
     let mut model_dir = None;
@@ -567,10 +567,16 @@ fn build_tts_backend_config(
             }
             let voice = voice
                 .filter(|value| !value.trim().is_empty())
-                .ok_or_else(|| "--voice is required with Siri".to_string())?;
+                .ok_or_else(|| {
+                    "Siri TTS is the default; select an installed voice with --voice NAME and --language BCP47"
+                        .to_string()
+                })?;
             let language = language
                 .filter(|value| !value.trim().is_empty())
-                .ok_or_else(|| "--language is required with Siri".to_string())?;
+                .ok_or_else(|| {
+                    "Siri TTS is the default; select an installed voice with --voice NAME and --language BCP47"
+                        .to_string()
+                })?;
             let rate = rate.unwrap_or(1.0);
             if !rate.is_finite() || !(0.5..=2.0).contains(&rate) {
                 return Err("--rate must be between 0.5 and 2.0".into());
@@ -1040,9 +1046,18 @@ fn create_tts_backend(config: &TtsBackendConfig) -> Result<Arc<dyn TtsBackend>, 
             voice,
             language,
             rate,
-        } => Ok(Arc::new(berd_voice::SiriTts::new(language, voice, *rate)?)),
+        } => berd_voice::SiriTts::new(language, voice, *rate)
+            .map(|backend| Arc::new(backend) as Arc<dyn TtsBackend>)
+            .map_err(|error| {
+                format!(
+                    "Siri TTS voice {voice:?} ({language}) is unavailable: {error}. Download it in Berd Voice settings or select another installed voice with --voice and --language"
+                )
+            }),
         #[cfg(not(target_os = "macos"))]
-        TtsBackendConfig::Siri { .. } => Err("Siri TTS is only available on macOS".into()),
+        TtsBackendConfig::Siri { .. } => Err(
+            "Siri TTS is the default but is only available on macOS; explicitly select --tts-backend openai or --tts-backend pocket on this platform"
+                .into(),
+        ),
         TtsBackendConfig::Pocket {
             model_dir,
             voice,
@@ -1069,18 +1084,20 @@ fn create_input_runtime(
         SttBackendConfig::Macos => {
             #[cfg(target_os = "macos")]
             {
-                let status = berd_voice::mac_speech::mac_speech_status()?;
-                if !status.ready {
-                    return Err(format!(
-                        "macOS speech recognition is not ready for the current locale (model status: {})",
-                        status.model_status
-                    ));
-                }
+                let status = berd_voice::mac_speech::mac_speech_status().map_err(|error| {
+                    format!(
+                        "Could not check the default macOS speech recognition engine: {error}. Open Berd Voice settings to verify or install the current-locale model"
+                    )
+                })?;
+                validate_macos_stt_status(&status)?;
                 VoiceInputEngineConfig::MacSpeech
             }
             #[cfg(not(target_os = "macos"))]
             {
-                return Err("macOS speech recognition is only available on macOS".into());
+                return Err(
+                    "macOS speech recognition is the default but is only available on macOS; explicitly select --stt-backend parakeet or --stt-backend openai on this platform"
+                        .into(),
+                );
             }
         }
         SttBackendConfig::OpenAi => {
@@ -1115,6 +1132,42 @@ fn create_input_runtime(
         speech_vad_threshold: 0.5,
         controls: VoiceInputControls::default(),
     })
+    .map_err(|error| match config {
+        SttBackendConfig::Macos => format!(
+            "Could not start the default macOS speech recognition engine: {error}. Open Berd Voice settings to verify or install the current-locale model"
+        ),
+        _ => error,
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn validate_macos_stt_status(
+    status: &berd_voice::mac_speech::MacSpeechEngineStatus,
+) -> Result<(), String> {
+    if status.ready {
+        return Ok(());
+    }
+    if !status.supported {
+        return Err(
+            "The default macOS SpeechTranscriber engine is unavailable and requires macOS 26 or later. Upgrade macOS, or explicitly select --stt-backend parakeet or --stt-backend openai"
+                .into(),
+        );
+    }
+    if !status.locale_supported {
+        return Err(
+            "The default macOS SpeechTranscriber engine does not support the current system locale. Select a supported macOS language and locale, or explicitly select --stt-backend parakeet or --stt-backend openai"
+                .into(),
+        );
+    }
+    let action = match status.model_status.as_str() {
+        "downloading" => "Wait for the download to finish in Berd Voice settings",
+        "available" => "Download the current-locale model in Berd Voice settings",
+        _ => "Open Berd Voice settings to verify or install the current-locale model",
+    };
+    Err(format!(
+        "The default macOS SpeechTranscriber model is not ready (model status: {}). {action}, or explicitly select --stt-backend parakeet or --stt-backend openai",
+        status.model_status
+    ))
 }
 
 #[cfg(target_os = "macos")]
@@ -1834,19 +1887,87 @@ mod tests {
     }
 
     #[test]
-    fn cli_defaults_to_openai_and_rejects_siri_options_for_it() {
+    fn cli_defaults_to_exact_siri_and_macos_without_cloud_fallback() {
+        let missing_voice = parse_args(&args(&["berd-voice", "session"])).unwrap_err();
+        assert!(missing_voice.contains("Siri TTS is the default"));
+        assert!(missing_voice.contains("--voice NAME and --language BCP47"));
+
         assert_eq!(
-            parse_args(&args(&["berd-voice", "session"])).unwrap(),
+            parse_args(&args(&[
+                "berd-voice",
+                "session",
+                "--voice",
+                "Aaron",
+                "--language",
+                "en-US"
+            ]))
+            .unwrap(),
+            SessionConfig {
+                tts: TtsBackendConfig::Siri {
+                    voice: "Aaron".into(),
+                    language: "en-US".into(),
+                    rate: 1.0,
+                },
+                stt: SttBackendConfig::Macos,
+            }
+        );
+
+        assert_eq!(
+            parse_args(&args(&["berd-voice", "session", "--tts-backend", "openai"])).unwrap(),
             SessionConfig {
                 tts: TtsBackendConfig::OpenAi,
                 stt: SttBackendConfig::Macos,
             }
         );
-        assert!(
-            parse_args(&args(&["berd-voice", "session", "--voice", "Aaron"]))
-                .unwrap_err()
-                .contains("require a non-OpenAI backend")
-        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn native_default_availability_errors_are_actionable() {
+        let unavailable_siri = create_tts_backend(&TtsBackendConfig::Siri {
+            voice: "__berd_voice_does_not_exist__".into(),
+            language: "en-US".into(),
+            rate: 1.0,
+        })
+        .err()
+        .unwrap();
+        assert!(unavailable_siri.contains("is unavailable"));
+        assert!(unavailable_siri.contains("Download it in Berd Voice settings"));
+
+        let status = |supported: bool, locale_supported: bool, model_status: &str, ready: bool| {
+            berd_voice::mac_speech::MacSpeechEngineStatus {
+                supported,
+                locale: locale_supported.then(|| "en-US".into()),
+                locale_supported,
+                model_status: model_status.into(),
+                ready,
+            }
+        };
+        for (status, expected) in [
+            (
+                status(false, false, "unsupported", false),
+                "requires macOS 26 or later",
+            ),
+            (
+                status(true, false, "unsupported", false),
+                "does not support the current system locale",
+            ),
+            (
+                status(true, true, "downloading", false),
+                "Wait for the download to finish",
+            ),
+            (
+                status(true, true, "available", false),
+                "Download the current-locale model",
+            ),
+        ] {
+            let error = validate_macos_stt_status(&status).unwrap_err();
+            assert!(error.contains(expected), "{error}");
+            assert!(error.contains("explicitly select --stt-backend"));
+        }
+
+        let ready = status(true, true, "installed", true);
+        assert_eq!(validate_macos_stt_status(&ready), Ok(()));
     }
 
     #[test]
@@ -1954,6 +2075,8 @@ mod tests {
             parse_args(&args(&[
                 "berd-voice",
                 "session",
+                "--tts-backend",
+                "openai",
                 "--stt-backend",
                 "parakeet",
                 "--stt-model-dir",
@@ -1970,6 +2093,8 @@ mod tests {
         assert!(parse_args(&args(&[
             "berd-voice",
             "session",
+            "--tts-backend",
+            "openai",
             "--stt-backend",
             "parakeet"
         ]))
@@ -1978,6 +2103,8 @@ mod tests {
         assert!(parse_args(&args(&[
             "berd-voice",
             "session",
+            "--tts-backend",
+            "openai",
             "--stt-backend",
             "macos",
             "--stt-model-dir",
@@ -1988,6 +2115,8 @@ mod tests {
         assert!(parse_args(&args(&[
             "berd-voice",
             "session",
+            "--tts-backend",
+            "openai",
             "--stt-backend",
             "parakeet",
             "--stt-model-dir",

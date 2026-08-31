@@ -36,6 +36,8 @@ fn framed_hello_reports_input_initialization_failure_before_ready() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_berd-voice"))
         .args([
             "session",
+            "--tts-backend",
+            "openai",
             "--stt-backend",
             "parakeet",
             "--stt-model-dir",
