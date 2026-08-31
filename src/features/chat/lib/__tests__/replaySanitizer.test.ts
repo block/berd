@@ -63,6 +63,83 @@ describe("sanitizeReplayMessages", () => {
     ]);
   });
 
+  it("restores batched realtime transcripts to user and spoken Emissary bubbles", () => {
+    const message = createTextMessage(
+      "voice-batch",
+      "user",
+      "[Voice transcript] Emissary said: Let me check.\n" +
+        "[Voice transcript] Emissary said (interrupted; best-effort transcript): One moment.\n" +
+        "[Voice transcript] User said: What did you find?",
+    );
+    message.metadata = {
+      ...message.metadata,
+      origin: "voice_conversation",
+    };
+
+    expect(sanitizeReplayMessages([message])).toMatchObject([
+      {
+        id: "voice-batch",
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "Let me check.",
+            speech: { status: "spoken" },
+          },
+        ],
+        metadata: {
+          personaName: "Emissary",
+          userVisible: true,
+          agentVisible: false,
+        },
+      },
+      {
+        id: "voice-batch:voice:1",
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "One moment.",
+            speech: { status: "interrupted", confidence: "low" },
+          },
+        ],
+        metadata: { personaName: "Emissary" },
+      },
+      {
+        id: "voice-batch:voice:2",
+        role: "user",
+        content: [{ type: "text", text: "What did you find?" }],
+        metadata: { userVisible: true, agentVisible: false },
+      },
+    ]);
+  });
+
+  it("restores persisted direct Emissary messages as coordination bubbles", () => {
+    const message = createTextMessage(
+      "direct-message",
+      "user",
+      "[Direct message from emissary; cursor 1] Check the transcript storage.",
+    );
+    message.metadata = {
+      ...message.metadata,
+      origin: "voice_conversation",
+      userVisible: false,
+    };
+
+    expect(sanitizeReplayMessages([message])).toMatchObject([
+      {
+        id: "direct-message",
+        role: "assistant",
+        content: [{ type: "text", text: "Check the transcript storage." }],
+        metadata: {
+          personaName: "Emissary → Master",
+          userVisible: true,
+          agentVisible: false,
+        },
+      },
+    ]);
+  });
+
   it("keeps TTS control lookalikes that are not voice-origin messages", () => {
     const message = createTextMessage(
       "user-1",

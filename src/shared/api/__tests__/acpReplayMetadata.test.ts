@@ -164,6 +164,8 @@ describe("getReplayUserMetadata", () => {
             voiceUtteranceId: "7",
             voiceConversationLifecycleId: "lifecycle-1",
             voiceConversationRevision: 3,
+            userVisible: false,
+            agentVisible: false,
           },
         },
       }),
@@ -172,6 +174,8 @@ describe("getReplayUserMetadata", () => {
       voiceUtteranceId: "7",
       voiceConversationLifecycleId: "lifecycle-1",
       voiceConversationRevision: 3,
+      userVisible: false,
+      agentVisible: false,
     });
   });
 

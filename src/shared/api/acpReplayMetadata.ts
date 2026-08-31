@@ -18,6 +18,8 @@ export type ReplayUserMetadata = Pick<
   | "voiceUtteranceId"
   | "voiceConversationLifecycleId"
   | "voiceConversationRevision"
+  | "userVisible"
+  | "agentVisible"
 >;
 
 export function getReplayMessageId(
@@ -100,6 +102,14 @@ export function getReplayUserMetadata(
     goose.voiceConversationRevision >= 0
       ? goose.voiceConversationRevision
       : undefined;
+  const userVisible =
+    origin === "voice_conversation" && typeof goose.userVisible === "boolean"
+      ? goose.userVisible
+      : undefined;
+  const agentVisible =
+    origin === "voice_conversation" && typeof goose.agentVisible === "boolean"
+      ? goose.agentVisible
+      : undefined;
   if (!delivery && !origin) {
     return undefined;
   }
@@ -114,6 +124,8 @@ export function getReplayUserMetadata(
     ...(voiceConversationRevision !== undefined
       ? { voiceConversationRevision }
       : {}),
+    ...(userVisible !== undefined ? { userVisible } : {}),
+    ...(agentVisible !== undefined ? { agentVisible } : {}),
   };
 }
 

@@ -856,7 +856,11 @@ class OpenAiRealtimeConversationRuntime {
             origin: "voice_conversation" as const,
             ...(hidden ? { userVisible: false } : {}),
           },
-          acpGooseMetadata: { origin: "voice_conversation" },
+          acpGooseMetadata: {
+            origin: "voice_conversation",
+            userVisible: !hidden,
+            agentVisible: false,
+          },
           ...(userMessageId ? { userMessageId } : {}),
         };
         const sendAsPrompt = async () => {
