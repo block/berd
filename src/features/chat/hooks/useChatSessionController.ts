@@ -118,6 +118,7 @@ import {
   type RecreateSessionForProvider,
 } from "../model-selection/strandedProviderRecovery";
 import { perfLog } from "@/shared/lib/perfLog";
+import { remoteSafeAttachments } from "@/features/chat/lib/attachments";
 import type { BerdChatChatSourceSurface } from "@/shared/telemetry/events";
 import { isFirstCommittedUserMessage } from "../lib/chatFirstMessage";
 import {
@@ -1506,11 +1507,23 @@ export function useChatSessionController({
     [sessionId],
   );
 
-  const handleRemoteHostChange = useCallback((host: string | null) => {
-    setPendingRemoteHost(host);
-    // A chosen directory belongs to one host, so any host change resets it.
-    setPendingRemoteDir(undefined);
-  }, []);
+  const handleRemoteHostChange = useCallback(
+    (host: string | null) => {
+      setPendingRemoteHost(host);
+      // A chosen directory belongs to one host, so any host change resets it.
+      setPendingRemoteDir(undefined);
+      if (host) {
+        const chatStore = useChatStore.getState();
+        chatStore.setDraftAttachments(
+          stateSessionId,
+          remoteSafeAttachments(
+            chatStore.draftAttachmentsBySession[stateSessionId],
+          ) ?? [],
+        );
+      }
+    },
+    [stateSessionId],
+  );
 
   const handleRemoteDirChange = useCallback((dir: string | null) => {
     setPendingRemoteDir(dir);
@@ -2620,7 +2633,7 @@ export function useChatSessionController({
         const payload = captureSessionSelection({
           text,
           persona: personaIntentFromComposer(personaId, personaName),
-          attachments,
+          attachments: remoteSafeAttachments(attachments),
           sendOptions,
         });
         const remoteExecutionTarget =

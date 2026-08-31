@@ -4,6 +4,7 @@ import {
   appendAttachmentPaths,
   buildAcpImages,
   buildMessageAttachments,
+  remoteSafeAttachments,
 } from "@/features/chat/lib/attachments";
 import {
   getSessionTitleFromDraft,
@@ -211,13 +212,19 @@ export async function dispatchPrompt(
     systemPrompt,
     userMessageMetadata,
   } = opts;
-  const images = buildAcpImages(attachments);
+  const sessionRunsRemotely = Boolean(
+    useChatSessionStore.getState().getSession(sessionId)?.remoteHost,
+  );
+  const dispatchAttachments = sessionRunsRemotely
+    ? remoteSafeAttachments(attachments)
+    : attachments;
+  const images = buildAcpImages(dispatchAttachments);
 
   // Reject oversized attachment payloads before committing anything: an
   // overflowing ACP WebSocket message silently kills the shared connection
   // and every open chat with it (BOT-1463). Failing here keeps the draft in
   // the composer so the user can remove attachments and retry.
-  const attachmentBytes = promptAttachmentBytes(attachments);
+  const attachmentBytes = promptAttachmentBytes(dispatchAttachments);
   if (attachmentBytes > MAX_PROMPT_ATTACHMENT_BYTES) {
     const errorMessage = formatAttachmentsTooLargeMessage(attachmentBytes);
     useChatStore.getState().setError(sessionId, errorMessage);
@@ -251,7 +258,7 @@ export async function dispatchPrompt(
       beforeUserMessageCommitted?.();
       const userMessage = createUserMessage(
         displayText ?? text,
-        buildMessageAttachments(attachments),
+        buildMessageAttachments(dispatchAttachments),
         chips,
       );
       if (persona) {
@@ -286,7 +293,7 @@ export async function dispatchPrompt(
       const session = sessionStore.getSession(sessionId);
       if (session && isDefaultChatTitle(session.title)) {
         sessionStore.patchSession(sessionId, {
-          title: getSessionTitleFromDraft(text, attachments),
+          title: getSessionTitleFromDraft(text, dispatchAttachments),
           updatedAt: new Date().toISOString(),
         });
       } else {
@@ -302,7 +309,7 @@ export async function dispatchPrompt(
 
     const promptWithPaths = appendAttachmentPaths(
       background ? text : text.trim(),
-      attachments,
+      dispatchAttachments,
     );
     const acpPrompt =
       promptWithPaths || (images?.length ? " " : promptWithPaths);

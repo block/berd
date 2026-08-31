@@ -39,12 +39,20 @@ const mocks = vi.hoisted(() => ({
   buildFeatures: {
     securityMl: true,
   },
+  remoteSessionsEnabled: true,
   setVoiceConversationForegroundSession: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/app/lib/chatRuntimeStartup", () => ({
   runChatRuntimeStartup: vi.fn().mockResolvedValue(undefined),
 }));
+
+vi.mock(
+  "@/features/chat/hooks/useRemoteSessionExperimentReconciliation",
+  () => ({
+    useRemoteSessionExperimentReconciliation: () => mocks.remoteSessionsEnabled,
+  }),
+);
 
 vi.mock("@/shared/profile/buildProfile", () => ({
   getBuildFeatureState: () => mocks.buildFeatures,
@@ -201,6 +209,7 @@ describe("SessionWindowApp", () => {
     vi.useRealTimers();
     handoffListeners.available = undefined;
     handoffListeners.searchTarget = undefined;
+    mocks.remoteSessionsEnabled = true;
     useSessionWindowStore.getState().setSnapshot([]);
     useChatStore.setState({
       messagesBySession: {},
@@ -234,6 +243,29 @@ describe("SessionWindowApp", () => {
     expect(
       await screen.findByText(/can.t find this session/i),
     ).toBeInTheDocument();
+  });
+
+  it("stops rendering a remote session when the experiment is disabled", async () => {
+    useChatSessionStore.setState({
+      sessions: [{ ...session, remoteHost: "devbox" }],
+      activeSessionId: null,
+      hasHydratedSessions: true,
+    });
+    const view = renderSessionWindow();
+    await screen.findByTestId("chat-view");
+
+    mocks.remoteSessionsEnabled = false;
+    view.rerender(
+      <SessionWindowApp
+        sessionId="session-1"
+        currentWindowLabel="session:session-1"
+      />,
+    );
+
+    expect(
+      await screen.findByText(/can.t find this session/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("chat-view")).not.toBeInTheDocument();
   });
 
   it("applies message search targets sent from the main window", async () => {

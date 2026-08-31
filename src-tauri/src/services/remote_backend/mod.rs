@@ -212,6 +212,35 @@ fn set_state(app: &AppHandle, slot: &HostSlot, state: RemoteBackendState) {
     emit_status(app, &slot.key, &state);
 }
 
+fn update_state_if_current(
+    shared: &mut SlotShared,
+    generation: u64,
+    state: RemoteBackendState,
+) -> bool {
+    if shared.generation != generation {
+        return false;
+    }
+    shared.state = state;
+    true
+}
+
+/// Publish a supervisor-owned transition only while its generation still owns
+/// the slot. Emitting while holding the same mutex keeps a later Disconnect
+/// event ordered after this one instead of allowing a stale event to overtake it.
+fn set_state_if_current(
+    app: &AppHandle,
+    slot: &HostSlot,
+    generation: u64,
+    state: RemoteBackendState,
+) -> bool {
+    let mut shared = slot.shared.lock().expect("slot poisoned");
+    if !update_state_if_current(&mut shared, generation, state.clone()) {
+        return false;
+    }
+    emit_status(app, &slot.key, &state);
+    true
+}
+
 fn emit_status(app: &AppHandle, host: &str, state: &RemoteBackendState) {
     let payload = RemoteBackendStatus {
         host: host.to_string(),
@@ -353,15 +382,14 @@ pub async fn connect(
                 &slot.key,
                 Some(&error.message),
             );
-            if slot.shared.lock().expect("slot poisoned").generation == expected_generation {
-                set_state(
-                    app,
-                    &slot,
-                    RemoteBackendState::Failed {
-                        error: error.clone(),
-                    },
-                );
-            }
+            set_state_if_current(
+                app,
+                &slot,
+                expected_generation,
+                RemoteBackendState::Failed {
+                    error: error.clone(),
+                },
+            );
             Err(error)
         }
     }
@@ -507,19 +535,22 @@ fn spawn_supervisor(
                 &slot.key,
                 Some(&last_error.message),
             );
-            set_state(&app, &slot, RemoteBackendState::Disconnected);
+            set_state_if_current(&app, &slot, generation, RemoteBackendState::Disconnected);
             return;
         }
 
         for attempt in start_attempt..=MAX_RECONNECT_ATTEMPTS {
-            set_state(
+            if !set_state_if_current(
                 &app,
                 &slot,
+                generation,
                 RemoteBackendState::Reconnecting {
                     attempt,
                     error: last_error.clone(),
                 },
-            );
+            ) {
+                return;
+            }
 
             let backoff = Duration::from_secs(1 << (attempt - 1)).min(RECONNECT_BACKOFF_CAP);
             tokio::time::sleep(backoff).await;
@@ -560,7 +591,7 @@ fn spawn_supervisor(
             &slot.key,
             Some(&last_error.message),
         );
-        set_state(&app, &slot, RemoteBackendState::Disconnected);
+        set_state_if_current(&app, &slot, generation, RemoteBackendState::Disconnected);
     });
 }
 
@@ -594,9 +625,16 @@ pub async fn shutdown(
 ) -> Result<(), RemoteBackendError> {
     let aliases = ssh_config::load_ssh_config_hosts();
     let spec = RemoteHostSpec::parse(host_input, &aliases)?;
+    let slot = registry.slot(&spec);
     let shell_env = dir_env::capture_home_interactive_env().await;
-    daemon::shutdown_daemon(&spec, &shell_env).await?;
+
+    // Wait out any in-flight establish, then invalidate its supervisor and
+    // drop its tunnel before touching the daemon. A new connect cannot start
+    // until shutdown releases this lock, so ensure_daemon cannot recreate the
+    // daemon after shutdown_daemon stops it.
+    let _guard = slot.connect_lock.lock().await;
     disconnect(app, registry, &spec.key());
+    daemon::shutdown_daemon(&spec, &shell_env).await?;
     record_diagnostic(DiagnosticLevel::Info, "daemon_shutdown", &spec.key(), None);
     Ok(())
 }
@@ -734,6 +772,37 @@ mod tests {
         shared.tunnel_pid = Some(100);
         assert!(!clear_tunnel_pid_if_current(&mut shared, 0, Some(100)));
         assert_eq!(shared.tunnel_pid, Some(100));
+    }
+
+    #[test]
+    fn reconnecting_state_is_rejected_after_generation_changes() {
+        let mut shared = ready_shared(None);
+        shared.generation = 3;
+
+        assert!(update_state_if_current(
+            &mut shared,
+            3,
+            RemoteBackendState::Reconnecting {
+                attempt: 1,
+                error: RemoteBackendError::internal("closed"),
+            },
+        ));
+        assert!(matches!(
+            shared.state,
+            RemoteBackendState::Reconnecting { attempt: 1, .. }
+        ));
+
+        shared.generation = 4;
+        shared.state = RemoteBackendState::Disconnected;
+        assert!(!update_state_if_current(
+            &mut shared,
+            3,
+            RemoteBackendState::Reconnecting {
+                attempt: 2,
+                error: RemoteBackendError::internal("closed again"),
+            },
+        ));
+        assert!(matches!(shared.state, RemoteBackendState::Disconnected));
     }
 
     #[test]

@@ -1,7 +1,22 @@
 import type {
   ChatAttachmentDraft,
+  ChatImageAttachmentDraft,
   MessageAttachment,
 } from "@/shared/types/messages";
+
+/**
+ * Remote ACP backends cannot resolve paths from the local machine. Keep only
+ * images whose bytes travel in the prompt, and strip their local path so it is
+ * never appended to the remote prompt or persisted as agent-readable context.
+ */
+export function remoteSafeAttachments(
+  attachments: ChatAttachmentDraft[] | undefined,
+): ChatImageAttachmentDraft[] | undefined {
+  const images = (attachments ?? []).flatMap((attachment) =>
+    attachment.kind === "image" ? [{ ...attachment, path: undefined }] : [],
+  );
+  return images.length > 0 ? images : undefined;
+}
 
 export function appendAttachmentPaths(
   text: string,

@@ -329,14 +329,14 @@ export function ChatInputToolbar({
             <DropdownMenuContent align="start">
               <DropdownMenuItem
                 onSelect={() => onAttachFiles?.()}
-                disabled={disabled}
+                disabled={disabled || Boolean(selectedRemoteHost)}
               >
                 <File className="mr-2 h-4 w-4" />
                 {t("toolbar.attachFile")}
               </DropdownMenuItem>
               <DropdownMenuItem
                 onSelect={() => onAttachFolders?.()}
-                // Local folder attachments are meaningless for a session that
+                // Local path attachments are meaningless for a session that
                 // runs its backend on a remote host.
                 disabled={disabled || Boolean(selectedRemoteHost)}
               >

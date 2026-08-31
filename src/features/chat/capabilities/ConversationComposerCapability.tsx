@@ -339,6 +339,7 @@ export function ConversationComposerCapability({
       }
       attachmentDropTargetRef={attachmentDropTargetRef}
       onAttachmentDragOverChange={onAttachmentDragOverChange}
+      attachmentsEnabled={!controller.selectedRemoteHost}
       initialValue={controller.draftValue}
       initialAttachments={controller.draftAttachments}
       onDraftChange={controller.handleDraftChange}

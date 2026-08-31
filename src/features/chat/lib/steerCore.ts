@@ -18,6 +18,7 @@ import {
   appendAttachmentPaths,
   buildAcpImages,
   buildMessageAttachments,
+  remoteSafeAttachments,
 } from "./attachments";
 import { isSessionRunning } from "./sessionActivity";
 import { getSessionPromptOwner } from "./sessionPromptOwnership";
@@ -37,8 +38,14 @@ export async function steerPromptInSession(
   sendOptions?: ChatSendOptions,
   options: { throwOnError?: boolean } = {},
 ): Promise<boolean> {
-  const images = buildAcpImages(attachments);
-  const hasAttachments = (attachments?.length ?? 0) > 0;
+  const sessionRunsRemotely = Boolean(
+    useChatSessionStore.getState().getSession(sessionId)?.remoteHost,
+  );
+  const dispatchAttachments = sessionRunsRemotely
+    ? remoteSafeAttachments(attachments)
+    : attachments;
+  const images = buildAcpImages(dispatchAttachments);
+  const hasAttachments = (dispatchAttachments?.length ?? 0) > 0;
   const activeRunId = useChatStore
     .getState()
     .getSessionRuntime(sessionId).activeRunId;
@@ -53,7 +60,7 @@ export async function steerPromptInSession(
   // (berdctl, queued steers) reach here directly. An oversized ACP message
   // silently kills the shared WebSocket and every open chat (BOT-1463), so
   // reject before committing anything.
-  const attachmentBytes = promptAttachmentBytes(attachments);
+  const attachmentBytes = promptAttachmentBytes(dispatchAttachments);
   if (attachmentBytes > MAX_PROMPT_ATTACHMENT_BYTES) {
     const errorMessage = formatAttachmentsTooLargeMessage(attachmentBytes);
     useChatStore
@@ -70,7 +77,7 @@ export async function steerPromptInSession(
 
   const userMessage = createUserMessage(
     sendOptions?.displayText ?? text,
-    buildMessageAttachments(attachments),
+    buildMessageAttachments(dispatchAttachments),
     sendOptions?.chips,
   );
   userMessage.metadata = {
@@ -90,7 +97,10 @@ export async function steerPromptInSession(
     }
   }
 
-  const promptWithPaths = appendAttachmentPaths(text.trim(), attachments);
+  const promptWithPaths = appendAttachmentPaths(
+    text.trim(),
+    dispatchAttachments,
+  );
   const acpPrompt = promptWithPaths || (images?.length ? " " : promptWithPaths);
   const chatStore = useChatStore.getState();
   chatStore.addMessage(sessionId, userMessage);

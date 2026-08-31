@@ -334,8 +334,8 @@ async function startChatRuntime(
     );
     // After the local page load so mergeAcpSessionPage cannot race the
     // placeholder insert; the merge itself is additive for remoteHost either
-    // way. This also rehydrates secondary session windows, which do not mount
-    // AppShell's live experiment reconciliation effect.
+    // way. The per-window experiment reconciliation hook also waits on this
+    // startup latch before applying later runtime changes.
     if (getExperiment(REMOTE_SSH_SESSIONS_EXPERIMENT_ID)?.enabled) {
       try {
         const { rehydrateRemoteSessions } = await import(

@@ -39,6 +39,7 @@ import { useBerdctlQueuedMessageDrain } from "@/features/berdctl/bridge/useBerdc
 import { ChatView } from "@/features/chat/ui/ChatView";
 import { BackgroundQueuedMessageDrain } from "@/features/chat/ui/BackgroundQueuedMessageDrain";
 import { useWorkspaceNameRequestQueue } from "@/features/chat/hooks/useWorkspaceNameRequestQueue";
+import { useRemoteSessionExperimentReconciliation } from "@/features/chat/hooks/useRemoteSessionExperimentReconciliation";
 import { ProjectWorkspaceStartupNameDialog } from "@/features/projects/ui/ProjectWorkspaceStartupNameDialog";
 import { Button } from "@/shared/ui/button";
 import { SecurityConfirmationFallback } from "@/features/security/ui/SecurityConfirmationPanel";
@@ -145,6 +146,7 @@ export function SessionWindowApp({
   currentWindowLabel: currentWindowLabelOverride,
 }: SessionWindowAppProps) {
   const { t } = useTranslation("chat");
+  const remoteSessionsEnabled = useRemoteSessionExperimentReconciliation();
   const [phase, setPhase] = useState<Phase>("loading");
   useBerdctlQueuedMessageDrain(sessionId, phase === "ready");
   const [session, setSession] = useState<ChatSession | null>(null);
@@ -160,6 +162,13 @@ export function SessionWindowApp({
   } = useWorkspaceNameRequestQueue();
   const isRightRailOpen = useChatSessionStore((s) => s.isRightRailOpen);
   const setRightRailOpen = useChatSessionStore((s) => s.setRightRailOpen);
+
+  useEffect(() => {
+    if (!remoteSessionsEnabled && session?.remoteHost) {
+      setSession(null);
+      setPhase("missing");
+    }
+  }, [remoteSessionsEnabled, session?.remoteHost]);
 
   const loadOwnedSession = useCallback(
     async (options: { force?: boolean } = {}) => {
