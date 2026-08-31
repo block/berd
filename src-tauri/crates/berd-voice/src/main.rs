@@ -1149,7 +1149,7 @@ fn validate_macos_stt_status(
     }
     if !status.supported {
         return Err(
-            "The default macOS SpeechTranscriber engine is unavailable and requires macOS 26 or later. Upgrade macOS, or explicitly select --stt-backend parakeet or --stt-backend openai"
+            "The default macOS speech engine requires macOS 26 or later with SpeechTranscriber available. Upgrade macOS or verify SpeechTranscriber availability, or explicitly select --stt-backend parakeet or --stt-backend openai"
                 .into(),
         );
     }
@@ -1946,7 +1946,7 @@ mod tests {
         for (status, expected) in [
             (
                 status(false, false, "unsupported", false),
-                "requires macOS 26 or later",
+                "requires macOS 26 or later with SpeechTranscriber available",
             ),
             (
                 status(true, false, "unsupported", false),
