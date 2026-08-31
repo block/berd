@@ -3,7 +3,7 @@
 use std::{
     collections::{HashMap, VecDeque},
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, Ordering},
         Arc, Mutex,
     },
     time::Duration,
@@ -502,32 +502,14 @@ pub struct NativeVoiceState {
     stop_serial: Arc<tokio::sync::Mutex<()>>,
     start_blocks: Arc<Mutex<HashMap<String, Vec<VoiceStartBlock>>>>,
     pending: Arc<Mutex<VecDeque<PendingTranscript>>>,
-    capture_suppressions: Arc<AtomicUsize>,
     microphone_muted: Arc<AtomicBool>,
     input_controls: berd_voice::input::VoiceInputControls,
-}
-
-#[must_use = "capture suppression ends when the guard is dropped"]
-pub struct CaptureSuppressionGuard {
-    capture_suppressions: Arc<AtomicUsize>,
-}
-
-impl Drop for CaptureSuppressionGuard {
-    fn drop(&mut self) {
-        let previous = self.capture_suppressions.fetch_sub(1, Ordering::SeqCst);
-        debug_assert!(previous > 0, "capture suppression guard underflow");
-        log::info!(
-            "[voice-echo-guard] capture resumed suppression_count={}",
-            previous.saturating_sub(1)
-        );
-    }
 }
 
 #[must_use = "assistant speech policy ends when the guard is dropped"]
 #[cfg(any(test, target_os = "macos"))]
 pub(crate) struct AssistantSpeechGuard {
     _activity: Option<berd_voice::input::AssistantActivityGuard>,
-    _capture_suppression: Option<CaptureSuppressionGuard>,
 }
 
 impl NativeVoiceState {
@@ -705,39 +687,23 @@ impl NativeVoiceState {
             .is_ok_and(|blocks| blocks.contains_key(session_id))
     }
 
-    pub fn suppress_capture(&self) -> CaptureSuppressionGuard {
-        let previous = self.capture_suppressions.fetch_add(1, Ordering::SeqCst);
-        log::info!(
-            "[voice-echo-guard] capture suppressed suppression_count={}",
-            previous + 1
-        );
-        CaptureSuppressionGuard {
-            capture_suppressions: Arc::clone(&self.capture_suppressions),
-        }
-    }
-
     #[cfg(any(test, target_os = "macos"))]
     pub(crate) fn begin_assistant_speech(
         &self,
         sensitivity: InterruptionSensitivity,
-        suppress_capture: bool,
+        input_during_tts: berd_voice::input::InputDuringTtsPolicy,
     ) -> AssistantSpeechGuard {
         let activity = self
             .input_controls
-            .begin_assistant_activity(sensitivity.vad_threshold())
+            .begin_assistant_activity(sensitivity.vad_threshold(), input_during_tts)
             .ok();
         AssistantSpeechGuard {
-            _capture_suppression: suppress_capture.then(|| self.suppress_capture()),
             _activity: activity,
         }
     }
 
-    fn capture_is_suppressed(&self) -> bool {
-        self.capture_suppressions.load(Ordering::SeqCst) > 0
-    }
-
     pub fn microphone_is_muted(&self) -> bool {
-        self.microphone_muted.load(Ordering::SeqCst) || self.input_controls.is_muted()
+        self.microphone_muted.load(Ordering::SeqCst) || self.input_controls.is_host_muted()
     }
 
     pub fn active_session_target(&self) -> Option<(String, String)> {
@@ -913,11 +879,9 @@ impl NativeVoiceState {
             // Native input mute is authoritative when installed so a hardware
             // unmute cannot be masked by a stale renderer fallback latch.
             let software_muted = software_microphone_mute(native_microphone_mute_control, muted);
-            let previous_software_muted =
-                self.microphone_muted.swap(software_muted, Ordering::SeqCst);
-            if previous_software_muted != software_muted || native_microphone_mute_control {
-                self.input_controls.set_muted(muted);
-            }
+            self.microphone_muted
+                .store(software_muted, Ordering::SeqCst);
+            self.input_controls.set_host_muted(muted);
             owner_window_label
         };
         Ok(Some(owner_window_label))
@@ -1520,7 +1484,7 @@ pub async fn start_native_voice_conversation(
         let mute_session_id = session_id.clone();
         let native_input_controls = input_controls.clone();
         runtime.native_microphone_mute_control = native_input_mute::start(move |muted| {
-            native_input_controls.set_muted(muted);
+            native_input_controls.set_host_muted(muted);
             let event = NativeVoiceEvent::MicrophoneMute {
                 session_id: mute_session_id.clone(),
                 muted,
@@ -1693,7 +1657,7 @@ pub async fn start_native_voice_conversation(
                             break;
                         }
                         native_input_mute::stop();
-                        event_state.input_controls.set_muted(false);
+                        event_state.input_controls.set_host_muted(false);
                         current.native_microphone_mute_control = false;
                         if let Some(admission) = current.admission.take() {
                             admission.close();
@@ -2096,7 +2060,7 @@ impl NativeVoiceState {
             let stopped = runtime.revision == revision && runtime.session_id == session_id;
             if stopped {
                 native_input_mute::stop();
-                self.input_controls.set_muted(false);
+                self.input_controls.set_host_muted(false);
                 runtime.native_microphone_mute_control = false;
                 if let Some(admission) = runtime.admission.take() {
                     admission.close();
@@ -2151,7 +2115,7 @@ impl NativeVoiceState {
                 .map_err(|_| "native voice state lock was poisoned".to_string())?;
             if runtime.revision == revision && runtime.session_id == session_id {
                 native_input_mute::stop();
-                self.input_controls.set_muted(false);
+                self.input_controls.set_host_muted(false);
                 runtime.native_microphone_mute_control = false;
                 if let Some(admission) = runtime.admission.take() {
                     admission.close();
@@ -2307,7 +2271,7 @@ impl NativeVoiceState {
                 }
             }
             native_input_mute::stop();
-            self.input_controls.set_muted(false);
+            self.input_controls.set_host_muted(false);
             runtime.native_microphone_mute_control = false;
             (
                 runtime.session_id.clone(),
@@ -2391,9 +2355,6 @@ fn push_audio_for_window(
     window_label: &str,
     bytes: Vec<u8>,
 ) -> Result<(), String> {
-    if state.capture_is_suppressed() || state.microphone_muted.load(Ordering::SeqCst) {
-        return Ok(());
-    }
     let runtime = state
         .runtime
         .lock()
@@ -2831,44 +2792,32 @@ mod tests {
     }
 
     #[test]
-    fn speaker_playback_blocks_vad_ingestion_until_all_guards_finish() {
+    fn assistant_suppression_uses_the_shared_input_controls() {
         let state = NativeVoiceState::default();
-        assert!(!state.capture_is_suppressed());
+        assert!(!state.input_controls.is_muted());
 
-        let first = state.suppress_capture();
-        assert!(state.capture_is_suppressed());
-        {
-            let second = state.suppress_capture();
-            assert!(state.capture_is_suppressed());
-            drop(second);
-            assert!(state.capture_is_suppressed());
-        }
-
-        drop(first);
-        assert!(!state.capture_is_suppressed());
-    }
-
-    #[test]
-    fn assistant_speech_guard_scopes_capture_suppression_to_playback() {
-        let state = NativeVoiceState::default();
-        assert!(!state.capture_is_suppressed());
-
-        let guard = state.begin_assistant_speech(InterruptionSensitivity::Balanced, true);
-        assert!(state.capture_is_suppressed());
+        let guard = state.begin_assistant_speech(
+            InterruptionSensitivity::Balanced,
+            berd_voice::input::InputDuringTtsPolicy::SuppressInput,
+        );
+        assert!(state.input_controls.is_muted());
 
         drop(guard);
-        assert!(!state.capture_is_suppressed());
+        assert!(!state.input_controls.is_muted());
     }
 
     #[test]
-    fn playback_capture_suppression_outlives_lifecycle_replacement() {
+    fn assistant_input_suppression_outlives_lifecycle_replacement() {
         let state = NativeVoiceState::default();
         {
             let mut runtime = state.runtime.lock().expect("lock native runtime");
             runtime.session_id = Some("old-session".to_string());
             runtime.revision = 7;
         }
-        let guard = state.begin_assistant_speech(InterruptionSensitivity::Less, true);
+        let guard = state.begin_assistant_speech(
+            InterruptionSensitivity::Less,
+            berd_voice::input::InputDuringTtsPolicy::SuppressInput,
+        );
         state
             .take_stop_snapshot(Some(("old-session", 7)))
             .expect("stop old lifecycle")
@@ -2879,9 +2828,9 @@ mod tests {
             runtime.revision = 8;
         }
 
-        assert!(state.capture_is_suppressed());
+        assert!(state.input_controls.is_muted());
         drop(guard);
-        assert!(!state.capture_is_suppressed());
+        assert!(!state.input_controls.is_muted());
     }
 
     #[test]
@@ -2978,6 +2927,13 @@ mod tests {
             Some("main".to_string()),
         );
         assert!(state.microphone_is_muted());
+        state.microphone_muted.store(false, Ordering::SeqCst);
+        assert!(state.input_controls.is_host_muted());
+        state
+            .set_microphone_muted_target("main", "session-b", 8, false)
+            .expect("authoritative unmute repairs a stale UI projection");
+        assert!(!state.input_controls.is_host_muted());
+        assert!(!state.microphone_is_muted());
     }
 
     #[test]

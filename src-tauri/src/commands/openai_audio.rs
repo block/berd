@@ -22,14 +22,16 @@ use tauri::{AppHandle, State};
 use super::{
     native_voice::AssistantSpeechGuard,
     pocket_voice::{
-        effective_output_device_name, playback_latency_safety_duration, selected_output_device,
-        should_suppress_capture,
+        effective_output_device_name, playback_latency_safety_duration,
+        resolve_input_during_tts_policy, selected_output_device,
     },
 };
 use super::{
     native_voice::{InterruptionSensitivity, NativeVoiceState},
     pocket_voice::VoiceInterruptionMode,
 };
+#[cfg(target_os = "macos")]
+use berd_voice::input::InputDuringTtsPolicy;
 #[cfg(any(test, target_os = "macos"))]
 use std::time::Instant;
 
@@ -397,6 +399,12 @@ pub fn start_openai_voice_stream(
         }
         let (sender, receiver) = mpsc::channel();
         let active = Arc::new(AtomicBool::new(true));
+        let output_device = selected_output_device();
+        let effective_output_device = effective_output_device_name(output_device.as_deref());
+        let input_during_tts =
+            resolve_input_during_tts_policy(interruption_mode, effective_output_device.as_deref());
+        let output_latency_grace =
+            playback_latency_safety_duration(effective_output_device.as_deref());
         let Some(admission) = native_voice.claim_assistant_speech(
             &session_id,
             expected_revision,
@@ -441,8 +449,10 @@ pub fn start_openai_voice_stream(
                 active.clone(),
                 receiver,
                 native_voice,
-                interruption_mode,
                 interruption_sensitivity,
+                input_during_tts,
+                output_device,
+                output_latency_grace,
                 speed,
             );
             if let Ok(mut playback) = playback.lock() {
@@ -613,8 +623,10 @@ fn run_openai_voice_stream(
     active: Arc<AtomicBool>,
     receiver: mpsc::Receiver<OpenAiStreamCommand>,
     native_voice: NativeVoiceState,
-    interruption_mode: VoiceInterruptionMode,
     interruption_sensitivity: InterruptionSensitivity,
+    input_during_tts: InputDuringTtsPolicy,
+    output_device: Option<String>,
+    output_latency_grace: Duration,
     speed: f32,
 ) -> Result<StreamOutcome, StreamFailure> {
     let tts = ConfiguredTtsSlot::new(TtsConfiguration::openai(
@@ -626,8 +638,6 @@ fn run_openai_voice_stream(
     ))?;
     let tts = tts.lease()?;
     let backend = tts.backend();
-    let output_device = selected_output_device();
-    let effective_output_device = effective_output_device_name(output_device.as_deref());
     let player = PocketAudioPlayer::new(TTS_SAMPLE_RATE, 1.0, output_device.as_deref())?;
     let mut playback = OutboundPlayback::new(
         &player,
@@ -635,9 +645,6 @@ fn run_openai_voice_stream(
         TTS_SAMPLE_RATE,
         INITIAL_PLAYBACK_BUFFER_FRAMES,
     )?;
-    let suppress_capture =
-        should_suppress_capture(interruption_mode, effective_output_device.as_deref());
-    let output_latency_grace = playback_latency_safety_duration(effective_output_device.as_deref());
     let mut assistant_speech = None::<AssistantSpeechGuard>;
     let mut playback_drained_at = None::<Instant>;
     let mut pending = String::new();
@@ -669,7 +676,7 @@ fn run_openai_voice_stream(
                         &mut pending,
                         &native_voice,
                         interruption_sensitivity,
-                        suppress_capture,
+                        input_during_tts,
                         &mut assistant_speech,
                         &mut playback_drained_at,
                     )
@@ -694,7 +701,7 @@ fn run_openai_voice_stream(
                     &mut pending,
                     &native_voice,
                     interruption_sensitivity,
-                    suppress_capture,
+                    input_during_tts,
                     &mut assistant_speech,
                     &mut playback_drained_at,
                 )
@@ -716,7 +723,7 @@ fn run_openai_voice_stream(
                     &mut pending,
                     &native_voice,
                     interruption_sensitivity,
-                    suppress_capture,
+                    input_during_tts,
                     &mut assistant_speech,
                     &mut playback_drained_at,
                 )
@@ -808,7 +815,7 @@ fn speak_pending(
     pending: &mut String,
     native_voice: &NativeVoiceState,
     interruption_sensitivity: InterruptionSensitivity,
-    suppress_capture: bool,
+    input_during_tts: InputDuringTtsPolicy,
     assistant_speech: &mut Option<AssistantSpeechGuard>,
     playback_drained_at: &mut Option<Instant>,
 ) -> Result<OutboundOutcome, OutboundFailure> {
@@ -825,7 +832,7 @@ fn speak_pending(
                 if assistant_speech.is_none() {
                     *assistant_speech = Some(
                         native_voice
-                            .begin_assistant_speech(interruption_sensitivity, suppress_capture),
+                            .begin_assistant_speech(interruption_sensitivity, input_during_tts),
                     );
                 }
                 Ok(())

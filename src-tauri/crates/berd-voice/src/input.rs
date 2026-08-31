@@ -16,6 +16,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc as tokio_mpsc;
 
 use crate::{
@@ -128,32 +129,93 @@ pub struct VoiceInputControls {
 }
 
 struct ControlState {
-    transition: Mutex<()>,
+    transition: Mutex<ControlTransitionState>,
     muted: AtomicBool,
     mute_epoch: AtomicU64,
     assistant_speaking: AtomicBool,
     assistant_vad_threshold: AtomicU32,
-    assistant_activity: Mutex<AssistantActivityState>,
 }
 
+#[derive(Default)]
+struct ControlTransitionState {
+    host_muted: bool,
+    assistant_activity: AssistantActivityState,
+}
+
+#[derive(Default)]
 struct AssistantActivityState {
     generation: u64,
-    lifetimes: BTreeMap<u64, u32>,
+    lifetimes: BTreeMap<u64, AssistantActivity>,
+}
+
+struct AssistantActivity {
+    vad_threshold: u32,
+    input_policy: InputDuringTtsPolicy,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum InputDuringTtsPolicy {
+    AllowBargeIn,
+    SuppressInput,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+pub struct InputDuringTtsSnapshot {
+    pub revision: u64,
+    pub policy: InputDuringTtsPolicy,
+}
+
+pub struct InputDuringTtsSlot {
+    snapshot: Mutex<InputDuringTtsSnapshot>,
+}
+
+impl InputDuringTtsSlot {
+    pub fn new(policy: InputDuringTtsPolicy) -> Self {
+        Self {
+            snapshot: Mutex::new(InputDuringTtsSnapshot {
+                revision: 1,
+                policy,
+            }),
+        }
+    }
+
+    pub fn snapshot(&self) -> Result<InputDuringTtsSnapshot, String> {
+        self.snapshot
+            .lock()
+            .map(|snapshot| *snapshot)
+            .map_err(|_| "input-during-TTS policy lock was poisoned".into())
+    }
+
+    pub fn update(
+        &self,
+        expected_revision: u64,
+        policy: InputDuringTtsPolicy,
+    ) -> Result<InputDuringTtsSnapshot, InputDuringTtsSnapshot> {
+        let mut snapshot = self
+            .snapshot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if snapshot.revision != expected_revision {
+            return Err(*snapshot);
+        }
+        let Some(revision) = snapshot.revision.checked_add(1) else {
+            return Err(*snapshot);
+        };
+        *snapshot = InputDuringTtsSnapshot { revision, policy };
+        Ok(*snapshot)
+    }
 }
 
 impl Default for VoiceInputControls {
     fn default() -> Self {
         Self {
             shared: Arc::new(ControlState {
-                transition: Mutex::new(()),
+                transition: Mutex::new(ControlTransitionState::default()),
                 muted: AtomicBool::new(false),
                 mute_epoch: AtomicU64::new(0),
                 assistant_speaking: AtomicBool::new(false),
                 assistant_vad_threshold: AtomicU32::new(0.5_f32.to_bits()),
-                assistant_activity: Mutex::new(AssistantActivityState {
-                    generation: 0,
-                    lifetimes: BTreeMap::new(),
-                }),
             }),
         }
     }
@@ -164,17 +226,25 @@ impl VoiceInputControls {
         self.shared.muted.load(Ordering::Acquire)
     }
 
-    /// Changes logical mute state. Each edge advances the epoch so queued
-    /// audio and provider results from the prior state cannot cross it.
-    pub fn set_muted(&self, muted: bool) {
-        let _transition = self
+    /// Changes the host-mute reason. Each effective composed edge advances the
+    /// epoch so queued audio and provider results from the prior state cannot
+    /// cross it.
+    pub fn set_host_muted(&self, muted: bool) {
+        let mut transition = self
             .shared
             .transition
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if self.shared.muted.swap(muted, Ordering::AcqRel) != muted {
-            self.shared.mute_epoch.fetch_add(1, Ordering::AcqRel);
-        }
+        transition.host_muted = muted;
+        self.publish_effective_mute(&transition);
+    }
+
+    pub fn is_host_muted(&self) -> bool {
+        self.shared
+            .transition
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .host_muted
     }
 
     /// Discards buffered audio and stale provider results without changing mute.
@@ -190,31 +260,31 @@ impl VoiceInputControls {
     pub fn begin_assistant_activity(
         &self,
         vad_threshold: f32,
+        input_policy: InputDuringTtsPolicy,
     ) -> Result<AssistantActivityGuard, String> {
         if !vad_threshold.is_finite() || !(0.0..=1.0).contains(&vad_threshold) {
             return Err("assistant VAD threshold must be finite and between 0 and 1".to_string());
         }
-        let threshold = vad_threshold.to_bits();
-        let mut activity = self
+        let mut transition = self
             .shared
-            .assistant_activity
+            .transition
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        activity.generation = activity.generation.wrapping_add(1);
-        let generation = activity.generation;
-        activity.lifetimes.insert(generation, threshold);
-        let active_threshold = activity
-            .lifetimes
-            .last_key_value()
-            .map(|(_, threshold)| *threshold)
-            .expect("just inserted assistant activity");
-        self.shared
-            .assistant_vad_threshold
-            .store(active_threshold, Ordering::Release);
-        self.shared
-            .assistant_speaking
-            .store(true, Ordering::Release);
-        drop(activity);
+        let generation = transition
+            .assistant_activity
+            .generation
+            .checked_add(1)
+            .ok_or_else(|| "assistant activity generation is exhausted".to_string())?;
+        transition.assistant_activity.generation = generation;
+        transition.assistant_activity.lifetimes.insert(
+            generation,
+            AssistantActivity {
+                vad_threshold: vad_threshold.to_bits(),
+                input_policy,
+            },
+        );
+        self.publish_assistant_activity(&transition.assistant_activity);
+        self.publish_effective_mute(&transition);
         Ok(AssistantActivityGuard {
             controls: self.clone(),
             generation,
@@ -232,6 +302,33 @@ impl VoiceInputControls {
             speech_threshold
         }
     }
+
+    fn publish_effective_mute(&self, transition: &ControlTransitionState) {
+        let assistant_suppressed = transition
+            .assistant_activity
+            .lifetimes
+            .values()
+            .any(|activity| activity.input_policy == InputDuringTtsPolicy::SuppressInput);
+        let muted = transition.host_muted || assistant_suppressed;
+        if self.shared.muted.swap(muted, Ordering::AcqRel) != muted {
+            self.shared.mute_epoch.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+
+    fn publish_assistant_activity(&self, activity: &AssistantActivityState) {
+        if let Some((_, current)) = activity.lifetimes.last_key_value() {
+            self.shared
+                .assistant_vad_threshold
+                .store(current.vad_threshold, Ordering::Release);
+            self.shared
+                .assistant_speaking
+                .store(true, Ordering::Release);
+        } else {
+            self.shared
+                .assistant_speaking
+                .store(false, Ordering::Release);
+        }
+    }
 }
 
 #[must_use = "assistant activity ends when the guard is dropped"]
@@ -242,28 +339,19 @@ pub struct AssistantActivityGuard {
 
 impl Drop for AssistantActivityGuard {
     fn drop(&mut self) {
-        let mut activity = self
+        let mut transition = self
             .controls
             .shared
-            .assistant_activity
+            .transition
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        activity.lifetimes.remove(&self.generation);
-        if let Some((_, threshold)) = activity.lifetimes.last_key_value() {
-            self.controls
-                .shared
-                .assistant_vad_threshold
-                .store(*threshold, Ordering::Release);
-            self.controls
-                .shared
-                .assistant_speaking
-                .store(true, Ordering::Release);
-        } else {
-            self.controls
-                .shared
-                .assistant_speaking
-                .store(false, Ordering::Release);
-        }
+        transition
+            .assistant_activity
+            .lifetimes
+            .remove(&self.generation);
+        self.controls
+            .publish_assistant_activity(&transition.assistant_activity);
+        self.controls.publish_effective_mute(&transition);
     }
 }
 
@@ -1546,22 +1634,87 @@ mod tests {
     fn mute_and_reset_advance_the_authoritative_epoch() {
         let controls = VoiceInputControls::default();
         assert_eq!(controls.mute_epoch(), 0);
-        controls.set_muted(true);
+        controls.set_host_muted(true);
         assert_eq!(controls.mute_epoch(), 1);
-        controls.set_muted(true);
+        controls.set_host_muted(true);
         assert_eq!(controls.mute_epoch(), 1);
-        controls.set_muted(false);
+        controls.set_host_muted(false);
         assert_eq!(controls.mute_epoch(), 2);
         controls.reset();
         assert_eq!(controls.mute_epoch(), 3);
     }
 
     #[test]
+    fn host_mute_and_assistant_suppression_cannot_clear_each_other() {
+        let controls = VoiceInputControls::default();
+        controls.set_host_muted(true);
+        let assistant = controls
+            .begin_assistant_activity(0.65, InputDuringTtsPolicy::SuppressInput)
+            .unwrap();
+        controls.set_host_muted(false);
+        assert!(controls.is_muted());
+        assert_eq!(controls.mute_epoch(), 1);
+        drop(assistant);
+        assert!(!controls.is_muted());
+        assert_eq!(controls.mute_epoch(), 2);
+
+        let assistant = controls
+            .begin_assistant_activity(0.65, InputDuringTtsPolicy::SuppressInput)
+            .unwrap();
+        controls.set_host_muted(true);
+        drop(assistant);
+        assert!(controls.is_muted());
+        assert_eq!(controls.mute_epoch(), 3);
+        controls.set_host_muted(false);
+        assert!(!controls.is_muted());
+        assert_eq!(controls.mute_epoch(), 4);
+    }
+
+    #[test]
+    fn overlapping_assistant_guards_snapshot_policy_and_drop_out_of_order() {
+        let controls = VoiceInputControls::default();
+        let suppress = controls
+            .begin_assistant_activity(0.8, InputDuringTtsPolicy::SuppressInput)
+            .unwrap();
+        let allow = controls
+            .begin_assistant_activity(0.65, InputDuringTtsPolicy::AllowBargeIn)
+            .unwrap();
+        assert!(controls.is_muted());
+        assert_eq!(controls.vad_threshold(0.5), 0.65);
+        drop(suppress);
+        assert!(!controls.is_muted());
+        assert_eq!(controls.vad_threshold(0.5), 0.65);
+        drop(allow);
+        assert_eq!(controls.vad_threshold(0.5), 0.5);
+    }
+
+    #[test]
+    fn input_during_tts_policy_updates_are_revisioned_and_nonmutating_when_stale() {
+        let slot = InputDuringTtsSlot::new(InputDuringTtsPolicy::AllowBargeIn);
+        let leased = slot.snapshot().unwrap();
+        let applied = slot.update(1, InputDuringTtsPolicy::SuppressInput).unwrap();
+        let stale = slot
+            .update(1, InputDuringTtsPolicy::AllowBargeIn)
+            .unwrap_err();
+
+        assert_eq!(leased.revision, 1);
+        assert_eq!(leased.policy, InputDuringTtsPolicy::AllowBargeIn);
+        assert_eq!(applied.revision, 2);
+        assert_eq!(applied.policy, InputDuringTtsPolicy::SuppressInput);
+        assert_eq!(stale, applied);
+        assert_eq!(slot.snapshot().unwrap(), applied);
+    }
+
+    #[test]
     fn assistant_activity_guards_restore_the_newest_overlapping_threshold() {
         let controls = VoiceInputControls::default();
-        let first = controls.begin_assistant_activity(0.8).unwrap();
+        let first = controls
+            .begin_assistant_activity(0.8, InputDuringTtsPolicy::AllowBargeIn)
+            .unwrap();
         assert_eq!(controls.vad_threshold(0.5), 0.8);
-        let second = controls.begin_assistant_activity(0.65).unwrap();
+        let second = controls
+            .begin_assistant_activity(0.65, InputDuringTtsPolicy::AllowBargeIn)
+            .unwrap();
         assert_eq!(controls.vad_threshold(0.5), 0.65);
         drop(first);
         assert_eq!(controls.vad_threshold(0.5), 0.65);
@@ -1582,7 +1735,9 @@ mod tests {
                 thread::spawn(move || {
                     let threshold = index as f32 / 10.0;
                     barrier.wait();
-                    let guard = controls.begin_assistant_activity(threshold).unwrap();
+                    let guard = controls
+                        .begin_assistant_activity(threshold, InputDuringTtsPolicy::AllowBargeIn)
+                        .unwrap();
                     result_tx
                         .send((guard.generation, threshold, guard))
                         .unwrap();
@@ -1609,7 +1764,9 @@ mod tests {
     fn cloned_controls_carry_assistant_activity_across_runtime_replacement() {
         let controls = VoiceInputControls::default();
         let replacement_controls = controls.clone();
-        let guard = controls.begin_assistant_activity(0.8).unwrap();
+        let guard = controls
+            .begin_assistant_activity(0.8, InputDuringTtsPolicy::AllowBargeIn)
+            .unwrap();
 
         assert_eq!(replacement_controls.vad_threshold(0.5), 0.8);
         drop(guard);
@@ -1671,7 +1828,7 @@ mod tests {
         let shutdown = AtomicBool::new(false);
         let shutdown_epoch = AtomicU64::new(controls.mute_epoch());
         shutdown.store(true, Ordering::Release);
-        controls.set_muted(true);
+        controls.set_host_muted(true);
 
         assert_eq!(
             effective_mute_epoch(&controls, &shutdown, &shutdown_epoch),
@@ -1784,12 +1941,40 @@ mod tests {
         };
         runtime.try_push_frame(silence_frame()).unwrap();
 
-        controls.set_muted(true);
-        controls.set_muted(false);
+        controls.set_host_muted(true);
+        controls.set_host_muted(false);
 
         let queued = frame_rx.try_recv().expect("queued pre-mute frame");
         assert_eq!(queued.mute_epoch, 0);
         assert_ne!(queued.mute_epoch, controls.mute_epoch());
+    }
+
+    #[test]
+    fn input_during_tts_policy_controls_frame_admission() {
+        let (frame_tx, frame_rx) = mpsc::sync_channel(INPUT_QUEUE_FRAMES);
+        let controls = VoiceInputControls::default();
+        let runtime = VoiceInputRuntime {
+            frame_tx,
+            controls: controls.clone(),
+            shutdown: Arc::new(AtomicBool::new(false)),
+            discard_on_shutdown: Arc::new(AtomicBool::new(false)),
+            shutdown_mute_epoch: Arc::new(AtomicU64::new(0)),
+            worker: None,
+        };
+
+        let suppress = controls
+            .begin_assistant_activity(0.65, InputDuringTtsPolicy::SuppressInput)
+            .unwrap();
+        runtime.try_push_frame(silence_frame()).unwrap();
+        assert!(frame_rx.try_recv().is_err());
+        drop(suppress);
+
+        let allow = controls
+            .begin_assistant_activity(0.65, InputDuringTtsPolicy::AllowBargeIn)
+            .unwrap();
+        runtime.try_push_frame(silence_frame()).unwrap();
+        assert!(frame_rx.try_recv().is_ok());
+        drop(allow);
     }
 
     #[test]
@@ -1843,7 +2028,7 @@ mod tests {
             worker: None,
         };
 
-        controls.set_muted(true);
+        controls.set_host_muted(true);
         runtime.signal_shutdown(false);
 
         assert!(runtime.discard_on_shutdown.load(Ordering::Acquire));
@@ -1867,7 +2052,7 @@ mod tests {
         };
 
         runtime.signal_shutdown(false);
-        controls.set_muted(true);
+        controls.set_host_muted(true);
 
         assert!(!runtime.discard_on_shutdown.load(Ordering::Acquire));
         assert_eq!(

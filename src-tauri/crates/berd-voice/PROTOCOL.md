@@ -38,17 +38,19 @@ does not guarantee that a later synthesis request cannot fail; those failures
 remain terminal speech events.
 
 The first request must be `hello`. Its optional `output_device` is an exact
-CoreAudio output name selected by the parent:
+CoreAudio output name selected by the parent. `input_during_tts` is the host's
+resolved initial policy; a host-specific `auto` mode must be resolved before
+the request:
 
 ```json
-{"type":"hello","id":1,"output_device":null}
+{"type":"hello","id":1,"output_device":null,"input_during_tts":"allow_barge_in"}
 ```
 
 The response retains `protocol:2` as a fixed wire-integrity marker, not a
 negotiated mode:
 
 ```json
-{"type":"ready","id":1,"protocol":2,"session":{"tts":{"revision":1,"backend":"siri","voice":"Aaron","language":"en-US","rate":1.0}}}
+{"type":"ready","id":1,"protocol":2,"session":{"tts":{"revision":1,"backend":"siri","voice":"Aaron","language":"en-US","rate":1.0},"input_during_tts":{"revision":1,"policy":"allow_barge_in"}}}
 ```
 
 The `session.tts` object is the authoritative, sanitized TTS configuration.
@@ -57,6 +59,8 @@ OpenAI snapshots contain `model`, `voice`, and `rate`; Siri contains `voice`,
 and `rate`. Credentials, endpoints, and bundle paths never appear on stdout.
 Detailed backend errors are diagnostics on stderr only; protocol rejection and
 fatal messages are sanitized at the stdout boundary.
+`session.input_during_tts` is the authoritative effective assistant-input
+policy and has its own revision.
 
 ## Stdin framing
 
@@ -75,10 +79,11 @@ before payload allocation. Stdout remains unframed, flushed JSONL.
 ## Parent requests
 
 ```text
-{"type":"hello","id":u64,"output_device":string|null}
+{"type":"hello","id":u64,"output_device":string|null,"input_during_tts":"allow_barge_in"|"suppress_input"}
 {"type":"set_paused","active":bool}
 {"type":"set_input_muted","id":u64,"active":bool}
 {"type":"set_tts_settings","id":u64,"expected_revision":u64,"settings":TtsSettings}
+{"type":"set_input_during_tts","id":u64,"expected_revision":u64,"policy":"allow_barge_in"|"suppress_input"}
 {"type":"reset_input","id":u64}
 {"type":"prepare_speak","id":u64,"acknowledgement":u64|null,"text":string}
 {"type":"output_ready","id":u64,"speech_id":u64}
@@ -117,8 +122,22 @@ admitted before the response retains its old backend/settings, while later
 admission receives the new revision. Pocket's public model identifier cannot be
 changed without selecting and validating another bundle at process startup.
 
-`set_input_muted` and `reset_input` apply the runtime's logical input epochs and
-return exact correlated acknowledgements:
+`set_input_during_tts` changes the policy for later admissions. Its expected
+revision must be positive. The correlated result is always authoritative:
+
+```text
+{"type":"input_during_tts_result","id":u64,"outcome":"applied"|"rejected","snapshot":{"revision":u64,"policy":"allow_barge_in"|"suppress_input"}}
+```
+
+A stale revision is rejected nonfatally with no mutation. Each speech leases
+the current policy when it is admitted; a held prepare leases only when it is
+eventually admitted. Updating the policy never changes an already-admitted
+utterance.
+
+`set_input_muted` controls the host-mute reason. Assistant suppression is a
+separate guard-owned reason, so clearing either reason cannot clear the other.
+The effective input-mute epoch advances only when the composed state changes.
+`set_input_muted` and `reset_input` return exact correlated acknowledgements:
 
 ```text
 {"type":"input_mute_applied","id":u64,"active":bool}
@@ -161,19 +180,24 @@ Reservation emits:
 {"type":"admitted","id":u64,"speech_id":u64,"confirmed_token":u64}
 ```
 
-It does not begin synthesis. The parent first suppresses capture and replies
-with the originating prepare ID and speech ID:
+It does not begin synthesis. The parent replies with the originating prepare
+ID and speech ID when it is ready to accept output:
 
 ```text
 {"type":"output_ready","id":u64,"speech_id":u64}
 {"type":"output_ready_result","id":u64,"speech_id":u64,"outcome":"accepted"|"stale"}
 ```
 
-`accepted` transfers output authority. Readiness is bounded to two seconds;
+Before emitting `accepted`, the child installs the admitted speech's leased
+assistant-activity guard. `suppress_input` stops PCM admission so user input
+cannot interrupt the speech; `allow_barge_in` continues PCM admission with the
+assistant-sensitive VAD threshold. `accepted` transfers output authority.
+Readiness is bounded to two seconds;
 expiry emits `speech_failed` with zero output. Speaking, recognition pending, a
 final, pause, or targeted cancellation interrupts waiting or playing speech.
-Accepted output owns a balanced assistant-activity guard until its terminal
-event.
+Accepted output owns exactly one assistant-activity guard. The child removes
+that guard before emitting completion, interruption, or failure, including
+cancellation and shutdown terminals.
 
 ## State, cancellation, and output events
 

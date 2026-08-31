@@ -14,12 +14,13 @@ use berd_voice::benchmark::{
     SttBenchmarkTarget, TtsBenchmarkMode, TtsBenchmarkPromptManifest, TtsBenchmarkTarget,
 };
 use berd_voice::input::{
-    AssistantActivityGuard, VoiceInputConfig, VoiceInputControls, VoiceInputEngineConfig,
-    VoiceInputEvent, VoiceInputFrame, VoiceInputRuntime, INPUT_FRAME_SAMPLES,
+    AssistantActivityGuard, InputDuringTtsSlot, InputDuringTtsSnapshot, VoiceInputConfig,
+    VoiceInputControls, VoiceInputEngineConfig, VoiceInputEvent, VoiceInputFrame,
+    VoiceInputRuntime, INPUT_FRAME_SAMPLES,
 };
 use berd_voice::protocol::{
-    CancelOutcome, NotAdmittedReason, OutputReadyOutcome, SessionMessage, SessionRequest,
-    TtsSettingsOutcome, VoiceSessionSnapshot,
+    CancelOutcome, InputDuringTtsOutcome, NotAdmittedReason, OutputReadyOutcome, SessionMessage,
+    SessionRequest, TtsSettingsOutcome, VoiceSessionSnapshot,
 };
 use berd_voice::session::{PrepareOutcome, PrepareRequest, SessionCore};
 use berd_voice::{
@@ -79,6 +80,7 @@ struct ActivePlayback {
     active: Option<Arc<AtomicBool>>,
     ready_deadline: Instant,
     assistant_activity: Option<AssistantActivityGuard>,
+    input_during_tts: InputDuringTtsSnapshot,
     tts: TtsConfigurationLease,
 }
 
@@ -190,6 +192,7 @@ fn run_session(config: SessionConfig) -> Result<(), String> {
     let mut core = SessionCore::default();
     let mut initialized = false;
     let mut tts_slot: Option<Arc<ConfiguredTtsSlot>> = None;
+    let mut input_during_tts_slot: Option<InputDuringTtsSlot> = None;
     let mut tts_update: Option<ActiveTtsConfigurationUpdate> = None;
     let mut next_tts_update_attempt = 1_u64;
     let mut input_runtime: Option<VoiceInputRuntime> = None;
@@ -227,6 +230,7 @@ fn run_session(config: SessionConfig) -> Result<(), String> {
             &mut core,
             &output_device,
             tts_slot.as_deref(),
+            input_during_tts_slot.as_ref(),
             &mut active,
             &mut writer,
         )?;
@@ -337,6 +341,7 @@ fn run_session(config: SessionConfig) -> Result<(), String> {
             Input::Request(SessionRequest::Hello {
                 id,
                 output_device: requested,
+                input_during_tts,
             }) => {
                 if initialized {
                     write_message(
@@ -392,10 +397,13 @@ fn run_session(config: SessionConfig) -> Result<(), String> {
                 input_events = Some(events);
                 initialized = true;
                 output_device = requested;
+                let input_policy = InputDuringTtsSlot::new(input_during_tts);
                 let session = VoiceSessionSnapshot {
                     tts: slot.snapshot()?,
+                    input_during_tts: input_policy.snapshot()?,
                 };
                 tts_slot = Some(slot);
+                input_during_tts_slot = Some(input_policy);
                 write_message(
                     &mut writer,
                     &SessionMessage::Ready {
@@ -419,7 +427,7 @@ fn run_session(config: SessionConfig) -> Result<(), String> {
                 input_controls
                     .as_ref()
                     .expect("hello initialized input controls")
-                    .set_muted(muted);
+                    .set_host_muted(muted);
                 write_message(
                     &mut writer,
                     &SessionMessage::InputMuteApplied { id, active: muted },
@@ -463,6 +471,27 @@ fn run_session(config: SessionConfig) -> Result<(), String> {
                     });
                 }
             }
+            Input::Request(SessionRequest::SetInputDuringTts {
+                id,
+                expected_revision,
+                policy,
+            }) => {
+                let slot = input_during_tts_slot
+                    .as_ref()
+                    .expect("hello initialized input-during-TTS policy");
+                let (outcome, snapshot) = match slot.update(expected_revision, policy) {
+                    Ok(snapshot) => (InputDuringTtsOutcome::Applied, snapshot),
+                    Err(snapshot) => (InputDuringTtsOutcome::Rejected, snapshot),
+                };
+                write_message(
+                    &mut writer,
+                    &SessionMessage::InputDuringTtsResult {
+                        id,
+                        outcome,
+                        snapshot,
+                    },
+                )?;
+            }
             Input::Request(SessionRequest::ResetInput { id }) => {
                 input_controls
                     .as_ref()
@@ -499,6 +528,9 @@ fn run_session(config: SessionConfig) -> Result<(), String> {
                         &mut core,
                         &output_device,
                         tts_slot.as_deref().expect("hello initialized TTS"),
+                        input_during_tts_slot
+                            .as_ref()
+                            .expect("hello initialized input-during-TTS policy"),
                         &mut active,
                         &mut held,
                         &mut writer,
@@ -511,19 +543,7 @@ fn run_session(config: SessionConfig) -> Result<(), String> {
                         && current.speech_id == speech_id
                         && current.active.is_none()
                 }) {
-                    write_message(
-                        &mut writer,
-                        &SessionMessage::OutputReadyResult {
-                            id,
-                            speech_id,
-                            outcome: OutputReadyOutcome::Accepted,
-                        },
-                    )?;
-                    current.assistant_activity = input_controls.as_ref().map(|controls| {
-                        controls
-                            .begin_assistant_activity(0.65)
-                            .expect("balanced assistant threshold is valid")
-                    });
+                    acknowledge_output_ready(current, input_controls.as_ref(), &mut writer)?;
                     let playback_active = Arc::new(AtomicBool::new(true));
                     current.active = Some(Arc::clone(&playback_active));
                     spawn_playback(
@@ -553,6 +573,26 @@ fn run_session(config: SessionConfig) -> Result<(), String> {
             }
         }
     }
+}
+
+fn acknowledge_output_ready(
+    current: &mut ActivePlayback,
+    input_controls: Option<&VoiceInputControls>,
+    writer: &mut impl Write,
+) -> Result<(), String> {
+    current.assistant_activity = input_controls.map(|controls| {
+        controls
+            .begin_assistant_activity(0.65, current.input_during_tts.policy)
+            .expect("balanced assistant threshold is valid")
+    });
+    write_message(
+        writer,
+        &SessionMessage::OutputReadyResult {
+            id: current.prepare_id,
+            speech_id: current.speech_id,
+            outcome: OutputReadyOutcome::Accepted,
+        },
+    )
 }
 
 fn wait_for_input_ready(
@@ -1440,6 +1480,7 @@ fn process_prepare(
     core: &mut SessionCore,
     output_device: &Option<String>,
     tts_slot: &ConfiguredTtsSlot,
+    input_during_tts_slot: &InputDuringTtsSlot,
     active: &mut Option<ActivePlayback>,
     held: &mut Option<PrepareRequest>,
     writer: &mut impl Write,
@@ -1461,6 +1502,7 @@ fn process_prepare(
             text,
         } => {
             let tts = tts_slot.lease()?;
+            let input_during_tts = input_during_tts_slot.snapshot()?;
             *active = Some(ActivePlayback {
                 prepare_id: id,
                 speech_id,
@@ -1469,6 +1511,7 @@ fn process_prepare(
                 active: None,
                 ready_deadline: Instant::now() + Duration::from_secs(2),
                 assistant_activity: None,
+                input_during_tts,
                 tts,
             });
             write_message(
@@ -1489,6 +1532,7 @@ fn reevaluate_held(
     core: &mut SessionCore,
     output_device: &Option<String>,
     tts_slot: Option<&ConfiguredTtsSlot>,
+    input_during_tts_slot: Option<&InputDuringTtsSlot>,
     active: &mut Option<ActivePlayback>,
     writer: &mut impl Write,
 ) -> Result<(), String> {
@@ -1499,6 +1543,8 @@ fn reevaluate_held(
                 core,
                 output_device,
                 tts_slot.expect("held prepare requires initialized TTS"),
+                input_during_tts_slot
+                    .expect("held prepare requires initialized input-during-TTS policy"),
                 active,
                 held,
                 writer,
@@ -1911,6 +1957,7 @@ fn validate_request(request: SessionRequest) -> Result<SessionRequest, String> {
         SessionRequest::Hello { id, .. }
         | SessionRequest::SetInputMuted { id, .. }
         | SessionRequest::SetTtsSettings { id, .. }
+        | SessionRequest::SetInputDuringTts { id, .. }
         | SessionRequest::ResetInput { id }
         | SessionRequest::PrepareSpeak { id, .. }
         | SessionRequest::OutputReady { id, .. }
@@ -1932,6 +1979,10 @@ fn validate_request(request: SessionRequest) -> Result<SessionRequest, String> {
             expected_revision: 0,
             ..
         } => return Err("expected TTS revision must be positive".into()),
+        SessionRequest::SetInputDuringTts {
+            expected_revision: 0,
+            ..
+        } => return Err("expected input-during-TTS revision must be positive".into()),
         _ => {}
     }
     Ok(request)
@@ -2033,9 +2084,10 @@ fn synthesize_to_output(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use berd_voice::input::InputDuringTtsPolicy;
     use berd_voice::{PcmAudioOutput, TtsOutcome, TtsPcmSpec};
     use serde_json::{json, Value};
-    use std::io::Cursor;
+    use std::io::{Cursor, Write};
     use std::sync::Mutex;
 
     struct FakeTts {
@@ -2072,6 +2124,25 @@ mod tests {
 
     struct BlockingOutput {
         cancelled: AtomicBool,
+    }
+
+    struct InputStateWriter<'a> {
+        controls: &'a VoiceInputControls,
+        expected_muted: bool,
+        bytes: Vec<u8>,
+    }
+
+    impl Write for InputStateWriter<'_> {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            assert_eq!(self.controls.is_muted(), self.expected_muted);
+            self.bytes.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            assert_eq!(self.controls.is_muted(), self.expected_muted);
+            Ok(())
+        }
     }
 
     impl PcmAudioOutput for BlockingOutput {
@@ -2126,6 +2197,14 @@ mod tests {
         test_tts_slot().lease().unwrap()
     }
 
+    fn test_input_policy_slot() -> InputDuringTtsSlot {
+        InputDuringTtsSlot::new(InputDuringTtsPolicy::AllowBargeIn)
+    }
+
+    fn test_input_policy() -> InputDuringTtsSnapshot {
+        test_input_policy_slot().snapshot().unwrap()
+    }
+
     fn active_playback(core: &mut SessionCore) -> ActivePlayback {
         let PrepareOutcome::Admitted {
             speech_id, text, ..
@@ -2145,6 +2224,7 @@ mod tests {
             active: Some(Arc::new(AtomicBool::new(true))),
             ready_deadline: Instant::now() + Duration::from_secs(2),
             assistant_activity: None,
+            input_during_tts: test_input_policy(),
             tts: test_tts_lease(),
         }
     }
@@ -2173,6 +2253,7 @@ mod tests {
             protocol: WIRE_MARKER,
             session: VoiceSessionSnapshot {
                 tts: snapshot.clone(),
+                input_during_tts: test_input_policy(),
             },
         })
         .unwrap();
@@ -2894,7 +2975,8 @@ mod tests {
 
     #[test]
     fn framing_decodes_json_and_exact_pcm_without_line_ambiguity() {
-        let json = br#"{"type":"hello","id":1,"output_device":null}"#;
+        let json =
+            br#"{"type":"hello","id":1,"output_device":null,"input_during_tts":"allow_barge_in"}"#;
         let pcm = [0_u8; PCM_FRAME_BYTES];
         let mut bytes = framed(JSON_FRAME_KIND, json);
         bytes.extend_from_slice(&framed(PCM_FRAME_KIND, &pcm));
@@ -2929,6 +3011,20 @@ mod tests {
     }
 
     #[test]
+    fn input_policy_update_requires_a_positive_expected_revision() {
+        let request = SessionRequest::SetInputDuringTts {
+            id: 9,
+            expected_revision: 0,
+            policy: InputDuringTtsPolicy::SuppressInput,
+        };
+
+        assert_eq!(
+            validate_request(request).unwrap_err(),
+            "expected input-during-TTS revision must be positive"
+        );
+    }
+
+    #[test]
     fn ready_requires_the_runtime_ready_event() {
         let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
         sender.blocking_send(VoiceInputEvent::Ready).unwrap();
@@ -2945,6 +3041,7 @@ mod tests {
     fn held_prepare_waits_for_pending_to_clear_without_a_timeout() {
         let mut core = SessionCore::default();
         core.set_recognition_pending(true);
+        let input_policy = test_input_policy_slot();
         let mut active = None;
         let mut held = None;
         let mut output = Vec::new();
@@ -2957,6 +3054,7 @@ mod tests {
             &mut core,
             &None,
             &test_tts_slot(),
+            &input_policy,
             &mut active,
             &mut held,
             &mut output,
@@ -2965,22 +3063,31 @@ mod tests {
         assert!(held.is_some());
         assert!(output.is_empty());
 
+        input_policy
+            .update(1, InputDuringTtsPolicy::SuppressInput)
+            .unwrap();
         core.set_recognition_pending(false);
         reevaluate_held(
             &mut held,
             &mut core,
             &None,
             Some(&test_tts_slot()),
+            Some(&input_policy),
             &mut active,
             &mut output,
         )
         .unwrap();
         assert_eq!(messages(&output)[0]["type"], "admitted");
+        assert_eq!(
+            active.as_ref().unwrap().input_during_tts.policy,
+            InputDuringTtsPolicy::SuppressInput
+        );
     }
 
     #[test]
     fn admission_leases_configuration_before_a_later_atomic_update() {
         let slot = test_tts_slot();
+        let input_policy = test_input_policy_slot();
         let mut core = SessionCore::default();
         let mut active = None;
         let mut held = None;
@@ -2994,12 +3101,14 @@ mod tests {
             &mut core,
             &None,
             &slot,
+            &input_policy,
             &mut active,
             &mut held,
             &mut output,
         )
         .unwrap();
         let old_revision = active.as_ref().unwrap().tts.snapshot().revision;
+        let leased_input_policy = active.as_ref().unwrap().input_during_tts;
         let replacement = slot
             .prepare_replacement(
                 1,
@@ -3011,9 +3120,22 @@ mod tests {
             )
             .unwrap();
         let applied = slot.commit_replacement(replacement).unwrap();
+        let applied_input_policy = input_policy
+            .update(1, InputDuringTtsPolicy::SuppressInput)
+            .unwrap();
 
         assert_eq!(old_revision, 1);
         assert_eq!(active.as_ref().unwrap().tts.snapshot().revision, 1);
+        assert_eq!(leased_input_policy.revision, 1);
+        assert_eq!(
+            leased_input_policy.policy,
+            InputDuringTtsPolicy::AllowBargeIn
+        );
+        assert_eq!(
+            active.as_ref().unwrap().input_during_tts,
+            leased_input_policy
+        );
+        assert_eq!(applied_input_policy.revision, 2);
         assert_eq!(
             active.as_ref().unwrap().tts.snapshot().settings.voice(),
             "test-voice"
@@ -3168,6 +3290,7 @@ mod tests {
             active: None,
             ready_deadline: Instant::now() + Duration::from_secs(2),
             assistant_activity: None,
+            input_during_tts: test_input_policy(),
             tts: test_tts_lease(),
         });
         let mut held = None;
@@ -3184,6 +3307,68 @@ mod tests {
                 json!({"type":"cancel_result","id":7,"outcome":"stale","speech_id":null}),
             ]
         );
+    }
+
+    #[test]
+    fn output_ready_installs_leased_suppression_before_acknowledgement() {
+        let mut core = SessionCore::default();
+        let mut current = active_playback(&mut core);
+        current.active = None;
+        current.input_during_tts = InputDuringTtsSnapshot {
+            revision: 2,
+            policy: InputDuringTtsPolicy::SuppressInput,
+        };
+        let controls = VoiceInputControls::default();
+        let mut writer = InputStateWriter {
+            controls: &controls,
+            expected_muted: true,
+            bytes: Vec::new(),
+        };
+
+        acknowledge_output_ready(&mut current, Some(&controls), &mut writer).unwrap();
+
+        assert!(current.assistant_activity.is_some());
+        assert_eq!(
+            messages(&writer.bytes),
+            [json!({
+                "type":"output_ready_result",
+                "id":7,
+                "speech_id":1,
+                "outcome":"accepted"
+            })]
+        );
+    }
+
+    #[test]
+    fn terminal_clears_suppression_before_publishing_completion() {
+        let mut core = SessionCore::default();
+        let mut current = active_playback(&mut core);
+        current.input_during_tts = InputDuringTtsSnapshot {
+            revision: 2,
+            policy: InputDuringTtsPolicy::SuppressInput,
+        };
+        let controls = VoiceInputControls::default();
+        let mut ignored = Vec::new();
+        acknowledge_output_ready(&mut current, Some(&controls), &mut ignored).unwrap();
+        assert!(controls.is_muted());
+        let speech_id = current.speech_id;
+        let mut active = Some(current);
+        let mut writer = InputStateWriter {
+            controls: &controls,
+            expected_muted: false,
+            bytes: Vec::new(),
+        };
+
+        handle_playback_event(
+            PlaybackEvent::Completed(speech_id),
+            &mut core,
+            &mut active,
+            &mut writer,
+        )
+        .unwrap();
+
+        assert!(active.is_none());
+        assert_eq!(messages(&writer.bytes)[0]["type"], "speech_completed");
     }
 
     #[test]
@@ -3235,6 +3420,7 @@ mod tests {
             active: None,
             ready_deadline: Instant::now() + Duration::from_secs(2),
             assistant_activity: None,
+            input_during_tts: test_input_policy(),
             tts: test_tts_lease(),
         });
         let mut next_token = 1;
@@ -3283,6 +3469,7 @@ mod tests {
             active: None,
             ready_deadline: Instant::now() + Duration::from_secs(2),
             assistant_activity: None,
+            input_during_tts: test_input_policy(),
             tts: test_tts_lease(),
         });
         let mut next_token = 1;

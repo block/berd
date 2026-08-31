@@ -12,6 +12,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
+use berd_voice::input::InputDuringTtsPolicy;
 #[cfg(target_os = "macos")]
 use berd_voice::SAMPLE_RATE;
 #[cfg(target_os = "macos")]
@@ -574,16 +575,20 @@ pub(crate) enum VoiceInterruptionMode {
 }
 
 #[cfg_attr(not(any(test, target_os = "macos")), allow(dead_code))]
-pub(crate) fn should_suppress_capture(
+pub(crate) fn resolve_input_during_tts_policy(
     mode: VoiceInterruptionMode,
     output_device: Option<&str>,
-) -> bool {
+) -> InputDuringTtsPolicy {
     match mode {
         // Automatic is best-effort because macOS cannot classify every external route.
         // Prevent feedback remains the reliable fallback when this heuristic misses one.
-        VoiceInterruptionMode::Automatic => output_device_uses_speakers(output_device),
-        VoiceInterruptionMode::AllowInterruptions => false,
-        VoiceInterruptionMode::PreventFeedback => true,
+        VoiceInterruptionMode::Automatic if output_device_uses_speakers(output_device) => {
+            InputDuringTtsPolicy::SuppressInput
+        }
+        VoiceInterruptionMode::Automatic | VoiceInterruptionMode::AllowInterruptions => {
+            InputDuringTtsPolicy::AllowBargeIn
+        }
+        VoiceInterruptionMode::PreventFeedback => InputDuringTtsPolicy::SuppressInput,
     }
 }
 
@@ -849,16 +854,19 @@ pub async fn preview_pocket_voice(
     )?;
     let output_device = selected_output_device();
     let effective_output_device = effective_output_device_name(output_device.as_deref());
-    let capture_suppression =
+    let assistant_speech =
         output_device_uses_speakers(effective_output_device.as_deref()).then(|| {
             log::info!("[voice-echo-guard] speaker output detected");
-            native_voice.suppress_capture()
+            native_voice.begin_assistant_speech(
+                InterruptionSensitivity::Balanced,
+                InputDuringTtsPolicy::SuppressInput,
+            )
         });
 
     let playback = state.playback.clone();
     let playback_active = session.active.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let _capture_suppression = capture_suppression;
+        let _assistant_speech = assistant_speech;
         let result = synthesize_and_stream(
             &base,
             voice,
@@ -898,16 +906,19 @@ pub async fn speak_pocket_voice(
     let session = begin_playback(&state, "Pocket voice playback is already active", &base)?;
     let output_device = selected_output_device();
     let effective_output_device = effective_output_device_name(output_device.as_deref());
-    let capture_suppression =
+    let assistant_speech =
         output_device_uses_speakers(effective_output_device.as_deref()).then(|| {
             log::info!("[voice-echo-guard] speaker output detected");
-            native_voice.suppress_capture()
+            native_voice.begin_assistant_speech(
+                InterruptionSensitivity::Balanced,
+                InputDuringTtsPolicy::SuppressInput,
+            )
         });
 
     let playback = state.playback.clone();
     let playback_active = session.active.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let _capture_suppression = capture_suppression;
+        let _assistant_speech = assistant_speech;
         let result = synthesize_and_stream(
             &base,
             voice,
@@ -970,8 +981,8 @@ pub fn start_pocket_voice_stream(
         let session = begin_playback(&state, "Pocket voice playback is already active", &base)?;
         let output_device = selected_output_device();
         let effective_output_device = effective_output_device_name(output_device.as_deref());
-        let suppress_capture =
-            should_suppress_capture(interruption_mode, effective_output_device.as_deref());
+        let input_during_tts =
+            resolve_input_during_tts_policy(interruption_mode, effective_output_device.as_deref());
         let (sender, receiver) = mpsc::channel();
         {
             let mut playback = state
@@ -1015,7 +1026,7 @@ pub fn start_pocket_voice_stream(
                     receiver,
                     native_voice_state,
                     interruption_sensitivity,
-                    suppress_capture,
+                    input_during_tts,
                 )
             });
             let (event_state, error, delivery) = match result {
@@ -2128,7 +2139,7 @@ fn run_pocket_voice_stream(
     receiver: mpsc::Receiver<PocketStreamCommand>,
     native_voice: NativeVoiceState,
     interruption_sensitivity: InterruptionSensitivity,
-    suppress_capture: bool,
+    input_during_tts: InputDuringTtsPolicy,
 ) -> Result<PocketStreamOutcome, PocketStreamFailure> {
     let version = base.join(CACHE_VERSION);
     let tts = ConfiguredTtsSlot::new(TtsConfiguration::pocket(
@@ -2175,7 +2186,7 @@ fn run_pocket_voice_stream(
                     &mut first_chunk_pending,
                     &native_voice,
                     interruption_sensitivity,
-                    suppress_capture,
+                    input_during_tts,
                     &mut assistant_speech,
                     &mut playback_drained_at,
                     &mut last_progress_emit,
@@ -2197,7 +2208,7 @@ fn run_pocket_voice_stream(
                     &mut first_chunk_pending,
                     &native_voice,
                     interruption_sensitivity,
-                    suppress_capture,
+                    input_during_tts,
                     &mut assistant_speech,
                     &mut playback_drained_at,
                     &mut last_progress_emit,
@@ -2219,7 +2230,7 @@ fn run_pocket_voice_stream(
                     &mut first_chunk_pending,
                     &native_voice,
                     interruption_sensitivity,
-                    suppress_capture,
+                    input_during_tts,
                     &mut assistant_speech,
                     &mut playback_drained_at,
                     &mut last_progress_emit,
@@ -2435,7 +2446,7 @@ fn synthesize_pocket_stream_ready(
     first_chunk_pending: &mut bool,
     native_voice: &NativeVoiceState,
     interruption_sensitivity: InterruptionSensitivity,
-    suppress_capture: bool,
+    input_during_tts: InputDuringTtsPolicy,
     assistant_speech: &mut Option<AssistantSpeechGuard>,
     playback_drained_at: &mut Option<Instant>,
     last_progress_emit: &mut Instant,
@@ -2454,7 +2465,7 @@ fn synthesize_pocket_stream_ready(
                     if assistant_speech.is_none() {
                         *assistant_speech = Some(
                             native_voice
-                                .begin_assistant_speech(interruption_sensitivity, suppress_capture),
+                                .begin_assistant_speech(interruption_sensitivity, input_during_tts),
                         );
                     }
                     reset_pocket_drain_grace(playback_drained_at);
@@ -2992,35 +3003,50 @@ mod tests {
     }
 
     #[test]
-    fn interruption_mode_selects_capture_suppression_policy() {
-        assert!(should_suppress_capture(
-            VoiceInterruptionMode::Automatic,
-            Some("MacBook Pro Speakers"),
-        ));
-        assert!(!should_suppress_capture(
-            VoiceInterruptionMode::Automatic,
-            Some("AirPods Pro"),
-        ));
-        assert!(!should_suppress_capture(
-            VoiceInterruptionMode::Automatic,
-            Some("USB Headphones"),
-        ));
-        assert!(!should_suppress_capture(
-            VoiceInterruptionMode::Automatic,
-            Some("Studio Display Audio"),
-        ));
-        assert!(!should_suppress_capture(
-            VoiceInterruptionMode::Automatic,
-            None,
-        ));
-        assert!(!should_suppress_capture(
-            VoiceInterruptionMode::AllowInterruptions,
-            Some("MacBook Pro Speakers"),
-        ));
-        assert!(should_suppress_capture(
-            VoiceInterruptionMode::PreventFeedback,
-            Some("AirPods Pro"),
-        ));
+    fn interruption_mode_resolves_shared_input_policy() {
+        assert_eq!(
+            resolve_input_during_tts_policy(
+                VoiceInterruptionMode::Automatic,
+                Some("MacBook Pro Speakers"),
+            ),
+            InputDuringTtsPolicy::SuppressInput
+        );
+        assert_eq!(
+            resolve_input_during_tts_policy(VoiceInterruptionMode::Automatic, Some("AirPods Pro"),),
+            InputDuringTtsPolicy::AllowBargeIn
+        );
+        assert_eq!(
+            resolve_input_during_tts_policy(
+                VoiceInterruptionMode::Automatic,
+                Some("USB Headphones"),
+            ),
+            InputDuringTtsPolicy::AllowBargeIn
+        );
+        assert_eq!(
+            resolve_input_during_tts_policy(
+                VoiceInterruptionMode::Automatic,
+                Some("Studio Display Audio"),
+            ),
+            InputDuringTtsPolicy::AllowBargeIn
+        );
+        assert_eq!(
+            resolve_input_during_tts_policy(VoiceInterruptionMode::Automatic, None,),
+            InputDuringTtsPolicy::AllowBargeIn
+        );
+        assert_eq!(
+            resolve_input_during_tts_policy(
+                VoiceInterruptionMode::AllowInterruptions,
+                Some("MacBook Pro Speakers"),
+            ),
+            InputDuringTtsPolicy::AllowBargeIn
+        );
+        assert_eq!(
+            resolve_input_during_tts_policy(
+                VoiceInterruptionMode::PreventFeedback,
+                Some("AirPods Pro"),
+            ),
+            InputDuringTtsPolicy::SuppressInput
+        );
     }
 
     #[cfg(target_os = "macos")]

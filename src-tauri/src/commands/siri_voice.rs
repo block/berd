@@ -25,8 +25,10 @@ use super::pocket_voice::VoiceInterruptionMode;
 #[cfg(target_os = "macos")]
 use super::pocket_voice::{
     effective_output_device_name, output_device_uses_speakers, playback_latency_safety_duration,
-    selected_output_device, should_suppress_capture,
+    resolve_input_during_tts_policy, selected_output_device,
 };
+#[cfg(target_os = "macos")]
+use berd_voice::input::InputDuringTtsPolicy;
 #[cfg(any(test, target_os = "macos"))]
 use berd_voice::DeliveryProgress as VoiceDeliveryProgress;
 #[cfg(test)]
@@ -577,7 +579,7 @@ fn synthesize_siri_stream_ready(
     first_chunk_pending: &mut bool,
     native_voice: &NativeVoiceState,
     interruption_sensitivity: InterruptionSensitivity,
-    suppress_capture: bool,
+    input_during_tts: InputDuringTtsPolicy,
     assistant_speech: &mut Option<AssistantSpeechGuard>,
     playback_drained_at: &mut Option<Instant>,
     last_progress_emit: &mut Instant,
@@ -602,7 +604,7 @@ fn synthesize_siri_stream_ready(
                     if assistant_speech.is_none() {
                         **assistant_speech = Some(
                             native_voice
-                                .begin_assistant_speech(interruption_sensitivity, suppress_capture),
+                                .begin_assistant_speech(interruption_sensitivity, input_during_tts),
                         );
                     }
                     **playback_drained_at_cell.borrow_mut() = None;
@@ -732,7 +734,7 @@ fn run_siri_stream(
     receiver: mpsc::Receiver<SiriStreamCommand>,
     native_voice: NativeVoiceState,
     interruption_sensitivity: InterruptionSensitivity,
-    suppress_capture: bool,
+    input_during_tts: InputDuringTtsPolicy,
     output_device: Option<&str>,
     output_latency_grace: Duration,
 ) -> Result<SiriStreamOutcome, SiriStreamFailure> {
@@ -783,7 +785,7 @@ fn run_siri_stream(
                     &mut first_chunk_pending,
                     &native_voice,
                     interruption_sensitivity,
-                    suppress_capture,
+                    input_during_tts,
                     &mut assistant_speech,
                     &mut playback_drained_at,
                     &mut last_progress_emit,
@@ -808,7 +810,7 @@ fn run_siri_stream(
                     &mut first_chunk_pending,
                     &native_voice,
                     interruption_sensitivity,
-                    suppress_capture,
+                    input_during_tts,
                     &mut assistant_speech,
                     &mut playback_drained_at,
                     &mut last_progress_emit,
@@ -833,7 +835,7 @@ fn run_siri_stream(
                     &mut first_chunk_pending,
                     &native_voice,
                     interruption_sensitivity,
-                    suppress_capture,
+                    input_during_tts,
                     &mut assistant_speech,
                     &mut playback_drained_at,
                     &mut last_progress_emit,
@@ -972,6 +974,12 @@ pub fn start_siri_voice_stream(
         let voice = resolve_stream_voice(&voice, || discover_voices(""))?;
         let settings = read_settings(&settings_path(&app)?);
         let active = begin_playback(&state, webview_window.label())?;
+        let output_device = selected_output_device();
+        let effective_output_device = effective_output_device_name(output_device.as_deref());
+        let input_during_tts =
+            resolve_input_during_tts_policy(interruption_mode, effective_output_device.as_deref());
+        let playback_latency_safety_duration =
+            playback_latency_safety_duration(effective_output_device.as_deref());
         let Some(admission) = native_voice.claim_assistant_speech(
             &session_id,
             expected_revision,
@@ -982,12 +990,6 @@ pub fn start_siri_voice_stream(
             finish_playback(state.inner(), &active);
             return Ok(false);
         };
-        let output_device = selected_output_device();
-        let effective_output_device = effective_output_device_name(output_device.as_deref());
-        let suppress_capture =
-            should_suppress_capture(interruption_mode, effective_output_device.as_deref());
-        let playback_latency_safety_duration =
-            playback_latency_safety_duration(effective_output_device.as_deref());
         let (sender, receiver) = mpsc::channel();
         {
             let mut runtime = state
@@ -1015,7 +1017,7 @@ pub fn start_siri_voice_stream(
                 receiver,
                 native_voice_state,
                 interruption_sensitivity,
-                suppress_capture,
+                input_during_tts,
                 output_device.as_deref(),
                 playback_latency_safety_duration,
             );
@@ -1124,15 +1126,18 @@ pub async fn preview_siri_voice(
         let name = CString::new(voice.name.clone())
             .map_err(|_| "Siri voice name cannot contain NUL bytes".to_string())?;
         let active = begin_playback(&state, webview_window.label())?;
-        let capture_suppression =
+        let assistant_speech =
             output_device_uses_speakers(effective_output_device_name(None).as_deref()).then(|| {
                 log::info!("[voice-echo-guard] speaker output detected");
-                native_voice.suppress_capture()
+                native_voice.begin_assistant_speech(
+                    InterruptionSensitivity::Balanced,
+                    InputDuringTtsPolicy::SuppressInput,
+                )
             });
         let playback_state = state.inner().clone();
         let playback_active = active.clone();
         tauri::async_runtime::spawn_blocking(move || {
-            let _capture_suppression = capture_suppression;
+            let _assistant_speech = assistant_speech;
             let result = (|| {
                 let mut error = std::ptr::null_mut();
                 // SAFETY: The bridge copies all strings synchronously. The Arc

@@ -10,9 +10,10 @@ client and macOS SpeechTranscriber engine used by Berd's existing native STT
 workers. The concrete voice-input runtime accepts bounded 20 ms, 48 kHz mono
 Float32 frames and owns Berd's adaptive VAD, resampling, utterance boundaries,
 logical mute/reset epochs, recognition-pending state, stale-result rejection,
-and bounded engine shutdown. Hosts retain capture devices, physical capture
-suppression, engine configuration resolution, transcript storage and delivery,
-and UI projection. OpenAI emits 24 kHz mono Float32 PCM. On macOS, the shared
+and bounded engine shutdown. Hosts retain capture devices, optional physical
+mute effects, engine configuration resolution, transcript storage and delivery,
+and UI projection. Logical host mute and assistant input suppression compose
+inside the shared runtime. OpenAI emits 24 kHz mono Float32 PCM. On macOS, the shared
 Siri bridge emits normalized 48 kHz mono Float32 PCM without opening an audio
 device; the existing Berd Siri player and the CLI use the same decoder.
 
@@ -50,6 +51,12 @@ session loop, commit atomically, and apply to the next admitted utterance.
 Already-admitted speech retains its configuration lease. Failed or stale
 updates keep the prior configuration, and private credentials, endpoints, and
 bundle paths never enter the snapshot.
+
+The session also projects a separately revisioned `input_during_tts` snapshot.
+`allow_barge_in` keeps PCM flowing through assistant-sensitive VAD, while
+`suppress_input` drops PCM at the shared runtime for the admitted utterance.
+Live policy updates apply to the next admission; host mute remains an
+independent reason, so neither state can accidentally clear the other.
 
 Pocket's model path is the exact portable bundle directory, not a Berd cache
 root. The CLI resolves an exact voice ID through the shared

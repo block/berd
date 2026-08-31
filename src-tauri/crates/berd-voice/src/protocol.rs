@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{TtsConfigurationSnapshot, TtsSettings};
+use crate::{
+    input::{InputDuringTtsPolicy, InputDuringTtsSnapshot},
+    TtsConfigurationSnapshot, TtsSettings,
+};
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
@@ -8,6 +11,7 @@ pub enum SessionRequest {
     Hello {
         id: u64,
         output_device: Option<String>,
+        input_during_tts: InputDuringTtsPolicy,
     },
     SetPaused {
         active: bool,
@@ -20,6 +24,11 @@ pub enum SessionRequest {
         id: u64,
         expected_revision: u64,
         settings: TtsSettings,
+    },
+    SetInputDuringTts {
+        id: u64,
+        expected_revision: u64,
+        policy: InputDuringTtsPolicy,
     },
     ResetInput {
         id: u64,
@@ -75,11 +84,19 @@ pub enum OutputReadyOutcome {
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct VoiceSessionSnapshot {
     pub tts: TtsConfigurationSnapshot,
+    pub input_during_tts: InputDuringTtsSnapshot,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TtsSettingsOutcome {
+    Applied,
+    Rejected,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum InputDuringTtsOutcome {
     Applied,
     Rejected,
 }
@@ -98,6 +115,11 @@ pub enum SessionMessage {
         snapshot: TtsConfigurationSnapshot,
         #[serde(skip_serializing_if = "Option::is_none")]
         message: Option<String>,
+    },
+    InputDuringTtsResult {
+        id: u64,
+        outcome: InputDuringTtsOutcome,
+        snapshot: InputDuringTtsSnapshot,
     },
     InputMuteApplied {
         id: u64,
@@ -197,10 +219,37 @@ mod tests {
                             rate: 1.0,
                         },
                     },
+                    input_during_tts: InputDuringTtsSnapshot {
+                        revision: 1,
+                        policy: InputDuringTtsPolicy::AllowBargeIn,
+                    },
                 },
             })
             .unwrap(),
-            r#"{"type":"ready","id":4,"protocol":2,"session":{"tts":{"revision":1,"backend":"openai","model":"gpt-4o-mini-tts","voice":"marin","rate":1.0}}}"#
+            r#"{"type":"ready","id":4,"protocol":2,"session":{"tts":{"revision":1,"backend":"openai","model":"gpt-4o-mini-tts","voice":"marin","rate":1.0},"input_during_tts":{"revision":1,"policy":"allow_barge_in"}}}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<SessionRequest>(
+                r#"{"type":"set_input_during_tts","id":8,"expected_revision":1,"policy":"suppress_input"}"#
+            )
+            .unwrap(),
+            SessionRequest::SetInputDuringTts {
+                id: 8,
+                expected_revision: 1,
+                policy: InputDuringTtsPolicy::SuppressInput,
+            }
+        );
+        assert_eq!(
+            serde_json::to_string(&SessionMessage::InputDuringTtsResult {
+                id: 8,
+                outcome: InputDuringTtsOutcome::Applied,
+                snapshot: InputDuringTtsSnapshot {
+                    revision: 2,
+                    policy: InputDuringTtsPolicy::SuppressInput,
+                },
+            })
+            .unwrap(),
+            r#"{"type":"input_during_tts_result","id":8,"outcome":"applied","snapshot":{"revision":2,"policy":"suppress_input"}}"#
         );
         assert_eq!(
             serde_json::from_str::<SessionRequest>(

@@ -52,7 +52,7 @@ fn framed_hello_reports_input_initialization_failure_before_ready() {
     let mut stdin = child.stdin.take().unwrap();
     write_session_json(
         &mut stdin,
-        &json!({"type":"hello","id":1,"output_device":null}),
+        &json!({"type":"hello","id":1,"output_device":null,"input_during_tts":"allow_barge_in"}),
     );
     drop(stdin);
     let output = child.wait_with_output().unwrap();
@@ -97,7 +97,7 @@ fn siri_session_reaches_ready_without_openai_credentials() {
     };
     write_session_json(
         &mut stdin,
-        &json!({"type":"hello","id":1,"output_device":null}),
+        &json!({"type":"hello","id":1,"output_device":null,"input_during_tts":"allow_barge_in"}),
     );
     stdin.flush().unwrap();
     let ready = receive();
@@ -107,6 +107,48 @@ fn siri_session_reaches_ready_without_openai_credentials() {
     assert_eq!(ready["session"]["tts"]["voice"], voice);
     assert_eq!(ready["session"]["tts"]["language"], language);
     assert_eq!(ready["session"]["tts"]["rate"], 1.0);
+    assert_eq!(
+        ready["session"]["input_during_tts"],
+        json!({"revision":1,"policy":"allow_barge_in"})
+    );
+    write_session_json(
+        &mut stdin,
+        &json!({
+            "type":"set_input_during_tts",
+            "id":20,
+            "expected_revision":1,
+            "policy":"suppress_input"
+        }),
+    );
+    stdin.flush().unwrap();
+    assert_eq!(
+        receive(),
+        json!({
+            "type":"input_during_tts_result",
+            "id":20,
+            "outcome":"applied",
+            "snapshot":{"revision":2,"policy":"suppress_input"}
+        })
+    );
+    write_session_json(
+        &mut stdin,
+        &json!({
+            "type":"set_input_during_tts",
+            "id":21,
+            "expected_revision":1,
+            "policy":"allow_barge_in"
+        }),
+    );
+    stdin.flush().unwrap();
+    assert_eq!(
+        receive(),
+        json!({
+            "type":"input_during_tts_result",
+            "id":21,
+            "outcome":"rejected",
+            "snapshot":{"revision":2,"policy":"suppress_input"}
+        })
+    );
     write_session_json(
         &mut stdin,
         &json!({
@@ -158,7 +200,7 @@ fn pocket_session_reaches_ready_without_openai_credentials() {
     let mut stdin = child.stdin.take().unwrap();
     write_session_json(
         &mut stdin,
-        &json!({"type":"hello","id":1,"output_device":null}),
+        &json!({"type":"hello","id":1,"output_device":null,"input_during_tts":"allow_barge_in"}),
     );
     write_session_json(&mut stdin, &json!({"type":"shutdown"}));
     drop(stdin);
@@ -206,7 +248,7 @@ fn explicit_macos_stt_session_reaches_ready_without_audio() {
     let mut stdin = child.stdin.take().unwrap();
     write_session_json(
         &mut stdin,
-        &json!({"type":"hello","id":1,"output_device":null}),
+        &json!({"type":"hello","id":1,"output_device":null,"input_during_tts":"allow_barge_in"}),
     );
     write_session_json(&mut stdin, &json!({"type":"shutdown"}));
     drop(stdin);
@@ -276,7 +318,7 @@ fn siri_multichannel_output_supports_consecutive_turns_and_cancellation() {
 
     send(
         &mut stdin,
-        json!({"type":"hello","id":1,"output_device":output_device}),
+        json!({"type":"hello","id":1,"output_device":output_device,"input_during_tts":"allow_barge_in"}),
     );
     assert_eq!(receive()["type"], "ready");
 
