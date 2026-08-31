@@ -9,8 +9,8 @@ import type {
 export interface OpenAiVoiceStatus {
   sttConfigured: boolean;
   ttsConfigured: boolean;
-  sttConfigurationSource: "default" | "environment";
-  ttsConfigurationSource: "default" | "environment";
+  sttConfigurationSource: "default" | "environment" | "settings";
+  ttsConfigurationSource: "default" | "environment" | "settings";
   sttUnavailableReason: string | null;
   ttsUnavailableReason: string | null;
   transcriptionModel: string;
@@ -87,6 +87,14 @@ export function stopOpenAiVoice(): Promise<boolean> {
 
 export function setOpenAiPlaybackSpeed(speed: number): Promise<void> {
   return invoke("set_openai_playback_speed", { speed });
+}
+
+export function setOpenAiTranscriptionModel(model: string): Promise<void> {
+  return invoke("set_openai_transcription_model", { model });
+}
+
+export function setOpenAiSpeechModel(model: string): Promise<void> {
+  return invoke("set_openai_speech_model", { model });
 }
 
 export function listenToOpenAiVoiceStream(

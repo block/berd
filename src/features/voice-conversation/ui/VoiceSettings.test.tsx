@@ -11,6 +11,13 @@ import type { VoiceInputBackend } from "../lib/voiceInputPreference";
 import type { VoiceOutputBackend } from "../lib/voiceOutputPreference";
 import { VoiceSettings } from "./VoiceSettings";
 
+if (!HTMLElement.prototype.hasPointerCapture) {
+  HTMLElement.prototype.hasPointerCapture = () => false;
+}
+if (!HTMLElement.prototype.scrollIntoView) {
+  HTMLElement.prototype.scrollIntoView = () => {};
+}
+
 const setupState = vi.hoisted(() => ({
   current: null as PocketVoiceSetup | null,
 }));
@@ -71,6 +78,8 @@ const openAiApiMocks = vi.hoisted(() => ({
   clearSttApiKey: vi.fn(() => Promise.resolve()),
   setTtsApiKey: vi.fn(() => Promise.resolve()),
   clearTtsApiKey: vi.fn(() => Promise.resolve()),
+  setTranscriptionModel: vi.fn(() => Promise.resolve()),
+  setSpeechModel: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock("../api/openAiVoice", () => ({
@@ -79,6 +88,8 @@ vi.mock("../api/openAiVoice", () => ({
   clearOpenAiSttApiKey: openAiApiMocks.clearSttApiKey,
   setOpenAiTtsApiKey: openAiApiMocks.setTtsApiKey,
   clearOpenAiTtsApiKey: openAiApiMocks.clearTtsApiKey,
+  setOpenAiTranscriptionModel: openAiApiMocks.setTranscriptionModel,
+  setOpenAiSpeechModel: openAiApiMocks.setSpeechModel,
 }));
 vi.mock("../hooks/useOpenAiVoiceSetup", () => ({
   useOpenAiVoiceSetup: () => ({
@@ -244,6 +255,8 @@ describe("VoiceSettings", () => {
     openAiApiMocks.clearTtsApiKey.mockClear();
     openAiApiMocks.setSttApiKey.mockClear();
     openAiApiMocks.clearSttApiKey.mockClear();
+    openAiApiMocks.setTranscriptionModel.mockClear();
+    openAiApiMocks.setSpeechModel.mockClear();
   });
 
   it("renders independently selected OpenAI input and output settings", async () => {
@@ -260,10 +273,38 @@ describe("VoiceSettings", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Playback speed")).toBeInTheDocument();
     expect(
+      screen.getByRole("combobox", { name: "Transcription model" }),
+    ).toHaveTextContent("gpt-live-transcribe");
+    expect(
+      screen.getByRole("combobox", { name: "Speech model" }),
+    ).toHaveTextContent("gpt-4o-mini-tts");
+    expect(
       screen.getAllByText(
         "Saved securely and shared by OpenAI transcription and voice playback.",
       ),
     ).toHaveLength(2);
+  });
+
+  it("selects chained OpenAI transcription and speech models independently", async () => {
+    inputState.backend = "openai";
+    outputState.backend = "openai";
+    setupState.current = setup(pocketStatus());
+    const user = userEvent.setup();
+    renderWithProviders(<VoiceSettings />);
+
+    await user.click(
+      screen.getByRole("combobox", { name: "Transcription model" }),
+    );
+    await user.click(
+      screen.getByRole("option", { name: "gpt-realtime-whisper" }),
+    );
+    expect(openAiApiMocks.setTranscriptionModel).toHaveBeenCalledWith(
+      "gpt-realtime-whisper",
+    );
+
+    await user.click(screen.getByRole("combobox", { name: "Speech model" }));
+    await user.click(screen.getByRole("option", { name: "tts-1-hd" }));
+    expect(openAiApiMocks.setSpeechModel).toHaveBeenCalledWith("tts-1-hd");
   });
 
   it("saves the shared OpenAI voice key from the speech-to-text settings", async () => {
@@ -295,6 +336,9 @@ describe("VoiceSettings", () => {
         "Development configuration is overridden by the Berd process environment.",
       ),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("combobox", { name: "Speech model" }),
+    ).toBeDisabled();
   });
 
   it("labels speech-to-text environment overrides", async () => {
@@ -311,6 +355,9 @@ describe("VoiceSettings", () => {
         "Development configuration is overridden by the Berd process environment.",
       ),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("combobox", { name: "Transcription model" }),
+    ).toBeDisabled();
   });
 
   it("saves the shared OpenAI voice key from the text-to-speech settings", async () => {
