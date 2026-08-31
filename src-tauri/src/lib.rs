@@ -1,5 +1,6 @@
 mod commands;
 mod deep_links;
+mod persistence;
 mod services;
 mod types;
 
@@ -267,15 +268,15 @@ pub fn run() {
             let release_channel_state = commands::updates::ReleaseChannelState::load(app.handle())?;
             app.manage(release_channel_state);
 
-            // `LayoutState::new` opens (and creates) the layout database, so the
+            // `BerdPersistenceState::new` opens (and creates) the shared database, so the
             // one-time legacy app-data migration must run first to copy any
             // pre-rename database before a fresh, empty one is created here.
             services::app_data_migration::migrate_legacy_app_data(app.handle());
-            let layout_state = tauri::async_runtime::block_on(commands::layout::LayoutState::new(
-                app_data_dir.clone(),
-            ))
+            let persistence_state = tauri::async_runtime::block_on(
+                persistence::BerdPersistenceState::new(app_data_dir.clone()),
+            )
             .map_err(std::io::Error::other)?;
-            app.manage(layout_state);
+            app.manage(persistence_state);
 
             // With all command state registered, it is now safe to run blocking,
             // async, network, or filesystem work.
@@ -551,6 +552,11 @@ pub fn run() {
             commands::acp::get_goose_serve_host_info,
             commands::project_icons::scan_project_icons,
             commands::project_icons::read_project_icon,
+            commands::projects::get_project_storage_status,
+            commands::projects::shadow_import_legacy_projects,
+            commands::projects::backfill_legacy_session_project,
+            commands::projects::resolve_session_project,
+            commands::projects::update_native_session_project,
             commands::renderer::log_renderer_event,
             commands::artifacts::get_artifacts,
             commands::doctor::run_doctor,
