@@ -4,14 +4,16 @@ import type { OpenAiVoiceStatus } from "../api/openAiVoice";
 import { useOpenAiVoiceSetup } from "./useOpenAiVoiceSetup";
 
 const mocks = vi.hoisted(() => ({
-  getStatus: vi.fn<() => Promise<OpenAiVoiceStatus>>(),
+  getStatus:
+    vi.fn<(options?: { coalesce?: boolean }) => Promise<OpenAiVoiceStatus>>(),
   settingsChanged: null as (() => void) | null,
   finishListening: null as (() => void) | null,
   listenerError: null as Error | null,
 }));
 
 vi.mock("../api/openAiVoice", () => ({
-  getOpenAiVoiceStatus: () => mocks.getStatus(),
+  getOpenAiVoiceStatus: (options?: { coalesce?: boolean }) =>
+    mocks.getStatus(options),
   listenToOpenAiVoiceSettings: (listener: () => void) => {
     mocks.settingsChanged = listener;
     if (mocks.listenerError) return Promise.reject(mocks.listenerError);
@@ -66,6 +68,7 @@ describe("useOpenAiVoiceSetup", () => {
     await waitFor(() => expect(mocks.settingsChanged).not.toBeNull());
     act(() => mocks.finishListening?.());
     await waitFor(() => expect(mocks.getStatus).toHaveBeenCalledTimes(1));
+    expect(mocks.getStatus).toHaveBeenLastCalledWith({ coalesce: true });
 
     act(() => mocks.settingsChanged?.());
     refreshed.resolve(status(true));
