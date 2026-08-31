@@ -18,7 +18,6 @@ mod parakeet;
 mod pocket;
 pub mod protocol;
 pub mod session;
-#[cfg(target_os = "macos")]
 pub mod siri;
 mod tts;
 

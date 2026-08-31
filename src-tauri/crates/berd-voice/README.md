@@ -37,6 +37,17 @@ Siri preflight validates the exact case-sensitive installed name, normalized
 BCP-47 language, and a responsive sirittsd availability query; later synthesis
 can still fail and is reported through the normal terminal speech lifecycle.
 
+The public `berd_voice::siri` management API is also the single native boundary
+used by Berd for Siri catalog discovery, represented languages, exact installed
+voice validation, and download. A voice identity is its case-sensitive catalog
+name plus a normalized BCP-47 language tag; private Apple identifiers are never
+persisted or exposed. Download is a blocking terminal success/error operation
+with a validated availability-polling bound and no invented byte progress.
+Native validation and subscription have separate bounded waits before that
+polling deadline. Berd continues to own persisted selection, fallback policy,
+settings/UI events, and management preview playback. There is intentionally no
+standalone management CLI in this first extraction increment.
+
 The host selects an optional output device in the protocol `hello`; the TTS
 backend only produces PCM and does not own device persistence. Stdin is one
 bounded framed stream containing JSON controls and exact 20 ms, 48 kHz mono

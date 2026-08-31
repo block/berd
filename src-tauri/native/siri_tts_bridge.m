@@ -938,7 +938,7 @@ static NSDictionary<NSString *, id> *BerdDownloadedVoiceSync(
 }
 
 static NSArray<NSDictionary<NSString *, id> *> *BerdDiscoverVoices(
-    NSString *languagePrefix,
+    NSString *languageFilter,
     NSError **error
 ) {
     if (!BerdLoadFramework(
@@ -964,8 +964,8 @@ static NSArray<NSDictionary<NSString *, id> *> *BerdDiscoverVoices(
         return nil;
     }
     NSArray *resources = ((SendObject)objc_msgSend)(manager, voicesSelector, nil);
-    NSString *normalizedPrefix =
-        [[languagePrefix stringByReplacingOccurrencesOfString:@"_" withString:@"-"] lowercaseString];
+    NSString *normalizedFilter =
+        [[languageFilter stringByReplacingOccurrencesOfString:@"_" withString:@"-"] lowercaseString];
     NSMutableDictionary<NSString *, NSDictionary<NSString *, id> *> *byKey =
         [NSMutableDictionary dictionary];
     for (id resource in resources ?: @[]) {
@@ -974,11 +974,10 @@ static NSArray<NSDictionary<NSString *, id> *> *BerdDiscoverVoices(
         NSString *language = [resource valueForKey:@"language"] ?: @"";
         NSString *normalizedLanguage =
             [[language stringByReplacingOccurrencesOfString:@"_" withString:@"-"] lowercaseString];
-        if (normalizedPrefix.length && ![normalizedLanguage isEqualToString:normalizedPrefix]) continue;
+        if (normalizedFilter.length && ![normalizedLanguage isEqualToString:normalizedFilter]) continue;
         NSString *name = [resource valueForKey:@"name"] ?: @"";
         if (!name.length || !language.length) continue;
-        NSString *key = [NSString stringWithFormat:@"%@|%@", name.lowercaseString,
-                                                   normalizedLanguage];
+        NSString *key = [NSString stringWithFormat:@"%@|%@", name, normalizedLanguage];
         byKey[key] = @{
             @"name" : name,
             @"language" : language,
@@ -1068,15 +1067,15 @@ static BOOL BerdTriggerDownload(NSString *language, NSError **error) {
     return YES;
 }
 
-char *berd_siri_tts_catalog_json(const char *languagePrefix, char **errorOut) {
+char *berd_siri_tts_catalog_json(const char *languageValue, char **errorOut) {
     @autoreleasepool {
         if (errorOut) *errorOut = NULL;
-        NSString *prefix = languagePrefix
-            ? [NSString stringWithUTF8String:languagePrefix]
+        NSString *language = languageValue
+            ? [NSString stringWithUTF8String:languageValue]
             : @"";
         NSError *error = nil;
         NSArray<NSDictionary<NSString *, id> *> *candidates =
-            BerdDiscoverVoices(prefix, &error);
+            BerdDiscoverVoices(language, &error);
         if (!candidates) {
             BerdSetError(errorOut, error);
             return NULL;
@@ -1087,15 +1086,19 @@ char *berd_siri_tts_catalog_json(const char *languagePrefix, char **errorOut) {
         for (NSDictionary *candidate in candidates) {
             NSString *name = candidate[@"name"];
             NSString *language = candidate[@"language"];
-            NSString *key = [NSString stringWithFormat:@"%@|%@", name.lowercaseString,
-                                                       language.lowercaseString];
+            NSString *normalizedLanguage =
+                [[language stringByReplacingOccurrencesOfString:@"_" withString:@"-"] lowercaseString];
+            NSString *key = [NSString stringWithFormat:@"%@|%@", name, normalizedLanguage];
             dispatch_group_enter(group);
             BerdDownloadedVoices(language, name, ^(NSArray *voices, NSError *failure) {
                 BOOL exact = NO;
                 if (!failure) {
                     for (NSDictionary *voice in voices) {
-                        if ([voice[@"name"] caseInsensitiveCompare:name] == NSOrderedSame &&
-                            [voice[@"language"] caseInsensitiveCompare:language] == NSOrderedSame) {
+                        NSString *downloadedLanguage =
+                            [[voice[@"language"] stringByReplacingOccurrencesOfString:@"_"
+                                                                            withString:@"-"] lowercaseString];
+                        if ([voice[@"name"] isEqualToString:name] &&
+                            [downloadedLanguage isEqualToString:normalizedLanguage]) {
                             exact = YES;
                             break;
                         }
@@ -1109,14 +1112,18 @@ char *berd_siri_tts_catalog_json(const char *languagePrefix, char **errorOut) {
             group,
             dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4 * NSEC_PER_SEC))
         );
+        NSDictionary<NSString *, NSNumber *> *installedSnapshot = nil;
+        @synchronized (installed) { installedSnapshot = [installed copy]; }
 
         NSMutableArray *result = [NSMutableArray arrayWithCapacity:candidates.count];
         for (NSDictionary *candidate in candidates) {
+            NSString *normalizedLanguage =
+                [[candidate[@"language"] stringByReplacingOccurrencesOfString:@"_"
+                                                                     withString:@"-"] lowercaseString];
             NSString *key = [NSString stringWithFormat:@"%@|%@",
-                [candidate[@"name"] lowercaseString],
-                [candidate[@"language"] lowercaseString]];
+                candidate[@"name"], normalizedLanguage];
             NSMutableDictionary *voice = [candidate mutableCopy];
-            voice[@"installed"] = installed[key] ?: @NO;
+            voice[@"installed"] = installedSnapshot[key] ?: @NO;
             [result addObject:voice];
         }
         NSData *json = [NSJSONSerialization dataWithJSONObject:result options:0 error:&error];

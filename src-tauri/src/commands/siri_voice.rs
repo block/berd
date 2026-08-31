@@ -29,6 +29,10 @@ use super::pocket_voice::{
 };
 #[cfg(target_os = "macos")]
 use berd_voice::input::InputDuringTtsPolicy;
+use berd_voice::siri::{
+    download_voice as download_managed_siri_voice, load_voice_catalog, validate_installed_voice,
+    SiriVoice, SiriVoiceIdentity, DEFAULT_SIRI_DOWNLOAD_WAIT_TIMEOUT,
+};
 #[cfg(any(test, target_os = "macos"))]
 use berd_voice::DeliveryProgress as VoiceDeliveryProgress;
 #[cfg(test)]
@@ -132,21 +136,7 @@ const MAX_PLAYBACK_SPEED: f32 = 2.0;
 static SIRI_SETTINGS_LOCK: Mutex<()> = Mutex::new(());
 static SIRI_SETTINGS_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct SiriVoice {
-    name: String,
-    language: String,
-    size_bytes: u64,
-    installed: bool,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct SiriVoiceSelection {
-    name: String,
-    language: String,
-}
+pub type SiriVoiceSelection = SiriVoiceIdentity;
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -229,17 +219,6 @@ fn update_settings(
 
 #[cfg(target_os = "macos")]
 unsafe extern "C" {
-    fn berd_siri_tts_catalog_json(
-        language_prefix: *const c_char,
-        error_out: *mut *mut c_char,
-    ) -> *mut c_char;
-    fn berd_siri_tts_languages_json(error_out: *mut *mut c_char) -> *mut c_char;
-    fn berd_siri_tts_download_voice(
-        language: *const c_char,
-        voice_name: *const c_char,
-        timeout_seconds: f64,
-        error_out: *mut *mut c_char,
-    ) -> bool;
     fn berd_siri_tts_play_sample(
         voice_name: *const c_char,
         language: *const c_char,
@@ -345,25 +324,8 @@ fn emit_stream_event(
 
 #[cfg(target_os = "macos")]
 fn discover_voices(language_prefix: &str) -> Result<Vec<SiriVoice>, String> {
-    let prefix = CString::new(language_prefix)
-        .map_err(|_| "Siri voice language cannot contain NUL bytes".to_string())?;
-    let mut error = std::ptr::null_mut();
-    // SAFETY: The bridge copies the input string synchronously and returns
-    // owned strings through its documented allocation contract.
-    let json = unsafe { berd_siri_tts_catalog_json(prefix.as_ptr(), &mut error) };
-    let json = take_bridge_string(json)
-        .ok_or_else(|| bridge_error(error, "Could not load the Siri voice catalog"))?;
-    serde_json::from_str(&json).map_err(|error| format!("decode Siri voice catalog: {error}"))
-}
-
-#[cfg(target_os = "macos")]
-fn discover_languages() -> Result<Vec<String>, String> {
-    let mut error = std::ptr::null_mut();
-    // SAFETY: Returned strings follow the bridge allocation contract.
-    let json = unsafe { berd_siri_tts_languages_json(&mut error) };
-    let json = take_bridge_string(json)
-        .ok_or_else(|| bridge_error(error, "Could not load Siri voice languages"))?;
-    serde_json::from_str(&json).map_err(|error| format!("decode Siri voice languages: {error}"))
+    load_voice_catalog((!language_prefix.is_empty()).then_some(language_prefix))
+        .map(|catalog| catalog.voices)
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -371,34 +333,11 @@ fn discover_voices(_language_prefix: &str) -> Result<Vec<SiriVoice>, String> {
     Ok(Vec::new())
 }
 
-#[cfg(not(target_os = "macos"))]
-fn discover_languages() -> Result<Vec<String>, String> {
-    Ok(Vec::new())
-}
-
-fn normalize_language(value: &str) -> String {
-    value.replace('_', "-").to_lowercase()
-}
-
-fn find_voice<'a>(
-    voices: &'a [SiriVoice],
-    selection: &SiriVoiceSelection,
-) -> Option<&'a SiriVoice> {
-    let language = normalize_language(&selection.language);
-    voices.iter().find(|voice| {
-        voice.name.eq_ignore_ascii_case(&selection.name)
-            && normalize_language(&voice.language) == language
-    })
-}
-
 fn first_installed_voice(voices: &[SiriVoice]) -> Option<SiriVoiceSelection> {
     voices
         .iter()
         .find(|voice| voice.installed)
-        .map(|voice| SiriVoiceSelection {
-            name: voice.name.clone(),
-            language: voice.language.clone(),
-        })
+        .map(SiriVoice::identity)
 }
 
 fn resolve_voice_selection(
@@ -407,7 +346,11 @@ fn resolve_voice_selection(
     load_all_voices: impl FnOnce() -> Result<Vec<SiriVoice>, String>,
 ) -> Result<(Option<SiriVoiceSelection>, bool), String> {
     if let Some(selection) = selected_voice {
-        if find_voice(preferred_voices, selection).is_some_and(|voice| voice.installed) {
+        if preferred_voices
+            .iter()
+            .find(|voice| voice.matches(selection))
+            .is_some_and(|voice| voice.installed)
+        {
             return Ok((Some(selection.clone()), true));
         }
     } else if let Some(selection) = first_installed_voice(preferred_voices) {
@@ -416,7 +359,11 @@ fn resolve_voice_selection(
 
     let all_voices = load_all_voices()?;
     if let Some(selection) = selected_voice {
-        if find_voice(&all_voices, selection).is_some_and(|voice| voice.installed) {
+        if all_voices
+            .iter()
+            .find(|voice| voice.matches(selection))
+            .is_some_and(|voice| voice.installed)
+        {
             return Ok((Some(selection.clone()), true));
         }
     }
@@ -434,7 +381,11 @@ fn resolve_stream_voice(
     load_all_voices: impl FnOnce() -> Result<Vec<SiriVoice>, String>,
 ) -> Result<SiriVoiceSelection, String> {
     let voices = load_all_voices()?;
-    if find_voice(&voices, selection).is_some_and(|voice| voice.installed) {
+    if voices
+        .iter()
+        .find(|voice| voice.matches(selection))
+        .is_some_and(|voice| voice.installed)
+    {
         return Ok(selection.clone());
     }
 
@@ -444,8 +395,9 @@ fn resolve_stream_voice(
 }
 
 fn status(app: &AppHandle, language_prefix: &str) -> Result<SiriVoiceStatus, String> {
-    let voices = discover_voices(language_prefix)?;
-    let available_languages = discover_languages()?;
+    let catalog = load_voice_catalog((!language_prefix.is_empty()).then_some(language_prefix))?;
+    let voices = catalog.voices;
+    let available_languages = catalog.available_languages;
     let path = settings_path(app)?;
     let previous_selection = read_settings(&path).selected_voice;
     let (resolved_selection, resolved_selection_installed) =
@@ -467,10 +419,15 @@ fn status(app: &AppHandle, language_prefix: &str) -> Result<SiriVoiceStatus, Str
             (resolved_selection, resolved_selection_installed)
         } else {
             let installed = settings.selected_voice.as_ref().is_some_and(|selection| {
-                find_voice(&voices, selection).is_some_and(|voice| voice.installed)
-                    || discover_voices(&selection.language)
+                voices
+                    .iter()
+                    .find(|voice| voice.matches(selection))
+                    .is_some_and(|voice| voice.installed)
+                    || discover_voices(selection.language())
                         .ok()
-                        .and_then(|selected| find_voice(&selected, selection).cloned())
+                        .and_then(|selected| {
+                            selected.into_iter().find(|voice| voice.matches(selection))
+                        })
                         .is_some_and(|voice| voice.installed)
             });
             (settings.selected_voice.clone(), installed)
@@ -500,20 +457,10 @@ pub async fn get_siri_voice_status(
 
 #[tauri::command]
 pub async fn select_siri_voice(app: AppHandle, voice: SiriVoiceSelection) -> Result<(), String> {
-    let prefix = voice.language.clone();
     let candidate = voice.clone();
-    let installed = tauri::async_runtime::spawn_blocking(move || {
-        let voices = discover_voices(&prefix)?;
-        Ok::<_, String>(find_voice(&voices, &candidate).is_some_and(|voice| voice.installed))
-    })
-    .await
-    .map_err(|error| format!("Siri voice validation task failed: {error}"))??;
-    if !installed {
-        return Err(format!(
-            "Siri voice {} ({}) must be downloaded before selection",
-            voice.name, voice.language
-        ));
-    }
+    tauri::async_runtime::spawn_blocking(move || validate_installed_voice(&candidate))
+        .await
+        .map_err(|error| format!("Siri voice validation task failed: {error}"))??;
     update_settings(&settings_path(&app)?, |settings| {
         settings.selected_voice = Some(voice);
         true
@@ -544,20 +491,8 @@ pub async fn download_siri_voice(app: AppHandle, voice: SiriVoiceSelection) -> R
 
     #[cfg(target_os = "macos")]
     {
-        let language = CString::new(voice.language.clone())
-            .map_err(|_| "Siri voice language cannot contain NUL bytes".to_string())?;
-        let name = CString::new(voice.name.clone())
-            .map_err(|_| "Siri voice name cannot contain NUL bytes".to_string())?;
         tauri::async_runtime::spawn_blocking(move || {
-            let mut error = std::ptr::null_mut();
-            // SAFETY: Inputs stay alive for the blocking call and returned
-            // errors follow the bridge string ownership contract.
-            let downloaded = unsafe {
-                berd_siri_tts_download_voice(language.as_ptr(), name.as_ptr(), 300.0, &mut error)
-            };
-            downloaded
-                .then_some(())
-                .ok_or_else(|| bridge_error(error, "Siri voice download failed"))
+            download_managed_siri_voice(&voice, DEFAULT_SIRI_DOWNLOAD_WAIT_TIMEOUT)
         })
         .await
         .map_err(|error| format!("Siri voice download task failed: {error}"))??;
@@ -739,8 +674,8 @@ fn run_siri_stream(
     output_latency_grace: Duration,
 ) -> Result<SiriStreamOutcome, SiriStreamFailure> {
     let tts = ConfiguredTtsSlot::new(TtsConfiguration::siri(
-        selection.name,
-        selection.language,
+        selection.name().to_owned(),
+        selection.language().to_owned(),
         speed,
     ))?;
     let tts = tts.lease()?;
@@ -1121,9 +1056,9 @@ pub async fn preview_siri_voice(
             .playback_speed
             .clamp(MIN_PLAYBACK_SPEED, MAX_PLAYBACK_SPEED);
         let text = CString::new("Hello. This is a preview of my voice.").expect("static preview");
-        let language = CString::new(voice.language.clone())
+        let language = CString::new(voice.language())
             .map_err(|_| "Siri voice language cannot contain NUL bytes".to_string())?;
-        let name = CString::new(voice.name.clone())
+        let name = CString::new(voice.name())
             .map_err(|_| "Siri voice name cannot contain NUL bytes".to_string())?;
         let active = begin_playback(&state, webview_window.label())?;
         let assistant_speech =
@@ -1158,8 +1093,7 @@ pub async fn preview_siri_voice(
                 }
 
                 let sample_error = bridge_error(error, "No system preview is available");
-                let voices = discover_voices(&voice.language)?;
-                if !find_voice(&voices, &voice).is_some_and(|candidate| candidate.installed) {
+                if validate_installed_voice(&voice).is_err() {
                     return Err(sample_error);
                 }
 
@@ -1241,18 +1175,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn voice_lookup_normalizes_language_and_name_case() {
+    fn voice_lookup_normalizes_language_but_preserves_exact_name() {
         let voices = vec![SiriVoice {
             name: "Aaron".to_string(),
-            language: "en_US".to_string(),
+            language: "en-US".to_string(),
             size_bytes: 10,
             installed: true,
         }];
-        let selected = SiriVoiceSelection {
-            name: "aaron".to_string(),
-            language: "EN-us".to_string(),
-        };
-        assert_eq!(find_voice(&voices, &selected), voices.first());
+        let selected = SiriVoiceSelection::new("Aaron", "en-US").unwrap();
+        assert_eq!(
+            voices.iter().find(|voice| voice.matches(&selected)),
+            voices.first()
+        );
+        assert!(voices
+            .iter()
+            .find(|voice| { voice.matches(&SiriVoiceSelection::new("aaron", "en-US").unwrap()) })
+            .is_none());
     }
 
     #[test]
@@ -1278,10 +1216,7 @@ mod tests {
                 release_selection_rx
                     .recv()
                     .expect("release selection write");
-                settings.selected_voice = Some(SiriVoiceSelection {
-                    name: "Aaron".to_string(),
-                    language: "en-US".to_string(),
-                });
+                settings.selected_voice = Some(SiriVoiceSelection::new("Aaron", "en-US").unwrap());
                 true
             })
             .expect("write selected voice");
@@ -1312,10 +1247,7 @@ mod tests {
         let settings = read_settings(&path);
         assert_eq!(
             settings.selected_voice,
-            Some(SiriVoiceSelection {
-                name: "Aaron".to_string(),
-                language: "en-US".to_string(),
-            })
+            Some(SiriVoiceSelection::new("Aaron", "en-US").unwrap())
         );
         assert_eq!(settings.playback_speed, 1.5);
         serde_json::from_slice::<SiriVoiceSettings>(&fs::read(&*path).expect("settings JSON"))
@@ -1342,10 +1274,7 @@ mod tests {
         assert_eq!(
             resolve_voice_selection(&voices, None, || Ok(Vec::new())),
             Ok((
-                Some(SiriVoiceSelection {
-                    name: "Aaron".to_string(),
-                    language: "en-US".to_string(),
-                }),
+                Some(SiriVoiceSelection::new("Aaron", "en-US").unwrap()),
                 true,
             ))
         );
@@ -1370,10 +1299,7 @@ mod tests {
                 }])
             }),
             Ok((
-                Some(SiriVoiceSelection {
-                    name: "Catherine".to_string(),
-                    language: "en-AU".to_string(),
-                }),
+                Some(SiriVoiceSelection::new("Catherine", "en-AU").unwrap()),
                 true,
             ))
         );
@@ -1381,10 +1307,7 @@ mod tests {
 
     #[test]
     fn unavailable_selection_falls_back_to_an_installed_siri_voice() {
-        let selected = SiriVoiceSelection {
-            name: "Aaron".to_string(),
-            language: "en-US".to_string(),
-        };
+        let selected = SiriVoiceSelection::new("Aaron", "en-US").unwrap();
         let preferred_voices = vec![
             SiriVoice {
                 name: "Aaron".to_string(),
@@ -1413,10 +1336,7 @@ mod tests {
                 ])
             }),
             Ok((
-                Some(SiriVoiceSelection {
-                    name: "Catherine".to_string(),
-                    language: "en-AU".to_string(),
-                }),
+                Some(SiriVoiceSelection::new("Catherine", "en-AU").unwrap()),
                 true,
             ))
         );
@@ -1424,10 +1344,7 @@ mod tests {
 
     #[test]
     fn unavailable_selection_is_preserved_when_no_siri_voice_is_installed() {
-        let selected = SiriVoiceSelection {
-            name: "Aaron".to_string(),
-            language: "en-US".to_string(),
-        };
+        let selected = SiriVoiceSelection::new("Aaron", "en-US").unwrap();
         let voices = vec![SiriVoice {
             name: "Aaron".to_string(),
             language: "en-US".to_string(),
@@ -1443,17 +1360,17 @@ mod tests {
 
     #[test]
     fn stream_voice_ingress_re_resolves_a_voice_removed_after_status() {
-        let selected = SiriVoiceSelection {
-            name: "Aaron".to_string(),
-            language: "en-US".to_string(),
-        };
+        let selected = SiriVoiceSelection::new("Aaron", "en-US").unwrap();
         let status_catalog = vec![SiriVoice {
-            name: selected.name.clone(),
-            language: selected.language.clone(),
+            name: selected.name().to_string(),
+            language: selected.language().to_string(),
             size_bytes: 10,
             installed: true,
         }];
-        assert!(find_voice(&status_catalog, &selected).is_some_and(|voice| voice.installed));
+        assert!(status_catalog
+            .iter()
+            .find(|voice| voice.matches(&selected))
+            .is_some_and(|voice| voice.installed));
 
         let current_catalog = vec![
             SiriVoice {
@@ -1470,25 +1387,19 @@ mod tests {
 
         assert_eq!(
             resolve_stream_voice(&selected, || Ok(current_catalog)),
-            Ok(SiriVoiceSelection {
-                name: "Catherine".to_string(),
-                language: "en-AU".to_string(),
-            })
+            Ok(SiriVoiceSelection::new("Catherine", "en-AU").unwrap())
         );
     }
 
     #[test]
     fn stream_voice_ingress_rejects_when_no_siri_voice_is_installed() {
-        let selected = SiriVoiceSelection {
-            name: "Aaron".to_string(),
-            language: "en-US".to_string(),
-        };
+        let selected = SiriVoiceSelection::new("Aaron", "en-US").unwrap();
 
         assert_eq!(
             resolve_stream_voice(&selected, || {
                 Ok(vec![SiriVoice {
-                    name: selected.name.clone(),
-                    language: selected.language.clone(),
+                    name: selected.name().to_string(),
+                    language: selected.language().to_string(),
                     size_bytes: 10,
                     installed: false,
                 }])

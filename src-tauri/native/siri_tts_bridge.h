@@ -8,17 +8,18 @@
 extern "C" {
 #endif
 
-/// Returns a malloc-owned JSON array of Siri voices for the requested language
-/// prefix. Each item contains name, language, sizeBytes, and installed. Returns
-/// NULL and sets error_out on failure.
-char *berd_siri_tts_catalog_json(const char *language_prefix, char **error_out);
+/// Returns a malloc-owned JSON array of Siri voices for the requested exact
+/// normalized language, or every language when empty. Each item contains name,
+/// language, sizeBytes, and installed. Returns NULL and sets error_out on failure.
+char *berd_siri_tts_catalog_json(const char *language, char **error_out);
 
 /// Returns the locale tags represented in the complete Siri voice catalog.
 /// This does not perform per-voice daemon validation.
 char *berd_siri_tts_languages_json(char **error_out);
 
 /// Downloads and validates one exact Siri voice. This call blocks until the
-/// voice is usable or the timeout elapses.
+/// voice is usable or the availability-polling timeout elapses. Validation and
+/// subscription are separately bounded and occur before that polling deadline.
 bool berd_siri_tts_download_voice(
     const char *language,
     const char *voice_name,
