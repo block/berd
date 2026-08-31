@@ -85,12 +85,10 @@ describe("project unread dot", () => {
 });
 
 describe("remote project identity", () => {
-  it("badges the project icon and uses a remote globe on its chat", () => {
+  it("uses a remote globe on the chat without badging the project", () => {
     const { container } = renderRemoteSection();
 
-    expect(
-      container.querySelector("[data-sidebar-project-remote]"),
-    ).toBeInTheDocument();
+    expect(container.querySelector("[data-sidebar-project-remote]")).toBeNull();
     expect(
       container.querySelector("[data-sidebar-chat-remote-host]"),
     ).toHaveAttribute("title", "Remote chat on blox");

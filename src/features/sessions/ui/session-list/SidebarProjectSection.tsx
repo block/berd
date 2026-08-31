@@ -4,7 +4,6 @@ import {
   IconChevronDown,
   IconChevronRight,
   IconEdit,
-  IconWorld,
 } from "@tabler/icons-react";
 import type { AppView } from "@/app/AppShell";
 import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
@@ -46,33 +45,6 @@ const PROJECT_CHAT_DISCLOSURE_CLASS = cn(
   "h-auto justify-start rounded-sm py-1",
   SIDEBAR_GROUP_LABEL_TEXT_CLASS,
 );
-
-function SidebarProjectIcon({
-  project,
-  remote,
-}: {
-  project: ProjectInfo;
-  remote: boolean;
-}) {
-  return (
-    <span className="relative flex size-[18px] items-center justify-center">
-      <ProjectIcon
-        icon={project.icon}
-        color={project.color}
-        projectId={project.id}
-        imageClassName="size-[18px] rounded-[4px]"
-      />
-      {remote ? (
-        <span
-          data-sidebar-project-remote
-          className="absolute -bottom-1 -right-1 flex size-3 items-center justify-center rounded-full bg-card-glass text-info"
-        >
-          <IconWorld className="size-2.5" stroke={2.2} />
-        </span>
-      ) : null}
-    </span>
-  );
-}
 
 export interface SidebarSessionItem {
   id: string;
@@ -185,9 +157,6 @@ export function SidebarProjectSection({
   const [menuOpen, setMenuOpen] = useState(false);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const projectHasUnread = projectChats.some((session) => session.hasUnread);
-  const projectHasRemoteChats = projectChats.some((session) =>
-    Boolean(session.remoteHost),
-  );
   const projectHasChats = projectChats.length > 0;
   const projectCanExpand = projectHasChats || emptyState != null;
   // When collapsed, surface unread on the project identity because its chat
@@ -397,9 +366,11 @@ export function SidebarProjectSection({
                 {showExpansionChevron && projectCanExpand ? (
                   <>
                     <span className="group-hover/chat-row:hidden group-focus-within/chat-row:hidden">
-                      <SidebarProjectIcon
-                        project={project}
-                        remote={projectHasRemoteChats}
+                      <ProjectIcon
+                        icon={project.icon}
+                        color={project.color}
+                        projectId={project.id}
+                        imageClassName="size-[18px] rounded-[4px]"
                       />
                     </span>
                     {isExpanded ? (
@@ -409,9 +380,11 @@ export function SidebarProjectSection({
                     )}
                   </>
                 ) : (
-                  <SidebarProjectIcon
-                    project={project}
-                    remote={projectHasRemoteChats}
+                  <ProjectIcon
+                    icon={project.icon}
+                    color={project.color}
+                    projectId={project.id}
+                    imageClassName="size-[18px] rounded-[4px]"
                   />
                 )}
               </SidebarLeadingIcon>
