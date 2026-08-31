@@ -9,8 +9,8 @@ use std::time::Duration;
 
 #[cfg(target_os = "macos")]
 use berd_voice::{
-    openai::OpenAiSpeechConfig, DeliveryProgress as VoiceDeliveryProgress, DrainPolicy, OpenAiTts,
-    OutboundFailure, OutboundOutcome, OutboundPlayback, PocketAudioPlayer, TtsBackend,
+    ConfiguredTtsSlot, DeliveryProgress as VoiceDeliveryProgress, DrainPolicy, OutboundFailure,
+    OutboundOutcome, OutboundPlayback, PocketAudioPlayer, TtsBackend, TtsConfiguration,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -617,13 +617,15 @@ fn run_openai_voice_stream(
     interruption_sensitivity: InterruptionSensitivity,
     speed: f32,
 ) -> Result<StreamOutcome, StreamFailure> {
-    let backend = OpenAiTts::new(OpenAiSpeechConfig {
-        endpoint: endpoint("audio/speech")?,
-        api_key: key,
-        model: speech_model(),
-        voice: speech_voice(),
+    let tts = ConfiguredTtsSlot::new(TtsConfiguration::openai(
+        endpoint("audio/speech")?,
+        key,
+        speech_model(),
+        speech_voice(),
         speed,
-    })?;
+    ))?;
+    let tts = tts.lease()?;
+    let backend = tts.backend();
     let output_device = selected_output_device();
     let effective_output_device = effective_output_device_name(output_device.as_deref());
     let player = PocketAudioPlayer::new(TTS_SAMPLE_RATE, 1.0, output_device.as_deref())?;
@@ -662,7 +664,7 @@ fn run_openai_voice_stream(
                     match speak_pending(
                         app,
                         stream_id,
-                        &backend,
+                        backend.as_ref(),
                         &mut playback,
                         &mut pending,
                         &native_voice,
@@ -687,7 +689,7 @@ fn run_openai_voice_stream(
                 if speak_pending(
                     app,
                     stream_id,
-                    &backend,
+                    backend.as_ref(),
                     &mut playback,
                     &mut pending,
                     &native_voice,
@@ -709,7 +711,7 @@ fn run_openai_voice_stream(
                 if speak_pending(
                     app,
                     stream_id,
-                    &backend,
+                    backend.as_ref(),
                     &mut playback,
                     &mut pending,
                     &native_voice,

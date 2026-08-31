@@ -19,9 +19,13 @@ use berd_voice::input::{
 };
 use berd_voice::protocol::{
     CancelOutcome, NotAdmittedReason, OutputReadyOutcome, SessionMessage, SessionRequest,
+    TtsSettingsOutcome, VoiceSessionSnapshot,
 };
 use berd_voice::session::{PrepareOutcome, PrepareRequest, SessionCore};
-use berd_voice::{OpenAiTts, TtsBackend};
+use berd_voice::{
+    ConfiguredTtsSlot, TtsBackend, TtsConfiguration, TtsConfigurationLease,
+    TtsConfigurationRejection, TtsConfigurationRejectionKind, POCKET_TTS_MODEL_ID,
+};
 
 const WIRE_MARKER: u32 = 2;
 const MAX_LINE_BYTES: usize = 1024 * 1024;
@@ -34,6 +38,7 @@ const MAX_FINAL_TEXT_BYTES: usize = 64 * 1024;
 const MAX_SPEAK_TEXT_BYTES: usize = 16 * 1024;
 const INPUT_QUEUE_CAPACITY: usize = 32;
 const SHUTDOWN_PLAYBACK_TIMEOUT: Duration = Duration::from_secs(2);
+const TTS_CONFIGURATION_TIMEOUT: Duration = Duration::from_secs(120);
 const MAX_OPENAI_BENCHMARK_REQUESTS: usize = 20;
 const MAX_OPENAI_BENCHMARK_TEXT_BYTES: usize = 64 * 1024;
 const MAX_OPENAI_STT_BENCHMARK_SECONDS: f64 = 120.0;
@@ -53,6 +58,19 @@ enum PlaybackEvent {
     Failed(u64, String),
 }
 
+struct TtsConfigurationEvent {
+    attempt: u64,
+    id: u64,
+    result: Result<berd_voice::TtsConfigurationReplacement, TtsConfigurationRejection>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ActiveTtsConfigurationUpdate {
+    attempt: u64,
+    id: u64,
+    deadline: Instant,
+}
+
 struct ActivePlayback {
     prepare_id: u64,
     speech_id: u64,
@@ -61,11 +79,14 @@ struct ActivePlayback {
     active: Option<Arc<AtomicBool>>,
     ready_deadline: Instant,
     assistant_activity: Option<AssistantActivityGuard>,
+    tts: TtsConfigurationLease,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 enum TtsBackendConfig {
-    OpenAi,
+    OpenAi {
+        rate: f32,
+    },
     Siri {
         voice: String,
         language: String,
@@ -163,11 +184,14 @@ fn run_session(config: SessionConfig) -> Result<(), String> {
     let (input_tx, input_rx) = mpsc::sync_channel(INPUT_QUEUE_CAPACITY);
     thread::spawn(move || read_framed_requests(io::stdin().lock(), input_tx));
     let (playback_tx, playback_rx) = mpsc::channel();
+    let (tts_configuration_tx, tts_configuration_rx) = mpsc::channel::<TtsConfigurationEvent>();
     let stdout = io::stdout();
     let mut writer = BufWriter::new(stdout.lock());
     let mut core = SessionCore::default();
     let mut initialized = false;
-    let mut tts_backend: Option<Arc<dyn TtsBackend>> = None;
+    let mut tts_slot: Option<Arc<ConfiguredTtsSlot>> = None;
+    let mut tts_update: Option<ActiveTtsConfigurationUpdate> = None;
+    let mut next_tts_update_attempt = 1_u64;
     let mut input_runtime: Option<VoiceInputRuntime> = None;
     let mut input_events: Option<tokio::sync::mpsc::Receiver<VoiceInputEvent>> = None;
     let mut input_controls: Option<VoiceInputControls> = None;
@@ -191,10 +215,18 @@ fn run_session(config: SessionConfig) -> Result<(), String> {
         while let Ok(event) = playback_rx.try_recv() {
             handle_playback_event(event, &mut core, &mut active, &mut writer)?;
         }
+        poll_tts_configuration_update(
+            Instant::now(),
+            &tts_configuration_rx,
+            tts_slot.as_deref(),
+            &mut tts_update,
+            &mut writer,
+        )?;
         reevaluate_held(
             &mut held,
             &mut core,
             &output_device,
+            tts_slot.as_deref(),
             &mut active,
             &mut writer,
         )?;
@@ -220,7 +252,7 @@ fn run_session(config: SessionConfig) -> Result<(), String> {
         };
         match input {
             Input::Invalid(message) => {
-                write_message(&mut writer, &SessionMessage::Fatal { message })?;
+                write_protocol_fatal(&mut writer, "invalid session input", &message)?;
                 abort_active(&active);
                 if let Some(runtime) = input_runtime.as_ref() {
                     runtime.cancel();
@@ -257,12 +289,7 @@ fn run_session(config: SessionConfig) -> Result<(), String> {
                     .expect("hello initializes input before PCM")
                     .try_push_frame(*frame)
                 {
-                    write_message(
-                        &mut writer,
-                        &SessionMessage::Fatal {
-                            message: message.clone(),
-                        },
-                    )?;
+                    write_protocol_fatal(&mut writer, "voice input frame was rejected", &message)?;
                     input_runtime
                         .as_ref()
                         .expect("hello initialized input runtime")
@@ -271,6 +298,12 @@ fn run_session(config: SessionConfig) -> Result<(), String> {
                 }
             }
             Input::Request(SessionRequest::Shutdown) => {
+                reject_tts_configuration_update(
+                    &mut tts_update,
+                    tts_slot.as_deref(),
+                    "session is shutting down",
+                    &mut writer,
+                )?;
                 if let Some(held) = held.take() {
                     write_message(
                         &mut writer,
@@ -315,27 +348,43 @@ fn run_session(config: SessionConfig) -> Result<(), String> {
                     abort_active(&active);
                     return Ok(());
                 }
-                let backend = match create_tts_backend(&config.tts) {
-                    Ok(backend) => backend,
+                let slot = match create_tts_slot(&config.tts) {
+                    Ok(slot) => Arc::new(slot),
                     Err(message) => {
-                        write_message(&mut writer, &SessionMessage::Fatal { message })?;
+                        write_protocol_fatal(
+                            &mut writer,
+                            &public_tts_startup_error(&config.tts),
+                            &format!("TTS startup failed: {message}"),
+                        )?;
                         return Ok(());
                     }
                 };
                 if let Err(message) = validate_output_device(requested.as_deref()) {
-                    write_message(&mut writer, &SessionMessage::Fatal { message })?;
+                    write_protocol_fatal(
+                        &mut writer,
+                        "selected audio output is unavailable",
+                        &message,
+                    )?;
                     return Ok(());
                 }
                 let (runtime, mut events) = match create_input_runtime(&config.stt) {
                     Ok(runtime) => runtime,
                     Err(message) => {
-                        write_message(&mut writer, &SessionMessage::Fatal { message })?;
+                        write_protocol_fatal(
+                            &mut writer,
+                            &public_stt_startup_error(&config.stt),
+                            &format!("STT startup failed: {message}"),
+                        )?;
                         return Ok(());
                     }
                 };
                 if let Err(message) = wait_for_input_ready(&mut events) {
                     runtime.cancel();
-                    write_message(&mut writer, &SessionMessage::Fatal { message })?;
+                    write_protocol_fatal(
+                        &mut writer,
+                        &public_stt_startup_error(&config.stt),
+                        &format!("STT readiness failed: {message}"),
+                    )?;
                     return Ok(());
                 }
                 input_controls = Some(runtime.controls());
@@ -343,12 +392,16 @@ fn run_session(config: SessionConfig) -> Result<(), String> {
                 input_events = Some(events);
                 initialized = true;
                 output_device = requested;
-                tts_backend = Some(backend);
+                let session = VoiceSessionSnapshot {
+                    tts: slot.snapshot()?,
+                };
+                tts_slot = Some(slot);
                 write_message(
                     &mut writer,
                     &SessionMessage::Ready {
                         id,
                         protocol: WIRE_MARKER,
+                        session,
                     },
                 )?;
             }
@@ -371,6 +424,44 @@ fn run_session(config: SessionConfig) -> Result<(), String> {
                     &mut writer,
                     &SessionMessage::InputMuteApplied { id, active: muted },
                 )?;
+            }
+            Input::Request(SessionRequest::SetTtsSettings {
+                id,
+                expected_revision,
+                settings,
+            }) => {
+                let slot = Arc::clone(tts_slot.as_ref().expect("hello initialized TTS"));
+                if tts_update.is_some() {
+                    write_message(
+                        &mut writer,
+                        &SessionMessage::TtsSettingsResult {
+                            id,
+                            outcome: TtsSettingsOutcome::Rejected,
+                            snapshot: slot.snapshot()?,
+                            message: Some("another TTS configuration update is in progress".into()),
+                        },
+                    )?;
+                } else {
+                    let attempt = next_tts_update_attempt;
+                    next_tts_update_attempt =
+                        next_tts_update_attempt.checked_add(1).ok_or_else(|| {
+                            "TTS configuration attempt space is exhausted".to_string()
+                        })?;
+                    tts_update = Some(ActiveTtsConfigurationUpdate {
+                        attempt,
+                        id,
+                        deadline: Instant::now() + TTS_CONFIGURATION_TIMEOUT,
+                    });
+                    let sender = tts_configuration_tx.clone();
+                    thread::spawn(move || {
+                        let result = slot.prepare_replacement(expected_revision, settings);
+                        let _ = sender.send(TtsConfigurationEvent {
+                            attempt,
+                            id,
+                            result,
+                        });
+                    });
+                }
             }
             Input::Request(SessionRequest::ResetInput { id }) => {
                 input_controls
@@ -407,6 +498,7 @@ fn run_session(config: SessionConfig) -> Result<(), String> {
                         request,
                         &mut core,
                         &output_device,
+                        tts_slot.as_deref().expect("hello initialized TTS"),
                         &mut active,
                         &mut held,
                         &mut writer,
@@ -438,7 +530,7 @@ fn run_session(config: SessionConfig) -> Result<(), String> {
                         speech_id,
                         current.text.clone(),
                         current.output_device.clone(),
-                        Arc::clone(tts_backend.as_ref().expect("hello initialized TTS")),
+                        Arc::clone(current.tts.backend()),
                         playback_active,
                         playback_tx.clone(),
                     );
@@ -553,13 +645,16 @@ fn build_tts_backend_config(
 ) -> Result<TtsBackendConfig, String> {
     match backend {
         "openai" => {
-            if voice.is_some() || language.is_some() || model_dir.is_some() || rate.is_some() {
+            if voice.is_some() || language.is_some() || model_dir.is_some() {
                 return Err(
-                    "--voice, --language, --model-dir, and --rate require a non-OpenAI backend"
-                        .into(),
+                    "--voice, --language, and --model-dir require a non-OpenAI backend".into(),
                 );
             }
-            Ok(TtsBackendConfig::OpenAi)
+            let rate = rate.unwrap_or(1.0);
+            if !rate.is_finite() || !(0.75..=2.0).contains(&rate) {
+                return Err("--rate must be between 0.75 and 2.0 for OpenAI".into());
+            }
+            Ok(TtsBackendConfig::OpenAi { rate })
         }
         "siri" => {
             if model_dir.is_some() {
@@ -741,7 +836,7 @@ fn parse_tts_benchmark_args(args: &[String]) -> Result<TtsBenchmarkConfig, Strin
             (requests, bytes)
         }
     };
-    if matches!(tts, TtsBackendConfig::OpenAi) {
+    if matches!(tts, TtsBackendConfig::OpenAi { .. }) {
         if !allow_paid_openai {
             return Err("OpenAI benchmarks require explicit --allow-paid-openai consent".into());
         }
@@ -790,7 +885,7 @@ fn tts_benchmark_target(
     openai_endpoint_from_environment: bool,
 ) -> TtsBenchmarkTarget {
     match config {
-        TtsBackendConfig::OpenAi => TtsBenchmarkTarget {
+        TtsBackendConfig::OpenAi { .. } => TtsBenchmarkTarget {
             backend: "openai".into(),
             model: Some(
                 std::env::var("OPENAI_TTS_MODEL").unwrap_or_else(|_| "gpt-4o-mini-tts".into()),
@@ -1022,50 +1117,66 @@ fn stt_benchmark_target(config: &SttBackendConfig) -> Result<SttBenchmarkTarget,
     }
 }
 
-fn create_tts_backend(config: &TtsBackendConfig) -> Result<Arc<dyn TtsBackend>, String> {
+fn create_tts_configuration(config: &TtsBackendConfig) -> Result<TtsConfiguration, String> {
     match config {
-        TtsBackendConfig::OpenAi => {
+        TtsBackendConfig::OpenAi { rate } => {
             let api_key = std::env::var("OPENAI_API_KEY")
                 .ok()
                 .filter(|key| !key.trim().is_empty())
                 .ok_or_else(|| "OPENAI_API_KEY is required".to_string())?;
             let base = std::env::var("OPENAI_BASE_URL")
                 .unwrap_or_else(|_| "https://api.openai.com/v1".into());
-            let config = berd_voice::openai::OpenAiSpeechConfig {
-                endpoint: format!("{}/audio/speech", base.trim_end_matches('/')),
+            Ok(TtsConfiguration::openai(
+                format!("{}/audio/speech", base.trim_end_matches('/')),
                 api_key,
-                model: std::env::var("OPENAI_TTS_MODEL")
-                    .unwrap_or_else(|_| "gpt-4o-mini-tts".into()),
-                voice: std::env::var("OPENAI_TTS_VOICE").unwrap_or_else(|_| "marin".into()),
-                speed: 1.0,
-            };
-            Ok(Arc::new(OpenAiTts::new(config)?))
+                std::env::var("OPENAI_TTS_MODEL").unwrap_or_else(|_| "gpt-4o-mini-tts".into()),
+                std::env::var("OPENAI_TTS_VOICE").unwrap_or_else(|_| "marin".into()),
+                *rate,
+            ))
         }
-        #[cfg(target_os = "macos")]
         TtsBackendConfig::Siri {
             voice,
             language,
             rate,
-        } => berd_voice::SiriTts::new(language, voice, *rate)
-            .map(|backend| Arc::new(backend) as Arc<dyn TtsBackend>)
-            .map_err(|error| {
-                format!(
-                    "Siri TTS voice {voice:?} ({language}) is unavailable: {error}. Download it in Berd Voice settings or select another installed voice with --voice and --language"
-                )
-            }),
-        #[cfg(not(target_os = "macos"))]
-        TtsBackendConfig::Siri { .. } => Err(
-            "Siri TTS is the default but is only available on macOS; explicitly select --tts-backend openai or --tts-backend pocket on this platform"
-                .into(),
-        ),
+        } => Ok(TtsConfiguration::siri(
+            voice.clone(),
+            language.clone(),
+            *rate,
+        )),
         TtsBackendConfig::Pocket {
             model_dir,
             voice,
             rate,
-        } => Ok(Arc::new(berd_voice::PocketTtsBackend::new(
-            model_dir, voice, *rate,
-        )?)),
+        } => Ok(TtsConfiguration::pocket(
+            model_dir.clone(),
+            POCKET_TTS_MODEL_ID.into(),
+            voice.clone(),
+            *rate,
+        )),
     }
+}
+
+fn create_tts_slot(config: &TtsBackendConfig) -> Result<ConfiguredTtsSlot, String> {
+    #[cfg(not(target_os = "macos"))]
+    if matches!(config, TtsBackendConfig::Siri { .. }) {
+        return Err(
+            "Siri TTS is the default but is only available on macOS; explicitly select --tts-backend openai or --tts-backend pocket on this platform"
+                .into(),
+        );
+    }
+    ConfiguredTtsSlot::new(create_tts_configuration(config)?).map_err(|error| match config {
+        TtsBackendConfig::Siri {
+            voice, language, ..
+        } => format!(
+            "Siri TTS voice {voice:?} ({language}) is unavailable: {error}. Download it in Berd Voice settings or select another installed voice with --voice and --language"
+        ),
+        _ => error,
+    })
+}
+
+fn create_tts_backend(config: &TtsBackendConfig) -> Result<Arc<dyn TtsBackend>, String> {
+    let slot = create_tts_slot(config)?;
+    Ok(Arc::clone(slot.lease()?.backend()))
 }
 
 fn create_input_runtime(
@@ -1187,11 +1298,148 @@ fn validate_output_device(name: Option<&str>) -> Result<(), String> {
     }
 }
 
+fn poll_tts_configuration_update(
+    now: Instant,
+    receiver: &Receiver<TtsConfigurationEvent>,
+    tts_slot: Option<&ConfiguredTtsSlot>,
+    active: &mut Option<ActiveTtsConfigurationUpdate>,
+    writer: &mut impl Write,
+) -> Result<(), String> {
+    if active.is_some_and(|update| update.deadline <= now) {
+        reject_tts_configuration_update(
+            active,
+            tts_slot,
+            "TTS configuration update timed out",
+            writer,
+        )?;
+    }
+    while let Ok(event) = receiver.try_recv() {
+        if active.is_none_or(|update| update.attempt != event.attempt || update.id != event.id) {
+            continue;
+        }
+        active.take();
+        let slot = tts_slot.expect("TTS update requires initialized slot");
+        let result = event
+            .result
+            .and_then(|replacement| slot.commit_replacement(replacement));
+        let (outcome, snapshot, message) = match result {
+            Ok(snapshot) => (TtsSettingsOutcome::Applied, snapshot, None),
+            Err(rejection) => {
+                eprintln!("TTS configuration update failed: {}", rejection.message);
+                let message = public_tts_rejection_message(rejection.kind);
+                (
+                    TtsSettingsOutcome::Rejected,
+                    rejection.snapshot,
+                    Some(message.into()),
+                )
+            }
+        };
+        write_message(
+            writer,
+            &SessionMessage::TtsSettingsResult {
+                id: event.id,
+                outcome,
+                snapshot,
+                message,
+            },
+        )?;
+    }
+    Ok(())
+}
+
+fn public_tts_rejection_message(kind: TtsConfigurationRejectionKind) -> &'static str {
+    match kind {
+        TtsConfigurationRejectionKind::StaleRevision => {
+            "TTS settings revision is stale; retry with the authoritative snapshot"
+        }
+        TtsConfigurationRejectionKind::BackendMismatch => {
+            "TTS backend cannot be changed in a live session"
+        }
+        TtsConfigurationRejectionKind::InvalidSettings => {
+            "TTS settings are invalid; the previous configuration remains active"
+        }
+        TtsConfigurationRejectionKind::Initialization => {
+            "TTS settings could not be initialized; the previous configuration remains active"
+        }
+        TtsConfigurationRejectionKind::Internal => {
+            "TTS settings could not be applied; the previous configuration remains active"
+        }
+    }
+}
+
+fn public_tts_startup_error(config: &TtsBackendConfig) -> String {
+    match config {
+        TtsBackendConfig::OpenAi { .. } => {
+            "OpenAI TTS could not initialize; verify OPENAI_API_KEY and the selected model and voice"
+                .into()
+        }
+        TtsBackendConfig::Siri { .. } =>
+            "Siri TTS could not initialize; download the selected voice in Berd Voice settings or select another installed voice"
+                .into(),
+        TtsBackendConfig::Pocket { .. } =>
+            "Pocket TTS could not initialize; verify the selected Pocket bundle and voice".into(),
+    }
+}
+
+fn public_stt_startup_error(config: &SttBackendConfig) -> String {
+    match config {
+        SttBackendConfig::Macos => {
+            "macOS speech recognition could not initialize; verify SpeechTranscriber availability, locale support, and the installed model in Berd Voice settings"
+                .into()
+        }
+        SttBackendConfig::Parakeet { .. } => {
+            "Parakeet speech recognition could not initialize; verify the selected model bundle"
+                .into()
+        }
+        SttBackendConfig::OpenAi => {
+            "OpenAI speech recognition could not initialize; verify OPENAI_API_KEY and the selected transcription model"
+                .into()
+        }
+    }
+}
+
+fn write_protocol_fatal(
+    writer: &mut impl Write,
+    public_message: &str,
+    diagnostic: &str,
+) -> Result<(), String> {
+    eprintln!("{diagnostic}");
+    write_message(
+        writer,
+        &SessionMessage::Fatal {
+            message: public_message.into(),
+        },
+    )
+}
+
+fn reject_tts_configuration_update(
+    active: &mut Option<ActiveTtsConfigurationUpdate>,
+    tts_slot: Option<&ConfiguredTtsSlot>,
+    message: &str,
+    writer: &mut impl Write,
+) -> Result<(), String> {
+    let Some(update) = active.take() else {
+        return Ok(());
+    };
+    write_message(
+        writer,
+        &SessionMessage::TtsSettingsResult {
+            id: update.id,
+            outcome: TtsSettingsOutcome::Rejected,
+            snapshot: tts_slot
+                .expect("TTS update requires initialized slot")
+                .snapshot()?,
+            message: Some(message.into()),
+        },
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 fn process_prepare(
     request: PrepareRequest,
     core: &mut SessionCore,
     output_device: &Option<String>,
+    tts_slot: &ConfiguredTtsSlot,
     active: &mut Option<ActivePlayback>,
     held: &mut Option<PrepareRequest>,
     writer: &mut impl Write,
@@ -1212,6 +1460,7 @@ fn process_prepare(
             confirmed_token,
             text,
         } => {
+            let tts = tts_slot.lease()?;
             *active = Some(ActivePlayback {
                 prepare_id: id,
                 speech_id,
@@ -1220,6 +1469,7 @@ fn process_prepare(
                 active: None,
                 ready_deadline: Instant::now() + Duration::from_secs(2),
                 assistant_activity: None,
+                tts,
             });
             write_message(
                 writer,
@@ -1238,12 +1488,21 @@ fn reevaluate_held(
     held: &mut Option<PrepareRequest>,
     core: &mut SessionCore,
     output_device: &Option<String>,
+    tts_slot: Option<&ConfiguredTtsSlot>,
     active: &mut Option<ActivePlayback>,
     writer: &mut impl Write,
 ) -> Result<(), String> {
     if !core.user_speaking() && !core.recognition_pending() && active.is_none() {
         if let Some(pending_prepare) = held.take() {
-            process_prepare(pending_prepare, core, output_device, active, held, writer)?;
+            process_prepare(
+                pending_prepare,
+                core,
+                output_device,
+                tts_slot.expect("held prepare requires initialized TTS"),
+                active,
+                held,
+                writer,
+            )?;
         }
     }
     Ok(())
@@ -1289,12 +1548,7 @@ fn handle_voice_input_event(
             writer,
         )?,
         VoiceInputEvent::Failed(message) => {
-            write_message(
-                writer,
-                &SessionMessage::Fatal {
-                    message: message.clone(),
-                },
-            )?;
+            write_protocol_fatal(writer, "voice input runtime failed", &message)?;
             abort_active(active);
             return Err(message);
         }
@@ -1656,6 +1910,7 @@ fn validate_request(request: SessionRequest) -> Result<SessionRequest, String> {
     let id = match &request {
         SessionRequest::Hello { id, .. }
         | SessionRequest::SetInputMuted { id, .. }
+        | SessionRequest::SetTtsSettings { id, .. }
         | SessionRequest::ResetInput { id }
         | SessionRequest::PrepareSpeak { id, .. }
         | SessionRequest::OutputReady { id, .. }
@@ -1673,6 +1928,10 @@ fn validate_request(request: SessionRequest) -> Result<SessionRequest, String> {
         SessionRequest::OutputReady { speech_id: 0, .. } => {
             return Err("speech id must be positive".into())
         }
+        SessionRequest::SetTtsSettings {
+            expected_revision: 0,
+            ..
+        } => return Err("expected TTS revision must be positive".into()),
         _ => {}
     }
     Ok(request)
@@ -1852,6 +2111,21 @@ mod tests {
         }
     }
 
+    fn test_tts_slot() -> ConfiguredTtsSlot {
+        ConfiguredTtsSlot::new(TtsConfiguration::openai(
+            "https://example.invalid/audio/speech".into(),
+            "test-key".into(),
+            "test-model".into(),
+            "test-voice".into(),
+            1.0,
+        ))
+        .unwrap()
+    }
+
+    fn test_tts_lease() -> TtsConfigurationLease {
+        test_tts_slot().lease().unwrap()
+    }
+
     fn active_playback(core: &mut SessionCore) -> ActivePlayback {
         let PrepareOutcome::Admitted {
             speech_id, text, ..
@@ -1871,6 +2145,7 @@ mod tests {
             active: Some(Arc::new(AtomicBool::new(true))),
             ready_deadline: Instant::now() + Duration::from_secs(2),
             assistant_activity: None,
+            tts: test_tts_lease(),
         }
     }
 
@@ -1880,6 +2155,52 @@ mod tests {
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect()
+    }
+
+    #[test]
+    fn public_tts_protocol_messages_never_expose_private_paths() {
+        let private_path = "/Users/alice/private/native-voice-v2";
+        let snapshot = berd_voice::TtsConfigurationSnapshot {
+            revision: 1,
+            settings: berd_voice::TtsSettings::Pocket {
+                model: POCKET_TTS_MODEL_ID.into(),
+                voice: "mary".into(),
+                rate: 1.0,
+            },
+        };
+        let ready = serde_json::to_string(&SessionMessage::Ready {
+            id: 1,
+            protocol: WIRE_MARKER,
+            session: VoiceSessionSnapshot {
+                tts: snapshot.clone(),
+            },
+        })
+        .unwrap();
+        let rejection = TtsConfigurationRejection {
+            kind: TtsConfigurationRejectionKind::Initialization,
+            message: format!("could not load {private_path}/model.onnx"),
+            snapshot: snapshot.clone(),
+        };
+        let result = serde_json::to_string(&SessionMessage::TtsSettingsResult {
+            id: 2,
+            outcome: TtsSettingsOutcome::Rejected,
+            snapshot: rejection.snapshot,
+            message: Some(public_tts_rejection_message(rejection.kind).into()),
+        })
+        .unwrap();
+        let fatal = serde_json::to_string(&SessionMessage::Fatal {
+            message: public_tts_startup_error(&TtsBackendConfig::Pocket {
+                model_dir: PathBuf::from(private_path),
+                voice: private_path.into(),
+                rate: 1.0,
+            }),
+        })
+        .unwrap();
+
+        for message in [ready, result, fatal] {
+            assert!(!message.contains(private_path));
+            assert!(!message.contains("/Users/alice"));
+        }
     }
 
     fn args(values: &[&str]) -> Vec<String> {
@@ -1915,7 +2236,7 @@ mod tests {
         assert_eq!(
             parse_args(&args(&["berd-voice", "session", "--tts-backend", "openai"])).unwrap(),
             SessionConfig {
-                tts: TtsBackendConfig::OpenAi,
+                tts: TtsBackendConfig::OpenAi { rate: 1.0 },
                 stt: SttBackendConfig::Macos,
             }
         );
@@ -2009,6 +2330,33 @@ mod tests {
     }
 
     #[test]
+    fn cli_accepts_openai_rate_two_and_rejects_out_of_range_rates() {
+        assert_eq!(
+            parse_args(&args(&[
+                "berd-voice",
+                "session",
+                "--tts-backend",
+                "openai",
+                "--rate",
+                "2.0"
+            ]))
+            .unwrap()
+            .tts,
+            TtsBackendConfig::OpenAi { rate: 2.0 }
+        );
+        assert!(parse_args(&args(&[
+            "berd-voice",
+            "session",
+            "--tts-backend",
+            "openai",
+            "--rate",
+            "2.1"
+        ]))
+        .unwrap_err()
+        .contains("0.75 and 2.0"));
+    }
+
+    #[test]
     fn cli_requires_explicit_pocket_bundle_and_voice() {
         assert_eq!(
             parse_args(&args(&[
@@ -2084,7 +2432,7 @@ mod tests {
             ]))
             .unwrap(),
             SessionConfig {
-                tts: TtsBackendConfig::OpenAi,
+                tts: TtsBackendConfig::OpenAi { rate: 1.0 },
                 stt: SttBackendConfig::Parakeet {
                     model_dir: PathBuf::from("/models/parakeet")
                 }
@@ -2295,13 +2643,13 @@ mod tests {
     #[test]
     fn openai_tts_target_reports_only_endpoint_source() {
         assert_eq!(
-            tts_benchmark_target(&TtsBackendConfig::OpenAi, false)
+            tts_benchmark_target(&TtsBackendConfig::OpenAi { rate: 1.0 }, false)
                 .endpoint_source
                 .as_deref(),
             Some("built_in_default")
         );
         assert_eq!(
-            tts_benchmark_target(&TtsBackendConfig::OpenAi, true)
+            tts_benchmark_target(&TtsBackendConfig::OpenAi { rate: 1.0 }, true)
                 .endpoint_source
                 .as_deref(),
             Some("OPENAI_BASE_URL_environment")
@@ -2608,6 +2956,7 @@ mod tests {
             },
             &mut core,
             &None,
+            &test_tts_slot(),
             &mut active,
             &mut held,
             &mut output,
@@ -2617,8 +2966,185 @@ mod tests {
         assert!(output.is_empty());
 
         core.set_recognition_pending(false);
-        reevaluate_held(&mut held, &mut core, &None, &mut active, &mut output).unwrap();
+        reevaluate_held(
+            &mut held,
+            &mut core,
+            &None,
+            Some(&test_tts_slot()),
+            &mut active,
+            &mut output,
+        )
+        .unwrap();
         assert_eq!(messages(&output)[0]["type"], "admitted");
+    }
+
+    #[test]
+    fn admission_leases_configuration_before_a_later_atomic_update() {
+        let slot = test_tts_slot();
+        let mut core = SessionCore::default();
+        let mut active = None;
+        let mut held = None;
+        let mut output = Vec::new();
+        process_prepare(
+            PrepareRequest {
+                id: 4,
+                acknowledgement: None,
+                text: "old voice".into(),
+            },
+            &mut core,
+            &None,
+            &slot,
+            &mut active,
+            &mut held,
+            &mut output,
+        )
+        .unwrap();
+        let old_revision = active.as_ref().unwrap().tts.snapshot().revision;
+        let replacement = slot
+            .prepare_replacement(
+                1,
+                berd_voice::TtsSettings::OpenAi {
+                    model: "test-model".into(),
+                    voice: "next-voice".into(),
+                    rate: 2.0,
+                },
+            )
+            .unwrap();
+        let applied = slot.commit_replacement(replacement).unwrap();
+
+        assert_eq!(old_revision, 1);
+        assert_eq!(active.as_ref().unwrap().tts.snapshot().revision, 1);
+        assert_eq!(
+            active.as_ref().unwrap().tts.snapshot().settings.voice(),
+            "test-voice"
+        );
+        assert_eq!(applied.revision, 2);
+        assert_eq!(
+            slot.lease().unwrap().snapshot().settings.voice(),
+            "next-voice"
+        );
+    }
+
+    fn prepared_tts_event(
+        slot: &ConfiguredTtsSlot,
+        attempt: u64,
+        id: u64,
+        voice: &str,
+    ) -> TtsConfigurationEvent {
+        TtsConfigurationEvent {
+            attempt,
+            id,
+            result: slot.prepare_replacement(
+                1,
+                berd_voice::TtsSettings::OpenAi {
+                    model: "test-model".into(),
+                    voice: voice.into(),
+                    rate: 2.0,
+                },
+            ),
+        }
+    }
+
+    #[test]
+    fn tts_update_before_deadline_applies_once() {
+        let slot = test_tts_slot();
+        let (sender, receiver) = mpsc::channel();
+        let now = Instant::now();
+        let mut active = Some(ActiveTtsConfigurationUpdate {
+            attempt: 9,
+            id: 4,
+            deadline: now + Duration::from_secs(1),
+        });
+        sender
+            .send(prepared_tts_event(&slot, 9, 4, "next"))
+            .unwrap();
+        let mut output = Vec::new();
+
+        poll_tts_configuration_update(now, &receiver, Some(&slot), &mut active, &mut output)
+            .unwrap();
+
+        assert!(active.is_none());
+        assert_eq!(slot.snapshot().unwrap().revision, 2);
+        assert_eq!(messages(&output).len(), 1);
+        assert_eq!(messages(&output)[0]["outcome"], "applied");
+    }
+
+    #[test]
+    fn tts_update_at_deadline_rejects_once_and_ignores_late_attempt() {
+        let slot = test_tts_slot();
+        let (sender, receiver) = mpsc::channel();
+        let deadline = Instant::now();
+        let mut active = Some(ActiveTtsConfigurationUpdate {
+            attempt: 9,
+            id: 4,
+            deadline,
+        });
+        sender
+            .send(prepared_tts_event(&slot, 9, 4, "too-late"))
+            .unwrap();
+        let mut output = Vec::new();
+
+        poll_tts_configuration_update(deadline, &receiver, Some(&slot), &mut active, &mut output)
+            .unwrap();
+        poll_tts_configuration_update(
+            deadline + Duration::from_secs(1),
+            &receiver,
+            Some(&slot),
+            &mut active,
+            &mut output,
+        )
+        .unwrap();
+
+        assert!(active.is_none());
+        assert_eq!(slot.snapshot().unwrap().revision, 1);
+        assert_eq!(messages(&output).len(), 1);
+        assert_eq!(messages(&output)[0]["outcome"], "rejected");
+        assert_eq!(
+            messages(&output)[0]["message"],
+            "TTS configuration update timed out"
+        );
+    }
+
+    #[test]
+    fn shutdown_rejects_once_and_generation_blocks_a_reused_client_id() {
+        let slot = test_tts_slot();
+        let (sender, receiver) = mpsc::channel();
+        let mut active = Some(ActiveTtsConfigurationUpdate {
+            attempt: 9,
+            id: 4,
+            deadline: Instant::now() + Duration::from_secs(1),
+        });
+        sender
+            .send(prepared_tts_event(&slot, 9, 4, "old-attempt"))
+            .unwrap();
+        let mut output = Vec::new();
+
+        reject_tts_configuration_update(
+            &mut active,
+            Some(&slot),
+            "session is shutting down",
+            &mut output,
+        )
+        .unwrap();
+        active = Some(ActiveTtsConfigurationUpdate {
+            attempt: 10,
+            id: 4,
+            deadline: Instant::now() + Duration::from_secs(1),
+        });
+        poll_tts_configuration_update(
+            Instant::now(),
+            &receiver,
+            Some(&slot),
+            &mut active,
+            &mut output,
+        )
+        .unwrap();
+
+        assert_eq!(slot.snapshot().unwrap().revision, 1);
+        assert_eq!(messages(&output).len(), 1);
+        assert_eq!(messages(&output)[0]["outcome"], "rejected");
+        assert_eq!(messages(&output)[0]["message"], "session is shutting down");
+        assert_eq!(active.unwrap().attempt, 10);
     }
 
     #[test]
@@ -2642,6 +3168,7 @@ mod tests {
             active: None,
             ready_deadline: Instant::now() + Duration::from_secs(2),
             assistant_activity: None,
+            tts: test_tts_lease(),
         });
         let mut held = None;
         let mut output = Vec::new();
@@ -2708,6 +3235,7 @@ mod tests {
             active: None,
             ready_deadline: Instant::now() + Duration::from_secs(2),
             assistant_activity: None,
+            tts: test_tts_lease(),
         });
         let mut next_token = 1;
         let mut output = Vec::new();
@@ -2755,6 +3283,7 @@ mod tests {
             active: None,
             ready_deadline: Instant::now() + Duration::from_secs(2),
             assistant_activity: None,
+            tts: test_tts_lease(),
         });
         let mut next_token = 1;
         let mut output = Vec::new();

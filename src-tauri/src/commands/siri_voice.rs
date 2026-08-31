@@ -33,8 +33,8 @@ use berd_voice::DeliveryProgress as VoiceDeliveryProgress;
 use berd_voice::DeliverySegment as VoiceDeliverySegment;
 #[cfg(target_os = "macos")]
 use berd_voice::{
-    DrainPolicy, OutboundFailure, OutboundOutcome, OutboundPlayback, PcmAudioOutput,
-    PocketAudioPlayer, SiriTts, TtsBackend,
+    ConfiguredTtsSlot, DrainPolicy, OutboundFailure, OutboundOutcome, OutboundPlayback,
+    PcmAudioOutput, PocketAudioPlayer, TtsBackend, TtsConfiguration,
 };
 
 #[derive(Clone, Debug, Default)]
@@ -736,7 +736,13 @@ fn run_siri_stream(
     output_device: Option<&str>,
     output_latency_grace: Duration,
 ) -> Result<SiriStreamOutcome, SiriStreamFailure> {
-    let backend = SiriTts::new(&selection.language, &selection.name, speed)?;
+    let tts = ConfiguredTtsSlot::new(TtsConfiguration::siri(
+        selection.name,
+        selection.language,
+        speed,
+    ))?;
+    let tts = tts.lease()?;
+    let backend = tts.backend();
     let pcm_spec = backend.pcm_spec();
     let player =
         PocketAudioPlayer::new(pcm_spec.sample_rate, pcm_spec.playback_rate, output_device)?;
@@ -769,7 +775,7 @@ fn run_siri_stream(
                 if !synthesize_siri_stream_ready(
                     &app,
                     &stream_id,
-                    &backend,
+                    backend.as_ref(),
                     &mut playback,
                     &player,
                     output_latency_grace,
@@ -794,7 +800,7 @@ fn run_siri_stream(
                 if !synthesize_siri_stream_ready(
                     &app,
                     &stream_id,
-                    &backend,
+                    backend.as_ref(),
                     &mut playback,
                     &player,
                     output_latency_grace,
@@ -819,7 +825,7 @@ fn run_siri_stream(
                 if !synthesize_siri_stream_ready(
                     &app,
                     &stream_id,
-                    &backend,
+                    backend.as_ref(),
                     &mut playback,
                     &player,
                     output_latency_grace,

@@ -12,7 +12,7 @@ The child selects closed TTS and STT backends at startup:
 
 ```text
 berd-voice session [--tts-backend siri] --voice NAME --language BCP47 [--rate 0.5..2.0]
-berd-voice session --tts-backend openai
+berd-voice session --tts-backend openai [--rate 0.75..2.0]
 berd-voice session --tts-backend pocket --model-dir ABS --voice ID [--rate 0.75..2.0]
 
 berd-voice session [--stt-backend macos]
@@ -48,8 +48,15 @@ The response retains `protocol:2` as a fixed wire-integrity marker, not a
 negotiated mode:
 
 ```json
-{"type":"ready","id":1,"protocol":2}
+{"type":"ready","id":1,"protocol":2,"session":{"tts":{"revision":1,"backend":"siri","voice":"Aaron","language":"en-US","rate":1.0}}}
 ```
+
+The `session.tts` object is the authoritative, sanitized TTS configuration.
+OpenAI snapshots contain `model`, `voice`, and `rate`; Siri contains `voice`,
+`language`, and `rate`; Pocket contains its public `model` identifier, `voice`,
+and `rate`. Credentials, endpoints, and bundle paths never appear on stdout.
+Detailed backend errors are diagnostics on stderr only; protocol rejection and
+fatal messages are sanitized at the stdout boundary.
 
 ## Stdin framing
 
@@ -71,6 +78,7 @@ before payload allocation. Stdout remains unframed, flushed JSONL.
 {"type":"hello","id":u64,"output_device":string|null}
 {"type":"set_paused","active":bool}
 {"type":"set_input_muted","id":u64,"active":bool}
+{"type":"set_tts_settings","id":u64,"expected_revision":u64,"settings":TtsSettings}
 {"type":"reset_input","id":u64}
 {"type":"prepare_speak","id":u64,"acknowledgement":u64|null,"text":string}
 {"type":"output_ready","id":u64,"speech_id":u64}
@@ -82,6 +90,32 @@ before payload allocation. Stdout remains unframed, flushed JSONL.
 Unknown fields are rejected. IDs are positive. Speak text is at most 16 KiB.
 The parent cannot author speaking state or finalized input; those are derived
 only from PCM by the child runtime.
+
+`set_tts_settings` accepts the same tagged public object projected by `ready`,
+without `revision`. It changes settings only for the already-active backend:
+
+```text
+{"backend":"openai","model":string,"voice":string,"rate":0.75..2.0}
+{"backend":"siri","voice":string,"language":string,"rate":0.5..2.0}
+{"backend":"pocket","model":string,"voice":string,"rate":0.75..2.0}
+```
+
+The child constructs and validates a replacement without blocking input or
+playback processing, then atomically commits it only if `expected_revision`
+still matches. It responds with:
+
+```text
+{"type":"tts_settings_result","id":u64,"outcome":"applied","snapshot":TtsConfigurationSnapshot}
+{"type":"tts_settings_result","id":u64,"outcome":"rejected","snapshot":TtsConfigurationSnapshot,"message":string}
+```
+
+The snapshot is authoritative in both outcomes. Invalid, stale, cross-backend,
+concurrent, timed-out, or shutdown-interrupted updates are nonfatal and leave
+the prior configuration active. The applied response is the client-visible
+linearization point. A speech reservation holds a configuration lease: speech
+admitted before the response retains its old backend/settings, while later
+admission receives the new revision. Pocket's public model identifier cannot be
+changed without selecting and validating another bundle at process startup.
 
 `set_input_muted` and `reset_input` apply the runtime's logical input epochs and
 return exact correlated acknowledgements:

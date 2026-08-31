@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::{TtsConfigurationSnapshot, TtsSettings};
+
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SessionRequest {
@@ -13,6 +15,11 @@ pub enum SessionRequest {
     SetInputMuted {
         id: u64,
         active: bool,
+    },
+    SetTtsSettings {
+        id: u64,
+        expected_revision: u64,
+        settings: TtsSettings,
     },
     ResetInput {
         id: u64,
@@ -66,11 +73,31 @@ pub enum OutputReadyOutcome {
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
+pub struct VoiceSessionSnapshot {
+    pub tts: TtsConfigurationSnapshot,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TtsSettingsOutcome {
+    Applied,
+    Rejected,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SessionMessage {
     Ready {
         id: u64,
         protocol: u32,
+        session: VoiceSessionSnapshot,
+    },
+    TtsSettingsResult {
+        id: u64,
+        outcome: TtsSettingsOutcome,
+        snapshot: TtsConfigurationSnapshot,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
     },
     InputMuteApplied {
         id: u64,
@@ -158,8 +185,54 @@ mod tests {
             }
         );
         assert_eq!(
-            serde_json::to_string(&SessionMessage::Ready { id: 4, protocol: 2 }).unwrap(),
-            r#"{"type":"ready","id":4,"protocol":2}"#
+            serde_json::to_string(&SessionMessage::Ready {
+                id: 4,
+                protocol: 2,
+                session: VoiceSessionSnapshot {
+                    tts: TtsConfigurationSnapshot {
+                        revision: 1,
+                        settings: TtsSettings::OpenAi {
+                            model: "gpt-4o-mini-tts".into(),
+                            voice: "marin".into(),
+                            rate: 1.0,
+                        },
+                    },
+                },
+            })
+            .unwrap(),
+            r#"{"type":"ready","id":4,"protocol":2,"session":{"tts":{"revision":1,"backend":"openai","model":"gpt-4o-mini-tts","voice":"marin","rate":1.0}}}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<SessionRequest>(
+                r#"{"type":"set_tts_settings","id":7,"expected_revision":1,"settings":{"backend":"openai","model":"gpt-4o-mini-tts","voice":"marin","rate":2.0}}"#
+            )
+            .unwrap(),
+            SessionRequest::SetTtsSettings {
+                id: 7,
+                expected_revision: 1,
+                settings: TtsSettings::OpenAi {
+                    model: "gpt-4o-mini-tts".into(),
+                    voice: "marin".into(),
+                    rate: 2.0,
+                },
+            }
+        );
+        assert_eq!(
+            serde_json::to_string(&SessionMessage::TtsSettingsResult {
+                id: 7,
+                outcome: TtsSettingsOutcome::Applied,
+                snapshot: TtsConfigurationSnapshot {
+                    revision: 2,
+                    settings: TtsSettings::OpenAi {
+                        model: "gpt-4o-mini-tts".into(),
+                        voice: "marin".into(),
+                        rate: 2.0,
+                    },
+                },
+                message: None,
+            })
+            .unwrap(),
+            r#"{"type":"tts_settings_result","id":7,"outcome":"applied","snapshot":{"revision":2,"backend":"openai","model":"gpt-4o-mini-tts","voice":"marin","rate":2.0}}"#
         );
         assert_eq!(
             serde_json::from_str::<SessionRequest>(

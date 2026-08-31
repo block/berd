@@ -89,20 +89,49 @@ fn siri_session_reaches_ready_without_openai_credentials() {
         .spawn()
         .unwrap();
     let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut receive = || {
+        let mut line = String::new();
+        stdout.read_line(&mut line).unwrap();
+        serde_json::from_str::<Value>(&line).unwrap()
+    };
     write_session_json(
         &mut stdin,
         &json!({"type":"hello","id":1,"output_device":null}),
     );
+    stdin.flush().unwrap();
+    let ready = receive();
+    assert_eq!(ready["type"], "ready");
+    assert_eq!(ready["protocol"], 2);
+    assert_eq!(ready["session"]["tts"]["backend"], "siri");
+    assert_eq!(ready["session"]["tts"]["voice"], voice);
+    assert_eq!(ready["session"]["tts"]["language"], language);
+    assert_eq!(ready["session"]["tts"]["rate"], 1.0);
+    write_session_json(
+        &mut stdin,
+        &json!({
+            "type":"set_tts_settings",
+            "id":2,
+            "expected_revision":1,
+            "settings":{
+                "backend":"siri",
+                "voice":voice,
+                "language":language,
+                "rate":2.0
+            }
+        }),
+    );
+    stdin.flush().unwrap();
+    let applied = receive();
+    assert_eq!(applied["type"], "tts_settings_result");
+    assert_eq!(applied["id"], 2);
+    assert_eq!(applied["outcome"], "applied");
+    assert_eq!(applied["snapshot"]["revision"], 2);
+    assert_eq!(applied["snapshot"]["rate"], 2.0);
+    assert!(applied.get("message").is_none());
     write_session_json(&mut stdin, &json!({"type":"shutdown"}));
     drop(stdin);
-    let output = child.wait_with_output().unwrap();
-    assert!(output.status.success());
-    let messages: Vec<Value> = String::from_utf8(output.stdout)
-        .unwrap()
-        .lines()
-        .map(|line| serde_json::from_str(line).unwrap())
-        .collect();
-    assert_eq!(messages, [json!({"type":"ready","id":1,"protocol":2})]);
+    assert!(child.wait().unwrap().success());
 }
 
 #[test]
@@ -144,7 +173,11 @@ fn pocket_session_reaches_ready_without_openai_credentials() {
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
-    assert_eq!(messages, [json!({"type":"ready","id":1,"protocol":2})]);
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0]["type"], "ready");
+    assert_eq!(messages[0]["session"]["tts"]["backend"], "pocket");
+    assert_eq!(messages[0]["session"]["tts"]["voice"], voice);
+    assert_eq!(messages[0]["session"]["tts"]["rate"], 1.0);
 }
 
 #[test]
@@ -188,7 +221,9 @@ fn explicit_macos_stt_session_reaches_ready_without_audio() {
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
-    assert_eq!(messages, [json!({"type":"ready","id":1,"protocol":2})]);
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0]["type"], "ready");
+    assert_eq!(messages[0]["session"]["tts"]["backend"], "siri");
 }
 
 #[test]

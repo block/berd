@@ -5,6 +5,7 @@ pub const MAC_SPEECH_RECOGNITION_FINISH_TIMEOUT_SECONDS: u64 = 5;
 
 mod audio_output;
 pub mod benchmark;
+mod configured_tts;
 pub mod input;
 #[cfg(target_os = "macos")]
 pub mod mac_speech;
@@ -22,6 +23,11 @@ pub mod siri;
 mod tts;
 
 pub use audio_output::{wait_until_drained, PcmAudioOutput};
+pub use configured_tts::{
+    ConfiguredTtsSlot, TtsConfiguration, TtsConfigurationLease, TtsConfigurationRejection,
+    TtsConfigurationRejectionKind, TtsConfigurationReplacement, TtsConfigurationSnapshot,
+    TtsSettings, POCKET_TTS_MODEL_ID,
+};
 #[cfg(target_os = "macos")]
 pub use macos_audio_output::PocketAudioPlayer;
 pub use outbound::{

@@ -22,7 +22,7 @@ defaults:
 
 ```text
 berd-voice session --voice Aaron --language en-US --rate 1.0
-berd-voice session --tts-backend openai
+berd-voice session --tts-backend openai --rate 1.0
 berd-voice session --tts-backend pocket --model-dir /path/to/native-voice-v2 --voice george --rate 1.0
 berd-voice session --stt-backend parakeet --stt-model-dir /path/to/parakeet
 berd-voice session --stt-backend openai
@@ -43,6 +43,13 @@ Float32 PCM frames. The shared runtime owns Berd's adaptive VAD,
 recognition-pending state, final-token storage, admission, and barge-in; the
 host still owns the capture device and sends normalized PCM. Omitting
 `--stt-backend` selects macOS speech recognition.
+
+The session's `ready` event projects a sanitized, revisioned TTS snapshot.
+Same-backend voice, language/model, and normalized rate updates validate off the
+session loop, commit atomically, and apply to the next admitted utterance.
+Already-admitted speech retains its configuration lease. Failed or stale
+updates keep the prior configuration, and private credentials, endpoints, and
+bundle paths never enter the snapshot.
 
 Pocket's model path is the exact portable bundle directory, not a Berd cache
 root. The CLI resolves an exact voice ID through the shared

@@ -16,9 +16,9 @@ use std::time::{Duration, Instant, SystemTime};
 use berd_voice::SAMPLE_RATE;
 #[cfg(target_os = "macos")]
 use berd_voice::{
-    load_pocket_voice_style, load_text_to_speech, DeliveryProgress as VoiceDeliveryProgress,
-    DrainPolicy, DrainTimeoutOutcome, OutboundFailure, OutboundOutcome, OutboundPlayback,
-    PocketTtsBackend, TtsBackend,
+    load_pocket_voice_style, load_text_to_speech, ConfiguredTtsSlot,
+    DeliveryProgress as VoiceDeliveryProgress, DrainPolicy, DrainTimeoutOutcome, OutboundFailure,
+    OutboundOutcome, OutboundPlayback, TtsBackend, TtsConfiguration,
 };
 use futures_util::StreamExt;
 #[cfg(target_os = "macos")]
@@ -44,7 +44,7 @@ use super::{
 use berd_voice::PocketAudioPlayer;
 use tokio::io::AsyncWriteExt;
 
-const CACHE_VERSION: &str = "native-voice-v2";
+const CACHE_VERSION: &str = berd_voice::POCKET_TTS_MODEL_ID;
 const VERIFIED_MARKER: &str = ".verified";
 const POCKET_EVENT: &str = "pocket-voice:event";
 #[cfg(target_os = "macos")]
@@ -2131,7 +2131,14 @@ fn run_pocket_voice_stream(
     suppress_capture: bool,
 ) -> Result<PocketStreamOutcome, PocketStreamFailure> {
     let version = base.join(CACHE_VERSION);
-    let backend = PocketTtsBackend::new(&version, voice.id, playback_rate)?;
+    let tts = ConfiguredTtsSlot::new(TtsConfiguration::pocket(
+        version,
+        CACHE_VERSION.into(),
+        voice.id.into(),
+        playback_rate,
+    ))?;
+    let tts = tts.lease()?;
+    let backend = tts.backend();
     let player = PocketAudioPlayer::new(SAMPLE_RATE, playback_rate, output_device)?;
     let mut playback = OutboundPlayback::new(&player, &active, SAMPLE_RATE, 0)?;
     let mut pending = String::new();
@@ -2162,7 +2169,7 @@ fn run_pocket_voice_stream(
                 if !synthesize_pocket_stream_ready(
                     app,
                     stream_id,
-                    &backend,
+                    backend.as_ref(),
                     &mut playback,
                     &mut pending,
                     &mut first_chunk_pending,
@@ -2184,7 +2191,7 @@ fn run_pocket_voice_stream(
                 if !synthesize_pocket_stream_ready(
                     app,
                     stream_id,
-                    &backend,
+                    backend.as_ref(),
                     &mut playback,
                     &mut pending,
                     &mut first_chunk_pending,
@@ -2206,7 +2213,7 @@ fn run_pocket_voice_stream(
                 if !synthesize_pocket_stream_ready(
                     app,
                     stream_id,
-                    &backend,
+                    backend.as_ref(),
                     &mut playback,
                     &mut pending,
                     &mut first_chunk_pending,
