@@ -887,8 +887,9 @@ fi
             .unwrap();
             assert!(!first.reused);
             let first_fields = read_record_fields(home.path());
-            assert_eq!(first_fields[0], "v2", "record fields: {first_fields:?}");
+            assert_eq!(first_fields[0], "v3", "record fields: {first_fields:?}");
             assert_eq!(first_fields[6], b64_arg(&stock.to_string_lossy()));
+            assert!(!first_fields[7].is_empty());
 
             // Same binary: the healthy daemon is handed back untouched.
             let (lines, code) = run_script(&["ensure", "-", &stock_arg], None, home.path());
@@ -926,8 +927,9 @@ fi
             kill_recorded_pid(&first_fields);
         }
 
-        /// A record written before the binary field existed cannot prove which
-        /// build is serving, so it is stale: stop it and start fresh.
+        /// A record written before process identities existed cannot prove PID
+        /// ownership, so it is discarded without signaling and a fresh daemon
+        /// is started.
         #[test]
         fn ensure_treats_a_legacy_record_as_not_reusable() {
             if !python3_available() {
@@ -969,10 +971,47 @@ fi
             .unwrap();
             assert!(!info.reused, "legacy record must not be reused");
             assert_ne!(info.pid.to_string(), fields[1]);
+            assert!(
+                StdCommand::new("kill")
+                    .arg("-0")
+                    .arg(&fields[1])
+                    .status()
+                    .unwrap()
+                    .success(),
+                "an unverifiable legacy PID must not be signaled"
+            );
 
             let (_, code) = run_script(&["shutdown"], None, home.path());
             assert_eq!(code, Some(0));
             kill_recorded_pid(&fields);
+        }
+
+        #[test]
+        fn shutdown_does_not_signal_a_pid_with_the_wrong_identity() {
+            let home = tempfile::tempdir().unwrap();
+            let state_dir = home.path().join(".state").join("berd").join("remote");
+            std::fs::create_dir_all(&state_dir).unwrap();
+            let mut unrelated = StdCommand::new("sleep").arg("120").spawn().unwrap();
+            std::fs::write(
+                state_dir.join("daemon.record"),
+                format!(
+                    "v3 {} 54321 secret - 0 - {}\n",
+                    unrelated.id(),
+                    b64_arg("not-the-recorded-process")
+                ),
+            )
+            .unwrap();
+
+            let (lines, code) = run_script(&["shutdown"], None, home.path());
+
+            assert_eq!(code, Some(0), "lines: {lines:?}");
+            assert!(lines.iter().any(|line| line == "STOPPED"));
+            assert!(
+                unrelated.try_wait().unwrap().is_none(),
+                "shutdown must leave a mismatched PID alive"
+            );
+            unrelated.kill().unwrap();
+            unrelated.wait().unwrap();
         }
 
         #[test]

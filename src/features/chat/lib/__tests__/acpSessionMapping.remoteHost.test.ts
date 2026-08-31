@@ -54,6 +54,17 @@ describe("acpSessionMapping remoteHost", () => {
     expect(session.remoteHost).toBe("devbox");
   });
 
+  it("infers the remote host from a composite session id", () => {
+    const session = acpSessionToChatSession(
+      makeAcpSession({
+        sessionId: "ssh:devbox#fork-1",
+        workingDir: "/remote/dir",
+      }),
+    );
+
+    expect(session.remoteHost).toBe("devbox");
+  });
+
   it("leaves locally loaded sessions untagged", () => {
     const session = acpSessionToChatSession(
       makeAcpSession({ sessionId: "local-1" }),

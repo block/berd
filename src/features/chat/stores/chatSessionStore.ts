@@ -985,6 +985,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   },
 
   addSession: (session) => {
+    let sessionForRemotePersistence: ChatSession | null = null;
     set((state) => {
       const existing = state.sessions.findIndex(
         (candidate) => candidate.id === session.id,
@@ -992,7 +993,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       const backfilledSession = withWorkspaceBackfill(session);
       if (existing >= 0) {
         const updated = [...state.sessions];
-        updated[existing] = withWorkspaceBackfill({
+        const merged = withWorkspaceBackfill({
           ...updated[existing],
           ...backfilledSession,
           workspaceAttachments:
@@ -1002,10 +1003,20 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
             updated[existing].activeWorkspaceId ??
             backfilledSession.activeWorkspaceId,
         });
+        updated[existing] = merged;
+        if (merged.remoteHost) {
+          sessionForRemotePersistence = merged;
+        }
         return { sessions: updated };
+      }
+      if (backfilledSession.remoteHost) {
+        sessionForRemotePersistence = backfilledSession;
       }
       return { sessions: [backfilledSession, ...state.sessions] };
     });
+    if (sessionForRemotePersistence) {
+      persistRemoteSessionRecordForSession(sessionForRemotePersistence);
+    }
   },
 
   removeSession: (id) => {

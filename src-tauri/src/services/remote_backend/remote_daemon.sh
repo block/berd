@@ -22,10 +22,10 @@
 #   listdir  <b64 absolute-or-~ path>      -> DIR <b64resolved>, E <D|F> <b64name> ..., LIST-DONE
 #
 # Daemon record (single line, space separated, field order pinned):
-#   v2 <pid> <port> <secret> <b64version> <started> <b64binary>
-# A record without the leading `v2` marker is a pre-override (v1) record: it
-# still parses for shutdown, but is never reusable because the binary that
-# started it is unknown.
+#   v3 <pid> <port> <secret> <b64version> <started> <b64binary> <b64identity>
+# The identity is an OS process-start token captured after readiness. Older
+# records still parse, but cannot prove PID ownership and are never reused or
+# signaled.
 #
 # Typed exit codes: 41 goose-not-found, 43 port-bind-failed, 44 bad-path, 45 no-such-dir.
 set -u
@@ -38,7 +38,7 @@ GOOSE_ARG="${4:--}"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/berd/remote"
 RECORD="$STATE_DIR/daemon.record"
 LOG="$STATE_DIR/goose-serve.log"
-RECORD_FORMAT="v2"
+RECORD_FORMAT="v3"
 
 emit() { printf '%s %s\n' "$NONCE" "$*"; }
 
@@ -75,11 +75,31 @@ resolve_goose_bin() {
   fi
 }
 
-# Fills rec_* from $RECORD. rec_b64binary is empty for a legacy (v1) record,
-# which callers must treat as not reusable.
+# Returns an OS-provided process identity that remains stable for the lifetime
+# of a PID. Linux exposes an exact boot-relative start tick; BSD/macOS ps
+# exposes the process start timestamp and command. The value is persisted and
+# must match before Berd ever signals the recorded PID.
+process_identity() {
+  identity_pid="$1"
+  if [ -r "/proc/$identity_pid/stat" ]; then
+    # After removing pid + parenthesized comm, process start time is field 20
+    # of the remainder (field 22 in proc_pid_stat(5)).
+    identity_start="$(sed 's/^.*) //' "/proc/$identity_pid/stat" 2>/dev/null | awk '{print $20}')"
+    [ -n "$identity_start" ] || return 1
+    printf 'proc:%s' "$identity_start"
+    return 0
+  fi
+
+  identity_ps="$(ps -p "$identity_pid" -o lstart= -o command= 2>/dev/null)" || return 1
+  [ -n "$identity_ps" ] || return 1
+  printf 'ps:%s' "$identity_ps"
+}
+
+# Fills rec_* from $RECORD. Records before v3 have no process identity and
+# therefore cannot authorize reuse or termination.
 read_record() {
   # shellcheck disable=SC2034
-  IFS=' ' read -r f1 f2 f3 f4 f5 f6 f7 <"$RECORD" 2>/dev/null || return 1
+  IFS=' ' read -r f1 f2 f3 f4 f5 f6 f7 f8 <"$RECORD" 2>/dev/null || return 1
   if [ "${f1:-}" = "$RECORD_FORMAT" ]; then
     rec_pid="${f2:-}"
     rec_port="${f3:-}"
@@ -87,14 +107,24 @@ read_record() {
     rec_b64version="${f5:--}"
     rec_started="${f6:-0}"
     rec_b64binary="${f7:-}"
+    rec_b64identity="${f8:-}"
+  elif [ "${f1:-}" = "v2" ]; then
+    rec_pid="${f2:-}"
+    rec_port="${f3:-}"
+    rec_secret="${f4:-}"
+    rec_b64version="${f5:--}"
+    rec_started="${f6:-0}"
+    rec_b64binary="${f7:-}"
+    rec_b64identity=""
   else
-    # Pre-override record: no recorded binary, so it can only be shut down.
+    # Pre-override record: no recorded binary or process identity.
     rec_pid="${f1:-}"
     rec_port="${f2:-}"
     rec_secret="${f3:-}"
     rec_b64version="${f4:--}"
     rec_started="${f5:-0}"
     rec_b64binary=""
+    rec_b64identity=""
   fi
   case "$rec_pid" in
   '' | *[!0-9]*) return 1 ;;
@@ -105,16 +135,26 @@ read_record() {
   [ -n "$rec_secret" ]
 }
 
-# Terminates the pid from the last read_record, TERM then KILL.
+# Confirms the PID is still the exact process that wrote this record. `kill -0`
+# alone is insufficient because a stale PID can be reused by another process.
+recorded_process_is_current() {
+  [ -n "$rec_b64identity" ] || return 1
+  kill -0 "$rec_pid" 2>/dev/null || return 1
+  current_identity="$(process_identity "$rec_pid")" || return 1
+  [ "$(b64 "$current_identity")" = "$rec_b64identity" ]
+}
+
+# Terminates the pid from the last read_record, TERM then KILL, while rechecking
+# ownership so a PID recycled during shutdown is never signaled.
 stop_recorded_daemon() {
-  if kill -0 "$rec_pid" 2>/dev/null; then
+  if recorded_process_is_current; then
     kill -TERM "$rec_pid" 2>/dev/null || true
     i=0
-    while [ "$i" -lt 30 ] && kill -0 "$rec_pid" 2>/dev/null; do
+    while [ "$i" -lt 30 ] && recorded_process_is_current; do
       sleep 0.1
       i=$((i + 1))
     done
-    if kill -0 "$rec_pid" 2>/dev/null; then
+    if recorded_process_is_current; then
       kill -KILL "$rec_pid" 2>/dev/null || true
     fi
   fi
@@ -131,13 +171,14 @@ ensure_daemon() {
   b64binary="$(b64 "$goose_bin")"
 
   if [ -f "$RECORD" ] && read_record; then
-    if kill -0 "$rec_pid" 2>/dev/null && port_listening "$rec_port"; then
-      if [ -n "$rec_b64binary" ] && [ "$rec_b64binary" = "$b64binary" ]; then
+    if recorded_process_is_current; then
+      if port_listening "$rec_port" && [ "$rec_b64binary" = "$b64binary" ]; then
         emit "READY $rec_pid $rec_port $rec_secret 1 $rec_b64version $rec_started"
         return 0
       fi
-      # A different (or unknown) goose binary is serving: stop it so the
-      # requested build is the one that answers.
+      # A known daemon is unhealthy or uses another binary: stop it so the
+      # requested build is the one that answers. Unverifiable old records are
+      # only discarded; their PIDs are never signaled.
       stop_recorded_daemon
     fi
     rm -f "$RECORD"
@@ -171,8 +212,13 @@ ensure_daemon() {
       fi
       if port_listening "$port"; then
         started="$(date +%s)"
-        printf '%s %s %s %s %s %s %s\n' "$RECORD_FORMAT" "$pid" "$port" "$secret" \
-          "$(b64 "$version")" "$started" "$b64binary" >"$RECORD"
+        identity="$(process_identity "$pid")"
+        if [ -z "$identity" ]; then
+          kill "$pid" 2>/dev/null || true
+          break
+        fi
+        printf '%s %s %s %s %s %s %s %s\n' "$RECORD_FORMAT" "$pid" "$port" "$secret" \
+          "$(b64 "$version")" "$started" "$b64binary" "$(b64 "$identity")" >"$RECORD"
         emit "READY $pid $port $secret 0 $(b64 "$version") $started"
         return 0
       fi

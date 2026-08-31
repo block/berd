@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   REMOTE_SESSIONS_STORAGE_KEY,
   readRemoteSessionRecords,
+  rehydrateRemoteSessions,
 } from "../remoteSessionPersistence";
 import { useChatSessionStore } from "../chatSessionStore";
 
@@ -164,6 +165,27 @@ describe("chatSessionStore remote sessions", () => {
     ]);
   });
 
+  it("persists remote sessions inserted by fork flows", () => {
+    useChatSessionStore.getState().addSession({
+      id: "ssh:devbox#fork-1",
+      title: "Remote fork",
+      remoteHost: "devbox",
+      workingDir: "/remote/dir",
+      createdAt: "2026-08-31T00:00:00.000Z",
+      updatedAt: "2026-08-31T00:00:00.000Z",
+      messageCount: 3,
+    });
+
+    expect(readRemoteSessionRecords()).toEqual([
+      expect.objectContaining({
+        sessionId: "ssh:devbox#fork-1",
+        host: "devbox",
+        title: "Remote fork",
+        workingDir: "/remote/dir",
+      }),
+    ]);
+  });
+
   it("updates the record on rename and removes it on delete", () => {
     const store = useChatSessionStore.getState();
     const draft = store.createDraftSession({
@@ -202,5 +224,37 @@ describe("chatSessionStore remote sessions", () => {
 
     await useChatSessionStore.getState().unarchiveSession("backend-4");
     expect(readRemoteSessionRecords()[0]?.archivedAt).toBeUndefined();
+  });
+
+  it("rehydrates archived remote sessions into history after restart", async () => {
+    const store = useChatSessionStore.getState();
+    const draft = store.createDraftSession({
+      workingDir: "/remote/dir",
+      remoteHost: "devbox",
+    });
+    store.promoteDraftSession(draft.id, "ssh:devbox#backend-5", {
+      title: "Archived remote work",
+    });
+    await useChatSessionStore.getState().archiveSession("ssh:devbox#backend-5");
+    const archivedAt = readRemoteSessionRecords()[0]?.archivedAt;
+
+    resetStore();
+    vi.clearAllMocks();
+    await rehydrateRemoteSessions();
+
+    expect(mocks.registerSessionBackend).toHaveBeenCalledWith(
+      "ssh:devbox#backend-5",
+      "ssh:devbox",
+      "backend-5",
+    );
+    expect(
+      useChatSessionStore.getState().getSession("ssh:devbox#backend-5"),
+    ).toEqual(
+      expect.objectContaining({
+        title: "Archived remote work",
+        remoteHost: "devbox",
+        archivedAt,
+      }),
+    );
   });
 });

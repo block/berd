@@ -195,20 +195,20 @@ describe("remoteSessionPersistence", () => {
       ]);
     });
 
-    it("skips archived records", async () => {
-      persistRemoteSessionRecord(
-        makeRecord({ archivedAt: "2026-08-02T00:00:00.000Z" }),
-      );
+    it("rehydrates archived records into session history", async () => {
+      const archivedAt = "2026-08-02T00:00:00.000Z";
+      persistRemoteSessionRecord(makeRecord({ archivedAt }));
 
       await rehydrateRemoteSessions();
 
-      expect(mocks.registerSessionBackend).not.toHaveBeenCalled();
-      expect(
-        useChatSessionStore.getState().getSession("remote-1"),
-      ).toBeUndefined();
+      expect(mocks.registerSessionBackend).toHaveBeenCalledWith(
+        "ssh:devbox#remote-1",
+        "ssh:devbox",
+        "remote-1",
+      );
       expect(
         useChatSessionStore.getState().getSession("ssh:devbox#remote-1"),
-      ).toBeUndefined();
+      ).toMatchObject({ archivedAt, remoteHost: "devbox" });
     });
 
     it("does not clobber a session already in the store", async () => {

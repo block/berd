@@ -134,8 +134,8 @@ export function readRemoteSessionRecords(): RemoteSessionRecord[] {
 }
 
 /**
- * Restores remote sessions after an app restart: re-registers each
- * non-archived record's session→backend routing and seeds a placeholder
+ * Restores remote sessions after an app restart: re-registers each record's
+ * session→backend routing and seeds a placeholder
  * `ChatSession` so the sidebar can render it before the remote backend is
  * contacted. Activation reconciles the placeholder (title, counts, replay)
  * through the normal session-load path.
@@ -145,9 +145,7 @@ export function readRemoteSessionRecords(): RemoteSessionRecord[] {
  * above.
  */
 export async function rehydrateRemoteSessions(): Promise<void> {
-  const records = readRemoteSessionRecords().filter(
-    (record) => !record.archivedAt,
-  );
+  const records = readRemoteSessionRecords();
   if (records.length === 0) return;
 
   const { useChatSessionStore } = await import(
@@ -181,6 +179,7 @@ export async function rehydrateRemoteSessions(): Promise<void> {
       clientSessionId: sessionId,
       createdAt: record.updatedAt,
       updatedAt: record.updatedAt,
+      archivedAt: record.archivedAt,
       // Placeholder: the remote message count is unknown until the session
       // loads, and 0 would hide the row from the sidebar entirely.
       messageCount: 1,

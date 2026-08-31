@@ -9,6 +9,10 @@ import { normalizeAcpTitle } from "@/features/chat/lib/sessionTitle";
 import { withWorkspaceBackfill } from "@/features/chat/lib/workspaceAttachments";
 import { loadPersistedChatWorkspaceMetadata } from "@/features/chat/stores/workspaceAttachmentPersistence";
 import { executionTargetFromGooseServeSession } from "@/features/chat/lib/gooseServeExecutionTarget";
+import {
+  remoteHostFromBackendId,
+  splitCompositeSessionId,
+} from "@/shared/api/acpBackendId";
 
 interface SessionPageState {
   sessions: ChatSession[];
@@ -52,6 +56,12 @@ export function chatSessionFromAcpInfo(
     providerId: session.providerId ?? undefined,
     modelId: session.modelId ?? undefined,
   });
+  const compositeBackend = splitCompositeSessionId(
+    session.sessionId,
+  )?.backendId;
+  const remoteHost =
+    context?.remoteHost ??
+    (compositeBackend ? remoteHostFromBackendId(compositeBackend) : null);
   return {
     id: session.sessionId,
     title: normalizeAcpTitle(session.title) ?? "Untitled",
@@ -60,9 +70,9 @@ export function chatSessionFromAcpInfo(
     executionTargetSource: executionTarget ? "acp" : undefined,
     personaId: session.personaId ?? undefined,
     workingDir: session.workingDir ?? undefined,
-    // Only set the key when the session actually came from a remote backend,
-    // so spreading a locally loaded row can never wipe an existing tag.
-    ...(context?.remoteHost ? { remoteHost: context.remoteHost } : {}),
+    // Only set the key when context or the composite id proves that the
+    // session came from a remote backend, so a local row cannot gain a tag.
+    ...(remoteHost ? { remoteHost } : {}),
     createdAt: session.createdAt ?? session.updatedAt ?? now,
     updatedAt: session.updatedAt ?? now,
     lastMessageAt: session.lastMessageAt ?? undefined,
