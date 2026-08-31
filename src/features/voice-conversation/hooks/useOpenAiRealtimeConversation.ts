@@ -221,7 +221,7 @@ function createMasterTurnEndedMessage(
   finalText?: string,
 ): Message {
   const summary = finalText?.trim()
-    ? finalText.trim()
+    ? "Final response shown above."
     : status === "completed"
       ? "No final response text."
       : `The Master turn ${status}.`;

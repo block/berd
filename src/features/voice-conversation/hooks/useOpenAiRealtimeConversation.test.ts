@@ -765,7 +765,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     await act(async () => owner.result.current.onToggle());
   });
 
-  it("delivers every terminal master turn to the emissary for evaluation", async () => {
+  it("delivers every terminal master turn without duplicating its visible final text", async () => {
     const owner = renderConversation("session-a");
     await act(async () => owner.result.current.onToggle());
     await waitFor(() => expect(owner.result.current.state).toBe("listening"));
@@ -789,7 +789,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       useChatStore.getState().messagesBySession["session-a"]?.at(-1),
     ).toMatchObject({
       role: "assistant",
-      content: [{ type: "text", text: "There are 20 repositories." }],
+      content: [{ type: "text", text: "Final response shown above." }],
       metadata: {
         agentVisible: false,
         personaName: "Master ended turn",
