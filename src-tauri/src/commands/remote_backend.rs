@@ -21,13 +21,17 @@ pub async fn list_ssh_config_hosts() -> Result<Vec<String>, RemoteBackendError> 
     )
 }
 
+/// `goose_path` (`goosePath` on the wire) is the optional per-host goose binary
+/// override: absolute or `~/`-prefixed, validated in Rust before any argv is
+/// built. `None` keeps the remote login PATH lookup.
 #[tauri::command]
 pub async fn remote_backend_connect(
     app: AppHandle,
     registry: State<'_, RemoteBackendRegistry>,
     host: String,
+    goose_path: Option<String>,
 ) -> Result<RemoteBackendConnection, RemoteBackendError> {
-    remote_backend::connect(&app, &registry, &host).await
+    remote_backend::connect(&app, &registry, &host, goose_path.as_deref()).await
 }
 
 #[tauri::command]
@@ -57,8 +61,11 @@ pub async fn list_remote_backends(
 }
 
 #[tauri::command]
-pub async fn check_remote_host(host: String) -> Result<Vec<RemoteToolProbe>, RemoteBackendError> {
-    remote_backend::check_host(&host).await
+pub async fn check_remote_host(
+    host: String,
+    goose_path: Option<String>,
+) -> Result<Vec<RemoteToolProbe>, RemoteBackendError> {
+    remote_backend::check_host(&host, goose_path.as_deref()).await
 }
 
 #[tauri::command]

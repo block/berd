@@ -1,5 +1,10 @@
 import { create } from "zustand";
 import {
+  isValidGoosePath,
+  loadPersistedGoosePaths,
+  persistGoosePaths,
+} from "@/features/remoteHosts/lib/gooseBinaryOverride";
+import {
   checkRemoteHost,
   connectRemoteHost,
   disconnectRemoteHost,
@@ -121,6 +126,8 @@ export interface RemoteHostStore {
   doctorPendingByHost: Record<string, boolean>;
   doctorErrorByHost: Record<string, RemoteBackendErrorLike | undefined>;
   recentDirsByHost: Record<string, string[]>;
+  /** Per-host goose binary override; absent means the remote login PATH. */
+  goosePathByHost: Record<string, string>;
 
   // Actions
   refreshConfigHosts: () => Promise<void>;
@@ -132,6 +139,12 @@ export interface RemoteHostStore {
   runDoctor: (host: string) => Promise<void>;
   recordRecentDir: (host: string, dir: string) => void;
   removeManualHost: (host: string) => void;
+  /**
+   * Set (or clear, with `null`) the goose binary a host's remote backend
+   * should run. Returns false for a path the remote script could not resolve.
+   * Takes effect on the next connect, which restarts the remote daemon.
+   */
+  setGoosePath: (host: string, path: string | null) => boolean;
 }
 
 export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
@@ -142,6 +155,7 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
   doctorPendingByHost: {},
   doctorErrorByHost: {},
   recentDirsByHost: loadPersistedRecentDirs(),
+  goosePathByHost: loadPersistedGoosePaths(),
 
   refreshConfigHosts: async () => {
     try {
@@ -281,6 +295,25 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
       persistManualHosts(manualHosts);
       return { manualHosts };
     });
+  },
+
+  setGoosePath: (host, path) => {
+    const trimmedHost = host.trim();
+    if (!trimmedHost) return false;
+    const trimmedPath = path?.trim() ?? "";
+    if (path !== null && !isValidGoosePath(trimmedPath)) return false;
+
+    set((state) => {
+      const goosePathByHost = { ...state.goosePathByHost };
+      if (path === null) {
+        delete goosePathByHost[trimmedHost];
+      } else {
+        goosePathByHost[trimmedHost] = trimmedPath;
+      }
+      persistGoosePaths(goosePathByHost);
+      return { goosePathByHost };
+    });
+    return true;
   },
 
   recordRecentDir: (host, dir) => {

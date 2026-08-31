@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { getGoosePathForHost } from "@/features/remoteHosts/lib/gooseBinaryOverride";
 
 /**
  * Error shape thrown by the remote-backend Tauri commands. `kind` is a
@@ -67,6 +68,8 @@ export interface RemoteToolProbe {
   binary: string;
   found: boolean;
   version?: string;
+  /** Path that answered the probe (an override, or the PATH resolution). */
+  path?: string;
 }
 
 export interface RemoteDirEntry {
@@ -87,11 +90,18 @@ export async function listSshConfigHosts(): Promise<string[]> {
 /**
  * Connect (or reuse the connection) to the Goose daemon on `host`. Idempotent
  * per host; the Rust side serializes concurrent connects.
+ *
+ * The persisted per-host goose binary override is looked up here rather than
+ * threaded through callers, so every connect path (settings, session routing,
+ * reconnects) agrees on which binary the host should run.
  */
 export async function connectRemoteHost(
   host: string,
 ): Promise<RemoteBackendConnection> {
-  return await invoke("remote_backend_connect", { host });
+  return await invoke("remote_backend_connect", {
+    host,
+    goosePath: getGoosePathForHost(host) ?? null,
+  });
 }
 
 /** Tear down the local tunnel to `host`, leaving the remote daemon running. */
@@ -111,11 +121,18 @@ export async function listRemoteBackends(): Promise<
   return await invoke("list_remote_backends");
 }
 
-/** Probe `host` for the agent binaries (goose, claude-agent-acp, codex-acp). */
+/**
+ * Probe `host` for the agent binaries (goose, claude-agent-acp, codex-acp).
+ * When the host has a goose binary override, that binary is probed instead of
+ * the PATH lookup so the report shows the build Berd would actually run.
+ */
 export async function checkRemoteHost(
   host: string,
 ): Promise<RemoteToolProbe[]> {
-  return await invoke("check_remote_host", { host });
+  return await invoke("check_remote_host", {
+    host,
+    goosePath: getGoosePathForHost(host) ?? null,
+  });
 }
 
 /**

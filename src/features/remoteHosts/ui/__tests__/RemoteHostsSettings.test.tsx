@@ -17,6 +17,7 @@ const shutdownHost = vi.fn(async () => {});
 const runDoctor = vi.fn(async () => {});
 const refreshConfigHosts = vi.fn(async () => {});
 const syncBackendSnapshot = vi.fn(async () => {});
+const setGoosePath = vi.fn((_host: string, _path: string | null) => true);
 
 function seedStore(overrides?: Partial<ReturnType<typeof baseState>>) {
   useRemoteHostStore.setState({ ...baseState(), ...overrides });
@@ -30,12 +31,14 @@ function baseState() {
     doctorPendingByHost: {},
     doctorErrorByHost: {},
     recentDirsByHost: {},
+    goosePathByHost: {} as Record<string, string>,
     ensureHostConnected,
     disconnect,
     shutdownHost,
     runDoctor,
     refreshConfigHosts,
     syncBackendSnapshot,
+    setGoosePath,
   };
 }
 
@@ -165,6 +168,102 @@ describe("RemoteHostsSettings", () => {
     expect(
       screen.getByText(enSettings.remoteHosts.doctor.gooseMissing),
     ).toBeInTheDocument();
+  });
+
+  describe("goose binary override", () => {
+    it("renders the persisted path for the host", () => {
+      seedStore({
+        configHosts: ["alpha"],
+        goosePathByHost: { alpha: "~/src/goose/target/release/goose" },
+      });
+      renderWithProviders(<RemoteHostsSettings />);
+
+      expect(
+        screen.getByLabelText(enSettings.remoteHosts.gooseBinary.label),
+      ).toHaveValue("~/src/goose/target/release/goose");
+      expect(
+        screen.getByText(enSettings.remoteHosts.gooseBinary.hint),
+      ).toBeInTheDocument();
+    });
+
+    it("saves a typed path through the store", async () => {
+      const user = userEvent.setup();
+      seedStore({ configHosts: ["alpha"] });
+      renderWithProviders(<RemoteHostsSettings />);
+
+      await user.type(
+        screen.getByLabelText(enSettings.remoteHosts.gooseBinary.label),
+        "/opt/goose/bin/goose",
+      );
+      await user.click(
+        screen.getByRole("button", {
+          name: enSettings.remoteHosts.gooseBinary.save,
+        }),
+      );
+
+      expect(setGoosePath).toHaveBeenCalledWith(
+        "alpha",
+        "/opt/goose/bin/goose",
+      );
+    });
+
+    it("shows an error for a path the remote script cannot resolve", async () => {
+      const user = userEvent.setup();
+      setGoosePath.mockReturnValueOnce(false);
+      seedStore({ configHosts: ["alpha"] });
+      renderWithProviders(<RemoteHostsSettings />);
+
+      await user.type(
+        screen.getByLabelText(enSettings.remoteHosts.gooseBinary.label),
+        "goose",
+      );
+      await user.click(
+        screen.getByRole("button", {
+          name: enSettings.remoteHosts.gooseBinary.save,
+        }),
+      );
+
+      expect(
+        screen.getByText(enSettings.remoteHosts.gooseBinary.invalidError),
+      ).toBeInTheDocument();
+    });
+
+    it("clears a saved path", async () => {
+      const user = userEvent.setup();
+      seedStore({
+        configHosts: ["alpha"],
+        goosePathByHost: { alpha: "/opt/goose/bin/goose" },
+      });
+      renderWithProviders(<RemoteHostsSettings />);
+
+      await user.click(
+        screen.getByRole("button", {
+          name: enSettings.remoteHosts.gooseBinary.clear,
+        }),
+      );
+
+      expect(setGoosePath).toHaveBeenCalledWith("alpha", null);
+    });
+
+    it("reports which binary answered the doctor check", async () => {
+      seedStore({
+        configHosts: ["alpha"],
+        doctorByHost: {
+          alpha: [
+            {
+              binary: "goose",
+              found: true,
+              version: "goose 2.0.0-patched",
+              path: "/opt/goose/bin/goose",
+            },
+          ],
+        },
+      });
+      renderWithProviders(<RemoteHostsSettings />);
+
+      expect(screen.getByText("goose 2.0.0-patched")).toBeInTheDocument();
+      expect(screen.getByText("/opt/goose/bin/goose")).toBeInTheDocument();
+    });
   });
 
   it("connects a free-form user@host and validates empty input", async () => {

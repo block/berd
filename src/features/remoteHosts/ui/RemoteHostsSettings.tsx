@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { REMOTE_SSH_SESSIONS_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { useExperiment } from "@/features/experiments/experimentPreferences";
@@ -76,7 +76,7 @@ function DoctorReport({
         {probes.map((probe) => (
           <li
             key={probe.binary}
-            className="flex items-center gap-2 text-xs text-muted-foreground"
+            className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
           >
             <span className="font-mono text-foreground">{probe.binary}</span>
             <span>
@@ -84,6 +84,10 @@ function DoctorReport({
                 ? (probe.version ?? t("remoteHosts.doctor.found"))
                 : t("remoteHosts.doctor.notFound")}
             </span>
+            {/* Which binary actually answered: confirms an override took. */}
+            {probe.path ? (
+              <span className="truncate font-mono">{probe.path}</span>
+            ) : null}
           </li>
         ))}
       </ul>
@@ -92,6 +96,85 @@ function DoctorReport({
           {t("remoteHosts.doctor.gooseMissing")}
         </p>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Optional per-host goose binary path. Empty means "resolve `goose` from the
+ * ssh login PATH" (the default); a saved path is what the remote daemon runs
+ * from the next connect on.
+ */
+function GooseBinaryOverride({ host }: { host: string }) {
+  const { t } = useTranslation("settings");
+  const inputId = useId();
+  const savedPath = useRemoteHostStore((state) => state.goosePathByHost[host]);
+  const setGoosePath = useRemoteHostStore((state) => state.setGoosePath);
+
+  const [draft, setDraft] = useState(savedPath ?? "");
+  const [error, setError] = useState<string | null>(null);
+
+  // Follow the persisted value when it changes elsewhere (other settings
+  // mount, another window) instead of stranding a stale draft.
+  useEffect(() => {
+    setDraft(savedPath ?? "");
+    setError(null);
+  }, [savedPath]);
+
+  const save = () => {
+    if (!setGoosePath(host, draft)) {
+      setError(t("remoteHosts.gooseBinary.invalidError"));
+      return;
+    }
+    setError(null);
+  };
+
+  const clear = () => {
+    setGoosePath(host, null);
+    setDraft("");
+    setError(null);
+  };
+
+  return (
+    <div className="space-y-1">
+      <label htmlFor={inputId} className="block text-xs text-muted-foreground">
+        {t("remoteHosts.gooseBinary.label")}
+      </label>
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          id={inputId}
+          value={draft}
+          spellCheck={false}
+          placeholder={t("remoteHosts.gooseBinary.placeholder")}
+          className="h-8 w-64 font-mono text-xs"
+          onChange={(event) => {
+            setDraft(event.target.value);
+            setError(null);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              save();
+            }
+          }}
+        />
+        <Button type="button" variant="outline" size="sm" onClick={save}>
+          {t("remoteHosts.gooseBinary.save")}
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={savedPath === undefined && draft === ""}
+          onClick={clear}
+        >
+          {t("remoteHosts.gooseBinary.clear")}
+        </Button>
+      </div>
+      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      <p className="text-xs text-muted-foreground">
+        {t("remoteHosts.gooseBinary.hint")}
+      </p>
     </div>
   );
 }
@@ -204,13 +287,16 @@ function RemoteHostRow({
         </div>
       }
       details={
-        showDoctor ? (
-          <DoctorReport
-            probes={probes}
-            pending={doctorPending}
-            errorMessage={doctorError?.message}
-          />
-        ) : undefined
+        <div className="space-y-3">
+          {showDoctor ? (
+            <DoctorReport
+              probes={probes}
+              pending={doctorPending}
+              errorMessage={doctorError?.message}
+            />
+          ) : null}
+          <GooseBinaryOverride host={host} />
+        </div>
       }
     />
   );

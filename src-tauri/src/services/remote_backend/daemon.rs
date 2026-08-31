@@ -1,9 +1,10 @@
 //! Drive the remote bootstrap script (`remote_daemon.sh`) over ssh.
 //!
-//! The script travels over stdin (`bash -s -- <nonce> <mode> [<b64arg>]`) so
-//! no script text, secret, or user path appears in remote argv. Only stdout
-//! lines prefixed with the per-invocation nonce are parsed; anything else is
-//! shell rc noise and ignored.
+//! The script travels over stdin
+//! (`bash -s -- <nonce> <mode> [<b64arg>] [<b64goosepath>]`) so no script text,
+//! secret, or user path appears in remote argv. Only stdout lines prefixed with
+//! the per-invocation nonce are parsed; anything else is shell rc noise and
+//! ignored.
 
 use std::collections::HashMap;
 use std::process::Stdio;
@@ -42,6 +43,9 @@ pub struct RemoteToolProbe {
     pub binary: String,
     pub found: bool,
     pub version: Option<String>,
+    /// Resolved path that answered the probe, so the UI can show which build
+    /// replied (an override, or whatever the login PATH resolved to).
+    pub path: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -65,17 +69,64 @@ pub(crate) struct ScriptOutput {
     pub exit_code: Option<i32>,
 }
 
+/// Validate and normalize a user-supplied goose binary override before it is
+/// ever encoded into the bootstrap argv. Absolute or `~/`-prefixed only: bare
+/// relative paths are ambiguous on the remote side, and newline/NUL bytes are
+/// rejected so nothing can smuggle extra protocol or argv content.
+pub(crate) fn normalize_goose_path(path: &str) -> Result<String, RemoteBackendError> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err(RemoteBackendError::new(
+            RemoteBackendErrorKind::InvalidHost,
+            "the goose binary path is empty",
+        ));
+    }
+    if trimmed.contains(['\n', '\r', '\0']) {
+        return Err(RemoteBackendError::new(
+            RemoteBackendErrorKind::InvalidHost,
+            "the goose binary path contains unsupported characters",
+        ));
+    }
+    if trimmed != "~" && !trimmed.starts_with('/') && !trimmed.starts_with("~/") {
+        return Err(RemoteBackendError::new(
+            RemoteBackendErrorKind::InvalidHost,
+            "the goose binary path must be absolute or start with ~/",
+        ));
+    }
+    if trimmed == "~" || trimmed.ends_with('/') {
+        return Err(RemoteBackendError::new(
+            RemoteBackendErrorKind::InvalidHost,
+            "the goose binary path must point at a file, not a directory",
+        ));
+    }
+    Ok(trimmed.to_string())
+}
+
+/// Base64 the (already validated) override so it never travels raw in argv.
+fn encode_goose_path(goose_path: Option<&str>) -> Option<String> {
+    goose_path.map(|path| base64::engine::general_purpose::STANDARD.encode(path))
+}
+
 pub(crate) async fn ensure_daemon(
     spec: &RemoteHostSpec,
     shell_env: &HashMap<String, String>,
     extra_serve_args: &[String],
+    goose_path: Option<&str>,
 ) -> Result<RemoteDaemonInfo, RemoteBackendError> {
     let arg = if extra_serve_args.is_empty() {
         None
     } else {
         Some(base64::engine::general_purpose::STANDARD.encode(extra_serve_args.join(" ")))
     };
-    let output = run_remote_script(spec, shell_env, "ensure", arg.as_deref()).await?;
+    let goose_arg = encode_goose_path(goose_path);
+    let output = run_remote_script(
+        spec,
+        shell_env,
+        "ensure",
+        arg.as_deref(),
+        goose_arg.as_deref(),
+    )
+    .await?;
     require_success(&output)?;
     let ready = output
         .lines
@@ -92,7 +143,7 @@ pub(crate) async fn shutdown_daemon(
     spec: &RemoteHostSpec,
     shell_env: &HashMap<String, String>,
 ) -> Result<(), RemoteBackendError> {
-    let output = run_remote_script(spec, shell_env, "shutdown", None).await?;
+    let output = run_remote_script(spec, shell_env, "shutdown", None, None).await?;
     require_success(&output)?;
     if output.lines.iter().any(|line| line == "STOPPED") {
         Ok(())
@@ -107,8 +158,10 @@ pub(crate) async fn shutdown_daemon(
 pub(crate) async fn check_host(
     spec: &RemoteHostSpec,
     shell_env: &HashMap<String, String>,
+    goose_path: Option<&str>,
 ) -> Result<Vec<RemoteToolProbe>, RemoteBackendError> {
-    let output = run_remote_script(spec, shell_env, "check", None).await?;
+    let goose_arg = encode_goose_path(goose_path);
+    let output = run_remote_script(spec, shell_env, "check", None, goose_arg.as_deref()).await?;
     require_success(&output)?;
     let probes = parse_tool_probes(&output.lines);
     if probes.is_empty() {
@@ -132,7 +185,7 @@ pub(crate) async fn list_remote_dir(
         ));
     }
     let arg = base64::engine::general_purpose::STANDARD.encode(path);
-    let output = run_remote_script(spec, shell_env, "listdir", Some(&arg)).await?;
+    let output = run_remote_script(spec, shell_env, "listdir", Some(&arg), None).await?;
     match output.exit_code {
         Some(44) => {
             return Err(RemoteBackendError::new(
@@ -152,22 +205,41 @@ pub(crate) async fn list_remote_dir(
         .ok_or_else(|| script_protocol_error("remote listing was malformed", &output))
 }
 
+/// Assemble the remote command string. Positional args are fixed
+/// (`<nonce> <mode> <b64arg> <b64goosepath>`), so a goose override without a
+/// mode arg still has to send the `-` placeholder in slot 3.
+fn remote_command_line(
+    nonce: &str,
+    mode: &str,
+    arg: Option<&str>,
+    goose_arg: Option<&str>,
+) -> String {
+    let mut line = format!("bash -s -- {nonce} {mode}");
+    if arg.is_some() || goose_arg.is_some() {
+        line.push(' ');
+        line.push_str(arg.unwrap_or("-"));
+    }
+    if let Some(goose_arg) = goose_arg {
+        line.push(' ');
+        line.push_str(goose_arg);
+    }
+    line
+}
+
 pub(crate) async fn run_remote_script(
     spec: &RemoteHostSpec,
     shell_env: &HashMap<String, String>,
     mode: &str,
     arg: Option<&str>,
+    goose_arg: Option<&str>,
 ) -> Result<ScriptOutput, RemoteBackendError> {
     let nonce = format!("berd-{}", uuid::Uuid::new_v4());
 
     let mut command = base_ssh_command(spec, shell_env);
     push_destination(&mut command, spec);
-    // The remote command string: constant except the nonce/mode/arg, all of
+    // The remote command string: constant except the nonce/mode/args, all of
     // which are restricted charsets (uuid, keyword, base64).
-    let remote_command = match arg {
-        Some(arg) => format!("bash -s -- {nonce} {mode} {arg}"),
-        None => format!("bash -s -- {nonce} {mode}"),
-    };
+    let remote_command = remote_command_line(&nonce, mode, arg, goose_arg);
     command.arg(remote_command);
     command
         .stdin(Stdio::piped())
@@ -367,10 +439,14 @@ fn parse_tool_probes(lines: &[String]) -> Vec<RemoteToolProbe> {
             let binary = fields.next()?.to_string();
             let found = fields.next()? == "1";
             let version = fields.next().and_then(decode_b64_field);
+            // `path` is optional so a daemon script from an older client still
+            // parses (pre-override hosts emit only three fields).
+            let path = fields.next().and_then(decode_b64_field);
             Some(RemoteToolProbe {
                 binary,
                 found,
                 version,
+                path,
             })
         })
         .collect()
@@ -440,16 +516,99 @@ mod tests {
     #[test]
     fn parses_tool_probes() {
         let lines = vec![
-            format!("TOOL goose 1 {}", b64("goose 9.9")),
-            "TOOL claude-agent-acp 0 -".to_string(),
+            format!(
+                "TOOL goose 1 {} {}",
+                b64("goose 9.9"),
+                b64("/opt/goose/bin/goose")
+            ),
+            "TOOL claude-agent-acp 0 - -".to_string(),
             "CHECK-DONE".to_string(),
         ];
         let probes = parse_tool_probes(&lines);
         assert_eq!(probes.len(), 2);
         assert!(probes[0].found);
         assert_eq!(probes[0].version.as_deref(), Some("goose 9.9"));
+        assert_eq!(probes[0].path.as_deref(), Some("/opt/goose/bin/goose"));
         assert!(!probes[1].found);
         assert_eq!(probes[1].version, None);
+        assert_eq!(probes[1].path, None);
+    }
+
+    /// A host still running a pre-override bootstrap emits only three fields.
+    #[test]
+    fn parses_tool_probes_without_a_path_field() {
+        let lines = vec![format!("TOOL goose 1 {}", b64("goose 9.9"))];
+        let probes = parse_tool_probes(&lines);
+        assert_eq!(probes.len(), 1);
+        assert_eq!(probes[0].version.as_deref(), Some("goose 9.9"));
+        assert_eq!(probes[0].path, None);
+    }
+
+    #[test]
+    fn normalize_goose_path_accepts_absolute_and_tilde_paths() {
+        assert_eq!(
+            normalize_goose_path("  /opt/goose/bin/goose  ").unwrap(),
+            "/opt/goose/bin/goose"
+        );
+        assert_eq!(
+            normalize_goose_path("~/src/goose/target/release/goose").unwrap(),
+            "~/src/goose/target/release/goose"
+        );
+    }
+
+    #[test]
+    fn normalize_goose_path_rejects_unusable_paths() {
+        for candidate in [
+            "",
+            "   ",
+            "goose",
+            "./goose",
+            "../goose",
+            "~goose",
+            "~",
+            "/opt/goose/",
+            "/opt/goose\nrm -rf /",
+            "/opt/goose\rgoose",
+            "/opt/goose\0goose",
+        ] {
+            let error = normalize_goose_path(candidate)
+                .expect_err(&format!("expected {candidate:?} to be rejected"));
+            assert_eq!(error.kind, RemoteBackendErrorKind::InvalidHost);
+        }
+    }
+
+    #[test]
+    fn remote_command_line_keeps_positional_slots_stable() {
+        assert_eq!(
+            remote_command_line("N", "shutdown", None, None),
+            "bash -s -- N shutdown"
+        );
+        assert_eq!(
+            remote_command_line("N", "listdir", Some("cGF0aA=="), None),
+            "bash -s -- N listdir cGF0aA=="
+        );
+        assert_eq!(
+            remote_command_line("N", "ensure", Some("YXJncw=="), Some("Ymlu")),
+            "bash -s -- N ensure YXJncw== Ymlu"
+        );
+        // No mode arg but an override: slot 3 has to carry the placeholder so
+        // the binary path still lands in slot 4.
+        assert_eq!(
+            remote_command_line("N", "check", None, Some("Ymlu")),
+            "bash -s -- N check - Ymlu"
+        );
+    }
+
+    #[test]
+    fn goose_path_travels_base64_encoded() {
+        let encoded = encode_goose_path(Some("~/src/goose/target/release/goose")).unwrap();
+        assert!(!encoded.contains("goose"), "raw path leaked: {encoded}");
+        assert!(!encoded.contains('~'), "raw path leaked: {encoded}");
+        assert_eq!(
+            decode_b64_field(&encoded).as_deref(),
+            Some("~/src/goose/target/release/goose")
+        );
+        assert_eq!(encode_goose_path(None), None);
     }
 
     #[test]
@@ -551,6 +710,74 @@ mod tests {
             (lines, out.status.code())
         }
 
+        fn b64_arg(value: &str) -> String {
+            base64::engine::general_purpose::STANDARD.encode(value)
+        }
+
+        /// Fake `goose` that reports a version and, for `serve`, actually binds
+        /// the requested port so the script's readiness probe succeeds.
+        fn write_goose_shim(
+            dir: &std::path::Path,
+            name: &str,
+            version: &str,
+        ) -> std::path::PathBuf {
+            let path = dir.join(name);
+            std::fs::write(
+                &path,
+                format!(
+                    r#"#!/usr/bin/env bash
+if [ "$1" = "--version" ]; then echo "{version}"; exit 0; fi
+if [ "$1" = "serve" ]; then
+  port=""
+  while [ $# -gt 0 ]; do [ "$1" = "--port" ] && port="$2"; shift; done
+  exec python3 -c 'import socket,sys,time
+s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+s.bind(("127.0.0.1",int(sys.argv[1]))); s.listen(5); time.sleep(120)' "$port"
+fi
+"#
+                ),
+            )
+            .unwrap();
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        }
+
+        fn read_record_fields(home: &std::path::Path) -> Vec<String> {
+            let record = std::fs::read_to_string(
+                home.join(".state")
+                    .join("berd")
+                    .join("remote")
+                    .join("daemon.record"),
+            )
+            .expect("daemon record");
+            record
+                .trim()
+                .split_whitespace()
+                .map(str::to_string)
+                .collect()
+        }
+
+        /// Safety net so a restarted-away shim never outlives the test run.
+        fn kill_recorded_pid(fields: &[String]) {
+            let _ = StdCommand::new("kill")
+                .arg("-9")
+                .arg(&fields[1])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+        }
+
+        fn python3_available() -> bool {
+            StdCommand::new("python3")
+                .arg("--version")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .map(|status| status.success())
+                .unwrap_or(false)
+        }
+
         #[test]
         fn ensure_reports_goose_not_found() {
             let home = tempfile::tempdir().unwrap();
@@ -558,6 +785,194 @@ mod tests {
             let (lines, code) = run_script(&["ensure"], Some("/usr/bin:/bin"), home.path());
             assert_eq!(code, Some(41), "lines: {lines:?}");
             assert!(lines.iter().any(|l| l == "ERR goose-not-found"));
+        }
+
+        /// An override that does not resolve must fail with the same typed
+        /// error as a missing PATH goose, even when PATH does have one.
+        #[test]
+        fn ensure_reports_goose_not_found_for_a_missing_override() {
+            let home = tempfile::tempdir().unwrap();
+            let bin = tempfile::tempdir().unwrap();
+            write_goose_shim(bin.path(), "goose", "goose 1.0.0");
+            let path = format!("{}:/usr/bin:/bin", bin.path().to_string_lossy());
+            let missing = b64_arg(&bin.path().join("goose-patched").to_string_lossy());
+
+            let (lines, code) = run_script(&["ensure", "-", &missing], Some(&path), home.path());
+
+            assert_eq!(code, Some(41), "lines: {lines:?}");
+            assert!(lines.iter().any(|l| l == "ERR goose-not-found"));
+        }
+
+        /// A directory (or any non-executable) override is not a goose binary.
+        #[test]
+        fn ensure_rejects_a_non_executable_override() {
+            let home = tempfile::tempdir().unwrap();
+            let bin = tempfile::tempdir().unwrap();
+            std::fs::write(bin.path().join("notes.txt"), "not a binary").unwrap();
+            let arg = b64_arg(&bin.path().join("notes.txt").to_string_lossy());
+
+            let (lines, code) =
+                run_script(&["ensure", "-", &arg], Some("/usr/bin:/bin"), home.path());
+
+            assert_eq!(code, Some(41), "lines: {lines:?}");
+            assert!(lines.iter().any(|l| l == "ERR goose-not-found"));
+        }
+
+        #[test]
+        fn check_probes_the_override_instead_of_path_goose() {
+            let home = tempfile::tempdir().unwrap();
+            let bin = tempfile::tempdir().unwrap();
+            write_goose_shim(bin.path(), "goose", "goose 1.0.0-stock");
+            let patched = write_goose_shim(bin.path(), "goose-patched", "goose 2.0.0-patched");
+            let path = format!("{}:/usr/bin:/bin", bin.path().to_string_lossy());
+            let arg = b64_arg(&patched.to_string_lossy());
+
+            let (lines, code) = run_script(&["check", "-", &arg], Some(&path), home.path());
+
+            assert_eq!(code, Some(0), "lines: {lines:?}");
+            let probes = parse_tool_probes(&lines);
+            let goose = probes.iter().find(|p| p.binary == "goose").unwrap();
+            assert!(goose.found);
+            assert_eq!(goose.version.as_deref(), Some("goose 2.0.0-patched"));
+            assert_eq!(
+                goose.path.as_deref(),
+                Some(patched.to_string_lossy().as_ref())
+            );
+        }
+
+        #[test]
+        fn check_reports_the_resolved_path_goose_when_no_override_is_given() {
+            let home = tempfile::tempdir().unwrap();
+            let bin = tempfile::tempdir().unwrap();
+            let stock = write_goose_shim(bin.path(), "goose", "goose 1.0.0-stock");
+            let path = format!("{}:/usr/bin:/bin", bin.path().to_string_lossy());
+
+            let (lines, code) = run_script(&["check"], Some(&path), home.path());
+
+            assert_eq!(code, Some(0), "lines: {lines:?}");
+            let goose = parse_tool_probes(&lines)
+                .into_iter()
+                .find(|p| p.binary == "goose")
+                .unwrap();
+            assert_eq!(goose.version.as_deref(), Some("goose 1.0.0-stock"));
+            assert_eq!(
+                goose.path.as_deref(),
+                Some(stock.to_string_lossy().as_ref())
+            );
+        }
+
+        /// The reuse decision: same recorded binary reuses the live daemon, a
+        /// different one stops it and starts the requested build instead.
+        #[test]
+        fn ensure_reuses_only_a_daemon_started_by_the_requested_binary() {
+            if !python3_available() {
+                eprintln!("skipping: python3 unavailable for the goose serve shim");
+                return;
+            }
+            let home = tempfile::tempdir().unwrap();
+            let bin = tempfile::tempdir().unwrap();
+            let stock = write_goose_shim(bin.path(), "goose", "goose 1.0.0-stock");
+            let patched = write_goose_shim(bin.path(), "goose-patched", "goose 2.0.0-patched");
+            let stock_arg = b64_arg(&stock.to_string_lossy());
+            let patched_arg = b64_arg(&patched.to_string_lossy());
+
+            let (lines, code) = run_script(&["ensure", "-", &stock_arg], None, home.path());
+            assert_eq!(code, Some(0), "lines: {lines:?}");
+            let first = parse_ready_line(
+                lines
+                    .iter()
+                    .find_map(|l| l.strip_prefix("READY "))
+                    .expect("READY"),
+            )
+            .unwrap();
+            assert!(!first.reused);
+            let first_fields = read_record_fields(home.path());
+            assert_eq!(first_fields[0], "v2", "record fields: {first_fields:?}");
+            assert_eq!(first_fields[6], b64_arg(&stock.to_string_lossy()));
+
+            // Same binary: the healthy daemon is handed back untouched.
+            let (lines, code) = run_script(&["ensure", "-", &stock_arg], None, home.path());
+            assert_eq!(code, Some(0), "lines: {lines:?}");
+            let reused = parse_ready_line(
+                lines
+                    .iter()
+                    .find_map(|l| l.strip_prefix("READY "))
+                    .expect("READY"),
+            )
+            .unwrap();
+            assert!(reused.reused);
+            assert_eq!(reused.pid, first.pid);
+            assert_eq!(reused.port, first.port);
+
+            // Different binary: restart, new port/secret, patched version.
+            let (lines, code) = run_script(&["ensure", "-", &patched_arg], None, home.path());
+            assert_eq!(code, Some(0), "lines: {lines:?}");
+            let restarted = parse_ready_line(
+                lines
+                    .iter()
+                    .find_map(|l| l.strip_prefix("READY "))
+                    .expect("READY"),
+            )
+            .unwrap();
+            assert!(!restarted.reused);
+            assert_ne!(restarted.pid, first.pid);
+            assert_ne!(restarted.secret, first.secret);
+            assert_eq!(restarted.goose_version, "goose 2.0.0-patched");
+            let fields = read_record_fields(home.path());
+            assert_eq!(fields[6], b64_arg(&patched.to_string_lossy()));
+
+            let (lines, code) = run_script(&["shutdown"], None, home.path());
+            assert_eq!(code, Some(0), "lines: {lines:?}");
+            kill_recorded_pid(&first_fields);
+        }
+
+        /// A record written before the binary field existed cannot prove which
+        /// build is serving, so it is stale: stop it and start fresh.
+        #[test]
+        fn ensure_treats_a_legacy_record_as_not_reusable() {
+            if !python3_available() {
+                eprintln!("skipping: python3 unavailable for the goose serve shim");
+                return;
+            }
+            let home = tempfile::tempdir().unwrap();
+            let bin = tempfile::tempdir().unwrap();
+            let stock = write_goose_shim(bin.path(), "goose", "goose 1.0.0-stock");
+            let stock_arg = b64_arg(&stock.to_string_lossy());
+
+            let (_, code) = run_script(&["ensure", "-", &stock_arg], None, home.path());
+            assert_eq!(code, Some(0));
+            let fields = read_record_fields(home.path());
+            let record_path = home
+                .path()
+                .join(".state")
+                .join("berd")
+                .join("remote")
+                .join("daemon.record");
+            // Rewrite as the pre-override (v1) shape: no marker, no binary.
+            std::fs::write(
+                &record_path,
+                format!(
+                    "{} {} {} {} {}\n",
+                    fields[1], fields[2], fields[3], fields[4], fields[5]
+                ),
+            )
+            .unwrap();
+
+            let (lines, code) = run_script(&["ensure", "-", &stock_arg], None, home.path());
+            assert_eq!(code, Some(0), "lines: {lines:?}");
+            let info = parse_ready_line(
+                lines
+                    .iter()
+                    .find_map(|l| l.strip_prefix("READY "))
+                    .expect("READY"),
+            )
+            .unwrap();
+            assert!(!info.reused, "legacy record must not be reused");
+            assert_ne!(info.pid.to_string(), fields[1]);
+
+            let (_, code) = run_script(&["shutdown"], None, home.path());
+            assert_eq!(code, Some(0));
+            kill_recorded_pid(&fields);
         }
 
         #[test]

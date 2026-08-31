@@ -719,6 +719,14 @@
       "notFound": "No encontrado"
     },
     "empty": "No se encontraron hosts en ~/.ssh/config.",
+    "gooseBinary": {
+      "clear": "Borrar",
+      "hint": "Sustituye la búsqueda de goose en el PATH de este host. Al cambiarla, el backend remoto se reinicia en la próxima conexión.",
+      "invalidError": "Introduce una ruta absoluta o que empiece por ~/.",
+      "label": "Ruta del binario de goose (opcional)",
+      "placeholder": "~/src/goose/target/release/goose",
+      "save": "Guardar"
+    },
     "shutdownConfirm": {
       "cancel": "Cancelar",
       "confirm": "Detener backend",

@@ -21,6 +21,11 @@ vi.mock("@/shared/api/remoteHosts", async (importOriginal) => {
 });
 
 import {
+  getGoosePathForHost,
+  loadPersistedGoosePaths,
+  REMOTE_HOST_GOOSE_PATH_STORAGE_KEY,
+} from "@/features/remoteHosts/lib/gooseBinaryOverride";
+import {
   initRemoteHostStore,
   loadPersistedManualHosts,
   loadPersistedRecentDirs,
@@ -47,6 +52,7 @@ function resetStore(): void {
     doctorPendingByHost: {},
     doctorErrorByHost: {},
     recentDirsByHost: {},
+    goosePathByHost: {},
   });
 }
 
@@ -329,6 +335,90 @@ describe("recordRecentDir", () => {
     window.localStorage.setItem(REMOTE_HOST_RECENT_DIRS_STORAGE_KEY, "{nope");
 
     expect(loadPersistedRecentDirs()).toEqual({});
+  });
+});
+
+describe("goose binary override persistence", () => {
+  it("saves, exposes, and persists a per-host path", () => {
+    expect(
+      useRemoteHostStore
+        .getState()
+        .setGoosePath("devbox", "  ~/src/goose/target/release/goose  "),
+    ).toBe(true);
+
+    expect(useRemoteHostStore.getState().goosePathByHost).toEqual({
+      devbox: "~/src/goose/target/release/goose",
+    });
+    expect(loadPersistedGoosePaths()).toEqual({
+      devbox: "~/src/goose/target/release/goose",
+    });
+    expect(getGoosePathForHost("devbox")).toBe(
+      "~/src/goose/target/release/goose",
+    );
+    expect(getGoosePathForHost("other")).toBeUndefined();
+  });
+
+  it("clears an override and persists the removal", () => {
+    const store = useRemoteHostStore.getState();
+    store.setGoosePath("devbox", "/opt/goose/bin/goose");
+    store.setGoosePath("gpu-1", "/opt/goose/bin/goose");
+
+    expect(store.setGoosePath("devbox", null)).toBe(true);
+
+    expect(useRemoteHostStore.getState().goosePathByHost).toEqual({
+      "gpu-1": "/opt/goose/bin/goose",
+    });
+    expect(loadPersistedGoosePaths()).toEqual({
+      "gpu-1": "/opt/goose/bin/goose",
+    });
+  });
+
+  it("rejects paths the remote script could not resolve", () => {
+    const store = useRemoteHostStore.getState();
+    for (const candidate of [
+      "",
+      "   ",
+      "goose",
+      "./goose",
+      "~goose",
+      "/opt/goose/",
+      "/opt/goose\ngoose",
+    ]) {
+      expect(store.setGoosePath("devbox", candidate)).toBe(false);
+    }
+    expect(store.setGoosePath("  ", "/opt/goose/bin/goose")).toBe(false);
+
+    expect(useRemoteHostStore.getState().goosePathByHost).toEqual({});
+    expect(
+      window.localStorage.getItem(REMOTE_HOST_GOOSE_PATH_STORAGE_KEY),
+    ).toBe(null);
+  });
+
+  it("tolerates corrupted storage and drops unusable entries", () => {
+    window.localStorage.setItem(
+      REMOTE_HOST_GOOSE_PATH_STORAGE_KEY,
+      "not-json{",
+    );
+    expect(loadPersistedGoosePaths()).toEqual({});
+
+    window.localStorage.setItem(
+      REMOTE_HOST_GOOSE_PATH_STORAGE_KEY,
+      JSON.stringify(["/opt/goose/bin/goose"]),
+    );
+    expect(loadPersistedGoosePaths()).toEqual({});
+
+    window.localStorage.setItem(
+      REMOTE_HOST_GOOSE_PATH_STORAGE_KEY,
+      JSON.stringify({
+        devbox: "/opt/goose/bin/goose",
+        relative: "goose",
+        numeric: 42,
+        "": "/opt/goose/bin/goose",
+      }),
+    );
+    expect(loadPersistedGoosePaths()).toEqual({
+      devbox: "/opt/goose/bin/goose",
+    });
   });
 });
 

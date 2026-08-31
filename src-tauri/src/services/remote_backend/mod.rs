@@ -12,6 +12,11 @@
 //! - `disconnect` kills only the tunnel. `shutdown` also stops the remote
 //!   daemon. App exit kills all tunnels and leaves daemons running on purpose.
 //!
+//! A host may pin an optional goose binary path instead of the remote login
+//! PATH lookup. The path is validated here before it reaches the bootstrap, is
+//! remembered per slot so reconnects keep using it, and switching it forces a
+//! fresh connect because the bootstrap restarts the remote daemon.
+//!
 //! Every state transition is emitted as [`REMOTE_BACKEND_STATUS_EVENT`] so the
 //! renderer can mirror per-host status without polling.
 
@@ -114,6 +119,10 @@ struct SlotShared {
     daemon: Option<RemoteDaemonInfo>,
     local_port: Option<u16>,
     tunnel_pid: Option<u32>,
+    /// Validated goose binary override this slot connected with (`None` = the
+    /// remote login PATH). Supervisor reconnects reuse it, and a connect that
+    /// asks for a different one must not be served from cache.
+    goose_path: Option<String>,
 }
 
 impl RemoteBackendRegistry {
@@ -130,6 +139,7 @@ impl RemoteBackendRegistry {
                     daemon: None,
                     local_port: None,
                     tunnel_pid: None,
+                    goose_path: None,
                 }),
             })
         }))
@@ -258,19 +268,49 @@ fn connection_from_shared(shared: &SlotShared) -> Option<RemoteBackendConnection
     }
 }
 
+/// The slot's cached connection, but only when it was established with the
+/// goose binary now being requested. A different override means the bootstrap
+/// has to restart the remote daemon, so the cached tunnel is not an answer.
+fn cached_connection(
+    shared: &SlotShared,
+    requested_goose_path: Option<&str>,
+) -> Option<RemoteBackendConnection> {
+    if shared.goose_path.as_deref() != requested_goose_path {
+        return None;
+    }
+    connection_from_shared(shared)
+}
+
 pub async fn connect(
     app: &AppHandle,
     registry: &RemoteBackendRegistry,
     host_input: &str,
+    goose_path: Option<&str>,
 ) -> Result<RemoteBackendConnection, RemoteBackendError> {
     let aliases = ssh_config::load_ssh_config_hosts();
     let spec = RemoteHostSpec::parse(host_input, &aliases)?;
+    let goose_path = goose_path.map(daemon::normalize_goose_path).transpose()?;
     let slot = registry.slot(&spec);
 
     let _guard = slot.connect_lock.lock().await;
 
-    if let Some(existing) = connection_from_shared(&slot.shared.lock().expect("slot poisoned")) {
-        return Ok(existing);
+    {
+        let mut shared = slot.shared.lock().expect("slot poisoned");
+        if let Some(existing) = cached_connection(&shared, goose_path.as_deref()) {
+            return Ok(existing);
+        }
+        if shared.goose_path.as_deref() != goose_path.as_deref() {
+            // A different goose binary was requested: the bootstrap will stop
+            // the recorded daemon and start a fresh one on a new remote port,
+            // so the current tunnel (and its supervisor) are already history.
+            shared.generation += 1;
+            if let Some(pid) = shared.tunnel_pid.take() {
+                kill_tunnel_pid(pid);
+            }
+            shared.local_port = None;
+            shared.daemon = None;
+            shared.goose_path = goose_path;
+        }
     }
 
     set_state(app, &slot, RemoteBackendState::Connecting);
@@ -311,7 +351,21 @@ async fn establish(
 ) -> Result<RemoteBackendConnection, RemoteBackendError> {
     let shell_env = dir_env::capture_home_interactive_env().await;
 
-    let daemon_info = daemon::ensure_daemon(&slot.spec, &shell_env, &extra_serve_args()).await?;
+    // Reconnects reuse the binary the slot connected with, so a supervisor
+    // never silently falls back to the PATH goose.
+    let goose_path = slot
+        .shared
+        .lock()
+        .expect("slot poisoned")
+        .goose_path
+        .clone();
+    let daemon_info = daemon::ensure_daemon(
+        &slot.spec,
+        &shell_env,
+        &extra_serve_args(),
+        goose_path.as_deref(),
+    )
+    .await?;
 
     let local_port = reserve_free_port().map_err(|error| {
         RemoteBackendError::new(RemoteBackendErrorKind::LocalPortBindFailed, error)
@@ -507,11 +561,13 @@ pub async fn shutdown(
 
 pub async fn check_host(
     host_input: &str,
+    goose_path: Option<&str>,
 ) -> Result<Vec<daemon::RemoteToolProbe>, RemoteBackendError> {
     let aliases = ssh_config::load_ssh_config_hosts();
     let spec = RemoteHostSpec::parse(host_input, &aliases)?;
+    let goose_path = goose_path.map(daemon::normalize_goose_path).transpose()?;
     let shell_env = dir_env::capture_home_interactive_env().await;
-    daemon::check_host(&spec, &shell_env).await
+    daemon::check_host(&spec, &shell_env, goose_path.as_deref()).await
 }
 
 pub async fn list_remote_dir(
@@ -561,6 +617,58 @@ mod tests {
         let json = serde_json::to_value(&status).unwrap();
         assert_eq!(json["host"], "devbox");
         assert_eq!(json["state"], "connecting");
+    }
+
+    fn ready_shared(goose_path: Option<&str>) -> SlotShared {
+        SlotShared {
+            state: RemoteBackendState::Ready {
+                ws_url: "ws://127.0.0.1:5000/acp?token=x".to_string(),
+                http_base_url: "http://127.0.0.1:5000".to_string(),
+                local_port: 5000,
+            },
+            generation: 1,
+            daemon: Some(RemoteDaemonInfo {
+                pid: 10,
+                port: 20,
+                secret: "hush".to_string(),
+                goose_version: "goose 1.0.0".to_string(),
+                started_at: "0".to_string(),
+                reused: false,
+            }),
+            local_port: Some(5000),
+            tunnel_pid: Some(99),
+            goose_path: goose_path.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn cached_connection_is_reused_for_the_same_goose_path() {
+        assert!(cached_connection(&ready_shared(None), None).is_some());
+        assert!(cached_connection(
+            &ready_shared(Some("/opt/goose/bin/goose")),
+            Some("/opt/goose/bin/goose")
+        )
+        .is_some());
+    }
+
+    #[test]
+    fn cached_connection_is_refused_for_a_different_goose_path() {
+        // Adding, removing, or swapping an override all force a fresh connect
+        // because the bootstrap restarts the remote daemon.
+        assert!(cached_connection(&ready_shared(None), Some("/opt/goose/bin/goose")).is_none());
+        assert!(cached_connection(&ready_shared(Some("/opt/goose/bin/goose")), None).is_none());
+        assert!(cached_connection(
+            &ready_shared(Some("/opt/goose/bin/goose")),
+            Some("~/src/goose/target/release/goose")
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn cached_connection_is_none_while_not_ready() {
+        let mut shared = ready_shared(None);
+        shared.state = RemoteBackendState::Connecting;
+        assert!(cached_connection(&shared, None).is_none());
     }
 
     #[test]
