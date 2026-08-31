@@ -3,6 +3,7 @@ import {
   REMOTE_SESSIONS_STORAGE_KEY,
   persistRemoteSessionRecord,
   readRemoteSessionRecords,
+  reconcileRemoteSessionsForExperiment,
   rehydrateRemoteSessions,
   removeRemoteSessionRecord,
   type RemoteSessionRecord,
@@ -14,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   transferSessionBackend: vi.fn(),
   unregisterSessionBackend: vi.fn(),
   getSessionBackend: vi.fn(),
+  disconnectRemoteHost: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/shared/api/acp", () => ({
@@ -44,6 +46,11 @@ vi.mock("@/shared/api/acpSessionBackends", () => ({
   unregisterSessionBackend: (...args: unknown[]) =>
     mocks.unregisterSessionBackend(...args),
   getSessionBackend: (...args: unknown[]) => mocks.getSessionBackend(...args),
+}));
+
+vi.mock("@/shared/api/remoteHosts", () => ({
+  disconnectRemoteHost: (...args: unknown[]) =>
+    mocks.disconnectRemoteHost(...args),
 }));
 
 function makeRecord(
@@ -241,6 +248,63 @@ describe("remoteSessionPersistence", () => {
       expect(
         useChatSessionStore.getState().getSession("ssh:devbox#remote-1"),
       ).toMatchObject({ title: "Fresh title", messageCount: 4 });
+    });
+  });
+
+  describe("reconcileRemoteSessionsForExperiment", () => {
+    it("hides remote sessions and disconnects hosts without deleting persistence", async () => {
+      const record = makeRecord({ sessionId: "ssh:devbox#remote-1" });
+      persistRemoteSessionRecord(record);
+      useChatSessionStore.setState({
+        sessions: [
+          {
+            id: "local-1",
+            title: "Local chat",
+            createdAt: record.updatedAt,
+            updatedAt: record.updatedAt,
+            messageCount: 1,
+          },
+          {
+            id: record.sessionId,
+            title: record.title,
+            remoteHost: record.host,
+            createdAt: record.updatedAt,
+            updatedAt: record.updatedAt,
+            messageCount: 1,
+          },
+        ],
+        activeSessionId: record.sessionId,
+        activeWorkspaceBySession: {
+          [record.sessionId]: { path: record.workingDir, branch: null },
+        },
+      });
+
+      await reconcileRemoteSessionsForExperiment(false);
+
+      expect(useChatSessionStore.getState().sessions).toEqual([
+        expect.objectContaining({ id: "local-1" }),
+      ]);
+      expect(useChatSessionStore.getState().activeSessionId).toBeNull();
+      expect(
+        useChatSessionStore.getState().activeWorkspaceBySession,
+      ).not.toHaveProperty(record.sessionId);
+      expect(mocks.unregisterSessionBackend).toHaveBeenCalledWith(
+        record.sessionId,
+      );
+      expect(mocks.disconnectRemoteHost).toHaveBeenCalledWith(record.host);
+      expect(readRemoteSessionRecords()).toEqual([record]);
+    });
+
+    it("rehydrates persisted sessions immediately when enabled", async () => {
+      persistRemoteSessionRecord(
+        makeRecord({ sessionId: "ssh:devbox#remote-1" }),
+      );
+
+      await reconcileRemoteSessionsForExperiment(true);
+
+      expect(
+        useChatSessionStore.getState().getSession("ssh:devbox#remote-1"),
+      ).toMatchObject({ remoteHost: "devbox" });
     });
   });
 });

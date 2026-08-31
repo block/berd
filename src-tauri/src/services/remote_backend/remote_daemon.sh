@@ -43,7 +43,9 @@ RECORD_FORMAT="v3"
 emit() { printf '%s %s\n' "$NONCE" "$*"; }
 
 b64() { printf %s "$1" | base64 | tr -d '\n'; }
-unb64() { printf %s "$1" | base64 --decode; }
+# `-d` is supported by both GNU coreutils and macOS/BSD base64; GNU's
+# `--decode` long option is not available on macOS remotes.
+unb64() { printf %s "$1" | base64 -d; }
 
 port_listening() {
   (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null

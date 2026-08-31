@@ -97,6 +97,7 @@ import { selectProjects } from "@/features/projects/stores/projectSelectors";
 import { findExistingDraft } from "@/features/chat/lib/newChat";
 import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
 import { useAppStartup } from "./hooks/useAppStartup";
+import { runChatRuntimeStartup } from "./lib/chatRuntimeStartup";
 import { useCompletionNotifications } from "@/shared/hooks/useCompletionNotifications";
 import { useHomeSessionStateSync } from "./hooks/useHomeSessionStateSync";
 import { useHomeWidgetStore } from "@/features/home/stores/homeWidgetStore";
@@ -285,7 +286,10 @@ import {
   requestStarterWidgetPicker,
   STARTER_WIDGET_ADDED_EVENT,
 } from "@/features/home/onboarding/starterWidgetTask";
-import { STARTER_TASKS_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import {
+  REMOTE_SSH_SESSIONS_EXPERIMENT_ID,
+  STARTER_TASKS_EXPERIMENT_ID,
+} from "@/features/experiments/experimentDefinitions";
 import {
   recordAssistiveMomentRetired,
   recordAssistiveMomentShown,
@@ -725,9 +729,34 @@ export function AppShell({
   const initialActiveView = getInitialAppView(initialSettingsSection);
   const [activeView, setActiveView] = useState<AppView>(initialActiveView);
   const capabilities = useProfileCapabilities();
+  const remoteSshSessionsExperimentEnabled =
+    useExperiment(REMOTE_SSH_SESSIONS_EXPERIMENT_ID)?.enabled === true;
   const isAutomationsFeatureEnabled = capabilities.automations;
   const isBuilderbotSurfaceEnabled = capabilities.builderbot;
   const isFeedbackEnabled = capabilities.feedback;
+  const remoteSessionReconciliationRef = useRef<Promise<void>>(
+    Promise.resolve(),
+  );
+  useEffect(() => {
+    remoteSessionReconciliationRef.current =
+      remoteSessionReconciliationRef.current
+        .catch(() => undefined)
+        .then(async () => {
+          await runChatRuntimeStartup();
+          const { reconcileRemoteSessionsForExperiment } = await import(
+            "@/features/chat/stores/remoteSessionPersistence"
+          );
+          await reconcileRemoteSessionsForExperiment(
+            remoteSshSessionsExperimentEnabled,
+          );
+        })
+        .catch((error) => {
+          console.error(
+            "Failed to reconcile remote-session experiment:",
+            error,
+          );
+        });
+  }, [remoteSshSessionsExperimentEnabled]);
   const sessionWindowSupport = useSessionWindowSupport();
   const isMultiWindowEnabled = sessionWindowSupport.supported;
   const stopVoiceConversation = useVoiceConversationStore(

@@ -3,7 +3,10 @@ import {
   splitCompositeSessionId,
   sshBackendId,
 } from "@/shared/api/acpBackendId";
-import { registerSessionBackend } from "@/shared/api/acpSessionBackends";
+import {
+  registerSessionBackend,
+  unregisterSessionBackend,
+} from "@/shared/api/acpSessionBackends";
 
 export const REMOTE_SESSIONS_STORAGE_KEY = "goose:remote-sessions:v1";
 
@@ -185,4 +188,77 @@ export async function rehydrateRemoteSessions(): Promise<void> {
       messageCount: 1,
     });
   }
+}
+
+/**
+ * Apply the remote-session experiment at runtime without deleting the user's
+ * persisted remote-session identities. Disabling hides those sessions and
+ * disconnects their SSH tunnels; re-enabling restores the placeholders and
+ * backend routing immediately.
+ */
+export async function reconcileRemoteSessionsForExperiment(
+  enabled: boolean,
+): Promise<void> {
+  if (enabled) {
+    await rehydrateRemoteSessions();
+    return;
+  }
+
+  const records = readRemoteSessionRecords();
+  const { useChatSessionStore } = await import(
+    "@/features/chat/stores/chatSessionStore"
+  );
+  const state = useChatSessionStore.getState();
+  const remoteSessionIds = new Set(
+    state.sessions
+      .filter((session) => Boolean(session.remoteHost))
+      .map((session) => session.id),
+  );
+  const remoteHosts = new Set(
+    state.sessions
+      .map((session) => session.remoteHost?.trim())
+      .filter((host): host is string => Boolean(host)),
+  );
+
+  for (const record of records) {
+    const backendId = sshBackendId(record.host);
+    const split = splitCompositeSessionId(record.sessionId);
+    remoteSessionIds.add(
+      split
+        ? record.sessionId
+        : compositeSessionId(backendId, record.sessionId),
+    );
+    remoteHosts.add(record.host);
+  }
+
+  useChatSessionStore.setState((current) => {
+    const activeWorkspaceBySession = { ...current.activeWorkspaceBySession };
+    const archiveMutationBySessionId = {
+      ...current.archiveMutationBySessionId,
+    };
+    for (const sessionId of remoteSessionIds) {
+      delete activeWorkspaceBySession[sessionId];
+      delete archiveMutationBySessionId[sessionId];
+    }
+    return {
+      sessions: current.sessions.filter(
+        (session) => !remoteSessionIds.has(session.id),
+      ),
+      activeSessionId:
+        current.activeSessionId && remoteSessionIds.has(current.activeSessionId)
+          ? null
+          : current.activeSessionId,
+      activeWorkspaceBySession,
+      archiveMutationBySessionId,
+    };
+  });
+
+  for (const sessionId of remoteSessionIds) {
+    unregisterSessionBackend(sessionId);
+  }
+
+  const { disconnectRemoteHost } = await import("@/shared/api/remoteHosts");
+  await Promise.allSettled(
+    [...remoteHosts].map((host) => disconnectRemoteHost(host)),
+  );
 }

@@ -284,6 +284,24 @@ fn cached_connection(
     connection_from_shared(shared)
 }
 
+fn advance_generation_if_current(shared: &mut SlotShared, expected: u64) -> Option<u64> {
+    if shared.generation != expected {
+        return None;
+    }
+    shared.generation += 1;
+    Some(shared.generation)
+}
+
+fn clear_tunnel_pid_if_current(shared: &mut SlotShared, generation: u64, pid: Option<u32>) -> bool {
+    if shared.generation != generation {
+        return false;
+    }
+    if shared.tunnel_pid == pid {
+        shared.tunnel_pid = None;
+    }
+    true
+}
+
 pub async fn connect(
     app: &AppHandle,
     registry: &RemoteBackendRegistry,
@@ -319,11 +337,15 @@ pub async fn connect(
     set_state(app, &slot, RemoteBackendState::Connecting);
     record_diagnostic(DiagnosticLevel::Info, "connect_start", &slot.key, None);
 
-    match establish(app, &slot, 0).await {
-        Ok(connection) => {
+    let expected_generation = slot.shared.lock().expect("slot poisoned").generation;
+    match establish(app, &slot, expected_generation, 0).await {
+        Ok(Some(connection)) => {
             record_diagnostic(DiagnosticLevel::Info, "connect_success", &slot.key, None);
             Ok(connection)
         }
+        Ok(None) => Err(RemoteBackendError::internal(
+            "remote connection attempt was superseded",
+        )),
         Err(error) => {
             record_diagnostic(
                 DiagnosticLevel::Error,
@@ -331,13 +353,15 @@ pub async fn connect(
                 &slot.key,
                 Some(&error.message),
             );
-            set_state(
-                app,
-                &slot,
-                RemoteBackendState::Failed {
-                    error: error.clone(),
-                },
-            );
+            if slot.shared.lock().expect("slot poisoned").generation == expected_generation {
+                set_state(
+                    app,
+                    &slot,
+                    RemoteBackendState::Failed {
+                        error: error.clone(),
+                    },
+                );
+            }
             Err(error)
         }
     }
@@ -347,11 +371,15 @@ pub async fn connect(
 /// Caller must hold the slot's connect lock. `prior_attempts` carries the
 /// reconnect budget already spent into the next supervisor so a flapping
 /// tunnel cannot reset it (see [`RECONNECT_STABLE_UPTIME`]).
+/// `expected_generation` is the ownership token observed before asynchronous
+/// setup began. `Ok(None)` means a disconnect or newer connection superseded
+/// this attempt before it could publish Ready.
 async fn establish(
     app: &AppHandle,
     slot: &Arc<HostSlot>,
+    expected_generation: u64,
     prior_attempts: u32,
-) -> Result<RemoteBackendConnection, RemoteBackendError> {
+) -> Result<Option<RemoteBackendConnection>, RemoteBackendError> {
     let shell_env = dir_env::capture_home_interactive_env().await;
 
     // Reconnects reuse the binary the slot connected with, so a supervisor
@@ -394,14 +422,20 @@ async fn establish(
         daemon_reused: daemon_info.reused,
     };
 
+    let tunnel_pid = tunnel.child.id();
     let generation = {
         let mut shared = slot.shared.lock().expect("slot poisoned");
-        shared.generation += 1;
-        shared.daemon = Some(daemon_info);
-        shared.local_port = Some(local_port);
-        shared.tunnel_pid = tunnel.child.id();
-        shared.state = state.clone();
-        shared.generation
+        advance_generation_if_current(&mut shared, expected_generation).inspect(|_| {
+            shared.daemon = Some(daemon_info);
+            shared.local_port = Some(local_port);
+            shared.tunnel_pid = tunnel_pid;
+            shared.state = state.clone();
+        })
+    };
+    let Some(generation) = generation else {
+        let _ = tunnel.child.start_kill();
+        let _ = tunnel.child.wait().await;
+        return Ok(None);
     };
     emit_status(app, &slot.key, &state);
 
@@ -413,7 +447,7 @@ async fn establish(
         prior_attempts,
     );
 
-    Ok(connection)
+    Ok(Some(connection))
 }
 
 /// Watch one tunnel child. On unexpected death, try to re-establish (each
@@ -427,11 +461,12 @@ fn spawn_supervisor(
 ) {
     tauri::async_runtime::spawn(async move {
         let established_at = tokio::time::Instant::now();
+        let tunnel_pid = tunnel.child.id();
         let status = tunnel.child.wait().await;
 
         let is_current = {
-            let shared = slot.shared.lock().expect("slot poisoned");
-            shared.generation == generation
+            let mut shared = slot.shared.lock().expect("slot poisoned");
+            clear_tunnel_pid_if_current(&mut shared, generation, tunnel_pid)
         };
         if !is_current {
             // Explicit disconnect, app exit, or a newer establish owns the
@@ -499,12 +534,16 @@ fn spawn_supervisor(
                 }
             }
 
-            match establish(&app, &slot, attempt).await {
-                Ok(_) => {
+            match establish(&app, &slot, generation, attempt).await {
+                Ok(Some(_)) => {
                     record_diagnostic(DiagnosticLevel::Info, "reconnect_success", &slot.key, None);
                     return;
                 }
+                Ok(None) => return,
                 Err(error) => {
+                    if slot.shared.lock().expect("slot poisoned").generation != generation {
+                        return;
+                    }
                     log::warn!(
                         "[remote-backend] reconnect attempt {attempt} to {} failed: {}",
                         slot.key,
@@ -672,6 +711,29 @@ mod tests {
         let mut shared = ready_shared(None);
         shared.state = RemoteBackendState::Connecting;
         assert!(cached_connection(&shared, None).is_none());
+    }
+
+    #[test]
+    fn stale_establish_cannot_advance_generation() {
+        let mut shared = ready_shared(None);
+        shared.generation = 4;
+
+        assert_eq!(advance_generation_if_current(&mut shared, 3), None);
+        assert_eq!(shared.generation, 4);
+        assert_eq!(advance_generation_if_current(&mut shared, 4), Some(5));
+        assert_eq!(shared.generation, 5);
+    }
+
+    #[test]
+    fn exited_tunnel_pid_is_cleared_only_by_its_current_supervisor() {
+        let mut shared = ready_shared(None);
+
+        assert!(clear_tunnel_pid_if_current(&mut shared, 1, Some(99)));
+        assert_eq!(shared.tunnel_pid, None);
+
+        shared.tunnel_pid = Some(100);
+        assert!(!clear_tunnel_pid_if_current(&mut shared, 0, Some(100)));
+        assert_eq!(shared.tunnel_pid, Some(100));
     }
 
     #[test]

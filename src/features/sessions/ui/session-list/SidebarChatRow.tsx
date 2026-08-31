@@ -7,7 +7,7 @@ import {
   type PointerEvent,
 } from "react";
 import { createPortal } from "react-dom";
-import { ExternalLink, MoreHorizontal, Server } from "lucide-react";
+import { ExternalLink, Globe2, MoreHorizontal } from "lucide-react";
 import { IconCheck, IconGitBranch } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import {
@@ -482,12 +482,12 @@ export function SidebarChatRow({
       {remoteHost ? (
         <span
           data-sidebar-chat-remote-host
-          className="flex size-4 shrink-0 items-center justify-center text-sidebar-foreground/60"
+          className="flex size-4 shrink-0 items-center justify-center text-info"
           role="img"
           aria-label={t("status.remoteHost", { host: remoteHost })}
           title={t("status.remoteHost", { host: remoteHost })}
         >
-          <Server className="size-3" aria-hidden="true" />
+          <Globe2 className="size-3" aria-hidden="true" />
         </span>
       ) : null}
       {isMultiWindowEnabled && isOpenInWindow ? (

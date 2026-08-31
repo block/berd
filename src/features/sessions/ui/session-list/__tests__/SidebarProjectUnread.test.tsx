@@ -41,6 +41,28 @@ function renderSection(isExpanded: boolean) {
   );
 }
 
+function renderRemoteSection() {
+  return render(
+    <SidebarChatDragProvider>
+      <SidebarProjectSection
+        project={PROJECT}
+        projectChats={[
+          {
+            id: "remote-1",
+            title: "Remote chat",
+            updatedAt: "2026-01-01T00:00:00Z",
+            remoteHost: "blox",
+          },
+        ]}
+        isExpanded
+        toggleProject={vi.fn()}
+        showChatIcons
+        showTimestamps
+      />
+    </SidebarChatDragProvider>,
+  );
+}
+
 describe("project unread dot", () => {
   it("swaps the project icon for the unread dot when collapsed and a chat is unread", () => {
     const { container } = renderSection(false);
@@ -59,5 +81,18 @@ describe("project unread dot", () => {
     expect(
       container.querySelectorAll('[aria-label="Unread messages"]'),
     ).toHaveLength(1);
+  });
+});
+
+describe("remote project identity", () => {
+  it("badges the project icon and uses a remote globe on its chat", () => {
+    const { container } = renderRemoteSection();
+
+    expect(
+      container.querySelector("[data-sidebar-project-remote]"),
+    ).toBeInTheDocument();
+    expect(
+      container.querySelector("[data-sidebar-chat-remote-host]"),
+    ).toHaveAttribute("title", "Remote chat on blox");
   });
 });
