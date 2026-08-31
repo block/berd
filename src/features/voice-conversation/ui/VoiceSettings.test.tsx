@@ -274,10 +274,10 @@ describe("VoiceSettings", () => {
     expect(screen.getByText("Playback speed")).toBeInTheDocument();
     expect(
       screen.getByRole("combobox", { name: "Transcription model" }),
-    ).toHaveTextContent("gpt-live-transcribe");
+    ).toHaveTextContent("gpt-live-transcribe (default)");
     expect(
       screen.getByRole("combobox", { name: "Speech model" }),
-    ).toHaveTextContent("gpt-4o-mini-tts");
+    ).toHaveTextContent("gpt-4o-mini-tts (default)");
     expect(
       screen.getAllByText(
         "Saved securely and shared by OpenAI transcription and voice playback.",

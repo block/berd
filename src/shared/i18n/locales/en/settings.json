@@ -934,6 +934,7 @@
   "voice": {
     "conversationMode": "Voice mode",
     "conversationModeDescription": "Choose the speech pipeline for Voice Conversation.",
+    "defaultOption": "{{value}} (default)",
     "modeChained": "Chained STT and TTS",
     "modeOpenAiRealtime": "OpenAI Realtime",
     "realtimeAdvanced": "Advanced",

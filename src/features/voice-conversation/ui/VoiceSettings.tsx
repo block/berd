@@ -63,6 +63,7 @@ const OPENAI_TRANSCRIPTION_MODELS = [
 const OPENAI_SPEECH_MODELS = ["gpt-4o-mini-tts", "tts-1-hd", "tts-1"] as const;
 
 function OpenAiModelSelect({
+  defaultModel,
   disabled,
   id,
   label,
@@ -70,6 +71,7 @@ function OpenAiModelSelect({
   onChange,
   value,
 }: {
+  defaultModel: string;
   disabled: boolean;
   id: string;
   label: string;
@@ -77,6 +79,8 @@ function OpenAiModelSelect({
   onChange(value: string): void;
   value: string;
 }) {
+  const { t } = useTranslation("settings");
+
   return (
     <div className="space-y-2">
       <Label htmlFor={id}>{label}</Label>
@@ -90,7 +94,9 @@ function OpenAiModelSelect({
           ) : null}
           {models.map((model) => (
             <SelectItem key={model} value={model}>
-              {model}
+              {model === defaultModel
+                ? t("voice.defaultOption", { value: model })
+                : model}
             </SelectItem>
           ))}
         </SelectContent>
@@ -336,6 +342,7 @@ export function VoiceSettings() {
                     {openAiStatus ? (
                       <OpenAiModelSelect
                         id="openai-transcription-model"
+                        defaultModel="gpt-live-transcribe"
                         label={t("voice.openAiSttModel")}
                         value={openAiStatus.transcriptionModel}
                         models={OPENAI_TRANSCRIPTION_MODELS}
@@ -443,6 +450,7 @@ export function VoiceSettings() {
                     {openAiStatus ? (
                       <OpenAiModelSelect
                         id="openai-speech-model"
+                        defaultModel="gpt-4o-mini-tts"
                         label={t("voice.openAiTtsModel")}
                         value={openAiStatus.speechModel}
                         models={OPENAI_SPEECH_MODELS}

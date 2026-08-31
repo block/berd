@@ -197,7 +197,9 @@ export function RealtimeVoiceSettings() {
               />
               {REALTIME_MODELS.map((model) => (
                 <SelectItem key={model} value={model}>
-                  {model}
+                  {model === "gpt-realtime-2.1"
+                    ? t("voice.defaultOption", { value: model })
+                    : model}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -226,7 +228,9 @@ export function RealtimeVoiceSettings() {
               />
               {TRANSCRIPTION_MODELS.map((model) => (
                 <SelectItem key={model} value={model}>
-                  {model}
+                  {model === "gpt-realtime-whisper"
+                    ? t("voice.defaultOption", { value: model })
+                    : model}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -253,7 +257,9 @@ export function RealtimeVoiceSettings() {
               />
               {REALTIME_VOICES.map((voice) => (
                 <SelectItem key={voice} value={voice}>
-                  {voiceLabel(voice)}
+                  {voice === "marin"
+                    ? t("voice.defaultOption", { value: voiceLabel(voice) })
+                    : voiceLabel(voice)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -277,7 +283,9 @@ export function RealtimeVoiceSettings() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="server_vad">
-                {t("voice.realtimeTurnDetectionServer")}
+                {t("voice.defaultOption", {
+                  value: t("voice.realtimeTurnDetectionServer"),
+                })}
               </SelectItem>
               <SelectItem value="semantic_vad">
                 {t("voice.realtimeTurnDetectionSemantic")}
@@ -304,7 +312,9 @@ export function RealtimeVoiceSettings() {
                   {t("voice.realtimeEagernessLow")}
                 </SelectItem>
                 <SelectItem value="auto">
-                  {t("voice.realtimeEagernessAuto")}
+                  {t("voice.defaultOption", {
+                    value: t("voice.realtimeEagernessAuto"),
+                  })}
                 </SelectItem>
                 <SelectItem value="medium">
                   {t("voice.realtimeEagernessMedium")}
@@ -409,7 +419,9 @@ export function RealtimeVoiceSettings() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="off">
-                    {t("voice.realtimeNoiseReductionOff")}
+                    {t("voice.defaultOption", {
+                      value: t("voice.realtimeNoiseReductionOff"),
+                    })}
                   </SelectItem>
                   <SelectItem value="near_field">
                     {t("voice.realtimeNoiseReductionNear")}

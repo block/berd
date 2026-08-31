@@ -34,16 +34,16 @@ describe("RealtimeVoiceSettings", () => {
 
     expect(
       screen.getByRole("combobox", { name: "Realtime model" }),
-    ).toHaveTextContent("gpt-realtime-2.1");
+    ).toHaveTextContent("gpt-realtime-2.1 (default)");
     expect(
       screen.getByRole("combobox", { name: "Transcription model" }),
-    ).toHaveTextContent("gpt-realtime-whisper");
+    ).toHaveTextContent("gpt-realtime-whisper (default)");
     expect(screen.getByRole("combobox", { name: "Voice" })).toHaveTextContent(
-      "Marin",
+      "Marin (default)",
     );
     expect(
       screen.getByRole("combobox", { name: "Turn detection" }),
-    ).toHaveTextContent("Server VAD");
+    ).toHaveTextContent("Server VAD (default)");
     expect(
       screen.getByRole("switch", { name: "Interrupt when I speak" }),
     ).toBeChecked();

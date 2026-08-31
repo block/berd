@@ -933,6 +933,7 @@
   "voice": {
     "conversationMode": "Modo de voz",
     "conversationModeDescription": "Elige el flujo de voz para Conversación por voz.",
+    "defaultOption": "{{value}} (predeterminado)",
     "modeChained": "STT y TTS encadenados",
     "modeOpenAiRealtime": "OpenAI Realtime",
     "realtimeAdvanced": "Avanzado",
