@@ -39,6 +39,9 @@ use crate::services::acp::goose_serve::{
 };
 use crate::services::diagnostic_log::{self, DiagnosticCategory, DiagnosticLevel};
 use crate::services::dir_env;
+// Only the unix tunnel-kill path goes through the shared process helpers; the
+// Windows branch talks to sysinfo directly.
+#[cfg(unix)]
 use crate::services::process;
 
 use daemon::RemoteDaemonInfo;
