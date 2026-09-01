@@ -8,8 +8,8 @@
 
 use crate::bridge::{Bridge, BridgeError, BridgeRequest, BridgeResult};
 use crate::discovery::PROTOCOL_VERSION;
-use axum::body::Bytes;
-use axum::extract::State;
+use axum::body::to_bytes;
+use axum::extract::{Request, State};
 use axum::http::header::{AUTHORIZATION, HOST, ORIGIN};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -31,6 +31,11 @@ const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 const MIN_REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
 const MAX_COMMAND_TIMEOUT: Duration = Duration::from_secs(900);
 const CAPABILITY_BYTES: usize = 32;
+/// Maximum accepted serialized `/v1/call` request body. The broker only
+/// forwards compact command envelopes, never arbitrary payload streams.
+// A 50,000-character prompt can exceed 200 KiB as UTF-8 and grow further
+// through JSON escaping. Leave ample envelope headroom while retaining a hard cap.
+const MAX_CALL_BODY_BYTES: usize = 512 * 1024;
 
 pub fn generate_capability() -> std::io::Result<String> {
     let mut bytes = [0_u8; CAPABILITY_BYTES];
@@ -267,11 +272,25 @@ fn empty_object() -> Value {
 async fn handle_call<D: CommandDispatcher>(
     State(ctx): State<Arc<ServerContext<D>>>,
     headers: HeaderMap,
-    body: Bytes,
+    request: Request,
 ) -> Response {
+    // `Request` leaves its body untouched until after all header-only
+    // defenses pass. In particular, an unauthenticated peer cannot make us
+    // buffer or parse a body before receiving its 403 response.
     if let Some(rejection) = forbidden_header_response(&ctx, &headers) {
         return rejection;
     }
+
+    let body = match to_bytes(request.into_body(), MAX_CALL_BODY_BYTES).await {
+        Ok(body) => body,
+        Err(_) => {
+            return error_response(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "payload_too_large",
+                "request body exceeds the maximum allowed size",
+            );
+        }
+    };
 
     let call = match serde_json::from_slice::<CallBody>(&body) {
         Ok(call) => call,
@@ -385,6 +404,7 @@ fn log_call(command: &str, result_code: &str, started: Instant) {
 mod tests {
     use super::*;
     use crate::bridge::BridgeErrorBody;
+    use tokio::net::TcpStream;
     use tokio::sync::{mpsc, Notify};
 
     const TEST_GENERATION: u64 = 3;
@@ -521,6 +541,41 @@ mod tests {
         post_call_with_capability(base, body, Some(TEST_CAPABILITY)).await
     }
 
+    async fn write_all(stream: &TcpStream, bytes: &[u8]) {
+        let mut written = 0;
+        while written < bytes.len() {
+            stream.writable().await.unwrap();
+            match stream.try_write(&bytes[written..]) {
+                Ok(count) => written += count,
+                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => continue,
+                Err(err) => panic!("write request: {err}"),
+            }
+        }
+    }
+
+    async fn read_headers(stream: &TcpStream) -> Vec<u8> {
+        tokio::time::timeout(Duration::from_secs(1), async {
+            let mut response = Vec::new();
+            let mut buffer = [0; 1024];
+            loop {
+                stream.readable().await.unwrap();
+                match stream.try_read(&mut buffer) {
+                    Ok(0) => return response,
+                    Ok(count) => {
+                        response.extend_from_slice(&buffer[..count]);
+                        if response.windows(4).any(|window| window == b"\r\n\r\n") {
+                            return response;
+                        }
+                    }
+                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => continue,
+                    Err(err) => panic!("read response: {err}"),
+                }
+            }
+        })
+        .await
+        .expect("server must reject headers without waiting for the body")
+    }
+
     fn call_body(command: &str, args: Value) -> Value {
         json!({ "command": command, "args": args })
     }
@@ -562,6 +617,51 @@ mod tests {
                 .status(),
             200
         );
+    }
+
+    #[tokio::test]
+    async fn unauthorized_call_is_rejected_before_its_body_is_consumed() {
+        let server = spawn_server(StubBehavior::Echo, Limits::default()).await;
+        let stream = TcpStream::connect(server.base.strip_prefix("http://").unwrap())
+            .await
+            .unwrap();
+        // Declare a body but deliberately do not send it. A response proves
+        // header authentication ran before any body collection could wait for
+        // these bytes.
+        write_all(
+            &stream,
+            format!(
+                "POST /v1/call HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Length: {}\r\n\r\n",
+                server.base.rsplit(':').next().unwrap(),
+                MAX_CALL_BODY_BYTES + 1,
+            )
+            .as_bytes(),
+        )
+        .await;
+
+        let response = String::from_utf8(read_headers(&stream).await).unwrap();
+        assert!(response.starts_with("HTTP/1.1 403"), "{response}");
+    }
+
+    #[tokio::test]
+    async fn call_body_over_explicit_limit_is_413() {
+        let server = spawn_server(StubBehavior::Echo, Limits::default()).await;
+        let body = format!(
+            r#"{{"command":"x","args":{{"padding":"{}"}}}}"#,
+            "x".repeat(MAX_CALL_BODY_BYTES),
+        );
+        let response = reqwest::Client::new()
+            .post(format!("{}/v1/call", server.base))
+            .bearer_auth(TEST_CAPABILITY)
+            .header("Content-Type", "application/json")
+            .body(body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 413);
+        let body: Value = response.json().await.unwrap();
+        assert_eq!(body["ok"], false);
+        assert_eq!(body["error"]["code"], "payload_too_large");
     }
 
     #[test]
