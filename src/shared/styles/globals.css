@@ -1980,7 +1980,7 @@ html[data-window-kind="voice-buddy"] #root {
 
 [data-streamdown="table"] td {
   font-size: 0.8125rem;
-  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
 }
 
 /* Streamdown paints its table scroll container with bg-background. Keep the

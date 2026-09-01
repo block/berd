@@ -16,7 +16,7 @@ describe("Streamdown table styles", () => {
       /\[data-streamdown="table"\]\s+th\s*\{[^}]*(?:letter-spacing|text-transform):/s,
     );
     expect(globalsCss).toMatch(
-      /\[data-streamdown="table"\]\s+td\s*\{[^}]*font-size:\s*0\.8125rem;[^}]*overflow-wrap:\s*break-word;/s,
+      /\[data-streamdown="table"\]\s+td\s*\{[^}]*font-size:\s*0\.8125rem;[^}]*overflow-wrap:\s*anywhere;/s,
     );
     expect(globalsCss).not.toMatch(
       /\[data-streamdown="table"\]\s+td\s*\{[^}]*white-space:\s*normal;/s,
