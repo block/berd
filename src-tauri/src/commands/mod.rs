@@ -48,6 +48,7 @@ pub mod pocket_voice;
 pub mod pr_tracker;
 pub mod project_icons;
 pub mod pull_requests;
+pub mod remote_backend;
 pub mod renderer;
 pub mod runtime_config;
 pub mod security_threshold;

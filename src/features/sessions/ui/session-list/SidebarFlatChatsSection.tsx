@@ -300,6 +300,7 @@ export function SidebarFlatChatsSection({
                       id={session.id}
                       title={session.title}
                       branchName={session.branchName}
+                      remoteHost={session.remoteHost}
                       activityAt={session.activityAt}
                       showLeadingIcon={showChatIcons}
                       showTimestamp={showTimestamps}

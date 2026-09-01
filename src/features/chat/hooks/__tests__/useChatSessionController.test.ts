@@ -1,4 +1,6 @@
 import { getModelSelectionIntent } from "@/features/chat/model-selection/modelSelectionIntent";
+import { REMOTE_SSH_SESSIONS_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
@@ -50,6 +52,7 @@ const mockMarkAgentBuilderSessionPreparationFailed = vi.fn();
 const mockDeletePersonaSource = vi.fn();
 const mockAcpCreateSession = vi.fn();
 const mockAcpSessionArchive = vi.fn();
+const mockEnsureRemoteHostConnected = vi.fn();
 const mockUseChatRuntime = {
   chatState: "idle",
   activeRunId: null as string | null,
@@ -125,8 +128,8 @@ vi.mock("sonner", () => ({
   toast: { error: (...args: unknown[]) => mockToastError(...args) },
 }));
 
-vi.mock("@/shared/api/acpConnection", () => ({
-  getClient: async () => ({
+vi.mock("@/shared/api/acpConnection", () => {
+  const getClient = async () => ({
     goose: {
       GooseUnstableDefaultsRead: (...args: unknown[]) =>
         mockGooseDefaultsRead(...args),
@@ -139,8 +142,9 @@ vi.mock("@/shared/api/acpConnection", () => ({
       GooseUnstableSessionArchive: (...args: unknown[]) =>
         mockAcpSessionArchive(...args),
     },
-  }),
-}));
+  });
+  return { getClient, getBackendClient: getClient };
+});
 
 vi.mock("../useChat", () => ({
   useChat: (
@@ -234,6 +238,14 @@ vi.mock("@/features/agents/hooks/useProviderSelection", () => ({
 
 vi.mock("@/features/projects/lib/sessionCwdSelection", () => ({
   resolveSessionCwd: (...args: unknown[]) => mockResolveSessionCwd(...args),
+}));
+
+vi.mock("../../lib/remoteSession", () => ({
+  isRemoteSession: (
+    session: { remoteHost?: string | null } | null | undefined,
+  ) => Boolean(session?.remoteHost?.trim()),
+  ensureRemoteHostConnected: (...args: unknown[]) =>
+    mockEnsureRemoteHostConnected(...args),
 }));
 
 vi.mock("../useAgentModelPickerState", () => ({
@@ -6564,6 +6576,191 @@ describe("useChatSessionController", () => {
           telemetrySourceSurface: CHAT_SOURCE_SURFACE.AGENT_BUILDER,
         });
       });
+    });
+  });
+
+  describe("remote SSH host selection", () => {
+    beforeEach(() => {
+      mockEnsureRemoteHostConnected.mockReset().mockResolvedValue(undefined);
+      setExperimentEnabled(REMOTE_SSH_SESSIONS_EXPERIMENT_ID, true);
+    });
+
+    it("is disabled while the experiment is off", () => {
+      setExperimentEnabled(REMOTE_SSH_SESSIONS_EXPERIMENT_ID, false);
+      const { result } = renderHook(() =>
+        useChatSessionController({ sessionId: "session-1" }),
+      );
+
+      expect(result.current.remoteHostSelectionEnabled).toBe(false);
+    });
+
+    it("tracks pending host and dir, and clearing the host resets the dir", () => {
+      const { result } = renderHook(() =>
+        useChatSessionController({ sessionId: "session-1" }),
+      );
+
+      expect(result.current.remoteHostSelectionEnabled).toBe(true);
+      expect(result.current.selectedRemoteHost).toBeNull();
+
+      act(() => {
+        result.current.handleRemoteHostChange("devbox");
+      });
+      expect(result.current.selectedRemoteHost).toBe("devbox");
+      // Remote sessions are project-less: picking a host clears the project.
+      expect(result.current.selectedProjectId).toBeNull();
+      expect(result.current.selectedRemoteDir).toBeNull();
+
+      act(() => {
+        result.current.handleRemoteDirChange("/home/dev/project");
+      });
+      expect(result.current.selectedRemoteDir).toBe("/home/dev/project");
+
+      act(() => {
+        result.current.handleRemoteHostChange(null);
+      });
+      expect(result.current.selectedRemoteHost).toBeNull();
+      expect(result.current.selectedRemoteDir).toBeNull();
+    });
+
+    it("is not offered once the session has started", () => {
+      useChatStore.setState({
+        messagesBySession: {
+          "session-1": [createUserMessage("already chatting")],
+        },
+      });
+
+      const { result } = renderHook(() =>
+        useChatSessionController({ sessionId: "session-1" }),
+      );
+
+      expect(result.current.remoteHostSelectionEnabled).toBe(false);
+    });
+
+    it("blocks a send when a host is selected without a remote directory", async () => {
+      const { result } = renderHook(() =>
+        useChatSessionController({ sessionId: "session-1" }),
+      );
+
+      act(() => {
+        result.current.handleRemoteHostChange("devbox");
+      });
+
+      let accepted: boolean | Promise<boolean> = true;
+      act(() => {
+        accepted = result.current.handleSend("hello remote");
+      });
+      expect(await accepted).toBe(false);
+      expect(mockAcpCreateSession).not.toHaveBeenCalled();
+      expect(mockEnsureRemoteHostConnected).not.toHaveBeenCalled();
+    });
+
+    it("routes a send with host and dir into a fresh remote session", async () => {
+      mockAcpCreateSession.mockResolvedValue({
+        sessionId: "remote-session-1",
+        configOptionsSnapshot: undefined,
+      });
+
+      const { result } = renderHook(() =>
+        useChatSessionController({ sessionId: "session-1" }),
+      );
+
+      act(() => {
+        result.current.handleRemoteHostChange("devbox");
+        result.current.handleRemoteDirChange("/home/dev/project");
+      });
+
+      let accepted: boolean | Promise<boolean> = false;
+      act(() => {
+        accepted = result.current.handleSend("hello remote");
+      });
+      await act(async () => {
+        expect(await accepted).toBe(true);
+      });
+
+      expect(mockEnsureRemoteHostConnected).toHaveBeenCalledWith("devbox");
+      expect(mockAcpCreateSession).toHaveBeenCalledWith(
+        expect.any(String),
+        "/home/dev/project",
+        expect.objectContaining({ remoteHost: "devbox" }),
+      );
+      const created = useChatSessionStore
+        .getState()
+        .getSession("remote-session-1");
+      expect(created?.remoteHost).toBe("devbox");
+      expect(created?.workingDir).toBe("/home/dev/project");
+      // The original (local) session is left untouched.
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.remoteHost,
+      ).toBeUndefined();
+      expect(useChatSessionStore.getState().activeSessionId).toBe(
+        "remote-session-1",
+      );
+    });
+
+    it("creates exactly one remote session when send fires twice in flight", async () => {
+      // ssh connect + session/new take a moment; a re-submit inside that
+      // window (double Enter, double click) must not create a second session.
+      let releaseConnect: () => void = () => {};
+      mockEnsureRemoteHostConnected.mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseConnect = resolve;
+          }),
+      );
+      mockAcpCreateSession.mockResolvedValue({
+        sessionId: "remote-session-1",
+        configOptionsSnapshot: undefined,
+      });
+
+      const { result } = renderHook(() =>
+        useChatSessionController({ sessionId: "session-1" }),
+      );
+
+      act(() => {
+        result.current.handleRemoteHostChange("devbox");
+        result.current.handleRemoteDirChange("/home/dev/project");
+      });
+
+      let first: boolean | Promise<boolean> = false;
+      let second: boolean | Promise<boolean> = true;
+      act(() => {
+        first = result.current.handleSend("hello remote");
+        second = result.current.handleSend("hello remote");
+      });
+      await act(async () => {
+        releaseConnect();
+        expect(await first).toBe(true);
+        expect(await second).toBe(false);
+      });
+
+      expect(mockAcpCreateSession).toHaveBeenCalledTimes(1);
+    });
+
+    it("reports a failed connect and keeps the send unaccepted", async () => {
+      mockEnsureRemoteHostConnected.mockRejectedValue({
+        kind: "host-unreachable",
+        message: "no route to host",
+      });
+
+      const { result } = renderHook(() =>
+        useChatSessionController({ sessionId: "session-1" }),
+      );
+
+      act(() => {
+        result.current.handleRemoteHostChange("devbox");
+        result.current.handleRemoteDirChange("/home/dev/project");
+      });
+
+      let accepted: boolean | Promise<boolean> = true;
+      act(() => {
+        accepted = result.current.handleSend("hello remote");
+      });
+      await act(async () => {
+        expect(await accepted).toBe(false);
+      });
+
+      expect(mockAcpCreateSession).not.toHaveBeenCalled();
+      expect(mockToastError).toHaveBeenCalled();
     });
   });
 });

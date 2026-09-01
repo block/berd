@@ -3152,4 +3152,53 @@ describe("ContextPanel", () => {
       await screen.findByText("No uncommitted changes"),
     ).toBeInTheDocument();
   });
+
+  it("degrades to a remote workspace summary and disables git queries for remote sessions", async () => {
+    const user = userEvent.setup();
+    useChatSessionStore.setState((state) => ({
+      sessions: [
+        {
+          id: "remote-session",
+          title: "Remote chat",
+          workingDir: "/home/dev/project",
+          remoteHost: "devbox",
+          createdAt: "2026-08-27T00:00:00.000Z",
+          updatedAt: "2026-08-27T00:00:00.000Z",
+          messageCount: 0,
+        },
+        ...state.sessions,
+      ],
+    }));
+
+    renderContextPanel({
+      sessionId: "remote-session",
+      projectWorkingDirs: [],
+      sessionWorkingDir: "/home/dev/project",
+    });
+
+    // Details: no git/branch/worktree widgets — just the folder + host badge.
+    expect(screen.getByTestId("remote-host-badge")).toHaveTextContent("devbox");
+    expect(screen.getByText("Folder on devbox")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /refresh local status/i }),
+    ).toBeNull();
+
+    // Every local git query mounts disabled: the paths live on the SSH host.
+    // (The workspace-runtime mock re-invokes mockUseGitState with no args, so
+    // only calls that actually pass the enabled flag are meaningful here.)
+    expect(mockUseGitState.mock.calls.some((call) => call[1] === true)).toBe(
+      false,
+    );
+    expect(
+      mockUseWorkspaceGitRuntimes.mock.calls.some((call) => call[1] === true),
+    ).toBe(false);
+
+    await user.click(screen.getByRole("tab", { name: /changes/i }));
+    expect(
+      await screen.findByText(/Changes live on devbox/),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: /files/i }));
+    expect(await screen.findByText(/Files live on devbox/)).toBeInTheDocument();
+  });
 });

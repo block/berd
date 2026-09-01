@@ -9,6 +9,9 @@ const mocks = vi.hoisted(() => ({
   newSession: vi.fn(),
   setSessionConfigOption: vi.fn(),
   extMethod: vi.fn(),
+  clientPrompt: vi.fn(),
+  clientLoadSession: vi.fn(),
+  clientCancel: vi.fn(),
 }));
 
 const includeLastMessageSnippetMeta = {
@@ -56,6 +59,7 @@ function createConfigOptionsResponse() {
 
 vi.mock("../acpConnection", () => ({
   getClient: (...args: unknown[]) => mocks.getClient(...args),
+  getBackendClient: (...args: unknown[]) => mocks.getClient(...args),
   interceptSessionNotifications: (...args: unknown[]) =>
     mocks.interceptSessionNotifications(...args),
 }));
@@ -926,5 +930,201 @@ describe("steerSession", () => {
         expectedRunId: "run-2",
       },
     );
+  });
+});
+
+describe("remote session wire translation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getClient.mockResolvedValue({
+      newSession: mocks.newSession,
+      prompt: mocks.clientPrompt,
+      loadSession: mocks.clientLoadSession,
+      cancel: mocks.clientCancel,
+      listSessions: mocks.listSessions,
+      unstable_forkSession: mocks.unstableForkSession,
+      setSessionConfigOption: mocks.setSessionConfigOption,
+      extMethod: mocks.extMethod,
+    });
+    setSessionConfigSnapshotHandlers({});
+  });
+
+  it("returns a composite id from a remote newSession and registers the wire id", async () => {
+    mocks.newSession.mockResolvedValueOnce({ sessionId: "20260828_2" });
+    const { newSession } = await import("../acpApi");
+    const { getSessionBackend, getWireSessionId, unregisterSessionBackend } =
+      await import("../acpSessionBackends");
+
+    const response = await newSession("/remote/dir", {
+      backendId: "ssh:workstation.blox",
+    });
+
+    expect(response.sessionId).toBe("ssh:workstation.blox#20260828_2");
+    expect(getSessionBackend("ssh:workstation.blox#20260828_2")).toBe(
+      "ssh:workstation.blox",
+    );
+    expect(getWireSessionId("ssh:workstation.blox#20260828_2")).toBe(
+      "20260828_2",
+    );
+    unregisterSessionBackend("ssh:workstation.blox#20260828_2");
+  });
+
+  it("keeps the bare id for a local newSession", async () => {
+    mocks.newSession.mockResolvedValueOnce({ sessionId: "20260828_2" });
+    const { newSession } = await import("../acpApi");
+    const { getSessionBackend, unregisterSessionBackend } = await import(
+      "../acpSessionBackends"
+    );
+
+    const response = await newSession("/local/dir");
+
+    expect(response.sessionId).toBe("20260828_2");
+    expect(getSessionBackend("20260828_2")).toBe("local");
+    unregisterSessionBackend("20260828_2");
+  });
+
+  it("sends the wire id for a registered remote session and the raw id for local", async () => {
+    const { prompt, loadSession, cancelSession } = await import("../acpApi");
+    const { registerSessionBackend, unregisterSessionBackend } = await import(
+      "../acpSessionBackends"
+    );
+    registerSessionBackend("ssh:devbox#20260828_2", "ssh:devbox", "20260828_2");
+    mocks.clientPrompt.mockResolvedValue({ stopReason: "end_turn" });
+    mocks.clientLoadSession.mockResolvedValue({});
+    mocks.clientCancel.mockResolvedValue(undefined);
+
+    await prompt("ssh:devbox#20260828_2", [{ type: "text", text: "hi" }]);
+    expect(mocks.clientPrompt).toHaveBeenCalledWith({
+      sessionId: "20260828_2",
+      prompt: [{ type: "text", text: "hi" }],
+      _meta: undefined,
+    });
+
+    await loadSession("ssh:devbox#20260828_2", "/remote/dir");
+    expect(mocks.clientLoadSession).toHaveBeenCalledWith({
+      sessionId: "20260828_2",
+      cwd: "/remote/dir",
+      mcpServers: [],
+    });
+
+    await cancelSession("ssh:devbox#20260828_2");
+    expect(mocks.clientCancel).toHaveBeenCalledWith({
+      sessionId: "20260828_2",
+    });
+
+    await prompt("local-session", [{ type: "text", text: "hi" }]);
+    expect(mocks.clientPrompt).toHaveBeenLastCalledWith({
+      sessionId: "local-session",
+      prompt: [{ type: "text", text: "hi" }],
+      _meta: undefined,
+    });
+
+    unregisterSessionBackend("ssh:devbox#20260828_2");
+  });
+
+  it("translates config, rename, archive, and steer calls to the wire id", async () => {
+    const {
+      setProvider,
+      setModel,
+      renameSession,
+      archiveSession,
+      steerSession,
+    } = await import("../acpApi");
+    const { registerSessionBackend, unregisterSessionBackend } = await import(
+      "../acpSessionBackends"
+    );
+    const goose = {
+      GooseUnstableSessionRename: vi.fn().mockResolvedValue(undefined),
+      GooseUnstableSessionArchive: vi.fn().mockResolvedValue(undefined),
+    };
+    mocks.getClient.mockResolvedValue({
+      setSessionConfigOption: mocks.setSessionConfigOption,
+      extMethod: mocks.extMethod,
+      goose,
+    });
+    registerSessionBackend("ssh:devbox#20260828_2", "ssh:devbox", "20260828_2");
+    mocks.setSessionConfigOption.mockResolvedValue(undefined);
+    mocks.extMethod.mockResolvedValue({ runId: "run-1", messageId: "m-1" });
+
+    await setProvider("ssh:devbox#20260828_2", "goose");
+    expect(mocks.setSessionConfigOption).toHaveBeenCalledWith({
+      sessionId: "20260828_2",
+      configId: "provider",
+      value: "goose",
+    });
+
+    await setModel("ssh:devbox#20260828_2", "claude-opus-4-8");
+    expect(mocks.setSessionConfigOption).toHaveBeenLastCalledWith({
+      sessionId: "20260828_2",
+      configId: "model",
+      value: "claude-opus-4-8",
+    });
+
+    await renameSession("ssh:devbox#20260828_2", "New title");
+    expect(goose.GooseUnstableSessionRename).toHaveBeenCalledWith({
+      sessionId: "20260828_2",
+      title: "New title",
+    });
+
+    await archiveSession("ssh:devbox#20260828_2");
+    expect(goose.GooseUnstableSessionArchive).toHaveBeenCalledWith({
+      sessionId: "20260828_2",
+    });
+
+    await steerSession(
+      "ssh:devbox#20260828_2",
+      [{ type: "text", text: "steer" }],
+      "run-1",
+    );
+    expect(mocks.extMethod).toHaveBeenCalledWith(
+      "_goose/unstable/session/steer",
+      {
+        sessionId: "20260828_2",
+        prompt: [{ type: "text", text: "steer" }],
+        expectedRunId: "run-1",
+      },
+    );
+
+    unregisterSessionBackend("ssh:devbox#20260828_2");
+  });
+
+  it("composes remote list results and fork children onto their backend", async () => {
+    const { listSessionsPage, forkSession } = await import("../acpApi");
+    const {
+      registerSessionBackend,
+      getWireSessionId,
+      unregisterSessionBackend,
+    } = await import("../acpSessionBackends");
+
+    mocks.listSessions.mockResolvedValueOnce({
+      sessions: [{ sessionId: "20260828_2", cwd: "/remote/dir" }],
+      nextCursor: null,
+    });
+    const page = await listSessionsPage({ backendId: "ssh:devbox" });
+    expect(page.sessions[0]?.sessionId).toBe("ssh:devbox#20260828_2");
+
+    mocks.listSessions.mockResolvedValueOnce({
+      sessions: [{ sessionId: "20260828_2", cwd: "/local/dir" }],
+      nextCursor: null,
+    });
+    const localPage = await listSessionsPage();
+    expect(localPage.sessions[0]?.sessionId).toBe("20260828_2");
+
+    registerSessionBackend("ssh:devbox#20260828_2", "ssh:devbox", "20260828_2");
+    mocks.unstableForkSession.mockResolvedValueOnce({
+      sessionId: "20260828_3",
+      _meta: {},
+    });
+    const fork = await forkSession("ssh:devbox#20260828_2", "/remote/dir");
+    expect(mocks.unstableForkSession).toHaveBeenCalledWith({
+      sessionId: "20260828_2",
+      cwd: "/remote/dir",
+      mcpServers: [],
+    });
+    expect(fork.sessionId).toBe("ssh:devbox#20260828_3");
+    expect(getWireSessionId("ssh:devbox#20260828_3")).toBe("20260828_3");
+
+    unregisterSessionBackend("ssh:devbox#20260828_2");
+    unregisterSessionBackend("ssh:devbox#20260828_3");
   });
 });

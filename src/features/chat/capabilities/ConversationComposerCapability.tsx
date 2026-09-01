@@ -1,4 +1,5 @@
 import { useCallback, type RefObject } from "react";
+import { useTranslation } from "react-i18next";
 import { summarizeProjectWorkspaceStartup } from "@/features/projects/lib/projectChatWorkspaces";
 import type {
   ChatInputControls,
@@ -152,6 +153,7 @@ export function ConversationComposerCapability({
   attachmentDropTargetRef,
   onAttachmentDragOverChange,
 }: ConversationComposerCapabilityProps) {
+  const { t } = useTranslation("chat");
   const {
     controller,
     target,
@@ -161,6 +163,16 @@ export function ConversationComposerCapability({
     onSendQueue,
   } = binding;
   const isPendingConversation = target.kind === "pendingConversation";
+  // A remote host without a chosen remote folder cannot start a session, so
+  // the send is blocked with an actionable reason until a folder is picked.
+  const remoteDirMissing = Boolean(
+    controller.remoteHostSelectionEnabled &&
+      controller.selectedRemoteHost &&
+      !controller.selectedRemoteDir,
+  );
+  const remoteDirMissingReason = remoteDirMissing
+    ? t("toolbar.remoteHost.missingDirectory")
+    : undefined;
   const readOnlyReason =
     target.kind === "existingSession"
       ? target.admission.readOnlyReason
@@ -274,9 +286,11 @@ export function ConversationComposerCapability({
             controller.projectMetadataPending ||
             controller.isCompactingContext,
         sendDisabled: isPendingConversation
-          ? undefined
-          : admissionBlocked || controller.workspaceSetupInProgress,
-        sendDisabledReason: admissionBlockingReason,
+          ? remoteDirMissing || undefined
+          : admissionBlocked ||
+            controller.workspaceSetupInProgress ||
+            remoteDirMissing,
+        sendDisabledReason: admissionBlockingReason ?? remoteDirMissingReason,
         queuedMessage: handoffInProgress
           ? null
           : (controller.queue.queuedMessage ??
@@ -325,6 +339,7 @@ export function ConversationComposerCapability({
       }
       attachmentDropTargetRef={attachmentDropTargetRef}
       onAttachmentDragOverChange={onAttachmentDragOverChange}
+      attachmentsEnabled={!controller.selectedRemoteHost}
       initialValue={controller.draftValue}
       initialAttachments={controller.draftAttachments}
       onDraftChange={controller.handleDraftChange}
@@ -367,6 +382,13 @@ export function ConversationComposerCapability({
               options?.onCreated?.(projectId);
             },
           }),
+      }}
+      remoteHostPicker={{
+        enabled: controller.remoteHostSelectionEnabled,
+        selectedHost: controller.selectedRemoteHost,
+        onHostChange: controller.handleRemoteHostChange,
+        selectedDir: controller.selectedRemoteDir,
+        onDirChange: controller.handleRemoteDirChange,
       }}
       contextUsage={{
         contextTokens: controller.tokenState.accumulatedTotal,

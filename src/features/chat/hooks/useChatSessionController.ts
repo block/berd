@@ -20,6 +20,15 @@ import {
   useChatSessionStore,
   type ChatSession,
 } from "../stores/chatSessionStore";
+import { toast } from "sonner";
+import { i18n } from "@/shared/i18n";
+import { REMOTE_SSH_SESSIONS_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { useExperiment } from "@/features/experiments/experimentPreferences";
+import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
+import {
+  ensureRemoteHostConnected,
+  isRemoteSession,
+} from "../lib/remoteSession";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { selectPersonas } from "@/features/agents/stores/agentSelectors";
 import { useProviderSelection } from "@/features/agents/hooks/useProviderSelection";
@@ -109,6 +118,7 @@ import {
   type RecreateSessionForProvider,
 } from "../model-selection/strandedProviderRecovery";
 import { perfLog } from "@/shared/lib/perfLog";
+import { remoteSafeAttachments } from "@/features/chat/lib/attachments";
 import type { BerdChatChatSourceSurface } from "@/shared/telemetry/events";
 import { isFirstCommittedUserMessage } from "../lib/chatFirstMessage";
 import {
@@ -371,6 +381,9 @@ export function useChatSessionController({
   const catalogLoaded = useProviderCatalogStore((s) => s.loaded);
   const [pendingPersonaId, setPendingPersonaId] = useState<string | null>();
   const [pendingProjectId, setPendingProjectId] = useState<string | null>();
+  const [pendingRemoteHost, setPendingRemoteHost] = useState<string | null>();
+  const remoteSendInFlightRef = useRef(false);
+  const [pendingRemoteDir, setPendingRemoteDir] = useState<string | null>();
   const [pendingExecutionTarget, setPendingExecutionTarget] =
     useState<SessionExecutionTarget | null>();
   const [pendingModelSelection, setPendingModelSelection] =
@@ -401,6 +414,23 @@ export function useChatSessionController({
   const sessionHasStarted = session
     ? hasSessionStarted(session, sessionLocalMessageCount)
     : false;
+  const remoteSshSessionsExperimentEnabled =
+    useExperiment(REMOTE_SSH_SESSIONS_EXPERIMENT_ID)?.enabled === true;
+  // A session's backend is fixed once its backend session exists, so remote
+  // host selection is offered pre-start only (home/draft/pending states);
+  // started sessions merely display their host.
+  const remoteHostSelectionEnabled =
+    remoteSshSessionsExperimentEnabled && !readOnly && !sessionHasStarted;
+  const selectedRemoteHost =
+    pendingRemoteHost !== undefined
+      ? pendingRemoteHost
+      : (session?.remoteHost ?? null);
+  const selectedRemoteDir =
+    pendingRemoteDir !== undefined
+      ? pendingRemoteDir
+      : session?.remoteHost
+        ? (session.workingDir ?? null)
+        : null;
   const pendingDraftValue = useChatStore(
     isHomeSession
       ? (s) => s.draftsBySession[PENDING_HOME_SESSION_ID] ?? ""
@@ -752,6 +782,30 @@ export function useChatSessionController({
     [skillProviderId],
   );
 
+  // Remote sessions carry a workingDir on the remote host's filesystem;
+  // local path resolution would rewrite it to a local artifacts dir. Pass it
+  // through verbatim for them (mirrors sessionActivation/queuedSessionSend).
+  const resolveCwdForSession = useCallback(
+    async (
+      targetSessionId: string | null | undefined,
+      nextProject: SessionCwdProject,
+      nextWorkspacePath: string | null | undefined,
+    ) => {
+      const liveSession = targetSessionId
+        ? useChatSessionStore.getState().getSession(targetSessionId)
+        : undefined;
+      if (
+        liveSession &&
+        isRemoteSession(liveSession) &&
+        liveSession.workingDir
+      ) {
+        return liveSession.workingDir;
+      }
+      return resolveSessionCwd(nextProject, nextWorkspacePath);
+    },
+    [],
+  );
+
   const prepareCurrentSession = useCallback(
     async (
       providerId: string,
@@ -762,7 +816,8 @@ export function useChatSessionController({
       if (!sessionId) {
         return false;
       }
-      const workingDir = await resolveSessionCwd(
+      const workingDir = await resolveCwdForSession(
+        sessionId,
         nextProject,
         nextWorkspacePath,
       );
@@ -785,7 +840,7 @@ export function useChatSessionController({
 
       return true;
     },
-    [project, sessionId, sessionWorkspacePath],
+    [project, sessionId, sessionWorkspacePath, resolveCwdForSession],
   );
   const prepareCurrentSessionTarget = useCallback(
     async (
@@ -816,7 +871,8 @@ export function useChatSessionController({
         targetToApply.target,
       ).providerId;
       if (!wireProviderId) return false;
-      const workingDir = await resolveSessionCwd(
+      const workingDir = await resolveCwdForSession(
+        sessionId,
         nextProject,
         nextWorkspacePath,
       );
@@ -870,7 +926,7 @@ export function useChatSessionController({
       delete pendingDefaultReasoningEffortBySessionRef.current[sessionId];
       return true;
     },
-    [project, sessionWorkspacePath, sessionId],
+    [project, sessionWorkspacePath, sessionId, resolveCwdForSession],
   );
   const prepareSelectedProvider = useCallback(
     (wireProviderId: string, options?: ModelSelectionApplyOptions) =>
@@ -910,7 +966,8 @@ export function useChatSessionController({
         return false;
       }
       const target = intent.target;
-      const workingDir = await resolveSessionCwd(
+      const workingDir = await resolveCwdForSession(
+        sessionId,
         options?.nextProject ?? project,
         options?.nextWorkspacePath ?? sessionWorkspacePath,
       );
@@ -955,7 +1012,13 @@ export function useChatSessionController({
       delete pendingDefaultReasoningEffortBySessionRef.current[sessionId];
       return true;
     },
-    [isHomeSession, project, sessionId, sessionWorkspacePath],
+    [
+      isHomeSession,
+      project,
+      sessionId,
+      sessionWorkspacePath,
+      resolveCwdForSession,
+    ],
   );
 
   // Escape hatch for the "Provider not set" trap. When an in-place provider or
@@ -977,7 +1040,8 @@ export function useChatSessionController({
     ): Promise<boolean> => {
       const store = useChatSessionStore.getState();
       const current = sessionId ? store.getSession(sessionId) : undefined;
-      const workingDir = await resolveSessionCwd(
+      const workingDir = await resolveCwdForSession(
+        sessionId,
         project,
         activeWorkspace?.path ?? current?.workingDir ?? session?.workingDir,
       );
@@ -1070,7 +1134,13 @@ export function useChatSessionController({
 
       return true;
     },
-    [activeWorkspace?.path, project, session?.workingDir, sessionId],
+    [
+      activeWorkspace?.path,
+      project,
+      session?.workingDir,
+      sessionId,
+      resolveCwdForSession,
+    ],
   );
 
   const prevProjectIdRef = useRef(session?.projectId);
@@ -1150,7 +1220,8 @@ export function useChatSessionController({
     reasoningEffortRefreshKeyBySessionRef.current[sessionId] = refreshKey;
 
     try {
-      const workingDir = await resolveSessionCwd(
+      const workingDir = await resolveCwdForSession(
+        sessionId,
         project,
         activeWorkspace?.path ?? session?.workingDir,
       );
@@ -1195,6 +1266,7 @@ export function useChatSessionController({
     session?.reasoningEffort,
     session?.workingDir,
     sessionId,
+    resolveCwdForSession,
   ]);
 
   const handlePickerOpenWithReasoningRefresh = useCallback(() => {
@@ -1247,7 +1319,8 @@ export function useChatSessionController({
               ?.executionTarget,
             sessionSelection,
           );
-        const workingDir = await resolveSessionCwd(
+        const workingDir = await resolveCwdForSession(
+          stateSessionId,
           project,
           preparationWorkspacePath,
         );
@@ -1271,7 +1344,12 @@ export function useChatSessionController({
         preparationWorkspacePath,
       );
     },
-    [prepareCurrentSessionTarget, project, stateSessionId],
+    [
+      prepareCurrentSessionTarget,
+      project,
+      stateSessionId,
+      resolveCwdForSession,
+    ],
   );
   const supportsSteering = selectedAgentId === STEERING_SUPPORTED_AGENT_ID;
 
@@ -1428,6 +1506,28 @@ export function useChatSessionController({
     },
     [sessionId],
   );
+
+  const handleRemoteHostChange = useCallback(
+    (host: string | null) => {
+      setPendingRemoteHost(host);
+      // A chosen directory belongs to one host, so any host change resets it.
+      setPendingRemoteDir(undefined);
+      if (host) {
+        const chatStore = useChatStore.getState();
+        chatStore.setDraftAttachments(
+          stateSessionId,
+          remoteSafeAttachments(
+            chatStore.draftAttachmentsBySession[stateSessionId],
+          ) ?? [],
+        );
+      }
+    },
+    [stateSessionId],
+  );
+
+  const handleRemoteDirChange = useCallback((dir: string | null) => {
+    setPendingRemoteDir(dir);
+  }, []);
 
   const handlePersonaChange = useCallback(
     (personaId: string | null) => {
@@ -2511,6 +2611,72 @@ export function useChatSessionController({
         }
         return accepted;
       };
+      // A remote host picked in this composer routes the send into a fresh
+      // session on that host's backend. The current session is never mutated:
+      // a session's backend is fixed at creation, so "switch to remote" means
+      // "start the chat over there".
+      if (remoteHostSelectionEnabled && pendingRemoteHost && !readOnly) {
+        const remoteHost = pendingRemoteHost;
+        const remoteDir = pendingRemoteDir ?? null;
+        if (!remoteDir) {
+          // The composer already blocks send with an inline reason when the
+          // remote directory is missing; this is a backstop.
+          return false;
+        }
+        // Creating the remote session takes a moment (ssh connect + ACP
+        // session/new); a re-submit in that window must not create a second
+        // session.
+        if (remoteSendInFlightRef.current) {
+          return false;
+        }
+        remoteSendInFlightRef.current = true;
+        const payload = captureSessionSelection({
+          text,
+          persona: personaIntentFromComposer(personaId, personaName),
+          attachments: remoteSafeAttachments(attachments),
+          sendOptions,
+        });
+        const remoteExecutionTarget =
+          pendingExecutionTarget !== undefined
+            ? (pendingExecutionTarget ?? undefined)
+            : session?.executionTarget;
+        return (async () => {
+          try {
+            await ensureRemoteHostConnected(remoteHost);
+            const created = await useChatSessionStore.getState().createSession({
+              executionTarget: remoteExecutionTarget,
+              personaId:
+                payload.persona.kind === "persona"
+                  ? payload.persona.id
+                  : (selectedPersonaId ?? undefined),
+              // The project association is local metadata (grouping, sidebar);
+              // the workspace itself lives on the remote host.
+              projectId: effectiveProjectId ?? undefined,
+              workingDir: remoteDir,
+              remoteHost,
+            });
+            const firstSend = acceptFirstSend(created.id, payload, {
+              queueReady: true,
+            });
+            if (!firstSend.accepted) {
+              return false;
+            }
+            setPendingRemoteHost(undefined);
+            setPendingRemoteDir(undefined);
+            activateSession(created.id);
+            onMessageAccepted?.(created.id);
+            return true;
+          } catch (error) {
+            console.error("Failed to start remote session:", error);
+            toast.error(i18n.t("chat:toolbar.remoteHost.startFailed"), {
+              description: formatAcpErrorMessage(error),
+            });
+            return false;
+          } finally {
+            remoteSendInFlightRef.current = false;
+          }
+        })();
+      }
       if (!sessionId) {
         if (readOnly) {
           return false;
@@ -2721,18 +2887,24 @@ export function useChatSessionController({
       handlePersonaChange,
       onMessageAccepted,
       onWorkspaceNameRequest,
+      pendingExecutionTarget,
+      pendingRemoteDir,
+      pendingRemoteHost,
       preselectedWorkspaceStartupName,
       queue,
       readOnly,
       recordDraftPreservingSubmission,
+      remoteHostSelectionEnabled,
       session?.agentBuilderOpen,
       session?.creationState,
+      session?.executionTarget,
       session?.intent,
       sessionId,
       selectedPersona,
       selectedPersonaId,
       stateSessionId,
       workspaceContextReady,
+      effectiveProjectId,
     ],
   );
 
@@ -3393,5 +3565,10 @@ export function useChatSessionController({
     selectedProjectId: effectiveProjectId,
     availableProjects,
     handleProjectChange,
+    remoteHostSelectionEnabled,
+    selectedRemoteHost,
+    selectedRemoteDir,
+    handleRemoteHostChange,
+    handleRemoteDirChange,
   };
 }

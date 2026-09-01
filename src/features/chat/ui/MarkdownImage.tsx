@@ -1,5 +1,7 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { ImageIcon } from "lucide-react";
 import { type ComponentProps, memo, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useArtifactActionsContext } from "@/features/chat/hooks/ArtifactPolicyContext";
 import { ClickableImage } from "./ClickableImage";
 
@@ -31,14 +33,16 @@ export const MarkdownImage = memo(
     node: _node,
     ...rest
   }: ComponentProps<"img"> & { node?: unknown }) => {
-    const { resolveMarkdownHref, pathExists } = useArtifactActionsContext();
+    const { t } = useTranslation("chat");
+    const { resolveMarkdownHref, pathExists, filesAreRemote, remoteHost } =
+      useArtifactActionsContext();
     const [assetSrc, setAssetSrc] = useState<string | null>(null);
 
     const rawSrc = typeof src === "string" ? src : "";
     const isLocalCandidate = rawSrc.length > 0 && !isRemoteOrDataSrc(rawSrc);
 
     useEffect(() => {
-      if (!isLocalCandidate) {
+      if (!isLocalCandidate || filesAreRemote) {
         setAssetSrc(null);
         return;
       }
@@ -74,7 +78,35 @@ export const MarkdownImage = memo(
       return () => {
         cancelled = true;
       };
-    }, [isLocalCandidate, rawSrc, resolveMarkdownHref, pathExists]);
+    }, [
+      filesAreRemote,
+      isLocalCandidate,
+      rawSrc,
+      resolveMarkdownHref,
+      pathExists,
+    ]);
+
+    // A local-looking path in a remote session names a file on the SSH host:
+    // the asset: scheme would 404 against the local disk. Render a compact
+    // placeholder (file name + host chip) instead of a broken image.
+    if (isLocalCandidate && filesAreRemote) {
+      const resolvedPath = resolveMarkdownHref(rawSrc)?.resolvedPath ?? rawSrc;
+      const displayName =
+        resolvedPath.split("/").filter(Boolean).pop() ?? resolvedPath;
+      return (
+        <span
+          data-testid="remote-image-placeholder"
+          title={resolvedPath}
+          className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border/80 bg-muted/40 px-2 py-1 text-xs text-muted-foreground"
+        >
+          <ImageIcon className="size-3.5 shrink-0" aria-hidden="true" />
+          <span className="truncate">{alt?.trim() || displayName}</span>
+          <span className="shrink-0 rounded-full border border-border/80 px-1.5 py-px">
+            {t("remoteSessionGuards.onHostChip", { host: remoteHost })}
+          </span>
+        </span>
+      );
+    }
 
     if (assetSrc) {
       return <ClickableImage src={assetSrc} alt={alt ?? ""} />;

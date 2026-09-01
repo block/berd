@@ -97,6 +97,7 @@ import { selectProjects } from "@/features/projects/stores/projectSelectors";
 import { findExistingDraft } from "@/features/chat/lib/newChat";
 import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
 import { useAppStartup } from "./hooks/useAppStartup";
+import { useRemoteSessionExperimentReconciliation } from "@/features/chat/hooks/useRemoteSessionExperimentReconciliation";
 import { useCompletionNotifications } from "@/shared/hooks/useCompletionNotifications";
 import { useHomeSessionStateSync } from "./hooks/useHomeSessionStateSync";
 import { useHomeWidgetStore } from "@/features/home/stores/homeWidgetStore";
@@ -219,6 +220,10 @@ import {
 import { acpCreateSession, acpSetSessionConfigOption } from "@/shared/api/acp";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import { findMissingProjectDirs } from "@/features/projects/lib/missingProjectDirs";
+import {
+  ensureRemoteHostConnected,
+  isRemoteSession,
+} from "@/features/chat/lib/remoteSession";
 import {
   createSystemNotificationMessage,
   isSystemNotification,
@@ -721,6 +726,7 @@ export function AppShell({
   const initialActiveView = getInitialAppView(initialSettingsSection);
   const [activeView, setActiveView] = useState<AppView>(initialActiveView);
   const capabilities = useProfileCapabilities();
+  useRemoteSessionExperimentReconciliation();
   const isAutomationsFeatureEnabled = capabilities.automations;
   const isBuilderbotSurfaceEnabled = capabilities.builderbot;
   const isFeedbackEnabled = capabilities.feedback;
@@ -1856,12 +1862,19 @@ export function AppShell({
           );
           const creationSelection =
             gooseServeSelectionFromExecutionTarget(requestedTarget);
+          // A remote draft's backend session must be created on the SSH host's
+          // backend, which needs the tunnel up first. Failures here flow into
+          // the shared creation-failure path below.
+          if (session.remoteHost) {
+            await ensureRemoteHostConnected(session.remoteHost);
+          }
           return acpCreateSession(
             creationSelection.providerId ?? requestedTarget.harnessId,
             resolvedWorkingDir,
             {
               projectId,
               modelId: requestedTarget.modelId,
+              remoteHost: session.remoteHost,
               // The draft is already interactive. Construct its provider now so
               // a selection made while creation is in flight can be applied to
               // the backend session as soon as it exists.
@@ -2087,7 +2100,9 @@ export function AppShell({
                 .getState()
                 .projects.find((candidate) => candidate.id === projectId)
             : undefined;
-          if (project) {
+          // Local missing-dir checks are meaningless for remote sessions:
+          // their paths live on the SSH host, not this machine.
+          if (project && !isRemoteSession(session)) {
             try {
               const missing = await findMissingProjectDirs(project);
               if (missing.length > 0) {
@@ -2178,7 +2193,10 @@ export function AppShell({
           (candidate) =>
             candidate.creationState === "failed" &&
             candidate.projectId === updatedProject.id &&
-            !candidate.archivedAt,
+            !candidate.archivedAt &&
+            // Remote sessions never fail on local project folders, so a
+            // local folder fix is not a retry trigger for them.
+            !isRemoteSession(candidate),
         );
         if (failedSessions.length === 0) {
           return;
@@ -2244,12 +2262,28 @@ export function AppShell({
         reuseExistingDraft?: boolean;
         executionTarget?: SessionExecutionTarget;
         reasoningEffort?: GlobalComposeOptions["reasoningEffort"];
+        /** SSH host to run the session's backend on. */
+        remoteHost?: string;
+        /** Remote working directory; required alongside remoteHost. */
+        remoteWorkingDir?: string;
       } = {},
     ) => {
       const shouldActivate = options.activate !== false;
+      const remoteHost = options.remoteHost?.trim() || undefined;
+      const remoteWorkingDir = options.remoteWorkingDir?.trim() || undefined;
+      if (remoteHost && !remoteWorkingDir) {
+        throw new Error(
+          "createNewTab requires remoteWorkingDir when remoteHost is set.",
+        );
+      }
+      // A remote session may belong to a project: the association is local
+      // grouping metadata. Its working dir still comes from the remote picker,
+      // never from the project's local folders (all cwd sites below guard on
+      // remoteHost).
+      const sessionProject = project;
       const tStart = performance.now();
       perfLog(
-        `[perf:newtab] createNewTab start (project=${project?.id ?? "none"})`,
+        `[perf:newtab] createNewTab start (project=${sessionProject?.id ?? "none"})`,
       );
       const sessionExecutionTarget =
         await resolveSessionCreationTarget(options);
@@ -2266,36 +2300,51 @@ export function AppShell({
         sessionIdsWithTerminals: getChatSessionIdsWithTerminals(),
         request: {
           title,
-          projectId: project?.id,
+          projectId: sessionProject?.id,
           executionTarget: sessionExecutionTarget,
           reasoningEffortValue: options.reasoningEffort?.value,
+          remoteHost,
         },
         allowDraftReuse: options.reuseExistingDraft !== false,
       });
 
-      if (
+      // A reused remote draft must also match the freshly chosen remote
+      // folder; its creation may already be in flight against its own dir.
+      const reusableDraft =
         existingDraft &&
-        (chatState.queuedMessageBySession[existingDraft.id]?.length ?? 0) === 0
+        (!remoteHost || existingDraft.workingDir === remoteWorkingDir)
+          ? existingDraft
+          : undefined;
+      if (
+        reusableDraft &&
+        (chatState.queuedMessageBySession[reusableDraft.id]?.length ?? 0) === 0
       ) {
         if (shouldActivate) {
           clearSettingsSectionUrl();
-          setActiveSession(existingDraft.id);
+          setActiveSession(reusableDraft.id);
           setActiveView("chat");
-          setChatActiveSession(existingDraft.id);
+          setChatActiveSession(reusableDraft.id);
         }
         perfLog(
-          `[perf:newtab] ${existingDraft.id.slice(0, 8)} reused draft in ${(performance.now() - tStart).toFixed(1)}ms`,
+          `[perf:newtab] ${reusableDraft.id.slice(0, 8)} reused draft in ${(performance.now() - tStart).toFixed(1)}ms`,
         );
-        return existingDraft;
+        return reusableDraft;
       }
 
       if (!shouldActivate) {
-        const workingDir = await resolveSessionCwd(project);
+        if (remoteHost && remoteWorkingDir) {
+          await ensureRemoteHostConnected(remoteHost);
+        }
+        const workingDir =
+          remoteHost && remoteWorkingDir
+            ? remoteWorkingDir
+            : await resolveSessionCwd(sessionProject);
         const session = await createSession({
           title,
-          projectId: project?.id,
+          projectId: sessionProject?.id,
           executionTarget: sessionExecutionTarget,
           workingDir,
+          remoteHost,
         });
         perfLog(
           `[perf:newtab] ${session.id.slice(0, 8)} created session in ${(performance.now() - tStart).toFixed(1)}ms`,
@@ -2303,12 +2352,18 @@ export function AppShell({
         return session;
       }
 
-      const optimisticWorkingDir = getOptimisticSessionCwd(project);
+      // Remote paths pass through verbatim: local optimistic-cwd resolution
+      // only knows this machine's filesystem.
+      const optimisticWorkingDir =
+        remoteHost && remoteWorkingDir
+          ? remoteWorkingDir
+          : getOptimisticSessionCwd(sessionProject);
       const session = createDraftSession({
         title,
-        projectId: project?.id,
+        projectId: sessionProject?.id,
         executionTarget: sessionExecutionTarget,
         workingDir: optimisticWorkingDir,
+        remoteHost,
       });
       clearSettingsSectionUrl();
       setActiveSession(session.id);
@@ -2320,8 +2375,11 @@ export function AppShell({
       startDraftSessionCreation({
         session,
         sessionExecutionTarget,
-        workingDir: resolveSessionCwd(project),
-        projectId: project?.id,
+        workingDir:
+          remoteHost && remoteWorkingDir
+            ? remoteWorkingDir
+            : resolveSessionCwd(sessionProject),
+        projectId: sessionProject?.id,
         onReady: applyReasoningEffortAfterDraftCreation(
           session.id,
           options.reasoningEffort,
@@ -2528,11 +2586,23 @@ export function AppShell({
       options: {
         executionTarget?: SessionExecutionTarget;
         reasoningEffort?: GlobalComposeOptions["reasoningEffort"];
+        remoteHost?: string;
+        remoteWorkingDir?: string;
       } = {},
     ) => {
+      const remoteHost = options.remoteHost?.trim() || undefined;
+      const remoteWorkingDir = options.remoteWorkingDir?.trim() || undefined;
+      if (remoteHost && !remoteWorkingDir) {
+        throw new Error(
+          "createBackgroundDraftChat requires remoteWorkingDir when remoteHost is set.",
+        );
+      }
+      // Project association is local grouping metadata; cwd sites below guard
+      // on remoteHost.
+      const sessionProject = project;
       const tStart = performance.now();
       perfLog(
-        `[perf:newtab] createBackgroundDraftChat start (project=${project?.id ?? "none"})`,
+        `[perf:newtab] createBackgroundDraftChat start (project=${sessionProject?.id ?? "none"})`,
       );
       const sessionExecutionTarget =
         await resolveSessionCreationTarget(options);
@@ -2547,28 +2617,38 @@ export function AppShell({
         sessionIdsWithTerminals: getChatSessionIdsWithTerminals(),
         request: {
           title,
-          projectId: project?.id,
+          projectId: sessionProject?.id,
           executionTarget: sessionExecutionTarget,
           reasoningEffortValue: options.reasoningEffort?.value,
+          remoteHost,
         },
       });
 
-      if (
+      const reusableDraft =
         existingDraft &&
-        (chatState.queuedMessageBySession[existingDraft.id]?.length ?? 0) === 0
+        (!remoteHost || existingDraft.workingDir === remoteWorkingDir)
+          ? existingDraft
+          : undefined;
+      if (
+        reusableDraft &&
+        (chatState.queuedMessageBySession[reusableDraft.id]?.length ?? 0) === 0
       ) {
         perfLog(
-          `[perf:newtab] ${existingDraft.id.slice(0, 8)} reused background draft in ${(performance.now() - tStart).toFixed(1)}ms`,
+          `[perf:newtab] ${reusableDraft.id.slice(0, 8)} reused background draft in ${(performance.now() - tStart).toFixed(1)}ms`,
         );
-        return existingDraft;
+        return reusableDraft;
       }
 
-      const optimisticWorkingDir = getOptimisticSessionCwd(project);
+      const optimisticWorkingDir =
+        remoteHost && remoteWorkingDir
+          ? remoteWorkingDir
+          : getOptimisticSessionCwd(sessionProject);
       const session = createDraftSession({
         title,
-        projectId: project?.id,
+        projectId: sessionProject?.id,
         executionTarget: sessionExecutionTarget,
         workingDir: optimisticWorkingDir,
+        remoteHost,
       });
       perfLog(
         `[perf:newtab] ${session.id.slice(0, 8)} created background draft in ${(performance.now() - tStart).toFixed(1)}ms`,
@@ -2576,8 +2656,11 @@ export function AppShell({
       startDraftSessionCreation({
         session,
         sessionExecutionTarget,
-        workingDir: resolveSessionCwd(project),
-        projectId: project?.id,
+        workingDir:
+          remoteHost && remoteWorkingDir
+            ? remoteWorkingDir
+            : resolveSessionCwd(sessionProject),
+        projectId: sessionProject?.id,
         onReady: applyReasoningEffortAfterDraftCreation(
           session.id,
           options.reasoningEffort,
@@ -2949,7 +3032,10 @@ export function AppShell({
       const project = options?.projectId
         ? projects.find((candidate) => candidate.id === options.projectId)
         : undefined;
+      // Project workspace startup (branches/worktrees) is local git machinery;
+      // a remote compose keeps the project association but skips those plans.
       const requiresProjectWorkspaceDraftPlan =
+        !options?.remoteHost &&
         workspaceRepository.mode === "multi" &&
         Boolean(project?.projectWorkspaces.length);
       const shouldRunComposerHandoff =
@@ -2971,6 +3057,8 @@ export function AppShell({
       const chatOptions = {
         executionTarget: options?.executionTarget,
         reasoningEffort: options?.reasoningEffort,
+        remoteHost: options?.remoteHost,
+        remoteWorkingDir: options?.remoteWorkingDir,
       };
       const acceptGlobalFirstSend = async (session: ChatSession) => {
         const sessionId = resolveLiveSessionId(session.id) ?? session.id;
@@ -3017,9 +3105,13 @@ export function AppShell({
       };
 
       const startChat = async () => {
-        const createChat = project
-          ? createNewProjectDraft(DEFAULT_CHAT_TITLE, project, chatOptions)
-          : createNewTab(DEFAULT_CHAT_TITLE, undefined, chatOptions);
+        // The project-draft route runs local workspace startup; remote project
+        // chats go through createNewTab, which carries the project association
+        // and uses the remote working directory verbatim.
+        const createChat =
+          project && !options?.remoteHost
+            ? createNewProjectDraft(DEFAULT_CHAT_TITLE, project, chatOptions)
+            : createNewTab(DEFAULT_CHAT_TITLE, project, chatOptions);
 
         try {
           const session = await createChat;
@@ -3206,19 +3298,24 @@ export function AppShell({
       const chatOptions = {
         executionTarget: options?.executionTarget,
         reasoningEffort: options?.reasoningEffort,
+        remoteHost: options?.remoteHost,
+        remoteWorkingDir: options?.remoteWorkingDir,
       };
 
       const shouldDismissCenteredComposer =
         globalComposerPlacement === "centered";
 
       const openExpandedDraft = async () => {
-        const session = project
-          ? await createNewProjectDraft(
-              DEFAULT_CHAT_TITLE,
-              project,
-              chatOptions,
-            )
-          : await createNewTab(DEFAULT_CHAT_TITLE, undefined, chatOptions);
+        // Remote project chats skip the local workspace-startup draft route
+        // but keep the project association (see handleGlobalCompose).
+        const session =
+          project && !options?.remoteHost
+            ? await createNewProjectDraft(
+                DEFAULT_CHAT_TITLE,
+                project,
+                chatOptions,
+              )
+            : await createNewTab(DEFAULT_CHAT_TITLE, project, chatOptions);
         if (!session) {
           return false;
         }
@@ -3309,6 +3406,8 @@ export function AppShell({
         reuseExistingDraft: false,
         executionTarget: options?.executionTarget,
         reasoningEffort: options?.reasoningEffort,
+        remoteHost: options?.remoteHost,
+        remoteWorkingDir: options?.remoteWorkingDir,
       };
 
       const createAndStart = async () => {

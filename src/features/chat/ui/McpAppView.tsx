@@ -6,7 +6,10 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import packageJson from "../../../../package.json";
-import { getClient } from "@/shared/api/acpConnection";
+import {
+  getClientForSession,
+  getWireSessionId,
+} from "@/shared/api/acpSessionBackends";
 import { getGooseServeHostInfo } from "@/shared/api/gooseServeHost";
 import { useTheme } from "@/shared/theme/ThemeProvider";
 import { createVirtualLayoutStabilityAttributes } from "@/features/chat/transcript/measurement";
@@ -380,9 +383,9 @@ export function McpAppView({
       setMcpActivity("nested-tool-request", true, { sourceId });
 
       try {
-        const client = await getClient();
+        const client = await getClientForSession(payload.sessionId);
         const response = await client.goose.GooseUnstableToolsCall({
-          sessionId: payload.sessionId,
+          sessionId: getWireSessionId(payload.sessionId),
           name: `${payload.tool.extensionName}__${name}`,
           arguments: args ?? {},
         });
@@ -409,9 +412,9 @@ export function McpAppView({
       const sourceId = `resource:${uri}:${mcpRequestSourceCounterRef.current}`;
       setMcpActivity("host-request", true, { sourceId });
       try {
-        const client = await getClient();
+        const client = await getClientForSession(payload.sessionId);
         const response = await client.goose.GooseUnstableResourcesRead({
-          sessionId: payload.sessionId,
+          sessionId: getWireSessionId(payload.sessionId),
           uri,
           extensionName: payload.tool.extensionName,
         });

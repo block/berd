@@ -187,6 +187,48 @@ describe("useGitStateAutoRefreshOnChatSettled", () => {
     expect(invalidateSpy).toHaveBeenCalledTimes(2);
   });
 
+  it("never invalidates git queries for a remote session", () => {
+    const queryClient = new QueryClient();
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Remote",
+          workingDir: "/home/dev/project",
+          remoteHost: "devbox",
+          createdAt: "2026-08-27T00:00:00.000Z",
+          updatedAt: "2026-08-27T00:00:00.000Z",
+          messageCount: 1,
+        },
+      ],
+    });
+    useChatStore.getState().setChatState("session-1", "streaming");
+    useChatStore.getState().setStreamingMessageId("session-1", "message-1");
+
+    renderHook(
+      () =>
+        useGitStateAutoRefreshOnChatSettled({
+          sessionId: "session-1",
+          sessionWorkingDir: "/home/dev/project",
+        }),
+      { wrapper: createWrapper(queryClient) },
+    );
+
+    act(() => {
+      useChatStore.getState().setChatState("session-1", "idle");
+      useChatStore.getState().setStreamingMessageId("session-1", null);
+    });
+    act(() => {
+      vi.advanceTimersByTime(CHAT_GIT_AUTO_REFRESH_DELAY_MS);
+    });
+
+    // The path names a directory on the SSH host; a local git-state refetch
+    // would probe the wrong filesystem, so the settle must not schedule one.
+    expect(invalidateSpy).not.toHaveBeenCalled();
+  });
+
   it("does not refresh on initial idle render", () => {
     const queryClient = new QueryClient();
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");

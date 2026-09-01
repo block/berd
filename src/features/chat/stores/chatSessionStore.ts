@@ -34,6 +34,15 @@ import {
   removePersistedChatWorkspaceMetadata,
 } from "./workspaceAttachmentPersistence";
 import {
+  persistRemoteSessionRecord,
+  removeRemoteSessionRecord,
+} from "./remoteSessionPersistence";
+import { backendIdForSession } from "@/shared/api/acpBackendId";
+import {
+  registerSessionBackend,
+  transferSessionBackend,
+} from "@/shared/api/acpSessionBackends";
+import {
   materializeSessionExecutionModel,
   normalizeSessionExecutionTarget,
   sameSessionExecutionTarget,
@@ -65,6 +74,8 @@ export interface ChatSession {
   personaId?: string;
   reasoningEffort?: ChatSessionReasoningEffortConfig;
   workingDir?: string | null;
+  /** SSH host whose backend owns this session; unset means local. */
+  remoteHost?: string;
   workspaceAttachments?: WorkspaceAttachment[];
   activeWorkspaceId?: string | null;
   createdAt: string;
@@ -179,6 +190,7 @@ interface CreateSessionOpts {
   executionTarget?: SessionExecutionTarget;
   personaId?: string;
   workingDir?: string;
+  remoteHost?: string;
   workspaceAttachments?: WorkspaceAttachment[];
   deferProviderSetup?: boolean;
 }
@@ -480,6 +492,19 @@ function releaseWindowedSession(sessionId: string): void {
   );
 }
 
+function persistRemoteSessionRecordForSession(session: ChatSession): void {
+  if (!session.remoteHost) return;
+  persistRemoteSessionRecord({
+    sessionId: session.id,
+    host: session.remoteHost,
+    title: session.title,
+    workingDir: session.workingDir ?? "",
+    updatedAt: session.updatedAt,
+    ...(session.projectId ? { projectId: session.projectId } : {}),
+    ...(session.archivedAt ? { archivedAt: session.archivedAt } : {}),
+  });
+}
+
 function persistWorkspaceMetadataForSession(session: ChatSession): void {
   persistChatWorkspaceMetadata(session.id, {
     workspaceAttachments: session.workspaceAttachments ?? [],
@@ -521,6 +546,9 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
         modelId: requestedModelId,
         projectId: opts.projectId,
         deferProviderSetup: opts.deferProviderSetup ?? requestedModelId == null,
+        // Creating on the remote backend also registers the session's backend,
+        // so every later per-session call routes to the same host.
+        remoteHost: opts.remoteHost,
       },
     );
     logReasoningEffortInfo("createSession acp resolved", {
@@ -545,6 +573,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       personaId: opts.personaId,
       reasoningEffort: configOptionsSnapshot?.reasoningEffort ?? undefined,
       workingDir: opts.workingDir,
+      ...(opts.remoteHost ? { remoteHost: opts.remoteHost } : {}),
       workspaceAttachments: opts.workspaceAttachments,
       createdAt: now,
       updatedAt: now,
@@ -565,6 +594,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       hasReasoningEffort: Boolean(chatSession.reasoningEffort),
     });
     persistWorkspaceMetadataForSession(chatSession);
+    persistRemoteSessionRecordForSession(chatSession);
     return chatSession;
   },
 
@@ -585,6 +615,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       executionTargetSource: "ui",
       personaId: opts.personaId,
       workingDir: opts.workingDir,
+      ...(opts.remoteHost ? { remoteHost: opts.remoteHost } : {}),
       workspaceAttachments: opts.workspaceAttachments,
       createdAt: now,
       updatedAt: now,
@@ -599,6 +630,11 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       targetAgentDraftState: null,
       targetAgentDraftSaved: false,
     });
+    if (opts.remoteHost) {
+      // Register the draft id too, so calls issued before promotion (e.g. the
+      // creation request itself) route to the remote backend.
+      registerSessionBackend(id, backendIdForSession(opts));
+    }
     set((state) => ({ sessions: [chatSession, ...state.sessions] }));
     return chatSession;
   },
@@ -712,9 +748,19 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
           : remainingWorkspaces,
       };
     });
-    if (promotedForPersistence) {
+    // Typed alias: TS does not track the assignment inside the `set` callback,
+    // so property access on the captured `let` would be on `never`.
+    const promoted = promotedForPersistence as ChatSession | null;
+    if (promoted) {
+      // No-op for local sessions: the draft id is only registered when the
+      // draft was created with a remote host.
+      transferSessionBackend(draftSessionId, backendSessionId);
       migratePersistedChatWorkspaceMetadata(draftSessionId, backendSessionId);
-      persistWorkspaceMetadataForSession(promotedForPersistence);
+      persistWorkspaceMetadataForSession(promoted);
+      if (promoted.remoteHost) {
+        removeRemoteSessionRecord(draftSessionId);
+        persistRemoteSessionRecordForSession(promoted);
+      }
     }
   },
 
@@ -824,6 +870,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     }
     const includesReasoningEffort = patchIncludesReasoningEffort(patch);
     let sessionForWorkspacePersistence: ChatSession | null = null;
+    let sessionForRemotePersistence: ChatSession | null = null;
     set((state) => {
       const existing = state.sessions.find((session) => session.id === id);
       if (!existing) {
@@ -900,6 +947,16 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       ) {
         sessionForWorkspacePersistence = merged;
       }
+      if (
+        merged.remoteHost &&
+        (merged.title !== existing.title ||
+          merged.workingDir !== existing.workingDir ||
+          merged.projectId !== existing.projectId ||
+          merged.archivedAt !== existing.archivedAt ||
+          merged.updatedAt !== existing.updatedAt)
+      ) {
+        sessionForRemotePersistence = merged;
+      }
       return {
         sessions: state.sessions.map((session) =>
           session.id === id ? merged : session,
@@ -908,6 +965,9 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     });
     if (sessionForWorkspacePersistence) {
       persistWorkspaceMetadataForSession(sessionForWorkspacePersistence);
+    }
+    if (sessionForRemotePersistence) {
+      persistRemoteSessionRecordForSession(sessionForRemotePersistence);
     }
   },
 
@@ -925,6 +985,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   },
 
   addSession: (session) => {
+    let sessionForRemotePersistence: ChatSession | null = null;
     set((state) => {
       const existing = state.sessions.findIndex(
         (candidate) => candidate.id === session.id,
@@ -932,7 +993,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       const backfilledSession = withWorkspaceBackfill(session);
       if (existing >= 0) {
         const updated = [...state.sessions];
-        updated[existing] = withWorkspaceBackfill({
+        const merged = withWorkspaceBackfill({
           ...updated[existing],
           ...backfilledSession,
           workspaceAttachments:
@@ -942,10 +1003,20 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
             updated[existing].activeWorkspaceId ??
             backfilledSession.activeWorkspaceId,
         });
+        updated[existing] = merged;
+        if (merged.remoteHost) {
+          sessionForRemotePersistence = merged;
+        }
         return { sessions: updated };
+      }
+      if (backfilledSession.remoteHost) {
+        sessionForRemotePersistence = backfilledSession;
       }
       return { sessions: [backfilledSession, ...state.sessions] };
     });
+    if (sessionForRemotePersistence) {
+      persistRemoteSessionRecordForSession(sessionForRemotePersistence);
+    }
   },
 
   removeSession: (id) => {
@@ -972,6 +1043,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       };
     });
     removePersistedChatWorkspaceMetadata(id);
+    removeRemoteSessionRecord(id);
     useSecurityConfirmationStore.getState().cancelAll(id);
     releaseWindowedSession(id);
   },
@@ -1012,6 +1084,10 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       await acpArchiveSession(session.id);
       set((state) => recordArchiveMutationSuccess(state, id, mutation));
       settleArchiveMutationAndCancelIfArchived(get(), id, operationId);
+      const archived = get().getSession(id);
+      if (archived?.remoteHost) {
+        persistRemoteSessionRecordForSession(archived);
+      }
     } catch (error) {
       // Roll back only the archive flag; navigation/window cleanup is owned by
       // AppShell's archive transaction.
@@ -1052,6 +1128,10 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       await acpUnarchiveSession(session.id);
       set((state) => recordArchiveMutationSuccess(state, id, mutation));
       settleArchiveMutationAndCancelIfArchived(get(), id, operationId);
+      const unarchived = get().getSession(id);
+      if (unarchived?.remoteHost) {
+        persistRemoteSessionRecordForSession(unarchived);
+      }
     } catch (error) {
       set((state) => rollbackFailedArchiveMutation(state, id, operationId));
       settleArchiveMutationAndCancelIfArchived(get(), id, operationId);

@@ -6,6 +6,7 @@ import {
   gitStateQueryKey,
 } from "@/shared/lib/gitStateQueryKey";
 import { INITIAL_SESSION_CHAT_RUNTIME } from "@/shared/types/chat";
+import { isRemoteSession } from "../lib/remoteSession";
 import { isSessionRunning } from "../lib/sessionActivity";
 import { useChatSessionStore } from "../stores/chatSessionStore";
 import { useChatStore } from "../stores/chatStore";
@@ -44,6 +45,17 @@ export function useGitStateAutoRefreshOnChatSettled({
   const activeWorkspacePath = useChatSessionStore((state) =>
     sessionId ? state.activeWorkspaceBySession[sessionId]?.path : undefined,
   );
+  // A remote session's workspace paths live on its SSH host: the local git
+  // Tauri commands behind these query keys would probe the wrong filesystem,
+  // so never schedule an invalidation (which would trigger refetches) for one.
+  const sessionIsRemote = useChatSessionStore((state) =>
+    sessionId
+      ? isRemoteSession(
+          state.sessions.find((candidate) => candidate.id === sessionId),
+        )
+      : false,
+  );
+  const refreshEnabled = enabled && !sessionIsRemote;
   const runtime = useChatStore((state) =>
     sessionId ? state.sessionStateById[sessionId] : undefined,
   );
@@ -89,7 +101,7 @@ export function useGitStateAutoRefreshOnChatSettled({
   );
 
   useEffect(() => {
-    if (!enabled || !sessionId) {
+    if (!refreshEnabled || !sessionId) {
       clearScheduledRefresh(refreshTimeoutRef);
       lastSessionIdRef.current = sessionId ?? null;
       wasWorkingRef.current = false;
@@ -117,7 +129,7 @@ export function useGitStateAutoRefreshOnChatSettled({
     if (gitTargetPath) {
       scheduleRefresh(gitTargetPath);
     }
-  }, [enabled, gitTargetPath, isWorking, scheduleRefresh, sessionId]);
+  }, [refreshEnabled, gitTargetPath, isWorking, scheduleRefresh, sessionId]);
 
   useEffect(() => {
     return () => clearScheduledRefresh(refreshTimeoutRef);

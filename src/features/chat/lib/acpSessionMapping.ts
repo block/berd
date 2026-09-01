@@ -9,6 +9,10 @@ import { normalizeAcpTitle } from "@/features/chat/lib/sessionTitle";
 import { withWorkspaceBackfill } from "@/features/chat/lib/workspaceAttachments";
 import { loadPersistedChatWorkspaceMetadata } from "@/features/chat/stores/workspaceAttachmentPersistence";
 import { executionTargetFromGooseServeSession } from "@/features/chat/lib/gooseServeExecutionTarget";
+import {
+  remoteHostFromBackendId,
+  splitCompositeSessionId,
+} from "@/shared/api/acpBackendId";
 
 interface SessionPageState {
   sessions: ChatSession[];
@@ -17,12 +21,20 @@ interface SessionPageState {
   hasMoreSessions: boolean;
 }
 
-export function acpSessionToChatSession(session: AcpSessionInfo): ChatSession {
+export interface AcpSessionMappingContext {
+  /** Set when the page/info was loaded from a remote SSH backend. */
+  remoteHost?: string;
+}
+
+export function acpSessionToChatSession(
+  session: AcpSessionInfo,
+  context?: AcpSessionMappingContext,
+): ChatSession {
   const persistedWorkspaceMetadata = loadPersistedChatWorkspaceMetadata(
     session.sessionId,
   );
   return withWorkspaceBackfill({
-    ...chatSessionFromAcpInfo(session),
+    ...chatSessionFromAcpInfo(session, context),
     workspaceAttachments: persistedWorkspaceMetadata?.workspaceAttachments,
     activeWorkspaceId: persistedWorkspaceMetadata?.activeWorkspaceId,
   });
@@ -35,12 +47,21 @@ export function acpSessionToChatSession(session: AcpSessionInfo): ChatSession {
  * workingDir backfill invents attachments for sessions that exist only as
  * search rows.
  */
-export function chatSessionFromAcpInfo(session: AcpSessionInfo): ChatSession {
+export function chatSessionFromAcpInfo(
+  session: AcpSessionInfo,
+  context?: AcpSessionMappingContext,
+): ChatSession {
   const now = new Date().toISOString();
   const executionTarget = executionTargetFromGooseServeSession({
     providerId: session.providerId ?? undefined,
     modelId: session.modelId ?? undefined,
   });
+  const compositeBackend = splitCompositeSessionId(
+    session.sessionId,
+  )?.backendId;
+  const remoteHost =
+    context?.remoteHost ??
+    (compositeBackend ? remoteHostFromBackendId(compositeBackend) : null);
   return {
     id: session.sessionId,
     title: normalizeAcpTitle(session.title) ?? "Untitled",
@@ -49,6 +70,9 @@ export function chatSessionFromAcpInfo(session: AcpSessionInfo): ChatSession {
     executionTargetSource: executionTarget ? "acp" : undefined,
     personaId: session.personaId ?? undefined,
     workingDir: session.workingDir ?? undefined,
+    // Only set the key when context or the composite id proves that the
+    // session came from a remote backend, so a local row cannot gain a tag.
+    ...(remoteHost ? { remoteHost } : {}),
     createdAt: session.createdAt ?? session.updatedAt ?? now,
     updatedAt: session.updatedAt ?? now,
     lastMessageAt: session.lastMessageAt ?? undefined,
@@ -96,6 +120,9 @@ function mergeSessionMetadata(
       ? existing.executionTargetSource
       : session.executionTargetSource;
     const personaId = session.personaId ?? existing?.personaId;
+    // Additive: a refresh from the local page load must not wipe the remote
+    // tag a rehydrated/remote-loaded session already carries.
+    const remoteHost = session.remoteHost ?? existing?.remoteHost;
     byId.set(
       session.id,
       withWorkspaceBackfill({
@@ -104,6 +131,7 @@ function mergeSessionMetadata(
         executionTarget,
         executionTargetSource,
         personaId,
+        remoteHost,
         workspaceAttachments:
           existing?.workspaceAttachments ?? session.workspaceAttachments,
         activeWorkspaceId:
@@ -134,10 +162,11 @@ function mergeSessionMetadata(
 export function mergeAcpSessionInfo(
   state: Pick<SessionPageState, "sessions" | "archiveMutationBySessionId">,
   session: AcpSessionInfo,
+  context?: AcpSessionMappingContext,
 ): Pick<SessionPageState, "sessions" | "archiveMutationBySessionId"> {
   return mergeSessionMetadata(
     state.sessions,
-    [acpSessionToChatSession(session)],
+    [acpSessionToChatSession(session, context)],
     state.archiveMutationBySessionId,
   );
 }
@@ -178,6 +207,7 @@ export function mergeAcpSessionPage(
   state: Pick<SessionPageState, "sessions" | "archiveMutationBySessionId">,
   page: AcpSessionsPage,
   previousCursor: string | null,
+  context?: AcpSessionMappingContext,
 ): SessionPageState {
   const { nextCursor } = page;
   const repeatedCursor =
@@ -192,7 +222,7 @@ export function mergeAcpSessionPage(
   const hasMoreSessions = nextCursor != null && !repeatedCursor;
   const merged = mergeSessionMetadata(
     state.sessions,
-    page.sessions.map(acpSessionToChatSession),
+    page.sessions.map((session) => acpSessionToChatSession(session, context)),
     state.archiveMutationBySessionId,
   );
 

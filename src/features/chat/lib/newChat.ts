@@ -11,6 +11,7 @@ interface NewChatRequest {
   projectId?: string;
   executionTarget?: SessionExecutionTarget;
   reasoningEffortValue?: string;
+  remoteHost?: string;
 }
 
 interface FindExistingDraftArgs {
@@ -23,12 +24,22 @@ interface FindExistingDraftArgs {
   allowDraftReuse?: boolean;
 }
 
+/** Treats undefined, null, and empty/whitespace hosts as "local". */
+function normalizeRemoteHost(
+  host: string | null | undefined,
+): string | undefined {
+  const trimmed = host?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 function isMatchingContext(
   session: ChatSession,
   request: Omit<NewChatRequest, "title">,
 ): boolean {
   return (
     session.projectId === request.projectId &&
+    normalizeRemoteHost(session.remoteHost) ===
+      normalizeRemoteHost(request.remoteHost) &&
     (!request.executionTarget ||
       sameSessionExecutionTarget(
         session.executionTarget,

@@ -837,6 +837,35 @@ describe("acpCreateSession", () => {
     expect(sessionRegistry.isSessionPrepared("acp-session-1")).toBe(true);
   });
 
+  it("routes creation to the host's SSH backend when remoteHost is set", async () => {
+    mockNewSession.mockResolvedValue({ sessionId: "acp-session-remote" });
+
+    const { acpCreateSession } = await import("../acp");
+
+    await acpCreateSession("openai", "/home/dev/project", {
+      modelId: "gpt-4.1",
+      remoteHost: "devbox",
+    });
+
+    expect(mockNewSession).toHaveBeenCalledWith("/home/dev/project", {
+      providerId: "openai",
+      projectId: undefined,
+      personaId: undefined,
+      backendId: "ssh:devbox",
+    });
+  });
+
+  it("does not send a backendId for local sessions", async () => {
+    mockNewSession.mockResolvedValue({ sessionId: "acp-session-local" });
+
+    const { acpCreateSession } = await import("../acp");
+
+    await acpCreateSession("openai", "/tmp/project", { modelId: "gpt-4.1" });
+
+    const [, newSessionOptions] = mockNewSession.mock.calls[0];
+    expect(newSessionOptions).not.toHaveProperty("backendId");
+  });
+
   it("sends a concrete provider even when provider setup is deferred", async () => {
     mockNewSession.mockResolvedValue({ sessionId: "acp-session-1" });
 

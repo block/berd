@@ -148,6 +148,7 @@ vi.mock("@/features/chat/stores/chatStore", () => ({
 
 vi.mock("@/features/experiments/experimentPreferences", () => ({
   useExperiment: () => ({ enabled: true }),
+  subscribeToExperimentChanges: () => () => {},
 }));
 
 vi.mock("../widgets/ChatCanvasCard", () => ({

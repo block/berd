@@ -530,6 +530,43 @@
     "viewMore": "View more",
     "switchAgent": "Switch agent",
     "noProject": "No project",
+    "remoteHost": {
+      "selectHost": "Select computer",
+      "chooseHost": "Where should this chat run?",
+      "thisComputer": "This computer",
+      "thisComputerDescription": "Run the session locally",
+      "sshHosts": "SSH hosts",
+      "localTriggerTitle": "Runs on this computer",
+      "remoteTriggerTitle": "Runs on {{host}} over SSH",
+      "missingDirectory": "Choose a folder on the remote host before sending",
+      "startFailed": "Couldn't start the remote session",
+      "status": {
+        "connecting": "Connecting...",
+        "ready": "Connected",
+        "reconnecting": "Reconnecting...",
+        "disconnected": "Disconnected",
+        "failed": "Connection failed"
+      },
+      "directory": {
+        "chooseFolder": "Choose folder",
+        "selectDirectory": "Select remote folder",
+        "title": "Folder on {{host}}",
+        "pathLabel": "Remote path",
+        "pathPlaceholder": "~/ or /absolute/path",
+        "parent": "Up one level",
+        "empty": "No subfolders",
+        "loading": "Loading...",
+        "recents": "Recent folders",
+        "use": "Use this folder"
+      },
+      "banner": {
+        "disconnected": "Disconnected from {{host}}",
+        "failed": "Couldn't connect to {{host}}",
+        "connecting": "Connecting to {{host}}...",
+        "reconnecting": "Reconnecting to {{host}}...",
+        "reconnect": "Reconnect"
+      }
+    },
     "selectModel": "Select model",
     "selectProject": "Select project",
     "sendMessage": "Send message",
@@ -708,5 +745,16 @@
   },
   "agentBuilder": {
     "hideChat": "Hide chat"
+  },
+  "remoteSessionGuards": {
+    "hostBadge": {
+      "tooltip": "Remote host {{host}}: {{state}}"
+    },
+    "workspaceOnHost": "Folder on {{host}}",
+    "onHostChip": "on {{host}}",
+    "changesUnavailable": "Changes live on {{host}} and can't be shown from this machine yet.",
+    "filesUnavailable": "Files live on {{host}} and can't be browsed from this machine yet.",
+    "openUnavailable": "This file is on {{host}} and can't be opened from this machine.",
+    "viewerUnavailable": "This file lives on {{host}}. Viewing remote files isn't supported yet."
   }
 }

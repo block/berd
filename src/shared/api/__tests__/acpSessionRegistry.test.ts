@@ -17,7 +17,8 @@ const noRequestModelContext = (providerId: string) => ({
 });
 
 vi.mock("../acpConnection", () => ({
-  invalidateClientConnection: (...args: unknown[]) =>
+  getBackendClient: vi.fn(),
+  invalidateBackendConnection: (...args: unknown[]) =>
     mockInvalidateClientConnection(...args),
 }));
 
@@ -356,6 +357,7 @@ describe("applySessionModel", () => {
       await expect(reasoning).rejects.toThrow("ACP operation timed out");
       await expect(load).resolves.toMatchObject({ isCurrent: true });
       expect(mockInvalidateClientConnection).toHaveBeenCalledOnce();
+      expect(mockInvalidateClientConnection).toHaveBeenCalledWith("local");
       expect(mockLoadSession).toHaveBeenCalledOnce();
       expect(registry.getPreparedProviderId("session-1")).toBe("openai");
     } finally {

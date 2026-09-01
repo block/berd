@@ -527,6 +527,43 @@
     "viewMore": "Ver más",
     "switchAgent": "Cambiar de agente",
     "noProject": "Sin proyecto",
+    "remoteHost": {
+      "selectHost": "Seleccionar equipo",
+      "chooseHost": "¿Dónde debería ejecutarse este chat?",
+      "thisComputer": "Este equipo",
+      "thisComputerDescription": "Ejecutar la sesión localmente",
+      "sshHosts": "Hosts SSH",
+      "localTriggerTitle": "Se ejecuta en este equipo",
+      "remoteTriggerTitle": "Se ejecuta en {{host}} por SSH",
+      "missingDirectory": "Elige una carpeta en el host remoto antes de enviar",
+      "startFailed": "No se pudo iniciar la sesión remota",
+      "status": {
+        "connecting": "Conectando...",
+        "ready": "Conectado",
+        "reconnecting": "Reconectando...",
+        "disconnected": "Desconectado",
+        "failed": "Error de conexión"
+      },
+      "directory": {
+        "chooseFolder": "Elegir carpeta",
+        "selectDirectory": "Seleccionar carpeta remota",
+        "title": "Carpeta en {{host}}",
+        "pathLabel": "Ruta remota",
+        "pathPlaceholder": "~/ o /ruta/absoluta",
+        "parent": "Subir un nivel",
+        "empty": "Sin subcarpetas",
+        "loading": "Cargando...",
+        "recents": "Carpetas recientes",
+        "use": "Usar esta carpeta"
+      },
+      "banner": {
+        "disconnected": "Desconectado de {{host}}",
+        "failed": "No se pudo conectar con {{host}}",
+        "connecting": "Conectando con {{host}}...",
+        "reconnecting": "Reconectando con {{host}}...",
+        "reconnect": "Reconectar"
+      }
+    },
     "selectModel": "Seleccionar modelo",
     "selectProject": "Seleccionar proyecto",
     "sendMessage": "Enviar mensaje",
@@ -704,5 +741,16 @@
   },
   "agentBuilder": {
     "hideChat": "Ocultar chat"
+  },
+  "remoteSessionGuards": {
+    "hostBadge": {
+      "tooltip": "Host remoto {{host}}: {{state}}"
+    },
+    "workspaceOnHost": "Carpeta en {{host}}",
+    "onHostChip": "en {{host}}",
+    "changesUnavailable": "Los cambios están en {{host}} y todavía no se pueden mostrar desde esta máquina.",
+    "filesUnavailable": "Los archivos están en {{host}} y todavía no se pueden explorar desde esta máquina.",
+    "openUnavailable": "Este archivo está en {{host}} y no se puede abrir desde esta máquina.",
+    "viewerUnavailable": "Este archivo está en {{host}}. Ver archivos remotos todavía no es compatible."
   }
 }

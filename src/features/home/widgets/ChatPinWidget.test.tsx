@@ -12,6 +12,7 @@ const { mockUseExperiment } = vi.hoisted(() => ({
 
 vi.mock("@/features/experiments/experimentPreferences", () => ({
   useExperiment: mockUseExperiment,
+  subscribeToExperimentChanges: () => () => {},
 }));
 
 vi.mock("./ChatCanvasCard", () => ({

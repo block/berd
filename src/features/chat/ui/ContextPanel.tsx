@@ -64,6 +64,8 @@ import {
   hasDeferredWorkspaceSend,
   releaseWorkspaceSendAfterUserEdit,
 } from "@/features/chat/lib/firstWorkspaceSend";
+import { isRemoteSession } from "@/features/chat/lib/remoteSession";
+import { RemoteWorkspaceSummary } from "./widgets/RemoteWorkspaceSummary";
 import { useWorkspaceRepository } from "@/features/workspaces/workspaceRepository";
 import { useChangeSessionFolder } from "@/features/chat/hooks/useChangeSessionFolder";
 import { supersedePendingSessionWorkspaceActivation } from "@/features/chat/lib/sessionWorkspaceActivation";
@@ -166,12 +168,20 @@ export function ContextPanelWorktreeTracker({
   );
   const runtime = useChatStore((state) => state.sessionStateById[sessionId]);
   const setActiveWorkspace = useChatSessionStore((s) => s.setActiveWorkspace);
+  // Remote sessions keep their worktrees on the SSH host; the local git probe
+  // and worktree-adoption events below would act on the wrong filesystem.
+  const sessionIsRemote = useChatSessionStore((s) =>
+    isRemoteSession(s.sessions.find((candidate) => candidate.id === sessionId)),
+  );
   const gitTargetPath =
     activeContext?.path ??
     sessionWorkingDir ??
     projectDefaultWorkspaceRoot ??
     null;
-  const { data: gitState } = useGitState(gitTargetPath, Boolean(gitTargetPath));
+  const { data: gitState } = useGitState(
+    gitTargetPath,
+    Boolean(gitTargetPath) && !sessionIsRemote,
+  );
   const previousWorktreeKeyRef = useRef<string | null>(null);
   const pendingCreatedWorktreeRef = useRef<PendingCreatedWorktree | null>(null);
   const chatRuntime = runtime ?? INITIAL_SESSION_CHAT_RUNTIME;
@@ -192,7 +202,7 @@ export function ContextPanelWorktreeTracker({
   const eventSourcePathKey = normalizedEventSourcePaths.join("\0");
 
   useEffect(() => {
-    if (!isWorking) return;
+    if (sessionIsRemote || !isWorking) return;
     const eventSourcePathSet = new Set(
       eventSourcePathKey ? eventSourcePathKey.split("\0") : [],
     );
@@ -215,7 +225,7 @@ export function ContextPanelWorktreeTracker({
     return () => {
       void unlisten.then((cleanup) => cleanup());
     };
-  }, [eventSourcePathKey, isWorking]);
+  }, [eventSourcePathKey, isWorking, sessionIsRemote]);
 
   useEffect(() => {
     const trackingKey = `${sessionId}:${normalizeComparablePath(
@@ -298,6 +308,13 @@ export function ContextPanel({
   const session = useChatSessionStore((s) =>
     s.sessions.find((candidate) => candidate.id === sessionId),
   );
+  // Everything below the remote guard talks to local-filesystem Tauri
+  // commands (git probes, changed files, folder pickers, file browsing). A
+  // remote session's paths live on its SSH host, so those queries stay off
+  // and the tabs degrade to compact remote summaries instead.
+  const remoteHost = isRemoteSession(session)
+    ? (session?.remoteHost?.trim() ?? null)
+    : null;
   const allSessions = useChatSessionStore((s) => s.sessions);
   const homeDir = useHomeDir();
   const attachWorkspace = useChatSessionStore((s) => s.attachWorkspace);
@@ -343,15 +360,17 @@ export function ContextPanel({
     isFetching: fallbackGitIsFetching,
   } = useGitState(
     gitTargetPath,
-    isWorkspaceContextTab && !hasWorkspaceAttachments,
+    isWorkspaceContextTab && !hasWorkspaceAttachments && remoteHost === null,
   );
   const workspaceGitRuntimes = useWorkspaceGitRuntimes(
     workspaceAttachments,
-    isMultiWorkspaceMode && (isWorkspaceContextTab || isAddWorkspaceOpen),
+    remoteHost === null &&
+      isMultiWorkspaceMode &&
+      (isWorkspaceContextTab || isAddWorkspaceOpen),
   );
   const workspaceChangedFileRuntimes = useWorkspaceChangedFilesRuntimes(
     workspaceGitRuntimes,
-    isWorkspaceContextTab,
+    isWorkspaceContextTab && remoteHost === null,
   );
   const renderedWorkspaceAttachments = useMemo(
     () => workspaceGitRuntimes.map((runtime) => runtime.workspace),
@@ -375,7 +394,7 @@ export function ContextPanel({
     isLoading: isFallbackFilesLoading,
   } = useChangedFiles(
     gitTargetPath,
-    isWorkspaceContextTab && !hasWorkspaceAttachments,
+    isWorkspaceContextTab && !hasWorkspaceAttachments && remoteHost === null,
   );
   const shouldShowChanges = hasWorkspaceAttachments
     ? workspaceChangedFileRuntimes.length > 0
@@ -1072,7 +1091,12 @@ export function ContextPanel({
 
       <TabsContent value="details" className={TAB_CONTENT_CLASS}>
         <div className="-mt-0.5 w-full">
-          {isMultiWorkspaceMode ? (
+          {remoteHost !== null ? (
+            <RemoteWorkspaceSummary
+              host={remoteHost}
+              workspacePath={gitTargetPath}
+            />
+          ) : isMultiWorkspaceMode ? (
             <>
               <WorkspaceWidget
                 projectName={projectName}
@@ -1155,61 +1179,77 @@ export function ContextPanel({
 
       <TabsContent value="changes" className={TAB_CONTENT_CLASS}>
         <div className="w-full pb-4">
-          {relatedPullRequestsEnabled && (
-            <SessionPullRequestsWidget
-              sessionId={sessionId}
-              workspacePath={gitTargetPath}
-              isOpen={sectionVisibility.pullRequests}
-              onToggleOpen={() => toggleSection("pullRequests")}
-            />
-          )}
-          {shouldShowChanges ? (
-            hasWorkspaceAttachments ? (
-              <WorkspaceChangesWidget
-                groups={workspaceChangedFileRuntimes}
-                onOpenFile={handleOpenWorkspaceChangedFile}
-                probeErrorMessage={
-                  changesProbeError
-                    ? changesProbeError.message ||
-                      t("contextPanel.errors.gitChangesRead")
-                    : null
-                }
-              />
-            ) : (
-              <ChangesWidget
-                files={fallbackChangedFiles}
-                isLoading={isFallbackFilesLoading}
-                error={
-                  fallbackChangedFilesError instanceof Error
-                    ? fallbackChangedFilesError
-                    : null
-                }
-                isLoadingError={isFallbackChangedFilesLoadingError}
-                currentBranch={fallbackGitState?.currentBranch ?? null}
-                dirtyFileCount={fallbackGitState?.dirtyFileCount ?? 0}
-                repoPath={gitTargetPath ?? ""}
-                onOpenFile={handleOpenChangedFile}
-                isOpen={sectionVisibility.changes}
-                onToggleOpen={() => toggleSection("changes")}
-              />
-            )
-          ) : isChangesProbeLoading ? (
-            <ChangesLoadingState />
-          ) : changesProbeError ? (
-            <ChangesErrorState
-              message={
-                changesProbeError.message ||
-                t("contextPanel.errors.gitChangesRead")
-              }
+          {remoteHost !== null ? (
+            <ChangesEmptyState
+              message={t("remoteSessionGuards.changesUnavailable", {
+                host: remoteHost,
+              })}
             />
           ) : (
-            <ChangesEmptyState message={changesUnavailableMessage} />
+            <>
+              {relatedPullRequestsEnabled && (
+                <SessionPullRequestsWidget
+                  sessionId={sessionId}
+                  workspacePath={gitTargetPath}
+                  isOpen={sectionVisibility.pullRequests}
+                  onToggleOpen={() => toggleSection("pullRequests")}
+                />
+              )}
+              {shouldShowChanges ? (
+                hasWorkspaceAttachments ? (
+                  <WorkspaceChangesWidget
+                    groups={workspaceChangedFileRuntimes}
+                    onOpenFile={handleOpenWorkspaceChangedFile}
+                    probeErrorMessage={
+                      changesProbeError
+                        ? changesProbeError.message ||
+                          t("contextPanel.errors.gitChangesRead")
+                        : null
+                    }
+                  />
+                ) : (
+                  <ChangesWidget
+                    files={fallbackChangedFiles}
+                    isLoading={isFallbackFilesLoading}
+                    error={
+                      fallbackChangedFilesError instanceof Error
+                        ? fallbackChangedFilesError
+                        : null
+                    }
+                    isLoadingError={isFallbackChangedFilesLoadingError}
+                    currentBranch={fallbackGitState?.currentBranch ?? null}
+                    dirtyFileCount={fallbackGitState?.dirtyFileCount ?? 0}
+                    repoPath={gitTargetPath ?? ""}
+                    onOpenFile={handleOpenChangedFile}
+                    isOpen={sectionVisibility.changes}
+                    onToggleOpen={() => toggleSection("changes")}
+                  />
+                )
+              ) : isChangesProbeLoading ? (
+                <ChangesLoadingState />
+              ) : changesProbeError ? (
+                <ChangesErrorState
+                  message={
+                    changesProbeError.message ||
+                    t("contextPanel.errors.gitChangesRead")
+                  }
+                />
+              ) : (
+                <ChangesEmptyState message={changesUnavailableMessage} />
+              )}
+            </>
           )}
         </div>
       </TabsContent>
 
       <TabsContent value="files" className={TAB_CONTENT_CLASS}>
-        <FilesList projectWorkingDirs={fileBrowserRoots} />
+        {remoteHost !== null ? (
+          <p className="rounded-sm px-2 py-1 text-sm text-muted-foreground">
+            {t("remoteSessionGuards.filesUnavailable", { host: remoteHost })}
+          </p>
+        ) : (
+          <FilesList projectWorkingDirs={fileBrowserRoots} />
+        )}
       </TabsContent>
     </Tabs>
   );

@@ -235,6 +235,10 @@
       "description": "Fija prompts guardados en Inicio que se ejecutan con un clic, opcionalmente con un agente adjunto.",
       "title": "Pins de prompts"
     },
+    "remoteSshSessions": {
+      "description": "Ejecuta sesiones en una máquina remota por SSH usando los hosts de tu configuración SSH. Berd inicia un daemon de Goose en el host remoto y crea un túnel hacia él.",
+      "title": "Sesiones SSH remotas"
+    },
     "resetToAuto": "Restablecer a automático",
     "saveError": "No se pudo guardar el ajuste del experimento. Inténtalo de nuevo.",
     "skillDiscovery": {
@@ -692,6 +696,61 @@
     "showMore": "Mostrar {{count}} proveedores más",
     "title": "Proveedores",
     "waitingForSignIn": "Esperando inicio de sesión..."
+  },
+  "remoteHosts": {
+    "actions": {
+      "check": "Comprobar host",
+      "connect": "Conectar",
+      "disconnect": "Desconectar",
+      "forget": "Olvidar",
+      "shutdown": "Detener backend remoto",
+      "takeover": "Detener y reconectar"
+    },
+    "custom": {
+      "description": "Conéctate a una máquina que no está en tu configuración SSH.",
+      "emptyError": "Introduce un host al que conectarte.",
+      "label": "Conectar a otro host",
+      "placeholder": "usuario@host"
+    },
+    "description": "Los hosts provienen de tu ~/.ssh/config. La autenticación por clave o agente ya debe funcionar: comprueba primero que `ssh <host>` funciona en una terminal.",
+    "conflict": {
+      "instance": "Daemon en conflicto: PID {{pid}}, {{version}}, {{binary}}",
+      "pathUnknown": "binario desconocido"
+    },
+    "doctor": {
+      "checking": "Comprobando el host...",
+      "found": "Encontrado",
+      "gooseMissing": "Instala goose en este host para usarlo en sesiones remotas.",
+      "notFound": "No encontrado"
+    },
+    "empty": "No se encontraron hosts en ~/.ssh/config.",
+    "gooseBinary": {
+      "clear": "Borrar",
+      "hint": "Sustituye la búsqueda de goose en el PATH de este host. Al cambiarla, el backend remoto se reinicia en la próxima conexión.",
+      "invalidError": "Introduce una ruta absoluta o que empiece por ~/.",
+      "label": "Ruta del binario de goose (opcional)",
+      "placeholder": "~/src/goose/target/release/goose",
+      "save": "Guardar"
+    },
+    "shutdownConfirm": {
+      "cancel": "Cancelar",
+      "confirm": "Detener backend",
+      "description": "Esto detiene el daemon del agente registrado en el host remoto después de verificar la identidad del proceso y finaliza cualquier trabajo remoto en curso.",
+      "stopping": "Deteniendo...",
+      "title": "¿Detener el backend remoto en \"{{host}}\"?"
+    },
+    "takeoverConfirm": {
+      "description": "Esto verifica y detiene el daemon en conflicto mostrado para este host y, a continuación, vuelve a conectar con la configuración actual de Goose. Si el daemon cambió desde que se detectó, no se detiene nada."
+    },
+    "status": {
+      "connecting": "Conectando...",
+      "disconnected": "Desconectado",
+      "failed": "Error",
+      "ready": "Conectado",
+      "reconnecting": "Reconectando...",
+      "reconnectingAttempt": "Reconectando (intento {{attempt}})..."
+    },
+    "title": "Hosts SSH remotos"
   },
   "runtimeConfig": {
     "clearError": "No se pudo limpiar la respuesta del endpoint falso.",

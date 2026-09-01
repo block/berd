@@ -80,7 +80,9 @@
   "status": {
     "chatActive": "Chat active",
     "pinnedChat": "Pinned chat",
-    "unreadMessages": "Unread messages"
+    "unreadMessages": "Unread messages",
+    "remoteHost": "Remote chat on {{host}}",
+    "remoteHostDisconnected": "Remote chat on {{host}} — disconnected"
   },
   "showLess": "Show less",
   "viewMoreChats": "View more",

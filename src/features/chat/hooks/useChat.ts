@@ -32,6 +32,7 @@ import {
   flushBufferedStreamingUpdatesForSession,
 } from "../acp/liveStreamingUpdates";
 import { useWorkspaceRepository } from "@/features/workspaces/workspaceRepository";
+import { isRemoteSession } from "../lib/remoteSession";
 
 // TODO: Remove this fallback once goose2 has first-class /-commands.
 const MANUAL_COMPACT_TRIGGER = "/compact";
@@ -374,12 +375,15 @@ export function useChat(
 
   const getWorkingDir = useCallback(() => {
     const sessionStore = useChatSessionStore.getState();
-    return workspaceRepository.chatWorkspaces(
-      sessionStore.getSession(sessionId),
-      {
-        activePath: sessionStore.activeWorkspaceBySession[sessionId]?.path,
-      },
-    ).primary?.path;
+    const session = sessionStore.getSession(sessionId);
+    if (isRemoteSession(session)) {
+      // Remote paths must pass through verbatim: the local workspace
+      // repository can only resolve directories on this machine.
+      return session?.workingDir ?? undefined;
+    }
+    return workspaceRepository.chatWorkspaces(session, {
+      activePath: sessionStore.activeWorkspaceBySession[sessionId]?.path,
+    }).primary?.path;
   }, [sessionId, workspaceRepository]);
 
   const compactConversation = useCallback(

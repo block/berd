@@ -71,6 +71,10 @@ export interface GlobalComposeOptions {
     configId: string;
     value: string;
   };
+  /** SSH host the new chat's backend should run on (remote sessions). */
+  remoteHost?: string;
+  /** Remote working directory; required alongside remoteHost. */
+  remoteWorkingDir?: string;
 }
 
 export interface GlobalComposerExpandPayload {

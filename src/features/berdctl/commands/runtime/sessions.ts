@@ -64,7 +64,7 @@ async function loadSessionsForBerdctlUntil(
   for (;;) {
     const page = await acpListSessionsPage({ cursor });
     const fetchedTarget = page.sessions
-      .map(acpSessionToChatSession)
+      .map((session) => acpSessionToChatSession(session))
       .some(shouldStop);
     useChatSessionStore.setState((state) => ({
       ...mergeAcpSessionPage(state, page, previousCursor),

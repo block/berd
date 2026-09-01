@@ -6,6 +6,8 @@ import { MarkdownImage } from "../MarkdownImage";
 const mocks = vi.hoisted(() => ({
   resolveMarkdownHref: vi.fn(),
   pathExists: vi.fn<(path: string) => Promise<boolean>>(),
+  filesAreRemote: false,
+  remoteHost: null as string | null,
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -16,6 +18,8 @@ vi.mock("@/features/chat/hooks/ArtifactPolicyContext", () => ({
   useArtifactActionsContext: () => ({
     resolveMarkdownHref: mocks.resolveMarkdownHref,
     pathExists: mocks.pathExists,
+    filesAreRemote: mocks.filesAreRemote,
+    remoteHost: mocks.remoteHost,
   }),
 }));
 
@@ -29,6 +33,8 @@ describe("MarkdownImage", () => {
   beforeEach(() => {
     mocks.resolveMarkdownHref.mockReset();
     mocks.pathExists.mockReset();
+    mocks.filesAreRemote = false;
+    mocks.remoteHost = null;
   });
 
   it("renders an eligible local image via the asset: scheme by default", async () => {
@@ -115,6 +121,38 @@ describe("MarkdownImage", () => {
     expect(screen.queryByTestId("clickable-image")).toBeNull();
     expect(screen.getByAltText("blocked").getAttribute("src")).toBe(
       "weird:thing",
+    );
+  });
+
+  it("renders a compact host placeholder for local paths in a remote session", () => {
+    mocks.filesAreRemote = true;
+    mocks.remoteHost = "devbox";
+    mocks.resolveMarkdownHref.mockReturnValue({
+      rawPath: "./remote.png",
+      resolvedPath: "/home/dev/project/remote.png",
+      isWithinSessionCwd: true,
+    });
+
+    render(<MarkdownImage src="./remote.png" alt="remote artifact" />);
+
+    // The file lives on the SSH host: no local existence check, no asset:
+    // load (which would 404) — a name + host chip stands in for the image.
+    expect(mocks.pathExists).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("clickable-image")).toBeNull();
+    const placeholder = screen.getByTestId("remote-image-placeholder");
+    expect(placeholder.textContent).toContain("remote artifact");
+    expect(placeholder.textContent).toContain("devbox");
+  });
+
+  it("still leaves http(s) images alone in a remote session", () => {
+    mocks.filesAreRemote = true;
+    mocks.remoteHost = "devbox";
+
+    render(<MarkdownImage src="https://example.com/p.jpg" alt="remote" />);
+
+    expect(screen.queryByTestId("remote-image-placeholder")).toBeNull();
+    expect(screen.getByAltText("remote").getAttribute("src")).toBe(
+      "https://example.com/p.jpg",
     );
   });
 

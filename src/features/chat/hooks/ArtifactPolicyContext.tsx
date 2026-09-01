@@ -7,12 +7,16 @@ import {
   useRef,
   type ReactNode,
 } from "react";
+import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import type {
   Message,
   ToolCallLocation,
   ToolKind,
 } from "@/shared/types/messages";
 import { pathExists } from "@/shared/api/system";
+import { isRemoteSession } from "@/features/chat/lib/remoteSession";
+import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { useArtifactViewerStore } from "@/features/chat/stores/artifactViewerStore";
 import {
   artifactBasename,
@@ -63,6 +67,15 @@ export interface ArtifactPolicyContextValue {
    * externally. Resolves the path against the session cwd first.
    */
   openInApp: (path: string, filename?: string) => Promise<void>;
+  /**
+   * True when this session's backend runs on a remote SSH host, so the
+   * transcript's file paths refer to that host's filesystem. Local existence
+   * checks and `convertFileSrc` asset loads would 404; renderers show a
+   * compact "on <host>" placeholder instead of attempting local file loads.
+   */
+  filesAreRemote: boolean;
+  /** SSH host carrying this session's files when `filesAreRemote`. */
+  remoteHost: string | null;
 }
 
 const DEFAULT_ACTIONS_CONTEXT_VALUE: ArtifactPolicyContextValue = {
@@ -70,6 +83,8 @@ const DEFAULT_ACTIONS_CONTEXT_VALUE: ArtifactPolicyContextValue = {
   pathExists: async () => false,
   openResolvedPath: async () => {},
   openInApp: async () => {},
+  filesAreRemote: false,
+  remoteHost: null,
 };
 
 const EMPTY_SESSION_ARTIFACTS: readonly SessionArtifact[] = [];
@@ -292,7 +307,16 @@ export function ArtifactPolicyProvider({
   sessionId?: string | null;
   children: ReactNode;
 }) {
+  const { t } = useTranslation("chat");
   const openInViewer = useArtifactViewerStore((s) => s.open);
+  const remoteHost = useChatSessionStore((s) => {
+    if (!sessionId) return null;
+    const session = s.sessions.find((candidate) => candidate.id === sessionId);
+    return isRemoteSession(session)
+      ? (session?.remoteHost?.trim() ?? null)
+      : null;
+  });
+  const filesAreRemote = remoteHost !== null;
   const normalizedSessionCwd = useMemo(
     () => sessionCwd?.trim() || null,
     [sessionCwd],
@@ -356,6 +380,9 @@ export function ArtifactPolicyProvider({
 
   const resolveOpenTarget = useCallback(
     async (path: string): Promise<string | null> => {
+      // Remote sessions: the path names a file on the SSH host, so a local
+      // existence probe is meaningless (and would report a false miss).
+      if (filesAreRemote) return null;
       const resolvedPath = resolvePath(path, normalizedSessionCwd);
       if (await pathExists(resolvedPath)) {
         return resolvedPath;
@@ -363,7 +390,7 @@ export function ArtifactPolicyProvider({
 
       return null;
     },
-    [normalizedSessionCwd],
+    [filesAreRemote, normalizedSessionCwd],
   );
 
   const checkPathExists = useCallback(
@@ -373,6 +400,13 @@ export function ArtifactPolicyProvider({
 
   const openResolvedPath = useCallback(
     async (path: string) => {
+      if (filesAreRemote) {
+        // Opening externally hands the path to the local OS, which cannot
+        // reach the remote filesystem. Callers surface or swallow the error.
+        throw new Error(
+          t("remoteSessionGuards.openUnavailable", { host: remoteHost }),
+        );
+      }
       const resolvedTarget = await resolveOpenTarget(path);
       if (!resolvedTarget) {
         const cwdMessage = normalizedSessionCwd ?? "<none>";
@@ -388,11 +422,29 @@ export function ArtifactPolicyProvider({
       lastOpenAtByPathRef.current.set(key, now);
       await openPath(resolvedTarget);
     },
-    [resolveOpenTarget, normalizedSessionCwd],
+    [filesAreRemote, remoteHost, resolveOpenTarget, normalizedSessionCwd, t],
   );
 
   const openInApp = useCallback(
     async (path: string, filename?: string) => {
+      if (filesAreRemote) {
+        // The viewer renders a compact "on <host>" placeholder for remote
+        // artifacts, so viewable files still open there (no existence check —
+        // that would probe the local disk). Everything else has no local
+        // hand-off; explain instead of silently launching the wrong file.
+        const resolvedPath = resolvePath(path, normalizedSessionCwd);
+        if (resolvedPath && sessionId && isViewableArtifact(resolvedPath)) {
+          openInViewer(sessionId, {
+            resolvedPath,
+            filename: filename ?? artifactBasename(resolvedPath),
+          });
+          return;
+        }
+        toast.message(
+          t("remoteSessionGuards.openUnavailable", { host: remoteHost }),
+        );
+        return;
+      }
       const resolvedTarget = await resolveOpenTarget(path);
       // Viewable + resolvable + we know the session: open in the viewer.
       if (resolvedTarget && sessionId && isViewableArtifact(resolvedTarget)) {
@@ -405,7 +457,16 @@ export function ArtifactPolicyProvider({
       // Otherwise fall back to opening externally (also handles not-found).
       await openResolvedPath(path);
     },
-    [resolveOpenTarget, sessionId, openInViewer, openResolvedPath],
+    [
+      filesAreRemote,
+      normalizedSessionCwd,
+      remoteHost,
+      resolveOpenTarget,
+      sessionId,
+      openInViewer,
+      openResolvedPath,
+      t,
+    ],
   );
 
   const actionsValue = useMemo<ArtifactPolicyContextValue>(
@@ -414,8 +475,17 @@ export function ArtifactPolicyProvider({
       pathExists: checkPathExists,
       openResolvedPath,
       openInApp,
+      filesAreRemote,
+      remoteHost,
     }),
-    [checkPathExists, openResolvedPath, openInApp, resolveMarkdownHref],
+    [
+      checkPathExists,
+      filesAreRemote,
+      openResolvedPath,
+      openInApp,
+      remoteHost,
+      resolveMarkdownHref,
+    ],
   );
 
   return (

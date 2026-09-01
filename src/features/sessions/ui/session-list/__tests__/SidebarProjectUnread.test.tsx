@@ -1,6 +1,7 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ProjectInfo } from "@/features/projects/api/projects";
+import { useRemoteHostStore } from "@/features/remoteHosts/stores/remoteHostStore";
 import { SidebarChatDragProvider } from "../SidebarChatDragContext";
 import { SidebarProjectSection } from "../SidebarProjectSection";
 
@@ -41,6 +42,28 @@ function renderSection(isExpanded: boolean) {
   );
 }
 
+function renderRemoteSection() {
+  return render(
+    <SidebarChatDragProvider>
+      <SidebarProjectSection
+        project={PROJECT}
+        projectChats={[
+          {
+            id: "remote-1",
+            title: "Remote chat",
+            updatedAt: "2026-01-01T00:00:00Z",
+            remoteHost: "blox",
+          },
+        ]}
+        isExpanded
+        toggleProject={vi.fn()}
+        showChatIcons
+        showTimestamps
+      />
+    </SidebarChatDragProvider>,
+  );
+}
+
 describe("project unread dot", () => {
   it("swaps the project icon for the unread dot when collapsed and a chat is unread", () => {
     const { container } = renderSection(false);
@@ -59,5 +82,38 @@ describe("project unread dot", () => {
     expect(
       container.querySelectorAll('[aria-label="Unread messages"]'),
     ).toHaveLength(1);
+  });
+});
+
+describe("remote project identity", () => {
+  it("marks the remote chat disconnected when its host has no live tunnel", () => {
+    const { container } = renderRemoteSection();
+
+    expect(container.querySelector("[data-sidebar-project-remote]")).toBeNull();
+    const glyph = container.querySelector("[data-sidebar-chat-remote-host]");
+    expect(glyph).toHaveAttribute(
+      "title",
+      "Remote chat on blox — disconnected",
+    );
+    expect(glyph).toHaveAttribute("data-remote-host-connected", "false");
+  });
+
+  it("uses the connected label once the host tunnel is ready", () => {
+    useRemoteHostStore.setState((state) => ({
+      statusByHost: { ...state.statusByHost, blox: { state: "ready" } },
+    }));
+    try {
+      const { container } = renderRemoteSection();
+
+      const glyph = container.querySelector("[data-sidebar-chat-remote-host]");
+      expect(glyph).toHaveAttribute("title", "Remote chat on blox");
+      expect(glyph).toHaveAttribute("data-remote-host-connected", "true");
+    } finally {
+      useRemoteHostStore.setState((state) => {
+        const statusByHost = { ...state.statusByHost };
+        delete statusByHost.blox;
+        return { statusByHost };
+      });
+    }
   });
 });

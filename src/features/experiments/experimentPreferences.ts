@@ -528,7 +528,7 @@ function getExperimentSnapshot(id: string, registry: ExperimentRegistry) {
   return snapshot;
 }
 
-function subscribeToExperimentChanges(onStoreChange: () => void) {
+export function subscribeToExperimentChanges(onStoreChange: () => void) {
   if (typeof window === "undefined") return () => {};
 
   const handleStorage = (event: StorageEvent) => {

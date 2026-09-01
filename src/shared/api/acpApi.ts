@@ -10,7 +10,22 @@ import type {
 import { messageSnippet } from "@/features/chat/lib/messageSnippet";
 import { getCuratedAgentProviders } from "@/features/providers/curatedProviders";
 import { toWireProviderId } from "./acpPersonaHandoff";
-import { getClient, interceptSessionNotifications } from "./acpConnection";
+import {
+  LOCAL_BACKEND_ID,
+  compositeSessionId,
+  type AcpBackendId,
+} from "./acpBackendId";
+import {
+  getBackendClient,
+  getClient,
+  interceptSessionNotifications,
+} from "./acpConnection";
+import {
+  getClientForSession,
+  getSessionBackend,
+  getWireSessionId,
+  registerSessionBackend,
+} from "./acpSessionBackends";
 import {
   applySessionConfigOptionsSnapshot,
   readSessionConfigOptionsSnapshots,
@@ -135,21 +150,28 @@ function mapSessionInfo(info: SessionInfo): AcpSessionInfo {
 export async function getSessionInfo(
   sessionId: string,
 ): Promise<AcpSessionInfo> {
-  const client = await getClient();
-  const result = await client.goose.GooseUnstableSessionInfo({ sessionId });
-  return mapSessionInfo(result.session as unknown as SessionInfo);
+  const client = await getClientForSession(sessionId);
+  const result = await client.goose.GooseUnstableSessionInfo({
+    sessionId: getWireSessionId(sessionId),
+  });
+  const info = mapSessionInfo(result.session as unknown as SessionInfo);
+  // The backend echoes its bare wire id; callers hold the composite id.
+  return { ...info, sessionId };
 }
 
 export async function listSessionsPage({
   cursor,
   query,
+  backendId,
 }: {
   cursor?: string | null;
   /** Keyword filter for goose's server-side message-content search
    *  (`_meta.query`). Only set when searching; omit for plain listing. */
   query?: string | null;
+  backendId?: AcpBackendId;
 } = {}): Promise<AcpSessionsPage> {
-  const client = await getClient();
+  const resolvedBackendId = backendId ?? LOCAL_BACKEND_ID;
+  const client = await getBackendClient(resolvedBackendId);
   const normalizedCursor = cursor?.trim() || null;
   const normalizedQuery = query?.trim() || null;
   // ACP session/list only standardizes cwd and cursor filters. Goose project
@@ -166,19 +188,30 @@ export async function listSessionsPage({
 
   const response = await client.listSessions(params);
   return {
-    sessions: response.sessions.map(mapSessionInfo),
+    // A remote page's wire ids collide with same-id local sessions, so each
+    // returned id becomes the composite renderer id (local ids pass through).
+    sessions: response.sessions.map((info) => {
+      const mapped = mapSessionInfo(info);
+      return {
+        ...mapped,
+        sessionId: compositeSessionId(resolvedBackendId, mapped.sessionId),
+      };
+    }),
     nextCursor: response.nextCursor?.trim() || null,
   };
 }
 
 export async function exportSession(sessionId: string): Promise<string> {
-  const client = await getClient();
-  const result = await client.goose.GooseUnstableSessionExport({ sessionId });
+  const client = await getClientForSession(sessionId);
+  const result = await client.goose.GooseUnstableSessionExport({
+    sessionId: getWireSessionId(sessionId),
+  });
   // biome-ignore lint/suspicious/noExplicitAny: SDK doesn't expose data field on export result
   return (result as any).data;
 }
 
 export async function importSession(json: string): Promise<AcpSessionInfo> {
+  // App-scoped: imports always land on the local backend.
   const client = await getClient();
   const result = await client.goose.GooseUnstableSessionImport({
     input: json,
@@ -200,9 +233,10 @@ export async function forkSession(
   workingDir: string,
   options: AcpForkSessionOptions = {},
 ): Promise<AcpSessionInfo> {
-  const client = await getClient();
+  const backendId = getSessionBackend(sessionId);
+  const client = await getBackendClient(backendId);
   const params: ForkSessionRequest = {
-    sessionId,
+    sessionId: getWireSessionId(sessionId),
     cwd: workingDir,
     mcpServers: [],
   };
@@ -211,8 +245,12 @@ export async function forkSession(
   }
 
   const response = await client.unstable_forkSession(params);
+  // The fork lives on the source session's backend; its renderer id is the
+  // composite of that backend and the returned wire id.
+  const forkedSessionId = compositeSessionId(backendId, response.sessionId);
+  registerSessionBackend(forkedSessionId, backendId, response.sessionId);
   return {
-    sessionId: response.sessionId,
+    sessionId: forkedSessionId,
     title: null,
     updatedAt: null,
     createdAt: metaString(response._meta, "createdAt"),
@@ -236,10 +274,10 @@ export async function setModel(
 ): Promise<AcpSessionConfigSnapshots> {
   const sid = sessionId.slice(0, 8);
   const tClient = performance.now();
-  const client = await getClient();
+  const client = await getClientForSession(sessionId);
   const tCall = performance.now();
   const response = await client.setSessionConfigOption({
-    sessionId,
+    sessionId: getWireSessionId(sessionId),
     configId: "model",
     value: modelId,
   });
@@ -272,10 +310,10 @@ export async function setSessionConfigOption(
 ): Promise<AcpSessionConfigSnapshots> {
   const sid = sessionId.slice(0, 8);
   const tClient = performance.now();
-  const client = await getClient();
+  const client = await getClientForSession(sessionId);
   const tCall = performance.now();
   const response = await client.setSessionConfigOption({
-    sessionId,
+    sessionId: getWireSessionId(sessionId),
     configId,
     value,
   });
@@ -307,11 +345,11 @@ export async function setProvider(
 ): Promise<AcpSessionConfigSnapshots> {
   const sid = sessionId.slice(0, 8);
   const tClient = performance.now();
-  const client = await getClient();
+  const client = await getClientForSession(sessionId);
   const wireProvider = toWireProviderId(providerId);
   const tCall = performance.now();
   const response = await client.setSessionConfigOption({
-    sessionId,
+    sessionId: getWireSessionId(sessionId),
     configId: "provider",
     value: wireProvider,
   });
@@ -343,13 +381,13 @@ export async function updateWorkingDir(
   workingDir: string,
   beforeUpdate?: () => void,
 ): Promise<void> {
-  const client = await getClient();
+  const client = await getClientForSession(sessionId);
   // Run guards after the asynchronous client lookup and synchronously before
   // dispatching the mutation. This lets callers close local state races
   // without exposing the ACP client or duplicating the wire operation.
   beforeUpdate?.();
   await client.goose.GooseUnstableSessionWorkingDirUpdate({
-    sessionId,
+    sessionId: getWireSessionId(sessionId),
     workingDir,
   });
 }
@@ -358,9 +396,9 @@ export async function setSessionSystemPrompt(
   sessionId: string,
   text: string,
 ): Promise<void> {
-  const client = await getClient();
+  const client = await getClientForSession(sessionId);
   await client.extMethod("_goose/unstable/session/system-prompt/set", {
-    sessionId,
+    sessionId: getWireSessionId(sessionId),
     mode: "set",
     text,
   });
@@ -371,9 +409,9 @@ export async function appendSessionSystemPrompt(
   key: string,
   text: string,
 ): Promise<void> {
-  const client = await getClient();
+  const client = await getClientForSession(sessionId);
   await client.extMethod("_goose/unstable/session/system-prompt/set", {
-    sessionId,
+    sessionId: getWireSessionId(sessionId),
     mode: "append",
     key,
     text,
@@ -384,39 +422,48 @@ export async function updateSessionProject(
   sessionId: string,
   projectId: string | null,
 ): Promise<void> {
-  const client = await getClient();
+  const client = await getClientForSession(sessionId);
   await client.goose.GooseUnstableSessionProjectUpdate({
-    sessionId,
+    sessionId: getWireSessionId(sessionId),
     projectId,
   });
 }
 
 export async function archiveSession(sessionId: string): Promise<void> {
-  const client = await getClient();
-  await client.goose.GooseUnstableSessionArchive({ sessionId });
+  const client = await getClientForSession(sessionId);
+  await client.goose.GooseUnstableSessionArchive({
+    sessionId: getWireSessionId(sessionId),
+  });
 }
 
 export async function deleteSession(sessionId: string): Promise<void> {
-  const client = await getClient();
-  await client.extMethod("session/delete", { sessionId });
+  const client = await getClientForSession(sessionId);
+  await client.extMethod("session/delete", {
+    sessionId: getWireSessionId(sessionId),
+  });
 }
 
 export async function unarchiveSession(sessionId: string): Promise<void> {
-  const client = await getClient();
-  await client.goose.GooseUnstableSessionUnarchive({ sessionId });
+  const client = await getClientForSession(sessionId);
+  await client.goose.GooseUnstableSessionUnarchive({
+    sessionId: getWireSessionId(sessionId),
+  });
 }
 
 export async function renameSession(
   sessionId: string,
   title: string,
 ): Promise<void> {
-  const client = await getClient();
-  await client.goose.GooseUnstableSessionRename({ sessionId, title });
+  const client = await getClientForSession(sessionId);
+  await client.goose.GooseUnstableSessionRename({
+    sessionId: getWireSessionId(sessionId),
+    title,
+  });
 }
 
 export async function cancelSession(sessionId: string): Promise<void> {
-  const client = await getClient();
-  await client.cancel({ sessionId });
+  const client = await getClientForSession(sessionId);
+  await client.cancel({ sessionId: getWireSessionId(sessionId) });
 }
 
 export interface NewSessionOptions {
@@ -424,6 +471,7 @@ export interface NewSessionOptions {
   projectId?: string;
   personaId?: string;
   hidden?: boolean;
+  backendId?: AcpBackendId;
 }
 
 export async function newSession(
@@ -431,8 +479,9 @@ export async function newSession(
   options: NewSessionOptions = {},
 ): Promise<NewSessionResponse> {
   const { providerId, projectId, personaId, hidden } = options;
+  const backendId = options.backendId ?? LOCAL_BACKEND_ID;
   const tClient = performance.now();
-  const client = await getClient();
+  const client = await getBackendClient(backendId);
   const request: Parameters<typeof client.newSession>[0] = {
     cwd: workingDir,
     mcpServers: [],
@@ -447,11 +496,16 @@ export async function newSession(
 
   const tCall = performance.now();
   const response = await client.newSession(request);
-  const sid = response.sessionId.slice(0, 8);
+  // The backend hands back a wire id that is only unique per backend. Callers
+  // (and every renderer-side store) get the composite id; the registry keeps
+  // the wire id for outbound translation.
+  const sessionId = compositeSessionId(backendId, response.sessionId);
+  registerSessionBackend(sessionId, backendId, response.sessionId);
+  const sid = sessionId.slice(0, 8);
   perfLog(
     `[perf:api] ${sid} newSession getClient=${(tCall - tClient).toFixed(1)}ms wire=${(performance.now() - tCall).toFixed(1)}ms`,
   );
-  return response;
+  return { ...response, sessionId };
 }
 
 export async function loadSession(
@@ -460,10 +514,10 @@ export async function loadSession(
 ): Promise<LoadSessionResponse> {
   const sid = sessionId.slice(0, 8);
   const tClient = performance.now();
-  const client = await getClient();
+  const client = await getClientForSession(sessionId);
   const tCall = performance.now();
   const response = await client.loadSession({
-    sessionId,
+    sessionId: getWireSessionId(sessionId),
     cwd: workingDir,
     mcpServers: [],
   });
@@ -491,10 +545,10 @@ export async function prompt(
     onPromptDispatched?: () => void;
   } = {},
 ): Promise<PromptResponse> {
-  const client = await getClient();
+  const client = await getClientForSession(sessionId);
   callbacks.onPromptDispatching?.();
   const promptPromise = client.prompt({
-    sessionId,
+    sessionId: getWireSessionId(sessionId),
     prompt: content,
     _meta: meta,
   });
@@ -596,10 +650,10 @@ export async function steerSession(
   expectedRunId: string | null,
   meta?: Record<string, unknown>,
 ): Promise<AcpSteerResponse> {
-  const client = await getClient();
+  const client = await getClientForSession(sessionId);
   const steer = async (runId: string): Promise<AcpSteerResponse> => {
     const response = await client.extMethod("_goose/unstable/session/steer", {
-      sessionId,
+      sessionId: getWireSessionId(sessionId),
       prompt: content,
       expectedRunId: runId,
       ...(meta ? { _meta: meta } : {}),

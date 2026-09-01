@@ -2,6 +2,8 @@ import { render, screen } from "@testing-library/react";
 import { useEffect } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { Message } from "@/shared/types/messages";
+import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
+import { useArtifactViewerStore } from "@/features/chat/stores/artifactViewerStore";
 import {
   ArtifactPolicyProvider,
   collectSessionArtifacts,
@@ -583,5 +585,84 @@ describe("ArtifactPolicyContext", () => {
 
     expect(screen.getByTestId("link-has-candidate")).toHaveTextContent("true");
     expect(screen.getByTestId("link-path")).toHaveTextContent("/tmp/report.md");
+  });
+
+  describe("remote sessions", () => {
+    function seedRemoteSession(sessionId: string) {
+      mockPathExists.mockClear();
+      useChatSessionStore.setState({
+        sessions: [
+          {
+            id: sessionId,
+            title: "Remote",
+            workingDir: "/home/dev/project",
+            remoteHost: "devbox",
+            createdAt: "2026-08-27T00:00:00.000Z",
+            updatedAt: "2026-08-27T00:00:00.000Z",
+            messageCount: 1,
+          },
+        ],
+      });
+    }
+
+    function renderRemoteActions(sessionId: string) {
+      let actions: ArtifactPolicyContextValue | null = null;
+      render(
+        <ArtifactPolicyProvider
+          messages={[]}
+          sessionCwd="/home/dev/project"
+          sessionId={sessionId}
+        >
+          <ActionIdentityProbe
+            onValue={(value) => {
+              actions = value;
+            }}
+          />
+        </ArtifactPolicyProvider>,
+      );
+      if (!actions) throw new Error("actions context did not render");
+      return actions as ArtifactPolicyContextValue;
+    }
+
+    it("flags the session's files as remote", () => {
+      seedRemoteSession("remote-session");
+      const actions = renderRemoteActions("remote-session");
+
+      expect(actions.filesAreRemote).toBe(true);
+      expect(actions.remoteHost).toBe("devbox");
+    });
+
+    it("never probes the local filesystem for existence", async () => {
+      seedRemoteSession("remote-session");
+      const actions = renderRemoteActions("remote-session");
+
+      await expect(actions.pathExists("./notes.md")).resolves.toBe(false);
+      expect(mockPathExists).not.toHaveBeenCalled();
+    });
+
+    it("refuses external opens with a host-naming error", async () => {
+      seedRemoteSession("remote-session");
+      const actions = renderRemoteActions("remote-session");
+
+      await expect(actions.openResolvedPath("./notes.md")).rejects.toThrow(
+        /devbox/,
+      );
+      expect(mockPathExists).not.toHaveBeenCalled();
+    });
+
+    it("opens viewable remote artifacts in the viewer without a local existence check", async () => {
+      seedRemoteSession("remote-session");
+      const actions = renderRemoteActions("remote-session");
+
+      await actions.openInApp("./notes.md");
+
+      expect(mockPathExists).not.toHaveBeenCalled();
+      expect(
+        useArtifactViewerStore.getState().openBySession["remote-session"],
+      ).toMatchObject({
+        resolvedPath: "/home/dev/project/notes.md",
+        filename: "notes.md",
+      });
+    });
   });
 });

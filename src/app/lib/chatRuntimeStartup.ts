@@ -33,6 +33,8 @@ import {
 import { checkAllProviderStatus } from "@/features/providers/api/credentials";
 import { useDefaultProviderReadinessStore } from "@/features/providers/stores/defaultProviderReadinessStore";
 import { useProviderModelCacheStore } from "@/features/providers/stores/providerModelCacheStore";
+import { REMOTE_SSH_SESSIONS_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { getExperiment } from "@/features/experiments/experimentPreferences";
 import { useDistroStore } from "@/features/settings/stores/distroStore";
 import type { AcpProvider } from "@/shared/api/acp";
 import {
@@ -330,6 +332,20 @@ async function startChatRuntime(
     perfLog(
       `[perf:startup] loadSessions done in ${(performance.now() - t0).toFixed(1)}ms`,
     );
+    // After the local page load so mergeAcpSessionPage cannot race the
+    // placeholder insert; the merge itself is additive for remoteHost either
+    // way. The per-window experiment reconciliation hook also waits on this
+    // startup latch before applying later runtime changes.
+    if (getExperiment(REMOTE_SSH_SESSIONS_EXPERIMENT_ID)?.enabled) {
+      try {
+        const { rehydrateRemoteSessions } = await import(
+          "@/features/chat/stores/remoteSessionPersistence"
+        );
+        await rehydrateRemoteSessions();
+      } catch (err) {
+        console.error("Failed to rehydrate remote sessions on startup:", err);
+      }
+    }
   };
 
   applyCuratedProviders(false);

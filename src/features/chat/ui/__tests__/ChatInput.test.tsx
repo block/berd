@@ -4065,6 +4065,46 @@ describe("ChatInput", () => {
     expect(screen.queryByText("Attach file")).not.toBeInTheDocument();
   });
 
+  it("disables local path attachment actions for a remote host", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <ChatInputToolbar
+        agentModelPicker={{
+          providers: [],
+          selectedProvider: "goose",
+          onProviderChange: vi.fn(),
+          availableModels: [],
+        }}
+        projectPicker={{ selectedProjectId: null, availableProjects: [] }}
+        remoteHostPicker={{
+          enabled: true,
+          selectedHost: "devbox",
+          onHostChange: vi.fn(),
+        }}
+        contextUsage={{ contextTokens: 0, contextLimit: 0 }}
+        composerActions={{
+          canSend: false,
+          isStreaming: false,
+          attachmentsEnabled: true,
+          onAttachFiles: vi.fn(),
+          onAttachFolders: vi.fn(),
+          onSend: vi.fn(),
+        }}
+        isCompact={false}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /attach/i }));
+
+    expect(screen.getByRole("menuitem", { name: "File" })).toHaveAttribute(
+      "data-disabled",
+    );
+    expect(screen.getByRole("menuitem", { name: "Folder" })).toHaveAttribute(
+      "data-disabled",
+    );
+  });
+
   it("keeps only one dropdown menu open when switching between attach and project", async () => {
     const user = userEvent.setup();
 

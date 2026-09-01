@@ -12,6 +12,7 @@ import {
   isSameWorkspacePathWithHome,
   workspaceAttachmentIdForPath,
 } from "@/features/chat/lib/workspaceAttachments";
+import { isRemoteSession } from "@/features/chat/lib/remoteSession";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { getMultiWorkspaceEnabled } from "@/features/workspaces/multiWorkspacePreference";
 import {
@@ -31,6 +32,25 @@ export class FolderAttachmentError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "FolderAttachmentError";
+  }
+}
+
+/**
+ * Folder attachment canonicalizes, git-probes, and existence-checks paths on
+ * the LOCAL filesystem, but a remote session's workspace lives on its SSH
+ * host — attaching local folders to it is meaningless in v1. Every mutation
+ * entry point below rejects up front instead of persisting a mixed-machine
+ * workspace set.
+ */
+function assertLocalSession(
+  sessionId: string,
+  operation: "attach" | "detach" | "replace",
+): void {
+  const session = useChatSessionStore.getState().getSession(sessionId);
+  if (session && isRemoteSession(session)) {
+    throw new FolderAttachmentError(
+      `Cannot ${operation} folders for session "${sessionId}": it runs on remote host "${session.remoteHost}", and local folder attachments are not supported for remote sessions.`,
+    );
   }
 }
 
@@ -182,6 +202,7 @@ export async function attachSessionFolder(
   requestedPath: string,
   options: AttachSessionFolderOptions = {},
 ): Promise<WorkspaceAttachment> {
+  assertLocalSession(sessionId, "attach");
   const observedIntentGeneration =
     getSessionWorkspaceIntentGeneration(sessionId);
   const homeDir = await getHomeDir();
@@ -322,6 +343,7 @@ export async function detachSessionFolder(
   requestedPath: string,
   options: DetachSessionFolderOptions = {},
 ): Promise<DetachSessionFolderResult> {
+  assertLocalSession(sessionId, "detach");
   const homeDir = await getHomeDir();
   const path = await canonicalizeDetachablePath(
     sessionId,
@@ -452,6 +474,7 @@ export async function replaceSessionFolder(
   newRequestedPath: string,
   options: ReplaceSessionFolderOptions = {},
 ): Promise<ReplaceSessionFolderResult> {
+  assertLocalSession(sessionId, "replace");
   const homeDir = await getHomeDir();
   const oldPath = await canonicalizeDetachablePath(
     sessionId,

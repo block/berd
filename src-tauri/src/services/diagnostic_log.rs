@@ -24,6 +24,7 @@ pub enum DiagnosticCategory {
     Startup,
     GooseServe,
     Renderer,
+    RemoteBackend,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -324,6 +325,7 @@ fn category_name(category: DiagnosticCategory) -> &'static str {
         DiagnosticCategory::Startup => "startup",
         DiagnosticCategory::GooseServe => "gooseServe",
         DiagnosticCategory::Renderer => "renderer",
+        DiagnosticCategory::RemoteBackend => "remoteBackend",
     }
 }
 

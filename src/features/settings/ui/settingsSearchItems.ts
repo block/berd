@@ -114,6 +114,13 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     sectionId: "connections",
     labelKey: "nav.connections",
   },
+  // Hidden via hiddenItemIds when the remote-ssh-sessions experiment is off,
+  // mirroring the card itself (RemoteHostsSettings renders null there).
+  {
+    id: "remote-ssh-hosts",
+    sectionId: "connections",
+    labelKey: "remoteHosts.title",
+  },
   {
     id: "providers",
     sectionId: "providers",

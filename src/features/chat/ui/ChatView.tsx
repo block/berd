@@ -11,6 +11,7 @@ import { IconLayoutSidebarLeftCollapse } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { ChatSearchBar } from "./ChatSearchBar";
 import { ChatTranscriptSurface } from "./ChatTranscriptSurface";
+import { RemoteHostConnectionBanner } from "./RemoteHostConnectionBanner";
 import { LoadingBerd } from "./LoadingBerd";
 import { ChatRightRail } from "./ChatRightRail";
 import {
@@ -37,6 +38,7 @@ import {
 import { useResizableAgentBuilderRail } from "../hooks/useResizableAgentBuilderRail";
 import { useWorkspaceRepository } from "@/features/workspaces/workspaceRepository";
 import { useChangeSessionFolder } from "../hooks/useChangeSessionFolder";
+import { isRemoteSession } from "../lib/remoteSession";
 import {
   useChatSessionStore,
   type ChatSession,
@@ -200,6 +202,11 @@ export function ChatView({
   const workspaceRepository = useWorkspaceRepository();
   const effectiveSession = controller.session ?? activeSession ?? null;
   const isReadOnly = Boolean(readOnlyStatus);
+  // A remote session's cwd and artifact paths live on its SSH host: the
+  // in-chat terminal (a local PTY), local folder pickers, and local file
+  // auto-open would all act on the wrong machine, so their affordances are
+  // withheld below (v1 — no ssh terminals or remote file loads).
+  const sessionIsRemote = isRemoteSession(effectiveSession);
   // While the viewer panel is open it occupies row width much like the
   // sidebar occludes the viewport: include its floor allowance in the
   // compact-mode query so the right rail only docks when rail + viewer +
@@ -412,8 +419,14 @@ export function ChatView({
     useConfiguredTerminalFallback && terminalFallbackCwd
       ? terminalFallbackCwd
       : effectiveSession?.workingDir;
-  const terminalCwd =
-    terminalWorkspacePath ?? sessionTerminalCwd ?? projectTerminalCwd ?? null;
+  // Never hand the terminal a remote session's cwd: the PTY spawns locally,
+  // so it would either fail or land in an unrelated local directory.
+  const terminalCwd = sessionIsRemote
+    ? null
+    : (terminalWorkspacePath ??
+      sessionTerminalCwd ??
+      projectTerminalCwd ??
+      null);
 
   // When a user action closes/collapses the terminal there is nowhere else
   // meaningful to land focus, so return it to the chat composer.
@@ -532,6 +545,9 @@ export function ChatView({
   );
 
   useEffect(() => {
+    // No terminal shortcut for remote sessions — there is no local cwd to
+    // open a PTY in, and the affordance is hidden everywhere else too.
+    if (sessionIsRemote) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.isComposing || event.keyCode === 229) return;
       if (eventMatchesShortcutCommand(event, "view.toggleTerminal")) {
@@ -542,7 +558,7 @@ export function ChatView({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleToggleTerminal]);
+  }, [handleToggleTerminal, sessionIsRemote]);
 
   const handleCloseRightRail = useCallback(() => {
     if (!effectiveSession?.id || !contextVisible) return;
@@ -587,7 +603,9 @@ export function ChatView({
     },
   );
   const onTimelineChangeFolder =
-    !isReadOnly && changeFolderSessionId ? handleChangeFolder : undefined;
+    !isReadOnly && !sessionIsRemote && changeFolderSessionId
+      ? handleChangeFolder
+      : undefined;
 
   const shouldShowLoadingIndicator =
     !controller.isLoadingHistory &&
@@ -674,6 +692,14 @@ export function ChatView({
           composerHandoffActive && "invisible pointer-events-none",
         )}
       >
+        {sessionIsRemote &&
+        effectiveSession?.remoteHost &&
+        !effectiveSession.creationState ? (
+          <RemoteHostConnectionBanner
+            host={effectiveSession.remoteHost}
+            sessionId={effectiveSession.id}
+          />
+        ) : null}
         <SecurityConfirmationPanel sessionId={sessionId} />
         <ConversationComposerCapability
           binding={composerBinding}
@@ -769,7 +795,9 @@ export function ChatView({
   return (
     <>
       <ArtifactAutoOpenMount
-        sessionId={sessionId}
+        // Remote artifacts cannot be read locally, so never auto-open the
+        // viewer for them; a null session absorbs appearances silently.
+        sessionId={sessionIsRemote ? null : sessionId}
         isHistoryLoading={controller.isLoadingHistory}
         sessionCwd={controller.sessionArtifactCwd}
       />
@@ -939,14 +967,16 @@ export function ChatView({
           terminalOpen={terminal.activeWorkspaceHasTerminal}
           contextPanelLeftViewportOcclusionPx={chatRowOcclusionPx}
           onRequestCloseRightRail={handleCloseRightRail}
-          onToggleTerminal={handleToggleTerminal}
+          onToggleTerminal={sessionIsRemote ? undefined : handleToggleTerminal}
           terminalController={terminal}
           terminalDockPreview={terminalDockPreview}
           terminalRootRef={terminalRootRef}
           getTerminalDockTargetForPointer={getTerminalDockTargetForPointer}
           onTerminalDockPreviewChange={setTerminalDockPreview}
           onTerminalDockToRegion={handleTerminalDockToRegion}
-          onOpenTerminalAtPath={handleOpenTerminalAtPath}
+          onOpenTerminalAtPath={
+            sessionIsRemote ? undefined : handleOpenTerminalAtPath
+          }
         />
       </div>
     </>

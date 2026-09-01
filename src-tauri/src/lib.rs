@@ -230,6 +230,7 @@ pub fn run() {
             app.manage(commands::terminal::TerminalState::default());
             app.manage(commands::window_session::WindowSessionRegistry::default());
             app.manage(commands::agent_setup::AgentSetupRegistry::default());
+            app.manage(services::remote_backend::RemoteBackendRegistry::default());
             app.manage(commands::model_setup::ModelSetupRegistry::default());
             app.manage(commands::pocket_voice::PocketVoiceState::default());
             app.manage(commands::siri_voice::SiriVoiceState::default());
@@ -549,6 +550,13 @@ pub fn run() {
             commands::whoami::whoami,
             commands::acp::get_goose_serve_url,
             commands::acp::get_goose_serve_host_info,
+            commands::remote_backend::list_ssh_config_hosts,
+            commands::remote_backend::remote_backend_connect,
+            commands::remote_backend::remote_backend_disconnect,
+            commands::remote_backend::remote_backend_shutdown,
+            commands::remote_backend::list_remote_backends,
+            commands::remote_backend::check_remote_host,
+            commands::remote_backend::list_remote_dirs,
             commands::project_icons::scan_project_icons,
             commands::project_icons::read_project_icon,
             commands::renderer::log_renderer_event,
@@ -735,6 +743,8 @@ pub fn run() {
                     .stop_for_app_exit();
                 app.state::<commands::siri_voice::SiriVoiceState>()
                     .stop_for_app_exit();
+                app.state::<services::remote_backend::RemoteBackendRegistry>()
+                    .kill_all_tunnels();
                 services::acp::goose_serve::GooseServeProcess::kill_singleton();
             }
             #[cfg(target_os = "macos")]

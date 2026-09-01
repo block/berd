@@ -35,6 +35,7 @@ const acpLoadSession = vi.hoisted(() => vi.fn());
 const acpPrepareSession = vi.hoisted(() => vi.fn());
 const resolvePath = vi.hoisted(() => vi.fn());
 const checkDirectoriesExist = vi.hoisted(() => vi.fn());
+const ensureRemoteHostConnected = vi.hoisted(() => vi.fn());
 
 vi.mock("@/shared/api/acp", () => ({
   acpGetSessionInfo: (...args: unknown[]) => acpGetSessionInfo(...args),
@@ -51,6 +52,16 @@ vi.mock("@/features/chat/acp/acpNotificationHandler", () => ({
   getReplayPerf: () => undefined,
   clearReplayPerf: vi.fn(),
 }));
+
+vi.mock("@/features/chat/lib/remoteSession", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/features/chat/lib/remoteSession")>();
+  return {
+    ...actual,
+    ensureRemoteHostConnected: (...args: unknown[]) =>
+      ensureRemoteHostConnected(...args),
+  };
+});
 
 function makeProject(overrides: Partial<ProjectInfo> = {}): ProjectInfo {
   return {
@@ -151,6 +162,7 @@ describe("loadSessionMessages", () => {
     acpGetSessionInfo.mockResolvedValue(null);
     acpLoadSession.mockResolvedValue(undefined);
     acpPrepareSession.mockResolvedValue(undefined);
+    ensureRemoteHostConnected.mockResolvedValue(undefined);
     resolvePath.mockImplementation(({ parts }: { parts: string[] }) =>
       Promise.resolve({ path: `/resolved${parts[0]}` }),
     );
@@ -1133,5 +1145,57 @@ describe("loadSessionMessages", () => {
     await expect(loadSessionMessages("s6")).resolves.toBe(false);
 
     expect(messagesFor("s6").map((m) => m.role)).toEqual(["system"]);
+  });
+
+  describe("remote sessions", () => {
+    it("passes the remote workingDir through verbatim and skips local checks", async () => {
+      seedSession({
+        id: "s-remote",
+        remoteHost: "devbox",
+        workingDir: "/remote/home/damien/project",
+      });
+
+      await expect(loadSessionMessages("s-remote")).resolves.toBe(true);
+
+      expect(ensureRemoteHostConnected).toHaveBeenCalledWith("devbox");
+      expect(acpLoadSession).toHaveBeenCalledWith(
+        "s-remote",
+        "/remote/home/damien/project",
+      );
+      expect(resolvePath).not.toHaveBeenCalled();
+      expect(checkDirectoriesExist).not.toHaveBeenCalled();
+    });
+
+    it("does not connect a host for local sessions", async () => {
+      seedSession({ id: "s-local", workingDir: "/existing/session" });
+
+      await expect(loadSessionMessages("s-local")).resolves.toBe(true);
+
+      expect(ensureRemoteHostConnected).not.toHaveBeenCalled();
+    });
+
+    it("surfaces a failed host connection as the standard load failure", async () => {
+      ensureRemoteHostConnected.mockRejectedValue(
+        new Error("ssh tunnel failed"),
+      );
+      seedSession(
+        {
+          id: "s-remote-down",
+          remoteHost: "devbox",
+          workingDir: "/remote/project",
+        },
+        { replay: false },
+      );
+
+      await expect(loadSessionMessages("s-remote-down")).resolves.toBe(false);
+
+      expect(acpLoadSession).not.toHaveBeenCalled();
+      const error = notificationFromLastMessage("s-remote-down");
+      expect(error.notificationType).toBe("error");
+      expect(error.text).toBe("ssh tunnel failed");
+      expect(
+        useChatStore.getState().loadingSessionIds.has("s-remote-down"),
+      ).toBe(false);
+    });
   });
 });

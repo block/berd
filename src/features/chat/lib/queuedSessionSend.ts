@@ -21,6 +21,7 @@ import {
   trackChatSessionStarted,
 } from "@/features/chat/lib/chatTelemetry";
 import { QueuedSessionNotReadyError } from "@/features/chat/lib/queuedMessageReadiness";
+import { isRemoteSession } from "@/features/chat/lib/remoteSession";
 import { loadSessionMessages } from "@/features/chat/lib/sessionActivation";
 import {
   SessionDispatchContentionError,
@@ -206,7 +207,12 @@ export async function prepareExistingSessionForBackgroundSend(
     ? session.workingDir
     : (useChatSessionStore.getState().activeWorkspaceBySession[sessionId]
         ?.path ?? session.workingDir);
-  const workingDir = await resolveSessionCwd(project, activeWorkspacePath);
+  // Remote sessions: the cwd names a directory on the SSH host, so the local
+  // resolve_path/artifact-root machinery must not touch it — pass the stored
+  // workingDir through verbatim (mirrors sessionActivation's load guard).
+  const workingDir = isRemoteSession(session)
+    ? (session.workingDir ?? "")
+    : await resolveSessionCwd(project, activeWorkspacePath);
   const liveSessionAtSubmit = useChatSessionStore
     .getState()
     .getSession(sessionId);

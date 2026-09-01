@@ -100,7 +100,9 @@ export async function loadAllSessionsForWorkspaceCleanup(): Promise<
 
   do {
     const page = await acpListSessionsPage({ cursor });
-    sessions.push(...page.sessions.map(acpSessionToChatSession));
+    sessions.push(
+      ...page.sessions.map((session) => acpSessionToChatSession(session)),
+    );
     if (sessions.length > SESSION_PAGE_SAFETY_LIMIT) {
       throw new Error(
         "Session pagination exceeded the workspace cleanup limit",
