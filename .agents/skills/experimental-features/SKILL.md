@@ -58,6 +58,23 @@ Supported config controls:
 Use `getExperiment(id)` or `useExperiment(id)` for callers. When an experiment is
 disabled, keep config stored but gate behavior as disabled.
 
+## Internal-Only Experiments
+
+Internal-only experiments need build gates at every layer they touch:
+
+- Add a `BuildFeature` resolved from a positive-opt-in `VITE_*` variable in
+  `src/shared/profile/buildProfile.ts`, and declare the variable in
+  `src/env.d.ts`.
+- Map the experiment id to that feature in `BUILD_FEATURE_GATED_EXPERIMENTS`.
+- If the experiment has backing Tauri commands, gate them behind a matching
+  `block-*` Cargo feature and map the `VITE_*` variable in
+  `scripts/block-feature-gates.sh`; drift-guard tests in
+  `scripts/release/tests/release-scripts.test.mjs` enforce this.
+- Set the gate to `0` in the public env in `.github/workflows/release.yml`.
+
+Registry-level hiding stops stale per-user `localStorage` overrides from
+re-enabling internal surfaces in consumer builds (issue 168).
+
 ## Storage Contract
 
 Experiment preferences live in `localStorage` under

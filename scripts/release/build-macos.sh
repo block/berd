@@ -102,6 +102,7 @@ VITE_AUTOMATIONS_VALUE="${VITE_AUTOMATIONS:-0}"
 VITE_BUILDERBOT_VALUE="${VITE_BUILDERBOT:-0}"
 VITE_FEEDBACK_VALUE="${VITE_FEEDBACK:-0}"
 VITE_MANAGED_CONNECTIONS_VALUE="${VITE_MANAGED_CONNECTIONS:-0}"
+VITE_SKILL_DISCOVERY_VALUE="${VITE_SKILL_DISCOVERY:-0}"
 # Managed internal distributions force telemetry consent ON and hide the
 # settings toggle; public builds leave consent to the user (default OFF).
 VITE_TELEMETRY_ENFORCED_VALUE="${VITE_TELEMETRY_ENFORCED:-0}"
@@ -142,6 +143,9 @@ set_vite_env() {
       ;;
     VITE_MANAGED_CONNECTIONS)
       VITE_MANAGED_CONNECTIONS_VALUE="$value"
+      ;;
+    VITE_SKILL_DISCOVERY)
+      VITE_SKILL_DISCOVERY_VALUE="$value"
       ;;
     VITE_TELEMETRY_ENFORCED)
       VITE_TELEMETRY_ENFORCED_VALUE="$value"
@@ -337,7 +341,7 @@ if [[ "$BUILD_KIND" == "custom" ]]; then
   mv "$merged" "$RUNTIME_CONFIG"
   rm -f "$overrides"
 
-  # Preserve non-Block custom-build policies independently of the six
+  # Preserve non-Block custom-build policies independently of the Block-service
   # positive opt-ins below. An explicit telemetry disable must take effect at
   # renderer build time, before runtime config is available.
   if [[ "$(jq -r '.featureToggles.telemetry == false' "$RUNTIME_CONFIG")" == "true" ]]; then
@@ -400,10 +404,10 @@ if [[ "$BUILD_KIND" == "custom" ]]; then
 fi
 
 
-# Resolve the seven independent Block-service product gates into matching
-# renderer and backend/package gates. Values are positive opt-ins: absent is
+# Resolve the paired renderer/native build gates into matching renderer
+# and backend/package gates. Values are positive opt-ins: absent is
 # public-off and no runtime config can revive a build-disabled family.
-for value in "$VITE_AGENT_TOOLS_VALUE" "$VITE_AUTOMATIONS_VALUE" "$VITE_BUILDERBOT_VALUE" "$VITE_FEEDBACK_VALUE" "$VITE_MANAGED_CONNECTIONS_VALUE" "$VITE_TELEMETRY_ENFORCED_VALUE" "$VITE_VOICE_DICTATION_VALUE"; do
+for value in "$VITE_AGENT_TOOLS_VALUE" "$VITE_AUTOMATIONS_VALUE" "$VITE_BUILDERBOT_VALUE" "$VITE_FEEDBACK_VALUE" "$VITE_MANAGED_CONNECTIONS_VALUE" "$VITE_SKILL_DISCOVERY_VALUE" "$VITE_TELEMETRY_ENFORCED_VALUE" "$VITE_VOICE_DICTATION_VALUE"; do
   [[ "$value" == "0" || "$value" == "1" ]] || { echo "Block-service feature gates must be 0 or 1" >&2; exit 1; }
 done
 [[ "$VITE_AGENT_TOOLS_VALUE" == "1" ]] && CARGO_FEATURES="$CARGO_FEATURES,block-agent-tools"
@@ -411,6 +415,7 @@ done
 [[ "$VITE_BUILDERBOT_VALUE" == "1" ]] && CARGO_FEATURES="$CARGO_FEATURES,block-builderbot"
 [[ "$VITE_FEEDBACK_VALUE" == "1" ]] && CARGO_FEATURES="$CARGO_FEATURES,block-feedback"
 [[ "$VITE_MANAGED_CONNECTIONS_VALUE" == "1" ]] && CARGO_FEATURES="$CARGO_FEATURES,block-managed-connections"
+[[ "$VITE_SKILL_DISCOVERY_VALUE" == "1" ]] && CARGO_FEATURES="$CARGO_FEATURES,block-skill-discovery"
 # The renderer flag and the Cargo feature must move together: the flag skips
 # the user setting in Gate A and hides the toggle, the feature does the same
 # for the native Gate B in export_otel_logs.
@@ -487,6 +492,7 @@ env \
   VITE_BUILDERBOT="$VITE_BUILDERBOT_VALUE" \
   VITE_FEEDBACK="$VITE_FEEDBACK_VALUE" \
   VITE_MANAGED_CONNECTIONS="$VITE_MANAGED_CONNECTIONS_VALUE" \
+  VITE_SKILL_DISCOVERY="$VITE_SKILL_DISCOVERY_VALUE" \
   VITE_TELEMETRY_ENFORCED="$VITE_TELEMETRY_ENFORCED_VALUE" \
   VITE_VOICE_DICTATION="$VITE_VOICE_DICTATION_VALUE" \
   VITE_BYO_KEY_PROVIDERS="$VITE_BYO_KEY_PROVIDERS_VALUE" \

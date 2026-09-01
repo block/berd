@@ -711,9 +711,13 @@ pub fn run() {
             commands::window_session::list_session_windows,
             commands::agent_skills::list_agent_skills,
             commands::agent_skills::list_berd_app_skills,
+            #[cfg(feature = "block-skill-discovery")]
             commands::skill_marketplace::skill_cli_status,
+            #[cfg(feature = "block-skill-discovery")]
             commands::skill_marketplace::list_remote_skills,
+            #[cfg(feature = "block-skill-discovery")]
             commands::skill_marketplace::show_remote_skill,
+            #[cfg(feature = "block-skill-discovery")]
             commands::skill_marketplace::install_remote_skill,
             commands::workspace_context::load_workspace_context,
         ])

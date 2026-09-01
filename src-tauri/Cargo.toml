@@ -168,6 +168,10 @@ block-automations = []
 block-builderbot = []
 block-feedback = []
 block-managed-connections = []
+# Gates the sq-agents marketplace bridge (list/show/install remote skills):
+# the catalog is a Block-internal service behind Zero Trust auth, so public
+# builds must not even register the commands (renderer gate: VITE_SKILL_DISCOVERY).
+block-skill-discovery = []
 # Forces telemetry consent ON, skipping the user's telemetry-settings.json
 # (the renderer hides the toggle via the paired VITE_TELEMETRY_ENFORCED flag).
 # For managed internal distributions where consent is an employment-policy

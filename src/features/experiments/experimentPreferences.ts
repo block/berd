@@ -3,11 +3,15 @@ import { useSyncExternalStore } from "react";
 import {
   BUILDERBOT_SURFACE_EXPERIMENT_ID,
   EXPERIMENT_DEFINITIONS,
+  SKILL_DISCOVERY_EXPERIMENT_ID,
   type ExperimentConfigControl,
   type ExperimentConfigValue,
   type ExperimentDefinition,
 } from "./experimentDefinitions";
-import { getBuildFeatureState } from "@/shared/profile/buildProfile";
+import {
+  getBuildFeatureState,
+  type BuildFeature,
+} from "@/shared/profile/buildProfile";
 export const EXPERIMENT_PREFERENCES_STORAGE_KEY = "goose:experimental-features";
 export const EXPERIMENT_PREFERENCES_STORAGE_VERSION = 2;
 export const EXPERIMENT_PREFERENCES_CHANGE_EVENT =
@@ -325,14 +329,30 @@ function findDefinition(id: string, registry: ExperimentRegistry) {
   );
 }
 
+/**
+ * Experiments whose runtime depends on Block-internal services stay hidden
+ * unless the matching build feature is enabled. Hiding at the registry level
+ * (not just in settings) means `getExperiment`/`useExperiment` return null in
+ * public builds, so stale per-user localStorage overrides can never re-enable
+ * a surface that would route consumer users to Block-internal auth (issue
+ * #168).
+ */
+const BUILD_FEATURE_GATED_EXPERIMENTS: Readonly<
+  Partial<Record<string, BuildFeature>>
+> = {
+  [BUILDERBOT_SURFACE_EXPERIMENT_ID]: "builderbot",
+  [SKILL_DISCOVERY_EXPERIMENT_ID]: "skillDiscovery",
+};
+
 export function getVisibleExperimentRegistry(
   registry: ExperimentRegistry = EXPERIMENT_DEFINITIONS,
 ): ExperimentRegistry {
-  if (getBuildFeatureState().builderbot) return registry;
+  const buildFeatures = getBuildFeatureState();
 
-  return registry.filter(
-    (definition) => definition.id !== BUILDERBOT_SURFACE_EXPERIMENT_ID,
-  );
+  return registry.filter((definition) => {
+    const requiredFeature = BUILD_FEATURE_GATED_EXPERIMENTS[definition.id];
+    return requiredFeature === undefined || buildFeatures[requiredFeature];
+  });
 }
 
 export function listExperiments(

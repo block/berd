@@ -500,7 +500,7 @@ describe("development Block-feature resources", () => {
 });
 
 describe("build-macos Block-service feature seam", () => {
-  it("defaults all six families off and maps each opt-in to packaging", async () => {
+  it("defaults every Block-service family off and maps each opt-in to packaging", async () => {
     const script = await readFile(
       join(repo, "scripts/release/build-macos.sh"),
       "utf8",
@@ -511,6 +511,7 @@ describe("build-macos Block-service feature seam", () => {
       ["BUILDERBOT", "block-builderbot"],
       ["FEEDBACK", "block-feedback"],
       ["MANAGED_CONNECTIONS", "block-managed-connections"],
+      ["SKILL_DISCOVERY", "block-skill-discovery"],
       ["VOICE_DICTATION", "block-voice-dictation"],
     ];
 
@@ -536,7 +537,7 @@ describe("build-macos Block-service feature seam", () => {
     );
   });
 
-  it("preserves the custom-build telemetry privacy opt-out outside the six gates", async () => {
+  it("preserves the custom-build telemetry privacy opt-out outside the Block-service gates", async () => {
     const script = await readFile(
       join(repo, "scripts/release/build-macos.sh"),
       "utf8",
@@ -732,6 +733,7 @@ describe("desktop release workflow platform gate", () => {
       VITE_FEEDBACK: "0",
       VITE_FEEDBACK_SURVEYS: "0",
       VITE_MANAGED_CONNECTIONS: "0",
+      VITE_SKILL_DISCOVERY: "0",
       VITE_VOICE_DICTATION: "0",
       VITE_BYO_KEY_PROVIDERS: "1",
       VITE_SECURITY_ML: "0",
@@ -2159,13 +2161,14 @@ describe("Block feature gate propagation", () => {
     expect(result.stdout.trim()).toBe("berdctl,no-voice-dictation");
   });
 
-  it("maps the seven independent renderer gates to matching Cargo features", () => {
+  it("maps every renderer gate to its matching Cargo feature", () => {
     const env = {
       VITE_AGENT_TOOLS: "1",
       VITE_AUTOMATIONS: "1",
       VITE_BUILDERBOT: "1",
       VITE_FEEDBACK: "1",
       VITE_MANAGED_CONNECTIONS: "1",
+      VITE_SKILL_DISCOVERY: "1",
       VITE_TELEMETRY_ENFORCED: "1",
       VITE_VOICE_DICTATION: "1",
     };
@@ -2183,6 +2186,7 @@ describe("Block feature gate propagation", () => {
       "block-builderbot",
       "block-feedback",
       "block-managed-connections",
+      "block-skill-discovery",
       "block-telemetry-enforced",
       "block-voice-dictation",
     ]);

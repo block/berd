@@ -24,6 +24,7 @@ describe("buildProfile", () => {
       feedback: false,
       feedbackSurveys: false,
       managedConnections: false,
+      skillDiscovery: false,
       telemetry: true,
       telemetryEnforced: false,
       voiceConversation: true,
@@ -39,6 +40,7 @@ describe("buildProfile", () => {
     ["VITE_BUILDERBOT", "builderbot"],
     ["VITE_FEEDBACK_SURVEYS", "feedbackSurveys"],
     ["VITE_MANAGED_CONNECTIONS", "managedConnections"],
+    ["VITE_SKILL_DISCOVERY", "skillDiscovery"],
     ["VITE_VOICE_DICTATION", "voiceDictation"],
   ] as const)("enables %s independently", async (env, feature) => {
     vi.resetModules();
@@ -53,6 +55,7 @@ describe("buildProfile", () => {
       "feedback",
       "feedbackSurveys",
       "managedConnections",
+      "skillDiscovery",
       "voiceDictation",
     ] as const) {
       if (other !== feature) expect(enabled[other]).toBe(false);
@@ -124,6 +127,14 @@ describe("buildProfile", () => {
     vi.stubEnv("VITE_TELEMETRY_ENFORCED", "true");
     const { getBuildFeatureState: nonOptIn } = await import("./buildProfile");
     expect(nonOptIn().telemetryEnforced).toBe(false);
+  });
+
+  it("keeps skill discovery off unless VITE_SKILL_DISCOVERY is exactly 1", async () => {
+    vi.resetModules();
+    vi.stubEnv("VITE_SKILL_DISCOVERY", "true");
+
+    const { getBuildFeatureState: nonOptIn } = await import("./buildProfile");
+    expect(nonOptIn().skillDiscovery).toBe(false);
   });
 
   it("keeps managed connections off for a non-opt-in value", async () => {

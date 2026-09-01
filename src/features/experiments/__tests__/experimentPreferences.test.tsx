@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   BUILDERBOT_SURFACE_EXPERIMENT_ID,
+  SKILL_DISCOVERY_EXPERIMENT_ID,
   type ExperimentDefinition,
 } from "../experimentDefinitions";
 import {
@@ -13,6 +14,7 @@ import {
   getExperiment,
   getExperimentAutoEnable,
   getVisibleExperimentRegistry,
+  listExperiments,
   resolveAutoEnabled,
   setExperimentAutoEnable,
   setExperimentConfigValue,
@@ -133,33 +135,53 @@ describe("experimentPreferences", () => {
     });
   });
 
-  it("hides the Builderbot experiment when its build family is unavailable", () => {
+  it.each([
+    { id: BUILDERBOT_SURFACE_EXPERIMENT_ID, env: "VITE_BUILDERBOT" },
+    { id: SKILL_DISCOVERY_EXPERIMENT_ID, env: "VITE_SKILL_DISCOVERY" },
+  ])("gates the $id experiment on its build family", ({ id, env }) => {
     const registry = [
       testRegistry[0],
       {
         ...testRegistry[0],
-        id: BUILDERBOT_SURFACE_EXPERIMENT_ID,
+        id,
       },
     ];
 
     expect(getVisibleExperimentRegistry(registry).map(({ id }) => id)).toEqual([
       "test-experiment",
     ]);
+
+    vi.stubEnv(env, "1");
+    expect(getVisibleExperimentRegistry(registry).map(({ id }) => id)).toEqual([
+      "test-experiment",
+      id,
+    ]);
   });
 
-  it("shows the Builderbot experiment when its build family is enabled", () => {
-    vi.stubEnv("VITE_BUILDERBOT", "1");
+  it("does not let a stale enabled override resurrect the Skill Discovery experiment when its build family is unavailable", () => {
     const registry = [
       testRegistry[0],
       {
         ...testRegistry[0],
-        id: BUILDERBOT_SURFACE_EXPERIMENT_ID,
+        id: SKILL_DISCOVERY_EXPERIMENT_ID,
       },
     ];
 
-    expect(getVisibleExperimentRegistry(registry).map(({ id }) => id)).toEqual([
+    localStorage.setItem(
+      EXPERIMENT_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        version: 2,
+        experiments: {
+          [SKILL_DISCOVERY_EXPERIMENT_ID]: {
+            enabled: true,
+          },
+        },
+      }),
+    );
+
+    expect(getExperiment(SKILL_DISCOVERY_EXPERIMENT_ID, registry)).toBeNull();
+    expect(listExperiments(registry).map(({ id }) => id)).toEqual([
       "test-experiment",
-      BUILDERBOT_SURFACE_EXPERIMENT_ID,
     ]);
   });
 
