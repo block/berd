@@ -198,18 +198,15 @@ export function SidebarProjectsSection({
   const showChatsEmptyState = projectSessions.standalone.length === 0;
   const showCombinedEmptyState = showProjectsEmptyState && !hasVisibleChats;
   const showProjects = collapsed || projectsSectionOpen;
-  // Only surface the Session History route when the grouped view actually
-  // hides chats: loaded standalone chats were truncated to the recents cap,
-  // or the backend has more sessions than are loaded. The hasMoreSessions
-  // case is gated on having any loaded chats (not standalone ones
-  // specifically): grouped auto-loading is bounded, so a user whose loaded
-  // chats all belong to projects must still get a route to older sessions.
-  // Brand-new users have no chats and no backend pages, so they never see
-  // the link.
+  // Surface the Session History route whenever the grouped view can hide
+  // chats: loaded standalone chats were truncated to the recents cap, or the
+  // backend has more sessions than are loaded. Gating on loaded chat counts
+  // would hide the link exactly when loading failed to reach the user's
+  // chats, which is when the escape hatch is needed most. Brand-new users
+  // have no chats and no backend pages, so they never see the link.
   const showGroupedHistoryLink =
     !collapsed &&
-    ((projectSessions.standaloneOverflow ?? false) ||
-      (hasMoreSessions && hasVisibleChats));
+    ((projectSessions.standaloneOverflow ?? false) || hasMoreSessions);
   const emptyActionClasses = cn(
     SIDEBAR_ROW_HEIGHT_CLASS,
     SIDEBAR_ROW_HOVER_CLASS,

@@ -75,6 +75,36 @@ describe("SidebarFlatChatsSection", () => {
     expect(onNewChat).toHaveBeenCalledOnce();
   });
 
+  it("offers the Session History route even when few chats are loaded", () => {
+    // Regression: the escape hatch used to be gated on loaded-chat counts,
+    // which hid it exactly when sessions failed to load (BOT-1688).
+    renderFlatChatsSection({
+      onNewChat: vi.fn(),
+      onNavigate: vi.fn(),
+      showViewAllInHistory: true,
+      groups: [
+        {
+          id: "last-hour",
+          sessions: [
+            {
+              id: "only-chat",
+              title: "Only Chat",
+              updatedAt: "2026-04-09T12:00:00.000Z",
+              projectId: "project-1",
+              projectName: "Project One",
+              projectIcon: "",
+              projectColor: "",
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(
+      screen.getByRole("button", { name: "View all chats" }),
+    ).toBeInTheDocument();
+  });
+
   it("offers grouping in the flat chats menu", async () => {
     const user = userEvent.setup();
     const onGroupChatsByProjectChange = vi.fn();
@@ -185,6 +215,48 @@ describe("SidebarFlatChatsSection", () => {
     expect(showTimestamps).not.toBeChecked();
     await user.click(showTimestamps);
     expect(onShowTimestampsChange).toHaveBeenCalledWith(true);
+  });
+
+  it("shows the Session History route in grouped mode when more sessions exist but none are loaded", () => {
+    // Regression: hasMoreSessions && hasVisibleChats meant a project list
+    // whose chats never loaded (BOT-1688) had no route to Session History.
+    render(
+      <SidebarProjectsSection
+        projects={[project]}
+        projectSessions={{ byProject: {}, standalone: [] }}
+        hasVisibleChats={false}
+        flatChatGroups={[]}
+        hasFlatChatOverflow={false}
+        groupChatsByProject
+        pinnedShowChatIcons={false}
+        onPinnedShowChatIconsChange={vi.fn()}
+        pinnedShowTimestamps={false}
+        onPinnedShowTimestampsChange={vi.fn()}
+        projectShowChatIcons={false}
+        onProjectShowChatIconsChange={vi.fn()}
+        projectShowTimestamps={false}
+        onProjectShowTimestampsChange={vi.fn()}
+        chatShowChatIcons={false}
+        onChatShowChatIconsChange={vi.fn()}
+        chatShowTimestamps={false}
+        onChatShowTimestampsChange={vi.fn()}
+        expandedProjects={{}}
+        toggleProject={vi.fn()}
+        collapsed={false}
+        labelTransition=""
+        labelVisible
+        projectsSectionOpen
+        recentsSectionOpen
+        onToggleProjectsSection={vi.fn()}
+        onToggleRecentsSection={vi.fn()}
+        hasMoreSessions
+        onNavigate={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "View all chats" }),
+    ).toBeInTheDocument();
   });
 
   it("uses icon-only flat chat rows when collapsed", async () => {
