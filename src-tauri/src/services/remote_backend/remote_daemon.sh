@@ -39,12 +39,14 @@ GOOSE_ARG="${4:--}"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/berd/remote"
 RECORD="$STATE_DIR/daemon.record"
 LOG="$STATE_DIR/goose-serve.log"
-LOCK_DIR="$STATE_DIR/daemon.lock"
-LOCK_OWNER="$LOCK_DIR/owner"
+LOCK_ROOT="$STATE_DIR/daemon.locks"
+LEGACY_LOCK_DIR="$STATE_DIR/daemon.lock"
+LEGACY_LOCK_OWNER="$LEGACY_LOCK_DIR/owner"
 RECORD_FORMAT="v4"
 LOG_MAX_BYTES=$((4 * 1024 * 1024))
 LOG_RETAIN_BYTES=$((2 * 1024 * 1024))
-LOG_MAX_KIB=$((LOG_MAX_BYTES / 1024))
+LOG_READ_BLOCK_BYTES=$((64 * 1024))
+LOG_READ_BLOCK_COUNT=64
 
 emit() { printf '%s %s\n' "$NONCE" "$*"; }
 
@@ -104,7 +106,8 @@ process_identity() {
 }
 
 lock_owner_is_current() {
-  IFS=' ' read -r lock_pid lock_b64identity lock_extra <"$LOCK_OWNER" 2>/dev/null || return 1
+  owner_path="$1"
+  IFS=' ' read -r lock_pid lock_b64identity lock_extra <"$owner_path" 2>/dev/null || return 1
   case "$lock_pid" in
   '' | *[!0-9]*) return 1 ;;
   esac
@@ -117,10 +120,9 @@ lock_owner_is_current() {
 
 release_daemon_lock() {
   [ "${lock_held:-0}" = "1" ] || return 0
-  if IFS= read -r current_lock_owner <"$LOCK_OWNER" 2>/dev/null &&
+  if IFS= read -r current_lock_owner <"$our_ticket/owner" 2>/dev/null &&
     [ "$current_lock_owner" = "$our_lock_owner" ]; then
-    rm -f "$LOCK_OWNER"
-    rmdir "$LOCK_DIR" 2>/dev/null || true
+    rm -rf -- "$our_ticket"
   fi
   lock_held=0
 }
@@ -161,36 +163,37 @@ cleanup_daemon_mutation() {
   release_daemon_lock
 }
 
-# Atomically move one observed stale lock generation out of the acquisition
-# path before deleting it. There is deliberately no second mutex: a crash after
-# the rename can leave only a uniquely named cleanup artifact, which cannot
-# prevent a future operation from acquiring daemon.lock. Concurrent observers
-# can claim at most the generation present when their rename executes, and
-# cleanup is confined to that exact claimed path.
-reclaim_stale_daemon_lock() {
-  if lock_owner_is_current; then
+# A pre-ticket script may have crashed while holding daemon.lock. Migrating
+# that one legacy path is safe for the ticket protocol because new owners never
+# reuse it; even a delayed legacy reclaimer cannot touch a ticket generation.
+clear_stale_legacy_lock() {
+  [ -d "$LEGACY_LOCK_DIR" ] || return 0
+  if lock_owner_is_current "$LEGACY_LOCK_OWNER"; then
     return 1
   fi
-
-  claimed_lock="$STATE_DIR/.daemon.lock.reclaimed.$$.$lock_attempt"
-  if mv "$LOCK_DIR" "$claimed_lock" 2>/dev/null; then
-    rm -rf -- "$claimed_lock"
-    return 0
+  legacy_claim="$STATE_DIR/.daemon.lock.legacy.$NONCE.$$"
+  if mv "$LEGACY_LOCK_DIR" "$legacy_claim" 2>/dev/null; then
+    rm -rf -- "$legacy_claim"
   fi
-  return 1
+  [ ! -d "$LEGACY_LOCK_DIR" ]
 }
 
-# `mkdir` is the portable cross-process atomic primitive available on both
-# Linux and macOS remotes. The lock covers every daemon.record read/mutation,
-# including shutdown from another Berd client using the same remote account.
+# Each invocation owns a path that is never reused (`NONCE` is a UUID). Stale
+# cleanup therefore removes the exact generation whose owner was inspected,
+# never a successor at a shared pathname. A Lamport bakery ticket orders
+# simultaneous contenders without introducing another reclaimable mutex: a
+# process first publishes `choosing`, then a number, and may enter only after
+# every live lower `(number, ticket-id)` pair has departed.
 acquire_daemon_lock() {
   umask 077
-  mkdir -p "$STATE_DIR" || {
+  mkdir -p "$STATE_DIR" "$LOCK_ROOT" || {
     emit "ERR state-dir"
     exit 46
   }
 
   lock_held=0
+  our_ticket=""
+  pending_ticket=""
   uncommitted_pid=""
   uncommitted_logger_pid=""
   uncommitted_log_pipe=""
@@ -198,61 +201,111 @@ acquire_daemon_lock() {
   trap 'exit 129' HUP
   trap 'exit 130' INT
   trap 'exit 143' TERM
-  stale_observations=0
+  case "$NONCE" in
+  '' | *[!A-Za-z0-9._-]*)
+    emit "ERR state-dir"
+    exit 46
+    ;;
+  esac
+  our_identity="$(process_identity "$$")" || {
+    emit "ERR state-dir"
+    exit 46
+  }
+  our_lock_owner="$$ $(b64 "$our_identity")"
+
+  legacy_attempt=0
+  while [ -d "$LEGACY_LOCK_DIR" ] && [ "$legacy_attempt" -lt 1200 ]; do
+    legacy_attempt=$((legacy_attempt + 1))
+    clear_stale_legacy_lock || true
+    [ ! -d "$LEGACY_LOCK_DIR" ] || sleep 0.1
+  done
+  if [ -d "$LEGACY_LOCK_DIR" ]; then
+    emit "ERR state-dir"
+    exit 46
+  fi
+
+  our_ticket_id="$NONCE.$$"
+  pending_ticket="$LOCK_ROOT/.pending.$our_ticket_id"
+  our_ticket="$LOCK_ROOT/ticket.$our_ticket_id"
+  rm -rf -- "$pending_ticket"
+  if ! mkdir "$pending_ticket" 2>/dev/null ||
+    ! printf '%s\n' "$our_lock_owner" >"$pending_ticket/owner" ||
+    ! : >"$pending_ticket/choosing" ||
+    ! mv "$pending_ticket" "$our_ticket" 2>/dev/null; then
+    rm -rf -- "$pending_ticket"
+    emit "ERR state-dir"
+    exit 46
+  fi
+
+  max_ticket_number=0
+  for observed_ticket in "$LOCK_ROOT"/ticket.*; do
+    [ -d "$observed_ticket" ] || continue
+    if ! lock_owner_is_current "$observed_ticket/owner"; then
+      rm -rf -- "$observed_ticket"
+      continue
+    fi
+    if IFS= read -r observed_number <"$observed_ticket/number" 2>/dev/null; then
+      case "$observed_number" in
+      '' | *[!0-9]*) ;;
+      *)
+        if [ "$observed_number" -gt "$max_ticket_number" ]; then
+          max_ticket_number="$observed_number"
+        fi
+        ;;
+      esac
+    fi
+  done
+  our_ticket_number=$((max_ticket_number + 1))
+  if ! printf '%s\n' "$our_ticket_number" >"$our_ticket/.number.$$" ||
+    ! mv "$our_ticket/.number.$$" "$our_ticket/number" 2>/dev/null ||
+    ! rm -f "$our_ticket/choosing"; then
+    rm -rf -- "$our_ticket"
+    emit "ERR state-dir"
+    exit 46
+  fi
+
   lock_attempt=0
   # A lock holder can spend about 80 seconds across five readiness attempts
   # and bounded cleanup. Wait longer than that critical section so a healthy
   # concurrent ensure cannot be mistaken for a wedged state-dir operation.
   while [ "$lock_attempt" -lt 1200 ]; do
     lock_attempt=$((lock_attempt + 1))
-    if mkdir "$LOCK_DIR" 2>/dev/null; then
-      our_identity="$(process_identity "$$")" || {
-        rmdir "$LOCK_DIR" 2>/dev/null || true
-        emit "ERR state-dir"
-        exit 46
-      }
-      our_lock_owner="$$ $(b64 "$our_identity")"
-      lock_owner_tmp="$LOCK_DIR/.owner.$$"
-      if ! printf '%s\n' "$our_lock_owner" >"$lock_owner_tmp" ||
-        ! mv -f "$lock_owner_tmp" "$LOCK_OWNER"; then
-        rm -f "$lock_owner_tmp"
-        rmdir "$LOCK_DIR" 2>/dev/null || true
-        # A concurrent stale observer may have claimed the generation between
-        # mkdir and owner publication. Nothing was committed under this lock;
-        # retry against the current path instead of turning the benign race
-        # into a state-dir failure.
-        stale_observations=0
-        sleep 0.01
+    ticket_blocked=0
+    for observed_ticket in "$LOCK_ROOT"/ticket.*; do
+      [ -d "$observed_ticket" ] || continue
+      [ "$observed_ticket" != "$our_ticket" ] || continue
+      if ! lock_owner_is_current "$observed_ticket/owner"; then
+        rm -rf -- "$observed_ticket"
         continue
       fi
-      # Give a reclaimer that performed its final stale check before owner
-      # publication a chance to complete its atomic rename, then prove our
-      # owner is still published at the acquisition path before proceeding.
-      sleep 0.01
-      if ! IFS= read -r current_lock_owner <"$LOCK_OWNER" 2>/dev/null ||
-        [ "$current_lock_owner" != "$our_lock_owner" ]; then
-        stale_observations=0
-        sleep 0.01
+      if [ -e "$observed_ticket/choosing" ]; then
+        ticket_blocked=1
         continue
       fi
+      if ! IFS= read -r observed_number <"$observed_ticket/number" 2>/dev/null; then
+        ticket_blocked=1
+        continue
+      fi
+      case "$observed_number" in
+      '' | *[!0-9]*)
+        ticket_blocked=1
+        continue
+        ;;
+      esac
+      observed_id="${observed_ticket##*/ticket.}"
+      if [ "$observed_number" -lt "$our_ticket_number" ] ||
+        { [ "$observed_number" -eq "$our_ticket_number" ] && [[ "$observed_id" < "$our_ticket_id" ]]; }; then
+        ticket_blocked=1
+      fi
+    done
+    if [ "$ticket_blocked" = "0" ]; then
       lock_held=1
       return 0
-    fi
-
-    if lock_owner_is_current; then
-      stale_observations=0
-    else
-      stale_observations=$((stale_observations + 1))
-      # Allow the mkdir winner time to publish its owner before treating a
-      # missing/malformed owner as stale after an interrupted invocation.
-      if [ "$stale_observations" -ge 20 ]; then
-        reclaim_stale_daemon_lock || true
-        stale_observations=0
-      fi
     fi
     sleep 0.1
   done
 
+  rm -rf -- "$our_ticket"
   emit "ERR state-dir"
   exit 46
 }
@@ -326,45 +379,58 @@ trim_log_if_needed() {
   fi
 }
 
-# `cat` is the only process on the FIFO read path, so even a multi-megabyte
-# pre-bind burst drains at native pipe speed. The kernel file-size limit stops
-# that writer exactly at 4 MiB; after retaining the final 2 MiB, a fresh cat
-# resumes from the still-open FIFO. This gives a hard on-disk cap without a
-# process-heavy per-chunk shell loop or polling race.
+# `dd` performs many pipe reads per invocation, so a multi-megabyte pre-bind
+# burst is drained without a process per small FIFO read. Every consumed byte
+# first lands in the chunk file; rotation then carries that complete chunk into
+# the bounded tail, avoiding the userspace read-ahead loss caused by killing a
+# writer at RLIMIT_FSIZE.
 bounded_log_writer() {
   writer_log="$1"
+  writer_chunk="$STATE_DIR/.goose-serve.log.chunk.$$"
   writer_tmp="$STATE_DIR/.goose-serve.log.rotate.$$"
-  # Preserve the FIFO on a non-stdin descriptor before starting cat
-  # asynchronously; non-interactive Bash redirects a background command's
-  # implicit stdin to /dev/null.
-  exec 3<&0
-  writer_cat_pid=""
-  trap 'kill -TERM "$writer_cat_pid" 2>/dev/null || true; wait "$writer_cat_pid" 2>/dev/null || true; rm -f "$writer_tmp"; exit 143' TERM
-  trap 'kill -TERM "$writer_cat_pid" 2>/dev/null || true; wait "$writer_cat_pid" 2>/dev/null || true; rm -f "$writer_tmp"; exit 129' HUP
-  trap 'kill -TERM "$writer_cat_pid" 2>/dev/null || true; wait "$writer_cat_pid" 2>/dev/null || true; rm -f "$writer_tmp"; exit 130' INT
+  trap 'rm -f "$writer_chunk" "$writer_tmp"; exit 143' TERM
+  trap 'rm -f "$writer_chunk" "$writer_tmp"; exit 129' HUP
+  trap 'rm -f "$writer_chunk" "$writer_tmp"; exit 130' INT
 
   while :; do
-    (ulimit -S -f "$LOG_MAX_KIB" && exec cat <&3 >>"$writer_log") 2>/dev/null &
-    writer_cat_pid=$!
-    if wait "$writer_cat_pid" 2>/dev/null; then
-      break
-    fi
+    rm -f "$writer_chunk"
+    dd bs="$LOG_READ_BLOCK_BYTES" count="$LOG_READ_BLOCK_COUNT" of="$writer_chunk" 2>/dev/null || true
+    chunk_bytes="$(wc -c <"$writer_chunk" 2>/dev/null | tr -d ' ')"
+    case "$chunk_bytes" in
+    '' | *[!0-9]*) chunk_bytes=0 ;;
+    esac
+    [ "$chunk_bytes" -gt 0 ] || break
+
     writer_bytes="$(wc -c <"$writer_log" 2>/dev/null | tr -d ' ')"
     case "$writer_bytes" in
     '' | *[!0-9]*) writer_bytes=0 ;;
     esac
-    if [ "$writer_bytes" -lt "$LOG_MAX_BYTES" ]; then
-      break
-    fi
-    if tail -c "$LOG_RETAIN_BYTES" "$writer_log" >"$writer_tmp" 2>/dev/null; then
-      mv -f "$writer_tmp" "$writer_log"
+    if [ "$chunk_bytes" -ge "$LOG_MAX_BYTES" ]; then
+      if ! tail -c "$LOG_MAX_BYTES" "$writer_chunk" >"$writer_tmp" 2>/dev/null; then
+        rm -f "$writer_tmp"
+        break
+      fi
+    elif [ $((writer_bytes + chunk_bytes)) -le "$LOG_MAX_BYTES" ]; then
+      cat "$writer_chunk" >>"$writer_log"
+      continue
     else
+      carry_bytes=$((LOG_MAX_BYTES - chunk_bytes))
+      if ! tail -c "$carry_bytes" "$writer_log" >"$writer_tmp" 2>/dev/null; then
+        rm -f "$writer_tmp"
+        break
+      fi
+      if ! cat "$writer_chunk" >>"$writer_tmp"; then
+        rm -f "$writer_tmp"
+        break
+      fi
+    fi
+    if ! mv -f "$writer_tmp" "$writer_log"; then
       rm -f "$writer_tmp"
       break
     fi
   done
   trim_log_if_needed "$writer_log"
-  rm -f "$writer_tmp"
+  rm -f "$writer_chunk" "$writer_tmp"
 }
 
 # Confirms the PID is still the exact process that wrote this record. `kill -0`
