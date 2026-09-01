@@ -173,6 +173,24 @@ vi.mock("../lib/realtimeEmissaryProtocol", () => ({
             type: "transcript.finalized",
           },
         ];
+      if (event.type === "test.emissary_partial_first")
+        return [
+          {
+            itemId: "emissary-item-multi",
+            speaker: "emissary",
+            text: "Let me think about that.",
+            type: "transcript.updated",
+          },
+        ];
+      if (event.type === "test.emissary_partial_second")
+        return [
+          {
+            itemId: "emissary-item-multi",
+            speaker: "emissary",
+            text: "Let me think about that. I received a compact transcript.",
+            type: "transcript.updated",
+          },
+        ];
       if (event.type === "test.emissary_result")
         return [
           {
@@ -1093,6 +1111,44 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       },
     });
     expect(onSend).not.toHaveBeenCalled();
+
+    await act(async () => owner.result.current.onToggle());
+  });
+
+  it("updates a multi-item emissary response in one speaking bubble", async () => {
+    const owner = renderConversation("session-a");
+    await act(async () => owner.result.current.onToggle());
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+
+    act(() => {
+      channel.dispatchEvent(
+        new MessageEvent("message", {
+          data: JSON.stringify({ type: "test.emissary_partial_first" }),
+        }),
+      );
+      channel.dispatchEvent(
+        new MessageEvent("message", {
+          data: JSON.stringify({ type: "test.emissary_partial_second" }),
+        }),
+      );
+    });
+
+    const messages = useChatStore.getState().messagesBySession["session-a"];
+    expect(messages).toHaveLength(1);
+    expect(messages?.[0]).toMatchObject({
+      role: "assistant",
+      content: [
+        {
+          type: "text",
+          text: "Let me think about that. I received a compact transcript.",
+          speech: { status: "speaking" },
+        },
+      ],
+      metadata: {
+        completionStatus: "inProgress",
+        personaName: "Emissary",
+      },
+    });
 
     await act(async () => owner.result.current.onToggle());
   });

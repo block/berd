@@ -143,6 +143,16 @@ export type RealtimeEmissaryProtocolEvent =
 export type RealtimeClientEvent = Record<string, unknown>;
 type RealtimeServerEvent = Record<string, unknown>;
 
+type PendingEmissaryTranscriptItem = {
+  streamedText: string;
+  finalText?: string;
+};
+
+type PendingEmissaryTranscript = {
+  displayItemId: string;
+  items: Map<string, PendingEmissaryTranscriptItem>;
+};
+
 export const SEND_TO_EMISSARY_TOOL_DEFINITION: RealtimeJsonObject = {
   type: "function",
   name: SEND_TO_EMISSARY_TOOL_NAME,
@@ -656,7 +666,7 @@ export class RealtimeEmissaryProtocol {
   private readonly pendingUserTranscripts = new Map<string, string>();
   private readonly pendingEmissaryTranscripts = new Map<
     string,
-    { itemId: string; streamedText: string; finalText?: string }
+    PendingEmissaryTranscript
   >();
   private readonly interruptedResponseIds = new Set<string>();
 
@@ -749,18 +759,16 @@ export class RealtimeEmissaryProtocol {
     ) {
       return [];
     }
-    const current = this.pendingEmissaryTranscripts.get(responseId);
-    const streamedText = (current?.streamedText ?? "") + delta;
-    this.pendingEmissaryTranscripts.set(responseId, {
-      itemId,
-      streamedText,
-      finalText: current?.finalText,
-    });
+    const pending = this.pendingEmissaryTranscript(responseId, itemId);
+    const item = pending.items.get(itemId) ?? { streamedText: "" };
+    item.streamedText += delta;
+    pending.items.set(itemId, item);
+    const streamedText = combinedEmissaryTranscript(pending, false);
     return streamedText.trim()
       ? [
           {
             type: "transcript.updated",
-            itemId,
+            itemId: pending.displayItemId,
             speaker: "emissary",
             text: streamedText,
           },
@@ -781,12 +789,10 @@ export class RealtimeEmissaryProtocol {
     ) {
       return;
     }
-    const current = this.pendingEmissaryTranscripts.get(responseId);
-    this.pendingEmissaryTranscripts.set(responseId, {
-      itemId,
-      streamedText: current?.streamedText ?? "",
-      finalText: text,
-    });
+    const pending = this.pendingEmissaryTranscript(responseId, itemId);
+    const item = pending.items.get(itemId) ?? { streamedText: "" };
+    item.finalText = text;
+    pending.items.set(itemId, item);
   }
 
   private finishEmissaryPlayback(
@@ -797,16 +803,20 @@ export class RealtimeEmissaryProtocol {
     if (this.interruptedResponseIds.delete(responseId)) return undefined;
     const pending = this.pendingEmissaryTranscripts.get(responseId);
     this.pendingEmissaryTranscripts.delete(responseId);
-    const text = pending?.finalText ?? pending?.streamedText.trim();
-    if (!pending || !text || this.finalizedItemIds.has(pending.itemId)) {
+    const text = pending
+      ? combinedEmissaryTranscript(pending, true).trim()
+      : "";
+    if (!pending || !text || this.finalizedItemIds.has(pending.displayItemId)) {
       return undefined;
     }
 
-    this.finalizedItemIds.add(pending.itemId);
+    for (const itemId of pending.items.keys()) {
+      this.finalizedItemIds.add(itemId);
+    }
     return {
       type: "transcript.finalized",
       id: this.nextTranscriptId++,
-      itemId: pending.itemId,
+      itemId: pending.displayItemId,
       speaker: "emissary",
       text,
     };
@@ -817,20 +827,38 @@ export class RealtimeEmissaryProtocol {
   ): FinalizedRealtimeTranscript | undefined {
     const pending = this.pendingEmissaryTranscripts.get(responseId);
     this.pendingEmissaryTranscripts.delete(responseId);
-    const text = pending?.streamedText.trim();
-    if (!pending || !text || this.finalizedItemIds.has(pending.itemId)) {
+    const text = pending
+      ? combinedEmissaryTranscript(pending, false).trim()
+      : "";
+    if (!pending || !text || this.finalizedItemIds.has(pending.displayItemId)) {
       return undefined;
     }
 
-    this.finalizedItemIds.add(pending.itemId);
+    for (const itemId of pending.items.keys()) {
+      this.finalizedItemIds.add(itemId);
+    }
     return {
       type: "transcript.finalized",
       id: this.nextTranscriptId++,
-      itemId: pending.itemId,
+      itemId: pending.displayItemId,
       speaker: "emissary",
       text,
       interrupted: true,
     };
+  }
+
+  private pendingEmissaryTranscript(
+    responseId: string,
+    itemId: string,
+  ): PendingEmissaryTranscript {
+    const existing = this.pendingEmissaryTranscripts.get(responseId);
+    if (existing) return existing;
+    const pending = {
+      displayItemId: itemId,
+      items: new Map<string, PendingEmissaryTranscriptItem>(),
+    };
+    this.pendingEmissaryTranscripts.set(responseId, pending);
+    return pending;
   }
 
   private finalizedTranscript(
@@ -943,6 +971,21 @@ function sendEvent(
   event: RealtimeClientEvent,
 ): void {
   transport.send(JSON.stringify(event));
+}
+
+function combinedEmissaryTranscript(
+  pending: PendingEmissaryTranscript,
+  preferFinalText: boolean,
+): string {
+  return [...pending.items.values()]
+    .map((item) =>
+      preferFinalText && item.finalText !== undefined
+        ? item.finalText
+        : item.streamedText,
+    )
+    .map((text) => text.trim())
+    .filter(Boolean)
+    .join(" ");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

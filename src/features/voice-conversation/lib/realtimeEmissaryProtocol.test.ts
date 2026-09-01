@@ -289,6 +289,66 @@ describe("RealtimeEmissaryProtocol", () => {
     ]);
   });
 
+  it("keeps multiple audio items from one response in one transcript", () => {
+    const protocol = new RealtimeEmissaryProtocol();
+    expect(
+      protocol.handle({
+        type: "response.output_audio_transcript.delta",
+        response_id: "response-1",
+        item_id: "assistant-1",
+        delta: "Let me think about that.",
+      }),
+    ).toEqual([
+      {
+        type: "transcript.updated",
+        itemId: "assistant-1",
+        speaker: "emissary",
+        text: "Let me think about that.",
+      },
+    ]);
+    expect(
+      protocol.handle({
+        type: "response.output_audio_transcript.delta",
+        response_id: "response-1",
+        item_id: "assistant-2",
+        delta: "I received a compact transcript.",
+      }),
+    ).toEqual([
+      {
+        type: "transcript.updated",
+        itemId: "assistant-1",
+        speaker: "emissary",
+        text: "Let me think about that. I received a compact transcript.",
+      },
+    ]);
+    protocol.handle({
+      type: "response.output_audio_transcript.done",
+      response_id: "response-1",
+      item_id: "assistant-1",
+      transcript: "Let me think about that.",
+    });
+    protocol.handle({
+      type: "response.output_audio_transcript.done",
+      response_id: "response-1",
+      item_id: "assistant-2",
+      transcript: "I received a compact transcript.",
+    });
+    expect(
+      protocol.handle({
+        type: "output_audio_buffer.stopped",
+        response_id: "response-1",
+      }),
+    ).toEqual([
+      {
+        type: "transcript.finalized",
+        id: 1,
+        itemId: "assistant-1",
+        speaker: "emissary",
+        text: "Let me think about that. I received a compact transcript.",
+      },
+    ]);
+  });
+
   it("emits finalized user and emissary transcripts once in observed order", () => {
     const protocol = new RealtimeEmissaryProtocol();
 
