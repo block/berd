@@ -1,5 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { exportSession } from "./acpApi";
+import { exportSession, listSessionsPage, type AcpSessionInfo } from "./acpApi";
 
 const SNIPPET_PREFIX = 40;
 const SNIPPET_SUFFIX = 60;
@@ -69,6 +69,15 @@ export interface SessionSearchSweep {
   failedIds: string[];
 }
 
+/** The full-store sweep: an export sweep plus the server-discovered match
+ *  set. `matchedInfos` covers every session whose message content matched the
+ *  query on the server — including sessions outside `targets`, so callers can
+ *  surface matches beyond the sessions currently loaded in the renderer.
+ *  Empty when nothing matched or no server-side discovery ran (short query). */
+export interface SessionSearchStoreSweep extends SessionSearchSweep {
+  matchedInfos: AcpSessionInfo[];
+}
+
 interface ParsedMessage {
   id: string;
   role: MessageRole | null;
@@ -103,6 +112,17 @@ export interface SessionSearchOptions {
   queryClient?: QueryClient;
 }
 
+/** Minimum query length for server-side content search. Re-exported by the
+ *  search hook as `SESSION_CONTENT_SEARCH_MIN_CHARS` so the API boundary, the
+ *  hook, and the status line share one policy. */
+export const SERVER_CONTENT_SEARCH_MIN_CHARS = 2;
+
+/** Safety bound on server-driven page walks: a backend that keeps handing out
+ *  cursors must not turn one search into an unbounded request loop. Generous
+ *  against the 50-row server page size; reaching it with a cursor pending is
+ *  treated as an error (see `searchSessions`), never as a complete answer. */
+const MAX_SERVER_SEARCH_PAGES = 100;
+
 export async function searchSessionsViaExports(
   query: string,
   targets: SessionSearchTarget[],
@@ -119,6 +139,14 @@ export async function searchSessionsViaExports(
     unique.push(target);
   }
 
+  // Match semantics mirror goose's server-side keyword filter — the query is
+  // split on whitespace and a text matches when ANY word appears — so export
+  // enrichment agrees with server discovery. Words are deduped so "foo foo"
+  // does not double-count its occurrences.
+  const needles = [
+    ...new Set(trimmed.toLowerCase().split(/\s+/).filter(Boolean)),
+  ];
+
   const results: (SessionSearchResult | null)[] = unique.map(() => null);
   // Per-target coverage, kept positionally so concurrent workers never race:
   // a slot is written only by the worker that claimed that index.
@@ -132,7 +160,7 @@ export async function searchSessionsViaExports(
       const target = unique[index];
       try {
         const messages = await fetchCorpus(target, options.queryClient);
-        results[index] = searchSession(target.id, messages, trimmed);
+        results[index] = searchSession(target.id, messages, needles);
       } catch {
         // A session whose corpus cannot be read is not a session without
         // matches. Record it so callers can say so instead of counting it as
@@ -159,6 +187,79 @@ export async function searchSessionsViaExports(
       .filter((_, index) => failed[index])
       .map((target) => target.id),
   };
+}
+
+/**
+ * Full session-store content search. Discovery runs server-side: goose's
+ * `session/list` `_meta.query` filter is a SQL keyword match over message
+ * text, cursor-paginated, so matches surface no matter how far back they sit
+ * — the old export-every-loaded-session sweep could never leave the first
+ * page. The export sweep then runs only over the page targets that actually
+ * matched, purely to enrich them with snippet/messageId/matchCount (and to
+ * keep coverage honest); a target whose export fails degrades to a snippet-less
+ * row instead of vanishing. Matches outside `targets` travel in
+ * `matchedInfos` for the caller to render with generic content rows.
+ */
+export async function searchSessions(
+  query: string,
+  targets: SessionSearchTarget[],
+  options: SessionSearchOptions = {},
+): Promise<SessionSearchStoreSweep> {
+  const trimmed = query.trim();
+  if (trimmed.length < SERVER_CONTENT_SEARCH_MIN_CHARS) {
+    return { results: [], searchedIds: [], failedIds: [], matchedInfos: [] };
+  }
+
+  const matchedInfos: AcpSessionInfo[] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | null = null;
+  for (let page = 0; page < MAX_SERVER_SEARCH_PAGES; page += 1) {
+    const { sessions, nextCursor } = await listSessionsPage({
+      cursor,
+      query: trimmed,
+    });
+    matchedInfos.push(...sessions);
+    if (!nextCursor) {
+      cursor = null;
+      break;
+    }
+    // A cursor the server has already handed out means the walk is cycling;
+    // continuing would duplicate matches and never terminate honestly.
+    if (seenCursors.has(nextCursor)) {
+      throw new Error("session/list returned a repeated pagination cursor");
+    }
+    seenCursors.add(nextCursor);
+    cursor = nextCursor;
+  }
+  // The walk must end on a null cursor: a truncated match set cannot be the
+  // authoritative full-store answer the caller treats it as.
+  if (cursor !== null) {
+    throw new Error(
+      `session/list search exceeded ${MAX_SERVER_SEARCH_PAGES} pages`,
+    );
+  }
+
+  // Match the server's keyword semantics client-side before spending exports:
+  // goose splits the query on whitespace and ORs the words as substrings, so a
+  // multi-word query matches sessions no single full-string sweep would find —
+  // and the client substring check would then erase a real server match.
+  const matchedTargetIds = new Set(matchedInfos.map((info) => info.sessionId));
+  const matchedTargets = targets.filter((target) =>
+    matchedTargetIds.has(target.id),
+  );
+  const enrichment =
+    matchedTargets.length > 0
+      ? await searchSessionsViaExports(trimmed, matchedTargets, {
+          queryClient: options.queryClient,
+        })
+      : { results: [], searchedIds: [], failedIds: [] };
+
+  // Evict superseded corpora for every target, not only the exported few: a
+  // session that stopped matching never reaches the sweep above, but its old
+  // stamp's corpus is just as dead.
+  if (options.queryClient) evictSupersededCorpora(options.queryClient, targets);
+
+  return { ...enrichment, matchedInfos };
 }
 
 /**
@@ -230,7 +331,7 @@ async function exportCorpus(sessionId: string): Promise<ParsedMessage[]> {
 function searchSession(
   sessionId: string,
   messages: ParsedMessage[],
-  query: string,
+  needles: string[],
 ): SessionSearchResult | null {
   if (!messages.length) return null;
 
@@ -243,14 +344,16 @@ function searchSession(
 
   for (const msg of messages) {
     for (const text of msg.texts) {
-      const count = countMatches(text, query);
-      if (!count) continue;
-      matchCount += count;
-      firstMatch ??= {
-        messageId: msg.id,
-        role: msg.role,
-        snippet: buildSnippet(text, query),
-      };
+      for (const needle of needles) {
+        const count = countMatches(text, needle);
+        if (!count) continue;
+        matchCount += count;
+        firstMatch ??= {
+          messageId: msg.id,
+          role: msg.role,
+          snippet: buildSnippet(text, needle),
+        };
+      }
     }
   }
 

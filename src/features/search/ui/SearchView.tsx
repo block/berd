@@ -74,6 +74,9 @@ interface SearchViewProps {
     sessionId: string,
     messageId?: string,
     query?: string,
+    /** The result row's own session, passed so the caller can hydrate
+     *  server-discovered sessions into the store before activating them. */
+    session?: ChatSession,
   ) => void;
   onOpenExtension: (entry: ExtensionEntry) => void;
   onOpenAgent: (agentId: string) => void;
@@ -167,6 +170,9 @@ export function SearchView({
     locale: i18n.resolvedLanguage,
     getDisplayTitle,
     visibleMetadataOnly: true,
+    // Cmd-K's loaded slice excludes archived sessions; server-discovered
+    // matches must follow the same policy.
+    includeDiscoveredSession: (session) => !session.archivedAt,
   });
   const {
     clear: clearChatSearch,
@@ -540,6 +546,7 @@ export function SearchView({
                 sessionId,
                 messageId,
                 submittedQuery || trimmedDebouncedQuery,
+                result.session,
               )
             }
           />

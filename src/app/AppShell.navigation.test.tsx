@@ -93,6 +93,7 @@ const mockAcpCreateSession = vi.hoisted(() => vi.fn());
 const mockAcpPrepareSession = vi.hoisted(() => vi.fn());
 const mockAcpSetSessionConfigOption = vi.hoisted(() => vi.fn());
 const mockAcpListSessionsPage = vi.hoisted(() => vi.fn());
+const mockAcpSearchSessions = vi.hoisted(() => vi.fn());
 const mockBuildFeatures = vi.hoisted(() => ({
   byoKeyProviders: false,
   voiceConversation: false,
@@ -492,6 +493,7 @@ vi.mock("@/shared/api/acp", () => ({
   acpGetSessionInfo: (...args: unknown[]) => mockAcpGetSessionInfo(...args),
   acpListSessionsPage: (...args: unknown[]) => mockAcpListSessionsPage(...args),
   acpLoadSession: (...args: unknown[]) => mockAcpLoadSession(...args),
+  acpSearchSessions: (...args: unknown[]) => mockAcpSearchSessions(...args),
   discoverAcpProviders: vi.fn().mockResolvedValue([]),
 }));
 
@@ -1003,6 +1005,15 @@ describe("AppShell global navigation", () => {
     mockAcpGetSessionInfo.mockResolvedValue(null);
     mockAcpLoadSession.mockReset();
     mockAcpLoadSession.mockResolvedValue(undefined);
+    mockAcpSearchSessions.mockReset();
+    // Default: the server matches nothing; tests that exercise discovery
+    // override with their own match set.
+    mockAcpSearchSessions.mockImplementation(async () => ({
+      results: [],
+      searchedIds: [],
+      failedIds: [],
+      matchedInfos: [],
+    }));
     mockToastError.mockReset();
     mockListenSessionDeepLinkErrors.mockReset();
     mockListenSessionDeepLinkErrors.mockResolvedValue(vi.fn());
@@ -5363,6 +5374,51 @@ describe("AppShell global navigation", () => {
     expect(new URLSearchParams(window.location.search).get("section")).toBe(
       "providers",
     );
+  });
+
+  it("hydrates a server-discovered session into the store when selected from search", async () => {
+    // The store starts EMPTY: the discovered session is known only to the
+    // server. Clicking its result must insert it synchronously — activation
+    // renders the chat only for store sessions.
+    useChatSessionStore.setState({ sessions: [] });
+    mockAcpSearchSessions.mockImplementation(async () => ({
+      results: [],
+      searchedIds: [],
+      failedIds: [],
+      matchedInfos: [
+        {
+          sessionId: "server-1",
+          title: "Server match",
+          updatedAt: "2026-07-28T12:00:00.000Z",
+          createdAt: "2026-07-28T11:00:00.000Z",
+          lastMessageAt: null,
+          archivedAt: null,
+          userSetName: false,
+          messageCount: 2,
+          subtitle: null,
+          workingDir: "/tmp/project",
+          projectId: null,
+          providerId: null,
+          modelId: null,
+          personaId: null,
+        },
+      ],
+    }));
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    const search = screen.getByRole("textbox", { name: "Universal search" });
+    await user.type(search, "server match");
+
+    await user.click(
+      await screen.findByRole("button", { name: /Open chat Server match/ }),
+    );
+
+    const stored = useChatSessionStore.getState().getSession("server-1");
+    expect(stored).toBeDefined();
+    expect(useChatSessionStore.getState().activeSessionId).toBe("server-1");
+    expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
   });
 
   it("focuses a detached chat selected from search", async () => {

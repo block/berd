@@ -18,15 +18,30 @@ interface SessionPageState {
 }
 
 export function acpSessionToChatSession(session: AcpSessionInfo): ChatSession {
-  const now = new Date().toISOString();
   const persistedWorkspaceMetadata = loadPersistedChatWorkspaceMetadata(
     session.sessionId,
   );
+  return withWorkspaceBackfill({
+    ...chatSessionFromAcpInfo(session),
+    workspaceAttachments: persistedWorkspaceMetadata?.workspaceAttachments,
+    activeWorkspaceId: persistedWorkspaceMetadata?.activeWorkspaceId,
+  });
+}
+
+/**
+ * The ACP→ChatSession field mapping without workspace hydration or backfill.
+ * Transient rows (server-discovered search results) skip both: the
+ * localStorage read is wasted on sessions this renderer never opened, and the
+ * workingDir backfill invents attachments for sessions that exist only as
+ * search rows.
+ */
+export function chatSessionFromAcpInfo(session: AcpSessionInfo): ChatSession {
+  const now = new Date().toISOString();
   const executionTarget = executionTargetFromGooseServeSession({
     providerId: session.providerId ?? undefined,
     modelId: session.modelId ?? undefined,
   });
-  return withWorkspaceBackfill({
+  return {
     id: session.sessionId,
     title: normalizeAcpTitle(session.title) ?? "Untitled",
     projectId: session.projectId ?? undefined,
@@ -34,8 +49,6 @@ export function acpSessionToChatSession(session: AcpSessionInfo): ChatSession {
     executionTargetSource: executionTarget ? "acp" : undefined,
     personaId: session.personaId ?? undefined,
     workingDir: session.workingDir ?? undefined,
-    workspaceAttachments: persistedWorkspaceMetadata?.workspaceAttachments,
-    activeWorkspaceId: persistedWorkspaceMetadata?.activeWorkspaceId,
     createdAt: session.createdAt ?? session.updatedAt ?? now,
     updatedAt: session.updatedAt ?? now,
     lastMessageAt: session.lastMessageAt ?? undefined,
@@ -43,7 +56,7 @@ export function acpSessionToChatSession(session: AcpSessionInfo): ChatSession {
     messageCount: session.messageCount,
     subtitle: session.subtitle ?? undefined,
     userSetName: session.userSetName,
-  });
+  };
 }
 
 function mergeSessionMetadata(

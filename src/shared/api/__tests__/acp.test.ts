@@ -146,7 +146,7 @@ vi.mock("../acpActiveMessageTracking", () => ({
 }));
 
 vi.mock("../sessionSearch", () => ({
-  searchSessionsViaExports: vi.fn(),
+  searchSessions: vi.fn(),
 }));
 
 describe("acpSteerMessage", () => {

@@ -118,25 +118,33 @@ vi.mock("../SessionCard", () => ({
   SessionCard: ({
     id,
     title,
+    onSelect,
     onExport,
     onOpenInWindow,
     isOpenInWindow,
     snippet,
     snippetLineClamp,
     onSelectionChange,
+    onArchive,
     onArchiveSelected,
+    onFork,
+    onRename,
     onUnarchive,
     onUnarchiveSelected,
   }: {
     id: string;
     title: string;
+    onSelect?: (id: string) => void;
     onExport?: (id: string) => void;
     onOpenInWindow?: (id: string) => void;
     isOpenInWindow?: boolean;
     snippet?: string;
     snippetLineClamp?: 1 | 3;
     onSelectionChange?: (id: string, selected: boolean) => void;
+    onArchive?: (id: string) => void;
     onArchiveSelected?: () => void;
+    onFork?: (id: string) => void;
+    onRename?: (id: string, nextTitle: string) => void;
     onUnarchive?: (id: string) => void;
     onUnarchiveSelected?: () => void;
   }) => (
@@ -153,6 +161,24 @@ vi.mock("../SessionCard", () => ({
       <button type="button" onClick={() => onExport?.(id)}>
         Export
       </button>
+      <button type="button" onClick={() => onSelect?.(id)}>
+        Open {title}
+      </button>
+      {onArchive ? (
+        <button type="button" onClick={() => onArchive(id)}>
+          Archive {title}
+        </button>
+      ) : null}
+      {onFork ? (
+        <button type="button" onClick={() => onFork(id)}>
+          Fork {title}
+        </button>
+      ) : null}
+      {onRename ? (
+        <button type="button" onClick={() => onRename(id, "Renamed")}>
+          Rename {title}
+        </button>
+      ) : null}
       <button type="button" onClick={() => onSelectionChange?.(id, true)}>
         Select {title}
       </button>
@@ -240,6 +266,25 @@ function scrollHistoryTo(scrollTop: number) {
   });
 }
 
+function historyMatchedInfo(sessionId: string) {
+  return {
+    sessionId,
+    title: "Server match",
+    updatedAt: "2026-04-12T12:00:00Z",
+    createdAt: "2026-04-12T12:00:00Z",
+    lastMessageAt: null,
+    archivedAt: null,
+    userSetName: false,
+    messageCount: 3,
+    subtitle: null,
+    workingDir: null,
+    projectId: null,
+    providerId: null,
+    modelId: null,
+    personaId: null,
+  };
+}
+
 describe("SessionHistoryView", () => {
   beforeEach(() => {
     mocks.sessionWindowSupport.supported = true;
@@ -272,13 +317,14 @@ describe("SessionHistoryView", () => {
       isLoadingMoreSessions: false,
       loadMoreSessions: undefined,
     });
-    // Coverage is reported per sweep, derived from the targets the boundary was
-    // handed, so tests never have to restate which sessions a sweep covered.
+    // Production shape: the server matches every target handed to it here, and
+    // searchedIds ⊆ matchedInfos (only matched targets are export-enriched).
     mocks.acpSearchSessions.mockImplementation(
       async (_query: string, targets: { id: string }[]) => ({
         results: [],
         searchedIds: targets.map((target) => target.id),
         failedIds: [],
+        matchedInfos: targets.map((target) => historyMatchedInfo(target.id)),
       }),
     );
   });
@@ -348,6 +394,13 @@ describe("SessionHistoryView", () => {
         }),
       ],
     });
+    // Title match only: the server finds nothing in the message content.
+    mocks.acpSearchSessions.mockImplementation(async () => ({
+      results: [],
+      searchedIds: [],
+      failedIds: [],
+      matchedInfos: [],
+    }));
 
     renderHistory();
 
@@ -932,6 +985,15 @@ describe("SessionHistoryView", () => {
       ],
     });
 
+    // "needle" matches nothing in content; only the archived session's title
+    // matches, and it is outside the active scope.
+    mocks.acpSearchSessions.mockImplementation(async () => ({
+      results: [],
+      searchedIds: [],
+      failedIds: [],
+      matchedInfos: [],
+    }));
+
     renderHistory();
 
     await user.type(screen.getByRole("searchbox"), "needle{Enter}");
@@ -965,6 +1027,15 @@ describe("SessionHistoryView", () => {
         }),
       ],
     });
+
+    // Title match only, so the premise (a metadata hit with no content match
+    // behind it) does not depend on the default match-everything sweep.
+    mocks.acpSearchSessions.mockImplementation(async () => ({
+      results: [],
+      searchedIds: [],
+      failedIds: [],
+      matchedInfos: [],
+    }));
 
     renderHistory();
 
@@ -1285,5 +1356,148 @@ describe("SessionHistoryView", () => {
         "Exported Codebase Research to test.json",
       );
     });
+  });
+});
+
+describe("server-discovered matches", () => {
+  function matchedInfo(sessionId: string, title: string) {
+    return {
+      sessionId,
+      title,
+      updatedAt: "2026-04-12T12:00:00Z",
+      createdAt: "2026-04-12T12:00:00Z",
+      lastMessageAt: null,
+      archivedAt: null,
+      userSetName: false,
+      messageCount: 3,
+      subtitle: null,
+      workingDir: null,
+      projectId: null,
+      providerId: null,
+      modelId: null,
+      personaId: null,
+    };
+  }
+
+  it("renders a content match for a session that is not loaded", async () => {
+    const user = userEvent.setup();
+    setSessionStoreState({ sessions: [session()] });
+    mocks.acpSearchSessions.mockImplementation(async () => ({
+      results: [],
+      // Production searchedIds ⊆ matchedInfos: only server-matched targets
+      // are export-enriched.
+      searchedIds: [],
+      failedIds: [],
+      matchedInfos: [matchedInfo("old-1", "Old Needle Chat")],
+    }));
+
+    renderHistory();
+
+    await user.type(screen.getByRole("searchbox"), "needle{Enter}");
+
+    expect(await screen.findByText("Old Needle Chat")).toBeInTheDocument();
+  });
+
+  it("excludes a discovered match the project filter rules out", async () => {
+    const user = userEvent.setup();
+    projectState.projects = [
+      { id: "project-a", name: "Project A", workingDirs: ["/a"] },
+    ];
+    setSessionStoreState({
+      sessions: [session({ projectId: "project-a" })],
+    });
+    mocks.acpSearchSessions.mockImplementation(async () => ({
+      results: [],
+      searchedIds: [],
+      failedIds: [],
+      matchedInfos: [
+        // An admitted in-project discovery alongside the excluded one, so the
+        // test proves the response was applied rather than ignored wholesale.
+        { ...matchedInfo("old-2", "Project A Needle"), projectId: "project-a" },
+        {
+          ...matchedInfo("old-1", "Other Project Needle"),
+          projectId: "other",
+        },
+      ],
+    }));
+
+    renderHistory();
+
+    await user.click(screen.getByRole("button", { name: "All projects" }));
+    await user.click(
+      screen.getByRole("menuitemcheckbox", { name: "Project A" }),
+    );
+    await user.keyboard("{Escape}");
+
+    await user.type(screen.getByRole("searchbox"), "needle{Enter}");
+
+    expect(await screen.findByText("Project A Needle")).toBeInTheDocument();
+    expect(screen.queryByText("Other Project Needle")).not.toBeInTheDocument();
+  });
+
+  it("routes a discovered row's selection through onSelectSearchResult with its session", async () => {
+    const user = userEvent.setup();
+    const onSelectSession = vi.fn();
+    const onSelectSearchResult = vi.fn();
+    setSessionStoreState({ sessions: [session()] });
+    mocks.acpSearchSessions.mockImplementation(async () => ({
+      results: [],
+      searchedIds: [],
+      failedIds: [],
+      matchedInfos: [matchedInfo("old-1", "Old Needle Chat")],
+    }));
+
+    render(
+      <SessionHistoryView
+        onSelectSession={onSelectSession}
+        onSelectSearchResult={onSelectSearchResult}
+      />,
+    );
+
+    await user.type(screen.getByRole("searchbox"), "needle{Enter}");
+    await user.click(
+      await screen.findByRole("button", { name: "Open Old Needle Chat" }),
+    );
+
+    // Discovered rows must not use plain session selection: the caller needs
+    // the row's session to hydrate the store before activating.
+    expect(onSelectSession).not.toHaveBeenCalled();
+    expect(onSelectSearchResult).toHaveBeenCalledWith(
+      "old-1",
+      undefined,
+      "needle",
+      expect.objectContaining({ id: "old-1", title: "Old Needle Chat" }),
+    );
+  });
+
+  it("hides store-backed actions on a discovered row but keeps export and open", async () => {
+    const user = userEvent.setup();
+    setSessionStoreState({ sessions: [session()] });
+    mocks.acpSearchSessions.mockImplementation(async () => ({
+      results: [],
+      searchedIds: [],
+      failedIds: [],
+      matchedInfos: [matchedInfo("old-1", "Old Needle Chat")],
+    }));
+
+    renderHistory();
+
+    await user.type(screen.getByRole("searchbox"), "needle{Enter}");
+    await screen.findByText("Old Needle Chat");
+
+    expect(
+      screen.getByRole("button", { name: "Open Old Needle Chat" }),
+    ).toBeInTheDocument();
+    // Not in the store: rename/fork/archive would silently no-op, so the row
+    // must not offer them.
+    expect(
+      screen.queryByRole("button", { name: "Rename Old Needle Chat" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Fork Old Needle Chat" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Archive Old Needle Chat" }),
+    ).not.toBeInTheDocument();
   });
 });

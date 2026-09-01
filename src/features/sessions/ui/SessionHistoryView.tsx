@@ -63,6 +63,7 @@ import { useForkSession } from "../hooks/useForkSession";
 import { useSessionSearch } from "../hooks/useSessionSearch";
 import {
   selectSessionsForScope,
+  sessionMatchesScope,
   type SessionScope,
 } from "../lib/sessionListFilters";
 import {
@@ -127,6 +128,7 @@ interface SessionHistoryViewProps {
     sessionId: string,
     messageId?: string,
     query?: string,
+    session?: ChatSession,
   ) => void;
   onRenameChat?: (sessionId: string, nextTitle: string) => void;
   onArchiveChat?: SessionAction;
@@ -388,6 +390,8 @@ export function SessionHistoryView({
     resolvers,
     locale: i18n.resolvedLanguage,
     getDisplayTitle,
+    includeDiscoveredSession: (session) =>
+      sessionMatchesScope(session, scope, selectedProjectIds),
   });
   const {
     error: searchError,
@@ -724,17 +728,30 @@ export function SessionHistoryView({
   );
   // Results are only as current as the last sweep, but membership can change
   // under them without touching the query, the scope, or the project filter —
-  // restoring a session from the Archived tab is exactly that. Gate them on the
-  // live session set so a row that no longer belongs cannot linger (still
-  // offering its Restore action) until something else triggers a resweep.
+  // restoring a session from the Archived tab is exactly that. Gate loaded rows
+  // on the live session set so a row that no longer belongs cannot linger
+  // (still offering its Restore action) until something else triggers a
+  // resweep. Server-discovered sessions are not in the loaded set; the hook
+  // already admitted them through the live scope/project filters, and an
+  // archive/restore flip lands in the store (loaded) or in the next resweep.
   const activeSessionIds = useMemo(
     () => new Set(activeSessions.map((session) => session.id)),
     [activeSessions],
   );
+  const allSessionIds = useMemo(
+    () => new Set(sessions.map((session) => session.id)),
+    [sessions],
+  );
   const visibleSearchResults = useMemo(
     () =>
-      searchResults.filter((result) => activeSessionIds.has(result.session.id)),
-    [activeSessionIds, searchResults],
+      searchResults.filter((result) => {
+        if (activeSessionIds.has(result.session.id)) return true;
+        // The store knows this session but the current scope excludes it
+        // (wrong tab, wrong project, archived under the Active tab): the
+        // server-discovered copy must not smuggle it back in.
+        return !allSessionIds.has(result.session.id);
+      }),
+    [activeSessionIds, allSessionIds, searchResults],
   );
   const searchRows = useMemo(
     () => flattenFlatSessionRows(visibleSearchResults, columns),
@@ -1121,14 +1138,13 @@ export function SessionHistoryView({
   }, [setTopBarActions, t, handleTriggerImport, isImporting]);
 
   const handleSelectResult = useCallback(
-    (sessionId: string, messageId?: string) => {
-      if (messageId) {
-        onSelectSearchResult?.(sessionId, messageId, submittedQuery);
-        return;
-      }
-      onSelectSession?.(sessionId);
+    (sessionId: string, messageId?: string, session?: ChatSession) => {
+      // Search rows go through the search-result path: discovered sessions
+      // need the caller's pre-activation hydration, which `onSelectSession`
+      // does not do.
+      onSelectSearchResult?.(sessionId, messageId, submittedQuery, session);
     },
-    [onSelectSearchResult, onSelectSession, submittedQuery],
+    [onSelectSearchResult, submittedQuery],
   );
 
   const renderSessionCard = useCallback(
@@ -1138,16 +1154,28 @@ export function SessionHistoryView({
         snippet?: string;
         matchCount?: number;
         messageId?: string;
-        isSearchResult?: boolean;
+        /** Present only for search rows; distinguishes metadata hits from
+         *  content hits. */
+        matchType?: "metadata" | "message";
       },
     ) => {
-      const isSearchResult = options?.isSearchResult ?? false;
+      const isSearchResult = options?.matchType !== undefined;
       const messageId = options?.messageId;
+      const isMetadataMatch = options?.matchType === "metadata";
+      // Server-discovered rows are not in the session store, so store-backed
+      // mutations (rename, fork, archive/restore) would silently no-op;
+      // export and open work straight off the session id and stay available.
+      const isHydrated = allSessionIds.has(session.id);
       // Browse cards preview the latest message text; search cards show the
-      // matched snippet instead.
-      const snippet = isSearchResult
-        ? options?.snippet
-        : (session.subtitle ?? undefined);
+      // matched snippet instead. A server-discovered content match has no
+      // snippet until its corpus is exported — fall back to the session
+      // preview. A metadata-only match has no content snippet to show, and
+      // the preview must not pose as one.
+      const snippet = isMetadataMatch
+        ? undefined
+        : isSearchResult
+          ? options?.snippet || (session.subtitle ?? undefined)
+          : (session.subtitle ?? undefined);
       return (
         <SessionCard
           key={session.id}
@@ -1176,8 +1204,8 @@ export function SessionHistoryView({
           snippetLineClamp={isSearchResult ? undefined : 1}
           matchCount={options?.matchCount}
           onSelect={
-            messageId
-              ? () => handleSelectResult(session.id, messageId)
+            isSearchResult
+              ? () => handleSelectResult(session.id, messageId, session)
               : onSelectSession
           }
           selected={selectedSessionIds.has(session.id)}
@@ -1186,10 +1214,10 @@ export function SessionHistoryView({
           selectionCount={selectedCount}
           onSelectionClear={clearSelection}
           onSelectionChange={toggleSessionSelection}
-          onRename={onRenameChat}
-          onFork={handleFork}
-          onArchive={handleArchive}
-          onUnarchive={handleUnarchive}
+          onRename={isHydrated ? onRenameChat : undefined}
+          onFork={isHydrated ? handleFork : undefined}
+          onArchive={isHydrated ? handleArchive : undefined}
+          onUnarchive={isHydrated ? handleUnarchive : undefined}
           onUnarchiveSelected={handleUnarchiveSelected}
           onArchiveSelected={requestArchiveSelected}
           onExport={handleExport}
@@ -1210,6 +1238,7 @@ export function SessionHistoryView({
       );
     },
     [
+      allSessionIds,
       getPersonaName,
       getProjectColor,
       getProjectIcon,
@@ -1291,7 +1320,7 @@ export function SessionHistoryView({
             snippet: result.snippet,
             matchCount: result.matchCount,
             messageId: result.messageId,
-            isSearchResult: true,
+            matchType: result.matchType,
           }),
         )}
       </div>

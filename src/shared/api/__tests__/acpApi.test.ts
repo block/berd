@@ -199,6 +199,37 @@ describe("listSessionsPage", () => {
     });
   });
 
+  it("sends the keyword filter as top-level _meta.query", async () => {
+    mocks.listSessions.mockResolvedValueOnce({
+      sessions: [],
+      nextCursor: null,
+    });
+
+    const { listSessionsPage } = await import("../acpApi");
+
+    await expect(
+      listSessionsPage({ query: "  refactor plan  " }),
+    ).resolves.toEqual({ sessions: [], nextCursor: null });
+    expect(mocks.listSessions).toHaveBeenCalledWith({
+      _meta: {
+        goose: { includeLastMessageSnippet: true },
+        query: "refactor plan",
+      },
+    });
+  });
+
+  it("omits the keyword filter for blank or absent queries", async () => {
+    mocks.listSessions.mockResolvedValue({ sessions: [], nextCursor: null });
+
+    const { listSessionsPage } = await import("../acpApi");
+
+    await listSessionsPage({ query: "   " });
+    await listSessionsPage();
+    for (const call of mocks.listSessions.mock.calls) {
+      expect(call[0]).toEqual(includeLastMessageSnippetMeta);
+    }
+  });
+
   it("trims the cursor and maps session info", async () => {
     mocks.listSessions.mockResolvedValueOnce({
       sessions: [
