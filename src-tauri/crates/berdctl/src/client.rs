@@ -381,19 +381,31 @@ fn error_parts(value: &Value) -> Option<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::io::{BufRead, BufReader, Read, Write};
+    #[cfg(unix)]
     use std::net::{TcpListener, TcpStream};
+    #[cfg(unix)]
     use std::path::PathBuf;
+    #[cfg(unix)]
     use std::sync::{mpsc, Arc};
+    #[cfg(unix)]
     use std::thread;
 
+    #[cfg(unix)]
     const CURRENT_CAPABILITY: &str =
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    #[cfg(unix)]
     const STALE_CAPABILITY: &str =
         "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 
+    // `discovery::load` deliberately verifies Unix ownership and mode bits.
+    // The production Windows reader instead validates a handle's owner/DACL;
+    // do not run this POSIX fixture there with an inherited temp-directory ACL.
+    #[cfg(unix)]
     struct TempDiscoveryFile(PathBuf);
 
+    #[cfg(unix)]
     impl TempDiscoveryFile {
         fn new(label: &str, port: u16, capability: &str) -> Self {
             let base = std::env::temp_dir().join(format!(
@@ -403,28 +415,35 @@ mod tests {
             std::fs::remove_dir_all(&base).ok();
             std::fs::create_dir(&base).expect("create discovery directory");
             let path = base.join("control.json");
+            Self::write(&path, port, capability);
+            Self(path)
+        }
+
+        fn replace(&self, port: u16, capability: &str) {
+            Self::write(&self.0, port, capability);
+        }
+
+        fn write(path: &Path, port: u16, capability: &str) {
+            use std::os::unix::fs::PermissionsExt;
+
             std::fs::write(
-                &path,
+                path,
                 format!(
                     r#"{{"port":{port},"pid":4242,"generation":7,"protocolVersion":{PROTOCOL_VERSION},"capability":"{capability}"}}"#
                 ),
             )
             .expect("write discovery file");
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(
-                    path.parent().expect("test discovery has a parent"),
-                    std::fs::Permissions::from_mode(0o700),
-                )
-                .expect("make discovery directory private");
-                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
-                    .expect("make discovery file private");
-            }
-            Self(path)
+            std::fs::set_permissions(
+                path.parent().expect("test discovery has a parent"),
+                std::fs::Permissions::from_mode(0o700),
+            )
+            .expect("make discovery directory private");
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+                .expect("make discovery file private");
         }
     }
 
+    #[cfg(unix)]
     impl Drop for TempDiscoveryFile {
         fn drop(&mut self) {
             if let Some(parent) = self.0.parent() {
@@ -433,6 +452,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     struct RecordedRequest {
         request_line: String,
         authorization: Option<String>,
@@ -440,6 +460,7 @@ mod tests {
         body: String,
     }
 
+    #[cfg(unix)]
     fn read_request(stream: &mut TcpStream) -> RecordedRequest {
         let mut reader = BufReader::new(stream.try_clone().expect("clone request stream"));
         let mut request_line = String::new();
@@ -485,6 +506,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     fn write_response(stream: &mut TcpStream, status: &str, body: &str) {
         write!(
             stream,
@@ -494,24 +516,34 @@ mod tests {
         .expect("write test response");
     }
 
+    #[cfg(unix)]
     fn spawn_broker_sequence(
         expected_requests: Vec<(&'static str, BrokerResponse)>,
     ) -> (u16, mpsc::Receiver<RecordedRequest>, thread::JoinHandle<()>) {
         spawn_broker_responses(expected_requests)
     }
 
+    #[cfg(unix)]
     #[derive(Clone, Copy)]
     enum BrokerResponse {
-        Ping { generation: u64 },
+        Ping {
+            generation: u64,
+        },
         Call,
+        CallError {
+            status: &'static str,
+            body: &'static str,
+        },
     }
 
+    #[cfg(unix)]
     fn spawn_broker_responses(
         expected_requests: Vec<(&'static str, BrokerResponse)>,
     ) -> (u16, mpsc::Receiver<RecordedRequest>, thread::JoinHandle<()>) {
         spawn_broker_responses_with_sync(expected_requests, None)
     }
 
+    #[cfg(unix)]
     fn spawn_broker_responses_with_sync(
         expected_requests: Vec<(&'static str, BrokerResponse)>,
         first_response_sync: Option<(Arc<std::sync::Barrier>, Arc<std::sync::Barrier>)>,
@@ -545,6 +577,9 @@ mod tests {
                     (true, BrokerResponse::Call) => {
                         write_response(&mut stream, "200 OK", r#"{"ok":true,"result":"ok"}"#)
                     }
+                    (true, BrokerResponse::CallError { status, body }) => {
+                        write_response(&mut stream, status, body)
+                    }
                     (false, _) => write_response(
                         &mut stream,
                         "403 Forbidden",
@@ -556,6 +591,7 @@ mod tests {
         (port, requests_rx, handle)
     }
 
+    #[cfg(unix)]
     fn spawn_broker(
         expected_capability: &'static str,
         request_count: usize,
@@ -574,6 +610,7 @@ mod tests {
         )
     }
 
+    #[cfg(unix)]
     #[test]
     fn handshake_and_call_send_current_capability() {
         let (port, requests, broker) = spawn_broker(CURRENT_CAPABILITY, 2);
@@ -618,6 +655,107 @@ mod tests {
         broker.join().expect("test broker exits");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn call_rehandshakes_once_after_broker_auth_403_and_retries_identical_payload() {
+        let (port, requests, broker) = spawn_broker_sequence(vec![
+            (STALE_CAPABILITY, BrokerResponse::Ping { generation: 7 }),
+            (CURRENT_CAPABILITY, BrokerResponse::Call),
+            (CURRENT_CAPABILITY, BrokerResponse::Ping { generation: 7 }),
+            (CURRENT_CAPABILITY, BrokerResponse::Call),
+        ]);
+        let lock_file = TempDiscoveryFile::new("call-capability-rotation", port, STALE_CAPABILITY);
+        let endpoint = handshake(&lock_file.0).expect("stale endpoint handshakes before rotation");
+        lock_file.replace(port, CURRENT_CAPABILITY);
+
+        let args = Map::from_iter([
+            ("action".to_string(), Value::String("create".to_string())),
+            (
+                "name".to_string(),
+                Value::String("payload must survive retry".to_string()),
+            ),
+        ]);
+        let result = call(&lock_file.0, &endpoint, "sessions", args, Some(4_242))
+            .expect("broker auth rejection is retried with the rotated capability");
+        assert_eq!(result, Value::String("ok".to_string()));
+
+        let initial_ping = requests.recv().expect("record initial ping");
+        let rejected_call = requests.recv().expect("record rejected call");
+        let retry_ping = requests.recv().expect("record retry handshake ping");
+        let retried_call = requests.recv().expect("record retried call");
+        broker
+            .join()
+            .expect("test broker exits after exactly four requests");
+
+        assert_eq!(
+            initial_ping.authorization.as_deref(),
+            Some(format!("Bearer {STALE_CAPABILITY}").as_str())
+        );
+        assert_eq!(
+            rejected_call.authorization.as_deref(),
+            Some(format!("Bearer {STALE_CAPABILITY}").as_str())
+        );
+        assert_eq!(
+            retry_ping.authorization.as_deref(),
+            Some(format!("Bearer {CURRENT_CAPABILITY}").as_str())
+        );
+        assert_eq!(
+            retried_call.authorization.as_deref(),
+            Some(format!("Bearer {CURRENT_CAPABILITY}").as_str())
+        );
+        assert!(rejected_call.expects_continue);
+        assert!(retried_call.expects_continue);
+        assert_eq!(
+            rejected_call.body, retried_call.body,
+            "retry must preserve the complete payload"
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&retried_call.body).expect("retried payload is JSON"),
+            serde_json::json!({
+                "command": "sessions",
+                "args": {"action": "create", "name": "payload must survive retry"},
+                "timeout_ms": 4242,
+            })
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn call_does_not_retry_other_403_responses() {
+        let (port, requests, broker) = spawn_broker_sequence(vec![
+            (CURRENT_CAPABILITY, BrokerResponse::Ping { generation: 7 }),
+            (
+                CURRENT_CAPABILITY,
+                BrokerResponse::CallError {
+                    status: "403 Forbidden",
+                    body: r#"{"ok":false,"error":{"code":"forbidden","message":"origin rejected"}}"#,
+                },
+            ),
+        ]);
+        let lock_file = TempDiscoveryFile::new("call-other-403", port, CURRENT_CAPABILITY);
+        let endpoint = handshake(&lock_file.0).expect("current endpoint handshakes");
+
+        let failure = call(
+            &lock_file.0,
+            &endpoint,
+            "sessions",
+            Map::from_iter([("action".to_string(), Value::String("list".to_string()))]),
+            None,
+        )
+        .expect_err("non-broker 403 must not be retried");
+        assert_eq!(failure.exit, EXIT_TRANSPORT);
+        assert!(failure.message.starts_with("forbidden: origin rejected"));
+
+        let ping = requests.recv().expect("record initial ping");
+        let call = requests.recv().expect("record call");
+        broker
+            .join()
+            .expect("test broker exits after exactly two requests");
+        assert_eq!(ping.request_line, "GET /v1/ping HTTP/1.1");
+        assert_eq!(call.request_line, "POST /v1/call HTTP/1.1");
+    }
+
+    #[cfg(unix)]
     #[test]
     fn handshake_recovers_when_capability_rotates_after_discovery_read() {
         let first_request = Arc::new(std::sync::Barrier::new(2));
@@ -667,6 +805,7 @@ mod tests {
         broker.join().expect("test broker exits");
     }
 
+    #[cfg(unix)]
     #[test]
     fn handshake_retries_generation_mismatch_with_rotated_capability() {
         let (port, requests, broker) = spawn_broker_sequence(vec![
@@ -707,6 +846,7 @@ mod tests {
         broker.join().expect("test broker exits");
     }
 
+    #[cfg(unix)]
     #[test]
     fn handshake_rejects_stale_capability() {
         // The first 403 triggers the one permitted discovery re-read; an
