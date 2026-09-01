@@ -272,10 +272,50 @@ vi.mock("@/features/terminal/ui/TerminalPanel", () => ({
   ),
 }));
 
+// The provider mock leaves a structural marker so tests can assert which
+// subtrees actually live inside it. Consumers outside the provider silently
+// receive the inert default context (every action is a no-op), so provider
+// placement is load-bearing: see "keeps the artifact viewer panel inside the
+// artifact policy provider" below. The marker stamps the provider's props so
+// tests can also assert the enclosing provider received real data — nesting
+// alone would pass even with e.g. messages={[]}. Note the marker renders for
+// every provider (ChatView's outer one AND ChatTranscriptSurface's inner
+// one), so assertions must use closest()/within(), never a singular
+// getByTestId.
 vi.mock("../../hooks/ArtifactPolicyContext", () => ({
-  ArtifactPolicyProvider: ({ children }: { children: ReactNode }) => children,
+  ArtifactPolicyProvider: ({
+    children,
+    sessionId,
+    sessionCwd,
+    messages,
+  }: {
+    children: ReactNode;
+    sessionId?: string | null;
+    sessionCwd?: string | null;
+    messages: unknown[];
+  }) => (
+    <div
+      data-testid="artifact-policy-provider"
+      data-session-id={sessionId ?? ""}
+      data-session-cwd={sessionCwd ?? ""}
+      data-message-count={messages.length}
+    >
+      {children}
+    </div>
+  ),
   useSessionArtifacts: () => [],
 }));
+
+vi.mock("../ArtifactViewerPanel", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../ArtifactViewerPanel")>();
+  return {
+    ...actual,
+    ArtifactViewerPanel: ({ sessionId }: { sessionId: string }) => (
+      <div data-testid="artifact-viewer-panel" data-session-id={sessionId} />
+    ),
+  };
+});
 
 vi.mock("../../hooks/useChatSessionController", () => ({
   useChatSessionController: mocks.useChatSessionController,
@@ -521,6 +561,30 @@ describe("ChatView MCP app messaging", () => {
     expect(onForkChat).toHaveBeenCalledWith("session-1", {
       conversationBefore: 1_700_000_003,
     });
+  });
+
+  it("keeps the artifact viewer panel inside the artifact policy provider", () => {
+    // Regression guard: the viewer's "Open in editor" action comes from the
+    // artifact actions context. If the panel mounts outside the provider, it
+    // silently receives the inert default context and the action no-ops with
+    // no error (this shipped once — the provider moved into
+    // ChatTranscriptSurface and left the panel orphaned).
+    render(
+      <ChatView
+        sessionId="session-1"
+        activeSession={chatSessionWithWorkingDir("/tmp/project")}
+      />,
+    );
+
+    const panel = screen.getByTestId("artifact-viewer-panel");
+    const provider = panel.closest(
+      "[data-testid='artifact-policy-provider']",
+    ) as HTMLElement | null;
+    expect(provider).not.toBeNull();
+    // Nesting alone is not enough — the enclosing provider must be the one
+    // fed real session data, not an accidental wrapper with empty props.
+    expect(provider?.dataset.sessionId).toBe("session-1");
+    expect(Number(provider?.dataset.messageCount)).toBeGreaterThan(0);
   });
 
   it("gates session surveys through the dedicated build capability", () => {

@@ -20,6 +20,7 @@ import {
   CONVERSATION_MIN_WIDTH_WITH_VIEWER,
 } from "./ArtifactViewerPanel";
 import { useOpenArtifact } from "../stores/artifactViewerStore";
+import { ArtifactPolicyProvider } from "../hooks/ArtifactPolicyContext";
 import { ArtifactAutoOpenMount } from "./ArtifactAutoOpenMount";
 import {
   CP_TOTAL_W,
@@ -823,7 +824,18 @@ export function ChatView({
   });
 
   return (
-    <>
+    // The provider must wrap the whole chat row — not just the transcript —
+    // because siblings of the transcript consume the artifact context too:
+    // ArtifactViewerPanel ("Open in editor"), the right rail's
+    // ArtifactsWidget (row opens), and ArtifactAutoOpenMount (the artifact
+    // list). ChatTranscriptSurface renders its own provider for the
+    // transcript, but without this outer one its siblings get the inert
+    // default context and their actions silently no-op.
+    <ArtifactPolicyProvider
+      messages={controller.messages}
+      sessionCwd={controller.sessionArtifactCwd}
+      sessionId={sessionId}
+    >
       <ArtifactAutoOpenMount
         // Remote artifacts cannot be read locally, so never auto-open the
         // viewer for them; a null session absorbs appearances silently.
@@ -1012,6 +1024,6 @@ export function ChatView({
           }
         />
       </div>
-    </>
+    </ArtifactPolicyProvider>
   );
 }
