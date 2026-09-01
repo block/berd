@@ -1,8 +1,12 @@
 import type { ComponentProps } from "react";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, afterEach } from "vitest";
 import { AgentModelPicker } from "../AgentModelPicker";
+import {
+  MODEL_RECENCY_STORAGE_KEY,
+  recordModelSelection,
+} from "../../lib/modelRecency";
 import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
 
 class ResizeObserverStub {
@@ -21,6 +25,11 @@ const AGENTS = [
 ];
 
 describe("AgentModelPicker", () => {
+  // Model selection persists recency to localStorage; keep tests isolated.
+  afterEach(() => {
+    localStorage.clear();
+  });
+
   it("shows the selected agent and model in the trigger", () => {
     render(
       <AgentModelPicker
@@ -957,10 +966,12 @@ describe("AgentModelPicker", () => {
       within(picker).getByRole("button", { name: /GPT-4o mini/ }),
     );
 
+    // The selection is recorded as recently used, so it joins the compact
+    // shortlist and nothing is left behind "View more".
     expect(
-      within(picker).getByRole("button", { name: "View more" }),
-    ).toBeInTheDocument();
-    expect(within(picker).queryByText("GPT-4o mini")).not.toBeInTheDocument();
+      within(picker).queryByRole("button", { name: "View more" }),
+    ).not.toBeInTheDocument();
+    expect(within(picker).getByText("GPT-4o mini")).toBeInTheDocument();
   });
 
   it("keeps keyboard navigation on picker rows and preserves search caret keys", async () => {
@@ -1474,6 +1485,168 @@ describe("AgentModelPicker", () => {
       expect(
         screen.getByRole("button", { name: "Claude Code" }),
       ).toBeInTheDocument();
+    });
+  });
+
+  describe("model recency", () => {
+    const openPicker = (user: ReturnType<typeof userEvent.setup>) =>
+      user.click(
+        screen.getByRole("button", { name: /choose agent and model/i }),
+      );
+
+    it("records a selection under the selected agent", async () => {
+      const user = userEvent.setup();
+
+      render(
+        <AgentModelPicker
+          agents={AGENTS}
+          selectedAgentId="goose"
+          onAgentChange={vi.fn()}
+          currentModelId="claude-sonnet-4"
+          currentModelName="Claude Sonnet 4"
+          availableModels={[
+            { id: "claude-sonnet-4", name: "Claude Sonnet 4" },
+            { id: "gpt-4o", name: "GPT-4o" },
+          ]}
+          onModelChange={vi.fn()}
+        />,
+      );
+
+      await openPicker(user);
+      await user.click(screen.getByRole("button", { name: "GPT-4o" }));
+
+      const stored = JSON.parse(
+        localStorage.getItem(MODEL_RECENCY_STORAGE_KEY) ?? "{}",
+      ) as Record<string, number>;
+      const entry = Object.entries(stored).find(
+        ([key]) => key.startsWith("goose/") && key.endsWith("/gpt-4o"),
+      );
+      expect(entry).toBeDefined();
+      expect(typeof entry?.[1]).toBe("number");
+    });
+
+    it("orders recently used models ahead of alphabetical fallbacks", async () => {
+      const user = userEvent.setup();
+      recordModelSelection("goose", { id: "zeta-model" });
+
+      render(
+        <AgentModelPicker
+          agents={AGENTS}
+          selectedAgentId="goose"
+          onAgentChange={vi.fn()}
+          currentModelId="alpha-model"
+          currentModelName="Alpha Model"
+          availableModels={[
+            { id: "alpha-model", name: "Alpha Model", recommended: true },
+            { id: "beta-model", name: "Beta Model", recommended: true },
+            { id: "gamma-model", name: "Gamma Model", recommended: true },
+            { id: "zeta-model", name: "Zeta Model", recommended: true },
+          ]}
+          onModelChange={vi.fn()}
+        />,
+      );
+
+      await openPicker(user);
+
+      const picker = screen.getByRole("dialog");
+      const rows = within(picker)
+        .getAllByRole("button")
+        .filter((button) => button.hasAttribute("data-picker-nav-item"));
+      const modelNames = rows
+        .map((button) => button.textContent)
+        .filter(
+          (text): text is string => text !== null && text.includes("Model"),
+        );
+
+      expect(modelNames).toEqual([
+        "Alpha Model",
+        "Zeta Model",
+        "Beta Model",
+        "Gamma Model",
+      ]);
+    });
+
+    it("folds recently used models into the compact view", async () => {
+      const user = userEvent.setup();
+      recordModelSelection("goose", { id: "recent-model" });
+
+      render(
+        <AgentModelPicker
+          agents={AGENTS}
+          selectedAgentId="goose"
+          onAgentChange={vi.fn()}
+          currentModelId="current-model"
+          currentModelName="Current Model"
+          availableModels={[
+            {
+              id: "current-model",
+              name: "Current Model",
+              recommended: true,
+            },
+            {
+              id: "harness-model",
+              name: "Harness Model",
+              recommended: true,
+            },
+            { id: "recent-model", name: "Recent Model" },
+            { id: "stale-model", name: "Stale Model" },
+          ]}
+          onModelChange={vi.fn()}
+        />,
+      );
+
+      await openPicker(user);
+
+      const picker = screen.getByRole("dialog");
+      expect(
+        within(picker).getByRole("button", { name: "Recent Model" }),
+      ).toBeInTheDocument();
+      expect(
+        within(picker).queryByRole("button", { name: "Stale Model" }),
+      ).not.toBeInTheDocument();
+
+      await user.click(
+        within(picker).getByRole("button", { name: "View more" }),
+      );
+
+      expect(
+        within(picker).getByRole("button", { name: "Stale Model" }),
+      ).toBeInTheDocument();
+    });
+
+    it("does not leak recency across agents", async () => {
+      const user = userEvent.setup();
+      recordModelSelection("claude-acp", { id: "zeta-model" });
+
+      render(
+        <AgentModelPicker
+          agents={AGENTS}
+          selectedAgentId="goose"
+          onAgentChange={vi.fn()}
+          currentModelId="alpha-model"
+          currentModelName="Alpha Model"
+          availableModels={[
+            { id: "alpha-model", name: "Alpha Model", recommended: true },
+            { id: "beta-model", name: "Beta Model", recommended: true },
+            { id: "zeta-model", name: "Zeta Model", recommended: true },
+          ]}
+          onModelChange={vi.fn()}
+        />,
+      );
+
+      await openPicker(user);
+
+      const picker = screen.getByRole("dialog");
+      const rows = within(picker)
+        .getAllByRole("button")
+        .filter((button) => button.hasAttribute("data-picker-nav-item"));
+      const modelNames = rows
+        .map((button) => button.textContent)
+        .filter(
+          (text): text is string => text !== null && text.includes("Model"),
+        );
+
+      expect(modelNames).toEqual(["Alpha Model", "Beta Model", "Zeta Model"]);
     });
   });
 });

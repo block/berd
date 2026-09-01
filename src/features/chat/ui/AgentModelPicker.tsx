@@ -15,6 +15,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { requestOpenSettings } from "@/features/settings/lib/settingsEvents";
 import { useComposerPickerCloseFocus } from "@/features/chat/hooks/useComposerPickerCloseFocus";
+import { recordModelSelection } from "@/features/chat/lib/modelRecency";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import { ComposerActionButton } from "@/shared/ui/composer-action-button";
@@ -366,6 +367,7 @@ export function AgentModelPicker({
   };
 
   const handleModelSelect = (model: ModelOption) => {
+    recordModelSelection(selectedAgentId, model);
     onModelChange?.(model.id, model);
   };
 
