@@ -137,13 +137,16 @@ nullable verified bytes, and the pinned total download bytes. Their install
 progress uses schema-version-one JSONL envelopes with lowercase phases and
 monotonic byte counts.
 
-The host selects an optional output device in the protocol `hello`; the TTS
-backend only produces PCM and does not own device persistence. Stdin is one
-bounded framed stream containing JSON controls and exact 20 ms, 48 kHz mono
-Float32 PCM frames. The shared runtime owns Berd's adaptive VAD,
-recognition-pending state, final-token storage, admission, and barge-in; the
-host still owns the capture device and sends normalized PCM. Omitting
-`--stt-backend` selects macOS speech recognition.
+The session host owns both physical devices. Stdin is one framed stream
+containing JSON controls and exact 20 ms, 48 kHz mono Float32 microphone frames;
+controls are priority-routed while PCM forwarding remains strictly bounded. A
+required inherited `--pcm-output-fd` carries independently framed synthesized
+PCM records so device backpressure cannot block stdout lifecycle events or
+stdin cancellation. The child retains source-frame delivery, drain, partial
+delivery, and terminal authority through correlated acceptance, played,
+drained, failed, and cancelled acknowledgements. The shared runtime owns Berd's
+adaptive VAD, recognition-pending state, final-token storage, admission, and
+barge-in. Omitting `--stt-backend` selects macOS speech recognition.
 
 The session's `ready` event projects a sanitized, revisioned TTS snapshot.
 Same-backend voice, language/model, and normalized rate updates validate off the

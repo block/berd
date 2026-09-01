@@ -1,4 +1,5 @@
 use std::io::{self, BufWriter, Read, Write};
+use std::os::fd::RawFd;
 use std::path::PathBuf;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -33,6 +34,10 @@ use berd_voice::{
 };
 use serde::Serialize;
 
+mod session_audio;
+
+use session_audio::{AudioHostAck, AudioPipeTransport, RemotePcmAudioOutput, AUDIO_CANCELLED};
+
 const WIRE_MARKER: u32 = 2;
 const MAX_LINE_BYTES: usize = 1024 * 1024;
 const FRAME_MAGIC: [u8; 2] = *b"BV";
@@ -43,7 +48,7 @@ const PCM_FRAME_BYTES: usize = INPUT_FRAME_SAMPLES * std::mem::size_of::<f32>();
 const MAX_FINAL_TEXT_BYTES: usize = 64 * 1024;
 const MAX_SPEAK_TEXT_BYTES: usize = 16 * 1024;
 const INPUT_QUEUE_CAPACITY: usize = 32;
-const SHUTDOWN_PLAYBACK_TIMEOUT: Duration = Duration::from_secs(2);
+const SHUTDOWN_PLAYBACK_TIMEOUT: Duration = Duration::from_secs(3);
 const TTS_CONFIGURATION_TIMEOUT: Duration = Duration::from_secs(120);
 const MAX_OPENAI_BENCHMARK_REQUESTS: usize = 20;
 const MAX_OPENAI_BENCHMARK_TEXT_BYTES: usize = 64 * 1024;
@@ -56,12 +61,24 @@ enum Input {
     Eof,
 }
 
+struct OrderedControl {
+    after_pcm: u64,
+    input: Input,
+}
+
 #[derive(Debug)]
 enum PlaybackEvent {
+    #[cfg(test)]
     Started(u64),
     Completed(u64),
     Interrupted(u64),
-    Failed(u64, String),
+    Failed(u64, String, bool),
+}
+
+#[derive(Debug)]
+struct PlaybackFailure {
+    message: String,
+    output_quiescent: bool,
 }
 
 struct TtsConfigurationEvent {
@@ -81,7 +98,7 @@ struct ActivePlayback {
     prepare_id: u64,
     speech_id: u64,
     text: String,
-    output_device: Option<String>,
+    output: Option<Arc<RemotePcmAudioOutput>>,
     active: Option<Arc<AtomicBool>>,
     ready_deadline: Instant,
     assistant_activity: Option<AssistantActivityGuard>,
@@ -341,8 +358,10 @@ fn main() {
     let args: Vec<_> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
         Some("session") => {
+            let pcm_output_fd =
+                parse_pcm_output_fd(&args).unwrap_or_else(|error| usage_error(&error));
             let config = parse_args(&args).unwrap_or_else(|error| usage_error(&error));
-            if let Err(error) = run_session(config) {
+            if let Err(error) = run_session(config, pcm_output_fd) {
                 eprintln!("berd-voice session failed: {error}");
                 std::process::exit(1);
             }
@@ -388,7 +407,7 @@ fn main() {
 fn usage_error(error: &str) -> ! {
     eprintln!("{error}");
     eprintln!(
-        "usage:\n  berd-voice session [--tts-backend siri|openai|pocket] \
+        "usage:\n  berd-voice session --pcm-output-fd FD [--tts-backend siri|openai|pocket] \
          [--model-dir PATH] [--voice ID] [--language BCP47] [--rate FLOAT] \
          [--stt-backend macos|parakeet|openai] [--stt-model-dir PATH]\n  \
          berd-voice benchmark tts --tts-backend openai|siri|pocket \
@@ -1055,9 +1074,11 @@ fn run_management_command(command: ManagementCommand) -> Result<(), ManagementFa
     }
 }
 
-fn run_session(config: SessionConfig) -> Result<(), String> {
-    let (input_tx, input_rx) = mpsc::sync_channel(INPUT_QUEUE_CAPACITY);
-    thread::spawn(move || read_framed_requests(io::stdin().lock(), input_tx));
+fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String> {
+    let (control_tx, control_rx) = mpsc::channel();
+    let (pcm_tx, pcm_rx) = mpsc::sync_channel(INPUT_QUEUE_CAPACITY);
+    thread::spawn(move || read_framed_requests(io::stdin().lock(), control_tx, pcm_tx));
+    let audio_transport = Arc::new(unsafe { AudioPipeTransport::from_raw_fd(pcm_output_fd)? });
     let (playback_tx, playback_rx) = mpsc::channel();
     let (tts_configuration_tx, tts_configuration_rx) = mpsc::channel::<TtsConfigurationEvent>();
     let stdout = io::stdout();
@@ -1072,7 +1093,8 @@ fn run_session(config: SessionConfig) -> Result<(), String> {
     let mut input_events: Option<tokio::sync::mpsc::Receiver<VoiceInputEvent>> = None;
     let mut input_controls: Option<VoiceInputControls> = None;
     let mut next_input_token = 1_u64;
-    let mut output_device = None;
+    let mut pending_control = None;
+    let mut processed_pcm = 0_u64;
     let mut held: Option<PrepareRequest> = None;
     let mut active: Option<ActivePlayback> = None;
 
@@ -1101,7 +1123,6 @@ fn run_session(config: SessionConfig) -> Result<(), String> {
         reevaluate_held(
             &mut held,
             &mut core,
-            &output_device,
             tts_slot.as_deref(),
             input_during_tts_slot.as_ref(),
             &mut active,
@@ -1122,10 +1143,13 @@ fn run_session(config: SessionConfig) -> Result<(), String> {
             )?;
         }
 
-        let input = match input_rx.recv_timeout(Duration::from_millis(10)) {
-            Ok(input) => input,
-            Err(mpsc::RecvTimeoutError::Timeout) => continue,
-            Err(mpsc::RecvTimeoutError::Disconnected) => Input::Eof,
+        let Some(input) = receive_session_input(
+            &control_rx,
+            &pcm_rx,
+            &mut pending_control,
+            &mut processed_pcm,
+        ) else {
+            continue;
         };
         match input {
             Input::Invalid(message) => {
@@ -1213,7 +1237,6 @@ fn run_session(config: SessionConfig) -> Result<(), String> {
             }
             Input::Request(SessionRequest::Hello {
                 id,
-                output_device: requested,
                 input_during_tts,
             }) => {
                 if initialized {
@@ -1237,14 +1260,6 @@ fn run_session(config: SessionConfig) -> Result<(), String> {
                         return Ok(());
                     }
                 };
-                if let Err(message) = validate_output_device(requested.as_deref()) {
-                    write_protocol_fatal(
-                        &mut writer,
-                        "selected audio output is unavailable",
-                        &message,
-                    )?;
-                    return Ok(());
-                }
                 let (runtime, mut events) = match create_input_runtime(&config.stt) {
                     Ok(runtime) => runtime,
                     Err(message) => {
@@ -1269,7 +1284,6 @@ fn run_session(config: SessionConfig) -> Result<(), String> {
                 input_runtime = Some(runtime);
                 input_events = Some(events);
                 initialized = true;
-                output_device = requested;
                 let input_policy = InputDuringTtsSlot::new(input_during_tts);
                 let session = VoiceSessionSnapshot {
                     tts: slot.snapshot()?,
@@ -1399,7 +1413,6 @@ fn run_session(config: SessionConfig) -> Result<(), String> {
                     process_prepare(
                         request,
                         &mut core,
-                        &output_device,
                         tts_slot.as_deref().expect("hello initialized TTS"),
                         input_during_tts_slot
                             .as_ref()
@@ -1418,12 +1431,19 @@ fn run_session(config: SessionConfig) -> Result<(), String> {
                 }) {
                     acknowledge_output_ready(current, input_controls.as_ref(), &mut writer)?;
                     let playback_active = Arc::new(AtomicBool::new(true));
+                    let output = Arc::new(RemotePcmAudioOutput::new(
+                        speech_id,
+                        current.tts.backend().pcm_spec(),
+                        Arc::clone(&audio_transport),
+                        Arc::clone(&playback_active),
+                    )?);
+                    current.output = Some(Arc::clone(&output));
                     current.active = Some(Arc::clone(&playback_active));
                     spawn_playback(
                         speech_id,
                         current.text.clone(),
-                        current.output_device.clone(),
                         Arc::clone(current.tts.backend()),
+                        output,
                         playback_active,
                         playback_tx.clone(),
                     );
@@ -1436,6 +1456,147 @@ fn run_session(config: SessionConfig) -> Result<(), String> {
                             outcome: OutputReadyOutcome::Stale,
                         },
                     )?;
+                }
+            }
+            Input::Request(SessionRequest::AudioBeginAccepted { speech_id }) => {
+                if let Err(message) =
+                    handle_audio_ack(speech_id, AudioHostAck::BeginAccepted, active.as_ref())
+                {
+                    write_protocol_fatal(
+                        &mut writer,
+                        "invalid host audio acknowledgement",
+                        &message,
+                    )?;
+                    abort_active(&active);
+                    return Ok(());
+                }
+            }
+            Input::Request(SessionRequest::AudioBeginFailed {
+                speech_id,
+                played_frames,
+                message,
+            }) => {
+                eprintln!("host audio begin failed: {message}");
+                if let Err(message) = handle_audio_ack(
+                    speech_id,
+                    AudioHostAck::BeginFailed {
+                        played_frames,
+                        message,
+                    },
+                    active.as_ref(),
+                ) {
+                    write_protocol_fatal(
+                        &mut writer,
+                        "invalid host audio acknowledgement",
+                        &message,
+                    )?;
+                    abort_active(&active);
+                    return Ok(());
+                }
+            }
+            Input::Request(SessionRequest::AudioChunkAccepted {
+                speech_id,
+                sequence,
+            }) => {
+                match handle_audio_ack(
+                    speech_id,
+                    AudioHostAck::ChunkAccepted { sequence },
+                    active.as_ref(),
+                ) {
+                    Ok(true) => {
+                        publish_speech_started(speech_id, &mut core, active.as_ref(), &mut writer)?
+                    }
+                    Ok(false) => {}
+                    Err(message) => {
+                        write_protocol_fatal(
+                            &mut writer,
+                            "invalid host audio acknowledgement",
+                            &message,
+                        )?;
+                        abort_active(&active);
+                        return Ok(());
+                    }
+                }
+            }
+            Input::Request(SessionRequest::AudioPlayed {
+                speech_id,
+                played_frames,
+            }) => {
+                if let Err(message) = handle_audio_ack(
+                    speech_id,
+                    AudioHostAck::Played { played_frames },
+                    active.as_ref(),
+                ) {
+                    write_protocol_fatal(
+                        &mut writer,
+                        "invalid host audio acknowledgement",
+                        &message,
+                    )?;
+                    abort_active(&active);
+                    return Ok(());
+                }
+            }
+            Input::Request(SessionRequest::AudioDrained {
+                speech_id,
+                sequence,
+                played_frames,
+            }) => {
+                if let Err(message) = handle_audio_ack(
+                    speech_id,
+                    AudioHostAck::Drained {
+                        sequence,
+                        played_frames,
+                    },
+                    active.as_ref(),
+                ) {
+                    write_protocol_fatal(
+                        &mut writer,
+                        "invalid host audio acknowledgement",
+                        &message,
+                    )?;
+                    abort_active(&active);
+                    return Ok(());
+                }
+            }
+            Input::Request(SessionRequest::AudioFailed {
+                speech_id,
+                played_frames,
+                message,
+            }) => {
+                eprintln!("host audio output failed: {message}");
+                if let Err(message) = handle_audio_ack(
+                    speech_id,
+                    AudioHostAck::Failed {
+                        played_frames,
+                        message,
+                    },
+                    active.as_ref(),
+                ) {
+                    write_protocol_fatal(
+                        &mut writer,
+                        "invalid host audio acknowledgement",
+                        &message,
+                    )?;
+                    abort_active(&active);
+                    return Ok(());
+                }
+            }
+            Input::Request(SessionRequest::AudioCancelled {
+                speech_id,
+                played_frames,
+            }) => {
+                if let Err(message) = handle_audio_ack(
+                    speech_id,
+                    AudioHostAck::Cancelled { played_frames },
+                    active.as_ref(),
+                ) {
+                    write_protocol_fatal(
+                        &mut writer,
+                        "invalid host audio acknowledgement",
+                        &message,
+                    )?;
+                    abort_active(&active);
+                    return Ok(());
                 }
             }
             Input::Request(SessionRequest::QueryState { id, after }) => {
@@ -1466,6 +1627,21 @@ fn acknowledge_output_ready(
             outcome: OutputReadyOutcome::Accepted,
         },
     )
+}
+
+fn handle_audio_ack(
+    speech_id: u64,
+    ack: AudioHostAck,
+    active: Option<&ActivePlayback>,
+) -> Result<bool, String> {
+    let current = active
+        .filter(|current| current.speech_id == speech_id)
+        .ok_or_else(|| "audio acknowledgement does not target the active speech".to_string())?;
+    current
+        .output
+        .as_ref()
+        .ok_or_else(|| "audio acknowledgement arrived before remote output began".to_string())?
+        .handle_ack(ack)
 }
 
 fn wait_for_input_ready(
@@ -1510,6 +1686,7 @@ fn parse_args(args: &[String]) -> Result<SessionConfig, String> {
             }
             "--stt-backend" => stt_backend = value,
             "--stt-model-dir" => stt_model_dir = Some(PathBuf::from(value)),
+            "--pcm-output-fd" => {}
             _ => return Err(format!("unknown argument: {flag}")),
         }
         index += 2;
@@ -1517,6 +1694,28 @@ fn parse_args(args: &[String]) -> Result<SessionConfig, String> {
     let tts = build_tts_backend_config(backend, voice, language, model_dir, rate)?;
     let stt = build_stt_backend_config(stt_backend, stt_model_dir)?;
     Ok(SessionConfig { tts, stt })
+}
+
+fn parse_pcm_output_fd(args: &[String]) -> Result<RawFd, String> {
+    let mut value = None;
+    let mut index = 2;
+    while index < args.len() {
+        if args[index] == "--pcm-output-fd" {
+            if value.is_some() {
+                return Err("--pcm-output-fd may be provided only once".into());
+            }
+            value = args.get(index + 1).cloned();
+        }
+        index += 2;
+    }
+    let fd = value
+        .ok_or("--pcm-output-fd is required")?
+        .parse::<RawFd>()
+        .map_err(|_| "--pcm-output-fd must be an integer file descriptor".to_string())?;
+    if fd < 3 {
+        return Err("--pcm-output-fd must be at least 3".into());
+    }
+    Ok(fd)
 }
 
 fn build_stt_backend_config(
@@ -2194,23 +2393,6 @@ fn validate_macos_stt_status(
     ))
 }
 
-#[cfg(target_os = "macos")]
-fn validate_output_device(name: Option<&str>) -> Result<(), String> {
-    let Some(name) = name else { return Ok(()) };
-    coreaudio::audio_unit::macos_helpers::get_device_id_from_name(name, false)
-        .map(|_| ())
-        .ok_or_else(|| format!("audio output not found: {name}"))
-}
-
-#[cfg(not(target_os = "macos"))]
-fn validate_output_device(name: Option<&str>) -> Result<(), String> {
-    if name.is_some() {
-        Err("named audio output is only available on macOS".into())
-    } else {
-        Ok(())
-    }
-}
-
 fn poll_tts_configuration_update(
     now: Instant,
     receiver: &Receiver<TtsConfigurationEvent>,
@@ -2351,7 +2533,6 @@ fn reject_tts_configuration_update(
 fn process_prepare(
     request: PrepareRequest,
     core: &mut SessionCore,
-    output_device: &Option<String>,
     tts_slot: &ConfiguredTtsSlot,
     input_during_tts_slot: &InputDuringTtsSlot,
     active: &mut Option<ActivePlayback>,
@@ -2380,7 +2561,7 @@ fn process_prepare(
                 prepare_id: id,
                 speech_id,
                 text,
-                output_device: output_device.clone(),
+                output: None,
                 active: None,
                 ready_deadline: Instant::now() + Duration::from_secs(2),
                 assistant_activity: None,
@@ -2403,7 +2584,6 @@ fn process_prepare(
 fn reevaluate_held(
     held: &mut Option<PrepareRequest>,
     core: &mut SessionCore,
-    output_device: &Option<String>,
     tts_slot: Option<&ConfiguredTtsSlot>,
     input_during_tts_slot: Option<&InputDuringTtsSlot>,
     active: &mut Option<ActivePlayback>,
@@ -2414,7 +2594,6 @@ fn reevaluate_held(
             process_prepare(
                 pending_prepare,
                 core,
-                output_device,
                 tts_slot.expect("held prepare requires initialized TTS"),
                 input_during_tts_slot
                     .expect("held prepare requires initialized input-during-TTS policy"),
@@ -2554,11 +2733,9 @@ fn handle_playback_event(
     writer: &mut impl Write,
 ) -> Result<(), String> {
     match event {
+        #[cfg(test)]
         PlaybackEvent::Started(speech_id) => {
-            if core.mark_started(speech_id) {
-                let id = active.as_ref().map_or(0, |current| current.prepare_id);
-                write_message(writer, &SessionMessage::SpeechStarted { id, speech_id })?;
-            }
+            publish_speech_started(speech_id, core, active.as_ref(), writer)?
         }
         PlaybackEvent::Completed(speech_id) => {
             let id = active.as_ref().map_or(0, |current| current.prepare_id);
@@ -2580,7 +2757,7 @@ fn handle_playback_event(
                 writer,
             )?
         }
-        PlaybackEvent::Failed(speech_id, message) => {
+        PlaybackEvent::Failed(speech_id, message, output_quiescent) => {
             let id = active.as_ref().map_or(0, |current| current.prepare_id);
             finish_playback(
                 core,
@@ -2592,8 +2769,24 @@ fn handle_playback_event(
                     message,
                 },
                 writer,
-            )?
+            )?;
+            if !output_quiescent {
+                return Err("remote PCM output did not reach a quiescent terminal".into());
+            }
         }
+    }
+    Ok(())
+}
+
+fn publish_speech_started(
+    speech_id: u64,
+    core: &mut SessionCore,
+    active: Option<&ActivePlayback>,
+    writer: &mut impl Write,
+) -> Result<(), String> {
+    if core.mark_started(speech_id) {
+        let id = active.map_or(0, |current| current.prepare_id);
+        write_message(writer, &SessionMessage::SpeechStarted { id, speech_id })?;
     }
     Ok(())
 }
@@ -2627,6 +2820,9 @@ fn interrupt_active(
     };
     if let Some(flag) = &current.active {
         flag.store(false, Ordering::SeqCst);
+        if let Some(output) = &current.output {
+            output.notify_cancel_requested();
+        }
     } else {
         let id = current.prepare_id;
         let speech_id = current.speech_id;
@@ -2760,7 +2956,57 @@ fn write_message(writer: &mut impl Write, message: &SessionMessage) -> Result<()
         .map_err(|error| error.to_string())
 }
 
-fn read_framed_requests(mut reader: impl Read, sender: SyncSender<Input>) {
+fn receive_session_input(
+    control_rx: &Receiver<OrderedControl>,
+    pcm_rx: &Receiver<Box<VoiceInputFrame>>,
+    pending_control: &mut Option<OrderedControl>,
+    processed_pcm: &mut u64,
+) -> Option<Input> {
+    if pending_control.is_none() {
+        *pending_control = control_rx.try_recv().ok();
+    }
+    if pending_control
+        .as_ref()
+        .is_some_and(|control| control.after_pcm <= *processed_pcm)
+    {
+        return pending_control.take().map(|control| control.input);
+    }
+    match pcm_rx.recv_timeout(Duration::from_millis(10)) {
+        Ok(frame) => {
+            *processed_pcm = processed_pcm.saturating_add(1);
+            Some(Input::Pcm(frame))
+        }
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            if pending_control.is_none() {
+                *pending_control = control_rx.try_recv().ok();
+            }
+            if pending_control
+                .as_ref()
+                .is_some_and(|control| control.after_pcm <= *processed_pcm)
+            {
+                pending_control.take().map(|control| control.input)
+            } else {
+                None
+            }
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            if pending_control.is_none() {
+                *pending_control = control_rx.try_recv().ok();
+            }
+            pending_control
+                .take()
+                .map(|control| control.input)
+                .or(Some(Input::Eof))
+        }
+    }
+}
+
+fn read_framed_requests(
+    mut reader: impl Read,
+    control_sender: mpsc::Sender<OrderedControl>,
+    pcm_sender: SyncSender<Box<VoiceInputFrame>>,
+) {
+    let mut sent_pcm = 0_u64;
     loop {
         let mut header = [0_u8; FRAME_HEADER_BYTES];
         let input = match reader.read(&mut header[..1]) {
@@ -2772,12 +3018,37 @@ fn read_framed_requests(mut reader: impl Read, sender: SyncSender<Input>) {
             Ok(_) => unreachable!("one-byte read"),
             Err(error) => Input::Invalid(format!("could not read stdin: {error}")),
         };
-        let terminal = matches!(input, Input::Invalid(_));
-        if sender.send(input).is_err() || terminal {
-            return;
+        match input {
+            Input::Pcm(frame) => match pcm_sender.try_send(frame) {
+                Ok(()) => sent_pcm = sent_pcm.saturating_add(1),
+                Err(mpsc::TrySendError::Full(_)) => {
+                    let _ = control_sender.send(OrderedControl {
+                        after_pcm: sent_pcm,
+                        input: Input::Invalid("session PCM input queue is full".into()),
+                    });
+                    return;
+                }
+                Err(mpsc::TrySendError::Disconnected(_)) => return,
+            },
+            input => {
+                let terminal = matches!(input, Input::Invalid(_));
+                if control_sender
+                    .send(OrderedControl {
+                        after_pcm: sent_pcm,
+                        input,
+                    })
+                    .is_err()
+                    || terminal
+                {
+                    return;
+                }
+            }
         }
     }
-    let _ = sender.send(Input::Eof);
+    let _ = control_sender.send(OrderedControl {
+        after_pcm: sent_pcm,
+        input: Input::Eof,
+    });
 }
 
 fn decode_framed_input(reader: &mut impl Read, header: [u8; FRAME_HEADER_BYTES]) -> Input {
@@ -2836,7 +3107,15 @@ fn validate_request(request: SessionRequest) -> Result<SessionRequest, String> {
         | SessionRequest::OutputReady { id, .. }
         | SessionRequest::QueryState { id, .. }
         | SessionRequest::Cancel { id } => Some(*id),
-        SessionRequest::SetPaused { .. } | SessionRequest::Shutdown => None,
+        SessionRequest::SetPaused { .. }
+        | SessionRequest::AudioBeginAccepted { .. }
+        | SessionRequest::AudioBeginFailed { .. }
+        | SessionRequest::AudioChunkAccepted { .. }
+        | SessionRequest::AudioPlayed { .. }
+        | SessionRequest::AudioDrained { .. }
+        | SessionRequest::AudioFailed { .. }
+        | SessionRequest::AudioCancelled { .. }
+        | SessionRequest::Shutdown => None,
     };
     if id == Some(0) {
         return Err("request id must be positive".into());
@@ -2856,68 +3135,76 @@ fn validate_request(request: SessionRequest) -> Result<SessionRequest, String> {
             expected_revision: 0,
             ..
         } => return Err("expected input-during-TTS revision must be positive".into()),
+        SessionRequest::AudioBeginAccepted { speech_id: 0 }
+        | SessionRequest::AudioBeginFailed { speech_id: 0, .. }
+        | SessionRequest::AudioChunkAccepted { speech_id: 0, .. }
+        | SessionRequest::AudioPlayed { speech_id: 0, .. }
+        | SessionRequest::AudioDrained { speech_id: 0, .. }
+        | SessionRequest::AudioFailed { speech_id: 0, .. }
+        | SessionRequest::AudioCancelled { speech_id: 0, .. } => {
+            return Err("audio speech id must be positive".into())
+        }
+        SessionRequest::AudioChunkAccepted { sequence: 0, .. }
+        | SessionRequest::AudioDrained { sequence: 0, .. } => {
+            return Err("audio sequence must be positive".into())
+        }
+        SessionRequest::AudioBeginFailed { message, .. }
+        | SessionRequest::AudioFailed { message, .. }
+            if message.len() > 4096 =>
+        {
+            return Err("audio failure message exceeds 4 KiB".into())
+        }
         _ => {}
     }
     Ok(request)
 }
 
-#[cfg(target_os = "macos")]
 fn spawn_playback(
     speech_id: u64,
     text: String,
-    output_device: Option<String>,
     backend: Arc<dyn TtsBackend>,
+    output: Arc<RemotePcmAudioOutput>,
     active: Arc<AtomicBool>,
     sender: mpsc::Sender<PlaybackEvent>,
 ) {
     thread::spawn(move || {
-        let terminal = match play_tts(
-            speech_id,
-            &text,
-            output_device.as_deref(),
-            backend.as_ref(),
-            &active,
-            &sender,
-        ) {
+        let terminal = match play_tts(&text, backend.as_ref(), &output, &active) {
             Ok(true) => PlaybackEvent::Completed(speech_id),
             Ok(false) => PlaybackEvent::Interrupted(speech_id),
-            Err(message) => PlaybackEvent::Failed(speech_id, message),
+            Err(failure) => {
+                PlaybackEvent::Failed(speech_id, failure.message, failure.output_quiescent)
+            }
         };
         let _ = sender.send(terminal);
     });
 }
 
-#[cfg(not(target_os = "macos"))]
-fn spawn_playback(
-    speech_id: u64,
-    _text: String,
-    _output_device: Option<String>,
-    _backend: Arc<dyn TtsBackend>,
-    _active: Arc<AtomicBool>,
-    sender: mpsc::Sender<PlaybackEvent>,
-) {
-    let _ = sender.send(PlaybackEvent::Failed(
-        speech_id,
-        "native PCM output is only available on macOS".into(),
-    ));
-}
-
-#[cfg(target_os = "macos")]
 fn play_tts(
-    speech_id: u64,
     text: &str,
-    output_device: Option<&str>,
     backend: &dyn TtsBackend,
+    output: &RemotePcmAudioOutput,
     active: &AtomicBool,
-    sender: &mpsc::Sender<PlaybackEvent>,
-) -> Result<bool, String> {
-    use berd_voice::PocketAudioPlayer;
-
-    let spec = backend.pcm_spec();
-    let output = PocketAudioPlayer::new(spec.sample_rate, spec.playback_rate, output_device)?;
-    synthesize_to_output(speech_id, text, backend, &output, active, sender)
+) -> Result<bool, PlaybackFailure> {
+    if let Err(message) = output.start() {
+        if message == AUDIO_CANCELLED {
+            return Ok(false);
+        }
+        return Err(PlaybackFailure {
+            message,
+            output_quiescent: output.failure_is_quiescent(),
+        });
+    }
+    synthesize_to_output_with_finish(
+        text,
+        backend,
+        output,
+        active,
+        &mut || output.finish_writes(),
+        &mut || Ok(()),
+    )
 }
 
+#[cfg(test)]
 fn synthesize_to_output(
     speech_id: u64,
     text: &str,
@@ -2925,33 +3212,64 @@ fn synthesize_to_output(
     output: &dyn berd_voice::PcmAudioOutput,
     active: &AtomicBool,
     sender: &mpsc::Sender<PlaybackEvent>,
-) -> Result<bool, String> {
-    use berd_voice::{DrainPolicy, OutboundOutcome, OutboundPlayback};
+) -> Result<bool, PlaybackFailure> {
+    synthesize_to_output_with_finish(text, backend, output, active, &mut || Ok(()), &mut || {
+        let _ = sender.send(PlaybackEvent::Started(speech_id));
+        Ok(())
+    })
+}
+
+fn synthesize_to_output_with_finish(
+    text: &str,
+    backend: &dyn TtsBackend,
+    output: &dyn berd_voice::PcmAudioOutput,
+    active: &AtomicBool,
+    finish_writes: &mut dyn FnMut() -> Result<(), String>,
+    on_started: &mut dyn FnMut() -> Result<(), String>,
+) -> Result<bool, PlaybackFailure> {
+    use berd_voice::{DrainPolicy, DrainTimeoutOutcome, OutboundOutcome, OutboundPlayback};
 
     let spec = backend.pcm_spec();
-    let initial_frames = usize::try_from(spec.sample_rate / 5)
-        .map_err(|_| "TTS sample rate is too large".to_string())?;
-    let mut playback = OutboundPlayback::new(output, active, spec.sample_rate, initial_frames)?;
+    let initial_frames = usize::try_from(spec.sample_rate / 5).map_err(|_| PlaybackFailure {
+        message: "TTS sample rate is too large".into(),
+        output_quiescent: false,
+    })?;
+    let mut playback = OutboundPlayback::new(output, active, spec.sample_rate, initial_frames)
+        .map_err(|message| PlaybackFailure {
+            message,
+            output_quiescent: false,
+        })?;
     if playback
-        .synthesize_segment(
-            backend,
-            text,
-            &mut |_| Ok(()),
-            &mut || {
-                let _ = sender.send(PlaybackEvent::Started(speech_id));
-                Ok(())
-            },
-            &mut |_| Ok(()),
-        )
-        .map_err(|failure| failure.message)?
+        .synthesize_segment(backend, text, &mut |_| Ok(()), on_started, &mut |_| Ok(()))
+        .map_err(|failure| PlaybackFailure {
+            message: failure.message,
+            output_quiescent: failure.output_quiescent,
+        })?
         == OutboundOutcome::Interrupted
     {
         return Ok(false);
     }
+    if let Err(message) = finish_writes() {
+        let output_quiescent = output.cancel_and_snapshot().is_ok();
+        return Err(PlaybackFailure {
+            message,
+            output_quiescent,
+        });
+    }
     playback
-        .finish(DrainPolicy::default(), &mut |_| Ok(()))
+        .finish(
+            DrainPolicy {
+                timeout: Some(Duration::from_secs(2)),
+                timeout_outcome: DrainTimeoutOutcome::Fail,
+                ..DrainPolicy::default()
+            },
+            &mut |_| Ok(()),
+        )
         .map(|outcome| outcome == OutboundOutcome::Completed)
-        .map_err(|failure| failure.message)
+        .map_err(|failure| PlaybackFailure {
+            message: failure.message,
+            output_quiescent: failure.output_quiescent,
+        })
 }
 
 #[cfg(test)]
@@ -3093,7 +3411,7 @@ mod tests {
             prepare_id: 7,
             speech_id,
             text,
-            output_device: None,
+            output: None,
             active: Some(Arc::new(AtomicBool::new(true))),
             ready_deadline: Instant::now() + Duration::from_secs(2),
             assistant_activity: None,
@@ -4343,6 +4661,30 @@ mod tests {
         );
     }
 
+    #[test]
+    fn session_requires_one_inherited_pcm_output_descriptor() {
+        assert_eq!(
+            parse_pcm_output_fd(&args(&["berd-voice", "session", "--pcm-output-fd", "9"])).unwrap(),
+            9
+        );
+        assert_eq!(
+            parse_pcm_output_fd(&args(&["berd-voice", "session"])).unwrap_err(),
+            "--pcm-output-fd is required"
+        );
+        assert!(
+            parse_pcm_output_fd(&args(&["berd-voice", "session", "--pcm-output-fd", "2"])).is_err()
+        );
+        assert!(parse_pcm_output_fd(&args(&[
+            "berd-voice",
+            "session",
+            "--pcm-output-fd",
+            "7",
+            "--pcm-output-fd",
+            "8"
+        ]))
+        .is_err());
+    }
+
     fn framed(kind: u8, payload: &[u8]) -> Vec<u8> {
         let mut frame = Vec::from([b'B', b'V', WIRE_MARKER as u8, kind]);
         frame.extend_from_slice(&(payload.len() as u32).to_le_bytes());
@@ -4352,21 +4694,47 @@ mod tests {
 
     #[test]
     fn framing_decodes_json_and_exact_pcm_without_line_ambiguity() {
-        let json =
-            br#"{"type":"hello","id":1,"output_device":null,"input_during_tts":"allow_barge_in"}"#;
+        let json = br#"{"type":"hello","id":1,"input_during_tts":"allow_barge_in"}"#;
         let pcm = [0_u8; PCM_FRAME_BYTES];
         let mut bytes = framed(JSON_FRAME_KIND, json);
         bytes.extend_from_slice(&framed(PCM_FRAME_KIND, &pcm));
-        let (sender, receiver) = mpsc::sync_channel(3);
+        let (control_sender, control_receiver) = mpsc::channel();
+        let (pcm_sender, pcm_receiver) = mpsc::sync_channel(3);
 
-        read_framed_requests(Cursor::new(bytes), sender);
+        read_framed_requests(Cursor::new(bytes), control_sender, pcm_sender);
 
         assert!(matches!(
-            receiver.recv().unwrap(),
+            control_receiver.recv().unwrap().input,
             Input::Request(SessionRequest::Hello { id: 1, .. })
         ));
-        assert!(matches!(receiver.recv().unwrap(), Input::Pcm(_)));
-        assert!(matches!(receiver.recv().unwrap(), Input::Eof));
+        assert!(pcm_receiver.recv().is_ok());
+        assert!(matches!(control_receiver.recv().unwrap().input, Input::Eof));
+    }
+
+    #[test]
+    fn disconnected_pcm_channel_does_not_overtake_queued_control() {
+        let (control_sender, control_receiver) = mpsc::channel();
+        let (pcm_sender, pcm_receiver) = mpsc::sync_channel(1);
+        control_sender
+            .send(OrderedControl {
+                after_pcm: 0,
+                input: Input::Request(SessionRequest::Shutdown),
+            })
+            .unwrap();
+        drop(control_sender);
+        drop(pcm_sender);
+
+        let mut pending = None;
+        let mut processed = 0;
+        assert!(matches!(
+            receive_session_input(
+                &control_receiver,
+                &pcm_receiver,
+                &mut pending,
+                &mut processed
+            ),
+            Some(Input::Request(SessionRequest::Shutdown))
+        ));
     }
 
     #[test]
@@ -4377,14 +4745,35 @@ mod tests {
         ] {
             let mut header = Vec::from([b'B', b'V', WIRE_MARKER as u8, kind]);
             header.extend_from_slice(&(length as u32).to_le_bytes());
-            let (sender, receiver) = mpsc::sync_channel(1);
-            read_framed_requests(Cursor::new(header), sender);
-            let Input::Invalid(message) = receiver.recv().unwrap() else {
+            let (control_sender, control_receiver) = mpsc::channel();
+            let (pcm_sender, _pcm_receiver) = mpsc::sync_channel(1);
+            read_framed_requests(Cursor::new(header), control_sender, pcm_sender);
+            let Input::Invalid(message) = control_receiver.recv().unwrap().input else {
                 panic!("invalid frame must be terminal")
             };
             assert!(message.contains(expected));
-            assert!(receiver.try_recv().is_err());
+            assert!(control_receiver.try_recv().is_err());
         }
+    }
+
+    #[test]
+    fn first_pcm_queue_overflow_is_terminal_without_blocking_the_reader() {
+        let pcm = [0_u8; PCM_FRAME_BYTES];
+        let mut bytes = framed(PCM_FRAME_KIND, &pcm);
+        bytes.extend_from_slice(&framed(PCM_FRAME_KIND, &pcm));
+        let (control_sender, control_receiver) = mpsc::channel();
+        let (pcm_sender, pcm_receiver) = mpsc::sync_channel(1);
+
+        read_framed_requests(Cursor::new(bytes), control_sender, pcm_sender);
+
+        assert!(pcm_receiver.recv().is_ok());
+        let control = control_receiver.recv().unwrap();
+        assert_eq!(control.after_pcm, 1);
+        let Input::Invalid(message) = control.input else {
+            panic!("queue discontinuity must be terminal")
+        };
+        assert_eq!(message, "session PCM input queue is full");
+        assert!(control_receiver.try_recv().is_err());
     }
 
     #[test]
@@ -4429,7 +4818,6 @@ mod tests {
                 text: "reply".into(),
             },
             &mut core,
-            &None,
             &test_tts_slot(),
             &input_policy,
             &mut active,
@@ -4447,7 +4835,6 @@ mod tests {
         reevaluate_held(
             &mut held,
             &mut core,
-            &None,
             Some(&test_tts_slot()),
             Some(&input_policy),
             &mut active,
@@ -4476,7 +4863,6 @@ mod tests {
                 text: "old voice".into(),
             },
             &mut core,
-            &None,
             &slot,
             &input_policy,
             &mut active,
@@ -4663,7 +5049,7 @@ mod tests {
             prepare_id: 7,
             speech_id,
             text,
-            output_device: None,
+            output: None,
             active: None,
             ready_deadline: Instant::now() + Duration::from_secs(2),
             assistant_activity: None,
@@ -4749,6 +5135,30 @@ mod tests {
     }
 
     #[test]
+    fn unquiesced_output_failure_terminates_the_session_after_its_speech_terminal() {
+        let mut core = SessionCore::default();
+        let current = active_playback(&mut core);
+        let speech_id = current.speech_id;
+        let mut active = Some(current);
+        let mut output = Vec::new();
+
+        let error = handle_playback_event(
+            PlaybackEvent::Failed(speech_id, "output failed".into(), false),
+            &mut core,
+            &mut active,
+            &mut output,
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error,
+            "remote PCM output did not reach a quiescent terminal"
+        );
+        assert!(active.is_none());
+        assert_eq!(messages(&output)[0]["type"], "speech_failed");
+    }
+
+    #[test]
     fn query_state_returns_authoritative_confirmation_and_order() {
         let mut core = SessionCore::default();
         core.add_final(4, "one".into()).unwrap();
@@ -4793,7 +5203,7 @@ mod tests {
             prepare_id: 7,
             speech_id,
             text,
-            output_device: None,
+            output: None,
             active: None,
             ready_deadline: Instant::now() + Duration::from_secs(2),
             assistant_activity: None,
@@ -4842,7 +5252,7 @@ mod tests {
             prepare_id: 7,
             speech_id,
             text,
-            output_device: None,
+            output: None,
             active: None,
             ready_deadline: Instant::now() + Duration::from_secs(2),
             assistant_activity: None,

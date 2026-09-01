@@ -2,18 +2,19 @@
 
 `berd-voice session` is a development, full-authority voice session. The child
 owns speech recognition, finalized-input order, confirmation, speak admission,
-synthesis, playback lifecycle, and barge-in. The parent owns capture devices and
-writes normalized microphone PCM; the child writes flushed JSONL events to
-stdout. Diagnostics go only to stderr.
+synthesis, source-frame delivery, playback lifecycle, and barge-in. The parent
+owns capture and playback devices: it writes normalized microphone PCM on stdin
+and consumes synthesized PCM from a dedicated inherited pipe. The child writes
+flushed JSONL events to stdout. Diagnostics go only to stderr.
 
 ## Startup
 
 The child selects closed TTS and STT backends at startup:
 
 ```text
-berd-voice session [--tts-backend siri] --voice NAME --language BCP47 [--rate 0.5..2.0]
-berd-voice session --tts-backend openai [--rate 0.75..2.0]
-berd-voice session --tts-backend pocket --model-dir ABS --voice ID [--rate 0.75..2.0]
+berd-voice session --pcm-output-fd FD [--tts-backend siri] --voice NAME --language BCP47 [--rate 0.5..2.0]
+berd-voice session --pcm-output-fd FD --tts-backend openai [--rate 0.75..2.0]
+berd-voice session --pcm-output-fd FD --tts-backend pocket --model-dir ABS --voice ID [--rate 0.75..2.0]
 
 berd-voice session [--stt-backend macos]
 berd-voice session --stt-backend parakeet --stt-model-dir ABS
@@ -37,13 +38,14 @@ normalized BCP-47 language, and a responsive sirittsd availability query. It
 does not guarantee that a later synthesis request cannot fail; those failures
 remain terminal speech events.
 
-The first request must be `hello`. Its optional `output_device` is an exact
-CoreAudio output name selected by the parent. `input_during_tts` is the host's
-resolved initial policy; a host-specific `auto` mode must be resolved before
-the request:
+`FD` must be an inherited writable descriptor at least 3. It is required and
+has no device-owning or stdout-multiplexed fallback.
+
+The first request must be `hello`. `input_during_tts` is the host's resolved
+initial policy; a host-specific `auto` mode must be resolved before the request:
 
 ```json
-{"type":"hello","id":1,"output_device":null,"input_during_tts":"allow_barge_in"}
+{"type":"hello","id":1,"input_during_tts":"allow_barge_in"}
 ```
 
 The response retains `protocol:2` as a fixed wire-integrity marker, not a
@@ -76,10 +78,87 @@ finite Float32 mono samples at 48 kHz. Wrong magic, marker, kind, length, JSON,
 PCM shape, or non-finite PCM is fatal. Frames are processed in order and bounded
 before payload allocation. Stdout remains unframed, flushed JSONL.
 
+JSON controls and acknowledgements use an unbounded control path inside the
+child. Microphone PCM uses a bounded nonblocking path; its first overflow is
+fatal. A control remains ordered after every earlier accepted microphone frame,
+but later PCM cannot block an urgent audio acknowledgement or cancellation.
+
+## Dedicated PCM output pipe
+
+The child is the sole writer of self-framed records on `--pcm-output-fd`. Each
+record has an eight-byte header followed by exactly `length` bytes:
+
+```text
+0x42 0x41 0x02 kind length:u32-little-endian
+```
+
+Kinds and little-endian payloads are:
+
+```text
+1 Begin:  speech_id:u64 sample_rate:u32 playback_rate:f32
+2 Chunk:  speech_id:u64 sequence:u64 samples:[f32]
+3 End:    speech_id:u64 last_sequence:u64 total_frames:u64
+4 Cancel: speech_id:u64
+```
+
+PCM is finite, unit-scale, mono Float32 at the Begin sample rate. The current
+closed sample rates are 24 kHz and 48 kHz; playback rate is finite `0.5..2.0`.
+Chunk sequence starts at 1 and is contiguous. A Chunk is nonempty and contains
+at most 4096 source frames. Pipe writes, Begin acceptance, each Chunk acceptance,
+credit release, and cancellation acknowledgement are each bounded to two
+seconds. A partial record that cannot finish within the pipe deadline poisons
+the transport; Cancel never overtakes bytes from an unfinished record.
+
+The parent acknowledges on framed stdin:
+
+```text
+{"type":"audio_begin_accepted","speech_id":u64}
+{"type":"audio_begin_failed","speech_id":u64,"played_frames":u64,"message":string}
+{"type":"audio_chunk_accepted","speech_id":u64,"sequence":u64}
+{"type":"audio_played","speech_id":u64,"played_frames":u64}
+{"type":"audio_drained","speech_id":u64,"sequence":u64,"played_frames":u64}
+{"type":"audio_failed","speech_id":u64,"played_frames":u64,"message":string}
+{"type":"audio_cancelled","speech_id":u64,"played_frames":u64}
+```
+
+Begin must be accepted before the first Chunk. Only one Chunk may await
+acceptance, and at most two accepted chunks may remain not fully played.
+The child flushes `output_ready_result(accepted)` before writing Begin, but
+stdout and the PCM pipe are independently observed. The host may therefore
+buffer one valid Begin for the single reserved speech for at most two seconds;
+it must not acknowledge Begin until its session actor has applied `accepted`.
+A second Begin, a speech mismatch, a stale result, or rendezvous expiry is
+fatal.
+`audio_played.played_frames` is cumulative, monotonic source-frame truth and may
+legitimately lag newer accepted sequences. It cannot exceed accepted frames.
+End follows the last accepted Chunk. Drained must name End's last sequence and
+confirm every source frame played before completion is published. A device host
+must include its bounded post-render route latency before stopping the engine
+and sending Drained; node buffer consumption alone is insufficient. That grace
+must remain within the child's two-second End-to-Drained deadline. Cancellation
+or failure bypasses the grace and quiesces immediately.
+
+Cancel is an ordered pipe record. `audio_cancelled` is a quiescence barrier and
+its settled played count is the authoritative partial-delivery snapshot before
+the child publishes interruption. A cancellation timeout or host failure
+publishes `speech_failed`, not `speech_interrupted`. When cancellation overtakes
+an already-written Begin, Chunk, or End, the exact in-flight acceptance,
+progress, Drained, or Failed acknowledgement may settle before the pipe-ordered
+Cancelled acknowledgement. Cancelled is then the quiescence barrier: failure
+wins the speech outcome, otherwise cancellation wins. Callbacks after that
+barrier are protocol-fatal. Outside this narrow race, Drained, Failed, and
+Cancelled are terminal. Only an exact duplicate in-phase played count is
+idempotent. Unknown or future speech IDs, sequence gaps or regressions,
+impossible counts, and stale terminal
+acknowledgements are fatal.
+If a backend or pipe write fails and the child cannot obtain a quiescent cancel
+barrier, it emits that speech's failure and terminates the session data plane;
+it never admits a replacement while old host audio may still be active.
+
 ## Parent requests
 
 ```text
-{"type":"hello","id":u64,"output_device":string|null,"input_during_tts":"allow_barge_in"|"suppress_input"}
+{"type":"hello","id":u64,"input_during_tts":"allow_barge_in"|"suppress_input"}
 {"type":"set_paused","active":bool}
 {"type":"set_input_muted","id":u64,"active":bool}
 {"type":"set_tts_settings","id":u64,"expected_revision":u64,"settings":TtsSettings}
@@ -87,6 +166,7 @@ before payload allocation. Stdout remains unframed, flushed JSONL.
 {"type":"reset_input","id":u64}
 {"type":"prepare_speak","id":u64,"acknowledgement":u64|null,"text":string}
 {"type":"output_ready","id":u64,"speech_id":u64}
+audio acknowledgements listed above
 {"type":"query_state","id":u64,"after":u64}
 {"type":"cancel","id":u64}
 {"type":"shutdown"}
@@ -191,8 +271,9 @@ ID and speech ID when it is ready to accept output:
 Before emitting `accepted`, the child installs the admitted speech's leased
 assistant-activity guard. `suppress_input` stops PCM admission so user input
 cannot interrupt the speech; `allow_barge_in` continues PCM admission with the
-assistant-sensitive VAD threshold. `accepted` transfers output authority.
-Readiness is bounded to two seconds;
+assistant-sensitive VAD threshold. `accepted` transfers output authority. The
+child then writes Begin and waits for `audio_begin_accepted` before delivering
+PCM. Readiness is bounded to two seconds;
 expiry emits `speech_failed` with zero output. Speaking, recognition pending, a
 final, pause, or targeted cancellation interrupts waiting or playing speech.
 Accepted output owns exactly one assistant-activity guard. The child removes
@@ -218,12 +299,13 @@ targets the originating `prepare_speak.id`. `cancel_result` is emitted first. A
 live held target then emits `not_admitted(cancelled)`; a live admitted target
 then emits `speech_interrupted`. Repeated or unknown cancellation is stale.
 Every speech event carries the originating prepare ID. `speech_started` appears
-only after PCM is accepted by the output, and exactly one terminal message
-follows every admission.
+only after the first PCM Chunk is accepted by the host, and exactly one terminal
+message follows every admission.
 
-On `shutdown`, all complete earlier frames are processed in order. The child
-cancels and drains output, finishes the input runtime while continuing to drain
-events and storage receipts, flushes, then exits. EOF, malformed framing, fatal
+On `shutdown`, all complete earlier frames are processed in order. The parent
+keeps stdin open while the child cancels and drains output. The child then
+finishes the input runtime while continuing to drain events and storage
+receipts, flushes, and exits. EOF, malformed framing, fatal
 input failure, or process death cancels both authorities without transparent
 restart. A fatal error is flushed exactly once and followed by no protocol
 output.

@@ -841,7 +841,7 @@ fn run_siri_stream(
             }
             Ok(SiriStreamCommand::Stop) | Err(mpsc::RecvTimeoutError::Disconnected) => {
                 active.store(false, Ordering::SeqCst);
-                playback.interrupt();
+                playback.interrupt().map_err(|failure| failure.message)?;
                 return Ok(SiriStreamOutcome {
                     state: SiriStreamEventState::Interrupted,
                     delivery: Some(playback.snapshot()),
@@ -865,7 +865,7 @@ fn run_siri_stream(
     assistant_speech.take();
     result.map_err(|error| {
         let delivery = delivery_with_played_audio(playback.snapshot());
-        playback.interrupt();
+        let _ = playback.interrupt();
         SiriStreamFailure { error, delivery }
     })
 }

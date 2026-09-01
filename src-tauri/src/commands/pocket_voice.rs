@@ -2053,7 +2053,7 @@ fn run_pocket_voice_stream(
             }
             Ok(PocketStreamCommand::Stop) | Err(mpsc::RecvTimeoutError::Disconnected) => {
                 active.store(false, Ordering::SeqCst);
-                playback.interrupt();
+                playback.interrupt().map_err(|failure| failure.message)?;
                 return Ok(PocketStreamOutcome {
                     state: PocketStreamEventState::Interrupted,
                     delivery: Some(playback.snapshot()),
@@ -2079,7 +2079,7 @@ fn run_pocket_voice_stream(
     assistant_speech.take();
     result.map_err(|error| {
         let delivery = delivery_with_played_audio(playback.snapshot());
-        playback.interrupt();
+        let _ = playback.interrupt();
         PocketStreamFailure { error, delivery }
     })
 }

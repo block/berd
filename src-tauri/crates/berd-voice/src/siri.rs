@@ -83,6 +83,8 @@ unsafe extern "C" {
         context: *mut c_void,
         error_out: *mut *mut c_char,
     ) -> bool;
+    #[cfg(test)]
+    fn berd_siri_tts_test_closed_pcm_gate_ignores_late_callback() -> bool;
     fn berd_siri_tts_free_string(value: *mut c_char);
 }
 
@@ -607,14 +609,17 @@ fn take_string(value: *mut c_char) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "macos")]
+    use super::{
+        berd_siri_tts_test_closed_pcm_gate_ignores_late_callback, receive_pcm_until_complete,
+        SiriTts,
+    };
     use super::{
         download_voice_with, parse_catalog_json, parse_languages_json,
         validate_download_wait_timeout, SiriDownloadAvailabilityWait, SiriVoice, SiriVoiceCatalog,
         SiriVoiceDownloadError, SiriVoiceIdentity, MAX_SIRI_DOWNLOAD_WAIT_TIMEOUT,
         MIN_SIRI_DOWNLOAD_WAIT_TIMEOUT,
     };
-    #[cfg(target_os = "macos")]
-    use super::{receive_pcm_until_complete, SiriTts};
     #[cfg(target_os = "macos")]
     use crate::{TtsBackend, TtsOutcome, TtsSynthesisEvent};
     use std::cell::Cell;
@@ -816,6 +821,14 @@ mod tests {
         .unwrap_err();
         assert_eq!(error, "Siri synthesis stopped making progress");
         assert!(callback_cancelled.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn native_completion_closes_the_borrowed_pcm_callback_context() {
+        // SAFETY: This native regression owns its stack canary for the complete
+        // synchronous call and performs no synthesis, device, or network work.
+        assert!(unsafe { berd_siri_tts_test_closed_pcm_gate_ignores_late_callback() });
     }
 
     #[test]

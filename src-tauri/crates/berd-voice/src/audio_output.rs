@@ -16,6 +16,18 @@ pub trait PcmAudioOutput {
     /// observed, and repeated cancellation must be harmless.
     fn cancel(&self);
 
+    /// Cancels playback and returns the final confirmed source-frame count.
+    ///
+    /// The default preserves local-output semantics by freezing progress before
+    /// cancellation can discard native bookkeeping. Outputs with a remote
+    /// quiescence acknowledgement may override this to cancel first and return
+    /// the settled count reported by the remote host.
+    fn cancel_and_snapshot(&self) -> Result<u64, String> {
+        let played_frames = self.played_frames();
+        self.cancel();
+        Ok(played_frames)
+    }
+
     /// Returns whether all queued source frames have drained.
     fn is_drained(&self) -> bool;
 

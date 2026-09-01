@@ -21,6 +21,7 @@ claxon = "0.4.3"
 earshot = "1.0"
 fs2 = "0.4"
 futures-util = "0.3"
+libc = "0.2"
 ort = { version = "=2.0.0-rc.12", default-features = false, features = ["api-24", "ndarray", "std"] }
 ort-sys = { version = "=2.0.0-rc.12", features = ["disable-linking"] }
 rand = "0.10"

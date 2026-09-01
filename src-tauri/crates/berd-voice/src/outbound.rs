@@ -58,6 +58,9 @@ impl Default for DrainPolicy {
 pub struct OutboundFailure {
     pub message: String,
     pub delivery: DeliveryProgress,
+    /// False means output cancellation did not prove a quiescent terminal and
+    /// the host must not admit another speech on the same data plane.
+    pub output_quiescent: bool,
 }
 
 #[derive(Debug)]
@@ -179,7 +182,7 @@ impl<'a> OutboundPlayback<'a> {
     pub fn poll(&mut self) -> Result<bool, OutboundFailure> {
         self.ensure_live()?;
         if !self.active.load(Ordering::SeqCst) {
-            self.interrupt();
+            self.interrupt()?;
             return Ok(false);
         }
         self.output
@@ -198,7 +201,7 @@ impl<'a> OutboundPlayback<'a> {
     ) -> Result<OutboundOutcome, OutboundFailure> {
         self.ensure_live()?;
         if !self.active.load(Ordering::SeqCst) {
-            return Ok(self.interrupt());
+            return self.interrupt();
         }
         self.ledger.begin_segment(text.to_string());
         let outcome = backend.synthesize_with_poll(text, self.active, &mut |event| match event {
@@ -235,10 +238,11 @@ impl<'a> OutboundPlayback<'a> {
         });
         let outcome = match outcome {
             Ok(outcome) => outcome,
+            Err(_) if !self.active.load(Ordering::SeqCst) => return self.interrupt(),
             Err(message) => return Err(self.fail(message)),
         };
         if outcome == TtsOutcome::Cancelled || !self.active.load(Ordering::SeqCst) {
-            return Ok(self.interrupt());
+            return self.interrupt();
         }
         self.ledger.complete_segment();
         if !self.initial.is_empty() {
@@ -262,14 +266,14 @@ impl<'a> OutboundPlayback<'a> {
         let mut forced_complete = false;
         while !self.output.is_drained() {
             if !self.active.load(Ordering::SeqCst) {
-                return Ok(self.interrupt());
+                return self.interrupt();
             }
             if policy
                 .timeout
                 .is_some_and(|timeout| started_at.elapsed() >= timeout)
             {
                 if policy.timeout_outcome == DrainTimeoutOutcome::Complete {
-                    self.remember_delivery_and_cancel();
+                    self.remember_delivery_and_cancel()?;
                     forced_complete = true;
                     break;
                 }
@@ -282,7 +286,7 @@ impl<'a> OutboundPlayback<'a> {
             std::thread::sleep(policy.poll_interval);
         }
         if !self.active.load(Ordering::SeqCst) {
-            return Ok(self.interrupt());
+            return self.interrupt();
         }
         if !forced_complete {
             self.output
@@ -292,7 +296,7 @@ impl<'a> OutboundPlayback<'a> {
         let post_drain_started = Instant::now();
         while post_drain_started.elapsed() < policy.post_drain {
             if !self.active.load(Ordering::SeqCst) {
-                return Ok(self.interrupt());
+                return self.interrupt();
             }
             if !forced_complete {
                 self.output
@@ -306,12 +310,12 @@ impl<'a> OutboundPlayback<'a> {
         Ok(OutboundOutcome::Completed)
     }
 
-    pub fn interrupt(&mut self) -> OutboundOutcome {
+    pub fn interrupt(&mut self) -> Result<OutboundOutcome, OutboundFailure> {
         if !self.terminal {
-            self.remember_delivery_and_cancel();
+            self.remember_delivery_and_cancel()?;
             self.terminal = true;
         }
-        OutboundOutcome::Interrupted
+        Ok(OutboundOutcome::Interrupted)
     }
 
     fn flush_initial(
@@ -335,6 +339,7 @@ impl<'a> OutboundPlayback<'a> {
             Err(OutboundFailure {
                 message: "TTS playback is already terminal".into(),
                 delivery: self.snapshot(),
+                output_quiescent: true,
             })
         } else {
             Ok(())
@@ -342,16 +347,51 @@ impl<'a> OutboundPlayback<'a> {
     }
 
     fn fail(&mut self, message: String) -> OutboundFailure {
-        let delivery = self.snapshot();
-        self.terminal_delivery = Some(delivery.clone());
-        self.output.cancel();
+        self.terminal_delivery = Some(self.snapshot());
+        let cancellation = self.output.cancel_and_snapshot();
+        let output_quiescent = cancellation.is_ok();
+        if let Ok(played_frames) = cancellation {
+            self.terminal_delivery = Some(self.ledger.snapshot(played_frames));
+        }
         self.terminal = true;
-        OutboundFailure { message, delivery }
+        let delivery = self
+            .terminal_delivery
+            .clone()
+            .expect("failure records terminal delivery");
+        let message = if output_quiescent {
+            message
+        } else {
+            format!("{message}; output cancellation did not reach a quiescent terminal")
+        };
+        OutboundFailure {
+            message,
+            delivery,
+            output_quiescent,
+        }
     }
 
-    fn remember_delivery_and_cancel(&mut self) {
-        self.terminal_delivery = Some(self.snapshot());
-        self.output.cancel();
+    fn remember_delivery_and_cancel(&mut self) -> Result<(), OutboundFailure> {
+        if self.terminal_delivery.is_some() {
+            self.output.cancel();
+            return Ok(());
+        }
+        let played_frames = self
+            .output
+            .cancel_and_snapshot()
+            .map_err(|message| self.fail_without_cancel(message))?;
+        self.terminal_delivery = Some(self.ledger.snapshot(played_frames));
+        Ok(())
+    }
+
+    fn fail_without_cancel(&mut self, message: String) -> OutboundFailure {
+        let delivery = self.snapshot();
+        self.terminal_delivery = Some(delivery.clone());
+        self.terminal = true;
+        OutboundFailure {
+            message,
+            delivery,
+            output_quiescent: false,
+        }
     }
 }
 
@@ -368,6 +408,32 @@ mod tests {
     }
 
     struct PollThenFramesTts;
+
+    struct UnquiescedOutput;
+
+    impl PcmAudioOutput for UnquiescedOutput {
+        fn write(&self, _samples: &[f32]) -> Result<(), String> {
+            Err("remote write failed".into())
+        }
+
+        fn cancel(&self) {}
+
+        fn cancel_and_snapshot(&self) -> Result<u64, String> {
+            Err("remote cancel timed out".into())
+        }
+
+        fn is_drained(&self) -> bool {
+            false
+        }
+
+        fn check_health(&self) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn played_frames(&self) -> u64 {
+            0
+        }
+    }
 
     impl TtsBackend for PollThenFramesTts {
         fn pcm_spec(&self) -> TtsPcmSpec {
@@ -505,6 +571,30 @@ mod tests {
             output.writes.lock().unwrap().as_slice(),
             &[vec![0.1, 0.2, 0.3, 0.4], vec![0.5]]
         );
+    }
+
+    #[test]
+    fn write_failure_without_a_cancel_barrier_is_not_reusable() {
+        let active = AtomicBool::new(true);
+        let backend = FakeTts {
+            chunks: vec![vec![0.2]],
+            cancel_after_first: false,
+        };
+        let mut playback = OutboundPlayback::new(&UnquiescedOutput, &active, 10, 1).unwrap();
+        let failure = playback
+            .synthesize_segment(
+                &backend,
+                "failure",
+                &mut |_| Ok(()),
+                &mut || Ok(()),
+                &mut |_| Ok(()),
+            )
+            .unwrap_err();
+
+        assert!(!failure.output_quiescent);
+        assert!(failure
+            .message
+            .contains("did not reach a quiescent terminal"));
     }
 
     #[test]

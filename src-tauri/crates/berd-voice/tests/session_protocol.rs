@@ -1,6 +1,10 @@
-use std::io::{BufRead, BufReader, Write};
+use std::fs::File;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::os::fd::{AsRawFd, FromRawFd};
+use std::os::unix::net::UnixStream;
+use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -26,6 +30,135 @@ fn write_session_json(writer: &mut impl Write, value: &Value) {
     writer.write_all(&payload).unwrap();
 }
 
+fn session_command() -> (Command, File, UnixStream) {
+    let (pcm, host) = UnixStream::pair().unwrap();
+    let source_fd = unsafe { libc::fcntl(pcm.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 64) };
+    assert!(source_fd >= 64);
+    let inherited = unsafe { File::from_raw_fd(source_fd) };
+    let mut command = Command::new(env!("CARGO_BIN_EXE_berd-voice"));
+    command.args(["session", "--pcm-output-fd", "9"]);
+    unsafe {
+        command.pre_exec(move || {
+            if libc::dup2(source_fd, 9) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            if libc::fcntl(9, libc::F_SETFD, 0) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    (command, inherited, host)
+}
+
+fn spawn_audio_host(
+    mut reader: UnixStream,
+    stdin: Arc<Mutex<std::process::ChildStdin>>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        let mut current = None::<(u64, u64, u64)>;
+        loop {
+            let mut header = [0_u8; 8];
+            match reader.read_exact(&mut header) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => return,
+                Err(error) => panic!("audio pipe read failed: {error}"),
+            }
+            assert_eq!(&header[..2], b"BA");
+            assert_eq!(header[2], 2);
+            let length = u32::from_le_bytes(header[4..8].try_into().unwrap()) as usize;
+            let mut payload = vec![0_u8; length];
+            reader.read_exact(&mut payload).unwrap();
+            let message = match header[3] {
+                1 => {
+                    assert_eq!(payload.len(), 16);
+                    let speech_id = u64::from_le_bytes(payload[..8].try_into().unwrap());
+                    current = Some((speech_id, 0, 0));
+                    json!({"type":"audio_begin_accepted","speech_id":speech_id})
+                }
+                2 => {
+                    assert!(payload.len() >= 20);
+                    let speech_id = u64::from_le_bytes(payload[..8].try_into().unwrap());
+                    let sequence = u64::from_le_bytes(payload[8..16].try_into().unwrap());
+                    let frames = u64::try_from((payload.len() - 16) / 4).unwrap();
+                    let state = current.as_mut().expect("chunk follows begin");
+                    assert_eq!(state.0, speech_id);
+                    assert_eq!(sequence, state.1 + 1);
+                    state.1 = sequence;
+                    state.2 += frames;
+                    let mut writer = stdin.lock().unwrap();
+                    write_session_json(
+                        &mut *writer,
+                        &json!({"type":"audio_chunk_accepted","speech_id":speech_id,"sequence":sequence}),
+                    );
+                    write_session_json(
+                        &mut *writer,
+                        &json!({"type":"audio_played","speech_id":speech_id,"played_frames":state.2}),
+                    );
+                    writer.flush().unwrap();
+                    continue;
+                }
+                3 => {
+                    assert_eq!(payload.len(), 24);
+                    let speech_id = u64::from_le_bytes(payload[..8].try_into().unwrap());
+                    let sequence = u64::from_le_bytes(payload[8..16].try_into().unwrap());
+                    let frames = u64::from_le_bytes(payload[16..24].try_into().unwrap());
+                    assert_eq!(current, Some((speech_id, sequence, frames)));
+                    current = None;
+                    json!({"type":"audio_drained","speech_id":speech_id,"sequence":sequence,"played_frames":frames})
+                }
+                4 => {
+                    assert_eq!(payload.len(), 8);
+                    let speech_id = u64::from_le_bytes(payload.try_into().unwrap());
+                    let played_frames = current
+                        .take()
+                        .filter(|state| state.0 == speech_id)
+                        .map_or(0, |state| state.2);
+                    json!({"type":"audio_cancelled","speech_id":speech_id,"played_frames":played_frames})
+                }
+                kind => panic!("unknown audio record kind {kind}"),
+            };
+            let mut writer = stdin.lock().unwrap();
+            write_session_json(&mut *writer, &message);
+            writer.flush().unwrap();
+        }
+    })
+}
+
+#[test]
+fn session_rejects_a_read_only_pcm_descriptor_before_hello() {
+    let mut descriptors = [-1; 2];
+    assert_eq!(unsafe { libc::pipe(descriptors.as_mut_ptr()) }, 0);
+    let read = unsafe { File::from_raw_fd(descriptors[0]) };
+    let write_guard = unsafe { File::from_raw_fd(descriptors[1]) };
+    let source_fd = unsafe { libc::fcntl(read.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 64) };
+    assert!(source_fd >= 64);
+    let read_guard = unsafe { File::from_raw_fd(source_fd) };
+    let mut command = Command::new(env!("CARGO_BIN_EXE_berd-voice"));
+    command
+        .args(["session", "--pcm-output-fd", "9", "--tts-backend", "openai"])
+        .env("OPENAI_API_KEY", "test-key-not-used")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    unsafe {
+        command.pre_exec(move || {
+            if libc::dup2(source_fd, 9) < 0 || libc::fcntl(9, libc::F_SETFD, 0) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let child = command.spawn().unwrap();
+    drop(read_guard);
+    drop(write_guard);
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("PCM output file descriptor is not writable"));
+}
+
 #[test]
 fn framed_hello_reports_input_initialization_failure_before_ready() {
     let missing = std::env::temp_dir().join(format!(
@@ -33,9 +166,9 @@ fn framed_hello_reports_input_initialization_failure_before_ready() {
         std::process::id()
     ));
     assert!(!missing.exists(), "test path must remain absent");
-    let mut child = Command::new(env!("CARGO_BIN_EXE_berd-voice"))
+    let (mut command, _pcm, _host) = session_command();
+    let mut child = command
         .args([
-            "session",
             "--tts-backend",
             "openai",
             "--stt-backend",
@@ -50,21 +183,19 @@ fn framed_hello_reports_input_initialization_failure_before_ready() {
         .spawn()
         .unwrap();
     let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
     write_session_json(
         &mut stdin,
-        &json!({"type":"hello","id":1,"output_device":null,"input_during_tts":"allow_barge_in"}),
+        &json!({"type":"hello","id":1,"input_during_tts":"allow_barge_in"}),
     );
+    stdin.flush().unwrap();
+    let mut line = String::new();
+    stdout.read_line(&mut line).unwrap();
     drop(stdin);
-    let output = child.wait_with_output().unwrap();
-    assert!(output.status.success());
-    let messages: Vec<Value> = String::from_utf8(output.stdout)
-        .unwrap()
-        .lines()
-        .map(|line| serde_json::from_str(line).unwrap())
-        .collect();
-    assert_eq!(messages.len(), 1);
-    assert_eq!(messages[0]["type"], "fatal");
-    assert!(!messages[0]["message"].as_str().unwrap().is_empty());
+    assert!(child.wait().unwrap().success());
+    let message: Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(message["type"], "fatal");
+    assert!(!message["message"].as_str().unwrap().is_empty());
 }
 
 #[test]
@@ -72,9 +203,9 @@ fn framed_hello_reports_input_initialization_failure_before_ready() {
 fn siri_session_reaches_ready_without_openai_credentials() {
     let voice = std::env::var("BERD_SIRI_TEST_VOICE").unwrap();
     let language = std::env::var("BERD_SIRI_TEST_LANGUAGE").unwrap_or_else(|_| "en-US".into());
-    let mut child = Command::new(env!("CARGO_BIN_EXE_berd-voice"))
+    let (mut command, _pcm, _host) = session_command();
+    let mut child = command
         .args([
-            "session",
             "--tts-backend",
             "siri",
             "--voice",
@@ -97,7 +228,7 @@ fn siri_session_reaches_ready_without_openai_credentials() {
     };
     write_session_json(
         &mut stdin,
-        &json!({"type":"hello","id":1,"output_device":null,"input_during_tts":"allow_barge_in"}),
+        &json!({"type":"hello","id":1,"input_during_tts":"allow_barge_in"}),
     );
     stdin.flush().unwrap();
     let ready = receive();
@@ -181,9 +312,9 @@ fn siri_session_reaches_ready_without_openai_credentials() {
 fn pocket_session_reaches_ready_without_openai_credentials() {
     let model_dir = std::env::var("BERD_POCKET_TEST_MODEL_DIR").unwrap();
     let voice = std::env::var("BERD_POCKET_TEST_VOICE").unwrap_or_else(|_| "george".into());
-    let mut child = Command::new(env!("CARGO_BIN_EXE_berd-voice"))
+    let (mut command, _pcm, _host) = session_command();
+    let mut child = command
         .args([
-            "session",
             "--tts-backend",
             "pocket",
             "--model-dir",
@@ -200,7 +331,7 @@ fn pocket_session_reaches_ready_without_openai_credentials() {
     let mut stdin = child.stdin.take().unwrap();
     write_session_json(
         &mut stdin,
-        &json!({"type":"hello","id":1,"output_device":null,"input_during_tts":"allow_barge_in"}),
+        &json!({"type":"hello","id":1,"input_during_tts":"allow_barge_in"}),
     );
     write_session_json(&mut stdin, &json!({"type":"shutdown"}));
     drop(stdin);
@@ -227,9 +358,9 @@ fn pocket_session_reaches_ready_without_openai_credentials() {
 fn explicit_macos_stt_session_reaches_ready_without_audio() {
     let voice = std::env::var("BERD_SIRI_TEST_VOICE").unwrap();
     let language = std::env::var("BERD_SIRI_TEST_LANGUAGE").unwrap_or_else(|_| "en-US".into());
-    let mut child = Command::new(env!("CARGO_BIN_EXE_berd-voice"))
+    let (mut command, _pcm, _host) = session_command();
+    let mut child = command
         .args([
-            "session",
             "--tts-backend",
             "siri",
             "--voice",
@@ -248,7 +379,7 @@ fn explicit_macos_stt_session_reaches_ready_without_audio() {
     let mut stdin = child.stdin.take().unwrap();
     write_session_json(
         &mut stdin,
-        &json!({"type":"hello","id":1,"output_device":null,"input_during_tts":"allow_barge_in"}),
+        &json!({"type":"hello","id":1,"input_during_tts":"allow_barge_in"}),
     );
     write_session_json(&mut stdin, &json!({"type":"shutdown"}));
     drop(stdin);
@@ -269,14 +400,13 @@ fn explicit_macos_stt_session_reaches_ready_without_audio() {
 }
 
 #[test]
-#[ignore = "requires Siri voice, macOS SpeechTranscriber model, and virtual output"]
-fn siri_multichannel_output_supports_consecutive_turns_and_cancellation() {
+#[ignore = "requires Siri voice and current-locale macOS SpeechTranscriber model"]
+fn siri_remote_output_supports_consecutive_turns_and_cancellation() {
     let voice = std::env::var("BERD_SIRI_TEST_VOICE").unwrap();
     let language = std::env::var("BERD_SIRI_TEST_LANGUAGE").unwrap_or_else(|_| "en-US".into());
-    let output_device = std::env::var("BERD_SIRI_TEST_OUTPUT_DEVICE").unwrap();
-    let child = Command::new(env!("CARGO_BIN_EXE_berd-voice"))
+    let (mut command, pcm_guard, host) = session_command();
+    let child = command
         .args([
-            "session",
             "--tts-backend",
             "siri",
             "--voice",
@@ -292,9 +422,11 @@ fn siri_multichannel_output_supports_consecutive_turns_and_cancellation() {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
+    drop(pcm_guard);
     let mut child = ChildGuard(Some(child));
     let child_process = child.0.as_mut().unwrap();
-    let mut stdin = child_process.stdin.take().unwrap();
+    let stdin = Arc::new(Mutex::new(child_process.stdin.take().unwrap()));
+    let audio_host = spawn_audio_host(host, Arc::clone(&stdin));
     let stdout = child_process.stdout.take().unwrap();
     let (sender, receiver) = mpsc::channel();
     let reader = std::thread::spawn(move || {
@@ -304,7 +436,8 @@ fn siri_multichannel_output_supports_consecutive_turns_and_cancellation() {
             }
         }
     });
-    let send = |stdin: &mut std::process::ChildStdin, message: Value| {
+    let send = |message: Value| {
+        let mut stdin = stdin.lock().unwrap();
         write_session_json(&mut *stdin, &message);
         stdin.flush().unwrap();
     };
@@ -316,86 +449,67 @@ fn siri_multichannel_output_supports_consecutive_turns_and_cancellation() {
         serde_json::from_str(&line).unwrap()
     };
 
-    send(
-        &mut stdin,
-        json!({"type":"hello","id":1,"output_device":output_device,"input_during_tts":"allow_barge_in"}),
-    );
+    send(json!({"type":"hello","id":1,"input_during_tts":"allow_barge_in"}));
     assert_eq!(receive()["type"], "ready");
 
-    send(
-        &mut stdin,
-        json!({
-            "type":"prepare_speak",
-            "id":2,
-            "acknowledgement":null,
-            "text":"First completed turn."
-        }),
-    );
+    send(json!({
+        "type":"prepare_speak",
+        "id":2,
+        "acknowledgement":null,
+        "text":"First completed turn."
+    }));
     let first = receive();
     assert_eq!(first["type"], "admitted");
     let first_speech_id = first["speech_id"].as_u64().unwrap();
-    send(
-        &mut stdin,
-        json!({"type":"output_ready","id":2,"speech_id":first_speech_id}),
-    );
+    send(json!({"type":"output_ready","id":2,"speech_id":first_speech_id}));
     assert_eq!(receive()["type"], "output_ready_result");
     assert_eq!(receive()["type"], "speech_started");
-    assert_eq!(receive()["type"], "speech_completed");
-
-    send(
-        &mut stdin,
-        json!({
-            "type":"prepare_speak",
-            "id":3,
-            "acknowledgement":null,
-            "text":"This deliberately long Siri phrase keeps queued output active until playback completes and the session must promptly return to idle."
-        }),
+    let first_terminal = receive();
+    assert_eq!(
+        first_terminal["type"], "speech_completed",
+        "unexpected first terminal: {first_terminal}"
     );
+
+    send(json!({
+        "type":"prepare_speak",
+        "id":3,
+        "acknowledgement":null,
+        "text":"This deliberately long Siri phrase keeps queued output active until playback completes and the session must promptly return to idle."
+    }));
     let admitted = receive();
     assert_eq!(admitted["type"], "admitted");
     let speech_id = admitted["speech_id"].as_u64().unwrap();
-    send(
-        &mut stdin,
-        json!({"type":"output_ready","id":3,"speech_id":speech_id}),
-    );
+    send(json!({"type":"output_ready","id":3,"speech_id":speech_id}));
     assert_eq!(receive()["type"], "output_ready_result");
     assert_eq!(receive()["type"], "speech_started");
     assert_eq!(receive()["type"], "speech_completed");
 
-    send(
-        &mut stdin,
-        json!({
-            "type":"prepare_speak",
-            "id":4,
-            "acknowledgement":null,
-            "text":"This second deliberately long Siri phrase stays active until targeted cancellation interrupts playback and the session must promptly return to idle."
-        }),
-    );
+    send(json!({
+        "type":"prepare_speak",
+        "id":4,
+        "acknowledgement":null,
+        "text":"This second deliberately long Siri phrase stays active until targeted cancellation interrupts playback and the session must promptly return to idle."
+    }));
     let interruptible = receive();
     assert_eq!(interruptible["type"], "admitted");
     let speech_id = interruptible["speech_id"].as_u64().unwrap();
-    send(
-        &mut stdin,
-        json!({"type":"output_ready","id":4,"speech_id":speech_id}),
-    );
+    send(json!({"type":"output_ready","id":4,"speech_id":speech_id}));
     assert_eq!(receive()["type"], "output_ready_result");
     assert_eq!(receive()["type"], "speech_started");
-    send(&mut stdin, json!({"type":"cancel","id":4}));
+    send(json!({"type":"cancel","id":4}));
     assert_eq!(receive()["type"], "cancel_result");
     assert_eq!(receive()["type"], "speech_interrupted");
 
-    send(
-        &mut stdin,
-        json!({"type":"prepare_speak","id":5,"acknowledgement":null,"text":"next"}),
-    );
+    send(json!({"type":"prepare_speak","id":5,"acknowledgement":null,"text":"next"}));
     let next = receive();
     assert_eq!(next["type"], "admitted");
-    send(&mut stdin, json!({"type":"cancel","id":5}));
+    send(json!({"type":"cancel","id":5}));
     assert_eq!(receive()["type"], "cancel_result");
     assert_eq!(receive()["type"], "speech_interrupted");
-    send(&mut stdin, json!({"type":"shutdown"}));
+    send(json!({"type":"shutdown"}));
     drop(stdin);
     let mut child_process = child.0.take().unwrap();
     assert!(child_process.wait().unwrap().success());
     reader.join().unwrap();
+    audio_host.join().unwrap();
 }

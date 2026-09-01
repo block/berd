@@ -10,7 +10,6 @@ use crate::{
 pub enum SessionRequest {
     Hello {
         id: u64,
-        output_device: Option<String>,
         input_during_tts: InputDuringTtsPolicy,
     },
     SetPaused {
@@ -41,6 +40,36 @@ pub enum SessionRequest {
     OutputReady {
         id: u64,
         speech_id: u64,
+    },
+    AudioBeginAccepted {
+        speech_id: u64,
+    },
+    AudioBeginFailed {
+        speech_id: u64,
+        played_frames: u64,
+        message: String,
+    },
+    AudioChunkAccepted {
+        speech_id: u64,
+        sequence: u64,
+    },
+    AudioPlayed {
+        speech_id: u64,
+        played_frames: u64,
+    },
+    AudioDrained {
+        speech_id: u64,
+        sequence: u64,
+        played_frames: u64,
+    },
+    AudioFailed {
+        speech_id: u64,
+        played_frames: u64,
+        message: String,
+    },
+    AudioCancelled {
+        speech_id: u64,
+        played_frames: u64,
     },
     QueryState {
         id: u64,
@@ -308,6 +337,27 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&SessionMessage::RecognitionPending { active: false }).unwrap(),
             r#"{"type":"recognition_pending","active":false}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<SessionRequest>(
+                r#"{"type":"audio_chunk_accepted","speech_id":9,"sequence":3}"#
+            )
+            .unwrap(),
+            SessionRequest::AudioChunkAccepted {
+                speech_id: 9,
+                sequence: 3,
+            }
+        );
+        assert_eq!(
+            serde_json::from_str::<SessionRequest>(
+                r#"{"type":"audio_drained","speech_id":9,"sequence":3,"played_frames":7000}"#
+            )
+            .unwrap(),
+            SessionRequest::AudioDrained {
+                speech_id: 9,
+                sequence: 3,
+                played_frames: 7000,
+            }
         );
     }
 }

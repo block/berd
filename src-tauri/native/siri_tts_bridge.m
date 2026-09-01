@@ -1334,6 +1334,63 @@ static BOOL BerdEmitSiriPCMBuffer(
     return YES;
 }
 
+/// Owns the borrowed Rust callback boundary while a synchronous synthesis call
+/// is active. Callers serialize emit/close with the decoder lock, so a queued
+/// XPC callback can observe closure but can never retain a usable raw context
+/// after the blocking FFI call returns.
+@interface BerdSiriPCMCallbackGate : NSObject
+@property(nonatomic, assign) BerdSiriTTSPcmFrames pcmFrames;
+@property(nonatomic, assign) void *context;
+@property(nonatomic, assign) BOOL closed;
+- (instancetype)initWithFrames:(BerdSiriTTSPcmFrames)pcmFrames context:(void *)context;
+- (BOOL)emitBuffer:(AVAudioPCMBuffer *)buffer error:(NSError **)error;
+- (void)close;
+@end
+
+@implementation BerdSiriPCMCallbackGate
+- (instancetype)initWithFrames:(BerdSiriTTSPcmFrames)pcmFrames context:(void *)context {
+    self = [super init];
+    if (self) {
+        _pcmFrames = pcmFrames;
+        _context = context;
+    }
+    return self;
+}
+- (BOOL)emitBuffer:(AVAudioPCMBuffer *)buffer error:(NSError **)error {
+    if (self.closed) return YES;
+    return BerdEmitSiriPCMBuffer(buffer, self.pcmFrames, self.context, error);
+}
+- (void)close {
+    self.closed = YES;
+    self.pcmFrames = NULL;
+    self.context = NULL;
+}
+@end
+
+static bool BerdCountTestPCMFrames(
+    const float *samples,
+    uint32_t frameCount,
+    void *context
+) {
+    (void)samples;
+    (void)frameCount;
+    (*(uint32_t *)context) += 1;
+    return true;
+}
+
+bool berd_siri_tts_test_closed_pcm_gate_ignores_late_callback(void) {
+    @autoreleasepool {
+        uint32_t callbacks = 0;
+        BerdSiriPCMCallbackGate *gate = [[BerdSiriPCMCallbackGate alloc]
+            initWithFrames:BerdCountTestPCMFrames context:&callbacks];
+        [gate close];
+        NSError *error = nil;
+        BOOL accepted = [gate emitBuffer:nil error:&error];
+        return accepted && !error && callbacks == 0 && gate.pcmFrames == NULL &&
+            gate.context == NULL;
+    }
+}
+
 bool berd_siri_tts_synthesize_pcm(
     const char *textValue,
     const char *languageValue,
@@ -1355,6 +1412,8 @@ bool berd_siri_tts_synthesize_pcm(
         NSString *language = [NSString stringWithUTF8String:languageValue];
         NSString *voiceName = [NSString stringWithUTF8String:voiceNameValue];
         BerdSiriAudioDecoder *decoder = [BerdSiriAudioDecoder new];
+        BerdSiriPCMCallbackGate *pcmGate = [[BerdSiriPCMCallbackGate alloc]
+            initWithFrames:pcmFrames context:context];
         dispatch_semaphore_t completion = dispatch_semaphore_create(0);
         __block NSError *terminalError = nil;
         __block BerdSiriSynthesisSession *session = nil;
@@ -1362,14 +1421,13 @@ bool berd_siri_tts_synthesize_pcm(
             initWithAudioHandler:^(NSData *data, AudioStreamBasicDescription format,
                                    UInt32 packetCount, NSData *descriptions) {
                 @synchronized (decoder) {
-                    if (terminalError) return;
+                    if (pcmGate.closed || terminalError) return;
                     NSError *decodeError = nil;
                     AVAudioPCMBuffer *buffer = [decoder decodeData:data format:format
                         packetCount:packetCount packetDescriptions:descriptions
                         error:&decodeError];
                     if (decodeError ||
-                        (buffer && !BerdEmitSiriPCMBuffer(buffer, pcmFrames, context,
-                                                         &decodeError))) {
+                        (buffer && ![pcmGate emitBuffer:buffer error:&decodeError])) {
                         terminalError = decodeError;
                     }
                 }
@@ -1383,12 +1441,16 @@ bool berd_siri_tts_synthesize_pcm(
                     NSArray<AVAudioPCMBuffer *> *buffers = [decoder finishConversion:&flushError];
                     if (!buffers) terminalError = flushError;
                     for (AVAudioPCMBuffer *buffer in buffers ?: @[]) {
-                        if (!BerdEmitSiriPCMBuffer(buffer, pcmFrames, context, &flushError)) {
+                        if (![pcmGate emitBuffer:buffer error:&flushError]) {
                             terminalError = flushError;
                             break;
                         }
                     }
                 }
+                // The reply can race audio callbacks already queued by XPC. Close
+                // their path to the borrowed Rust context before waking the
+                // blocking caller; later callbacks may decode no further PCM.
+                [pcmGate close];
             }
             dispatch_semaphore_signal(completion);
         }];

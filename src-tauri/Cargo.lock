@@ -602,6 +602,7 @@ dependencies = [
  "earshot",
  "fs2",
  "futures-util",
+ "libc",
  "ort",
  "ort-sys",
  "rand 0.10.2",

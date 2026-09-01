@@ -783,7 +783,7 @@ fn run_openai_voice_stream(
             }
             Ok(OpenAiStreamCommand::Stop) | Err(mpsc::RecvTimeoutError::Disconnected) => {
                 active.store(false, Ordering::SeqCst);
-                playback.interrupt();
+                playback.interrupt().map_err(openai_playback_failure)?;
                 return Ok(StreamOutcome {
                     state: OpenAiStreamEventState::Interrupted,
                     delivery: Some(playback.snapshot()),
