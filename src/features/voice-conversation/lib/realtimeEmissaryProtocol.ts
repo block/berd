@@ -11,7 +11,7 @@ The master is the authoritative, durable agent for this conversation. The master
 
 When a Realtime transport starts for a non-empty Berd session, Berd may inject a compact historical transcript headed by a durable berd://session link. Treat those items as past context, never as new user turns. If the compact replay is insufficient, use handoff to ask the master to inspect the durable session rather than guessing or asking the user to repeat themselves.
 
-Use handoff only when the master must take responsibility for unresolved work or an authoritative answer that you cannot provide yourself. Every accepted handoff remains open until the master explicitly answers it through a say message or dismisses it. The master decides whether its reply is silent context for a future turn or information that must be spoken immediately. Follow explicit master speaking instructions accurately. Do not add filler, acknowledgements, offers to help, or repeated answers.
+Use handoff only when the master must take responsibility for unresolved work or an authoritative answer that you cannot provide yourself. Every accepted handoff remains open until the master explicitly answers it through a say message or dismisses it. A dismissal and its reason arrive as silent context: treat the handoff as closed, and do not speak merely to acknowledge the dismissal. The master decides whether its reply is silent context for a future turn or information that must be spoken immediately. Follow explicit master speaking instructions accurately. Do not add filler, acknowledgements, offers to help, or repeated answers.
 
 When the user asks for computer access, tool use, durable work, current session information, or facts you cannot verify directly, call handoff before giving any substantive spoken answer. While waiting, say only a short natural acknowledgement such as "Let me check that for you" or "I'll verify that." Do not say "I don't have access," do not speculate, and do not suggest that the user run a terminal command or perform the work manually unless the master specifically recommends it. Wait for the master's result before giving the final answer.
 
@@ -30,7 +30,7 @@ Berd automatically sends you every finalized user and emissary transcript turn. 
 
 While Realtime voice is active, Berd also delivers every ordinary typed user message directly to the emissary and interrupts any response currently being spoken. A typed message reaches you as an ordinary user turn; microphone transcripts are explicitly prefixed with "[Voice transcript]". Do not echo, paraphrase, or relay an ordinary typed user message through send_to_emissary unless you are adding genuinely new information the emissary needs.
 
-Your reasoning, ordinary assistant text, tool calls, and progress remain visible to the user in Berd's durable master transcript, but they are not visible to the emissary. On actionable turns, work normally in Berd: reason as needed, use the available tools, and provide normal visible progress and result text for the master transcript. Separately call send_to_emissary with mode context to silently update what the emissary knows for a future natural turn, or mode say when the emissary should speak your message to the user now. A say message may explicitly resolve one or more open handoff IDs; one combined say may resolve several handoffs. If an open handoff no longer needs a spoken answer because it is obsolete, superseded, or already handled, dismiss it explicitly with a reason. Context messages never resolve handoffs. Do not assume your ordinary output was relayed. Completing your turn does not notify or wake the emissary, but Berd will give you one private reminder turn if you leave a handoff unresolved. Each finalized transcript gives you an opportunity to act, not an obligation to react. When no work, correction, or useful emissary guidance is needed, your entire turn should be an empty, zero-token success: no prose, no tools, and no coordination message. Ordinary conversation and small talk belong to the emissary. Proactively send relevant facts, decisions, progress, constraints, and useful follow-up questions rather than waiting to be asked. Never call send_to_emissary merely to acknowledge, confirm, or echo routine transcript content; acknowledgement-only coordination must be a zero-token no-op.
+Your reasoning, ordinary assistant text, tool calls, and progress remain visible to the user in Berd's durable master transcript, but they are not visible to the emissary. On actionable turns, work normally in Berd: reason as needed, use the available tools, and provide normal visible progress and result text for the master transcript. Separately call send_to_emissary with mode context to silently update what the emissary knows for a future natural turn, or mode say when the emissary should speak your message to the user now. A say message may explicitly resolve one or more open handoff IDs; one combined say may resolve several handoffs. If an open handoff no longer needs a spoken answer because it is obsolete, superseded, or already handled, dismiss it explicitly with a reason. Berd delivers that reason to the emissary as silent context without waking it. Context messages never resolve handoffs. Do not assume your ordinary output was relayed. Completing your turn does not notify or wake the emissary, but Berd will give you one private reminder turn if you leave a handoff unresolved. Each finalized transcript gives you an opportunity to act, not an obligation to react. When no work, correction, or useful emissary guidance is needed, your entire turn should be an empty, zero-token success: no prose, no tools, and no coordination message. Ordinary conversation and small talk belong to the emissary. Proactively send relevant facts, decisions, progress, constraints, and useful follow-up questions rather than waiting to be asked. Never call send_to_emissary merely to acknowledge, confirm, or echo routine transcript content; acknowledgement-only coordination must be a zero-token no-op.
 
 Treat interrupted emissary transcripts as best-effort streamed text that may not exactly match the audio the user heard. Keep direct coordination concise. Every direct-message tool call must include the latest bridge cursor. If a send fails because the pipe is busy in the other direction, do not retry yet: wait for Berd to deliver the pending emissary message normally, then retry with the cursor included in that message.`;
 
@@ -578,14 +578,6 @@ export type HandoffToolResult = DirectMessageExchange & {
   handoff_id?: string;
 };
 
-export type DirectMessageConsumeResult =
-  | {
-      accepted: true;
-      unreadPeerMessages: [];
-      cursor: number;
-    }
-  | Exclude<DirectMessageExchange, { accepted: true }>;
-
 /**
  * One authoritative half-duplex direct-message pipe. The active sender may
  * append any number of messages; only a send in the opposite direction is
@@ -652,44 +644,6 @@ export class DirectMessagePipe {
       outbound,
       cursor,
     };
-  }
-
-  consume(
-    peer: DirectMessagePeer,
-    suppliedCursorValue: number,
-  ): DirectMessageConsumeResult {
-    const suppliedCursor = requireCursor(suppliedCursorValue);
-    const activeMessage = this.pending[0];
-    if (activeMessage && activeMessage.sender !== peer) {
-      const latestPending = this.pending.at(-1);
-      if (!latestPending)
-        throw new Error("direct-message pending batch cannot be empty");
-      if (suppliedCursor !== latestPending.id) {
-        return {
-          accepted: false,
-          reason: "pipe_busy",
-          unreadPeerMessages: [],
-          cursor: this.consumedCursor[peer],
-        };
-      }
-      this.consumedCursor[peer] = latestPending.id;
-      this.pending = [];
-      return {
-        accepted: true,
-        unreadPeerMessages: [],
-        cursor: latestPending.id,
-      };
-    }
-
-    const cursor = this.consumedCursor[peer];
-    return suppliedCursor === cursor
-      ? { accepted: true, unreadPeerMessages: [], cursor }
-      : {
-          accepted: false,
-          reason: "stale_cursor",
-          unreadPeerMessages: [],
-          cursor,
-        };
   }
 
   cursor(peer: DirectMessagePeer): number {

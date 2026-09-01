@@ -756,15 +756,27 @@ class OpenAiRealtimeConversationRuntime {
         if (!reason.trim()) {
           throw new Error("handoff dismissal reason cannot be empty");
         }
-        const consumption = pipe.consume("master", cursor);
-        if (!consumption.accepted) return consumption;
+        const dismissalContext = `Handoffs ${dismissedHandoffIds.join(", ")} were dismissed without a spoken response. Reason: ${reason.trim()}`;
+        const exchange = pipe.send({
+          sender: "master",
+          cursor,
+          message: dismissalContext,
+        });
+        if (!exchange.accepted) return exchange;
         for (const handoffId of dismissedHandoffIds) {
           this.openHandoffs.delete(handoffId);
         }
+        const request = responses.requestMasterMessage({
+          message: `[bridge cursor ${exchange.outbound.id}] [Handoff dismissal] ${dismissalContext} This is silent context; do not speak merely to acknowledge it.`,
+          mode: "context",
+          eventId: `berd-master-dismissal-${exchange.outbound.id}`,
+        });
+        sendRealtimeEvents(transport, request.events);
         return {
           accepted: true,
-          cursor: consumption.cursor,
+          cursor: exchange.cursor,
           dismissedHandoffIds,
+          deliveryStatus: request.status,
         };
       };
       this.bridgeMasterTurnCompletion = ({ reminderHandoffIds }) => {

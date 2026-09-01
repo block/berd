@@ -1100,41 +1100,6 @@ describe("DirectMessagePipe", () => {
     expect(pipe.cursor("emissary")).toBe(2);
   });
 
-  it("consumes a complete pending batch without sending a reply", () => {
-    const pipe = new DirectMessagePipe();
-    pipe.send({ sender: "emissary", cursor: 0, message: "One." });
-    pipe.send({ sender: "emissary", cursor: 0, message: "Two." });
-
-    expect(pipe.consume("master", 1)).toEqual({
-      accepted: false,
-      reason: "pipe_busy",
-      unreadPeerMessages: [],
-      cursor: 0,
-    });
-    expect(pipe.consume("master", 2)).toEqual({
-      accepted: true,
-      unreadPeerMessages: [],
-      cursor: 2,
-    });
-    expect(pipe.cursor("master")).toBe(2);
-  });
-
-  it("requires the current consumed cursor when there is no pending batch", () => {
-    const pipe = new DirectMessagePipe();
-
-    expect(pipe.consume("master", 1)).toEqual({
-      accepted: false,
-      reason: "stale_cursor",
-      unreadPeerMessages: [],
-      cursor: 0,
-    });
-    expect(pipe.consume("master", 0)).toEqual({
-      accepted: true,
-      unreadPeerMessages: [],
-      cursor: 0,
-    });
-  });
-
   it("rejects a stale send without consuming the pending direction", () => {
     const pipe = new DirectMessagePipe();
     const master = pipe.send({

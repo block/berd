@@ -58,7 +58,7 @@
         "dismiss-handoffs": {
           "action": "dismiss_handoffs",
           "about": "Dismiss open voice handoffs without speaking",
-          "afterHelp": "Example:\n  berdctl session dismiss-handoffs --session-id <session-id> --cursor 2     --handoff-id handoff-1 --handoff-id handoff-2     --reason \"The user's follow-up superseded both requests.\" --json\n\nResult:\n  {\"session_id\":\"...\",\"cursor\":2,\"dismissed_handoff_ids\":[\"handoff-1\",\"handoff-2\"]}\n\nEvery id must still be open. A dismissal consumes pending emissary handoffs only\nwhen --cursor proves the Master received the complete pending batch. Use\nsend-to-emissary --mode say instead when the user still needs an answer."
+          "afterHelp": "Example:\n  berdctl session dismiss-handoffs --session-id <session-id> --cursor 2     --handoff-id handoff-1 --handoff-id handoff-2     --reason \"The user's follow-up superseded both requests.\" --json\n\nResult:\n  {\"session_id\":\"...\",\"cursor\":2,\"dismissed_handoff_ids\":[\"handoff-1\",\"handoff-2\"],\"context_delivery_status\":\"sent\"|\"interrupting\"|\"queued\"}\n\nEvery id must still be open. A dismissal consumes pending emissary handoffs only\nwhen --cursor proves the Master received the complete pending batch, then\natomically sends the dismissal reason back as silent context. Use send-to-emissary\n--mode say instead when the user still needs an answer."
         },
         "fork": {
           "action": "fork",

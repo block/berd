@@ -91,12 +91,13 @@ describe("Realtime handoff commands", () => {
     });
   });
 
-  it("dismisses multiple handoffs without sending to the emissary", async () => {
+  it("dismisses multiple handoffs with silent context delivery status", async () => {
     const sendMasterMessage = vi.fn();
     const dismissHandoffs = vi.fn().mockResolvedValue({
       accepted: true,
       cursor: 2,
       dismissedHandoffIds: ["handoff-1", "handoff-2"],
+      deliveryStatus: "sent",
     });
     releaseBridge = registerRealtimeEmissary({
       sessionId: "session-1",
@@ -117,6 +118,7 @@ describe("Realtime handoff commands", () => {
       session_id: "session-1",
       cursor: 2,
       dismissed_handoff_ids: ["handoff-1", "handoff-2"],
+      context_delivery_status: "sent",
     });
     expect(dismissHandoffs).toHaveBeenCalledWith(
       2,

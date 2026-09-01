@@ -32,6 +32,7 @@ interface DismissHandoffsSessionResult {
   session_id: string;
   cursor: number;
   dismissed_handoff_ids: string[];
+  context_delivery_status: "sent" | "interrupting" | "queued";
 }
 
 export const dismissHandoffsSessionCommand = defineCommand({
@@ -40,21 +41,22 @@ export const dismissHandoffsSessionCommand = defineCommand({
   destructive: false,
   summary: "Dismiss open voice handoffs without speaking",
   description:
-    "Explicitly close one or more open Realtime emissary handoffs without " +
-    "waking the emissary. Use this only when a spoken response is obsolete, " +
-    "superseded, or already handled. The command and its reason remain visible " +
-    "in the Master's normal Berd activity.",
+    "Explicitly close one or more open Realtime emissary handoffs and deliver " +
+    "the reason as silent context without waking the emissary. Use this only " +
+    "when a spoken response is obsolete, superseded, or already handled. The " +
+    "command and its reason remain visible in the Master's normal Berd activity.",
   helpFooter: `Example:
   berdctl session dismiss-handoffs --session-id <session-id> --cursor 2 \
     --handoff-id handoff-1 --handoff-id handoff-2 \
     --reason "The user's follow-up superseded both requests." --json
 
 Result:
-  {"session_id":"...","cursor":2,"dismissed_handoff_ids":["handoff-1","handoff-2"]}
+  {"session_id":"...","cursor":2,"dismissed_handoff_ids":["handoff-1","handoff-2"],"context_delivery_status":"sent"|"interrupting"|"queued"}
 
 Every id must still be open. A dismissal consumes pending emissary handoffs only
-when --cursor proves the Master received the complete pending batch. Use
-send-to-emissary --mode say instead when the user still needs an answer.`,
+when --cursor proves the Master received the complete pending batch, then
+atomically sends the dismissal reason back as silent context. Use send-to-emissary
+--mode say instead when the user still needs an answer.`,
   schema: dismissHandoffsSessionSchema,
   execute: async (args): Promise<DismissHandoffsSessionResult> => {
     const { getActiveRealtimeEmissary } = await import(
@@ -91,6 +93,7 @@ send-to-emissary --mode say instead when the user still needs an answer.`,
       session_id: args.session_id,
       cursor: dismissal.cursor,
       dismissed_handoff_ids: dismissal.dismissedHandoffIds,
+      context_delivery_status: dismissal.deliveryStatus,
     };
   },
 });

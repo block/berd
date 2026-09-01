@@ -101,9 +101,6 @@ vi.mock("../lib/realtimeEmissaryProtocol", () => ({
     cursor() {
       return 0;
     }
-    consume() {
-      return { accepted: true, cursor: 0, unreadPeerMessages: [] };
-    }
     send(options: { sender: "master" | "emissary"; message: string }) {
       const id = this.nextId++;
       return {
@@ -1579,7 +1576,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     await act(async () => owner.result.current.onToggle());
   });
 
-  it("dismisses several handoffs without waking the emissary", async () => {
+  it("delivers several dismissed handoffs as silent emissary context", async () => {
     const onSend = vi.fn().mockResolvedValue(true);
     const owner = renderConversation("session-a", onSend);
     await act(async () => owner.result.current.onToggle());
@@ -1610,8 +1607,15 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       accepted: true,
       cursor: 0,
       dismissedHandoffIds: ["handoff-1", "handoff-2"],
+      deliveryStatus: "sent",
     });
-    expect(mocks.requestMasterMessage).not.toHaveBeenCalled();
+    expect(mocks.requestMasterMessage).toHaveBeenCalledWith({
+      eventId: "berd-master-dismissal-3",
+      message: expect.stringMatching(
+        /\[bridge cursor 3\].*handoff-1, handoff-2.*The user withdrew both requests.*silent context/is,
+      ),
+      mode: "context",
+    });
 
     act(() =>
       mocks.activeEmissary?.completeMasterTurn({ reminderHandoffIds: [] }),

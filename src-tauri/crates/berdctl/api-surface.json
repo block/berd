@@ -511,7 +511,7 @@
           }
         },
         "dismiss_handoffs": {
-          "description": "Explicitly close one or more open Realtime emissary handoffs without waking the emissary. Use this only when a spoken response is obsolete, superseded, or already handled. The command and its reason remain visible in the Master's normal Berd activity.",
+          "description": "Explicitly close one or more open Realtime emissary handoffs and deliver the reason as silent context without waking the emissary. Use this only when a spoken response is obsolete, superseded, or already handled. The command and its reason remain visible in the Master's normal Berd activity.",
           "fields": [
             {
               "name": "session_id",

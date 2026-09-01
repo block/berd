@@ -1,6 +1,5 @@
 import type {
   DirectBridgeMessage,
-  DirectMessageConsumeResult,
   DirectMessageExchange,
   MasterMessageMode,
 } from "./realtimeEmissaryProtocol";
@@ -28,8 +27,9 @@ export type HandoffDismissal =
       accepted: true;
       cursor: number;
       dismissedHandoffIds: string[];
+      deliveryStatus: "sent" | "interrupting" | "queued";
     }
-  | Exclude<DirectMessageConsumeResult, { accepted: true }>
+  | Exclude<DirectMessageExchange, { accepted: true }>
   | HandoffDispositionFailure;
 
 export interface RealtimeMasterTurnCompletion {
