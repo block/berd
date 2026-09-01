@@ -8,6 +8,7 @@ mod audio_output;
 pub mod benchmark;
 mod configured_tts;
 pub mod input;
+pub mod local_assets;
 #[cfg(target_os = "macos")]
 pub mod mac_speech;
 #[cfg(target_os = "macos")]

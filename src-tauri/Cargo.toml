@@ -33,7 +33,6 @@ anyhow = "1"
 base64 = "0.22"
 builderbot-auth = { path = "../crates/builderbot-auth", features = ["blocking-client"] }
 bytes = "1"
-bzip2 = "0.6"
 berd-voice = { path = "crates/berd-voice", features = ["static"] }
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "6.0.0"

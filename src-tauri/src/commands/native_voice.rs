@@ -15,7 +15,9 @@ use tokio::sync::Notify;
 
 use super::mac_speech;
 use super::{
-    native_input_mute, pocket_voice::parakeet_model_dir, voice_capture::VoiceCaptureState,
+    native_input_mute,
+    pocket_voice::{parakeet_model_dir, parakeet_model_for_loading},
+    voice_capture::VoiceCaptureState,
 };
 
 pub(crate) const EVENT_NAME: &str = "voice-conversation:event";
@@ -1362,9 +1364,14 @@ pub async fn start_native_voice_conversation(
         renderer_epoch,
         owner_id.clone(),
     )?;
+    let mut parakeet_assets = None;
     let engine = match input_backend {
-        VoiceInputBackend::Parakeet => parakeet_model_dir(&app)
-            .map(|model_dir| berd_voice::input::VoiceInputEngineConfig::Parakeet { model_dir }),
+        VoiceInputBackend::Parakeet => {
+            parakeet_model_for_loading(&app).map(|(model_dir, assets)| {
+                parakeet_assets = Some(assets);
+                berd_voice::input::VoiceInputEngineConfig::Parakeet { model_dir }
+            })
+        }
         VoiceInputBackend::Macos => {
             #[cfg(target_os = "macos")]
             {
@@ -1406,6 +1413,7 @@ pub async fn start_native_voice_conversation(
             speech_vad_threshold: VAD_THRESHOLD,
             controls: state.input_controls.clone(),
         });
+    drop(parakeet_assets);
     let (pipeline, mut events) = match pipeline {
         Ok(result) => result,
         Err(error) => {

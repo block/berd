@@ -1,6 +1,10 @@
 //! Pinned, portable Pocket TTS model and voice assets.
 
 use crate::asset_verification::{inspect_assets, AssetInspection, PinnedAsset};
+use crate::local_assets::{
+    self, CombinedPublication, DownloadSpec, LocalAssetRoots, LocalInstallError,
+    LocalInstallErrorKind, LocalInstallPhase, LocalInstallProgress, TemporaryDirectory,
+};
 use std::path::Path;
 
 /// Stable public identity of Berd's pinned Pocket TTS model.
@@ -9,7 +13,7 @@ pub const MODEL_LICENSE_ID: &str = "CC-BY-4.0";
 pub const VOICE_LICENSE_ID: &str = "CC-BY-4.0";
 
 /// One immutable Pocket model file.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PocketModelAsset {
     pub relative_path: &'static str,
     pub size_bytes: u64,
@@ -34,6 +38,17 @@ pub enum PocketAssetStatus {
     Missing,
     Invalid,
     Ready { verified_bytes: u64 },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PocketInstallOutcome {
+    AlreadyReady {
+        verified_bytes: u64,
+    },
+    Installed {
+        verified_bytes: u64,
+        cleanup_pending: Option<std::path::PathBuf>,
+    },
 }
 
 const MODEL_ARTIFACTS: &[PocketModelAsset] = &[
@@ -100,12 +115,239 @@ pub fn inspect(root: &Path) -> Result<PocketAssetStatus, String> {
     })
 }
 
+pub async fn install(
+    roots: &LocalAssetRoots,
+    on_progress: impl FnMut(LocalInstallProgress),
+) -> Result<PocketInstallOutcome, LocalInstallError> {
+    let client = local_assets::default_client()?;
+    install_with_client(roots, &client, &pocket_download_specs(), None, on_progress).await
+}
+
+async fn install_with_client(
+    roots: &LocalAssetRoots,
+    client: &reqwest::Client,
+    specs: &[DownloadSpec<'static>],
+    preparation_barrier: Option<&tokio::sync::Barrier>,
+    mut on_progress: impl FnMut(LocalInstallProgress),
+) -> Result<PocketInstallOutcome, LocalInstallError> {
+    let total_download_bytes = specs.iter().try_fold(0_u64, |total, spec| {
+        total.checked_add(spec.size_bytes).ok_or_else(|| {
+            LocalInstallError::new(
+                LocalInstallErrorKind::Integrity,
+                "Pocket download byte total overflow",
+            )
+        })
+    })?;
+    {
+        let lock = local_assets::lock_for_mutation(roots)
+            .await
+            .map_err(LocalInstallError::from)?;
+        lock.recover_interrupted_publication()?;
+        if let crate::asset_verification::AssetInspection::Ready { verified_bytes } =
+            local_assets::inspect_download_specs(roots.pocket_bundle_root(), specs).map_err(
+                |message| LocalInstallError {
+                    kind: LocalInstallErrorKind::Integrity,
+                    message,
+                    recovery_paths: Vec::new(),
+                },
+            )?
+        {
+            return Ok(PocketInstallOutcome::AlreadyReady { verified_bytes });
+        }
+    }
+    if let Some(barrier) = preparation_barrier {
+        barrier.wait().await;
+    }
+
+    let prepared = TemporaryDirectory::create(roots.coordination_root(), "pocket-download")?;
+    let mut downloaded_bytes = 0_u64;
+    on_progress(LocalInstallProgress {
+        phase: LocalInstallPhase::Downloading,
+        downloaded_bytes,
+        total_download_bytes,
+    });
+    for spec in specs.iter().copied() {
+        local_assets::download(client, prepared.path(), spec, |increment| {
+            downloaded_bytes = downloaded_bytes.saturating_add(increment);
+            on_progress(LocalInstallProgress {
+                phase: LocalInstallPhase::Downloading,
+                downloaded_bytes,
+                total_download_bytes,
+            });
+        })
+        .await?;
+    }
+    on_progress(LocalInstallProgress {
+        phase: LocalInstallPhase::Verifying,
+        downloaded_bytes,
+        total_download_bytes,
+    });
+    if !matches!(
+        local_assets::inspect_download_specs(prepared.path(), specs),
+        Ok(crate::asset_verification::AssetInspection::Ready { .. })
+    ) {
+        return Err(LocalInstallError {
+            kind: LocalInstallErrorKind::Integrity,
+            message: "downloaded Pocket bundle failed pinned-file verification".to_string(),
+            recovery_paths: Vec::new(),
+        });
+    }
+
+    on_progress(LocalInstallProgress {
+        phase: LocalInstallPhase::Publishing,
+        downloaded_bytes,
+        total_download_bytes,
+    });
+    let lock = local_assets::lock_for_mutation(roots)
+        .await
+        .map_err(LocalInstallError::from)?;
+    lock.recover_interrupted_publication()?;
+    if let crate::asset_verification::AssetInspection::Ready { verified_bytes } =
+        local_assets::inspect_download_specs(roots.pocket_bundle_root(), specs).map_err(
+            |message| LocalInstallError {
+                kind: LocalInstallErrorKind::Integrity,
+                message,
+                recovery_paths: Vec::new(),
+            },
+        )?
+    {
+        drop(lock);
+        report_complete(&mut on_progress, downloaded_bytes, total_download_bytes);
+        return Ok(PocketInstallOutcome::AlreadyReady { verified_bytes });
+    }
+    let preserve_parakeet = matches!(
+        crate::parakeet_assets::inspect(roots.parakeet_bundle_root()),
+        Ok(crate::parakeet_assets::ParakeetAssetStatus::Ready { .. })
+    );
+    let publication = CombinedPublication::prepare(roots)?;
+    local_assets::copy_exact_files(
+        prepared.path(),
+        publication.root(),
+        specs
+            .iter()
+            .map(|spec| (spec.relative_path, spec.size_bytes, spec.sha256)),
+    )?;
+    if preserve_parakeet {
+        local_assets::copy_exact_files(
+            roots.parakeet_bundle_root(),
+            &publication.root().join("stt"),
+            crate::parakeet_assets::exact_files(),
+        )?;
+    }
+    let target_ready = |root: &Path| {
+        matches!(
+            local_assets::inspect_download_specs(root, specs),
+            Ok(crate::asset_verification::AssetInspection::Ready { .. })
+        )
+    };
+    let combined_ready = |root: &Path| {
+        target_ready(root)
+            && (!preserve_parakeet
+                || matches!(
+                    crate::parakeet_assets::inspect(&root.join("stt")),
+                    Ok(crate::parakeet_assets::ParakeetAssetStatus::Ready { .. })
+                ))
+    };
+    if !combined_ready(publication.root()) {
+        return Err(LocalInstallError {
+            kind: LocalInstallErrorKind::Integrity,
+            message: "staged Pocket bundle failed pinned-file verification".to_string(),
+            recovery_paths: Vec::new(),
+        });
+    }
+    let cleanup_pending = publication.publish(combined_ready)?;
+    let verified_bytes =
+        match local_assets::inspect_download_specs(roots.pocket_bundle_root(), specs) {
+            Ok(crate::asset_verification::AssetInspection::Ready { verified_bytes }) => {
+                verified_bytes
+            }
+            _ => {
+                return Err(LocalInstallError {
+                    kind: LocalInstallErrorKind::Integrity,
+                    message: "published Pocket bundle was not ready".to_string(),
+                    recovery_paths: Vec::new(),
+                })
+            }
+        };
+    drop(lock);
+    report_complete(&mut on_progress, downloaded_bytes, total_download_bytes);
+    Ok(PocketInstallOutcome::Installed {
+        verified_bytes,
+        cleanup_pending,
+    })
+}
+
+fn report_complete(
+    on_progress: &mut impl FnMut(LocalInstallProgress),
+    downloaded_bytes: u64,
+    total_download_bytes: u64,
+) {
+    on_progress(LocalInstallProgress {
+        phase: LocalInstallPhase::Complete,
+        downloaded_bytes,
+        total_download_bytes,
+    });
+}
+
+fn pocket_download_specs() -> Vec<DownloadSpec<'static>> {
+    MODEL_ARTIFACTS
+        .iter()
+        .map(|asset| DownloadSpec {
+            source_url: asset.source_url,
+            relative_path: asset.relative_path,
+            size_bytes: asset.size_bytes,
+            sha256: asset.sha256,
+        })
+        .chain(VOICES.iter().map(|voice| DownloadSpec {
+            source_url: voice.source_url,
+            relative_path: voice.relative_path,
+            size_bytes: voice.size_bytes,
+            sha256: voice.sha256,
+        }))
+        .collect()
+}
+
+pub(crate) fn exact_files() -> Vec<(&'static str, u64, &'static str)> {
+    pocket_exact_files()
+}
+
+/// Copy one verified Pocket bundle into a host-owned transaction staging root.
+pub fn stage_verified_bundle(
+    mutation: &crate::local_assets::LocalAssetMutationGuard,
+    source: &Path,
+    destination: &Path,
+) -> Result<(), LocalInstallError> {
+    mutation.validate_staging_paths(source, mutation.roots().pocket_bundle_root(), destination)?;
+    local_assets::copy_exact_files(source, destination, pocket_exact_files())?;
+    if !matches!(inspect(destination), Ok(PocketAssetStatus::Ready { .. })) {
+        return Err(LocalInstallError::new(
+            LocalInstallErrorKind::Integrity,
+            "staged Pocket bundle failed pinned-file verification",
+        ));
+    }
+    Ok(())
+}
+
+fn pocket_exact_files() -> Vec<(&'static str, u64, &'static str)> {
+    MODEL_ARTIFACTS
+        .iter()
+        .map(|asset| (asset.relative_path, asset.size_bytes, asset.sha256))
+        .chain(
+            VOICES
+                .iter()
+                .map(|voice| (voice.relative_path, voice.size_bytes, voice.sha256)),
+        )
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         download_bytes, model_artifacts, voices, MODEL_ID, MODEL_LICENSE_ID, VOICE_LICENSE_ID,
     };
     use std::collections::HashSet;
+    use std::sync::{Arc, Mutex};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[test]
     fn pinned_catalog_has_stable_identity_and_safe_unique_paths() {
@@ -150,5 +392,158 @@ mod tests {
             license.sha256,
             "fe7b4ce83b8381cc5b216bbb4af73c570688d1b819c73bbaed8ca401f4677cd6"
         );
+    }
+
+    #[test]
+    fn late_ready_race_reports_terminal_complete_progress() {
+        let mut progress = Vec::new();
+        super::report_complete(
+            &mut |event| progress.push(event),
+            super::download_bytes(),
+            super::download_bytes(),
+        );
+        assert_eq!(progress.len(), 1);
+        assert_eq!(progress[0].phase, super::LocalInstallPhase::Complete);
+        assert_eq!(progress[0].downloaded_bytes, super::download_bytes());
+    }
+
+    #[tokio::test]
+    async fn concrete_installs_serialize_and_late_racer_completes_without_redownload_loss() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind fixture server");
+        let address = listener.local_addr().expect("fixture address");
+        let server = tokio::spawn(async move {
+            for _ in 0..2 {
+                let (mut socket, _) = listener.accept().await.expect("accept request");
+                let mut request = [0_u8; 1024];
+                let bytes_read = socket.read(&mut request).await.expect("read request");
+                assert!(bytes_read > 0, "fixture request was empty");
+                socket
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nkeep")
+                    .await
+                    .expect("write fixture response");
+            }
+        });
+        let root = tempfile::tempdir().expect("temporary directory");
+        let roots = super::LocalAssetRoots::new(
+            root.path(),
+            root.path().join("native-voice-v2"),
+            root.path().join("native-voice-v2/stt"),
+        )
+        .expect("asset roots");
+        let specs = [super::DownloadSpec {
+            source_url: Box::leak(format!("http://{address}/asset").into_boxed_str()),
+            relative_path: "asset",
+            size_bytes: 4,
+            sha256: "6ca7ea2feefc88ecb5ed6356ed963f47dc9137f82526fdd25d618ea626d0803f",
+        }];
+        let client = reqwest::Client::new();
+        let first_progress = Arc::new(Mutex::new(Vec::new()));
+        let second_progress = Arc::new(Mutex::new(Vec::new()));
+        let first_events = Arc::clone(&first_progress);
+        let second_events = Arc::clone(&second_progress);
+        let barrier = tokio::sync::Barrier::new(2);
+        let (first, second) = tokio::join!(
+            super::install_with_client(&roots, &client, &specs, Some(&barrier), move |event| {
+                first_events.lock().expect("first progress").push(event);
+            }),
+            super::install_with_client(&roots, &client, &specs, Some(&barrier), move |event| {
+                second_events.lock().expect("second progress").push(event);
+            }),
+        );
+        let outcomes = [
+            first.expect("first install"),
+            second.expect("second install"),
+        ];
+        assert!(outcomes
+            .iter()
+            .any(|outcome| matches!(outcome, super::PocketInstallOutcome::Installed { .. })));
+        assert!(outcomes
+            .iter()
+            .any(|outcome| matches!(outcome, super::PocketInstallOutcome::AlreadyReady { .. })));
+        for events in [first_progress, second_progress] {
+            assert_eq!(
+                events
+                    .lock()
+                    .expect("progress")
+                    .last()
+                    .map(|event| event.phase),
+                Some(super::LocalInstallPhase::Complete)
+            );
+        }
+        server.await.expect("fixture server");
+    }
+
+    #[test]
+    fn staging_rejects_a_mutation_guard_from_another_store() {
+        let first = tempfile::tempdir().expect("first store");
+        let second = tempfile::tempdir().expect("second store");
+        let first_roots = super::LocalAssetRoots::new(
+            first.path(),
+            first.path().join("native-voice-v2"),
+            first.path().join("native-voice-v2/stt"),
+        )
+        .expect("first roots");
+        let second_roots = super::LocalAssetRoots::new(
+            second.path(),
+            second.path().join("native-voice-v2"),
+            second.path().join("native-voice-v2/stt"),
+        )
+        .expect("second roots");
+        let guard = crate::local_assets::try_lock_for_mutation(&first_roots).expect("first lock");
+        let error = super::stage_verified_bundle(
+            &guard,
+            second_roots.pocket_bundle_root(),
+            first.path().join("stage").as_path(),
+        )
+        .expect_err("cross-store guard");
+        assert_eq!(error.kind, super::LocalInstallErrorKind::InvalidRoot);
+
+        for destination in [
+            first.path().join("../outside"),
+            first.path().to_path_buf(),
+            first_roots.pocket_bundle_root().join("nested-stage"),
+        ] {
+            let error = super::stage_verified_bundle(
+                &guard,
+                first_roots.pocket_bundle_root(),
+                &destination,
+            )
+            .expect_err("unsafe staging destination");
+            assert_eq!(error.kind, super::LocalInstallErrorKind::InvalidRoot);
+        }
+    }
+
+    #[tokio::test]
+    async fn initial_ready_preflight_makes_no_request_and_reports_already_ready() {
+        let root = tempfile::tempdir().expect("temporary directory");
+        let roots = super::LocalAssetRoots::new(
+            root.path(),
+            root.path().join("native-voice-v2"),
+            root.path().join("native-voice-v2/stt"),
+        )
+        .expect("asset roots");
+        std::fs::create_dir_all(roots.pocket_bundle_root()).expect("create ready bundle");
+        std::fs::write(roots.pocket_bundle_root().join("asset"), b"keep")
+            .expect("write ready asset");
+        let specs = [super::DownloadSpec {
+            source_url: "http://127.0.0.1:1/must-not-be-called",
+            relative_path: "asset",
+            size_bytes: 4,
+            sha256: "6ca7ea2feefc88ecb5ed6356ed963f47dc9137f82526fdd25d618ea626d0803f",
+        }];
+        let mut progress = Vec::new();
+        let outcome =
+            super::install_with_client(&roots, &reqwest::Client::new(), &specs, None, |event| {
+                progress.push(event)
+            })
+            .await
+            .expect("already ready");
+        assert!(matches!(
+            outcome,
+            super::PocketInstallOutcome::AlreadyReady { .. }
+        ));
+        assert!(progress.is_empty());
     }
 }

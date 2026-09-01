@@ -32,6 +32,14 @@ pub(crate) fn inspect_assets(
     let mut verified_bytes = 0_u64;
     for asset in assets {
         let path = root.join(asset.relative_path);
+        match std::fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+                return Ok(AssetInspection::Invalid)
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == ErrorKind::NotFound => continue,
+            Err(_) => return Ok(AssetInspection::Invalid),
+        }
         let mut file = match File::open(&path) {
             Ok(file) => {
                 found = true;
@@ -196,6 +204,21 @@ mod tests {
         fs::write(directory.path().join("one"), b"one").expect("write first asset");
         assert_eq!(
             inspect_assets(directory.path(), &manifest).expect("inspect partial"),
+            AssetInspection::Invalid
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pinned_file_symlinks_are_invalid_even_when_the_target_matches() {
+        use std::os::unix::fs::symlink;
+
+        let directory = TestDirectory::new();
+        let manifest = [asset("model.bin", b"model")];
+        fs::write(directory.path().join("target.bin"), b"model").expect("write target");
+        symlink("target.bin", directory.path().join("model.bin")).expect("create symlink");
+        assert_eq!(
+            inspect_assets(directory.path(), &manifest).expect("inspect symlink"),
             AssetInspection::Invalid
         );
     }

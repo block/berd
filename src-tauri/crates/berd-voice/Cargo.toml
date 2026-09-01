@@ -16,8 +16,10 @@ shared = ["sherpa-onnx/shared"]
 [dependencies]
 audioadapter-buffers = "3.0"
 base64 = "0.22"
+bzip2 = "0.6"
 claxon = "0.4.3"
 earshot = "1.0"
+fs2 = "0.4"
 futures-util = "0.3"
 ort = { version = "=2.0.0-rc.12", default-features = false, features = ["api-24", "ndarray", "std"] }
 ort-sys = { version = "=2.0.0-rc.12", features = ["disable-linking"] }
@@ -29,6 +31,7 @@ sentencepiece-model = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+tar = "0.4"
 # Held below 1.13: sherpa-onnx-sys downloads prebuilt native libs into a
 # version-stamped dir under the target dir, and rust-cache strips the files out
 # of it when saving. The restored empty skeleton defeats the build script's
@@ -44,8 +47,9 @@ sha2 = "0.10"
 # `cargo update -p sherpa-onnx-sys --precise 1.12.40`.
 sherpa-onnx = { version = "~1.12.40", default-features = false }
 tokenizers = { version = "0.22", default-features = false, features = ["fancy-regex"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time"] }
+tokio = { version = "1", features = ["fs", "io-util", "rt-multi-thread", "macros", "net", "sync", "time"] }
 tokio-tungstenite = { version = "0.27", features = ["rustls-tls-webpki-roots"] }
+uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 coreaudio-rs = "0.14.2"
@@ -53,3 +57,6 @@ coreaudio-rs = "0.14.2"
 [target.'cfg(target_os = "macos")'.build-dependencies]
 cc = "1"
 swift-rs = { version = "1.0.7", features = ["build"] }
+
+[dev-dependencies]
+tempfile = "3"

@@ -12,7 +12,6 @@ dependencies = [
  "block2",
  "builderbot-auth",
  "bytes",
- "bzip2 0.6.1",
  "chrono",
  "coreaudio-rs",
  "dirs",
@@ -596,10 +595,12 @@ version = "0.1.0"
 dependencies = [
  "audioadapter-buffers",
  "base64 0.22.1",
+ "bzip2 0.6.1",
  "cc",
  "claxon",
  "coreaudio-rs",
  "earshot",
+ "fs2",
  "futures-util",
  "ort",
  "ort-sys",
@@ -613,9 +614,12 @@ dependencies = [
  "sha2",
  "sherpa-onnx",
  "swift-rs",
+ "tar",
+ "tempfile",
  "tokenizers",
  "tokio",
  "tokio-tungstenite",
+ "uuid",
 ]
 
 [[package]]

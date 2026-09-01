@@ -88,9 +88,24 @@ file, checks that it is a regular file with the pinned size, and streams its
 SHA-256 through a bounded buffer. Pocket exposes its model files and twelve
 voice descriptors; Parakeet has its own model identity and pins the runtime
 model, tokens, and exact attribution/license file. These modules do not choose
-a default voice, cache root, staging layout, publication marker, download
-policy, or UI representation. Berd remains responsible for those host concerns
-and consumes the shared descriptors and full-root inspection after publication.
+a default voice, cache root, removal policy, or UI representation. Their
+concrete installers accept an explicit closed Pocket/Parakeet root layout,
+download only pinned HTTPS assets with bounded streaming size and checksum
+verification, extract only exact Parakeet manifest entries, and publish a fully
+verified combined tree. A short cross-process transaction lock coordinates
+publication with model-loading readers and host-owned removal; interrupted
+publication is recovered from one unambiguous verified backup, while ambiguous
+or failed rollback state is returned with recovery paths. Downloads and archive
+preparation remain outside that lock. Progress describes concrete phases plus
+monotonic downloaded bytes; it does not invent extraction progress. Berd keeps
+root selection, Tauri queue/revisions/events, settings and fallback policy,
+live-stop policy, and removal UI.
+
+Once the new combined tree passes final verification it is authoritative. If
+deleting the retired backup then fails, installation still returns success with
+`cleanup_pending`; Berd logs the retained path and the next locked preflight
+retries cleanup. This avoids reporting a failed install after the model has
+already been applied.
 
 `voices.list` returns `backend`, normalized `languageFilter`,
 `availableLanguages`, and exact voice records. `voices.download` returns the
