@@ -151,7 +151,11 @@ export function recordModelSelection(
     currentMap[key] ?? Number.NEGATIVE_INFINITY,
   );
   entries.push([key, nextRank]);
-  const nextMap = sortAndPruneModelRecencyEntries(entries);
+  // Normalize the generated map so a near-ceiling stored rank cannot push the
+  // next rank past the safe-integer boundary and freeze monotonic ordering.
+  const nextMap = normalizeCeilingModelRecencyRanks(
+    sortAndPruneModelRecencyEntries(entries),
+  );
   if (JSON.stringify(nextMap) === cachedRaw) return;
 
   persistModelRecencyMap(nextMap);

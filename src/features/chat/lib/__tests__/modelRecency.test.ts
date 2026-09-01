@@ -141,6 +141,35 @@ describe("model recency", () => {
     expect(Object.values(map).every(Number.isSafeInteger)).toBe(true);
   });
 
+  it("keeps ranks safe and ordered when seeded just below the ceiling", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(100);
+    localStorage.setItem(
+      MODEL_RECENCY_STORAGE_KEY,
+      JSON.stringify({
+        "agent//older": 10,
+        "agent//newest": Number.MAX_SAFE_INTEGER - 1,
+      }),
+    );
+
+    recordModelSelection("agent", { id: "second" });
+    recordModelSelection("agent", { id: "third" });
+
+    const map = getModelRecencyMap();
+    const ranks = [
+      getModelRecencyRank(map, "agent", { id: "older" }),
+      getModelRecencyRank(map, "agent", { id: "newest" }),
+      getModelRecencyRank(map, "agent", { id: "second" }),
+      getModelRecencyRank(map, "agent", { id: "third" }),
+    ];
+    expect(ranks.every((rank) => rank !== null)).toBe(true);
+    expect(Object.values(map).every(Number.isSafeInteger)).toBe(true);
+    // The two newest selections keep their relative order.
+    const secondRank = getModelRecencyRank(map, "agent", { id: "second" });
+    const thirdRank = getModelRecencyRank(map, "agent", { id: "third" });
+    expect(thirdRank).toBeGreaterThan(Number(secondRank));
+  });
+
   it("does not reintroduce ceiling ranks from stale cross-window events", () => {
     vi.useFakeTimers();
     vi.setSystemTime(100);
