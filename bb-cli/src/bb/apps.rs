@@ -104,6 +104,12 @@ pub fn command() -> Command {
                         .value_name("APP_ID")
                         .required(true)
                         .help("App identifier returned by `bb apps list` or `bb apps create`"),
+                )
+                .arg(
+                    Arg::new("environment")
+                        .long("environment")
+                        .value_name("ENVIRONMENT")
+                        .help("Optional Compose environment override"),
                 ),
         ))
         .subcommand(control_plane_args(
@@ -114,6 +120,12 @@ pub fn command() -> Command {
                         .value_name("APP_ID")
                         .required(true)
                         .help("App identifier returned by `bb apps list` or `bb apps create`"),
+                )
+                .arg(
+                    Arg::new("environment")
+                        .long("environment")
+                        .value_name("ENVIRONMENT")
+                        .help("Optional Compose environment override"),
                 ),
         ))
         .subcommand(control_plane_args(
@@ -316,8 +328,9 @@ fn run_get(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     let app_id = matches
         .get_one::<String>("app-id")
         .context("expected app id")?;
+    let environment = matches.get_one::<String>("environment").map(String::as_str);
     let (client, credential) = control_plane_context(config, matches)?;
-    let response = client.get_app(&credential, app_id)?;
+    let response = client.get_app(&credential, app_id, environment)?;
     print_json(&response)
 }
 
@@ -325,8 +338,9 @@ fn run_versions(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     let app_id = matches
         .get_one::<String>("app-id")
         .context("expected app id")?;
+    let environment = matches.get_one::<String>("environment").map(String::as_str);
     let (client, credential) = control_plane_context(config, matches)?;
-    let response = client.versions(&credential, app_id)?;
+    let response = client.versions(&credential, app_id, environment)?;
     print_json(&response)
 }
 
@@ -705,13 +719,29 @@ impl ControlPlaneClient {
         self.get_url(credential, url)
     }
 
-    fn get_app(&self, credential: &ComposeSessionCredential, app_id: &str) -> Result<Value> {
-        let url = self.app_url(app_id)?;
+    fn get_app(
+        &self,
+        credential: &ComposeSessionCredential,
+        app_id: &str,
+        environment: Option<&str>,
+    ) -> Result<Value> {
+        let query = environment
+            .map(|environment| vec![("environment", environment.to_string())])
+            .unwrap_or_default();
+        let url = self.app_url(app_id, &query)?;
         self.get_url(credential, url)
     }
 
-    fn versions(&self, credential: &ComposeSessionCredential, app_id: &str) -> Result<Value> {
-        self.get_app_resource(credential, app_id, "versions", &[])
+    fn versions(
+        &self,
+        credential: &ComposeSessionCredential,
+        app_id: &str,
+        environment: Option<&str>,
+    ) -> Result<Value> {
+        let query = environment
+            .map(|environment| vec![("environment", environment.to_string())])
+            .unwrap_or_default();
+        self.get_app_resource(credential, app_id, "versions", &query)
     }
 
     fn initialize(
@@ -819,8 +849,8 @@ impl ControlPlaneClient {
         Ok(url)
     }
 
-    fn app_url(&self, app_id: &str) -> Result<url::Url> {
-        let mut url = self.apps_url(&[])?;
+    fn app_url(&self, app_id: &str, query: &[(&str, String)]) -> Result<url::Url> {
+        let mut url = self.apps_url(query)?;
         url.path_segments_mut()
             .map_err(|_| {
                 anyhow::anyhow!("Apps Platform control-plane URL cannot contain path segments")
@@ -835,18 +865,12 @@ impl ControlPlaneClient {
         resource: &str,
         query: &[(&str, String)],
     ) -> Result<url::Url> {
-        let mut url = self.app_url(app_id)?;
+        let mut url = self.app_url(app_id, query)?;
         url.path_segments_mut()
             .map_err(|_| {
                 anyhow::anyhow!("Apps Platform control-plane URL cannot contain path segments")
             })?
             .push(resource);
-        if !query.is_empty() {
-            let mut pairs = url.query_pairs_mut();
-            for (name, value) in query {
-                pairs.append_pair(name, value);
-            }
-        }
         Ok(url)
     }
 
@@ -1520,6 +1544,7 @@ mod tests {
             "ok": true,
             "app": {
                 "app_id": "merchant/lookup app",
+                "environment": "staging",
                 "role": "owner",
                 "ready": true,
                 "route_revision": 9
@@ -1539,6 +1564,8 @@ mod tests {
                 "apps",
                 "get",
                 "merchant/lookup app",
+                "--environment",
+                "staging",
                 "--base-url",
                 APPROVED_TEST_BASE_URL,
                 "--client-version",
@@ -1561,7 +1588,7 @@ mod tests {
         assert_process_control_plane(
             &requests[0],
             "GET",
-            "/v1/agent/apps/merchant%2Flookup%20app",
+            "/v1/agent/apps/merchant%2Flookup%20app?environment=staging",
             credential,
         );
     }
@@ -1572,7 +1599,7 @@ mod tests {
         let versions = json!({
             "ok": true,
             "app_id": "merchant-lookup",
-            "environment": "production",
+            "environment": "staging",
             "active_version_id": "ver-123",
             "count": 2,
             "versions": [
@@ -1589,6 +1616,8 @@ mod tests {
                 "apps",
                 "versions",
                 "merchant-lookup",
+                "--environment",
+                "staging",
                 "--base-url",
                 APPROVED_TEST_BASE_URL,
                 "--client-version",
@@ -1611,7 +1640,7 @@ mod tests {
         assert_process_control_plane(
             &requests[0],
             "GET",
-            "/v1/agent/apps/merchant-lookup/versions",
+            "/v1/agent/apps/merchant-lookup/versions?environment=staging",
             credential,
         );
     }
@@ -2390,6 +2419,50 @@ mod tests {
     }
 
     #[test]
+    fn get_and_versions_support_default_and_explicit_environments() {
+        let server = Server::http("127.0.0.1:0").expect("bind control-plane server");
+        let base_url = format!("http://{}", server.server_addr());
+        let expected_paths = [
+            "/v1/agent/apps/app",
+            "/v1/agent/apps/app?environment=staging%2Fwest%3Fcell%3D1",
+            "/v1/agent/apps/app/versions",
+            "/v1/agent/apps/app/versions?environment=staging%2Fwest%3Fcell%3D1",
+        ];
+        let server_thread = thread::spawn(move || {
+            for (index, expected_path) in expected_paths.into_iter().enumerate() {
+                let request = server.recv().expect("receive inspection request");
+                assert_eq!(request.method().as_str(), "GET");
+                assert_eq!(request.url(), expected_path);
+                request
+                    .respond(
+                        Response::from_string(format!(r#"{{"request":{index}}}"#)).with_header(
+                            Header::from_bytes("Content-Type", "application/json")
+                                .expect("build content type"),
+                        ),
+                    )
+                    .expect("respond to inspection request");
+            }
+        });
+        let client = test_control_plane_client(&base_url, Duration::from_secs(2));
+        let credential = test_credential("inspection_environment_session_credential_123456");
+
+        let responses = [
+            client.get_app(&credential, "app", None),
+            client.get_app(&credential, "app", Some("staging/west?cell=1")),
+            client.versions(&credential, "app", None),
+            client.versions(&credential, "app", Some("staging/west?cell=1")),
+        ];
+        for (index, response) in responses.into_iter().enumerate() {
+            assert_eq!(
+                response.expect("request inspection response")["request"],
+                index
+            );
+        }
+
+        server_thread.join().expect("join control-plane server");
+    }
+
+    #[test]
     fn debug_tail_lines_match_control_plane_bounds() {
         for invalid in ["0", "1001"] {
             let error = command()
@@ -2432,7 +2505,7 @@ mod tests {
         assert_eq!(url.path(), "/v1/agent/apps/app%2F..%2F..%2Fidentity/deploy");
 
         let app = client
-            .app_url("app/with space")
+            .app_url("app/with space", &[])
             .expect("build app detail URL");
         assert_eq!(app.path(), "/v1/agent/apps/app%2Fwith%20space");
 

@@ -3694,7 +3694,11 @@ fn bb_apps_inspection_help_exposes_filters_and_app_ids() {
             .unwrap_or_else(|error| panic!("run bb apps {subcommand} help: {error}"));
         let (stdout, stderr) = output_text(&output);
         assert!(output.status.success(), "stderr was: {stderr}");
-        for expected in ["<APP_ID>", "--base-url <URL>"] {
+        for expected in [
+            "<APP_ID>",
+            "--environment <ENVIRONMENT>",
+            "--base-url <URL>",
+        ] {
             assert!(
                 stdout.contains(expected),
                 "{subcommand} help omitted {expected:?}: {stdout}"
