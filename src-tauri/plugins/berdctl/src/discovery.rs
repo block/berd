@@ -79,9 +79,10 @@ mod windows_discovery_security {
         },
         Storage::FileSystem::{
             CreateFileW, FileAttributeTagInfo, GetFileInformationByHandleEx, MoveFileExW,
-            FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO,
-            FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ,
-            FILE_SHARE_WRITE, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, OPEN_EXISTING,
+            CREATE_NEW, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL,
+            FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS,
+            FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ, FILE_SHARE_WRITE,
+            MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, OPEN_EXISTING,
         },
         System::Threading::{GetCurrentProcess, OpenProcessToken},
     };
@@ -91,6 +92,7 @@ mod windows_discovery_security {
     const READ_CONTROL: u32 = 0x0002_0000;
     const WRITE_DAC: u32 = 0x0004_0000;
     const WRITE_OWNER: u32 = 0x0008_0000;
+    const GENERIC_WRITE: u32 = 0x4000_0000;
     const GENERIC_ALL: u32 = 0x1000_0000;
     const OBJECT_INHERIT_ACE: u32 = 0x01;
     const CONTAINER_INHERIT_ACE: u32 = 0x02;
@@ -292,14 +294,31 @@ mod windows_discovery_security {
         unsafe { apply_current_user_dacl(handle, 0) }
     }
 
-    pub(super) fn open_private_file(file: &std::fs::File) -> std::io::Result<()> {
-        use std::os::windows::io::AsRawHandle;
+    pub(super) fn create_private_file(path: &Path) -> std::io::Result<std::fs::File> {
+        use std::os::windows::io::{FromRawHandle, RawHandle};
 
-        let handle = file.as_raw_handle() as HANDLE;
-        // std::fs opens the newly-created temp path. It is safe to repair its
-        // ACL only while the verified directory handle is held by the caller.
-        // The file is private before any capability bytes are written.
-        private_file_handle(handle)
+        let wide_path = path_as_wide_null(path);
+        // CREATE_NEW preserves the caller's collision retry semantics and
+        // avoids opening an attacker-provided existing object. Request every
+        // right SetSecurityInfo needs explicitly: WRITE_DAC replaces the DACL
+        // and WRITE_OWNER sets the owner. OPEN_REPARSE_POINT prevents a
+        // reparse point at the fresh candidate path from being traversed.
+        let handle = unsafe {
+            CreateFileW(
+                wide_path.as_ptr(),
+                GENERIC_WRITE | READ_CONTROL | WRITE_DAC | WRITE_OWNER,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                std::ptr::null(),
+                CREATE_NEW,
+                FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+                std::ptr::null_mut(),
+            )
+        };
+        if handle == INVALID_HANDLE_VALUE {
+            return Err(std::io::Error::last_os_error());
+        }
+        // SAFETY: CreateFileW returned an owned, valid file handle above.
+        Ok(unsafe { std::fs::File::from_raw_handle(handle as RawHandle) })
     }
 
     /// Replaces an old discovery file in one filesystem operation. `rename`
@@ -326,6 +345,54 @@ mod windows_discovery_security {
             }));
         }
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub(super) fn discovery_file_has_private_acl(path: &Path) -> std::io::Result<bool> {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::{
+            Foundation::LocalFree,
+            Security::Authorization::{GetSecurityInfo, SE_FILE_OBJECT},
+            Security::{EqualSid, GetSecurityDescriptorControl, SE_DACL_PROTECTED},
+        };
+
+        let file = std::fs::File::open(path)?;
+        let mut owner = std::ptr::null_mut();
+        let mut dacl = std::ptr::null_mut();
+        let mut descriptor = std::ptr::null_mut();
+        let status = unsafe {
+            GetSecurityInfo(
+                file.as_raw_handle() as _,
+                SE_FILE_OBJECT,
+                OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                &mut owner,
+                std::ptr::null_mut(),
+                &mut dacl,
+                std::ptr::null_mut(),
+                &mut descriptor,
+            )
+        };
+        if status != 0 {
+            return Err(win_error("reading discovery file ACL", status));
+        }
+        let result = unsafe {
+            with_current_user_sid(|current_user_sid| {
+                let mut control = 0;
+                let mut revision = 0;
+                if GetSecurityDescriptorControl(descriptor, &mut control, &mut revision) == 0 {
+                    return Err(win_error(
+                        "reading discovery file ACL control",
+                        GetLastError(),
+                    ));
+                }
+                Ok(!dacl.is_null()
+                    && EqualSid(owner, current_user_sid) != 0
+                    && control & SE_DACL_PROTECTED != 0)
+            })
+        };
+        // SAFETY: GetSecurityInfo allocated this descriptor with LocalAlloc.
+        unsafe { LocalFree(descriptor as _) };
+        result
     }
 
     #[cfg(test)]
@@ -454,14 +521,20 @@ pub(crate) fn write_discovery_file(
             tmp_name.push(format!(".{}.tmp", hex::encode(suffix)));
             let candidate = path.with_file_name(tmp_name);
 
-            let mut options = std::fs::OpenOptions::new();
-            options.write(true).create_new(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                options.mode(0o600);
-            }
-            match options.open(&candidate) {
+            #[cfg(windows)]
+            let file_result = windows_discovery_security::create_private_file(&candidate);
+            #[cfg(not(windows))]
+            let file_result = {
+                let mut options = std::fs::OpenOptions::new();
+                options.write(true).create_new(true);
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::OpenOptionsExt;
+                    options.mode(0o600);
+                }
+                options.open(&candidate)
+            };
+            match file_result {
                 Ok(file) => Some(Ok((candidate, file))),
                 Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => None,
                 Err(err) => Some(Err(err)),
@@ -470,13 +543,14 @@ pub(crate) fn write_discovery_file(
         .transpose()?
         .ok_or_else(|| std::io::Error::other("could not allocate discovery temp file"))?;
     let (tmp, mut file) = tmp;
-    #[cfg(windows)]
-    windows_discovery_security::open_private_file(&file)?;
-    #[cfg(unix)]
-    file.set_permissions(unix_permissions(0o600))?;
-
     let mut renamed = false;
     let result = (|| {
+        #[cfg(windows)]
+        windows_discovery_security::private_file_handle(
+            std::os::windows::io::AsRawHandle::as_raw_handle(&file) as _,
+        )?;
+        #[cfg(unix)]
+        file.set_permissions(unix_permissions(0o600))?;
         file.write_all(payload.to_string().as_bytes())?;
         file.sync_all()?;
         drop(file);
@@ -632,6 +706,39 @@ mod tests {
         assert_ne!(error.kind(), std::io::ErrorKind::NotFound);
 
         std::fs::remove_dir_all(base).ok();
+    }
+
+    #[cfg(all(feature = "server", windows))]
+    #[test]
+    fn windows_write_and_rewrite_preserve_private_acl() {
+        const FIRST_CAPABILITY: &str =
+            "1111111111111111111111111111111111111111111111111111111111111111";
+        const ROTATED_CAPABILITY: &str =
+            "2222222222222222222222222222222222222222222222222222222222222222";
+        let base = std::env::temp_dir().join(format!(
+            "berdctl-discovery-acl-roundtrip-test-{}",
+            std::process::id()
+        ));
+        std::fs::remove_dir_all(&base).ok();
+        let path = discovery_file_path(&base, 4242);
+
+        write_discovery_file(&path, 8080, 4242, 7, FIRST_CAPABILITY).unwrap();
+        assert!(
+            windows_discovery_security::discovery_file_has_private_acl(&path).unwrap(),
+            "initial discovery file must have an owner-private protected DACL"
+        );
+
+        write_discovery_file(&path, 9090, 4242, 8, ROTATED_CAPABILITY).unwrap();
+        assert!(
+            windows_discovery_security::discovery_file_has_private_acl(&path).unwrap(),
+            "rewritten discovery file must retain an owner-private protected DACL"
+        );
+        let parsed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(parsed["generation"], 8);
+        assert_eq!(parsed["capability"], ROTATED_CAPABILITY);
+
+        std::fs::remove_dir_all(&base).ok();
     }
 
     #[cfg(feature = "server")]
