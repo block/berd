@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import {
   type ChatSession,
+  type LoadMoreSessionsOutcome,
   useChatSessionStore,
 } from "@/features/chat/stores/chatSessionStore";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
@@ -385,17 +386,20 @@ describe("SessionHistoryView", () => {
       title: "Chat Two",
       updatedAt: "2026-04-09T12:01:00.000Z",
     });
-    const loadMoreSessions = vi.fn(async () => {
-      useChatSessionStore.setState((state) => ({
-        sessions: [...state.sessions, secondPageSession],
-        hasMoreSessions: true,
-        isLoadingMoreSessions: false,
-        sessionPageCursor: "cursor-2",
-      }));
-      if (scroller) {
-        setScrollMetrics(scroller, { scrollHeight: 2200, clientHeight: 600 });
-      }
-    });
+    const loadMoreSessions = vi.fn(
+      async (): Promise<LoadMoreSessionsOutcome> => {
+        useChatSessionStore.setState((state) => ({
+          sessions: [...state.sessions, secondPageSession],
+          hasMoreSessions: true,
+          isLoadingMoreSessions: false,
+          sessionPageCursor: "cursor-2",
+        }));
+        if (scroller) {
+          setScrollMetrics(scroller, { scrollHeight: 2200, clientHeight: 600 });
+        }
+        return "applied";
+      },
+    );
     setSessionStoreState({
       sessions: [session()],
       hasMoreSessions: true,
@@ -423,7 +427,7 @@ describe("SessionHistoryView", () => {
   });
 
   it("loads another page when the viewport is underfilled and exposes loading status", async () => {
-    const loadMoreSessions = vi.fn().mockResolvedValue(undefined);
+    const loadMoreSessions = vi.fn().mockResolvedValue("applied");
     setSessionStoreState({
       sessions: [session()],
       hasMoreSessions: true,
@@ -460,13 +464,16 @@ describe("SessionHistoryView", () => {
       title: "Second Needle Session",
       updatedAt: "2026-04-09T12:01:00.000Z",
     });
-    const loadMoreSessions = vi.fn(async () => {
-      useChatSessionStore.setState((state) => ({
-        sessions: [...state.sessions, secondPageSession],
-        hasMoreSessions: false,
-        sessionPageCursor: null,
-      }));
-    });
+    const loadMoreSessions = vi.fn(
+      async (): Promise<LoadMoreSessionsOutcome> => {
+        useChatSessionStore.setState((state) => ({
+          sessions: [...state.sessions, secondPageSession],
+          hasMoreSessions: false,
+          sessionPageCursor: null,
+        }));
+        return "applied";
+      },
+    );
     setSessionStoreState({
       sessions: [session()],
       hasMoreSessions: true,
@@ -506,22 +513,25 @@ describe("SessionHistoryView", () => {
     const pageGate = new Promise<void>((resolve) => {
       releasePage = resolve;
     });
-    const loadMoreSessions = vi.fn(async () => {
-      await pageGate;
-      useChatSessionStore.setState((state) => ({
-        sessions: [
-          ...state.sessions,
-          session({
-            id: "session-3",
-            title: "Late Archived Needle",
-            archivedAt: "2026-04-09T12:06:00.000Z",
-            updatedAt: "2026-04-09T12:02:00.000Z",
-          }),
-        ],
-        hasMoreSessions: false,
-        sessionPageCursor: null,
-      }));
-    });
+    const loadMoreSessions = vi.fn(
+      async (): Promise<LoadMoreSessionsOutcome> => {
+        await pageGate;
+        useChatSessionStore.setState((state) => ({
+          sessions: [
+            ...state.sessions,
+            session({
+              id: "session-3",
+              title: "Late Archived Needle",
+              archivedAt: "2026-04-09T12:06:00.000Z",
+              updatedAt: "2026-04-09T12:02:00.000Z",
+            }),
+          ],
+          hasMoreSessions: false,
+          sessionPageCursor: null,
+        }));
+        return "applied";
+      },
+    );
     setSessionStoreState({
       sessions: [
         session({ id: "session-1", title: "Active Needle" }),
@@ -654,21 +664,24 @@ describe("SessionHistoryView", () => {
       { id: "project-a", name: "Project A", workingDirs: ["/a"] },
       { id: "project-b", name: "Project B", workingDirs: ["/b"] },
     ];
-    const loadMoreSessions = vi.fn(async () => {
-      useChatSessionStore.setState((state) => ({
-        sessions: [
-          ...state.sessions,
-          session({
-            id: "session-2",
-            title: "Other Project Needle",
-            projectId: "project-b",
-            updatedAt: "2026-04-09T12:01:00.000Z",
-          }),
-        ],
-        hasMoreSessions: false,
-        sessionPageCursor: null,
-      }));
-    });
+    const loadMoreSessions = vi.fn(
+      async (): Promise<LoadMoreSessionsOutcome> => {
+        useChatSessionStore.setState((state) => ({
+          sessions: [
+            ...state.sessions,
+            session({
+              id: "session-2",
+              title: "Other Project Needle",
+              projectId: "project-b",
+              updatedAt: "2026-04-09T12:01:00.000Z",
+            }),
+          ],
+          hasMoreSessions: false,
+          sessionPageCursor: null,
+        }));
+        return "applied";
+      },
+    );
     setSessionStoreState({
       sessions: [
         session({
@@ -763,20 +776,23 @@ describe("SessionHistoryView", () => {
       messageCount: 0,
       updatedAt: "2026-04-09T12:01:00.000Z",
     });
-    const loadMoreSessions = vi.fn(async () => {
-      useChatStore.setState({
-        queuedMessageBySession: {
-          "session-queued": [
-            { kind: "transport-ready", recordId: "q1", payload: {} },
-          ],
-        },
-      } as never);
-      useChatSessionStore.setState((state) => ({
-        sessions: [...state.sessions, queuedOnlySession],
-        hasMoreSessions: false,
-        sessionPageCursor: null,
-      }));
-    });
+    const loadMoreSessions = vi.fn(
+      async (): Promise<LoadMoreSessionsOutcome> => {
+        useChatStore.setState({
+          queuedMessageBySession: {
+            "session-queued": [
+              { kind: "transport-ready", recordId: "q1", payload: {} },
+            ],
+          },
+        } as never);
+        useChatSessionStore.setState((state) => ({
+          sessions: [...state.sessions, queuedOnlySession],
+          hasMoreSessions: false,
+          sessionPageCursor: null,
+        }));
+        return "applied";
+      },
+    );
     setSessionStoreState({
       sessions: [session()],
       hasMoreSessions: true,

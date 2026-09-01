@@ -44,6 +44,7 @@ import { useHomeWidgetStore } from "@/features/home/stores/homeWidgetStore";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { useBulkSessionActions } from "@/features/sessions/hooks/useBulkSessionActions";
+import { useProjectSessionHydration } from "@/features/sessions/hooks/useProjectSessionHydration";
 import {
   areSetsEqual,
   getRenderedSessionIdsInOrder,
@@ -78,7 +79,6 @@ const SECTION_VISIBILITY_STORAGE_KEY = "goose:sidebar:section-visibility";
 const DISPLAY_OPTIONS_STORAGE_KEY = "goose:sidebar:display-options";
 const PINNED_NAV_ORDER_STORAGE_KEY = "goose:sidebar:pinned-nav-order";
 const MAX_RECENTS = MAX_FLAT_SIDEBAR_CHATS;
-const MAX_AUTO_LOADED_GROUPED_CHATS = MAX_FLAT_SIDEBAR_CHATS * 2;
 const FLAT_CHAT_GROUP_REFRESH_INTERVAL_MS = 60 * 1000;
 
 type SessionListSectionVisibility = {
@@ -891,26 +891,19 @@ export function SessionListCapability({
   const hasFlatChatOverflow =
     flatSessionCandidates.length > MAX_FLAT_SIDEBAR_CHATS ||
     (flatSessionCandidates.length >= MAX_FLAT_SIDEBAR_CHATS && hasMoreSessions);
-  const standaloneChatCount = groupChatsByProject
-    ? projectSessions.standalone.length
-    : flatSessionCandidates.length;
-  const groupedChatCount = useMemo(
-    () =>
-      projectSessions.standalone.length +
-      Object.values(projectSessions.byProject).reduce(
-        (count, chats) => count + chats.length,
-        0,
-      ),
-    [projectSessions],
-  );
-  const reachedAutoLoadLimit = groupChatsByProject
-    ? standaloneChatCount >= MAX_FLAT_SIDEBAR_CHATS ||
-      groupedChatCount >= MAX_AUTO_LOADED_GROUPED_CHATS
-    : standaloneChatCount >= MAX_FLAT_SIDEBAR_CHATS;
+  const reachedAutoLoadLimit =
+    !groupChatsByProject &&
+    flatSessionCandidates.length >= MAX_FLAT_SIDEBAR_CHATS;
   const chatLoadMoreCursorKey = sessionPageCursor ?? "__initial__";
+
+  // Grouped mode pages until every project has a chat loaded, pagination is
+  // exhausted, or the hook's page/retry budgets are spent — instead of
+  // stopping at a fixed recents cap.
+  useProjectSessionHydration(groupChatsByProject && !surface.preview, projects);
 
   useEffect(() => {
     if (
+      groupChatsByProject ||
       surface.preview ||
       !hasMoreSessions ||
       isLoadingMoreSessions ||
@@ -926,6 +919,7 @@ export function SessionListCapability({
     void loadMoreSessions();
   }, [
     chatLoadMoreCursorKey,
+    groupChatsByProject,
     hasMoreSessions,
     isLoadingMoreSessions,
     loadMoreSessions,

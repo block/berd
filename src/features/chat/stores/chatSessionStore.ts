@@ -166,6 +166,12 @@ interface ChatSessionStoreState {
   isLoading: boolean;
   isLoadingMoreSessions: boolean;
   hasHydratedSessions: boolean;
+  /**
+   * Bumped each time a full loadSessions() reload applies a fresh first page.
+   * Consumers that page loadMoreSessions in the background use it to detect
+   * pagination rewinds (and dropped in-flight pages) even while unmounted.
+   */
+  sessionListReloadCount: number;
   sessionPageCursor: string | null;
   hasMoreSessions: boolean;
   isRightRailOpen: boolean;
@@ -206,6 +212,13 @@ type ChatSessionPromotionPatch = ChatSessionPatch & {
   executionTarget?: SessionExecutionTarget;
 };
 
+/** Outcome of a loadMoreSessions() page attempt. */
+export type LoadMoreSessionsOutcome =
+  | "applied"
+  | "superseded"
+  | "skipped"
+  | "failed";
+
 interface ChatSessionStoreActions {
   createSession: (opts?: CreateSessionOpts) => Promise<ChatSession>;
   createDraftSession: (opts?: CreateSessionOpts) => ChatSession;
@@ -218,7 +231,14 @@ interface ChatSessionStoreActions {
   resetSessionCreation: (id: string) => void;
   ensurePinnedSessionPlaceholder: (id: string) => void;
   loadSessions: () => Promise<void>;
-  loadMoreSessions: () => Promise<void>;
+  /**
+   * Page in the next slice of sessions.
+   * - "applied": a page was merged into the store.
+   * - "superseded": a loadSessions() reload dropped the in-flight page.
+   * - "skipped": another page is in flight or pagination is exhausted.
+   * - "failed": the request failed (the store logs it).
+   */
+  loadMoreSessions: () => Promise<LoadMoreSessionsOutcome>;
   patchSession: (id: string, patch: ChatSessionPatch) => void;
   updateSessionSubtitleFromText: (sessionId: string, text: string) => void;
   addSession: (session: ChatSession) => void;
@@ -494,6 +514,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   isLoading: false,
   isLoadingMoreSessions: false,
   hasHydratedSessions: false,
+  sessionListReloadCount: 0,
   sessionPageCursor: null,
   hasMoreSessions: false,
   isRightRailOpen: loadRightRailOpenPreference(),
@@ -783,7 +804,12 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     try {
       const page = await acpListSessionsPage();
       if (sessionLoadEpoch !== loadEpoch) return;
-      set((state) => mergeAcpSessionPage(state, page, null));
+      set((state) => ({
+        ...mergeAcpSessionPage(state, page, null),
+        // Only a successfully applied first page starts a new pagination
+        // generation; failed reloads must not rewind background pagers.
+        sessionListReloadCount: state.sessionListReloadCount + 1,
+      }));
     } catch (error) {
       if (sessionLoadEpoch === loadEpoch) {
         console.error("Failed to load sessions from ACP:", error);
@@ -798,19 +824,20 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   loadMoreSessions: async () => {
     const { sessionPageCursor, hasMoreSessions, isLoadingMoreSessions } = get();
     if (isLoadingMoreSessions || !hasMoreSessions) {
-      return;
+      return "skipped";
     }
 
     const loadEpoch = sessionLoadEpoch;
     set({ isLoadingMoreSessions: true });
     try {
       const page = await acpListSessionsPage({ cursor: sessionPageCursor });
-      if (sessionLoadEpoch !== loadEpoch) return;
+      if (sessionLoadEpoch !== loadEpoch) return "superseded";
       set((state) => mergeAcpSessionPage(state, page, sessionPageCursor));
+      return "applied";
     } catch (error) {
-      if (sessionLoadEpoch === loadEpoch) {
-        console.error("Failed to load more sessions from ACP:", error);
-      }
+      if (sessionLoadEpoch !== loadEpoch) return "superseded";
+      console.error("Failed to load more sessions from ACP:", error);
+      return "failed";
     } finally {
       set({ isLoadingMoreSessions: false });
     }

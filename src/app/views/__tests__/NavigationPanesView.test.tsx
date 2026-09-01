@@ -27,6 +27,7 @@ import {
   type RuntimeConfig,
 } from "@/shared/runtime-config/schema";
 import { MAX_FLAT_SIDEBAR_CHATS } from "@/features/sidebar/lib/sidebarFlatChats";
+import { resetProjectSessionHydrationAccounting } from "@/features/sessions/hooks/useProjectSessionHydration";
 import {
   resetHomeWidgetStoreForTests,
   useHomeWidgetStore,
@@ -330,6 +331,8 @@ vi.mock("@/features/chat/stores/chatSessionStore", () => ({
       selector({
         sessions: mockSessions,
         activeWorkspaceBySession: mockActiveWorkspaceBySession,
+        hasHydratedSessions: true,
+        sessionListReloadCount: 0,
         hasMoreSessions: mockHasMoreSessions,
         isLoadingMoreSessions: mockIsLoadingMoreSessions,
         sessionPageCursor: mockSessionPageCursor,
@@ -339,6 +342,8 @@ vi.mock("@/features/chat/stores/chatSessionStore", () => ({
       getState: () => ({
         sessions: mockSessions,
         activeWorkspaceBySession: mockActiveWorkspaceBySession,
+        hasHydratedSessions: true,
+        sessionListReloadCount: 0,
         hasMoreSessions: mockHasMoreSessions,
         isLoadingMoreSessions: mockIsLoadingMoreSessions,
         loadMoreSessions: mockLoadMoreSessions,
@@ -379,6 +384,8 @@ describe("NavigationPanesView", () => {
     mockActiveWorkspaceBySession = {};
     mockSessionStateById = {};
     mockLoadMoreSessions.mockReset();
+    mockLoadMoreSessions.mockResolvedValue("applied");
+    resetProjectSessionHydrationAccounting();
     mockAcpSearchSessions.mockReset();
     mockAcpSearchSessions.mockResolvedValue([]);
     mockGetGitState.mockReset();
@@ -661,10 +668,9 @@ describe("NavigationPanesView", () => {
   });
 
   it("keeps the view-all-chats row when all loaded chats belong to projects and more sessions remain", () => {
-    // Grouped auto-loading stops at MAX_FLAT_SIDEBAR_CHATS * 2 chats. Seed
-    // that bound split across two projects with zero standalone chats: the
-    // Recents list is empty, but older sessions remain on the backend, so
-    // the history route must stay visible.
+    // Seed a large chat set split across two projects with zero standalone
+    // chats: the Recents list is empty, but older sessions remain on the
+    // backend, so the history route must stay visible.
     mockHasMoreSessions = true;
     seedSessions(
       ...Array.from({ length: MAX_FLAT_SIDEBAR_CHATS * 2 }, (_, index) => ({
@@ -1291,8 +1297,11 @@ describe("NavigationPanesView", () => {
     await waitFor(() => expect(mockLoadMoreSessions).toHaveBeenCalledOnce());
   });
 
-  it("bounds grouped chat auto-loading when project chats dominate", async () => {
+  it("hydrates project chats beyond the old grouped auto-load cap", async () => {
+    // project-2 has no chat in the loaded slice; previously grouped mode
+    // stopped paging at MAX_AUTO_LOADED_GROUPED_CHATS, leaving it empty (#259).
     mockHasMoreSessions = true;
+    mockSessionPageCursor = "cursor-1";
     seedSessions(
       ...Array.from({ length: MAX_FLAT_SIDEBAR_CHATS * 2 }, (_, index) => ({
         id: `loaded-project-chat-${index + 1}`,
@@ -1303,7 +1312,36 @@ describe("NavigationPanesView", () => {
       })),
     );
 
-    renderSidebar({ projects: [mockProject()] });
+    renderSidebar({
+      projects: [
+        mockProject(),
+        mockProject({ id: "project-2", name: "Project Two", order: 1 }),
+      ],
+    });
+
+    await waitFor(() => expect(mockLoadMoreSessions).toHaveBeenCalled());
+  });
+
+  it("does not hydrate projects when grouping is disabled", async () => {
+    disableProjectGrouping();
+    mockHasMoreSessions = true;
+    mockSessionPageCursor = "cursor-1";
+    // Flat mode keeps its own recents cap: with the flat list full and no
+    // grouped projects to hydrate, no auto-load fires at all.
+    seedSessions(
+      ...Array.from({ length: MAX_FLAT_SIDEBAR_CHATS }, (_, index) => ({
+        id: `loaded-flat-chat-${index + 1}`,
+        title: `Loaded Flat Chat ${index + 1}`,
+        updatedAt: `2026-04-09T12:${String(index).padStart(2, "0")}:00.000Z`,
+        messageCount: 3,
+      })),
+    );
+
+    renderSidebar({
+      projects: [
+        mockProject({ id: "project-2", name: "Project Two", order: 1 }),
+      ],
+    });
     await waitForAnimationFrame();
 
     expect(mockLoadMoreSessions).not.toHaveBeenCalled();

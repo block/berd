@@ -392,7 +392,7 @@ describe("WidgetCanvas", () => {
     mocks.profileCapabilities.automations = true;
     mocks.hasMoreSessions = false;
     mocks.isLoadingMoreSessions = false;
-    mocks.loadMoreSessions.mockResolvedValue(undefined);
+    mocks.loadMoreSessions.mockResolvedValue("skipped");
     mocks.getAutomationTiles.mockResolvedValue({
       tiles: [
         {

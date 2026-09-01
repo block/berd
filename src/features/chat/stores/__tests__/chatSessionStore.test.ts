@@ -72,6 +72,7 @@ function resetStore() {
     isLoading: false,
     isLoadingMoreSessions: false,
     hasHydratedSessions: false,
+    sessionListReloadCount: 0,
     sessionPageCursor: null,
     hasMoreSessions: false,
     isRightRailOpen: false,
@@ -1669,8 +1670,9 @@ describe("chatSessionStore", () => {
       expect(mocks.acpListSessionsPage).toHaveBeenCalledOnce();
 
       deferred.resolve(mockPage());
-      await Promise.all([firstLoad, secondLoad]);
+      const results = await Promise.all([firstLoad, secondLoad]);
 
+      expect(results).toEqual(["applied", "skipped"]);
       expect(useChatSessionStore.getState().isLoadingMoreSessions).toBe(false);
     });
 
@@ -1759,6 +1761,25 @@ describe("chatSessionStore", () => {
       expect(state.sessionPageCursor).toBeNull();
       expect(state.hasMoreSessions).toBe(false);
       expect(state.isLoadingMoreSessions).toBe(false);
+    });
+
+    it("reports a stale rejected page as superseded, not failed", async () => {
+      const loadMore = createDeferredPromise<ReturnType<typeof mockPage>>();
+      useChatSessionStore.setState({
+        sessionPageCursor: "cursor-2",
+        hasMoreSessions: true,
+      });
+      mocks.acpListSessionsPage
+        .mockReturnValueOnce(loadMore.promise)
+        .mockResolvedValueOnce(mockPage([], null));
+
+      const loadMorePromise = useChatSessionStore.getState().loadMoreSessions();
+      const loadSessionsPromise = useChatSessionStore.getState().loadSessions();
+
+      loadMore.reject(new Error("network down"));
+      await loadSessionsPromise;
+
+      await expect(loadMorePromise).resolves.toBe("superseded");
     });
 
     it("dedupes sessions by id and refreshes existing metadata", async () => {
