@@ -122,7 +122,13 @@ The parent acknowledges on framed stdin:
 ```
 
 Begin must be accepted before the first Chunk. Only one Chunk may await
-acceptance, and at most two accepted chunks may remain not fully played.
+acceptance. Accepted-but-not-fully-played credit is measured in cumulative
+source frames and is duration-derived to retain at least 400 ms of runway at
+the Begin sample and playback rates. The child coalesces backend callbacks into
+4096-frame records plus one final tail. The host nevertheless validates source
+duration rather than assuming full records and also caps the queue at 64 records
+(at most 1 MiB of Float32 PCM). Every individual record remains bounded to 4096
+source frames.
 The child flushes `output_ready_result(accepted)` before writing Begin, but
 stdout and the PCM pipe are independently observed. The host may therefore
 buffer one valid Begin for the single reserved speech for at most two seconds;

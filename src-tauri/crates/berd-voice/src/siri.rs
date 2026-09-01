@@ -1,13 +1,13 @@
 //! Safe Siri voice management and device-free sirittsd synthesis primitives.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, VecDeque};
 #[cfg(target_os = "macos")]
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::fmt;
 #[cfg(target_os = "macos")]
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_os = "macos")]
-use std::sync::mpsc;
+use std::sync::{mpsc, Mutex};
 use std::time::Duration;
 
 use serde::{Deserialize, Deserializer, Serialize};
@@ -18,7 +18,7 @@ use crate::{TtsBackend, TtsOutcome, TtsPcmSpec, TtsSynthesisEvent};
 #[cfg(target_os = "macos")]
 const SIRI_PCM_SAMPLE_RATE: u32 = 48_000;
 #[cfg(target_os = "macos")]
-const PCM_CHANNEL_CAPACITY: usize = 8;
+const MAX_PENDING_PCM_FRAMES: usize = SIRI_PCM_SAMPLE_RATE as usize * 60;
 #[cfg(target_os = "macos")]
 const SYNTHESIS_POLL_INTERVAL: Duration = Duration::from_millis(10);
 #[cfg(target_os = "macos")]
@@ -440,7 +440,9 @@ impl SiriTts {
 struct CallbackContext<'a> {
     active: &'a AtomicBool,
     callback_cancelled: &'a AtomicBool,
-    sender: mpsc::SyncSender<Vec<f32>>,
+    queue_overflowed: &'a AtomicBool,
+    frames: &'a Mutex<VecDeque<f32>>,
+    notification: mpsc::SyncSender<()>,
 }
 
 #[cfg(target_os = "macos")]
@@ -460,7 +462,35 @@ unsafe extern "C" fn receive_pcm(
     let frames = unsafe { std::slice::from_raw_parts(samples, frame_count as usize) };
     // SAFETY: The native call is scoped to the lifetime of this context.
     let context = unsafe { &*(context.cast::<CallbackContext<'_>>()) };
-    context.active.load(Ordering::SeqCst) && context.sender.send(frames.to_vec()).is_ok()
+    if !context.active.load(Ordering::SeqCst) || context.callback_cancelled.load(Ordering::SeqCst) {
+        return false;
+    }
+    let Ok(mut pending) = context.frames.lock() else {
+        context.queue_overflowed.store(true, Ordering::SeqCst);
+        context.callback_cancelled.store(true, Ordering::SeqCst);
+        return false;
+    };
+    if pending
+        .len()
+        .checked_add(frames.len())
+        .filter(|total| *total <= MAX_PENDING_PCM_FRAMES)
+        .is_none()
+        || pending.try_reserve(frames.len()).is_err()
+    {
+        context.queue_overflowed.store(true, Ordering::SeqCst);
+        context.callback_cancelled.store(true, Ordering::SeqCst);
+        return false;
+    }
+    pending.extend(frames.iter().copied());
+    drop(pending);
+    match context.notification.try_send(()) {
+        Ok(()) | Err(mpsc::TrySendError::Full(())) => true,
+        Err(mpsc::TrySendError::Disconnected(())) => {
+            context.queue_overflowed.store(true, Ordering::SeqCst);
+            context.callback_cancelled.store(true, Ordering::SeqCst);
+            false
+        }
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -494,8 +524,10 @@ impl TtsBackend for SiriTts {
             return Ok(TtsOutcome::Cancelled);
         }
         let text = CString::new(text).map_err(|_| "Siri text contains NUL")?;
-        let (sender, receiver) = mpsc::sync_channel(PCM_CHANNEL_CAPACITY);
+        let frames = Mutex::new(VecDeque::new());
+        let (notification, receiver) = mpsc::sync_channel(1);
         let callback_cancelled = AtomicBool::new(false);
+        let queue_overflowed = AtomicBool::new(false);
         let language = self.language.clone();
         let voice_name = self.voice_name.clone();
         let rate = self.rate;
@@ -503,7 +535,9 @@ impl TtsBackend for SiriTts {
             let mut context = CallbackContext {
                 active,
                 callback_cancelled: &callback_cancelled,
-                sender,
+                queue_overflowed: &queue_overflowed,
+                frames: &frames,
+                notification,
             };
             let native = scope.spawn(move || {
                 let mut error = std::ptr::null_mut();
@@ -530,6 +564,8 @@ impl TtsBackend for SiriTts {
             let receive_result = receive_pcm_until_complete(
                 receiver,
                 &callback_cancelled,
+                &queue_overflowed,
+                &frames,
                 SYNTHESIS_POLL_INTERVAL,
                 SIRI_SYNTHESIS_STALL_TIMEOUT,
                 on_event,
@@ -550,22 +586,36 @@ impl TtsBackend for SiriTts {
 
 #[cfg(target_os = "macos")]
 fn receive_pcm_until_complete(
-    receiver: mpsc::Receiver<Vec<f32>>,
+    receiver: mpsc::Receiver<()>,
     callback_cancelled: &AtomicBool,
+    queue_overflowed: &AtomicBool,
+    pending_frames: &Mutex<VecDeque<f32>>,
     poll_interval: Duration,
     stall_timeout: Duration,
     on_event: &mut dyn FnMut(TtsSynthesisEvent<'_>) -> Result<(), String>,
 ) -> Result<(), String> {
     let mut last_progress_at = std::time::Instant::now();
     loop {
-        match receiver.recv_timeout(poll_interval) {
-            Ok(frames) => {
-                last_progress_at = std::time::Instant::now();
-                if let Err(error) = on_event(TtsSynthesisEvent::Frames(&frames)) {
-                    callback_cancelled.store(true, Ordering::SeqCst);
-                    return Err(error);
-                }
+        if queue_overflowed.load(Ordering::SeqCst) {
+            return Err("Siri synthesis exceeded its bounded PCM queue".into());
+        }
+        let frames = {
+            let mut pending = pending_frames
+                .lock()
+                .map_err(|_| "Siri PCM queue failed".to_string())?;
+            let count = pending.len().min(4_096);
+            pending.drain(..count).collect::<Vec<_>>()
+        };
+        if !frames.is_empty() {
+            last_progress_at = std::time::Instant::now();
+            if let Err(error) = on_event(TtsSynthesisEvent::Frames(&frames)) {
+                callback_cancelled.store(true, Ordering::SeqCst);
+                return Err(error);
             }
+            continue;
+        }
+        match receiver.recv_timeout(poll_interval) {
+            Ok(()) => continue,
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 if let Err(error) = on_event(TtsSynthesisEvent::Poll) {
                     callback_cancelled.store(true, Ordering::SeqCst);
@@ -611,8 +661,8 @@ fn take_string(value: *mut c_char) -> Option<String> {
 mod tests {
     #[cfg(target_os = "macos")]
     use super::{
-        berd_siri_tts_test_closed_pcm_gate_ignores_late_callback, receive_pcm_until_complete,
-        SiriTts,
+        berd_siri_tts_test_closed_pcm_gate_ignores_late_callback, receive_pcm,
+        receive_pcm_until_complete, CallbackContext, SiriTts, MAX_PENDING_PCM_FRAMES,
     };
     use super::{
         download_voice_with, parse_catalog_json, parse_languages_json,
@@ -624,9 +674,11 @@ mod tests {
     use crate::{TtsBackend, TtsOutcome, TtsSynthesisEvent};
     use std::cell::Cell;
     #[cfg(target_os = "macos")]
+    use std::collections::VecDeque;
+    #[cfg(target_os = "macos")]
     use std::sync::atomic::{AtomicBool, Ordering};
     #[cfg(target_os = "macos")]
-    use std::sync::mpsc;
+    use std::sync::{mpsc, Arc, Mutex};
     use std::time::Duration;
     #[cfg(target_os = "macos")]
     use std::time::Instant;
@@ -782,11 +834,15 @@ mod tests {
     #[cfg(target_os = "macos")]
     fn pcm_receive_loop_resets_progress_deadline_and_cancels_a_stall() {
         let callback_cancelled = AtomicBool::new(false);
-        let (sender, receiver) = mpsc::channel();
+        let queue_overflowed = AtomicBool::new(false);
+        let pending_frames = Arc::new(Mutex::new(VecDeque::new()));
+        let (sender, receiver) = mpsc::sync_channel(2);
+        let producer_frames = Arc::clone(&pending_frames);
         let producer = std::thread::spawn(move || {
             for sample in [0.1, 0.2] {
                 std::thread::sleep(Duration::from_millis(5));
-                sender.send(vec![sample]).unwrap();
+                producer_frames.lock().unwrap().push_back(sample);
+                sender.send(()).unwrap();
             }
         });
         let mut samples = Vec::new();
@@ -794,6 +850,8 @@ mod tests {
         receive_pcm_until_complete(
             receiver,
             &callback_cancelled,
+            &queue_overflowed,
+            &pending_frames,
             Duration::from_millis(2),
             Duration::from_secs(1),
             &mut |event| {
@@ -810,16 +868,106 @@ mod tests {
         assert!(idle_polls > 0);
         assert!(!callback_cancelled.load(Ordering::SeqCst));
 
-        let (_sender, receiver) = mpsc::channel();
+        let (_sender, receiver) = mpsc::sync_channel(1);
+        let queue_overflowed = AtomicBool::new(false);
+        let pending_frames = Mutex::new(VecDeque::new());
         let error = receive_pcm_until_complete(
             receiver,
             &callback_cancelled,
+            &queue_overflowed,
+            &pending_frames,
             Duration::from_millis(1),
             Duration::from_millis(5),
             &mut |_| Ok(()),
         )
         .unwrap_err();
         assert_eq!(error, "Siri synthesis stopped making progress");
+        assert!(callback_cancelled.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn native_pcm_callback_coalesces_tiny_frames_without_blocking_on_playback() {
+        let active = AtomicBool::new(true);
+        let callback_cancelled = AtomicBool::new(false);
+        let queue_overflowed = AtomicBool::new(false);
+        let pending_frames = Mutex::new(VecDeque::new());
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let (finished_tx, finished_rx) = mpsc::channel();
+        std::thread::scope(|scope| {
+            let worker = scope.spawn(|| {
+                let mut context = CallbackContext {
+                    active: &active,
+                    callback_cancelled: &callback_cancelled,
+                    queue_overflowed: &queue_overflowed,
+                    frames: &pending_frames,
+                    notification: sender,
+                };
+                let sample = 0.25_f32;
+                for _ in 0..10_000 {
+                    // SAFETY: The sample slice and callback context remain live for this call.
+                    assert!(unsafe {
+                        receive_pcm(
+                            &sample,
+                            1,
+                            (&mut context as *mut CallbackContext<'_>).cast(),
+                        )
+                    });
+                }
+                finished_tx.send(()).unwrap();
+            });
+            let completed_without_playback =
+                finished_rx.recv_timeout(Duration::from_millis(50)).is_ok();
+            if !completed_without_playback {
+                drop(receiver);
+            }
+            worker.join().unwrap();
+            assert!(
+                completed_without_playback,
+                "the native Siri callback must copy PCM without waiting for playback credit"
+            );
+        });
+        assert_eq!(pending_frames.lock().unwrap().len(), 10_000);
+        assert!(!queue_overflowed.load(Ordering::SeqCst));
+        assert!(!callback_cancelled.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn native_pcm_callback_fails_instead_of_exceeding_its_memory_bound() {
+        let active = AtomicBool::new(true);
+        let callback_cancelled = AtomicBool::new(false);
+        let queue_overflowed = AtomicBool::new(false);
+        let pending_frames = Mutex::new(VecDeque::from(vec![0.0; MAX_PENDING_PCM_FRAMES]));
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let mut context = CallbackContext {
+            active: &active,
+            callback_cancelled: &callback_cancelled,
+            queue_overflowed: &queue_overflowed,
+            frames: &pending_frames,
+            notification: sender,
+        };
+        let sample = 0.25_f32;
+        // SAFETY: The sample and callback context remain live for this call.
+        assert!(!unsafe {
+            receive_pcm(
+                &sample,
+                1,
+                (&mut context as *mut CallbackContext<'_>).cast(),
+            )
+        });
+        let error = receive_pcm_until_complete(
+            receiver,
+            &callback_cancelled,
+            &queue_overflowed,
+            &pending_frames,
+            Duration::from_millis(1),
+            Duration::from_secs(1),
+            &mut |_| Ok(()),
+        )
+        .unwrap_err();
+        assert_eq!(error, "Siri synthesis exceeded its bounded PCM queue");
+        assert_eq!(pending_frames.lock().unwrap().len(), MAX_PENDING_PCM_FRAMES);
         assert!(callback_cancelled.load(Ordering::SeqCst));
     }
 

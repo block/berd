@@ -16,7 +16,8 @@ pub const AUDIO_END_KIND: u8 = 3;
 pub const AUDIO_CANCEL_KIND: u8 = 4;
 pub const AUDIO_FRAME_HEADER_BYTES: usize = 8;
 pub const MAX_AUDIO_CHUNK_FRAMES: usize = 4096;
-pub const MAX_ACCEPTED_NOT_PLAYED_CHUNKS: usize = 2;
+const MIN_ACCEPTED_AUDIO_RUNWAY_MS: f64 = 400.0;
+const MAX_ACCEPTED_NOT_PLAYED_CHUNKS: usize = 64;
 
 const AUDIO_OPERATION_TIMEOUT: Duration = Duration::from_secs(2);
 pub const AUDIO_CANCELLED: &str = "remote PCM output was cancelled";
@@ -165,6 +166,8 @@ pub struct RemotePcmAudioOutput {
     transport: Arc<AudioPipeTransport>,
     active: Arc<AtomicBool>,
     operation_timeout: Duration,
+    minimum_accepted_runway_frames: u64,
+    pending_samples: Mutex<Vec<f32>>,
     state: Mutex<State>,
     changed: Condvar,
 }
@@ -199,6 +202,8 @@ impl RemotePcmAudioOutput {
             transport,
             active,
             operation_timeout,
+            minimum_accepted_runway_frames: accepted_audio_runway_frames(spec),
+            pending_samples: Mutex::new(Vec::with_capacity(MAX_AUDIO_CHUNK_FRAMES)),
             state: Mutex::new(State {
                 phase: Phase::New,
                 begin_accepted: false,
@@ -239,6 +244,15 @@ impl RemotePcmAudioOutput {
     }
 
     pub fn finish_writes(&self) -> Result<(), String> {
+        let final_samples = std::mem::take(
+            &mut *self
+                .pending_samples
+                .lock()
+                .expect("remote pending PCM lock"),
+        );
+        if !final_samples.is_empty() {
+            self.write_chunk(&final_samples)?;
+        }
         let (last_sequence, total_frames) = {
             let mut state = self.state.lock().expect("remote output state");
             if state.phase != Phase::Streaming {
@@ -471,6 +485,68 @@ impl RemotePcmAudioOutput {
             .expect("remote output state")
             .played_frames)
     }
+
+    fn write_chunk(&self, chunk: &[f32]) -> Result<(), String> {
+        debug_assert!(!chunk.is_empty() && chunk.len() <= MAX_AUDIO_CHUNK_FRAMES);
+        {
+            let deadline = Instant::now() + self.operation_timeout;
+            let mut state = self.state.lock().expect("remote output state");
+            while (state.accepted_frames.saturating_sub(state.played_frames)
+                >= self.minimum_accepted_runway_frames
+                || state.accepted_chunk_ends.len() >= MAX_ACCEPTED_NOT_PLAYED_CHUNKS)
+                && state.phase == Phase::Streaming
+            {
+                if !self.active.load(Ordering::SeqCst) {
+                    drop(state);
+                    self.cancel_settled()?;
+                    return Err(AUDIO_CANCELLED.into());
+                }
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    state.phase = Phase::Failed;
+                    state.failure =
+                        Some("host audio queue did not release credit before its deadline".into());
+                    self.changed.notify_all();
+                    return Err(state.failure.clone().expect("credit failure"));
+                }
+                let (next, _) = self
+                    .changed
+                    .wait_timeout(state, remaining)
+                    .expect("remote output credit wait");
+                state = next;
+            }
+            if state.phase != Phase::Streaming {
+                return Err(state
+                    .failure
+                    .clone()
+                    .unwrap_or_else(|| "remote PCM output is not streaming".into()));
+            }
+            state.pending_sequence = Some(state.next_sequence);
+            state.total_frames = state
+                .total_frames
+                .checked_add(u64::try_from(chunk.len()).expect("chunk length fits u64"))
+                .ok_or_else(|| "audio source-frame count is exhausted".to_string())?;
+            state.phase = Phase::WaitingChunk;
+        }
+        let sequence = self
+            .state
+            .lock()
+            .expect("remote output state")
+            .pending_sequence
+            .expect("pending audio sequence");
+        let mut payload = Vec::with_capacity(16 + chunk.len() * 4);
+        payload.extend_from_slice(&self.speech_id.to_le_bytes());
+        payload.extend_from_slice(&sequence.to_le_bytes());
+        for sample in chunk {
+            payload.extend_from_slice(&sample.to_le_bytes());
+        }
+        self.transport.write_record(AUDIO_CHUNK_KIND, &payload)?;
+        self.wait_for(
+            |state| state.pending_sequence.is_none(),
+            "audio chunk acknowledgement",
+            true,
+        )
+    }
 }
 
 impl PcmAudioOutput for RemotePcmAudioOutput {
@@ -481,67 +557,18 @@ impl PcmAudioOutput for RemotePcmAudioOutput {
         {
             return Err("remote PCM output requires finite unit-scale samples".into());
         }
-        for chunk in samples.chunks(MAX_AUDIO_CHUNK_FRAMES) {
-            if chunk.is_empty() {
-                continue;
-            }
-            {
-                let deadline = Instant::now() + self.operation_timeout;
-                let mut state = self.state.lock().expect("remote output state");
-                while state.accepted_chunk_ends.len() >= MAX_ACCEPTED_NOT_PLAYED_CHUNKS
-                    && state.phase == Phase::Streaming
-                {
-                    if !self.active.load(Ordering::SeqCst) {
-                        drop(state);
-                        self.cancel_settled()?;
-                        return Err(AUDIO_CANCELLED.into());
-                    }
-                    let remaining = deadline.saturating_duration_since(Instant::now());
-                    if remaining.is_zero() {
-                        state.phase = Phase::Failed;
-                        state.failure = Some(
-                            "host audio queue did not release credit before its deadline".into(),
-                        );
-                        self.changed.notify_all();
-                        return Err(state.failure.clone().expect("credit failure"));
-                    }
-                    let (next, _) = self
-                        .changed
-                        .wait_timeout(state, remaining)
-                        .expect("remote output credit wait");
-                    state = next;
-                }
-                if state.phase != Phase::Streaming {
-                    return Err(state
-                        .failure
-                        .clone()
-                        .unwrap_or_else(|| "remote PCM output is not streaming".into()));
-                }
-                state.pending_sequence = Some(state.next_sequence);
-                state.total_frames = state
-                    .total_frames
-                    .checked_add(u64::try_from(chunk.len()).expect("chunk length fits u64"))
-                    .ok_or_else(|| "audio source-frame count is exhausted".to_string())?;
-                state.phase = Phase::WaitingChunk;
-            }
-            let sequence = self
-                .state
+        let complete_samples = {
+            let mut pending = self
+                .pending_samples
                 .lock()
-                .expect("remote output state")
-                .pending_sequence
-                .expect("pending audio sequence");
-            let mut payload = Vec::with_capacity(16 + chunk.len() * 4);
-            payload.extend_from_slice(&self.speech_id.to_le_bytes());
-            payload.extend_from_slice(&sequence.to_le_bytes());
-            for sample in chunk {
-                payload.extend_from_slice(&sample.to_le_bytes());
-            }
-            self.transport.write_record(AUDIO_CHUNK_KIND, &payload)?;
-            self.wait_for(
-                |state| state.pending_sequence.is_none(),
-                "audio chunk acknowledgement",
-                true,
-            )?;
+                .expect("remote pending PCM lock");
+            pending.extend_from_slice(samples);
+            let complete_len = pending.len() / MAX_AUDIO_CHUNK_FRAMES * MAX_AUDIO_CHUNK_FRAMES;
+            let tail = pending.split_off(complete_len);
+            std::mem::replace(&mut *pending, tail)
+        };
+        for chunk in complete_samples.chunks_exact(MAX_AUDIO_CHUNK_FRAMES) {
+            self.write_chunk(chunk)?;
         }
         Ok(())
     }
@@ -578,6 +605,14 @@ impl PcmAudioOutput for RemotePcmAudioOutput {
     }
 }
 
+fn accepted_audio_runway_frames(spec: TtsPcmSpec) -> u64 {
+    let runway_frames =
+        (f64::from(spec.sample_rate) * f64::from(spec.playback_rate) * MIN_ACCEPTED_AUDIO_RUNWAY_MS
+            / 1_000.0)
+            .ceil() as usize;
+    u64::try_from(runway_frames).expect("closed PCM runway fits u64")
+}
+
 fn public_host_failure(_message: String) -> String {
     "host audio output failed".into()
 }
@@ -596,15 +631,25 @@ mod tests {
     }
 
     fn fixture_with_timeout(timeout: Duration) -> (Arc<RemotePcmAudioOutput>, UnixStream) {
+        fixture_with_spec_and_timeout(
+            TtsPcmSpec {
+                sample_rate: 24_000,
+                playback_rate: 1.0,
+            },
+            timeout,
+        )
+    }
+
+    fn fixture_with_spec_and_timeout(
+        spec: TtsPcmSpec,
+        timeout: Duration,
+    ) -> (Arc<RemotePcmAudioOutput>, UnixStream) {
         let (child, host) = UnixStream::pair().unwrap();
         let transport = unsafe { AudioPipeTransport::from_raw_fd(child.into_raw_fd()) }.unwrap();
         let output = Arc::new(
             RemotePcmAudioOutput::new_with_timeout(
                 7,
-                TtsPcmSpec {
-                    sample_rate: 24_000,
-                    playback_rate: 1.0,
-                },
+                spec,
                 Arc::new(transport),
                 Arc::new(AtomicBool::new(true)),
                 timeout,
@@ -634,7 +679,7 @@ mod tests {
         assert_eq!(u64::from_le_bytes(payload[..8].try_into().unwrap()), 7);
         assert_eq!(
             u32::from_le_bytes(payload[8..12].try_into().unwrap()),
-            24_000
+            output.spec.sample_rate
         );
         output.handle_ack(AudioHostAck::BeginAccepted).unwrap();
         worker.join().unwrap().unwrap();
@@ -653,19 +698,21 @@ mod tests {
             .handle_ack(AudioHostAck::ChunkAccepted { sequence: 1 })
             .unwrap();
         assert!(started);
+        worker.join().unwrap().unwrap();
+
+        let current = Arc::clone(&output);
+        let finisher = thread::spawn(move || current.finish_writes());
         let (kind, second) = read_record(&mut host);
         assert_eq!(kind, AUDIO_CHUNK_KIND);
         assert_eq!(second.len(), 16 + 904 * 4);
         output
             .handle_ack(AudioHostAck::ChunkAccepted { sequence: 2 })
             .unwrap();
-        worker.join().unwrap().unwrap();
-
-        output.finish_writes().unwrap();
         let (kind, end) = read_record(&mut host);
         assert_eq!(kind, AUDIO_END_KIND);
         assert_eq!(u64::from_le_bytes(end[8..16].try_into().unwrap()), 2);
         assert_eq!(u64::from_le_bytes(end[16..24].try_into().unwrap()), 5_000);
+        finisher.join().unwrap().unwrap();
         output
             .handle_ack(AudioHostAck::Drained {
                 sequence: 2,
@@ -681,8 +728,8 @@ mod tests {
         let (output, mut host) = fixture();
         start(&output, &mut host);
         let current = Arc::clone(&output);
-        let worker = thread::spawn(move || current.write(&vec![0.25; 4096 * 3]));
-        for sequence in 1..=2 {
+        let worker = thread::spawn(move || current.write(&vec![0.25; 4096 * 4]));
+        for sequence in 1..=3 {
             let (kind, _) = read_record(&mut host);
             assert_eq!(kind, AUDIO_CHUNK_KIND);
             let started = output
@@ -703,12 +750,69 @@ mod tests {
         let (kind, _) = read_record(&mut host);
         assert_eq!(kind, AUDIO_CHUNK_KIND);
         output
-            .handle_ack(AudioHostAck::Played {
-                played_frames: 4096 * 2,
-            })
+            .handle_ack(AudioHostAck::ChunkAccepted { sequence: 4 })
             .unwrap();
+        worker.join().unwrap().unwrap();
+    }
+
+    #[test]
+    fn production_rates_buffer_a_sustained_runway_before_played_credit() {
+        for (spec, expected_chunks) in [
+            (
+                TtsPcmSpec {
+                    sample_rate: 48_000,
+                    playback_rate: 1.5,
+                },
+                8,
+            ),
+            (
+                TtsPcmSpec {
+                    sample_rate: 24_000,
+                    playback_rate: 2.0,
+                },
+                5,
+            ),
+        ] {
+            let (output, mut host) =
+                fixture_with_spec_and_timeout(spec, Duration::from_millis(100));
+            start(&output, &mut host);
+            let current = Arc::clone(&output);
+            let worker = thread::spawn(move || {
+                current.write(&vec![0.25; MAX_AUDIO_CHUNK_FRAMES * expected_chunks])
+            });
+            host.set_read_timeout(Some(Duration::from_millis(50)))
+                .unwrap();
+            for sequence in 1..=expected_chunks as u64 {
+                let (kind, _) = read_record(&mut host);
+                assert_eq!(kind, AUDIO_CHUNK_KIND);
+                output
+                    .handle_ack(AudioHostAck::ChunkAccepted { sequence })
+                    .unwrap();
+            }
+            worker.join().unwrap().unwrap();
+        }
+    }
+
+    #[test]
+    fn short_backend_callbacks_coalesce_into_bounded_transport_records() {
+        let (output, mut host) = fixture();
+        start(&output, &mut host);
+        for _ in 0..7 {
+            output.write(&vec![0.25; 512]).unwrap();
+        }
+        host.set_read_timeout(Some(Duration::from_millis(20)))
+            .unwrap();
+        let mut byte = [0];
+        assert!(host.read(&mut byte).is_err());
+
+        let current = Arc::clone(&output);
+        let worker = thread::spawn(move || current.write(&vec![0.25; 512]));
+        host.set_read_timeout(None).unwrap();
+        let (kind, chunk) = read_record(&mut host);
+        assert_eq!(kind, AUDIO_CHUNK_KIND);
+        assert_eq!(chunk.len(), 16 + MAX_AUDIO_CHUNK_FRAMES * 4);
         output
-            .handle_ack(AudioHostAck::ChunkAccepted { sequence: 3 })
+            .handle_ack(AudioHostAck::ChunkAccepted { sequence: 1 })
             .unwrap();
         worker.join().unwrap().unwrap();
     }
@@ -753,7 +857,7 @@ mod tests {
         let (output, mut host) = fixture();
         start(&output, &mut host);
         let current = Arc::clone(&output);
-        let worker = thread::spawn(move || current.write(&[0.25; 128]));
+        let worker = thread::spawn(move || current.write(&[0.25; MAX_AUDIO_CHUNK_FRAMES]));
         assert_eq!(read_record(&mut host).0, AUDIO_CHUNK_KIND);
 
         output.active.store(false, Ordering::SeqCst);
@@ -773,7 +877,7 @@ mod tests {
         let (output, mut host) = fixture();
         start(&output, &mut host);
         let current = Arc::clone(&output);
-        let worker = thread::spawn(move || current.write(&[0.25; 128]));
+        let worker = thread::spawn(move || current.write(&[0.25; MAX_AUDIO_CHUNK_FRAMES]));
         assert_eq!(read_record(&mut host).0, AUDIO_CHUNK_KIND);
 
         output.active.store(false, Ordering::SeqCst);
@@ -798,7 +902,7 @@ mod tests {
         let (output, mut host) = fixture();
         start(&output, &mut host);
         let current = Arc::clone(&output);
-        let writer = thread::spawn(move || current.write(&[0.25; 32]));
+        let writer = thread::spawn(move || current.write(&[0.25; MAX_AUDIO_CHUNK_FRAMES]));
         assert_eq!(read_record(&mut host).0, AUDIO_CHUNK_KIND);
         output
             .handle_ack(AudioHostAck::ChunkAccepted { sequence: 1 })
@@ -813,13 +917,18 @@ mod tests {
         output
             .handle_ack(AudioHostAck::Drained {
                 sequence: 1,
-                played_frames: 32,
+                played_frames: MAX_AUDIO_CHUNK_FRAMES as u64,
             })
             .unwrap();
         output
-            .handle_ack(AudioHostAck::Cancelled { played_frames: 32 })
+            .handle_ack(AudioHostAck::Cancelled {
+                played_frames: MAX_AUDIO_CHUNK_FRAMES as u64,
+            })
             .unwrap();
-        assert_eq!(cancel.join().unwrap().unwrap(), 32);
+        assert_eq!(
+            cancel.join().unwrap().unwrap(),
+            MAX_AUDIO_CHUNK_FRAMES as u64
+        );
     }
 
     #[test]
