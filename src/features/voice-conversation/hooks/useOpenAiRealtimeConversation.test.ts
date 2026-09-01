@@ -672,7 +672,16 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
         }),
       );
     });
-    expect(onSend).not.toHaveBeenCalled();
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+    expect(onSend).toHaveBeenCalledWith(
+      "[Voice transcript] Emissary said: hello user",
+      undefined,
+      undefined,
+      expect.objectContaining({
+        displayText: "hello user",
+        userMessageMetadata: expect.objectContaining({ userVisible: false }),
+      }),
+    );
     expect(
       useChatStore.getState().messagesBySession["backend-session"]?.[0],
     ).toMatchObject({ metadata: { personaName: "Emissary" } });
@@ -1110,7 +1119,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
         personaName: "Emissary",
       },
     });
-    expect(onSend).not.toHaveBeenCalled();
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
 
     await act(async () => owner.result.current.onToggle());
   });
@@ -1153,7 +1162,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     await act(async () => owner.result.current.onToggle());
   });
 
-  it("handles a repository question and symlink follow-up without emissary-triggered master wakes", async () => {
+  it("wakes the master for every finalized transcript in a repository follow-up", async () => {
     const onSend = vi.fn().mockResolvedValue(true);
     const owner = renderConversation("session-a", onSend);
     await act(async () => owner.result.current.onToggle());
@@ -1187,7 +1196,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
         }),
       );
     });
-    await waitFor(() => expect(mocks.steerPrompt).toHaveBeenCalledOnce());
+    await waitFor(() => expect(mocks.steerPrompt).toHaveBeenCalledTimes(2));
     expect(onSend).toHaveBeenCalledOnce();
 
     await act(async () => {
@@ -1203,6 +1212,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
         }),
       );
     });
+    await waitFor(() => expect(mocks.steerPrompt).toHaveBeenCalledTimes(3));
     await waitFor(() =>
       expect(
         useChatStore.getState().messagesBySession["session-a"],
@@ -1221,9 +1231,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     });
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
     expect(onSend.mock.calls[1]?.[0]).toBe(
-      "[Voice transcript] Emissary said: hello user\n" +
-        "[Voice transcript] Emissary said: You have 21 repositories.\n" +
-        "[Voice transcript] User said: are any of them symbolic links?",
+      "[Voice transcript] User said: are any of them symbolic links?",
     );
     act(() => useChatStore.getState().setChatState("session-a", "thinking"));
     act(() =>
@@ -1242,7 +1250,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
         }),
       );
     });
-    await waitFor(() => expect(mocks.steerPrompt).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mocks.steerPrompt).toHaveBeenCalledTimes(5));
     expect(onSend).toHaveBeenCalledTimes(2);
 
     await act(async () => {
@@ -1258,6 +1266,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
         }),
       );
     });
+    await waitFor(() => expect(mocks.steerPrompt).toHaveBeenCalledTimes(6));
     await waitFor(() =>
       expect(
         useChatStore
@@ -1298,7 +1307,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     await act(async () => owner.result.current.onToggle());
   });
 
-  it("buffers emissary speech until the next user-triggered master turn", async () => {
+  it("wakes the master immediately for finalized emissary speech", async () => {
     const onSend = vi.fn().mockResolvedValue(true);
     const owner = renderConversation("session-a", onSend);
     await act(async () => owner.result.current.onToggle());
@@ -1318,8 +1327,16 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       content: [{ type: "text", text: "hello user" }],
       metadata: { personaName: "Emissary" },
     });
-    await Promise.resolve();
-    expect(onSend).not.toHaveBeenCalled();
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+    expect(onSend).toHaveBeenLastCalledWith(
+      "[Voice transcript] Emissary said: hello user",
+      undefined,
+      undefined,
+      expect.objectContaining({
+        displayText: "hello user",
+        userMessageMetadata: expect.objectContaining({ userVisible: false }),
+      }),
+    );
 
     act(() => {
       channel.dispatchEvent(
@@ -1328,9 +1345,9 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
         }),
       );
     });
-    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
-    expect(onSend).toHaveBeenCalledWith(
-      "[Voice transcript] Emissary said: hello user\n[Voice transcript] User said: hello master",
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
+    expect(onSend).toHaveBeenLastCalledWith(
+      "[Voice transcript] User said: hello master",
       undefined,
       undefined,
       expect.objectContaining({ displayText: "hello master" }),
@@ -1364,7 +1381,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       throw new Error("expected an emissary text message");
     const speech = content.speech;
     expect(speech).toEqual({ status: "interrupted", confidence: "low" });
-    expect(onSend).not.toHaveBeenCalled();
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
 
     await act(async () => owner.result.current.onToggle());
   });

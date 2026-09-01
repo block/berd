@@ -513,7 +513,6 @@ class OpenAiRealtimeConversationRuntime {
       const responses = new RealtimeResponseCoordinator();
       const pipe = new DirectMessagePipe();
       const transcriptMessageIds = new Map<string, string>();
-      const pendingEmissaryTranscripts: string[] = [];
       const masterTurnHandoffs = new Map<string, number>();
       let activeMasterTurnId: string | null = null;
       let userTranscriptRevision = 0;
@@ -557,18 +556,6 @@ class OpenAiRealtimeConversationRuntime {
       };
       const forwardTypedUserMessage = (text: string) => {
         userTranscriptRevision += 1;
-        const ownerSessionId = this.snapshot.boundSessionId;
-        if (ownerSessionId && pendingEmissaryTranscripts.length > 0) {
-          const priorEmissaryContext = pendingEmissaryTranscripts.splice(0);
-          const context = priorEmissaryContext.join("\n");
-          this.deliverToMaster(
-            ownerSessionId,
-            context,
-            context,
-            undefined,
-            true,
-          );
-        }
         const request = responses.requestTypedUserMessage(text);
         sendRealtimeEvents(transport, request.events);
       };
@@ -604,14 +591,19 @@ class OpenAiRealtimeConversationRuntime {
                     }: ${bridgeEvent.text}`;
               const masterTranscript = `[Voice transcript] ${transcriptLabel}`;
               if (bridgeEvent.speaker === "emissary") {
-                pendingEmissaryTranscripts.push(masterTranscript);
+                this.deliverToMaster(
+                  ownerSessionId,
+                  masterTranscript,
+                  bridgeEvent.text,
+                  undefined,
+                  true,
+                );
                 continue;
               }
               userTranscriptRevision += 1;
-              const priorEmissaryContext = pendingEmissaryTranscripts.splice(0);
               this.deliverToMaster(
                 ownerSessionId,
-                [...priorEmissaryContext, masterTranscript].join("\n"),
+                masterTranscript,
                 bridgeEvent.text,
                 undefined,
                 false,
