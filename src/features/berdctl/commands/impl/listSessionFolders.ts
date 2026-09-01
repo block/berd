@@ -24,15 +24,18 @@ Result:
   schema: listSessionFoldersSchema,
   execute: async (args) => {
     const [
-      { getWorkspaceAttachments, isSameWorkspacePath },
+      { getWorkspaceAttachments, isSameWorkspacePathWithHome },
+      { getHomeDir },
       { useChatSessionStore },
       { loadSessionForBerdctl, requireSession },
     ] = await Promise.all([
       import("@/features/chat/lib/workspaceAttachments"),
+      import("@/shared/api/system"),
       import("@/features/chat/stores/chatSessionStore"),
       import("../runtime/sessions"),
     ]);
     await loadSessionForBerdctl(args.session_id);
+    const homeDir = await getHomeDir();
     const session = requireSession(args.session_id);
     const cwd = session.workingDir ?? null;
     const folders = getWorkspaceAttachments(
@@ -43,7 +46,9 @@ Result:
         path: attachment.path,
         kind: attachment.kind,
         branch: attachment.branch ?? null,
-        cwd: cwd != null && isSameWorkspacePath(attachment.path, cwd),
+        cwd:
+          cwd != null &&
+          isSameWorkspacePathWithHome(attachment.path, cwd, homeDir),
       }));
     return { ok: true as const, cwd, folders };
   },
