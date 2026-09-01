@@ -2,7 +2,6 @@
 
 use std::collections::VecDeque;
 use std::fs;
-use std::io::Read;
 #[cfg(target_os = "macos")]
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -21,6 +20,7 @@ use berd_voice::{
     DeliveryProgress as VoiceDeliveryProgress, DrainPolicy, DrainTimeoutOutcome, OutboundFailure,
     OutboundOutcome, OutboundPlayback, TtsBackend, TtsConfiguration,
 };
+use berd_voice::{parakeet_assets, pocket_assets};
 use futures_util::StreamExt;
 #[cfg(target_os = "macos")]
 use objc2_core_audio::{
@@ -45,7 +45,7 @@ use super::{
 use berd_voice::PocketAudioPlayer;
 use tokio::io::AsyncWriteExt;
 
-const CACHE_VERSION: &str = berd_voice::POCKET_TTS_MODEL_ID;
+const CACHE_VERSION: &str = pocket_assets::MODEL_ID;
 const VERIFIED_MARKER: &str = ".verified";
 const POCKET_EVENT: &str = "pocket-voice:event";
 #[cfg(target_os = "macos")]
@@ -103,38 +103,6 @@ pub(crate) fn playback_latency_safety_duration(output_device: Option<&str>) -> D
         device_id.and_then(|id| get_device_transport_type(id).ok()),
     )
 }
-const PARAKEET_ARCHIVE: Artifact = Artifact {
-    filename: "parakeet.tar.bz2",
-    size: 104_337_827,
-    sha256: "17f945007b52ccd8b7200ffc7c5652e9e8e961dfdf479cefcabd06cf5703630b",
-    url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet_tdt_ctc_110m-en-36000-int8.tar.bz2",
-};
-const PARAKEET_ARCHIVE_DIR: &str = "sherpa-onnx-nemo-parakeet_tdt_ctc_110m-en-36000-int8";
-const PARAKEET_MODEL_SIZE: u64 = 131_652_171;
-const PARAKEET_MODEL_SHA256: &str =
-    "9177a9146cf32ee0cc8152276ef95116f312018d316be37ccf57f7efea81fc1a";
-const PARAKEET_TOKENS_SIZE: u64 = 9_953;
-const PARAKEET_TOKENS_SHA256: &str =
-    "450e56bd2f036fe5b6aa821865838cc5aa9d8b0106134ce9a9ba0664abe6cd10";
-const PARAKEET_LICENSE: &str = "\
-NVIDIA Parakeet TDT-CTC 110M (English)
-© NVIDIA Corporation.
-
-Licensed under the Creative Commons Attribution 4.0 International License:
-https://creativecommons.org/licenses/by/4.0/
-
-Original model: https://huggingface.co/nvidia/parakeet-tdt_ctc-110m
-ONNX conversion: https://github.com/k2-fsa/sherpa-onnx
-";
-
-#[derive(Clone, Copy)]
-struct Artifact {
-    filename: &'static str,
-    size: u64,
-    sha256: &'static str,
-    url: &'static str,
-}
-
 struct DownloadSpec<'a> {
     url: &'a str,
     destination: &'a Path,
@@ -142,47 +110,14 @@ struct DownloadSpec<'a> {
     expected_sha256: &'a str,
 }
 
-const MODEL_ARTIFACTS: &[Artifact] = &[
-    Artifact { filename: "bundle.json", size: 24_381, sha256: "bab643150f437f37df080a710520ff39ed9ebd9a339f8ebdc739f7eddfc28b3f", url: "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/58a6d00cf13d239b6748cb0769f35c580a8f606c/onnx/english_2026-04/bundle.json" },
-    Artifact { filename: "bos_before_voice.npy", size: 4_224, sha256: "f46edf4f7007b7ba4ea58831f49d003e59e167b4641c44bb3addfe9231a780b1", url: "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/58a6d00cf13d239b6748cb0769f35c580a8f606c/onnx/english_2026-04/bos_before_voice.npy" },
-    Artifact { filename: "tokenizer.model", size: 59_339, sha256: "d461765ae179566678c93091c5fa6f2984c31bbe990bf1aa62d92c64d91bc3f6", url: "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/58a6d00cf13d239b6748cb0769f35c580a8f606c/onnx/english_2026-04/tokenizer.model" },
-    Artifact { filename: "flow_lm_main_int8.onnx", size: 76_341_079, sha256: "f9bd8106b79a0192c1c43399ab938fb24900a95c1c599870d75a884e99000116", url: "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/58a6d00cf13d239b6748cb0769f35c580a8f606c/onnx/english_2026-04/flow_lm_main_int8.onnx" },
-    Artifact { filename: "flow_lm_flow_int8.onnx", size: 9_962_530, sha256: "3dd781ee5abee9e195320bf0106bebd6372a852b3b36352524ee78b40554635d", url: "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/58a6d00cf13d239b6748cb0769f35c580a8f606c/onnx/english_2026-04/flow_lm_flow_int8.onnx" },
-    Artifact { filename: "mimi_decoder_int8.onnx", size: 22_684_077, sha256: "3630450a3297a101792a6ac66619ebc70ab916b265e6220c2afaef8b1673f925", url: "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/58a6d00cf13d239b6748cb0769f35c580a8f606c/onnx/english_2026-04/mimi_decoder_int8.onnx" },
-    Artifact { filename: "mimi_encoder.onnx", size: 39_768_446, sha256: "853e2ca623b8782d94c3745ec6133bfdff7ce33d9b11128bd29ea03f28d76e3d", url: "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/58a6d00cf13d239b6748cb0769f35c580a8f606c/onnx/english_2026-04/mimi_encoder.onnx" },
-    Artifact { filename: "text_conditioner.onnx", size: 16_388_344, sha256: "4ecee995fb69f85c7a7493d11f7b5ee15d9950facc7ab3f5c9c49ef1e03847bb", url: "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/58a6d00cf13d239b6748cb0769f35c580a8f606c/onnx/english_2026-04/text_conditioner.onnx" },
-    Artifact { filename: "LICENSE", size: 18_655, sha256: "fe7b4ce83b8381cc5b216bbb4af73c570688d1b819c73bbaed8ca401f4677cd6", url: "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/58a6d00cf13d239b6748cb0769f35c580a8f606c/onnx/LICENSE" },
-];
+type PocketVoice = pocket_assets::PocketVoiceDescriptor;
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct PocketVoice {
+struct PocketVoiceOption {
     id: &'static str,
     name: &'static str,
-    #[serde(skip_serializing)]
-    filename: &'static str,
-    #[serde(skip_serializing)]
-    size_bytes: u64,
-    #[serde(skip_serializing)]
-    sha256: &'static str,
-    #[serde(skip_serializing)]
-    url: &'static str,
 }
-
-const VOICES: &[PocketVoice] = &[
-    PocketVoice { id: "anna", name: "Anna", filename: "anna.wav", size_bytes: 804_630, sha256: "0a6de25cf12bf1540beb85979f306a92be81fecc051c547c5395e7e5237a3856", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p228_023_enhanced.wav" },
-    PocketVoice { id: "vera", name: "Vera", filename: "vera.wav", size_bytes: 691_416, sha256: "309cf91a895830f15842b398f69a4962cb1f7e0bfab10e25dd27838e826c204b", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p229_023_enhanced.wav" },
-    PocketVoice { id: "fantine", name: "Fantine", filename: "fantine.wav", size_bytes: 674_852, sha256: "5f07d4e2a3f20a15572aae885156b43ef3fc12ef3812996fd135680d9956448b", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p244_023_enhanced.wav" },
-    PocketVoice { id: "charles", name: "Charles", filename: "charles.wav", size_bytes: 639_272, sha256: "6b681a429198f16e378d53bccb08d06939da7b00144a7696111d4f8f76be7756", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p254_023_enhanced.wav" },
-    PocketVoice { id: "paul", name: "Paul", filename: "paul.wav", size_bytes: 717_182, sha256: "7aba504fe0b3b16478b69eb27ce6007e3cb42b0c1915b5f1c6a6024ae37d679b", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p259_023_enhanced.wav" },
-    PocketVoice { id: "eponine", name: "Eponine", filename: "eponine.wav", size_bytes: 716_330, sha256: "a13c27fb47627b05223691a0ef2974358a18c886e6c2f9d2762ff1d02c20926b", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p262_023_enhanced.wav" },
-    PocketVoice { id: "azelma", name: "Azelma", filename: "azelma.wav", size_bytes: 823_852, sha256: "60e3d26cdf2efdec5df712152c839928f4d5522821e6554ae11fd96c57ab1026", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p303_023_enhanced.wav" },
-    PocketVoice { id: "george", name: "George", filename: "george.wav", size_bytes: 642_692, sha256: "29a41f93bf5236e5b21501091d7774c255d5f3d4e62fa4f9fdf0a92a793c84ae", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p315_023_enhanced.wav" },
-    PocketVoice { id: "mary", name: "Mary", filename: "mary.wav", size_bytes: 639_084, sha256: "a35b0468382218e9f37a9a7494d1e4b74deaf18d7ced22265b4e325bb55c183f", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p333_023_enhanced.wav" },
-    PocketVoice { id: "jane", name: "Jane", filename: "jane.wav", size_bytes: 759_340, sha256: "2f12e7f155eb3118f55425394f1b049e5b1b67bdc9b3932c8ba4521420aeb84a", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p339_023_enhanced.wav" },
-    PocketVoice { id: "michael", name: "Michael", filename: "michael.wav", size_bytes: 751_140, sha256: "b6743e9195e5e3fd34fe9d1633ae93f7ffab787b249e45f6467d7d6f7a6ee6ad", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p360_023_enhanced.wav" },
-    PocketVoice { id: "eve", name: "Eve", filename: "eve.wav", size_bytes: 671_872, sha256: "396e7cbd066b0f3fb6d67fa26e7904076958239d736d4390f15b5fe88feb14cd", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p361_023_enhanced.wav" },
-];
 
 #[derive(Clone, Debug, Default)]
 pub struct PocketVoiceState {
@@ -350,7 +285,7 @@ pub struct PocketVoiceStatus {
     error: Option<String>,
     selected_voice: String,
     playback_speed: f32,
-    voices: &'static [PocketVoice],
+    voices: Vec<PocketVoiceOption>,
 }
 
 fn default_playback_speed() -> f32 {
@@ -368,12 +303,11 @@ fn settings(base: &Path) -> PocketSettings {
 }
 
 fn pocket_download_bytes() -> u64 {
-    MODEL_ARTIFACTS.iter().map(|item| item.size).sum::<u64>()
-        + VOICES.iter().map(|item| item.size_bytes).sum::<u64>()
+    pocket_assets::download_bytes()
 }
 
 fn parakeet_download_bytes() -> u64 {
-    PARAKEET_ARCHIVE.size
+    parakeet_assets::download_bytes()
 }
 
 fn pocket_published_bytes() -> u64 {
@@ -382,18 +316,18 @@ fn pocket_published_bytes() -> u64 {
 
 #[cfg(test)]
 fn parakeet_published_bytes() -> u64 {
-    PARAKEET_MODEL_SIZE + PARAKEET_TOKENS_SIZE + PARAKEET_LICENSE.len() as u64
+    parakeet_assets::published_bytes()
 }
 
 fn pocket_disk_bytes(base: &Path) -> Option<u64> {
     let version = base.join(CACHE_VERSION);
-    MODEL_ARTIFACTS
+    pocket_assets::model_artifacts()
         .iter()
-        .map(|item| version.join(item.filename))
+        .map(|item| version.join(item.relative_path))
         .chain(
-            VOICES
+            pocket_assets::voices()
                 .iter()
-                .map(|voice| version.join("voices").join(voice.filename)),
+                .map(|voice| version.join(voice.relative_path)),
         )
         .try_fold(0_u64, |total, path| {
             total.checked_add(fs::metadata(path).ok()?.len())
@@ -402,20 +336,12 @@ fn pocket_disk_bytes(base: &Path) -> Option<u64> {
 
 fn parakeet_disk_bytes(base: &Path) -> Option<u64> {
     let stt = base.join(CACHE_VERSION).join("stt");
-    [
-        stt.join("model.int8.onnx"),
-        stt.join("tokens.txt"),
-        stt.join("MODEL_LICENSE.txt"),
-    ]
-    .into_iter()
-    .try_fold(0_u64, |total, path| {
-        total.checked_add(fs::metadata(path).ok()?.len())
-    })
-}
-
-#[cfg(test)]
-fn total_bytes() -> u64 {
-    pocket_download_bytes() + parakeet_download_bytes()
+    parakeet_assets::published_assets()
+        .iter()
+        .map(|asset| stt.join(asset.relative_path))
+        .try_fold(0_u64, |total, path| {
+            total.checked_add(fs::metadata(path).ok()?.len())
+        })
 }
 
 fn cache_base(app: &AppHandle) -> Result<PathBuf, String> {
@@ -427,7 +353,7 @@ fn cache_base(app: &AppHandle) -> Result<PathBuf, String> {
 
 fn selected_voice(base: &Path) -> String {
     Some(settings(base).selected_voice)
-        .filter(|id| VOICES.iter().any(|voice| voice.id == id))
+        .filter(|id| pocket_assets::voices().iter().any(|voice| voice.id == id))
         .unwrap_or_else(|| DEFAULT_VOICE.to_string())
 }
 
@@ -592,10 +518,6 @@ pub(crate) fn resolve_input_during_tts_policy(
     }
 }
 
-fn file_has_size(path: &Path, size: u64) -> bool {
-    fs::metadata(path).is_ok_and(|metadata| metadata.len() == size)
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct InstallationFingerprint(Vec<(PathBuf, u64, SystemTime)>);
 
@@ -639,21 +561,10 @@ fn pocket_installation_valid(base: &Path) -> bool {
         pocket_installation_fingerprint(base),
         &POCKET_INSTALLATION_VALIDATION,
         || {
-            MODEL_ARTIFACTS.iter().all(|item| {
-                verify_file(
-                    &base.join(CACHE_VERSION).join(item.filename),
-                    item.size,
-                    item.sha256,
-                )
-                .is_ok()
-            }) && VOICES.iter().all(|voice| {
-                verify_file(
-                    &base.join(CACHE_VERSION).join("voices").join(voice.filename),
-                    voice.size_bytes,
-                    voice.sha256,
-                )
-                .is_ok()
-            })
+            matches!(
+                pocket_assets::inspect(&base.join(CACHE_VERSION)),
+                Ok(pocket_assets::PocketAssetStatus::Ready { .. })
+            )
         },
     )
 }
@@ -664,18 +575,10 @@ fn parakeet_installation_valid(base: &Path) -> bool {
         parakeet_installation_fingerprint(base),
         &PARAKEET_INSTALLATION_VALIDATION,
         || {
-            verify_file(
-                &base.join(CACHE_VERSION).join("stt").join("model.int8.onnx"),
-                PARAKEET_MODEL_SIZE,
-                PARAKEET_MODEL_SHA256,
+            matches!(
+                parakeet_assets::inspect(&base.join(CACHE_VERSION).join("stt")),
+                Ok(parakeet_assets::ParakeetAssetStatus::Ready { .. })
             )
-            .is_ok()
-                && verify_file(
-                    &base.join(CACHE_VERSION).join("stt").join("tokens.txt"),
-                    PARAKEET_TOKENS_SIZE,
-                    PARAKEET_TOKENS_SHA256,
-                )
-                .is_ok()
         },
     )
 }
@@ -693,30 +596,29 @@ fn verified_version(base: &Path) -> Option<PathBuf> {
 
 fn pocket_installation_fingerprint(base: &Path) -> Option<InstallationFingerprint> {
     let version = verified_version(base)?;
-    let mut files: Vec<(PathBuf, u64)> = MODEL_ARTIFACTS
+    let mut files: Vec<(PathBuf, u64)> = pocket_assets::model_artifacts()
         .iter()
-        .map(|item| (version.join(item.filename), item.size))
+        .map(|item| (version.join(item.relative_path), item.size_bytes))
         .collect();
-    files.extend(VOICES.iter().map(|voice| {
-        (
-            version.join("voices").join(voice.filename),
-            voice.size_bytes,
-        )
-    }));
+    files.extend(
+        pocket_assets::voices()
+            .iter()
+            .map(|voice| (version.join(voice.relative_path), voice.size_bytes)),
+    );
     fingerprint_files(files)
 }
 
 fn parakeet_installation_fingerprint(base: &Path) -> Option<InstallationFingerprint> {
     let version = verified_version(base)?;
-    let mut files = vec![
-        (
-            version.join("stt").join("model.int8.onnx"),
-            PARAKEET_MODEL_SIZE,
-        ),
-        (version.join("stt").join("tokens.txt"), PARAKEET_TOKENS_SIZE),
-    ];
-    let license = version.join("stt").join("MODEL_LICENSE.txt");
-    files.push((license.clone(), fs::metadata(&license).ok()?.len()));
+    let files = parakeet_assets::published_assets()
+        .iter()
+        .map(|asset| {
+            (
+                version.join("stt").join(asset.relative_path),
+                asset.size_bytes,
+            )
+        })
+        .collect::<Vec<_>>();
     fingerprint_files(files)
 }
 
@@ -791,13 +693,22 @@ fn pocket_voice_status(
         }),
         selected_voice: selected_voice(&base),
         playback_speed: playback_speed(&base),
-        voices: VOICES,
+        voices: pocket_assets::voices()
+            .iter()
+            .map(|voice| PocketVoiceOption {
+                id: voice.id,
+                name: voice.name,
+            })
+            .collect(),
     })
 }
 
 #[tauri::command]
 pub fn select_pocket_voice(app: AppHandle, voice_id: String) -> Result<(), String> {
-    if !VOICES.iter().any(|voice| voice.id == voice_id) {
+    if !pocket_assets::voices()
+        .iter()
+        .any(|voice| voice.id == voice_id)
+    {
         return Err(format!("Unknown Pocket voice: {voice_id}"));
     }
     let base = cache_base(&app)?;
@@ -839,7 +750,7 @@ pub async fn preview_pocket_voice(
     voice_id: String,
 ) -> Result<(), String> {
     let base = cache_base(&app)?;
-    let voice = VOICES
+    let voice = pocket_assets::voices()
         .iter()
         .find(|voice| voice.id == voice_id)
         .copied()
@@ -898,7 +809,7 @@ pub async fn speak_pocket_voice(
         return Err("Pocket TTS installation is incomplete or corrupt".to_string());
     }
     let voice_id = selected_voice(&base);
-    let voice = VOICES
+    let voice = pocket_assets::voices()
         .iter()
         .find(|voice| voice.id == voice_id)
         .copied()
@@ -973,7 +884,7 @@ pub fn start_pocket_voice_stream(
             return Err("Pocket TTS installation is incomplete or corrupt".to_string());
         }
         let voice_id = selected_voice(&base);
-        let voice = VOICES
+        let voice = pocket_assets::voices()
             .iter()
             .find(|voice| voice.id == voice_id)
             .copied()
@@ -1290,9 +1201,9 @@ fn remove_cached_model(base: &Path, model: VoiceModelKind) -> Result<(), String>
 
     let retained_paths: Vec<PathBuf> = match model {
         VoiceModelKind::Pocket => vec![PathBuf::from("stt")],
-        VoiceModelKind::Parakeet => MODEL_ARTIFACTS
+        VoiceModelKind::Parakeet => pocket_assets::model_artifacts()
             .iter()
-            .map(|artifact| PathBuf::from(artifact.filename))
+            .map(|artifact| PathBuf::from(artifact.relative_path))
             .chain(std::iter::once(PathBuf::from("voices")))
             .collect(),
     };
@@ -1788,8 +1699,8 @@ async fn install_one_model(
     }
     match model {
         VoiceModelKind::Pocket => {
-            for artifact in MODEL_ARTIFACTS {
-                let _ = fs::remove_file(staging.join(artifact.filename));
+            for artifact in pocket_assets::model_artifacts() {
+                let _ = fs::remove_file(staging.join(artifact.relative_path));
             }
             let _ = fs::remove_dir_all(staging.join("voices"));
         }
@@ -1805,7 +1716,7 @@ async fn install_one_model(
     let install_result = async {
         match model {
             VoiceModelKind::Parakeet => {
-                let archive = staging.join(PARAKEET_ARCHIVE.filename);
+                let archive = staging.join(parakeet_assets::ARCHIVE.filename);
                 download_artifact(
                     app,
                     state,
@@ -1813,10 +1724,10 @@ async fn install_one_model(
                     attempt_id,
                     &client,
                     DownloadSpec {
-                        url: PARAKEET_ARCHIVE.url,
+                        url: parakeet_assets::ARCHIVE.source_url,
                         destination: &archive,
-                        expected_size: PARAKEET_ARCHIVE.size,
-                        expected_sha256: PARAKEET_ARCHIVE.sha256,
+                        expected_size: parakeet_assets::ARCHIVE.size_bytes,
+                        expected_sha256: parakeet_assets::ARCHIVE.sha256,
                     },
                 )
                 .await?;
@@ -1825,7 +1736,7 @@ async fn install_one_model(
                     model,
                     attempt_id,
                     VoiceModelDownloadPhase::Extracting,
-                    Some(PARAKEET_ARCHIVE.size),
+                    Some(parakeet_assets::ARCHIVE.size_bytes),
                 )?;
                 emit_pocket_status(app, state);
                 extract_parakeet(&archive, &staging).await?;
@@ -1845,7 +1756,7 @@ async fn install_one_model(
                 tokio::fs::create_dir_all(staging.join("voices"))
                     .await
                     .map_err(|error| format!("create Pocket staging directory: {error}"))?;
-                for item in MODEL_ARTIFACTS {
+                for item in pocket_assets::model_artifacts() {
                     download_artifact(
                         app,
                         state,
@@ -1853,15 +1764,15 @@ async fn install_one_model(
                         attempt_id,
                         &client,
                         DownloadSpec {
-                            url: item.url,
-                            destination: &staging.join(item.filename),
-                            expected_size: item.size,
+                            url: item.source_url,
+                            destination: &staging.join(item.relative_path),
+                            expected_size: item.size_bytes,
                             expected_sha256: item.sha256,
                         },
                     )
                     .await?;
                 }
-                for voice in VOICES {
+                for voice in pocket_assets::voices() {
                     download_artifact(
                         app,
                         state,
@@ -1869,8 +1780,8 @@ async fn install_one_model(
                         attempt_id,
                         &client,
                         DownloadSpec {
-                            url: voice.url,
-                            destination: &staging.join("voices").join(voice.filename),
+                            url: voice.source_url,
+                            destination: &staging.join(voice.relative_path),
                             expected_size: voice.size_bytes,
                             expected_sha256: voice.sha256,
                         },
@@ -1954,17 +1865,18 @@ async fn extract_parakeet(archive: &Path, staging: &Path) -> Result<(), String> 
         archive
             .unpack(&extraction)
             .map_err(|error| format!("extract Parakeet archive: {error}"))?;
-        let source = extraction.join(PARAKEET_ARCHIVE_DIR);
-        verify_file(
-            &source.join("model.int8.onnx"),
-            PARAKEET_MODEL_SIZE,
-            PARAKEET_MODEL_SHA256,
-        )?;
-        verify_file(
-            &source.join("tokens.txt"),
-            PARAKEET_TOKENS_SIZE,
-            PARAKEET_TOKENS_SHA256,
-        )?;
+        let source = extraction.join(parakeet_assets::ARCHIVE_DIRECTORY);
+        fs::write(
+            source.join("MODEL_LICENSE.txt"),
+            parakeet_assets::license_text(),
+        )
+        .map_err(|error| format!("write Parakeet attribution: {error}"))?;
+        if !matches!(
+            parakeet_assets::inspect(&source),
+            Ok(parakeet_assets::ParakeetAssetStatus::Ready { .. })
+        ) {
+            return Err("Extracted Parakeet model failed pinned-file verification".to_string());
+        }
         let destination = staging.join("stt");
         fs::create_dir_all(&destination)
             .map_err(|error| format!("create Parakeet staging directory: {error}"))?;
@@ -1975,40 +1887,16 @@ async fn extract_parakeet(archive: &Path, staging: &Path) -> Result<(), String> 
         .map_err(|error| format!("stage Parakeet model: {error}"))?;
         fs::rename(source.join("tokens.txt"), destination.join("tokens.txt"))
             .map_err(|error| format!("stage Parakeet tokens: {error}"))?;
-        fs::write(destination.join("MODEL_LICENSE.txt"), PARAKEET_LICENSE)
-            .map_err(|error| format!("write Parakeet attribution: {error}"))?;
+        fs::rename(
+            source.join("MODEL_LICENSE.txt"),
+            destination.join("MODEL_LICENSE.txt"),
+        )
+        .map_err(|error| format!("stage Parakeet attribution: {error}"))?;
         fs::remove_dir_all(&extraction)
             .map_err(|error| format!("remove Parakeet extraction directory: {error}"))
     })
     .await
     .map_err(|error| format!("Parakeet extraction task failed: {error}"))?
-}
-
-fn verify_file(path: &Path, expected_size: u64, expected_sha256: &str) -> Result<(), String> {
-    if !file_has_size(path, expected_size) {
-        return Err(format!("Voice asset size mismatch for {}", path.display()));
-    }
-    let mut file =
-        fs::File::open(path).map_err(|error| format!("open {}: {error}", path.display()))?;
-    let mut hasher = Sha256::new();
-    let mut buffer = [0_u8; 64 * 1024];
-    loop {
-        let read = file
-            .read(&mut buffer)
-            .map_err(|error| format!("read {}: {error}", path.display()))?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
-    let actual = format!("{:x}", hasher.finalize());
-    if actual != expected_sha256 {
-        return Err(format!(
-            "Voice asset checksum mismatch for {}: expected {expected_sha256}, got {actual}",
-            path.display()
-        ));
-    }
-    Ok(())
 }
 
 pub fn parakeet_model_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -2671,21 +2559,6 @@ mod tests {
     }
 
     #[test]
-    fn manifest_has_unique_paths_and_expected_total() {
-        let mut names = std::collections::HashSet::new();
-        for artifact in MODEL_ARTIFACTS {
-            assert!(names.insert(artifact.filename));
-            assert_eq!(artifact.url.matches("/resolve/").count(), 1);
-        }
-        for voice in VOICES {
-            assert!(names.insert(voice.filename));
-            assert_eq!(voice.url.matches("/resolve/").count(), 1);
-        }
-        assert_eq!(VOICES.len(), 12);
-        assert_eq!(total_bytes(), 278_120_564);
-    }
-
-    #[test]
     fn invalid_install_rejects_missing_and_corrupt_files() {
         let directory = tempfile::tempdir().expect("temporary directory");
         assert!(!installation_valid(directory.path()));
@@ -2704,16 +2577,16 @@ mod tests {
         fs::create_dir_all(version.join("stt")).expect("create Parakeet fixture");
 
         let mut expected_pocket_bytes = 0;
-        for artifact in MODEL_ARTIFACTS {
-            let contents = vec![b'p'; artifact.filename.len()];
+        for artifact in pocket_assets::model_artifacts() {
+            let contents = vec![b'p'; artifact.relative_path.len()];
             expected_pocket_bytes += contents.len() as u64;
-            fs::write(version.join(artifact.filename), contents)
+            fs::write(version.join(artifact.relative_path), contents)
                 .expect("write Pocket artifact fixture");
         }
-        for voice in VOICES {
-            let contents = vec![b'v'; voice.filename.len()];
+        for voice in pocket_assets::voices() {
+            let contents = vec![b'v'; voice.relative_path.len()];
             expected_pocket_bytes += contents.len() as u64;
-            fs::write(version.join("voices").join(voice.filename), contents)
+            fs::write(version.join(voice.relative_path), contents)
                 .expect("write Pocket voice fixture");
         }
 
@@ -2729,20 +2602,6 @@ mod tests {
             Some(expected_pocket_bytes)
         );
         assert_eq!(parakeet_disk_bytes(directory.path()), Some(18));
-    }
-
-    #[test]
-    fn verification_rejects_same_length_corruption() {
-        let directory = tempfile::tempdir().expect("temporary directory");
-        let path = directory.path().join("asset.bin");
-        fs::write(&path, b"same-size-a").expect("write original fixture");
-        let expected_sha256 = format!("{:x}", Sha256::digest(b"same-size-a"));
-        verify_file(&path, 11, &expected_sha256).expect("verify original fixture");
-
-        fs::write(&path, b"same-size-b").expect("write corrupt fixture");
-        assert!(verify_file(&path, 11, &expected_sha256)
-            .expect_err("same-length corruption must fail")
-            .contains("checksum mismatch"));
     }
 
     #[tokio::test]
@@ -2859,10 +2718,10 @@ mod tests {
             .expect("begin Pocket attempt");
         let mut observed = vec![0];
 
-        for size in MODEL_ARTIFACTS
+        for size in pocket_assets::model_artifacts()
             .iter()
-            .map(|artifact| artifact.size)
-            .chain(VOICES.iter().map(|voice| voice.size_bytes))
+            .map(|artifact| artifact.size_bytes)
+            .chain(pocket_assets::voices().iter().map(|voice| voice.size_bytes))
         {
             assert!(increment_model_progress(
                 &mut runtime,
@@ -3247,7 +3106,7 @@ mod tests {
             &mut runtime,
             VoiceModelKind::Parakeet,
             attempt_id,
-            PARAKEET_ARCHIVE.size - first_chunk,
+            parakeet_assets::ARCHIVE.size_bytes - first_chunk,
         )
         .expect("finish Parakeet archive");
         advance_model_progress(
@@ -3255,7 +3114,7 @@ mod tests {
             VoiceModelKind::Parakeet,
             attempt_id,
             VoiceModelDownloadPhase::Extracting,
-            Some(PARAKEET_ARCHIVE.size),
+            Some(parakeet_assets::ARCHIVE.size_bytes),
         )
         .expect("extract Parakeet");
         let after_archive = runtime
@@ -3424,8 +3283,8 @@ mod tests {
         let version = base.join(CACHE_VERSION);
         fs::create_dir_all(version.join("voices")).expect("create Pocket fixture");
         fs::create_dir_all(version.join("stt")).expect("create Parakeet fixture");
-        for artifact in MODEL_ARTIFACTS {
-            fs::write(version.join(artifact.filename), b"pocket")
+        for artifact in pocket_assets::model_artifacts() {
+            fs::write(version.join(artifact.relative_path), b"pocket")
                 .expect("write Pocket artifact fixture");
         }
         fs::write(version.join("voices").join("mary.wav"), b"voice").expect("write voice fixture");
@@ -3450,7 +3309,9 @@ mod tests {
         assert!(version.join("stt").join("model.int8.onnx").exists());
         assert!(version.join(VERIFIED_MARKER).exists());
         assert!(!version.join("voices").exists());
-        assert!(!version.join(MODEL_ARTIFACTS[0].filename).exists());
+        assert!(!version
+            .join(pocket_assets::model_artifacts()[0].relative_path)
+            .exists());
     }
 
     #[test]
@@ -3463,7 +3324,9 @@ mod tests {
 
         let version = directory.path().join(CACHE_VERSION);
         assert!(version.join("voices").join("mary.wav").exists());
-        assert!(version.join(MODEL_ARTIFACTS[0].filename).exists());
+        assert!(version
+            .join(pocket_assets::model_artifacts()[0].relative_path)
+            .exists());
         assert!(version.join(VERIFIED_MARKER).exists());
         assert!(!version.join("stt").exists());
     }

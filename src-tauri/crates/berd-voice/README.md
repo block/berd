@@ -81,6 +81,17 @@ commands have no cancellation protocol, and interruption by a process signal
 does not promise a terminal JSON line. None opens an audio device, starts a
 voice session, applies host settings, chooses fallbacks, or emits Tauri events.
 
+The public `pocket_assets` and `parakeet_assets` modules define the immutable
+asset catalogs used by Berd and inspect an explicit portable bundle root as
+`Missing`, `Invalid`, or `Ready { verified_bytes }`. Verification opens each
+file, checks that it is a regular file with the pinned size, and streams its
+SHA-256 through a bounded buffer. Pocket exposes its model files and twelve
+voice descriptors; Parakeet has its own model identity and pins the runtime
+model, tokens, and exact attribution/license file. These modules do not choose
+a default voice, cache root, staging layout, publication marker, download
+policy, or UI representation. Berd remains responsible for those host concerns
+and consumes the shared descriptors and full-root inspection after publication.
+
 `voices.list` returns `backend`, normalized `languageFilter`,
 `availableLanguages`, and exact voice records. `voices.download` returns the
 canonical voice, `installed: true`, and `availabilityWaitSeconds`; a missing

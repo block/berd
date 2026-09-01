@@ -25,7 +25,7 @@ use berd_voice::protocol::{
 use berd_voice::session::{PrepareOutcome, PrepareRequest, SessionCore};
 use berd_voice::{
     ConfiguredTtsSlot, TtsBackend, TtsConfiguration, TtsConfigurationLease,
-    TtsConfigurationRejection, TtsConfigurationRejectionKind, POCKET_TTS_MODEL_ID,
+    TtsConfigurationRejection, TtsConfigurationRejectionKind,
 };
 use serde::Serialize;
 
@@ -1637,7 +1637,7 @@ fn create_tts_configuration(config: &TtsBackendConfig) -> Result<TtsConfiguratio
             rate,
         } => Ok(TtsConfiguration::pocket(
             model_dir.clone(),
-            POCKET_TTS_MODEL_ID.into(),
+            berd_voice::pocket_assets::MODEL_ID.into(),
             voice.clone(),
             *rate,
         )),
@@ -2691,7 +2691,7 @@ mod tests {
         let snapshot = berd_voice::TtsConfigurationSnapshot {
             revision: 1,
             settings: berd_voice::TtsSettings::Pocket {
-                model: POCKET_TTS_MODEL_ID.into(),
+                model: berd_voice::pocket_assets::MODEL_ID.into(),
                 voice: "mary".into(),
                 rate: 1.0,
             },

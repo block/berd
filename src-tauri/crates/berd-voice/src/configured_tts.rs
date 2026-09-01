@@ -8,7 +8,6 @@ use crate::openai::OpenAiSpeechConfig;
 #[cfg(target_os = "macos")]
 use crate::SiriTts;
 
-pub const POCKET_TTS_MODEL_ID: &str = "native-voice-v2";
 use crate::{OpenAiTts, PocketTtsBackend, TtsBackend};
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -702,7 +701,7 @@ mod tests {
             ),
             (
                 TtsSettings::Pocket {
-                    model: POCKET_TTS_MODEL_ID.into(),
+                    model: crate::pocket_assets::MODEL_ID.into(),
                     voice: "mary".into(),
                     rate: 1.5,
                 },
