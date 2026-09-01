@@ -703,7 +703,8 @@
       "connect": "Conectar",
       "disconnect": "Desconectar",
       "forget": "Olvidar",
-      "shutdown": "Detener backend remoto"
+      "shutdown": "Detener backend remoto",
+      "takeover": "Detener y reconectar"
     },
     "custom": {
       "description": "Conéctate a una máquina que no está en tu configuración SSH.",
@@ -712,6 +713,10 @@
       "placeholder": "usuario@host"
     },
     "description": "Los hosts provienen de tu ~/.ssh/config. La autenticación por clave o agente ya debe funcionar: comprueba primero que `ssh <host>` funciona en una terminal.",
+    "conflict": {
+      "instance": "Daemon en conflicto: PID {{pid}}, {{version}}, {{binary}}",
+      "pathUnknown": "binario desconocido"
+    },
     "doctor": {
       "checking": "Comprobando el host...",
       "found": "Encontrado",
@@ -730,9 +735,12 @@
     "shutdownConfirm": {
       "cancel": "Cancelar",
       "confirm": "Detener backend",
-      "description": "Esto detiene el daemon del agente en el host remoto y finaliza cualquier trabajo remoto en curso.",
+      "description": "Esto detiene el daemon del agente registrado en el host remoto después de verificar la identidad del proceso y finaliza cualquier trabajo remoto en curso.",
       "stopping": "Deteniendo...",
       "title": "¿Detener el backend remoto en \"{{host}}\"?"
+    },
+    "takeoverConfirm": {
+      "description": "Esto verifica y detiene el daemon en conflicto mostrado para este host y, a continuación, vuelve a conectar con la configuración actual de Goose. Si el daemon cambió desde que se detectó, no se detiene nada."
     },
     "status": {
       "connecting": "Conectando...",

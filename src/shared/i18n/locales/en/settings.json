@@ -700,7 +700,8 @@
       "connect": "Connect",
       "disconnect": "Disconnect",
       "forget": "Forget",
-      "shutdown": "Stop remote backend"
+      "shutdown": "Stop remote backend",
+      "takeover": "Stop and reconnect"
     },
     "custom": {
       "description": "Connect to a machine that isn't in your SSH config.",
@@ -709,6 +710,10 @@
       "placeholder": "user@host"
     },
     "description": "Hosts come from your ~/.ssh/config. Key or agent authentication must already work — check that `ssh <host>` succeeds in a terminal first.",
+    "conflict": {
+      "instance": "Conflicting daemon: PID {{pid}}, {{version}}, {{binary}}",
+      "pathUnknown": "unknown binary"
+    },
     "doctor": {
       "checking": "Checking host...",
       "found": "Found",
@@ -727,9 +732,12 @@
     "shutdownConfirm": {
       "cancel": "Cancel",
       "confirm": "Stop backend",
-      "description": "This stops the agent daemon on the remote host and ends any remote work running through it.",
+      "description": "This stops the recorded agent daemon on the remote host after verifying its process identity, and ends any remote work running through it.",
       "stopping": "Stopping...",
       "title": "Stop the remote backend on \"{{host}}\"?"
+    },
+    "takeoverConfirm": {
+      "description": "This verifies and stops the conflicting daemon shown for this host, then reconnects using your current Goose configuration. If the daemon changed since detection, nothing is stopped."
     },
     "status": {
       "connecting": "Connecting...",

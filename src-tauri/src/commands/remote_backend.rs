@@ -39,8 +39,9 @@ pub async fn remote_backend_disconnect(
     app: AppHandle,
     registry: State<'_, RemoteBackendRegistry>,
     host: String,
+    expected_generation: Option<u64>,
 ) -> Result<(), RemoteBackendError> {
-    remote_backend::disconnect(&app, &registry, &host);
+    remote_backend::disconnect_generation(&app, &registry, &host, expected_generation);
     Ok(())
 }
 
@@ -49,8 +50,9 @@ pub async fn remote_backend_shutdown(
     app: AppHandle,
     registry: State<'_, RemoteBackendRegistry>,
     host: String,
+    expected_instance_token: Option<String>,
 ) -> Result<(), RemoteBackendError> {
-    remote_backend::shutdown(&app, &registry, &host).await
+    remote_backend::shutdown(&app, &registry, &host, expected_instance_token.as_deref()).await
 }
 
 #[tauri::command]

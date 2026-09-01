@@ -5,6 +5,7 @@ import {
   checkRemoteHost,
   connectRemoteHost,
   disconnectRemoteHost,
+  shutdownRemoteHost,
 } from "@/shared/api/remoteHosts";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -87,6 +88,25 @@ describe("remote host goose binary override", () => {
 
     expect(mockedInvoke).toHaveBeenCalledWith("remote_backend_disconnect", {
       host: "devbox",
+      expectedGeneration: null,
+    });
+  });
+
+  it("scopes initializer cleanup to its remote generation", async () => {
+    await disconnectRemoteHost("devbox", 7);
+
+    expect(mockedInvoke).toHaveBeenCalledWith("remote_backend_disconnect", {
+      host: "devbox",
+      expectedGeneration: 7,
+    });
+  });
+
+  it("scopes a confirmed takeover to the inspected daemon instance", async () => {
+    await shutdownRemoteHost("devbox", "instance-token");
+
+    expect(mockedInvoke).toHaveBeenCalledWith("remote_backend_shutdown", {
+      host: "devbox",
+      expectedInstanceToken: "instance-token",
     });
   });
 });

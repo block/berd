@@ -19,6 +19,7 @@ interface FakeClient {
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
   connectRemoteHost: vi.fn(),
+  disconnectRemoteHost: vi.fn(),
   createWebSocketStream: vi.fn(),
   clientCallbackFactories: [] as Array<() => Client>,
 }));
@@ -34,6 +35,8 @@ vi.mock("../createWebSocketStream", () => ({
 
 vi.mock("../remoteHosts", () => ({
   connectRemoteHost: (...args: unknown[]) => mocks.connectRemoteHost(...args),
+  disconnectRemoteHost: (...args: unknown[]) =>
+    mocks.disconnectRemoteHost(...args),
 }));
 
 vi.mock("@agentclientprotocol/sdk", () => ({
@@ -85,7 +88,9 @@ beforeEach(() => {
     httpBaseUrl: "http://remote",
     secretKey: "secret",
     localPort: 4242,
+    generation: 1,
   });
+  mocks.disconnectRemoteHost.mockResolvedValue(undefined);
   mocks.createWebSocketStream.mockImplementation(() => ({
     writable: { abort: vi.fn().mockResolvedValue(undefined) },
   }));
@@ -218,6 +223,68 @@ describe("backend connection registry", () => {
       "Remote SSH sessions are disabled",
     );
     expect(mocks.connectRemoteHost).toHaveBeenCalledTimes(1);
+  });
+
+  it("disposes a remote setup that resolves after experiment invalidation", async () => {
+    let resolveRemote!: (value: {
+      wsUrl: string;
+      httpBaseUrl: string;
+      secretKey: string;
+      localPort: number;
+      generation: number;
+    }) => void;
+    mocks.connectRemoteHost.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveRemote = resolve;
+      }),
+    );
+    const conn = await importConnection();
+    const remoteConnection = conn.getBackendConnection("ssh:dev-box");
+    const pendingClient = remoteConnection.getClient();
+
+    window.localStorage.setItem(
+      "goose:experimental-features",
+      JSON.stringify({
+        version: 2,
+        experiments: { "remote-ssh-sessions": { enabled: false } },
+      }),
+    );
+    window.dispatchEvent(new Event("goose:experimental-features-change"));
+    resolveRemote({
+      wsUrl: "ws://stale-remote",
+      httpBaseUrl: "http://stale-remote",
+      secretKey: "stale",
+      localPort: 4343,
+      generation: 7,
+    });
+
+    await expect(pendingClient).rejects.toThrow(
+      "Remote SSH sessions are disabled",
+    );
+    expect(mocks.createWebSocketStream).not.toHaveBeenCalled();
+    expect(mocks.disconnectRemoteHost).toHaveBeenCalledWith("dev-box", 7);
+    expect(remoteConnection.getClientSync()).toBeNull();
+
+    window.localStorage.setItem(
+      "goose:experimental-features",
+      JSON.stringify({
+        version: 2,
+        experiments: { "remote-ssh-sessions": { enabled: true } },
+      }),
+    );
+    window.dispatchEvent(new Event("goose:experimental-features-change"));
+    mocks.connectRemoteHost.mockResolvedValueOnce({
+      wsUrl: "ws://fresh-remote",
+      httpBaseUrl: "http://fresh-remote",
+      secretKey: "fresh",
+      localPort: 4444,
+      generation: 8,
+    });
+
+    await expect(remoteConnection.getClient()).resolves.toBeDefined();
+    expect(mocks.createWebSocketStream).toHaveBeenCalledWith(
+      "ws://fresh-remote",
+    );
   });
 
   it("re-runs the ws-url resolver after the connection closes", async () => {

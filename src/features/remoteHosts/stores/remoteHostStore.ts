@@ -135,7 +135,7 @@ export interface RemoteHostStore {
   applyStatusEvent: (payload: RemoteBackendStatusPayload) => void;
   ensureHostConnected: (host: string) => Promise<void>;
   disconnect: (host: string) => Promise<void>;
-  shutdownHost: (host: string) => Promise<void>;
+  shutdownHost: (host: string, expectedInstanceToken?: string) => Promise<void>;
   runDoctor: (host: string) => Promise<void>;
   recordRecentDir: (host: string, dir: string) => void;
   removeManualHost: (host: string) => void;
@@ -254,8 +254,12 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
     }));
   },
 
-  shutdownHost: async (host) => {
-    await shutdownRemoteHost(host);
+  shutdownHost: async (host, expectedInstanceToken) => {
+    if (expectedInstanceToken) {
+      await shutdownRemoteHost(host, expectedInstanceToken);
+    } else {
+      await shutdownRemoteHost(host);
+    }
     set((state) => ({
       statusByHost: {
         ...state.statusByHost,

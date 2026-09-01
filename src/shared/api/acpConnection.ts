@@ -134,15 +134,68 @@ export interface AcpConnection {
   onClosed(cb: () => void): () => void;
 }
 
+interface ResolvedAcpEndpoint {
+  wsUrl: string;
+  /** Tear down only the remote transport generation this endpoint created. */
+  dispose?: () => Promise<void>;
+}
+
+type AcpEndpointResolver = () => Promise<string | ResolvedAcpEndpoint>;
+
+function invalidatedConnectionError(): Error {
+  return new Error("ACP connection initialization was invalidated");
+}
+
 export function createAcpConnection(
-  resolveWsUrl: () => Promise<string>,
+  resolveEndpoint: AcpEndpointResolver,
   backendId: AcpBackendId = LOCAL_BACKEND_ID,
   assertAvailable?: () => void,
 ): AcpConnection {
   let clientPromise: Promise<GooseClient> | null = null;
   let resolvedClient: GooseClient | null = null;
   let activeStream: ReturnType<typeof createWebSocketStream> | null = null;
+  let activeEndpointCleanup: (() => Promise<void>) | null = null;
+  let invalidationGeneration = 0;
   const closedListeners = new Set<() => void>();
+  const cleanedStreams = new WeakSet<object>();
+
+  function assertInitializationCurrent(expectedGeneration: number): void {
+    assertAvailable?.();
+    if (invalidationGeneration !== expectedGeneration) {
+      throw invalidatedConnectionError();
+    }
+  }
+
+  function onceAsync(fn: (() => Promise<void>) | undefined) {
+    if (!fn) return null;
+    let called = false;
+    return async () => {
+      if (called) return;
+      called = true;
+      await fn();
+    };
+  }
+
+  async function cleanupOwnedTransport(
+    stream: ReturnType<typeof createWebSocketStream> | null,
+    cleanupEndpoint: (() => Promise<void>) | null,
+  ): Promise<void> {
+    if (stream && activeStream === stream) {
+      activeStream = null;
+    }
+    if (cleanupEndpoint && activeEndpointCleanup === cleanupEndpoint) {
+      activeEndpointCleanup = null;
+    }
+    const cleanupTasks: Promise<unknown>[] = [];
+    if (stream && !cleanedStreams.has(stream)) {
+      cleanedStreams.add(stream);
+      cleanupTasks.push(stream.writable.abort());
+    }
+    if (cleanupEndpoint) {
+      cleanupTasks.push(cleanupEndpoint());
+    }
+    await Promise.allSettled(cleanupTasks);
+  }
 
   function monitorConnection(
     client: GooseClient,
@@ -155,6 +208,7 @@ export function createAcpConnection(
       resolvedClient = null;
       clientPromise = null;
       activeStream = null;
+      activeEndpointCleanup = null;
       for (const listener of closedListeners) {
         listener();
       }
@@ -175,26 +229,41 @@ export function createAcpConnection(
   }
 
   async function invalidate(): Promise<void> {
+    invalidationGeneration += 1;
     const stream = activeStream;
+    const cleanupEndpoint = activeEndpointCleanup;
     activeStream = null;
+    activeEndpointCleanup = null;
     resolvedClient = null;
     clientPromise = null;
-    if (stream) {
-      await stream.writable.abort();
-    }
+    await cleanupOwnedTransport(stream, cleanupEndpoint);
   }
 
-  async function initializeConnection(): Promise<GooseClient> {
-    assertAvailable?.();
+  async function initializeConnection(
+    expectedGeneration: number,
+  ): Promise<GooseClient> {
+    assertInitializationCurrent(expectedGeneration);
     const tStart = performance.now();
-    const wsUrl = await resolveWsUrl();
+    const resolvedEndpoint = await resolveEndpoint();
+    const endpoint =
+      typeof resolvedEndpoint === "string"
+        ? { wsUrl: resolvedEndpoint }
+        : resolvedEndpoint;
+    const cleanupEndpoint = onceAsync(endpoint.dispose);
+    try {
+      assertInitializationCurrent(expectedGeneration);
+    } catch (error) {
+      await cleanupOwnedTransport(null, cleanupEndpoint);
+      throw error;
+    }
     perfLog(
       `[perf:conn] get_goose_serve_url in ${(performance.now() - tStart).toFixed(1)}ms`,
     );
 
     const tStream = performance.now();
-    const stream = createWebSocketStream(wsUrl);
+    const stream = createWebSocketStream(endpoint.wsUrl);
     activeStream = stream;
+    activeEndpointCleanup = cleanupEndpoint;
 
     const client = new GooseClient(createClientCallbacks(backendId), stream);
     perfLog(
@@ -202,22 +271,27 @@ export function createAcpConnection(
     );
 
     const tInit = performance.now();
-    await client.initialize({
-      protocolVersion: PROTOCOL_VERSION,
-      clientCapabilities: {
-        _meta: {
-          goose: {
-            mcpHostCapabilities: DEFAULT_GOOSE_MCP_HOST_CAPABILITIES,
-            toolCallLabelEnrichment: true,
+    try {
+      await client.initialize({
+        protocolVersion: PROTOCOL_VERSION,
+        clientCapabilities: {
+          _meta: {
+            goose: {
+              mcpHostCapabilities: DEFAULT_GOOSE_MCP_HOST_CAPABILITIES,
+              toolCallLabelEnrichment: true,
+            },
           },
         },
-      },
-      clientInfo: {
-        name: packageJson.name,
-        version: packageJson.version,
-      },
-    } satisfies GooseInitializeRequest);
-    assertAvailable?.();
+        clientInfo: {
+          name: packageJson.name,
+          version: packageJson.version,
+        },
+      } satisfies GooseInitializeRequest);
+      assertInitializationCurrent(expectedGeneration);
+    } catch (error) {
+      await cleanupOwnedTransport(stream, cleanupEndpoint);
+      throw error;
+    }
     perfLog(
       `[perf:conn] client.initialize in ${(performance.now() - tInit).toFixed(1)}ms (total ${(performance.now() - tStart).toFixed(1)}ms)`,
     );
@@ -235,15 +309,19 @@ export function createAcpConnection(
 
     if (!clientPromise) {
       perfLog("[perf:conn] getClient() → initializing new ACP connection");
-      clientPromise = initializeConnection()
+      const expectedGeneration = invalidationGeneration;
+      const initialization = initializeConnection(expectedGeneration)
         .then((client) => {
           resolvedClient = client;
           return client;
         })
         .catch((error) => {
-          clientPromise = null;
+          if (clientPromise === initialization) {
+            clientPromise = null;
+          }
           throw error;
         });
+      clientPromise = initialization;
     } else {
       perfLog(
         "[perf:conn] getClient() awaiting in-flight initializeConnection",
@@ -317,9 +395,14 @@ function createBackendConnection(backendId: AcpBackendId): AcpConnection {
   }
   return createAcpConnection(
     async () => {
-      const { connectRemoteHost } = await import("./remoteHosts");
+      const { connectRemoteHost, disconnectRemoteHost } = await import(
+        "./remoteHosts"
+      );
       const remote = await connectRemoteHost(host);
-      return remote.wsUrl;
+      return {
+        wsUrl: remote.wsUrl,
+        dispose: () => disconnectRemoteHost(host, remote.generation),
+      };
     },
     backendId,
     assertRemoteSessionsEnabled,

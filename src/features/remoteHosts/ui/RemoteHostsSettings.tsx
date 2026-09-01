@@ -179,7 +179,7 @@ function RemoteHostRow({
   onRequestShutdown,
 }: {
   host: string;
-  onRequestShutdown: (host: string) => void;
+  onRequestShutdown: (target: ShutdownTarget) => void;
 }) {
   const { t } = useTranslation("settings");
   const status = useRemoteHostStore((state) => state.statusByHost[host]);
@@ -205,6 +205,11 @@ function RemoteHostRow({
   const state = status?.state ?? "disconnected";
   const isConnected = state === "ready" || state === "reconnecting";
   const failedMessage = state === "failed" ? status?.error?.message : undefined;
+  const conflictInstance =
+    status?.error?.kind === "daemon-conflict"
+      ? status.error.daemonInstance
+      : undefined;
+  const isConflict = conflictInstance !== undefined;
   const showDoctor = doctorPending || doctorError !== undefined || !!probes;
 
   return (
@@ -247,15 +252,23 @@ function RemoteHostRow({
                 : t("remoteHosts.actions.connect")}
             </Button>
           )}
-          {isConnected ? (
+          {state !== "connecting" ? (
             <Button
               type="button"
               variant="outline"
               size="sm"
               destructive
-              onClick={() => onRequestShutdown(host)}
+              onClick={() =>
+                onRequestShutdown({
+                  host,
+                  reconnect: isConflict,
+                  instanceToken: conflictInstance?.instanceToken,
+                })
+              }
             >
-              {t("remoteHosts.actions.shutdown")}
+              {isConflict
+                ? t("remoteHosts.actions.takeover")
+                : t("remoteHosts.actions.shutdown")}
             </Button>
           ) : null}
           <Button
@@ -290,6 +303,17 @@ function RemoteHostRow({
               errorMessage={doctorError?.message}
             />
           ) : null}
+          {conflictInstance ? (
+            <p className="text-xs text-muted-foreground">
+              {t("remoteHosts.conflict.instance", {
+                pid: conflictInstance.pid,
+                version: conflictInstance.gooseVersion,
+                binary:
+                  conflictInstance.binary ??
+                  t("remoteHosts.conflict.pathUnknown"),
+              })}
+            </p>
+          ) : null}
           <GooseBinaryOverride host={host} />
         </div>
       }
@@ -318,7 +342,9 @@ export function RemoteHostsSettings() {
   const [customHost, setCustomHost] = useState("");
   const [customHostError, setCustomHostError] = useState<string | null>(null);
   const [customHostConnecting, setCustomHostConnecting] = useState(false);
-  const [shutdownTarget, setShutdownTarget] = useState<string | null>(null);
+  const [shutdownTarget, setShutdownTarget] = useState<ShutdownTarget | null>(
+    null,
+  );
   const [shutdownPending, setShutdownPending] = useState(false);
 
   useEffect(() => {
@@ -427,9 +453,13 @@ export function RemoteHostsSettings() {
           if (!open) setShutdownTarget(null);
         }}
         title={t("remoteHosts.shutdownConfirm.title", {
-          host: shutdownTarget ?? "",
+          host: shutdownTarget?.host ?? "",
         })}
-        description={t("remoteHosts.shutdownConfirm.description")}
+        description={t(
+          shutdownTarget?.reconnect
+            ? "remoteHosts.takeoverConfirm.description"
+            : "remoteHosts.shutdownConfirm.description",
+        )}
         cancelLabel={t("remoteHosts.shutdownConfirm.cancel")}
         confirmLabel={t("remoteHosts.shutdownConfirm.confirm")}
         loadingLabel={t("remoteHosts.shutdownConfirm.stopping")}
@@ -438,7 +468,17 @@ export function RemoteHostsSettings() {
           if (shutdownTarget === null) return;
           setShutdownPending(true);
           try {
-            await shutdownHost(shutdownTarget);
+            if (shutdownTarget.instanceToken) {
+              await shutdownHost(
+                shutdownTarget.host,
+                shutdownTarget.instanceToken,
+              );
+            } else {
+              await shutdownHost(shutdownTarget.host);
+            }
+            if (shutdownTarget.reconnect) {
+              await ensureHostConnected(shutdownTarget.host);
+            }
             setShutdownTarget(null);
           } finally {
             setShutdownPending(false);
@@ -450,4 +490,10 @@ export function RemoteHostsSettings() {
       />
     </SettingsSection>
   );
+}
+
+interface ShutdownTarget {
+  host: string;
+  reconnect: boolean;
+  instanceToken?: string;
 }

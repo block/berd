@@ -41,6 +41,7 @@ const connection: RemoteBackendConnection = {
   localPort: 4001,
   gooseVersion: "1.2.3",
   daemonReused: false,
+  generation: 1,
 };
 
 function resetStore(): void {
@@ -244,6 +245,19 @@ describe("disconnect and shutdownHost", () => {
     expect(useRemoteHostStore.getState().statusByHost.devbox).toEqual({
       state: "disconnected",
     });
+  });
+
+  it("passes a conflict generation token to shutdown", async () => {
+    mocks.shutdownRemoteHost.mockResolvedValue(undefined);
+
+    await useRemoteHostStore
+      .getState()
+      .shutdownHost("devbox", "opaque-generation");
+
+    expect(mocks.shutdownRemoteHost).toHaveBeenCalledWith(
+      "devbox",
+      "opaque-generation",
+    );
   });
 });
 

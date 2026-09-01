@@ -139,6 +139,67 @@ describe("RemoteHostsSettings", () => {
     expect(disconnect).toHaveBeenCalledWith("alpha");
   });
 
+  it("offers a confirmed stop for a persisted disconnected daemon", async () => {
+    const user = userEvent.setup();
+    seedStore({ configHosts: ["alpha"] });
+    renderWithProviders(<RemoteHostsSettings />);
+
+    await user.click(
+      screen.getByRole("button", {
+        name: enSettings.remoteHosts.actions.shutdown,
+      }),
+    );
+    await user.click(
+      await screen.findByRole("button", {
+        name: enSettings.remoteHosts.shutdownConfirm.confirm,
+      }),
+    );
+
+    expect(shutdownHost).toHaveBeenCalledWith("alpha");
+  });
+
+  it("stops the exact conflicting daemon generation before reconnecting", async () => {
+    const user = userEvent.setup();
+    seedStore({
+      configHosts: ["alpha"],
+      statusByHost: {
+        alpha: {
+          state: "failed",
+          error: {
+            kind: "daemon-conflict",
+            message: "incompatible daemon",
+            daemonInstance: {
+              pid: 4242,
+              startedAt: "1756700000",
+              gooseVersion: "goose 2.0",
+              binary: "/opt/goose",
+              instanceToken: "opaque-generation",
+            },
+          },
+        },
+      },
+    });
+    renderWithProviders(<RemoteHostsSettings />);
+
+    expect(
+      screen.getByText(/PID 4242, goose 2\.0, \/opt\/goose/),
+    ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", {
+        name: enSettings.remoteHosts.actions.takeover,
+      }),
+    );
+    expect(shutdownHost).not.toHaveBeenCalled();
+    await user.click(
+      await screen.findByRole("button", {
+        name: enSettings.remoteHosts.shutdownConfirm.confirm,
+      }),
+    );
+
+    expect(shutdownHost).toHaveBeenCalledWith("alpha", "opaque-generation");
+    expect(ensureHostConnected).toHaveBeenCalledWith("alpha");
+  });
+
   it("runs the doctor and renders the report inline", async () => {
     const user = userEvent.setup();
     seedStore({

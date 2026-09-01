@@ -97,6 +97,9 @@ pub struct RemoteBackendConnection {
     pub local_port: u16,
     pub goose_version: String,
     pub daemon_reused: bool,
+    /// Slot generation that owns this tunnel. Callers use it to invalidate
+    /// only the connection they established, never a newer replacement.
+    pub generation: u64,
 }
 
 #[derive(Default)]
@@ -294,6 +297,7 @@ fn connection_from_shared(shared: &SlotShared) -> Option<RemoteBackendConnection
             local_port,
             goose_version: daemon.goose_version.clone(),
             daemon_reused: daemon.reused,
+            generation: shared.generation,
         })
     } else {
         None
@@ -441,20 +445,11 @@ async fn establish(
         local_port,
     };
 
-    let connection = RemoteBackendConnection {
-        ws_url,
-        http_base_url,
-        secret_key: daemon_info.secret.clone(),
-        local_port,
-        goose_version: daemon_info.goose_version.clone(),
-        daemon_reused: daemon_info.reused,
-    };
-
     let tunnel_pid = tunnel.child.id();
     let generation = {
         let mut shared = slot.shared.lock().expect("slot poisoned");
         advance_generation_if_current(&mut shared, expected_generation).inspect(|_| {
-            shared.daemon = Some(daemon_info);
+            shared.daemon = Some(daemon_info.clone());
             shared.local_port = Some(local_port);
             shared.tunnel_pid = tunnel_pid;
             shared.state = state.clone();
@@ -466,6 +461,16 @@ async fn establish(
         return Ok(None);
     };
     emit_status(app, &slot.key, &state);
+
+    let connection = RemoteBackendConnection {
+        ws_url,
+        http_base_url,
+        secret_key: daemon_info.secret.clone(),
+        local_port,
+        goose_version: daemon_info.goose_version.clone(),
+        daemon_reused: daemon_info.reused,
+        generation,
+    };
 
     spawn_supervisor(
         app.clone(),
@@ -597,16 +602,31 @@ fn spawn_supervisor(
 
 /// Kill the tunnel; the remote daemon keeps running.
 pub fn disconnect(app: &AppHandle, registry: &RemoteBackendRegistry, host_input: &str) {
+    disconnect_generation(app, registry, host_input, None);
+}
+
+/// Disconnect only when `expected_generation` still owns the host slot. This
+/// lets an initializer clean up work superseded while it was awaiting without
+/// tearing down a newer connection that won the race.
+pub fn disconnect_generation(
+    app: &AppHandle,
+    registry: &RemoteBackendRegistry,
+    host_input: &str,
+    expected_generation: Option<u64>,
+) -> bool {
     // Normalize through the parser when possible so `damien@devbox:2222` and
     // its parsed key line up; fall back to the raw string for exact keys.
     let host_key = RemoteHostSpec::parse(host_input, &ssh_config::load_ssh_config_hosts())
         .map(|spec| spec.key())
         .unwrap_or_else(|_| host_input.trim().to_string());
     let Some(slot) = registry.existing_slot(&host_key) else {
-        return;
+        return false;
     };
     {
         let mut shared = slot.shared.lock().expect("slot poisoned");
+        if expected_generation.is_some_and(|expected| shared.generation != expected) {
+            return false;
+        }
         shared.generation += 1;
         if let Some(pid) = shared.tunnel_pid.take() {
             kill_tunnel_pid(pid);
@@ -615,6 +635,7 @@ pub fn disconnect(app: &AppHandle, registry: &RemoteBackendRegistry, host_input:
     }
     set_state(app, &slot, RemoteBackendState::Disconnected);
     record_diagnostic(DiagnosticLevel::Info, "disconnected", &host_key, None);
+    true
 }
 
 /// Stop the remote daemon, then drop the tunnel.
@@ -622,6 +643,7 @@ pub async fn shutdown(
     app: &AppHandle,
     registry: &RemoteBackendRegistry,
     host_input: &str,
+    expected_instance_token: Option<&str>,
 ) -> Result<(), RemoteBackendError> {
     let aliases = ssh_config::load_ssh_config_hosts();
     let spec = RemoteHostSpec::parse(host_input, &aliases)?;
@@ -634,7 +656,7 @@ pub async fn shutdown(
     // daemon after shutdown_daemon stops it.
     let _guard = slot.connect_lock.lock().await;
     disconnect(app, registry, &spec.key());
-    daemon::shutdown_daemon(&spec, &shell_env).await?;
+    daemon::shutdown_daemon(&spec, &shell_env, expected_instance_token).await?;
     record_diagnostic(DiagnosticLevel::Info, "daemon_shutdown", &spec.key(), None);
     Ok(())
 }

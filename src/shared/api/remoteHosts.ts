@@ -13,6 +13,13 @@ import { getGoosePathForHost } from "@/features/remoteHosts/lib/gooseBinaryOverr
 export interface RemoteBackendErrorLike {
   kind: string;
   message: string;
+  daemonInstance?: {
+    pid: number;
+    startedAt: string;
+    gooseVersion: string;
+    binary?: string;
+    instanceToken: string;
+  };
 }
 
 export function isRemoteBackendError(x: unknown): x is RemoteBackendErrorLike {
@@ -30,6 +37,7 @@ export interface RemoteBackendConnection {
   localPort: number;
   gooseVersion: string;
   daemonReused: boolean;
+  generation: number;
 }
 
 export type RemoteBackendState =
@@ -106,13 +114,25 @@ export async function connectRemoteHost(
 }
 
 /** Tear down the local tunnel to `host`, leaving the remote daemon running. */
-export async function disconnectRemoteHost(host: string): Promise<void> {
-  await invoke("remote_backend_disconnect", { host });
+export async function disconnectRemoteHost(
+  host: string,
+  expectedGeneration?: number,
+): Promise<void> {
+  await invoke("remote_backend_disconnect", {
+    host,
+    expectedGeneration: expectedGeneration ?? null,
+  });
 }
 
 /** Stop the remote daemon on `host` and tear down the tunnel. */
-export async function shutdownRemoteHost(host: string): Promise<void> {
-  await invoke("remote_backend_shutdown", { host });
+export async function shutdownRemoteHost(
+  host: string,
+  expectedInstanceToken?: string,
+): Promise<void> {
+  await invoke("remote_backend_shutdown", {
+    host,
+    expectedInstanceToken: expectedInstanceToken ?? null,
+  });
 }
 
 /** Snapshot of all known remote backends and their current states. */

@@ -28,7 +28,7 @@
 # still parse for safe migration, but are never reused.
 #
 # Typed exit codes: 41 goose-not-found, 43 port-bind-failed, 44 bad-path,
-# 45 no-such-dir, 47 daemon-conflict.
+# 45 no-such-dir, 47 daemon-conflict, 48 daemon-changed.
 set -u
 
 NONCE="${1:?nonce required}"
@@ -41,9 +41,11 @@ RECORD="$STATE_DIR/daemon.record"
 LOG="$STATE_DIR/goose-serve.log"
 LOCK_DIR="$STATE_DIR/daemon.lock"
 LOCK_OWNER="$LOCK_DIR/owner"
+LOCK_RECLAIM_DIR="$STATE_DIR/daemon.lock.reclaim"
 RECORD_FORMAT="v4"
 LOG_MAX_BYTES=$((4 * 1024 * 1024))
 LOG_RETAIN_BYTES=$((2 * 1024 * 1024))
+LOG_WRITE_CHUNK_BYTES=$((64 * 1024))
 
 emit() { printf '%s %s\n' "$NONCE" "$*"; }
 
@@ -124,6 +126,12 @@ release_daemon_lock() {
   lock_held=0
 }
 
+release_reclaim_lock() {
+  [ "${reclaim_held:-0}" = "1" ] || return 0
+  rmdir "$LOCK_RECLAIM_DIR" 2>/dev/null || true
+  reclaim_held=0
+}
+
 terminate_uncommitted_daemon() {
   case "${uncommitted_pid:-}" in
   '' | *[!0-9]*) ;;
@@ -158,6 +166,31 @@ terminate_uncommitted_daemon() {
 cleanup_daemon_mutation() {
   terminate_uncommitted_daemon
   release_daemon_lock
+  release_reclaim_lock
+}
+
+# Claim one stale lock generation before deleting it. The separate reclaim
+# mutex serializes observers: after its final owner re-check, no peer can
+# remove the old directory and let a new generation appear before this process
+# atomically renames it. Once renamed, cleanup is confined to the claimed path,
+# so partial `.owner.*` publications are removed without touching a successor.
+reclaim_stale_daemon_lock() {
+  if ! mkdir "$LOCK_RECLAIM_DIR" 2>/dev/null; then
+    return 1
+  fi
+  reclaim_held=1
+
+  if lock_owner_is_current; then
+    release_reclaim_lock
+    return 1
+  fi
+
+  claimed_lock="$STATE_DIR/.daemon.lock.reclaimed.$$.$lock_attempt"
+  if mv "$LOCK_DIR" "$claimed_lock" 2>/dev/null; then
+    rm -rf -- "$claimed_lock"
+  fi
+  release_reclaim_lock
+  return 0
 }
 
 # `mkdir` is the portable cross-process atomic primitive available on both
@@ -171,9 +204,20 @@ acquire_daemon_lock() {
   }
 
   lock_held=0
+  reclaim_held=0
+  uncommitted_pid=""
+  uncommitted_logger_pid=""
+  uncommitted_log_pipe=""
+  trap cleanup_daemon_mutation EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   stale_observations=0
   lock_attempt=0
-  while [ "$lock_attempt" -lt 450 ]; do
+  # A lock holder can spend about 80 seconds across five readiness attempts
+  # and bounded cleanup. Wait longer than that critical section so a healthy
+  # concurrent ensure cannot be mistaken for a wedged state-dir operation.
+  while [ "$lock_attempt" -lt 1200 ]; do
     lock_attempt=$((lock_attempt + 1))
     if mkdir "$LOCK_DIR" 2>/dev/null; then
       our_identity="$(process_identity "$$")" || {
@@ -191,13 +235,6 @@ acquire_daemon_lock() {
         exit 46
       fi
       lock_held=1
-      uncommitted_pid=""
-      uncommitted_logger_pid=""
-      uncommitted_log_pipe=""
-      trap cleanup_daemon_mutation EXIT
-      trap 'exit 129' HUP
-      trap 'exit 130' INT
-      trap 'exit 143' TERM
       return 0
     fi
 
@@ -208,8 +245,7 @@ acquire_daemon_lock() {
       # Allow the mkdir winner time to publish its owner before treating a
       # missing/malformed owner as stale after an interrupted invocation.
       if [ "$stale_observations" -ge 20 ]; then
-        rm -f "$LOCK_OWNER"
-        rmdir "$LOCK_DIR" 2>/dev/null || true
+        reclaim_stale_daemon_lock || true
         stale_observations=0
       fi
     fi
@@ -289,14 +325,45 @@ trim_log_if_needed() {
   fi
 }
 
-# Consume the daemon's pipe for its whole lifetime while keeping only a bounded
-# tail on disk. Each append reopens the path so atomic trims take effect.
+prepare_log_for_append() {
+  append_log="$1"
+  append_bytes="$2"
+  [ -f "$append_log" ] || return 0
+  current_bytes="$(wc -c <"$append_log" 2>/dev/null | tr -d ' ')"
+  case "$current_bytes" in
+  '' | *[!0-9]*) return 0 ;;
+  esac
+  if [ $((current_bytes + append_bytes)) -gt "$LOG_MAX_BYTES" ]; then
+    log_tmp="$STATE_DIR/.goose-serve.log.$$"
+    if tail -c "$LOG_RETAIN_BYTES" "$append_log" >"$log_tmp" 2>/dev/null; then
+      mv -f "$log_tmp" "$append_log"
+    else
+      rm -f "$log_tmp"
+    fi
+  fi
+}
+
+# Consume fixed-size byte chunks rather than newline records. This bounds shell
+# memory for a huge line and continues rotating a producer that never emits a
+# newline. Each append reopens the path so atomic trims take effect.
 bounded_log_writer() {
   writer_log="$1"
-  while IFS= read -r writer_line || [ -n "$writer_line" ]; do
-    printf '%s\n' "$writer_line" >>"$writer_log"
-    trim_log_if_needed "$writer_log"
+  writer_chunk="$STATE_DIR/.goose-serve.log.chunk.$$"
+  while :; do
+    rm -f "$writer_chunk"
+    dd bs="$LOG_WRITE_CHUNK_BYTES" count=1 of="$writer_chunk" 2>/dev/null || true
+    writer_bytes="$(wc -c <"$writer_chunk" 2>/dev/null | tr -d ' ')"
+    case "$writer_bytes" in
+    '' | *[!0-9]*) writer_bytes=0 ;;
+    esac
+    if [ "$writer_bytes" -eq 0 ]; then
+      rm -f "$writer_chunk"
+      break
+    fi
+    prepare_log_for_append "$writer_log" "$writer_bytes"
+    cat "$writer_chunk" >>"$writer_log"
   done
+  rm -f "$writer_chunk"
 }
 
 # Confirms the PID is still the exact process that wrote this record. `kill -0`
@@ -306,6 +373,10 @@ recorded_process_is_current() {
   kill -0 "$rec_pid" 2>/dev/null || return 1
   current_identity="$(process_identity "$rec_pid")" || return 1
   [ "$(b64 "$current_identity")" = "$rec_b64identity" ]
+}
+
+record_instance_token() {
+  b64 "$rec_pid $rec_b64identity"
 }
 
 # Terminates the pid from the last read_record, TERM then KILL, while rechecking
@@ -342,6 +413,7 @@ ensure_daemon() {
       if port_listening "$rec_port"; then
         if [ -n "$rec_b64launchspec" ] &&
           [ "$rec_b64launchspec" != "$b64launchspec" ]; then
+          emit "CONFLICT $rec_pid $rec_started $rec_b64version $rec_b64binary $(record_instance_token)"
           emit "ERR daemon-conflict"
           exit 47
         fi
@@ -423,6 +495,16 @@ ensure_daemon() {
 
 shutdown_daemon() {
   if [ -f "$RECORD" ] && read_record; then
+    if [ "$ARG" != "-" ]; then
+      expected_instance_token="$(unb64 "$ARG")" || {
+        emit "ERR daemon-changed"
+        exit 48
+      }
+      if [ "$expected_instance_token" != "$(record_instance_token)" ]; then
+        emit "ERR daemon-changed"
+        exit 48
+      fi
+    fi
     stop_recorded_daemon
   fi
   rm -f "$RECORD"

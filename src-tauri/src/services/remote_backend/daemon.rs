@@ -16,16 +16,18 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use super::error::{
     classify_script_exit, classify_ssh_stderr, RemoteBackendError, RemoteBackendErrorKind,
+    RemoteDaemonInstance,
 };
 use super::host::RemoteHostSpec;
 use super::ssh::{base_ssh_command, push_destination};
 use crate::services::log_redaction::redact_log_line;
 
 const BOOTSTRAP_SCRIPT: &str = include_str!("remote_daemon.sh");
-// The remote script can wait 45s for another account-level mutation and spend
+// The remote script can wait 120s for another account-level mutation and spend
 // roughly 80s on five readiness attempts plus cleanup. Keep the outer timeout
-// above that bounded lifetime so cancellation cannot strand an unrecorded PID.
-const SCRIPT_TIMEOUT: Duration = Duration::from_secs(180);
+// above their combined bounded lifetime so cancellation cannot strand an
+// unrecorded PID.
+const SCRIPT_TIMEOUT: Duration = Duration::from_secs(300);
 const MAX_STDERR_BYTES: usize = 16 * 1024;
 
 #[derive(Clone, Debug, Serialize)]
@@ -145,8 +147,18 @@ pub(crate) async fn ensure_daemon(
 pub(crate) async fn shutdown_daemon(
     spec: &RemoteHostSpec,
     shell_env: &HashMap<String, String>,
+    expected_instance_token: Option<&str>,
 ) -> Result<(), RemoteBackendError> {
-    let output = run_remote_script(spec, shell_env, "shutdown", None, None).await?;
+    let expected_instance_arg = expected_instance_token
+        .map(|token| base64::engine::general_purpose::STANDARD.encode(token));
+    let output = run_remote_script(
+        spec,
+        shell_env,
+        "shutdown",
+        expected_instance_arg.as_deref(),
+        None,
+    )
+    .await?;
     require_success(&output)?;
     if output.lines.iter().any(|line| line == "STOPPED") {
         Ok(())
@@ -367,6 +379,10 @@ pub(crate) fn require_success(output: &ScriptOutput) -> Result<(), RemoteBackend
                     "another Berd client is using this remote account with an incompatible Goose launch configuration"
                         .to_string()
                 }
+                RemoteBackendErrorKind::DaemonChanged => {
+                    "the remote daemon changed after confirmation; inspect it and try again"
+                        .to_string()
+                }
                 RemoteBackendErrorKind::AuthFailed => {
                     "ssh authentication failed; make sure key or agent auth works (try `ssh <host>` in a terminal)"
                         .to_string()
@@ -386,9 +402,37 @@ pub(crate) fn require_success(output: &ScriptOutput) -> Result<(), RemoteBackend
                     stderr_tail
                 ),
             };
-            Err(RemoteBackendError::new(kind, message))
+            let error = RemoteBackendError::new(kind, message);
+            if kind == RemoteBackendErrorKind::DaemonConflict {
+                if let Some(instance) = parse_conflict_instance(&output.lines) {
+                    return Err(error.with_daemon_instance(instance));
+                }
+            }
+            Err(error)
         }
     }
+}
+
+fn parse_conflict_instance(lines: &[String]) -> Option<RemoteDaemonInstance> {
+    let rest = lines
+        .iter()
+        .find_map(|line| line.strip_prefix("CONFLICT "))?;
+    let mut fields = rest.split_whitespace();
+    let pid = fields.next()?.parse().ok()?;
+    let started_at = fields.next()?.to_string();
+    let goose_version = decode_b64_field(fields.next()?).unwrap_or_else(|| "unknown".to_string());
+    let binary = decode_b64_field(fields.next()?);
+    let instance_token = fields.next()?.to_string();
+    if fields.next().is_some() {
+        return None;
+    }
+    Some(RemoteDaemonInstance {
+        pid,
+        started_at,
+        goose_version,
+        binary,
+        instance_token,
+    })
 }
 
 fn script_protocol_error(context: &str, output: &ScriptOutput) -> RemoteBackendError {
@@ -643,6 +687,26 @@ mod tests {
 
         let err = require_success(&output(&["ERR daemon-conflict"], Some(47), "")).unwrap_err();
         assert_eq!(err.kind, RemoteBackendErrorKind::DaemonConflict);
+
+        let err = require_success(&output(&["ERR daemon-changed"], Some(48), "")).unwrap_err();
+        assert_eq!(err.kind, RemoteBackendErrorKind::DaemonChanged);
+    }
+
+    #[test]
+    fn daemon_conflict_carries_exact_instance_metadata() {
+        let line = format!(
+            "CONFLICT 4242 1756700000 {} {} opaque-token",
+            b64("goose 2.0"),
+            b64("/opt/goose")
+        );
+        let err =
+            require_success(&output(&[&line, "ERR daemon-conflict"], Some(47), "")).unwrap_err();
+        let instance = err.daemon_instance.expect("conflict instance");
+        assert_eq!(instance.pid, 4242);
+        assert_eq!(instance.started_at, "1756700000");
+        assert_eq!(instance.goose_version, "goose 2.0");
+        assert_eq!(instance.binary.as_deref(), Some("/opt/goose"));
+        assert_eq!(instance.instance_token, "opaque-token");
     }
 
     #[test]
@@ -794,9 +858,34 @@ if [ "$1" = "serve" ]; then
   port=""
   while [ $# -gt 0 ]; do [ "$1" = "--port" ] && port="$2"; shift; done
   exec python3 -c 'import socket,sys,time
-sys.stderr.write("x" * (5 * 1024 * 1024) + "\n"); sys.stderr.flush()
+sys.stderr.write("x" * (5 * 1024 * 1024) + "\nBOUNDED-TAIL\n"); sys.stderr.flush()
 s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
 s.bind(("127.0.0.1",int(sys.argv[1]))); s.listen(5); time.sleep(120)' "$port"
+fi
+"#,
+            )
+            .unwrap();
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        }
+
+        fn write_no_newline_goose_shim(dir: &std::path::Path) -> std::path::PathBuf {
+            let path = dir.join("goose-no-newline");
+            std::fs::write(
+                &path,
+                r#"#!/usr/bin/env bash
+if [ "$1" = "--version" ]; then echo "goose no-newline"; exit 0; fi
+if [ "$1" = "serve" ]; then
+  port=""
+  while [ $# -gt 0 ]; do [ "$1" = "--port" ] && port="$2"; shift; done
+  exec python3 -c 'import os,socket,sys,time
+s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+s.bind(("127.0.0.1",int(sys.argv[1]))); s.listen(5)
+for _ in range(80):
+ sys.stderr.write("z" * 65536); sys.stderr.flush(); time.sleep(0.005)
+open(os.path.join(os.environ["HOME"],"no-newline-complete"),"w").close()
+time.sleep(120)' "$port"
 fi
 "#,
             )
@@ -1041,6 +1130,48 @@ fi
         }
 
         #[test]
+        fn recovers_a_crash_during_lock_owner_publication() {
+            let home = tempfile::tempdir().unwrap();
+            let lock_dir = home.path().join(".state/berd/remote/daemon.lock");
+            std::fs::create_dir_all(&lock_dir).unwrap();
+            std::fs::write(lock_dir.join(".owner.99999"), "partial owner").unwrap();
+
+            let (lines, code) = run_script(&["shutdown"], None, home.path());
+
+            assert_eq!(code, Some(0), "lines: {lines:?}");
+            assert!(lines.iter().any(|line| line == "STOPPED"));
+            assert!(!lock_dir.exists(), "partial lock generation survived");
+        }
+
+        #[test]
+        fn synchronized_reclaimers_do_not_remove_a_successor_lock() {
+            let home = tempfile::tempdir().unwrap();
+            let state_dir = home.path().join(".state/berd/remote");
+            let lock_dir = state_dir.join("daemon.lock");
+            std::fs::create_dir_all(&lock_dir).unwrap();
+            std::fs::write(lock_dir.join("owner"), "999999 invalid-identity").unwrap();
+
+            let reclaimers = (0..6)
+                .map(|_| spawn_script(&["shutdown"], None, home.path()))
+                .collect::<Vec<_>>();
+            for child in reclaimers {
+                let (lines, code) = collect_script(child);
+                assert_eq!(code, Some(0), "lines: {lines:?}");
+            }
+
+            assert!(!lock_dir.exists(), "lock remained after all shutdowns");
+            let leftovers = std::fs::read_dir(&state_dir)
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+                .filter(|name| name.contains("daemon.lock"))
+                .collect::<Vec<_>>();
+            assert!(
+                leftovers.is_empty(),
+                "lock artifacts remained: {leftovers:?}"
+            );
+        }
+
+        #[test]
         fn terminating_bootstrap_cleans_up_an_uncommitted_daemon() {
             let home = tempfile::tempdir().unwrap();
             let bin = tempfile::tempdir().unwrap();
@@ -1098,19 +1229,92 @@ fi
             let log_path = home.path().join(".state/berd/remote/goose-serve.log");
             let mut log_len = 0;
             for _ in 0..100 {
-                log_len = std::fs::metadata(&log_path)
-                    .map(|metadata| metadata.len())
-                    .unwrap_or(0);
-                if log_len > 0 && log_len <= 4 * 1024 * 1024 {
+                let contents = std::fs::read(&log_path).unwrap_or_default();
+                log_len = contents.len() as u64;
+                assert!(
+                    log_len <= 4 * 1024 * 1024,
+                    "log transiently grew to {log_len} bytes"
+                );
+                if contents.ends_with(b"BOUNDED-TAIL\n") {
                     break;
                 }
                 std::thread::sleep(Duration::from_millis(20));
             }
             assert!(log_len > 0);
             assert!(log_len <= 4 * 1024 * 1024, "log grew to {log_len} bytes");
+            assert!(
+                std::fs::read(&log_path)
+                    .unwrap_or_default()
+                    .ends_with(b"BOUNDED-TAIL\n"),
+                "bounded writer did not retain the final record tail"
+            );
 
             let (_, code) = run_script(&["shutdown"], None, home.path());
             assert_eq!(code, Some(0));
+        }
+
+        #[test]
+        fn daemon_log_stays_bounded_while_no_newline_producer_is_open() {
+            if !python3_available() {
+                eprintln!("skipping: python3 unavailable for the goose serve shim");
+                return;
+            }
+            let home = tempfile::tempdir().unwrap();
+            let bin = tempfile::tempdir().unwrap();
+            let goose = write_no_newline_goose_shim(bin.path());
+            let goose_arg = b64_arg(&goose.to_string_lossy());
+
+            let (lines, code) = run_script(&["ensure", "-", &goose_arg], None, home.path());
+            assert_eq!(code, Some(0), "lines: {lines:?}");
+            let log_path = home.path().join(".state/berd/remote/goose-serve.log");
+            let complete = home.path().join("no-newline-complete");
+            for _ in 0..1500 {
+                let log_len = std::fs::metadata(&log_path)
+                    .map(|metadata| metadata.len())
+                    .unwrap_or(0);
+                assert!(
+                    log_len <= 4 * 1024 * 1024,
+                    "no-newline log transiently grew to {log_len} bytes"
+                );
+                if complete.exists() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert!(
+                complete.exists(),
+                "producer did not finish its no-newline burst"
+            );
+            assert!(std::fs::metadata(&log_path).unwrap().len() <= 4 * 1024 * 1024);
+
+            let (_, code) = run_script(&["shutdown"], None, home.path());
+            assert_eq!(code, Some(0));
+        }
+
+        #[test]
+        fn shutdown_refuses_a_changed_daemon_generation() {
+            if !python3_available() {
+                eprintln!("skipping: python3 unavailable for the goose serve shim");
+                return;
+            }
+            let home = tempfile::tempdir().unwrap();
+            let bin = tempfile::tempdir().unwrap();
+            let goose = write_goose_shim(bin.path(), "goose", "goose 1.0.0");
+            let goose_arg = b64_arg(&goose.to_string_lossy());
+            let (_, code) = run_script(&["ensure", "-", &goose_arg], None, home.path());
+            assert_eq!(code, Some(0));
+            let fields = read_record_fields(home.path());
+            let expected_token = b64_arg(&format!("{} {}", fields[1], fields[8]));
+
+            let wrong_token_arg = b64_arg("wrong-token");
+            let (lines, code) = run_script(&["shutdown", &wrong_token_arg], None, home.path());
+            assert_eq!(code, Some(48), "lines: {lines:?}");
+            assert!(lines.iter().any(|line| line == "ERR daemon-changed"));
+            assert_eq!(read_record_fields(home.path()), fields);
+
+            let expected_token_arg = b64_arg(&expected_token);
+            let (lines, code) = run_script(&["shutdown", &expected_token_arg], None, home.path());
+            assert_eq!(code, Some(0), "lines: {lines:?}");
         }
 
         /// A record written before process identities existed cannot prove PID

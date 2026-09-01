@@ -7,6 +7,18 @@
 
 use serde::Serialize;
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteDaemonInstance {
+    pub pid: u32,
+    pub started_at: String,
+    pub goose_version: String,
+    pub binary: Option<String>,
+    /// Opaque generation token required for a conflict takeover. It prevents
+    /// a delayed confirmation from stopping a replacement daemon.
+    pub instance_token: String,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RemoteBackendErrorKind {
@@ -17,6 +29,7 @@ pub enum RemoteBackendErrorKind {
     HostUnreachable,
     GooseNotInstalled,
     DaemonConflict,
+    DaemonChanged,
     RemotePortBindFailed,
     LocalPortBindFailed,
     TunnelClosed,
@@ -30,6 +43,8 @@ pub enum RemoteBackendErrorKind {
 pub struct RemoteBackendError {
     pub kind: RemoteBackendErrorKind,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub daemon_instance: Option<Box<RemoteDaemonInstance>>,
 }
 
 impl RemoteBackendError {
@@ -37,7 +52,13 @@ impl RemoteBackendError {
         Self {
             kind,
             message: message.into(),
+            daemon_instance: None,
         }
+    }
+
+    pub fn with_daemon_instance(mut self, daemon_instance: RemoteDaemonInstance) -> Self {
+        self.daemon_instance = Some(Box::new(daemon_instance));
+        self
     }
 
     pub fn internal(message: impl Into<String>) -> Self {
@@ -114,12 +135,14 @@ pub(crate) fn classify_ssh_stderr(stderr: &str) -> RemoteBackendErrorKind {
 pub(crate) const EXIT_GOOSE_NOT_FOUND: i32 = 41;
 pub(crate) const EXIT_REMOTE_PORT_BIND_FAILED: i32 = 43;
 pub(crate) const EXIT_DAEMON_CONFLICT: i32 = 47;
+pub(crate) const EXIT_DAEMON_CHANGED: i32 = 48;
 
 pub(crate) fn classify_script_exit(code: i32) -> Option<RemoteBackendErrorKind> {
     match code {
         EXIT_GOOSE_NOT_FOUND => Some(RemoteBackendErrorKind::GooseNotInstalled),
         EXIT_REMOTE_PORT_BIND_FAILED => Some(RemoteBackendErrorKind::RemotePortBindFailed),
         EXIT_DAEMON_CONFLICT => Some(RemoteBackendErrorKind::DaemonConflict),
+        EXIT_DAEMON_CHANGED => Some(RemoteBackendErrorKind::DaemonChanged),
         _ => None,
     }
 }
@@ -189,6 +212,10 @@ mod tests {
         assert_eq!(
             classify_script_exit(EXIT_DAEMON_CONFLICT),
             Some(RemoteBackendErrorKind::DaemonConflict)
+        );
+        assert_eq!(
+            classify_script_exit(EXIT_DAEMON_CHANGED),
+            Some(RemoteBackendErrorKind::DaemonChanged)
         );
         assert_eq!(classify_script_exit(1), None);
     }
