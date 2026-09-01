@@ -2,7 +2,9 @@ import type { ZodError } from "zod/v4";
 
 import { archiveProjectCommand } from "./impl/archiveProject";
 import { archiveSessionCommand } from "./impl/archiveSession";
+import { attachProjectFolderCommand } from "./impl/attachProjectFolder";
 import { attachSessionFolderCommand } from "./impl/attachSessionFolder";
+import { detachProjectFolderCommand } from "./impl/detachProjectFolder";
 import { detachSessionFolderCommand } from "./impl/detachSessionFolder";
 import { listSessionFoldersCommand } from "./impl/listSessionFolders";
 import { replaceSessionFolderCommand } from "./impl/replaceSessionFolder";
@@ -113,14 +115,17 @@ export const ALL_TOOL_GROUPS = {
   },
   projects: {
     description:
-      "Manage the user's projects: create, list, get, set startup mode, archive.",
+      "Manage the user's projects: create, list, get, attach folder, detach folder, set startup mode, archive.",
     cli: {
       noun: "project",
-      about: "Manage projects: create, list, get, set startup mode, archive",
+      about:
+        "Manage projects: create, list, get, attach folder, detach folder, set startup mode, archive",
       verbs: {
         create: "create",
         list: "list",
         get: "get",
+        "attach-folder": "attach_folder",
+        "detach-folder": "detach_folder",
         "set-startup-mode": "set_startup_mode",
         archive: "archive",
       },
@@ -129,6 +134,8 @@ export const ALL_TOOL_GROUPS = {
       create: createProjectCommand,
       list: listProjectsCommand,
       get: getProjectCommand,
+      attach_folder: attachProjectFolderCommand,
+      detach_folder: detachProjectFolderCommand,
       set_startup_mode: setProjectStartupModeCommand,
       archive: archiveProjectCommand,
     },

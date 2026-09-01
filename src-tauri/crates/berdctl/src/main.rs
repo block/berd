@@ -293,6 +293,9 @@ mod tests {
             ("project", "create") => vec!["--name", "n"],
             ("project", "list") => vec![],
             ("project", "get") => vec!["--project-id", "p"],
+            ("project", "attach-folder") | ("project", "detach-folder") => {
+                vec!["--project-id", "p", "--path", "/w"]
+            }
             ("project", "set-startup-mode") => {
                 vec!["--project-id", "p", "--mode", "worktree"]
             }

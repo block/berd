@@ -175,6 +175,7 @@ vi.mock("@/features/projects/api/projects", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("@/features/projects/api/projects")>();
   return {
+    isWorktreeStartupMode: actual.isWorktreeStartupMode,
     normalizeProjectWorkspaces: actual.normalizeProjectWorkspaces,
     projectWorkspaceFromDirectory: actual.projectWorkspaceFromDirectory,
     listProjects: (...args: unknown[]) => mocks.listProjects(...args),
@@ -610,6 +611,8 @@ describe("action schemas", () => {
       "projects.create": { name: "Project" },
       "projects.list": {},
       "projects.get": { project_id: "p1" },
+      "projects.attach_folder": { project_id: "p1", path: "/tmp/dir" },
+      "projects.detach_folder": { project_id: "p1", path: "/tmp/dir" },
       "projects.set_startup_mode": { project_id: "p1", mode: "worktree" },
       "projects.archive": { project_id: "p1" },
       "agents.create": { name: "Agent", system_prompt: "Be helpful" },
@@ -4058,6 +4061,531 @@ describe("projects", () => {
       );
       expect(mocks.getGitState).not.toHaveBeenCalled();
       expect(mocks.updateProject).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("attach_folder", () => {
+    const existingWorkspace = {
+      id: "path:/projects/one",
+      path: "/projects/one",
+      kind: "directory" as const,
+      source: "inferred" as const,
+      branch: null,
+      usedByAgent: false,
+      startupMode: "none" as const,
+    };
+
+    function seedProject(overrides: Partial<ProjectInfo> = {}) {
+      const project = makeProject({
+        id: "p-1",
+        workingDirs: [existingWorkspace.path],
+        projectWorkspaces: [existingWorkspace],
+        ...overrides,
+      });
+      useProjectStore.setState({
+        projects: [project],
+        hasFetchedProjects: true,
+      });
+      mocks.listProjects.mockResolvedValue([project]);
+      return project;
+    }
+
+    it("attaches a new folder with its Git identity and startup mode none", async () => {
+      seedProject();
+      mocks.getGitState.mockResolvedValue({
+        isGitRepo: true,
+        currentBranch: "main",
+        dirtyFileCount: 0,
+        incomingCommitCount: 0,
+        worktrees: [{ path: "/src/api", branch: "main", isMain: true }],
+        isWorktree: false,
+        mainWorktreePath: "/src/api",
+        localBranches: ["main"],
+      });
+
+      const result = await dispatchCommand(
+        "projects",
+        { action: "attach_folder", project_id: "p-1", path: "/src/api" },
+        ctx,
+      );
+
+      expect(mocks.updateProject).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "p-1" }),
+        expect.objectContaining({
+          workingDirs: ["/projects/one", "/src/api"],
+          useWorktrees: false,
+          projectWorkspaces: [
+            existingWorkspace,
+            expect.objectContaining({
+              path: "/src/api",
+              kind: "git-main-worktree",
+              branch: "main",
+              startupMode: "none",
+              repositoryPath: "/src/api",
+            }),
+          ],
+        }),
+      );
+      expect(result).toEqual({
+        ok: true,
+        path: "/src/api",
+        kind: "git-main-worktree",
+        branch: "main",
+        attached: true,
+        working_dirs: ["/projects/one", "/src/api"],
+      });
+    });
+
+    it("re-attaching an existing folder is a no-op", async () => {
+      seedProject();
+
+      const result = await dispatchCommand(
+        "projects",
+        { action: "attach_folder", project_id: "p-1", path: "/projects/one" },
+        ctx,
+      );
+
+      expect(mocks.updateProject).not.toHaveBeenCalled();
+      expect(mocks.getGitState).not.toHaveBeenCalled();
+      expect(mocks.checkDirectoriesExist).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        ok: true,
+        path: "/projects/one",
+        kind: "directory",
+        branch: null,
+        attached: false,
+        working_dirs: ["/projects/one"],
+      });
+    });
+
+    it("treats a stored ~ path as already attached", async () => {
+      mocks.resolvePath.mockImplementation(
+        async ({ parts }: { parts: string[] }) => ({
+          path: parts[0].replace(/^~/, "/Users/me"),
+        }),
+      );
+      seedProject({
+        workingDirs: ["~/src/api"],
+        projectWorkspaces: [
+          {
+            ...existingWorkspace,
+            id: "path:~/src/api",
+            path: "~/src/api",
+          },
+        ],
+      });
+
+      const result = await dispatchCommand(
+        "projects",
+        { action: "attach_folder", project_id: "p-1", path: "~/src/api" },
+        ctx,
+      );
+
+      expect(mocks.getGitState).not.toHaveBeenCalled();
+      expect(mocks.updateProject).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        attached: false,
+        path: "~/src/api",
+      });
+    });
+
+    it("rejects a relative path", async () => {
+      seedProject();
+      await expectCommandError(
+        dispatchCommand(
+          "projects",
+          { action: "attach_folder", project_id: "p-1", path: "src/api" },
+          ctx,
+        ),
+        "invalid_args",
+      );
+      expect(mocks.getGitState).not.toHaveBeenCalled();
+      expect(mocks.updateProject).not.toHaveBeenCalled();
+    });
+
+    it("rejects a path that is not an existing directory", async () => {
+      seedProject();
+      mocks.checkDirectoriesExist.mockResolvedValue(["/missing"]);
+
+      await expectCommandError(
+        dispatchCommand(
+          "projects",
+          { action: "attach_folder", project_id: "p-1", path: "/missing" },
+          ctx,
+        ),
+        "invalid_args",
+      );
+      expect(mocks.getGitState).not.toHaveBeenCalled();
+      expect(mocks.updateProject).not.toHaveBeenCalled();
+    });
+
+    it("changes nothing when the Git probe fails", async () => {
+      seedProject();
+      mocks.getGitState.mockRejectedValue(new Error("git exploded"));
+
+      await expectCommandError(
+        dispatchCommand(
+          "projects",
+          { action: "attach_folder", project_id: "p-1", path: "/src/api" },
+          ctx,
+        ),
+        "internal_error",
+      );
+      expect(mocks.updateProject).not.toHaveBeenCalled();
+    });
+
+    it("uses the live folder list after Git inspection", async () => {
+      seedProject();
+      mocks.getGitState.mockImplementationOnce(async () => {
+        useProjectStore.setState({
+          projects: [
+            makeProject({
+              id: "p-1",
+              workingDirs: [existingWorkspace.path, "/projects/two"],
+              projectWorkspaces: [
+                existingWorkspace,
+                { ...existingWorkspace, path: "/projects/two" },
+              ],
+            }),
+          ],
+        });
+        return {
+          isGitRepo: false,
+          currentBranch: null,
+          dirtyFileCount: 0,
+          incomingCommitCount: 0,
+          worktrees: [],
+          isWorktree: false,
+          mainWorktreePath: null,
+          localBranches: [],
+        };
+      });
+
+      const result = await dispatchCommand(
+        "projects",
+        { action: "attach_folder", project_id: "p-1", path: "/src/api" },
+        ctx,
+      );
+
+      expect(mocks.updateProject).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          workingDirs: ["/projects/one", "/projects/two", "/src/api"],
+        }),
+      );
+      expect(result).toMatchObject({ attached: true, path: "/src/api" });
+    });
+
+    it("rejects an unknown project", async () => {
+      mocks.listProjects.mockResolvedValue([]);
+      await expectCommandError(
+        dispatchCommand(
+          "projects",
+          { action: "attach_folder", project_id: "missing", path: "/src/api" },
+          ctx,
+        ),
+        "project_not_found",
+      );
+      expect(mocks.getGitState).not.toHaveBeenCalled();
+      expect(mocks.updateProject).not.toHaveBeenCalled();
+    });
+
+    it("times out before mutating if validation overruns the deadline", async () => {
+      seedProject();
+      const now = Date.now();
+      const nowSpy = vi.spyOn(Date, "now").mockReturnValue(now);
+      mocks.getGitState.mockImplementation(async () => {
+        nowSpy.mockReturnValue(now + 10_000);
+        return {
+          isGitRepo: false,
+          currentBranch: null,
+          dirtyFileCount: 0,
+          incomingCommitCount: 0,
+          worktrees: [],
+          isWorktree: false,
+          mainWorktreePath: null,
+          localBranches: [],
+        };
+      });
+
+      await expectCommandError(
+        dispatchCommand(
+          "projects",
+          { action: "attach_folder", project_id: "p-1", path: "/src/api" },
+          { deadlineMs: now + 4_000 },
+        ),
+        "timed_out",
+      );
+      expect(mocks.updateProject).not.toHaveBeenCalled();
+      nowSpy.mockRestore();
+    });
+  });
+
+  describe("detach_folder", () => {
+    const mainWorkspace = {
+      id: "ws-main",
+      path: "/projects/repo",
+      kind: "git-main-worktree" as const,
+      source: "selected" as const,
+      branch: "main",
+      usedByAgent: false,
+      startupMode: "auto-worktree" as const,
+      repositoryPath: "/projects/repo",
+      worktreePath: "/projects/repo",
+    };
+    const docsWorkspace = {
+      id: "ws-docs",
+      path: "/projects/docs",
+      kind: "non-git-directory" as const,
+      source: "selected" as const,
+      branch: null,
+      usedByAgent: false,
+      startupMode: "none" as const,
+    };
+
+    it("removes the folder and recomputes the worktree flag from what remains", async () => {
+      const project = makeProject({
+        id: "p-1",
+        workingDirs: [mainWorkspace.path, docsWorkspace.path],
+        projectWorkspaces: [mainWorkspace, docsWorkspace],
+        useWorktrees: true,
+      });
+      useProjectStore.setState({
+        projects: [project],
+        hasFetchedProjects: true,
+      });
+      mocks.listProjects.mockResolvedValue([project]);
+
+      const result = await dispatchCommand(
+        "projects",
+        { action: "detach_folder", project_id: "p-1", path: "/projects/repo" },
+        ctx,
+      );
+
+      expect(mocks.getGitState).not.toHaveBeenCalled();
+      expect(mocks.updateProject).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "p-1" }),
+        expect.objectContaining({
+          workingDirs: ["/projects/docs"],
+          useWorktrees: false,
+          projectWorkspaces: [docsWorkspace],
+        }),
+      );
+      expect(result).toEqual({
+        ok: true,
+        path: "/projects/repo",
+        detached: true,
+        working_dirs: ["/projects/docs"],
+      });
+    });
+
+    it("keeps the worktree flag when other worktree-mode folders remain", async () => {
+      const project = makeProject({
+        id: "p-1",
+        workingDirs: [mainWorkspace.path, docsWorkspace.path],
+        projectWorkspaces: [mainWorkspace, docsWorkspace],
+        useWorktrees: true,
+      });
+      useProjectStore.setState({
+        projects: [project],
+        hasFetchedProjects: true,
+      });
+      mocks.listProjects.mockResolvedValue([project]);
+
+      await dispatchCommand(
+        "projects",
+        { action: "detach_folder", project_id: "p-1", path: "/projects/docs" },
+        ctx,
+      );
+
+      expect(mocks.updateProject).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          workingDirs: ["/projects/repo"],
+          useWorktrees: true,
+        }),
+      );
+    });
+
+    it("reports detached:false and changes nothing when the path is not attached", async () => {
+      const project = makeProject({
+        id: "p-1",
+        workingDirs: [docsWorkspace.path],
+        projectWorkspaces: [docsWorkspace],
+      });
+      useProjectStore.setState({
+        projects: [project],
+        hasFetchedProjects: true,
+      });
+      mocks.listProjects.mockResolvedValue([project]);
+
+      const result = await dispatchCommand(
+        "projects",
+        { action: "detach_folder", project_id: "p-1", path: "/elsewhere" },
+        ctx,
+      );
+
+      expect(result).toEqual({
+        ok: true,
+        path: "/elsewhere",
+        detached: false,
+        working_dirs: ["/projects/docs"],
+      });
+      expect(mocks.updateProject).not.toHaveBeenCalled();
+    });
+
+    it("detaches a stored ~ path from an expanded request", async () => {
+      mocks.resolvePath.mockImplementation(
+        async ({ parts }: { parts: string[] }) => ({
+          path: parts[0].replace(/^~/, "/Users/me"),
+        }),
+      );
+      const project = makeProject({
+        id: "p-1",
+        workingDirs: ["~/src/api"],
+        projectWorkspaces: [
+          {
+            ...docsWorkspace,
+            id: "path:~/src/api",
+            path: "~/src/api",
+          },
+        ],
+      });
+      useProjectStore.setState({
+        projects: [project],
+        hasFetchedProjects: true,
+      });
+      mocks.listProjects.mockResolvedValue([project]);
+
+      const result = await dispatchCommand(
+        "projects",
+        { action: "detach_folder", project_id: "p-1", path: "~/src/api" },
+        ctx,
+      );
+
+      expect(result).toMatchObject({ detached: true, working_dirs: [] });
+    });
+
+    it("rejects a relative path", async () => {
+      const project = makeProject({
+        id: "p-1",
+        workingDirs: [docsWorkspace.path],
+        projectWorkspaces: [docsWorkspace],
+      });
+      useProjectStore.setState({
+        projects: [project],
+        hasFetchedProjects: true,
+      });
+      mocks.listProjects.mockResolvedValue([project]);
+
+      await expectCommandError(
+        dispatchCommand(
+          "projects",
+          { action: "detach_folder", project_id: "p-1", path: "docs" },
+          ctx,
+        ),
+        "invalid_args",
+      );
+      expect(mocks.updateProject).not.toHaveBeenCalled();
+    });
+
+    it("allows detaching the last folder", async () => {
+      const project = makeProject({
+        id: "p-1",
+        workingDirs: [docsWorkspace.path],
+        projectWorkspaces: [docsWorkspace],
+      });
+      useProjectStore.setState({
+        projects: [project],
+        hasFetchedProjects: true,
+      });
+      mocks.listProjects.mockResolvedValue([project]);
+
+      const result = await dispatchCommand(
+        "projects",
+        { action: "detach_folder", project_id: "p-1", path: "/projects/docs" },
+        ctx,
+      );
+
+      expect(result).toMatchObject({ detached: true, working_dirs: [] });
+      expect(mocks.updateProject).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          workingDirs: [],
+          useWorktrees: false,
+          projectWorkspaces: [],
+        }),
+      );
+    });
+
+    it("allows detaching a folder that no longer exists on disk", async () => {
+      mocks.checkDirectoriesExist.mockResolvedValue(["/projects/docs"]);
+      const project = makeProject({
+        id: "p-1",
+        workingDirs: [docsWorkspace.path],
+        projectWorkspaces: [docsWorkspace],
+      });
+      useProjectStore.setState({
+        projects: [project],
+        hasFetchedProjects: true,
+      });
+      mocks.listProjects.mockResolvedValue([project]);
+
+      const result = await dispatchCommand(
+        "projects",
+        { action: "detach_folder", project_id: "p-1", path: "/projects/docs" },
+        ctx,
+      );
+
+      expect(mocks.checkDirectoriesExist).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ detached: true, working_dirs: [] });
+    });
+
+    it("rejects an unknown project", async () => {
+      mocks.listProjects.mockResolvedValue([]);
+      await expectCommandError(
+        dispatchCommand(
+          "projects",
+          { action: "detach_folder", project_id: "missing", path: "/x" },
+          ctx,
+        ),
+        "project_not_found",
+      );
+      expect(mocks.updateProject).not.toHaveBeenCalled();
+    });
+
+    it("times out before mutating if validation overruns the deadline", async () => {
+      const project = makeProject({
+        id: "p-1",
+        workingDirs: [docsWorkspace.path],
+        projectWorkspaces: [docsWorkspace],
+      });
+      useProjectStore.setState({
+        projects: [project],
+        hasFetchedProjects: true,
+      });
+      mocks.listProjects.mockResolvedValue([project]);
+      const now = Date.now();
+      const nowSpy = vi.spyOn(Date, "now").mockReturnValue(now);
+      mocks.resolvePath.mockImplementation(async ({ parts }) => {
+        nowSpy.mockReturnValue(now + 10_000);
+        return { path: parts[0] };
+      });
+
+      await expectCommandError(
+        dispatchCommand(
+          "projects",
+          {
+            action: "detach_folder",
+            project_id: "p-1",
+            path: "/projects/docs",
+          },
+          { deadlineMs: now + 4_000 },
+        ),
+        "timed_out",
+      );
+      expect(mocks.updateProject).not.toHaveBeenCalled();
+      nowSpy.mockRestore();
     });
   });
 });

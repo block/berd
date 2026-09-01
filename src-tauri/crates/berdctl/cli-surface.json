@@ -95,7 +95,7 @@
     },
     "project": {
       "group": "projects",
-      "about": "Manage projects: create, list, get, set startup mode, archive",
+      "about": "Manage projects: create, list, get, attach folder, detach folder, set startup mode, archive",
       "verbs": {
         "create": {
           "action": "create",
@@ -111,6 +111,16 @@
           "action": "get",
           "about": "Read one project's details",
           "afterHelp": "Example:\n  berdctl project get --project-id <project-id> --json\n\nResult:\n  {\"project_id\": \"...\", \"name\": \"...\", \"description\": \"...\",\n   \"instructions\": \"...\", \"working_dirs\": [\"...\"], \"workspaces\": [\n     {\"path\": \"...\", \"startup_mode\": \"worktree\"}\n   ], \"archived\": false, \"session_count\": 4, \"chat_groups\": [\n     {\"group_id\": \"...\", \"name\": \"Launch\", \"session_ids\": [\"...\"]}\n   ]}"
+        },
+        "attach-folder": {
+          "action": "attach_folder",
+          "about": "Attach a folder to an existing project",
+          "afterHelp": "The new folder starts with startup mode \"none\"; set worktree behavior with\n`berdctl project set-startup-mode` afterwards. Detach with\n`berdctl project detach-folder`.\n\nExample:\n  berdctl project attach-folder --project-id <project-id> --path ~/src/api\n\nResult:\n  {\"ok\": true, \"path\": \"...\", \"kind\": \"...\", \"branch\": \"...\"|null,\n   \"attached\": true, \"working_dirs\": [\"...\", ...]}"
+        },
+        "detach-folder": {
+          "action": "detach_folder",
+          "about": "Detach a folder from an existing project",
+          "afterHelp": "Sessions already in the project keep their own folders; this only changes which\nfolders new project chats start from. Re-add with\n`berdctl project attach-folder`.\n\nExample:\n  berdctl project detach-folder --project-id <project-id> --path ~/src/api\n\nResult:\n  {\"ok\": true, \"path\": \"...\", \"detached\": true|false, \"working_dirs\": [...]}"
         },
         "set-startup-mode": {
           "action": "set_startup_mode",
