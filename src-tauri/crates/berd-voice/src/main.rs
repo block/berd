@@ -24,6 +24,10 @@ use berd_voice::protocol::{
 };
 use berd_voice::session::{PrepareOutcome, PrepareRequest, SessionCore};
 use berd_voice::{
+    local_assets::{
+        LocalAssetLockError, LocalAssetRoots, LocalInstallError, LocalInstallErrorKind,
+        LocalInstallPhase, LocalInstallProgress,
+    },
     ConfiguredTtsSlot, TtsBackend, TtsConfiguration, TtsConfigurationLease,
     TtsConfigurationRejection, TtsConfigurationRejectionKind,
 };
@@ -149,6 +153,19 @@ enum ManagementCommand {
     },
     MacosModelStatus,
     InstallMacosModel,
+    PocketModelStatus {
+        roots: LocalAssetRoots,
+    },
+    InstallPocketModel {
+        roots: LocalAssetRoots,
+    },
+    ListPocketVoices,
+    ParakeetModelStatus {
+        roots: LocalAssetRoots,
+    },
+    InstallParakeetModel {
+        roots: LocalAssetRoots,
+    },
 }
 
 impl ManagementCommand {
@@ -158,8 +175,86 @@ impl ManagementCommand {
             Self::DownloadVoice { .. } => "voices.download",
             Self::MacosModelStatus => "models.macos.status",
             Self::InstallMacosModel => "models.macos.install",
+            Self::PocketModelStatus { .. } => "models.pocket.status",
+            Self::InstallPocketModel { .. } => "models.pocket.install",
+            Self::ListPocketVoices => "models.pocket.voices",
+            Self::ParakeetModelStatus { .. } => "models.parakeet.status",
+            Self::InstallParakeetModel { .. } => "models.parakeet.install",
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LocalModelKind {
+    Pocket,
+    Parakeet,
+}
+
+impl LocalModelKind {
+    fn backend(self) -> &'static str {
+        match self {
+            Self::Pocket => "pocket",
+            Self::Parakeet => "parakeet",
+        }
+    }
+
+    fn model_id(self) -> &'static str {
+        match self {
+            Self::Pocket => berd_voice::pocket_assets::MODEL_ID,
+            Self::Parakeet => berd_voice::parakeet_assets::MODEL_ID,
+        }
+    }
+
+    fn total_download_bytes(self) -> u64 {
+        match self {
+            Self::Pocket => berd_voice::pocket_assets::download_bytes(),
+            Self::Parakeet => berd_voice::parakeet_assets::download_bytes(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LocalModelState {
+    Missing,
+    Invalid,
+    Ready { verified_bytes: u64 },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalModelStatusResult {
+    backend: &'static str,
+    model_id: &'static str,
+    state: &'static str,
+    ready: bool,
+    verified_bytes: Option<u64>,
+    total_download_bytes: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalModelInstallResult {
+    backend: &'static str,
+    model_id: &'static str,
+    outcome: &'static str,
+    ready: bool,
+    verified_bytes: u64,
+    cleanup_pending: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PocketVoicesResult {
+    backend: &'static str,
+    model_id: &'static str,
+    voice_license_id: &'static str,
+    voices: Vec<PocketVoiceResult>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+struct PocketVoiceResult {
+    id: &'static str,
+    name: &'static str,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -211,6 +306,17 @@ struct ManagementProgressEnvelope {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct LocalModelProgressEnvelope {
+    schema_version: u32,
+    operation: &'static str,
+    event: &'static str,
+    phase: &'static str,
+    downloaded_bytes: u64,
+    total_download_bytes: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ManagementErrorEnvelope {
     schema_version: u32,
     operation: &'static str,
@@ -258,8 +364,7 @@ fn main() {
             }
         }
         Some("voices" | "models") => {
-            let command =
-                parse_management_args(&args).unwrap_or_else(|error| usage_error(&error));
+            let command = parse_management_args(&args).unwrap_or_else(|error| usage_error(&error));
             let operation = command.operation();
             if let Err(failure) = run_management_command(command) {
                 if failure.code == "output_failed" {
@@ -275,7 +380,7 @@ fn main() {
             }
         }
         _ => usage_error(
-            "supported commands are session, voices, models macos, benchmark tts, and benchmark stt",
+            "supported commands are session, voices, models, benchmark tts, and benchmark stt",
         ),
     }
 }
@@ -297,7 +402,10 @@ fn usage_error(error: &str) -> ! {
          berd-voice voices download --voice NAME --language BCP47 \
          [--availability-wait-seconds 1..1800]\n  \
          berd-voice models macos status\n  \
-         berd-voice models macos install"
+         berd-voice models macos install\n  \
+         berd-voice models pocket status|install --store-root ABSOLUTE_PATH\n  \
+         berd-voice models pocket voices\n  \
+         berd-voice models parakeet status|install --store-root ABSOLUTE_PATH"
     );
     std::process::exit(2);
 }
@@ -372,12 +480,58 @@ fn parse_management_args(args: &[String]) -> Result<ManagementCommand, String> {
         (Some("models"), Some("macos"), Some("install")) if args.len() == 4 => {
             Ok(ManagementCommand::InstallMacosModel)
         }
-        (Some("voices"), _, _) => Err("expected voices list or voices download".into()),
-        (Some("models"), _, _) => {
-            Err("expected models macos status or models macos install".into())
+        (Some("models"), Some("pocket"), Some("status")) => {
+            Ok(ManagementCommand::PocketModelStatus {
+                roots: parse_local_model_roots(args)?,
+            })
         }
+        (Some("models"), Some("pocket"), Some("install")) => {
+            Ok(ManagementCommand::InstallPocketModel {
+                roots: parse_local_model_roots(args)?,
+            })
+        }
+        (Some("models"), Some("pocket"), Some("voices")) if args.len() == 4 => {
+            Ok(ManagementCommand::ListPocketVoices)
+        }
+        (Some("models"), Some("parakeet"), Some("status")) => {
+            Ok(ManagementCommand::ParakeetModelStatus {
+                roots: parse_local_model_roots(args)?,
+            })
+        }
+        (Some("models"), Some("parakeet"), Some("install")) => {
+            Ok(ManagementCommand::InstallParakeetModel {
+                roots: parse_local_model_roots(args)?,
+            })
+        }
+        (Some("voices"), _, _) => Err("expected voices list or voices download".into()),
+        (Some("models"), _, _) => Err("expected a supported models command".into()),
         _ => Err("expected a management command".into()),
     }
+}
+
+fn parse_local_model_roots(args: &[String]) -> Result<LocalAssetRoots, String> {
+    if args.len() != 6 || args.get(4).map(String::as_str) != Some("--store-root") {
+        return Err("local model status/install requires --store-root exactly once".into());
+    }
+    let value = &args[5];
+    if value
+        .split(['/', '\\'])
+        .any(|component| matches!(component, "." | ".."))
+    {
+        return Err("--store-root must not contain . or .. components".into());
+    }
+    local_model_roots(std::path::Path::new(value))
+}
+
+fn local_model_roots(store_root: &std::path::Path) -> Result<LocalAssetRoots, String> {
+    LocalAssetRoots::new(
+        store_root,
+        store_root.join(berd_voice::pocket_assets::MODEL_ID),
+        store_root
+            .join(berd_voice::pocket_assets::MODEL_ID)
+            .join("stt"),
+    )
+    .map_err(|error| error.to_string())
 }
 
 fn voices_list_report(
@@ -403,6 +557,121 @@ fn voice_download_report(
         voice: identity.clone(),
         installed: true,
         availability_wait_seconds: availability_wait.seconds(),
+    }
+}
+
+fn pocket_voices_report() -> PocketVoicesResult {
+    PocketVoicesResult {
+        backend: "pocket",
+        model_id: berd_voice::pocket_assets::MODEL_ID,
+        voice_license_id: berd_voice::pocket_assets::VOICE_LICENSE_ID,
+        voices: berd_voice::pocket_assets::voices()
+            .iter()
+            .map(|voice| PocketVoiceResult {
+                id: voice.id,
+                name: voice.name,
+            })
+            .collect(),
+    }
+}
+
+fn local_model_status_report(
+    model: LocalModelKind,
+    state: LocalModelState,
+) -> LocalModelStatusResult {
+    let (state_name, verified_bytes) = match state {
+        LocalModelState::Missing => ("missing", None),
+        LocalModelState::Invalid => ("invalid", None),
+        LocalModelState::Ready { verified_bytes } => ("ready", Some(verified_bytes)),
+    };
+    LocalModelStatusResult {
+        backend: model.backend(),
+        model_id: model.model_id(),
+        state: state_name,
+        ready: matches!(state, LocalModelState::Ready { .. }),
+        verified_bytes,
+        total_download_bytes: model.total_download_bytes(),
+    }
+}
+
+fn read_local_model_status(
+    model: LocalModelKind,
+    roots: &LocalAssetRoots,
+) -> Result<LocalModelStatusResult, ManagementFailure> {
+    match std::fs::symlink_metadata(roots.coordination_root()) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(local_model_status_report(model, LocalModelState::Missing));
+        }
+        Err(error) => {
+            return Err(management_failure(
+                "io_failed",
+                "Could not inspect the local model store",
+                error.to_string(),
+            ));
+        }
+        Ok(_) => {}
+    }
+    let _assets =
+        berd_voice::local_assets::try_lock_for_read(roots).map_err(local_model_lock_failure)?;
+    let state = match model {
+        LocalModelKind::Pocket => match berd_voice::pocket_assets::inspect(
+            roots.pocket_bundle_root(),
+        )
+        .map_err(|error| {
+            management_failure(
+                "integrity_failed",
+                "Could not inspect the Pocket model",
+                error,
+            )
+        })? {
+            berd_voice::pocket_assets::PocketAssetStatus::Missing => LocalModelState::Missing,
+            berd_voice::pocket_assets::PocketAssetStatus::Invalid => LocalModelState::Invalid,
+            berd_voice::pocket_assets::PocketAssetStatus::Ready { verified_bytes } => {
+                LocalModelState::Ready { verified_bytes }
+            }
+        },
+        LocalModelKind::Parakeet => {
+            match berd_voice::parakeet_assets::inspect(roots.parakeet_bundle_root()).map_err(
+                |error| {
+                    management_failure(
+                        "integrity_failed",
+                        "Could not inspect the Parakeet model",
+                        error,
+                    )
+                },
+            )? {
+                berd_voice::parakeet_assets::ParakeetAssetStatus::Missing => {
+                    LocalModelState::Missing
+                }
+                berd_voice::parakeet_assets::ParakeetAssetStatus::Invalid => {
+                    LocalModelState::Invalid
+                }
+                berd_voice::parakeet_assets::ParakeetAssetStatus::Ready { verified_bytes } => {
+                    LocalModelState::Ready { verified_bytes }
+                }
+            }
+        }
+    };
+    Ok(local_model_status_report(model, state))
+}
+
+fn local_model_lock_failure(error: LocalAssetLockError) -> ManagementFailure {
+    match error {
+        LocalAssetLockError::Busy => management_failure(
+            "busy",
+            "The local model store is being updated",
+            error.to_string(),
+        ),
+        LocalAssetLockError::InvalidRoot(_) => management_failure(
+            "invalid_root",
+            "The local model store root is invalid",
+            error.to_string(),
+        ),
+        LocalAssetLockError::Io(_) => management_failure(
+            "io_failed",
+            "Could not access the local model store",
+            error.to_string(),
+        ),
     }
 }
 
@@ -500,6 +769,133 @@ fn write_management_progress(progress: f64) {
     if let Err(error) = write_json_line(io::stdout().lock(), &envelope) {
         eprintln!("berd-voice could not write install progress: {error}");
     }
+}
+
+fn local_install_phase_name(phase: LocalInstallPhase) -> &'static str {
+    match phase {
+        LocalInstallPhase::Downloading => "downloading",
+        LocalInstallPhase::Extracting => "extracting",
+        LocalInstallPhase::Verifying => "verifying",
+        LocalInstallPhase::Publishing => "publishing",
+        LocalInstallPhase::Complete => "complete",
+    }
+}
+
+fn write_local_model_progress(operation: &'static str, progress: LocalInstallProgress) {
+    let envelope = LocalModelProgressEnvelope {
+        schema_version: MANAGEMENT_SCHEMA_VERSION,
+        operation,
+        event: "progress",
+        phase: local_install_phase_name(progress.phase),
+        downloaded_bytes: progress.downloaded_bytes,
+        total_download_bytes: progress.total_download_bytes,
+    };
+    if let Err(error) = write_json_line(io::stdout().lock(), &envelope) {
+        eprintln!("berd-voice could not write local model install progress: {error}");
+    }
+}
+
+fn local_install_failure(error: LocalInstallError) -> ManagementFailure {
+    let (code, message) = match error.kind {
+        LocalInstallErrorKind::Busy => ("busy", "The local model store is being updated"),
+        LocalInstallErrorKind::InvalidRoot => {
+            ("invalid_root", "The local model store root is invalid")
+        }
+        LocalInstallErrorKind::Download => ("download_failed", "Could not download the model"),
+        LocalInstallErrorKind::Integrity => {
+            ("integrity_failed", "The local model failed verification")
+        }
+        LocalInstallErrorKind::Extraction => {
+            ("extraction_failed", "Could not extract the local model")
+        }
+        LocalInstallErrorKind::Io => ("io_failed", "Could not access the local model store"),
+        LocalInstallErrorKind::Publish => ("publish_failed", "Could not publish the local model"),
+        LocalInstallErrorKind::Rollback => (
+            "rollback_failed",
+            "Could not restore the prior local model store",
+        ),
+        LocalInstallErrorKind::Recovery => {
+            ("recovery_failed", "The local model store needs recovery")
+        }
+        LocalInstallErrorKind::Cleanup => {
+            ("cleanup_failed", "Could not clean the local model store")
+        }
+    };
+    let mut detail = error.to_string();
+    if !error.recovery_paths.is_empty() {
+        detail.push_str("; recovery data remains at ");
+        detail.push_str(
+            &error
+                .recovery_paths
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+    }
+    management_failure(code, message, detail)
+}
+
+fn run_local_model_install(
+    model: LocalModelKind,
+    roots: LocalAssetRoots,
+    operation: &'static str,
+) -> Result<LocalModelInstallResult, ManagementFailure> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| {
+            management_failure(
+                "operation_failed",
+                "Could not start the local model installer",
+                error.to_string(),
+            )
+        })?;
+    let (outcome, verified_bytes, cleanup_pending) = match model {
+        LocalModelKind::Pocket => {
+            match runtime.block_on(berd_voice::pocket_assets::install(&roots, |progress| {
+                write_local_model_progress(operation, progress);
+            })) {
+                Ok(berd_voice::pocket_assets::PocketInstallOutcome::AlreadyReady {
+                    verified_bytes,
+                }) => ("alreadyReady", verified_bytes, None),
+                Ok(berd_voice::pocket_assets::PocketInstallOutcome::Installed {
+                    verified_bytes,
+                    cleanup_pending,
+                }) => ("installed", verified_bytes, cleanup_pending),
+                Err(error) => return Err(local_install_failure(error)),
+            }
+        }
+        LocalModelKind::Parakeet => {
+            match runtime.block_on(berd_voice::parakeet_assets::install(&roots, |progress| {
+                write_local_model_progress(operation, progress);
+            })) {
+                Ok(berd_voice::parakeet_assets::ParakeetInstallOutcome::AlreadyReady {
+                    verified_bytes,
+                }) => ("alreadyReady", verified_bytes, None),
+                Ok(berd_voice::parakeet_assets::ParakeetInstallOutcome::Installed {
+                    verified_bytes,
+                    cleanup_pending,
+                }) => ("installed", verified_bytes, cleanup_pending),
+                Err(error) => return Err(local_install_failure(error)),
+            }
+        }
+    };
+    if let Some(path) = cleanup_pending.as_ref() {
+        eprintln!(
+            "berd-voice installed the {} model; prior backup cleanup remains at {}",
+            model.backend(),
+            path.display()
+        );
+    }
+    Ok(LocalModelInstallResult {
+        backend: model.backend(),
+        model_id: model.model_id(),
+        outcome,
+        ready: true,
+        verified_bytes,
+        cleanup_pending: cleanup_pending.is_some(),
+    })
 }
 
 fn management_failure(
@@ -624,6 +1020,35 @@ fn run_management_command(command: ManagementCommand) -> Result<(), ManagementFa
                 initial_status
             };
             write_management_result(operation, status).map_err(|error| {
+                management_failure("output_failed", "Could not write command result", error)
+            })
+        }
+        ManagementCommand::PocketModelStatus { roots } => {
+            let status = read_local_model_status(LocalModelKind::Pocket, &roots)?;
+            write_management_result(operation, status).map_err(|error| {
+                management_failure("output_failed", "Could not write command result", error)
+            })
+        }
+        ManagementCommand::InstallPocketModel { roots } => {
+            let result = run_local_model_install(LocalModelKind::Pocket, roots, operation)?;
+            write_management_result(operation, result).map_err(|error| {
+                management_failure("output_failed", "Could not write command result", error)
+            })
+        }
+        ManagementCommand::ListPocketVoices => {
+            write_management_result(operation, pocket_voices_report()).map_err(|error| {
+                management_failure("output_failed", "Could not write command result", error)
+            })
+        }
+        ManagementCommand::ParakeetModelStatus { roots } => {
+            let status = read_local_model_status(LocalModelKind::Parakeet, &roots)?;
+            write_management_result(operation, status).map_err(|error| {
+                management_failure("output_failed", "Could not write command result", error)
+            })
+        }
+        ManagementCommand::InstallParakeetModel { roots } => {
+            let result = run_local_model_install(LocalModelKind::Parakeet, roots, operation)?;
+            write_management_result(operation, result).map_err(|error| {
                 management_failure("output_failed", "Could not write command result", error)
             })
         }
@@ -2798,6 +3223,66 @@ mod tests {
             parse_management_args(&args(&["berd-voice", "models", "macos", "install"])).unwrap(),
             ManagementCommand::InstallMacosModel
         );
+        let store = std::env::temp_dir().join("berd-voice-management-parser");
+        let roots = local_model_roots(&store).unwrap();
+        assert_eq!(
+            parse_management_args(&args(&[
+                "berd-voice",
+                "models",
+                "pocket",
+                "status",
+                "--store-root",
+                store.to_str().unwrap(),
+            ]))
+            .unwrap(),
+            ManagementCommand::PocketModelStatus {
+                roots: roots.clone()
+            }
+        );
+        assert_eq!(
+            parse_management_args(&args(&[
+                "berd-voice",
+                "models",
+                "pocket",
+                "install",
+                "--store-root",
+                store.to_str().unwrap(),
+            ]))
+            .unwrap(),
+            ManagementCommand::InstallPocketModel {
+                roots: roots.clone()
+            }
+        );
+        assert_eq!(
+            parse_management_args(&args(&[
+                "berd-voice",
+                "models",
+                "parakeet",
+                "status",
+                "--store-root",
+                store.to_str().unwrap(),
+            ]))
+            .unwrap(),
+            ManagementCommand::ParakeetModelStatus {
+                roots: roots.clone()
+            }
+        );
+        assert_eq!(
+            parse_management_args(&args(&[
+                "berd-voice",
+                "models",
+                "parakeet",
+                "install",
+                "--store-root",
+                store.to_str().unwrap(),
+            ]))
+            .unwrap(),
+            ManagementCommand::InstallParakeetModel { roots }
+        );
+        assert_eq!(
+            parse_management_args(&args(&["berd-voice", "models", "pocket", "voices"])).unwrap(),
+            ManagementCommand::ListPocketVoices
+        );
 
         for invalid in [
             vec!["berd-voice", "voices", "list", "--language"],
@@ -2836,12 +3321,41 @@ mod tests {
             ],
             vec!["berd-voice", "models", "macos", "status", "extra"],
             vec!["berd-voice", "models", "pocket", "status"],
+            vec![
+                "berd-voice",
+                "models",
+                "pocket",
+                "status",
+                "--store-root",
+                "relative",
+            ],
+            vec![
+                "berd-voice",
+                "models",
+                "parakeet",
+                "install",
+                "--store-root",
+                "/tmp/../outside",
+            ],
+            vec![
+                "berd-voice",
+                "models",
+                "pocket",
+                "status",
+                "--store-root",
+                "/tmp/./store",
+            ],
+            vec!["berd-voice", "models", "pocket", "voices", "extra"],
         ] {
             assert!(
                 parse_management_args(&args(&invalid)).is_err(),
                 "{invalid:?}"
             );
         }
+        assert_eq!(
+            parse_management_args(&args(&["berd-voice", "models", "pocket", "typo"])).unwrap_err(),
+            "expected a supported models command"
+        );
     }
 
     #[test]
@@ -2882,6 +3396,90 @@ mod tests {
                         "sizeBytes": 42,
                         "installed": true
                     }]
+                }
+            })
+        );
+
+        assert_eq!(
+            serde_json::to_value(ManagementResultEnvelope {
+                schema_version: MANAGEMENT_SCHEMA_VERSION,
+                operation: "models.pocket.status",
+                event: "result",
+                result: local_model_status_report(LocalModelKind::Pocket, LocalModelState::Missing),
+            })
+            .unwrap(),
+            json!({
+                "schemaVersion": 1,
+                "operation": "models.pocket.status",
+                "event": "result",
+                "result": {
+                    "backend": "pocket",
+                    "modelId": "native-voice-v2",
+                    "state": "missing",
+                    "ready": false,
+                    "verifiedBytes": null,
+                    "totalDownloadBytes": berd_voice::pocket_assets::download_bytes()
+                }
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(ManagementResultEnvelope {
+                schema_version: MANAGEMENT_SCHEMA_VERSION,
+                operation: "models.pocket.voices",
+                event: "result",
+                result: pocket_voices_report(),
+            })
+            .unwrap()["result"]["voices"][0],
+            json!({"id": "anna", "name": "Anna"})
+        );
+        let voices = serde_json::to_value(ManagementResultEnvelope {
+            schema_version: MANAGEMENT_SCHEMA_VERSION,
+            operation: "models.pocket.voices",
+            event: "result",
+            result: pocket_voices_report(),
+        })
+        .unwrap();
+        assert_eq!(voices["result"]["backend"], "pocket");
+        assert_eq!(voices["result"]["modelId"], "native-voice-v2");
+        assert_eq!(voices["result"]["voiceLicenseId"], "CC-BY-4.0");
+        assert_eq!(voices["result"]["voices"].as_array().unwrap().len(), 12);
+        let voices = voices.to_string();
+        for private_field in [
+            "relativePath",
+            "sizeBytes",
+            "sha256",
+            "sourceUrl",
+            "https://",
+        ] {
+            assert!(!voices.contains(private_field));
+        }
+
+        assert_eq!(
+            serde_json::to_value(ManagementResultEnvelope {
+                schema_version: MANAGEMENT_SCHEMA_VERSION,
+                operation: "models.parakeet.install",
+                event: "result",
+                result: LocalModelInstallResult {
+                    backend: "parakeet",
+                    model_id: berd_voice::parakeet_assets::MODEL_ID,
+                    outcome: "installed",
+                    ready: true,
+                    verified_bytes: 123,
+                    cleanup_pending: true,
+                },
+            })
+            .unwrap(),
+            json!({
+                "schemaVersion": 1,
+                "operation": "models.parakeet.install",
+                "event": "result",
+                "result": {
+                    "backend": "parakeet",
+                    "modelId": "parakeet-tdt-ctc-110m-en-int8",
+                    "outcome": "installed",
+                    "ready": true,
+                    "verifiedBytes": 123,
+                    "cleanupPending": true
                 }
             })
         );
@@ -2964,6 +3562,25 @@ mod tests {
                 "fraction": 0.427
             })
         );
+        assert_eq!(
+            serde_json::to_value(LocalModelProgressEnvelope {
+                schema_version: MANAGEMENT_SCHEMA_VERSION,
+                operation: "models.pocket.install",
+                event: "progress",
+                phase: local_install_phase_name(LocalInstallPhase::Verifying),
+                downloaded_bytes: 42,
+                total_download_bytes: 100,
+            })
+            .unwrap(),
+            json!({
+                "schemaVersion": 1,
+                "operation": "models.pocket.install",
+                "event": "progress",
+                "phase": "verifying",
+                "downloadedBytes": 42,
+                "totalDownloadBytes": 100
+            })
+        );
     }
 
     #[test]
@@ -2993,6 +3610,19 @@ mod tests {
             berd_voice::siri::SiriVoiceIdentity::new("Missing", "en-US").unwrap(),
         ));
         assert_eq!(missing.code, "voice_not_found");
+
+        let local = local_install_failure(LocalInstallError {
+            kind: LocalInstallErrorKind::Rollback,
+            message: "private rollback detail".into(),
+            recovery_paths: vec![PathBuf::from("/Users/alice/private-backup")],
+        });
+        assert_eq!(local.code, "rollback_failed");
+        assert!(local.detail.contains("/Users/alice/private-backup"));
+        let envelope =
+            serde_json::to_string(&management_error_envelope("models.pocket.install", &local))
+                .unwrap();
+        assert!(!envelope.contains("/Users/alice"));
+        assert!(!envelope.contains("private rollback detail"));
     }
 
     #[test]

@@ -61,6 +61,11 @@ berd-voice voices download --voice Aaron --language en-US \
   --availability-wait-seconds 300
 berd-voice models macos status
 berd-voice models macos install
+berd-voice models pocket status --store-root /absolute/portable-store
+berd-voice models pocket install --store-root /absolute/portable-store
+berd-voice models pocket voices
+berd-voice models parakeet status --store-root /absolute/portable-store
+berd-voice models parakeet install --store-root /absolute/portable-store
 ```
 
 The Siri language filter is an exact normalized BCP-47 language, not a prefix.
@@ -80,6 +85,16 @@ unsupported platform still exits 0 with `supported: false`. These blocking
 commands have no cancellation protocol, and interruption by a process signal
 does not promise a terminal JSON line. None opens an audio device, starts a
 voice session, applies host settings, chooses fallbacks, or emits Tauri events.
+
+Pocket and Parakeet require an explicit absolute coordination root; there is no
+default and no coupling to Berd's app cache. The CLI derives the closed portable
+layout `<store-root>/native-voice-v2`, with Parakeet nested at `stt`. Status does
+not create a missing store. Install is per engine, is idempotent when that
+engine is already Ready, and preserves the other Ready engine through the
+shared transaction. Progress reports only the shared phase, downloaded bytes,
+and total download bytes. A successful result identifies `alreadyReady` or
+`installed`, verified bytes, and whether cleanup remains; any retained recovery
+path is diagnostic stderr data, never JSON.
 
 The public `pocket_assets` and `parakeet_assets` modules define the immutable
 asset catalogs used by Berd and inspect an explicit portable bundle root as
@@ -114,6 +129,13 @@ exact catalog identity fails with `voice_not_found` before any native download
 request. macOS status and install results contain `supported`, `locale`,
 `localeSupported`, `modelStatus`, and `ready`. Install progress records contain
 the native finite fraction clamped to `0...1`; nonfinite callbacks are omitted.
+`models.pocket.voices` is a separate immutable catalog because Pocket installs
+one pinned all-voices bundle rather than managing OS voices one at a time. It
+returns only public model/license IDs and `{id,name}` records—no paths, hashes,
+or source URLs. Pocket and Parakeet status return `missing|invalid|ready`,
+nullable verified bytes, and the pinned total download bytes. Their install
+progress uses schema-version-one JSONL envelopes with lowercase phases and
+monotonic byte counts.
 
 The host selects an optional output device in the protocol `hello`; the TTS
 backend only produces PCM and does not own device persistence. Stdin is one

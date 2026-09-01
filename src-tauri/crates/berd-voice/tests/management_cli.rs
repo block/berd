@@ -24,6 +24,9 @@ fn management_usage_errors_are_exit_two_and_do_not_emit_json() {
             "0",
         ],
         vec!["models", "macos", "status", "extra"],
+        vec!["models", "pocket", "status"],
+        vec!["models", "parakeet", "install", "--store-root", "relative"],
+        vec!["models", "pocket", "status", "--store-root", "/tmp/./store"],
     ] {
         let output = berd_voice(&args);
         assert_eq!(output.status.code(), Some(2), "{args:?}");
@@ -34,6 +37,107 @@ fn management_usage_errors_are_exit_two_and_do_not_emit_json() {
                 .contains("usage:"),
             "{args:?}"
         );
+    }
+}
+
+#[test]
+fn local_model_management_is_process_stable_without_network_or_root_creation() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let missing_store = temporary.path().join("missing-store");
+    let missing_store_arg = missing_store.to_str().expect("UTF-8 path");
+
+    for (engine, model_id) in [
+        ("pocket", "native-voice-v2"),
+        ("parakeet", "parakeet-tdt-ctc-110m-en-int8"),
+    ] {
+        let output = berd_voice(&[
+            "models",
+            engine,
+            "status",
+            "--store-root",
+            missing_store_arg,
+        ]);
+        assert!(
+            output.status.success(),
+            "{engine}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let lines = String::from_utf8(output.stdout).expect("UTF-8 stdout");
+        let lines = lines.lines().collect::<Vec<_>>();
+        assert_eq!(lines.len(), 1, "{engine}");
+        let value: Value = serde_json::from_str(lines[0]).expect("JSON result");
+        assert_eq!(value["schemaVersion"], 1);
+        assert_eq!(value["operation"], format!("models.{engine}.status"));
+        assert_eq!(value["event"], "result");
+        assert_eq!(value["result"]["modelId"], model_id);
+        assert_eq!(value["result"]["state"], "missing");
+        assert_eq!(value["result"]["ready"], false);
+        assert!(value["result"]["verifiedBytes"].is_null());
+        assert!(value["result"]["totalDownloadBytes"].as_u64().unwrap() > 0);
+        assert!(output.stderr.is_empty());
+        assert!(
+            !missing_store.exists(),
+            "status created {missing_store_arg}"
+        );
+    }
+
+    let output = berd_voice(&["models", "pocket", "voices"]);
+    assert!(output.status.success());
+    let lines = String::from_utf8(output.stdout).expect("UTF-8 stdout");
+    let lines = lines.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 1);
+    let value: Value = serde_json::from_str(lines[0]).expect("JSON result");
+    assert_eq!(value["operation"], "models.pocket.voices");
+    assert_eq!(value["result"]["voiceLicenseId"], "CC-BY-4.0");
+    let voices = value["result"]["voices"].as_array().unwrap();
+    assert_eq!(voices.len(), 12);
+    assert!(voices.iter().all(|voice| {
+        voice.as_object().is_some_and(|voice| {
+            voice.len() == 2 && voice.contains_key("id") && voice.contains_key("name")
+        })
+    }));
+
+    for (engine, relative_file) in [
+        ("pocket", "native-voice-v2/bundle.json"),
+        ("parakeet", "native-voice-v2/stt/model.int8.onnx"),
+    ] {
+        let invalid_store = temporary.path().join(format!("invalid-{engine}"));
+        let invalid_file = invalid_store.join(relative_file);
+        std::fs::create_dir_all(invalid_file.parent().unwrap()).expect("create invalid bundle");
+        std::fs::write(invalid_file, b"invalid").expect("write invalid bundle");
+        let output = berd_voice(&[
+            "models",
+            engine,
+            "status",
+            "--store-root",
+            invalid_store.to_str().expect("UTF-8 path"),
+        ]);
+        assert!(output.status.success());
+        let value: Value = serde_json::from_slice(&output.stdout).expect("JSON result");
+        assert_eq!(value["result"]["state"], "invalid");
+        assert_eq!(value["result"]["ready"], false);
+        assert!(value["result"]["verifiedBytes"].is_null());
+    }
+
+    let blocked_store = temporary.path().join("blocked-store");
+    std::fs::write(&blocked_store, b"not a directory").expect("write blocked store");
+    for engine in ["pocket", "parakeet"] {
+        let output = berd_voice(&[
+            "models",
+            engine,
+            "install",
+            "--store-root",
+            blocked_store.to_str().expect("UTF-8 path"),
+        ]);
+        assert_eq!(output.status.code(), Some(1));
+        let lines = String::from_utf8(output.stdout).expect("UTF-8 stdout");
+        let lines = lines.lines().collect::<Vec<_>>();
+        assert_eq!(lines.len(), 1, "{engine}");
+        let value: Value = serde_json::from_str(lines[0]).expect("JSON error");
+        assert_eq!(value["operation"], format!("models.{engine}.install"));
+        assert_eq!(value["event"], "error");
+        assert_eq!(value["error"]["code"], "io_failed");
+        assert!(!output.stderr.is_empty());
     }
 }
 
