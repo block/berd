@@ -23,6 +23,7 @@ pub mod pocket_assets;
 pub mod protocol;
 pub mod session;
 pub mod siri;
+mod synthesis;
 mod tts;
 
 pub use audio_output::{wait_until_drained, PcmAudioOutput};
@@ -44,4 +45,5 @@ pub use pocket::{
 };
 #[cfg(target_os = "macos")]
 pub use siri::SiriTts;
+pub use synthesis::{synthesize_pcm16_wav, WavSynthesis, WavSynthesisError, WavSynthesisErrorKind};
 pub use tts::{OpenAiTts, PocketTtsBackend, TtsBackend, TtsOutcome, TtsPcmSpec, TtsSynthesisEvent};

@@ -37,6 +37,27 @@ Siri preflight validates the exact case-sensitive installed name, normalized
 BCP-47 language, and a responsive sirittsd availability query; later synthesis
 can still fail and is reported through the normal terminal speech lifecycle.
 
+## Synthesize to WAV
+
+`synthesize` renders through the same TTS backends without opening an audio device. It writes mono signed 16-bit little-endian PCM WAV to a new file:
+
+```sh
+berd-voice synthesize --tts-backend siri --voice Aaron --language en-US \
+  --rate 1.0 --text "Hello" --output hello.wav
+berd-voice synthesize --tts-backend pocket \
+  --model-dir /absolute/path/to/native-voice-v2 --voice mary --rate 1.0 \
+  --text "Hello" --output hello.wav
+berd-voice synthesize --tts-backend openai --model gpt-4o-mini-tts \
+  --voice marin --rate 1.0 --allow-paid-openai \
+  --text "Hello" --output hello.wav
+```
+
+The command rejects an existing output before constructing the backend, writes to a same-directory temporary file, synchronizes the completed WAV, and publishes it without clobbering a target that appears concurrently. Failure leaves no partial target. Input text is nonempty and at most 16 KiB; output is bounded to ten minutes of finite source PCM in `[-1, 1]`. Backend cancellation, empty or invalid PCM, and a non-1x PCM playback specification fail rather than publishing a misleading file.
+
+Pocket rendering supports only rate `1.0`: its other rates are a host playback time-stretch policy and are not encoded into synthesized PCM. Siri applies its rate during native synthesis. OpenAI requires an explicit model, voice, and `--allow-paid-openai`; one invocation makes at most one request and reads the credential only from `OPENAI_API_KEY` after output preflight.
+
+Success emits one schema-version-one JSON line with the public backend identity, requested rate, and WAV encoding, sample rate, channels, bit depth, source frames, duration, and byte count. It never serializes the prompt, credential, endpoint, Pocket bundle path, or temporary path. Operation failure emits one sanitized error line and exits 1; usage failure emits no JSON and exits 2. Stdout is reserved for this machine-readable terminal record, not audio data.
+
 The public `berd_voice::siri` management API is also the single native boundary
 used by Berd for Siri catalog discovery, represented languages, exact installed
 voice validation, and download. A voice identity is its case-sensitive catalog

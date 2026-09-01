@@ -1,6 +1,6 @@
 use std::io::{self, BufWriter, Read, Write};
 use std::os::fd::RawFd;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc::{self, Receiver, SyncSender},
@@ -30,7 +30,7 @@ use berd_voice::{
         LocalInstallPhase, LocalInstallProgress,
     },
     ConfiguredTtsSlot, TtsBackend, TtsConfiguration, TtsConfigurationLease,
-    TtsConfigurationRejection, TtsConfigurationRejectionKind,
+    TtsConfigurationRejection, TtsConfigurationRejectionKind, WavSynthesisErrorKind,
 };
 use serde::Serialize;
 
@@ -155,6 +155,36 @@ struct SttBenchmarkConfig {
     runs: usize,
     mode: SttBenchmarkMode,
     allow_paid_openai: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum SynthesisTtsConfig {
+    OpenAi {
+        model: String,
+        voice: String,
+        rate: f32,
+    },
+    Local(TtsBackendConfig),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct SynthesisConfig {
+    tts: SynthesisTtsConfig,
+    text: String,
+    output: PathBuf,
+}
+
+impl SynthesisConfig {
+    fn backend(&self) -> &'static str {
+        match &self.tts {
+            SynthesisTtsConfig::OpenAi { .. } => "openai",
+            SynthesisTtsConfig::Local(TtsBackendConfig::Siri { .. }) => "siri",
+            SynthesisTtsConfig::Local(TtsBackendConfig::Pocket { .. }) => "pocket",
+            SynthesisTtsConfig::Local(TtsBackendConfig::OpenAi { .. }) => {
+                unreachable!("OpenAI synthesis carries explicit identity")
+            }
+        }
+    }
 }
 
 const MANAGEMENT_SCHEMA_VERSION: u32 = 1;
@@ -354,6 +384,38 @@ struct ManagementFailure {
     detail: String,
 }
 
+#[derive(Debug)]
+struct SynthesisFailure {
+    code: &'static str,
+    public_message: &'static str,
+    detail: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SynthesisResult {
+    backend: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
+    voice: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    language: Option<String>,
+    rate: f32,
+    wav: SynthesisWavResult,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SynthesisWavResult {
+    encoding: &'static str,
+    sample_rate: u32,
+    channels: u16,
+    bits_per_sample: u16,
+    frames: u64,
+    duration_ms: f64,
+    bytes: u64,
+}
+
 fn main() {
     let args: Vec<_> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
@@ -382,6 +444,28 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Some("synthesize") => {
+            let config =
+                parse_synthesis_args(&args).unwrap_or_else(|error| usage_error(&error));
+            if let Err(failure) = run_synthesis_command(config) {
+                if failure.code != "output_failed" {
+                    let envelope = ManagementErrorEnvelope {
+                        schema_version: MANAGEMENT_SCHEMA_VERSION,
+                        operation: "synthesize",
+                        event: "error",
+                        error: ManagementErrorBody {
+                            code: failure.code,
+                            message: failure.public_message,
+                        },
+                    };
+                    if let Err(error) = write_json_line(io::stdout().lock(), &envelope) {
+                        eprintln!("berd-voice could not write synthesis error: {error}");
+                    }
+                }
+                eprintln!("berd-voice synthesize failed: {}", failure.detail);
+                std::process::exit(1);
+            }
+        }
         Some("voices" | "models") => {
             let command = parse_management_args(&args).unwrap_or_else(|error| usage_error(&error));
             let operation = command.operation();
@@ -399,7 +483,7 @@ fn main() {
             }
         }
         _ => usage_error(
-            "supported commands are session, voices, models, benchmark tts, and benchmark stt",
+            "supported commands are session, synthesize, voices, models, benchmark tts, and benchmark stt",
         ),
     }
 }
@@ -410,6 +494,9 @@ fn usage_error(error: &str) -> ! {
         "usage:\n  berd-voice session --pcm-output-fd FD [--tts-backend siri|openai|pocket] \
          [--model-dir PATH] [--voice ID] [--language BCP47] [--rate FLOAT] \
          [--stt-backend macos|parakeet|openai] [--stt-model-dir PATH]\n  \
+         berd-voice synthesize --tts-backend siri|openai|pocket --voice ID \
+         [--language BCP47] [--model MODEL] [--model-dir ABSOLUTE_PATH] [--rate FLOAT] \
+         [--allow-paid-openai] --text TEXT --output PATH\n  \
          berd-voice benchmark tts --tts-backend openai|siri|pocket \
          [--model-dir PATH] [--voice ID] [--language BCP47] [--rate FLOAT] \
          (--text TEXT --runs COUNT | --prompt-manifest english-short-v1) \
@@ -1718,6 +1805,129 @@ fn parse_pcm_output_fd(args: &[String]) -> Result<RawFd, String> {
     Ok(fd)
 }
 
+fn parse_synthesis_args(args: &[String]) -> Result<SynthesisConfig, String> {
+    if args.get(1).map(String::as_str) != Some("synthesize") {
+        return Err("expected synthesize".into());
+    }
+    let mut backend = None;
+    let mut model = None;
+    let mut voice = None;
+    let mut language = None;
+    let mut model_dir = None;
+    let mut rate = None;
+    let mut text = None;
+    let mut output = None;
+    let mut allow_paid_openai = false;
+    let mut index = 2;
+    while index < args.len() {
+        let flag = args[index].as_str();
+        if flag == "--allow-paid-openai" {
+            if allow_paid_openai {
+                return Err("--allow-paid-openai may be provided only once".into());
+            }
+            allow_paid_openai = true;
+            index += 1;
+            continue;
+        }
+        let value = args
+            .get(index + 1)
+            .ok_or_else(|| format!("{flag} requires a value"))?;
+        let destination = match flag {
+            "--tts-backend" => &mut backend,
+            "--model" => &mut model,
+            "--voice" => &mut voice,
+            "--language" => &mut language,
+            "--model-dir" => &mut model_dir,
+            "--text" => &mut text,
+            "--output" => &mut output,
+            "--rate" => {
+                if rate.is_some() {
+                    return Err("--rate may be provided only once".into());
+                }
+                rate = Some(
+                    value
+                        .parse::<f32>()
+                        .map_err(|_| "--rate must be a number".to_string())?,
+                );
+                index += 2;
+                continue;
+            }
+            _ => return Err(format!("unknown synthesize argument: {flag}")),
+        };
+        if destination.is_some() {
+            return Err(format!("{flag} may be provided only once"));
+        }
+        *destination = Some(value.clone());
+        index += 2;
+    }
+
+    let backend = backend.ok_or_else(|| "--tts-backend is required".to_string())?;
+    let text = text.ok_or_else(|| "--text is required".to_string())?;
+    if text.trim().is_empty() {
+        return Err("--text must be nonempty".into());
+    }
+    if text.len() > MAX_SPEAK_TEXT_BYTES {
+        return Err(format!("--text exceeds {MAX_SPEAK_TEXT_BYTES} UTF-8 bytes"));
+    }
+    let output = PathBuf::from(output.ok_or_else(|| "--output is required".to_string())?);
+    if output.as_os_str().is_empty() || output == Path::new("-") {
+        return Err("--output must name a WAV file; stdout is not supported".into());
+    }
+
+    let tts = match backend.as_str() {
+        "openai" => {
+            if language.is_some() || model_dir.is_some() {
+                return Err("--language and --model-dir are not valid with OpenAI".into());
+            }
+            if !allow_paid_openai {
+                return Err(
+                    "OpenAI synthesis requires explicit --allow-paid-openai consent".into(),
+                );
+            }
+            let model = model
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| "--model is required with OpenAI".to_string())?;
+            let voice = voice
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| "--voice is required with OpenAI".to_string())?;
+            let rate = rate.unwrap_or(1.0);
+            if !rate.is_finite() || !(0.75..=2.0).contains(&rate) {
+                return Err("--rate must be between 0.75 and 2.0 for OpenAI".into());
+            }
+            SynthesisTtsConfig::OpenAi { model, voice, rate }
+        }
+        "siri" | "pocket" => {
+            if model.is_some() {
+                return Err("--model is only valid with OpenAI".into());
+            }
+            if allow_paid_openai {
+                return Err("--allow-paid-openai is only valid with OpenAI".into());
+            }
+            let mut local = build_tts_backend_config(
+                &backend,
+                voice,
+                language,
+                model_dir.map(PathBuf::from),
+                rate,
+            )?;
+            if let TtsBackendConfig::Siri {
+                voice, language, ..
+            } = &mut local
+            {
+                let identity = berd_voice::siri::SiriVoiceIdentity::new(voice.clone(), language)?;
+                *voice = identity.name().to_string();
+                *language = identity.language().to_string();
+            }
+            if matches!(local, TtsBackendConfig::Pocket { rate, .. } if rate != 1.0) {
+                return Err("Pocket WAV synthesis supports only --rate 1.0".into());
+            }
+            SynthesisTtsConfig::Local(local)
+        }
+        value => return Err(format!("unsupported TTS backend: {value}")),
+    };
+    Ok(SynthesisConfig { tts, text, output })
+}
+
 fn build_stt_backend_config(
     stt_backend: &str,
     stt_model_dir: Option<PathBuf>,
@@ -2231,21 +2441,11 @@ fn stt_benchmark_target(config: &SttBackendConfig) -> Result<SttBenchmarkTarget,
 
 fn create_tts_configuration(config: &TtsBackendConfig) -> Result<TtsConfiguration, String> {
     match config {
-        TtsBackendConfig::OpenAi { rate } => {
-            let api_key = std::env::var("OPENAI_API_KEY")
-                .ok()
-                .filter(|key| !key.trim().is_empty())
-                .ok_or_else(|| "OPENAI_API_KEY is required".to_string())?;
-            let base = std::env::var("OPENAI_BASE_URL")
-                .unwrap_or_else(|_| "https://api.openai.com/v1".into());
-            Ok(TtsConfiguration::openai(
-                format!("{}/audio/speech", base.trim_end_matches('/')),
-                api_key,
-                std::env::var("OPENAI_TTS_MODEL").unwrap_or_else(|_| "gpt-4o-mini-tts".into()),
-                std::env::var("OPENAI_TTS_VOICE").unwrap_or_else(|_| "marin".into()),
-                *rate,
-            ))
-        }
+        TtsBackendConfig::OpenAi { rate } => create_openai_tts_configuration(
+            *rate,
+            std::env::var("OPENAI_TTS_MODEL").unwrap_or_else(|_| "gpt-4o-mini-tts".into()),
+            std::env::var("OPENAI_TTS_VOICE").unwrap_or_else(|_| "marin".into()),
+        ),
         TtsBackendConfig::Siri {
             voice,
             language,
@@ -2266,6 +2466,26 @@ fn create_tts_configuration(config: &TtsBackendConfig) -> Result<TtsConfiguratio
             *rate,
         )),
     }
+}
+
+fn create_openai_tts_configuration(
+    rate: f32,
+    model: String,
+    voice: String,
+) -> Result<TtsConfiguration, String> {
+    let api_key = std::env::var("OPENAI_API_KEY")
+        .ok()
+        .filter(|key| !key.trim().is_empty())
+        .ok_or_else(|| "OPENAI_API_KEY is required".to_string())?;
+    let base =
+        std::env::var("OPENAI_BASE_URL").unwrap_or_else(|_| "https://api.openai.com/v1".into());
+    Ok(TtsConfiguration::openai(
+        format!("{}/audio/speech", base.trim_end_matches('/')),
+        api_key,
+        model,
+        voice,
+        rate,
+    ))
 }
 
 fn create_tts_slot(config: &TtsBackendConfig) -> Result<ConfiguredTtsSlot, String> {
@@ -2289,6 +2509,189 @@ fn create_tts_slot(config: &TtsBackendConfig) -> Result<ConfiguredTtsSlot, Strin
 fn create_tts_backend(config: &TtsBackendConfig) -> Result<Arc<dyn TtsBackend>, String> {
     let slot = create_tts_slot(config)?;
     Ok(Arc::clone(slot.lease()?.backend()))
+}
+
+fn create_synthesis_backend(config: &SynthesisTtsConfig) -> Result<Arc<dyn TtsBackend>, String> {
+    match config {
+        SynthesisTtsConfig::OpenAi { model, voice, rate } => {
+            let slot = ConfiguredTtsSlot::new(create_openai_tts_configuration(
+                *rate,
+                model.clone(),
+                voice.clone(),
+            )?)?;
+            Ok(Arc::clone(slot.lease()?.backend()))
+        }
+        SynthesisTtsConfig::Local(config) => create_tts_backend(config),
+    }
+}
+
+fn synthesis_failure(
+    code: &'static str,
+    public_message: &'static str,
+    detail: impl Into<String>,
+) -> SynthesisFailure {
+    SynthesisFailure {
+        code,
+        public_message,
+        detail: detail.into(),
+    }
+}
+
+fn prepare_synthesis_output(path: &Path) -> Result<tempfile::NamedTempFile, SynthesisFailure> {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => {
+            return Err(synthesis_failure(
+                "output_unavailable",
+                "The output file already exists",
+                format!("output already exists: {}", path.display()),
+            ))
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(synthesis_failure(
+                "output_unavailable",
+                "The output path could not be inspected",
+                error.to_string(),
+            ))
+        }
+    }
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    tempfile::Builder::new()
+        .prefix(".berd-voice-synthesize-")
+        .suffix(".wav.tmp")
+        .tempfile_in(parent)
+        .map_err(|error| {
+            synthesis_failure(
+                "output_unavailable",
+                "A temporary output file could not be created",
+                error.to_string(),
+            )
+        })
+}
+
+fn synthesis_identity(config: &SynthesisConfig) -> (Option<String>, String, Option<String>, f32) {
+    match &config.tts {
+        SynthesisTtsConfig::OpenAi { model, voice, rate } => {
+            (Some(model.clone()), voice.clone(), None, *rate)
+        }
+        SynthesisTtsConfig::Local(TtsBackendConfig::Siri {
+            voice,
+            language,
+            rate,
+        }) => (None, voice.clone(), Some(language.clone()), *rate),
+        SynthesisTtsConfig::Local(TtsBackendConfig::Pocket { voice, rate, .. }) => (
+            Some(berd_voice::pocket_assets::MODEL_ID.into()),
+            voice.clone(),
+            None,
+            *rate,
+        ),
+        SynthesisTtsConfig::Local(TtsBackendConfig::OpenAi { .. }) => {
+            unreachable!("OpenAI synthesis carries explicit identity")
+        }
+    }
+}
+
+fn run_synthesis_with_factory(
+    config: &SynthesisConfig,
+    factory: impl FnOnce(&SynthesisTtsConfig) -> Result<Arc<dyn TtsBackend>, String>,
+) -> Result<SynthesisResult, SynthesisFailure> {
+    // Establish that a no-clobber output is possible before constructing a backend. For OpenAI,
+    // this keeps ordinary path failures at zero paid requests.
+    let mut temporary = prepare_synthesis_output(&config.output)?;
+    let backend = factory(&config.tts).map_err(|error| {
+        synthesis_failure(
+            "backend_unavailable",
+            "The selected TTS backend is unavailable",
+            error,
+        )
+    })?;
+    let wav =
+        berd_voice::synthesize_pcm16_wav(backend.as_ref(), &config.text, temporary.as_file_mut())
+            .map_err(|error| {
+            let (code, message) = match error.kind {
+                WavSynthesisErrorKind::Backend => (
+                    "synthesis_failed",
+                    "The TTS backend could not synthesize the text",
+                ),
+                WavSynthesisErrorKind::Cancelled => {
+                    ("synthesis_cancelled", "TTS synthesis was cancelled")
+                }
+                WavSynthesisErrorKind::Empty => {
+                    ("invalid_audio", "TTS synthesis produced no audio")
+                }
+                WavSynthesisErrorKind::InvalidPcm => {
+                    ("invalid_audio", "TTS synthesis produced invalid audio")
+                }
+                WavSynthesisErrorKind::TooLong => {
+                    ("audio_too_long", "TTS synthesis exceeded ten minutes")
+                }
+                WavSynthesisErrorKind::Output => {
+                    ("output_unavailable", "The WAV output could not be written")
+                }
+            };
+            synthesis_failure(code, message, error.detail)
+        })?;
+    temporary.as_file().sync_all().map_err(|error| {
+        synthesis_failure(
+            "output_unavailable",
+            "The WAV output could not be synchronized",
+            error.to_string(),
+        )
+    })?;
+    let bytes = temporary
+        .as_file()
+        .metadata()
+        .map_err(|error| {
+            synthesis_failure(
+                "output_unavailable",
+                "The WAV output could not be inspected",
+                error.to_string(),
+            )
+        })?
+        .len();
+    temporary
+        .persist_noclobber(&config.output)
+        .map_err(|error| {
+            synthesis_failure(
+                "output_unavailable",
+                "The output file appeared before synthesis completed",
+                error.error.to_string(),
+            )
+        })?;
+    let (model, voice, language, rate) = synthesis_identity(config);
+    Ok(SynthesisResult {
+        backend: config.backend(),
+        model,
+        voice,
+        language,
+        rate,
+        wav: SynthesisWavResult {
+            encoding: "pcm_s16le",
+            sample_rate: wav.sample_rate,
+            channels: 1,
+            bits_per_sample: 16,
+            frames: wav.frames,
+            duration_ms: wav.frames as f64 * 1_000.0 / f64::from(wav.sample_rate),
+            bytes,
+        },
+    })
+}
+
+fn run_synthesis_command(config: SynthesisConfig) -> Result<(), SynthesisFailure> {
+    let result = run_synthesis_with_factory(&config, create_synthesis_backend)?;
+    write_json_line(
+        io::stdout().lock(),
+        &ManagementResultEnvelope {
+            schema_version: MANAGEMENT_SCHEMA_VERSION,
+            operation: "synthesize",
+            event: "result",
+            result,
+        },
+    )
+    .map_err(|error| synthesis_failure("output_failed", "Could not write command result", error))
 }
 
 fn create_input_runtime(
@@ -3281,8 +3684,278 @@ mod tests {
     use std::io::{Cursor, Write};
     use std::sync::Mutex;
 
+    fn synthesis_config(tts: SynthesisTtsConfig, output: PathBuf) -> SynthesisConfig {
+        SynthesisConfig {
+            tts,
+            text: "A bounded test sentence.".into(),
+            output,
+        }
+    }
+
+    #[test]
+    fn parses_closed_synthesis_surface_for_each_backend() {
+        let siri = parse_synthesis_args(&args(&[
+            "berd-voice",
+            "synthesize",
+            "--tts-backend",
+            "siri",
+            "--voice",
+            "Aaron",
+            "--language",
+            "en_US",
+            "--rate",
+            "2",
+            "--text",
+            "hello",
+            "--output",
+            "voice.wav",
+        ]))
+        .unwrap();
+        assert!(matches!(
+            siri.tts,
+            SynthesisTtsConfig::Local(TtsBackendConfig::Siri {
+                language,
+                rate: 2.0,
+                ..
+            }) if language == "en-US"
+        ));
+
+        let pocket = parse_synthesis_args(&args(&[
+            "berd-voice",
+            "synthesize",
+            "--tts-backend",
+            "pocket",
+            "--model-dir",
+            "/models/pocket",
+            "--voice",
+            "mary",
+            "--rate",
+            "1",
+            "--text",
+            "hello",
+            "--output",
+            "voice.wav",
+        ]))
+        .unwrap();
+        assert!(matches!(
+            pocket.tts,
+            SynthesisTtsConfig::Local(TtsBackendConfig::Pocket { rate: 1.0, .. })
+        ));
+
+        let openai = parse_synthesis_args(&args(&[
+            "berd-voice",
+            "synthesize",
+            "--tts-backend",
+            "openai",
+            "--model",
+            "gpt-test",
+            "--voice",
+            "marin",
+            "--rate",
+            "1.5",
+            "--allow-paid-openai",
+            "--text",
+            "hello",
+            "--output",
+            "voice.wav",
+        ]))
+        .unwrap();
+        assert!(matches!(
+            openai.tts,
+            SynthesisTtsConfig::OpenAi { rate: 1.5, .. }
+        ));
+    }
+
+    #[test]
+    fn synthesis_parser_rejects_unsafe_or_untruthful_combinations() {
+        let cases = [
+            vec![
+                "--tts-backend",
+                "openai",
+                "--model",
+                "gpt-test",
+                "--voice",
+                "marin",
+            ],
+            vec![
+                "--tts-backend",
+                "openai",
+                "--model",
+                "gpt-test",
+                "--voice",
+                "marin",
+                "--allow-paid-openai",
+                "--language",
+                "en-US",
+            ],
+            vec![
+                "--tts-backend",
+                "pocket",
+                "--model-dir",
+                "/models/pocket",
+                "--voice",
+                "mary",
+                "--rate",
+                "2",
+            ],
+            vec![
+                "--tts-backend",
+                "siri",
+                "--voice",
+                "Aaron",
+                "--language",
+                "en-US",
+                "--allow-paid-openai",
+            ],
+        ];
+        for mut flags in cases {
+            let mut values = vec!["berd-voice", "synthesize"];
+            values.append(&mut flags);
+            values.extend(["--text", "hello", "--output", "voice.wav"]);
+            assert!(parse_synthesis_args(&args(&values)).is_err(), "{values:?}");
+        }
+        assert!(parse_synthesis_args(&args(&[
+            "berd-voice",
+            "synthesize",
+            "--tts-backend",
+            "siri",
+            "--voice",
+            "Aaron",
+            "--language",
+            "en-US",
+            "--text",
+            "hello",
+            "--output",
+            "-",
+        ]))
+        .is_err());
+    }
+
+    #[test]
+    fn output_preflight_precedes_backend_construction_and_never_clobbers() {
+        let directory = tempfile::tempdir().unwrap();
+        let output = directory.path().join("voice.wav");
+        std::fs::write(&output, b"owned").unwrap();
+        let config = synthesis_config(
+            SynthesisTtsConfig::OpenAi {
+                model: "gpt-test".into(),
+                voice: "marin".into(),
+                rate: 1.0,
+            },
+            output.clone(),
+        );
+        let constructed = AtomicBool::new(false);
+        let error = run_synthesis_with_factory(&config, |_| {
+            constructed.store(true, Ordering::SeqCst);
+            Ok(Arc::new(FakeTts { frames: vec![0.1] }))
+        })
+        .unwrap_err();
+        assert_eq!(error.code, "output_unavailable");
+        assert!(!constructed.load(Ordering::SeqCst));
+        assert_eq!(std::fs::read(output).unwrap(), b"owned");
+    }
+
+    #[test]
+    fn synthesis_publishes_valid_wav_and_reports_only_public_identity() {
+        let directory = tempfile::tempdir().unwrap();
+        let output = directory.path().join("voice.wav");
+        let config = synthesis_config(
+            SynthesisTtsConfig::Local(TtsBackendConfig::Pocket {
+                model_dir: PathBuf::from("/private/model/path"),
+                voice: "mary".into(),
+                rate: 1.0,
+            }),
+            output.clone(),
+        );
+        let result = run_synthesis_with_factory(&config, |_| {
+            Ok(Arc::new(FakeTts {
+                frames: vec![0.25, -0.25],
+            }))
+        })
+        .unwrap();
+        assert_eq!(&std::fs::read(&output).unwrap()[..4], b"RIFF");
+        let value = serde_json::to_value(ManagementResultEnvelope {
+            schema_version: MANAGEMENT_SCHEMA_VERSION,
+            operation: "synthesize",
+            event: "result",
+            result,
+        })
+        .unwrap();
+        assert_eq!(value["result"]["backend"], "pocket");
+        assert_eq!(
+            value["result"]["model"],
+            berd_voice::pocket_assets::MODEL_ID
+        );
+        assert_eq!(value["result"]["voice"], "mary");
+        let serialized = value.to_string();
+        assert!(!serialized.contains("/private"));
+        assert!(!serialized.contains("bounded test"));
+    }
+
+    #[test]
+    fn synthesis_publish_race_preserves_the_competing_target() {
+        let directory = tempfile::tempdir().unwrap();
+        let output = directory.path().join("voice.wav");
+        let config = synthesis_config(
+            SynthesisTtsConfig::Local(TtsBackendConfig::Siri {
+                voice: "Aaron".into(),
+                language: "en-US".into(),
+                rate: 1.0,
+            }),
+            output.clone(),
+        );
+        let error = run_synthesis_with_factory(&config, |_| {
+            std::fs::write(&output, b"race winner").unwrap();
+            Ok(Arc::new(FakeTts { frames: vec![0.1] }))
+        })
+        .unwrap_err();
+        assert_eq!(error.code, "output_unavailable");
+        assert_eq!(std::fs::read(&output).unwrap(), b"race winner");
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn synthesis_failure_after_partial_pcm_leaves_no_artifact() {
+        let directory = tempfile::tempdir().unwrap();
+        let output = directory.path().join("voice.wav");
+        let config = synthesis_config(
+            SynthesisTtsConfig::Local(TtsBackendConfig::Siri {
+                voice: "Aaron".into(),
+                language: "en-US".into(),
+                rate: 1.0,
+            }),
+            output.clone(),
+        );
+        let error =
+            run_synthesis_with_factory(&config, |_| Ok(Arc::new(PartialFailureTts))).unwrap_err();
+        assert_eq!(error.code, "synthesis_failed");
+        assert!(!output.exists());
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+    }
+
     struct FakeTts {
         frames: Vec<f32>,
+    }
+
+    struct PartialFailureTts;
+
+    impl TtsBackend for PartialFailureTts {
+        fn pcm_spec(&self) -> TtsPcmSpec {
+            TtsPcmSpec {
+                sample_rate: 24_000,
+                playback_rate: 1.0,
+            }
+        }
+
+        fn synthesize(
+            &self,
+            _text: &str,
+            _active: &AtomicBool,
+            on_frames: &mut dyn FnMut(&[f32]) -> Result<(), String>,
+        ) -> Result<TtsOutcome, String> {
+            on_frames(&[0.25, -0.25])?;
+            Err("provider stopped".into())
+        }
     }
 
     impl TtsBackend for FakeTts {
