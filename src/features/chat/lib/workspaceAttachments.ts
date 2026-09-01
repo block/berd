@@ -1,4 +1,4 @@
-import { expandHomePath } from "@/shared/lib/homePath";
+import { expandHomePath, isHomeRelativePath } from "@/shared/lib/homePath";
 import type {
   WorkspaceAttachment,
   WorkspaceAttachmentLifecycle,
@@ -88,6 +88,22 @@ export function isSameWorkspacePath(
   b: string | null | undefined,
 ): boolean {
   return isSamePath(a, b);
+}
+
+/** Compare persisted workspace paths that may mix `~` and expanded spellings. */
+export function isSameWorkspacePathWithHome(
+  a: string | null | undefined,
+  b: string | null | undefined,
+  homeDir: string,
+): boolean {
+  if (isSameWorkspacePath(a, b)) return true;
+  if (!a || !b || (!isHomeRelativePath(a) && !isHomeRelativePath(b))) {
+    return false;
+  }
+  return isSameWorkspacePath(
+    expandHomePath(a, homeDir),
+    expandHomePath(b, homeDir),
+  );
 }
 
 function normalizeLifecycleString(value: string | null | undefined) {

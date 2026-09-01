@@ -1,5 +1,6 @@
 import type { WorkspaceAttachment } from "@/shared/types/chat";
 import { getGitState } from "@/shared/api/git";
+import { getHomeDir } from "@/shared/api/system";
 import {
   canonicalizeAuthorizedWorkspaceDirectory,
   resolvePath,
@@ -8,7 +9,7 @@ import { useProjectStore } from "@/features/projects/stores/projectStore";
 import {
   classifyWorkspaceAttachment,
   getWorkspaceAttachments,
-  isSameWorkspacePath,
+  isSameWorkspacePathWithHome,
   workspaceAttachmentIdForPath,
 } from "@/features/chat/lib/workspaceAttachments";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
@@ -103,6 +104,7 @@ async function canonicalizeForSession(
 async function canonicalizeDetachablePath(
   sessionId: string,
   requestedPath: string,
+  homeDir: string,
 ): Promise<string> {
   const session = useChatSessionStore.getState().getSession(sessionId);
   if (!session) {
@@ -118,7 +120,11 @@ async function canonicalizeDetachablePath(
   const stored = getWorkspaceAttachments(session).find(
     (candidate) =>
       candidate.source !== "excluded" &&
-      isSameWorkspacePath(candidate.path, resolvedRequestedPath),
+      isSameWorkspacePathWithHome(
+        candidate.path,
+        resolvedRequestedPath,
+        homeDir,
+      ),
   );
   return (
     stored?.path ?? canonicalizeForSession(sessionId, requestedPath, "detach")
@@ -132,13 +138,20 @@ export interface AttachSessionFolderOptions {
   replaceExistingInSingleWorkspace?: boolean;
 }
 
-async function isImplicitDefaultCwd(sessionId: string): Promise<boolean> {
+function isImplicitDefaultCwd(
+  sessionId: string,
+  artifactRoot: string,
+  homeDir: string,
+): boolean {
   const session = useChatSessionStore.getState().getSession(sessionId);
   if (!session?.workingDir) return true;
-  const artifactRoot = await resolveArtifactRootPath();
   return (
-    isSameWorkspacePath(session.workingDir, artifactRoot) ||
-    isSameWorkspacePath(session.workingDir, getOptimisticArtifactCwd())
+    isSameWorkspacePathWithHome(session.workingDir, artifactRoot, homeDir) ||
+    isSameWorkspacePathWithHome(
+      session.workingDir,
+      getOptimisticArtifactCwd(),
+      homeDir,
+    )
   );
 }
 
@@ -171,12 +184,14 @@ export async function attachSessionFolder(
 ): Promise<WorkspaceAttachment> {
   const observedIntentGeneration =
     getSessionWorkspaceIntentGeneration(sessionId);
+  const homeDir = await getHomeDir();
   const prepared = await prepareSessionFolder(sessionId, requestedPath);
-  const shouldPromoteDefaultCwd =
-    options.promoteDefaultCwd !== false &&
-    (await isImplicitDefaultCwd(sessionId));
+  const artifactRoot = await resolveArtifactRootPath();
   const { classification } = prepared;
   const path = await canonicalizeForSession(sessionId, prepared.path, "attach");
+  const shouldPromoteDefaultCwd =
+    options.promoteDefaultCwd !== false &&
+    isImplicitDefaultCwd(sessionId, artifactRoot, homeDir);
 
   // Reauthorize after every preparation/promotion await so policy and
   // persistence use the same current session state at the mutation boundary.
@@ -189,8 +204,8 @@ export async function attachSessionFolder(
   const includedAttachments = currentAttachments.filter(
     (candidate) => candidate.source !== "excluded",
   );
-  const alreadyAttached = includedAttachments.some((candidate) =>
-    isSameWorkspacePath(candidate.path, path),
+  const alreadyAttached = includedAttachments.find((candidate) =>
+    isSameWorkspacePathWithHome(candidate.path, path, homeDir),
   );
   const singleWorkspaceReplacement =
     options.replaceExistingInSingleWorkspace &&
@@ -201,8 +216,11 @@ export async function attachSessionFolder(
   if (options.enforceWorkspaceLimit && !getMultiWorkspaceEnabled()) {
     const realAttachments = includedAttachments.filter(
       (candidate) =>
-        !isSameWorkspacePath(candidate.path, currentSession.workingDir) ||
-        !shouldPromoteDefaultCwd,
+        !isSameWorkspacePathWithHome(
+          candidate.path,
+          currentSession.workingDir,
+          homeDir,
+        ) || !shouldPromoteDefaultCwd,
     );
     if (!alreadyAttached && realAttachments.length > 0) {
       throw new FolderAttachmentError(
@@ -221,26 +239,30 @@ export async function attachSessionFolder(
     });
   } else {
     currentStore.attachWorkspace(sessionId, {
-      path,
+      path: alreadyAttached?.path ?? path,
       source: "inferred",
       usedByAgent: true,
       ...classification,
     });
   }
 
-  if (await isImplicitDefaultCwd(sessionId)) {
+  if (isImplicitDefaultCwd(sessionId, artifactRoot, homeDir)) {
     const promotedSession = currentStore.getSession(sessionId);
     const implicitAttachment = promotedSession
       ? getWorkspaceAttachments(promotedSession).find(
           (candidate) =>
             candidate.source !== "excluded" &&
-            isSameWorkspacePath(candidate.path, promotedSession.workingDir),
+            isSameWorkspacePathWithHome(
+              candidate.path,
+              promotedSession.workingDir,
+              homeDir,
+            ),
         )
       : undefined;
     if (
       promotedSession &&
       implicitAttachment &&
-      !isSameWorkspacePath(implicitAttachment.path, path)
+      !isSameWorkspacePathWithHome(implicitAttachment.path, path, homeDir)
     ) {
       currentStore.patchSession(sessionId, {
         workspaceAttachments: getWorkspaceAttachments(promotedSession).filter(
@@ -259,7 +281,7 @@ export async function attachSessionFolder(
     ?.workspaceAttachments?.find(
       (candidate) =>
         candidate.source !== "excluded" &&
-        isSameWorkspacePath(candidate.path, path),
+        isSameWorkspacePathWithHome(candidate.path, path, homeDir),
     );
   if (!attachment) {
     throw new FolderAttachmentError(
@@ -270,7 +292,7 @@ export async function attachSessionFolder(
     shouldPromoteDefaultCwd &&
     getSessionWorkspaceIntentGeneration(sessionId) ===
       observedIntentGeneration &&
-    (await isImplicitDefaultCwd(sessionId))
+    isImplicitDefaultCwd(sessionId, artifactRoot, homeDir)
   ) {
     const intentGeneration = claimSessionWorkspaceIntent(sessionId);
     queueSessionWorkspaceActivation({
@@ -300,7 +322,12 @@ export async function detachSessionFolder(
   requestedPath: string,
   options: DetachSessionFolderOptions = {},
 ): Promise<DetachSessionFolderResult> {
-  const path = await canonicalizeDetachablePath(sessionId, requestedPath);
+  const homeDir = await getHomeDir();
+  const path = await canonicalizeDetachablePath(
+    sessionId,
+    requestedPath,
+    homeDir,
+  );
 
   const currentStore = useChatSessionStore.getState();
   const session = currentStore.getSession(sessionId);
@@ -311,7 +338,7 @@ export async function detachSessionFolder(
   const attachment = getWorkspaceAttachments(session).find(
     (candidate) =>
       candidate.source !== "excluded" &&
-      isSameWorkspacePath(candidate.path, path),
+      isSameWorkspacePathWithHome(candidate.path, path, homeDir),
   );
   if (!attachment) {
     return {
@@ -326,7 +353,11 @@ export async function detachSessionFolder(
   const pendingActivation = getPendingSessionWorkspaceActivation(sessionId);
   if (
     pendingActivation &&
-    isSameWorkspacePath(pendingActivation.path, attachment.path)
+    isSameWorkspacePathWithHome(
+      pendingActivation.path,
+      attachment.path,
+      homeDir,
+    )
   ) {
     await supersedePendingSessionWorkspaceActivation(sessionId);
   }
@@ -348,7 +379,7 @@ export async function detachSessionFolder(
   }
   const detachingCwd =
     latestSession.workingDir != null &&
-    isSameWorkspacePath(latestSession.workingDir, path);
+    isSameWorkspacePathWithHome(latestSession.workingDir, path, homeDir);
   const intentGeneration =
     detachingCwd && options.updateCwd !== false
       ? claimSessionWorkspaceIntent(sessionId)
@@ -379,7 +410,7 @@ export async function detachSessionFolder(
     intentGeneration == null ||
     !isCurrentSessionWorkspaceIntent(sessionId, intentGeneration) ||
     finalSession?.workingDir == null ||
-    !isSameWorkspacePath(finalSession.workingDir, path)
+    !isSameWorkspacePathWithHome(finalSession.workingDir, path, homeDir)
   ) {
     return {
       path,
@@ -421,13 +452,18 @@ export async function replaceSessionFolder(
   newRequestedPath: string,
   options: ReplaceSessionFolderOptions = {},
 ): Promise<ReplaceSessionFolderResult> {
-  const oldPath = await canonicalizeDetachablePath(sessionId, oldRequestedPath);
+  const homeDir = await getHomeDir();
+  const oldPath = await canonicalizeDetachablePath(
+    sessionId,
+    oldRequestedPath,
+    homeDir,
+  );
   const session = useChatSessionStore.getState().getSession(sessionId);
   const oldAttachment = session
     ? getWorkspaceAttachments(session).find(
         (candidate) =>
           candidate.source !== "excluded" &&
-          isSameWorkspacePath(candidate.path, oldPath),
+          isSameWorkspacePathWithHome(candidate.path, oldPath, homeDir),
       )
     : undefined;
   if (!oldAttachment) {
@@ -477,12 +513,20 @@ export async function replaceSessionFolder(
   const replacingPendingCwd =
     !newerPendingActivation &&
     currentPendingActivation != null &&
-    isSameWorkspacePath(currentPendingActivation.path, oldPath);
+    isSameWorkspacePathWithHome(
+      currentPendingActivation.path,
+      oldPath,
+      homeDir,
+    );
   const replacingCwd =
     !newerPendingActivation &&
     (replacingPendingCwd ||
       (currentSession?.workingDir != null &&
-        isSameWorkspacePath(currentSession.workingDir, oldPath)));
+        isSameWorkspacePathWithHome(
+          currentSession.workingDir,
+          oldPath,
+          homeDir,
+        )));
   const intentGeneration = replacingCwd
     ? claimSessionWorkspaceIntent(sessionId)
     : null;
@@ -511,12 +555,12 @@ export async function replaceSessionFolder(
   const stillOwnsCwd =
     replacingPendingCwd ||
     (latestWorkingDir != null &&
-      isSameWorkspacePath(latestWorkingDir, oldPath));
+      isSameWorkspacePathWithHome(latestWorkingDir, oldPath, homeDir));
   const shouldMoveCwd =
     intentGeneration != null &&
     isCurrentSessionWorkspaceIntent(sessionId, intentGeneration) &&
     replacingCwd &&
-    !isSameWorkspacePath(oldPath, attachment.path) &&
+    !isSameWorkspacePathWithHome(oldPath, attachment.path, homeDir) &&
     stillOwnsCwd;
   if (shouldMoveCwd) {
     queueSessionWorkspaceActivation({
