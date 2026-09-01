@@ -31,6 +31,28 @@ function sortAndPruneModelRecencyEntries(
   return Object.fromEntries(entries.slice(-MODEL_RECENCY_LIMIT));
 }
 
+function mergeModelRecencyMaps(
+  currentMap: ModelRecencyMap,
+  incomingMap: ModelRecencyMap,
+): ModelRecencyMap {
+  const merged = new Map(Object.entries(currentMap));
+  for (const [key, rank] of Object.entries(incomingMap)) {
+    merged.set(
+      key,
+      Math.max(merged.get(key) ?? Number.NEGATIVE_INFINITY, rank),
+    );
+  }
+  return sortAndPruneModelRecencyEntries([...merged]);
+}
+
+function renormalizeModelRecencyMap(map: ModelRecencyMap): ModelRecencyMap {
+  return Object.fromEntries(
+    Object.entries(map)
+      .sort(([, leftRank], [, rightRank]) => leftRank - rightRank)
+      .map(([key], index) => [key, index + 1]),
+  );
+}
+
 function parseModelRecencyMap(raw: string | null): ModelRecencyMap {
   if (raw === null) return EMPTY_MAP;
 
@@ -69,10 +91,24 @@ export function getModelRecencyMap(): ModelRecencyMap {
   // useSyncExternalStore needs a stable snapshot identity between writes.
   if (raw === cachedRaw) return cachedMap;
 
-  const map = parseModelRecencyMap(raw);
-  cachedRaw = raw;
-  cachedMap = map;
-  return map;
+  const incomingMap = parseModelRecencyMap(raw);
+  if (raw === null || Object.keys(cachedMap).length === 0) {
+    cachedRaw = raw;
+    cachedMap = incomingMap;
+    return incomingMap;
+  }
+
+  const nextMap = mergeModelRecencyMaps(cachedMap, incomingMap);
+  if (JSON.stringify(nextMap) === JSON.stringify(cachedMap)) {
+    persistModelRecencyMap(cachedMap);
+    return cachedMap;
+  }
+
+  if (!persistModelRecencyMap(nextMap)) {
+    cachedRaw = raw;
+    cachedMap = nextMap;
+  }
+  return cachedMap;
 }
 
 export function recordModelSelection(
@@ -82,7 +118,12 @@ export function recordModelSelection(
   if (typeof window === "undefined") return;
 
   const key = modelRecencyKey(agentId, model);
-  const currentMap = getModelRecencyMap();
+  let currentMap = getModelRecencyMap();
+  if (
+    Object.values(currentMap).some((rank) => rank >= Number.MAX_SAFE_INTEGER)
+  ) {
+    currentMap = renormalizeModelRecencyMap(currentMap);
+  }
   const entries = Object.entries(currentMap).filter(
     ([candidate]) => candidate !== key,
   );
@@ -150,16 +191,10 @@ function handleStorageChange(event: StorageEvent) {
     }
   }
 
-  const merged = new Map(Object.entries(cachedMap));
-  for (const [key, rank] of Object.entries(parseModelRecencyMap(raw))) {
-    merged.set(
-      key,
-      Math.max(merged.get(key) ?? Number.NEGATIVE_INFINITY, rank),
-    );
-  }
-  const nextMap = sortAndPruneModelRecencyEntries([...merged]);
+  const nextMap = mergeModelRecencyMaps(cachedMap, parseModelRecencyMap(raw));
   if (JSON.stringify(nextMap) === JSON.stringify(cachedMap)) {
     persistModelRecencyMap(cachedMap);
+    notifyListeners();
     return;
   }
 

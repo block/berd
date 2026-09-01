@@ -179,7 +179,27 @@ export const RecommendedModelList = forwardRef<
             currentModelProviderId,
           ),
       )
-      .sort((a, b) => b.rank - a.rank)
+      .sort((left, right) => {
+        if (left.rank !== right.rank) {
+          return right.rank - left.rank;
+        }
+
+        const leftProvider = getGooseModelProviderLabel(left.model) ?? "";
+        const rightProvider = getGooseModelProviderLabel(right.model) ?? "";
+        if (leftProvider !== rightProvider) {
+          return leftProvider.localeCompare(rightProvider);
+        }
+
+        const leftOrder = left.model.sortOrder ?? Number.MAX_SAFE_INTEGER;
+        const rightOrder = right.model.sortOrder ?? Number.MAX_SAFE_INTEGER;
+        if (leftOrder !== rightOrder) {
+          return leftOrder - rightOrder;
+        }
+
+        return getModelDisplayName(left.model).localeCompare(
+          getModelDisplayName(right.model),
+        );
+      })
       .slice(0, RECENT_MODEL_LIMIT)
       .map((entry) => entry.model);
     const rec = models

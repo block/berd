@@ -14,6 +14,7 @@ describe("model recency", () => {
   afterEach(() => {
     vi.useRealTimers();
     localStorage.clear();
+    getModelRecencyMap();
   });
 
   it("returns an empty map for missing or corrupt storage", () => {
@@ -111,6 +112,33 @@ describe("model recency", () => {
     expect(getModelRecencyRank(map, "agent", { id: "m2" })).toBeGreaterThan(
       1_000,
     );
+  });
+
+  it("renormalizes ranks before incrementing Number.MAX_SAFE_INTEGER", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(100);
+    localStorage.setItem(
+      MODEL_RECENCY_STORAGE_KEY,
+      JSON.stringify({
+        "agent//older": 10,
+        "agent//newest": Number.MAX_SAFE_INTEGER,
+      }),
+    );
+
+    recordModelSelection("agent", { id: "new-selection" });
+
+    const map = getModelRecencyMap();
+    const newRank = getModelRecencyRank(map, "agent", {
+      id: "new-selection",
+    });
+    const otherRanks = [
+      getModelRecencyRank(map, "agent", { id: "older" }),
+      getModelRecencyRank(map, "agent", { id: "newest" }),
+    ];
+    expect(otherRanks).toEqual([1, 2]);
+    expect(newRank).not.toBeNull();
+    expect(newRank).toBeGreaterThan(Math.max(...otherRanks.map(Number)));
+    expect(Object.values(map).every(Number.isSafeInteger)).toBe(true);
   });
 
   it("prunes to the newest 50 entries, dropping the oldest", () => {
@@ -283,6 +311,43 @@ describe("model recency", () => {
         providerId: "p1",
       }),
     ).toEqual(expect.any(Number));
+  });
+
+  it("retains local recency when storage is read before the remote event", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const { result } = renderHook(() => useModelRecency());
+
+    act(() => {
+      recordModelSelection("agent", { id: "local" });
+    });
+
+    const remoteRaw = JSON.stringify({ "agent//remote": 2_000 });
+    localStorage.setItem(MODEL_RECENCY_STORAGE_KEY, remoteRaw);
+    const snapshot = getModelRecencyMap();
+
+    expect(snapshot).toEqual({
+      "agent//local": 1_000,
+      "agent//remote": 2_000,
+    });
+    expect(
+      JSON.parse(localStorage.getItem(MODEL_RECENCY_STORAGE_KEY) ?? ""),
+    ).toEqual(snapshot);
+
+    act(() => {
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: MODEL_RECENCY_STORAGE_KEY,
+          newValue: remoteRaw,
+        }),
+      );
+    });
+
+    expect(result.current).toBe(snapshot);
+    expect(result.current).toEqual({
+      "agent//local": 1_000,
+      "agent//remote": 2_000,
+    });
   });
 
   it("merges cross-window storage events into useModelRecency", () => {

@@ -6,6 +6,7 @@ import { AgentModelPicker } from "../AgentModelPicker";
 import {
   getModelRecencyMap,
   getModelRecencyRank,
+  MODEL_RECENCY_STORAGE_KEY,
   recordModelSelection,
 } from "../../lib/modelRecency";
 import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
@@ -30,6 +31,7 @@ describe("AgentModelPicker", () => {
   afterEach(() => {
     vi.useRealTimers();
     localStorage.clear();
+    getModelRecencyMap();
   });
 
   it("shows the selected agent and model in the trigger", () => {
@@ -1657,6 +1659,68 @@ describe("AgentModelPicker", () => {
 
       expect(
         within(picker).getByRole("button", { name: "Oldest Recent Model" }),
+      ).toBeInTheDocument();
+    });
+
+    it("deterministically limits models with tied recency ranks", async () => {
+      const rank = 1_000;
+      localStorage.setItem(
+        MODEL_RECENCY_STORAGE_KEY,
+        JSON.stringify({
+          "goose/zulu/zulu-provider": rank,
+          "goose/alpha/later-sort": rank,
+          "goose/alpha/zulu-name": rank,
+          "goose/alpha/alpha-name": rank,
+        }),
+      );
+      const user = userEvent.setup();
+
+      renderPicker(
+        [
+          {
+            id: "zulu-provider",
+            name: "Zulu Provider Model",
+            providerId: "zulu",
+            providerName: "Zulu Provider",
+            sortOrder: 0,
+          },
+          {
+            id: "later-sort",
+            name: "Later Sort Model",
+            providerId: "alpha",
+            providerName: "Alpha Provider",
+            sortOrder: 2,
+          },
+          {
+            id: "zulu-name",
+            name: "Zulu Name Model",
+            providerId: "alpha",
+            providerName: "Alpha Provider",
+            sortOrder: 1,
+          },
+          {
+            id: "alpha-name",
+            name: "Alpha Name Model",
+            providerId: "alpha",
+            providerName: "Alpha Provider",
+            sortOrder: 1,
+          },
+        ],
+        { currentModelId: null, currentModelName: null },
+      );
+
+      const picker = await openPicker(user);
+
+      expect(modelRowNames(picker)).toEqual([
+        "Alpha Name Model",
+        "Zulu Name Model",
+        "Later Sort Model",
+      ]);
+      expect(
+        within(picker).queryByRole("button", { name: "Zulu Provider Model" }),
+      ).not.toBeInTheDocument();
+      expect(
+        within(picker).getByRole("button", { name: "View more" }),
       ).toBeInTheDocument();
     });
 
