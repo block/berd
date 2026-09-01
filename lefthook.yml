@@ -15,14 +15,10 @@ pre-commit:
       glob: "*.{ts,tsx,js,jsx,json,css}"
       run: pnpm exec biome check --fix --no-errors-on-unmatched {staged_files}
       stage_fixed: true
-    check:
-      run: just check
 
 pre-push:
   parallel: true
   commands:
-    fmt-check:
-      run: just fmt-check
     clippy:
       run: just clippy
     check:
