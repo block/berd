@@ -76,6 +76,47 @@ pub fn command() -> Command {
                 ),
         ))
         .subcommand(control_plane_args(
+            Command::new("list")
+                .about("List apps the current caller can manage")
+                .long_about(
+                    "List Apps Platform apps the current caller owns or is approved to publish. \
+                     Deleted apps remain hidden unless explicitly included.",
+                )
+                .arg(
+                    Arg::new("scope")
+                        .long("scope")
+                        .value_name("SCOPE")
+                        .value_parser(["manageable", "owned", "publisher"])
+                        .help("Filter by relationship to the app (control-plane default: manageable)"),
+                )
+                .arg(
+                    Arg::new("include-deleted")
+                        .long("include-deleted")
+                        .action(clap::ArgAction::SetTrue)
+                        .help("Include logically deleted apps"),
+                ),
+        ))
+        .subcommand(control_plane_args(
+            Command::new("get")
+                .about("Get one manageable app and its recorded versions")
+                .arg(
+                    Arg::new("app-id")
+                        .value_name("APP_ID")
+                        .required(true)
+                        .help("App identifier returned by `bb apps list` or `bb apps create`"),
+                ),
+        ))
+        .subcommand(control_plane_args(
+            Command::new("versions")
+                .about("List active and rollback-candidate versions for an app")
+                .arg(
+                    Arg::new("app-id")
+                        .value_name("APP_ID")
+                        .required(true)
+                        .help("App identifier returned by `bb apps list` or `bb apps create`"),
+                ),
+        ))
+        .subcommand(control_plane_args(
             Command::new("create")
                 .about("Plan and initialize an app")
                 .long_about(
@@ -238,6 +279,9 @@ fn dispatch(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     runner::ensure_org_configured(config)?;
     match matches.subcommand() {
         Some(("contract", contract_matches)) => run_contract(config, contract_matches),
+        Some(("list", list_matches)) => run_list(config, list_matches),
+        Some(("get", get_matches)) => run_get(config, get_matches),
+        Some(("versions", versions_matches)) => run_versions(config, versions_matches),
         Some(("create", create_matches)) => run_create(config, create_matches),
         Some(("deploy", deploy_matches)) => run_deploy(config, deploy_matches),
         Some(("ready", ready_matches)) => run_ready(config, ready_matches),
@@ -258,6 +302,32 @@ fn run_contract(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     let credential = ComposeSessionCredential::from_config(config)?;
     let contract = client.contract(&credential)?;
     print_json(&contract)
+}
+
+fn run_list(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
+    let scope = matches.get_one::<String>("scope").map(String::as_str);
+    let include_deleted = matches.get_flag("include-deleted");
+    let (client, credential) = control_plane_context(config, matches)?;
+    let response = client.list_apps(&credential, scope, include_deleted)?;
+    print_json(&response)
+}
+
+fn run_get(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
+    let app_id = matches
+        .get_one::<String>("app-id")
+        .context("expected app id")?;
+    let (client, credential) = control_plane_context(config, matches)?;
+    let response = client.get_app(&credential, app_id)?;
+    print_json(&response)
+}
+
+fn run_versions(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
+    let app_id = matches
+        .get_one::<String>("app-id")
+        .context("expected app id")?;
+    let (client, credential) = control_plane_context(config, matches)?;
+    let response = client.versions(&credential, app_id)?;
+    print_json(&response)
 }
 
 fn run_create(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
@@ -618,6 +688,32 @@ impl ControlPlaneClient {
         })
     }
 
+    fn list_apps(
+        &self,
+        credential: &ComposeSessionCredential,
+        scope: Option<&str>,
+        include_deleted: bool,
+    ) -> Result<Value> {
+        let mut query = Vec::new();
+        if let Some(scope) = scope {
+            query.push(("scope", scope.to_string()));
+        }
+        if include_deleted {
+            query.push(("include_deleted", "true".to_string()));
+        }
+        let url = self.apps_url(&query)?;
+        self.get_url(credential, url)
+    }
+
+    fn get_app(&self, credential: &ComposeSessionCredential, app_id: &str) -> Result<Value> {
+        let url = self.app_url(app_id)?;
+        self.get_url(credential, url)
+    }
+
+    fn versions(&self, credential: &ComposeSessionCredential, app_id: &str) -> Result<Value> {
+        self.get_app_resource(credential, app_id, "versions", &[])
+    }
+
     fn initialize(
         &self,
         credential: &ComposeSessionCredential,
@@ -691,6 +787,10 @@ impl ControlPlaneClient {
         query: &[(&str, String)],
     ) -> Result<Value> {
         let url = self.app_resource_url(app_id, resource, query)?;
+        self.get_url(credential, url)
+    }
+
+    fn get_url(&self, credential: &ComposeSessionCredential, url: url::Url) -> Result<Value> {
         let path = request_path(&url);
         self.authorized_json_request(credential, "GET", &path, |authorization| {
             self.standard_request(self.client.get(url.clone()), authorization)
@@ -708,18 +808,38 @@ impl ControlPlaneClient {
         self.app_resource_url(app_id, action, &[])
     }
 
+    fn apps_url(&self, query: &[(&str, String)]) -> Result<url::Url> {
+        let mut url = self.endpoint("/v1/agent/apps")?;
+        if !query.is_empty() {
+            let mut pairs = url.query_pairs_mut();
+            for (name, value) in query {
+                pairs.append_pair(name, value);
+            }
+        }
+        Ok(url)
+    }
+
+    fn app_url(&self, app_id: &str) -> Result<url::Url> {
+        let mut url = self.apps_url(&[])?;
+        url.path_segments_mut()
+            .map_err(|_| {
+                anyhow::anyhow!("Apps Platform control-plane URL cannot contain path segments")
+            })?
+            .push(app_id);
+        Ok(url)
+    }
+
     fn app_resource_url(
         &self,
         app_id: &str,
         resource: &str,
         query: &[(&str, String)],
     ) -> Result<url::Url> {
-        let mut url = self.endpoint("/v1/agent/apps")?;
+        let mut url = self.app_url(app_id)?;
         url.path_segments_mut()
             .map_err(|_| {
                 anyhow::anyhow!("Apps Platform control-plane URL cannot contain path segments")
             })?
-            .push(app_id)
             .push(resource);
         if !query.is_empty() {
             let mut pairs = url.query_pairs_mut();
@@ -1329,6 +1449,171 @@ mod tests {
         let control_requests = control_plane.finish();
         assert_process_auth(&auth_requests[0], credential);
         assert_process_control_plane(&control_requests[0], "GET", APPS_CONTRACT_PATH, credential);
+    }
+
+    #[test]
+    fn bb_apps_list_process_sends_filters_and_preserves_inventory() {
+        let credential = "apps-e2e-only.list.session+credential";
+        let inventory = json!({
+            "ok": true,
+            "caller": "apps-user",
+            "scope": "publisher",
+            "captured_at": "2026-09-01T12:00:00Z",
+            "count": 1,
+            "apps": [{
+                "app_id": "merchant-lookup",
+                "role": "publisher",
+                "status": "deleted",
+                "ready": false,
+                "active_version_id": "ver-123",
+                "last_published_by": "apps-user"
+            }]
+        });
+        let auth_server = ProcessServer::start(vec![process_auth_response()]);
+        let control_plane = ProcessServer::start(vec![ProcessResponse::json(inventory.clone())]);
+        let mut command = process_command(
+            &auth_server,
+            &control_plane,
+            &[
+                "apps",
+                "list",
+                "--scope",
+                "publisher",
+                "--include-deleted",
+                "--base-url",
+                APPROVED_TEST_BASE_URL,
+                "--client-version",
+                "0.2.0",
+                "--json",
+            ],
+            credential,
+        );
+
+        let output = command.output().expect("run Apps list process command");
+        assert!(
+            output.status.success(),
+            "stderr was: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&process_stdout(&output))
+                .expect("parse list process output"),
+            inventory
+        );
+        let auth_requests = auth_server.finish();
+        let requests = control_plane.finish();
+        assert_process_auth(&auth_requests[0], credential);
+        assert_eq!(requests.len(), 1);
+        assert_process_control_plane(
+            &requests[0],
+            "GET",
+            "/v1/agent/apps?scope=publisher&include_deleted=true",
+            credential,
+        );
+        assert_eq!(requests[0].body, Value::Null);
+    }
+
+    #[test]
+    fn bb_apps_get_process_encodes_app_id_and_preserves_versions() {
+        let credential = "apps-e2e-only.get.session+credential";
+        let app = json!({
+            "ok": true,
+            "app": {
+                "app_id": "merchant/lookup app",
+                "role": "owner",
+                "ready": true,
+                "route_revision": 9
+            },
+            "versions": [{
+                "version_id": "ver-123",
+                "deployment_id": "dpl-123",
+                "active": true
+            }]
+        });
+        let auth_server = ProcessServer::start(vec![process_auth_response()]);
+        let control_plane = ProcessServer::start(vec![ProcessResponse::json(app.clone())]);
+        let mut command = process_command(
+            &auth_server,
+            &control_plane,
+            &[
+                "apps",
+                "get",
+                "merchant/lookup app",
+                "--base-url",
+                APPROVED_TEST_BASE_URL,
+                "--client-version",
+                "0.2.0",
+                "--json",
+            ],
+            credential,
+        );
+
+        let output = command.output().expect("run Apps get process command");
+        assert!(output.status.success());
+        assert_eq!(
+            serde_json::from_str::<Value>(&process_stdout(&output))
+                .expect("parse get process output"),
+            app
+        );
+        let auth_requests = auth_server.finish();
+        let requests = control_plane.finish();
+        assert_process_auth(&auth_requests[0], credential);
+        assert_process_control_plane(
+            &requests[0],
+            "GET",
+            "/v1/agent/apps/merchant%2Flookup%20app",
+            credential,
+        );
+    }
+
+    #[test]
+    fn bb_apps_versions_process_preserves_rollback_candidates() {
+        let credential = "apps-e2e-only.versions.session+credential";
+        let versions = json!({
+            "ok": true,
+            "app_id": "merchant-lookup",
+            "environment": "production",
+            "active_version_id": "ver-123",
+            "count": 2,
+            "versions": [
+                {"version_id": "ver-123", "route_revision": 9, "active": true},
+                {"version_id": "ver-122", "route_revision": 8, "active": false}
+            ]
+        });
+        let auth_server = ProcessServer::start(vec![process_auth_response()]);
+        let control_plane = ProcessServer::start(vec![ProcessResponse::json(versions.clone())]);
+        let mut command = process_command(
+            &auth_server,
+            &control_plane,
+            &[
+                "apps",
+                "versions",
+                "merchant-lookup",
+                "--base-url",
+                APPROVED_TEST_BASE_URL,
+                "--client-version",
+                "0.2.0",
+                "--json",
+            ],
+            credential,
+        );
+
+        let output = command.output().expect("run Apps versions process command");
+        assert!(output.status.success());
+        assert_eq!(
+            serde_json::from_str::<Value>(&process_stdout(&output))
+                .expect("parse versions process output"),
+            versions
+        );
+        let auth_requests = auth_server.finish();
+        let requests = control_plane.finish();
+        assert_process_auth(&auth_requests[0], credential);
+        assert_process_control_plane(
+            &requests[0],
+            "GET",
+            "/v1/agent/apps/merchant-lookup/versions",
+            credential,
+        );
     }
 
     #[test]
@@ -2059,6 +2344,52 @@ mod tests {
     }
 
     #[test]
+    fn list_builds_each_supported_query_shape() {
+        let server = Server::http("127.0.0.1:0").expect("bind control-plane server");
+        let base_url = format!("http://{}", server.server_addr());
+        let expected_paths = [
+            "/v1/agent/apps",
+            "/v1/agent/apps?scope=owned",
+            "/v1/agent/apps?include_deleted=true",
+            "/v1/agent/apps?scope=publisher&include_deleted=true",
+        ];
+        let server_thread = thread::spawn(move || {
+            for (index, expected_path) in expected_paths.into_iter().enumerate() {
+                let request = server.recv().expect("receive list request");
+                assert_eq!(request.method().as_str(), "GET");
+                assert_eq!(request.url(), expected_path);
+                request
+                    .respond(
+                        Response::from_string(format!(r#"{{"request":{index}}}"#)).with_header(
+                            Header::from_bytes("Content-Type", "application/json")
+                                .expect("build content type"),
+                        ),
+                    )
+                    .expect("respond to list request");
+            }
+        });
+        let client = test_control_plane_client(&base_url, Duration::from_secs(2));
+        let credential = test_credential("list_query_session_credential_123456");
+
+        for (index, (scope, include_deleted)) in [
+            (None, false),
+            (Some("owned"), false),
+            (None, true),
+            (Some("publisher"), true),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let response = client
+                .list_apps(&credential, scope, include_deleted)
+                .expect("request list response");
+            assert_eq!(response["request"], index);
+        }
+
+        server_thread.join().expect("join control-plane server");
+    }
+
+    #[test]
     fn debug_tail_lines_match_control_plane_bounds() {
         for invalid in ["0", "1001"] {
             let error = command()
@@ -2099,6 +2430,11 @@ mod tests {
             .expect("build app deploy URL");
 
         assert_eq!(url.path(), "/v1/agent/apps/app%2F..%2F..%2Fidentity/deploy");
+
+        let app = client
+            .app_url("app/with space")
+            .expect("build app detail URL");
+        assert_eq!(app.path(), "/v1/agent/apps/app%2Fwith%20space");
 
         let ready = client
             .app_resource_url(
