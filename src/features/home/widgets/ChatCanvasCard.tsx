@@ -11,6 +11,7 @@ import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
 import { projectRecentConversationExchanges } from "@/features/chat/lib/boundedConversationProjection";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
+import { ArtifactPolicyProvider } from "@/features/chat/hooks/ArtifactPolicyContext";
 import { ChatTranscriptSurface } from "@/features/chat/ui/ChatTranscriptSurface";
 import { LoadingBerd } from "@/features/chat/ui/LoadingBerd";
 import { selectProjects } from "@/features/projects/stores/projectSelectors";
@@ -258,12 +259,23 @@ export function ChatCanvasCard({
         onClick={(event) => event.stopPropagation()}
         onFocusCapture={activateComposerFromFocus}
       >
-        <CanvasCardComposer
-          session={session}
-          onCreatePersona={onCreatePersona}
-          onCreateProject={onCreateProject}
-          onWorkspaceNameRequest={onWorkspaceNameRequest}
-        />
+        {/* The composer is a sibling of ChatTranscriptSurface, so it sits
+            outside the transcript's own ArtifactPolicyProvider. Its @-file
+            mentions read the session artifact list from context; without a
+            provider here they silently see an empty list. Full messages (not
+            the bounded projection) so mentions cover the whole session. */}
+        <ArtifactPolicyProvider
+          messages={transcript.messages}
+          sessionCwd={transcript.sessionArtifactCwd ?? null}
+          sessionId={session.id}
+        >
+          <CanvasCardComposer
+            session={session}
+            onCreatePersona={onCreatePersona}
+            onCreateProject={onCreateProject}
+            onWorkspaceNameRequest={onWorkspaceNameRequest}
+          />
+        </ArtifactPolicyProvider>
       </div>
     </section>
   );
