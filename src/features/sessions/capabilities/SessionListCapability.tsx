@@ -889,8 +889,7 @@ export function SessionListCapability({
   );
 
   const hasFlatChatOverflow =
-    flatSessionCandidates.length > MAX_FLAT_SIDEBAR_CHATS ||
-    (flatSessionCandidates.length >= MAX_FLAT_SIDEBAR_CHATS && hasMoreSessions);
+    flatSessionCandidates.length > MAX_FLAT_SIDEBAR_CHATS || hasMoreSessions;
   const standaloneChatCount = groupChatsByProject
     ? projectSessions.standalone.length
     : flatSessionCandidates.length;
