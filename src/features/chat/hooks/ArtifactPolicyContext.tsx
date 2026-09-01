@@ -420,7 +420,15 @@ export function ArtifactPolicyProvider({
         return;
       }
       lastOpenAtByPathRef.current.set(key, now);
-      await openPath(resolvedTarget);
+      try {
+        await openPath(resolvedTarget);
+      } catch (error) {
+        // A failed hand-off must not consume the debounce window: the user
+        // should be able to retry immediately (e.g. after fixing whatever the
+        // OS rejected) instead of having the retry silently absorbed.
+        lastOpenAtByPathRef.current.delete(key);
+        throw error;
+      }
     },
     [filesAreRemote, remoteHost, resolveOpenTarget, normalizedSessionCwd, t],
   );
