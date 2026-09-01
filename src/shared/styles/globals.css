@@ -1967,7 +1967,7 @@ html[data-window-kind="voice-buddy"] #root {
 }
 
 [data-streamdown="table-wrapper"] > div:has(> [data-streamdown="table"]) {
-  overflow-y: hidden;
+  overflow-y: auto;
   padding-block-end: var(--streamdown-table-scrollbar-block-size, 0px);
 }
 
@@ -1980,6 +1980,7 @@ html[data-window-kind="voice-buddy"] #root {
 
 [data-streamdown="table"] td {
   font-size: 0.8125rem;
+  overflow-wrap: anywhere;
 }
 
 /* Streamdown paints its table scroll container with bg-background. Keep the

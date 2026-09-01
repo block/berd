@@ -16,10 +16,19 @@ describe("Streamdown table styles", () => {
       /\[data-streamdown="table"\]\s+th\s*\{[^}]*(?:letter-spacing|text-transform):/s,
     );
     expect(globalsCss).toMatch(
-      /\[data-streamdown="table"\]\s+td\s*\{[^}]*font-size:\s*0\.8125rem;/s,
+      /\[data-streamdown="table"\]\s+td\s*\{[^}]*font-size:\s*0\.8125rem;[^}]*overflow-wrap:\s*anywhere;/s,
     );
     expect(globalsCss).not.toMatch(
       /\[data-streamdown="table"\]\s+td\s*\{[^}]*white-space:\s*normal;/s,
+    );
+  });
+
+  it("allows vertical scrolling for tables taller than the max height", () => {
+    expect(globalsCss).toMatch(
+      /table-wrapper"\][^}]*> div:has\(> \[data-streamdown="table"\]\)\s*\{[^}]*overflow-y:\s*auto;/s,
+    );
+    expect(globalsCss).not.toMatch(
+      /table-wrapper"\][^}]*overflow-y:\s*hidden/s,
     );
   });
 });
