@@ -138,6 +138,7 @@ const mockDiscoveryExperimentEnabled = vi.hoisted(() => ({ value: false }));
 const mockUseExperiment = vi.hoisted(() => vi.fn());
 vi.mock("@/features/experiments/experimentPreferences", () => ({
   useExperiment: mockUseExperiment,
+  subscribeToExperimentChanges: () => () => {},
 }));
 
 const mockRemoteSkillsState = vi.hoisted(() => ({

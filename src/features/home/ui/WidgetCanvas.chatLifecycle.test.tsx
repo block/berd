@@ -55,6 +55,7 @@ const messages: Message[] = [
 
 vi.mock("@/features/experiments/experimentPreferences", () => ({
   useExperiment: () => ({ enabled: true }),
+  subscribeToExperimentChanges: () => () => {},
 }));
 
 vi.mock("@/features/chat/hooks/useChatTranscriptReadModel", () => ({

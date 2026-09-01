@@ -12,6 +12,7 @@ vi.mock("@/app/lib/chatRuntimeStartup", () => ({
 }));
 vi.mock("@/features/experiments/experimentPreferences", () => ({
   useExperiment: () => ({ enabled: mocks.enabled }),
+  subscribeToExperimentChanges: () => () => {},
 }));
 vi.mock("@/features/chat/stores/remoteSessionPersistence", () => ({
   reconcileRemoteSessionsForExperiment: mocks.reconcile,
