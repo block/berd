@@ -13,7 +13,9 @@ const dismissHandoffsSessionSchema = z
       .int()
       .min(0)
       .max(4_294_967_295)
-      .describe("Latest direct-message cursor returned by the voice bridge."),
+      .describe(
+        "Newest cursor from any Master-bound voice transcript, handoff, reminder, or bridge result.",
+      ),
     handoff_id: z
       .array(z.string().trim().min(1).max(100))
       .min(1)

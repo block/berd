@@ -98,28 +98,68 @@ vi.mock("../lib/realtimeEmissaryProtocol", () => ({
   createHandoffToolOutput: mocks.createHandoffToolOutput,
   DirectMessagePipe: class {
     private nextId = 1;
-    cursor() {
-      return 0;
+    private pending: Array<{
+      id: number;
+      sender: "master" | "emissary";
+      recipient: "master" | "emissary";
+      senderCursor: number;
+      message: string;
+    }> = [];
+    private consumed = { master: 0, emissary: 0 };
+    cursor(peer: "master" | "emissary") {
+      return this.consumed[peer];
     }
-    send(options: { sender: "master" | "emissary"; message: string }) {
+    deliveryCursor(peer: "master" | "emissary") {
+      const latest = this.pending.at(-1);
+      return latest?.recipient === peer ? latest.id : this.consumed[peer];
+    }
+    send(options: {
+      sender: "master" | "emissary";
+      cursor: number;
+      message: string;
+    }) {
+      const active = this.pending[0];
+      if (active && active.sender !== options.sender) {
+        const latest = this.pending.at(-1);
+        if (!latest || options.cursor !== latest.id) {
+          return {
+            accepted: false,
+            reason: "pipe_busy",
+            cursor: this.consumed[options.sender],
+            unreadPeerMessages: [],
+          };
+        }
+        this.consumed[options.sender] = latest.id;
+        this.pending = [];
+      }
+      if (options.cursor !== this.consumed[options.sender]) {
+        return {
+          accepted: false,
+          reason: "stale_cursor",
+          cursor: this.consumed[options.sender],
+          unreadPeerMessages: [],
+        };
+      }
       const id = this.nextId++;
+      const outbound = {
+        id,
+        sender: options.sender,
+        recipient: options.sender === "master" ? "emissary" : "master",
+        senderCursor: this.consumed[options.sender],
+        message: options.message,
+      } as const;
+      this.pending.push(outbound);
       return {
         accepted: true,
-        cursor: 0,
+        cursor: this.consumed[options.sender],
         unreadPeerMessages: [],
-        outbound: {
-          id,
-          sender: options.sender,
-          recipient: options.sender === "master" ? "emissary" : "master",
-          senderCursor: 0,
-          message: options.message,
-        },
+        outbound,
       };
     }
   },
   REALTIME_MASTER_INSTRUCTIONS: "Master instructions",
   RealtimeEmissaryProtocol: class {
-    handle(event: { type?: string }) {
+    handle(event: { type?: string; cursor?: number }) {
       if (event.type === "test.transcript")
         return [
           {
@@ -248,7 +288,7 @@ vi.mock("../lib/realtimeEmissaryProtocol", () => ({
         return [
           {
             callId: "call-2",
-            cursor: 0,
+            cursor: event.cursor ?? 0,
             message: "Please verify whether those repositories are symlinks.",
             type: "handoff",
           },
@@ -679,7 +719,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     });
     await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
     expect(onSend).toHaveBeenCalledWith(
-      "[Voice transcript] Emissary said: hello user",
+      "[Voice transcript; cursor 1] Emissary said: hello user",
       undefined,
       undefined,
       expect.objectContaining({
@@ -720,6 +760,55 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     await act(async () => owner.result.current.onToggle());
   });
 
+  it("does not let a master message overtake a queued transcript steer", async () => {
+    let acceptSteer: (() => void) | undefined;
+    mocks.steerPrompt.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          acceptSteer = () => resolve(true);
+        }),
+    );
+    const owner = renderConversation(
+      "session-a",
+      vi.fn().mockResolvedValue(true),
+    );
+    await act(async () => owner.result.current.onToggle());
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+    act(() => {
+      useChatStore.getState().setChatState("session-a", "thinking");
+      useChatStore.getState().setActiveRunId("session-a", "run-1");
+      channel.dispatchEvent(
+        new MessageEvent("message", {
+          data: JSON.stringify({ type: "test.transcript" }),
+        }),
+      );
+    });
+    await waitFor(() => expect(mocks.steerPrompt).toHaveBeenCalledOnce());
+
+    await expect(
+      mocks.activeEmissary?.sendMasterMessage("This must wait.", 0, "say", []),
+    ).resolves.toEqual({
+      accepted: false,
+      reason: "pipe_busy",
+      unreadPeerMessages: [],
+      cursor: 0,
+    });
+    expect(mocks.requestMasterMessage).not.toHaveBeenCalled();
+
+    await act(async () => acceptSteer?.());
+    await expect(
+      mocks.activeEmissary?.sendMasterMessage(
+        "This follows the transcript.",
+        1,
+        "say",
+        [],
+      ),
+    ).resolves.toMatchObject({ accepted: true, cursor: 1 });
+    expect(mocks.requestMasterMessage).toHaveBeenCalledOnce();
+
+    await act(async () => owner.result.current.onToggle());
+  });
+
   it("retries as a normal prompt when the master finishes before steer admission", async () => {
     const onSend = vi.fn().mockResolvedValue(true);
     mocks.steerPrompt.mockRejectedValueOnce(
@@ -746,14 +835,14 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     });
     await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
     expect(onSend).toHaveBeenCalledWith(
-      "[Voice transcript] User said: hello master",
+      "[Voice transcript; cursor 1] User said: hello master",
       undefined,
       undefined,
       expect.objectContaining({ displayText: "hello master" }),
     );
     expect(mocks.steerPrompt).toHaveBeenCalledWith(
       "session-a",
-      "[Voice transcript] User said: hello master",
+      "[Voice transcript; cursor 1] User said: hello master",
       undefined,
       expect.anything(),
       {
@@ -885,7 +974,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
 
     await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
     expect(onSend).toHaveBeenCalledWith(
-      "[Voice transcript] User said: hello master",
+      "[Voice transcript; cursor 1] User said: hello master",
       undefined,
       undefined,
       expect.objectContaining({
@@ -998,7 +1087,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     await waitFor(() => expect(mocks.steerPrompt).toHaveBeenCalledOnce());
     expect(mocks.steerPrompt).toHaveBeenCalledWith(
       "session-a",
-      "[Voice transcript] Emissary said: hello user",
+      "[Voice transcript; cursor 1] Emissary said: hello user",
       undefined,
       expect.objectContaining({
         userMessageMetadata: {
@@ -1125,7 +1214,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     });
     await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
     expect(onSend.mock.calls[0]?.[0]).toBe(
-      "[Voice transcript] User said: how many repos are in my development folder?",
+      "[Voice transcript; cursor 1] User said: how many repos are in my development folder?",
     );
     act(() => useChatStore.getState().setChatState("session-a", "thinking"));
     act(() =>
@@ -1150,9 +1239,9 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     await act(async () => {
       await mocks.activeEmissary?.sendMasterMessage(
         "The answer is 21 repositories.",
-        0,
+        3,
         "say",
-        ["handoff-1"],
+        ["handoff-3"],
       );
     });
     act(() => {
@@ -1181,7 +1270,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     });
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
     expect(onSend.mock.calls[1]?.[0]).toBe(
-      "[Voice transcript] User said: are any of them symbolic links?",
+      "[Voice transcript; cursor 6] User said: are any of them symbolic links?",
     );
     act(() => useChatStore.getState().setChatState("session-a", "thinking"));
     act(() =>
@@ -1196,7 +1285,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       );
       channel.dispatchEvent(
         new MessageEvent("message", {
-          data: JSON.stringify({ type: "test.handoff_followup" }),
+          data: JSON.stringify({ type: "test.handoff_followup", cursor: 4 }),
         }),
       );
     });
@@ -1206,9 +1295,9 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     await act(async () => {
       await mocks.activeEmissary?.sendMasterMessage(
         "None of the repositories are symbolic links.",
-        0,
+        8,
         "say",
-        ["handoff-3"],
+        ["handoff-8"],
       );
     });
     act(() => {
@@ -1279,7 +1368,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     });
     await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
     expect(onSend).toHaveBeenLastCalledWith(
-      "[Voice transcript] Emissary said: hello user",
+      "[Voice transcript; cursor 1] Emissary said: hello user",
       undefined,
       undefined,
       expect.objectContaining({
@@ -1297,7 +1386,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     });
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
     expect(onSend).toHaveBeenLastCalledWith(
-      "[Voice transcript] User said: hello master",
+      "[Voice transcript; cursor 2] User said: hello master",
       undefined,
       undefined,
       expect.objectContaining({ displayText: "hello master" }),
@@ -1436,7 +1525,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       ).toMatchObject({
         content: [
           expect.objectContaining({
-            text: expect.stringContaining("Emissary handoff handoff-1"),
+            text: expect.stringContaining("Emissary handoff handoff-2"),
           }),
         ],
         metadata: { personaName: "Routing" },
@@ -1530,7 +1619,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     await expect(
       mocks.activeEmissary?.sendMasterMessage(
         "I handled both requests.",
-        0,
+        2,
         "say",
         ["handoff-1", "handoff-2"],
       ),
@@ -1599,13 +1688,13 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
 
     await expect(
       mocks.activeEmissary?.dismissHandoffs(
-        0,
+        2,
         ["handoff-1", "handoff-2"],
         "The user withdrew both requests.",
       ),
     ).resolves.toEqual({
       accepted: true,
-      cursor: 0,
+      cursor: 2,
       dismissedHandoffIds: ["handoff-1", "handoff-2"],
       deliveryStatus: "sent",
     });
@@ -1645,7 +1734,9 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       mocks.activeEmissary?.completeMasterTurn({ reminderHandoffIds: [] }),
     );
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
-    expect(onSend.mock.calls[1]?.[0]).toContain("[Private handoff reminder]");
+    expect(onSend.mock.calls[1]?.[0]).toContain(
+      "[Private handoff reminder; cursor 2]",
+    );
     expect(onSend.mock.calls[1]?.[0]).toContain("handoff-1");
     expect(onSend.mock.calls[1]?.[3]).toMatchObject({
       displayText: "Handoff reminder",

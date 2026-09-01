@@ -321,7 +321,7 @@ function waitForDataChannelOpen(channel: RTCDataChannel): Promise<void> {
 function masterPrompt(sessionId: string): string {
   return `${REALTIME_MASTER_INSTRUCTIONS}
 
-Your send_to_emissary tool is the Berd CLI command below. The initial bridge cursor is 0. Always use the latest cursor returned by a successful command or stale-send error. Choose --mode context to silently update the emissary's context for a future natural turn. Choose --mode say only when the emissary should speak your message to the user now. A say may resolve several open handoffs by repeating --resolves for each handoff id. Context cannot resolve a handoff. Finishing your turn does not notify or wake the emissary, so send explicitly when needed.
+Your send_to_emissary tool is the Berd CLI command below. The initial bridge cursor is 0. Always use the newest cursor from any Master-bound transcript, handoff, reminder, or prior tool result. A stale cursor means a newer event is already queued; wait for its normal delivery rather than bypassing it. Choose --mode context to silently update the emissary's context for a future natural turn. Choose --mode say only when the emissary should speak your message to the user now. A say may resolve several open handoffs by repeating --resolves for each handoff id. Context cannot resolve a handoff. Finishing your turn does not notify or wake the emissary, so send explicitly when needed.
 
 berdctl session send-to-emissary --session-id ${JSON.stringify(sessionId)} --cursor <cursor> --mode <context|say> [--resolves <handoff-id> ...] --message <message> --json
 
@@ -512,6 +512,19 @@ class OpenAiRealtimeConversationRuntime {
       const protocol = new RealtimeEmissaryProtocol();
       const responses = new RealtimeResponseCoordinator();
       const pipe = new DirectMessagePipe();
+      const queueMasterBoundEvent = (message: string) => {
+        const exchange = pipe.send({
+          sender: "emissary",
+          cursor: pipe.deliveryCursor("emissary"),
+          message,
+        });
+        if (!exchange.accepted) {
+          throw new Error(
+            `The realtime event could not enter the master pipe (${exchange.reason}).`,
+          );
+        }
+        return exchange.outbound;
+      };
       const transcriptMessageIds = new Map<string, string>();
       const upsertTranscriptMessage = (
         ownerSessionId: string,
@@ -584,7 +597,9 @@ class OpenAiRealtimeConversationRuntime {
                         ? " (interrupted; best-effort transcript)"
                         : ""
                     }: ${bridgeEvent.text}`;
-              const masterTranscript = `[Voice transcript] ${transcriptLabel}`;
+              const transcriptMessage = `[Voice transcript] ${transcriptLabel}`;
+              const masterBound = queueMasterBoundEvent(transcriptMessage);
+              const masterTranscript = `[Voice transcript; cursor ${masterBound.id}] ${transcriptLabel}`;
               if (bridgeEvent.speaker === "emissary") {
                 this.deliverToMaster(
                   ownerSessionId,
@@ -806,9 +821,11 @@ class OpenAiRealtimeConversationRuntime {
         const requests = pending
           .map(([handoffId, handoff]) => `- ${handoffId}: ${handoff.message}`)
           .join("\n");
+        const reminder = `[Private handoff reminder]\nYou ended your turn without resolving the required handoffs below. Resolve them now with one or more send-to-emissary --mode say calls that name every answered handoff in --resolves, or dismiss obsolete handoffs explicitly. Do not redo completed work.\n${requests}`;
+        const masterBound = queueMasterBoundEvent(reminder);
         this.deliverToMaster(
           ownerSessionId,
-          `[Private handoff reminder]\nYou ended your turn without resolving the required handoffs below. Resolve them now with one or more send-to-emissary --mode say calls that name every answered handoff in --resolves, or dismiss obsolete handoffs explicitly. Do not redo completed work.\n${requests}`,
+          `[Private handoff reminder; cursor ${masterBound.id}]${reminder.slice("[Private handoff reminder]".length)}`,
           "Handoff reminder",
           undefined,
           true,

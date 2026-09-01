@@ -26,13 +26,13 @@ Keep the spoken conversation natural and responsive. Represent the master's info
 
 export const REALTIME_MASTER_INSTRUCTIONS = `You are the master: the authoritative, durable agent for a Berd session whose live spoken conversation is conducted by a low-latency OpenAI Realtime emissary.
 
-Berd automatically sends you every finalized user and emissary transcript turn. Do not ask the emissary to repeat routine transcript content.
+Berd sends every finalized user and emissary transcript turn through the same ordered bridge as direct coordination. Each transcript prefix includes its bridge cursor. Do not ask the emissary to repeat routine transcript content.
 
 While Realtime voice is active, Berd also delivers every ordinary typed user message directly to the emissary and interrupts any response currently being spoken. A typed message reaches you as an ordinary user turn; microphone transcripts are explicitly prefixed with "[Voice transcript]". Do not echo, paraphrase, or relay an ordinary typed user message through send_to_emissary unless you are adding genuinely new information the emissary needs.
 
 Your reasoning, ordinary assistant text, tool calls, and progress remain visible to the user in Berd's durable master transcript, but they are not visible to the emissary. On actionable turns, work normally in Berd: reason as needed, use the available tools, and provide normal visible progress and result text for the master transcript. Separately call send_to_emissary with mode context to silently update what the emissary knows for a future natural turn, or mode say when the emissary should speak your message to the user now. A say message may explicitly resolve one or more open handoff IDs; one combined say may resolve several handoffs. If an open handoff no longer needs a spoken answer because it is obsolete, superseded, or already handled, dismiss it explicitly with a reason. Berd delivers that reason to the emissary as silent context without waking it. Context messages never resolve handoffs. Do not assume your ordinary output was relayed. Completing your turn does not notify or wake the emissary, but Berd will give you one private reminder turn if you leave a handoff unresolved. Each finalized transcript gives you an opportunity to act, not an obligation to react. When no work, correction, or useful emissary guidance is needed, your entire turn should be an empty, zero-token success: no prose, no tools, and no coordination message. Ordinary conversation and small talk belong to the emissary. Proactively send relevant facts, decisions, progress, constraints, and useful follow-up questions rather than waiting to be asked. Never call send_to_emissary merely to acknowledge, confirm, or echo routine transcript content; acknowledgement-only coordination must be a zero-token no-op.
 
-Treat interrupted emissary transcripts as best-effort streamed text that may not exactly match the audio the user heard. Keep direct coordination concise. Every direct-message tool call must include the latest bridge cursor. If a send fails because the pipe is busy in the other direction, do not retry yet: wait for Berd to deliver the pending emissary message normally, then retry with the cursor included in that message.`;
+Treat interrupted emissary transcripts as best-effort streamed text that may not exactly match the audio the user heard. Keep direct coordination concise. Every direct-message tool call must include the newest cursor from any Master-bound transcript, handoff, reminder, or prior tool result. If a send fails because a newer event is already queued in the other direction, do not retry yet: wait for Berd to deliver that event normally, then retry with its cursor.`;
 
 export interface RealtimeEventTransport {
   send(data: string): void;
@@ -155,7 +155,7 @@ export const SEND_TO_EMISSARY_TOOL_DEFINITION: RealtimeJsonObject = {
       cursor: {
         type: "integer",
         minimum: 0,
-        description: "Latest direct-message cursor returned by the bridge.",
+        description: "Latest bridge cursor received from the other agent.",
       },
       message: { type: "string" },
       mode: {
@@ -254,8 +254,7 @@ export function createRealtimeEmissarySessionUpdate(
             cursor: {
               type: "integer",
               minimum: 0,
-              description:
-                "Latest direct-message cursor returned by the bridge.",
+              description: "Latest bridge cursor received from the master.",
             },
             message: {
               type: "string",
@@ -579,15 +578,14 @@ export type HandoffToolResult = DirectMessageExchange & {
 };
 
 /**
- * One authoritative half-duplex direct-message pipe. The active sender may
- * append any number of messages; only a send in the opposite direction is
- * blocked until the recipient consumes the pending batch. Transcript events
- * do not enter this state machine and therefore never block coordination.
- * Ordinary delivery places pending messages into the recipient's context but
- * does not mutate pipe state. The recipient consumes the complete pending
- * batch by supplying its latest message id as the cursor on a reverse send;
- * consumption, direction reversal, and reply enqueueing happen atomically.
- * A stale reverse send neither exposes nor consumes pending messages.
+ * One authoritative half-duplex pipe for every event crossing between the
+ * realtime conversation and the master. The active sender may append any
+ * number of messages; only a send in the opposite direction is blocked until
+ * the recipient consumes the pending batch. The recipient consumes the
+ * complete pending batch by supplying its latest message id as the cursor on
+ * a reverse send; consumption, direction reversal, and reply enqueueing
+ * happen atomically. A stale reverse send neither exposes nor consumes
+ * pending messages.
  */
 export class DirectMessagePipe {
   private nextMessageId = 1;
@@ -648,6 +646,19 @@ export class DirectMessagePipe {
 
   cursor(peer: DirectMessagePeer): number {
     return this.consumedCursor[peer];
+  }
+
+  /**
+   * Cursor available at a trusted delivery boundary. If the peer has pending
+   * inbound messages, transport delivery proves it has received the complete
+   * batch; otherwise its last explicitly consumed cursor remains current.
+   * Model-authored tool calls must continue to supply their own cursor.
+   */
+  deliveryCursor(peer: DirectMessagePeer): number {
+    const latestPending = this.pending.at(-1);
+    return latestPending?.recipient === peer
+      ? latestPending.id
+      : this.consumedCursor[peer];
   }
 }
 

@@ -1139,22 +1139,37 @@ describe("DirectMessagePipe", () => {
     expect(pipe.cursor("emissary")).toBe(master.outbound.id);
   });
 
-  it("does not block independent transcript flow", () => {
+  it("exposes the latest inbound cursor to trusted delivery boundaries", () => {
     const pipe = new DirectMessagePipe();
-    const protocol = new RealtimeEmissaryProtocol();
-    pipe.send({ sender: "emissary", cursor: 0, message: "Direct." });
+    const first = pipe.send({
+      sender: "master",
+      cursor: 0,
+      message: "Context.",
+    });
+    const second = pipe.send({
+      sender: "master",
+      cursor: 0,
+      message: "More context.",
+    });
+    if (!first.accepted || !second.accepted)
+      throw new Error("expected an accepted batch");
 
-    expect(
-      protocol.handle({
-        type: "conversation.item.input_audio_transcription.completed",
-        item_id: "user-1",
-        transcript: "Transcript keeps moving.",
-      }),
-    ).toEqual([
-      expect.objectContaining({
-        type: "transcript.finalized",
-        text: "Transcript keeps moving.",
-      }),
-    ]);
+    expect(pipe.deliveryCursor("emissary")).toBe(second.outbound.id);
+    expect(pipe.deliveryCursor("master")).toBe(0);
+
+    const reverse = pipe.send({
+      sender: "emissary",
+      cursor: pipe.deliveryCursor("emissary"),
+      message: "Transcript.",
+    });
+    expect(reverse).toMatchObject({
+      accepted: true,
+      cursor: second.outbound.id,
+      outbound: { sender: "emissary" },
+    });
+    expect(pipe.deliveryCursor("emissary")).toBe(second.outbound.id);
+    expect(pipe.deliveryCursor("master")).toBe(
+      reverse.accepted ? reverse.outbound.id : -1,
+    );
   });
 });

@@ -19,7 +19,9 @@ const sendToEmissarySessionSchema = z
       .int()
       .min(0)
       .max(4_294_967_295)
-      .describe("Latest direct-message cursor returned by the voice bridge."),
+      .describe(
+        "Newest cursor from any Master-bound voice transcript, handoff, reminder, or bridge result.",
+      ),
     mode: z
       .enum(["context", "say"])
       .default("say")
@@ -67,9 +69,9 @@ response. Use --mode say when the emissary should speak the message now.
 Repeat --resolves to close every handoff answered by one say. Context messages
 cannot resolve handoffs. A say may omit --resolves when volunteering information.
 
-A send while the pipe is carrying emissary-to-master coordination fails with
-reason "pipe_busy" without consuming that pending message. Wait for Berd to
-deliver it normally, then retry with the cursor included in that message.`,
+A send while the pipe contains a newer Master-bound transcript, handoff, or
+reminder fails with reason "pipe_busy" without consuming that pending event.
+Wait for Berd to deliver it normally, then retry with its cursor.`,
   schema: sendToEmissarySessionSchema,
   execute: async (args): Promise<SendToEmissarySessionResult> => {
     const { getActiveRealtimeEmissary } = await import(

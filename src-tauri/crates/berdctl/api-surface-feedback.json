@@ -449,7 +449,7 @@
               "name": "cursor",
               "required": true,
               "kind": "number",
-              "description": "Latest direct-message cursor returned by the voice bridge.",
+              "description": "Newest cursor from any Master-bound voice transcript, handoff, reminder, or bridge result.",
               "min": 0,
               "max": 4294967295
             },
@@ -486,7 +486,7 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 4294967295,
-                "description": "Latest direct-message cursor returned by the voice bridge."
+                "description": "Newest cursor from any Master-bound voice transcript, handoff, reminder, or bridge result."
               },
               "mode": {
                 "default": "say",
@@ -524,7 +524,7 @@
               "name": "cursor",
               "required": true,
               "kind": "number",
-              "description": "Latest direct-message cursor returned by the voice bridge.",
+              "description": "Newest cursor from any Master-bound voice transcript, handoff, reminder, or bridge result.",
               "min": 0,
               "max": 4294967295
             },
@@ -556,7 +556,7 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 4294967295,
-                "description": "Latest direct-message cursor returned by the voice bridge."
+                "description": "Newest cursor from any Master-bound voice transcript, handoff, reminder, or bridge result."
               },
               "handoff_id": {
                 "minItems": 1,
