@@ -48,6 +48,25 @@ function getGooseModelProviderLabel(model: ModelOption) {
   return null;
 }
 
+function compareModelsByProviderOrderAndName(
+  left: ModelOption,
+  right: ModelOption,
+): number {
+  const leftProvider = getGooseModelProviderLabel(left) ?? "";
+  const rightProvider = getGooseModelProviderLabel(right) ?? "";
+  if (leftProvider !== rightProvider) {
+    return leftProvider.localeCompare(rightProvider);
+  }
+
+  const leftOrder = left.sortOrder ?? Number.MAX_SAFE_INTEGER;
+  const rightOrder = right.sortOrder ?? Number.MAX_SAFE_INTEGER;
+  if (leftOrder !== rightOrder) {
+    return leftOrder - rightOrder;
+  }
+
+  return getModelDisplayName(left).localeCompare(getModelDisplayName(right));
+}
+
 function modelMatchesSelection(
   model: ModelOption,
   currentModelId: string | null,
@@ -92,19 +111,7 @@ function sortModels(
       return rightRank - leftRank;
     }
 
-    const leftProvider = getGooseModelProviderLabel(left) ?? "";
-    const rightProvider = getGooseModelProviderLabel(right) ?? "";
-    if (leftProvider !== rightProvider) {
-      return leftProvider.localeCompare(rightProvider);
-    }
-
-    const leftOrder = left.sortOrder ?? Number.MAX_SAFE_INTEGER;
-    const rightOrder = right.sortOrder ?? Number.MAX_SAFE_INTEGER;
-    if (leftOrder !== rightOrder) {
-      return leftOrder - rightOrder;
-    }
-
-    return getModelDisplayName(left).localeCompare(getModelDisplayName(right));
+    return compareModelsByProviderOrderAndName(left, right);
   });
 }
 
@@ -184,21 +191,7 @@ export const RecommendedModelList = forwardRef<
           return right.rank - left.rank;
         }
 
-        const leftProvider = getGooseModelProviderLabel(left.model) ?? "";
-        const rightProvider = getGooseModelProviderLabel(right.model) ?? "";
-        if (leftProvider !== rightProvider) {
-          return leftProvider.localeCompare(rightProvider);
-        }
-
-        const leftOrder = left.model.sortOrder ?? Number.MAX_SAFE_INTEGER;
-        const rightOrder = right.model.sortOrder ?? Number.MAX_SAFE_INTEGER;
-        if (leftOrder !== rightOrder) {
-          return leftOrder - rightOrder;
-        }
-
-        return getModelDisplayName(left.model).localeCompare(
-          getModelDisplayName(right.model),
-        );
+        return compareModelsByProviderOrderAndName(left.model, right.model);
       })
       .slice(0, RECENT_MODEL_LIMIT)
       .map((entry) => entry.model);

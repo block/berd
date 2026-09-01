@@ -141,6 +141,49 @@ describe("model recency", () => {
     expect(Object.values(map).every(Number.isSafeInteger)).toBe(true);
   });
 
+  it("does not reintroduce ceiling ranks from stale cross-window events", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(100);
+    const staleRaw = JSON.stringify({
+      "agent//older": 10,
+      "agent//ceiling": Number.MAX_SAFE_INTEGER,
+    });
+    localStorage.setItem(MODEL_RECENCY_STORAGE_KEY, staleRaw);
+    const { result } = renderHook(() => useModelRecency());
+
+    expect(result.current).toEqual({
+      "agent//older": 1,
+      "agent//ceiling": 2,
+    });
+
+    act(() => {
+      recordModelSelection("agent", { id: "newer" });
+    });
+    const localSnapshot = result.current;
+
+    act(() => {
+      localStorage.setItem(MODEL_RECENCY_STORAGE_KEY, staleRaw);
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: MODEL_RECENCY_STORAGE_KEY,
+          newValue: staleRaw,
+        }),
+      );
+    });
+
+    const ranks = Object.values(result.current).sort(
+      (left, right) => left - right,
+    );
+    expect(result.current).toBe(localSnapshot);
+    expect(ranks.every((rank) => rank < Number.MAX_SAFE_INTEGER)).toBe(true);
+    expect(
+      ranks.every((rank, index) => index === 0 || rank > ranks[index - 1]),
+    ).toBe(true);
+    expect(
+      JSON.parse(localStorage.getItem(MODEL_RECENCY_STORAGE_KEY) ?? ""),
+    ).toEqual(result.current);
+  });
+
   it("prunes to the newest 50 entries, dropping the oldest", () => {
     vi.useFakeTimers();
     for (let i = 0; i < 55; i++) {

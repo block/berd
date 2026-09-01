@@ -42,7 +42,11 @@ function mergeModelRecencyMaps(
       Math.max(merged.get(key) ?? Number.NEGATIVE_INFINITY, rank),
     );
   }
-  return sortAndPruneModelRecencyEntries([...merged]);
+  // Normalize so a stale ceiling rank surviving in currentMap cannot be
+  // reintroduced into a converged cross-window write.
+  return normalizeCeilingModelRecencyRanks(
+    sortAndPruneModelRecencyEntries([...merged]),
+  );
 }
 
 function renormalizeModelRecencyMap(map: ModelRecencyMap): ModelRecencyMap {
@@ -51,6 +55,15 @@ function renormalizeModelRecencyMap(map: ModelRecencyMap): ModelRecencyMap {
       .sort(([, leftRank], [, rightRank]) => leftRank - rightRank)
       .map(([key], index) => [key, index + 1]),
   );
+}
+
+function normalizeCeilingModelRecencyRanks(
+  map: ModelRecencyMap,
+): ModelRecencyMap {
+  if (!Object.values(map).some((rank) => rank >= Number.MAX_SAFE_INTEGER)) {
+    return map;
+  }
+  return renormalizeModelRecencyMap(map);
 }
 
 function parseModelRecencyMap(raw: string | null): ModelRecencyMap {
@@ -72,7 +85,11 @@ function parseModelRecencyMap(raw: string | null): ModelRecencyMap {
         entries.push([key, value]);
       }
     }
-    return sortAndPruneModelRecencyEntries(entries);
+    // Normalize at the single parse boundary so ceiling ranks can never enter
+    // the cache from any read path and freeze monotonic ordering.
+    return normalizeCeilingModelRecencyRanks(
+      sortAndPruneModelRecencyEntries(entries),
+    );
   } catch {
     // Corrupt JSON is treated as empty.
     return EMPTY_MAP;
@@ -98,6 +115,8 @@ export function getModelRecencyMap(): ModelRecencyMap {
     return incomingMap;
   }
 
+  // A remote window's write can land between our last read and its storage
+  // event; merge rather than replace so local-only recency is not lost.
   const nextMap = mergeModelRecencyMaps(cachedMap, incomingMap);
   if (JSON.stringify(nextMap) === JSON.stringify(cachedMap)) {
     persistModelRecencyMap(cachedMap);
@@ -118,12 +137,7 @@ export function recordModelSelection(
   if (typeof window === "undefined") return;
 
   const key = modelRecencyKey(agentId, model);
-  let currentMap = getModelRecencyMap();
-  if (
-    Object.values(currentMap).some((rank) => rank >= Number.MAX_SAFE_INTEGER)
-  ) {
-    currentMap = renormalizeModelRecencyMap(currentMap);
-  }
+  const currentMap = getModelRecencyMap();
   const entries = Object.entries(currentMap).filter(
     ([candidate]) => candidate !== key,
   );
