@@ -2,12 +2,18 @@ import { QueryClient } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockExportSession = vi.hoisted(() => vi.fn());
+const mockListSessionsPage = vi.hoisted(() => vi.fn());
 
 vi.mock("../acpApi", () => ({
   exportSession: mockExportSession,
+  listSessionsPage: (...args: unknown[]) => mockListSessionsPage(...args),
 }));
 
-import { searchSessionsViaExports, sessionSearchStamp } from "../sessionSearch";
+import {
+  searchSessions,
+  searchSessionsViaExports,
+  sessionSearchStamp,
+} from "../sessionSearch";
 
 function exportedNeedleConversation(sessionId: string): string {
   return JSON.stringify({
@@ -311,5 +317,189 @@ describe("searchSessionsViaExports", () => {
     ]);
     expect(retried.searchedIds).toEqual(["session-1"]);
     expect(retried.failedIds).toEqual([]);
+  });
+});
+
+function serverSession(
+  sessionId: string,
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    sessionId,
+    title: `Session ${sessionId}`,
+    updatedAt: "2026-04-10T12:00:00Z",
+    createdAt: null,
+    lastMessageAt: null,
+    archivedAt: null,
+    userSetName: false,
+    messageCount: 2,
+    subtitle: null,
+    workingDir: null,
+    projectId: null,
+    providerId: null,
+    modelId: null,
+    personaId: null,
+    ...overrides,
+  };
+}
+
+describe("searchSessions", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("does not hit the server for queries below the content threshold", async () => {
+    await expect(
+      searchSessions("n", [{ id: "session-1", stamp: "v1" }]),
+    ).resolves.toEqual({
+      results: [],
+      searchedIds: [],
+      failedIds: [],
+      matchedInfos: [],
+    });
+    expect(mockListSessionsPage).not.toHaveBeenCalled();
+    expect(mockExportSession).not.toHaveBeenCalled();
+  });
+
+  it("discovers matches server-side across pages and enriches only matched targets", async () => {
+    mockListSessionsPage
+      .mockResolvedValueOnce({
+        sessions: [serverSession("session-1"), serverSession("old-1")],
+        nextCursor: "cursor-2",
+      })
+      .mockResolvedValueOnce({
+        sessions: [serverSession("old-2")],
+        nextCursor: null,
+      });
+    mockExportSession.mockResolvedValue(
+      exportedNeedleConversation("session-1"),
+    );
+
+    const sweep = await searchSessions("needle", [
+      { id: "session-1", stamp: "v1" },
+      { id: "session-2", stamp: "v1" },
+    ]);
+
+    // The query filter rides every page request, and pagination follows the
+    // returned cursor until the server stops handing one out.
+    expect(mockListSessionsPage).toHaveBeenNthCalledWith(1, {
+      cursor: null,
+      query: "needle",
+    });
+    expect(mockListSessionsPage).toHaveBeenNthCalledWith(2, {
+      cursor: "cursor-2",
+      query: "needle",
+    });
+
+    // Every server match — including sessions outside the loaded targets —
+    // comes back in matchedInfos so the caller can surface them.
+    expect(sweep.matchedInfos?.map((info) => info.sessionId)).toEqual([
+      "session-1",
+      "old-1",
+      "old-2",
+    ]);
+
+    // Only matched targets get an export; the unmatched one is already
+    // answered by the server and must not pay for a corpus read.
+    expect(mockExportSession).toHaveBeenCalledTimes(1);
+    expect(mockExportSession).toHaveBeenCalledWith("session-1");
+    expect(sweep.results).toMatchObject([
+      { sessionId: "session-1", matchCount: 1 },
+    ]);
+    expect(sweep.searchedIds).toEqual(["session-1"]);
+    expect(sweep.failedIds).toEqual([]);
+  });
+
+  it("matches any whitespace-separated keyword, mirroring the server filter", async () => {
+    mockListSessionsPage.mockResolvedValueOnce({
+      sessions: [serverSession("session-1")],
+      nextCursor: null,
+    });
+    mockExportSession.mockResolvedValue(
+      JSON.stringify({
+        conversation: [
+          {
+            id: "m1",
+            role: "user",
+            content: "only the second word appears here",
+          },
+        ],
+      }),
+    );
+
+    // The full phrase never appears, but the server's OR over words matched
+    // this session — the enrichment must agree or the match would be erased.
+    const sweep = await searchSessions("missing word", [
+      { id: "session-1", stamp: "v1" },
+    ]);
+
+    expect(sweep.results).toMatchObject([
+      { sessionId: "session-1", matchCount: 1 },
+    ]);
+    expect(sweep.failedIds).toEqual([]);
+  });
+
+  it("reports matched targets whose export fails as unread, keeping the match", async () => {
+    mockListSessionsPage.mockResolvedValueOnce({
+      sessions: [serverSession("session-1")],
+      nextCursor: null,
+    });
+    mockExportSession.mockRejectedValue(new Error("export failed"));
+
+    const sweep = await searchSessions("needle", [
+      { id: "session-1", stamp: "v1" },
+    ]);
+
+    expect(sweep.results).toEqual([]);
+    expect(sweep.failedIds).toEqual(["session-1"]);
+    // The server already established the match; matchedInfos carries it so
+    // the caller can degrade to a snippet-less row instead of hiding it.
+    expect(sweep.matchedInfos?.map((info) => info.sessionId)).toEqual([
+      "session-1",
+    ]);
+  });
+
+  it("fails on a repeated pagination cursor instead of looping", async () => {
+    mockListSessionsPage.mockResolvedValue({
+      sessions: [serverSession("loop-1")],
+      nextCursor: "cursor-forever",
+    });
+
+    // A server that hands back the same cursor is cycling; the search must
+    // error rather than storm requests or treat duplicates as the full set.
+    await expect(searchSessions("needle", [])).rejects.toThrow(
+      "repeated pagination cursor",
+    );
+    expect(mockListSessionsPage).toHaveBeenCalledTimes(2);
+  });
+
+  it("fails rather than truncate when the page cap is reached", async () => {
+    let page = 0;
+    mockListSessionsPage.mockImplementation(async () => {
+      page += 1;
+      return {
+        sessions: [serverSession(`session-${page}`)],
+        nextCursor: `cursor-${page}`,
+      };
+    });
+
+    await expect(searchSessions("needle", [])).rejects.toThrow(
+      "exceeded 100 pages",
+    );
+    expect(mockListSessionsPage).toHaveBeenCalledTimes(100);
+  });
+
+  it("propagates a mid-pagination failure", async () => {
+    mockListSessionsPage
+      .mockResolvedValueOnce({
+        sessions: [serverSession("session-1")],
+        nextCursor: "cursor-2",
+      })
+      .mockRejectedValueOnce(new Error("connection closed"));
+
+    await expect(searchSessions("needle", [])).rejects.toThrow(
+      "connection closed",
+    );
+    expect(mockExportSession).not.toHaveBeenCalled();
   });
 });

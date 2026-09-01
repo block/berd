@@ -18,7 +18,7 @@ import {
   clearActiveMessageId,
 } from "./acpActiveMessageTracking";
 import {
-  searchSessionsViaExports,
+  searchSessions,
   type SessionSearchOptions,
   type SessionSearchTarget,
 } from "./sessionSearch";
@@ -527,23 +527,37 @@ export interface AcpSessionSearchSweep {
   results: AcpSessionSearchResult[];
   searchedIds: string[];
   failedIds: string[];
+  /** Metadata of every session whose message content matched the query on the
+   *  server — including sessions not among `targets`, so callers can surface
+   *  matches beyond the sessions currently loaded in the renderer. Empty when
+   *  nothing matched or no server-side discovery ran (short query). */
+  matchedInfos: AcpSessionInfo[];
 }
 
 /** List one page of sessions known to the goose binary. */
 export async function acpListSessionsPage({
   cursor,
+  query,
 }: {
   cursor?: string | null;
+  query?: string | null;
 } = {}): Promise<AcpSessionsPage> {
-  return directAcp.listSessionsPage({ cursor });
+  return directAcp.listSessionsPage({ cursor, query });
 }
 
+/**
+ * Search session content. A query that meets the content-search threshold is
+ * discovered server-side (goose's `_meta.query` SQL filter over message text,
+ * cursor-paginated) so the whole session store is covered; `targets` are then
+ * export-swept for snippet/match-count enrichment and coverage. Below the
+ * threshold no content search runs at all and the sweep is empty.
+ */
 export async function acpSearchSessions(
   query: string,
   targets: SessionSearchTarget[],
   options: SessionSearchOptions = {},
 ): Promise<AcpSessionSearchSweep> {
-  return searchSessionsViaExports(query, targets, options);
+  return searchSessions(query, targets, options);
 }
 
 /**

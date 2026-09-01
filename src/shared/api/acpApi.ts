@@ -63,6 +63,16 @@ const LIST_SESSIONS_META = {
   },
 } satisfies NonNullable<ListSessionsRequest["_meta"]>;
 
+/** `_meta` for a keyword-filtered session/list: goose reads top-level
+ *  `_meta.query` as a whitespace-split, case-insensitive keyword OR over
+ *  message text, so discovery runs server-side over the whole session store
+ *  instead of only the sessions the renderer has loaded. Case folding is
+ *  SQLite `LOWER()` — ASCII-only, so "CAFÉ" will not match a query of "café";
+ *  a Unicode-aware collation belongs to goose, not this client. */
+function listSessionsMeta(query: string): ListSessionsRequest["_meta"] {
+  return { ...LIST_SESSIONS_META, query };
+}
+
 export async function listProviders(): Promise<AcpProvider[]> {
   return getCuratedAgentProviders();
 }
@@ -132,16 +142,23 @@ export async function getSessionInfo(
 
 export async function listSessionsPage({
   cursor,
+  query,
 }: {
   cursor?: string | null;
+  /** Keyword filter for goose's server-side message-content search
+   *  (`_meta.query`). Only set when searching; omit for plain listing. */
+  query?: string | null;
 } = {}): Promise<AcpSessionsPage> {
   const client = await getClient();
   const normalizedCursor = cursor?.trim() || null;
+  const normalizedQuery = query?.trim() || null;
   // ACP session/list only standardizes cwd and cursor filters. Goose project
   // membership lives in _meta.projectId, so callers must paginate globally and
   // group by projectId client-side instead of using cwd as a proxy.
   const params: ListSessionsRequest = {
-    _meta: LIST_SESSIONS_META,
+    _meta: normalizedQuery
+      ? listSessionsMeta(normalizedQuery)
+      : LIST_SESSIONS_META,
   };
   if (normalizedCursor != null) {
     params.cursor = normalizedCursor;

@@ -40,6 +40,19 @@ export function selectSessionsForScope(
 }
 
 /**
+ * Whether one session passes a scope tab and project filter — the per-session
+ * form of `selectSessionsForScope`, for admitting server-discovered search
+ * results that are not in any loaded list.
+ */
+export function sessionMatchesScope(
+  session: ChatSession,
+  scope: SessionScope,
+  projectIds: ReadonlySet<string>,
+): boolean {
+  return selectSessionsForScope([session], scope, projectIds).length > 0;
+}
+
+/**
  * Filter sessions to those whose `projectId` is in `projectIds`.
  *
  * - An empty set means "no filter": all sessions pass through.

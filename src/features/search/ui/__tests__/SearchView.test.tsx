@@ -61,6 +61,25 @@ function render(ui: ReactElement) {
   );
 }
 
+function matchedInfo(sessionId: string) {
+  return {
+    sessionId,
+    title: "Server match",
+    updatedAt: "2026-04-12T12:00:00Z",
+    createdAt: "2026-04-12T12:00:00Z",
+    lastMessageAt: null,
+    archivedAt: null,
+    userSetName: false,
+    messageCount: 3,
+    subtitle: null,
+    workingDir: null,
+    projectId: null,
+    providerId: null,
+    modelId: null,
+    personaId: null,
+  };
+}
+
 describe("SearchView", () => {
   beforeEach(() => {
     vi.stubEnv("VITE_AUTOMATIONS", "1");
@@ -69,13 +88,14 @@ describe("SearchView", () => {
     mockGetAutomationTiles.mockReset();
     mockGetAutomationTiles.mockResolvedValue({ tiles: [] });
     mockAcpSearchSessions.mockReset();
-    // Coverage is reported per sweep, derived from the targets the boundary was
-    // handed, so tests never have to restate which sessions a sweep covered.
+    // Production shape: the server matches every target handed to it here, and
+    // searchedIds ⊆ matchedInfos (only matched targets are export-enriched).
     mockAcpSearchSessions.mockImplementation(
       async (_query: string, targets: { id: string }[]) => ({
         results: [],
         searchedIds: targets.map((target) => target.id),
         failedIds: [],
+        matchedInfos: targets.map((target) => matchedInfo(target.id)),
       }),
     );
     mockListSkills.mockReset();
@@ -612,6 +632,7 @@ describe("SearchView", () => {
         results: [messageMatch],
         searchedIds: targets.map((target) => target.id),
         failedIds: [],
+        matchedInfos: targets.map((target) => matchedInfo(target.id)),
       }),
     );
 
@@ -648,6 +669,7 @@ describe("SearchView", () => {
       results: (typeof messageMatch)[];
       searchedIds: string[];
       failedIds: string[];
+      matchedInfos: ReturnType<typeof matchedInfo>[];
     };
     let resolveSweep: (sweep: Sweep) => void = () => {};
     mockAcpSearchSessions.mockReturnValueOnce(
@@ -679,6 +701,7 @@ describe("SearchView", () => {
         results: [messageMatch],
         searchedIds: ["session-1", "session-2"],
         failedIds: [],
+        matchedInfos: [matchedInfo("session-1"), matchedInfo("session-2")],
       });
     });
 

@@ -17,12 +17,52 @@ type SearchSweep = {
   results: MessageSearchResult[];
   searchedIds: string[];
   failedIds: string[];
+  /** Server-discovered match set; production always returns it for a content
+   *  query. Tests model it explicitly: any session the server matched, whether
+   *  or not it is also an enrichment target. */
+  matchedInfos: MatchedInfo[];
 };
 
+type MatchedInfo = {
+  sessionId: string;
+  title: string;
+  updatedAt: string;
+  createdAt: string | null;
+  lastMessageAt: string | null;
+  archivedAt: string | null;
+  userSetName: boolean;
+  messageCount: number;
+  subtitle: string | null;
+  workingDir: string | null;
+  projectId: string | null;
+  providerId: string | null;
+  modelId: string | null;
+  personaId: string | null;
+};
+
+function matchedInfo(sessionId: string, title = "Server match"): MatchedInfo {
+  return {
+    sessionId,
+    title,
+    updatedAt: "2026-04-12T12:00:00Z",
+    createdAt: "2026-04-12T12:00:00Z",
+    lastMessageAt: null,
+    archivedAt: null,
+    userSetName: false,
+    messageCount: 3,
+    subtitle: "preview text",
+    workingDir: null,
+    projectId: null,
+    providerId: null,
+    modelId: null,
+    personaId: null,
+  };
+}
+
 /**
- * A sweep that read every target it was given. The boundary reports coverage
- * per target, so tests that only care about matches still have to say which
- * sessions were read — otherwise the hook would rightly report them unsearched.
+ * A sweep where the server matched every target it was handed. Production
+ * searchedIds are exactly the matched targets that were export-read, so
+ * modeling all targets as matched and read is the reachable shape.
  */
 function sweptAll(results: MessageSearchResult[] = []) {
   return async (
@@ -32,18 +72,22 @@ function sweptAll(results: MessageSearchResult[] = []) {
     results,
     searchedIds: targets.map((target) => target.id),
     failedIds: [],
+    matchedInfos: targets.map((target) => matchedInfo(target.id)),
   });
 }
 
 /**
  * An explicit sweep result, for deferred mocks that cannot see their targets.
- * `searchedIds` must name the sessions this sweep actually covered.
+ * `searchedIds` must name the sessions this sweep actually covered, and every
+ * searched id must also appear in `matchedInfos` — the boundary only reads
+ * targets the server matched.
  */
 function sweep(
   searchedIds: string[],
   results: MessageSearchResult[] = [],
+  matchedInfos: MatchedInfo[] = searchedIds.map((id) => matchedInfo(id)),
 ): SearchSweep {
-  return { results, searchedIds, failedIds: [] };
+  return { results, searchedIds, failedIds: [], matchedInfos };
 }
 
 vi.mock("@/shared/api/acp", () => ({
@@ -181,18 +225,23 @@ describe("useSessionSearch", () => {
   });
 
   it("searches only new sessions incrementally and merges message results newest first", async () => {
+    // The server answers with the full match set on every call, not only the
+    // page's targets: page two's set includes acp-1 again.
     mockAcpSearchSessions
       .mockImplementationOnce(sweptAll())
-      .mockImplementationOnce(
-        sweptAll([
+      .mockImplementationOnce(async () => ({
+        results: [
           {
             sessionId: "acp-2",
             snippet: "needle in message",
             messageId: "message-2",
             matchCount: 2,
           },
-        ]),
-      );
+        ],
+        searchedIds: ["acp-2"],
+        failedIds: [],
+        matchedInfos: [matchedInfo("acp-1"), matchedInfo("acp-2")],
+      }));
 
     const { result } = renderSessionSearch();
 
@@ -233,6 +282,13 @@ describe("useSessionSearch", () => {
     await searchFor(result, "needle");
     const staleSearchMore = result.current.searchMore;
 
+    // "follow" matches nothing on the server: an empty match set.
+    mockAcpSearchSessions.mockImplementationOnce(async () => ({
+      results: [],
+      searchedIds: [],
+      failedIds: [],
+      matchedInfos: [],
+    }));
     await searchFor(result, "follow");
     await act(async () => {
       await staleSearchMore([oldQueryOnlySession]);
@@ -505,6 +561,7 @@ describe("useSessionSearch", () => {
         results: [],
         searchedIds: ["acp-1"],
         failedIds: ["acp-2"],
+        matchedInfos: [matchedInfo("acp-1"), matchedInfo("acp-2")],
       }),
     );
 
@@ -528,6 +585,7 @@ describe("useSessionSearch", () => {
           results: [],
           searchedIds: [],
           failedIds: ["acp-1"],
+          matchedInfos: [matchedInfo("acp-1")],
         }),
       )
       .mockImplementationOnce(sweptAll());
@@ -620,6 +678,7 @@ describe("useSessionSearch", () => {
           results: [],
           searchedIds: [],
           failedIds: ["acp-2"],
+          matchedInfos: [matchedInfo("acp-2")],
         }),
       )
       // The next page sweep must target acp-2 again, and this time it reads.
@@ -683,6 +742,7 @@ describe("useSessionSearch", () => {
           results: [],
           searchedIds: [],
           failedIds: ["acp-1"],
+          matchedInfos: [matchedInfo("acp-1")],
         }),
       );
 
@@ -728,6 +788,7 @@ describe("useSessionSearch", () => {
           results: [],
           searchedIds: [],
           failedIds: ["acp-1"],
+          matchedInfos: [matchedInfo("acp-1")],
         }),
       )
       // The next incremental sweep must target acp-1 again, and it reads.
@@ -803,5 +864,189 @@ describe("useSessionSearch", () => {
     expect(result.current.error).toBe(
       "Failed to export session for search: session missing",
     );
+  });
+});
+
+function serverSweep(
+  matchedInfos: MatchedInfo[],
+  searchedIds: string[],
+  results: MessageSearchResult[] = [],
+  failedIds: string[] = [],
+): SearchSweep {
+  return { results, searchedIds, failedIds, matchedInfos };
+}
+
+describe("server-side discovery", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("surfaces content matches for sessions that are not loaded", async () => {
+    mockAcpSearchSessions.mockResolvedValueOnce(
+      serverSweep([matchedInfo("acp-1"), matchedInfo("old-1")], ["acp-1"]),
+    );
+
+    const { result } = renderSessionSearch();
+    await searchFor(result, "needle");
+
+    expect(result.current.results.map((item) => item.session.id)).toEqual([
+      "old-1",
+      "acp-1",
+    ]);
+    const discovered = result.current.results.find(
+      (item) => item.session.id === "old-1",
+    );
+    // A server-discovered match rows as a content hit with no client-derived
+    // snippet until its corpus is exported.
+    expect(discovered).toMatchObject({
+      matchType: "message",
+      session: { id: "old-1", title: "Server match" },
+    });
+    expect(discovered?.snippet).toBeUndefined();
+    expect(discovered?.messageId).toBeUndefined();
+  });
+
+  it("drops a loaded content match the server no longer matches", async () => {
+    const contentOnlySession: ChatSession = {
+      id: "acp-9",
+      title: "Untitled",
+      createdAt: "2026-04-10T12:00:00Z",
+      updatedAt: "2026-04-10T12:00:00Z",
+      messageCount: 1,
+    };
+    mockAcpSearchSessions.mockResolvedValueOnce(
+      serverSweep(
+        [matchedInfo("acp-9")],
+        ["acp-9"],
+        [
+          {
+            sessionId: "acp-9",
+            snippet: "needle in message",
+            messageId: "message-9",
+            matchCount: 1,
+          },
+        ],
+      ),
+    );
+
+    const { result } = renderSessionSearch([contentOnlySession]);
+    await searchFor(result, "needle");
+    expect(result.current.results.map((item) => item.session.id)).toEqual([
+      "acp-9",
+    ]);
+
+    // The session's content changed between sweeps: the server's empty match
+    // set is authoritative, so the stale content row must go even though no
+    // enrichment ran for it.
+    mockAcpSearchSessions.mockResolvedValueOnce(serverSweep([], []));
+    await submitCurrentSearch(result);
+
+    expect(result.current.results).toEqual([]);
+  });
+
+  it("keeps a matched target on screen when its enrichment export fails", async () => {
+    // Title deliberately does NOT match the query: if the row survives only
+    // as a metadata hit, the test proves nothing about content retention.
+    const contentOnlySession: ChatSession = {
+      id: "acp-9",
+      title: "Untitled",
+      createdAt: "2026-04-10T12:00:00Z",
+      updatedAt: "2026-04-10T12:00:00Z",
+      messageCount: 1,
+    };
+    mockAcpSearchSessions.mockResolvedValueOnce({
+      ...serverSweep([matchedInfo("acp-9")], []),
+      failedIds: ["acp-9"],
+    });
+
+    const { result } = renderSessionSearch([contentOnlySession]);
+    await searchFor(result, "needle");
+
+    // The export could not be read, but the server confirmed the match: the
+    // row degrades to snippet-less rather than vanishing.
+    expect(result.current.results).toHaveLength(1);
+    expect(result.current.results[0]).toMatchObject({
+      session: { id: "acp-9" },
+      matchType: "message",
+    });
+    expect(result.current.progress).toMatchObject({
+      searched: 0,
+      unreadable: 1,
+    });
+  });
+
+  it("honors the admission check for discovered sessions", async () => {
+    mockAcpSearchSessions.mockResolvedValueOnce(
+      serverSweep([matchedInfo("acp-1"), matchedInfo("old-1")], ["acp-1"]),
+    );
+
+    const queryClient = new QueryClient();
+    const { result } = renderHook(
+      () =>
+        useSessionSearch({
+          sessions,
+          resolvers,
+          includeDiscoveredSession: (session) => session.id !== "old-1",
+        }),
+      {
+        wrapper: ({ children }: { children: ReactNode }) =>
+          createElement(QueryClientProvider, { client: queryClient }, children),
+      },
+    );
+    await searchFor(result, "needle");
+
+    expect(result.current.results.map((item) => item.session.id)).toEqual([
+      "acp-1",
+    ]);
+  });
+
+  it("discovers matches with no loaded sessions at all", async () => {
+    // An empty loaded slice (fresh store, or a project filter with nothing on
+    // screen) must still reach the server: discovery needs no export targets.
+    mockAcpSearchSessions.mockResolvedValueOnce(
+      serverSweep([matchedInfo("old-1")], []),
+    );
+
+    const { result } = renderSessionSearch([]);
+    await searchFor(result, "needle");
+
+    expect(mockAcpSearchSessions).toHaveBeenCalledWith(
+      "needle",
+      [],
+      searchOptions,
+    );
+    expect(result.current.results.map((item) => item.session.id)).toEqual([
+      "old-1",
+    ]);
+  });
+
+  it("keeps earlier server-discovered rows across a searchMore page sweep", async () => {
+    mockAcpSearchSessions.mockResolvedValue(
+      serverSweep([matchedInfo("acp-1"), matchedInfo("old-1")], ["acp-1"]),
+    );
+
+    const { result } = renderSessionSearch();
+    await searchFor(result, "needle");
+    expect(result.current.results.map((item) => item.session.id)).toEqual([
+      "old-1",
+      "acp-1",
+    ]);
+
+    // A page sweep re-runs discovery; the server answers with the full match
+    // set again (now including the newly loaded session), so every earlier
+    // row must survive the rebuild.
+    mockAcpSearchSessions.mockResolvedValueOnce(
+      serverSweep(
+        [matchedInfo("acp-1"), matchedInfo("acp-2"), matchedInfo("old-1")],
+        ["acp-2"],
+      ),
+    );
+    await searchMore(result, [...sessions, newerSession]);
+
+    expect(result.current.results.map((item) => item.session.id)).toEqual([
+      "old-1",
+      "acp-2",
+      "acp-1",
+    ]);
   });
 });
