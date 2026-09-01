@@ -78,10 +78,10 @@ mod windows_discovery_security {
             PROTECTED_DACL_SECURITY_INFORMATION, TOKEN_QUERY, TOKEN_USER,
         },
         Storage::FileSystem::{
-            CreateFileW, FileAttributeTagInfo, GetFileInformationByHandleEx,
+            CreateFileW, FileAttributeTagInfo, GetFileInformationByHandleEx, MoveFileExW,
             FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO,
             FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ,
-            FILE_SHARE_WRITE, OPEN_EXISTING,
+            FILE_SHARE_WRITE, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, OPEN_EXISTING,
         },
         System::Threading::{GetCurrentProcess, OpenProcessToken},
     };
@@ -158,8 +158,11 @@ mod windows_discovery_security {
                     "current user SID information has an invalid size",
                 ));
             }
-            let mut buffer = vec![0_u8; size as usize];
-            // SAFETY: `buffer` has the size requested by the preceding call.
+            // TOKEN_USER contains pointer-sized fields, so use aligned backing
+            // before interpreting the initialized bytes as TOKEN_USER.
+            let mut buffer = vec![0_usize; (size as usize).div_ceil(size_of::<usize>())];
+            // SAFETY: `buffer` is suitably aligned and has at least the size
+            // requested by the preceding call.
             if unsafe {
                 GetTokenInformation(
                     token,
@@ -175,7 +178,8 @@ mod windows_discovery_security {
                 }));
             }
             let user = buffer.as_ptr().cast::<TOKEN_USER>();
-            // SAFETY: GetTokenInformation initialized a TOKEN_USER in buffer.
+            // SAFETY: GetTokenInformation initialized a suitably aligned
+            // TOKEN_USER in buffer.
             f(unsafe { (*user).User.Sid })
         })();
         // SAFETY: OpenProcessToken returned this handle above.
@@ -243,7 +247,7 @@ mod windows_discovery_security {
                 std::ptr::null(),
                 OPEN_EXISTING,
                 FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
-                0,
+                std::ptr::null_mut(),
             )
         };
         if handle == INVALID_HANDLE_VALUE {
@@ -296,6 +300,32 @@ mod windows_discovery_security {
         // ACL only while the verified directory handle is held by the caller.
         // The file is private before any capability bytes are written.
         private_file_handle(handle)
+    }
+
+    /// Replaces an old discovery file in one filesystem operation. `rename`
+    /// cannot replace an existing destination on Windows, which breaks a
+    /// broker restart when its PID has been reused. The replacement preserves
+    /// the temp file's already-applied protected DACL rather than inheriting
+    /// permissions from the old discovery file.
+    pub(super) fn replace_discovery_file(tmp: &Path, path: &Path) -> std::io::Result<()> {
+        let wide_tmp = path_as_wide_null(tmp);
+        let wide_path = path_as_wide_null(path);
+        // MOVEFILE_WRITE_THROUGH waits for the filesystem to complete the
+        // replacement. The containing directory remains held privately by the
+        // caller, preventing it from being swapped during this operation.
+        if unsafe {
+            MoveFileExW(
+                wide_tmp.as_ptr(),
+                wide_path.as_ptr(),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+        } == 0
+        {
+            return Err(win_error("replacing discovery file", unsafe {
+                GetLastError()
+            }));
+        }
+        Ok(())
     }
 
     #[cfg(test)]
@@ -450,7 +480,7 @@ pub(crate) fn write_discovery_file(
         file.write_all(payload.to_string().as_bytes())?;
         file.sync_all()?;
         drop(file);
-        std::fs::rename(&tmp, path)?;
+        replace_discovery_file(&tmp, path)?;
         renamed = true;
         sync_directory(dir)
     })();
@@ -462,6 +492,16 @@ pub(crate) fn write_discovery_file(
         }
     }
     result
+}
+
+#[cfg(all(feature = "server", windows))]
+fn replace_discovery_file(tmp: &Path, path: &Path) -> std::io::Result<()> {
+    windows_discovery_security::replace_discovery_file(tmp, path)
+}
+
+#[cfg(all(feature = "server", not(windows)))]
+fn replace_discovery_file(tmp: &Path, path: &Path) -> std::io::Result<()> {
+    std::fs::rename(tmp, path)
 }
 
 #[cfg(feature = "server")]

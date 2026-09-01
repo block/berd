@@ -288,12 +288,12 @@ unsafe fn windows_discovery_permissions_are_private(
         unsafe { CloseHandle(token) };
         return Err("cannot determine the current user");
     }
-    let mut bytes = vec![0u8; size as usize];
+    let mut bytes = vec![0_usize; (size as usize).div_ceil(size_of::<usize>())];
     let ok = unsafe {
         GetTokenInformation(token, TokenUser, bytes.as_mut_ptr().cast(), size, &mut size)
     } != 0;
     unsafe { CloseHandle(token) };
-    if !ok || bytes.len() < size_of::<TOKEN_USER>() {
+    if !ok || bytes.len() * size_of::<usize>() < size_of::<TOKEN_USER>() {
         return Err("cannot determine the current user");
     }
     let current_user = unsafe { (*(bytes.as_ptr().cast::<TOKEN_USER>())).User.Sid };
@@ -353,11 +353,8 @@ unsafe fn windows_ace_sid_is_trusted(
     if sid.is_null() || available_bytes < 8 {
         return false;
     }
-    if unsafe { EqualSid(sid, current_user) } != 0 {
-        return true;
-    }
     // The SID is embedded in the ACE, so validate its variable-length layout
-    // against that ACE before inspecting its authority and sub-authorities.
+    // against that ACE before passing it to Win32 or inspecting its fields.
     let sid = sid as *const u8;
     let revision = unsafe { *sid };
     let count = unsafe { *sid.add(1) };
@@ -366,6 +363,9 @@ unsafe fn windows_ace_sid_is_trusted(
     };
     if revision != 1 || sid_len > available_bytes {
         return false;
+    }
+    if unsafe { EqualSid(sid.cast(), current_user) } != 0 {
+        return true;
     }
     // S-1-5-18 (LOCAL SYSTEM) and S-1-5-32-544 (BUILTIN\\Administrators)
     // are privileged principals, not other unprivileged users.
