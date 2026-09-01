@@ -3652,12 +3652,69 @@ fn bb_apps_help_distinguishes_external_and_internal_paths() {
         "Cloudflare-backed internal App Kit",
         "bb tools appkit",
         "separate internal Compose workflow",
+        "ready",
+        "debug",
     ] {
         assert!(
             stdout.contains(expected),
             "help did not explain {expected:?}: {stdout}"
         );
     }
+}
+
+#[test]
+fn bb_apps_ready_and_debug_help_expose_their_arguments() {
+    let ready = bb_command()
+        .args(["apps", "ready", "--help"])
+        .output()
+        .expect("run bb apps ready help");
+    let (ready_stdout, ready_stderr) = output_text(&ready);
+    assert!(ready.status.success(), "stderr was: {ready_stderr}");
+    for expected in ["<APP_ID>", "--version-id <VERSION_ID>", "--base-url <URL>"] {
+        assert!(
+            ready_stdout.contains(expected),
+            "ready help omitted {expected:?}: {ready_stdout}"
+        );
+    }
+
+    let debug = bb_command()
+        .args(["apps", "debug", "--help"])
+        .output()
+        .expect("run bb apps debug help");
+    let (debug_stdout, debug_stderr) = output_text(&debug);
+    assert!(debug.status.success(), "stderr was: {debug_stderr}");
+    for expected in [
+        "<APP_ID>",
+        "--version-id <VERSION_ID>",
+        "--tail-lines <N>",
+        "1-1000",
+        "control-plane default: 200",
+    ] {
+        assert!(
+            debug_stdout.contains(expected),
+            "debug help omitted {expected:?}: {debug_stdout}"
+        );
+    }
+}
+
+#[test]
+fn bb_apps_ready_requires_version_before_auth_or_network() {
+    let output = bb_command()
+        .args([
+            "apps",
+            "ready",
+            "merchant-lookup",
+            "--base-url",
+            "https://compose-ctrl.test.blockstaging.build",
+        ])
+        .output()
+        .expect("run bb apps ready without version id");
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(!output.status.success());
+    assert!(stdout.is_empty(), "stdout was: {stdout}");
+    assert!(stderr.contains("--version-id <VERSION_ID>"));
+    assert!(stderr.contains("required"));
 }
 
 #[test]

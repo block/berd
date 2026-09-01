@@ -46,6 +46,7 @@ const APPS_E2E_AUTH_URL_ENV_VAR: &str = "BB_APPS_E2E_AUTH_URL";
 const APPS_E2E_CREDENTIAL_ENV_VAR: &str = "BB_APPS_E2E_CREDENTIAL";
 const APPS_CONTRACT_PATH: &str = "/v1/agent/contract";
 const APPS_PLAN_PATH: &str = "/v1/agent/apps/plan";
+const MAX_DEBUG_TAIL_LINES: u16 = 1000;
 const HOTPOD_AGENT_CLIENT_VERSION_HEADER: &str = "X-Hotpod-Agent-Client-Version";
 // Compose may synchronously wait up to two minutes for an initialize or
 // deploy rollout. Leave enough headroom for the response to traverse ingress.
@@ -152,6 +153,56 @@ pub fn command() -> Command {
                         .help("Optional deployment identifier"),
                 ),
         ))
+        .subcommand(control_plane_args(
+            Command::new("ready")
+                .about("Check readiness for an exact deployed app version")
+                .long_about(
+                    "Request one control-plane readiness snapshot for an exact deployed app version. \
+                     The response includes active-route, runner, readiness, and diagnostic fields; \
+                     callers can follow the returned guidance to poll again.",
+                )
+                .arg(
+                    Arg::new("app-id")
+                        .value_name("APP_ID")
+                        .required(true)
+                        .help("App identifier returned by `bb apps create`"),
+                )
+                .arg(
+                    Arg::new("version-id")
+                        .long("version-id")
+                        .value_name("VERSION_ID")
+                        .required(true)
+                        .help("Exact version identifier returned by `bb apps deploy`"),
+                ),
+        ))
+        .subcommand(control_plane_args(
+            Command::new("debug")
+                .about("Collect a bounded diagnostic snapshot for an app")
+                .long_about(
+                    "Request one control-plane diagnostic snapshot, preserving partial results when \
+                     individual collectors fail. Optionally correlate the snapshot to a deployed \
+                     version and control the number of log lines collected per container.",
+                )
+                .arg(
+                    Arg::new("app-id")
+                        .value_name("APP_ID")
+                        .required(true)
+                        .help("App identifier returned by `bb apps create`"),
+                )
+                .arg(
+                    Arg::new("version-id")
+                        .long("version-id")
+                        .value_name("VERSION_ID")
+                        .help("Optional version identifier to correlate with the active route"),
+                )
+                .arg(
+                    Arg::new("tail-lines")
+                        .long("tail-lines")
+                        .value_name("N")
+                        .value_parser(clap::value_parser!(u16).range(1..=MAX_DEBUG_TAIL_LINES.into()))
+                        .help("Log lines to collect per container (1-1000; control-plane default: 200)"),
+                ),
+        ))
 }
 
 fn control_plane_args(command: Command) -> Command {
@@ -189,6 +240,8 @@ fn dispatch(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
         Some(("contract", contract_matches)) => run_contract(config, contract_matches),
         Some(("create", create_matches)) => run_create(config, create_matches),
         Some(("deploy", deploy_matches)) => run_deploy(config, deploy_matches),
+        Some(("ready", ready_matches)) => run_ready(config, ready_matches),
+        Some(("debug", debug_matches)) => run_debug(config, debug_matches),
         _ => anyhow::bail!("expected an apps subcommand"),
     }
 }
@@ -278,6 +331,29 @@ fn run_deploy(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     };
     let (client, credential) = control_plane_context(config, matches)?;
     let response = client.deploy(&credential, app_id, artifact, &options)?;
+    print_json(&response)
+}
+
+fn run_ready(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
+    let app_id = matches
+        .get_one::<String>("app-id")
+        .context("expected app id")?;
+    let version_id = matches
+        .get_one::<String>("version-id")
+        .context("expected version id")?;
+    let (client, credential) = control_plane_context(config, matches)?;
+    let response = client.ready(&credential, app_id, version_id)?;
+    print_json(&response)
+}
+
+fn run_debug(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
+    let app_id = matches
+        .get_one::<String>("app-id")
+        .context("expected app id")?;
+    let version_id = matches.get_one::<String>("version-id").map(String::as_str);
+    let tail_lines = matches.get_one::<u16>("tail-lines").copied();
+    let (client, credential) = control_plane_context(config, matches)?;
+    let response = client.debug(&credential, app_id, version_id, tail_lines)?;
     print_json(&response)
 }
 
@@ -576,19 +652,81 @@ impl ControlPlaneClient {
         })
     }
 
+    fn ready(
+        &self,
+        credential: &ComposeSessionCredential,
+        app_id: &str,
+        version_id: &str,
+    ) -> Result<Value> {
+        self.get_app_resource(
+            credential,
+            app_id,
+            "ready",
+            &[("version_id", version_id.to_string())],
+        )
+    }
+
+    fn debug(
+        &self,
+        credential: &ComposeSessionCredential,
+        app_id: &str,
+        version_id: Option<&str>,
+        tail_lines: Option<u16>,
+    ) -> Result<Value> {
+        let mut query = Vec::new();
+        if let Some(version_id) = version_id {
+            query.push(("version_id", version_id.to_string()));
+        }
+        if let Some(tail_lines) = tail_lines {
+            query.push(("tail_lines", tail_lines.to_string()));
+        }
+        self.get_app_resource(credential, app_id, "debug", &query)
+    }
+
+    fn get_app_resource(
+        &self,
+        credential: &ComposeSessionCredential,
+        app_id: &str,
+        resource: &str,
+        query: &[(&str, String)],
+    ) -> Result<Value> {
+        let url = self.app_resource_url(app_id, resource, query)?;
+        let path = request_path(&url);
+        self.authorized_json_request(credential, "GET", &path, |authorization| {
+            self.standard_request(self.client.get(url.clone()), authorization)
+                .build()
+                .with_context(|| format!("build Apps Platform GET {path} request"))
+        })
+    }
+
     fn endpoint(&self, path: &str) -> Result<url::Url> {
         auth_url(&self.base_url, path)
             .with_context(|| format!("build Apps Platform control-plane {path} URL"))
     }
 
     fn app_action_url(&self, app_id: &str, action: &str) -> Result<url::Url> {
+        self.app_resource_url(app_id, action, &[])
+    }
+
+    fn app_resource_url(
+        &self,
+        app_id: &str,
+        resource: &str,
+        query: &[(&str, String)],
+    ) -> Result<url::Url> {
         let mut url = self.endpoint("/v1/agent/apps")?;
         url.path_segments_mut()
             .map_err(|_| {
                 anyhow::anyhow!("Apps Platform control-plane URL cannot contain path segments")
             })?
             .push(app_id)
-            .push(action);
+            .push(resource);
+        if !query.is_empty() {
+            let mut pairs = url.query_pairs_mut();
+            for (name, value) in query {
+                pairs.append_pair(name, value);
+            }
+        }
         Ok(url)
     }
 
@@ -665,6 +803,13 @@ impl ControlPlaneClient {
             return transport.execute(request);
         }
         self.client.execute(request)
+    }
+}
+
+fn request_path(url: &url::Url) -> String {
+    match url.query() {
+        Some(query) => format!("{}?{query}", url.path()),
+        None => url.path().to_string(),
     }
 }
 
@@ -1104,6 +1249,13 @@ mod tests {
             request.headers.get("authorization").map(String::as_str),
             Some(format!("BBIdentity {credential}").as_str())
         );
+        assert_eq!(
+            request
+                .headers
+                .get("x-hotpod-agent-client-version")
+                .map(String::as_str),
+            Some("0.2.0")
+        );
         for forbidden in [
             "cookie",
             "x-bb-session-credential",
@@ -1365,6 +1517,137 @@ mod tests {
         ] {
             assert!(body.contains(expected), "multipart omitted {expected:?}");
         }
+    }
+
+    #[test]
+    fn bb_apps_ready_process_requests_exact_version_and_preserves_response() {
+        let credential = "apps-e2e-only.ready.session+credential";
+        let ready = json!({
+            "ok": true,
+            "app_id": "merchant-lookup",
+            "version_id": "ver/123?route=active",
+            "ready": false,
+            "status": "runner_unavailable",
+            "active_version_id": "ver/123?route=active",
+            "route_revision": 8,
+            "readiness": {
+                "control_plane_url": "/v1/agent/apps/merchant-lookup/ready?version_id=ver-123",
+                "diagnostics_url": "/v1/agent/apps/merchant-lookup/debug?version_id=ver-123"
+            },
+            "runner_readiness": {
+                "http_status": 503,
+                "error": {"code": "runner_readiness_unreachable"}
+            },
+            "next_action": "Call the diagnostics endpoint."
+        });
+        let auth_server = ProcessServer::start(vec![process_auth_response()]);
+        let control_plane = ProcessServer::start(vec![ProcessResponse::json(ready.clone())]);
+        let mut command = process_command(
+            &auth_server,
+            &control_plane,
+            &[
+                "apps",
+                "ready",
+                "merchant/lookup app",
+                "--version-id",
+                "ver/123?route=active",
+                "--base-url",
+                APPROVED_TEST_BASE_URL,
+                "--client-version",
+                "0.2.0",
+                "--json",
+            ],
+            credential,
+        );
+
+        let output = command.output().expect("run Apps ready process command");
+        assert!(
+            output.status.success(),
+            "stderr was: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&process_stdout(&output))
+                .expect("parse ready process output"),
+            ready
+        );
+        let auth_requests = auth_server.finish();
+        let requests = control_plane.finish();
+        assert_process_auth(&auth_requests[0], credential);
+        assert_eq!(requests.len(), 1);
+        assert_process_control_plane(
+            &requests[0],
+            "GET",
+            "/v1/agent/apps/merchant%2Flookup%20app/ready?version_id=ver%2F123%3Froute%3Dactive",
+            credential,
+        );
+        assert_eq!(requests[0].body, Value::Null);
+    }
+
+    #[test]
+    fn bb_apps_debug_process_preserves_partial_diagnostics() {
+        let credential = "apps-e2e-only.debug.session+credential";
+        let debug = json!({
+            "ok": true,
+            "complete": false,
+            "status": "incomplete",
+            "app_id": "merchant-lookup",
+            "version_id": "ver-123",
+            "route": {"active_version_id": "ver-122", "version_matches": false},
+            "runner_readiness": {"http_status": 503},
+            "pods": [{
+                "name": "hotpod-runner-abc",
+                "logs": [{"container": "hotpod-runner", "current": "useful log line"}]
+            }],
+            "events": [{"reason": "FailedScheduling", "message": "insufficient cpu"}],
+            "issues": [{"code": "route_version_mismatch", "severity": "warning"}],
+            "collection_errors": [{"source": "deployment", "message": "temporarily unavailable"}],
+            "next_actions": ["Retry the debug request."]
+        });
+        let auth_server = ProcessServer::start(vec![process_auth_response()]);
+        let control_plane = ProcessServer::start(vec![ProcessResponse::json(debug.clone())]);
+        let mut command = process_command(
+            &auth_server,
+            &control_plane,
+            &[
+                "apps",
+                "debug",
+                "merchant-lookup",
+                "--version-id",
+                "ver-123",
+                "--tail-lines",
+                "75",
+                "--base-url",
+                APPROVED_TEST_BASE_URL,
+                "--client-version",
+                "0.2.0",
+                "--json",
+            ],
+            credential,
+        );
+
+        let output = command.output().expect("run Apps debug process command");
+        assert!(
+            output.status.success(),
+            "stderr was: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&process_stdout(&output))
+                .expect("parse debug process output"),
+            debug
+        );
+        let auth_requests = auth_server.finish();
+        let requests = control_plane.finish();
+        assert_process_auth(&auth_requests[0], credential);
+        assert_eq!(requests.len(), 1);
+        assert_process_control_plane(
+            &requests[0],
+            "GET",
+            "/v1/agent/apps/merchant-lookup/debug?version_id=ver-123&tail_lines=75",
+            credential,
+        );
+        assert_eq!(requests[0].body, Value::Null);
     }
 
     fn test_control_plane_client(base_url: &str, timeout: Duration) -> ControlPlaneClient {
@@ -1730,7 +2013,85 @@ mod tests {
     }
 
     #[test]
-    fn app_ids_are_encoded_as_single_path_segments() {
+    fn debug_builds_each_supported_query_shape() {
+        let server = Server::http("127.0.0.1:0").expect("bind control-plane server");
+        let base_url = format!("http://{}", server.server_addr());
+        let expected_paths = [
+            "/v1/agent/apps/app/debug",
+            "/v1/agent/apps/app/debug?version_id=ver%2F123%3Factive",
+            "/v1/agent/apps/app/debug?tail_lines=25",
+            "/v1/agent/apps/app/debug?version_id=ver-123&tail_lines=50",
+        ];
+        let server_thread = thread::spawn(move || {
+            for (index, expected_path) in expected_paths.into_iter().enumerate() {
+                let request = server.recv().expect("receive debug request");
+                assert_eq!(request.method().as_str(), "GET");
+                assert_eq!(request.url(), expected_path);
+                request
+                    .respond(
+                        Response::from_string(format!(r#"{{"request":{index}}}"#)).with_header(
+                            Header::from_bytes("Content-Type", "application/json")
+                                .expect("build content type"),
+                        ),
+                    )
+                    .expect("respond to debug request");
+            }
+        });
+        let client = test_control_plane_client(&base_url, Duration::from_secs(2));
+        let credential = test_credential("debug_query_session_credential_123456");
+
+        for (index, (version_id, tail_lines)) in [
+            (None, None),
+            (Some("ver/123?active"), None),
+            (None, Some(25)),
+            (Some("ver-123"), Some(50)),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let response = client
+                .debug(&credential, "app", version_id, tail_lines)
+                .expect("request debug response");
+            assert_eq!(response["request"], index);
+        }
+
+        server_thread.join().expect("join control-plane server");
+    }
+
+    #[test]
+    fn debug_tail_lines_match_control_plane_bounds() {
+        for invalid in ["0", "1001"] {
+            let error = command()
+                .try_get_matches_from([
+                    "apps",
+                    "debug",
+                    "app",
+                    "--tail-lines",
+                    invalid,
+                    "--base-url",
+                    APPROVED_TEST_BASE_URL,
+                ])
+                .expect_err("reject out-of-range tail lines");
+            assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
+        }
+
+        for valid in ["1", "1000"] {
+            command()
+                .try_get_matches_from([
+                    "apps",
+                    "debug",
+                    "app",
+                    "--tail-lines",
+                    valid,
+                    "--base-url",
+                    APPROVED_TEST_BASE_URL,
+                ])
+                .expect("accept bounded tail lines");
+        }
+    }
+
+    #[test]
+    fn app_resource_urls_encode_path_segments_and_query_values() {
         let client = test_control_plane_client("http://127.0.0.1:9", Duration::from_secs(2));
 
         let url = client
@@ -1738,5 +2099,17 @@ mod tests {
             .expect("build app deploy URL");
 
         assert_eq!(url.path(), "/v1/agent/apps/app%2F..%2F..%2Fidentity/deploy");
+
+        let ready = client
+            .app_resource_url(
+                "app/with space",
+                "ready",
+                &[("version_id", "version/?&= value".to_string())],
+            )
+            .expect("build app ready URL");
+        assert_eq!(
+            request_path(&ready),
+            "/v1/agent/apps/app%2Fwith%20space/ready?version_id=version%2F%3F%26%3D+value"
+        );
     }
 }
