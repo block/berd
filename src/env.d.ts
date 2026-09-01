@@ -16,6 +16,7 @@ declare global {
     readonly VITE_TELEMETRY?: string;
     readonly VITE_VOICE_DICTATION?: string;
     readonly VITE_MANAGED_CONNECTIONS?: string;
+    readonly VITE_SKILL_DISCOVERY?: string;
     readonly VITE_TELEMETRY_DEBUG?: string;
     readonly VITE_OTLP_LOGS_ENDPOINT?: string;
     readonly VITE_DESIGN_SYSTEM_EXPLORER?: string;

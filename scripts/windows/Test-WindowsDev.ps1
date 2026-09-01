@@ -78,16 +78,16 @@ try {
     Assert-Equal "process args: embedded quote escaped" (Join-WindowsProcessArguments -Arguments @('say "hi"')) '"say \"hi\""'
 
     Assert-Equal "public app feature defaults fail closed" (Get-BerdAppFeatures) "berdctl,app-test-driver,no-voice-dictation"
-    $featureGateNames = @("VITE_AGENT_TOOLS", "VITE_AUTOMATIONS", "VITE_BUILDERBOT", "VITE_FEEDBACK", "VITE_MANAGED_CONNECTIONS", "VITE_TELEMETRY_ENFORCED", "VITE_VOICE_DICTATION")
+    $featureGateNames = @("VITE_AGENT_TOOLS", "VITE_AUTOMATIONS", "VITE_BUILDERBOT", "VITE_FEEDBACK", "VITE_MANAGED_CONNECTIONS", "VITE_SKILL_DISCOVERY", "VITE_TELEMETRY_ENFORCED", "VITE_VOICE_DICTATION")
     $savedFeatureGates = @{}
     foreach ($name in $featureGateNames) {
         $savedFeatureGates[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
         [Environment]::SetEnvironmentVariable($name, "1", "Process")
     }
     try {
-        Assert-Equal "all seven renderer gates map to app Cargo features" `
+        Assert-Equal "every renderer gate maps to its app Cargo feature" `
             (Get-BerdAppFeatures -BaseFeatures @("berdctl")) `
-            "berdctl,block-agent-tools,block-automations,block-builderbot,block-feedback,block-managed-connections,block-telemetry-enforced,block-voice-dictation"
+            "berdctl,block-agent-tools,block-automations,block-builderbot,block-feedback,block-managed-connections,block-skill-discovery,block-telemetry-enforced,block-voice-dictation"
     } finally {
         foreach ($name in $featureGateNames) {
             [Environment]::SetEnvironmentVariable($name, $savedFeatureGates[$name], "Process")

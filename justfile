@@ -213,10 +213,10 @@ _tauri-check-unix:
 _tauri-check-windows:
     just tauri-check-windows
 
-# Run the Rust plugin and app-crate telemetry tests with external sidecars
-# disabled. The telemetry lanes filter the app lib's tests by name — the
-# `commands::telemetry` module path matches wholesale — and run twice because
-# the `block-telemetry-enforced` feature swaps in the enforced-consent tests.
+# Run the Rust plugin tests plus the app-crate suites for feature-gated
+# modules (telemetry consent, skill marketplace) with external sidecars
+# disabled. Gated lanes pass a name filter and their enabling Cargo feature —
+# e.g. `block-telemetry-enforced` swaps in the enforced-consent tests.
 tauri-test:
     just _tauri-test-{{ os_family() }}
 
@@ -226,6 +226,11 @@ tauri-test:
 test-siri-tts-stream-regression:
     ./scripts/test-siri-tts-stream-regression.sh
 
+# Run the marketplace bridge's unit tests with its gating Cargo feature on.
+[unix]
+_tauri-test-skill-marketplace:
+    just _tauri-cargo-unix test --lib --features block-skill-discovery skill_marketplace
+
 [unix]
 _tauri-test-unix:
     # rust-cache can restore Sherpa's generated cache directory without its native libraries.
@@ -234,6 +239,11 @@ _tauri-test-unix:
     just _tauri-cargo-unix test -p berdctl
     just _tauri-cargo-unix test --lib telemetry
     just _tauri-cargo-unix test --lib --features block-telemetry-enforced telemetry
+    just _tauri-test-skill-marketplace
+
+[windows]
+_tauri-test-skill-marketplace:
+    just _tauri-cargo-windows test --lib --features block-skill-discovery skill_marketplace
 
 [windows]
 _tauri-test-windows:
@@ -241,6 +251,7 @@ _tauri-test-windows:
     just _tauri-cargo-windows test -p berdctl
     just _tauri-cargo-windows test --lib telemetry
     just _tauri-cargo-windows test --lib --features block-telemetry-enforced telemetry
+    just _tauri-test-skill-marketplace
 
 # Run the local CI gate.
 ci: release-version-check check tauri-fmt-check tauri-check tauri-test clippy test release-scripts-test build

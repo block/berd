@@ -480,7 +480,7 @@ function Join-WindowsProcessArguments {
     return ($quoted -join " ")
 }
 
-# Single source of truth for mapping the seven renderer build gates onto the
+# Single source of truth for mapping the renderer build gates onto the
 # matching Tauri Cargo feature set. Callers may add posture features (for
 # example berdctl/app-test-driver/devtools) without duplicating gate policy.
 # Windows cannot call scripts/block-feature-gates.sh (no guaranteed bash in the
@@ -501,6 +501,7 @@ function Get-BerdAppFeatures {
         @{ Env = "VITE_BUILDERBOT"; Feature = "block-builderbot" },
         @{ Env = "VITE_FEEDBACK"; Feature = "block-feedback" },
         @{ Env = "VITE_MANAGED_CONNECTIONS"; Feature = "block-managed-connections" },
+        @{ Env = "VITE_SKILL_DISCOVERY"; Feature = "block-skill-discovery" },
         @{ Env = "VITE_TELEMETRY_ENFORCED"; Feature = "block-telemetry-enforced" },
         @{ Env = "VITE_VOICE_DICTATION"; Feature = "block-voice-dictation" }
     )

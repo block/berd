@@ -7,6 +7,7 @@ export type BuildFeature =
   | "feedback"
   | "feedbackSurveys"
   | "managedConnections"
+  | "skillDiscovery"
   | "telemetry"
   | "telemetryEnforced"
   | "voiceConversation"
@@ -37,6 +38,11 @@ function readBuildFeatures(): Record<BuildFeature, boolean> {
       import.meta.env.VITE_FEEDBACK_SURVEYS === "1" ||
       import.meta.env.VITE_FEEDBACK === "1",
     managedConnections: import.meta.env.VITE_MANAGED_CONNECTIONS === "1",
+    // Skill discovery shells out to the Block-internal sq-agents marketplace,
+    // so it shares the Block-only positive opt-in posture: public builds must
+    // never reach the internal catalog or its Zero Trust auth flow, even via
+    // stale per-user experiment overrides.
+    skillDiscovery: import.meta.env.VITE_SKILL_DISCOVERY === "1",
     telemetry: import.meta.env.VITE_TELEMETRY !== "0",
     // Managed internal distributions force telemetry consent ON: the user
     // setting is skipped and the settings toggle is hidden. A positive opt-in
