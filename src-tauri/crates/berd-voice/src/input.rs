@@ -123,6 +123,32 @@ pub enum VoiceInputEvent {
     Failed(String),
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum VoiceInputFinishError {
+    WorkerPanicked,
+    Quarantined { timeout: Duration },
+}
+
+impl VoiceInputFinishError {
+    pub fn is_quarantined(&self) -> bool {
+        matches!(self, Self::Quarantined { .. })
+    }
+}
+
+impl std::fmt::Display for VoiceInputFinishError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::WorkerPanicked => formatter.write_str("voice input runtime worker panicked"),
+            Self::Quarantined { timeout } => write!(
+                formatter,
+                "voice input runtime did not stop within {timeout:?}; the worker was quarantined"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for VoiceInputFinishError {}
+
 #[derive(Clone)]
 pub struct VoiceInputControls {
     shared: Arc<ControlState>,
@@ -487,21 +513,10 @@ impl VoiceInputRuntime {
         self.signal_shutdown(true);
     }
 
-    pub async fn finish(mut self) -> Result<(), String> {
+    pub async fn finish(mut self) -> Result<(), VoiceInputFinishError> {
         let worker = self.begin_shutdown();
         if let Some(worker) = worker {
-            let deadline = tokio::time::Instant::now() + FINISH_TIMEOUT;
-            while !worker.is_finished() {
-                if tokio::time::Instant::now() >= deadline {
-                    return Err(format!(
-                        "voice input runtime did not stop within {FINISH_TIMEOUT:?}"
-                    ));
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-            worker
-                .join()
-                .map_err(|_| "voice input runtime worker panicked".to_string())?;
+            finish_worker(worker, FINISH_TIMEOUT).await?;
         }
         Ok(())
     }
@@ -533,13 +548,40 @@ impl VoiceInputRuntime {
 impl Drop for VoiceInputRuntime {
     fn drop(&mut self) {
         if let Some(worker) = self.begin_shutdown() {
-            let _ = thread::Builder::new()
-                .name("berd-voice-input-reaper".to_string())
-                .spawn(move || {
-                    let _ = worker.join();
-                });
+            reap_dropped_worker(worker);
         }
     }
+}
+
+async fn finish_worker(
+    worker: thread::JoinHandle<()>,
+    timeout: Duration,
+) -> Result<(), VoiceInputFinishError> {
+    let deadline = tokio::time::Instant::now() + timeout;
+    while !worker.is_finished() {
+        if tokio::time::Instant::now() >= deadline {
+            // Rust cannot safely terminate an arbitrary thread blocked inside
+            // native code. Detaching this handle avoids adding a second
+            // permanently blocked reaper thread; the caller must quarantine
+            // the runtime and forbid replacement work in this process.
+            drop(worker);
+            return Err(VoiceInputFinishError::Quarantined { timeout });
+        }
+        tokio::time::sleep(Duration::from_millis(10).min(timeout)).await;
+    }
+    worker
+        .join()
+        .map_err(|_| VoiceInputFinishError::WorkerPanicked)
+}
+
+fn reap_dropped_worker(worker: thread::JoinHandle<()>) {
+    // Preserve the pre-existing best-effort Drop behavior. Explicit bounded
+    // finish uses the typed quarantine path above instead.
+    let _ = thread::Builder::new()
+        .name("berd-voice-input-reaper".to_string())
+        .spawn(move || {
+            let _ = worker.join();
+        });
 }
 
 struct PendingRecognitions {
@@ -2538,5 +2580,46 @@ mod tests {
             worker: Some(worker),
         };
         runtime.finish().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn blocked_worker_is_quarantined_at_the_production_finish_seam() {
+        let (release_tx, release_rx) = mpsc::sync_channel::<()>(0);
+        let returned = Arc::new(AtomicBool::new(false));
+        let worker_returned = Arc::clone(&returned);
+        let worker = thread::spawn(move || {
+            let _ = release_rx.recv();
+            worker_returned.store(true, Ordering::Release);
+        });
+
+        let error = finish_worker(worker, Duration::from_millis(20))
+            .await
+            .expect_err("blocked worker must miss its bounded finish deadline");
+        assert_eq!(
+            error,
+            VoiceInputFinishError::Quarantined {
+                timeout: Duration::from_millis(20)
+            }
+        );
+        assert!(!returned.load(Ordering::Acquire));
+
+        release_tx
+            .send(())
+            .expect("release quarantined test worker");
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while !returned.load(Ordering::Acquire) && Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert!(returned.load(Ordering::Acquire));
+    }
+
+    #[tokio::test]
+    async fn panicked_worker_is_quiescent_and_not_quarantined() {
+        let worker = thread::spawn(|| panic!("deliberate worker panic"));
+        let error = finish_worker(worker, Duration::from_secs(1))
+            .await
+            .expect_err("panic is reported");
+        assert_eq!(error, VoiceInputFinishError::WorkerPanicked);
+        assert!(!error.is_quarantined());
     }
 }

@@ -3107,7 +3107,11 @@ fn finish_input_runtime(
             .enable_time()
             .build()
             .map_err(|error| format!("initialize voice input shutdown: {error}"))
-            .and_then(|runtime_handle| runtime_handle.block_on(runtime.finish()));
+            .and_then(|runtime_handle| {
+                runtime_handle
+                    .block_on(runtime.finish())
+                    .map_err(|error| error.to_string())
+            });
         let _ = done_tx.send(result);
     });
     loop {

@@ -602,10 +602,10 @@ async fn finish_runtime(
     tokio::pin!(finish);
     loop {
         tokio::select! {
-            result = &mut finish => return result,
+            result = &mut finish => return result.map_err(|error| error.to_string()),
             event = events.recv() => match event {
                 Some(event) => observe_shutdown_event(event)?,
-                None => return finish.await,
+                None => return finish.await.map_err(|error| error.to_string()),
             }
         }
     }

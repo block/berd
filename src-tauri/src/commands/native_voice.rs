@@ -206,6 +206,7 @@ struct Runtime {
     controls_window_revision: Option<u64>,
     native_microphone_mute_control: bool,
     admission: Option<Arc<BerdAdmissionCoordinator>>,
+    voice_input_quarantined: bool,
 }
 
 #[derive(Debug)]
@@ -496,6 +497,7 @@ struct StopCompletion {
     next_revision: u64,
     owner: RuntimeOwner,
     owner_id: String,
+    shutdown_error: Option<String>,
 }
 
 #[derive(Clone, Default)]
@@ -515,6 +517,43 @@ pub(crate) struct AssistantSpeechGuard {
 }
 
 impl NativeVoiceState {
+    fn ensure_voice_input_not_quarantined(&self) -> Result<(), String> {
+        let runtime = self
+            .runtime
+            .lock()
+            .map_err(|_| "native voice state lock was poisoned".to_string())?;
+        if runtime.voice_input_quarantined {
+            Err("Voice recognition did not stop safely. Restart Berd before starting another voice conversation.".to_string())
+        } else {
+            Ok(())
+        }
+    }
+
+    fn record_voice_input_finish(
+        &self,
+        result: Result<(), berd_voice::input::VoiceInputFinishError>,
+    ) -> Option<String> {
+        let error = result.err()?;
+        log::error!("Native voice recognizer shutdown failed: {error}");
+        if error.is_quarantined() {
+            if let Ok(mut runtime) = self.runtime.lock() {
+                runtime.voice_input_quarantined = true;
+            }
+            Some("Voice recognition did not stop safely. Restart Berd before starting another voice conversation.".to_string())
+        } else {
+            Some(error.to_string())
+        }
+    }
+
+    async fn finish_uninstalled_pipeline(
+        &self,
+        pipeline: berd_voice::input::VoiceInputRuntime,
+        startup_error: String,
+    ) -> String {
+        self.record_voice_input_finish(shutdown_pipeline(pipeline).await)
+            .unwrap_or(startup_error)
+    }
+
     fn admission_target(
         &self,
         caller_window_label: &str,
@@ -1027,10 +1066,10 @@ impl NativeVoiceState {
     }
 }
 
-async fn shutdown_pipeline(pipeline: berd_voice::input::VoiceInputRuntime) {
-    if let Err(error) = pipeline.finish().await {
-        log::error!("Native voice recognizer shutdown failed: {error}");
-    }
+async fn shutdown_pipeline(
+    pipeline: berd_voice::input::VoiceInputRuntime,
+) -> Result<(), berd_voice::input::VoiceInputFinishError> {
+    pipeline.finish().await
 }
 async fn status_with_availability<F, Fut>(
     state: &NativeVoiceState,
@@ -1041,14 +1080,20 @@ where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = bool>,
 {
-    let (session_active, revision_before_availability) = {
+    let (session_active, revision_before_availability, quarantined_before_availability) = {
         let runtime = state
             .runtime
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        (runtime.session_id.is_some(), runtime.revision)
+        (
+            runtime.session_id.is_some(),
+            runtime.revision,
+            runtime.voice_input_quarantined,
+        )
     };
-    let macos_available = if needs_macos_status(session_active, parakeet_available) {
+    let macos_available = if !quarantined_before_availability
+        && needs_macos_status(session_active, parakeet_available)
+    {
         macos_status().await
     } else {
         false
@@ -1065,9 +1110,11 @@ where
                 .as_ref()
                 .map(|owner| owner.window_label.clone()),
             runtime.revision,
+            runtime.voice_input_quarantined,
         )
     };
-    let macos_available = if snapshot.2 != revision_before_availability
+    let macos_available = if !snapshot.3
+        && snapshot.2 != revision_before_availability
         && needs_macos_status(snapshot.0.is_some(), parakeet_available)
     {
         let available = macos_status().await;
@@ -1083,22 +1130,27 @@ where
                     .as_ref()
                     .map(|owner| owner.window_label.clone()),
                 runtime.revision,
+                runtime.voice_input_quarantined,
             )
         };
         available
     } else {
         macos_available
     };
-    let (session_id, owner_window_label, revision) = snapshot;
-    let (available, unavailable_reason) =
-        if session_id.is_some() || parakeet_available || macos_available {
-            (true, None)
-        } else {
-            (
+    let (session_id, owner_window_label, revision, voice_input_quarantined) = snapshot;
+    let (available, unavailable_reason) = if voice_input_quarantined {
+        (
                 false,
-                Some("Download speech recognition before starting a call.".to_string()),
+                Some("Voice recognition did not stop safely. Restart Berd before starting another voice conversation.".to_string()),
             )
-        };
+    } else if session_id.is_some() || parakeet_available || macos_available {
+        (true, None)
+    } else {
+        (
+            false,
+            Some("Download speech recognition before starting a call.".to_string()),
+        )
+    };
     NativeVoiceStatus {
         available,
         unavailable_reason,
@@ -1323,6 +1375,7 @@ pub async fn start_native_voice_conversation(
     {
         return Err("An OpenAI Realtime voice conversation is already active.".to_string());
     }
+    state.ensure_voice_input_not_quarantined()?;
     if input_backend == VoiceInputBackend::Macos
         && !mac_speech::status_async().await?.model_installed
     {
@@ -1433,6 +1486,7 @@ pub async fn start_native_voice_conversation(
         &session_id,
         Some(foreground_generation),
     ) {
+        let error = state.finish_uninstalled_pipeline(pipeline, error).await;
         drop(lifecycle_guard);
         if microphone_claimed {
             capture.release_microphone(&window_label, &renderer_id, renderer_epoch, &owner_id);
@@ -1449,6 +1503,7 @@ pub async fn start_native_voice_conversation(
     ) {
         Ok(()) => {}
         Err(error) => {
+            let error = state.finish_uninstalled_pipeline(pipeline, error).await;
             drop(lifecycle_guard);
             if microphone_claimed {
                 capture.release_microphone(&window_label, &renderer_id, renderer_epoch, &owner_id);
@@ -1456,6 +1511,7 @@ pub async fn start_native_voice_conversation(
             return Err(error);
         }
     }
+    let mut pipeline = Some(pipeline);
     let install_result = (|| -> Result<(u64, String), String> {
         let start_blocks = state
             .start_blocks
@@ -1468,6 +1524,9 @@ pub async fn start_native_voice_conversation(
             .runtime
             .lock()
             .map_err(|_| "native voice state lock was poisoned".to_string())?;
+        if runtime.voice_input_quarantined {
+            return Err("Voice recognition did not stop safely. Restart Berd before starting another voice conversation.".to_string());
+        }
         if runtime.session_id.is_some() {
             return Err("A native voice conversation is already active.".to_string());
         }
@@ -1477,7 +1536,7 @@ pub async fn start_native_voice_conversation(
         runtime.owner = Some(RuntimeOwner {
             window_label: window_label.clone(),
         });
-        runtime.pipeline = Some(pipeline);
+        runtime.pipeline = pipeline.take();
         runtime.admission = Some(Arc::new(BerdAdmissionCoordinator::default()));
         runtime.controls_ready = false;
         // Voice always starts from its owning session, where the in-session
@@ -1509,6 +1568,10 @@ pub async fn start_native_voice_conversation(
     let (revision, lifecycle_id) = match install_result {
         Ok(lifecycle) => lifecycle,
         Err(error) => {
+            let error = match pipeline.take() {
+                Some(pipeline) => state.finish_uninstalled_pipeline(pipeline, error).await,
+                None => error,
+            };
             drop(lifecycle_guard);
             if microphone_claimed {
                 capture.release_microphone(&window_label, &renderer_id, renderer_epoch, &owner_id);
@@ -1579,6 +1642,7 @@ pub async fn start_native_voice_conversation(
             let active = runtime.lock().ok().is_some_and(|current| {
                 current.session_id.as_deref() == Some(session_id.as_str())
                     && current.revision == revision
+                    && !current.voice_input_quarantined
             });
             if !active {
                 break;
@@ -1616,19 +1680,20 @@ pub async fn start_native_voice_conversation(
                         revision,
                         delivery_attempts: 0,
                     };
-                    let Ok((accepted, evicted)) = enqueue_transcript_if_active(
+                    let Ok(disposition) = store_final_if_active(
                         &runtime,
                         &pending,
                         &admission,
                         &session_id,
                         revision,
                         transcript.clone(),
+                        || storage_receipt.stored(),
                     ) else {
                         break;
                     };
-                    if !accepted {
+                    let StoredFinal::Stored { evicted } = disposition else {
                         break;
-                    }
+                    };
                     if evicted.is_some() {
                         let _ = event_window.emit(
                             EVENT_NAME,
@@ -1651,7 +1716,6 @@ pub async fn start_native_voice_conversation(
                             delivery_attempts: transcript.delivery_attempts,
                         },
                     );
-                    storage_receipt.stored();
                 }
                 berd_voice::input::VoiceInputEvent::Failed(message) => {
                     let _stop_guard = event_state.stop_serial.lock().await;
@@ -1676,16 +1740,19 @@ pub async fn start_native_voice_conversation(
                         current.revision = current.revision.wrapping_add(1);
                         current.pipeline.take()
                     };
-                    if let Some(pipeline) = pipeline {
-                        shutdown_pipeline(pipeline).await;
-                    }
+                    let shutdown_error = match pipeline {
+                        Some(pipeline) => {
+                            event_state.record_voice_input_finish(shutdown_pipeline(pipeline).await)
+                        }
+                        None => None,
+                    };
                     event_state.microphone_muted.store(false, Ordering::SeqCst);
                     event_app
                         .state::<VoiceCaptureState>()
                         .release_owner(&window_label, &owner_id);
                     let terminal_event = NativeVoiceEvent::Error {
                         session_id: Some(session_id.clone()),
-                        message,
+                        message: shutdown_error.unwrap_or(message),
                         revision: revision.wrapping_add(1),
                         terminal: true,
                     };
@@ -2014,11 +2081,12 @@ impl NativeVoiceState {
             next_revision,
             owner,
             owner_id,
+            shutdown_error,
         }) = completion
         else {
             return Ok(false);
         };
-        if let Some(failure_message) = failure_message {
+        if let Some(failure_message) = shutdown_error.as_deref().or(failure_message) {
             let failure_event = NativeVoiceEvent::Error {
                 session_id: Some(session_id.clone()),
                 message: failure_message.to_string(),
@@ -2055,11 +2123,12 @@ impl NativeVoiceState {
         };
         // Keep the lifecycle current through the bounded shutdown window so a
         // cooperative worker can flush its final utterance durably. A worker
-        // that misses the deadline is detached; its revision-bound late events
-        // are discarded rather than leaking into a replacement lifecycle.
-        if let Some(pipeline) = pipeline {
-            shutdown_pipeline(pipeline).await;
-        }
+        // that misses the deadline is quarantined; its revision-bound late
+        // events are discarded and this process cannot start a replacement.
+        let shutdown_error = match pipeline {
+            Some(pipeline) => self.record_voice_input_finish(shutdown_pipeline(pipeline).await),
+            None => None,
+        };
         let (stopped, next_revision) = {
             let mut runtime = self
                 .runtime
@@ -2092,6 +2161,7 @@ impl NativeVoiceState {
             next_revision,
             owner,
             owner_id,
+            shutdown_error,
         }))
     }
 
@@ -2113,9 +2183,10 @@ impl NativeVoiceState {
                 runtime.owner.clone(),
             )
         };
-        if let Some(pipeline) = pipeline {
-            shutdown_pipeline(pipeline).await;
-        }
+        let shutdown_error = match pipeline {
+            Some(pipeline) => self.record_voice_input_finish(shutdown_pipeline(pipeline).await),
+            None => None,
+        };
         let next_revision = {
             let mut runtime = self
                 .runtime
@@ -2138,6 +2209,18 @@ impl NativeVoiceState {
         self.microphone_muted.store(false, Ordering::SeqCst);
         if let (Some(owner), Some(session_id)) = (owner, session_id) {
             capture.release_owner(&owner.window_label, &native_owner_id(&session_id));
+            if let Some(message) = shutdown_error {
+                let failure_event = NativeVoiceEvent::Error {
+                    session_id: Some(session_id.clone()),
+                    message,
+                    revision: next_revision,
+                    terminal: true,
+                };
+                if let Some(window) = app.get_webview_window(&owner.window_label) {
+                    let _ = window.emit(EVENT_NAME, failure_event.clone());
+                }
+                super::voice_buddy::emit(app, failure_event);
+            }
             let shutdown_event = NativeVoiceEvent::CleanShutdown {
                 session_id,
                 revision: next_revision,
@@ -2409,21 +2492,29 @@ fn enqueue_pending_transcript(
     evicted
 }
 
-fn enqueue_transcript_if_active(
+#[derive(Debug)]
+enum StoredFinal {
+    Stored { evicted: Option<PendingTranscript> },
+    Inactive,
+}
+
+fn store_final_if_active(
     runtime: &Mutex<Runtime>,
     pending: &Mutex<VecDeque<PendingTranscript>>,
     admission: &BerdAdmissionCoordinator,
     expected_session_id: &str,
     expected_revision: u64,
     transcript: PendingTranscript,
-) -> Result<(bool, Option<PendingTranscript>), String> {
+    mark_stored: impl FnOnce(),
+) -> Result<StoredFinal, String> {
     let runtime = runtime
         .lock()
         .map_err(|_| "native voice state lock was poisoned".to_string())?;
     if runtime.session_id.as_deref() != Some(expected_session_id)
         || runtime.revision != expected_revision
+        || runtime.voice_input_quarantined
     {
-        return Ok((false, None));
+        return Ok(StoredFinal::Inactive);
     }
     let mut pending = pending
         .lock()
@@ -2449,12 +2540,267 @@ fn enqueue_transcript_if_active(
         pending.pop_front();
     }
     pending.push_back(transcript);
-    Ok((true, evicted))
+    drop(pending);
+    drop(runtime);
+    // This acknowledgement is the durability boundary. UI delivery below is
+    // best effort and must not delay or decide whether the engine may finish.
+    mark_stored();
+    Ok(StoredFinal::Stored { evicted })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{thread, time::Instant};
+
+    fn pending_transcript(
+        session_id: &str,
+        lifecycle_id: &str,
+        id: &str,
+        revision: u64,
+    ) -> PendingTranscript {
+        PendingTranscript {
+            session_id: session_id.to_string(),
+            lifecycle_id: lifecycle_id.to_string(),
+            id: id.to_string(),
+            text: format!("text-{id}"),
+            revision,
+            delivery_attempts: 0,
+        }
+    }
+
+    #[test]
+    fn final_that_linearizes_before_stop_is_stored_and_acknowledged_once() {
+        let runtime = Arc::new(Mutex::new(Runtime {
+            session_id: Some("session-a".into()),
+            lifecycle_id: Some("lifecycle-a".into()),
+            revision: 4,
+            ..Runtime::default()
+        }));
+        let pending = Arc::new(Mutex::new(VecDeque::new()));
+        let admission = Arc::new(BerdAdmissionCoordinator::default());
+        let acknowledgements = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let pending_gate = pending.lock().expect("hold pending queue");
+
+        let final_thread = {
+            let runtime = Arc::clone(&runtime);
+            let pending = Arc::clone(&pending);
+            let pending_at_ack = Arc::clone(&pending);
+            let admission = Arc::clone(&admission);
+            let acknowledgements = Arc::clone(&acknowledgements);
+            thread::spawn(move || {
+                store_final_if_active(
+                    &runtime,
+                    &pending,
+                    &admission,
+                    "session-a",
+                    4,
+                    pending_transcript("session-a", "lifecycle-a", "final", 4),
+                    || {
+                        assert_eq!(
+                            pending_at_ack.lock().expect("inspect stored final")[0].id,
+                            "final"
+                        );
+                        acknowledgements.fetch_add(1, Ordering::SeqCst);
+                    },
+                )
+                .expect("store final")
+            })
+        };
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while runtime.try_lock().is_ok() && Instant::now() < deadline {
+            thread::yield_now();
+        }
+        assert!(runtime.try_lock().is_err(), "final holds lifecycle lock");
+        let close_thread = {
+            let runtime = Arc::clone(&runtime);
+            thread::spawn(move || {
+                let mut runtime = runtime.lock().expect("close lifecycle");
+                runtime.session_id = None;
+                runtime.lifecycle_id = None;
+                runtime.revision += 1;
+            })
+        };
+        drop(pending_gate);
+
+        assert!(matches!(
+            final_thread.join().expect("join final"),
+            StoredFinal::Stored { .. }
+        ));
+        close_thread.join().expect("join close");
+        assert_eq!(acknowledgements.load(Ordering::SeqCst), 1);
+        assert_eq!(pending.lock().expect("pending queue").len(), 1);
+        let admission = admission.inner.lock().expect("admission state");
+        assert_eq!(admission.next_token, 1);
+        assert_eq!(admission.tokens.len(), 1);
+        assert_eq!(admission.core.utterances_after(0).len(), 1);
+    }
+
+    #[test]
+    fn stop_that_linearizes_before_final_drops_without_acknowledging() {
+        let runtime = Arc::new(Mutex::new(Runtime {
+            session_id: Some("session-a".into()),
+            lifecycle_id: Some("lifecycle-a".into()),
+            revision: 4,
+            ..Runtime::default()
+        }));
+        let pending = Arc::new(Mutex::new(VecDeque::new()));
+        let admission = Arc::new(BerdAdmissionCoordinator::default());
+        let acknowledgements = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut close = runtime.lock().expect("hold lifecycle for stop");
+        let final_thread = {
+            let runtime = Arc::clone(&runtime);
+            let pending = Arc::clone(&pending);
+            let admission = Arc::clone(&admission);
+            let acknowledgements = Arc::clone(&acknowledgements);
+            thread::spawn(move || {
+                store_final_if_active(
+                    &runtime,
+                    &pending,
+                    &admission,
+                    "session-a",
+                    4,
+                    pending_transcript("session-a", "lifecycle-a", "late", 4),
+                    || {
+                        acknowledgements.fetch_add(1, Ordering::SeqCst);
+                    },
+                )
+                .expect("dispose final")
+            })
+        };
+        close.session_id = None;
+        close.lifecycle_id = None;
+        close.revision = 5;
+        drop(close);
+
+        assert!(matches!(
+            final_thread.join().expect("join final"),
+            StoredFinal::Inactive
+        ));
+        assert_eq!(acknowledgements.load(Ordering::SeqCst), 0);
+        assert!(pending.lock().expect("pending queue").is_empty());
+        let admission = admission.inner.lock().expect("admission state");
+        assert_eq!(admission.next_token, 0);
+        assert!(admission.tokens.is_empty());
+        assert!(admission.core.utterances_after(0).is_empty());
+    }
+
+    #[test]
+    fn old_revision_final_cannot_reach_replacement_but_current_final_can() {
+        let runtime = Mutex::new(Runtime {
+            session_id: Some("session-b".into()),
+            lifecycle_id: Some("lifecycle-b".into()),
+            revision: 5,
+            ..Runtime::default()
+        });
+        let pending = Mutex::new(VecDeque::new());
+        let admission = BerdAdmissionCoordinator::default();
+        let acknowledgements = std::sync::atomic::AtomicUsize::new(0);
+
+        assert!(matches!(
+            store_final_if_active(
+                &runtime,
+                &pending,
+                &admission,
+                "session-a",
+                4,
+                pending_transcript("session-a", "lifecycle-a", "old", 4),
+                || {
+                    acknowledgements.fetch_add(1, Ordering::SeqCst);
+                },
+            )
+            .expect("reject old final"),
+            StoredFinal::Inactive
+        ));
+        assert!(matches!(
+            store_final_if_active(
+                &runtime,
+                &pending,
+                &admission,
+                "session-b",
+                5,
+                pending_transcript("session-b", "lifecycle-b", "new", 5),
+                || {
+                    acknowledgements.fetch_add(1, Ordering::SeqCst);
+                },
+            )
+            .expect("store replacement final"),
+            StoredFinal::Stored { .. }
+        ));
+        assert_eq!(acknowledgements.load(Ordering::SeqCst), 1);
+        let pending = pending.lock().expect("pending queue");
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].id, "new");
+        let admission = admission.inner.lock().expect("admission state");
+        assert_eq!(admission.next_token, 1);
+        assert_eq!(admission.tokens.len(), 1);
+        assert_eq!(admission.core.utterances_after(0).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn nonquiescent_finish_blocks_restart_and_projects_unavailable() {
+        let state = NativeVoiceState::default();
+        {
+            let mut runtime = state.runtime.lock().expect("install old lifecycle");
+            runtime.session_id = Some("session-a".into());
+            runtime.lifecycle_id = Some("lifecycle-a".into());
+            runtime.revision = 4;
+        }
+        let message = state
+            .record_voice_input_finish(Err(berd_voice::input::VoiceInputFinishError::Quarantined {
+                timeout: Duration::from_millis(20),
+            }))
+            .expect("quarantine is terminal");
+        assert!(message.contains("Restart Berd"));
+        assert!(state.ensure_voice_input_not_quarantined().is_err());
+
+        let admission = BerdAdmissionCoordinator::default();
+        let acknowledgements = std::sync::atomic::AtomicUsize::new(0);
+        assert!(matches!(
+            store_final_if_active(
+                &state.runtime,
+                &state.pending,
+                &admission,
+                "session-a",
+                4,
+                pending_transcript("session-a", "lifecycle-a", "too-late", 4),
+                || {
+                    acknowledgements.fetch_add(1, Ordering::SeqCst);
+                },
+            )
+            .expect("quarantine rejects late final"),
+            StoredFinal::Inactive
+        ));
+        assert_eq!(acknowledgements.load(Ordering::SeqCst), 0);
+        assert!(state.pending.lock().expect("pending queue").is_empty());
+
+        let status = status_with_availability(&state, true, || async { true }).await;
+        assert!(!status.available);
+        assert!(status
+            .unavailable_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("Restart Berd")));
+    }
+
+    #[test]
+    fn quiescent_completion_and_worker_panic_do_not_poison_restart() {
+        let completed = NativeVoiceState::default();
+        assert_eq!(completed.record_voice_input_finish(Ok(())), None);
+        completed
+            .ensure_voice_input_not_quarantined()
+            .expect("joined worker remains restartable");
+
+        let panicked = NativeVoiceState::default();
+        assert_eq!(
+            panicked.record_voice_input_finish(Err(
+                berd_voice::input::VoiceInputFinishError::WorkerPanicked,
+            )),
+            Some("voice input runtime worker panicked".to_string())
+        );
+        panicked
+            .ensure_voice_input_not_quarantined()
+            .expect("joined panic is quiescent and restartable");
+    }
 
     fn transcript_reference(id: &str) -> VoiceTranscriptReference {
         VoiceTranscriptReference {
