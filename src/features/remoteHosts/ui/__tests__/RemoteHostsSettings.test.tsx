@@ -17,6 +17,7 @@ const shutdownHost = vi.fn(async () => {});
 const runDoctor = vi.fn(async () => {});
 const refreshConfigHosts = vi.fn(async () => {});
 const syncBackendSnapshot = vi.fn(async () => {});
+const forgetHost = vi.fn(async () => {});
 const setGoosePath = vi.fn((_host: string, _path: string | null) => true);
 
 function seedStore(overrides?: Partial<ReturnType<typeof baseState>>) {
@@ -26,6 +27,7 @@ function seedStore(overrides?: Partial<ReturnType<typeof baseState>>) {
 function baseState() {
   return {
     configHosts: [] as string[],
+    manualHosts: [] as string[],
     statusByHost: {},
     doctorByHost: {},
     doctorPendingByHost: {},
@@ -38,6 +40,7 @@ function baseState() {
     runDoctor,
     refreshConfigHosts,
     syncBackendSnapshot,
+    forgetHost,
     setGoosePath,
   };
 }
@@ -95,6 +98,45 @@ describe("RemoteHostsSettings", () => {
     });
     renderWithProviders(<RemoteHostsSettings />);
     expect(screen.getByText("user@adhoc")).toBeInTheDocument();
+  });
+
+  it("can forget a failed free-form host", async () => {
+    const user = userEvent.setup();
+    const host = "ssh broken.blox";
+    seedStore({
+      statusByHost: {
+        [host]: {
+          state: "failed",
+          error: {
+            kind: "invalid-host",
+            message: "host must not contain whitespace or control characters",
+          },
+        },
+      },
+    });
+    renderWithProviders(<RemoteHostsSettings />);
+
+    await user.click(
+      screen.getByRole("button", {
+        name: enSettings.remoteHosts.actions.forget,
+      }),
+    );
+
+    expect(forgetHost).toHaveBeenCalledWith(host);
+  });
+
+  it("does not offer Forget for an ssh-config host", () => {
+    seedStore({
+      configHosts: ["configured"],
+      statusByHost: { configured: { state: "failed" } },
+    });
+    renderWithProviders(<RemoteHostsSettings />);
+
+    expect(
+      screen.queryByRole("button", {
+        name: enSettings.remoteHosts.actions.forget,
+      }),
+    ).not.toBeInTheDocument();
   });
 
   it("connects a disconnected host via the row's Connect button", async () => {

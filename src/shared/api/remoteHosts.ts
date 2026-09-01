@@ -124,6 +124,11 @@ export async function disconnectRemoteHost(
   });
 }
 
+/** Remove an inactive host from the backend registry. */
+export async function forgetRemoteHost(host: string): Promise<void> {
+  await invoke("remote_backend_forget", { host });
+}
+
 /** Stop the remote daemon on `host` and tear down the tunnel. */
 export async function shutdownRemoteHost(
   host: string,

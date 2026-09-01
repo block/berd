@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   listSshConfigHosts: vi.fn(),
   connectRemoteHost: vi.fn(),
   disconnectRemoteHost: vi.fn(),
+  forgetRemoteHost: vi.fn(),
   shutdownRemoteHost: vi.fn(),
   listRemoteBackends: vi.fn(),
   checkRemoteHost: vi.fn(),
@@ -61,6 +62,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   window.localStorage.clear();
   resetStore();
+  mocks.forgetRemoteHost.mockResolvedValue(undefined);
 });
 
 describe("applyStatusEvent", () => {
@@ -510,14 +512,68 @@ describe("manual host persistence", () => {
     expect(useRemoteHostStore.getState().manualHosts).toEqual(["adhoc.blox"]);
   });
 
-  it("forgets a manual host and persists the removal", async () => {
-    mocks.connectRemoteHost.mockResolvedValue(connection);
-    await useRemoteHostStore.getState().ensureHostConnected("adhoc.blox");
+  it("forgets a broken host and clears all of its local state", async () => {
+    const host = "ssh broken.blox";
+    useRemoteHostStore.setState({
+      manualHosts: [host, "keep.blox"],
+      statusByHost: {
+        [host]: {
+          state: "failed",
+          error: { kind: "invalid-host", message: "invalid host" },
+        },
+      },
+      doctorByHost: { [host]: [] },
+      doctorPendingByHost: { [host]: false },
+      doctorErrorByHost: {
+        [host]: { kind: "invalid-host", message: "invalid host" },
+      },
+      recentDirsByHost: { [host]: ["~/src"] },
+      goosePathByHost: { [host]: "~/bin/goose" },
+    });
+    window.localStorage.setItem(
+      REMOTE_HOST_MANUAL_HOSTS_STORAGE_KEY,
+      JSON.stringify([host, "keep.blox"]),
+    );
+    window.localStorage.setItem(
+      REMOTE_HOST_RECENT_DIRS_STORAGE_KEY,
+      JSON.stringify({ [host]: ["~/src"] }),
+    );
+    window.localStorage.setItem(
+      REMOTE_HOST_GOOSE_PATH_STORAGE_KEY,
+      JSON.stringify({ [host]: "~/bin/goose" }),
+    );
 
-    useRemoteHostStore.getState().removeManualHost("adhoc.blox");
+    await useRemoteHostStore.getState().forgetHost(host);
 
-    expect(useRemoteHostStore.getState().manualHosts).toEqual([]);
-    expect(loadPersistedManualHosts()).toEqual([]);
+    expect(mocks.forgetRemoteHost).toHaveBeenCalledWith(host);
+    const state = useRemoteHostStore.getState();
+    expect(state.manualHosts).toEqual(["keep.blox"]);
+    expect(state.statusByHost).not.toHaveProperty(host);
+    expect(state.doctorByHost).not.toHaveProperty(host);
+    expect(state.doctorPendingByHost).not.toHaveProperty(host);
+    expect(state.doctorErrorByHost).not.toHaveProperty(host);
+    expect(state.recentDirsByHost).not.toHaveProperty(host);
+    expect(state.goosePathByHost).not.toHaveProperty(host);
+    expect(loadPersistedManualHosts()).toEqual(["keep.blox"]);
+    expect(loadPersistedRecentDirs()).toEqual({});
+    expect(loadPersistedGoosePaths()).toEqual({});
+  });
+
+  it("keeps local state when the backend refuses to forget an active host", async () => {
+    mocks.forgetRemoteHost.mockRejectedValueOnce(new Error("active"));
+    useRemoteHostStore.setState({
+      manualHosts: ["adhoc.blox"],
+      statusByHost: { "adhoc.blox": { state: "ready" } },
+    });
+
+    await expect(
+      useRemoteHostStore.getState().forgetHost("adhoc.blox"),
+    ).rejects.toThrow("active");
+
+    expect(useRemoteHostStore.getState().manualHosts).toEqual(["adhoc.blox"]);
+    expect(useRemoteHostStore.getState().statusByHost).toHaveProperty(
+      "adhoc.blox",
+    );
   });
 
   it("tolerates corrupted storage when loading manual hosts", () => {

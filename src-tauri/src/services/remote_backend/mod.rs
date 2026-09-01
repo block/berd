@@ -170,6 +170,24 @@ impl RemoteBackendRegistry {
             .collect()
     }
 
+    /// Remove an inactive host slot from the registry. The exact key is used
+    /// deliberately so malformed inputs from a failed connect can still be
+    /// forgotten instead of having to pass host parsing again.
+    pub fn forget(&self, key: &str) -> bool {
+        let mut slots = self.slots.lock().expect("remote backend registry poisoned");
+        let Some(slot) = slots.get(key) else {
+            return true;
+        };
+        let forgettable = matches!(
+            slot.shared.lock().expect("slot poisoned").state,
+            RemoteBackendState::Disconnected | RemoteBackendState::Failed { .. }
+        );
+        if forgettable {
+            slots.remove(key);
+        }
+        forgettable
+    }
+
     /// Best-effort synchronous tunnel teardown for app exit. Daemons are left
     /// running deliberately: surviving the client is the feature.
     pub fn kill_all_tunnels(&self) {
@@ -835,5 +853,29 @@ mod tests {
         let snapshot = registry.snapshot();
         assert_eq!(snapshot.len(), 1);
         assert_eq!(snapshot[0].host, "devbox");
+    }
+
+    #[test]
+    fn forget_removes_inactive_slot_by_its_exact_key() {
+        let registry = RemoteBackendRegistry::default();
+        let spec = RemoteHostSpec::parse("devbox", &[]).unwrap();
+        let slot = registry.slot(&spec);
+        slot.shared.lock().expect("slot poisoned").state = RemoteBackendState::Failed {
+            error: RemoteBackendError::internal("failed"),
+        };
+
+        assert!(registry.forget("devbox"));
+        assert!(registry.snapshot().is_empty());
+    }
+
+    #[test]
+    fn forget_preserves_active_slot() {
+        let registry = RemoteBackendRegistry::default();
+        let spec = RemoteHostSpec::parse("devbox", &[]).unwrap();
+        let slot = registry.slot(&spec);
+        slot.shared.lock().expect("slot poisoned").state = RemoteBackendState::Connecting;
+
+        assert!(!registry.forget("devbox"));
+        assert_eq!(registry.snapshot().len(), 1);
     }
 }

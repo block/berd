@@ -195,12 +195,10 @@ function RemoteHostRow({
   );
   const disconnect = useRemoteHostStore((state) => state.disconnect);
   const runDoctor = useRemoteHostStore((state) => state.runDoctor);
-  const isManualHost = useRemoteHostStore((state) =>
-    state.manualHosts.includes(host),
+  const isConfigHost = useRemoteHostStore((state) =>
+    state.configHosts.includes(host),
   );
-  const removeManualHost = useRemoteHostStore(
-    (state) => state.removeManualHost,
-  );
+  const forgetHost = useRemoteHostStore((state) => state.forgetHost);
 
   const state = status?.state ?? "disconnected";
   const isConnected = state === "ready" || state === "reconnecting";
@@ -282,12 +280,14 @@ function RemoteHostRow({
           >
             {t("remoteHosts.actions.check")}
           </Button>
-          {isManualHost && !isConnected ? (
+          {!isConfigHost && (state === "failed" || state === "disconnected") ? (
             <Button
               type="button"
               variant="ghost"
               size="sm"
-              onClick={() => removeManualHost(host)}
+              onClick={() => {
+                void forgetHost(host).catch(() => {});
+              }}
             >
               {t("remoteHosts.actions.forget")}
             </Button>

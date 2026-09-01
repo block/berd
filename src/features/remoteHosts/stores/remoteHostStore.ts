@@ -8,6 +8,7 @@ import {
   checkRemoteHost,
   connectRemoteHost,
   disconnectRemoteHost,
+  forgetRemoteHost,
   isRemoteBackendError,
   listenRemoteBackendStatus,
   listRemoteBackends,
@@ -138,7 +139,7 @@ export interface RemoteHostStore {
   shutdownHost: (host: string, expectedInstanceToken?: string) => Promise<void>;
   runDoctor: (host: string) => Promise<void>;
   recordRecentDir: (host: string, dir: string) => void;
-  removeManualHost: (host: string) => void;
+  forgetHost: (host: string) => Promise<void>;
   /**
    * Set (or clear, with `null`) the goose binary a host's remote backend
    * should run. Returns false for a path the remote script could not resolve.
@@ -290,14 +291,36 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
     }
   },
 
-  removeManualHost: (host) => {
+  forgetHost: async (host) => {
+    await forgetRemoteHost(host);
     set((state) => {
-      if (!state.manualHosts.includes(host)) return state;
       const manualHosts = state.manualHosts.filter(
         (candidate) => candidate !== host,
       );
+      const statusByHost = { ...state.statusByHost };
+      const doctorByHost = { ...state.doctorByHost };
+      const doctorPendingByHost = { ...state.doctorPendingByHost };
+      const doctorErrorByHost = { ...state.doctorErrorByHost };
+      const recentDirsByHost = { ...state.recentDirsByHost };
+      const goosePathByHost = { ...state.goosePathByHost };
+      delete statusByHost[host];
+      delete doctorByHost[host];
+      delete doctorPendingByHost[host];
+      delete doctorErrorByHost[host];
+      delete recentDirsByHost[host];
+      delete goosePathByHost[host];
       persistManualHosts(manualHosts);
-      return { manualHosts };
+      persistRecentDirs(recentDirsByHost);
+      persistGoosePaths(goosePathByHost);
+      return {
+        manualHosts,
+        statusByHost,
+        doctorByHost,
+        doctorPendingByHost,
+        doctorErrorByHost,
+        recentDirsByHost,
+        goosePathByHost,
+      };
     });
   },
 

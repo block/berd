@@ -46,6 +46,20 @@ pub async fn remote_backend_disconnect(
 }
 
 #[tauri::command]
+pub async fn remote_backend_forget(
+    registry: State<'_, RemoteBackendRegistry>,
+    host: String,
+) -> Result<(), RemoteBackendError> {
+    if registry.forget(&host) {
+        Ok(())
+    } else {
+        Err(RemoteBackendError::internal(
+            "Cannot forget an active remote backend",
+        ))
+    }
+}
+
+#[tauri::command]
 pub async fn remote_backend_shutdown(
     app: AppHandle,
     registry: State<'_, RemoteBackendRegistry>,
