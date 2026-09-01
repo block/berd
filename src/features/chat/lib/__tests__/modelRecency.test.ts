@@ -49,6 +49,18 @@ describe("model recency", () => {
     expect(JSON.parse(stored ?? "")).toEqual({ "agent/p1/m1": 2_000 });
   });
 
+  it("assigns strictly increasing ranks when the clock does not advance", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+
+    recordModelSelection("agent", { id: "m1" });
+    recordModelSelection("agent", { id: "m2" });
+
+    const map = getModelRecencyMap();
+    expect(map["agent//m1"]).toBe(1_000);
+    expect(map["agent//m2"]).toBeGreaterThan(map["agent//m1"]);
+  });
+
   it("prunes to the newest 50 entries, dropping the oldest", () => {
     vi.useFakeTimers();
     for (let i = 0; i < 55; i++) {
@@ -66,41 +78,75 @@ describe("model recency", () => {
     }
   });
 
-  it("ranks by exact key, then falls back to providerless or other-provider keys", () => {
+  it("matches exact providers and legacy providerless keys without cross-provider aliases", () => {
     const map = {
       "agent/p1/m1": 100,
-      "agent//m2": 200,
-      "other-agent/p1/m1": 999,
+      "agent//m1": 900,
+      "agent//legacy": 200,
+      "agent/p2/shared": 300,
+      "other-agent/p1/isolated": 999,
     };
 
     expect(
       getModelRecencyRank(map, "agent", { id: "m1", providerId: "p1" }),
     ).toBe(100);
     expect(
-      getModelRecencyRank(map, "agent", { id: "m2", providerId: "p2" }),
+      getModelRecencyRank(map, "agent", { id: "legacy", providerId: "p3" }),
     ).toBe(200);
-    expect(getModelRecencyRank(map, "agent", { id: "missing" })).toBeNull();
     expect(
-      getModelRecencyRank(map, "agent", { id: "m1", providerId: "p3" }),
-    ).toBe(100);
+      getModelRecencyRank(map, "agent", { id: "shared", providerId: "p3" }),
+    ).toBeNull();
+    expect(
+      getModelRecencyRank(map, "agent", {
+        id: "isolated",
+        providerId: "p1",
+      }),
+    ).toBeNull();
   });
 
-  it("takes the max timestamp when multiple providers share a model id", () => {
+  it("does not alias stored model ids containing a slash", () => {
     const map = {
-      "agent/p1/m1": 100,
-      "agent/p2/m1": 300,
-      "agent//m1": 200,
+      "agent/openrouter/anthropic/claude-3": 400,
     };
+
     expect(
-      getModelRecencyRank(map, "agent", { id: "m1", providerId: "p3" }),
-    ).toBe(300);
-    expect(getModelRecencyRank(map, "agent", { id: "m1" })).toBe(200);
+      getModelRecencyRank(map, "agent", {
+        id: "anthropic/claude-3",
+        providerId: "openrouter",
+      }),
+    ).toBe(400);
+    expect(
+      getModelRecencyRank(map, "agent", {
+        id: "claude-3",
+        providerId: "openrouter",
+      }),
+    ).toBeNull();
+    expect(
+      getModelRecencyRank(map, "agent", {
+        id: "claude-3",
+        providerId: "anthropic",
+      }),
+    ).toBeNull();
+    expect(getModelRecencyRank(map, "agent", { id: "claude-3" })).toBeNull();
   });
 
   it("dispatches the changed event on record", () => {
     const listener = vi.fn();
     window.addEventListener(MODEL_RECENCY_CHANGED_EVENT, listener);
 
+    recordModelSelection("agent", { id: "m1" });
+
+    expect(listener).toHaveBeenCalledOnce();
+    window.removeEventListener(MODEL_RECENCY_CHANGED_EVENT, listener);
+  });
+
+  it("does not dispatch the changed event when a record is unchanged", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const listener = vi.fn();
+    window.addEventListener(MODEL_RECENCY_CHANGED_EVENT, listener);
+
+    recordModelSelection("agent", { id: "m1" });
     recordModelSelection("agent", { id: "m1" });
 
     expect(listener).toHaveBeenCalledOnce();
@@ -116,5 +162,28 @@ describe("model recency", () => {
     });
 
     expect(result.current).toEqual({ "agent/p1/m1": expect.any(Number) });
+  });
+
+  it("updates useModelRecency for relevant cross-window storage events", () => {
+    const { result } = renderHook(() => useModelRecency());
+
+    act(() => {
+      localStorage.setItem(
+        MODEL_RECENCY_STORAGE_KEY,
+        JSON.stringify({ "agent/p1/m1": 1_000 }),
+      );
+      window.dispatchEvent(
+        new StorageEvent("storage", { key: MODEL_RECENCY_STORAGE_KEY }),
+      );
+    });
+
+    expect(result.current).toEqual({ "agent/p1/m1": 1_000 });
+    const snapshot = result.current;
+
+    act(() => {
+      window.dispatchEvent(new StorageEvent("storage", { key: "unrelated" }));
+    });
+
+    expect(result.current).toBe(snapshot);
   });
 });

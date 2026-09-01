@@ -65,15 +65,25 @@ export function recordModelSelection(
   if (typeof window === "undefined") return;
 
   const key = modelRecencyKey(agentId, model);
-  const entries = Object.entries(getModelRecencyMap()).filter(
+  const currentMap = getModelRecencyMap();
+  const entries = Object.entries(currentMap).filter(
     ([candidate]) => candidate !== key,
   );
-  entries.push([key, Date.now()]);
-  // Entry order is recency order, so pruning from the front drops the oldest.
-  persistModelRecencyMap(
-    Object.fromEntries(entries.slice(-MODEL_RECENCY_LIMIT)),
+  const highestRank = entries.reduce(
+    (highest, [, rank]) => Math.max(highest, rank),
+    Number.NEGATIVE_INFINITY,
   );
+  const nextRank = Math.max(
+    Date.now(),
+    highestRank + 1,
+    currentMap[key] ?? Number.NEGATIVE_INFINITY,
+  );
+  entries.push([key, nextRank]);
+  // Entry order is recency order, so pruning from the front drops the oldest.
+  const nextMap = Object.fromEntries(entries.slice(-MODEL_RECENCY_LIMIT));
+  if (JSON.stringify(nextMap) === cachedRaw) return;
 
+  persistModelRecencyMap(nextMap);
   window.dispatchEvent(new CustomEvent(MODEL_RECENCY_CHANGED_EVENT));
 }
 
@@ -96,14 +106,7 @@ export function getModelRecencyRank(
   const exact = map[modelRecencyKey(agentId, model)];
   if (exact !== undefined) return exact;
 
-  const prefix = `${agentId}/`;
-  const suffix = `/${model.id}`;
-  let best: number | null = null;
-  for (const [key, timestamp] of Object.entries(map)) {
-    if (!key.startsWith(prefix) || !key.endsWith(suffix)) continue;
-    if (best === null || timestamp > best) best = timestamp;
-  }
-  return best;
+  return map[`${agentId}//${model.id}`] ?? null;
 }
 
 const listeners = new Set<() => void>();
