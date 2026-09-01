@@ -16,6 +16,7 @@ pub enum RemoteBackendErrorKind {
     HostKeyUnverified,
     HostUnreachable,
     GooseNotInstalled,
+    DaemonConflict,
     RemotePortBindFailed,
     LocalPortBindFailed,
     TunnelClosed,
@@ -112,11 +113,13 @@ pub(crate) fn classify_ssh_stderr(stderr: &str) -> RemoteBackendErrorKind {
 /// Exit codes the bootstrap script uses to report typed failures.
 pub(crate) const EXIT_GOOSE_NOT_FOUND: i32 = 41;
 pub(crate) const EXIT_REMOTE_PORT_BIND_FAILED: i32 = 43;
+pub(crate) const EXIT_DAEMON_CONFLICT: i32 = 47;
 
 pub(crate) fn classify_script_exit(code: i32) -> Option<RemoteBackendErrorKind> {
     match code {
         EXIT_GOOSE_NOT_FOUND => Some(RemoteBackendErrorKind::GooseNotInstalled),
         EXIT_REMOTE_PORT_BIND_FAILED => Some(RemoteBackendErrorKind::RemotePortBindFailed),
+        EXIT_DAEMON_CONFLICT => Some(RemoteBackendErrorKind::DaemonConflict),
         _ => None,
     }
 }
@@ -182,6 +185,10 @@ mod tests {
         assert_eq!(
             classify_script_exit(EXIT_REMOTE_PORT_BIND_FAILED),
             Some(RemoteBackendErrorKind::RemotePortBindFailed)
+        );
+        assert_eq!(
+            classify_script_exit(EXIT_DAEMON_CONFLICT),
+            Some(RemoteBackendErrorKind::DaemonConflict)
         );
         assert_eq!(classify_script_exit(1), None);
     }

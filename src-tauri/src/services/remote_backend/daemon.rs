@@ -22,7 +22,10 @@ use super::ssh::{base_ssh_command, push_destination};
 use crate::services::log_redaction::redact_log_line;
 
 const BOOTSTRAP_SCRIPT: &str = include_str!("remote_daemon.sh");
-const SCRIPT_TIMEOUT: Duration = Duration::from_secs(60);
+// The remote script can wait 45s for another account-level mutation and spend
+// roughly 80s on five readiness attempts plus cleanup. Keep the outer timeout
+// above that bounded lifetime so cancellation cannot strand an unrecorded PID.
+const SCRIPT_TIMEOUT: Duration = Duration::from_secs(180);
 const MAX_STDERR_BYTES: usize = 16 * 1024;
 
 #[derive(Clone, Debug, Serialize)]
@@ -360,6 +363,10 @@ pub(crate) fn require_success(output: &ScriptOutput) -> Result<(), RemoteBackend
                 RemoteBackendErrorKind::RemotePortBindFailed => {
                     "the remote host could not bind a port for goose serve".to_string()
                 }
+                RemoteBackendErrorKind::DaemonConflict => {
+                    "another Berd client is using this remote account with an incompatible Goose launch configuration"
+                        .to_string()
+                }
                 RemoteBackendErrorKind::AuthFailed => {
                     "ssh authentication failed; make sure key or agent auth works (try `ssh <host>` in a terminal)"
                         .to_string()
@@ -633,6 +640,9 @@ mod tests {
 
         let err = require_success(&output(&["ERR port-bind-failed"], Some(43), "")).unwrap_err();
         assert_eq!(err.kind, RemoteBackendErrorKind::RemotePortBindFailed);
+
+        let err = require_success(&output(&["ERR daemon-conflict"], Some(47), "")).unwrap_err();
+        assert_eq!(err.kind, RemoteBackendErrorKind::DaemonConflict);
     }
 
     #[test]
@@ -749,6 +759,46 @@ s.bind(("127.0.0.1",int(sys.argv[1]))); s.listen(5); time.sleep(120)' "$port"
 fi
 "#
                 ),
+            )
+            .unwrap();
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        }
+
+        fn write_stalling_goose_shim(dir: &std::path::Path) -> std::path::PathBuf {
+            let path = dir.join("goose-stalling");
+            std::fs::write(
+                &path,
+                r#"#!/usr/bin/env bash
+if [ "$1" = "--version" ]; then echo "goose stalling"; exit 0; fi
+if [ "$1" = "serve" ]; then
+  echo $$ > "$HOME/uncommitted-goose.pid"
+  exec sleep 120
+fi
+"#,
+            )
+            .unwrap();
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        }
+
+        fn write_noisy_goose_shim(dir: &std::path::Path) -> std::path::PathBuf {
+            let path = dir.join("goose-noisy");
+            std::fs::write(
+                &path,
+                r#"#!/usr/bin/env bash
+if [ "$1" = "--version" ]; then echo "goose noisy"; exit 0; fi
+if [ "$1" = "serve" ]; then
+  port=""
+  while [ $# -gt 0 ]; do [ "$1" = "--port" ] && port="$2"; shift; done
+  exec python3 -c 'import socket,sys,time
+sys.stderr.write("x" * (5 * 1024 * 1024) + "\n"); sys.stderr.flush()
+s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+s.bind(("127.0.0.1",int(sys.argv[1]))); s.listen(5); time.sleep(120)' "$port"
+fi
+"#,
             )
             .unwrap();
             use std::os::unix::fs::PermissionsExt as _;
@@ -874,10 +924,10 @@ fi
             );
         }
 
-        /// The reuse decision: same recorded binary reuses the live daemon, a
-        /// different one stops it and starts the requested build instead.
+        /// A daemon is reused only for the exact launch contract. Other Berd
+        /// clients get a conflict instead of evicting each other's daemon.
         #[test]
-        fn ensure_reuses_only_a_daemon_started_by_the_requested_binary() {
+        fn ensure_reuses_only_an_identical_launch_spec() {
             if !python3_available() {
                 eprintln!("skipping: python3 unavailable for the goose serve shim");
                 return;
@@ -900,9 +950,10 @@ fi
             .unwrap();
             assert!(!first.reused);
             let first_fields = read_record_fields(home.path());
-            assert_eq!(first_fields[0], "v3", "record fields: {first_fields:?}");
+            assert_eq!(first_fields[0], "v4", "record fields: {first_fields:?}");
             assert_eq!(first_fields[6], b64_arg(&stock.to_string_lossy()));
             assert!(!first_fields[7].is_empty());
+            assert!(!first_fields[8].is_empty());
 
             // Same binary: the healthy daemon is handed back untouched.
             let (lines, code) = run_script(&["ensure", "-", &stock_arg], None, home.path());
@@ -918,26 +969,23 @@ fi
             assert_eq!(reused.pid, first.pid);
             assert_eq!(reused.port, first.port);
 
-            // Different binary: restart, new port/secret, patched version.
+            // A different allowed-origin contract cannot silently inherit the
+            // first daemon, even when it uses the same Goose binary.
+            let windows_origins = b64_arg("--allowed-origins http://tauri.localhost");
+            let (lines, code) =
+                run_script(&["ensure", &windows_origins, &stock_arg], None, home.path());
+            assert_eq!(code, Some(47), "lines: {lines:?}");
+            assert!(lines.iter().any(|line| line == "ERR daemon-conflict"));
+
+            // A different binary is also an ownership conflict, not a daemon
+            // eviction loop between clients.
             let (lines, code) = run_script(&["ensure", "-", &patched_arg], None, home.path());
-            assert_eq!(code, Some(0), "lines: {lines:?}");
-            let restarted = parse_ready_line(
-                lines
-                    .iter()
-                    .find_map(|l| l.strip_prefix("READY "))
-                    .expect("READY"),
-            )
-            .unwrap();
-            assert!(!restarted.reused);
-            assert_ne!(restarted.pid, first.pid);
-            assert_ne!(restarted.secret, first.secret);
-            assert_eq!(restarted.goose_version, "goose 2.0.0-patched");
-            let fields = read_record_fields(home.path());
-            assert_eq!(fields[6], b64_arg(&patched.to_string_lossy()));
+            assert_eq!(code, Some(47), "lines: {lines:?}");
+            assert!(lines.iter().any(|line| line == "ERR daemon-conflict"));
+            assert_eq!(read_record_fields(home.path()), first_fields);
 
             let (lines, code) = run_script(&["shutdown"], None, home.path());
             assert_eq!(code, Some(0), "lines: {lines:?}");
-            kill_recorded_pid(&first_fields);
         }
 
         #[test]
@@ -987,6 +1035,79 @@ fi
                     .all(|name| !name.to_string_lossy().starts_with(".daemon.record.")),
                 "atomic record temp was left behind: {entries:?}"
             );
+
+            let (_, code) = run_script(&["shutdown"], None, home.path());
+            assert_eq!(code, Some(0));
+        }
+
+        #[test]
+        fn terminating_bootstrap_cleans_up_an_uncommitted_daemon() {
+            let home = tempfile::tempdir().unwrap();
+            let bin = tempfile::tempdir().unwrap();
+            let goose = write_stalling_goose_shim(bin.path());
+            let goose_arg = b64_arg(&goose.to_string_lossy());
+            let bootstrap = spawn_script(&["ensure", "-", &goose_arg], None, home.path());
+            let pid_path = home.path().join("uncommitted-goose.pid");
+
+            for _ in 0..100 {
+                if pid_path.exists() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            let daemon_pid = std::fs::read_to_string(&pid_path)
+                .expect("stalling goose should publish its pid")
+                .trim()
+                .to_string();
+            assert!(StdCommand::new("kill")
+                .arg("-TERM")
+                .arg(bootstrap.id().to_string())
+                .status()
+                .unwrap()
+                .success());
+            let (_, code) = collect_script(bootstrap);
+            assert_eq!(code, Some(143));
+            assert!(
+                !StdCommand::new("kill")
+                    .arg("-0")
+                    .arg(&daemon_pid)
+                    .status()
+                    .unwrap()
+                    .success(),
+                "uncommitted daemon {daemon_pid} survived bootstrap termination"
+            );
+            assert!(!home
+                .path()
+                .join(".state/berd/remote/daemon.record")
+                .exists());
+        }
+
+        #[test]
+        fn daemon_log_retains_a_bounded_tail() {
+            if !python3_available() {
+                eprintln!("skipping: python3 unavailable for the goose serve shim");
+                return;
+            }
+            let home = tempfile::tempdir().unwrap();
+            let bin = tempfile::tempdir().unwrap();
+            let goose = write_noisy_goose_shim(bin.path());
+            let goose_arg = b64_arg(&goose.to_string_lossy());
+
+            let (lines, code) = run_script(&["ensure", "-", &goose_arg], None, home.path());
+            assert_eq!(code, Some(0), "lines: {lines:?}");
+            let log_path = home.path().join(".state/berd/remote/goose-serve.log");
+            let mut log_len = 0;
+            for _ in 0..100 {
+                log_len = std::fs::metadata(&log_path)
+                    .map(|metadata| metadata.len())
+                    .unwrap_or(0);
+                if log_len > 0 && log_len <= 4 * 1024 * 1024 {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            assert!(log_len > 0);
+            assert!(log_len <= 4 * 1024 * 1024, "log grew to {log_len} bytes");
 
             let (_, code) = run_script(&["shutdown"], None, home.path());
             assert_eq!(code, Some(0));

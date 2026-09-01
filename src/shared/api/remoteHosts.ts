@@ -7,7 +7,8 @@ import { getGoosePathForHost } from "@/features/remoteHosts/lib/gooseBinaryOverr
  * kebab-case discriminator such as "auth-failed", "goose-not-installed",
  * "invalid-host", "host-key-unverified", "host-unreachable", "ssh-not-found",
  * "ready-timeout", "tunnel-closed", "remote-script-failed",
- * "local-port-bind-failed", "remote-port-bind-failed", or "internal".
+ * "local-port-bind-failed", "remote-port-bind-failed", "daemon-conflict",
+ * or "internal".
  */
 export interface RemoteBackendErrorLike {
   kind: string;

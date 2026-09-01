@@ -22,12 +22,13 @@
 #   listdir  <b64 absolute-or-~ path>      -> DIR <b64resolved>, E <D|F> <b64name> ..., LIST-DONE
 #
 # Daemon record (single line, space separated, field order pinned):
-#   v3 <pid> <port> <secret> <b64version> <started> <b64binary> <b64identity>
-# The identity is an OS process-start token captured after readiness. Older
-# records still parse, but cannot prove PID ownership and are never reused or
-# signaled.
+#   v4 <pid> <port> <secret> <b64version> <started> <b64binary> <b64launchspec> <b64identity>
+# The launch spec covers the binary, serve args, and bootstrap protocol. The
+# identity is an OS process-start token captured after readiness. Older records
+# still parse for safe migration, but are never reused.
 #
-# Typed exit codes: 41 goose-not-found, 43 port-bind-failed, 44 bad-path, 45 no-such-dir.
+# Typed exit codes: 41 goose-not-found, 43 port-bind-failed, 44 bad-path,
+# 45 no-such-dir, 47 daemon-conflict.
 set -u
 
 NONCE="${1:?nonce required}"
@@ -40,7 +41,9 @@ RECORD="$STATE_DIR/daemon.record"
 LOG="$STATE_DIR/goose-serve.log"
 LOCK_DIR="$STATE_DIR/daemon.lock"
 LOCK_OWNER="$LOCK_DIR/owner"
-RECORD_FORMAT="v3"
+RECORD_FORMAT="v4"
+LOG_MAX_BYTES=$((4 * 1024 * 1024))
+LOG_RETAIN_BYTES=$((2 * 1024 * 1024))
 
 emit() { printf '%s %s\n' "$NONCE" "$*"; }
 
@@ -121,6 +124,42 @@ release_daemon_lock() {
   lock_held=0
 }
 
+terminate_uncommitted_daemon() {
+  case "${uncommitted_pid:-}" in
+  '' | *[!0-9]*) ;;
+  *)
+    cleanup_pid="$uncommitted_pid"
+    if kill -0 "$cleanup_pid" 2>/dev/null; then
+      kill -TERM "$cleanup_pid" 2>/dev/null || true
+      cleanup_i=0
+      while [ "$cleanup_i" -lt 10 ] && kill -0 "$cleanup_pid" 2>/dev/null; do
+        sleep 0.1
+        cleanup_i=$((cleanup_i + 1))
+      done
+      if kill -0 "$cleanup_pid" 2>/dev/null; then
+        kill -KILL "$cleanup_pid" 2>/dev/null || true
+      fi
+    fi
+    wait "$cleanup_pid" 2>/dev/null || true
+    ;;
+  esac
+  uncommitted_pid=""
+  if [ -n "${uncommitted_logger_pid:-}" ]; then
+    kill -TERM "$uncommitted_logger_pid" 2>/dev/null || true
+    wait "$uncommitted_logger_pid" 2>/dev/null || true
+    uncommitted_logger_pid=""
+  fi
+  if [ -n "${uncommitted_log_pipe:-}" ]; then
+    rm -f "$uncommitted_log_pipe"
+    uncommitted_log_pipe=""
+  fi
+}
+
+cleanup_daemon_mutation() {
+  terminate_uncommitted_daemon
+  release_daemon_lock
+}
+
 # `mkdir` is the portable cross-process atomic primitive available on both
 # Linux and macOS remotes. The lock covers every daemon.record read/mutation,
 # including shutdown from another Berd client using the same remote account.
@@ -134,7 +173,7 @@ acquire_daemon_lock() {
   lock_held=0
   stale_observations=0
   lock_attempt=0
-  while [ "$lock_attempt" -lt 1200 ]; do
+  while [ "$lock_attempt" -lt 450 ]; do
     lock_attempt=$((lock_attempt + 1))
     if mkdir "$LOCK_DIR" 2>/dev/null; then
       our_identity="$(process_identity "$$")" || {
@@ -152,7 +191,10 @@ acquire_daemon_lock() {
         exit 46
       fi
       lock_held=1
-      trap release_daemon_lock EXIT
+      uncommitted_pid=""
+      uncommitted_logger_pid=""
+      uncommitted_log_pipe=""
+      trap cleanup_daemon_mutation EXIT
       trap 'exit 129' HUP
       trap 'exit 130' INT
       trap 'exit 143' TERM
@@ -178,11 +220,12 @@ acquire_daemon_lock() {
   exit 46
 }
 
-# Fills rec_* from $RECORD. Records before v3 have no process identity and
-# therefore cannot authorize reuse or termination.
+# Fills rec_* from $RECORD. v3 records retain a process identity so Berd can
+# stop them during migration, but only v4 records carry a reusable launch spec.
+# Older records cannot authorize reuse or termination.
 read_record() {
   # shellcheck disable=SC2034
-  IFS=' ' read -r f1 f2 f3 f4 f5 f6 f7 f8 <"$RECORD" 2>/dev/null || return 1
+  IFS=' ' read -r f1 f2 f3 f4 f5 f6 f7 f8 f9 <"$RECORD" 2>/dev/null || return 1
   if [ "${f1:-}" = "$RECORD_FORMAT" ]; then
     rec_pid="${f2:-}"
     rec_port="${f3:-}"
@@ -190,6 +233,16 @@ read_record() {
     rec_b64version="${f5:--}"
     rec_started="${f6:-0}"
     rec_b64binary="${f7:-}"
+    rec_b64launchspec="${f8:-}"
+    rec_b64identity="${f9:-}"
+  elif [ "${f1:-}" = "v3" ]; then
+    rec_pid="${f2:-}"
+    rec_port="${f3:-}"
+    rec_secret="${f4:-}"
+    rec_b64version="${f5:--}"
+    rec_started="${f6:-0}"
+    rec_b64binary="${f7:-}"
+    rec_b64launchspec=""
     rec_b64identity="${f8:-}"
   elif [ "${f1:-}" = "v2" ]; then
     rec_pid="${f2:-}"
@@ -198,6 +251,7 @@ read_record() {
     rec_b64version="${f5:--}"
     rec_started="${f6:-0}"
     rec_b64binary="${f7:-}"
+    rec_b64launchspec=""
     rec_b64identity=""
   else
     # Pre-override record: no recorded binary or process identity.
@@ -207,6 +261,7 @@ read_record() {
     rec_b64version="${f4:--}"
     rec_started="${f5:-0}"
     rec_b64binary=""
+    rec_b64launchspec=""
     rec_b64identity=""
   fi
   case "$rec_pid" in
@@ -216,6 +271,32 @@ read_record() {
   '' | *[!0-9]*) return 1 ;;
   esac
   [ -n "$rec_secret" ]
+}
+
+trim_log_if_needed() {
+  log_path="$1"
+  [ -f "$log_path" ] || return 0
+  log_bytes="$(wc -c <"$log_path" 2>/dev/null | tr -d ' ')"
+  case "$log_bytes" in
+  '' | *[!0-9]*) return 0 ;;
+  esac
+  [ "$log_bytes" -le "$LOG_MAX_BYTES" ] && return 0
+  log_tmp="$STATE_DIR/.goose-serve.log.$$"
+  if tail -c "$LOG_RETAIN_BYTES" "$log_path" >"$log_tmp" 2>/dev/null; then
+    mv -f "$log_tmp" "$log_path"
+  else
+    rm -f "$log_tmp"
+  fi
+}
+
+# Consume the daemon's pipe for its whole lifetime while keeping only a bounded
+# tail on disk. Each append reopens the path so atomic trims take effect.
+bounded_log_writer() {
+  writer_log="$1"
+  while IFS= read -r writer_line || [ -n "$writer_line" ]; do
+    printf '%s\n' "$writer_line" >>"$writer_log"
+    trim_log_if_needed "$writer_log"
+  done
 }
 
 # Confirms the PID is still the exact process that wrote this record. `kill -0`
@@ -247,28 +328,37 @@ ensure_daemon() {
   resolve_goose_bin
   b64binary="$(b64 "$goose_bin")"
 
+  extra_args=""
+  if [ "$ARG" != "-" ]; then
+    extra_args="$(unb64 "$ARG")"
+  fi
+  version="$("$goose_bin" --version 2>/dev/null | head -n 1)"
+  [ -n "$version" ] || version="unknown"
+  launch_spec="$(printf 'remote-daemon-v1\n%s\n%s\n%s' "$goose_bin" "$version" "$extra_args")"
+  b64launchspec="$(b64 "$launch_spec")"
+
   if [ -f "$RECORD" ] && read_record; then
     if recorded_process_is_current; then
-      if port_listening "$rec_port" && [ "$rec_b64binary" = "$b64binary" ]; then
-        emit "READY $rec_pid $rec_port $rec_secret 1 $rec_b64version $rec_started"
-        return 0
+      if port_listening "$rec_port"; then
+        if [ -n "$rec_b64launchspec" ] &&
+          [ "$rec_b64launchspec" != "$b64launchspec" ]; then
+          emit "ERR daemon-conflict"
+          exit 47
+        fi
+        if [ "$rec_b64launchspec" = "$b64launchspec" ]; then
+          emit "READY $rec_pid $rec_port $rec_secret 1 $rec_b64version $rec_started"
+          return 0
+        fi
       fi
-      # A known daemon is unhealthy or uses another binary: stop it so the
-      # requested build is the one that answers. Unverifiable old records are
-      # only discarded; their PIDs are never signaled.
+      # A known daemon is unhealthy, or predates launch-spec identity. Stop it
+      # so a v4 record can be committed. Unverifiable old records are only
+      # discarded; their PIDs are never signaled.
       stop_recorded_daemon
     fi
     rm -f "$RECORD"
   fi
 
-  version="$("$goose_bin" --version 2>/dev/null | head -n 1)"
-  [ -n "$version" ] || version="unknown"
   secret="berd-remote-$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-
-  extra_args=""
-  if [ "$ARG" != "-" ]; then
-    extra_args="$(unb64 "$ARG")"
-  fi
 
   attempt=0
   while [ "$attempt" -lt 5 ]; do
@@ -277,11 +367,23 @@ ensure_daemon() {
     if port_listening "$port"; then
       continue
     fi
-    # Detached: nohup + fully redirected stdio survives the ssh session ending
-    # (no PTY is allocated, and non-interactive bash does not forward SIGHUP).
+    trim_log_if_needed "$LOG"
+    log_pipe="$STATE_DIR/.goose-serve.log.pipe.$$"
+    rm -f "$log_pipe"
+    if ! mkfifo "$log_pipe"; then
+      emit "ERR state-dir"
+      exit 46
+    fi
+    uncommitted_log_pipe="$log_pipe"
+    bounded_log_writer "$LOG" <"$log_pipe" >/dev/null 2>&1 &
+    logger_pid=$!
+    uncommitted_logger_pid="$logger_pid"
+    # Detached: nohup writes into a FIFO consumed by the bounded logger. The
+    # logger has no protocol-stream descriptors and exits when Goose closes.
     # shellcheck disable=SC2086
-    GOOSE_SERVER__SECRET_KEY="$secret" nohup "$goose_bin" serve --host 127.0.0.1 --port "$port" $extra_args >>"$LOG" 2>&1 </dev/null &
+    GOOSE_SERVER__SECRET_KEY="$secret" nohup "$goose_bin" serve --host 127.0.0.1 --port "$port" $extra_args >"$log_pipe" 2>&1 </dev/null &
     pid=$!
+    uncommitted_pid="$pid"
     i=0
     while [ "$i" -lt 150 ]; do
       if ! kill -0 "$pid" 2>/dev/null; then
@@ -291,25 +393,29 @@ ensure_daemon() {
         started="$(date +%s)"
         identity="$(process_identity "$pid")"
         if [ -z "$identity" ]; then
-          kill "$pid" 2>/dev/null || true
+          terminate_uncommitted_daemon
           break
         fi
         record_tmp="$STATE_DIR/.daemon.record.$$"
-        if ! printf '%s %s %s %s %s %s %s %s\n' "$RECORD_FORMAT" "$pid" "$port" "$secret" \
-          "$(b64 "$version")" "$started" "$b64binary" "$(b64 "$identity")" >"$record_tmp" ||
+        if ! printf '%s %s %s %s %s %s %s %s %s\n' "$RECORD_FORMAT" "$pid" "$port" "$secret" \
+          "$(b64 "$version")" "$started" "$b64binary" "$b64launchspec" "$(b64 "$identity")" >"$record_tmp" ||
           ! mv -f "$record_tmp" "$RECORD"; then
           rm -f "$record_tmp"
-          kill "$pid" 2>/dev/null || true
+          terminate_uncommitted_daemon
           emit "ERR state-dir"
           exit 46
         fi
+        rm -f "$log_pipe"
+        uncommitted_pid=""
+        uncommitted_logger_pid=""
+        uncommitted_log_pipe=""
         emit "READY $pid $port $secret 0 $(b64 "$version") $started"
         return 0
       fi
       sleep 0.1
       i=$((i + 1))
     done
-    kill "$pid" 2>/dev/null || true
+    terminate_uncommitted_daemon
   done
   emit "ERR port-bind-failed"
   exit 43
