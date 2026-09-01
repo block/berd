@@ -31,7 +31,7 @@ use super::pocket_voice::{
 use berd_voice::input::InputDuringTtsPolicy;
 use berd_voice::siri::{
     download_voice as download_managed_siri_voice, load_voice_catalog, validate_installed_voice,
-    SiriVoice, SiriVoiceIdentity, DEFAULT_SIRI_DOWNLOAD_WAIT_TIMEOUT,
+    SiriDownloadAvailabilityWait, SiriVoice, SiriVoiceIdentity,
 };
 #[cfg(any(test, target_os = "macos"))]
 use berd_voice::DeliveryProgress as VoiceDeliveryProgress;
@@ -492,7 +492,9 @@ pub async fn download_siri_voice(app: AppHandle, voice: SiriVoiceSelection) -> R
     #[cfg(target_os = "macos")]
     {
         tauri::async_runtime::spawn_blocking(move || {
-            download_managed_siri_voice(&voice, DEFAULT_SIRI_DOWNLOAD_WAIT_TIMEOUT)
+            download_managed_siri_voice(&voice, SiriDownloadAvailabilityWait::default())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
         })
         .await
         .map_err(|error| format!("Siri voice download task failed: {error}"))??;

@@ -46,7 +46,48 @@ with a validated availability-polling bound and no invented byte progress.
 Native validation and subscription have separate bounded waits before that
 polling deadline. Berd continues to own persisted selection, fallback policy,
 settings/UI events, and management preview playback. There is intentionally no
-standalone management CLI in this first extraction increment.
+host settings or fallback policy in the standalone management commands.
+
+## Voice and model management
+
+The standalone commands are thin projections of the same shared management
+APIs used by Berd:
+
+```sh
+berd-voice voices list
+berd-voice voices list --language en-US
+berd-voice voices download --voice Aaron --language en-US
+berd-voice voices download --voice Aaron --language en-US \
+  --availability-wait-seconds 300
+berd-voice models macos status
+berd-voice models macos install
+```
+
+The Siri language filter is an exact normalized BCP-47 language, not a prefix.
+Download identifies a voice by its exact case-sensitive catalog name plus that
+language. Its optional `1..1800` second bound applies only to the final native
+availability poll; validation and subscription retain their separate bounded
+waits. Siri download reports no invented byte progress.
+
+Management stdout is machine-first JSONL. Every line contains
+`schemaVersion: 1`, an `operation`, and an `event`. Read-only commands and Siri
+download emit exactly one terminal `result`; macOS model installation may emit
+native `progress` fractions followed by exactly one terminal `result` or
+`error`. Operation failures emit a sanitized structured `error` on stdout and
+diagnostic detail on stderr. Usage errors emit no JSON and exit 2; operation or
+unsupported-mutation failures exit 1; successful read-only status on an
+unsupported platform still exits 0 with `supported: false`. These blocking
+commands have no cancellation protocol, and interruption by a process signal
+does not promise a terminal JSON line. None opens an audio device, starts a
+voice session, applies host settings, chooses fallbacks, or emits Tauri events.
+
+`voices.list` returns `backend`, normalized `languageFilter`,
+`availableLanguages`, and exact voice records. `voices.download` returns the
+canonical voice, `installed: true`, and `availabilityWaitSeconds`; a missing
+exact catalog identity fails with `voice_not_found` before any native download
+request. macOS status and install results contain `supported`, `locale`,
+`localeSupported`, `modelStatus`, and `ready`. Install progress records contain
+the native finite fraction clamped to `0...1`; nonfinite callbacks are omitted.
 
 The host selects an optional output device in the protocol `hello`; the TTS
 backend only produces PCM and does not own device persistence. Stdin is one

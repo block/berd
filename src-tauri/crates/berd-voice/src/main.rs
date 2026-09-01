@@ -27,6 +27,7 @@ use berd_voice::{
     ConfiguredTtsSlot, TtsBackend, TtsConfiguration, TtsConfigurationLease,
     TtsConfigurationRejection, TtsConfigurationRejectionKind, POCKET_TTS_MODEL_ID,
 };
+use serde::Serialize;
 
 const WIRE_MARKER: u32 = 2;
 const MAX_LINE_BYTES: usize = 1024 * 1024;
@@ -135,6 +136,101 @@ struct SttBenchmarkConfig {
     allow_paid_openai: bool,
 }
 
+const MANAGEMENT_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ManagementCommand {
+    ListVoices {
+        language: Option<String>,
+    },
+    DownloadVoice {
+        identity: berd_voice::siri::SiriVoiceIdentity,
+        availability_wait: berd_voice::siri::SiriDownloadAvailabilityWait,
+    },
+    MacosModelStatus,
+    InstallMacosModel,
+}
+
+impl ManagementCommand {
+    fn operation(&self) -> &'static str {
+        match self {
+            Self::ListVoices { .. } => "voices.list",
+            Self::DownloadVoice { .. } => "voices.download",
+            Self::MacosModelStatus => "models.macos.status",
+            Self::InstallMacosModel => "models.macos.install",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VoicesListResult {
+    backend: &'static str,
+    supported: bool,
+    language_filter: Option<String>,
+    available_languages: Vec<String>,
+    voices: Vec<berd_voice::siri::SiriVoice>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VoiceDownloadResult {
+    backend: &'static str,
+    voice: berd_voice::siri::SiriVoiceIdentity,
+    installed: bool,
+    availability_wait_seconds: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MacosModelStatus {
+    supported: bool,
+    locale: Option<String>,
+    locale_supported: bool,
+    model_status: String,
+    ready: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ManagementResultEnvelope<T> {
+    schema_version: u32,
+    operation: &'static str,
+    event: &'static str,
+    result: T,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ManagementProgressEnvelope {
+    schema_version: u32,
+    operation: &'static str,
+    event: &'static str,
+    fraction: f64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ManagementErrorEnvelope {
+    schema_version: u32,
+    operation: &'static str,
+    event: &'static str,
+    error: ManagementErrorBody,
+}
+
+#[derive(Serialize)]
+struct ManagementErrorBody {
+    code: &'static str,
+    message: &'static str,
+}
+
+#[derive(Debug)]
+struct ManagementFailure {
+    code: &'static str,
+    public_message: &'static str,
+    detail: String,
+}
+
 fn main() {
     let args: Vec<_> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
@@ -161,7 +257,26 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        _ => usage_error("supported commands are session, benchmark tts, and benchmark stt"),
+        Some("voices" | "models") => {
+            let command =
+                parse_management_args(&args).unwrap_or_else(|error| usage_error(&error));
+            let operation = command.operation();
+            if let Err(failure) = run_management_command(command) {
+                if failure.code == "output_failed" {
+                    eprintln!("berd-voice {operation} failed: {}", failure.detail);
+                    std::process::exit(1);
+                }
+                let envelope = management_error_envelope(operation, &failure);
+                if let Err(error) = write_json_line(io::stdout().lock(), &envelope) {
+                    eprintln!("berd-voice could not write management error: {error}");
+                }
+                eprintln!("berd-voice {operation} failed: {}", failure.detail);
+                std::process::exit(1);
+            }
+        }
+        _ => usage_error(
+            "supported commands are session, voices, models macos, benchmark tts, and benchmark stt",
+        ),
     }
 }
 
@@ -177,9 +292,342 @@ fn usage_error(error: &str) -> ! {
          --mode fresh-backend|warm [--allow-paid-openai]\n  \
          berd-voice benchmark stt --stt-backend macos|parakeet|openai \
          [--stt-model-dir PATH] --runs COUNT --mode cold|warm \
-         [--allow-paid-openai]"
+         [--allow-paid-openai]\n  \
+         berd-voice voices list [--language BCP47]\n  \
+         berd-voice voices download --voice NAME --language BCP47 \
+         [--availability-wait-seconds 1..1800]\n  \
+         berd-voice models macos status\n  \
+         berd-voice models macos install"
     );
     std::process::exit(2);
+}
+
+fn parse_management_args(args: &[String]) -> Result<ManagementCommand, String> {
+    match (
+        args.get(1).map(String::as_str),
+        args.get(2).map(String::as_str),
+        args.get(3).map(String::as_str),
+    ) {
+        (Some("voices"), Some("list"), _) => {
+            let mut language = None;
+            let mut index = 3;
+            while index < args.len() {
+                let flag = args[index].as_str();
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| format!("{flag} requires a value"))?;
+                match flag {
+                    "--language" if language.is_none() => language = Some(value.clone()),
+                    "--language" => return Err("--language may be provided only once".into()),
+                    _ => return Err(format!("unknown voices list argument: {flag}")),
+                }
+                index += 2;
+            }
+            let language = language
+                .as_deref()
+                .map(berd_voice::siri::normalize_language)
+                .transpose()?;
+            Ok(ManagementCommand::ListVoices { language })
+        }
+        (Some("voices"), Some("download"), _) => {
+            let mut voice = None;
+            let mut language = None;
+            let mut availability_wait = berd_voice::siri::SiriDownloadAvailabilityWait::default();
+            let mut wait_seen = false;
+            let mut index = 3;
+            while index < args.len() {
+                let flag = args[index].as_str();
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| format!("{flag} requires a value"))?;
+                match flag {
+                    "--voice" if voice.is_none() => voice = Some(value.clone()),
+                    "--language" if language.is_none() => language = Some(value.clone()),
+                    "--availability-wait-seconds" if !wait_seen => {
+                        let seconds = value.parse::<u64>().map_err(|_| {
+                            "--availability-wait-seconds must be an integer from 1 to 1800"
+                                .to_string()
+                        })?;
+                        availability_wait =
+                            berd_voice::siri::SiriDownloadAvailabilityWait::from_seconds(seconds)?;
+                        wait_seen = true;
+                    }
+                    "--voice" | "--language" | "--availability-wait-seconds" => {
+                        return Err(format!("{flag} may be provided only once"))
+                    }
+                    _ => return Err(format!("unknown voices download argument: {flag}")),
+                }
+                index += 2;
+            }
+            let voice = voice.ok_or_else(|| "--voice is required".to_string())?;
+            let language = language.ok_or_else(|| "--language is required".to_string())?;
+            Ok(ManagementCommand::DownloadVoice {
+                identity: berd_voice::siri::SiriVoiceIdentity::new(voice, &language)?,
+                availability_wait,
+            })
+        }
+        (Some("models"), Some("macos"), Some("status")) if args.len() == 4 => {
+            Ok(ManagementCommand::MacosModelStatus)
+        }
+        (Some("models"), Some("macos"), Some("install")) if args.len() == 4 => {
+            Ok(ManagementCommand::InstallMacosModel)
+        }
+        (Some("voices"), _, _) => Err("expected voices list or voices download".into()),
+        (Some("models"), _, _) => {
+            Err("expected models macos status or models macos install".into())
+        }
+        _ => Err("expected a management command".into()),
+    }
+}
+
+fn voices_list_report(
+    supported: bool,
+    language_filter: Option<String>,
+    catalog: berd_voice::siri::SiriVoiceCatalog,
+) -> VoicesListResult {
+    VoicesListResult {
+        backend: "siri",
+        supported,
+        language_filter,
+        available_languages: catalog.available_languages,
+        voices: catalog.voices,
+    }
+}
+
+fn voice_download_report(
+    identity: &berd_voice::siri::SiriVoiceIdentity,
+    availability_wait: berd_voice::siri::SiriDownloadAvailabilityWait,
+) -> VoiceDownloadResult {
+    VoiceDownloadResult {
+        backend: "siri",
+        voice: identity.clone(),
+        installed: true,
+        availability_wait_seconds: availability_wait.seconds(),
+    }
+}
+
+#[cfg(any(test, not(target_os = "macos")))]
+fn unsupported_macos_model_status() -> MacosModelStatus {
+    MacosModelStatus {
+        supported: false,
+        locale: None,
+        locale_supported: false,
+        model_status: "unsupported".into(),
+        ready: false,
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn current_macos_model_status() -> Result<MacosModelStatus, String> {
+    let status = berd_voice::mac_speech::mac_speech_status()?;
+    Ok(MacosModelStatus {
+        supported: status.supported,
+        locale: status.locale,
+        locale_supported: status.locale_supported,
+        model_status: status.model_status,
+        ready: status.ready,
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn current_macos_model_status() -> Result<MacosModelStatus, String> {
+    Ok(unsupported_macos_model_status())
+}
+
+fn macos_install_needs_mutation(status: &MacosModelStatus) -> Result<bool, ManagementFailure> {
+    if !status.supported {
+        return Err(management_failure(
+            "unsupported",
+            "macOS SpeechTranscriber is unavailable on this system",
+            "macOS SpeechTranscriber is unavailable on this system",
+        ));
+    }
+    if !status.locale_supported {
+        return Err(management_failure(
+            "unsupported_locale",
+            "macOS SpeechTranscriber does not support the current locale",
+            "macOS SpeechTranscriber does not support the current locale",
+        ));
+    }
+    Ok(!status.ready)
+}
+
+#[cfg(target_os = "macos")]
+fn install_macos_model_platform() -> Result<(), String> {
+    berd_voice::mac_speech::install_mac_speech_model(write_management_progress)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn install_macos_model_platform() -> Result<(), String> {
+    Err("macOS speech model installation is available only on macOS".into())
+}
+
+fn normalized_install_progress(value: f64) -> Option<f64> {
+    value.is_finite().then(|| value.clamp(0.0, 1.0))
+}
+
+fn write_json_line(mut writer: impl Write, value: &impl Serialize) -> Result<(), String> {
+    serde_json::to_writer(&mut writer, value).map_err(|error| error.to_string())?;
+    writer
+        .write_all(b"\n")
+        .and_then(|_| writer.flush())
+        .map_err(|error| error.to_string())
+}
+
+fn write_management_result<T: Serialize>(operation: &'static str, result: T) -> Result<(), String> {
+    write_json_line(
+        io::stdout().lock(),
+        &ManagementResultEnvelope {
+            schema_version: MANAGEMENT_SCHEMA_VERSION,
+            operation,
+            event: "result",
+            result,
+        },
+    )
+}
+
+fn write_management_progress(progress: f64) {
+    let Some(fraction) = normalized_install_progress(progress) else {
+        eprintln!("berd-voice ignored invalid macOS model install progress: {progress}");
+        return;
+    };
+    let envelope = ManagementProgressEnvelope {
+        schema_version: MANAGEMENT_SCHEMA_VERSION,
+        operation: "models.macos.install",
+        event: "progress",
+        fraction,
+    };
+    if let Err(error) = write_json_line(io::stdout().lock(), &envelope) {
+        eprintln!("berd-voice could not write install progress: {error}");
+    }
+}
+
+fn management_failure(
+    code: &'static str,
+    public_message: &'static str,
+    detail: impl Into<String>,
+) -> ManagementFailure {
+    ManagementFailure {
+        code,
+        public_message,
+        detail: detail.into(),
+    }
+}
+
+fn management_error_envelope(
+    operation: &'static str,
+    failure: &ManagementFailure,
+) -> ManagementErrorEnvelope {
+    ManagementErrorEnvelope {
+        schema_version: MANAGEMENT_SCHEMA_VERSION,
+        operation,
+        event: "error",
+        error: ManagementErrorBody {
+            code: failure.code,
+            message: failure.public_message,
+        },
+    }
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn voice_download_failure(error: berd_voice::siri::SiriVoiceDownloadError) -> ManagementFailure {
+    match error {
+        berd_voice::siri::SiriVoiceDownloadError::NotFound(_) => management_failure(
+            "voice_not_found",
+            "The requested Siri voice was not found",
+            error.to_string(),
+        ),
+        berd_voice::siri::SiriVoiceDownloadError::Operation(_) => management_failure(
+            "operation_failed",
+            "Could not make the requested Siri voice available",
+            error.to_string(),
+        ),
+    }
+}
+
+fn run_management_command(command: ManagementCommand) -> Result<(), ManagementFailure> {
+    let operation = command.operation();
+    match command {
+        ManagementCommand::ListVoices { language } => {
+            let catalog =
+                berd_voice::siri::load_voice_catalog(language.as_deref()).map_err(|error| {
+                    management_failure("operation_failed", "Could not list Siri voices", error)
+                })?;
+            write_management_result(
+                operation,
+                voices_list_report(cfg!(target_os = "macos"), language, catalog),
+            )
+            .map_err(|error| {
+                management_failure("output_failed", "Could not write command result", error)
+            })
+        }
+        ManagementCommand::DownloadVoice {
+            identity,
+            availability_wait,
+        } => {
+            #[cfg(not(target_os = "macos"))]
+            {
+                let _ = (identity, availability_wait);
+                return Err(management_failure(
+                    "unsupported",
+                    "Siri voice download is available only on macOS",
+                    "Siri voice download is available only on macOS",
+                ));
+            }
+            #[cfg(target_os = "macos")]
+            {
+                let identity = berd_voice::siri::download_voice(&identity, availability_wait)
+                    .map_err(voice_download_failure)?;
+                let result = voice_download_report(&identity, availability_wait);
+                write_management_result(operation, result).map_err(|error| {
+                    management_failure("output_failed", "Could not write command result", error)
+                })
+            }
+        }
+        ManagementCommand::MacosModelStatus => {
+            let status = current_macos_model_status().map_err(|error| {
+                management_failure(
+                    "operation_failed",
+                    "Could not read macOS speech model status",
+                    error,
+                )
+            })?;
+            write_management_result(operation, status).map_err(|error| {
+                management_failure("output_failed", "Could not write command result", error)
+            })
+        }
+        ManagementCommand::InstallMacosModel => {
+            let initial_status = current_macos_model_status().map_err(|error| {
+                management_failure(
+                    "operation_failed",
+                    "Could not read macOS speech model status",
+                    error,
+                )
+            })?;
+            let needs_mutation = macos_install_needs_mutation(&initial_status)?;
+            let status = if needs_mutation {
+                install_macos_model_platform().map_err(|error| {
+                    management_failure(
+                        "operation_failed",
+                        "Could not install the macOS speech model",
+                        error,
+                    )
+                })?;
+                current_macos_model_status().map_err(|error| {
+                    management_failure(
+                        "operation_failed",
+                        "The model installed but its status could not be read",
+                        error,
+                    )
+                })?
+            } else {
+                initial_status
+            };
+            write_management_result(operation, status).map_err(|error| {
+                management_failure("output_failed", "Could not write command result", error)
+            })
+        }
+    }
 }
 
 fn run_session(config: SessionConfig) -> Result<(), String> {
@@ -2286,6 +2734,305 @@ mod tests {
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_string()).collect()
+    }
+
+    #[test]
+    fn management_cli_parses_only_the_closed_command_shapes() {
+        assert_eq!(
+            parse_management_args(&args(&["berd-voice", "voices", "list"])).unwrap(),
+            ManagementCommand::ListVoices { language: None }
+        );
+        assert_eq!(
+            parse_management_args(&args(&[
+                "berd-voice",
+                "voices",
+                "list",
+                "--language",
+                "en_US"
+            ]))
+            .unwrap(),
+            ManagementCommand::ListVoices {
+                language: Some("en-US".into())
+            }
+        );
+        assert_eq!(
+            parse_management_args(&args(&[
+                "berd-voice",
+                "voices",
+                "download",
+                "--voice",
+                "Aaron",
+                "--language",
+                "en_US"
+            ]))
+            .unwrap(),
+            ManagementCommand::DownloadVoice {
+                identity: berd_voice::siri::SiriVoiceIdentity::new("Aaron", "en-US").unwrap(),
+                availability_wait: berd_voice::siri::SiriDownloadAvailabilityWait::default(),
+            }
+        );
+        assert_eq!(
+            parse_management_args(&args(&[
+                "berd-voice",
+                "voices",
+                "download",
+                "--voice",
+                "Aaron",
+                "--language",
+                "en-US",
+                "--availability-wait-seconds",
+                "12"
+            ]))
+            .unwrap(),
+            ManagementCommand::DownloadVoice {
+                identity: berd_voice::siri::SiriVoiceIdentity::new("Aaron", "en-US").unwrap(),
+                availability_wait: berd_voice::siri::SiriDownloadAvailabilityWait::from_seconds(12)
+                    .unwrap(),
+            }
+        );
+        assert_eq!(
+            parse_management_args(&args(&["berd-voice", "models", "macos", "status"])).unwrap(),
+            ManagementCommand::MacosModelStatus
+        );
+        assert_eq!(
+            parse_management_args(&args(&["berd-voice", "models", "macos", "install"])).unwrap(),
+            ManagementCommand::InstallMacosModel
+        );
+
+        for invalid in [
+            vec!["berd-voice", "voices", "list", "--language"],
+            vec!["berd-voice", "voices", "list", "--unknown", "en-US"],
+            vec!["berd-voice", "voices", "download", "--voice", "Aaron"],
+            vec![
+                "berd-voice",
+                "voices",
+                "download",
+                "--voice",
+                "Aaron",
+                "--language",
+                "en-US",
+                "--availability-wait-seconds",
+                "0",
+            ],
+            vec![
+                "berd-voice",
+                "voices",
+                "download",
+                "--voice",
+                "Aaron",
+                "--language",
+                "en-US",
+                "--availability-wait-seconds",
+                "1801",
+            ],
+            vec![
+                "berd-voice",
+                "voices",
+                "download",
+                "--voice",
+                "aaron ",
+                "--language",
+                "en-US",
+            ],
+            vec!["berd-voice", "models", "macos", "status", "extra"],
+            vec!["berd-voice", "models", "pocket", "status"],
+        ] {
+            assert!(
+                parse_management_args(&args(&invalid)).is_err(),
+                "{invalid:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn management_json_schemas_are_stable_and_sanitized() {
+        let list = voices_list_report(
+            true,
+            Some("en-US".into()),
+            berd_voice::siri::SiriVoiceCatalog {
+                available_languages: vec!["en-US".into()],
+                voices: vec![berd_voice::siri::SiriVoice {
+                    name: "Aaron".into(),
+                    language: "en-US".into(),
+                    size_bytes: 42,
+                    installed: true,
+                }],
+            },
+        );
+        assert_eq!(
+            serde_json::to_value(ManagementResultEnvelope {
+                schema_version: MANAGEMENT_SCHEMA_VERSION,
+                operation: "voices.list",
+                event: "result",
+                result: list,
+            })
+            .unwrap(),
+            json!({
+                "schemaVersion": 1,
+                "operation": "voices.list",
+                "event": "result",
+                "result": {
+                    "supported": true,
+                    "backend": "siri",
+                    "languageFilter": "en-US",
+                    "availableLanguages": ["en-US"],
+                    "voices": [{
+                        "name": "Aaron",
+                        "language": "en-US",
+                        "sizeBytes": 42,
+                        "installed": true
+                    }]
+                }
+            })
+        );
+
+        let identity = berd_voice::siri::SiriVoiceIdentity::new("Aaron", "en_US").unwrap();
+        assert_eq!(
+            serde_json::to_value(ManagementResultEnvelope {
+                schema_version: MANAGEMENT_SCHEMA_VERSION,
+                operation: "voices.download",
+                event: "result",
+                result: voice_download_report(
+                    &identity,
+                    berd_voice::siri::SiriDownloadAvailabilityWait::default(),
+                ),
+            })
+            .unwrap(),
+            json!({
+                "schemaVersion": 1,
+                "operation": "voices.download",
+                "event": "result",
+                "result": {
+                    "backend": "siri",
+                    "voice": {"name": "Aaron", "language": "en-US"},
+                    "installed": true,
+                    "availabilityWaitSeconds": 300
+                }
+            })
+        );
+
+        let status = MacosModelStatus {
+            supported: true,
+            locale: Some("en-US".into()),
+            locale_supported: true,
+            model_status: "installed".into(),
+            ready: true,
+        };
+        assert_eq!(
+            serde_json::to_value(ManagementResultEnvelope {
+                schema_version: MANAGEMENT_SCHEMA_VERSION,
+                operation: "models.macos.status",
+                event: "result",
+                result: status,
+            })
+            .unwrap(),
+            json!({
+                "schemaVersion": 1,
+                "operation": "models.macos.status",
+                "event": "result",
+                "result": {
+                    "supported": true,
+                    "locale": "en-US",
+                    "localeSupported": true,
+                    "modelStatus": "installed",
+                    "ready": true
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn macos_model_install_progress_is_honest_and_bounded() {
+        assert_eq!(normalized_install_progress(0.0), Some(0.0));
+        assert_eq!(normalized_install_progress(0.427), Some(0.427));
+        assert_eq!(normalized_install_progress(1.0), Some(1.0));
+        assert_eq!(normalized_install_progress(-0.1), Some(0.0));
+        assert_eq!(normalized_install_progress(1.1), Some(1.0));
+        assert_eq!(normalized_install_progress(f64::NAN), None);
+        assert_eq!(
+            serde_json::to_value(ManagementProgressEnvelope {
+                schema_version: MANAGEMENT_SCHEMA_VERSION,
+                operation: "models.macos.install",
+                event: "progress",
+                fraction: 0.427,
+            })
+            .unwrap(),
+            json!({
+                "schemaVersion": 1,
+                "operation": "models.macos.install",
+                "event": "progress",
+                "fraction": 0.427
+            })
+        );
+    }
+
+    #[test]
+    fn management_operation_errors_are_structured_without_details() {
+        let failure = management_failure(
+            "operation_failed",
+            "Could not make the requested Siri voice available",
+            "private native detail at /Users/alice/private",
+        );
+        let envelope = management_error_envelope("voices.download", &failure);
+        let json = serde_json::to_string(&envelope).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&json).unwrap(),
+            json!({
+                "schemaVersion": 1,
+                "operation": "voices.download",
+                "event": "error",
+                "error": {
+                    "code": "operation_failed",
+                    "message": "Could not make the requested Siri voice available"
+                }
+            })
+        );
+        assert!(!json.contains("/Users/alice/private"));
+
+        let missing = voice_download_failure(berd_voice::siri::SiriVoiceDownloadError::NotFound(
+            berd_voice::siri::SiriVoiceIdentity::new("Missing", "en-US").unwrap(),
+        ));
+        assert_eq!(missing.code, "voice_not_found");
+    }
+
+    #[test]
+    fn unsupported_platform_status_has_the_same_schema() {
+        assert_eq!(
+            unsupported_macos_model_status(),
+            MacosModelStatus {
+                supported: false,
+                locale: None,
+                locale_supported: false,
+                model_status: "unsupported".into(),
+                ready: false,
+            }
+        );
+    }
+
+    #[test]
+    fn macos_model_install_is_idempotent_and_rejects_unsupported_states_before_mutation() {
+        let status = |supported: bool, locale_supported: bool, ready: bool| MacosModelStatus {
+            supported,
+            locale: locale_supported.then(|| "en-US".into()),
+            locale_supported,
+            model_status: if ready { "installed" } else { "available" }.into(),
+            ready,
+        };
+
+        assert!(!macos_install_needs_mutation(&status(true, true, true)).unwrap());
+        assert!(macos_install_needs_mutation(&status(true, true, false)).unwrap());
+        assert_eq!(
+            macos_install_needs_mutation(&status(false, false, false))
+                .unwrap_err()
+                .code,
+            "unsupported"
+        );
+        assert_eq!(
+            macos_install_needs_mutation(&status(true, false, false))
+                .unwrap_err()
+                .code,
+            "unsupported_locale"
+        );
     }
 
     #[test]

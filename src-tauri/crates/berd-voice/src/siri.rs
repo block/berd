@@ -3,6 +3,7 @@
 use std::collections::BTreeSet;
 #[cfg(target_os = "macos")]
 use std::ffi::{c_char, c_void, CStr, CString};
+use std::fmt;
 #[cfg(target_os = "macos")]
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_os = "macos")]
@@ -22,9 +23,37 @@ const PCM_CHANNEL_CAPACITY: usize = 8;
 const SYNTHESIS_POLL_INTERVAL: Duration = Duration::from_millis(10);
 #[cfg(target_os = "macos")]
 const SIRI_SYNTHESIS_STALL_TIMEOUT: Duration = Duration::from_secs(60);
-pub const DEFAULT_SIRI_DOWNLOAD_WAIT_TIMEOUT: Duration = Duration::from_secs(300);
+const DEFAULT_SIRI_DOWNLOAD_WAIT_TIMEOUT: Duration = Duration::from_secs(300);
 const MIN_SIRI_DOWNLOAD_WAIT_TIMEOUT: Duration = Duration::from_secs(1);
 const MAX_SIRI_DOWNLOAD_WAIT_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+
+/// A validated bound for polling whether a requested Siri voice became available.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SiriDownloadAvailabilityWait(Duration);
+
+impl SiriDownloadAvailabilityWait {
+    /// Creates an availability wait from an inclusive `1..=1800` second bound.
+    pub fn from_seconds(seconds: u64) -> Result<Self, String> {
+        let timeout = Duration::from_secs(seconds);
+        validate_download_wait_timeout(timeout)?;
+        Ok(Self(timeout))
+    }
+
+    fn duration(self) -> Duration {
+        self.0
+    }
+
+    /// Returns the configured availability-polling bound in whole seconds.
+    pub fn seconds(self) -> u64 {
+        self.0.as_secs()
+    }
+}
+
+impl Default for SiriDownloadAvailabilityWait {
+    fn default() -> Self {
+        Self(DEFAULT_SIRI_DOWNLOAD_WAIT_TIMEOUT)
+    }
+}
 
 #[cfg(target_os = "macos")]
 unsafe extern "C" {
@@ -77,7 +106,7 @@ impl SiriVoiceIdentity {
         }
         Ok(Self {
             name,
-            language: normalize_bcp47(language)?,
+            language: normalize_language(language)?,
         })
     }
 
@@ -135,6 +164,28 @@ pub struct SiriVoiceCatalog {
     pub voices: Vec<SiriVoice>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SiriVoiceDownloadError {
+    NotFound(SiriVoiceIdentity),
+    Operation(String),
+}
+
+impl fmt::Display for SiriVoiceDownloadError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotFound(identity) => write!(
+                formatter,
+                "Siri voice {:?} ({}) was not found",
+                identity.name(),
+                identity.language()
+            ),
+            Self::Operation(message) => formatter.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for SiriVoiceDownloadError {}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RawSiriVoice {
@@ -144,7 +195,8 @@ struct RawSiriVoice {
     installed: bool,
 }
 
-fn normalize_bcp47(value: &str) -> Result<String, String> {
+/// Normalizes one Siri catalog language using the shared BCP-47 identity rule.
+pub fn normalize_language(value: &str) -> Result<String, String> {
     let value = value.trim().replace('_', "-");
     if value.is_empty() || value.contains('\0') {
         return Err("Siri voice language must be a nonempty BCP-47 tag".into());
@@ -212,7 +264,7 @@ fn parse_languages_json(json: &str) -> Result<Vec<String>, String> {
     let mut seen = BTreeSet::new();
     let mut languages = Vec::new();
     for language in raw {
-        let language = normalize_bcp47(&language)?;
+        let language = normalize_language(&language)?;
         if seen.insert(language.clone()) {
             languages.push(language);
         }
@@ -225,7 +277,7 @@ fn parse_languages_json(json: &str) -> Result<Vec<String>, String> {
 #[cfg(target_os = "macos")]
 pub fn load_voice_catalog(language: Option<&str>) -> Result<SiriVoiceCatalog, String> {
     let language = language
-        .map(normalize_bcp47)
+        .map(normalize_language)
         .transpose()?
         .unwrap_or_default();
     let language = CString::new(language).expect("normalized language has no NUL");
@@ -287,15 +339,41 @@ fn validate_download_wait_timeout(timeout: Duration) -> Result<(), String> {
     Ok(())
 }
 
-/// Requests one exact voice and blocks until it is available or the bounded
-/// availability-polling wait elapses. Native validation and subscription have
-/// their own bounded calls, so this is not a hard whole-operation deadline.
+/// Resolves one exact catalog identity, then requests it when not already
+/// installed and blocks until it is available or the bounded
+/// availability-polling wait elapses. A missing identity fails before native
+/// mutation. Native validation and subscription have their own bounded calls,
+/// so this is not a hard whole-operation deadline.
 pub fn download_voice(
     identity: &SiriVoiceIdentity,
-    availability_wait_timeout: Duration,
-) -> Result<(), String> {
-    validate_download_wait_timeout(availability_wait_timeout)?;
-    download_voice_platform(identity, availability_wait_timeout)
+    availability_wait: SiriDownloadAvailabilityWait,
+) -> Result<SiriVoiceIdentity, SiriVoiceDownloadError> {
+    download_voice_with(
+        identity,
+        availability_wait,
+        |language| load_voice_catalog(Some(language)),
+        download_voice_platform,
+    )
+}
+
+fn download_voice_with(
+    requested: &SiriVoiceIdentity,
+    availability_wait: SiriDownloadAvailabilityWait,
+    load_catalog: impl FnOnce(&str) -> Result<SiriVoiceCatalog, String>,
+    download: impl FnOnce(&SiriVoiceIdentity, Duration) -> Result<(), String>,
+) -> Result<SiriVoiceIdentity, SiriVoiceDownloadError> {
+    let catalog = load_catalog(requested.language()).map_err(SiriVoiceDownloadError::Operation)?;
+    let voice = catalog
+        .voices
+        .iter()
+        .find(|voice| voice.matches(requested))
+        .ok_or_else(|| SiriVoiceDownloadError::NotFound(requested.clone()))?;
+    let identity = voice.identity();
+    if !voice.installed {
+        download(&identity, availability_wait.duration())
+            .map_err(SiriVoiceDownloadError::Operation)?;
+    }
+    Ok(identity)
 }
 
 #[cfg(target_os = "macos")]
@@ -530,13 +608,16 @@ fn take_string(value: *mut c_char) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_catalog_json, parse_languages_json, validate_download_wait_timeout,
-        SiriVoiceIdentity, MAX_SIRI_DOWNLOAD_WAIT_TIMEOUT, MIN_SIRI_DOWNLOAD_WAIT_TIMEOUT,
+        download_voice_with, parse_catalog_json, parse_languages_json,
+        validate_download_wait_timeout, SiriDownloadAvailabilityWait, SiriVoice, SiriVoiceCatalog,
+        SiriVoiceDownloadError, SiriVoiceIdentity, MAX_SIRI_DOWNLOAD_WAIT_TIMEOUT,
+        MIN_SIRI_DOWNLOAD_WAIT_TIMEOUT,
     };
     #[cfg(target_os = "macos")]
     use super::{receive_pcm_until_complete, SiriTts};
     #[cfg(target_os = "macos")]
     use crate::{TtsBackend, TtsOutcome, TtsSynthesisEvent};
+    use std::cell::Cell;
     #[cfg(target_os = "macos")]
     use std::sync::atomic::{AtomicBool, Ordering};
     #[cfg(target_os = "macos")]
@@ -623,6 +704,73 @@ mod tests {
             MAX_SIRI_DOWNLOAD_WAIT_TIMEOUT + Duration::from_secs(1)
         )
         .is_err());
+    }
+
+    #[test]
+    fn download_preflights_exact_catalog_identity_before_native_mutation() {
+        let requested = SiriVoiceIdentity::new("Aaron", "en_US").unwrap();
+        let wait = SiriDownloadAvailabilityWait::default();
+        let download_calls = Cell::new(0);
+        let missing = download_voice_with(
+            &requested,
+            wait,
+            |_| {
+                Ok(SiriVoiceCatalog {
+                    available_languages: vec!["en-US".into()],
+                    voices: vec![SiriVoice {
+                        name: "aaron".into(),
+                        language: "en-US".into(),
+                        size_bytes: 42,
+                        installed: false,
+                    }],
+                })
+            },
+            |_, _| {
+                download_calls.set(download_calls.get() + 1);
+                Ok(())
+            },
+        )
+        .unwrap_err();
+        assert_eq!(missing, SiriVoiceDownloadError::NotFound(requested.clone()));
+        assert_eq!(download_calls.get(), 0);
+
+        let available = |installed| SiriVoiceCatalog {
+            available_languages: vec!["en-US".into()],
+            voices: vec![SiriVoice {
+                name: "Aaron".into(),
+                language: "en-US".into(),
+                size_bytes: 42,
+                installed,
+            }],
+        };
+        assert_eq!(
+            download_voice_with(
+                &requested,
+                wait,
+                |_| Ok(available(true)),
+                |_, _| {
+                    download_calls.set(download_calls.get() + 1);
+                    Ok(())
+                },
+            )
+            .unwrap(),
+            requested
+        );
+        assert_eq!(download_calls.get(), 0);
+
+        download_voice_with(
+            &requested,
+            wait,
+            |_| Ok(available(false)),
+            |identity, duration| {
+                assert_eq!(identity, &requested);
+                assert_eq!(duration.as_secs(), wait.seconds());
+                download_calls.set(download_calls.get() + 1);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(download_calls.get(), 1);
     }
 
     #[test]
