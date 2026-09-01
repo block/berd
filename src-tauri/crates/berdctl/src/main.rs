@@ -56,7 +56,7 @@ fn main() -> ExitCode {
 fn run(command: &str, args: Map<String, Value>, globals: &wire::Globals) -> Result<(), Failure> {
     let lock_path = discovery::resolve_lock_path(globals.lock_path.clone())?;
     let endpoint = client::handshake(&lock_path)?;
-    let result = client::call(&endpoint, command, args, globals.timeout_ms)?;
+    let result = client::call(&lock_path, &endpoint, command, args, globals.timeout_ms)?;
     let rendered = if globals.json {
         serde_json::to_string(&result)
     } else {

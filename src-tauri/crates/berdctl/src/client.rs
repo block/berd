@@ -214,31 +214,90 @@ pub fn handshake(lock_path: &Path) -> Result<Endpoint, Failure> {
 }
 
 /// POST one command. `args` already contains the `action` discriminator.
+///
+/// A legitimate broker restart can happen after [`handshake`] and before this
+/// request. Its old capability is rejected before dispatch, so re-read and
+/// re-handshake exactly once before retrying. `Expect: 100-continue` prevents
+/// the rejected listener from receiving the command body: the body is sent
+/// only after that listener has accepted the request headers.
 pub fn call(
+    lock_path: &Path,
     endpoint: &Endpoint,
     command: &str,
     args: Map<String, Value>,
     timeout_ms: Option<u64>,
 ) -> Result<Value, Failure> {
-    let url = format!("http://127.0.0.1:{}/v1/call", endpoint.port);
     let mut payload = Map::new();
     payload.insert("command".into(), Value::String(command.into()));
     payload.insert("args".into(), Value::Object(args));
     if let Some(ms) = timeout_ms {
         payload.insert("timeout_ms".into(), Value::from(ms));
     }
+    let payload = Value::Object(payload);
+
+    match call_once(endpoint, &payload) {
+        Ok(result) => Ok(result),
+        Err(CallFailure::BrokerAuthForbidden) => {
+            // The broker emits this 403 before reading the body or dispatching
+            // it. Do not retry any other response: HTTP cannot establish
+            // whether it may already have been dispatched.
+            let endpoint = handshake(lock_path)?;
+            call_once(&endpoint, &payload).map_err(CallFailure::into_failure)
+        }
+        Err(failure) => Err(failure.into_failure()),
+    }
+}
+
+/// A 403 with this exact broker error is known not to have been dispatched:
+/// the broker checks its bearer capability before reading `/v1/call`'s body.
+enum CallFailure {
+    BrokerAuthForbidden,
+    Other(Failure),
+}
+
+impl CallFailure {
+    fn into_failure(self) -> Failure {
+        match self {
+            Self::BrokerAuthForbidden => Failure::transport(
+                "the app control endpoint rejected a retried command before dispatch",
+            ),
+            Self::Other(failure) => failure,
+        }
+    }
+}
+
+fn call_once(endpoint: &Endpoint, payload: &Value) -> Result<Value, CallFailure> {
+    let url = format!("http://127.0.0.1:{}/v1/call", endpoint.port);
     let mut response = agent(CALL_TIMEOUT)
         .post(&url)
         .header("Authorization", format!("Bearer {}", endpoint.capability))
-        .send_json(Value::Object(payload))
-        .map_err(|err| transport_error_failure(endpoint.port, &err))?;
+        // A final response to this header prevents ureq from sending the body.
+        // This limits a port-reuse listener to request metadata; HTTP cannot
+        // remove the unavoidable TOCTOU after a peer sends 100 Continue.
+        .header("Expect", "100-continue")
+        .send_json(payload)
+        .map_err(|err| CallFailure::Other(transport_error_failure(endpoint.port, &err)))?;
     let status = response.status().as_u16();
     let body = response.body_mut().read_to_string().map_err(|err| {
-        Failure::transport(format!(
+        CallFailure::Other(Failure::transport(format!(
             "the app control endpoint's response could not be read ({err})"
-        ))
+        )))
     })?;
-    classify_response(status, &body)
+    if is_broker_auth_forbidden(status, &body) {
+        return Err(CallFailure::BrokerAuthForbidden);
+    }
+    classify_response(status, &body).map_err(CallFailure::Other)
+}
+
+fn is_broker_auth_forbidden(status: u16, body: &str) -> bool {
+    status == 403
+        && serde_json::from_str::<Value>(body)
+            .ok()
+            .as_ref()
+            .and_then(error_parts)
+            .is_some_and(|(code, message)| {
+                code == "forbidden" && message == "valid bearer capability required"
+            })
 }
 
 /// The app quitting between ping and call surfaces as a refused connection —
@@ -377,6 +436,7 @@ mod tests {
     struct RecordedRequest {
         request_line: String,
         authorization: Option<String>,
+        expects_continue: bool,
         body: String,
     }
 
@@ -388,6 +448,7 @@ mod tests {
             .expect("read request line");
         let mut authorization = None;
         let mut content_length = 0;
+        let mut expects_continue = false;
         loop {
             let mut line = String::new();
             reader.read_line(&mut line).expect("read request header");
@@ -403,12 +464,23 @@ mod tests {
             if name.eq_ignore_ascii_case("content-length") {
                 content_length = value.trim().parse().expect("valid content length");
             }
+            if name.eq_ignore_ascii_case("expect")
+                && value.trim().eq_ignore_ascii_case("100-continue")
+            {
+                expects_continue = true;
+            }
+        }
+        if expects_continue {
+            stream
+                .write_all(b"HTTP/1.1 100 Continue\r\n\r\n")
+                .expect("accept request body");
         }
         let mut body = vec![0; content_length];
         reader.read_exact(&mut body).expect("read request body");
         RecordedRequest {
             request_line: request_line.trim_end().to_string(),
             authorization,
+            expects_continue,
             body: String::from_utf8(body).expect("request body is UTF-8"),
         }
     }
@@ -514,6 +586,7 @@ mod tests {
             "debug output must not disclose the bearer capability"
         );
         let result = call(
+            &lock_file.0,
             &endpoint,
             "sessions",
             Map::from_iter([("action".to_string(), Value::String("list".to_string()))]),
@@ -529,6 +602,7 @@ mod tests {
             Some(format!("Bearer {CURRENT_CAPABILITY}").as_str())
         );
         assert!(ping.body.is_empty());
+        assert!(!ping.expects_continue);
 
         let call = requests.recv().expect("record call");
         assert_eq!(call.request_line, "POST /v1/call HTTP/1.1");
@@ -536,6 +610,7 @@ mod tests {
             call.authorization.as_deref(),
             Some(format!("Bearer {CURRENT_CAPABILITY}").as_str())
         );
+        assert!(call.expects_continue);
         let call_body: Value = serde_json::from_str(&call.body).expect("call body is JSON");
         assert_eq!(call_body["command"], "sessions");
         assert_eq!(call_body["args"]["action"], "list");
@@ -651,6 +726,22 @@ mod tests {
         }
 
         broker.join().expect("test broker exits");
+    }
+
+    #[test]
+    fn only_the_broker_auth_403_is_safe_to_retry() {
+        assert!(is_broker_auth_forbidden(
+            403,
+            r#"{"ok":false,"error":{"code":"forbidden","message":"valid bearer capability required"}}"#,
+        ));
+        assert!(!is_broker_auth_forbidden(
+            403,
+            r#"{"ok":false,"error":{"code":"forbidden","message":"origin rejected"}}"#,
+        ));
+        assert!(!is_broker_auth_forbidden(
+            500,
+            r#"{"ok":false,"error":{"code":"forbidden","message":"valid bearer capability required"}}"#,
+        ));
     }
 
     #[test]

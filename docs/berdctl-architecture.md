@@ -146,4 +146,4 @@ bump. Adding a command or optional field is not a wire reshape.
 | safety metadata complete | berdctl command tests |
 
 Review-only rules: single renderer dispatch point, detecting breaking wire
-reshapes, and product judgment for no-auth command eligibility.
+reshapes, and product judgment for command eligibility under capability authentication.
