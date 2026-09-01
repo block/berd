@@ -688,7 +688,7 @@
       }
     },
     "projects": {
-      "description": "Manage the user's projects: create, list, get, set startup mode, archive.",
+      "description": "Manage the user's projects: create, list, get, attach folder, detach folder, set startup mode, archive.",
       "actions": {
         "create": {
           "description": "Create a new project; it appears immediately in the app's project list.",
@@ -769,6 +769,80 @@
               }
             },
             "required": ["project_id"],
+            "additionalProperties": false
+          }
+        },
+        "attach_folder": {
+          "description": "Add an existing folder to a project's configured folders, matching the project dialog's add-folder action. Git checkouts are detected so identity behaves as if the folder was added in the UI. Repeating the command is safe.",
+          "fields": [
+            {
+              "name": "project_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the project to update.",
+              "min": 1
+            },
+            {
+              "name": "path",
+              "required": true,
+              "kind": "string",
+              "description": "Existing absolute folder or Git checkout path; ~ is expanded.",
+              "min": 1
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "project_id": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Id of the project to update."
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Existing absolute folder or Git checkout path; ~ is expanded."
+              }
+            },
+            "required": ["project_id", "path"],
+            "additionalProperties": false
+          }
+        },
+        "detach_folder": {
+          "description": "Remove a folder from a project's configured folders without deleting anything from disk or Git, matching the project dialog's remove-folder action. Detaching the last folder leaves the project without folders, which is allowed.",
+          "fields": [
+            {
+              "name": "project_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the project to update.",
+              "min": 1
+            },
+            {
+              "name": "path",
+              "required": true,
+              "kind": "string",
+              "description": "Attached folder path to remove; ~ is expanded.",
+              "min": 1
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "project_id": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Id of the project to update."
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Attached folder path to remove; ~ is expanded."
+              }
+            },
+            "required": ["project_id", "path"],
             "additionalProperties": false
           }
         },
