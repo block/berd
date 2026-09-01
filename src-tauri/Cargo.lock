@@ -642,6 +642,7 @@ dependencies = [
  "serde",
  "serde_json",
  "ureq 3.4.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6689,6 +6690,7 @@ dependencies = [
  "tauri-plugin",
  "tokio",
  "uuid",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

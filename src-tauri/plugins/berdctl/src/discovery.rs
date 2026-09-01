@@ -63,7 +63,274 @@ pub fn owner_pid_from_discovery_file_name(name: &str) -> Option<u32> {
     pid.parse().ok()
 }
 
-#[cfg(feature = "server")]
+#[cfg(all(feature = "server", windows))]
+mod windows_discovery_security {
+    use std::{ffi::c_void, mem::size_of, os::windows::ffi::OsStrExt, path::Path};
+
+    use windows_sys::Win32::{
+        Foundation::{
+            CloseHandle, GetLastError, ERROR_INSUFFICIENT_BUFFER, HANDLE, INVALID_HANDLE_VALUE,
+        },
+        Security::Authorization::{SetSecurityInfo, SE_FILE_OBJECT},
+        Security::{
+            AddAccessAllowedAceEx, GetLengthSid, GetTokenInformation, InitializeAcl, TokenUser,
+            ACL, ACL_REVISION, DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION,
+            PROTECTED_DACL_SECURITY_INFORMATION, TOKEN_QUERY, TOKEN_USER,
+        },
+        Storage::FileSystem::{
+            CreateFileW, FileAttributeTagInfo, GetFileInformationByHandleEx,
+            FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO,
+            FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ,
+            FILE_SHARE_WRITE, OPEN_EXISTING,
+        },
+        System::Threading::{GetCurrentProcess, OpenProcessToken},
+    };
+
+    // These access and inheritance values are stable Win32 ABI constants. They
+    // intentionally avoid relying on an inherited ACL from an app-data parent.
+    const READ_CONTROL: u32 = 0x0002_0000;
+    const WRITE_DAC: u32 = 0x0004_0000;
+    const WRITE_OWNER: u32 = 0x0008_0000;
+    const GENERIC_ALL: u32 = 0x1000_0000;
+    const OBJECT_INHERIT_ACE: u32 = 0x01;
+    const CONTAINER_INHERIT_ACE: u32 = 0x02;
+    const MAX_TOKEN_USER_INFO_SIZE: u32 = 64 * 1024;
+    const MAX_SID_LENGTH: usize = 68;
+
+    pub(super) struct PrivateDirectory(HANDLE);
+
+    impl Drop for PrivateDirectory {
+        fn drop(&mut self) {
+            // SAFETY: this type owns a successful CreateFileW handle.
+            unsafe { CloseHandle(self.0) };
+        }
+    }
+
+    fn win_error(context: &str, code: u32) -> std::io::Error {
+        std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("{context}: Windows error {code}"),
+        )
+    }
+
+    fn path_as_wide_null(path: &Path) -> Vec<u16> {
+        path.as_os_str().encode_wide().chain(Some(0)).collect()
+    }
+
+    /// Kept separate from the syscall wrapper so the security decision is
+    /// directly unit-testable without creating Windows filesystem objects.
+    fn is_plain_directory(attributes: u32) -> bool {
+        attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)
+            == FILE_ATTRIBUTE_DIRECTORY
+    }
+
+    fn acl_size_for_sid(sid_len: usize) -> usize {
+        size_of::<ACL>() + 8 + sid_len
+    }
+
+    fn is_bounded_token_user_info_size(size: u32) -> bool {
+        (size as usize) >= size_of::<TOKEN_USER>() && size <= MAX_TOKEN_USER_INFO_SIZE
+    }
+
+    unsafe fn with_current_user_sid<T>(
+        f: impl FnOnce(*mut c_void) -> std::io::Result<T>,
+    ) -> std::io::Result<T> {
+        let mut token = 0;
+        // SAFETY: pseudo process handle is valid and `token` is writable.
+        if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
+            return Err(win_error("opening current process token", unsafe {
+                GetLastError()
+            }));
+        }
+        let result = (|| {
+            let mut size = 0;
+            // SAFETY: querying the required buffer size permits a null buffer.
+            let queried = unsafe {
+                GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut size)
+            };
+            if queried != 0 || unsafe { GetLastError() } != ERROR_INSUFFICIENT_BUFFER {
+                return Err(win_error("querying current user SID", unsafe {
+                    GetLastError()
+                }));
+            }
+            if !is_bounded_token_user_info_size(size) {
+                return Err(std::io::Error::other(
+                    "current user SID information has an invalid size",
+                ));
+            }
+            let mut buffer = vec![0_u8; size as usize];
+            // SAFETY: `buffer` has the size requested by the preceding call.
+            if unsafe {
+                GetTokenInformation(
+                    token,
+                    TokenUser,
+                    buffer.as_mut_ptr().cast(),
+                    size,
+                    &mut size,
+                )
+            } == 0
+            {
+                return Err(win_error("reading current user SID", unsafe {
+                    GetLastError()
+                }));
+            }
+            let user = buffer.as_ptr().cast::<TOKEN_USER>();
+            // SAFETY: GetTokenInformation initialized a TOKEN_USER in buffer.
+            f(unsafe { (*user).User.Sid })
+        })();
+        // SAFETY: OpenProcessToken returned this handle above.
+        unsafe { CloseHandle(token) };
+        result
+    }
+
+    unsafe fn apply_current_user_dacl(handle: HANDLE, inherit: u32) -> std::io::Result<()> {
+        unsafe {
+            with_current_user_sid(|sid| {
+                let sid_len = GetLengthSid(sid) as usize;
+                if sid_len == 0 {
+                    return Err(win_error("measuring current user SID", GetLastError()));
+                }
+                if sid_len > MAX_SID_LENGTH {
+                    return Err(std::io::Error::other("current user SID is too large"));
+                }
+                // u32 backing gives the ACL its required alignment.
+                let mut acl_storage =
+                    vec![0_u32; acl_size_for_sid(sid_len).div_ceil(size_of::<u32>())];
+                let acl = acl_storage.as_mut_ptr().cast::<ACL>();
+                if InitializeAcl(
+                    acl,
+                    (acl_storage.len() * size_of::<u32>()) as u32,
+                    ACL_REVISION,
+                ) == 0
+                {
+                    return Err(win_error("initializing discovery ACL", GetLastError()));
+                }
+                if AddAccessAllowedAceEx(acl, ACL_REVISION, inherit, GENERIC_ALL, sid) == 0 {
+                    return Err(win_error(
+                        "adding current user discovery ACL",
+                        GetLastError(),
+                    ));
+                }
+                let status = SetSecurityInfo(
+                    handle,
+                    SE_FILE_OBJECT,
+                    OWNER_SECURITY_INFORMATION
+                        | DACL_SECURITY_INFORMATION
+                        | PROTECTED_DACL_SECURITY_INFORMATION,
+                    sid,
+                    std::ptr::null_mut(),
+                    acl,
+                    std::ptr::null(),
+                );
+                if status != 0 {
+                    return Err(win_error("setting private discovery ACL", status));
+                }
+                Ok(())
+            })
+        }
+    }
+
+    pub(super) fn open_private_directory(path: &Path) -> std::io::Result<PrivateDirectory> {
+        let wide_path = path_as_wide_null(path);
+        // Do not share delete access: holding this handle prevents a checked
+        // directory from being renamed/replaced while paths beneath it are used.
+        // OPEN_REPARSE_POINT lets us inspect (rather than traverse) junctions.
+        let handle = unsafe {
+            CreateFileW(
+                wide_path.as_ptr(),
+                READ_CONTROL | WRITE_DAC | WRITE_OWNER,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                std::ptr::null(),
+                OPEN_EXISTING,
+                FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+                0,
+            )
+        };
+        if handle == INVALID_HANDLE_VALUE {
+            return Err(win_error("opening discovery directory", unsafe {
+                GetLastError()
+            }));
+        }
+        let result = (|| unsafe {
+            let mut info = FILE_ATTRIBUTE_TAG_INFO {
+                FileAttributes: 0,
+                ReparseTag: 0,
+            };
+            if GetFileInformationByHandleEx(
+                handle,
+                FileAttributeTagInfo,
+                (&mut info as *mut FILE_ATTRIBUTE_TAG_INFO).cast(),
+                size_of::<FILE_ATTRIBUTE_TAG_INFO>() as u32,
+            ) == 0
+            {
+                return Err(win_error("checking discovery directory", GetLastError()));
+            }
+            if !is_plain_directory(info.FileAttributes) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "discovery directory is not a plain directory (reparse points are forbidden)",
+                ));
+            }
+            apply_current_user_dacl(handle, OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE)
+        })();
+        match result {
+            Ok(()) => Ok(PrivateDirectory(handle)),
+            Err(error) => {
+                unsafe { CloseHandle(handle) };
+                Err(error)
+            }
+        }
+    }
+
+    pub(super) fn private_file_handle(handle: HANDLE) -> std::io::Result<()> {
+        // Temp files get an explicit protected DACL before the capability is
+        // written; inheritance alone would not repair an existing weak ACL.
+        unsafe { apply_current_user_dacl(handle, 0) }
+    }
+
+    pub(super) fn open_private_file(file: &std::fs::File) -> std::io::Result<()> {
+        use std::os::windows::io::AsRawHandle;
+
+        let handle = file.as_raw_handle() as HANDLE;
+        // std::fs opens the newly-created temp path. It is safe to repair its
+        // ACL only while the verified directory handle is held by the caller.
+        // The file is private before any capability bytes are written.
+        private_file_handle(handle)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn plain_directory_rejects_reparse_points_and_files() {
+            assert!(is_plain_directory(FILE_ATTRIBUTE_DIRECTORY));
+            assert!(!is_plain_directory(0));
+            assert!(!is_plain_directory(
+                FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT
+            ));
+        }
+
+        #[test]
+        fn acl_storage_includes_header_ace_and_sid() {
+            assert_eq!(acl_size_for_sid(12), size_of::<ACL>() + 8 + 12);
+        }
+
+        #[test]
+        fn token_user_buffer_size_is_bounded() {
+            assert!(!is_bounded_token_user_info_size(0));
+            assert!(is_bounded_token_user_info_size(
+                size_of::<TOKEN_USER>() as u32
+            ));
+            assert!(is_bounded_token_user_info_size(MAX_TOKEN_USER_INFO_SIZE));
+            assert!(!is_bounded_token_user_info_size(
+                MAX_TOKEN_USER_INFO_SIZE + 1
+            ));
+        }
+    }
+}
+
+#[cfg(all(feature = "server", not(windows)))]
 fn private_discovery_directory(dir: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
@@ -128,6 +395,9 @@ pub(crate) fn write_discovery_file(
         dir_builder.mode(0o700);
     }
     dir_builder.create(dir)?;
+    #[cfg(windows)]
+    let _private_dir = windows_discovery_security::open_private_directory(dir)?;
+    #[cfg(not(windows))]
     private_discovery_directory(dir)?;
 
     let payload = serde_json::json!({
@@ -170,6 +440,8 @@ pub(crate) fn write_discovery_file(
         .transpose()?
         .ok_or_else(|| std::io::Error::other("could not allocate discovery temp file"))?;
     let (tmp, mut file) = tmp;
+    #[cfg(windows)]
+    windows_discovery_security::open_private_file(&file)?;
     #[cfg(unix)]
     file.set_permissions(unix_permissions(0o600))?;
 

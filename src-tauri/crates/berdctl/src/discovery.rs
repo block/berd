@@ -21,6 +21,7 @@ pub const NOT_UNDER_APP: &str =
 
 const REREAD_DELAY: Duration = Duration::from_millis(200);
 const CAPABILITY_HEX_LEN: usize = 64;
+const MAX_DISCOVERY_BYTES: u64 = 4096;
 
 /// Shape of the discovery file the berdctl broker writes on start
 /// (`<app-data>/berdctl/control-<app-pid>.json`). Duplicated by hand from
@@ -90,8 +91,6 @@ fn read_private_discovery_file(path: &Path) -> Result<String, String> {
     use std::io::Read;
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 
-    const MAX_DISCOVERY_BYTES: u64 = 4096;
-
     // Check the containing directory first. Once it is owner-private, another
     // user cannot replace the final path while it is opened below.
     let parent = path
@@ -153,7 +152,230 @@ fn read_private_discovery_file(path: &Path) -> Result<String, String> {
     Ok(contents)
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn read_private_discovery_file(path: &Path) -> Result<String, String> {
+    use std::fs::File;
+    use std::io::Read;
+    use std::mem::zeroed;
+    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, RawHandle};
+    use windows_sys::Win32::Foundation::{GENERIC_READ, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Security::Authorization::{GetSecurityInfo, SE_FILE_OBJECT};
+    use windows_sys::Win32::Security::{DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION};
+    use windows_sys::Win32::Storage::FileSystem::{
+        CreateFileW, GetFileInformationByHandle, GetFileType, BY_HANDLE_FILE_INFORMATION,
+        FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_SHARE_DELETE, FILE_SHARE_READ,
+        FILE_SHARE_WRITE, FILE_TYPE_DISK, OPEN_EXISTING,
+    };
+
+    // FILE_FLAG_OPEN_REPARSE_POINT makes the handle refer to the reparse point
+    // itself rather than its target. This makes the reparse-point check below
+    // apply to the object we opened, not to a potentially attacker-selected target.
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    const READ_CONTROL: u32 = 0x0002_0000;
+
+    let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+    if wide.contains(&0) {
+        return Err(format!("cannot open {}: path contains NUL", path.display()));
+    }
+    wide.push(0);
+    let handle = unsafe {
+        CreateFileW(
+            wide.as_ptr(),
+            GENERIC_READ | READ_CONTROL,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            std::ptr::null(),
+            OPEN_EXISTING,
+            FILE_FLAG_OPEN_REPARSE_POINT,
+            0,
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        return Err(format!(
+            "cannot open {}: {}",
+            path.display(),
+            std::io::Error::last_os_error()
+        ));
+    }
+    // SAFETY: CreateFileW above returned an owned, valid handle.
+    let file = unsafe { File::from_raw_handle(handle as RawHandle) };
+
+    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { zeroed() };
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle() as _, &mut info) } == 0 {
+        return Err(format!(
+            "cannot inspect {}: {}",
+            path.display(),
+            std::io::Error::last_os_error()
+        ));
+    }
+    if info.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY) != 0
+        || unsafe { GetFileType(file.as_raw_handle() as _) } != FILE_TYPE_DISK
+    {
+        return Err(format!(
+            "{} is not a regular, non-reparse file",
+            path.display()
+        ));
+    }
+    let size = (u64::from(info.nFileSizeHigh) << 32) | u64::from(info.nFileSizeLow);
+    if size > MAX_DISCOVERY_BYTES {
+        return Err(format!("{} is unexpectedly large", path.display()));
+    }
+
+    // GetSecurityInfo returns a self-contained descriptor for this handle. The
+    // ownership and DACL checks are therefore bound to the object read below,
+    // rather than a path that could be replaced between checks.
+    let mut owner = std::ptr::null_mut();
+    let mut dacl = std::ptr::null_mut();
+    let mut descriptor = std::ptr::null_mut();
+    let security_error = unsafe {
+        GetSecurityInfo(
+            file.as_raw_handle() as _,
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+            &mut owner,
+            std::ptr::null_mut(),
+            &mut dacl,
+            std::ptr::null_mut(),
+            &mut descriptor,
+        )
+    };
+    if security_error != 0 {
+        return Err(format!(
+            "cannot inspect permissions for {}: Windows error {security_error}",
+            path.display()
+        ));
+    }
+    let permissions = unsafe { windows_discovery_permissions_are_private(owner, dacl) };
+    // SAFETY: GetSecurityInfo allocated this descriptor with LocalAlloc.
+    unsafe { windows_sys::Win32::Foundation::LocalFree(descriptor as _) };
+    permissions.map_err(|reason| format!("{} {reason}", path.display()))?;
+
+    let mut contents = String::new();
+    file.take(MAX_DISCOVERY_BYTES + 1)
+        .read_to_string(&mut contents)
+        .map_err(|err| format!("cannot read {}: {err}", path.display()))?;
+    if contents.len() as u64 > MAX_DISCOVERY_BYTES {
+        return Err(format!("{} is unexpectedly large", path.display()));
+    }
+    Ok(contents)
+}
+
+/// Verifies the handle's owner and DACL. An absent DACL grants everyone full
+/// access, and an allow ACE for an identity other than the owner, SYSTEM, or
+/// Administrators can expose or replace the capability, so both fail closed.
+#[cfg(windows)]
+unsafe fn windows_discovery_permissions_are_private(
+    owner: windows_sys::Win32::Foundation::PSID,
+    dacl: *mut windows_sys::Win32::Security::ACL,
+) -> Result<(), &'static str> {
+    use std::mem::size_of;
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::Security::{
+        EqualSid, GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER,
+    };
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    if owner.is_null() || dacl.is_null() {
+        return Err("does not have an owner-private DACL");
+    }
+    let mut token = 0;
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
+        return Err("cannot determine the current user");
+    }
+    let mut size = 0;
+    unsafe { GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut size) };
+    if size < size_of::<TOKEN_USER>() {
+        unsafe { CloseHandle(token) };
+        return Err("cannot determine the current user");
+    }
+    let mut bytes = vec![0u8; size as usize];
+    let ok = unsafe {
+        GetTokenInformation(token, TokenUser, bytes.as_mut_ptr().cast(), size, &mut size)
+    } != 0;
+    unsafe { CloseHandle(token) };
+    if !ok || bytes.len() < size_of::<TOKEN_USER>() {
+        return Err("cannot determine the current user");
+    }
+    let current_user = unsafe { (*(bytes.as_ptr().cast::<TOKEN_USER>())).User.Sid };
+    if current_user.is_null() || unsafe { EqualSid(owner, current_user) } == 0 {
+        return Err("is not owned by the current user");
+    }
+
+    // ACL and ACE layouts start with these fixed Windows ABI fields. Parsing
+    // only ordinary/callback allow ACEs lets us fail closed on every less
+    // familiar ACE type rather than accidentally treating it as private.
+    let acl = unsafe { &*dacl };
+    let mut offset = size_of::<windows_sys::Win32::Security::ACL>();
+    let acl_size = usize::from(acl.AclSize);
+    if acl_size < offset {
+        return Err("has a malformed DACL");
+    }
+    for _ in 0..acl.AceCount {
+        if offset.checked_add(8).map_or(true, |end| end > acl_size) {
+            return Err("has a malformed DACL");
+        }
+        let ace = unsafe { (dacl as *const u8).add(offset) };
+        let ace_type = unsafe { *ace };
+        let ace_size = usize::from(unsafe { *(ace.add(2).cast::<u16>()) });
+        if ace_size < 8
+            || ace_size % 4 != 0
+            || offset
+                .checked_add(ace_size)
+                .map_or(true, |end| end > acl_size)
+        {
+            return Err("has a malformed DACL");
+        }
+        // ACCESS_ALLOWED_ACE_TYPE and ACCESS_ALLOWED_CALLBACK_ACE_TYPE.
+        if matches!(ace_type, 0 | 9) {
+            let sid = unsafe { ace.add(8).cast() };
+            if !unsafe { windows_ace_sid_is_trusted(sid, ace_size - 8, current_user) } {
+                return Err("is accessible by other users");
+            }
+        } else if !matches!(ace_type, 1 | 6 | 10 | 12) {
+            // Deny ACEs only further restrict access. Every other ACE type is
+            // rejected, including object/callback allow ACEs whose SID has a
+            // variable layout, so an unfamiliar granting ACE cannot slip by.
+            return Err("has an unsupported DACL entry");
+        }
+        offset += ace_size;
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+unsafe fn windows_ace_sid_is_trusted(
+    sid: windows_sys::Win32::Foundation::PSID,
+    available_bytes: usize,
+    current_user: windows_sys::Win32::Foundation::PSID,
+) -> bool {
+    use windows_sys::Win32::Security::EqualSid;
+
+    if sid.is_null() || available_bytes < 8 {
+        return false;
+    }
+    if unsafe { EqualSid(sid, current_user) } != 0 {
+        return true;
+    }
+    // The SID is embedded in the ACE, so validate its variable-length layout
+    // against that ACE before inspecting its authority and sub-authorities.
+    let sid = sid as *const u8;
+    let revision = unsafe { *sid };
+    let count = unsafe { *sid.add(1) };
+    let Some(sid_len) = 8usize.checked_add(usize::from(count).saturating_mul(4)) else {
+        return false;
+    };
+    if revision != 1 || sid_len > available_bytes {
+        return false;
+    }
+    // S-1-5-18 (LOCAL SYSTEM) and S-1-5-32-544 (BUILTIN\\Administrators)
+    // are privileged principals, not other unprivileged users.
+    let authority = unsafe { std::slice::from_raw_parts(sid.add(2), 6) };
+    let sub_authorities =
+        unsafe { std::slice::from_raw_parts(sid.add(8).cast::<u32>(), usize::from(count)) };
+    authority == [0, 0, 0, 0, 0, 5] && matches!(sub_authorities, [18] | [32, 544])
+}
+
+#[cfg(all(not(unix), not(windows)))]
 fn read_private_discovery_file(path: &Path) -> Result<String, String> {
     std::fs::read_to_string(path).map_err(|err| format!("cannot read {}: {err}", path.display()))
 }
