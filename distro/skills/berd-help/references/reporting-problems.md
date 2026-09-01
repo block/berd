@@ -1,9 +1,22 @@
 # Reporting Problems
 
-Route app-level bugs, crashes, and feedback through Berd's built-in feedback
-flow rather than improvising a report. The default path mirrors the in-app
-Feedback dialog: prefill a report and let the user review it before anything
-is sent.
+Route app-level bugs, crashes, and feedback through an available feedback
+route rather than improvising a report. Routes vary by build — verify which
+exist before recommending one, and use the first that applies:
+
+1. Run `berdctl feedback --help`. If the `feedback` subcommand exists,
+   follow the guidance below. If invoking it reports that feedback is
+   unavailable or disabled, continue to the next route.
+2. Otherwise, check whether the app shows a visible in-app feedback action
+   (labeled "Send feedback"). If it's visible, point the user there —
+   don't assume it's present.
+3. Otherwise, the fallback is the public issue tracker:
+   https://github.com/block/berd/issues. You may help the user draft a
+   report (title, description, steps to reproduce, app version, OS), but
+   the user reviews and files it themselves. Never file on their behalf,
+   and never invent another URL or email for reports.
+
+When `berdctl feedback` exists:
 
 - Prefer `berdctl feedback open --title <title> --description <description>`
   (add `--include-logs` only when the user wants diagnostics attached). This
