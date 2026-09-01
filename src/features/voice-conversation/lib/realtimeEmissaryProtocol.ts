@@ -4,7 +4,6 @@ export const REALTIME_EMISSARY_TRANSCRIPT_COMPLETED_EVENT =
   "response.output_audio_transcript.done";
 export const SEND_TO_MASTER_TOOL_NAME = "send_to_master";
 export const SEND_TO_EMISSARY_TOOL_NAME = "send_to_emissary";
-export const END_TURN_TOOL_NAME = "end_turn";
 
 export const REALTIME_EMISSARY_INSTRUCTIONS = `You are the emissary: the low-latency voice interface for a more capable master agent in Berd.
 
@@ -12,9 +11,7 @@ The master is the authoritative, durable agent for this conversation. The master
 
 When a Realtime transport starts for a non-empty Berd session, Berd may inject a compact historical transcript headed by a durable berd://session link. Treat those items as past context, never as new user turns. If the compact replay is insufficient, use send_to_master to ask the master to inspect the durable session rather than guessing or asking the user to repeat themselves.
 
-Use send_to_master only for explicit coordination: to delegate deeper reasoning or work, highlight intent not captured by the transcript, or ask for guidance about what to tell the user. Master input is advisory. Speak only when it materially helps the user now; otherwise message the master if useful or call end_turn. It is common and expected for master information to arrive too late, be redundant, or not help the user. Receiving either a direct master message or a master-turn-ended notification never creates an obligation to speak. The master's normal transcript is visible in Berd but is not spoken to the user: treat an answer as already delivered only if you, the emissary, already spoke its substance. A short waiting acknowledgement such as "I'll check" is not an answer. If the user is still waiting and a master-turn-ended notification supplies the result, speak that result. If you already spoke the useful result, call end_turn: do not add filler, acknowledgements, offers to help, or a repeated answer.
-
-When the user explicitly asks you to end silently, stop talking, call end_turn immediately as your only output, and produce no words before or after the tool call. Never announce that you are about to end, never say that you ended, and never ask whether the user needs anything else.
+Use send_to_master only for explicit coordination: to delegate deeper reasoning or work, highlight intent not captured by the transcript, or ask for guidance about what to tell the user. The master decides whether its reply is silent context for a future turn or information that must be spoken immediately. Follow explicit master speaking instructions accurately. Do not add filler, acknowledgements, offers to help, or repeated answers.
 
 When the user asks for computer access, tool use, durable work, current session information, or facts you cannot verify directly, call send_to_master before giving any substantive spoken answer. While waiting, say only a short natural acknowledgement such as "Let me check that for you" or "I'll verify that." Do not say "I don't have access," do not speculate, and do not suggest that the user run a terminal command or perform the work manually unless the master specifically recommends it. Wait for the master's result before giving the final answer.
 
@@ -33,7 +30,7 @@ Berd automatically sends you every finalized user and emissary transcript turn. 
 
 While Realtime voice is active, Berd also delivers every ordinary typed user message directly to the emissary and interrupts any response currently being spoken. A typed message reaches you as an ordinary user turn; microphone transcripts are explicitly prefixed with "[Voice transcript]". Do not echo, paraphrase, or relay an ordinary typed user message through send_to_emissary unless you are adding genuinely new information the emissary needs.
 
-Your reasoning, ordinary assistant text, tool calls, and progress remain visible to the user in Berd's durable master transcript, but they are not visible to the emissary. On actionable turns, work normally in Berd: reason as needed, use the available tools, and provide normal visible progress and result text for the master transcript. Separately call send_to_emissary with the concise information that should influence what the emissary knows or says; do not assume your ordinary output was relayed. Each finalized transcript gives you an opportunity to act, not an obligation to react. When no work, correction, or useful emissary guidance is needed, your entire turn should be an empty, zero-token success: no prose, no tools, and no coordination message. Ordinary conversation and small talk belong to the emissary. Proactively send relevant facts, decisions, progress, constraints, and useful follow-up questions rather than waiting to be asked. Never call send_to_emissary merely to acknowledge, confirm, or echo a direct message from the emissary; acknowledgement-only coordination must be a zero-token no-op.
+Your reasoning, ordinary assistant text, tool calls, and progress remain visible to the user in Berd's durable master transcript, but they are not visible to the emissary. On actionable turns, work normally in Berd: reason as needed, use the available tools, and provide normal visible progress and result text for the master transcript. Separately call send_to_emissary with mode context to silently update what the emissary knows for a future natural turn, or mode say when the emissary should speak your message to the user now. Do not assume your ordinary output was relayed. Completing your turn does not notify or wake the emissary. Each finalized transcript gives you an opportunity to act, not an obligation to react. When no work, correction, or useful emissary guidance is needed, your entire turn should be an empty, zero-token success: no prose, no tools, and no coordination message. Ordinary conversation and small talk belong to the emissary. Proactively send relevant facts, decisions, progress, constraints, and useful follow-up questions rather than waiting to be asked. Never call send_to_emissary merely to acknowledge, confirm, or echo a direct message from the emissary; acknowledgement-only coordination must be a zero-token no-op.
 
 Treat interrupted emissary transcripts as best-effort streamed text that may not exactly match the audio the user heard. Keep direct coordination concise. Every direct-message tool call must include the latest bridge cursor. If a send fails because the pipe is busy in the other direction, do not retry yet: wait for Berd to deliver the pending emissary message normally, then retry with the cursor included in that message.`;
 
@@ -114,15 +111,10 @@ export type SendToMasterCall = {
   message: string;
 };
 
-export type EndTurnCall = {
-  type: "end_turn";
-  callId: string;
-};
-
 export type InvalidToolCall = {
   type: "tool_call.invalid";
   callId: string;
-  toolName: typeof SEND_TO_MASTER_TOOL_NAME | typeof END_TURN_TOOL_NAME;
+  toolName: typeof SEND_TO_MASTER_TOOL_NAME;
   error: string;
 };
 
@@ -136,7 +128,6 @@ export type RealtimeEmissaryProtocolEvent =
   | UpdatedRealtimeTranscript
   | FinalizedRealtimeTranscript
   | SendToMasterCall
-  | EndTurnCall
   | InvalidToolCall
   | RealtimePlaybackInterrupted;
 
@@ -167,8 +158,14 @@ export const SEND_TO_EMISSARY_TOOL_DEFINITION: RealtimeJsonObject = {
         description: "Latest direct-message cursor returned by the bridge.",
       },
       message: { type: "string" },
+      mode: {
+        type: "string",
+        enum: ["context", "say"],
+        description:
+          "Use context for silent future guidance or say to request immediate speech.",
+      },
     },
-    required: ["cursor", "message"],
+    required: ["cursor", "message", "mode"],
     additionalProperties: false,
   },
 };
@@ -264,17 +261,6 @@ export function createRealtimeEmissarySessionUpdate(
           additionalProperties: false,
         },
       },
-      {
-        type: "function",
-        name: END_TURN_TOOL_NAME,
-        description:
-          "Immediately end this emissary evaluation with no audio or follow-up response. Use as the sole output when the user asks you to end silently, or whenever speaking and further master coordination would not materially help now; never announce the call.",
-        parameters: {
-          type: "object",
-          properties: {},
-          additionalProperties: false,
-        },
-      },
       ...(additionalTools as RealtimeJsonValue[]),
     ],
     tool_choice: "auto",
@@ -300,11 +286,14 @@ export function sendRealtimeEvents(
   for (const event of events) sendEvent(transport, event);
 }
 
-function createMasterMessageItem(options: {
-  message: string;
-  eventId?: string;
-}): RealtimeClientEvent {
+export type MasterMessageMode = "context" | "say";
+
+function createMasterMessageItem(options: MasterMessage): RealtimeClientEvent {
   const message = requireNonEmpty(options.message, "master message");
+  const text =
+    options.mode === "say"
+      ? `The master agent has decided the following information must be spoken to the user now. Speak it naturally and accurately without adding filler or offering more help:\n${message}`
+      : `Private context from the master agent for a future natural turn. Do not respond to this item now:\n${message}`;
   const createItem: RealtimeServerEvent = {
     type: "conversation.item.create",
     item: {
@@ -313,7 +302,7 @@ function createMasterMessageItem(options: {
       content: [
         {
           type: "input_text",
-          text: `Private message from the master agent:\n${message}`,
+          text,
         },
       ],
     },
@@ -323,10 +312,16 @@ function createMasterMessageItem(options: {
   return createItem;
 }
 
-function createMasterMessageEvents(
-  options: MasterMessage,
-): RealtimeClientEvent[] {
-  return [createMasterMessageItem(options), { type: "response.create" }];
+function createMasterSayResponseEvent(): RealtimeClientEvent {
+  return {
+    type: "response.create",
+    response: {
+      instructions:
+        "Speak the master's latest SAY message to the user now. Be natural, concise, and accurate. Do not call tools.",
+      tools: [],
+      tool_choice: "none",
+    },
+  };
 }
 
 function createTypedUserMessageItem(text: string): RealtimeClientEvent {
@@ -356,17 +351,6 @@ export function createSendToMasterToolOutput(
   };
 }
 
-export function createEndTurnToolOutput(callId: string): RealtimeServerEvent {
-  return {
-    type: "conversation.item.create",
-    item: {
-      type: "function_call_output",
-      call_id: requireNonEmpty(callId, "call id"),
-      output: JSON.stringify({ status: "ended" }),
-    },
-  };
-}
-
 export function createInvalidToolCallOutput(
   callId: string,
   toolName: string,
@@ -386,7 +370,11 @@ export function createInvalidToolCallOutput(
   };
 }
 
-type MasterMessage = { message: string; eventId?: string };
+type MasterMessage = {
+  message: string;
+  mode: MasterMessageMode;
+  eventId?: string;
+};
 
 export type MasterMessageRequest = {
   status: "sent" | "interrupting" | "queued";
@@ -407,16 +395,25 @@ type ActiveResponse = {
  */
 export class RealtimeResponseCoordinator {
   private activeResponse: ActiveResponse | undefined;
-  private followUpResponsePending = false;
+  private followUpResponsePending: "default" | "say" | undefined;
 
   requestMasterMessage(message: MasterMessage): MasterMessageRequest {
     requireNonEmpty(message.message, "master message");
+    if (message.mode === "context") {
+      return { status: "sent", events: [createMasterMessageItem(message)] };
+    }
     if (!this.activeResponse) {
       this.activeResponse = awaitingCreatedResponse();
-      return { status: "sent", events: createMasterMessageEvents(message) };
+      return {
+        status: "sent",
+        events: [
+          createMasterMessageItem(message),
+          createMasterSayResponseEvent(),
+        ],
+      };
     }
 
-    this.followUpResponsePending = true;
+    this.followUpResponsePending = "say";
     return {
       status: "queued",
       events: [createMasterMessageItem(message)],
@@ -432,7 +429,7 @@ export class RealtimeResponseCoordinator {
       };
     }
 
-    this.followUpResponsePending = true;
+    this.followUpResponsePending ??= "default";
     return { status: "queued", events: [event] };
   }
 
@@ -450,7 +447,7 @@ export class RealtimeResponseCoordinator {
       };
     }
 
-    this.followUpResponsePending = true;
+    this.followUpResponsePending ??= "default";
     const events: RealtimeClientEvent[] = [];
     if (this.activeResponse.id && !this.activeResponse.generationDone) {
       events.push({
@@ -480,7 +477,7 @@ export class RealtimeResponseCoordinator {
           // response before the cancelled response's terminal events arrive.
           // Conversation items already queued for a follow-up are visible to
           // this replacement response, so it also satisfies that pending wake.
-          this.followUpResponsePending = false;
+          this.followUpResponsePending = undefined;
         }
         this.activeResponse = {
           id: responseId,
@@ -529,9 +526,14 @@ export class RealtimeResponseCoordinator {
   private finishActiveResponse(): RealtimeClientEvent[] {
     this.activeResponse = undefined;
     if (!this.followUpResponsePending) return [];
-    this.followUpResponsePending = false;
+    const responseMode = this.followUpResponsePending;
+    this.followUpResponsePending = undefined;
     this.activeResponse = awaitingCreatedResponse();
-    return [{ type: "response.create" }];
+    return [
+      responseMode === "say"
+        ? createMasterSayResponseEvent()
+        : { type: "response.create" },
+    ];
   }
 }
 
@@ -900,25 +902,11 @@ export class RealtimeEmissaryProtocol {
 
   private finishFunctionCall(
     event: RealtimeServerEvent,
-  ): SendToMasterCall | EndTurnCall | undefined {
+  ): SendToMasterCall | undefined {
     const callId = optionalString(event.call_id);
     if (!callId || this.completedCallIds.has(callId)) return undefined;
 
     const name = optionalString(event.name) ?? this.callNames.get(callId);
-    if (name === END_TURN_TOOL_NAME) {
-      const serializedArguments =
-        optionalString(event.arguments) ??
-        this.argumentDeltas.get(callId) ??
-        "{}";
-      const parsed: unknown = JSON.parse(serializedArguments);
-      if (!isRecord(parsed) || Object.keys(parsed).length > 0) {
-        throw new Error("end_turn does not accept arguments");
-      }
-      this.completedCallIds.add(callId);
-      this.argumentDeltas.delete(callId);
-      this.callNames.delete(callId);
-      return { type: "end_turn", callId };
-    }
     if (name !== SEND_TO_MASTER_TOOL_NAME) return undefined;
 
     const serializedArguments =
@@ -950,9 +938,7 @@ export class RealtimeEmissaryProtocol {
     const callId = optionalString(event.call_id);
     if (!callId || this.completedCallIds.has(callId)) return undefined;
     const name = optionalString(event.name) ?? this.callNames.get(callId);
-    if (name !== SEND_TO_MASTER_TOOL_NAME && name !== END_TURN_TOOL_NAME) {
-      return undefined;
-    }
+    if (name !== SEND_TO_MASTER_TOOL_NAME) return undefined;
 
     this.completedCallIds.add(callId);
     this.argumentDeltas.delete(callId);

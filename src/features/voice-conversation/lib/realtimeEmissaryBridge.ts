@@ -1,6 +1,7 @@
 import type {
   DirectBridgeMessage,
   DirectMessageExchange,
+  MasterMessageMode,
 } from "./realtimeEmissaryProtocol";
 
 export type MasterMessageDelivery =
@@ -14,18 +15,11 @@ export type MasterMessageDelivery =
 
 export interface ActiveRealtimeEmissary {
   sessionId: string;
-  beginMasterTurn(turnId: string): void;
-  endMasterTurn(completion: MasterTurnCompletion): void;
   sendMasterMessage(
     message: string,
     cursor: number,
+    mode: MasterMessageMode,
   ): Promise<MasterMessageDelivery>;
-}
-
-export interface MasterTurnCompletion {
-  turnId: string;
-  status: "completed" | "cancelled" | "failed";
-  finalText?: string;
 }
 
 let activeEmissary: ActiveRealtimeEmissary | null = null;
@@ -43,19 +37,6 @@ export function getActiveRealtimeEmissary(): ActiveRealtimeEmissary | null {
   return activeEmissary;
 }
 
-export function beginActiveRealtimeMasterTurn(
-  sessionId: string,
-  turnId: string,
-): boolean {
-  if (!activeEmissary || activeEmissary.sessionId !== sessionId) return false;
-  activeEmissary.beginMasterTurn(turnId);
-  return true;
-}
-
-export function endActiveRealtimeMasterTurn(
-  sessionId: string,
-  completion: MasterTurnCompletion,
-): void {
-  if (!activeEmissary || activeEmissary.sessionId !== sessionId) return;
-  activeEmissary.endMasterTurn(completion);
+export function hasActiveRealtimeEmissary(sessionId: string): boolean {
+  return activeEmissary?.sessionId === sessionId;
 }

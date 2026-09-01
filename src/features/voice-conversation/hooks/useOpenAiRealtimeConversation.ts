@@ -24,14 +24,13 @@ import {
 } from "@/features/chat/lib/openaiRealtimeAudio";
 import {
   type MasterMessageDelivery,
-  type MasterTurnCompletion,
   registerRealtimeEmissary,
 } from "../lib/realtimeEmissaryBridge";
 import {
-  createEndTurnToolOutput,
   createInvalidToolCallOutput,
   createSendToMasterToolOutput,
   DirectMessagePipe,
+  type MasterMessageMode,
   REALTIME_MASTER_INSTRUCTIONS,
   RealtimeEmissaryProtocol,
   RealtimeResponseCoordinator,
@@ -217,30 +216,6 @@ function createCoordinationMessage(
   };
 }
 
-function createMasterTurnEndedMessage(
-  status: "completed" | "cancelled" | "failed",
-  finalText?: string,
-): Message {
-  const summary = finalText?.trim()
-    ? "Final response shown above."
-    : status === "completed"
-      ? "No final response text."
-      : `The Master turn ${status}.`;
-  return {
-    id: crypto.randomUUID(),
-    role: "assistant",
-    created: Date.now(),
-    content: [{ type: "text", text: summary }],
-    metadata: {
-      userVisible: true,
-      agentVisible: false,
-      origin: "voice_conversation",
-      personaName: "Master ended turn",
-      completionStatus: "completed",
-    },
-  };
-}
-
 function visibleMessageText(message: Message): string {
   return message.content
     .flatMap((content) => (content.type === "text" ? [content.text] : []))
@@ -341,9 +316,9 @@ function waitForDataChannelOpen(channel: RTCDataChannel): Promise<void> {
 function masterPrompt(sessionId: string): string {
   return `${REALTIME_MASTER_INSTRUCTIONS}
 
-Your send_to_emissary tool is the Berd CLI command below. The initial bridge cursor is 0. Always use the latest cursor returned by a successful command or stale-send error.
+Your send_to_emissary tool is the Berd CLI command below. The initial bridge cursor is 0. Always use the latest cursor returned by a successful command or stale-send error. Choose --mode context to silently update the emissary's context for a future natural turn. Choose --mode say only when the emissary should speak your message to the user now. Finishing your turn does not notify or wake the emissary, so send explicitly when needed.
 
-berdctl session send-to-emissary --session-id ${JSON.stringify(sessionId)} --cursor <cursor> --message <message> --json`;
+berdctl session send-to-emissary --session-id ${JSON.stringify(sessionId)} --cursor <cursor> --mode <context|say> --message <message> --json`;
 }
 
 type RuntimeState = ChatInputVoiceConversation["state"];
@@ -375,11 +350,11 @@ class OpenAiRealtimeConversationRuntime {
   private audio: HTMLAudioElement | null = null;
   private releaseBridge: (() => void) | null = null;
   private bridgeSender:
-    | ((message: string, cursor: number) => Promise<MasterMessageDelivery>)
-    | null = null;
-  private bridgeMasterTurnBegin: ((turnId: string) => void) | null = null;
-  private bridgeMasterTurnEnd:
-    | ((completion: MasterTurnCompletion) => void)
+    | ((
+        message: string,
+        cursor: number,
+        mode: MasterMessageMode,
+      ) => Promise<MasterMessageDelivery>)
     | null = null;
   private activeRun = 0;
   private deliveryQueue = Promise.resolve();
@@ -513,8 +488,6 @@ class OpenAiRealtimeConversationRuntime {
       const responses = new RealtimeResponseCoordinator();
       const pipe = new DirectMessagePipe();
       const transcriptMessageIds = new Map<string, string>();
-      const masterTurnHandoffs = new Map<string, number>();
-      let activeMasterTurnId: string | null = null;
       let userTranscriptRevision = 0;
       let masterDeliveryRevision: number | undefined;
       const upsertTranscriptMessage = (
@@ -651,10 +624,6 @@ class OpenAiRealtimeConversationRuntime {
                   false,
                 );
               }
-            } else if (bridgeEvent.type === "end_turn") {
-              sendRealtimeEvents(transport, [
-                createEndTurnToolOutput(bridgeEvent.callId),
-              ]);
             } else if (bridgeEvent.type === "tool_call.invalid") {
               const toolFollowUp = responses.requestToolOutput(
                 createInvalidToolCallOutput(
@@ -715,17 +684,12 @@ class OpenAiRealtimeConversationRuntime {
           ),
         );
       });
-      this.bridgeSender = async (message, cursor) => {
+      this.bridgeSender = async (message, cursor, mode) => {
         const exchange = pipe.send({ sender: "master", cursor, message });
         if (!exchange.accepted) return exchange;
-        if (activeMasterTurnId) {
-          masterTurnHandoffs.set(
-            activeMasterTurnId,
-            (masterTurnHandoffs.get(activeMasterTurnId) ?? 0) + 1,
-          );
-        }
         const request = responses.requestMasterMessage({
           message: `[bridge cursor ${exchange.outbound.id}] ${message}`,
+          mode,
           eventId: `berd-master-${exchange.outbound.id}`,
         });
         sendRealtimeEvents(transport, request.events);
@@ -740,45 +704,6 @@ class OpenAiRealtimeConversationRuntime {
             createCoordinationMessage("Master", "Emissary", message),
           );
         return { ...exchange, deliveryStatus: request.status };
-      };
-      this.bridgeMasterTurnBegin = (turnId) => {
-        activeMasterTurnId = turnId;
-        masterTurnHandoffs.set(turnId, 0);
-      };
-      this.bridgeMasterTurnEnd = (completion) => {
-        const handoffCount = masterTurnHandoffs.get(completion.turnId) ?? 0;
-        masterTurnHandoffs.delete(completion.turnId);
-        if (activeMasterTurnId === completion.turnId) {
-          activeMasterTurnId = null;
-        }
-        const finalText = completion.finalText?.trim();
-        const notification = [
-          `Master turn ended (${completion.status}).`,
-          handoffCount > 0
-            ? `The Master sent ${handoffCount} direct message${handoffCount === 1 ? "" : "s"} during this turn.`
-            : "The Master sent no direct messages during this turn.",
-          finalText
-            ? `Final response:\n${finalText}`
-            : "The Master produced no final response text.",
-          "Evaluate whether the user still needs anything from this information. The Master's visible Berd output was not spoken. If you only gave a waiting acknowledgement and this notification now supplies the answer, speak the answer. If you already spoke the useful result, this is late or redundant, or there is no materially useful new information, call end_turn now. Do not speak filler, acknowledge receipt, offer more help, or repeat an answer.",
-        ].join("\n");
-        const request = responses.requestMasterMessage({
-          message: notification,
-          eventId: `berd-master-turn-ended-${completion.turnId}`,
-        });
-        sendRealtimeEvents(transport, request.events);
-        const ownerSessionId = this.snapshot.boundSessionId;
-        if (ownerSessionId) {
-          useChatStore
-            .getState()
-            .addMessage(
-              ownerSessionId,
-              createMasterTurnEndedMessage(
-                completion.status,
-                completion.finalText,
-              ),
-            );
-        }
       };
       this.registerBridge(this.snapshot.boundSessionId ?? sessionId);
       this.setSnapshot({ ...this.snapshot, state: "listening" });
@@ -832,8 +757,6 @@ class OpenAiRealtimeConversationRuntime {
     if (sessionId) await this.cleanupResources(sessionId);
     this.boundOnSend = null;
     this.bridgeSender = null;
-    this.bridgeMasterTurnBegin = null;
-    this.bridgeMasterTurnEnd = null;
     this.typedUserMessageSink = null;
     this.pendingTypedUserMessages = [];
     this.failureInProgress = false;
@@ -967,8 +890,6 @@ class OpenAiRealtimeConversationRuntime {
     this.audio?.pause();
     this.releaseBridge = null;
     this.bridgeSender = null;
-    this.bridgeMasterTurnBegin = null;
-    this.bridgeMasterTurnEnd = null;
     this.typedUserMessageSink = null;
     this.pendingTypedUserMessages = [];
     this.channel = null;
@@ -989,17 +910,10 @@ class OpenAiRealtimeConversationRuntime {
   }
 
   private registerBridge(sessionId: string): void {
-    if (
-      !this.bridgeSender ||
-      !this.bridgeMasterTurnBegin ||
-      !this.bridgeMasterTurnEnd
-    )
-      return;
+    if (!this.bridgeSender) return;
     this.releaseBridge?.();
     this.releaseBridge = registerRealtimeEmissary({
       sessionId,
-      beginMasterTurn: this.bridgeMasterTurnBegin,
-      endMasterTurn: this.bridgeMasterTurnEnd,
       sendMasterMessage: this.bridgeSender,
     });
   }

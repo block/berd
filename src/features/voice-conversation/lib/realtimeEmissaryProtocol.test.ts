@@ -7,7 +7,6 @@ import {
   RealtimeEmissaryProtocol,
   RealtimeResponseCoordinator,
   configureRealtimeEmissarySession,
-  createEndTurnToolOutput,
   createInvalidToolCallOutput,
   createRealtimeEmissarySessionUpdate,
   createSendToMasterToolOutput,
@@ -52,23 +51,12 @@ describe("Realtime emissary session configuration", () => {
       "Never acknowledge, confirm, summarize, or copy a master message",
     );
     expect(event.session.instructions).toContain(
-      "Master input is advisory. Speak only when it materially helps the user now",
-    );
-    expect(event.session.instructions).toContain(
-      "call end_turn immediately as your only output",
-    );
-    expect(event.session.instructions).toContain(
-      "produce no words before or after the tool call",
+      "The master decides whether its reply is silent context",
     );
     expect(event.session.tools).toEqual([
       expect.objectContaining({
         type: "function",
         name: "send_to_master",
-        parameters: expect.objectContaining({ additionalProperties: false }),
-      }),
-      expect.objectContaining({
-        type: "function",
-        name: "end_turn",
         parameters: expect.objectContaining({ additionalProperties: false }),
       }),
     ]);
@@ -101,7 +89,6 @@ describe("Realtime emissary session configuration", () => {
       ),
       tools: [
         expect.objectContaining({ name: "send_to_master" }),
-        expect.objectContaining({ name: "end_turn" }),
         expect.objectContaining({ name: "look_up_status" }),
       ],
     });
@@ -207,6 +194,12 @@ describe("Realtime emissary session configuration", () => {
       "Separately call send_to_emissary",
     );
     expect(REALTIME_MASTER_INSTRUCTIONS).toContain(
+      "mode context to silently update",
+    );
+    expect(REALTIME_MASTER_INSTRUCTIONS).toContain(
+      "Completing your turn does not notify or wake the emissary",
+    );
+    expect(REALTIME_MASTER_INSTRUCTIONS).toContain(
       "entire turn should be an empty, zero-token success",
     );
     expect(REALTIME_MASTER_INSTRUCTIONS).toContain(
@@ -221,7 +214,7 @@ describe("Realtime emissary session configuration", () => {
     expect(SEND_TO_EMISSARY_TOOL_DEFINITION).toMatchObject({
       name: "send_to_emissary",
       parameters: {
-        required: ["cursor", "message"],
+        required: ["cursor", "message", "mode"],
         additionalProperties: false,
       },
     });
@@ -528,42 +521,6 @@ describe("RealtimeEmissaryProtocol", () => {
     ).toEqual([]);
   });
 
-  it("emits an explicit argument-free end_turn call once", () => {
-    const protocol = new RealtimeEmissaryProtocol();
-    protocol.handle({
-      type: "response.output_item.added",
-      item: {
-        type: "function_call",
-        name: "end_turn",
-        call_id: "call-end",
-      },
-    });
-
-    expect(
-      protocol.handle({
-        type: "response.function_call_arguments.done",
-        call_id: "call-end",
-        arguments: "{}",
-      }),
-    ).toEqual([{ type: "end_turn", callId: "call-end" }]);
-    expect(
-      protocol.handle({
-        type: "response.function_call_arguments.done",
-        name: "end_turn",
-        call_id: "call-end",
-        arguments: "{}",
-      }),
-    ).toEqual([]);
-    expect(createEndTurnToolOutput("call-end")).toEqual({
-      type: "conversation.item.create",
-      item: {
-        type: "function_call_output",
-        call_id: "call-end",
-        output: '{"status":"ended"}',
-      },
-    });
-  });
-
   it("rejects malformed send_to_master arguments", () => {
     const protocol = new RealtimeEmissaryProtocol();
     expect(
@@ -664,7 +621,7 @@ describe("master message injection", () => {
 
   it("interrupts active generation and playback for typed user text", () => {
     const coordinator = new RealtimeResponseCoordinator();
-    coordinator.requestMasterMessage({ message: "context" });
+    coordinator.requestMasterMessage({ message: "context", mode: "say" });
     coordinator.handle({
       type: "response.created",
       response: { id: "response-1" },
@@ -715,7 +672,10 @@ describe("master message injection", () => {
       type: "output_audio_buffer.started",
       response_id: "response-1",
     });
-    coordinator.requestMasterMessage({ message: "Queued master context." });
+    coordinator.requestMasterMessage({
+      message: "Queued master context.",
+      mode: "say",
+    });
 
     expect(
       coordinator.handle({
@@ -737,29 +697,66 @@ describe("master message injection", () => {
     ).toEqual([]);
 
     expect(
-      coordinator.requestMasterMessage({ message: "A later result." }),
+      coordinator.requestMasterMessage({
+        message: "A later result.",
+        mode: "say",
+      }),
     ).toMatchObject({ status: "sent" });
   });
 
   it("creates no emissary event for empty master output", () => {
     const coordinator = new RealtimeResponseCoordinator();
 
-    expect(() => coordinator.requestMasterMessage({ message: "   " })).toThrow(
-      "master message cannot be empty",
-    );
+    expect(() =>
+      coordinator.requestMasterMessage({ message: "   ", mode: "context" }),
+    ).toThrow("master message cannot be empty");
 
     // Rejection leaves the coordinator idle; no hidden response lifecycle was
     // created for the empty master turn.
     expect(
-      coordinator.requestMasterMessage({ message: "Useful guidance." }).status,
+      coordinator.requestMasterMessage({
+        message: "Useful guidance.",
+        mode: "context",
+      }).status,
     ).toBe("sent");
   });
 
-  it("injects private master context and requests an emissary response", () => {
+  it("injects private master context without requesting a response", () => {
+    const coordinator = new RealtimeResponseCoordinator();
+
+    expect(
+      coordinator.requestMasterMessage({
+        message: "Keep this in mind.",
+        mode: "context",
+        eventId: "context-1",
+      }),
+    ).toEqual({
+      status: "sent",
+      events: [
+        {
+          type: "conversation.item.create",
+          event_id: "context-1",
+          item: {
+            type: "message",
+            role: "system",
+            content: [
+              {
+                type: "input_text",
+                text: "Private context from the master agent for a future natural turn. Do not respond to this item now:\nKeep this in mind.",
+              },
+            ],
+          },
+        },
+      ],
+    });
+  });
+
+  it("injects a master SAY message and requests a tool-free response", () => {
     const coordinator = new RealtimeResponseCoordinator();
     const transport = { send: vi.fn() };
     const events = coordinator.requestMasterMessage({
       message: "Relay the result.",
+      mode: "say",
       eventId: "m1",
     }).events;
     sendRealtimeEvents(transport, events);
@@ -776,12 +773,20 @@ describe("master message injection", () => {
           content: [
             {
               type: "input_text",
-              text: "Private message from the master agent:\nRelay the result.",
+              text: "The master agent has decided the following information must be spoken to the user now. Speak it naturally and accurately without adding filler or offering more help:\nRelay the result.",
             },
           ],
         },
       },
-      { type: "response.create" },
+      {
+        type: "response.create",
+        response: {
+          instructions:
+            "Speak the master's latest SAY message to the user now. Be natural, concise, and accurate. Do not call tools.",
+          tools: [],
+          tool_choice: "none",
+        },
+      },
     ]);
   });
 
@@ -824,7 +829,10 @@ describe("master message injection", () => {
       item: { type: "function_call_output", call_id: "call-1", output: "{}" },
     });
     expect(
-      coordinator.requestMasterMessage({ message: "The answer is 26." }),
+      coordinator.requestMasterMessage({
+        message: "The answer is 26.",
+        mode: "say",
+      }),
     ).toMatchObject({ status: "queued" });
     expect(
       coordinator.handle({
@@ -837,7 +845,12 @@ describe("master message injection", () => {
         type: "output_audio_buffer.stopped",
         response_id: "response-1",
       }),
-    ).toEqual([{ type: "response.create" }]);
+    ).toEqual([
+      expect.objectContaining({
+        type: "response.create",
+        response: expect.objectContaining({ tools: [], tool_choice: "none" }),
+      }),
+    ]);
   });
 
   it("requests a response immediately for a tool output while idle", () => {
@@ -853,11 +866,12 @@ describe("master message injection", () => {
     });
   });
 
-  it("sends immediately without cancelling when the session is idle", () => {
+  it("sends SAY immediately without cancelling when the session is idle", () => {
     const coordinator = new RealtimeResponseCoordinator();
 
     const request = coordinator.requestMasterMessage({
       message: "Keep this in mind.",
+      mode: "say",
     });
 
     expect(request.status).toBe("sent");
@@ -895,7 +909,10 @@ describe("master message injection", () => {
     ).toEqual([]);
 
     expect(
-      coordinator.requestMasterMessage({ message: "A later result." }),
+      coordinator.requestMasterMessage({
+        message: "A later result.",
+        mode: "say",
+      }),
     ).toMatchObject({ status: "sent" });
   });
 
@@ -911,7 +928,10 @@ describe("master message injection", () => {
     });
 
     expect(
-      coordinator.requestMasterMessage({ message: "First master message." }),
+      coordinator.requestMasterMessage({
+        message: "First master message.",
+        mode: "say",
+      }),
     ).toEqual({
       status: "queued",
       events: [
@@ -928,7 +948,10 @@ describe("master message injection", () => {
       ],
     });
     expect(
-      coordinator.requestMasterMessage({ message: "Second master message." }),
+      coordinator.requestMasterMessage({
+        message: "Second master message.",
+        mode: "say",
+      }),
     ).toEqual({
       status: "queued",
       events: [
@@ -956,7 +979,12 @@ describe("master message injection", () => {
         type: "output_audio_buffer.stopped",
         response_id: "response-1",
       }),
-    ).toEqual([{ type: "response.create" }]);
+    ).toEqual([
+      expect.objectContaining({
+        type: "response.create",
+        response: expect.objectContaining({ tools: [], tool_choice: "none" }),
+      }),
+    ]);
   });
 
   it("reports a busy reverse direction without consuming its message", () => {

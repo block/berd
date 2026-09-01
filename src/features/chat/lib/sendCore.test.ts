@@ -255,7 +255,7 @@ describe("dispatchPrompt voice conversation no-op", () => {
   });
 });
 
-describe("dispatchPrompt realtime Master turn lifecycle", () => {
+describe("dispatchPrompt realtime Master transcript recovery", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.acpExportSession.mockResolvedValue("{}");
@@ -269,14 +269,11 @@ describe("dispatchPrompt realtime Master turn lifecycle", () => {
     });
   });
 
-  it("publishes the normal final Master text at the terminal prompt boundary", async () => {
-    const beginMasterTurn = vi.fn();
-    const endMasterTurn = vi.fn();
+  it("does not notify the emissary when a Master turn completes", async () => {
+    const sendMasterMessage = vi.fn();
     const release = registerRealtimeEmissary({
       sessionId: "session-1",
-      beginMasterTurn,
-      endMasterTurn,
-      sendMasterMessage: vi.fn(),
+      sendMasterMessage,
     });
     mocks.acpSendMessage.mockImplementationOnce(
       (
@@ -306,116 +303,16 @@ describe("dispatchPrompt realtime Master turn lifecycle", () => {
 
     await dispatchPrompt("session-1", "Count repositories", {});
 
-    expect(beginMasterTurn).toHaveBeenCalledOnce();
-    const turnId = beginMasterTurn.mock.calls[0]?.[0];
-    expect(turnId).toEqual(expect.any(String));
-    expect(endMasterTurn).toHaveBeenCalledWith({
-      turnId,
-      status: "completed",
-      finalText: "There are 20 repositories.",
-    });
-    release();
-  });
-
-  it("publishes final text appended to a reused streaming assistant row", async () => {
-    const beginMasterTurn = vi.fn();
-    const endMasterTurn = vi.fn();
-    const release = registerRealtimeEmissary({
-      sessionId: "session-1",
-      beginMasterTurn,
-      endMasterTurn,
-      sendMasterMessage: vi.fn(),
-    });
-    useChatStore.getState().addMessage("session-1", {
-      id: "reused-stream",
-      role: "assistant",
-      created: Date.now(),
-      content: [{ type: "text", text: "" }],
-      metadata: { agentVisible: true, userVisible: true },
-    });
-    mocks.acpSendMessage.mockImplementationOnce(
-      (
-        sessionId: string,
-        _prompt: string,
-        options: {
-          onPromptDispatching(): void;
-          onPromptDispatched(): void;
-        },
-      ) => {
-        options.onPromptDispatching();
-        options.onPromptDispatched();
-        useChatStore
-          .getState()
-          .updateMessage(sessionId, "reused-stream", (message) => ({
-            ...message,
-            content: [{ type: "text", text: "There are 20 repositories." }],
-          }));
-        return Promise.resolve();
-      },
+    expect(sendMasterMessage).not.toHaveBeenCalled();
+    expect(useChatStore.getState().messagesBySession["session-1"]).toHaveLength(
+      2,
     );
-
-    await dispatchPrompt("session-1", "Count repositories", {});
-
-    expect(endMasterTurn).toHaveBeenCalledWith({
-      turnId: expect.any(String),
-      status: "completed",
-      finalText: "There are 20 repositories.",
-    });
-    release();
-  });
-
-  it("includes a final Master notification delivered just after prompt resolution", async () => {
-    const endMasterTurn = vi.fn();
-    const release = registerRealtimeEmissary({
-      sessionId: "session-1",
-      beginMasterTurn: vi.fn(),
-      endMasterTurn,
-      sendMasterMessage: vi.fn(),
-    });
-    mocks.acpSendMessage.mockImplementationOnce(
-      (
-        sessionId: string,
-        _prompt: string,
-        options: {
-          onPromptDispatching(): void;
-          onPromptDispatched(): void;
-        },
-      ) => {
-        options.onPromptDispatching();
-        options.onPromptDispatched();
-        window.setTimeout(() => {
-          useChatStore.getState().addMessage(sessionId, {
-            id: "late-master-final",
-            role: "assistant",
-            created: Date.now(),
-            content: [{ type: "text", text: "The late final answer." }],
-            metadata: {
-              agentVisible: true,
-              userVisible: true,
-              completionStatus: "completed",
-            },
-          });
-        }, 0);
-        return Promise.resolve();
-      },
-    );
-
-    await dispatchPrompt("session-1", "Check the answer", {});
-
-    expect(endMasterTurn).toHaveBeenCalledWith({
-      turnId: expect.any(String),
-      status: "completed",
-      finalText: "The late final answer.",
-    });
     release();
   });
 
   it("keeps a new-session Master turn owned until hydration publishes its final text", async () => {
-    const endMasterTurn = vi.fn();
     const release = registerRealtimeEmissary({
       sessionId: "session-1",
-      beginMasterTurn: vi.fn(),
-      endMasterTurn,
       sendMasterMessage: vi.fn(),
     });
     useChatStore.getState().setSessionLoading("session-1", true);
@@ -450,20 +347,18 @@ describe("dispatchPrompt realtime Master turn lifecycle", () => {
 
     await dispatchPrompt("session-1", "Check the answer", {});
 
-    expect(endMasterTurn).toHaveBeenCalledWith({
-      turnId: expect.any(String),
-      status: "completed",
-      finalText: "The hydrated final answer.",
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.at(-1),
+    ).toMatchObject({
+      id: "hydrating-master-final",
+      content: [{ type: "text", text: "The hydrated final answer." }],
     });
     release();
   });
 
   it("recovers missed Master thinking, tools, and final text from the durable turn", async () => {
-    const endMasterTurn = vi.fn();
     const release = registerRealtimeEmissary({
       sessionId: "session-1",
-      beginMasterTurn: vi.fn(),
-      endMasterTurn,
       sendMasterMessage: vi.fn(),
     });
     mocks.acpExportSession.mockResolvedValue(
@@ -554,59 +449,6 @@ describe("dispatchPrompt realtime Master turn lifecycle", () => {
         content: [{ type: "text", text: "There are 21 repositories." }],
       },
     ]);
-    expect(endMasterTurn).toHaveBeenCalledWith({
-      turnId: expect.any(String),
-      status: "completed",
-      finalText: "There are 21 repositories.",
-    });
-    release();
-  });
-
-  it("does not forward the backend empty-response placeholder as Master output", async () => {
-    const beginMasterTurn = vi.fn();
-    const endMasterTurn = vi.fn();
-    const release = registerRealtimeEmissary({
-      sessionId: "session-1",
-      beginMasterTurn,
-      endMasterTurn,
-      sendMasterMessage: vi.fn(),
-    });
-    mocks.acpSendMessage.mockImplementationOnce(
-      (
-        sessionId: string,
-        _prompt: string,
-        options: {
-          onPromptDispatching(): void;
-          onPromptDispatched(): void;
-        },
-      ) => {
-        options.onPromptDispatching();
-        options.onPromptDispatched();
-        useChatStore.getState().addMessage(sessionId, {
-          id: "master-empty-fallback",
-          role: "assistant",
-          created: Date.now(),
-          content: [
-            {
-              type: "text",
-              text: "The model returned an empty response. Please resend your message to continue.",
-            },
-          ],
-          metadata: { agentVisible: true, userVisible: true },
-        });
-        return Promise.resolve();
-      },
-    );
-
-    await dispatchPrompt("session-1", "[Voice transcript] User said: hello", {
-      userMessageMetadata: { origin: "voice_conversation" },
-    });
-
-    expect(endMasterTurn).toHaveBeenCalledWith({
-      turnId: expect.any(String),
-      status: "completed",
-      finalText: undefined,
-    });
     release();
   });
 });

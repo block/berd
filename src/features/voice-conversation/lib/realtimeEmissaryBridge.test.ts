@@ -1,8 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  beginActiveRealtimeMasterTurn,
-  endActiveRealtimeMasterTurn,
   getActiveRealtimeEmissary,
+  hasActiveRealtimeEmissary,
   registerRealtimeEmissary,
 } from "./realtimeEmissaryBridge";
 
@@ -14,35 +13,21 @@ describe("realtime emissary bridge registration", () => {
       unreadPeerMessages: [],
       cursor: 2,
     });
-    const beginMasterTurn = vi.fn();
-    const endMasterTurn = vi.fn();
     const emissary = {
       sessionId: "session-1",
-      beginMasterTurn,
-      endMasterTurn,
       sendMasterMessage,
     };
     const release = registerRealtimeEmissary(emissary);
 
     expect(getActiveRealtimeEmissary()).toBe(emissary);
     await expect(
-      emissary.sendMasterMessage("update", 1),
+      emissary.sendMasterMessage("update", 1, "context"),
     ).resolves.toMatchObject({ accepted: false, cursor: 2 });
-    expect(beginActiveRealtimeMasterTurn("session-1", "turn-1")).toBe(true);
-    expect(beginMasterTurn).toHaveBeenCalledWith("turn-1");
-    endActiveRealtimeMasterTurn("session-1", {
-      turnId: "turn-1",
-      status: "completed",
-      finalText: "Finished.",
-    });
-    expect(endMasterTurn).toHaveBeenCalledWith({
-      turnId: "turn-1",
-      status: "completed",
-      finalText: "Finished.",
-    });
+    expect(hasActiveRealtimeEmissary("session-1")).toBe(true);
+    expect(hasActiveRealtimeEmissary("session-2")).toBe(false);
 
     release();
     expect(getActiveRealtimeEmissary()).toBeNull();
-    expect(beginActiveRealtimeMasterTurn("session-1", "turn-2")).toBe(false);
+    expect(hasActiveRealtimeEmissary("session-1")).toBe(false);
   });
 });

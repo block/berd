@@ -604,6 +604,7 @@ describe("action schemas", () => {
         session_id: "s1",
         cursor: 0,
         message: "Status update",
+        mode: "context",
       },
       "sessions.open": { session_id: "s1" },
       "sessions.list": {},

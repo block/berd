@@ -20,6 +20,12 @@ const sendToEmissarySessionSchema = z
       .min(0)
       .max(4_294_967_295)
       .describe("Latest direct-message cursor returned by the voice bridge."),
+    mode: z
+      .enum(["context", "say"])
+      .default("say")
+      .describe(
+        "Delivery mode: context updates future turns silently; say asks the emissary to speak now.",
+      ),
   })
   .strict();
 
@@ -27,6 +33,7 @@ interface SendToEmissarySessionResult {
   session_id: string;
   cursor: number;
   delivery_status: "sent" | "interrupting" | "queued";
+  mode: "context" | "say";
 }
 
 export const sendToEmissarySessionCommand = defineCommand({
@@ -37,14 +44,17 @@ export const sendToEmissarySessionCommand = defineCommand({
   description:
     "Inject a private coordination message into the OpenAI Realtime voice " +
     "emissary owned by an existing Berd session. The emissary receives the " +
-    "message immediately and starts a response; active speech may be interrupted. " +
+    "message either as silent context for future turns or as a request to speak now. " +
     "The command fails when the target session has no live Realtime voice conversation.",
   helpFooter: `Example:
   berdctl session send-to-emissary --session-id <session-id> --cursor 0 \\
-    --message "The build failed because the signing certificate expired." --json
+    --mode say --message "The build failed because the signing certificate expired." --json
 
 Result:
-  {"session_id":"...","cursor":0,"delivery_status":"sent"|"interrupting"|"queued"}
+  {"session_id":"...","cursor":0,"delivery_status":"sent"|"interrupting"|"queued","mode":"context"|"say"}
+
+Use --mode context to update the emissary's future context without starting a
+response. Use --mode say when the emissary should speak the message now.
 
 A send while the pipe is carrying emissary-to-master coordination fails with
 reason "pipe_busy" without consuming that pending message. Wait for Berd to
@@ -65,6 +75,7 @@ deliver it normally, then retry with the cursor included in that message.`,
     const delivery = await emissary.sendMasterMessage(
       args.message,
       args.cursor,
+      args.mode,
     );
     if (!delivery.accepted) {
       throw new CommandError(
@@ -81,6 +92,7 @@ deliver it normally, then retry with the cursor included in that message.`,
       session_id: args.session_id,
       cursor: delivery.cursor,
       delivery_status: delivery.deliveryStatus,
+      mode: args.mode,
     };
   },
 });

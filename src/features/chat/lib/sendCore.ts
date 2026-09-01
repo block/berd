@@ -35,10 +35,7 @@ import {
 import { perfLog } from "@/shared/lib/perfLog";
 import { completeAssistantMessage } from "@/features/chat/lib/messageCompletion";
 import { isVoiceConversationEmptyResponse } from "@/features/chat/lib/voiceConversationNoop";
-import {
-  beginActiveRealtimeMasterTurn,
-  endActiveRealtimeMasterTurn,
-} from "@/features/voice-conversation/lib/realtimeEmissaryBridge";
+import { hasActiveRealtimeEmissary } from "@/features/voice-conversation/lib/realtimeEmissaryBridge";
 import {
   type ChatAttachmentDraft,
   type Message,
@@ -201,7 +198,7 @@ async function recoverMissingMasterTranscript(
   }
 }
 
-async function settleMasterTranscriptNotifications(
+async function settleMasterTranscriptDelivery(
   sessionId: string,
 ): Promise<void> {
   if (useChatStore.getState().loadingSessionIds.has(sessionId)) {
@@ -215,7 +212,7 @@ async function settleMasterTranscriptNotifications(
   }
   // ACP may resolve session/prompt immediately before dispatching the final
   // session/update already read from the same transport. Yield one macrotask
-  // so the terminal Master notification sees that last visible text block.
+  // so transcript recovery sees that last visible text block.
   // Keep ownership through new-session hydration as well: a late live chunk
   // routed after ownership is released looks like replay and can be discarded
   // by the hydration snapshot that is finishing at the same boundary.
@@ -357,21 +354,8 @@ export async function dispatchPrompt(
   }
 
   const promptOwner = claimSessionPrompt(sessionId);
-  const realtimeMasterTurnId = crypto.randomUUID();
   const assistantTextBeforeTurn = assistantTextSnapshot(sessionId);
-  let realtimeMasterTurnStarted = false;
-  let realtimeMasterTurnEnded = false;
-  const endRealtimeMasterTurn = (
-    status: "completed" | "cancelled" | "failed",
-  ) => {
-    if (!realtimeMasterTurnStarted || realtimeMasterTurnEnded) return;
-    realtimeMasterTurnEnded = true;
-    endActiveRealtimeMasterTurn(sessionId, {
-      turnId: realtimeMasterTurnId,
-      status,
-      finalText: finalMasterTextSince(sessionId, assistantTextBeforeTurn),
-    });
-  };
+  let realtimeVoiceActive = false;
   const isCurrent = () => ownsSessionPrompt(sessionId, promptOwner);
   let userMessageCommitted = false;
   let preCommitRejected = false;
@@ -512,10 +496,7 @@ export async function dispatchPrompt(
       ),
       onPromptDispatching: commitUserMessage,
       onPromptDispatched: () => {
-        realtimeMasterTurnStarted = beginActiveRealtimeMasterTurn(
-          sessionId,
-          realtimeMasterTurnId,
-        );
+        realtimeVoiceActive = hasActiveRealtimeEmissary(sessionId);
         onPromptDispatched?.();
       },
     });
@@ -527,13 +508,12 @@ export async function dispatchPrompt(
     }
 
     finishPromptSuccessfully();
-    if (realtimeMasterTurnStarted) {
-      await settleMasterTranscriptNotifications(sessionId);
+    if (realtimeVoiceActive) {
+      await settleMasterTranscriptDelivery(sessionId);
       if (!finalMasterTextSince(sessionId, assistantTextBeforeTurn)) {
         await recoverMissingMasterTranscript(sessionId, acpPrompt);
       }
     }
-    endRealtimeMasterTurn("completed");
   } catch (err) {
     const isVoiceConversationNoop =
       userMessageCommitted &&
@@ -541,24 +521,18 @@ export async function dispatchPrompt(
       isVoiceConversationEmptyResponse(formatAcpErrorMessage(err));
     if (isVoiceConversationNoop) {
       finishPromptSuccessfully();
-      if (realtimeMasterTurnStarted) {
-        await settleMasterTranscriptNotifications(sessionId);
+      if (realtimeVoiceActive) {
+        await settleMasterTranscriptDelivery(sessionId);
         if (!finalMasterTextSince(sessionId, assistantTextBeforeTurn)) {
           await recoverMissingMasterTranscript(sessionId, dispatchedPrompt);
         }
       }
-      endRealtimeMasterTurn("completed");
       if (isCurrent()) {
         setError(sessionId, null);
         setPendingAssistantProvider(sessionId, null);
       }
       return;
     }
-    endRealtimeMasterTurn(
-      err instanceof DOMException && err.name === "AbortError"
-        ? "cancelled"
-        : "failed",
-    );
     preCommitRejected = err instanceof PreCommitSendRejectedError;
     if (!preCommitRejected) {
       const cancellationRace = assistantCancellationRaces.get(promptOwner);

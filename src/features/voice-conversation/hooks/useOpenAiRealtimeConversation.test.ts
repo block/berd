@@ -14,20 +14,17 @@ const mocks = vi.hoisted(() => ({
   claimMicrophone: vi.fn(),
   connectPeer: vi.fn(),
   createSendToMasterToolOutput: vi.fn(),
-  createEndTurnToolOutput: vi.fn(),
   createInvalidToolCallOutput: vi.fn(),
   createPeer: vi.fn(),
   createSession: vi.fn(),
   registerEmissary: vi.fn(),
   activeEmissary: null as null | {
     sessionId: string;
-    beginMasterTurn(turnId: string): void;
-    endMasterTurn(completion: {
-      turnId: string;
-      status: "completed" | "cancelled" | "failed";
-      finalText?: string;
-    }): void;
-    sendMasterMessage(message: string, cursor: number): Promise<unknown>;
+    sendMasterMessage(
+      message: string,
+      cursor: number,
+      mode: "context" | "say",
+    ): Promise<unknown>;
   },
   releaseBridge: vi.fn(),
   releaseMicrophone: vi.fn(),
@@ -90,7 +87,6 @@ vi.mock("../lib/realtimeVoicePreference", () => ({
 
 vi.mock("../lib/realtimeEmissaryProtocol", () => ({
   configureRealtimeEmissarySession: vi.fn(),
-  createEndTurnToolOutput: mocks.createEndTurnToolOutput,
   createInvalidToolCallOutput: mocks.createInvalidToolCallOutput,
   createSendToMasterToolOutput: mocks.createSendToMasterToolOutput,
   DirectMessagePipe: class {
@@ -248,8 +244,6 @@ vi.mock("../lib/realtimeEmissaryProtocol", () => ({
             type: "send_to_master",
           },
         ];
-      if (event.type === "test.end_turn")
-        return [{ callId: "call-end", type: "end_turn" }];
       if (event.type === "test.invalid_tool_call")
         return [
           {
@@ -413,14 +407,6 @@ beforeEach(() => {
     type: "conversation.item.create",
     item: { type: "function_call_output" },
   });
-  mocks.createEndTurnToolOutput.mockReturnValue({
-    type: "conversation.item.create",
-    item: {
-      type: "function_call_output",
-      call_id: "call-end",
-      output: '{"status":"ended"}',
-    },
-  });
   mocks.createInvalidToolCallOutput.mockReturnValue({
     type: "conversation.item.create",
     item: {
@@ -548,6 +534,11 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
         ),
       ),
     );
+    expect(mocks.appendSessionSystemPrompt).toHaveBeenCalledWith(
+      "backend-session",
+      expect.any(String),
+      expect.stringContaining("--mode <context|say>"),
+    );
     expect(owner.result.current.state).toBe("listening");
     expect(owner.result.current.boundSessionId).toBe("backend-session");
 
@@ -663,6 +654,11 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
           'send-to-emissary --session-id "backend-session"',
         ),
       ),
+    );
+    expect(mocks.appendSessionSystemPrompt).toHaveBeenCalledWith(
+      "backend-session",
+      expect.any(String),
+      expect.stringContaining("--mode <context|say>"),
     );
 
     await act(async () => {
@@ -807,7 +803,17 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     await waitFor(() => expect(owner.result.current.state).toBe("listening"));
 
     await act(async () => {
-      await mocks.activeEmissary?.sendMasterMessage("There are 20 repos.", 0);
+      await mocks.activeEmissary?.sendMasterMessage(
+        "There are 20 repos.",
+        0,
+        "context",
+      );
+    });
+
+    expect(mocks.requestMasterMessage).toHaveBeenCalledWith({
+      eventId: "berd-master-1",
+      message: "[bridge cursor 1] There are 20 repos.",
+      mode: "context",
     });
 
     expect(
@@ -820,67 +826,6 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
         personaName: "Master → Emissary",
       },
     });
-
-    await act(async () => owner.result.current.onToggle());
-  });
-
-  it("delivers every terminal master turn without duplicating its visible final text", async () => {
-    const owner = renderConversation("session-a");
-    await act(async () => owner.result.current.onToggle());
-    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
-
-    act(() => {
-      mocks.activeEmissary?.beginMasterTurn("turn-1");
-      mocks.activeEmissary?.endMasterTurn({
-        turnId: "turn-1",
-        status: "completed",
-        finalText: "There are 20 repositories.",
-      });
-    });
-
-    expect(mocks.requestMasterMessage).toHaveBeenCalledWith({
-      eventId: "berd-master-turn-ended-turn-1",
-      message: expect.stringContaining(
-        "Final response:\nThere are 20 repositories.",
-      ),
-    });
-    expect(
-      useChatStore.getState().messagesBySession["session-a"]?.at(-1),
-    ).toMatchObject({
-      role: "assistant",
-      content: [{ type: "text", text: "Final response shown above." }],
-      metadata: {
-        agentVisible: false,
-        personaName: "Master ended turn",
-      },
-    });
-
-    await act(async () => owner.result.current.onToggle());
-  });
-
-  it("ends an emissary evaluation silently without scheduling a continuation", async () => {
-    const owner = renderConversation("session-a");
-    await act(async () => owner.result.current.onToggle());
-    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
-    mocks.sendRealtimeEvents.mockClear();
-
-    act(() => {
-      channel.dispatchEvent(
-        new MessageEvent("message", {
-          data: JSON.stringify({ type: "test.end_turn" }),
-        }),
-      );
-    });
-
-    expect(mocks.createEndTurnToolOutput).toHaveBeenCalledWith("call-end");
-    expect(mocks.sendRealtimeEvents).toHaveBeenCalledWith(expect.anything(), [
-      expect.objectContaining({
-        type: "conversation.item.create",
-        item: expect.objectContaining({ type: "function_call_output" }),
-      }),
-    ]);
-    expect(mocks.requestToolOutput).not.toHaveBeenCalled();
-    expect(mocks.requestMasterMessage).not.toHaveBeenCalled();
 
     await act(async () => owner.result.current.onToggle());
   });
@@ -1203,6 +1148,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       await mocks.activeEmissary?.sendMasterMessage(
         "The answer is 21 repositories.",
         0,
+        "say",
       );
     });
     act(() => {
@@ -1257,6 +1203,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       await mocks.activeEmissary?.sendMasterMessage(
         "None of the repositories are symbolic links.",
         0,
+        "say",
       );
     });
     act(() => {
@@ -1494,7 +1441,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     await waitFor(() => expect(owner.result.current.state).toBe("listening"));
 
     await act(async () => {
-      await mocks.activeEmissary?.sendMasterMessage("The result.", 0);
+      await mocks.activeEmissary?.sendMasterMessage("The result.", 0, "say");
     });
     mocks.createSendToMasterToolOutput.mockClear();
     mocks.sendRealtimeEvents.mockClear();

@@ -428,7 +428,7 @@
           }
         },
         "send_to_emissary": {
-          "description": "Inject a private coordination message into the OpenAI Realtime voice emissary owned by an existing Berd session. The emissary receives the message immediately and starts a response; active speech may be interrupted. The command fails when the target session has no live Realtime voice conversation.",
+          "description": "Inject a private coordination message into the OpenAI Realtime voice emissary owned by an existing Berd session. The emissary receives the message either as silent context for future turns or as a request to speak now. The command fails when the target session has no live Realtime voice conversation.",
           "fields": [
             {
               "name": "session_id",
@@ -452,6 +452,13 @@
               "description": "Latest direct-message cursor returned by the voice bridge.",
               "min": 0,
               "max": 4294967295
+            },
+            {
+              "name": "mode",
+              "required": false,
+              "kind": "string",
+              "description": "Delivery mode: context updates future turns silently; say asks the emissary to speak now.",
+              "values": ["context", "say"]
             }
           ],
           "schema": {
@@ -474,6 +481,12 @@
                 "minimum": 0,
                 "maximum": 4294967295,
                 "description": "Latest direct-message cursor returned by the voice bridge."
+              },
+              "mode": {
+                "default": "say",
+                "description": "Delivery mode: context updates future turns silently; say asks the emissary to speak now.",
+                "type": "string",
+                "enum": ["context", "say"]
               }
             },
             "required": ["session_id", "message", "cursor"],
