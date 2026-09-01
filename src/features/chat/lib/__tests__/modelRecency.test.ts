@@ -37,6 +37,43 @@ describe("model recency", () => {
     expect(getModelRecencyMap()).toEqual({ [validKey]: 42 });
   });
 
+  it("bounds stored recency to the 50 highest-ranked entries", () => {
+    const entries = Array.from({ length: 75 }, (_, rank) => [
+      `agent//m${rank}`,
+      rank,
+    ]);
+    localStorage.setItem(
+      MODEL_RECENCY_STORAGE_KEY,
+      JSON.stringify(Object.fromEntries(entries)),
+    );
+
+    const map = getModelRecencyMap();
+
+    expect(Object.keys(map)).toHaveLength(MODEL_RECENCY_LIMIT);
+    expect(map).toEqual(
+      Object.fromEntries(entries.slice(-MODEL_RECENCY_LIMIT)),
+    );
+  });
+
+  it("drops unsafe-integer ranks from storage", () => {
+    const firstValidKey = "agent//first-valid";
+    const unsafeKey = "agent//unsafe";
+    const secondValidKey = "agent//second-valid";
+    localStorage.setItem(
+      MODEL_RECENCY_STORAGE_KEY,
+      JSON.stringify({
+        [firstValidKey]: 41,
+        [unsafeKey]: 9_007_199_254_740_992,
+        [secondValidKey]: 43,
+      }),
+    );
+
+    expect(getModelRecencyMap()).toEqual({
+      [firstValidKey]: 41,
+      [secondValidKey]: 43,
+    });
+  });
+
   it("persists selections and updates the timestamp", () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000);
@@ -248,36 +285,63 @@ describe("model recency", () => {
     ).toEqual(expect.any(Number));
   });
 
-  it("updates useModelRecency for relevant cross-window storage events", () => {
+  it("merges cross-window storage events into useModelRecency", () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000);
-    recordModelSelection("agent", { id: "m1", providerId: "p1" });
-    const stored = localStorage.getItem(MODEL_RECENCY_STORAGE_KEY);
-    if (!stored) throw new Error("Missing stored recency map");
-
-    localStorage.removeItem(MODEL_RECENCY_STORAGE_KEY);
-    expect(getModelRecencyMap()).toEqual({});
     const { result } = renderHook(() => useModelRecency());
 
     act(() => {
-      localStorage.setItem(MODEL_RECENCY_STORAGE_KEY, stored);
+      for (let i = 0; i < MODEL_RECENCY_LIMIT; i++) {
+        vi.setSystemTime(1_000 + i);
+        recordModelSelection("agent", { id: `m${i}` });
+      }
+    });
+
+    act(() => {
+      localStorage.setItem(
+        MODEL_RECENCY_STORAGE_KEY,
+        JSON.stringify({
+          "agent//m10": 2_000,
+          "agent//m20": 500,
+          "agent//remote": 3_000,
+        }),
+      );
       window.dispatchEvent(
         new StorageEvent("storage", { key: MODEL_RECENCY_STORAGE_KEY }),
       );
     });
 
+    expect(Object.keys(result.current)).toHaveLength(MODEL_RECENCY_LIMIT);
     expect(
-      getModelRecencyRank(result.current, "agent", {
-        id: "m1",
-        providerId: "p1",
-      }),
-    ).toBe(1_000);
-    const snapshot = result.current;
+      getModelRecencyRank(result.current, "agent", { id: "m0" }),
+    ).toBeNull();
+    expect(getModelRecencyRank(result.current, "agent", { id: "m10" })).toBe(
+      2_000,
+    );
+    expect(getModelRecencyRank(result.current, "agent", { id: "m20" })).toBe(
+      1_020,
+    );
+    expect(getModelRecencyRank(result.current, "agent", { id: "remote" })).toBe(
+      3_000,
+    );
+    expect(
+      JSON.parse(localStorage.getItem(MODEL_RECENCY_STORAGE_KEY) ?? ""),
+    ).toEqual(result.current);
 
+    const snapshot = result.current;
     act(() => {
-      window.dispatchEvent(new StorageEvent("storage", { key: "unrelated" }));
+      localStorage.setItem(
+        MODEL_RECENCY_STORAGE_KEY,
+        JSON.stringify({ "agent//m10": 1_999, "agent//m20": 500 }),
+      );
+      window.dispatchEvent(
+        new StorageEvent("storage", { key: MODEL_RECENCY_STORAGE_KEY }),
+      );
     });
 
     expect(result.current).toBe(snapshot);
+    expect(
+      JSON.parse(localStorage.getItem(MODEL_RECENCY_STORAGE_KEY) ?? ""),
+    ).toEqual(snapshot);
   });
 });
