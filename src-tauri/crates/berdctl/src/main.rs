@@ -284,6 +284,16 @@ mod tests {
                 "--message",
                 "status",
             ],
+            ("session", "dismiss-handoffs") => vec![
+                "--session-id",
+                "s",
+                "--cursor",
+                "1",
+                "--handoff-id",
+                "handoff-1",
+                "--reason",
+                "superseded",
+            ],
             ("folder", "attach") | ("folder", "detach") | ("folder", "set-cwd") => {
                 vec!["--session-id", "s", "--path", "/w"]
             }

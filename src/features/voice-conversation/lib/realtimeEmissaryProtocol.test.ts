@@ -9,7 +9,7 @@ import {
   configureRealtimeEmissarySession,
   createInvalidToolCallOutput,
   createRealtimeEmissarySessionUpdate,
-  createSendToMasterToolOutput,
+  createHandoffToolOutput,
   sendRealtimeEvents,
 } from "./realtimeEmissaryProtocol";
 
@@ -45,10 +45,10 @@ describe("Realtime emissary session configuration", () => {
       "never claim that you or the assistant cannot access",
     );
     expect(event.session.instructions).toContain(
-      "call send_to_master before giving any substantive spoken answer",
+      "call handoff before giving any substantive spoken answer",
     );
     expect(event.session.instructions).toContain(
-      "Never acknowledge, confirm, summarize, or copy a master message",
+      "Do not open another handoff merely to acknowledge, confirm, summarize",
     );
     expect(event.session.instructions).toContain(
       "The master decides whether its reply is silent context",
@@ -56,7 +56,7 @@ describe("Realtime emissary session configuration", () => {
     expect(event.session.tools).toEqual([
       expect.objectContaining({
         type: "function",
-        name: "send_to_master",
+        name: "handoff",
         parameters: expect.objectContaining({ additionalProperties: false }),
       }),
     ]);
@@ -88,7 +88,7 @@ describe("Realtime emissary session configuration", () => {
         `${REALTIME_EMISSARY_INSTRUCTIONS}\n\nUse the user's preferred terminology.`,
       ),
       tools: [
-        expect.objectContaining({ name: "send_to_master" }),
+        expect.objectContaining({ name: "handoff" }),
         expect.objectContaining({ name: "look_up_status" }),
       ],
     });
@@ -172,10 +172,10 @@ describe("Realtime emissary session configuration", () => {
     expect(() =>
       createRealtimeEmissarySessionUpdate({
         sessionOverrides: {
-          tools: [{ type: "function", name: "send_to_master" }],
+          tools: [{ type: "function", name: "handoff" }],
         },
       }),
-    ).toThrow("cannot replace the send_to_master tool");
+    ).toThrow("cannot replace the handoff tool");
     expect(() =>
       createRealtimeEmissarySessionUpdate({
         sessionOverrides: { tool_choice: "none" },
@@ -214,7 +214,7 @@ describe("Realtime emissary session configuration", () => {
     expect(SEND_TO_EMISSARY_TOOL_DEFINITION).toMatchObject({
       name: "send_to_emissary",
       parameters: {
-        required: ["cursor", "message", "mode"],
+        required: ["cursor", "message", "mode", "resolves"],
         additionalProperties: false,
       },
     });
@@ -477,13 +477,13 @@ describe("RealtimeEmissaryProtocol", () => {
     ).toEqual([]);
   });
 
-  it("assembles a send_to_master call from streamed arguments", () => {
+  it("assembles a handoff call from streamed arguments", () => {
     const protocol = new RealtimeEmissaryProtocol();
     protocol.handle({
       type: "response.output_item.added",
       item: {
         type: "function_call",
-        name: "send_to_master",
+        name: "handoff",
         call_id: "call-1",
       },
     });
@@ -505,7 +505,7 @@ describe("RealtimeEmissaryProtocol", () => {
       }),
     ).toEqual([
       {
-        type: "send_to_master",
+        type: "handoff",
         callId: "call-1",
         cursor: 4,
         message: "Please investigate this.",
@@ -514,19 +514,19 @@ describe("RealtimeEmissaryProtocol", () => {
     expect(
       protocol.handle({
         type: "response.function_call_arguments.done",
-        name: "send_to_master",
+        name: "handoff",
         call_id: "call-1",
         arguments: '{"cursor":4,"message":"duplicate"}',
       }),
     ).toEqual([]);
   });
 
-  it("rejects malformed send_to_master arguments", () => {
+  it("rejects malformed handoff arguments", () => {
     const protocol = new RealtimeEmissaryProtocol();
     expect(
       protocol.handle({
         type: "response.function_call_arguments.done",
-        name: "send_to_master",
+        name: "handoff",
         call_id: "call-1",
         arguments: '{"cursor":0,"message":"hello","unexpected":true}',
       }),
@@ -534,8 +534,8 @@ describe("RealtimeEmissaryProtocol", () => {
       {
         type: "tool_call.invalid",
         callId: "call-1",
-        toolName: "send_to_master",
-        error: "send_to_master accepts only cursor and message arguments",
+        toolName: "handoff",
+        error: "handoff accepts only cursor and message arguments",
       },
     ]);
   });
@@ -546,7 +546,7 @@ describe("RealtimeEmissaryProtocol", () => {
       type: "response.output_item.added",
       item: {
         type: "function_call",
-        name: "send_to_master",
+        name: "handoff",
         call_id: "call-broken",
       },
     });
@@ -563,7 +563,7 @@ describe("RealtimeEmissaryProtocol", () => {
     expect(invalidCall).toMatchObject({
       type: "tool_call.invalid",
       callId: "call-broken",
-      toolName: "send_to_master",
+      toolName: "handoff",
     });
     expect(invalidCall).toHaveProperty(
       "error",
@@ -579,7 +579,7 @@ describe("RealtimeEmissaryProtocol", () => {
     expect(
       createInvalidToolCallOutput(
         "call-broken",
-        "send_to_master",
+        "handoff",
         "JSON Parse error: Unterminated string",
       ),
     ).toEqual({
@@ -591,7 +591,7 @@ describe("RealtimeEmissaryProtocol", () => {
           accepted: false,
           reason: "invalid_arguments",
           error:
-            "send_to_master arguments were invalid: JSON Parse error: Unterminated string. Retry this tool call with complete valid JSON. Do not speak this internal error to the user.",
+            "handoff arguments were invalid: JSON Parse error: Unterminated string. Retry this tool call with complete valid JSON. Do not speak this internal error to the user.",
         }),
       },
     });
@@ -989,7 +989,7 @@ describe("master message injection", () => {
 
   it("reports a busy reverse direction without consuming its message", () => {
     expect(
-      createSendToMasterToolOutput("call-1", {
+      createHandoffToolOutput("call-1", {
         accepted: false,
         reason: "pipe_busy",
         cursor: 0,
@@ -1006,13 +1006,20 @@ describe("master message injection", () => {
     });
   });
 
-  it("returns the coordination loop guard without requesting another reply", () => {
+  it("includes an accepted handoff id in the tool result", () => {
     expect(
-      createSendToMasterToolOutput("call-2", {
-        accepted: false,
-        reason: "awaiting_new_user_input",
-        cursor: 4,
+      createHandoffToolOutput("call-2", {
+        accepted: true,
+        cursor: 0,
         unreadPeerMessages: [],
+        handoff_id: "handoff-4",
+        outbound: {
+          id: 4,
+          sender: "emissary",
+          recipient: "master",
+          senderCursor: 0,
+          message: "Inspect the folder.",
+        },
       }),
     ).toEqual({
       type: "conversation.item.create",
@@ -1020,7 +1027,7 @@ describe("master message injection", () => {
         type: "function_call_output",
         call_id: "call-2",
         output:
-          '{"accepted":false,"reason":"awaiting_new_user_input","cursor":4,"unreadPeerMessages":[]}',
+          '{"accepted":true,"cursor":0,"unreadPeerMessages":[],"handoff_id":"handoff-4","outbound":{"id":4,"sender":"emissary","recipient":"master","senderCursor":0,"message":"Inspect the folder."}}',
       },
     });
   });
@@ -1091,6 +1098,41 @@ describe("DirectMessagePipe", () => {
       outbound: { senderCursor: 2 },
     });
     expect(pipe.cursor("emissary")).toBe(2);
+  });
+
+  it("consumes a complete pending batch without sending a reply", () => {
+    const pipe = new DirectMessagePipe();
+    pipe.send({ sender: "emissary", cursor: 0, message: "One." });
+    pipe.send({ sender: "emissary", cursor: 0, message: "Two." });
+
+    expect(pipe.consume("master", 1)).toEqual({
+      accepted: false,
+      reason: "pipe_busy",
+      unreadPeerMessages: [],
+      cursor: 0,
+    });
+    expect(pipe.consume("master", 2)).toEqual({
+      accepted: true,
+      unreadPeerMessages: [],
+      cursor: 2,
+    });
+    expect(pipe.cursor("master")).toBe(2);
+  });
+
+  it("requires the current consumed cursor when there is no pending batch", () => {
+    const pipe = new DirectMessagePipe();
+
+    expect(pipe.consume("master", 1)).toEqual({
+      accepted: false,
+      reason: "stale_cursor",
+      unreadPeerMessages: [],
+      cursor: 0,
+    });
+    expect(pipe.consume("master", 0)).toEqual({
+      accepted: true,
+      unreadPeerMessages: [],
+      cursor: 0,
+    });
   });
 
   it("rejects a stale send without consuming the pending direction", () => {

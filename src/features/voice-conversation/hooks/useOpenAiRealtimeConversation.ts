@@ -23,12 +23,14 @@ import {
   createOpenAiRealtimePeerConnection,
 } from "@/features/chat/lib/openaiRealtimeAudio";
 import {
+  type HandoffDismissal,
   type MasterMessageDelivery,
+  type RealtimeMasterTurnCompletion,
   registerRealtimeEmissary,
 } from "../lib/realtimeEmissaryBridge";
 import {
+  createHandoffToolOutput,
   createInvalidToolCallOutput,
-  createSendToMasterToolOutput,
   DirectMessagePipe,
   type MasterMessageMode,
   REALTIME_MASTER_INSTRUCTIONS,
@@ -45,6 +47,7 @@ import {
 const MASTER_PROMPT_KEY = "berd-realtime-voice-master";
 const MICROPHONE_OWNER_ID = "berd:realtime-voice-conversation";
 const MAX_REALTIME_REPLAY_ITEMS = 12;
+const HANDOFF_REMINDER_IDS_METADATA = "realtimeHandoffReminderIds";
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -196,21 +199,22 @@ function createUserTranscriptMessage(
   };
 }
 
-function createCoordinationMessage(
-  sender: "Emissary" | "Master",
-  recipient: "Emissary" | "Master",
-  text: string,
-): Message {
+function createHandoffDebugMessage(handoffId: string, text: string): Message {
   return {
     id: crypto.randomUUID(),
-    role: "assistant",
+    role: "user",
     created: Date.now(),
-    content: [{ type: "text", text }],
+    content: [
+      {
+        type: "text",
+        text: `Emissary handoff ${handoffId} → Master\n${text}`,
+      },
+    ],
     metadata: {
       userVisible: true,
       agentVisible: false,
       origin: "voice_conversation",
-      personaName: `${sender} → ${recipient}`,
+      personaName: "Routing",
       completionStatus: "completed",
     },
   };
@@ -246,6 +250,7 @@ export function createRealtimeTranscriptReplayEvents(
       continue;
     }
     if (
+      message.metadata?.personaName === "Routing" ||
       message.metadata?.personaName?.includes("→") ||
       (message.metadata?.completionStatus &&
         message.metadata.completionStatus !== "completed")
@@ -316,9 +321,13 @@ function waitForDataChannelOpen(channel: RTCDataChannel): Promise<void> {
 function masterPrompt(sessionId: string): string {
   return `${REALTIME_MASTER_INSTRUCTIONS}
 
-Your send_to_emissary tool is the Berd CLI command below. The initial bridge cursor is 0. Always use the latest cursor returned by a successful command or stale-send error. Choose --mode context to silently update the emissary's context for a future natural turn. Choose --mode say only when the emissary should speak your message to the user now. Finishing your turn does not notify or wake the emissary, so send explicitly when needed.
+Your send_to_emissary tool is the Berd CLI command below. The initial bridge cursor is 0. Always use the latest cursor returned by a successful command or stale-send error. Choose --mode context to silently update the emissary's context for a future natural turn. Choose --mode say only when the emissary should speak your message to the user now. A say may resolve several open handoffs by repeating --resolves for each handoff id. Context cannot resolve a handoff. Finishing your turn does not notify or wake the emissary, so send explicitly when needed.
 
-berdctl session send-to-emissary --session-id ${JSON.stringify(sessionId)} --cursor <cursor> --mode <context|say> --message <message> --json`;
+berdctl session send-to-emissary --session-id ${JSON.stringify(sessionId)} --cursor <cursor> --mode <context|say> [--resolves <handoff-id> ...] --message <message> --json
+
+If a handoff is obsolete, superseded, or already handled, dismiss it explicitly:
+
+berdctl session dismiss-handoffs --session-id ${JSON.stringify(sessionId)} --cursor <cursor> --handoff-id <handoff-id> [--handoff-id <handoff-id> ...] --reason <reason> --json`;
 }
 
 type RuntimeState = ChatInputVoiceConversation["state"];
@@ -354,8 +363,23 @@ class OpenAiRealtimeConversationRuntime {
         message: string,
         cursor: number,
         mode: MasterMessageMode,
+        resolves: string[],
       ) => Promise<MasterMessageDelivery>)
     | null = null;
+  private bridgeHandoffDismissal:
+    | ((
+        cursor: number,
+        handoffIds: string[],
+        reason: string,
+      ) => Promise<HandoffDismissal>)
+    | null = null;
+  private bridgeMasterTurnCompletion:
+    | ((completion: RealtimeMasterTurnCompletion) => void)
+    | null = null;
+  private readonly openHandoffs = new Map<
+    string,
+    { message: string; reminderSent: boolean }
+  >();
   private activeRun = 0;
   private deliveryQueue = Promise.resolve();
   private boundOnSend: ChatInputSendHandler | null = null;
@@ -419,6 +443,7 @@ class OpenAiRealtimeConversationRuntime {
 
     const runId = ++this.activeRun;
     this.failureInProgress = false;
+    this.openHandoffs.clear();
     this.boundOnSend = onSend;
     this.pendingTypedUserMessages = [];
     this.setSnapshot({
@@ -488,8 +513,6 @@ class OpenAiRealtimeConversationRuntime {
       const responses = new RealtimeResponseCoordinator();
       const pipe = new DirectMessagePipe();
       const transcriptMessageIds = new Map<string, string>();
-      let userTranscriptRevision = 0;
-      let masterDeliveryRevision: number | undefined;
       const upsertTranscriptMessage = (
         ownerSessionId: string,
         transcript: {
@@ -528,7 +551,6 @@ class OpenAiRealtimeConversationRuntime {
         return messageId;
       };
       const forwardTypedUserMessage = (text: string) => {
-        userTranscriptRevision += 1;
         const request = responses.requestTypedUserMessage(text);
         sendRealtimeEvents(transport, request.events);
       };
@@ -573,7 +595,6 @@ class OpenAiRealtimeConversationRuntime {
                 );
                 continue;
               }
-              userTranscriptRevision += 1;
               this.deliverToMaster(
                 ownerSessionId,
                 masterTranscript,
@@ -582,41 +603,39 @@ class OpenAiRealtimeConversationRuntime {
                 false,
                 transcriptMessageId,
               );
-            } else if (bridgeEvent.type === "send_to_master") {
-              if (masterDeliveryRevision === userTranscriptRevision) {
-                sendRealtimeEvents(transport, [
-                  createSendToMasterToolOutput(bridgeEvent.callId, {
-                    accepted: false,
-                    reason: "awaiting_new_user_input",
-                    unreadPeerMessages: [],
-                    cursor: pipe.cursor("emissary"),
-                  }),
-                ]);
-                continue;
-              }
+            } else if (bridgeEvent.type === "handoff") {
               const exchange = pipe.send({
                 sender: "emissary",
                 cursor: bridgeEvent.cursor,
                 message: bridgeEvent.message,
               });
+              const handoffId = exchange.accepted
+                ? `handoff-${exchange.outbound.id}`
+                : undefined;
               const toolFollowUp = responses.requestToolOutput(
-                createSendToMasterToolOutput(bridgeEvent.callId, exchange),
+                createHandoffToolOutput(bridgeEvent.callId, {
+                  ...exchange,
+                  ...(handoffId ? { handoff_id: handoffId } : {}),
+                }),
               );
               sendRealtimeEvents(transport, toolFollowUp.events);
-              if (exchange.accepted) {
+              if (exchange.accepted && handoffId) {
+                this.openHandoffs.set(handoffId, {
+                  message: exchange.outbound.message,
+                  reminderSent: false,
+                });
                 useChatStore
                   .getState()
                   .addMessage(
                     ownerSessionId,
-                    createCoordinationMessage(
-                      "Emissary",
-                      "Master",
+                    createHandoffDebugMessage(
+                      handoffId,
                       exchange.outbound.message,
                     ),
                   );
                 this.deliverToMaster(
                   ownerSessionId,
-                  `[Direct message from emissary; cursor ${exchange.outbound.id}] ${exchange.outbound.message}`,
+                  `[Handoff ${handoffId} from emissary; cursor ${exchange.outbound.id}] ${exchange.outbound.message}`,
                   exchange.outbound.message,
                   undefined,
                   true,
@@ -684,26 +703,107 @@ class OpenAiRealtimeConversationRuntime {
           ),
         );
       });
-      this.bridgeSender = async (message, cursor, mode) => {
+      this.bridgeSender = async (message, cursor, mode, resolves) => {
+        const resolvedHandoffIds = [...new Set(resolves)];
+        if (mode === "context" && resolvedHandoffIds.length > 0) {
+          return {
+            accepted: false,
+            reason: "context_cannot_resolve",
+            unreadPeerMessages: [],
+            cursor: pipe.cursor("master"),
+            handoffIds: resolvedHandoffIds,
+          };
+        }
+        const unknownHandoffIds = resolvedHandoffIds.filter(
+          (handoffId) => !this.openHandoffs.has(handoffId),
+        );
+        if (unknownHandoffIds.length > 0) {
+          return {
+            accepted: false,
+            reason: "unknown_handoff",
+            unreadPeerMessages: [],
+            cursor: pipe.cursor("master"),
+            handoffIds: unknownHandoffIds,
+          };
+        }
         const exchange = pipe.send({ sender: "master", cursor, message });
         if (!exchange.accepted) return exchange;
+        for (const handoffId of resolvedHandoffIds) {
+          this.openHandoffs.delete(handoffId);
+        }
         const request = responses.requestMasterMessage({
           message: `[bridge cursor ${exchange.outbound.id}] ${message}`,
           mode,
           eventId: `berd-master-${exchange.outbound.id}`,
         });
         sendRealtimeEvents(transport, request.events);
-        masterDeliveryRevision = userTranscriptRevision;
-        const ownerSessionId = this.snapshot.boundSessionId;
-        if (!ownerSessionId)
-          throw new Error("The realtime voice owner is no longer available.");
-        useChatStore
-          .getState()
-          .addMessage(
-            ownerSessionId,
-            createCoordinationMessage("Master", "Emissary", message),
-          );
         return { ...exchange, deliveryStatus: request.status };
+      };
+      this.bridgeHandoffDismissal = async (cursor, handoffIds, reason) => {
+        const dismissedHandoffIds = [...new Set(handoffIds)];
+        const unknownHandoffIds = dismissedHandoffIds.filter(
+          (handoffId) => !this.openHandoffs.has(handoffId),
+        );
+        if (unknownHandoffIds.length > 0) {
+          return {
+            accepted: false,
+            reason: "unknown_handoff",
+            unreadPeerMessages: [],
+            cursor: pipe.cursor("master"),
+            handoffIds: unknownHandoffIds,
+          };
+        }
+        if (!reason.trim()) {
+          throw new Error("handoff dismissal reason cannot be empty");
+        }
+        const consumption = pipe.consume("master", cursor);
+        if (!consumption.accepted) return consumption;
+        for (const handoffId of dismissedHandoffIds) {
+          this.openHandoffs.delete(handoffId);
+        }
+        return {
+          accepted: true,
+          cursor: consumption.cursor,
+          dismissedHandoffIds,
+        };
+      };
+      this.bridgeMasterTurnCompletion = ({ reminderHandoffIds }) => {
+        const ownerSessionId = this.snapshot.boundSessionId;
+        if (!ownerSessionId) return;
+        if (reminderHandoffIds.length > 0) {
+          const unresolved = reminderHandoffIds.filter((handoffId) =>
+            this.openHandoffs.has(handoffId),
+          );
+          if (unresolved.length > 0) {
+            void this.fail(
+              ownerSessionId,
+              new Error(
+                `The master left required ${unresolved.join(", ")} unresolved after its reminder turn.`,
+              ),
+            );
+            return;
+          }
+        }
+
+        const pending = [...this.openHandoffs.entries()].filter(
+          ([, handoff]) => !handoff.reminderSent,
+        );
+        if (pending.length === 0) return;
+        const pendingIds = pending.map(([handoffId]) => handoffId);
+        for (const [, handoff] of pending) handoff.reminderSent = true;
+        const requests = pending
+          .map(([handoffId, handoff]) => `- ${handoffId}: ${handoff.message}`)
+          .join("\n");
+        this.deliverToMaster(
+          ownerSessionId,
+          `[Private handoff reminder]\nYou ended your turn without resolving the required handoffs below. Resolve them now with one or more send-to-emissary --mode say calls that name every answered handoff in --resolves, or dismiss obsolete handoffs explicitly. Do not redo completed work.\n${requests}`,
+          "Handoff reminder",
+          undefined,
+          true,
+          undefined,
+          true,
+          pendingIds,
+        );
       };
       this.registerBridge(this.snapshot.boundSessionId ?? sessionId);
       this.setSnapshot({ ...this.snapshot, state: "listening" });
@@ -757,6 +857,9 @@ class OpenAiRealtimeConversationRuntime {
     if (sessionId) await this.cleanupResources(sessionId);
     this.boundOnSend = null;
     this.bridgeSender = null;
+    this.bridgeHandoffDismissal = null;
+    this.bridgeMasterTurnCompletion = null;
+    this.openHandoffs.clear();
     this.typedUserMessageSink = null;
     this.pendingTypedUserMessages = [];
     this.failureInProgress = false;
@@ -773,6 +876,7 @@ class OpenAiRealtimeConversationRuntime {
     hidden = false,
     userMessageId?: string,
     queueUntilIdle = false,
+    reminderHandoffIds: string[] = [],
   ): void {
     this.deliveryQueue = this.deliveryQueue
       .catch(() => undefined)
@@ -799,6 +903,9 @@ class OpenAiRealtimeConversationRuntime {
             origin: "voice_conversation",
             userVisible: !hidden,
             agentVisible: false,
+            ...(reminderHandoffIds.length > 0
+              ? { [HANDOFF_REMINDER_IDS_METADATA]: reminderHandoffIds }
+              : {}),
           },
           ...(userMessageId ? { userMessageId } : {}),
         };
@@ -890,6 +997,9 @@ class OpenAiRealtimeConversationRuntime {
     this.audio?.pause();
     this.releaseBridge = null;
     this.bridgeSender = null;
+    this.bridgeHandoffDismissal = null;
+    this.bridgeMasterTurnCompletion = null;
+    this.openHandoffs.clear();
     this.typedUserMessageSink = null;
     this.pendingTypedUserMessages = [];
     this.channel = null;
@@ -910,11 +1020,18 @@ class OpenAiRealtimeConversationRuntime {
   }
 
   private registerBridge(sessionId: string): void {
-    if (!this.bridgeSender) return;
+    if (
+      !this.bridgeSender ||
+      !this.bridgeHandoffDismissal ||
+      !this.bridgeMasterTurnCompletion
+    )
+      return;
     this.releaseBridge?.();
     this.releaseBridge = registerRealtimeEmissary({
       sessionId,
       sendMasterMessage: this.bridgeSender,
+      dismissHandoffs: this.bridgeHandoffDismissal,
+      completeMasterTurn: this.bridgeMasterTurnCompletion,
     });
   }
 }

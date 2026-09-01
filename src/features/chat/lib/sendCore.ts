@@ -35,7 +35,10 @@ import {
 import { perfLog } from "@/shared/lib/perfLog";
 import { completeAssistantMessage } from "@/features/chat/lib/messageCompletion";
 import { isVoiceConversationEmptyResponse } from "@/features/chat/lib/voiceConversationNoop";
-import { hasActiveRealtimeEmissary } from "@/features/voice-conversation/lib/realtimeEmissaryBridge";
+import {
+  completeActiveRealtimeMasterTurn,
+  hasActiveRealtimeEmissary,
+} from "@/features/voice-conversation/lib/realtimeEmissaryBridge";
 import {
   type ChatAttachmentDraft,
   type Message,
@@ -147,6 +150,18 @@ function assistantTextSnapshot(sessionId: string): ReadonlyMap<string, string> {
           .trim(),
       ]),
   );
+}
+
+function realtimeHandoffReminderIds(
+  metadata: Record<string, unknown> | undefined,
+): string[] {
+  const value = metadata?.realtimeHandoffReminderIds;
+  return Array.isArray(value)
+    ? value.filter(
+        (handoffId): handoffId is string =>
+          typeof handoffId === "string" && handoffId.length > 0,
+      )
+    : [];
 }
 
 function messageText(message: Message): string {
@@ -513,6 +528,9 @@ export async function dispatchPrompt(
       if (!finalMasterTextSince(sessionId, assistantTextBeforeTurn)) {
         await recoverMissingMasterTranscript(sessionId, acpPrompt);
       }
+      completeActiveRealtimeMasterTurn(sessionId, {
+        reminderHandoffIds: realtimeHandoffReminderIds(acpGooseMetadata),
+      });
     }
   } catch (err) {
     const isVoiceConversationNoop =
@@ -526,6 +544,9 @@ export async function dispatchPrompt(
         if (!finalMasterTextSince(sessionId, assistantTextBeforeTurn)) {
           await recoverMissingMasterTranscript(sessionId, dispatchedPrompt);
         }
+        completeActiveRealtimeMasterTurn(sessionId, {
+          reminderHandoffIds: realtimeHandoffReminderIds(acpGooseMetadata),
+        });
       }
       if (isCurrent()) {
         setError(sessionId, null);

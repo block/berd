@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  completeActiveRealtimeMasterTurn,
   getActiveRealtimeEmissary,
   hasActiveRealtimeEmissary,
   registerRealtimeEmissary,
@@ -16,13 +17,21 @@ describe("realtime emissary bridge registration", () => {
     const emissary = {
       sessionId: "session-1",
       sendMasterMessage,
+      dismissHandoffs: vi.fn(),
+      completeMasterTurn: vi.fn(),
     };
     const release = registerRealtimeEmissary(emissary);
 
     expect(getActiveRealtimeEmissary()).toBe(emissary);
     await expect(
-      emissary.sendMasterMessage("update", 1, "context"),
+      emissary.sendMasterMessage("update", 1, "context", []),
     ).resolves.toMatchObject({ accepted: false, cursor: 2 });
+    completeActiveRealtimeMasterTurn("session-1", {
+      reminderHandoffIds: ["handoff-1"],
+    });
+    expect(emissary.completeMasterTurn).toHaveBeenCalledWith({
+      reminderHandoffIds: ["handoff-1"],
+    });
     expect(hasActiveRealtimeEmissary("session-1")).toBe(true);
     expect(hasActiveRealtimeEmissary("session-2")).toBe(false);
 

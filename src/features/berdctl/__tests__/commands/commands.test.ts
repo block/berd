@@ -606,6 +606,12 @@ describe("action schemas", () => {
         message: "Status update",
         mode: "context",
       },
+      "sessions.dismiss_handoffs": {
+        session_id: "s1",
+        cursor: 1,
+        handoff_id: ["handoff-1"],
+        reason: "The request was superseded.",
+      },
       "sessions.open": { session_id: "s1" },
       "sessions.list": {},
       "sessions.get": { session_id: "s1" },

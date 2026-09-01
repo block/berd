@@ -26,6 +26,13 @@ const sendToEmissarySessionSchema = z
       .describe(
         "Delivery mode: context updates future turns silently; say asks the emissary to speak now.",
       ),
+    resolves: z
+      .array(z.string().trim().min(1).max(100))
+      .max(100)
+      .default([])
+      .describe(
+        "Open handoff id resolved by this say message; repeat for multiple handoffs.",
+      ),
   })
   .strict();
 
@@ -34,6 +41,7 @@ interface SendToEmissarySessionResult {
   cursor: number;
   delivery_status: "sent" | "interrupting" | "queued";
   mode: "context" | "say";
+  resolved_handoff_ids: string[];
 }
 
 export const sendToEmissarySessionCommand = defineCommand({
@@ -48,13 +56,16 @@ export const sendToEmissarySessionCommand = defineCommand({
     "The command fails when the target session has no live Realtime voice conversation.",
   helpFooter: `Example:
   berdctl session send-to-emissary --session-id <session-id> --cursor 0 \\
-    --mode say --message "The build failed because the signing certificate expired." --json
+    --mode say --resolves handoff-1 \\
+    --message "The build failed because the signing certificate expired." --json
 
 Result:
-  {"session_id":"...","cursor":0,"delivery_status":"sent"|"interrupting"|"queued","mode":"context"|"say"}
+  {"session_id":"...","cursor":0,"delivery_status":"sent"|"interrupting"|"queued","mode":"context"|"say","resolved_handoff_ids":["handoff-1"]}
 
 Use --mode context to update the emissary's future context without starting a
 response. Use --mode say when the emissary should speak the message now.
+Repeat --resolves to close every handoff answered by one say. Context messages
+cannot resolve handoffs. A say may omit --resolves when volunteering information.
 
 A send while the pipe is carrying emissary-to-master coordination fails with
 reason "pipe_busy" without consuming that pending message. Wait for Berd to
@@ -76,6 +87,7 @@ deliver it normally, then retry with the cursor included in that message.`,
       args.message,
       args.cursor,
       args.mode,
+      args.resolves,
     );
     if (!delivery.accepted) {
       throw new CommandError(
@@ -84,6 +96,10 @@ deliver it normally, then retry with the cursor included in that message.`,
           reason: delivery.reason,
           cursor: delivery.cursor,
           unread_peer_messages: delivery.unreadPeerMessages,
+          ...(delivery.reason === "unknown_handoff" ||
+          delivery.reason === "context_cannot_resolve"
+            ? { handoff_ids: delivery.handoffIds }
+            : {}),
         }),
       );
     }
@@ -93,6 +109,7 @@ deliver it normally, then retry with the cursor included in that message.`,
       cursor: delivery.cursor,
       delivery_status: delivery.deliveryStatus,
       mode: args.mode,
+      resolved_handoff_ids: args.resolves,
     };
   },
 });

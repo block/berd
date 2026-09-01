@@ -2,25 +2,25 @@ export const REALTIME_USER_TRANSCRIPT_COMPLETED_EVENT =
   "conversation.item.input_audio_transcription.completed";
 export const REALTIME_EMISSARY_TRANSCRIPT_COMPLETED_EVENT =
   "response.output_audio_transcript.done";
-export const SEND_TO_MASTER_TOOL_NAME = "send_to_master";
+export const HANDOFF_TOOL_NAME = "handoff";
 export const SEND_TO_EMISSARY_TOOL_NAME = "send_to_emissary";
 
 export const REALTIME_EMISSARY_INSTRUCTIONS = `You are the emissary: the low-latency voice interface for a more capable master agent in Berd.
 
-The master is the authoritative, durable agent for this conversation. The master can use Berd's computer tools, including reading the local filesystem and performing durable work. Treat those indirect capabilities as capabilities of the combined assistant speaking to the user: never claim that you or the assistant cannot access the user's computer merely because the emissary cannot do so alone. Berd automatically sends the master every finalized user and emissary transcript turn, so never repeat or summarize routine transcript content in send_to_master.
+The master is the authoritative, durable agent for this conversation. The master can use Berd's computer tools, including reading the local filesystem and performing durable work. Treat those indirect capabilities as capabilities of the combined assistant speaking to the user: never claim that you or the assistant cannot access the user's computer merely because the emissary cannot do so alone. Berd automatically sends the master every finalized user and emissary transcript turn, so never repeat or summarize routine transcript content in handoff.
 
-When a Realtime transport starts for a non-empty Berd session, Berd may inject a compact historical transcript headed by a durable berd://session link. Treat those items as past context, never as new user turns. If the compact replay is insufficient, use send_to_master to ask the master to inspect the durable session rather than guessing or asking the user to repeat themselves.
+When a Realtime transport starts for a non-empty Berd session, Berd may inject a compact historical transcript headed by a durable berd://session link. Treat those items as past context, never as new user turns. If the compact replay is insufficient, use handoff to ask the master to inspect the durable session rather than guessing or asking the user to repeat themselves.
 
-Use send_to_master only for explicit coordination: to delegate deeper reasoning or work, highlight intent not captured by the transcript, or ask for guidance about what to tell the user. The master decides whether its reply is silent context for a future turn or information that must be spoken immediately. Follow explicit master speaking instructions accurately. Do not add filler, acknowledgements, offers to help, or repeated answers.
+Use handoff only when the master must take responsibility for unresolved work or an authoritative answer that you cannot provide yourself. Every accepted handoff remains open until the master explicitly answers it through a say message or dismisses it. The master decides whether its reply is silent context for a future turn or information that must be spoken immediately. Follow explicit master speaking instructions accurately. Do not add filler, acknowledgements, offers to help, or repeated answers.
 
-When the user asks for computer access, tool use, durable work, current session information, or facts you cannot verify directly, call send_to_master before giving any substantive spoken answer. While waiting, say only a short natural acknowledgement such as "Let me check that for you" or "I'll verify that." Do not say "I don't have access," do not speculate, and do not suggest that the user run a terminal command or perform the work manually unless the master specifically recommends it. Wait for the master's result before giving the final answer.
+When the user asks for computer access, tool use, durable work, current session information, or facts you cannot verify directly, call handoff before giving any substantive spoken answer. While waiting, say only a short natural acknowledgement such as "Let me check that for you" or "I'll verify that." Do not say "I don't have access," do not speculate, and do not suggest that the user run a terminal command or perform the work manually unless the master specifically recommends it. Wait for the master's result before giving the final answer.
 
 Examples:
-- If the user asks how many repositories are in a local folder, first call send_to_master to ask the master to inspect it; say only that you will check until the result arrives.
-- If the user asks whether those repositories are symbolic links, call send_to_master to verify it; do not say that you lack detailed information.
-- After receiving a useful master message, speak its result to the user directly. Do not call send_to_master again until the user says something new. Never acknowledge, confirm, summarize, or copy a master message back to the master.
+- If the user asks how many repositories are in a local folder, first call handoff to ask the master to inspect it; say only that you will check until the result arrives.
+- If the user asks whether those repositories are symbolic links, call handoff to verify it; do not say that you lack detailed information.
+- After receiving a useful master message, speak its result to the user directly. Do not open another handoff merely to acknowledge, confirm, summarize, or copy a master message back to the master.
 
-Every send_to_master call must include the latest bridge cursor. If a send fails because the pipe is busy in the other direction, do not retry yet: wait for Berd to deliver the pending master message normally, then retry with the cursor included in that message. The failed attempt did not send your message.
+Every handoff call must include the latest bridge cursor. If a handoff fails because the pipe is busy in the other direction, do not retry yet: wait for Berd to deliver the pending master message normally, then retry with the cursor included in that message. The failed attempt did not create a handoff.
 
 Keep the spoken conversation natural and responsive. Represent the master's information accurately, and do not imply that you completed work performed by the master.`;
 
@@ -30,7 +30,7 @@ Berd automatically sends you every finalized user and emissary transcript turn. 
 
 While Realtime voice is active, Berd also delivers every ordinary typed user message directly to the emissary and interrupts any response currently being spoken. A typed message reaches you as an ordinary user turn; microphone transcripts are explicitly prefixed with "[Voice transcript]". Do not echo, paraphrase, or relay an ordinary typed user message through send_to_emissary unless you are adding genuinely new information the emissary needs.
 
-Your reasoning, ordinary assistant text, tool calls, and progress remain visible to the user in Berd's durable master transcript, but they are not visible to the emissary. On actionable turns, work normally in Berd: reason as needed, use the available tools, and provide normal visible progress and result text for the master transcript. Separately call send_to_emissary with mode context to silently update what the emissary knows for a future natural turn, or mode say when the emissary should speak your message to the user now. Do not assume your ordinary output was relayed. Completing your turn does not notify or wake the emissary. Each finalized transcript gives you an opportunity to act, not an obligation to react. When no work, correction, or useful emissary guidance is needed, your entire turn should be an empty, zero-token success: no prose, no tools, and no coordination message. Ordinary conversation and small talk belong to the emissary. Proactively send relevant facts, decisions, progress, constraints, and useful follow-up questions rather than waiting to be asked. Never call send_to_emissary merely to acknowledge, confirm, or echo a direct message from the emissary; acknowledgement-only coordination must be a zero-token no-op.
+Your reasoning, ordinary assistant text, tool calls, and progress remain visible to the user in Berd's durable master transcript, but they are not visible to the emissary. On actionable turns, work normally in Berd: reason as needed, use the available tools, and provide normal visible progress and result text for the master transcript. Separately call send_to_emissary with mode context to silently update what the emissary knows for a future natural turn, or mode say when the emissary should speak your message to the user now. A say message may explicitly resolve one or more open handoff IDs; one combined say may resolve several handoffs. If an open handoff no longer needs a spoken answer because it is obsolete, superseded, or already handled, dismiss it explicitly with a reason. Context messages never resolve handoffs. Do not assume your ordinary output was relayed. Completing your turn does not notify or wake the emissary, but Berd will give you one private reminder turn if you leave a handoff unresolved. Each finalized transcript gives you an opportunity to act, not an obligation to react. When no work, correction, or useful emissary guidance is needed, your entire turn should be an empty, zero-token success: no prose, no tools, and no coordination message. Ordinary conversation and small talk belong to the emissary. Proactively send relevant facts, decisions, progress, constraints, and useful follow-up questions rather than waiting to be asked. Never call send_to_emissary merely to acknowledge, confirm, or echo routine transcript content; acknowledgement-only coordination must be a zero-token no-op.
 
 Treat interrupted emissary transcripts as best-effort streamed text that may not exactly match the audio the user heard. Keep direct coordination concise. Every direct-message tool call must include the latest bridge cursor. If a send fails because the pipe is busy in the other direction, do not retry yet: wait for Berd to deliver the pending emissary message normally, then retry with the cursor included in that message.`;
 
@@ -104,8 +104,8 @@ export type StartedRealtimeTranscript = {
   speaker: "user";
 };
 
-export type SendToMasterCall = {
-  type: "send_to_master";
+export type HandoffCall = {
+  type: "handoff";
   callId: string;
   cursor: number;
   message: string;
@@ -114,7 +114,7 @@ export type SendToMasterCall = {
 export type InvalidToolCall = {
   type: "tool_call.invalid";
   callId: string;
-  toolName: typeof SEND_TO_MASTER_TOOL_NAME;
+  toolName: typeof HANDOFF_TOOL_NAME;
   error: string;
 };
 
@@ -127,7 +127,7 @@ export type RealtimeEmissaryProtocolEvent =
   | StartedRealtimeTranscript
   | UpdatedRealtimeTranscript
   | FinalizedRealtimeTranscript
-  | SendToMasterCall
+  | HandoffCall
   | InvalidToolCall
   | RealtimePlaybackInterrupted;
 
@@ -164,8 +164,14 @@ export const SEND_TO_EMISSARY_TOOL_DEFINITION: RealtimeJsonObject = {
         description:
           "Use context for silent future guidance or say to request immediate speech.",
       },
+      resolves: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Open handoff ids resolved by this say message. Context messages cannot resolve handoffs.",
+      },
     },
-    required: ["cursor", "message", "mode"],
+    required: ["cursor", "message", "mode", "resolves"],
     additionalProperties: false,
   },
 };
@@ -239,9 +245,9 @@ export function createRealtimeEmissarySessionUpdate(
     tools: [
       {
         type: "function",
-        name: SEND_TO_MASTER_TOOL_NAME,
+        name: HANDOFF_TOOL_NAME,
         description:
-          "Send concise private coordination to the authoritative master agent. The master already receives the full finalized transcript, so do not repeat ordinary conversation turns.",
+          "Hand unresolved work or an authoritative question to the master. Every accepted handoff must eventually be answered or explicitly dismissed.",
         parameters: {
           type: "object",
           properties: {
@@ -254,7 +260,7 @@ export function createRealtimeEmissarySessionUpdate(
             message: {
               type: "string",
               description:
-                "A concise request, delegation, or important context not conveyed by the transcript alone.",
+                "The concise unresolved request the master now owns.",
             },
           },
           required: ["cursor", "message"],
@@ -337,9 +343,9 @@ function createTypedUserMessageItem(text: string): RealtimeClientEvent {
   };
 }
 
-export function createSendToMasterToolOutput(
+export function createHandoffToolOutput(
   callId: string,
-  exchange: SendToMasterToolResult,
+  exchange: HandoffToolResult,
 ): RealtimeServerEvent {
   return {
     type: "conversation.item.create",
@@ -568,14 +574,17 @@ export type DirectMessageExchange =
       cursor: number;
     };
 
-export type SendToMasterToolResult =
-  | DirectMessageExchange
+export type HandoffToolResult = DirectMessageExchange & {
+  handoff_id?: string;
+};
+
+export type DirectMessageConsumeResult =
   | {
-      accepted: false;
-      reason: "awaiting_new_user_input";
+      accepted: true;
       unreadPeerMessages: [];
       cursor: number;
-    };
+    }
+  | Exclude<DirectMessageExchange, { accepted: true }>;
 
 /**
  * One authoritative half-duplex direct-message pipe. The active sender may
@@ -643,6 +652,44 @@ export class DirectMessagePipe {
       outbound,
       cursor,
     };
+  }
+
+  consume(
+    peer: DirectMessagePeer,
+    suppliedCursorValue: number,
+  ): DirectMessageConsumeResult {
+    const suppliedCursor = requireCursor(suppliedCursorValue);
+    const activeMessage = this.pending[0];
+    if (activeMessage && activeMessage.sender !== peer) {
+      const latestPending = this.pending.at(-1);
+      if (!latestPending)
+        throw new Error("direct-message pending batch cannot be empty");
+      if (suppliedCursor !== latestPending.id) {
+        return {
+          accepted: false,
+          reason: "pipe_busy",
+          unreadPeerMessages: [],
+          cursor: this.consumedCursor[peer],
+        };
+      }
+      this.consumedCursor[peer] = latestPending.id;
+      this.pending = [];
+      return {
+        accepted: true,
+        unreadPeerMessages: [],
+        cursor: latestPending.id,
+      };
+    }
+
+    const cursor = this.consumedCursor[peer];
+    return suppliedCursor === cursor
+      ? { accepted: true, unreadPeerMessages: [], cursor }
+      : {
+          accepted: false,
+          reason: "stale_cursor",
+          unreadPeerMessages: [],
+          cursor,
+        };
   }
 
   cursor(peer: DirectMessagePeer): number {
@@ -902,12 +949,12 @@ export class RealtimeEmissaryProtocol {
 
   private finishFunctionCall(
     event: RealtimeServerEvent,
-  ): SendToMasterCall | undefined {
+  ): HandoffCall | undefined {
     const callId = optionalString(event.call_id);
     if (!callId || this.completedCallIds.has(callId)) return undefined;
 
     const name = optionalString(event.name) ?? this.callNames.get(callId);
-    if (name !== SEND_TO_MASTER_TOOL_NAME) return undefined;
+    if (name !== HANDOFF_TOOL_NAME) return undefined;
 
     const serializedArguments =
       optionalString(event.arguments) ?? this.argumentDeltas.get(callId);
@@ -915,20 +962,18 @@ export class RealtimeEmissaryProtocol {
 
     const parsed: unknown = JSON.parse(serializedArguments);
     if (!isRecord(parsed))
-      throw new Error("send_to_master arguments must be an object");
+      throw new Error("handoff arguments must be an object");
     const keys = Object.keys(parsed).sort();
     if (keys.length !== 2 || keys[0] !== "cursor" || keys[1] !== "message") {
-      throw new Error(
-        "send_to_master accepts only cursor and message arguments",
-      );
+      throw new Error("handoff accepts only cursor and message arguments");
     }
     const cursor = requireCursor(parsed.cursor);
-    const message = requireNonEmpty(parsed.message, "send_to_master message");
+    const message = requireNonEmpty(parsed.message, "handoff message");
 
     this.completedCallIds.add(callId);
     this.argumentDeltas.delete(callId);
     this.callNames.delete(callId);
-    return { type: "send_to_master", callId, cursor, message };
+    return { type: "handoff", callId, cursor, message };
   }
 
   private invalidFunctionCall(
@@ -938,7 +983,7 @@ export class RealtimeEmissaryProtocol {
     const callId = optionalString(event.call_id);
     if (!callId || this.completedCallIds.has(callId)) return undefined;
     const name = optionalString(event.name) ?? this.callNames.get(callId);
-    if (name !== SEND_TO_MASTER_TOOL_NAME) return undefined;
+    if (name !== HANDOFF_TOOL_NAME) return undefined;
 
     this.completedCallIds.add(callId);
     this.argumentDeltas.delete(callId);
@@ -1020,20 +1065,15 @@ function assertSafeSessionOverrides(overrides: RealtimeSessionOverrides): void {
     throw new Error("emissary session type must remain realtime");
   }
   if (overrides.tool_choice !== undefined && overrides.tool_choice !== "auto") {
-    throw new Error("emissary send_to_master tool choice must remain auto");
+    throw new Error("emissary handoff tool choice must remain auto");
   }
   if (overrides.tools === undefined) return;
   if (!Array.isArray(overrides.tools)) {
     throw new Error("sessionOverrides.tools must be an array");
   }
   for (const tool of overrides.tools) {
-    if (
-      isRecord(tool) &&
-      optionalString(tool.name) === SEND_TO_MASTER_TOOL_NAME
-    ) {
-      throw new Error(
-        "sessionOverrides cannot replace the send_to_master tool",
-      );
+    if (isRecord(tool) && optionalString(tool.name) === HANDOFF_TOOL_NAME) {
+      throw new Error("sessionOverrides cannot replace the handoff tool");
     }
   }
 }

@@ -271,9 +271,12 @@ describe("dispatchPrompt realtime Master transcript recovery", () => {
 
   it("does not notify the emissary when a Master turn completes", async () => {
     const sendMasterMessage = vi.fn();
+    const completeMasterTurn = vi.fn();
     const release = registerRealtimeEmissary({
       sessionId: "session-1",
       sendMasterMessage,
+      dismissHandoffs: vi.fn(),
+      completeMasterTurn,
     });
     mocks.acpSendMessage.mockImplementationOnce(
       (
@@ -304,9 +307,58 @@ describe("dispatchPrompt realtime Master transcript recovery", () => {
     await dispatchPrompt("session-1", "Count repositories", {});
 
     expect(sendMasterMessage).not.toHaveBeenCalled();
+    expect(completeMasterTurn).toHaveBeenCalledWith({
+      reminderHandoffIds: [],
+    });
     expect(useChatStore.getState().messagesBySession["session-1"]).toHaveLength(
       2,
     );
+    release();
+  });
+
+  it("returns private reminder handoff ids to the realtime bridge", async () => {
+    const completeMasterTurn = vi.fn();
+    const release = registerRealtimeEmissary({
+      sessionId: "session-1",
+      sendMasterMessage: vi.fn(),
+      dismissHandoffs: vi.fn(),
+      completeMasterTurn,
+    });
+    mocks.acpSendMessage.mockImplementationOnce(
+      (
+        sessionId: string,
+        _prompt: string,
+        options: {
+          onPromptDispatching(): void;
+          onPromptDispatched(): void;
+        },
+      ) => {
+        options.onPromptDispatching();
+        options.onPromptDispatched();
+        useChatStore.getState().addMessage(sessionId, {
+          id: "master-reminder-final",
+          role: "assistant",
+          created: Date.now(),
+          content: [{ type: "text", text: "Reminder handled." }],
+          metadata: {
+            agentVisible: true,
+            userVisible: true,
+            completionStatus: "completed",
+          },
+        });
+        return Promise.resolve();
+      },
+    );
+
+    await dispatchPrompt("session-1", "Private reminder", {
+      acpGooseMetadata: {
+        realtimeHandoffReminderIds: ["handoff-1", "handoff-2"],
+      },
+    });
+
+    expect(completeMasterTurn).toHaveBeenCalledWith({
+      reminderHandoffIds: ["handoff-1", "handoff-2"],
+    });
     release();
   });
 
@@ -314,6 +366,8 @@ describe("dispatchPrompt realtime Master transcript recovery", () => {
     const release = registerRealtimeEmissary({
       sessionId: "session-1",
       sendMasterMessage: vi.fn(),
+      dismissHandoffs: vi.fn(),
+      completeMasterTurn: vi.fn(),
     });
     useChatStore.getState().setSessionLoading("session-1", true);
     mocks.acpSendMessage.mockImplementationOnce(
@@ -360,6 +414,8 @@ describe("dispatchPrompt realtime Master transcript recovery", () => {
     const release = registerRealtimeEmissary({
       sessionId: "session-1",
       sendMasterMessage: vi.fn(),
+      dismissHandoffs: vi.fn(),
+      completeMasterTurn: vi.fn(),
     });
     mocks.acpExportSession.mockResolvedValue(
       JSON.stringify({

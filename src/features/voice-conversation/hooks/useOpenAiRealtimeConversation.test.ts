@@ -13,17 +13,24 @@ const mocks = vi.hoisted(() => ({
   appendSessionSystemPrompt: vi.fn(),
   claimMicrophone: vi.fn(),
   connectPeer: vi.fn(),
-  createSendToMasterToolOutput: vi.fn(),
+  createHandoffToolOutput: vi.fn(),
   createInvalidToolCallOutput: vi.fn(),
   createPeer: vi.fn(),
   createSession: vi.fn(),
   registerEmissary: vi.fn(),
   activeEmissary: null as null | {
     sessionId: string;
+    completeMasterTurn(completion: { reminderHandoffIds: string[] }): void;
+    dismissHandoffs(
+      cursor: number,
+      handoffIds: string[],
+      reason: string,
+    ): Promise<unknown>;
     sendMasterMessage(
       message: string,
       cursor: number,
       mode: "context" | "say",
+      resolves: string[],
     ): Promise<unknown>;
   },
   releaseBridge: vi.fn(),
@@ -88,18 +95,23 @@ vi.mock("../lib/realtimeVoicePreference", () => ({
 vi.mock("../lib/realtimeEmissaryProtocol", () => ({
   configureRealtimeEmissarySession: vi.fn(),
   createInvalidToolCallOutput: mocks.createInvalidToolCallOutput,
-  createSendToMasterToolOutput: mocks.createSendToMasterToolOutput,
+  createHandoffToolOutput: mocks.createHandoffToolOutput,
   DirectMessagePipe: class {
+    private nextId = 1;
     cursor() {
       return 0;
     }
+    consume() {
+      return { accepted: true, cursor: 0, unreadPeerMessages: [] };
+    }
     send(options: { sender: "master" | "emissary"; message: string }) {
+      const id = this.nextId++;
       return {
         accepted: true,
         cursor: 0,
         unreadPeerMessages: [],
         outbound: {
-          id: 1,
+          id,
           sender: options.sender,
           recipient: options.sender === "master" ? "emissary" : "master",
           senderCursor: 0,
@@ -226,22 +238,22 @@ vi.mock("../lib/realtimeEmissaryProtocol", () => ({
             type: "transcript.finalized",
           },
         ];
-      if (event.type === "test.send_to_master")
+      if (event.type === "test.handoff")
         return [
           {
             callId: "call-1",
             cursor: 0,
             message: "Please inspect the disk.",
-            type: "send_to_master",
+            type: "handoff",
           },
         ];
-      if (event.type === "test.send_to_master_followup")
+      if (event.type === "test.handoff_followup")
         return [
           {
             callId: "call-2",
             cursor: 0,
             message: "Please verify whether those repositories are symlinks.",
-            type: "send_to_master",
+            type: "handoff",
           },
         ];
       if (event.type === "test.invalid_tool_call")
@@ -249,7 +261,7 @@ vi.mock("../lib/realtimeEmissaryProtocol", () => ({
           {
             callId: "call-broken",
             error: "JSON Parse error: Unterminated string",
-            toolName: "send_to_master",
+            toolName: "handoff",
             type: "tool_call.invalid",
           },
         ];
@@ -403,7 +415,7 @@ beforeEach(() => {
   mocks.appendSessionSystemPrompt.mockResolvedValue(undefined);
   mocks.claimMicrophone.mockResolvedValue(undefined);
   mocks.connectPeer.mockResolvedValue(undefined);
-  mocks.createSendToMasterToolOutput.mockReturnValue({
+  mocks.createHandoffToolOutput.mockReturnValue({
     type: "conversation.item.create",
     item: { type: "function_call_output" },
   });
@@ -797,7 +809,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     await act(async () => owner.result.current.onToggle());
   });
 
-  it("shows accepted master-to-emissary coordination in the transcript", async () => {
+  it("does not duplicate master routing commands in the transcript", async () => {
     const owner = renderConversation("session-a");
     await act(async () => owner.result.current.onToggle());
     await waitFor(() => expect(owner.result.current.state).toBe("listening"));
@@ -807,6 +819,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
         "There are 20 repos.",
         0,
         "context",
+        [],
       );
     });
 
@@ -817,15 +830,8 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     });
 
     expect(
-      useChatStore.getState().messagesBySession["session-a"]?.at(-1),
-    ).toMatchObject({
-      role: "assistant",
-      content: [{ type: "text", text: "There are 20 repos." }],
-      metadata: {
-        agentVisible: false,
-        personaName: "Master → Emissary",
-      },
-    });
+      useChatStore.getState().messagesBySession["session-a"] ?? [],
+    ).toHaveLength(0);
 
     await act(async () => owner.result.current.onToggle());
   });
@@ -846,7 +852,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
 
     expect(mocks.createInvalidToolCallOutput).toHaveBeenCalledWith(
       "call-broken",
-      "send_to_master",
+      "handoff",
       "JSON Parse error: Unterminated string",
     );
     expect(mocks.requestToolOutput).toHaveBeenCalledWith(
@@ -1137,7 +1143,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       );
       channel.dispatchEvent(
         new MessageEvent("message", {
-          data: JSON.stringify({ type: "test.send_to_master" }),
+          data: JSON.stringify({ type: "test.handoff" }),
         }),
       );
     });
@@ -1149,6 +1155,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
         "The answer is 21 repositories.",
         0,
         "say",
+        ["handoff-1"],
       );
     });
     act(() => {
@@ -1162,7 +1169,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     await waitFor(() =>
       expect(
         useChatStore.getState().messagesBySession["session-a"],
-      ).toHaveLength(5),
+      ).toHaveLength(4),
     );
     expect(onSend).toHaveBeenCalledOnce();
 
@@ -1192,7 +1199,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       );
       channel.dispatchEvent(
         new MessageEvent("message", {
-          data: JSON.stringify({ type: "test.send_to_master_followup" }),
+          data: JSON.stringify({ type: "test.handoff_followup" }),
         }),
       );
     });
@@ -1204,6 +1211,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
         "None of the repositories are symbolic links.",
         0,
         "say",
+        ["handoff-3"],
       );
     });
     act(() => {
@@ -1231,9 +1239,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     const messages =
       useChatStore.getState().messagesBySession["session-a"] ?? [];
     expect(
-      messages.filter(
-        (message) => message.metadata?.personaName === "Master → Emissary",
-      ),
+      messages.filter((message) => message.metadata?.personaName === "Routing"),
     ).toHaveLength(2);
     expect(
       messages.filter(
@@ -1342,7 +1348,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     act(() => {
       channel.dispatchEvent(
         new MessageEvent("message", {
-          data: JSON.stringify({ type: "test.send_to_master" }),
+          data: JSON.stringify({ type: "test.handoff" }),
         }),
       );
     });
@@ -1351,11 +1357,16 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       expect(
         useChatStore.getState().messagesBySession["session-a"]?.at(-1),
       ).toMatchObject({
-        role: "assistant",
-        content: [{ type: "text", text: "Please inspect the disk." }],
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "Emissary handoff handoff-1 → Master\nPlease inspect the disk.",
+          },
+        ],
         metadata: {
           agentVisible: false,
-          personaName: "Emissary → Master",
+          personaName: "Routing",
         },
       }),
     );
@@ -1384,7 +1395,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     act(() => {
       channel.dispatchEvent(
         new MessageEvent("message", {
-          data: JSON.stringify({ type: "test.send_to_master" }),
+          data: JSON.stringify({ type: "test.handoff" }),
         }),
       );
     });
@@ -1393,7 +1404,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     expect(onSend).not.toHaveBeenCalled();
     expect(
       useChatStore.getState().messagesBySession["session-a"]?.at(-1),
-    ).toMatchObject({ metadata: { personaName: "Emissary → Master" } });
+    ).toMatchObject({ role: "user", metadata: { personaName: "Routing" } });
 
     await act(async () => owner.result.current.onToggle());
   });
@@ -1418,14 +1429,21 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     act(() => {
       channel.dispatchEvent(
         new MessageEvent("message", {
-          data: JSON.stringify({ type: "test.send_to_master" }),
+          data: JSON.stringify({ type: "test.handoff" }),
         }),
       );
     });
     await waitFor(() =>
       expect(
         useChatStore.getState().messagesBySession["session-a"]?.at(-1),
-      ).toMatchObject({ metadata: { personaName: "Emissary → Master" } }),
+      ).toMatchObject({
+        content: [
+          expect.objectContaining({
+            text: expect.stringContaining("Emissary handoff handoff-1"),
+          }),
+        ],
+        metadata: { personaName: "Routing" },
+      }),
     );
 
     await waitFor(() => expect(mocks.steerPrompt).toHaveBeenCalledOnce());
@@ -1434,38 +1452,35 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     await act(async () => owner.result.current.onToggle());
   });
 
-  it("blocks acknowledgement loops until the user speaks again", async () => {
+  it("accepts multiple handoffs without requiring new user input", async () => {
     const onSend = vi.fn().mockResolvedValue(true);
     const owner = renderConversation("session-a", onSend);
     await act(async () => owner.result.current.onToggle());
     await waitFor(() => expect(owner.result.current.state).toBe("listening"));
 
-    await act(async () => {
-      await mocks.activeEmissary?.sendMasterMessage("The result.", 0, "say");
-    });
-    mocks.createSendToMasterToolOutput.mockClear();
+    mocks.createHandoffToolOutput.mockClear();
     mocks.sendRealtimeEvents.mockClear();
 
     await act(async () => {
       channel.dispatchEvent(
         new MessageEvent("message", {
-          data: JSON.stringify({ type: "test.send_to_master" }),
+          data: JSON.stringify({ type: "test.handoff" }),
         }),
       );
     });
 
     await waitFor(() =>
-      expect(mocks.createSendToMasterToolOutput).toHaveBeenCalledWith(
+      expect(mocks.createHandoffToolOutput).toHaveBeenCalledWith(
         "call-1",
-        {
-          accepted: false,
-          reason: "awaiting_new_user_input",
+        expect.objectContaining({
+          accepted: true,
+          handoff_id: "handoff-1",
           unreadPeerMessages: [],
           cursor: 0,
-        },
+        }),
       ),
     );
-    expect(onSend).not.toHaveBeenCalled();
+    expect(onSend).toHaveBeenCalledOnce();
     expect(mocks.sendRealtimeEvents).toHaveBeenCalledWith(expect.anything(), [
       {
         type: "conversation.item.create",
@@ -1479,17 +1494,196 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     await act(async () => {
       channel.dispatchEvent(
         new MessageEvent("message", {
-          data: JSON.stringify({ type: "test.transcript" }),
-        }),
-      );
-      channel.dispatchEvent(
-        new MessageEvent("message", {
-          data: JSON.stringify({ type: "test.send_to_master" }),
+          data: JSON.stringify({ type: "test.handoff_followup" }),
         }),
       );
     });
 
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
+    expect(mocks.createHandoffToolOutput).toHaveBeenLastCalledWith(
+      "call-2",
+      expect.objectContaining({
+        accepted: true,
+        handoff_id: "handoff-2",
+      }),
+    );
     await act(async () => owner.result.current.onToggle());
+  });
+
+  it("lets one say resolve several open handoffs", async () => {
+    const onSend = vi.fn().mockResolvedValue(true);
+    const owner = renderConversation("session-a", onSend);
+    await act(async () => owner.result.current.onToggle());
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+
+    act(() => {
+      channel.dispatchEvent(
+        new MessageEvent("message", {
+          data: JSON.stringify({ type: "test.handoff" }),
+        }),
+      );
+      channel.dispatchEvent(
+        new MessageEvent("message", {
+          data: JSON.stringify({ type: "test.handoff_followup" }),
+        }),
+      );
+    });
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
+
+    await expect(
+      mocks.activeEmissary?.sendMasterMessage(
+        "I handled both requests.",
+        0,
+        "say",
+        ["handoff-1", "handoff-2"],
+      ),
+    ).resolves.toMatchObject({ accepted: true });
+
+    act(() =>
+      mocks.activeEmissary?.completeMasterTurn({ reminderHandoffIds: [] }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onSend).toHaveBeenCalledTimes(2);
+
+    await act(async () => owner.result.current.onToggle());
+  });
+
+  it("rejects resolving a handoff through silent context", async () => {
+    const onSend = vi.fn().mockResolvedValue(true);
+    const owner = renderConversation("session-a", onSend);
+    await act(async () => owner.result.current.onToggle());
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+
+    act(() => {
+      channel.dispatchEvent(
+        new MessageEvent("message", {
+          data: JSON.stringify({ type: "test.handoff" }),
+        }),
+      );
+    });
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+
+    await expect(
+      mocks.activeEmissary?.sendMasterMessage("Silent context.", 0, "context", [
+        "handoff-1",
+      ]),
+    ).resolves.toEqual({
+      accepted: false,
+      reason: "context_cannot_resolve",
+      unreadPeerMessages: [],
+      cursor: 0,
+      handoffIds: ["handoff-1"],
+    });
+    expect(mocks.requestMasterMessage).not.toHaveBeenCalled();
+
+    await act(async () => owner.result.current.onToggle());
+  });
+
+  it("dismisses several handoffs without waking the emissary", async () => {
+    const onSend = vi.fn().mockResolvedValue(true);
+    const owner = renderConversation("session-a", onSend);
+    await act(async () => owner.result.current.onToggle());
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+
+    act(() => {
+      channel.dispatchEvent(
+        new MessageEvent("message", {
+          data: JSON.stringify({ type: "test.handoff" }),
+        }),
+      );
+      channel.dispatchEvent(
+        new MessageEvent("message", {
+          data: JSON.stringify({ type: "test.handoff_followup" }),
+        }),
+      );
+    });
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
+    mocks.requestMasterMessage.mockClear();
+
+    await expect(
+      mocks.activeEmissary?.dismissHandoffs(
+        0,
+        ["handoff-1", "handoff-2"],
+        "The user withdrew both requests.",
+      ),
+    ).resolves.toEqual({
+      accepted: true,
+      cursor: 0,
+      dismissedHandoffIds: ["handoff-1", "handoff-2"],
+    });
+    expect(mocks.requestMasterMessage).not.toHaveBeenCalled();
+
+    act(() =>
+      mocks.activeEmissary?.completeMasterTurn({ reminderHandoffIds: [] }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onSend).toHaveBeenCalledTimes(2);
+
+    await act(async () => owner.result.current.onToggle());
+  });
+
+  it("gives the master one private reminder for unresolved handoffs", async () => {
+    const onSend = vi.fn().mockResolvedValue(true);
+    const owner = renderConversation("session-a", onSend);
+    await act(async () => owner.result.current.onToggle());
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+
+    act(() => {
+      channel.dispatchEvent(
+        new MessageEvent("message", {
+          data: JSON.stringify({ type: "test.handoff" }),
+        }),
+      );
+    });
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+
+    act(() =>
+      mocks.activeEmissary?.completeMasterTurn({ reminderHandoffIds: [] }),
+    );
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
+    expect(onSend.mock.calls[1]?.[0]).toContain("[Private handoff reminder]");
+    expect(onSend.mock.calls[1]?.[0]).toContain("handoff-1");
+    expect(onSend.mock.calls[1]?.[3]).toMatchObject({
+      displayText: "Handoff reminder",
+      userMessageMetadata: { userVisible: false },
+      acpGooseMetadata: {
+        realtimeHandoffReminderIds: ["handoff-1"],
+        userVisible: false,
+      },
+    });
+
+    act(() =>
+      mocks.activeEmissary?.completeMasterTurn({ reminderHandoffIds: [] }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onSend).toHaveBeenCalledTimes(2);
+
+    await act(async () => owner.result.current.onToggle());
+  });
+
+  it("fails loudly when a reminder turn still leaves its handoff unresolved", async () => {
+    const onSend = vi.fn().mockResolvedValue(true);
+    const owner = renderConversation("session-a", onSend);
+    await act(async () => owner.result.current.onToggle());
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+
+    act(() => {
+      channel.dispatchEvent(
+        new MessageEvent("message", {
+          data: JSON.stringify({ type: "test.handoff" }),
+        }),
+      );
+    });
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+
+    act(() =>
+      mocks.activeEmissary?.completeMasterTurn({
+        reminderHandoffIds: ["handoff-1"],
+      }),
+    );
+    await waitFor(() => expect(owner.result.current.state).toBe("error"));
+    expect(owner.result.current.error).toContain(
+      "left required handoff-1 unresolved after its reminder turn",
+    );
   });
 });
