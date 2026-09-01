@@ -1956,14 +1956,20 @@ describe("sessions.open", () => {
 });
 
 describe("sessions.list", () => {
-  it("throws backend_read_failed when the backend session read fails", async () => {
-    mocks.acpListSessionsPage.mockRejectedValue(new Error("backend down"));
+  it("throws backend_read_failed with the backend error detail when the session read fails", async () => {
+    mocks.acpListSessionsPage.mockRejectedValue(
+      Object.assign(new Error("Internal error"), {
+        code: -32603,
+        data: "database is locked",
+      }),
+    );
 
-    await expectCommandError(
+    const error = await expectCommandError(
       dispatchCommand("sessions", { action: "list" }, ctx),
       "backend_read_failed",
     );
 
+    expect(error.message).toContain("database is locked");
     expect(useChatSessionStore.getState().hasHydratedSessions).toBe(false);
   });
 
@@ -2092,6 +2098,26 @@ describe("sessions.list", () => {
 });
 
 describe("sessions.get", () => {
+  it("surfaces the ACP error data payload when the session read fails", async () => {
+    mocks.acpGetSessionInfo.mockRejectedValue(
+      Object.assign(new Error("Internal error"), {
+        code: -32603,
+        data: "session store corrupted",
+      }),
+    );
+
+    const error = await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        { action: "get", session_id: "session-1" },
+        ctx,
+      ),
+      "backend_read_failed",
+    );
+
+    expect(error.message).toContain("session store corrupted");
+  });
+
   it("returns metadata without touching the export when messages is omitted", async () => {
     mockSessionFound({
       providerId: "codex-acp",
@@ -2525,6 +2551,47 @@ describe("sessions.archive", () => {
       ),
       "backend_archive_failed",
     );
+  });
+
+  it("relays the backend error detail from a failed facade outcome", async () => {
+    mockSessionFound();
+    controller.archiveSession.mockResolvedValue({
+      ok: false,
+      reason: "backend_archive_failed",
+      detail: "session store write failed",
+    });
+
+    const error = await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        { action: "archive", session_id: "session-1" },
+        ctx,
+      ),
+      "backend_archive_failed",
+    );
+
+    expect(error.message).toContain("session store write failed");
+  });
+
+  it("caps an oversized facade detail before it reaches the wire", async () => {
+    mockSessionFound();
+    controller.archiveSession.mockResolvedValue({
+      ok: false,
+      reason: "backend_archive_failed",
+      detail: "x".repeat(5000),
+    });
+
+    const error = await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        { action: "archive", session_id: "session-1" },
+        ctx,
+      ),
+      "backend_archive_failed",
+    );
+
+    expect(error.message.length).toBeLessThan(2300);
+    expect(error.message).toContain("…");
   });
 });
 
@@ -3529,19 +3596,25 @@ describe("projects", () => {
     });
   });
 
-  it("list throws backend_read_failed when the backend project read fails", async () => {
+  it("list throws backend_read_failed with the backend error detail when the project read fails", async () => {
     const staleProject = makeProject({ id: "stale" });
     useProjectStore.setState({
       projects: [staleProject],
       hasFetchedProjects: false,
     });
-    mocks.listProjects.mockRejectedValue(new Error("backend down"));
+    mocks.listProjects.mockRejectedValue(
+      Object.assign(new Error("Internal error"), {
+        code: -32603,
+        data: "project source unavailable",
+      }),
+    );
 
-    await expectCommandError(
+    const error = await expectCommandError(
       dispatchCommand("projects", { action: "list" }, ctx),
       "backend_read_failed",
     );
 
+    expect(error.message).toContain("project source unavailable");
     expect(useProjectStore.getState().hasFetchedProjects).toBe(false);
     expect(useProjectStore.getState().projects).toEqual([staleProject]);
   });
@@ -3707,7 +3780,12 @@ describe("projects", () => {
       hasFetchedProjects: true,
     });
     mocks.listProjects.mockResolvedValue([project]);
-    mocks.archiveProject.mockRejectedValue(new Error("backend down"));
+    mocks.archiveProject.mockRejectedValue(
+      Object.assign(new Error("Internal error"), {
+        code: -32603,
+        data: "project store write failed",
+      }),
+    );
 
     const error = await expectCommandError(
       dispatchCommand(
@@ -3717,6 +3795,7 @@ describe("projects", () => {
       ),
       "backend_archive_failed",
     );
+    expect(error.message).toContain("project store write failed");
     expect(error.message).toContain("berdctl project list");
   });
 

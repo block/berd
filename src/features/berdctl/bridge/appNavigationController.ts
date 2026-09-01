@@ -19,7 +19,13 @@ export type CommandOutcome =
         "target_session_running" | "workspace_cleanup_failed" | "timed_out"
       >;
     }
-  | { ok: false; reason: CommandFailureReason };
+  | {
+      ok: false;
+      reason: CommandFailureReason;
+      /** Backend error detail (e.g. the ACP error `data` payload) to relay to
+       *  the caller; omitted for refusal reasons that are self-explanatory. */
+      detail?: string;
+    };
 
 export interface AppContext {
   view: string;

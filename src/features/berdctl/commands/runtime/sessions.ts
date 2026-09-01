@@ -11,7 +11,7 @@ import {
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
 import { acpGetSessionInfo, acpListSessionsPage } from "@/shared/api/acp";
-import { sessionNotFoundMessage } from "../helpers";
+import { berdctlErrorDetail, sessionNotFoundMessage } from "../helpers";
 import { CommandError } from "../types";
 
 export async function loadAllSessionsForBerdctl(): Promise<void> {
@@ -20,7 +20,7 @@ export async function loadAllSessionsForBerdctl(): Promise<void> {
   } catch (error) {
     throw new CommandError(
       "backend_read_failed",
-      `Failed to read sessions from the app backend: ${String(error)}`,
+      `Failed to read sessions from the app backend: ${berdctlErrorDetail(error)}`,
     );
   }
 }
@@ -40,7 +40,7 @@ export async function loadSessionForBerdctl(sessionId: string): Promise<void> {
     }
     throw new CommandError(
       "backend_read_failed",
-      `Failed to read session from the app backend: ${String(error)}`,
+      `Failed to read session from the app backend: ${berdctlErrorDetail(error)}`,
     );
   }
 }

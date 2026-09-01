@@ -3,6 +3,7 @@ import { z } from "zod/v4";
 import type { CommandFailureReason } from "../../navigation";
 import {
   backendArchiveFailedMessage,
+  berdctlErrorDetail,
   sessionNotFoundMessage,
 } from "../helpers";
 import { CommandError, defineCommand } from "../types";
@@ -56,7 +57,7 @@ Result:
     if (!outcome.ok) {
       throw new CommandError(
         outcome.reason,
-        archiveFailureMessage(args.session_id, outcome.reason),
+        archiveFailureMessage(args.session_id, outcome.reason, outcome.detail),
       );
     }
     if (outcome.cleanupIncomplete) {
@@ -93,12 +94,17 @@ function archiveCleanupIncompleteMessage(
 function archiveFailureMessage(
   sessionId: string,
   reason: CommandFailureReason,
+  detail?: string,
 ): string {
   switch (reason) {
     case "session_not_found":
       return sessionNotFoundMessage(sessionId);
     case "backend_archive_failed":
-      return backendArchiveFailedMessage("session", sessionId);
+      return backendArchiveFailedMessage(
+        "session",
+        sessionId,
+        detail === undefined ? undefined : berdctlErrorDetail(detail),
+      );
     case "voice_stop_failed":
       return `Could not stop voice for session "${sessionId}"; the session was not archived.`;
     case "target_session_running":

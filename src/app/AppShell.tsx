@@ -3950,6 +3950,10 @@ export function AppShell({
                 error instanceof SessionNotFoundError
                   ? ("session_not_found" as const)
                   : ("backend_archive_failed" as const),
+              detail:
+                error instanceof SessionNotFoundError
+                  ? undefined
+                  : formatAcpErrorMessage(error),
             };
           }
           let cleanupFailureReason:

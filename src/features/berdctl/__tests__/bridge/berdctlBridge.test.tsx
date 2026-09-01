@@ -266,6 +266,36 @@ describe("BerdctlBridge request handling", () => {
     });
   });
 
+  it("surfaces the ACP error data payload for non-CommandError failures", async () => {
+    renderBridge();
+    await flushAsync();
+    mocks.dispatchCommand.mockRejectedValue(
+      Object.assign(new Error("Internal error"), {
+        code: -32603,
+        data: "fork failed: session row missing",
+      }),
+    );
+
+    emitRequest({
+      id: "req-acp",
+      command: "sessions",
+      args: { action: "fork", session_id: "other" },
+      timeoutMs: 60_000,
+    });
+    await flushAsync();
+
+    expect(mocks.invoke).toHaveBeenCalledWith("plugin:berdctl|submit_result", {
+      result: {
+        id: "req-acp",
+        ok: false,
+        error: {
+          code: "internal_error",
+          message: "fork failed: session row missing",
+        },
+      },
+    });
+  });
+
   it("never rejects: a failed submit_result is logged and dropped", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mocks.dispatchCommand.mockResolvedValue({ ok: true });
