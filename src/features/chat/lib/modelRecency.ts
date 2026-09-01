@@ -16,7 +16,9 @@ function modelRecencyKey(
   agentId: string,
   model: { id: string; providerId?: string },
 ): string {
-  return `${agentId}/${model.providerId ?? ""}/${model.id}`;
+  return [agentId, model.providerId ?? "", model.id]
+    .map(encodeURIComponent)
+    .join("/");
 }
 
 export function getModelRecencyMap(): ModelRecencyMap {
@@ -79,7 +81,10 @@ export function recordModelSelection(
     currentMap[key] ?? Number.NEGATIVE_INFINITY,
   );
   entries.push([key, nextRank]);
-  // Entry order is recency order, so pruning from the front drops the oldest.
+  entries.sort(
+    ([leftKey, leftRank], [rightKey, rightRank]) =>
+      leftRank - rightRank || leftKey.localeCompare(rightKey),
+  );
   const nextMap = Object.fromEntries(entries.slice(-MODEL_RECENCY_LIMIT));
   if (JSON.stringify(nextMap) === cachedRaw) return;
 
@@ -106,7 +111,7 @@ export function getModelRecencyRank(
   const exact = map[modelRecencyKey(agentId, model)];
   if (exact !== undefined) return exact;
 
-  return map[`${agentId}//${model.id}`] ?? null;
+  return map[modelRecencyKey(agentId, { id: model.id })] ?? null;
 }
 
 const listeners = new Set<() => void>();

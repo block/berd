@@ -1,10 +1,11 @@
 import type { ComponentProps } from "react";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi, afterEach } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentModelPicker } from "../AgentModelPicker";
 import {
-  MODEL_RECENCY_STORAGE_KEY,
+  getModelRecencyMap,
+  getModelRecencyRank,
   recordModelSelection,
 } from "../../lib/modelRecency";
 import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
@@ -27,6 +28,7 @@ const AGENTS = [
 describe("AgentModelPicker", () => {
   // Model selection persists recency to localStorage; keep tests isolated.
   afterEach(() => {
+    vi.useRealTimers();
     localStorage.clear();
   });
 
@@ -1489,40 +1491,58 @@ describe("AgentModelPicker", () => {
   });
 
   describe("model recency", () => {
-    const openPicker = (user: ReturnType<typeof userEvent.setup>) =>
-      user.click(
-        screen.getByRole("button", { name: /choose agent and model/i }),
-      );
+    type PickerProps = ComponentProps<typeof AgentModelPicker>;
 
-    it("records a selection under the selected agent", async () => {
-      const user = userEvent.setup();
-
+    const renderPicker = (
+      models: PickerProps["availableModels"],
+      overrides: Partial<PickerProps> = {},
+    ) =>
       render(
         <AgentModelPicker
           agents={AGENTS}
           selectedAgentId="goose"
           onAgentChange={vi.fn()}
-          currentModelId="claude-sonnet-4"
-          currentModelName="Claude Sonnet 4"
-          availableModels={[
-            { id: "claude-sonnet-4", name: "Claude Sonnet 4" },
-            { id: "gpt-4o", name: "GPT-4o" },
-          ]}
+          currentModelId={models[0]?.id}
+          currentModelName={models[0]?.name}
+          availableModels={models}
           onModelChange={vi.fn()}
+          {...overrides}
         />,
       );
 
-      await openPicker(user);
-      await user.click(screen.getByRole("button", { name: "GPT-4o" }));
-
-      const stored = JSON.parse(
-        localStorage.getItem(MODEL_RECENCY_STORAGE_KEY) ?? "{}",
-      ) as Record<string, number>;
-      const entry = Object.entries(stored).find(
-        ([key]) => key.startsWith("goose/") && key.endsWith("/gpt-4o"),
+    const openPicker = async (user: ReturnType<typeof userEvent.setup>) => {
+      await user.click(
+        screen.getByRole("button", { name: /choose agent and model/i }),
       );
-      expect(entry).toBeDefined();
-      expect(typeof entry?.[1]).toBe("number");
+      return screen.getByRole("dialog");
+    };
+
+    const modelRowNames = (picker: HTMLElement) =>
+      Array.from(
+        picker.querySelectorAll<HTMLButtonElement>(
+          '[data-col="model"] button[data-picker-nav-item]',
+        ),
+      )
+        .map((button) => button.textContent)
+        .filter(
+          (text): text is string => text !== null && text !== "View more",
+        );
+
+    it("records a selection under the selected agent", async () => {
+      const user = userEvent.setup();
+      renderPicker([
+        { id: "claude-sonnet-4", name: "Claude Sonnet 4" },
+        { id: "gpt-4o", name: "GPT-4o" },
+      ]);
+
+      const picker = await openPicker(user);
+      await user.click(within(picker).getByRole("button", { name: "GPT-4o" }));
+
+      const map = getModelRecencyMap();
+      expect(Object.keys(map)).toHaveLength(1);
+      expect(getModelRecencyRank(map, "goose", { id: "gpt-4o" })).toEqual(
+        expect.any(Number),
+      );
     });
 
     it("selects a model when recency persistence exceeds quota", async () => {
@@ -1535,23 +1555,18 @@ describe("AgentModelPicker", () => {
         });
 
       try {
-        render(
-          <AgentModelPicker
-            agents={AGENTS}
-            selectedAgentId="goose"
-            onAgentChange={vi.fn()}
-            currentModelId="claude-sonnet-4"
-            currentModelName="Claude Sonnet 4"
-            availableModels={[
-              { id: "claude-sonnet-4", name: "Claude Sonnet 4" },
-              { id: "gpt-4o", name: "GPT-4o" },
-            ]}
-            onModelChange={onModelChange}
-          />,
+        renderPicker(
+          [
+            { id: "claude-sonnet-4", name: "Claude Sonnet 4" },
+            { id: "gpt-4o", name: "GPT-4o" },
+          ],
+          { onModelChange },
         );
 
-        await openPicker(user);
-        await user.click(screen.getByRole("button", { name: "GPT-4o" }));
+        const picker = await openPicker(user);
+        await user.click(
+          within(picker).getByRole("button", { name: "GPT-4o" }),
+        );
 
         expect(onModelChange).toHaveBeenCalledWith(
           "gpt-4o",
@@ -1563,101 +1578,67 @@ describe("AgentModelPicker", () => {
     });
 
     it("orders recently used models ahead of alphabetical fallbacks", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(1_000);
+      recordModelSelection("goose", { id: "zeta-model" });
+      vi.setSystemTime(2_000);
+      recordModelSelection("goose", { id: "omega-model" });
       const user = userEvent.setup();
-      localStorage.setItem(
-        MODEL_RECENCY_STORAGE_KEY,
-        JSON.stringify({
-          "goose//zeta-model": 1_000,
-          "goose//omega-model": 2_000,
-        }),
-      );
 
-      render(
-        <AgentModelPicker
-          agents={AGENTS}
-          selectedAgentId="goose"
-          onAgentChange={vi.fn()}
-          currentModelId="alpha-model"
-          currentModelName="Alpha Model"
-          availableModels={[
-            { id: "alpha-model", name: "Alpha Model", recommended: true },
-            { id: "beta-model", name: "Beta Model", recommended: true },
-            { id: "gamma-model", name: "Gamma Model", recommended: true },
-            { id: "omega-model", name: "Omega Model", recommended: true },
-            { id: "zeta-model", name: "Zeta Model", recommended: true },
-          ]}
-          onModelChange={vi.fn()}
-        />,
-      );
+      renderPicker([
+        { id: "alpha-model", name: "Alpha Model", recommended: true },
+        { id: "beta-model", name: "Beta Model", recommended: true },
+        { id: "gamma-model", name: "Gamma Model", recommended: true },
+        { id: "omega-model", name: "Omega Model", recommended: true },
+        { id: "zeta-model", name: "Zeta Model", recommended: true },
+      ]);
 
-      await openPicker(user);
+      const picker = await openPicker(user);
 
-      const picker = screen.getByRole("dialog");
-      const rows = within(picker)
-        .getAllByRole("button")
-        .filter((button) => button.hasAttribute("data-picker-nav-item"));
-      const modelNames = rows
-        .map((button) => button.textContent)
-        .filter((text): text is string => text?.includes("Model") ?? false);
-
-      expect(modelNames).toEqual([
+      expect(modelRowNames(picker)).toEqual([
         "Alpha Model",
         "Omega Model",
         "Zeta Model",
         "Beta Model",
         "Gamma Model",
       ]);
+      expect(
+        within(picker).queryByRole("button", { name: "View more" }),
+      ).not.toBeInTheDocument();
     });
 
     it("folds recently used models into the compact view", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(1_000);
+      recordModelSelection("goose", { id: "oldest-recent-model" });
+      vi.setSystemTime(2_000);
+      recordModelSelection("goose", { id: "older-recent-model" });
+      vi.setSystemTime(3_000);
+      recordModelSelection("goose", { id: "newer-recent-model" });
+      vi.setSystemTime(4_000);
+      recordModelSelection("goose", { id: "newest-recent-model" });
       const user = userEvent.setup();
-      localStorage.setItem(
-        MODEL_RECENCY_STORAGE_KEY,
-        JSON.stringify({
-          "goose//oldest-recent-model": 1_000,
-          "goose//older-recent-model": 2_000,
-          "goose//newer-recent-model": 3_000,
-          "goose//newest-recent-model": 4_000,
-        }),
-      );
 
-      render(
-        <AgentModelPicker
-          agents={AGENTS}
-          selectedAgentId="goose"
-          onAgentChange={vi.fn()}
-          currentModelId="current-model"
-          currentModelName="Current Model"
-          availableModels={[
-            {
-              id: "current-model",
-              name: "Current Model",
-              recommended: true,
-            },
-            {
-              id: "harness-model",
-              name: "Harness Model",
-              recommended: true,
-            },
-            { id: "oldest-recent-model", name: "Oldest Recent Model" },
-            { id: "older-recent-model", name: "Older Recent Model" },
-            { id: "newer-recent-model", name: "Newer Recent Model" },
-            { id: "newest-recent-model", name: "Newest Recent Model" },
-          ]}
-          onModelChange={vi.fn()}
-        />,
-      );
+      renderPicker([
+        {
+          id: "current-model",
+          name: "Current Model",
+          recommended: true,
+        },
+        {
+          id: "harness-model",
+          name: "Harness Model",
+          recommended: true,
+        },
+        { id: "oldest-recent-model", name: "Oldest Recent Model" },
+        { id: "older-recent-model", name: "Older Recent Model" },
+        { id: "newer-recent-model", name: "Newer Recent Model" },
+        { id: "newest-recent-model", name: "Newest Recent Model" },
+      ]);
 
-      await openPicker(user);
+      const picker = await openPicker(user);
 
-      const picker = screen.getByRole("dialog");
-      const rows = within(picker)
-        .getAllByRole("button")
-        .filter((button) => button.hasAttribute("data-picker-nav-item"));
-      const modelNames = rows
-        .map((button) => button.textContent)
-        .filter((text): text is string => text?.includes("Model") ?? false);
-      expect(modelNames).toEqual([
+      expect(modelRowNames(picker)).toEqual([
         "Current Model",
         "Newest Recent Model",
         "Newer Recent Model",
@@ -1667,10 +1648,12 @@ describe("AgentModelPicker", () => {
       expect(
         within(picker).queryByRole("button", { name: "Oldest Recent Model" }),
       ).not.toBeInTheDocument();
+      const viewMore = within(picker).getByRole("button", {
+        name: "View more",
+      });
+      expect(viewMore).toBeInTheDocument();
 
-      await user.click(
-        within(picker).getByRole("button", { name: "View more" }),
-      );
+      await user.click(viewMore);
 
       expect(
         within(picker).getByRole("button", { name: "Oldest Recent Model" }),
@@ -1681,33 +1664,19 @@ describe("AgentModelPicker", () => {
       const user = userEvent.setup();
       recordModelSelection("claude-acp", { id: "zeta-model" });
 
-      render(
-        <AgentModelPicker
-          agents={AGENTS}
-          selectedAgentId="goose"
-          onAgentChange={vi.fn()}
-          currentModelId="alpha-model"
-          currentModelName="Alpha Model"
-          availableModels={[
-            { id: "alpha-model", name: "Alpha Model", recommended: true },
-            { id: "beta-model", name: "Beta Model", recommended: true },
-            { id: "zeta-model", name: "Zeta Model", recommended: true },
-          ]}
-          onModelChange={vi.fn()}
-        />,
-      );
+      renderPicker([
+        { id: "alpha-model", name: "Alpha Model", recommended: true },
+        { id: "beta-model", name: "Beta Model", recommended: true },
+        { id: "zeta-model", name: "Zeta Model", recommended: true },
+      ]);
 
-      await openPicker(user);
+      const picker = await openPicker(user);
 
-      const picker = screen.getByRole("dialog");
-      const rows = within(picker)
-        .getAllByRole("button")
-        .filter((button) => button.hasAttribute("data-picker-nav-item"));
-      const modelNames = rows
-        .map((button) => button.textContent)
-        .filter((text): text is string => text?.includes("Model") ?? false);
-
-      expect(modelNames).toEqual(["Alpha Model", "Beta Model", "Zeta Model"]);
+      expect(modelRowNames(picker)).toEqual([
+        "Alpha Model",
+        "Beta Model",
+        "Zeta Model",
+      ]);
     });
   });
 });
