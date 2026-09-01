@@ -116,10 +116,23 @@ The parent acknowledges on framed stdin:
 {"type":"audio_begin_failed","speech_id":u64,"played_frames":u64,"message":string}
 {"type":"audio_chunk_accepted","speech_id":u64,"sequence":u64}
 {"type":"audio_played","speech_id":u64,"played_frames":u64}
+{"type":"audio_suspended","speech_id":u64,"played_frames":u64}
+{"type":"audio_resumed","speech_id":u64,"played_frames":u64}
 {"type":"audio_drained","speech_id":u64,"sequence":u64,"played_frames":u64}
 {"type":"audio_failed","speech_id":u64,"played_frames":u64,"message":string}
 {"type":"audio_cancelled","speech_id":u64,"played_frames":u64}
 ```
+
+For provisional barge-in, the child writes one of these flushed JSONL commands on stdout:
+
+```text
+{"type":"audio_suspend","speech_id":u64}
+{"type":"audio_resume","speech_id":u64}
+```
+
+Suspend and Resume are nonterminal controls for the same speech and the same host player. `audio_suspended` is an audible-quiescence barrier: the host has paused the player, included its bounded presentation latency, settled callbacks, retained already queued audio in place, and reports the cumulative unique source frames actually played. No callback or audible progress from the suspended generation may cross that barrier. `audio_resumed` confirms that the same retained player is ready to continue, with an unchanged cumulative `played_frames`, before the child releases more PCM. Both acknowledgements are bounded to two seconds. While fully suspended, the child blocks synthesis delivery without applying the normal two-second played-credit deadline; memory remains bounded by the existing backend and transport queues, and cancellation, shutdown, host failure, or EOF wakes the wait.
+
+Stdout and the PCM pipe are independently observed. A host must therefore correlate a Suspend that arrives before Begin, acknowledge it at zero only after proving the route quiescent, and keep the later Begin paused until Resume. The child emits Suspend only for the active speech, emits no later Chunk or End while waiting for its acknowledgement, and does not emit Resume until both speaking and recognition-pending state have cleared without a final. If no-result settlement races the Suspend acknowledgement, Resume follows that exact barrier. A real final, targeted cancellation, host mute/reset of a provisional hold, pause, or shutdown suppresses Resume, waits any already-emitted Suspend or Resume acknowledgement, then serializes Cancel. End or Drained racing ahead of Suspend remains a provisional logical hold rather than publishing completion; no-result Resume releases exactly one completion, while terminal cancellation clears the held host state and publishes exactly one interruption. Stale, mismatched, regressed, post-barrier, or unsolicited suspension acknowledgements are fatal.
 
 Begin must be accepted before the first Chunk. Only one Chunk may await
 acceptance. Accepted-but-not-fully-played credit is measured in cumulative
@@ -279,9 +292,7 @@ assistant-activity guard. `suppress_input` stops PCM admission so user input
 cannot interrupt the speech; `allow_barge_in` continues PCM admission with the
 assistant-sensitive VAD threshold. `accepted` transfers output authority. The
 child then writes Begin and waits for `audio_begin_accepted` before delivering
-PCM. Readiness is bounded to two seconds;
-expiry emits `speech_failed` with zero output. Speaking, recognition pending, a
-final, pause, or targeted cancellation interrupts waiting or playing speech.
+PCM. Readiness is bounded to two seconds; expiry emits `speech_failed` with zero output. With `allow_barge_in`, speaking or recognition pending provisionally suspends started output. If both clear without a final, the same speech and player resume. A final, targeted cancellation, host mute/reset while provisionally suspended, pause, or shutdown discards the hold and interrupts exactly once.
 Accepted output owns exactly one assistant-activity guard. The child removes
 that guard before emitting completion, interruption, or failure, including
 cancellation and shutdown terminals.

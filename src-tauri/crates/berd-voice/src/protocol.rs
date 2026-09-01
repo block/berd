@@ -57,6 +57,14 @@ pub enum SessionRequest {
         speech_id: u64,
         played_frames: u64,
     },
+    AudioSuspended {
+        speech_id: u64,
+        played_frames: u64,
+    },
+    AudioResumed {
+        speech_id: u64,
+        played_frames: u64,
+    },
     AudioDrained {
         speech_id: u64,
         sequence: u64,
@@ -194,6 +202,12 @@ pub enum SessionMessage {
         id: u64,
         speech_id: u64,
         outcome: OutputReadyOutcome,
+    },
+    AudioSuspend {
+        speech_id: u64,
+    },
+    AudioResume {
+        speech_id: u64,
     },
     SpeechStarted {
         id: u64,
@@ -358,6 +372,34 @@ mod tests {
                 sequence: 3,
                 played_frames: 7000,
             }
+        );
+        assert_eq!(
+            serde_json::from_str::<SessionRequest>(
+                r#"{"type":"audio_suspended","speech_id":9,"played_frames":4096}"#
+            )
+            .unwrap(),
+            SessionRequest::AudioSuspended {
+                speech_id: 9,
+                played_frames: 4096,
+            }
+        );
+        assert_eq!(
+            serde_json::from_str::<SessionRequest>(
+                r#"{"type":"audio_resumed","speech_id":9,"played_frames":4096}"#
+            )
+            .unwrap(),
+            SessionRequest::AudioResumed {
+                speech_id: 9,
+                played_frames: 4096,
+            }
+        );
+        assert_eq!(
+            serde_json::to_string(&SessionMessage::AudioSuspend { speech_id: 9 }).unwrap(),
+            r#"{"type":"audio_suspend","speech_id":9}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&SessionMessage::AudioResume { speech_id: 9 }).unwrap(),
+            r#"{"type":"audio_resume","speech_id":9}"#
         );
     }
 }

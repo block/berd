@@ -3,6 +3,7 @@ use std::fs::File;
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -28,9 +29,25 @@ pub enum AudioHostAck {
     BeginFailed { played_frames: u64, message: String },
     ChunkAccepted { sequence: u64 },
     Played { played_frames: u64 },
+    Suspended { played_frames: u64 },
+    Resumed { played_frames: u64 },
     Drained { sequence: u64, played_frames: u64 },
     Failed { played_frames: u64, message: String },
     Cancelled { played_frames: u64 },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AudioOutputControlRequest {
+    Suspend { speech_id: u64 },
+    Resume { speech_id: u64 },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SuspensionPhase {
+    Running,
+    Suspending,
+    Suspended,
+    Resuming,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,6 +76,9 @@ struct State {
     ended_sequence: Option<u64>,
     failure: Option<String>,
     failure_quiescent: bool,
+    suspension: SuspensionPhase,
+    suspension_requested: bool,
+    suspension_deadline: Option<Instant>,
 }
 
 pub struct AudioPipeTransport {
@@ -165,6 +185,7 @@ pub struct RemotePcmAudioOutput {
     spec: TtsPcmSpec,
     transport: Arc<AudioPipeTransport>,
     active: Arc<AtomicBool>,
+    control_sender: mpsc::Sender<AudioOutputControlRequest>,
     operation_timeout: Duration,
     minimum_accepted_runway_frames: u64,
     pending_samples: Mutex<Vec<f32>>,
@@ -178,8 +199,16 @@ impl RemotePcmAudioOutput {
         spec: TtsPcmSpec,
         transport: Arc<AudioPipeTransport>,
         active: Arc<AtomicBool>,
+        control_sender: mpsc::Sender<AudioOutputControlRequest>,
     ) -> Result<Self, String> {
-        Self::new_with_timeout(speech_id, spec, transport, active, AUDIO_OPERATION_TIMEOUT)
+        Self::new_with_timeout(
+            speech_id,
+            spec,
+            transport,
+            active,
+            control_sender,
+            AUDIO_OPERATION_TIMEOUT,
+        )
     }
 
     fn new_with_timeout(
@@ -187,6 +216,7 @@ impl RemotePcmAudioOutput {
         spec: TtsPcmSpec,
         transport: Arc<AudioPipeTransport>,
         active: Arc<AtomicBool>,
+        control_sender: mpsc::Sender<AudioOutputControlRequest>,
         operation_timeout: Duration,
     ) -> Result<Self, String> {
         if speech_id == 0
@@ -201,6 +231,7 @@ impl RemotePcmAudioOutput {
             spec,
             transport,
             active,
+            control_sender,
             operation_timeout,
             minimum_accepted_runway_frames: accepted_audio_runway_frames(spec),
             pending_samples: Mutex::new(Vec::with_capacity(MAX_AUDIO_CHUNK_FRAMES)),
@@ -217,6 +248,9 @@ impl RemotePcmAudioOutput {
                 ended_sequence: None,
                 failure: None,
                 failure_quiescent: false,
+                suspension: SuspensionPhase::Running,
+                suspension_requested: false,
+                suspension_deadline: None,
             }),
             changed: Condvar::new(),
         })
@@ -240,7 +274,8 @@ impl RemotePcmAudioOutput {
             "audio begin acknowledgement",
             true,
         )?;
-        self.check_health()
+        self.check_health()?;
+        self.wait_for_running()
     }
 
     pub fn finish_writes(&self) -> Result<(), String> {
@@ -253,8 +288,14 @@ impl RemotePcmAudioOutput {
         if !final_samples.is_empty() {
             self.write_chunk(&final_samples)?;
         }
+        self.wait_for_running()?;
         let (last_sequence, total_frames) = {
             let mut state = self.state.lock().expect("remote output state");
+            if state.suspension_requested || state.suspension != SuspensionPhase::Running {
+                drop(state);
+                self.wait_for_running()?;
+                state = self.state.lock().expect("remote output state");
+            }
             if state.phase != Phase::Streaming {
                 return Err("remote PCM output cannot end before streaming is ready".into());
             }
@@ -273,6 +314,81 @@ impl RemotePcmAudioOutput {
     /// The caller owns only the cancellation flag; pipe writes remain worker-owned.
     pub fn notify_cancel_requested(&self) {
         self.changed.notify_all();
+    }
+
+    pub fn request_suspend(&self) -> Result<(), String> {
+        let mut state = self.state.lock().expect("remote output state");
+        state.suspension_requested = true;
+        if state.suspension == SuspensionPhase::Running
+            && !matches!(
+                state.phase,
+                Phase::Drained | Phase::Cancelled | Phase::Failed
+            )
+        {
+            state.suspension = SuspensionPhase::Suspending;
+            state.suspension_deadline = Some(Instant::now() + self.operation_timeout);
+            self.control_sender
+                .send(AudioOutputControlRequest::Suspend {
+                    speech_id: self.speech_id,
+                })
+                .map_err(|_| "audio control receiver disconnected".to_string())?;
+        }
+        self.changed.notify_all();
+        Ok(())
+    }
+
+    pub fn request_resume(&self) -> Result<(), String> {
+        let mut state = self.state.lock().expect("remote output state");
+        if !self.active.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        state.suspension_requested = false;
+        if state.suspension == SuspensionPhase::Suspended {
+            state.suspension = SuspensionPhase::Resuming;
+            state.suspension_deadline = Some(Instant::now() + self.operation_timeout);
+            self.control_sender
+                .send(AudioOutputControlRequest::Resume {
+                    speech_id: self.speech_id,
+                })
+                .map_err(|_| "audio control receiver disconnected".to_string())?;
+        }
+        self.changed.notify_all();
+        Ok(())
+    }
+
+    pub fn control_request_is_outstanding(&self, request: AudioOutputControlRequest) -> bool {
+        let state = self.state.lock().expect("remote output state");
+        matches!(
+            (request, state.suspension),
+            (
+                AudioOutputControlRequest::Suspend { speech_id },
+                SuspensionPhase::Suspending
+            ) if speech_id == self.speech_id
+        ) || matches!(
+            (request, state.suspension),
+            (
+                AudioOutputControlRequest::Resume { speech_id },
+                SuspensionPhase::Resuming
+            ) if speech_id == self.speech_id
+        )
+    }
+
+    pub fn check_suspension_deadline(&self, now: Instant) -> Result<(), String> {
+        let mut state = self.state.lock().expect("remote output state");
+        if state
+            .suspension_deadline
+            .is_some_and(|deadline| now >= deadline)
+            && matches!(
+                state.suspension,
+                SuspensionPhase::Suspending | SuspensionPhase::Resuming
+            )
+        {
+            state.phase = Phase::Failed;
+            state.failure = Some("host did not settle audio suspension before its deadline".into());
+            self.changed.notify_all();
+            return Err(state.failure.clone().expect("suspension deadline failure"));
+        }
+        Ok(())
     }
 
     pub fn failure_is_quiescent(&self) -> bool {
@@ -343,6 +459,48 @@ impl RemotePcmAudioOutput {
                     state.accepted_chunk_ends.pop_front();
                 }
             }
+            AudioHostAck::Suspended { played_frames }
+                if state.suspension == SuspensionPhase::Suspending
+                    && !matches!(state.phase, Phase::Cancelled | Phase::Failed)
+                    && played_frames >= state.played_frames
+                    && played_frames <= state.accepted_frames =>
+            {
+                state.played_frames = played_frames;
+                while state
+                    .accepted_chunk_ends
+                    .front()
+                    .is_some_and(|end| *end <= played_frames)
+                {
+                    state.accepted_chunk_ends.pop_front();
+                }
+                state.suspension = SuspensionPhase::Suspended;
+                state.suspension_deadline = None;
+                if !state.suspension_requested && self.active.load(Ordering::SeqCst) {
+                    state.suspension = SuspensionPhase::Resuming;
+                    state.suspension_deadline = Some(Instant::now() + self.operation_timeout);
+                    self.control_sender
+                        .send(AudioOutputControlRequest::Resume {
+                            speech_id: self.speech_id,
+                        })
+                        .map_err(|_| "audio control receiver disconnected".to_string())?;
+                }
+            }
+            AudioHostAck::Resumed { played_frames }
+                if state.suspension == SuspensionPhase::Resuming
+                    && played_frames == state.played_frames =>
+            {
+                state.suspension = SuspensionPhase::Running;
+                state.suspension_deadline = None;
+                if state.suspension_requested && self.active.load(Ordering::SeqCst) {
+                    state.suspension = SuspensionPhase::Suspending;
+                    state.suspension_deadline = Some(Instant::now() + self.operation_timeout);
+                    self.control_sender
+                        .send(AudioOutputControlRequest::Suspend {
+                            speech_id: self.speech_id,
+                        })
+                        .map_err(|_| "audio control receiver disconnected".to_string())?;
+                }
+            }
             AudioHostAck::Drained {
                 sequence,
                 played_frames,
@@ -354,6 +512,10 @@ impl RemotePcmAudioOutput {
                 state.accepted_chunk_ends.clear();
                 if state.phase == Phase::Ended {
                     state.phase = Phase::Drained;
+                }
+                if state.phase == Phase::Drained && state.suspension == SuspensionPhase::Running {
+                    state.suspension = SuspensionPhase::Running;
+                    state.suspension_deadline = None;
                 }
             }
             AudioHostAck::Failed {
@@ -369,6 +531,8 @@ impl RemotePcmAudioOutput {
                 if state.phase != Phase::Cancelling {
                     state.phase = Phase::Failed;
                     state.failure_quiescent = true;
+                    state.suspension = SuspensionPhase::Running;
+                    state.suspension_deadline = None;
                 }
                 state.failure = Some(public_host_failure(message));
             }
@@ -384,6 +548,8 @@ impl RemotePcmAudioOutput {
                 } else {
                     Phase::Cancelled
                 };
+                state.suspension = SuspensionPhase::Running;
+                state.suspension_deadline = None;
             }
             AudioHostAck::Played { played_frames }
                 if matches!(
@@ -445,10 +611,39 @@ impl RemotePcmAudioOutput {
     }
 
     fn cancel_settled(&self) -> Result<u64, String> {
+        {
+            let mut state = self.state.lock().expect("remote output state");
+            while matches!(
+                state.suspension,
+                SuspensionPhase::Suspending | SuspensionPhase::Resuming
+            ) && state.phase != Phase::Failed
+            {
+                let remaining = state
+                    .suspension_deadline
+                    .map_or(Duration::ZERO, |deadline| {
+                        deadline.saturating_duration_since(Instant::now())
+                    });
+                if remaining.is_zero() {
+                    state.phase = Phase::Failed;
+                    state.failure =
+                        Some("host did not settle audio suspension before cancellation".into());
+                    self.changed.notify_all();
+                    return Err(state.failure.clone().expect("suspension cancel failure"));
+                }
+                let (next, _) = self
+                    .changed
+                    .wait_timeout(state, remaining)
+                    .expect("remote output cancellation wait");
+                state = next;
+            }
+        }
         let should_send = {
             let mut state = self.state.lock().expect("remote output state");
             match state.phase {
-                Phase::Drained | Phase::Cancelled => return Ok(state.played_frames),
+                Phase::Drained if state.suspension == SuspensionPhase::Running => {
+                    return Ok(state.played_frames)
+                }
+                Phase::Cancelled => return Ok(state.played_frames),
                 Phase::Failed => {
                     if state.failure_quiescent {
                         return Ok(state.played_frames);
@@ -459,7 +654,11 @@ impl RemotePcmAudioOutput {
                         .unwrap_or_else(|| "host audio output failed".into()));
                 }
                 Phase::Cancelling => false,
-                Phase::WaitingBegin | Phase::Streaming | Phase::WaitingChunk | Phase::Ended => {
+                Phase::WaitingBegin
+                | Phase::Streaming
+                | Phase::WaitingChunk
+                | Phase::Ended
+                | Phase::Drained => {
                     state.phase = Phase::Cancelling;
                     true
                 }
@@ -486,8 +685,86 @@ impl RemotePcmAudioOutput {
             .played_frames)
     }
 
+    fn wait_for_running(&self) -> Result<(), String> {
+        loop {
+            {
+                let state = self.state.lock().expect("remote output state");
+                match state.phase {
+                    Phase::Cancelled => return Err(AUDIO_CANCELLED.into()),
+                    Phase::Failed => {
+                        return Err(state
+                            .failure
+                            .clone()
+                            .unwrap_or_else(|| "host audio output failed".into()))
+                    }
+                    Phase::Drained => return Err("remote PCM output is already drained".into()),
+                    _ => {}
+                }
+                if !self.active.load(Ordering::SeqCst) {
+                    drop(state);
+                    self.cancel_settled()?;
+                    return Err(AUDIO_CANCELLED.into());
+                }
+                if let (SuspensionPhase::Running, false) =
+                    (state.suspension, state.suspension_requested)
+                {
+                    return Ok(());
+                }
+            }
+            let mut state = self.state.lock().expect("remote output state");
+            loop {
+                let settled = matches!(
+                    (state.suspension, state.suspension_requested),
+                    (SuspensionPhase::Running, false)
+                        | (SuspensionPhase::Suspended, true)
+                        | (SuspensionPhase::Suspended, false)
+                );
+                if settled || state.phase == Phase::Failed {
+                    break;
+                }
+                let remaining = state
+                    .suspension_deadline
+                    .map_or(self.operation_timeout, |deadline| {
+                        deadline.saturating_duration_since(Instant::now())
+                    });
+                if remaining.is_zero() {
+                    state.phase = Phase::Failed;
+                    state.failure =
+                        Some("host did not settle audio suspension before its deadline".into());
+                    self.changed.notify_all();
+                    return Err(state.failure.clone().expect("suspension failure"));
+                }
+                let (next, _) = self
+                    .changed
+                    .wait_timeout(state, remaining)
+                    .expect("remote output suspension wait");
+                state = next;
+            }
+            if state.phase == Phase::Failed {
+                return Err(state
+                    .failure
+                    .clone()
+                    .unwrap_or_else(|| "host audio output failed".into()));
+            }
+            if state.suspension == SuspensionPhase::Suspended && state.suspension_requested {
+                while state.suspension_requested && self.active.load(Ordering::SeqCst) {
+                    state = self
+                        .changed
+                        .wait(state)
+                        .expect("remote output suspended wait");
+                }
+                if !self.active.load(Ordering::SeqCst) {
+                    drop(state);
+                    self.cancel_settled()?;
+                    return Err(AUDIO_CANCELLED.into());
+                }
+            }
+        }
+    }
+
     fn write_chunk(&self, chunk: &[f32]) -> Result<(), String> {
         debug_assert!(!chunk.is_empty() && chunk.len() <= MAX_AUDIO_CHUNK_FRAMES);
+        self.wait_for_running()?;
         {
             let deadline = Instant::now() + self.operation_timeout;
             let mut state = self.state.lock().expect("remote output state");
@@ -514,6 +791,11 @@ impl RemotePcmAudioOutput {
                     .wait_timeout(state, remaining)
                     .expect("remote output credit wait");
                 state = next;
+                if state.suspension_requested {
+                    drop(state);
+                    self.wait_for_running()?;
+                    state = self.state.lock().expect("remote output state");
+                }
             }
             if state.phase != Phase::Streaming {
                 return Err(state
@@ -582,7 +864,8 @@ impl PcmAudioOutput for RemotePcmAudioOutput {
     }
 
     fn is_drained(&self) -> bool {
-        self.state.lock().expect("remote output state").phase == Phase::Drained
+        let state = self.state.lock().expect("remote output state");
+        state.phase == Phase::Drained && state.suspension == SuspensionPhase::Running
     }
 
     fn check_health(&self) -> Result<(), String> {
@@ -644,7 +927,20 @@ mod tests {
         spec: TtsPcmSpec,
         timeout: Duration,
     ) -> (Arc<RemotePcmAudioOutput>, UnixStream) {
+        let (output, host, _control_receiver) = fixture_with_control(spec, timeout);
+        (output, host)
+    }
+
+    fn fixture_with_control(
+        spec: TtsPcmSpec,
+        timeout: Duration,
+    ) -> (
+        Arc<RemotePcmAudioOutput>,
+        UnixStream,
+        mpsc::Receiver<AudioOutputControlRequest>,
+    ) {
         let (child, host) = UnixStream::pair().unwrap();
+        let (control_sender, control_receiver) = mpsc::channel();
         let transport = unsafe { AudioPipeTransport::from_raw_fd(child.into_raw_fd()) }.unwrap();
         let output = Arc::new(
             RemotePcmAudioOutput::new_with_timeout(
@@ -652,11 +948,12 @@ mod tests {
                 spec,
                 Arc::new(transport),
                 Arc::new(AtomicBool::new(true)),
+                control_sender,
                 timeout,
             )
             .unwrap(),
         );
-        (output, host)
+        (output, host, control_receiver)
     }
 
     fn read_record(reader: &mut impl Read) -> (u8, Vec<u8>) {
@@ -753,6 +1050,419 @@ mod tests {
             .handle_ack(AudioHostAck::ChunkAccepted { sequence: 4 })
             .unwrap();
         worker.join().unwrap().unwrap();
+    }
+
+    #[test]
+    fn suspension_quiesces_and_resumes_the_same_remote_stream() {
+        let (output, mut host, controls) = fixture_with_control(
+            TtsPcmSpec {
+                sample_rate: 24_000,
+                playback_rate: 1.0,
+            },
+            AUDIO_OPERATION_TIMEOUT,
+        );
+        start(&output, &mut host);
+        let current = Arc::clone(&output);
+        let worker = thread::spawn(move || current.write(&vec![0.25; 4096 * 2]));
+        let (kind, _) = read_record(&mut host);
+        assert_eq!(kind, AUDIO_CHUNK_KIND);
+
+        output.request_suspend().unwrap();
+        assert_eq!(
+            controls.recv_timeout(Duration::from_millis(30)).unwrap(),
+            AudioOutputControlRequest::Suspend { speech_id: 7 }
+        );
+        assert!(output
+            .handle_ack(AudioHostAck::ChunkAccepted { sequence: 1 })
+            .unwrap());
+        output
+            .handle_ack(AudioHostAck::Suspended {
+                played_frames: 4096,
+            })
+            .unwrap();
+        host.set_read_timeout(Some(Duration::from_millis(30)))
+            .unwrap();
+        let mut byte = [0];
+        assert!(host.read(&mut byte).is_err());
+
+        output.request_resume().unwrap();
+        assert_eq!(
+            controls.recv_timeout(Duration::from_millis(30)).unwrap(),
+            AudioOutputControlRequest::Resume { speech_id: 7 }
+        );
+        output
+            .handle_ack(AudioHostAck::Resumed {
+                played_frames: 4096,
+            })
+            .unwrap();
+        host.set_read_timeout(None).unwrap();
+        let (kind, _) = read_record(&mut host);
+        assert_eq!(kind, AUDIO_CHUNK_KIND);
+        output
+            .handle_ack(AudioHostAck::ChunkAccepted { sequence: 2 })
+            .unwrap();
+        worker.join().unwrap().unwrap();
+    }
+
+    #[test]
+    fn suspension_before_begin_and_early_settlement_are_correlated() {
+        let (output, mut host, controls) = fixture_with_control(
+            TtsPcmSpec {
+                sample_rate: 24_000,
+                playback_rate: 1.0,
+            },
+            AUDIO_OPERATION_TIMEOUT,
+        );
+        output.request_suspend().unwrap();
+        output.request_resume().unwrap();
+        assert_eq!(
+            controls.recv_timeout(Duration::from_millis(30)).unwrap(),
+            AudioOutputControlRequest::Suspend { speech_id: 7 }
+        );
+        output
+            .handle_ack(AudioHostAck::Suspended { played_frames: 0 })
+            .unwrap();
+        assert_eq!(
+            controls.recv_timeout(Duration::from_millis(30)).unwrap(),
+            AudioOutputControlRequest::Resume { speech_id: 7 }
+        );
+        output
+            .handle_ack(AudioHostAck::Resumed { played_frames: 0 })
+            .unwrap();
+
+        start(&output, &mut host);
+    }
+
+    #[test]
+    fn renewed_speaking_while_resume_is_in_flight_reissues_suspend() {
+        let (output, mut host, controls) = fixture_with_control(
+            TtsPcmSpec {
+                sample_rate: 24_000,
+                playback_rate: 1.0,
+            },
+            AUDIO_OPERATION_TIMEOUT,
+        );
+        start(&output, &mut host);
+        output.request_suspend().unwrap();
+        assert_eq!(
+            controls.recv_timeout(Duration::from_millis(30)).unwrap(),
+            AudioOutputControlRequest::Suspend { speech_id: 7 }
+        );
+        output
+            .handle_ack(AudioHostAck::Suspended { played_frames: 0 })
+            .unwrap();
+        output.request_resume().unwrap();
+        assert_eq!(
+            controls.recv_timeout(Duration::from_millis(30)).unwrap(),
+            AudioOutputControlRequest::Resume { speech_id: 7 }
+        );
+
+        output.request_suspend().unwrap();
+        output
+            .handle_ack(AudioHostAck::Resumed { played_frames: 0 })
+            .unwrap();
+        assert_eq!(
+            controls.recv_timeout(Duration::from_millis(30)).unwrap(),
+            AudioOutputControlRequest::Suspend { speech_id: 7 }
+        );
+        assert!(output
+            .control_request_is_outstanding(AudioOutputControlRequest::Suspend { speech_id: 7 }));
+    }
+
+    #[test]
+    fn cancellation_waits_for_an_in_flight_suspension_barrier() {
+        let (output, mut host, controls) = fixture_with_control(
+            TtsPcmSpec {
+                sample_rate: 24_000,
+                playback_rate: 1.0,
+            },
+            AUDIO_OPERATION_TIMEOUT,
+        );
+        start(&output, &mut host);
+        output.request_suspend().unwrap();
+        assert_eq!(
+            controls.recv_timeout(Duration::from_millis(30)).unwrap(),
+            AudioOutputControlRequest::Suspend { speech_id: 7 }
+        );
+        let current = Arc::clone(&output);
+        let canceller = thread::spawn(move || current.cancel_settled());
+        host.set_read_timeout(Some(Duration::from_millis(30)))
+            .unwrap();
+        let mut byte = [0];
+        assert!(host.read(&mut byte).is_err());
+        output
+            .handle_ack(AudioHostAck::Suspended { played_frames: 0 })
+            .unwrap();
+        host.set_read_timeout(None).unwrap();
+        let (kind, _) = read_record(&mut host);
+        assert_eq!(kind, AUDIO_CANCEL_KIND);
+        output
+            .handle_ack(AudioHostAck::Cancelled { played_frames: 0 })
+            .unwrap();
+        assert_eq!(canceller.join().unwrap().unwrap(), 0);
+    }
+
+    #[test]
+    fn cancellation_authority_suppresses_resume_after_a_late_suspend_ack() {
+        let (child, mut host) = UnixStream::pair().unwrap();
+        let transport = unsafe { AudioPipeTransport::from_raw_fd(child.into_raw_fd()) }.unwrap();
+        let active = Arc::new(AtomicBool::new(true));
+        let (control_sender, controls) = mpsc::channel();
+        let output = Arc::new(
+            RemotePcmAudioOutput::new_with_timeout(
+                7,
+                TtsPcmSpec {
+                    sample_rate: 24_000,
+                    playback_rate: 1.0,
+                },
+                Arc::new(transport),
+                Arc::clone(&active),
+                control_sender,
+                AUDIO_OPERATION_TIMEOUT,
+            )
+            .unwrap(),
+        );
+        start(&output, &mut host);
+        output.request_suspend().unwrap();
+        assert_eq!(
+            controls.recv_timeout(Duration::from_millis(30)).unwrap(),
+            AudioOutputControlRequest::Suspend { speech_id: 7 }
+        );
+        output.request_resume().unwrap();
+
+        active.store(false, Ordering::SeqCst);
+        output.notify_cancel_requested();
+        let current = Arc::clone(&output);
+        let canceller = thread::spawn(move || current.cancel_settled());
+        output
+            .handle_ack(AudioHostAck::Suspended { played_frames: 0 })
+            .unwrap();
+        assert!(controls.try_recv().is_err());
+        assert_eq!(read_record(&mut host).0, AUDIO_CANCEL_KIND);
+        output
+            .handle_ack(AudioHostAck::Cancelled { played_frames: 0 })
+            .unwrap();
+        assert_eq!(canceller.join().unwrap().unwrap(), 0);
+    }
+
+    #[test]
+    fn cancellation_authority_suppresses_resuspend_after_a_late_resume_ack() {
+        let (child, mut host) = UnixStream::pair().unwrap();
+        let transport = unsafe { AudioPipeTransport::from_raw_fd(child.into_raw_fd()) }.unwrap();
+        let active = Arc::new(AtomicBool::new(true));
+        let (control_sender, controls) = mpsc::channel();
+        let output = Arc::new(
+            RemotePcmAudioOutput::new_with_timeout(
+                7,
+                TtsPcmSpec {
+                    sample_rate: 24_000,
+                    playback_rate: 1.0,
+                },
+                Arc::new(transport),
+                Arc::clone(&active),
+                control_sender,
+                AUDIO_OPERATION_TIMEOUT,
+            )
+            .unwrap(),
+        );
+        start(&output, &mut host);
+        output.request_suspend().unwrap();
+        assert_eq!(
+            controls.recv_timeout(Duration::from_millis(30)).unwrap(),
+            AudioOutputControlRequest::Suspend { speech_id: 7 }
+        );
+        output
+            .handle_ack(AudioHostAck::Suspended { played_frames: 0 })
+            .unwrap();
+        output.request_resume().unwrap();
+        assert_eq!(
+            controls.recv_timeout(Duration::from_millis(30)).unwrap(),
+            AudioOutputControlRequest::Resume { speech_id: 7 }
+        );
+        output.request_suspend().unwrap();
+
+        active.store(false, Ordering::SeqCst);
+        output.notify_cancel_requested();
+        let current = Arc::clone(&output);
+        let canceller = thread::spawn(move || current.cancel_settled());
+        output
+            .handle_ack(AudioHostAck::Resumed { played_frames: 0 })
+            .unwrap();
+        assert!(controls.try_recv().is_err());
+        assert_eq!(read_record(&mut host).0, AUDIO_CANCEL_KIND);
+        output
+            .handle_ack(AudioHostAck::Cancelled { played_frames: 0 })
+            .unwrap();
+        assert_eq!(canceller.join().unwrap().unwrap(), 0);
+    }
+
+    #[test]
+    fn cancellation_waits_for_an_in_flight_resume_barrier() {
+        let (output, mut host, controls) = fixture_with_control(
+            TtsPcmSpec {
+                sample_rate: 24_000,
+                playback_rate: 1.0,
+            },
+            AUDIO_OPERATION_TIMEOUT,
+        );
+        start(&output, &mut host);
+        output.request_suspend().unwrap();
+        assert_eq!(
+            controls.recv_timeout(Duration::from_millis(30)).unwrap(),
+            AudioOutputControlRequest::Suspend { speech_id: 7 }
+        );
+        output
+            .handle_ack(AudioHostAck::Suspended { played_frames: 0 })
+            .unwrap();
+        output.request_resume().unwrap();
+        assert_eq!(
+            controls.recv_timeout(Duration::from_millis(30)).unwrap(),
+            AudioOutputControlRequest::Resume { speech_id: 7 }
+        );
+
+        let current = Arc::clone(&output);
+        let canceller = thread::spawn(move || current.cancel_settled());
+        host.set_read_timeout(Some(Duration::from_millis(30)))
+            .unwrap();
+        let mut byte = [0];
+        assert!(host.read(&mut byte).is_err());
+        output
+            .handle_ack(AudioHostAck::Resumed { played_frames: 0 })
+            .unwrap();
+        host.set_read_timeout(None).unwrap();
+        assert_eq!(read_record(&mut host).0, AUDIO_CANCEL_KIND);
+        output
+            .handle_ack(AudioHostAck::Cancelled { played_frames: 0 })
+            .unwrap();
+        assert_eq!(canceller.join().unwrap().unwrap(), 0);
+    }
+
+    #[test]
+    fn terminal_output_rejects_a_late_suspension_ack() {
+        let (output, mut host, _controls) = fixture_with_control(
+            TtsPcmSpec {
+                sample_rate: 24_000,
+                playback_rate: 1.0,
+            },
+            AUDIO_OPERATION_TIMEOUT,
+        );
+        start(&output, &mut host);
+        output.request_suspend().unwrap();
+        output
+            .handle_ack(AudioHostAck::Failed {
+                played_frames: 0,
+                message: "route failed".into(),
+            })
+            .unwrap();
+        assert_eq!(
+            output
+                .handle_ack(AudioHostAck::Suspended { played_frames: 0 })
+                .unwrap_err(),
+            "audio host acknowledgement is stale, out of order, or impossible"
+        );
+    }
+
+    #[test]
+    fn drained_before_suspend_ack_stays_held_until_resume() {
+        let (output, mut host, controls) = fixture_with_control(
+            TtsPcmSpec {
+                sample_rate: 24_000,
+                playback_rate: 1.0,
+            },
+            AUDIO_OPERATION_TIMEOUT,
+        );
+        start(&output, &mut host);
+        let current = Arc::clone(&output);
+        let writer = thread::spawn(move || current.write(&vec![0.25; 4096]));
+        let (kind, _) = read_record(&mut host);
+        assert_eq!(kind, AUDIO_CHUNK_KIND);
+        output
+            .handle_ack(AudioHostAck::ChunkAccepted { sequence: 1 })
+            .unwrap();
+        writer.join().unwrap().unwrap();
+        let current = Arc::clone(&output);
+        let finisher = thread::spawn(move || current.finish_writes());
+        let (kind, end) = read_record(&mut host);
+        assert_eq!(kind, AUDIO_END_KIND);
+        assert_eq!(u64::from_le_bytes(end[8..16].try_into().unwrap()), 1);
+
+        output.request_suspend().unwrap();
+        assert_eq!(
+            controls.recv_timeout(Duration::from_millis(30)).unwrap(),
+            AudioOutputControlRequest::Suspend { speech_id: 7 }
+        );
+        output
+            .handle_ack(AudioHostAck::Drained {
+                sequence: 1,
+                played_frames: 4096,
+            })
+            .unwrap();
+        assert!(!output.is_drained());
+        output
+            .handle_ack(AudioHostAck::Suspended {
+                played_frames: 4096,
+            })
+            .unwrap();
+        output.request_resume().unwrap();
+        assert_eq!(
+            controls.recv_timeout(Duration::from_millis(30)).unwrap(),
+            AudioOutputControlRequest::Resume { speech_id: 7 }
+        );
+        output
+            .handle_ack(AudioHostAck::Resumed {
+                played_frames: 4096,
+            })
+            .unwrap();
+        assert!(output.is_drained());
+        finisher.join().unwrap().unwrap();
+    }
+
+    #[test]
+    fn terminal_cancel_clears_a_suspended_already_drained_stream() {
+        let (output, mut host, controls) = fixture_with_control(
+            TtsPcmSpec {
+                sample_rate: 24_000,
+                playback_rate: 1.0,
+            },
+            AUDIO_OPERATION_TIMEOUT,
+        );
+        start(&output, &mut host);
+        let current = Arc::clone(&output);
+        let writer = thread::spawn(move || current.write(&vec![0.25; 4096]));
+        assert_eq!(read_record(&mut host).0, AUDIO_CHUNK_KIND);
+        output
+            .handle_ack(AudioHostAck::ChunkAccepted { sequence: 1 })
+            .unwrap();
+        writer.join().unwrap().unwrap();
+        let current = Arc::clone(&output);
+        let finisher = thread::spawn(move || current.finish_writes());
+        assert_eq!(read_record(&mut host).0, AUDIO_END_KIND);
+        output.request_suspend().unwrap();
+        assert_eq!(
+            controls.recv_timeout(Duration::from_millis(30)).unwrap(),
+            AudioOutputControlRequest::Suspend { speech_id: 7 }
+        );
+        output
+            .handle_ack(AudioHostAck::Drained {
+                sequence: 1,
+                played_frames: 4096,
+            })
+            .unwrap();
+        output
+            .handle_ack(AudioHostAck::Suspended {
+                played_frames: 4096,
+            })
+            .unwrap();
+        let current = Arc::clone(&output);
+        let canceller = thread::spawn(move || current.cancel_settled());
+        assert_eq!(read_record(&mut host).0, AUDIO_CANCEL_KIND);
+        output
+            .handle_ack(AudioHostAck::Cancelled {
+                played_frames: 4096,
+            })
+            .unwrap();
+        assert_eq!(canceller.join().unwrap().unwrap(), 4096);
+        finisher.join().unwrap().unwrap();
     }
 
     #[test]
@@ -1004,6 +1714,7 @@ mod tests {
             let (child, _host) = UnixStream::pair().unwrap();
             let transport =
                 unsafe { AudioPipeTransport::from_raw_fd(child.into_raw_fd()) }.unwrap();
+            let (control_sender, _control_receiver) = mpsc::channel();
             assert!(RemotePcmAudioOutput::new(
                 1,
                 TtsPcmSpec {
@@ -1012,11 +1723,13 @@ mod tests {
                 },
                 Arc::new(transport),
                 Arc::new(AtomicBool::new(true)),
+                control_sender,
             )
             .is_ok());
         }
         let (child, _host) = UnixStream::pair().unwrap();
         let transport = unsafe { AudioPipeTransport::from_raw_fd(child.into_raw_fd()) }.unwrap();
+        let (control_sender, _control_receiver) = mpsc::channel();
         assert!(RemotePcmAudioOutput::new(
             1,
             TtsPcmSpec {
@@ -1025,6 +1738,7 @@ mod tests {
             },
             Arc::new(transport),
             Arc::new(AtomicBool::new(true)),
+            control_sender,
         )
         .is_err());
     }

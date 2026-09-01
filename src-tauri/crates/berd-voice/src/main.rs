@@ -36,7 +36,10 @@ use serde::Serialize;
 
 mod session_audio;
 
-use session_audio::{AudioHostAck, AudioPipeTransport, RemotePcmAudioOutput, AUDIO_CANCELLED};
+use session_audio::{
+    AudioHostAck, AudioOutputControlRequest, AudioPipeTransport, RemotePcmAudioOutput,
+    AUDIO_CANCELLED,
+};
 
 const WIRE_MARKER: u32 = 2;
 const MAX_LINE_BYTES: usize = 1024 * 1024;
@@ -104,6 +107,7 @@ struct ActivePlayback {
     assistant_activity: Option<AssistantActivityGuard>,
     input_during_tts: InputDuringTtsSnapshot,
     tts: TtsConfigurationLease,
+    suspension_requested: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1167,6 +1171,7 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
     thread::spawn(move || read_framed_requests(io::stdin().lock(), control_tx, pcm_tx));
     let audio_transport = Arc::new(unsafe { AudioPipeTransport::from_raw_fd(pcm_output_fd)? });
     let (playback_tx, playback_rx) = mpsc::channel();
+    let (audio_control_tx, audio_control_rx) = mpsc::channel();
     let (tts_configuration_tx, tts_configuration_rx) = mpsc::channel::<TtsConfigurationEvent>();
     let stdout = io::stdout();
     let mut writer = BufWriter::new(stdout.lock());
@@ -1197,8 +1202,32 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                 )?;
             }
         }
+        while let Ok(request) = audio_control_rx.try_recv() {
+            write_audio_control_request(request, active.as_ref(), &mut writer)?;
+        }
         while let Ok(event) = playback_rx.try_recv() {
             handle_playback_event(event, &mut core, &mut active, &mut writer)?;
+        }
+        if let Some(output) = active.as_ref().and_then(|current| current.output.as_ref()) {
+            if let Err(message) = output.check_suspension_deadline(Instant::now()) {
+                if let Some(flag) = active.as_ref().and_then(|current| current.active.as_ref()) {
+                    flag.store(false, Ordering::SeqCst);
+                    output.notify_cancel_requested();
+                }
+                let current = active
+                    .take()
+                    .expect("audio control requires active playback");
+                core.finish(current.speech_id);
+                write_message(
+                    &mut writer,
+                    &SessionMessage::SpeechFailed {
+                        id: current.prepare_id,
+                        speech_id: current.speech_id,
+                        message: message.clone(),
+                    },
+                )?;
+                return Err(message);
+            }
         }
         poll_tts_configuration_update(
             Instant::now(),
@@ -1398,13 +1427,15 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                 return Ok(());
             }
             Input::Request(SessionRequest::SetInputMuted { id, active: muted }) => {
-                input_controls
-                    .as_ref()
-                    .expect("hello initialized input controls")
-                    .set_host_muted(muted);
-                write_message(
+                handle_input_muted(
+                    id,
+                    muted,
+                    input_controls
+                        .as_ref()
+                        .expect("hello initialized input controls"),
+                    &mut core,
+                    &mut active,
                     &mut writer,
-                    &SessionMessage::InputMuteApplied { id, active: muted },
                 )?;
             }
             Input::Request(SessionRequest::SetTtsSettings {
@@ -1467,11 +1498,15 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                 )?;
             }
             Input::Request(SessionRequest::ResetInput { id }) => {
-                input_controls
-                    .as_ref()
-                    .expect("hello initialized input controls")
-                    .reset();
-                write_message(&mut writer, &SessionMessage::InputResetApplied { id })?;
+                handle_reset_input(
+                    id,
+                    input_controls
+                        .as_ref()
+                        .expect("hello initialized input controls"),
+                    &mut core,
+                    &mut active,
+                    &mut writer,
+                )?;
             }
             Input::Request(SessionRequest::SetPaused { active: paused }) => {
                 if core.set_paused(paused) {
@@ -1523,7 +1558,11 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                         current.tts.backend().pcm_spec(),
                         Arc::clone(&audio_transport),
                         Arc::clone(&playback_active),
+                        audio_control_tx.clone(),
                     )?);
+                    if current.suspension_requested {
+                        output.request_suspend()?;
+                    }
                     current.output = Some(Arc::clone(&output));
                     current.active = Some(Arc::clone(&playback_active));
                     spawn_playback(
@@ -1612,6 +1651,42 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                 if let Err(message) = handle_audio_ack(
                     speech_id,
                     AudioHostAck::Played { played_frames },
+                    active.as_ref(),
+                ) {
+                    write_protocol_fatal(
+                        &mut writer,
+                        "invalid host audio acknowledgement",
+                        &message,
+                    )?;
+                    abort_active(&active);
+                    return Ok(());
+                }
+            }
+            Input::Request(SessionRequest::AudioSuspended {
+                speech_id,
+                played_frames,
+            }) => {
+                if let Err(message) = handle_audio_ack(
+                    speech_id,
+                    AudioHostAck::Suspended { played_frames },
+                    active.as_ref(),
+                ) {
+                    write_protocol_fatal(
+                        &mut writer,
+                        "invalid host audio acknowledgement",
+                        &message,
+                    )?;
+                    abort_active(&active);
+                    return Ok(());
+                }
+            }
+            Input::Request(SessionRequest::AudioResumed {
+                speech_id,
+                played_frames,
+            }) => {
+                if let Err(message) = handle_audio_ack(
+                    speech_id,
+                    AudioHostAck::Resumed { played_frames },
                     active.as_ref(),
                 ) {
                     write_protocol_fatal(
@@ -1729,6 +1804,31 @@ fn handle_audio_ack(
         .as_ref()
         .ok_or_else(|| "audio acknowledgement arrived before remote output began".to_string())?
         .handle_ack(ack)
+}
+
+fn write_audio_control_request(
+    request: AudioOutputControlRequest,
+    active: Option<&ActivePlayback>,
+    writer: &mut impl Write,
+) -> Result<(), String> {
+    let (speech_id, message) = match request {
+        AudioOutputControlRequest::Suspend { speech_id } => {
+            (speech_id, SessionMessage::AudioSuspend { speech_id })
+        }
+        AudioOutputControlRequest::Resume { speech_id } => {
+            (speech_id, SessionMessage::AudioResume { speech_id })
+        }
+    };
+    if active.is_none_or(|current| current.speech_id != speech_id) {
+        return Err("audio control request does not target the active speech".into());
+    }
+    if !active
+        .and_then(|current| current.output.as_ref())
+        .is_some_and(|output| output.control_request_is_outstanding(request))
+    {
+        return Ok(());
+    }
+    write_message(writer, &message)
 }
 
 fn wait_for_input_ready(
@@ -2970,6 +3070,7 @@ fn process_prepare(
                 assistant_activity: None,
                 input_during_tts,
                 tts,
+                suspension_requested: false,
             });
             write_message(
                 writer,
@@ -3021,21 +3122,17 @@ fn handle_voice_input_event(
             return Err("voice input emitted a duplicate readiness event".into())
         }
         VoiceInputEvent::SpeakingChanged(speaking) => {
-            let interrupts = core.set_user_speaking(speaking);
+            core.set_user_speaking(speaking);
             write_message(writer, &SessionMessage::InputSpeaking { active: speaking })?;
-            if interrupts {
-                interrupt_active(core, active, writer)?;
-            }
+            update_provisional_suspension(core, active)?;
         }
         VoiceInputEvent::RecognitionPendingChanged(pending) => {
-            let interrupts = core.set_recognition_pending(pending);
+            core.set_recognition_pending(pending);
             write_message(
                 writer,
                 &SessionMessage::RecognitionPending { active: pending },
             )?;
-            if interrupts {
-                interrupt_active(core, active, writer)?;
-            }
+            update_provisional_suspension(core, active)?;
         }
         VoiceInputEvent::FinalTranscript {
             text,
@@ -3052,6 +3149,35 @@ fn handle_voice_input_event(
             write_protocol_fatal(writer, "voice input runtime failed", &message)?;
             abort_active(active);
             return Err(message);
+        }
+    }
+    Ok(())
+}
+
+fn update_provisional_suspension(
+    core: &SessionCore,
+    active: &mut Option<ActivePlayback>,
+) -> Result<(), String> {
+    let Some(current) = active.as_mut() else {
+        return Ok(());
+    };
+    if current
+        .active
+        .as_ref()
+        .is_some_and(|authority| !authority.load(Ordering::SeqCst))
+    {
+        return Ok(());
+    }
+    let requested = core.user_speaking() || core.recognition_pending();
+    if current.suspension_requested == requested {
+        return Ok(());
+    }
+    current.suspension_requested = requested;
+    if let Some(output) = &current.output {
+        if requested {
+            output.request_suspend()?;
+        } else {
+            output.request_resume()?;
         }
     }
     Ok(())
@@ -3238,6 +3364,51 @@ fn interrupt_active(
         write_message(writer, &SessionMessage::SpeechInterrupted { id, speech_id })?;
     }
     Ok(())
+}
+
+fn discard_provisional_active(
+    core: &mut SessionCore,
+    active: &mut Option<ActivePlayback>,
+    writer: &mut impl Write,
+) -> Result<(), String> {
+    if active
+        .as_ref()
+        .is_some_and(|current| current.suspension_requested)
+    {
+        interrupt_active(core, active, writer)?;
+    }
+    Ok(())
+}
+
+fn handle_input_muted(
+    id: u64,
+    muted: bool,
+    controls: &VoiceInputControls,
+    core: &mut SessionCore,
+    active: &mut Option<ActivePlayback>,
+    writer: &mut impl Write,
+) -> Result<(), String> {
+    controls.set_host_muted(muted);
+    write_message(
+        writer,
+        &SessionMessage::InputMuteApplied { id, active: muted },
+    )?;
+    if muted {
+        discard_provisional_active(core, active, writer)?;
+    }
+    Ok(())
+}
+
+fn handle_reset_input(
+    id: u64,
+    controls: &VoiceInputControls,
+    core: &mut SessionCore,
+    active: &mut Option<ActivePlayback>,
+    writer: &mut impl Write,
+) -> Result<(), String> {
+    controls.reset();
+    write_message(writer, &SessionMessage::InputResetApplied { id })?;
+    discard_provisional_active(core, active, writer)
 }
 
 fn handle_cancel(
@@ -3519,6 +3690,8 @@ fn validate_request(request: SessionRequest) -> Result<SessionRequest, String> {
         | SessionRequest::AudioBeginFailed { .. }
         | SessionRequest::AudioChunkAccepted { .. }
         | SessionRequest::AudioPlayed { .. }
+        | SessionRequest::AudioSuspended { .. }
+        | SessionRequest::AudioResumed { .. }
         | SessionRequest::AudioDrained { .. }
         | SessionRequest::AudioFailed { .. }
         | SessionRequest::AudioCancelled { .. }
@@ -3546,6 +3719,8 @@ fn validate_request(request: SessionRequest) -> Result<SessionRequest, String> {
         | SessionRequest::AudioBeginFailed { speech_id: 0, .. }
         | SessionRequest::AudioChunkAccepted { speech_id: 0, .. }
         | SessionRequest::AudioPlayed { speech_id: 0, .. }
+        | SessionRequest::AudioSuspended { speech_id: 0, .. }
+        | SessionRequest::AudioResumed { speech_id: 0, .. }
         | SessionRequest::AudioDrained { speech_id: 0, .. }
         | SessionRequest::AudioFailed { speech_id: 0, .. }
         | SessionRequest::AudioCancelled { speech_id: 0, .. } => {
@@ -3685,7 +3860,9 @@ mod tests {
     use berd_voice::input::InputDuringTtsPolicy;
     use berd_voice::{PcmAudioOutput, TtsOutcome, TtsPcmSpec};
     use serde_json::{json, Value};
-    use std::io::{Cursor, Write};
+    use std::io::{Cursor, Read, Write};
+    use std::os::fd::IntoRawFd;
+    use std::os::unix::net::UnixStream;
     use std::sync::Mutex;
 
     fn synthesis_config(tts: SynthesisTtsConfig, output: PathBuf) -> SynthesisConfig {
@@ -3943,6 +4120,27 @@ mod tests {
 
     struct PartialFailureTts;
 
+    struct LongRemoteTts;
+
+    impl TtsBackend for LongRemoteTts {
+        fn pcm_spec(&self) -> TtsPcmSpec {
+            TtsPcmSpec {
+                sample_rate: 24_000,
+                playback_rate: 1.0,
+            }
+        }
+
+        fn synthesize(
+            &self,
+            _text: &str,
+            _active: &AtomicBool,
+            on_frames: &mut dyn FnMut(&[f32]) -> Result<(), String>,
+        ) -> Result<TtsOutcome, String> {
+            on_frames(&vec![0.25; session_audio::MAX_AUDIO_CHUNK_FRAMES * 8])?;
+            Ok(TtsOutcome::Completed)
+        }
+    }
+
     impl TtsBackend for PartialFailureTts {
         fn pcm_spec(&self) -> TtsPcmSpec {
             TtsPcmSpec {
@@ -4094,7 +4292,200 @@ mod tests {
             assistant_activity: None,
             input_during_tts: test_input_policy(),
             tts: test_tts_lease(),
+            suspension_requested: false,
         }
+    }
+
+    fn read_audio_record(reader: &mut impl Read) -> (u8, Vec<u8>) {
+        let mut header = [0; session_audio::AUDIO_FRAME_HEADER_BYTES];
+        reader.read_exact(&mut header).unwrap();
+        assert_eq!(header[..2], session_audio::AUDIO_FRAME_MAGIC);
+        assert_eq!(header[2], session_audio::AUDIO_FRAME_MARKER);
+        let length = u32::from_le_bytes(header[4..8].try_into().unwrap()) as usize;
+        let mut payload = vec![0; length];
+        reader.read_exact(&mut payload).unwrap();
+        (header[3], payload)
+    }
+
+    #[test]
+    fn false_barge_quiesces_and_resumes_one_remote_speech_without_a_terminal() {
+        let mut core = SessionCore::default();
+        let mut current = active_playback(&mut core);
+        let speech_id = current.speech_id;
+        let (child, mut host) = UnixStream::pair().unwrap();
+        let transport = unsafe { AudioPipeTransport::from_raw_fd(child.into_raw_fd()) }.unwrap();
+        let authority = current.active.as_ref().unwrap().clone();
+        let (control_sender, control_receiver) = mpsc::channel();
+        let output = Arc::new(
+            RemotePcmAudioOutput::new(
+                speech_id,
+                LongRemoteTts.pcm_spec(),
+                Arc::new(transport),
+                Arc::clone(&authority),
+                control_sender,
+            )
+            .unwrap(),
+        );
+        current.output = Some(Arc::clone(&output));
+        let mut active = Some(current);
+        let (playback_sender, playback_receiver) = mpsc::channel();
+        spawn_playback(
+            speech_id,
+            "a long remote reply".into(),
+            Arc::new(LongRemoteTts),
+            Arc::clone(&output),
+            authority,
+            playback_sender,
+        );
+
+        let (kind, _) = read_audio_record(&mut host);
+        assert_eq!(kind, session_audio::AUDIO_BEGIN_KIND);
+        assert!(
+            !handle_audio_ack(speech_id, AudioHostAck::BeginAccepted, active.as_ref()).unwrap()
+        );
+        let (kind, first_chunk) = read_audio_record(&mut host);
+        assert_eq!(kind, session_audio::AUDIO_CHUNK_KIND);
+        let first_frames = u64::try_from((first_chunk.len() - 16) / 4).unwrap();
+        let mut output_messages = Vec::new();
+        let mut next_token = 1;
+
+        handle_voice_input_event(
+            VoiceInputEvent::SpeakingChanged(true),
+            &mut core,
+            &mut active,
+            &mut next_token,
+            &mut output_messages,
+        )
+        .unwrap();
+        let suspend = control_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap();
+        write_audio_control_request(suspend, active.as_ref(), &mut output_messages).unwrap();
+        assert!(handle_audio_ack(
+            speech_id,
+            AudioHostAck::ChunkAccepted { sequence: 1 },
+            active.as_ref(),
+        )
+        .unwrap());
+        publish_speech_started(speech_id, &mut core, active.as_ref(), &mut output_messages)
+            .unwrap();
+        handle_audio_ack(
+            speech_id,
+            AudioHostAck::Played {
+                played_frames: first_frames,
+            },
+            active.as_ref(),
+        )
+        .unwrap();
+        handle_audio_ack(
+            speech_id,
+            AudioHostAck::Suspended {
+                played_frames: first_frames,
+            },
+            active.as_ref(),
+        )
+        .unwrap();
+        host.set_read_timeout(Some(Duration::from_millis(30)))
+            .unwrap();
+        let mut byte = [0];
+        assert!(host.read(&mut byte).is_err());
+
+        for event in [
+            VoiceInputEvent::RecognitionPendingChanged(true),
+            VoiceInputEvent::SpeakingChanged(false),
+        ] {
+            handle_voice_input_event(
+                event,
+                &mut core,
+                &mut active,
+                &mut next_token,
+                &mut output_messages,
+            )
+            .unwrap();
+        }
+        assert!(control_receiver.try_recv().is_err());
+        handle_voice_input_event(
+            VoiceInputEvent::RecognitionPendingChanged(false),
+            &mut core,
+            &mut active,
+            &mut next_token,
+            &mut output_messages,
+        )
+        .unwrap();
+        let resume = control_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap();
+        write_audio_control_request(resume, active.as_ref(), &mut output_messages).unwrap();
+        handle_audio_ack(
+            speech_id,
+            AudioHostAck::Resumed {
+                played_frames: first_frames,
+            },
+            active.as_ref(),
+        )
+        .unwrap();
+
+        host.set_read_timeout(None).unwrap();
+        let mut played_frames = first_frames;
+        let mut last_sequence = 1;
+        loop {
+            let (kind, payload) = read_audio_record(&mut host);
+            match kind {
+                session_audio::AUDIO_CHUNK_KIND => {
+                    let sequence = u64::from_le_bytes(payload[8..16].try_into().unwrap());
+                    let frames = u64::try_from((payload.len() - 16) / 4).unwrap();
+                    assert_eq!(sequence, last_sequence + 1);
+                    last_sequence = sequence;
+                    handle_audio_ack(
+                        speech_id,
+                        AudioHostAck::ChunkAccepted { sequence },
+                        active.as_ref(),
+                    )
+                    .unwrap();
+                    played_frames += frames;
+                    handle_audio_ack(
+                        speech_id,
+                        AudioHostAck::Played { played_frames },
+                        active.as_ref(),
+                    )
+                    .unwrap();
+                }
+                session_audio::AUDIO_END_KIND => {
+                    let sequence = u64::from_le_bytes(payload[8..16].try_into().unwrap());
+                    let total_frames = u64::from_le_bytes(payload[16..24].try_into().unwrap());
+                    assert_eq!(sequence, last_sequence);
+                    assert_eq!(total_frames, played_frames);
+                    handle_audio_ack(
+                        speech_id,
+                        AudioHostAck::Drained {
+                            sequence,
+                            played_frames,
+                        },
+                        active.as_ref(),
+                    )
+                    .unwrap();
+                    break;
+                }
+                other => panic!("unexpected audio record kind {other}"),
+            }
+        }
+        let terminal = playback_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap();
+        handle_playback_event(terminal, &mut core, &mut active, &mut output_messages).unwrap();
+
+        let emitted = messages(&output_messages);
+        assert!(!emitted
+            .iter()
+            .any(|message| message["type"] == "speech_interrupted"));
+        assert_eq!(
+            emitted
+                .iter()
+                .filter(|message| message["type"] == "speech_completed")
+                .count(),
+            1
+        );
+        assert!(active.is_none());
     }
 
     fn messages(output: &[u8]) -> Vec<Value> {
@@ -5732,6 +6123,7 @@ mod tests {
             assistant_activity: None,
             input_during_tts: test_input_policy(),
             tts: test_tts_lease(),
+            suspension_requested: false,
         });
         let mut held = None;
         let mut output = Vec::new();
@@ -5886,10 +6278,13 @@ mod tests {
             assistant_activity: None,
             input_during_tts: test_input_policy(),
             tts: test_tts_lease(),
+            suspension_requested: false,
         });
         let mut next_token = 1;
         let mut output = Vec::new();
         let stored = AtomicBool::new(false);
+        core.set_recognition_pending(true);
+        active.as_mut().unwrap().suspension_requested = true;
 
         store_and_publish_voice_final(
             "hello".into(),
@@ -5913,7 +6308,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_pending_is_published_before_it_interrupts_reserved_output() {
+    fn runtime_pending_provisionally_holds_reserved_output_without_a_terminal() {
         let mut core = SessionCore::default();
         let PrepareOutcome::Admitted {
             speech_id, text, ..
@@ -5935,6 +6330,7 @@ mod tests {
             assistant_activity: None,
             input_during_tts: test_input_policy(),
             tts: test_tts_lease(),
+            suspension_requested: false,
         });
         let mut next_token = 1;
         let mut output = Vec::new();
@@ -5953,9 +6349,110 @@ mod tests {
                 .iter()
                 .map(|message| message["type"].as_str().unwrap())
                 .collect::<Vec<_>>(),
-            ["recognition_pending", "speech_interrupted"]
+            ["recognition_pending"]
         );
         assert!(core.recognition_pending());
+        assert!(active.unwrap().suspension_requested);
+    }
+
+    #[test]
+    fn final_then_pending_settlement_never_requests_resume() {
+        let mut core = SessionCore::default();
+        let mut current = active_playback(&mut core);
+        let speech_id = current.speech_id;
+        let (child, _host) = UnixStream::pair().unwrap();
+        let transport = unsafe { AudioPipeTransport::from_raw_fd(child.into_raw_fd()) }.unwrap();
+        let (control_sender, control_receiver) = mpsc::channel();
+        current.output = Some(Arc::new(
+            RemotePcmAudioOutput::new(
+                speech_id,
+                LongRemoteTts.pcm_spec(),
+                Arc::new(transport),
+                current.active.as_ref().unwrap().clone(),
+                control_sender,
+            )
+            .unwrap(),
+        ));
+        let mut active = Some(current);
+        let mut next_token = 1;
+        let mut output = Vec::new();
+        handle_voice_input_event(
+            VoiceInputEvent::RecognitionPendingChanged(true),
+            &mut core,
+            &mut active,
+            &mut next_token,
+            &mut output,
+        )
+        .unwrap();
+        assert!(matches!(
+            control_receiver.recv_timeout(Duration::from_millis(30)),
+            Ok(AudioOutputControlRequest::Suspend { .. })
+        ));
+
+        store_and_publish_voice_final(
+            "real words".into(),
+            || {},
+            &mut core,
+            &mut active,
+            &mut next_token,
+            &mut output,
+        )
+        .unwrap();
+        handle_voice_input_event(
+            VoiceInputEvent::RecognitionPendingChanged(false),
+            &mut core,
+            &mut active,
+            &mut next_token,
+            &mut output,
+        )
+        .unwrap();
+
+        assert!(control_receiver.try_recv().is_err());
+        assert!(!active
+            .as_ref()
+            .unwrap()
+            .active
+            .as_ref()
+            .unwrap()
+            .load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn host_mute_and_reset_discard_only_a_provisional_hold() {
+        for reset in [false, true] {
+            let mut core = SessionCore::default();
+            let mut active = Some(active_playback(&mut core));
+            active.as_mut().unwrap().active = None;
+            active.as_mut().unwrap().suspension_requested = true;
+            let controls = VoiceInputControls::default();
+            let mut output = Vec::new();
+            if reset {
+                handle_reset_input(9, &controls, &mut core, &mut active, &mut output).unwrap();
+            } else {
+                handle_input_muted(9, true, &controls, &mut core, &mut active, &mut output)
+                    .unwrap();
+            }
+            assert!(active.is_none());
+            assert_eq!(
+                messages(&output)
+                    .iter()
+                    .map(|message| message["type"].as_str().unwrap())
+                    .collect::<Vec<_>>(),
+                if reset {
+                    vec!["input_reset_applied", "speech_interrupted"]
+                } else {
+                    vec!["input_mute_applied", "speech_interrupted"]
+                }
+            );
+        }
+
+        let mut core = SessionCore::default();
+        let mut active = Some(active_playback(&mut core));
+        let controls = VoiceInputControls::default();
+        let mut output = Vec::new();
+        handle_input_muted(10, true, &controls, &mut core, &mut active, &mut output).unwrap();
+        assert!(active.is_some());
+        assert_eq!(messages(&output)[0]["type"], "input_mute_applied");
     }
 
     #[test]
