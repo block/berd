@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   connectPeer: vi.fn(),
   createSendToMasterToolOutput: vi.fn(),
   createEndTurnToolOutput: vi.fn(),
+  createInvalidToolCallOutput: vi.fn(),
   createPeer: vi.fn(),
   createSession: vi.fn(),
   registerEmissary: vi.fn(),
@@ -90,6 +91,7 @@ vi.mock("../lib/realtimeVoicePreference", () => ({
 vi.mock("../lib/realtimeEmissaryProtocol", () => ({
   configureRealtimeEmissarySession: vi.fn(),
   createEndTurnToolOutput: mocks.createEndTurnToolOutput,
+  createInvalidToolCallOutput: mocks.createInvalidToolCallOutput,
   createSendToMasterToolOutput: mocks.createSendToMasterToolOutput,
   DirectMessagePipe: class {
     cursor() {
@@ -230,6 +232,15 @@ vi.mock("../lib/realtimeEmissaryProtocol", () => ({
         ];
       if (event.type === "test.end_turn")
         return [{ callId: "call-end", type: "end_turn" }];
+      if (event.type === "test.invalid_tool_call")
+        return [
+          {
+            callId: "call-broken",
+            error: "JSON Parse error: Unterminated string",
+            toolName: "send_to_master",
+            type: "tool_call.invalid",
+          },
+        ];
       return [];
     }
   },
@@ -390,6 +401,14 @@ beforeEach(() => {
       type: "function_call_output",
       call_id: "call-end",
       output: '{"status":"ended"}',
+    },
+  });
+  mocks.createInvalidToolCallOutput.mockReturnValue({
+    type: "conversation.item.create",
+    item: {
+      type: "function_call_output",
+      call_id: "call-broken",
+      output: '{"accepted":false,"reason":"invalid_arguments"}',
     },
   });
   mocks.createPeer.mockReturnValue(peer);
@@ -835,6 +854,42 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     ]);
     expect(mocks.requestToolOutput).not.toHaveBeenCalled();
     expect(mocks.requestMasterMessage).not.toHaveBeenCalled();
+
+    await act(async () => owner.result.current.onToggle());
+  });
+
+  it("returns malformed tool arguments without ending the voice session", async () => {
+    const owner = renderConversation("session-a");
+    await act(async () => owner.result.current.onToggle());
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+    mocks.sendRealtimeEvents.mockClear();
+
+    act(() => {
+      channel.dispatchEvent(
+        new MessageEvent("message", {
+          data: JSON.stringify({ type: "test.invalid_tool_call" }),
+        }),
+      );
+    });
+
+    expect(mocks.createInvalidToolCallOutput).toHaveBeenCalledWith(
+      "call-broken",
+      "send_to_master",
+      "JSON Parse error: Unterminated string",
+    );
+    expect(mocks.requestToolOutput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "conversation.item.create",
+        item: expect.objectContaining({ type: "function_call_output" }),
+      }),
+    );
+    expect(mocks.sendRealtimeEvents).toHaveBeenCalledWith(expect.anything(), [
+      expect.objectContaining({
+        type: "conversation.item.create",
+        item: expect.objectContaining({ type: "function_call_output" }),
+      }),
+    ]);
+    expect(owner.result.current.state).toBe("listening");
 
     await act(async () => owner.result.current.onToggle());
   });

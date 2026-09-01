@@ -8,6 +8,7 @@ import {
   RealtimeResponseCoordinator,
   configureRealtimeEmissarySession,
   createEndTurnToolOutput,
+  createInvalidToolCallOutput,
   createRealtimeEmissarySessionUpdate,
   createSendToMasterToolOutput,
   sendRealtimeEvents,
@@ -505,14 +506,78 @@ describe("RealtimeEmissaryProtocol", () => {
 
   it("rejects malformed send_to_master arguments", () => {
     const protocol = new RealtimeEmissaryProtocol();
-    expect(() =>
+    expect(
       protocol.handle({
         type: "response.function_call_arguments.done",
         name: "send_to_master",
         call_id: "call-1",
         arguments: '{"cursor":0,"message":"hello","unexpected":true}',
       }),
-    ).toThrow("accepts only cursor and message arguments");
+    ).toEqual([
+      {
+        type: "tool_call.invalid",
+        callId: "call-1",
+        toolName: "send_to_master",
+        error: "send_to_master accepts only cursor and message arguments",
+      },
+    ]);
+  });
+
+  it("returns unterminated tool arguments to the emissary for a silent retry", () => {
+    const protocol = new RealtimeEmissaryProtocol();
+    protocol.handle({
+      type: "response.output_item.added",
+      item: {
+        type: "function_call",
+        name: "send_to_master",
+        call_id: "call-broken",
+      },
+    });
+    protocol.handle({
+      type: "response.function_call_arguments.delta",
+      call_id: "call-broken",
+      delta: '{"cursor":0,"message":"Please inspect',
+    });
+
+    const [invalidCall] = protocol.handle({
+      type: "response.function_call_arguments.done",
+      call_id: "call-broken",
+    });
+    expect(invalidCall).toMatchObject({
+      type: "tool_call.invalid",
+      callId: "call-broken",
+      toolName: "send_to_master",
+    });
+    expect(invalidCall).toHaveProperty(
+      "error",
+      expect.stringMatching(/unterminated|JSON/i),
+    );
+    expect(
+      protocol.handle({
+        type: "response.function_call_arguments.done",
+        call_id: "call-broken",
+      }),
+    ).toEqual([]);
+
+    expect(
+      createInvalidToolCallOutput(
+        "call-broken",
+        "send_to_master",
+        "JSON Parse error: Unterminated string",
+      ),
+    ).toEqual({
+      type: "conversation.item.create",
+      item: {
+        type: "function_call_output",
+        call_id: "call-broken",
+        output: JSON.stringify({
+          accepted: false,
+          reason: "invalid_arguments",
+          error:
+            "send_to_master arguments were invalid: JSON Parse error: Unterminated string. Retry this tool call with complete valid JSON. Do not speak this internal error to the user.",
+        }),
+      },
+    });
   });
 });
 

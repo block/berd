@@ -119,6 +119,13 @@ export type EndTurnCall = {
   callId: string;
 };
 
+export type InvalidToolCall = {
+  type: "tool_call.invalid";
+  callId: string;
+  toolName: typeof SEND_TO_MASTER_TOOL_NAME | typeof END_TURN_TOOL_NAME;
+  error: string;
+};
+
 export type RealtimePlaybackInterrupted = {
   type: "emissary.playback_interrupted";
   responseId: string;
@@ -130,6 +137,7 @@ export type RealtimeEmissaryProtocolEvent =
   | FinalizedRealtimeTranscript
   | SendToMasterCall
   | EndTurnCall
+  | InvalidToolCall
   | RealtimePlaybackInterrupted;
 
 export type RealtimeClientEvent = Record<string, unknown>;
@@ -345,6 +353,25 @@ export function createEndTurnToolOutput(callId: string): RealtimeServerEvent {
       type: "function_call_output",
       call_id: requireNonEmpty(callId, "call id"),
       output: JSON.stringify({ status: "ended" }),
+    },
+  };
+}
+
+export function createInvalidToolCallOutput(
+  callId: string,
+  toolName: string,
+  error: string,
+): RealtimeServerEvent {
+  return {
+    type: "conversation.item.create",
+    item: {
+      type: "function_call_output",
+      call_id: requireNonEmpty(callId, "call id"),
+      output: JSON.stringify({
+        accepted: false,
+        reason: "invalid_arguments",
+        error: `${requireNonEmpty(toolName, "tool name")} arguments were invalid: ${requireNonEmpty(error, "tool error")}. Retry this tool call with complete valid JSON. Do not speak this internal error to the user.`,
+      }),
     },
   };
 }
@@ -647,8 +674,14 @@ export class RealtimeEmissaryProtocol {
         this.captureFunctionArguments(event);
         return [];
       case "response.function_call_arguments.done": {
-        const call = this.finishFunctionCall(event);
-        return call ? [call] : [];
+        try {
+          const call = this.finishFunctionCall(event);
+          return call ? [call] : [];
+        } catch (error) {
+          const invalidCall = this.invalidFunctionCall(event, error);
+          if (!invalidCall) throw error;
+          return [invalidCall];
+        }
       }
       case "input_audio_buffer.speech_started": {
         const itemId = optionalString(event.item_id);
@@ -880,6 +913,28 @@ export class RealtimeEmissaryProtocol {
     this.argumentDeltas.delete(callId);
     this.callNames.delete(callId);
     return { type: "send_to_master", callId, cursor, message };
+  }
+
+  private invalidFunctionCall(
+    event: RealtimeServerEvent,
+    error: unknown,
+  ): InvalidToolCall | undefined {
+    const callId = optionalString(event.call_id);
+    if (!callId || this.completedCallIds.has(callId)) return undefined;
+    const name = optionalString(event.name) ?? this.callNames.get(callId);
+    if (name !== SEND_TO_MASTER_TOOL_NAME && name !== END_TURN_TOOL_NAME) {
+      return undefined;
+    }
+
+    this.completedCallIds.add(callId);
+    this.argumentDeltas.delete(callId);
+    this.callNames.delete(callId);
+    return {
+      type: "tool_call.invalid",
+      callId,
+      toolName: name,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 

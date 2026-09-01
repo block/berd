@@ -29,6 +29,7 @@ import {
 } from "../lib/realtimeEmissaryBridge";
 import {
   createEndTurnToolOutput,
+  createInvalidToolCallOutput,
   createSendToMasterToolOutput,
   DirectMessagePipe,
   REALTIME_MASTER_INSTRUCTIONS,
@@ -662,6 +663,15 @@ class OpenAiRealtimeConversationRuntime {
               sendRealtimeEvents(transport, [
                 createEndTurnToolOutput(bridgeEvent.callId),
               ]);
+            } else if (bridgeEvent.type === "tool_call.invalid") {
+              const toolFollowUp = responses.requestToolOutput(
+                createInvalidToolCallOutput(
+                  bridgeEvent.callId,
+                  bridgeEvent.toolName,
+                  bridgeEvent.error,
+                ),
+              );
+              sendRealtimeEvents(transport, toolFollowUp.events);
             }
           }
         } catch (error) {
