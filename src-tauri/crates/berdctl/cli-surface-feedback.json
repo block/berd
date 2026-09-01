@@ -124,6 +124,37 @@
         }
       }
     },
+    "schedule": {
+      "group": "schedules",
+      "about": "Manage jobs in Berd's live Goose scheduler: list, pause, unpause, kill, remove",
+      "verbs": {
+        "list": {
+          "action": "list",
+          "about": "List scheduled recipe jobs from Berd's live Goose scheduler",
+          "afterHelp": "Example:\n  berdctl schedule list --json\n\nResult:\n  {\"schedules\": [{\"id\": \"daily-report\", \"cron\": \"0 9 * * *\",\n                   \"paused\": false, \"currently_running\": false,\n                   \"source\": \"...\", \"last_run\": null,\n                   \"current_session_id\": null, \"job_start_time\": null}]}"
+        },
+        "pause": {
+          "action": "pause",
+          "about": "Pause a job in Berd's live Goose scheduler",
+          "afterHelp": "Example:\n  berdctl schedule pause --schedule-id daily-report\n\nResult:\n  {\"ok\": true, \"schedule_id\": \"daily-report\", \"paused\": true}"
+        },
+        "unpause": {
+          "action": "unpause",
+          "about": "Resume a paused job in Berd's live Goose scheduler",
+          "afterHelp": "Example:\n  berdctl schedule unpause --schedule-id daily-report\n\nResult:\n  {\"ok\": true, \"schedule_id\": \"daily-report\", \"paused\": false}"
+        },
+        "kill": {
+          "action": "kill",
+          "about": "Stop the active run of a scheduled recipe job",
+          "afterHelp": "Examples:\n  berdctl schedule kill --schedule-id daily-report\n  berdctl schedule kill --schedule-id daily-report && \\\n    berdctl schedule remove --schedule-id daily-report --confirm\n\nResult:\n  {\"ok\": true, \"schedule_id\": \"daily-report\", \"message\": \"...\"}"
+        },
+        "remove": {
+          "action": "remove",
+          "about": "Remove a job from Berd's live Goose scheduler",
+          "afterHelp": "Example:\n  berdctl schedule remove --schedule-id daily-report --confirm\n\nResult:\n  {\"ok\": true, \"schedule_id\": \"daily-report\"}\n\nIf the job is currently running, use berdctl schedule kill first when you also need to stop that active run."
+        }
+      }
+    },
     "agent": {
       "group": "agents",
       "about": "Manage agents (personas): create, list",

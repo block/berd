@@ -21,16 +21,21 @@ import { listAgentsCommand } from "./impl/listAgents";
 import { listHarnessesCommand } from "./impl/listHarnesses";
 import { listModelsCommand } from "./impl/listModels";
 import { listProjectsCommand } from "./impl/listProjects";
+import { listSchedulesCommand } from "./impl/listSchedules";
 import { listSessionsCommand } from "./impl/listSessions";
 import { listSkillsCommand } from "./impl/listSkills";
 import { moveSessionCommand } from "./impl/moveSession";
 import { moveSessionToGroupCommand } from "./impl/moveSessionToGroup";
 import { openFeedbackCommand } from "./impl/openFeedback";
 import { openSessionCommand } from "./impl/openSession";
+import { pauseScheduleCommand } from "./impl/pauseSchedule";
+import { removeScheduleCommand } from "./impl/removeSchedule";
 import { renameSessionCommand } from "./impl/renameSession";
 import { sendSessionCommand } from "./impl/sendSession";
 import { setProjectStartupModeCommand } from "./impl/setProjectStartupMode";
 import { submitFeedbackCommand } from "./impl/submitFeedback";
+import { unpauseScheduleCommand } from "./impl/unpauseSchedule";
+import { killScheduleCommand } from "./impl/killSchedule";
 import { commandBridgeTimeoutMs } from "./timeouts";
 import { CommandError, type CommandContext, type ToolGroup } from "./types";
 
@@ -131,6 +136,29 @@ export const ALL_TOOL_GROUPS = {
       get: getProjectCommand,
       set_startup_mode: setProjectStartupModeCommand,
       archive: archiveProjectCommand,
+    },
+  },
+  schedules: {
+    description:
+      "Manage scheduled recipe jobs in Berd's live embedded Goose scheduler: list, pause, unpause, kill an active run, or remove a schedule.",
+    cli: {
+      noun: "schedule",
+      about:
+        "Manage jobs in Berd's live Goose scheduler: list, pause, unpause, kill, remove",
+      verbs: {
+        list: "list",
+        pause: "pause",
+        unpause: "unpause",
+        kill: "kill",
+        remove: "remove",
+      },
+    },
+    actions: {
+      list: listSchedulesCommand,
+      pause: pauseScheduleCommand,
+      unpause: unpauseScheduleCommand,
+      kill: killScheduleCommand,
+      remove: removeScheduleCommand,
     },
   },
   agents: {

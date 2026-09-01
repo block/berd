@@ -844,6 +844,132 @@
         }
       }
     },
+    "schedules": {
+      "description": "Manage scheduled recipe jobs in Berd's live embedded Goose scheduler: list, pause, unpause, kill an active run, or remove a schedule.",
+      "actions": {
+        "list": {
+          "description": "List scheduled recipe jobs from the live Goose scheduler embedded in Berd. Unlike a separate goose schedule process, this reads the scheduler instance that is actually running the jobs and does not change app state.",
+          "fields": [],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          }
+        },
+        "pause": {
+          "description": "Pause an idle scheduled recipe job through the live Goose scheduler embedded in Berd. Future scheduled runs stop until the job is unpaused. If a run is active, stop it first with berdctl schedule kill.",
+          "fields": [
+            {
+              "name": "schedule_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the scheduled recipe job to pause.",
+              "min": 1
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "schedule_id": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Id of the scheduled recipe job to pause."
+              }
+            },
+            "required": ["schedule_id"],
+            "additionalProperties": false
+          }
+        },
+        "unpause": {
+          "description": "Unpause a scheduled recipe job through the live Goose scheduler embedded in Berd. Future runs resume on the job's existing cron schedule.",
+          "fields": [
+            {
+              "name": "schedule_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the scheduled recipe job to unpause.",
+              "min": 1
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "schedule_id": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Id of the scheduled recipe job to unpause."
+              }
+            },
+            "required": ["schedule_id"],
+            "additionalProperties": false
+          }
+        },
+        "kill": {
+          "description": "Stop the current run of a scheduled recipe job through Berd's live Goose scheduler. The schedule itself remains registered and can run again later; use remove or pause when future runs must also stop.",
+          "fields": [
+            {
+              "name": "schedule_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the scheduled recipe job whose active run should stop.",
+              "min": 1
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "schedule_id": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Id of the scheduled recipe job whose active run should stop."
+              }
+            },
+            "required": ["schedule_id"],
+            "additionalProperties": false
+          }
+        },
+        "remove": {
+          "description": "Remove a scheduled recipe job through the live Goose scheduler embedded in Berd. This updates the scheduler that is actually running jobs, so a stale in-memory copy cannot restore the deleted schedule. The saved recipe file is kept.",
+          "fields": [
+            {
+              "name": "schedule_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the scheduled recipe job to remove.",
+              "min": 1
+            },
+            {
+              "name": "confirm",
+              "required": false,
+              "kind": "boolean",
+              "description": "Confirm removal of the schedule registration. The saved recipe file is kept."
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "schedule_id": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Id of the scheduled recipe job to remove."
+              },
+              "confirm": {
+                "default": false,
+                "description": "Confirm removal of the schedule registration. The saved recipe file is kept.",
+                "type": "boolean"
+              }
+            },
+            "required": ["schedule_id"],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
     "agents": {
       "description": "Manage the user's agents (personas): create, list.",
       "actions": {

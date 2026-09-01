@@ -13,6 +13,12 @@ import {
   updateAutomationTile,
 } from "@/features/automations/api/kgooseAutomations";
 import {
+  listLocalSchedules,
+  killLocalScheduleRun,
+  pauseLocalSchedule,
+  removeLocalSchedule,
+} from "@/features/automations/api/localSchedules";
+import {
   TopBarActionsProvider,
   useTopBarActions,
 } from "@/app/contexts/TopBarActionsContext";
@@ -42,6 +48,15 @@ vi.mock("@/features/automations/api/kgooseAutomations", () => ({
   updateAutomationTile: vi.fn(),
   deleteAutomationTile: vi.fn(),
   refreshAutomationTile: vi.fn(),
+}));
+
+vi.mock("@/features/automations/api/localSchedules", () => ({
+  LOCAL_SCHEDULES_QUERY_KEY: ["local-goose-schedules"],
+  listLocalSchedules: vi.fn(),
+  pauseLocalSchedule: vi.fn(),
+  unpauseLocalSchedule: vi.fn(),
+  removeLocalSchedule: vi.fn(),
+  killLocalScheduleRun: vi.fn(),
 }));
 
 vi.mock("@/features/automations/ui/AutomationBuilderView", () => ({
@@ -108,6 +123,10 @@ describe("AutomationsView", () => {
   beforeEach(() => {
     resetHomeWidgetStoreForTests();
     vi.clearAllMocks();
+    vi.mocked(listLocalSchedules).mockResolvedValue([]);
+    vi.mocked(pauseLocalSchedule).mockResolvedValue(undefined);
+    vi.mocked(removeLocalSchedule).mockResolvedValue(undefined);
+    vi.mocked(killLocalScheduleRun).mockResolvedValue(undefined);
     vi.mocked(getAutomationTiles).mockResolvedValue({
       tiles: [
         {
@@ -236,6 +255,70 @@ describe("AutomationsView", () => {
     expect(screen.getByText("Revenue was up.")).toBeInTheDocument();
   });
 
+  it("shows and controls local Goose schedules through the live scheduler", async () => {
+    const user = userEvent.setup({ delay: null });
+    vi.mocked(listLocalSchedules).mockResolvedValue([
+      {
+        id: "daily-report",
+        source: "/recipes/daily-report.yaml",
+        cron: "0 9 * * *",
+        lastRun: null,
+        currentlyRunning: false,
+        paused: false,
+        currentSessionId: null,
+        jobStartTime: null,
+      },
+    ]);
+
+    renderAutomationsView();
+
+    expect(await screen.findByText("Local schedules")).toBeInTheDocument();
+    expect(screen.getByText("daily-report")).toBeInTheDocument();
+    expect(screen.getByText("0 9 * * *")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Pause" }));
+    await waitFor(() =>
+      expect(pauseLocalSchedule).toHaveBeenCalledWith("daily-report"),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Remove schedule" }));
+    expect(
+      await screen.findByText(/Remove local schedule "daily-report"\?/),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Remove schedule" }));
+    await waitFor(() =>
+      expect(removeLocalSchedule).toHaveBeenCalledWith("daily-report"),
+    );
+  });
+
+  it("stops the active run without removing its local schedule", async () => {
+    const user = userEvent.setup({ delay: null });
+    vi.mocked(listLocalSchedules).mockResolvedValue([
+      {
+        id: "running-report",
+        source: "/recipes/running-report.yaml",
+        cron: "0 9 * * *",
+        lastRun: null,
+        currentlyRunning: true,
+        paused: false,
+        currentSessionId: "session-1",
+        jobStartTime: "2026-08-28T09:00:00Z",
+      },
+    ]);
+
+    renderAutomationsView();
+
+    expect(await screen.findByRole("button", { name: "Pause" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Remove schedule" }),
+    ).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Stop run" }));
+    await waitFor(() =>
+      expect(killLocalScheduleRun).toHaveBeenCalledWith("running-report"),
+    );
+    expect(removeLocalSchedule).not.toHaveBeenCalled();
+  });
+
   it("renders markdown emphasis in overview summaries", async () => {
     vi.mocked(getAutomationTiles).mockResolvedValue({
       tiles: [
@@ -255,6 +338,19 @@ describe("AutomationsView", () => {
     const emphasizedText = await screen.findByText("Great Blue Heron");
     expect(emphasizedText.tagName).toBe("STRONG");
     expect(screen.queryByText(/\*\*Great Blue Heron\*\*/)).toBeNull();
+  });
+
+  it("surfaces local schedule load failures", async () => {
+    vi.mocked(listLocalSchedules).mockRejectedValue(
+      new Error("Live scheduler unavailable"),
+    );
+
+    renderAutomationsView();
+
+    expect(
+      await screen.findByText("Local schedules failed to load"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Live scheduler unavailable")).toBeInTheDocument();
   });
 
   it("opens automation details from the overview", async () => {

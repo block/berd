@@ -73,6 +73,11 @@ const mocks = vi.hoisted(() => ({
   createSkill: vi.fn(),
   listSkills: vi.fn(),
   getVoiceConversationStatus: vi.fn(),
+  listSchedules: vi.fn(),
+  deleteSchedule: vi.fn(),
+  pauseSchedule: vi.fn(),
+  unpauseSchedule: vi.fn(),
+  killSchedule: vi.fn(),
 }));
 
 vi.mock("@/shared/api/acp", () => ({
@@ -115,6 +120,22 @@ vi.mock(
   },
 );
 
+vi.mock("@/shared/api/acpConnection", () => ({
+  getClient: vi.fn(async () => ({
+    goose: {
+      GooseUnstableSchedulesList: (...args: unknown[]) =>
+        mocks.listSchedules(...args),
+      GooseUnstableSchedulesDelete: (...args: unknown[]) =>
+        mocks.deleteSchedule(...args),
+      GooseUnstableSchedulesPause: (...args: unknown[]) =>
+        mocks.pauseSchedule(...args),
+      GooseUnstableSchedulesUnpause: (...args: unknown[]) =>
+        mocks.unpauseSchedule(...args),
+      GooseUnstableSchedulesRunningJobKill: (...args: unknown[]) =>
+        mocks.killSchedule(...args),
+    },
+  })),
+}));
 vi.mock("@/features/chat/lib/sessionActivation", () => ({
   loadSessionMessages: (...args: unknown[]) =>
     mocks.loadSessionMessages(...args),
@@ -612,6 +633,11 @@ describe("action schemas", () => {
       "projects.get": { project_id: "p1" },
       "projects.set_startup_mode": { project_id: "p1", mode: "worktree" },
       "projects.archive": { project_id: "p1" },
+      "schedules.list": {},
+      "schedules.pause": { schedule_id: "daily-report" },
+      "schedules.unpause": { schedule_id: "daily-report" },
+      "schedules.kill": { schedule_id: "daily-report" },
+      "schedules.remove": { schedule_id: "daily-report", confirm: true },
       "agents.create": { name: "Agent", system_prompt: "Be helpful" },
       "agents.list": {},
       "skills.create": { name: "Skill", description: "Does X", content: "#" },
@@ -4133,6 +4159,190 @@ describe("skills", () => {
       dispatchCommand("skills", { action: "get", skill_id: "nope" }, ctx),
       "skill_not_found",
     );
+  });
+});
+
+describe("schedules", () => {
+  it("lists jobs from the live embedded Goose scheduler", async () => {
+    mocks.listSchedules.mockResolvedValue({
+      jobs: [
+        {
+          id: "daily-report",
+          source: "/recipes/daily-report.yaml",
+          cron: "0 9 * * *",
+          lastRun: "2026-08-28T09:00:00Z",
+          currentlyRunning: true,
+          paused: false,
+          currentSessionId: "session-1",
+          jobStartTime: "2026-08-28T09:00:01Z",
+        },
+      ],
+    });
+
+    await expect(
+      dispatchCommand("schedules", { action: "list" }, ctx),
+    ).resolves.toEqual({
+      schedules: [
+        {
+          id: "daily-report",
+          source: "/recipes/daily-report.yaml",
+          cron: "0 9 * * *",
+          last_run: "2026-08-28T09:00:00Z",
+          currently_running: true,
+          paused: false,
+          current_session_id: "session-1",
+          job_start_time: "2026-08-28T09:00:01Z",
+        },
+      ],
+    });
+    expect(mocks.listSchedules).toHaveBeenCalledWith({});
+  });
+
+  it("pauses before removing a schedule through the live scheduler client", async () => {
+    mocks.pauseSchedule.mockResolvedValue(undefined);
+    mocks.listSchedules.mockResolvedValue({
+      jobs: [{ id: "daily-report", currentlyRunning: false }],
+    });
+    mocks.deleteSchedule.mockResolvedValue(undefined);
+
+    await expect(
+      dispatchCommand(
+        "schedules",
+        { action: "remove", schedule_id: "daily-report", confirm: true },
+        ctx,
+      ),
+    ).resolves.toEqual({ ok: true, schedule_id: "daily-report" });
+    expect(mocks.pauseSchedule).toHaveBeenCalledWith({
+      scheduleId: "daily-report",
+    });
+    expect(mocks.deleteSchedule).toHaveBeenCalledWith({
+      scheduleId: "daily-report",
+    });
+  });
+
+  it("restores the pause state when schedule removal fails", async () => {
+    mocks.listSchedules.mockResolvedValue({
+      jobs: [
+        {
+          id: "daily-report",
+          paused: false,
+          currentlyRunning: false,
+        },
+      ],
+    });
+    mocks.pauseSchedule.mockResolvedValue(undefined);
+    mocks.deleteSchedule.mockRejectedValue(new Error("delete failed"));
+    mocks.unpauseSchedule.mockResolvedValue(undefined);
+
+    await expect(
+      dispatchCommand(
+        "schedules",
+        { action: "remove", schedule_id: "daily-report", confirm: true },
+        ctx,
+      ),
+    ).rejects.toThrow("delete failed");
+    expect(mocks.unpauseSchedule).toHaveBeenCalledWith({
+      scheduleId: "daily-report",
+    });
+  });
+
+  it("refuses to remove a schedule while its run is active", async () => {
+    mocks.pauseSchedule.mockResolvedValue(undefined);
+    mocks.listSchedules.mockResolvedValue({
+      jobs: [{ id: "daily-report", currentlyRunning: true }],
+    });
+
+    await expect(
+      dispatchCommand(
+        "schedules",
+        { action: "remove", schedule_id: "daily-report", confirm: true },
+        ctx,
+      ),
+    ).rejects.toThrow("Stop the active run");
+    expect(mocks.deleteSchedule).not.toHaveBeenCalled();
+  });
+
+  it("refuses schedule removal without explicit confirmation", async () => {
+    await expectCommandError(
+      dispatchCommand(
+        "schedules",
+        { action: "remove", schedule_id: "daily-report" },
+        ctx,
+      ),
+      "confirmation_required",
+    );
+    expect(mocks.deleteSchedule).not.toHaveBeenCalled();
+  });
+
+  it("pauses and unpauses through the live scheduler client", async () => {
+    mocks.listSchedules.mockResolvedValue({
+      jobs: [{ id: "daily-report", currentlyRunning: false }],
+    });
+    mocks.pauseSchedule.mockResolvedValue(undefined);
+    mocks.unpauseSchedule.mockResolvedValue(undefined);
+
+    await expect(
+      dispatchCommand(
+        "schedules",
+        { action: "pause", schedule_id: "daily-report" },
+        ctx,
+      ),
+    ).resolves.toEqual({
+      ok: true,
+      schedule_id: "daily-report",
+      paused: true,
+    });
+    await expect(
+      dispatchCommand(
+        "schedules",
+        { action: "unpause", schedule_id: "daily-report" },
+        ctx,
+      ),
+    ).resolves.toEqual({
+      ok: true,
+      schedule_id: "daily-report",
+      paused: false,
+    });
+    expect(mocks.pauseSchedule).toHaveBeenCalledWith({
+      scheduleId: "daily-report",
+    });
+    expect(mocks.unpauseSchedule).toHaveBeenCalledWith({
+      scheduleId: "daily-report",
+    });
+  });
+
+  it("refuses to pause a schedule while its run is active", async () => {
+    mocks.listSchedules.mockResolvedValue({
+      jobs: [{ id: "daily-report", currentlyRunning: true }],
+    });
+
+    await expect(
+      dispatchCommand(
+        "schedules",
+        { action: "pause", schedule_id: "daily-report" },
+        ctx,
+      ),
+    ).rejects.toThrow("Stop the active run");
+    expect(mocks.pauseSchedule).not.toHaveBeenCalled();
+  });
+
+  it("kills only the active run and leaves the schedule registered", async () => {
+    mocks.killSchedule.mockResolvedValue({ message: "Scheduled job stopped" });
+
+    await expect(
+      dispatchCommand(
+        "schedules",
+        { action: "kill", schedule_id: "daily-report" },
+        ctx,
+      ),
+    ).resolves.toEqual({
+      ok: true,
+      schedule_id: "daily-report",
+      message: "Scheduled job stopped",
+    });
+    expect(mocks.killSchedule).toHaveBeenCalledWith({
+      jobId: "daily-report",
+    });
   });
 });
 
