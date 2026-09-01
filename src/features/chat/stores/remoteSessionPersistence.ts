@@ -257,8 +257,14 @@ export async function reconcileRemoteSessionsForExperiment(
     unregisterSessionBackend(sessionId);
   }
 
+  const { invalidateBackendConnection } = await import(
+    "@/shared/api/acpConnection"
+  );
   const { disconnectRemoteHost } = await import("@/shared/api/remoteHosts");
   await Promise.allSettled(
-    [...remoteHosts].map((host) => disconnectRemoteHost(host)),
+    [...remoteHosts].flatMap((host) => [
+      invalidateBackendConnection(sshBackendId(host)),
+      disconnectRemoteHost(host),
+    ]),
   );
 }

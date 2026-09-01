@@ -678,6 +678,14 @@ mod tests {
             path_override: Option<&str>,
             home: &std::path::Path,
         ) -> (Vec<String>, Option<i32>) {
+            collect_script(spawn_script(args, path_override, home))
+        }
+
+        fn spawn_script(
+            args: &[&str],
+            path_override: Option<&str>,
+            home: &std::path::Path,
+        ) -> std::process::Child {
             let nonce = "berd-test-nonce";
             let mut command = StdCommand::new("bash");
             command
@@ -701,6 +709,11 @@ mod tests {
                 .unwrap()
                 .write_all(BOOTSTRAP_SCRIPT.as_bytes())
                 .unwrap();
+            child
+        }
+
+        fn collect_script(child: std::process::Child) -> (Vec<String>, Option<i32>) {
+            let nonce = "berd-test-nonce";
             let out = child.wait_with_output().expect("script output");
             let prefix = format!("{nonce} ");
             let lines = String::from_utf8_lossy(&out.stdout)
@@ -925,6 +938,58 @@ fi
             let (lines, code) = run_script(&["shutdown"], None, home.path());
             assert_eq!(code, Some(0), "lines: {lines:?}");
             kill_recorded_pid(&first_fields);
+        }
+
+        #[test]
+        fn concurrent_ensure_calls_share_one_recorded_daemon() {
+            if !python3_available() {
+                eprintln!("skipping: python3 unavailable for the goose serve shim");
+                return;
+            }
+            let home = tempfile::tempdir().unwrap();
+            let bin = tempfile::tempdir().unwrap();
+            let goose = write_goose_shim(bin.path(), "goose", "goose 1.0.0");
+            let goose_arg = b64_arg(&goose.to_string_lossy());
+
+            let first = spawn_script(&["ensure", "-", &goose_arg], None, home.path());
+            let second = spawn_script(&["ensure", "-", &goose_arg], None, home.path());
+            let (first_lines, first_code) = collect_script(first);
+            let (second_lines, second_code) = collect_script(second);
+
+            assert_eq!(first_code, Some(0), "lines: {first_lines:?}");
+            assert_eq!(second_code, Some(0), "lines: {second_lines:?}");
+            let first_ready = parse_ready_line(
+                first_lines
+                    .iter()
+                    .find_map(|line| line.strip_prefix("READY "))
+                    .expect("first READY"),
+            )
+            .unwrap();
+            let second_ready = parse_ready_line(
+                second_lines
+                    .iter()
+                    .find_map(|line| line.strip_prefix("READY "))
+                    .expect("second READY"),
+            )
+            .unwrap();
+            assert_eq!(first_ready.pid, second_ready.pid);
+            assert_eq!(first_ready.port, second_ready.port);
+            assert_ne!(first_ready.reused, second_ready.reused);
+
+            let state_dir = home.path().join(".state").join("berd").join("remote");
+            let entries = std::fs::read_dir(&state_dir)
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name())
+                .collect::<Vec<_>>();
+            assert!(
+                entries
+                    .iter()
+                    .all(|name| !name.to_string_lossy().starts_with(".daemon.record.")),
+                "atomic record temp was left behind: {entries:?}"
+            );
+
+            let (_, code) = run_script(&["shutdown"], None, home.path());
+            assert_eq!(code, Some(0));
         }
 
         /// A record written before process identities existed cannot prove PID

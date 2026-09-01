@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   transferSessionBackend: vi.fn(),
   unregisterSessionBackend: vi.fn(),
   getSessionBackend: vi.fn(),
+  invalidateBackendConnection: vi.fn().mockResolvedValue(undefined),
   disconnectRemoteHost: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -51,6 +52,11 @@ vi.mock("@/shared/api/acpSessionBackends", () => ({
 vi.mock("@/shared/api/remoteHosts", () => ({
   disconnectRemoteHost: (...args: unknown[]) =>
     mocks.disconnectRemoteHost(...args),
+}));
+
+vi.mock("@/shared/api/acpConnection", () => ({
+  invalidateBackendConnection: (...args: unknown[]) =>
+    mocks.invalidateBackendConnection(...args),
 }));
 
 function makeRecord(
@@ -292,6 +298,9 @@ describe("remoteSessionPersistence", () => {
         record.sessionId,
       );
       expect(mocks.disconnectRemoteHost).toHaveBeenCalledWith(record.host);
+      expect(mocks.invalidateBackendConnection).toHaveBeenCalledWith(
+        "ssh:devbox",
+      );
       expect(readRemoteSessionRecords()).toEqual([record]);
     });
 

@@ -12,6 +12,11 @@ import {
   type RequestPermissionResponse,
 } from "@agentclientprotocol/sdk";
 import packageJson from "../../../package.json";
+import { REMOTE_SSH_SESSIONS_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import {
+  getExperiment,
+  subscribeToExperimentChanges,
+} from "@/features/experiments/experimentPreferences";
 import {
   LOCAL_BACKEND_ID,
   compositeSessionId,
@@ -132,6 +137,7 @@ export interface AcpConnection {
 export function createAcpConnection(
   resolveWsUrl: () => Promise<string>,
   backendId: AcpBackendId = LOCAL_BACKEND_ID,
+  assertAvailable?: () => void,
 ): AcpConnection {
   let clientPromise: Promise<GooseClient> | null = null;
   let resolvedClient: GooseClient | null = null;
@@ -179,6 +185,7 @@ export function createAcpConnection(
   }
 
   async function initializeConnection(): Promise<GooseClient> {
+    assertAvailable?.();
     const tStart = performance.now();
     const wsUrl = await resolveWsUrl();
     perfLog(
@@ -210,6 +217,7 @@ export function createAcpConnection(
         version: packageJson.version,
       },
     } satisfies GooseInitializeRequest);
+    assertAvailable?.();
     perfLog(
       `[perf:conn] client.initialize in ${(performance.now() - tInit).toFixed(1)}ms (total ${(performance.now() - tStart).toFixed(1)}ms)`,
     );
@@ -220,6 +228,7 @@ export function createAcpConnection(
   }
 
   async function getClient(): Promise<GooseClient> {
+    assertAvailable?.();
     if (resolvedClient) {
       return resolvedClient;
     }
@@ -286,6 +295,18 @@ async function resolveLocalWsUrl(): Promise<string> {
 
 const connections = new Map<AcpBackendId, AcpConnection>();
 
+function remoteSessionsEnabled(): boolean {
+  return getExperiment(REMOTE_SSH_SESSIONS_EXPERIMENT_ID)?.enabled === true;
+}
+
+function assertRemoteSessionsEnabled(): void {
+  if (!remoteSessionsEnabled()) {
+    throw new Error(
+      "Remote SSH sessions are disabled in Experimental Features",
+    );
+  }
+}
+
 function createBackendConnection(backendId: AcpBackendId): AcpConnection {
   if (backendId === LOCAL_BACKEND_ID) {
     return createAcpConnection(resolveLocalWsUrl);
@@ -294,14 +315,21 @@ function createBackendConnection(backendId: AcpBackendId): AcpConnection {
   if (!host) {
     throw new Error(`Unknown ACP backend id: ${backendId}`);
   }
-  return createAcpConnection(async () => {
-    const { connectRemoteHost } = await import("./remoteHosts");
-    const remote = await connectRemoteHost(host);
-    return remote.wsUrl;
-  }, backendId);
+  return createAcpConnection(
+    async () => {
+      const { connectRemoteHost } = await import("./remoteHosts");
+      const remote = await connectRemoteHost(host);
+      return remote.wsUrl;
+    },
+    backendId,
+    assertRemoteSessionsEnabled,
+  );
 }
 
 export function getBackendConnection(backendId: AcpBackendId): AcpConnection {
+  if (backendId !== LOCAL_BACKEND_ID) {
+    assertRemoteSessionsEnabled();
+  }
   let connection = connections.get(backendId);
   if (!connection) {
     connection = createBackendConnection(backendId);
@@ -321,6 +349,18 @@ export async function invalidateBackendConnection(
 ): Promise<void> {
   await connections.get(backendId)?.invalidate();
 }
+
+// Renderer reconciliation removes remote sessions and tunnels, while this
+// lower-level subscription makes the transport itself authoritative. It also
+// closes clients already cached by non-React callers in this window.
+subscribeToExperimentChanges(() => {
+  if (remoteSessionsEnabled()) return;
+  for (const [backendId, connection] of connections) {
+    if (backendId !== LOCAL_BACKEND_ID) {
+      void connection.invalidate();
+    }
+  }
+});
 
 /**
  * Abort the current transport after an ACP request exceeds its liveness bound.

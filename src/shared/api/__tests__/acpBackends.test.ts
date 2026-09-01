@@ -71,6 +71,13 @@ function flushClosedMonitor() {
 beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
+  window.localStorage.setItem(
+    "goose:experimental-features",
+    JSON.stringify({
+      version: 2,
+      experiments: { "remote-ssh-sessions": { enabled: true } },
+    }),
+  );
   mocks.clientCallbackFactories.length = 0;
   mocks.invoke.mockResolvedValue("ws://local");
   mocks.connectRemoteHost.mockResolvedValue({
@@ -184,6 +191,33 @@ describe("backend connection registry", () => {
     expect(mocks.connectRemoteHost).toHaveBeenCalledWith("dev-box");
     expect(mocks.createWebSocketStream).toHaveBeenCalledWith("ws://remote");
     expect(mocks.invoke).not.toHaveBeenCalled();
+  });
+
+  it("blocks and invalidates ssh transports when the experiment is disabled", async () => {
+    const conn = await importConnection();
+    const remoteConnection = conn.getBackendConnection("ssh:dev-box");
+    await remoteConnection.getClient();
+    const remoteStream = mocks.createWebSocketStream.mock.results.at(-1)
+      ?.value as { writable: { abort: ReturnType<typeof vi.fn> } };
+
+    window.localStorage.setItem(
+      "goose:experimental-features",
+      JSON.stringify({
+        version: 2,
+        experiments: { "remote-ssh-sessions": { enabled: false } },
+      }),
+    );
+    window.dispatchEvent(new Event("goose:experimental-features-change"));
+    await Promise.resolve();
+
+    expect(remoteStream.writable.abort).toHaveBeenCalledOnce();
+    expect(() => conn.getBackendConnection("ssh:dev-box")).toThrow(
+      "Remote SSH sessions are disabled",
+    );
+    await expect(remoteConnection.getClient()).rejects.toThrow(
+      "Remote SSH sessions are disabled",
+    );
+    expect(mocks.connectRemoteHost).toHaveBeenCalledTimes(1);
   });
 
   it("re-runs the ws-url resolver after the connection closes", async () => {

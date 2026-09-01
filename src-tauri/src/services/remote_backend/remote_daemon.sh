@@ -38,6 +38,8 @@ GOOSE_ARG="${4:--}"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/berd/remote"
 RECORD="$STATE_DIR/daemon.record"
 LOG="$STATE_DIR/goose-serve.log"
+LOCK_DIR="$STATE_DIR/daemon.lock"
+LOCK_OWNER="$LOCK_DIR/owner"
 RECORD_FORMAT="v3"
 
 emit() { printf '%s %s\n' "$NONCE" "$*"; }
@@ -95,6 +97,85 @@ process_identity() {
   identity_ps="$(ps -p "$identity_pid" -o lstart= -o command= 2>/dev/null)" || return 1
   [ -n "$identity_ps" ] || return 1
   printf 'ps:%s' "$identity_ps"
+}
+
+lock_owner_is_current() {
+  IFS=' ' read -r lock_pid lock_b64identity lock_extra <"$LOCK_OWNER" 2>/dev/null || return 1
+  case "$lock_pid" in
+  '' | *[!0-9]*) return 1 ;;
+  esac
+  [ -n "$lock_b64identity" ] || return 1
+  [ -z "${lock_extra:-}" ] || return 1
+  kill -0 "$lock_pid" 2>/dev/null || return 1
+  lock_identity="$(process_identity "$lock_pid")" || return 1
+  [ "$(b64 "$lock_identity")" = "$lock_b64identity" ]
+}
+
+release_daemon_lock() {
+  [ "${lock_held:-0}" = "1" ] || return 0
+  if IFS= read -r current_lock_owner <"$LOCK_OWNER" 2>/dev/null &&
+    [ "$current_lock_owner" = "$our_lock_owner" ]; then
+    rm -f "$LOCK_OWNER"
+    rmdir "$LOCK_DIR" 2>/dev/null || true
+  fi
+  lock_held=0
+}
+
+# `mkdir` is the portable cross-process atomic primitive available on both
+# Linux and macOS remotes. The lock covers every daemon.record read/mutation,
+# including shutdown from another Berd client using the same remote account.
+acquire_daemon_lock() {
+  umask 077
+  mkdir -p "$STATE_DIR" || {
+    emit "ERR state-dir"
+    exit 46
+  }
+
+  lock_held=0
+  stale_observations=0
+  lock_attempt=0
+  while [ "$lock_attempt" -lt 1200 ]; do
+    lock_attempt=$((lock_attempt + 1))
+    if mkdir "$LOCK_DIR" 2>/dev/null; then
+      our_identity="$(process_identity "$$")" || {
+        rmdir "$LOCK_DIR" 2>/dev/null || true
+        emit "ERR state-dir"
+        exit 46
+      }
+      our_lock_owner="$$ $(b64 "$our_identity")"
+      lock_owner_tmp="$LOCK_DIR/.owner.$$"
+      if ! printf '%s\n' "$our_lock_owner" >"$lock_owner_tmp" ||
+        ! mv -f "$lock_owner_tmp" "$LOCK_OWNER"; then
+        rm -f "$lock_owner_tmp"
+        rmdir "$LOCK_DIR" 2>/dev/null || true
+        emit "ERR state-dir"
+        exit 46
+      fi
+      lock_held=1
+      trap release_daemon_lock EXIT
+      trap 'exit 129' HUP
+      trap 'exit 130' INT
+      trap 'exit 143' TERM
+      return 0
+    fi
+
+    if lock_owner_is_current; then
+      stale_observations=0
+    else
+      stale_observations=$((stale_observations + 1))
+      # Allow the mkdir winner time to publish its owner before treating a
+      # missing/malformed owner as stale after an interrupted invocation.
+      if [ "$stale_observations" -ge 20 ]; then
+        rm -f "$LOCK_OWNER"
+        rmdir "$LOCK_DIR" 2>/dev/null || true
+        stale_observations=0
+      fi
+    fi
+    sleep 0.1
+  done
+
+  emit "ERR state-dir"
+  exit 46
 }
 
 # Fills rec_* from $RECORD. Records before v3 have no process identity and
@@ -163,12 +244,6 @@ stop_recorded_daemon() {
 }
 
 ensure_daemon() {
-  umask 077
-  mkdir -p "$STATE_DIR" || {
-    emit "ERR state-dir"
-    exit 46
-  }
-
   resolve_goose_bin
   b64binary="$(b64 "$goose_bin")"
 
@@ -219,8 +294,15 @@ ensure_daemon() {
           kill "$pid" 2>/dev/null || true
           break
         fi
-        printf '%s %s %s %s %s %s %s %s\n' "$RECORD_FORMAT" "$pid" "$port" "$secret" \
-          "$(b64 "$version")" "$started" "$b64binary" "$(b64 "$identity")" >"$RECORD"
+        record_tmp="$STATE_DIR/.daemon.record.$$"
+        if ! printf '%s %s %s %s %s %s %s %s\n' "$RECORD_FORMAT" "$pid" "$port" "$secret" \
+          "$(b64 "$version")" "$started" "$b64binary" "$(b64 "$identity")" >"$record_tmp" ||
+          ! mv -f "$record_tmp" "$RECORD"; then
+          rm -f "$record_tmp"
+          kill "$pid" 2>/dev/null || true
+          emit "ERR state-dir"
+          exit 46
+        fi
         emit "READY $pid $port $secret 0 $(b64 "$version") $started"
         return 0
       fi
@@ -300,8 +382,14 @@ list_dir() {
 }
 
 case "$MODE" in
-ensure) ensure_daemon ;;
-shutdown) shutdown_daemon ;;
+ensure)
+  acquire_daemon_lock
+  ensure_daemon
+  ;;
+shutdown)
+  acquire_daemon_lock
+  shutdown_daemon
+  ;;
 check) check_host ;;
 listdir) list_dir ;;
 *)

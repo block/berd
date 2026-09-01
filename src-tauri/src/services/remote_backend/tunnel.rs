@@ -29,6 +29,22 @@ pub(crate) struct TunnelProcess {
     pub stderr_tail: Arc<Mutex<String>>,
 }
 
+fn append_to_bounded_tail(tail: &mut String, line: &str, max_bytes: usize) {
+    tail.push_str(line);
+    tail.push('\n');
+    if tail.len() <= max_bytes {
+        return;
+    }
+
+    let excess = tail.len() - max_bytes;
+    let drain_end = tail
+        .char_indices()
+        .map(|(index, _)| index)
+        .find(|index| *index >= excess)
+        .unwrap_or(tail.len());
+    tail.drain(..drain_end);
+}
+
 pub(crate) fn build_tunnel_command(
     spec: &RemoteHostSpec,
     shell_env: &HashMap<String, String>,
@@ -78,12 +94,7 @@ pub(crate) fn spawn_tunnel(
                 let redacted = redact_log_line(&line);
                 log::warn!("[remote-backend tunnel stderr] {redacted}");
                 if let Ok(mut tail) = tail.lock() {
-                    tail.push_str(&redacted);
-                    tail.push('\n');
-                    if tail.len() > 8 * 1024 {
-                        let excess = tail.len() - 8 * 1024;
-                        tail.drain(..excess);
-                    }
+                    append_to_bounded_tail(&mut tail, &redacted, 8 * 1024);
                 }
             }
         });
@@ -165,5 +176,14 @@ mod tests {
         // Destination is last, after `--`, with no trailing remote command.
         assert_eq!(argv.last().unwrap(), "damien@devbox");
         assert_eq!(argv[argv.len() - 2], "--");
+    }
+
+    #[test]
+    fn stderr_tail_truncation_respects_utf8_boundaries() {
+        let mut tail = String::new();
+        append_to_bounded_tail(&mut tail, &format!("é{}", "a".repeat(8_190)), 8 * 1024);
+
+        assert!(tail.len() <= 8 * 1024);
+        assert_eq!(tail, format!("{}\n", "a".repeat(8_190)));
     }
 }
