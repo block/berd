@@ -41,11 +41,10 @@ RECORD="$STATE_DIR/daemon.record"
 LOG="$STATE_DIR/goose-serve.log"
 LOCK_DIR="$STATE_DIR/daemon.lock"
 LOCK_OWNER="$LOCK_DIR/owner"
-LOCK_RECLAIM_DIR="$STATE_DIR/daemon.lock.reclaim"
 RECORD_FORMAT="v4"
 LOG_MAX_BYTES=$((4 * 1024 * 1024))
 LOG_RETAIN_BYTES=$((2 * 1024 * 1024))
-LOG_WRITE_CHUNK_BYTES=$((64 * 1024))
+LOG_MAX_KIB=$((LOG_MAX_BYTES / 1024))
 
 emit() { printf '%s %s\n' "$NONCE" "$*"; }
 
@@ -126,12 +125,6 @@ release_daemon_lock() {
   lock_held=0
 }
 
-release_reclaim_lock() {
-  [ "${reclaim_held:-0}" = "1" ] || return 0
-  rmdir "$LOCK_RECLAIM_DIR" 2>/dev/null || true
-  reclaim_held=0
-}
-
 terminate_uncommitted_daemon() {
   case "${uncommitted_pid:-}" in
   '' | *[!0-9]*) ;;
@@ -166,31 +159,25 @@ terminate_uncommitted_daemon() {
 cleanup_daemon_mutation() {
   terminate_uncommitted_daemon
   release_daemon_lock
-  release_reclaim_lock
 }
 
-# Claim one stale lock generation before deleting it. The separate reclaim
-# mutex serializes observers: after its final owner re-check, no peer can
-# remove the old directory and let a new generation appear before this process
-# atomically renames it. Once renamed, cleanup is confined to the claimed path,
-# so partial `.owner.*` publications are removed without touching a successor.
+# Atomically move one observed stale lock generation out of the acquisition
+# path before deleting it. There is deliberately no second mutex: a crash after
+# the rename can leave only a uniquely named cleanup artifact, which cannot
+# prevent a future operation from acquiring daemon.lock. Concurrent observers
+# can claim at most the generation present when their rename executes, and
+# cleanup is confined to that exact claimed path.
 reclaim_stale_daemon_lock() {
-  if ! mkdir "$LOCK_RECLAIM_DIR" 2>/dev/null; then
-    return 1
-  fi
-  reclaim_held=1
-
   if lock_owner_is_current; then
-    release_reclaim_lock
     return 1
   fi
 
   claimed_lock="$STATE_DIR/.daemon.lock.reclaimed.$$.$lock_attempt"
   if mv "$LOCK_DIR" "$claimed_lock" 2>/dev/null; then
     rm -rf -- "$claimed_lock"
+    return 0
   fi
-  release_reclaim_lock
-  return 0
+  return 1
 }
 
 # `mkdir` is the portable cross-process atomic primitive available on both
@@ -204,7 +191,6 @@ acquire_daemon_lock() {
   }
 
   lock_held=0
-  reclaim_held=0
   uncommitted_pid=""
   uncommitted_logger_pid=""
   uncommitted_log_pipe=""
@@ -231,8 +217,23 @@ acquire_daemon_lock() {
         ! mv -f "$lock_owner_tmp" "$LOCK_OWNER"; then
         rm -f "$lock_owner_tmp"
         rmdir "$LOCK_DIR" 2>/dev/null || true
-        emit "ERR state-dir"
-        exit 46
+        # A concurrent stale observer may have claimed the generation between
+        # mkdir and owner publication. Nothing was committed under this lock;
+        # retry against the current path instead of turning the benign race
+        # into a state-dir failure.
+        stale_observations=0
+        sleep 0.01
+        continue
+      fi
+      # Give a reclaimer that performed its final stale check before owner
+      # publication a chance to complete its atomic rename, then prove our
+      # owner is still published at the acquisition path before proceeding.
+      sleep 0.01
+      if ! IFS= read -r current_lock_owner <"$LOCK_OWNER" 2>/dev/null ||
+        [ "$current_lock_owner" != "$our_lock_owner" ]; then
+        stale_observations=0
+        sleep 0.01
+        continue
       fi
       lock_held=1
       return 0
@@ -325,45 +326,45 @@ trim_log_if_needed() {
   fi
 }
 
-prepare_log_for_append() {
-  append_log="$1"
-  append_bytes="$2"
-  [ -f "$append_log" ] || return 0
-  current_bytes="$(wc -c <"$append_log" 2>/dev/null | tr -d ' ')"
-  case "$current_bytes" in
-  '' | *[!0-9]*) return 0 ;;
-  esac
-  if [ $((current_bytes + append_bytes)) -gt "$LOG_MAX_BYTES" ]; then
-    log_tmp="$STATE_DIR/.goose-serve.log.$$"
-    if tail -c "$LOG_RETAIN_BYTES" "$append_log" >"$log_tmp" 2>/dev/null; then
-      mv -f "$log_tmp" "$append_log"
-    else
-      rm -f "$log_tmp"
-    fi
-  fi
-}
-
-# Consume fixed-size byte chunks rather than newline records. This bounds shell
-# memory for a huge line and continues rotating a producer that never emits a
-# newline. Each append reopens the path so atomic trims take effect.
+# `cat` is the only process on the FIFO read path, so even a multi-megabyte
+# pre-bind burst drains at native pipe speed. The kernel file-size limit stops
+# that writer exactly at 4 MiB; after retaining the final 2 MiB, a fresh cat
+# resumes from the still-open FIFO. This gives a hard on-disk cap without a
+# process-heavy per-chunk shell loop or polling race.
 bounded_log_writer() {
   writer_log="$1"
-  writer_chunk="$STATE_DIR/.goose-serve.log.chunk.$$"
+  writer_tmp="$STATE_DIR/.goose-serve.log.rotate.$$"
+  # Preserve the FIFO on a non-stdin descriptor before starting cat
+  # asynchronously; non-interactive Bash redirects a background command's
+  # implicit stdin to /dev/null.
+  exec 3<&0
+  writer_cat_pid=""
+  trap 'kill -TERM "$writer_cat_pid" 2>/dev/null || true; wait "$writer_cat_pid" 2>/dev/null || true; rm -f "$writer_tmp"; exit 143' TERM
+  trap 'kill -TERM "$writer_cat_pid" 2>/dev/null || true; wait "$writer_cat_pid" 2>/dev/null || true; rm -f "$writer_tmp"; exit 129' HUP
+  trap 'kill -TERM "$writer_cat_pid" 2>/dev/null || true; wait "$writer_cat_pid" 2>/dev/null || true; rm -f "$writer_tmp"; exit 130' INT
+
   while :; do
-    rm -f "$writer_chunk"
-    dd bs="$LOG_WRITE_CHUNK_BYTES" count=1 of="$writer_chunk" 2>/dev/null || true
-    writer_bytes="$(wc -c <"$writer_chunk" 2>/dev/null | tr -d ' ')"
+    (ulimit -S -f "$LOG_MAX_KIB" && exec cat <&3 >>"$writer_log") 2>/dev/null &
+    writer_cat_pid=$!
+    if wait "$writer_cat_pid" 2>/dev/null; then
+      break
+    fi
+    writer_bytes="$(wc -c <"$writer_log" 2>/dev/null | tr -d ' ')"
     case "$writer_bytes" in
     '' | *[!0-9]*) writer_bytes=0 ;;
     esac
-    if [ "$writer_bytes" -eq 0 ]; then
-      rm -f "$writer_chunk"
+    if [ "$writer_bytes" -lt "$LOG_MAX_BYTES" ]; then
       break
     fi
-    prepare_log_for_append "$writer_log" "$writer_bytes"
-    cat "$writer_chunk" >>"$writer_log"
+    if tail -c "$LOG_RETAIN_BYTES" "$writer_log" >"$writer_tmp" 2>/dev/null; then
+      mv -f "$writer_tmp" "$writer_log"
+    else
+      rm -f "$writer_tmp"
+      break
+    fi
   done
-  rm -f "$writer_chunk"
+  trim_log_if_needed "$writer_log"
+  rm -f "$writer_tmp"
 }
 
 # Confirms the PID is still the exact process that wrote this record. `kill -0`

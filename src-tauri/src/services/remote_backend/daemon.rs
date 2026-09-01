@@ -760,6 +760,15 @@ mod tests {
             path_override: Option<&str>,
             home: &std::path::Path,
         ) -> std::process::Child {
+            spawn_script_source(args, path_override, home, BOOTSTRAP_SCRIPT)
+        }
+
+        fn spawn_script_source(
+            args: &[&str],
+            path_override: Option<&str>,
+            home: &std::path::Path,
+            script: &str,
+        ) -> std::process::Child {
             let nonce = "berd-test-nonce";
             let mut command = StdCommand::new("bash");
             command
@@ -781,7 +790,7 @@ mod tests {
                 .stdin
                 .take()
                 .unwrap()
-                .write_all(BOOTSTRAP_SCRIPT.as_bytes())
+                .write_all(script.as_bytes())
                 .unwrap();
             child
         }
@@ -1141,6 +1150,57 @@ fi
             assert_eq!(code, Some(0), "lines: {lines:?}");
             assert!(lines.iter().any(|line| line == "STOPPED"));
             assert!(!lock_dir.exists(), "partial lock generation survived");
+        }
+
+        #[test]
+        fn a_crash_after_reclaim_does_not_block_future_daemon_operations() {
+            let home = tempfile::tempdir().unwrap();
+            let state_dir = home.path().join(".state/berd/remote");
+            let lock_dir = state_dir.join("daemon.lock");
+            std::fs::create_dir_all(&lock_dir).unwrap();
+            std::fs::write(lock_dir.join("owner"), "999999 invalid-identity").unwrap();
+
+            // Pause a test-only copy immediately after its atomic claim. The
+            // production script contains no pause hook; replacing this exact
+            // cleanup statement lets the test kill the real shell at the
+            // otherwise tiny rename-to-delete boundary deterministically.
+            let paused_marker = state_dir.join("reclaim-paused");
+            let paused_script = BOOTSTRAP_SCRIPT.replace(
+                "    rm -rf -- \"$claimed_lock\"",
+                "    : > \"$STATE_DIR/reclaim-paused\"\n    while [ ! -f \"$STATE_DIR/reclaim-continue\" ]; do sleep 0.01; done\n    rm -rf -- \"$claimed_lock\"",
+            );
+            assert_ne!(paused_script, BOOTSTRAP_SCRIPT);
+            let mut reclaimer =
+                spawn_script_source(&["shutdown"], None, home.path(), &paused_script);
+            for _ in 0..500 {
+                if paused_marker.exists() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert!(
+                paused_marker.exists(),
+                "reclaimer never claimed the stale lock"
+            );
+            assert!(StdCommand::new("kill")
+                .arg("-KILL")
+                .arg(reclaimer.id().to_string())
+                .status()
+                .unwrap()
+                .success());
+            assert_eq!(reclaimer.wait().unwrap().code(), None);
+            assert!(
+                !lock_dir.exists(),
+                "claimed generation returned to lock path"
+            );
+
+            // Also leave the ownerless mutex used by the previous
+            // implementation. Neither crash artifact may participate in the
+            // new acquisition protocol.
+            std::fs::create_dir(state_dir.join("daemon.lock.reclaim")).unwrap();
+            let (lines, code) = run_script(&["shutdown"], None, home.path());
+            assert_eq!(code, Some(0), "lines: {lines:?}");
+            assert!(lines.iter().any(|line| line == "STOPPED"));
         }
 
         #[test]
