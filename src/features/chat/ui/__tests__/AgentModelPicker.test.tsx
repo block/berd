@@ -1,8 +1,14 @@
 import type { ComponentProps } from "react";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentModelPicker } from "../AgentModelPicker";
+import {
+  getModelRecencyMap,
+  getModelRecencyRank,
+  MODEL_RECENCY_STORAGE_KEY,
+  recordModelSelection,
+} from "../../lib/modelRecency";
 import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
 
 class ResizeObserverStub {
@@ -21,6 +27,13 @@ const AGENTS = [
 ];
 
 describe("AgentModelPicker", () => {
+  // Model selection persists recency to localStorage; keep tests isolated.
+  afterEach(() => {
+    vi.useRealTimers();
+    localStorage.clear();
+    getModelRecencyMap();
+  });
+
   it("shows the selected agent and model in the trigger", () => {
     render(
       <AgentModelPicker
@@ -957,10 +970,12 @@ describe("AgentModelPicker", () => {
       within(picker).getByRole("button", { name: /GPT-4o mini/ }),
     );
 
+    // The selection is recorded as recently used, so it joins the compact
+    // shortlist and nothing is left behind "View more".
     expect(
-      within(picker).getByRole("button", { name: "View more" }),
-    ).toBeInTheDocument();
-    expect(within(picker).queryByText("GPT-4o mini")).not.toBeInTheDocument();
+      within(picker).queryByRole("button", { name: "View more" }),
+    ).not.toBeInTheDocument();
+    expect(within(picker).getByText("GPT-4o mini")).toBeInTheDocument();
   });
 
   it("keeps keyboard navigation on picker rows and preserves search caret keys", async () => {
@@ -1474,6 +1489,258 @@ describe("AgentModelPicker", () => {
       expect(
         screen.getByRole("button", { name: "Claude Code" }),
       ).toBeInTheDocument();
+    });
+  });
+
+  describe("model recency", () => {
+    type PickerProps = ComponentProps<typeof AgentModelPicker>;
+
+    const renderPicker = (
+      models: PickerProps["availableModels"],
+      overrides: Partial<PickerProps> = {},
+    ) =>
+      render(
+        <AgentModelPicker
+          agents={AGENTS}
+          selectedAgentId="goose"
+          onAgentChange={vi.fn()}
+          currentModelId={models[0]?.id}
+          currentModelName={models[0]?.name}
+          availableModels={models}
+          onModelChange={vi.fn()}
+          {...overrides}
+        />,
+      );
+
+    const openPicker = async (user: ReturnType<typeof userEvent.setup>) => {
+      await user.click(
+        screen.getByRole("button", { name: /choose agent and model/i }),
+      );
+      return screen.getByRole("dialog");
+    };
+
+    const modelRowNames = (picker: HTMLElement) =>
+      Array.from(
+        picker.querySelectorAll<HTMLButtonElement>(
+          '[data-col="model"] button[data-picker-nav-item]',
+        ),
+      )
+        .map((button) => button.textContent)
+        .filter(
+          (text): text is string => text !== null && text !== "View more",
+        );
+
+    it("records a selection under the selected agent", async () => {
+      const user = userEvent.setup();
+      renderPicker([
+        { id: "claude-sonnet-4", name: "Claude Sonnet 4" },
+        { id: "gpt-4o", name: "GPT-4o" },
+      ]);
+
+      const picker = await openPicker(user);
+      await user.click(within(picker).getByRole("button", { name: "GPT-4o" }));
+
+      const map = getModelRecencyMap();
+      expect(Object.keys(map)).toHaveLength(1);
+      expect(getModelRecencyRank(map, "goose", { id: "gpt-4o" })).toEqual(
+        expect.any(Number),
+      );
+    });
+
+    it("selects a model when recency persistence exceeds quota", async () => {
+      const user = userEvent.setup();
+      const onModelChange = vi.fn();
+      const setItem = vi
+        .spyOn(Storage.prototype, "setItem")
+        .mockImplementation(() => {
+          throw new DOMException("quota", "QuotaExceededError");
+        });
+
+      try {
+        renderPicker(
+          [
+            { id: "claude-sonnet-4", name: "Claude Sonnet 4" },
+            { id: "gpt-4o", name: "GPT-4o" },
+          ],
+          { onModelChange },
+        );
+
+        const picker = await openPicker(user);
+        await user.click(
+          within(picker).getByRole("button", { name: "GPT-4o" }),
+        );
+
+        expect(onModelChange).toHaveBeenCalledWith(
+          "gpt-4o",
+          expect.objectContaining({ id: "gpt-4o" }),
+        );
+      } finally {
+        setItem.mockRestore();
+      }
+    });
+
+    it("orders recently used models ahead of alphabetical fallbacks", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(1_000);
+      recordModelSelection("goose", { id: "zeta-model" });
+      vi.setSystemTime(2_000);
+      recordModelSelection("goose", { id: "omega-model" });
+      const user = userEvent.setup();
+
+      renderPicker([
+        { id: "alpha-model", name: "Alpha Model", recommended: true },
+        { id: "beta-model", name: "Beta Model", recommended: true },
+        { id: "gamma-model", name: "Gamma Model", recommended: true },
+        { id: "omega-model", name: "Omega Model", recommended: true },
+        { id: "zeta-model", name: "Zeta Model", recommended: true },
+      ]);
+
+      const picker = await openPicker(user);
+
+      expect(modelRowNames(picker)).toEqual([
+        "Alpha Model",
+        "Omega Model",
+        "Zeta Model",
+        "Beta Model",
+        "Gamma Model",
+      ]);
+      expect(
+        within(picker).queryByRole("button", { name: "View more" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("folds recently used models into the compact view", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(1_000);
+      recordModelSelection("goose", { id: "oldest-recent-model" });
+      vi.setSystemTime(2_000);
+      recordModelSelection("goose", { id: "older-recent-model" });
+      vi.setSystemTime(3_000);
+      recordModelSelection("goose", { id: "newer-recent-model" });
+      vi.setSystemTime(4_000);
+      recordModelSelection("goose", { id: "newest-recent-model" });
+      const user = userEvent.setup();
+
+      renderPicker([
+        {
+          id: "current-model",
+          name: "Current Model",
+          recommended: true,
+        },
+        {
+          id: "harness-model",
+          name: "Harness Model",
+          recommended: true,
+        },
+        { id: "oldest-recent-model", name: "Oldest Recent Model" },
+        { id: "older-recent-model", name: "Older Recent Model" },
+        { id: "newer-recent-model", name: "Newer Recent Model" },
+        { id: "newest-recent-model", name: "Newest Recent Model" },
+      ]);
+
+      const picker = await openPicker(user);
+
+      expect(modelRowNames(picker)).toEqual([
+        "Current Model",
+        "Newest Recent Model",
+        "Newer Recent Model",
+        "Older Recent Model",
+        "Harness Model",
+      ]);
+      expect(
+        within(picker).queryByRole("button", { name: "Oldest Recent Model" }),
+      ).not.toBeInTheDocument();
+      const viewMore = within(picker).getByRole("button", {
+        name: "View more",
+      });
+      expect(viewMore).toBeInTheDocument();
+
+      await user.click(viewMore);
+
+      expect(
+        within(picker).getByRole("button", { name: "Oldest Recent Model" }),
+      ).toBeInTheDocument();
+    });
+
+    it("deterministically limits models with tied recency ranks", async () => {
+      const rank = 1_000;
+      localStorage.setItem(
+        MODEL_RECENCY_STORAGE_KEY,
+        JSON.stringify({
+          "goose/zulu/zulu-provider": rank,
+          "goose/alpha/later-sort": rank,
+          "goose/alpha/zulu-name": rank,
+          "goose/alpha/alpha-name": rank,
+        }),
+      );
+      const user = userEvent.setup();
+
+      renderPicker(
+        [
+          {
+            id: "zulu-provider",
+            name: "Zulu Provider Model",
+            providerId: "zulu",
+            providerName: "Zulu Provider",
+            sortOrder: 0,
+          },
+          {
+            id: "later-sort",
+            name: "Later Sort Model",
+            providerId: "alpha",
+            providerName: "Alpha Provider",
+            sortOrder: 2,
+          },
+          {
+            id: "zulu-name",
+            name: "Zulu Name Model",
+            providerId: "alpha",
+            providerName: "Alpha Provider",
+            sortOrder: 1,
+          },
+          {
+            id: "alpha-name",
+            name: "Alpha Name Model",
+            providerId: "alpha",
+            providerName: "Alpha Provider",
+            sortOrder: 1,
+          },
+        ],
+        { currentModelId: null, currentModelName: null },
+      );
+
+      const picker = await openPicker(user);
+
+      expect(modelRowNames(picker)).toEqual([
+        "Alpha Name Model",
+        "Zulu Name Model",
+        "Later Sort Model",
+      ]);
+      expect(
+        within(picker).queryByRole("button", { name: "Zulu Provider Model" }),
+      ).not.toBeInTheDocument();
+      expect(
+        within(picker).getByRole("button", { name: "View more" }),
+      ).toBeInTheDocument();
+    });
+
+    it("does not leak recency across agents", async () => {
+      const user = userEvent.setup();
+      recordModelSelection("claude-acp", { id: "zeta-model" });
+
+      renderPicker([
+        { id: "alpha-model", name: "Alpha Model", recommended: true },
+        { id: "beta-model", name: "Beta Model", recommended: true },
+        { id: "zeta-model", name: "Zeta Model", recommended: true },
+      ]);
+
+      const picker = await openPicker(user);
+
+      expect(modelRowNames(picker)).toEqual([
+        "Alpha Model",
+        "Beta Model",
+        "Zeta Model",
+      ]);
     });
   });
 });

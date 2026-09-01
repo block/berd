@@ -16,6 +16,11 @@ import {
   getProviderIcon,
 } from "@/shared/ui/icons/ProviderIcons";
 import type { ModelOption } from "../types";
+import {
+  getModelRecencyRank,
+  type ModelRecencyMap,
+  useModelRecency,
+} from "@/features/chat/lib/modelRecency";
 import { PickerItem } from "./AgentModelPickerItem";
 
 /**
@@ -24,6 +29,8 @@ import { PickerItem } from "./AgentModelPickerItem";
  * if no models are hidden behind a recommended shortlist.
  */
 const SEARCHABLE_LIST_THRESHOLD = 8;
+
+const RECENT_MODEL_LIMIT = 3;
 
 function getModelDisplayName(model: ModelOption) {
   return model.displayName ?? model.name;
@@ -39,6 +46,25 @@ function getGooseModelProviderLabel(model: ModelOption) {
   }
 
   return null;
+}
+
+function compareModelsByProviderOrderAndName(
+  left: ModelOption,
+  right: ModelOption,
+): number {
+  const leftProvider = getGooseModelProviderLabel(left) ?? "";
+  const rightProvider = getGooseModelProviderLabel(right) ?? "";
+  if (leftProvider !== rightProvider) {
+    return leftProvider.localeCompare(rightProvider);
+  }
+
+  const leftOrder = left.sortOrder ?? Number.MAX_SAFE_INTEGER;
+  const rightOrder = right.sortOrder ?? Number.MAX_SAFE_INTEGER;
+  if (leftOrder !== rightOrder) {
+    return leftOrder - rightOrder;
+  }
+
+  return getModelDisplayName(left).localeCompare(getModelDisplayName(right));
 }
 
 function modelMatchesSelection(
@@ -63,6 +89,7 @@ function sortModels(
   models: ModelOption[],
   currentModelId: string | null,
   currentModelProviderId: string | null,
+  recency: { map: ModelRecencyMap; agentId: string },
 ) {
   return [...models].sort((left, right) => {
     if (modelMatchesSelection(left, currentModelId, currentModelProviderId)) {
@@ -72,19 +99,19 @@ function sortModels(
       return 1;
     }
 
-    const leftProvider = getGooseModelProviderLabel(left) ?? "";
-    const rightProvider = getGooseModelProviderLabel(right) ?? "";
-    if (leftProvider !== rightProvider) {
-      return leftProvider.localeCompare(rightProvider);
+    const leftRank = getModelRecencyRank(recency.map, recency.agentId, left);
+    const rightRank = getModelRecencyRank(recency.map, recency.agentId, right);
+    if (leftRank !== null && rightRank === null) {
+      return -1;
+    }
+    if (rightRank !== null && leftRank === null) {
+      return 1;
+    }
+    if (leftRank !== null && rightRank !== null && leftRank !== rightRank) {
+      return rightRank - leftRank;
     }
 
-    const leftOrder = left.sortOrder ?? Number.MAX_SAFE_INTEGER;
-    const rightOrder = right.sortOrder ?? Number.MAX_SAFE_INTEGER;
-    if (leftOrder !== rightOrder) {
-      return leftOrder - rightOrder;
-    }
-
-    return getModelDisplayName(left).localeCompare(getModelDisplayName(right));
+    return compareModelsByProviderOrderAndName(left, right);
   });
 }
 
@@ -143,12 +170,42 @@ export const RecommendedModelList = forwardRef<
     setShowAll(false);
     resetScroll();
   }, [resetScroll]);
+  const recencyMap = useModelRecency();
   const recommended = useMemo(() => {
-    const rec = models.filter((m) => m.recommended);
+    const recent = models
+      .map((m) => ({
+        model: m,
+        rank: getModelRecencyRank(recencyMap, selectedAgentId, m),
+      }))
+      .filter(
+        (entry): entry is { model: ModelOption; rank: number } =>
+          entry.rank !== null &&
+          !modelMatchesSelection(
+            entry.model,
+            currentModelId,
+            currentModelProviderId,
+          ),
+      )
+      .sort((left, right) => {
+        if (left.rank !== right.rank) {
+          return right.rank - left.rank;
+        }
+
+        return compareModelsByProviderOrderAndName(left.model, right.model);
+      })
+      .slice(0, RECENT_MODEL_LIMIT)
+      .map((entry) => entry.model);
+    const rec = models
+      .filter((m) => m.recommended)
+      .filter(
+        (m) =>
+          !recent.some((r) => r.id === m.id && r.providerId === m.providerId),
+      );
+    const shortlist = [...recent, ...rec];
     if (
       currentModelId &&
-      rec.length > 0 &&
-      !rec.some((m) =>
+      shortlist.length > 0 &&
+      !shortlist.some((m) =>
         modelMatchesSelection(m, currentModelId, currentModelProviderId),
       )
     ) {
@@ -156,11 +213,17 @@ export const RecommendedModelList = forwardRef<
         modelMatchesSelection(m, currentModelId, currentModelProviderId),
       );
       if (current) {
-        return [current, ...rec];
+        return [current, ...shortlist];
       }
     }
-    return rec.length > 0 ? rec : models;
-  }, [models, currentModelId, currentModelProviderId]);
+    return shortlist.length > 0 ? shortlist : models;
+  }, [
+    models,
+    currentModelId,
+    currentModelProviderId,
+    recencyMap,
+    selectedAgentId,
+  ]);
 
   useEffect(() => {
     if (searchOpen) {
@@ -203,8 +266,18 @@ export const RecommendedModelList = forwardRef<
   }, [models, query, recommended, searchOpen, showAll]);
 
   const sorted = useMemo(
-    () => sortModels(visibleModels, currentModelId, currentModelProviderId),
-    [visibleModels, currentModelId, currentModelProviderId],
+    () =>
+      sortModels(visibleModels, currentModelId, currentModelProviderId, {
+        map: recencyMap,
+        agentId: selectedAgentId,
+      }),
+    [
+      visibleModels,
+      currentModelId,
+      currentModelProviderId,
+      recencyMap,
+      selectedAgentId,
+    ],
   );
 
   const hasMore = models.length > recommended.length;
