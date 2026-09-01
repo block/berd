@@ -9,6 +9,8 @@ use crate::{TtsBackend, TtsOutcome, TtsSynthesisEvent};
 
 mod stt;
 
+#[cfg(test)]
+pub(crate) use stt::first_bundled_fixture_frames_for_test;
 pub use stt::{
     benchmark_stt, load_bundled_stt_fixture_pack, SttBenchmarkEnvironment, SttBenchmarkMode,
     SttBenchmarkReport, SttBenchmarkTarget, SttBenchmarkWorkload, SttFixturePack,

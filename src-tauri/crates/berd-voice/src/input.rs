@@ -10,7 +10,7 @@ use std::{
     sync::{
         atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
         mpsc::{self, Receiver, SyncSender, TrySendError},
-        Arc, Mutex,
+        Arc, Condvar, Mutex,
     },
     thread,
     time::{Duration, Instant},
@@ -31,6 +31,7 @@ pub const INPUT_SAMPLE_RATE: usize = 48_000;
 pub const INPUT_FRAME_SAMPLES: usize = 960;
 const INPUT_FRAME_DURATION: Duration = Duration::from_millis(20);
 const INPUT_QUEUE_FRAMES: usize = 50;
+const PARAKEET_RESULT_QUEUE_DEPTH: usize = 1;
 
 const EVENT_QUEUE_DEPTH: usize = 64;
 const MAX_SPEECH_SAMPLES: usize = 16_000 * 30;
@@ -712,6 +713,303 @@ fn clear_speech_state(
     }
 }
 
+struct ParakeetUtterance {
+    sequence: u64,
+    speech: Vec<f32>,
+    mute_epoch: u64,
+}
+
+struct ParakeetRecognition {
+    sequence: u64,
+    text: String,
+    mute_epoch: u64,
+}
+
+struct PendingParakeetRecognition {
+    sequence: u64,
+    mute_epoch: u64,
+}
+
+struct ParakeetRecognitionLedger {
+    next_sequence: u64,
+    pending: VecDeque<PendingParakeetRecognition>,
+}
+
+impl ParakeetRecognitionLedger {
+    fn new() -> Self {
+        Self {
+            next_sequence: 0,
+            pending: VecDeque::new(),
+        }
+    }
+
+    fn next_sequence(&self) -> Result<u64, String> {
+        self.next_sequence
+            .checked_add(1)
+            .ok_or_else(|| "Parakeet recognition sequence is exhausted.".to_string())
+    }
+
+    fn record(&mut self, sequence: u64, mute_epoch: u64) {
+        self.next_sequence = sequence;
+        self.pending.push_back(PendingParakeetRecognition {
+            sequence,
+            mute_epoch,
+        });
+    }
+
+    fn take(&mut self, sequence: u64) -> Result<PendingParakeetRecognition, String> {
+        let Some(expected) = self.pending.pop_front() else {
+            return Err("Parakeet recognition produced an unexpected result.".to_string());
+        };
+        if expected.sequence != sequence {
+            return Err("Parakeet recognition results arrived out of order.".to_string());
+        }
+        Ok(expected)
+    }
+
+    fn remove(&mut self, sequence: u64) -> Result<PendingParakeetRecognition, String> {
+        let Some(index) = self
+            .pending
+            .iter()
+            .position(|pending| pending.sequence == sequence)
+        else {
+            return Err("Parakeet recognition replacement was not pending.".to_string());
+        };
+        self.pending
+            .remove(index)
+            .ok_or_else(|| "Parakeet recognition replacement disappeared.".to_string())
+    }
+}
+
+struct ParakeetMailbox {
+    state: Mutex<ParakeetMailboxState>,
+    ready: Condvar,
+}
+
+struct ParakeetMailboxState {
+    open: bool,
+    waiting: Option<ParakeetUtterance>,
+}
+
+impl ParakeetMailbox {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(ParakeetMailboxState {
+                open: true,
+                waiting: None,
+            }),
+            ready: Condvar::new(),
+        }
+    }
+
+    fn try_submit(
+        &self,
+        utterance: ParakeetUtterance,
+    ) -> Result<Option<ParakeetUtterance>, String> {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !state.open {
+            return Err("Parakeet recognition is no longer running.".to_string());
+        }
+        let displaced = match state.waiting.as_ref() {
+            Some(waiting) if waiting.mute_epoch == utterance.mute_epoch => {
+                return Err(
+                    "Parakeet recognition overrun: completed utterances arrived faster than they could be decoded."
+                        .to_string(),
+                );
+            }
+            Some(_) => state.waiting.replace(utterance),
+            None => {
+                state.waiting = Some(utterance);
+                None
+            }
+        };
+        self.ready.notify_one();
+        Ok(displaced)
+    }
+
+    fn receive(&self) -> Option<ParakeetUtterance> {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        loop {
+            if let Some(utterance) = state.waiting.take() {
+                return Some(utterance);
+            }
+            if !state.open {
+                return None;
+            }
+            state = self
+                .ready
+                .wait(state)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+    }
+
+    fn close(&self) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.open = false;
+        self.ready.notify_one();
+    }
+}
+
+struct ParakeetDecoder {
+    utterances: Option<Arc<ParakeetMailbox>>,
+    results: Receiver<ParakeetRecognition>,
+    worker: Option<thread::JoinHandle<()>>,
+}
+
+impl ParakeetDecoder {
+    fn start(
+        controls: VoiceInputControls,
+        shutdown: Arc<AtomicBool>,
+        discard_on_shutdown: Arc<AtomicBool>,
+        shutdown_mute_epoch: Arc<AtomicU64>,
+        mut recognize: impl FnMut(&[f32]) -> String + Send + 'static,
+    ) -> Result<Self, String> {
+        let utterances = Arc::new(ParakeetMailbox::new());
+        let worker_utterances = Arc::clone(&utterances);
+        // Only the capture worker submits utterances and drains results. While
+        // it is occupied, at most the in-flight decode plus the bounded
+        // utterance queue can produce results, so this channel is structurally
+        // bounded without making the decoder wait on capture.
+        let (result_tx, result_rx) = mpsc::sync_channel(PARAKEET_RESULT_QUEUE_DEPTH);
+        let worker = thread::Builder::new()
+            .name("berd-parakeet-decode".to_string())
+            .spawn(move || {
+                while let Some(utterance) = worker_utterances.receive() {
+                    let (shutting_down, current_epoch) =
+                        effective_mute_epoch(&controls, &shutdown, &shutdown_mute_epoch);
+                    let discard = shutting_down && discard_on_shutdown.load(Ordering::Acquire);
+                    let text = if !discard && current_epoch == utterance.mute_epoch {
+                        recognize(&utterance.speech)
+                    } else {
+                        String::new()
+                    };
+                    if result_tx
+                        .send(ParakeetRecognition {
+                            sequence: utterance.sequence,
+                            text,
+                            mute_epoch: utterance.mute_epoch,
+                        })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            })
+            .map_err(|error| format!("start Parakeet recognition worker: {error}"))?;
+        Ok(Self {
+            utterances: Some(utterances),
+            results: result_rx,
+            worker: Some(worker),
+        })
+    }
+
+    fn try_submit(
+        &self,
+        utterance: ParakeetUtterance,
+    ) -> Result<Option<ParakeetUtterance>, String> {
+        let Some(sender) = self.utterances.as_ref() else {
+            return Err("Parakeet recognition is no longer running.".to_string());
+        };
+        sender.try_submit(utterance)
+    }
+
+    fn close(&mut self) {
+        if let Some(sender) = self.utterances.take() {
+            sender.close();
+        }
+    }
+
+    fn is_finished(&self) -> bool {
+        self.worker
+            .as_ref()
+            .is_none_or(thread::JoinHandle::is_finished)
+    }
+
+    fn discard_ready_results(&self) {
+        while self.results.try_recv().is_ok() {}
+    }
+
+    fn finish(&mut self) -> thread::Result<()> {
+        self.close();
+        if let Some(worker) = self.worker.take() {
+            worker.join()
+        } else {
+            Ok(())
+        }
+    }
+}
+
+fn submit_parakeet_utterance(
+    decoder: &ParakeetDecoder,
+    speech: Vec<f32>,
+    mute_epoch: u64,
+    ledger: &mut ParakeetRecognitionLedger,
+    pending: &mut PendingRecognitions,
+    events: &tokio_mpsc::Sender<VoiceInputEvent>,
+) -> Result<(), String> {
+    if speech.is_empty() {
+        return Ok(());
+    }
+    let sequence = ledger.next_sequence()?;
+    let displaced = decoder.try_submit(ParakeetUtterance {
+        sequence,
+        speech,
+        mute_epoch,
+    })?;
+    if let Some(displaced) = displaced {
+        ledger.remove(displaced.sequence)?;
+    }
+    ledger.record(sequence, mute_epoch);
+    pending
+        .begin(events)
+        .map_err(|_| "voice input event receiver closed".to_string())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn drain_parakeet_results(
+    decoder: &ParakeetDecoder,
+    events: &tokio_mpsc::Sender<VoiceInputEvent>,
+    ledger: &mut ParakeetRecognitionLedger,
+    pending: &mut PendingRecognitions,
+    storage_deadline: Option<Instant>,
+    controls: &VoiceInputControls,
+    shutdown: &AtomicBool,
+    discard_on_shutdown: &AtomicBool,
+    shutdown_mute_epoch: &AtomicU64,
+) -> Result<(), String> {
+    loop {
+        let result = match decoder.results.try_recv() {
+            Ok(result) => result,
+            Err(mpsc::TryRecvError::Empty) => return Ok(()),
+            Err(mpsc::TryRecvError::Disconnected) if decoder.utterances.is_none() => return Ok(()),
+            Err(mpsc::TryRecvError::Disconnected) => {
+                return Err("Parakeet recognition stopped unexpectedly.".to_string());
+            }
+        };
+        let expected = ledger.take(result.sequence)?;
+        if expected.mute_epoch != result.mute_epoch {
+            return Err("Parakeet recognition result epoch did not match its request.".to_string());
+        }
+        let (shutting_down, current_epoch) =
+            effective_mute_epoch(controls, shutdown, shutdown_mute_epoch);
+        if (shutting_down && discard_on_shutdown.load(Ordering::Acquire))
+            || result.mute_epoch != current_epoch
+        {
+            continue;
+        }
+        complete_parakeet_recognition(result.text, events, pending, storage_deadline);
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn parakeet_worker(
     model_dir: PathBuf,
@@ -723,20 +1021,59 @@ fn parakeet_worker(
     controls: VoiceInputControls,
     speech_vad_threshold: f32,
 ) {
-    use rubato::{Fft, FixedSync, Resampler};
+    use rubato::{Fft, FixedSync};
 
-    let mut resampler =
-        match Fft::<f32>::new(INPUT_SAMPLE_RATE, 16_000, 1024, 2, 1, FixedSync::Input) {
-            Ok(resampler) => resampler,
-            Err(error) => {
-                let _ = events.blocking_send(VoiceInputEvent::Failed(format!(
-                    "Could not initialize native audio resampling: {error}"
-                )));
-                return;
-            }
-        };
+    let resampler = match Fft::<f32>::new(INPUT_SAMPLE_RATE, 16_000, 1024, 2, 1, FixedSync::Input) {
+        Ok(resampler) => resampler,
+        Err(error) => {
+            let _ = events.blocking_send(VoiceInputEvent::Failed(format!(
+                "Could not initialize native audio resampling: {error}"
+            )));
+            return;
+        }
+    };
     let recognizer = match ParakeetRecognizer::load(&model_dir) {
         Ok(recognizer) => recognizer,
+        Err(error) => {
+            let _ = events.blocking_send(VoiceInputEvent::Failed(error));
+            return;
+        }
+    };
+    parakeet_coordinator(
+        resampler,
+        frames,
+        events,
+        shutdown,
+        discard_on_shutdown,
+        shutdown_mute_epoch,
+        controls,
+        speech_vad_threshold,
+        move |speech| recognizer.recognize_utterance(speech),
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn parakeet_coordinator(
+    mut resampler: rubato::Fft<f32>,
+    frames: Receiver<QueuedFrame>,
+    events: tokio_mpsc::Sender<VoiceInputEvent>,
+    shutdown: Arc<AtomicBool>,
+    discard_on_shutdown: Arc<AtomicBool>,
+    shutdown_mute_epoch: Arc<AtomicU64>,
+    controls: VoiceInputControls,
+    speech_vad_threshold: f32,
+    recognize: impl FnMut(&[f32]) -> String + Send + 'static,
+) {
+    use rubato::Resampler;
+
+    let mut decoder = match ParakeetDecoder::start(
+        controls.clone(),
+        Arc::clone(&shutdown),
+        Arc::clone(&discard_on_shutdown),
+        Arc::clone(&shutdown_mute_epoch),
+        recognize,
+    ) {
+        Ok(decoder) => decoder,
         Err(error) => {
             let _ = events.blocking_send(VoiceInputEvent::Failed(error));
             return;
@@ -751,11 +1088,29 @@ fn parakeet_worker(
     let mut in_speech = false;
     let mut observed_epoch = controls.mute_epoch();
     let mut pending = PendingRecognitions::new();
+    let mut ledger = ParakeetRecognitionLedger::new();
+    let mut terminal_failure = false;
     if events.blocking_send(VoiceInputEvent::Ready).is_err() {
+        let _ = decoder.finish();
         return;
     }
 
-    loop {
+    'capture: loop {
+        if let Err(error) = drain_parakeet_results(
+            &decoder,
+            &events,
+            &mut ledger,
+            &mut pending,
+            None,
+            &controls,
+            &shutdown,
+            &discard_on_shutdown,
+            &shutdown_mute_epoch,
+        ) {
+            let _ = events.blocking_send(VoiceInputEvent::Failed(error));
+            terminal_failure = true;
+            break;
+        }
         let frame = match frames.recv_timeout(Duration::from_millis(50)) {
             Ok(frame) => Some(frame),
             Err(mpsc::RecvTimeoutError::Timeout) => None,
@@ -807,82 +1162,109 @@ fn parakeet_worker(
                         silence_frames = 0;
                         in_speech = false;
                         let utterance = std::mem::take(&mut speech);
-                        recognize_parakeet(
-                            &utterance,
-                            &recognizer,
-                            &events,
-                            &mut pending,
-                            None,
+                        let queued = submit_parakeet_utterance(
+                            &decoder,
+                            utterance,
                             observed_epoch,
-                            &controls,
-                            &shutdown,
-                            &shutdown_mute_epoch,
+                            &mut ledger,
+                            &mut pending,
+                            &events,
                         );
                         let _ = events.blocking_send(VoiceInputEvent::SpeakingChanged(false));
+                        if let Err(error) = queued {
+                            let _ = events.blocking_send(VoiceInputEvent::Failed(error));
+                            terminal_failure = true;
+                            break 'capture;
+                        }
                     }
                 }
                 if speech.len() >= MAX_SPEECH_SAMPLES {
                     let utterance = std::mem::take(&mut speech);
                     silence_frames = 0;
                     let was_speaking = std::mem::take(&mut in_speech);
-                    recognize_parakeet(
-                        &utterance,
-                        &recognizer,
-                        &events,
-                        &mut pending,
-                        None,
+                    let queued = submit_parakeet_utterance(
+                        &decoder,
+                        utterance,
                         observed_epoch,
-                        &controls,
-                        &shutdown,
-                        &shutdown_mute_epoch,
+                        &mut ledger,
+                        &mut pending,
+                        &events,
                     );
                     if was_speaking {
                         let _ = events.blocking_send(VoiceInputEvent::SpeakingChanged(false));
+                    }
+                    if let Err(error) = queued {
+                        let _ = events.blocking_send(VoiceInputEvent::Failed(error));
+                        terminal_failure = true;
+                        break 'capture;
                     }
                 }
             }
         }
     }
 
-    if !discard_on_shutdown.load(Ordering::Acquire) && !speech.is_empty() {
-        recognize_parakeet(
-            &speech,
-            &recognizer,
-            &events,
-            &mut pending,
-            Some(Instant::now() + FINAL_STORAGE_TIMEOUT),
+    let discard = discard_on_shutdown.load(Ordering::Acquire);
+    if !terminal_failure && !discard && !speech.is_empty() {
+        if let Err(error) = submit_parakeet_utterance(
+            &decoder,
+            speech,
             observed_epoch,
+            &mut ledger,
+            &mut pending,
+            &events,
+        ) {
+            let _ = events.blocking_send(VoiceInputEvent::Failed(error));
+            terminal_failure = true;
+        }
+    }
+    decoder.close();
+    let storage_deadline = Instant::now() + FINAL_STORAGE_TIMEOUT;
+    while !decoder.is_finished() {
+        if !terminal_failure && !discard {
+            if let Err(error) = drain_parakeet_results(
+                &decoder,
+                &events,
+                &mut ledger,
+                &mut pending,
+                Some(storage_deadline),
+                &controls,
+                &shutdown,
+                &discard_on_shutdown,
+                &shutdown_mute_epoch,
+            ) {
+                let _ = events.blocking_send(VoiceInputEvent::Failed(error));
+                terminal_failure = true;
+            }
+        } else {
+            decoder.discard_ready_results();
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+    if !terminal_failure && !discard {
+        if let Err(error) = drain_parakeet_results(
+            &decoder,
+            &events,
+            &mut ledger,
+            &mut pending,
+            Some(storage_deadline),
             &controls,
             &shutdown,
+            &discard_on_shutdown,
             &shutdown_mute_epoch,
-        );
+        ) {
+            let _ = events.blocking_send(VoiceInputEvent::Failed(error));
+        }
     }
+    let decoder_result = decoder.finish();
     let _ = pending.reset(&events);
-}
-
-#[allow(clippy::too_many_arguments)]
-fn recognize_parakeet(
-    speech: &[f32],
-    recognizer: &ParakeetRecognizer,
-    events: &tokio_mpsc::Sender<VoiceInputEvent>,
-    pending: &mut PendingRecognitions,
-    storage_deadline: Option<Instant>,
-    expected_epoch: u64,
-    controls: &VoiceInputControls,
-    shutdown: &AtomicBool,
-    shutdown_mute_epoch: &AtomicU64,
-) {
-    if speech.is_empty() || pending.begin(events).is_err() {
-        return;
+    if let Err(payload) = decoder_result {
+        if !terminal_failure {
+            let _ = events.blocking_send(VoiceInputEvent::Failed(
+                "Parakeet recognition stopped unexpectedly.".to_string(),
+            ));
+        }
+        std::panic::resume_unwind(payload);
     }
-    let text = recognizer.recognize_utterance(speech);
-    complete_parakeet_recognition(
-        text,
-        events,
-        pending,
-        storage_deadline,
-        effective_mute_epoch(controls, shutdown, shutdown_mute_epoch).1 == expected_epoch,
-    );
 }
 
 fn complete_parakeet_recognition(
@@ -890,9 +1272,8 @@ fn complete_parakeet_recognition(
     events: &tokio_mpsc::Sender<VoiceInputEvent>,
     pending: &mut PendingRecognitions,
     storage_deadline: Option<Instant>,
-    current_epoch: bool,
 ) {
-    if current_epoch && !text.is_empty() {
+    if !text.is_empty() {
         let _ = send_final(events, text, storage_deadline);
     }
     let _ = pending.resolve(events);
@@ -1837,18 +2218,22 @@ mod tests {
     }
 
     #[test]
-    fn parakeet_pending_and_final_precede_the_idle_transition() {
+    fn parakeet_pending_precedes_idle_and_ordered_final_resolution_follows() {
         let (events, mut receiver) = tokio_mpsc::channel(8);
         let mut pending = PendingRecognitions::new();
         pending.begin(&events).unwrap();
-        complete_parakeet_recognition("final words".to_string(), &events, &mut pending, None, true);
         events
             .blocking_send(VoiceInputEvent::SpeakingChanged(false))
             .unwrap();
+        complete_parakeet_recognition("final words".to_string(), &events, &mut pending, None);
 
         assert!(matches!(
             receiver.try_recv(),
             Ok(VoiceInputEvent::RecognitionPendingChanged(true))
+        ));
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(VoiceInputEvent::SpeakingChanged(false))
         ));
         assert!(matches!(
             receiver.try_recv(),
@@ -1858,10 +2243,487 @@ mod tests {
             receiver.try_recv(),
             Ok(VoiceInputEvent::RecognitionPendingChanged(false))
         ));
+    }
+
+    #[test]
+    fn parakeet_decoder_orders_one_waiter_and_rejects_a_third_utterance() {
+        let controls = VoiceInputControls::default();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let discard = Arc::new(AtomicBool::new(false));
+        let shutdown_epoch = Arc::new(AtomicU64::new(0));
+        let (decode_started_tx, decode_started_rx) = mpsc::sync_channel(0);
+        let (release_decode_tx, release_decode_rx) = mpsc::sync_channel(0);
+        let mut decode_count = 0;
+        let mut decoder = ParakeetDecoder::start(
+            controls,
+            Arc::clone(&shutdown),
+            discard,
+            shutdown_epoch,
+            move |speech| {
+                decode_count += 1;
+                if decode_count == 1 {
+                    decode_started_tx.send(()).unwrap();
+                    release_decode_rx.recv().unwrap();
+                }
+                format!("recognized {}", speech[0])
+            },
+        )
+        .unwrap();
+        assert!(decoder
+            .try_submit(ParakeetUtterance {
+                sequence: 1,
+                speech: vec![0.25; VAD_FRAME_SAMPLES],
+                mute_epoch: 0,
+            })
+            .unwrap()
+            .is_none());
+        decode_started_rx
+            .recv_timeout(Duration::from_millis(100))
+            .expect("recognizer starts");
+        assert!(decoder
+            .try_submit(ParakeetUtterance {
+                sequence: 2,
+                speech: vec![0.5; VAD_FRAME_SAMPLES],
+                mute_epoch: 0,
+            })
+            .expect("one waiting utterance is bounded and accepted")
+            .is_none());
+        let third = decoder.try_submit(ParakeetUtterance {
+            sequence: 3,
+            speech: vec![0.75; VAD_FRAME_SAMPLES],
+            mute_epoch: 0,
+        });
+        assert_eq!(
+            third.err().expect("third same-epoch utterance is full"),
+            "Parakeet recognition overrun: completed utterances arrived faster than they could be decoded."
+        );
+
+        release_decode_tx.send(()).unwrap();
+        let first = decoder
+            .results
+            .recv_timeout(Duration::from_millis(100))
+            .expect("first recognition result");
+        let second = decoder
+            .results
+            .recv_timeout(Duration::from_millis(100))
+            .expect("ordered waiting recognition result");
+        assert_eq!(
+            (first.sequence, first.text.as_str()),
+            (1, "recognized 0.25")
+        );
+        assert_eq!(
+            (second.sequence, second.text.as_str()),
+            (2, "recognized 0.5")
+        );
+        decoder.finish().unwrap();
+    }
+
+    #[tokio::test]
+    async fn blocked_parakeet_decode_does_not_overrun_the_production_frame_coordinator() {
+        use rubato::{Fft, FixedSync};
+
+        let controls = VoiceInputControls::default();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let discard = Arc::new(AtomicBool::new(false));
+        let shutdown_epoch = Arc::new(AtomicU64::new(0));
+        let (frame_tx, frame_rx) = mpsc::sync_channel(INPUT_QUEUE_FRAMES);
+        let (event_tx, mut event_rx) = tokio_mpsc::channel(EVENT_QUEUE_DEPTH);
+        let (decode_started_tx, decode_started_rx) = mpsc::sync_channel(0);
+        let (release_decode_tx, release_decode_rx) = mpsc::sync_channel(0);
+        let resampler = Fft::<f32>::new(INPUT_SAMPLE_RATE, 16_000, 1024, 2, 1, FixedSync::Input)
+            .expect("resampler");
+        let worker_controls = controls.clone();
+        let worker_shutdown = Arc::clone(&shutdown);
+        let worker_discard = Arc::clone(&discard);
+        let worker_shutdown_epoch = Arc::clone(&shutdown_epoch);
+        let worker = thread::spawn(move || {
+            parakeet_coordinator(
+                resampler,
+                frame_rx,
+                event_tx,
+                worker_shutdown,
+                worker_discard,
+                worker_shutdown_epoch,
+                worker_controls,
+                0.5,
+                move |_| {
+                    decode_started_tx.send(()).unwrap();
+                    release_decode_rx.recv().unwrap();
+                    "fixture final".to_string()
+                },
+            )
+        });
+        let runtime = VoiceInputRuntime {
+            frame_tx,
+            controls,
+            shutdown,
+            discard_on_shutdown: discard,
+            shutdown_mute_epoch: shutdown_epoch,
+            worker: Some(worker),
+        };
+
+        let mut decode_started = false;
+        for samples in crate::benchmark::first_bundled_fixture_frames_for_test() {
+            runtime
+                .try_push_frame(VoiceInputFrame::try_from_samples(&samples).unwrap())
+                .expect("fixture frame reaches the production coordinator");
+            if decode_started_rx.try_recv().is_ok() {
+                decode_started = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert!(decode_started, "checked fixture reaches a VAD boundary");
+
+        for _ in 0..INPUT_QUEUE_FRAMES + 5 {
+            runtime
+                .try_push_frame(silence_frame())
+                .expect("20 ms capture remains drainable during blocked inference");
+            thread::sleep(INPUT_FRAME_DURATION);
+        }
+        release_decode_tx.send(()).unwrap();
+
+        let mut observed = Vec::new();
+        while !observed.contains(&"pending:false") {
+            let event = tokio::time::timeout(Duration::from_secs(1), event_rx.recv())
+                .await
+                .expect("coordinator event timeout")
+                .expect("coordinator event channel");
+            match event {
+                VoiceInputEvent::Ready => observed.push("ready"),
+                VoiceInputEvent::SpeakingChanged(true) => observed.push("speaking:true"),
+                VoiceInputEvent::SpeakingChanged(false) => observed.push("speaking:false"),
+                VoiceInputEvent::RecognitionPendingChanged(true) => observed.push("pending:true"),
+                VoiceInputEvent::RecognitionPendingChanged(false) => observed.push("pending:false"),
+                VoiceInputEvent::FinalTranscript {
+                    text,
+                    storage_receipt,
+                } => {
+                    assert_eq!(text, "fixture final");
+                    storage_receipt.stored();
+                    observed.push("final");
+                }
+                VoiceInputEvent::Failed(error) => panic!("unexpected input failure: {error}"),
+            }
+        }
+        assert_eq!(
+            observed,
+            [
+                "ready",
+                "speaking:true",
+                "pending:true",
+                "speaking:false",
+                "final",
+                "pending:false",
+            ]
+        );
+        runtime.finish().await.unwrap();
+    }
+
+    #[test]
+    fn parakeet_inference_panic_emits_one_terminal_failure() {
+        let controls = VoiceInputControls::default();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let discard = Arc::new(AtomicBool::new(false));
+        let shutdown_epoch = Arc::new(AtomicU64::new(0));
+        let mut decoder = ParakeetDecoder::start(
+            controls.clone(),
+            Arc::clone(&shutdown),
+            Arc::clone(&discard),
+            Arc::clone(&shutdown_epoch),
+            move |_| panic!("synthetic inference panic"),
+        )
+        .unwrap();
+        let (events, mut event_rx) = tokio_mpsc::channel(8);
+        let mut pending = PendingRecognitions::new();
+        let mut ledger = ParakeetRecognitionLedger::new();
+        submit_parakeet_utterance(
+            &decoder,
+            vec![0.25; VAD_FRAME_SAMPLES],
+            0,
+            &mut ledger,
+            &mut pending,
+            &events,
+        )
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_millis(100);
+        let failure = loop {
+            match drain_parakeet_results(
+                &decoder,
+                &events,
+                &mut ledger,
+                &mut pending,
+                None,
+                &controls,
+                &shutdown,
+                &discard,
+                &shutdown_epoch,
+            ) {
+                Ok(()) if Instant::now() < deadline => thread::yield_now(),
+                Ok(()) => panic!("inference worker did not disconnect"),
+                Err(error) => break error,
+            }
+        };
+        events
+            .blocking_send(VoiceInputEvent::Failed(failure))
+            .unwrap();
+        let decoder_result = decoder.finish();
+        pending.reset(&events).unwrap();
+        assert!(decoder_result.is_err());
+
         assert!(matches!(
-            receiver.try_recv(),
-            Ok(VoiceInputEvent::SpeakingChanged(false))
+            event_rx.try_recv(),
+            Ok(VoiceInputEvent::RecognitionPendingChanged(true))
         ));
+        assert!(matches!(
+            event_rx.try_recv(),
+            Ok(VoiceInputEvent::Failed(message))
+                if message == "Parakeet recognition stopped unexpectedly."
+        ));
+        assert!(matches!(
+            event_rx.try_recv(),
+            Ok(VoiceInputEvent::RecognitionPendingChanged(false))
+        ));
+        assert!(event_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn reset_replaces_a_stale_waiter_without_resolving_fresh_pending() {
+        let controls = VoiceInputControls::default();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let discard = Arc::new(AtomicBool::new(false));
+        let shutdown_epoch = Arc::new(AtomicU64::new(0));
+        let (first_started_tx, first_started_rx) = mpsc::sync_channel(0);
+        let (release_first_tx, release_first_rx) = mpsc::sync_channel(0);
+        let (second_started_tx, second_started_rx) = mpsc::sync_channel(0);
+        let (release_second_tx, release_second_rx) = mpsc::sync_channel(0);
+        let mut decode_count = 0;
+        let mut decoder = ParakeetDecoder::start(
+            controls.clone(),
+            Arc::clone(&shutdown),
+            Arc::clone(&discard),
+            Arc::clone(&shutdown_epoch),
+            move |_| {
+                decode_count += 1;
+                if decode_count == 1 {
+                    first_started_tx.send(()).unwrap();
+                    release_first_rx.recv().unwrap();
+                    "stale".to_string()
+                } else {
+                    second_started_tx.send(()).unwrap();
+                    release_second_rx.recv().unwrap();
+                    "fresh".to_string()
+                }
+            },
+        )
+        .unwrap();
+        let (events, mut event_rx) = tokio_mpsc::channel(8);
+        let mut pending = PendingRecognitions::new();
+        let mut ledger = ParakeetRecognitionLedger::new();
+
+        submit_parakeet_utterance(
+            &decoder,
+            vec![0.25; VAD_FRAME_SAMPLES],
+            0,
+            &mut ledger,
+            &mut pending,
+            &events,
+        )
+        .unwrap();
+        first_started_rx.recv().unwrap();
+        assert!(matches!(
+            event_rx.try_recv(),
+            Ok(VoiceInputEvent::RecognitionPendingChanged(true))
+        ));
+        submit_parakeet_utterance(
+            &decoder,
+            vec![0.375; VAD_FRAME_SAMPLES],
+            0,
+            &mut ledger,
+            &mut pending,
+            &events,
+        )
+        .expect("one old-epoch utterance may wait behind the active decode");
+        assert_eq!(pending.count, 2);
+        assert!(event_rx.try_recv().is_err());
+
+        controls.reset();
+        pending.reset(&events).unwrap();
+        submit_parakeet_utterance(
+            &decoder,
+            vec![0.5; VAD_FRAME_SAMPLES],
+            controls.mute_epoch(),
+            &mut ledger,
+            &mut pending,
+            &events,
+        )
+        .expect("fresh utterance replaces the stale waiting utterance");
+        assert!(matches!(
+            event_rx.try_recv(),
+            Ok(VoiceInputEvent::RecognitionPendingChanged(false))
+        ));
+        assert!(matches!(
+            event_rx.try_recv(),
+            Ok(VoiceInputEvent::RecognitionPendingChanged(true))
+        ));
+
+        release_first_tx.send(()).unwrap();
+        second_started_rx.recv().unwrap();
+        drain_parakeet_results(
+            &decoder,
+            &events,
+            &mut ledger,
+            &mut pending,
+            None,
+            &controls,
+            &shutdown,
+            &discard,
+            &shutdown_epoch,
+        )
+        .unwrap();
+        assert_eq!(pending.count, 1);
+        assert!(event_rx.try_recv().is_err());
+
+        release_second_tx.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_millis(100);
+        while ledger.pending.len() == 1 && Instant::now() < deadline {
+            drain_parakeet_results(
+                &decoder,
+                &events,
+                &mut ledger,
+                &mut pending,
+                None,
+                &controls,
+                &shutdown,
+                &discard,
+                &shutdown_epoch,
+            )
+            .unwrap();
+            thread::yield_now();
+        }
+        assert!(matches!(
+            event_rx.try_recv(),
+            Ok(VoiceInputEvent::FinalTranscript { text, .. }) if text == "fresh"
+        ));
+        assert!(matches!(
+            event_rx.try_recv(),
+            Ok(VoiceInputEvent::RecognitionPendingChanged(false))
+        ));
+        assert!(event_rx.try_recv().is_err());
+        decoder.finish().unwrap();
+    }
+
+    #[test]
+    fn cancel_rejects_a_late_parakeet_result() {
+        let controls = VoiceInputControls::default();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let discard = Arc::new(AtomicBool::new(false));
+        let shutdown_epoch = Arc::new(AtomicU64::new(0));
+        let (started_tx, started_rx) = mpsc::sync_channel(0);
+        let (release_tx, release_rx) = mpsc::sync_channel(0);
+        let mut decoder = ParakeetDecoder::start(
+            controls.clone(),
+            Arc::clone(&shutdown),
+            Arc::clone(&discard),
+            Arc::clone(&shutdown_epoch),
+            move |_| {
+                started_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                "too late".to_string()
+            },
+        )
+        .unwrap();
+        let (events, mut event_rx) = tokio_mpsc::channel(8);
+        let mut pending = PendingRecognitions::new();
+        let mut ledger = ParakeetRecognitionLedger::new();
+        submit_parakeet_utterance(
+            &decoder,
+            vec![0.25; VAD_FRAME_SAMPLES],
+            0,
+            &mut ledger,
+            &mut pending,
+            &events,
+        )
+        .unwrap();
+        started_rx.recv().unwrap();
+        assert!(matches!(
+            event_rx.try_recv(),
+            Ok(VoiceInputEvent::RecognitionPendingChanged(true))
+        ));
+
+        discard.store(true, Ordering::Release);
+        shutdown.store(true, Ordering::Release);
+        pending.reset(&events).unwrap();
+        release_tx.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_millis(100);
+        while ledger.pending.len() == 1 && Instant::now() < deadline {
+            drain_parakeet_results(
+                &decoder,
+                &events,
+                &mut ledger,
+                &mut pending,
+                None,
+                &controls,
+                &shutdown,
+                &discard,
+                &shutdown_epoch,
+            )
+            .unwrap();
+            thread::yield_now();
+        }
+        assert!(matches!(
+            event_rx.try_recv(),
+            Ok(VoiceInputEvent::RecognitionPendingChanged(false))
+        ));
+        assert!(event_rx.try_recv().is_err());
+        decoder.finish().unwrap();
+    }
+
+    #[tokio::test]
+    async fn blocked_parakeet_inference_preserves_outer_quarantine() {
+        let controls = VoiceInputControls::default();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let (started_tx, started_rx) = mpsc::sync_channel(0);
+        let (release_tx, release_rx) = mpsc::sync_channel(0);
+        let mut decoder = ParakeetDecoder::start(
+            controls,
+            shutdown,
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicU64::new(0)),
+            move |_| {
+                started_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                String::new()
+            },
+        )
+        .unwrap();
+        assert!(decoder
+            .try_submit(ParakeetUtterance {
+                sequence: 1,
+                speech: vec![0.25; VAD_FRAME_SAMPLES],
+                mute_epoch: 0,
+            })
+            .unwrap()
+            .is_none());
+        started_rx.recv().unwrap();
+        let (finished_tx, finished_rx) = mpsc::sync_channel(0);
+        let outer = thread::spawn(move || {
+            decoder.finish().unwrap();
+            finished_tx.send(()).unwrap();
+        });
+
+        assert_eq!(
+            finish_worker(outer, Duration::from_millis(20))
+                .await
+                .unwrap_err(),
+            VoiceInputFinishError::Quarantined {
+                timeout: Duration::from_millis(20)
+            }
+        );
+        release_tx.send(()).unwrap();
+        finished_rx
+            .recv_timeout(Duration::from_millis(100))
+            .expect("quarantined nested worker can still finish after release");
     }
 
     #[test]

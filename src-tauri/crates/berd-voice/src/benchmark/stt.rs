@@ -816,6 +816,12 @@ fn framed_utterance(samples: &[f32]) -> Vec<[f32; INPUT_FRAME_SAMPLES]> {
     frames
 }
 
+#[cfg(test)]
+pub(crate) fn first_bundled_fixture_frames_for_test() -> Vec<[f32; INPUT_FRAME_SAMPLES]> {
+    let pack = load_bundled_stt_fixture_pack().expect("checked bundled STT fixture");
+    framed_utterance(&pack.utterances[0].samples_48k)
+}
+
 fn word_error(reference: &str, hypothesis: &str) -> SttWordError {
     let reference = normalized_words(reference);
     let hypothesis = normalized_words(hypothesis);
