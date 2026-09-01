@@ -1,6 +1,6 @@
 import { z } from "zod/v4";
 
-import { backendArchiveFailedMessage } from "../helpers";
+import { berdctlErrorDetail, backendArchiveFailedMessage } from "../helpers";
 import { CommandError, defineCommand } from "../types";
 
 const archiveProjectSchema = z
@@ -36,10 +36,14 @@ Result:
     await findProjectOrThrow(args.project_id);
     try {
       await archiveProject(args.project_id);
-    } catch {
+    } catch (error) {
       throw new CommandError(
         "backend_archive_failed",
-        backendArchiveFailedMessage("project", args.project_id),
+        backendArchiveFailedMessage(
+          "project",
+          args.project_id,
+          berdctlErrorDetail(error),
+        ),
       );
     }
     // Mirror AppShell's archive handler: refetch so the sidebar drops the

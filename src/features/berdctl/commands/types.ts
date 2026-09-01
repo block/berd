@@ -1,5 +1,7 @@
 import type { ZodType } from "zod/v4";
 
+import { berdctlErrorDetail } from "./helpers";
+
 export interface CommandContext {
   /** Absolute time (ms epoch) the broker reports this call as timed out.
    *  Commands with slow pre-mutation work must not mutate state past it —
@@ -107,5 +109,5 @@ export function toCommandError(e: unknown): { code: string; message: string } {
   if (e instanceof CommandError) {
     return { code: e.code, message: e.message };
   }
-  return { code: "internal_error", message: String(e) };
+  return { code: "internal_error", message: berdctlErrorDetail(e) };
 }

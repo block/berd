@@ -476,7 +476,14 @@ describe("AppShell berdctl integration", () => {
   });
 
   it("archiveSession reports backend failure and keeps the session unarchived", async () => {
-    mockAcpArchiveSession.mockRejectedValue(new Error("backend down"));
+    // ACP-shaped error: the formatted detail must surface the `data` payload,
+    // not String(error)'s "Error: Internal error".
+    mockAcpArchiveSession.mockRejectedValue(
+      Object.assign(new Error("Internal error"), {
+        code: -32603,
+        data: "session row missing",
+      }),
+    );
     useChatSessionStore.setState({ sessions: [makeSession()] });
     render(<AppShell />);
 
@@ -484,7 +491,11 @@ describe("AppShell berdctl integration", () => {
       getAppNavigationController().archiveSession("session-1", "reject"),
     );
 
-    expect(outcome).toEqual({ ok: false, reason: "backend_archive_failed" });
+    expect(outcome).toEqual({
+      ok: false,
+      reason: "backend_archive_failed",
+      detail: "session row missing",
+    });
     expect(
       useChatSessionStore.getState().getSession("session-1")?.archivedAt,
     ).toBeUndefined();
@@ -506,7 +517,11 @@ describe("AppShell berdctl integration", () => {
       getAppNavigationController().archiveSession("session-1", "reject"),
     );
 
-    expect(outcome).toEqual({ ok: false, reason: "backend_archive_failed" });
+    expect(outcome).toEqual({
+      ok: false,
+      reason: "backend_archive_failed",
+      detail: "backend down",
+    });
     expect(useChatSessionStore.getState().activeSessionId).toBe("session-1");
     expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
     expect(
