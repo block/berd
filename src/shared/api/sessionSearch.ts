@@ -12,6 +12,12 @@ const SNIPPET_SUFFIX = 60;
 const EXPORT_CONCURRENCY = 4;
 
 const CORPUS_QUERY_KEY_PREFIX = "session-search-corpus";
+type CorpusStampRegistration = { stamp: string; generation: number };
+const latestCorpusStamps = new WeakMap<
+  QueryClient,
+  Map<string, CorpusStampRegistration>
+>();
+let corpusStampGeneration = 0;
 /**
  * How long a corpus survives after **its export**, not after its last read:
  * react-query schedules the gc timer when a fetch settles and never reschedules
@@ -110,7 +116,22 @@ export interface SessionSearchOptions {
    *  consumers — search page, Cmd-K dialog, history) share one export per
    *  (session, stamp). Absent, every sweep re-exports. */
   queryClient?: QueryClient;
+  /** Cancels the sweep. Checked before every server page, when an in-flight
+   *  page settles, before enrichment, and before every export-worker claim;
+   *  once it fires the sweep rejects and starts no further requests. An
+   *  abort is never reported through `failedIds` — cancellation is not a
+   *  coverage gap. */
+  signal?: AbortSignal;
+  /** Called with the current phase: "waiting" while the server-side page
+   *  walk is in flight, "reading" once it finishes and export enrichment
+   *  begins. Transitions only, never repeated; both are reported in
+   *  `searchSessions`, only "reading" in an export-only sweep. */
+  onPhaseChange?: (phase: SessionSearchPhase) => void;
+  /** Acquisition-time ordering for delayed enrichment of an existing sweep. */
+  corpusStampGeneration?: number;
 }
+
+export type SessionSearchPhase = "waiting" | "reading";
 
 /** Minimum query length for server-side content search. Re-exported by the
  *  search hook as `SESSION_CONTENT_SEARCH_MIN_CHARS` so the API boundary, the
@@ -123,6 +144,20 @@ export const SERVER_CONTENT_SEARCH_MIN_CHARS = 2;
  *  treated as an error (see `searchSessions`), never as a complete answer. */
 const MAX_SERVER_SEARCH_PAGES = 100;
 
+/** Keeps an abort's rejection distinguishable from an underlying request
+ *  failure: when both race (a page rejects as the signal fires) the caller
+ *  sees the reason it acted on, not whichever error landed first. */
+function abortError(signal: AbortSignal): unknown {
+  return (
+    signal.reason ??
+    new DOMException("The operation was aborted.", "AbortError")
+  );
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw abortError(signal);
+}
+
 export async function searchSessionsViaExports(
   query: string,
   targets: SessionSearchTarget[],
@@ -130,6 +165,26 @@ export async function searchSessionsViaExports(
 ): Promise<SessionSearchSweep> {
   const trimmed = query.trim();
   if (!trimmed) return { results: [], searchedIds: [], failedIds: [] };
+
+  // An export-only sweep has no waiting phase; it is reading from the start.
+  throwIfAborted(options.signal);
+  if (options.queryClient) {
+    registerCorpusStamps(
+      options.queryClient,
+      targets,
+      options.corpusStampGeneration,
+    );
+  }
+  options.onPhaseChange?.("reading");
+  return exportSweep(trimmed, targets, options);
+}
+
+async function exportSweep(
+  trimmed: string,
+  targets: SessionSearchTarget[],
+  options: SessionSearchOptions,
+): Promise<SessionSearchSweep> {
+  throwIfAborted(options.signal);
 
   const seenIds = new Set<string>();
   const unique: SessionSearchTarget[] = [];
@@ -155,26 +210,44 @@ export async function searchSessionsViaExports(
 
   async function worker(): Promise<void> {
     while (nextIndex < unique.length) {
+      // Abort is checked per claim, not per fetch, so it stays cheap and
+      // deterministic: in-flight exports settle (their outcomes are discarded
+      // with the sweep) but no worker starts a new one.
+      throwIfAborted(options.signal);
       const index = nextIndex;
       nextIndex += 1;
       const target = unique[index];
       try {
         const messages = await fetchCorpus(target, options.queryClient);
+        throwIfAborted(options.signal);
         results[index] = searchSession(target.id, messages, needles);
       } catch {
+        if (options.signal?.aborted) throw abortError(options.signal);
         // A session whose corpus cannot be read is not a session without
         // matches. Record it so callers can say so instead of counting it as
         // searched and turning a read failure into a confident "no match".
+        // The re-thrown abort stays out of failedIds: a cancelled target was
+        // never evaluated, which is not the same as "could not be read".
         failed[index] = true;
       }
     }
   }
 
-  await Promise.all(
-    Array.from({ length: Math.min(EXPORT_CONCURRENCY, unique.length) }, worker),
-  );
-
-  if (options.queryClient) evictSupersededCorpora(options.queryClient, unique);
+  try {
+    const workers = Array.from(
+      { length: Math.min(EXPORT_CONCURRENCY, unique.length) },
+      worker,
+    );
+    const settled = await Promise.allSettled(workers);
+    const rejected = settled.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (rejected) throw rejected.reason;
+  } finally {
+    if (options.queryClient) {
+      evictSupersededCorpora(options.queryClient, unique);
+    }
+  }
 
   return {
     results: results.filter(
@@ -210,56 +283,90 @@ export async function searchSessions(
     return { results: [], searchedIds: [], failedIds: [], matchedInfos: [] };
   }
 
-  const matchedInfos: AcpSessionInfo[] = [];
-  const seenCursors = new Set<string>();
-  let cursor: string | null = null;
-  for (let page = 0; page < MAX_SERVER_SEARCH_PAGES; page += 1) {
-    const { sessions, nextCursor } = await listSessionsPage({
-      cursor,
-      query: trimmed,
-    });
-    matchedInfos.push(...sessions);
-    if (!nextCursor) {
-      cursor = null;
-      break;
+  try {
+    // An already-aborted sweep must not start even the first page. Drop idle
+    // corpora whose stamps are already obsolete before the slow page walk;
+    // an abort during discovery must not retain them for the GC window.
+    throwIfAborted(options.signal);
+    if (options.queryClient) {
+      registerCorpusStamps(
+        options.queryClient,
+        targets,
+        options.corpusStampGeneration,
+      );
+      evictSupersededCorpora(options.queryClient, targets);
     }
-    // A cursor the server has already handed out means the walk is cycling;
-    // continuing would duplicate matches and never terminate honestly.
-    if (seenCursors.has(nextCursor)) {
-      throw new Error("session/list returned a repeated pagination cursor");
+    options.onPhaseChange?.("waiting");
+
+    const matchedInfos: AcpSessionInfo[] = [];
+    const seenCursors = new Set<string>();
+    let cursor: string | null = null;
+    for (let page = 0; page < MAX_SERVER_SEARCH_PAGES; page += 1) {
+      throwIfAborted(options.signal);
+      let pageResult: Awaited<ReturnType<typeof listSessionsPage>>;
+      try {
+        pageResult = await listSessionsPage({
+          cursor,
+          query: trimmed,
+        });
+      } catch (error) {
+        // A page that fails as the sweep is aborted reports the abort: the
+        // caller acted on cancellation, not on whichever socket error raced it.
+        if (options.signal?.aborted) throw abortError(options.signal);
+        throw error;
+      }
+      const { sessions, nextCursor } = pageResult;
+      // The socket outlives the signal, so a page can resolve after the abort;
+      // discard it rather than enrich or paginate on stale results.
+      throwIfAborted(options.signal);
+      matchedInfos.push(...sessions);
+      if (!nextCursor) {
+        cursor = null;
+        break;
+      }
+      // A cursor the server has already handed out means the walk is cycling;
+      // continuing would duplicate matches and never terminate honestly.
+      if (seenCursors.has(nextCursor)) {
+        throw new Error("session/list returned a repeated pagination cursor");
+      }
+      seenCursors.add(nextCursor);
+      cursor = nextCursor;
     }
-    seenCursors.add(nextCursor);
-    cursor = nextCursor;
-  }
-  // The walk must end on a null cursor: a truncated match set cannot be the
-  // authoritative full-store answer the caller treats it as.
-  if (cursor !== null) {
-    throw new Error(
-      `session/list search exceeded ${MAX_SERVER_SEARCH_PAGES} pages`,
+    // The walk must end on a null cursor: a truncated match set cannot be the
+    // authoritative full-store answer the caller treats it as.
+    if (cursor !== null) {
+      throw new Error(
+        `session/list search exceeded ${MAX_SERVER_SEARCH_PAGES} pages`,
+      );
+    }
+
+    // Match the server's keyword semantics client-side before spending exports:
+    // goose splits the query on whitespace and ORs the words as substrings, so a
+    // multi-word query matches sessions no single full-string sweep would find —
+    // and the client substring check would then erase a real server match.
+    const matchedTargetIds = new Set(
+      matchedInfos.map((info) => info.sessionId),
     );
+    const matchedTargets = targets.filter((target) =>
+      matchedTargetIds.has(target.id),
+    );
+    // Aborting between the walk and enrichment must not start any export.
+    throwIfAborted(options.signal);
+    options.onPhaseChange?.("reading");
+    const enrichment =
+      matchedTargets.length > 0
+        ? await exportSweep(trimmed, matchedTargets, options)
+        : { results: [], searchedIds: [], failedIds: [] };
+
+    return { ...enrichment, matchedInfos };
+  } finally {
+    // Evict superseded corpora for every target, not only the exported few:
+    // a session that stopped matching never reaches the sweep above, but its
+    // old stamp's corpus is just as dead.
+    if (options.queryClient) {
+      evictSupersededCorpora(options.queryClient, targets);
+    }
   }
-
-  // Match the server's keyword semantics client-side before spending exports:
-  // goose splits the query on whitespace and ORs the words as substrings, so a
-  // multi-word query matches sessions no single full-string sweep would find —
-  // and the client substring check would then erase a real server match.
-  const matchedTargetIds = new Set(matchedInfos.map((info) => info.sessionId));
-  const matchedTargets = targets.filter((target) =>
-    matchedTargetIds.has(target.id),
-  );
-  const enrichment =
-    matchedTargets.length > 0
-      ? await searchSessionsViaExports(trimmed, matchedTargets, {
-          queryClient: options.queryClient,
-        })
-      : { results: [], searchedIds: [], failedIds: [] };
-
-  // Evict superseded corpora for every target, not only the exported few: a
-  // session that stopped matching never reaches the sweep above, but its old
-  // stamp's corpus is just as dead.
-  if (options.queryClient) evictSupersededCorpora(options.queryClient, targets);
-
-  return { ...enrichment, matchedInfos };
 }
 
 /**
@@ -269,10 +376,49 @@ export async function searchSessions(
  * whole window. Corpora for sessions outside this sweep are left alone: the
  * search page and the Cmd-K dialog sweep different lists and share entries.
  */
+export function registerSessionSearchTargets(
+  queryClient: QueryClient,
+  targets: SessionSearchTarget[],
+): number {
+  const generation = ++corpusStampGeneration;
+  recordLatestCorpusStamps(queryClient, targets, generation);
+  return generation;
+}
+
+function recordLatestCorpusStamps(
+  queryClient: QueryClient,
+  targets: SessionSearchTarget[],
+  generation: number,
+): void {
+  const stamps =
+    latestCorpusStamps.get(queryClient) ??
+    new Map<string, CorpusStampRegistration>();
+  for (const target of targets) {
+    const current = stamps.get(target.id);
+    if (!current || current.generation <= generation) {
+      stamps.set(target.id, { stamp: target.stamp, generation });
+    }
+  }
+  latestCorpusStamps.set(queryClient, stamps);
+}
+
+function registerCorpusStamps(
+  queryClient: QueryClient,
+  targets: SessionSearchTarget[],
+  generation: number | undefined,
+): void {
+  if (generation === undefined) {
+    registerSessionSearchTargets(queryClient, targets);
+  } else {
+    recordLatestCorpusStamps(queryClient, targets, generation);
+  }
+}
+
 function evictSupersededCorpora(
   queryClient: QueryClient,
   targets: SessionSearchTarget[],
 ): void {
+  const latestStamps = latestCorpusStamps.get(queryClient);
   const stampById = new Map(targets.map((target) => [target.id, target.stamp]));
   queryClient.removeQueries({
     queryKey: [CORPUS_QUERY_KEY_PREFIX],
@@ -282,8 +428,13 @@ function evictSupersededCorpora(
       // one awaiting it.
       if (query.state.fetchStatus !== "idle") return false;
       const [, id, stamp] = query.queryKey as [string, string, string];
-      const currentStamp = stampById.get(id);
-      return currentStamp !== undefined && currentStamp !== stamp;
+      const sweepStamp = stampById.get(id);
+      if (sweepStamp === undefined) return false;
+      // The newest sweep removes older stamps. A stale sweep may remove only
+      // its own stamp, never the newer corpus that overtook it.
+      return latestStamps?.get(id)?.stamp === sweepStamp
+        ? stamp !== sweepStamp
+        : stamp === sweepStamp;
     },
   });
 }

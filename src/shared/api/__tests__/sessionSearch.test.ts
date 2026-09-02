@@ -10,6 +10,7 @@ vi.mock("../acpApi", () => ({
 }));
 
 import {
+  registerSessionSearchTargets,
   searchSessions,
   searchSessionsViaExports,
   sessionSearchStamp,
@@ -501,5 +502,218 @@ describe("searchSessions", () => {
       "connection closed",
     );
     expect(mockExportSession).not.toHaveBeenCalled();
+  });
+});
+
+describe("slow-search guardrails", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((res) => {
+      resolve = res;
+    });
+    return { promise, resolve };
+  }
+
+  it("starts no request for an already-aborted sweep", async () => {
+    const onPhaseChange = vi.fn();
+
+    await expect(
+      searchSessions("needle", [], {
+        signal: AbortSignal.abort(),
+        onPhaseChange,
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+
+    expect(mockListSessionsPage).not.toHaveBeenCalled();
+    expect(onPhaseChange).not.toHaveBeenCalled();
+  });
+
+  it("stops at the in-flight page when aborted", async () => {
+    const page = deferred<{
+      sessions: ReturnType<typeof serverSession>[];
+      nextCursor: string;
+    }>();
+    mockListSessionsPage.mockReturnValueOnce(page.promise);
+    const controller = new AbortController();
+    const sweep = searchSessions("needle", [{ id: "session-1", stamp: "v1" }], {
+      signal: controller.signal,
+    });
+
+    controller.abort();
+    page.resolve({
+      sessions: [serverSession("session-1")],
+      nextCursor: "cursor-2",
+    });
+
+    await expect(sweep).rejects.toMatchObject({ name: "AbortError" });
+    expect(mockListSessionsPage).toHaveBeenCalledTimes(1);
+    expect(mockExportSession).not.toHaveBeenCalled();
+  });
+
+  it("does not enrich a final page that settles after abort", async () => {
+    const controller = new AbortController();
+    mockListSessionsPage.mockImplementationOnce(async () => {
+      controller.abort();
+      return {
+        sessions: [serverSession("session-1")],
+        nextCursor: null,
+      };
+    });
+
+    await expect(
+      searchSessions("needle", [{ id: "session-1", stamp: "v1" }], {
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(mockExportSession).not.toHaveBeenCalled();
+  });
+
+  it("stops export workers from claiming more targets after abort", async () => {
+    const exports: Array<ReturnType<typeof deferred<string>>> = [];
+    mockExportSession.mockImplementation(() => {
+      const pending = deferred<string>();
+      exports.push(pending);
+      return pending.promise;
+    });
+    const controller = new AbortController();
+    const sweep = searchSessionsViaExports(
+      "needle",
+      Array.from({ length: 10 }, (_, index) => ({
+        id: `session-${index}`,
+        stamp: "v1",
+      })),
+      { signal: controller.signal },
+    );
+    await vi.waitFor(() => expect(mockExportSession).toHaveBeenCalledTimes(4));
+
+    controller.abort();
+    for (const pending of exports) {
+      pending.resolve(exportedNeedleConversation("late"));
+    }
+
+    await expect(sweep).rejects.toMatchObject({ name: "AbortError" });
+    expect(mockExportSession).toHaveBeenCalledTimes(4);
+  });
+
+  it("reports waiting before reading matched sessions", async () => {
+    const phases: string[] = [];
+    mockListSessionsPage.mockResolvedValueOnce({
+      sessions: [serverSession("session-1")],
+      nextCursor: null,
+    });
+    mockExportSession.mockResolvedValue(
+      exportedNeedleConversation("session-1"),
+    );
+
+    await searchSessions("needle", [{ id: "session-1", stamp: "v1" }], {
+      onPhaseChange: (phase) => phases.push(phase),
+    });
+
+    expect(phases).toEqual(["waiting", "reading"]);
+  });
+
+  it("evicts an old corpus that settles during aborted discovery", async () => {
+    const queryClient = new QueryClient();
+    const oldExport = deferred<string>();
+    mockExportSession.mockReturnValueOnce(oldExport.promise);
+    const oldSweep = searchSessionsViaExports(
+      "needle",
+      [{ id: "session-1", stamp: "v1" }],
+      { queryClient },
+    );
+    await vi.waitFor(() => expect(mockExportSession).toHaveBeenCalledOnce());
+
+    const page = deferred<{ sessions: []; nextCursor: null }>();
+    mockListSessionsPage.mockReturnValueOnce(page.promise);
+    const controller = new AbortController();
+    const sweep = searchSessions("needle", [{ id: "session-1", stamp: "v2" }], {
+      queryClient,
+      signal: controller.signal,
+    });
+    oldExport.resolve(exportedNeedleConversation("session-1"));
+    await oldSweep;
+    controller.abort();
+    page.resolve({ sessions: [], nextCursor: null });
+
+    await expect(sweep).rejects.toMatchObject({ name: "AbortError" });
+    expect(
+      queryClient
+        .getQueryCache()
+        .findAll({ queryKey: ["session-search-corpus"] }),
+    ).toHaveLength(0);
+  });
+
+  it("does not let delayed older enrichment evict a newer corpus", async () => {
+    const queryClient = new QueryClient();
+    const oldTargets = [{ id: "session-1", stamp: "v1" }];
+    const oldGeneration = registerSessionSearchTargets(queryClient, oldTargets);
+    const oldExport = deferred<string>();
+    const newExport = deferred<string>();
+    mockExportSession
+      .mockReturnValueOnce(newExport.promise)
+      .mockReturnValueOnce(oldExport.promise);
+    const newSweep = searchSessionsViaExports(
+      "needle",
+      [{ id: "session-1", stamp: "v2" }],
+      { queryClient },
+    );
+    await vi.waitFor(() => expect(mockExportSession).toHaveBeenCalledOnce());
+
+    const controller = new AbortController();
+    const oldSweep = searchSessionsViaExports("needle", oldTargets, {
+      queryClient,
+      signal: controller.signal,
+      corpusStampGeneration: oldGeneration,
+    });
+    await vi.waitFor(() => expect(mockExportSession).toHaveBeenCalledTimes(2));
+
+    newExport.resolve(exportedNeedleConversation("session-1"));
+    await newSweep;
+    controller.abort();
+    oldExport.resolve(exportedNeedleConversation("session-1"));
+    await expect(oldSweep).rejects.toMatchObject({ name: "AbortError" });
+
+    expect(
+      queryClient
+        .getQueryCache()
+        .findAll({ queryKey: ["session-search-corpus"] })
+        .map((entry) => entry.queryKey),
+    ).toEqual([["session-search-corpus", "session-1", "v2"]]);
+  });
+
+  it("evicts superseded stamps after aborted exports drain", async () => {
+    const queryClient = new QueryClient();
+    mockExportSession.mockResolvedValueOnce(
+      exportedNeedleConversation("session-1"),
+    );
+    await searchSessionsViaExports(
+      "needle",
+      [{ id: "session-1", stamp: "v1" }],
+      { queryClient },
+    );
+
+    const nextExport = deferred<string>();
+    mockExportSession.mockReturnValueOnce(nextExport.promise);
+    const controller = new AbortController();
+    const sweep = searchSessionsViaExports(
+      "needle",
+      [{ id: "session-1", stamp: "v2" }],
+      { queryClient, signal: controller.signal },
+    );
+    await vi.waitFor(() => expect(mockExportSession).toHaveBeenCalledTimes(2));
+    controller.abort();
+    nextExport.resolve(exportedNeedleConversation("session-1"));
+
+    await expect(sweep).rejects.toMatchObject({ name: "AbortError" });
+    expect(
+      queryClient
+        .getQueryCache()
+        .findAll({ queryKey: ["session-search-corpus"] })
+        .map((entry) => entry.queryKey),
+    ).toEqual([["session-search-corpus", "session-1", "v2"]]);
   });
 });

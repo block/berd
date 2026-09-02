@@ -16,6 +16,7 @@
     "placeholder": "Search your Berd"
   },
   "noMatches": "No matches for \"{{query}}\"",
+  "searchTimedOut": "Search took too long and was stopped. Try a more specific query.",
   "settingsResult": {
     "meta": "Settings > {{name}}"
   },

@@ -38,7 +38,10 @@ import {
 } from "@/features/chat/stores/chatSessionStore";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
-import { useSessionSearch } from "@/features/sessions/hooks/useSessionSearch";
+import {
+  SESSION_CONTENT_SEARCH_MIN_CHARS,
+  useSessionSearch,
+} from "@/features/sessions/hooks/useSessionSearch";
 import type { SessionSearchDisplayResult } from "@/features/sessions/lib/buildSessionSearchResults";
 import { useDebouncedValue } from "@/shared/hooks/useDebouncedValue";
 import { useLocaleFormatting } from "@/shared/i18n";
@@ -89,6 +92,12 @@ interface SearchViewProps {
 }
 
 const DEBOUNCE_MS = 100;
+// Content sweeps are expensive (server-side store walk), so they are gated
+// harder than metadata typeahead: only a settled query of at least this many
+// trimmed characters fires one automatically. Shorter queries reach content
+// only via an explicit Enter, which the API floor still gates at 2.
+const AUTO_CONTENT_SEARCH_MIN_CHARS = 4;
+const AUTO_CONTENT_SEARCH_DELAY_MS = 500;
 const searchViewStyle = {
   "--search-results-top": "100px",
   "--search-results-height": "min(620px, calc(100% - 132px))",
@@ -125,6 +134,7 @@ export function SearchView({
   const [leftFadeAmount, setLeftFadeAmount] = useState(0);
   const [rightFadeAmount, setRightFadeAmount] = useState(0);
   const [query, setQuery] = useState("");
+  const [queryVersion, setQueryVersion] = useState(0);
   const [activeResultId, setActiveResultId] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState<SearchCategory>("all");
   const [dialogResultsEl, setDialogResultsEl] = useState<HTMLDivElement | null>(
@@ -133,6 +143,10 @@ export function SearchView({
   const [showDialogTopFade, setShowDialogTopFade] = useState(false);
   const [showDialogBottomFade, setShowDialogBottomFade] = useState(false);
   const debouncedQuery = useDebouncedValue(query, DEBOUNCE_MS);
+  const contentDebouncedQueryVersion = useDebouncedValue(
+    queryVersion,
+    AUTO_CONTENT_SEARCH_DELAY_MS,
+  );
   const trimmedQuery = query.trim();
   const trimmedDebouncedQuery = debouncedQuery.trim();
 
@@ -185,6 +199,7 @@ export function SearchView({
     search: runChatSearch,
     setQuery: setChatQuery,
     submittedQuery,
+    timedOut: chatSearchTimedOut,
   } = chatSearch;
   const extensionResults = useExtensionSearch(debouncedQuery);
   const agentResults = useAgentSearch(debouncedQuery);
@@ -224,25 +239,14 @@ export function SearchView({
     ],
   );
 
-  // Sweeps are keyed on who is in the list and what version of them we hold,
-  // not on session object identity: store churn (title streams, unread flips,
-  // `activeRunId` notifications, the persona/project refresh) must not re-fire
-  // a full export sweep, while sessions arriving after mount (initial load,
-  // background pagination) and content changes in sessions already on screen
-  // still get swept.
-  //
-  // The keys are sorted because list order is not membership: every
-  // `loadSessions()` merge re-sorts by activity, so a background session
-  // receiving a message reshuffles the list without changing who is in it.
-  // Sorting `id:stamp` is equivalent to sorting by id, since ids are unique.
-  //
-  // Stamps are safe triggers: nothing on the frontend patches them per token or
-  // per message. `session_info_update` for meta changes leaves them alone, so
-  // they only move on the 60s/window-focus list refresh (all changed sessions
-  // batch into one store update, hence one sweep) and on the once-per-run name
-  // generation notification. Each such sweep re-exports only the sessions whose
-  // stamp actually moved — the rest are corpus-cache hits — and the hook treats
-  // a re-sent query as additive, so rendered rows stay put until it resolves.
+  // Sweeps are keyed on membership + content stamps, not session object
+  // identity: store churn (title streams, unread flips, meta-only
+  // `session_info_update`) must not re-fire a full export sweep, while late
+  // arrivals and real content changes still do. Sorting `id:stamp` makes list
+  // order irrelevant (merges re-sort by activity). Stamps only move on the
+  // batched 60s/focus refresh and once-per-run name generation, and the hook
+  // treats a re-sent query as additive, so re-sweeps are cache-friendly and
+  // rendered rows stay put until they resolve.
   const sessionSweepKey = useMemo(
     () =>
       visibleSessions
@@ -252,11 +256,81 @@ export function SearchView({
     [visibleSessions],
   );
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: sessionSweepKey is an intentional trigger; runChatSearch reads the sessions through a ref.
+  // Once content has been requested for this query/list snapshot, its own
+  // interim step keeps metadata current. Remembering that key prevents the
+  // short-debounce effect and Enter/auto paths from duplicating the raw walk.
+  const lastContentSweepRef = useRef<{
+    query: string;
+    sweepKey: string;
+  } | null>(null);
+  const submitContentSearch = useCallback(
+    (trimmed: string) => {
+      lastContentSweepRef.current =
+        trimmed.length >= SESSION_CONTENT_SEARCH_MIN_CHARS
+          ? { query: trimmed, sweepKey: sessionSweepKey }
+          : null;
+      setChatQuery(trimmed);
+      void runChatSearch(trimmed);
+    },
+    [runChatSearch, sessionSweepKey, setChatQuery],
+  );
+
   useEffect(() => {
-    setChatQuery(debouncedQuery);
-    void runChatSearch(debouncedQuery);
-  }, [debouncedQuery, sessionSweepKey, runChatSearch, setChatQuery]);
+    const trimmed = debouncedQuery.trim();
+    if (trimmed !== trimmedQuery) return;
+    setChatQuery(trimmed);
+    const previous = lastContentSweepRef.current;
+    if (previous?.query === trimmed) {
+      if (
+        trimmed.length >= AUTO_CONTENT_SEARCH_MIN_CHARS ||
+        previous.sweepKey === sessionSweepKey ||
+        isChatSearching
+      ) {
+        return;
+      }
+      previous.sweepKey = sessionSweepKey;
+    }
+    void runChatSearch(trimmed, { content: false });
+  }, [
+    debouncedQuery,
+    isChatSearching,
+    sessionSweepKey,
+    runChatSearch,
+    setChatQuery,
+    trimmedQuery,
+  ]);
+
+  useEffect(() => {
+    const settledQuery = trimmedQuery;
+    if (
+      contentDebouncedQueryVersion !== queryVersion ||
+      settledQuery.length < AUTO_CONTENT_SEARCH_MIN_CHARS
+    ) {
+      return;
+    }
+    const previous = lastContentSweepRef.current;
+    if (
+      previous?.query === settledQuery &&
+      previous.sweepKey === sessionSweepKey
+    ) {
+      return;
+    }
+    submitContentSearch(settledQuery);
+  }, [
+    contentDebouncedQueryVersion,
+    queryVersion,
+    sessionSweepKey,
+    submitContentSearch,
+    trimmedQuery,
+  ]);
+
+  const handleQueryChange = useCallback((nextQuery: string) => {
+    if (lastContentSweepRef.current?.query !== nextQuery.trim()) {
+      lastContentSweepRef.current = null;
+    }
+    setQueryVersion((version) => version + 1);
+    setQuery(nextQuery);
+  }, []);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -346,8 +420,19 @@ export function SearchView({
     skillResults.length > 0 ||
     settingsResults.length > 0;
   const showResults = hasAnyResults;
+  const submittedContentSweep = lastContentSweepRef.current;
+  const isAutoContentSearchPending =
+    trimmedQuery.length >= AUTO_CONTENT_SEARCH_MIN_CHARS &&
+    (submittedContentSweep?.query !== trimmedQuery ||
+      submittedContentSweep.sweepKey !== sessionSweepKey);
+  const showSearchTimeout =
+    chatSearchTimedOut && !isChatSearching && trimmedQuery === submittedQuery;
   const showNoMatches =
-    trimmedDebouncedQuery.length > 0 && !hasAnyResults && !isChatSearching;
+    trimmedDebouncedQuery.length > 0 &&
+    !hasAnyResults &&
+    !isChatSearching &&
+    !isAutoContentSearchPending &&
+    !showSearchTimeout;
 
   const resultColumnsByCategory = useMemo<Record<SearchCategory, string[]>>(
     () => ({
@@ -414,15 +499,21 @@ export function SearchView({
     }
   }, [activeResultId]);
 
+  const clearSearch = useCallback(() => {
+    setQueryVersion((version) => version + 1);
+    setQuery("");
+    lastContentSweepRef.current = null;
+    clearChatSearch();
+    inputRef.current?.focus();
+  }, [clearChatSearch]);
+
   const handleEscape = useCallback(() => {
     if (query.trim()) {
-      setQuery("");
-      clearChatSearch();
-      inputRef.current?.focus();
+      clearSearch();
     } else {
       onExit();
     }
-  }, [clearChatSearch, onExit, query]);
+  }, [clearSearch, onExit, query]);
 
   const handledEscapeRequestRef = useRef(escapeRequest);
   useEffect(() => {
@@ -497,15 +588,29 @@ export function SearchView({
         return;
       }
 
-      if (event.key === "Enter" && activeResultId) {
-        const activeElement = document.getElementById(activeResultId);
-        if (activeElement instanceof HTMLButtonElement) {
-          event.preventDefault();
-          activeElement.click();
+      if (event.key === "Enter") {
+        if (activeResultId) {
+          const activeElement = document.getElementById(activeResultId);
+          if (activeElement instanceof HTMLButtonElement) {
+            event.preventDefault();
+            activeElement.click();
+          }
+          return;
         }
+        const trimmed = query.trim();
+        if (!trimmed) return;
+        event.preventDefault();
+        submitContentSearch(trimmed);
       }
     },
-    [activeResultId, navigableResultColumns, navigableResultIds, showResults],
+    [
+      activeResultId,
+      navigableResultColumns,
+      navigableResultIds,
+      query,
+      showResults,
+      submitContentSearch,
+    ],
   );
 
   const resultSections: Array<{
@@ -729,7 +834,7 @@ export function SearchView({
         <SearchHeadingInput
           ref={inputRef}
           value={query}
-          onChange={setQuery}
+          onChange={handleQueryChange}
           activeDescendant={showResults ? activeResultId : null}
           controlsId={resultsId}
           isRaised={trimmedQuery.length > 0}
@@ -745,11 +850,7 @@ export function SearchView({
             size="icon-xs"
             aria-label={t("actions.clear")}
             tooltip={t("actions.clear")}
-            onClick={() => {
-              setQuery("");
-              clearChatSearch();
-              inputRef.current?.focus();
-            }}
+            onClick={clearSearch}
             className="absolute right-0 top-1/2 z-10 -translate-y-1/2"
           >
             <X aria-hidden="true" className="!size-4" />
@@ -854,6 +955,19 @@ export function SearchView({
             ))}
           </div>
         </div>
+      )}
+
+      {showSearchTimeout && (
+        <p
+          role="status"
+          className={cn(
+            "animate-fade-in text-center text-sm italic text-muted-foreground motion-reduce:animate-none",
+            variant === "page" && "absolute inset-x-6 top-[72px]",
+            variant === "dialog" && "pt-2 pb-4",
+          )}
+        >
+          {t("searchTimedOut")}
+        </p>
       )}
 
       {showNoMatches && (

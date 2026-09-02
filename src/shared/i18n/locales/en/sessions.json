@@ -72,6 +72,9 @@
     },
     "searchStatus": {
       "searching": "Searching conversations… {{searched}} of {{total}}",
+      "waiting": "Waiting for sessions from the server…",
+      "reading": "Reading matching sessions…",
+      "timedOut": "Search took too long and was stopped. Matches found so far are shown — try a more specific query.",
       "pending": "Searching as you type…",
       "doneWithContent_one": "{{count}} result · titles, agents, projects, dates, and conversation text",
       "doneWithContent_other": "{{count}} results · titles, agents, projects, dates, and conversation text",

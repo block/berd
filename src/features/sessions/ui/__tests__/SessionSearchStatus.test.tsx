@@ -18,7 +18,7 @@ describe("SessionSearchStatus", () => {
       <SessionSearchStatus
         query="needle"
         isSearching
-        progress={{ searched: 3, total: 12 }}
+        progress={{ searched: 3, total: 12, unreadable: 0 }}
         resultCount={0}
       />,
     );
@@ -26,6 +26,97 @@ describe("SessionSearchStatus", () => {
     const status = screen.getByRole("status");
     expect(status).toHaveAttribute("aria-live", "polite");
     expect(status).toHaveTextContent("Searching conversations… 3 of 12");
+  });
+
+  it("says it is waiting on the server before any page comes back", () => {
+    render(
+      <SessionSearchStatus
+        query="needle"
+        isSearching
+        progress={{ searched: 0, total: 0, unreadable: 0, phase: "waiting" }}
+        resultCount={0}
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Waiting for sessions from the server…",
+    );
+  });
+
+  it("keeps the sweep counts while reading loaded sessions", () => {
+    render(
+      <SessionSearchStatus
+        query="needle"
+        isSearching
+        progress={{ searched: 3, total: 12, unreadable: 0, phase: "reading" }}
+        resultCount={0}
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Reading matching sessions…",
+    );
+  });
+
+  it("narrates the waiting phase in Spanish", async () => {
+    await act(async () => {
+      await i18n.changeLanguage("es");
+    });
+    render(
+      <SessionSearchStatus
+        query="needle"
+        isSearching
+        progress={{ searched: 0, total: 0, unreadable: 0, phase: "waiting" }}
+        resultCount={0}
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Esperando sesiones del servidor…",
+    );
+  });
+
+  it("shows localized timeout copy ahead of the generic error", () => {
+    render(
+      <SessionSearchStatus
+        query="needle"
+        isSearching={false}
+        progress={null}
+        resultCount={0}
+        error="Search timed out after 30000ms"
+        timedOut
+      />,
+    );
+
+    const status = screen.getByRole("status");
+    expect(status).toHaveClass("text-destructive");
+    expect(status.textContent).not.toContain("30000ms");
+    expect(status).toHaveTextContent(
+      "Search took too long and was stopped. Matches found so far are shown — try a more specific query.",
+    );
+    expect(status.textContent).not.toContain("Message search failed");
+  });
+
+  it("shows the timeout copy in Spanish", async () => {
+    await act(async () => {
+      await i18n.changeLanguage("es");
+    });
+    render(
+      <SessionSearchStatus
+        query="needle"
+        isSearching={false}
+        progress={null}
+        resultCount={0}
+        error="Search timed out after 30000ms"
+        timedOut
+      />,
+    );
+
+    const status = screen.getByRole("status");
+    expect(status.textContent).not.toContain("30000ms");
+    expect(status).toHaveTextContent(
+      "La búsqueda tardó demasiado y se detuvo. Se muestran las coincidencias encontradas hasta ahora — prueba con una consulta más específica.",
+    );
   });
 
   it("names every searched field when a content sweep ran", () => {
@@ -58,8 +149,6 @@ describe("SessionSearchStatus", () => {
     );
   });
 
-  // A one-character query never reaches the message corpus, so the completed
-  // status must not claim conversation text was read.
   it("omits the conversation-text claim for a query too short to sweep", () => {
     render(
       <SessionSearchStatus
@@ -79,6 +168,22 @@ describe("SessionSearchStatus", () => {
     );
   });
 
+  it("does not claim content for a metadata-only submitted run", () => {
+    render(
+      <SessionSearchStatus
+        query="needle"
+        searchedContent={false}
+        isSearching={false}
+        progress={null}
+        resultCount={2}
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "2 results · titles, agents, projects, and dates — type more to search conversation text",
+    );
+  });
+
   it("claims conversation text once the query is long enough to sweep", () => {
     render(
       <SessionSearchStatus
@@ -94,8 +199,6 @@ describe("SessionSearchStatus", () => {
     );
   });
 
-  // The sweep resolves even when individual corpus exports fail, so a
-  // "complete" claim here would present a false negative as authoritative.
   it("admits the gap when some conversations could not be read", () => {
     render(
       <SessionSearchStatus
@@ -111,8 +214,6 @@ describe("SessionSearchStatus", () => {
     );
   });
 
-  // The result count and the unread count pluralize independently; a single
-  // string could only ever agree with one of them.
   it("pluralizes the unread clause on its own count", () => {
     render(
       <SessionSearchStatus
@@ -179,8 +280,6 @@ describe("SessionSearchStatus", () => {
     expect(status.textContent).not.toContain("5 results");
   });
 
-  // The backend's message is English technical prose; only locale copy is
-  // shown, so a Spanish UI never surfaces it.
   it("shows localized copy rather than the backend error text", () => {
     render(
       <SessionSearchStatus

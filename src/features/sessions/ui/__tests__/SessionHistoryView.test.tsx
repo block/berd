@@ -13,6 +13,8 @@ import {
   useChatSessionStore,
 } from "@/features/chat/stores/chatSessionStore";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
+import { SESSION_SEARCH_TIMEOUT_MS } from "@/features/sessions/hooks/useSessionSearch";
+import type { SessionSearchStoreSweep } from "@/shared/api/sessionSearch";
 import {
   focusSessionWindow,
   getSessionWindowSupport,
@@ -410,6 +412,50 @@ describe("SessionHistoryView", () => {
       expect(screen.getByText("Needle Chat")).toBeInTheDocument();
       expect(screen.queryByText("Latest session text")).not.toBeInTheDocument();
     });
+  });
+
+  it("shows timeout guidance without a false no-matches state", async () => {
+    const emptySweep: SessionSearchStoreSweep = {
+      results: [],
+      searchedIds: [],
+      failedIds: [],
+      matchedInfos: [],
+    };
+    let resolveSweep!: (value: SessionSearchStoreSweep) => void;
+    const pending = new Promise<SessionSearchStoreSweep>((resolve) => {
+      resolveSweep = resolve;
+    });
+    mocks.acpSearchSessions.mockReturnValueOnce(pending);
+    vi.useFakeTimers();
+    try {
+      renderHistory();
+      const input = screen.getByRole("searchbox");
+      fireEvent.change(input, { target: { value: "needle" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(SESSION_SEARCH_TIMEOUT_MS);
+      });
+
+      expect(
+        screen.getByText(/Search took too long and was stopped/),
+      ).toBeVisible();
+      expect(
+        screen.queryByText('No sessions match "needle"'),
+      ).not.toBeInTheDocument();
+
+      fireEvent.change(input, { target: { value: "other" } });
+      expect(screen.getByText("Searching as you type…")).toBeVisible();
+      expect(
+        screen.queryByText(/Search took too long/),
+      ).not.toBeInTheDocument();
+
+      resolveSweep(emptySweep);
+      await pending;
+    } finally {
+      resolveSweep(emptySweep);
+      await pending;
+      vi.useRealTimers();
+    }
   });
 
   it("focuses an existing session window from history when session windows are supported", async () => {

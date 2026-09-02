@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
+import { SESSION_SEARCH_TIMEOUT_MS } from "@/features/sessions/hooks/useSessionSearch";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { sessionSearchStamp } from "@/shared/api/sessionSearch";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
@@ -843,5 +844,248 @@ describe("SearchView", () => {
       expect.objectContaining({ name: "reporting" }),
     );
     expect(onOpenAgent).not.toHaveBeenCalled();
+  });
+
+  function renderGuardedSearch(variant: "dialog" | "page" = "dialog") {
+    render(
+      <SearchView
+        variant={variant}
+        onExit={vi.fn()}
+        onSelectSearchResult={vi.fn()}
+        onOpenExtension={vi.fn()}
+        onOpenAgent={vi.fn()}
+        onOpenAutomation={vi.fn()}
+        onOpenSkill={vi.fn()}
+      />,
+    );
+    return screen.getByRole("textbox", { name: "Universal search" });
+  }
+
+  async function advance(ms: number) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  }
+
+  it("keeps sub-four-character input metadata-only", async () => {
+    vi.useFakeTimers();
+    try {
+      useChatSessionStore.setState({
+        sessions: [
+          {
+            id: "session-abc",
+            title: "abc notes",
+            createdAt: "2026-04-10T12:00:00Z",
+            updatedAt: "2026-04-10T12:00:00Z",
+            messageCount: 1,
+          },
+        ],
+      });
+      const input = renderGuardedSearch();
+      fireEvent.change(input, { target: { value: "abc" } });
+
+      await advance(600);
+
+      expect(screen.getByRole("button", { name: /abc notes/ })).toBeVisible();
+      expect(mockAcpSearchSessions).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("submits the two-character content-search floor once on Enter", async () => {
+    vi.useFakeTimers();
+    try {
+      const input = renderGuardedSearch();
+      fireEvent.change(input, { target: { value: "ab" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      await advance(1_000);
+
+      expect(mockAcpSearchSessions).toHaveBeenCalledTimes(1);
+      expect(mockAcpSearchSessions).toHaveBeenCalledWith(
+        "ab",
+        [],
+        expect.anything(),
+      );
+
+      act(() => {
+        useChatSessionStore.setState({
+          sessions: [
+            {
+              id: "session-ab",
+              title: "ab notes",
+              createdAt: "2026-04-10T12:00:00Z",
+              updatedAt: "2026-04-10T12:00:00Z",
+              messageCount: 1,
+            },
+          ],
+        });
+      });
+      await advance(600);
+      expect(screen.getByRole("button", { name: /ab notes/ })).toBeVisible();
+      expect(mockAcpSearchSessions).toHaveBeenCalledTimes(1);
+
+      act(() => useChatSessionStore.setState({ sessions: [] }));
+      await advance(600);
+      expect(
+        screen.queryByRole("button", { name: /ab notes/ }),
+      ).not.toBeInTheDocument();
+      expect(mockAcpSearchSessions).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("prunes removed short-query content hits without another sweep", async () => {
+    vi.useFakeTimers();
+    try {
+      const contentOnly = {
+        id: "session-content",
+        title: "Untitled",
+        createdAt: "2026-04-10T12:00:00Z",
+        updatedAt: "2026-04-10T12:00:00Z",
+        messageCount: 1,
+      };
+      useChatSessionStore.setState({ sessions: [contentOnly] });
+      mockAcpSearchSessions.mockResolvedValueOnce({
+        results: [
+          {
+            sessionId: contentOnly.id,
+            snippet: "ab in a message",
+            messageId: "message-1",
+            matchCount: 1,
+          },
+        ],
+        searchedIds: [contentOnly.id],
+        failedIds: [],
+        matchedInfos: [matchedInfo(contentOnly.id)],
+      });
+      const input = renderGuardedSearch();
+      fireEvent.change(input, { target: { value: "ab" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      await advance(100);
+      expect(screen.getByRole("button", { name: /Untitled/ })).toBeVisible();
+
+      act(() => useChatSessionStore.setState({ sessions: [] }));
+      await advance(600);
+      expect(
+        screen.queryByRole("button", { name: /Untitled/ }),
+      ).not.toBeInTheDocument();
+      expect(mockAcpSearchSessions).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("auto-searches only the latest settled four-character query", async () => {
+    vi.useFakeTimers();
+    try {
+      const input = renderGuardedSearch();
+      fireEvent.change(input, { target: { value: "abcd" } });
+      await advance(300);
+      fireEvent.change(input, { target: { value: "wxyz" } });
+      await advance(499);
+      expect(mockAcpSearchSessions).not.toHaveBeenCalled();
+
+      await advance(1);
+      expect(mockAcpSearchSessions).toHaveBeenCalledTimes(1);
+      expect(mockAcpSearchSessions).toHaveBeenCalledWith(
+        "wxyz",
+        [],
+        expect.anything(),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("re-debounces a query revisited before the delay", async () => {
+    vi.useFakeTimers();
+    try {
+      const input = renderGuardedSearch();
+      fireEvent.change(input, { target: { value: "needle" } });
+      await advance(500);
+      expect(mockAcpSearchSessions).toHaveBeenCalledTimes(1);
+
+      fireEvent.change(input, { target: { value: "other" } });
+      await advance(100);
+      fireEvent.change(input, { target: { value: "needle" } });
+      await advance(499);
+      expect(mockAcpSearchSessions).toHaveBeenCalledTimes(1);
+
+      await advance(1);
+      expect(mockAcpSearchSessions).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("treats surrounding whitespace as the same settled query", async () => {
+    vi.useFakeTimers();
+    try {
+      useChatSessionStore.setState({
+        sessions: [
+          {
+            id: "session-needle",
+            title: "Needle notes",
+            createdAt: "2026-04-10T12:00:00Z",
+            updatedAt: "2026-04-10T12:00:00Z",
+            messageCount: 1,
+          },
+        ],
+      });
+      const input = renderGuardedSearch();
+      fireEvent.change(input, { target: { value: "needle" } });
+      await advance(500);
+      expect(mockAcpSearchSessions).toHaveBeenCalledTimes(1);
+
+      fireEvent.change(input, { target: { value: "  needle  " } });
+      await advance(600);
+      expect(
+        screen.getByRole("button", { name: /Needle notes/ }),
+      ).toBeVisible();
+      expect(mockAcpSearchSessions).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("surfaces a content timeout above page results", async () => {
+    vi.useFakeTimers();
+    let resolveSweep!: (value: {
+      results: never[];
+      searchedIds: never[];
+      failedIds: never[];
+      matchedInfos: never[];
+    }) => void;
+    const pending = new Promise<{
+      results: never[];
+      searchedIds: never[];
+      failedIds: never[];
+      matchedInfos: never[];
+    }>((resolve) => {
+      resolveSweep = resolve;
+    });
+    try {
+      mockAcpSearchSessions.mockReturnValueOnce(pending);
+      const input = renderGuardedSearch("page");
+      fireEvent.change(input, { target: { value: "needle" } });
+      await advance(500);
+      await advance(SESSION_SEARCH_TIMEOUT_MS);
+
+      const status = screen.getByRole("status");
+      expect(status).toHaveTextContent("Search took too long and was stopped");
+      expect(status).toHaveClass("top-[72px]", "inset-x-6");
+      expect(screen.queryByText(/No matches for/)).not.toBeInTheDocument();
+    } finally {
+      resolveSweep({
+        results: [],
+        searchedIds: [],
+        failedIds: [],
+        matchedInfos: [],
+      });
+      await pending;
+      vi.useRealTimers();
+    }
   });
 });

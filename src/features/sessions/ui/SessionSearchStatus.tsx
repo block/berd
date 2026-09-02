@@ -1,5 +1,8 @@
 import { useTranslation } from "react-i18next";
-import { SESSION_CONTENT_SEARCH_MIN_CHARS } from "@/features/sessions/hooks/useSessionSearch";
+import {
+  SESSION_CONTENT_SEARCH_MIN_CHARS,
+  type SessionSearchProgress,
+} from "@/features/sessions/hooks/useSessionSearch";
 import { cn } from "@/shared/lib/cn";
 
 interface SessionSearchStatusProps {
@@ -11,15 +14,14 @@ interface SessionSearchStatusProps {
    */
   isPending?: boolean;
   isSearching: boolean;
-  progress: {
-    searched: number;
-    total: number;
-    /** Targeted sessions whose conversation text could not be read. */
-    unreadable?: number;
-  } | null;
+  progress: SessionSearchProgress | null;
   resultCount: number;
+  /** Whether the submitted run actually included conversation content. */
+  searchedContent?: boolean;
   /** Presence flags a failed sweep; the raw text is never shown to the user. */
   error?: string | null;
+  /** The sweep hit its time budget; narrowing the query helps, so it gets its own copy. */
+  timedOut?: boolean;
 }
 
 /**
@@ -47,25 +49,35 @@ export function SessionSearchStatus({
   isSearching,
   progress,
   resultCount,
+  searchedContent: searchedContentProp,
   error,
+  timedOut = false,
 }: SessionSearchStatusProps) {
   const { t } = useTranslation(["sessions"]);
   const searchedContent =
+    searchedContentProp ??
     query.trim().length >= SESSION_CONTENT_SEARCH_MIN_CHARS;
   const unreadable = progress?.unreadable ?? 0;
 
   let content: string;
-  if (error) {
-    content = t("history.searchError");
-  } else if (isPending) {
-    // The counts below still describe the last submitted query, so reporting
-    // them under freshly edited text would read as a result for what is typed.
+  if (isPending) {
+    // Every other state still describes the previous submitted query.
     content = t("history.searchStatus.pending");
+  } else if (timedOut) {
+    content = t("history.searchStatus.timedOut");
+  } else if (error) {
+    content = t("history.searchError");
   } else if (isSearching && progress) {
-    content = t("history.searchStatus.searching", {
-      searched: progress.searched,
-      total: progress.total,
-    });
+    content =
+      progress.phase === "waiting"
+        ? // No pages back yet, so the loaded-slice counts would read as stalled.
+          t("history.searchStatus.waiting")
+        : progress.phase === "reading"
+          ? t("history.searchStatus.reading")
+          : t("history.searchStatus.searching", {
+              searched: progress.searched,
+              total: progress.total,
+            });
   } else if (searchedContent && unreadable > 0) {
     // Some conversations were never opened, so "no match" cannot be claimed for
     // them. Name the gap instead of implying the sweep was complete.
@@ -93,7 +105,7 @@ export function SessionSearchStatus({
       aria-live="polite"
       className={cn(
         "text-xs text-muted-foreground",
-        error && "text-destructive",
+        !isPending && (error || timedOut) && "text-destructive",
       )}
     >
       {content}

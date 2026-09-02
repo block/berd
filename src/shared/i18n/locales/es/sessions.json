@@ -72,6 +72,9 @@
     },
     "searchStatus": {
       "searching": "Buscando conversaciones… {{searched}} de {{total}}",
+      "waiting": "Esperando sesiones del servidor…",
+      "reading": "Leyendo sesiones coincidentes…",
+      "timedOut": "La búsqueda tardó demasiado y se detuvo. Se muestran las coincidencias encontradas hasta ahora — prueba con una consulta más específica.",
       "pending": "Buscando mientras escribes…",
       "doneWithContent_one": "{{count}} resultado · títulos, agentes, proyectos, fechas y texto de conversación",
       "doneWithContent_other": "{{count}} resultados · títulos, agentes, proyectos, fechas y texto de conversación",

@@ -16,6 +16,7 @@
     "filterAriaLabel": "Filtrar resultados de búsqueda"
   },
   "noMatches": "No hay coincidencias para \"{{query}}\"",
+  "searchTimedOut": "La búsqueda tardó demasiado y se detuvo. Prueba con una consulta más específica.",
   "settingsResult": {
     "meta": "Configuración > {{name}}"
   },

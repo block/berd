@@ -401,7 +401,9 @@ export function SessionHistoryView({
     search: submitSearch,
     searchMore,
     setQuery: setSearchQuery,
+    submittedContentSearch,
     submittedQuery,
+    timedOut: searchTimedOut,
   } = search;
 
   // What the user has typed, held locally rather than pushed straight into the
@@ -1387,7 +1389,9 @@ export function SessionHistoryView({
                 isSearching={isSearching}
                 progress={searchProgress}
                 resultCount={visibleSearchResults.length}
+                searchedContent={submittedContentSearch}
                 error={searchError}
+                timedOut={searchTimedOut}
               />
             ) : null}
             <SessionListControls
@@ -1573,7 +1577,7 @@ export function SessionHistoryView({
                 <History className="h-10 w-10 opacity-30" />
                 <p className="text-sm font-medium">{t("history.searching")}</p>
               </div>
-            ) : (
+            ) : searchTimedOut ? null : (
               <SessionSearchEmptyState
                 query={submittedQuery}
                 onClearFilters={

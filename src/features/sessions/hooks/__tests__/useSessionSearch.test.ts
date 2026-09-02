@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import type { FilterResolvers } from "@/features/sessions/lib/filterSessions";
 
@@ -94,7 +94,10 @@ vi.mock("@/shared/api/acp", () => ({
   acpSearchSessions: (...args: unknown[]) => mockAcpSearchSessions(...args),
 }));
 
-import { useSessionSearch } from "../useSessionSearch";
+import {
+  SESSION_SEARCH_TIMEOUT_MS,
+  useSessionSearch,
+} from "../useSessionSearch";
 
 function createDeferredPromise<T>() {
   let resolve!: (value: T) => void;
@@ -163,9 +166,29 @@ function searchTarget(session: ChatSession) {
   };
 }
 
-const searchOptions = { queryClient: expect.any(QueryClient) };
+const searchOptions = {
+  queryClient: expect.any(QueryClient),
+  signal: expect.any(AbortSignal),
+  onPhaseChange: expect.any(Function),
+  corpusStampGeneration: expect.any(Number),
+};
 
 type SearchHookResult = ReturnType<typeof renderSessionSearch>["result"];
+
+function expectProgress(
+  result: SearchHookResult,
+  searched: number,
+  total: number,
+  unreadable: number,
+  extra?: { phase: "waiting" | "reading" },
+) {
+  expect(result.current.progress).toEqual({
+    searched,
+    total,
+    unreadable,
+    ...extra,
+  });
+}
 
 async function setSearchQuery(result: SearchHookResult, query: string) {
   await act(async () => {
@@ -498,22 +521,14 @@ describe("useSessionSearch", () => {
     });
 
     expect(result.current.isSearching).toBe(true);
-    expect(result.current.progress).toEqual({
-      searched: 0,
-      total: 2,
-      unreadable: 0,
-    });
+    expectProgress(result, 0, 2, 0, { phase: "waiting" });
 
     deferred.resolve(sweep(["acp-1", "acp-2"]));
     await act(async () => {
       await deferred.promise;
     });
 
-    expect(result.current.progress).toEqual({
-      searched: 2,
-      total: 2,
-      unreadable: 0,
-    });
+    expectProgress(result, 2, 2, 0);
   });
 
   it("grows progress as incremental sweeps are queued and complete", async () => {
@@ -522,11 +537,7 @@ describe("useSessionSearch", () => {
     const { result } = renderSessionSearch();
 
     await searchFor(result, "needle");
-    expect(result.current.progress).toEqual({
-      searched: 1,
-      total: 1,
-      unreadable: 0,
-    });
+    expectProgress(result, 1, 1, 0);
 
     const deferred = createDeferredPromise<SearchSweep>();
     mockAcpSearchSessions.mockReturnValueOnce(deferred.promise);
@@ -534,22 +545,14 @@ describe("useSessionSearch", () => {
       void result.current.searchMore([...sessions, newerSession]);
     });
 
-    expect(result.current.progress).toEqual({
-      searched: 1,
-      total: 2,
-      unreadable: 0,
-    });
+    expectProgress(result, 1, 2, 0, { phase: "waiting" });
 
     deferred.resolve(sweep(["acp-2"]));
     await act(async () => {
       await deferred.promise;
     });
 
-    expect(result.current.progress).toEqual({
-      searched: 2,
-      total: 2,
-      unreadable: 0,
-    });
+    expectProgress(result, 2, 2, 0);
   });
 
   // The boundary resolves even when individual corpus exports fail, so a sweep
@@ -571,11 +574,7 @@ describe("useSessionSearch", () => {
 
     // One of the two conversations was never read: coverage is 1 of 2, and the
     // unread one is reported rather than folded into the searched count.
-    expect(result.current.progress).toEqual({
-      searched: 1,
-      total: 2,
-      unreadable: 1,
-    });
+    expectProgress(result, 1, 2, 1);
   });
 
   it("promotes a session to searched when a retry reads it", async () => {
@@ -593,20 +592,12 @@ describe("useSessionSearch", () => {
     const { result } = renderSessionSearch();
 
     await searchFor(result, "needle");
-    expect(result.current.progress).toEqual({
-      searched: 0,
-      total: 1,
-      unreadable: 1,
-    });
+    expectProgress(result, 0, 1, 1);
 
     // Re-submitting the same query re-sweeps; a successful read must clear the
     // unreadable flag rather than leaving a permanent gap.
     await submitCurrentSearch(result);
-    expect(result.current.progress).toEqual({
-      searched: 1,
-      total: 1,
-      unreadable: 0,
-    });
+    expectProgress(result, 1, 1, 0);
   });
 
   // Regression: `searchMore` used to add every attempted session to a running
@@ -635,28 +626,16 @@ describe("useSessionSearch", () => {
     const { result } = renderSessionSearch();
 
     await searchFor(result, "needle");
-    expect(result.current.progress).toEqual({
-      searched: 1,
-      total: 1,
-      unreadable: 0,
-    });
+    expectProgress(result, 1, 1, 0);
 
     await searchMore(result, [...sessions, newerSession]);
-    expect(result.current.progress).toEqual({
-      searched: 1,
-      total: 2,
-      unreadable: 1,
-    });
+    expectProgress(result, 1, 2, 1);
 
     await searchMore(result, [...sessions, newerSession, thirdSession]);
 
     // Three real sessions, all now read: the retry must not have counted acp-2
     // a second time and left an unreachable "3 of 4".
-    expect(result.current.progress).toEqual({
-      searched: 3,
-      total: 3,
-      unreadable: 0,
-    });
+    expectProgress(result, 3, 3, 0);
   });
 
   // Regression: a partially failed page sweep still resolves, so marking every
@@ -689,11 +668,7 @@ describe("useSessionSearch", () => {
     await searchFor(result, "needle");
     await searchMore(result, [...sessions, newerSession]);
 
-    expect(result.current.progress).toEqual({
-      searched: 1,
-      total: 2,
-      unreadable: 1,
-    });
+    expectProgress(result, 1, 2, 1);
 
     // Same session list again: acp-2 was never read, so it must not have been
     // filtered out as already-searched.
@@ -705,11 +680,7 @@ describe("useSessionSearch", () => {
       [searchTarget(newerSession)],
       searchOptions,
     );
-    expect(result.current.progress).toEqual({
-      searched: 2,
-      total: 2,
-      unreadable: 0,
-    });
+    expectProgress(result, 2, 2, 0);
     expect(result.current.results.map((item) => item.session.id)).toContain(
       "acp-2",
     );
@@ -763,11 +734,7 @@ describe("useSessionSearch", () => {
       "acp-1",
     ]);
     expect(result.current.results[0]?.snippet).toBe("needle in message");
-    expect(result.current.progress).toEqual({
-      searched: 0,
-      total: 1,
-      unreadable: 1,
-    });
+    expectProgress(result, 0, 1, 1);
   });
 
   // Regression: `search` pre-marked every initial target as searched before
@@ -797,11 +764,7 @@ describe("useSessionSearch", () => {
     const { result } = renderSessionSearch();
 
     await searchFor(result, "needle");
-    expect(result.current.progress).toEqual({
-      searched: 0,
-      total: 1,
-      unreadable: 1,
-    });
+    expectProgress(result, 0, 1, 1);
 
     // Same loaded set — no new sessions. The unreadable initial target must
     // still be eligible, exactly like a failed paged-in target.
@@ -813,11 +776,7 @@ describe("useSessionSearch", () => {
       [searchTarget(sessions[0])],
       searchOptions,
     );
-    expect(result.current.progress).toEqual({
-      searched: 1,
-      total: 1,
-      unreadable: 0,
-    });
+    expectProgress(result, 1, 1, 0);
     expect(result.current.results.map((item) => item.session.id)).toContain(
       "acp-1",
     );
@@ -829,11 +788,7 @@ describe("useSessionSearch", () => {
     const { result } = renderSessionSearch();
 
     await searchFor(result, "needle");
-    expect(result.current.progress).toEqual({
-      searched: 1,
-      total: 1,
-      unreadable: 0,
-    });
+    expectProgress(result, 1, 1, 0);
 
     await act(async () => {
       result.current.clear();
@@ -841,11 +796,7 @@ describe("useSessionSearch", () => {
     expect(result.current.progress).toBeNull();
 
     await searchFor(result, "needle");
-    expect(result.current.progress).toEqual({
-      searched: 1,
-      total: 1,
-      unreadable: 0,
-    });
+    expectProgress(result, 1, 1, 0);
 
     await setSearchQuery(result, "other");
     expect(result.current.progress).toBeNull();
@@ -864,6 +815,904 @@ describe("useSessionSearch", () => {
     expect(result.current.error).toBe(
       "Failed to export session for search: session missing",
     );
+  });
+});
+
+type SearchOptionsArg = {
+  signal: AbortSignal;
+  onPhaseChange: (phase: "waiting" | "reading") => void;
+};
+
+function capturedSearchOptions(callIndex: number): SearchOptionsArg {
+  return mockAcpSearchSessions.mock.calls[callIndex]?.[2] as SearchOptionsArg;
+}
+
+describe("slow search guardrails", () => {
+  const pendingSweeps: Array<
+    ReturnType<typeof createDeferredPromise<SearchSweep>>
+  > = [];
+  const deferredSweep = () => {
+    const pending = createDeferredPromise<SearchSweep>();
+    pendingSweeps.push(pending);
+    return pending;
+  };
+
+  beforeEach(() => {
+    pendingSweeps.length = 0;
+    mockAcpSearchSessions.mockReset();
+  });
+
+  afterEach(async () => {
+    for (const pending of pendingSweeps) pending.resolve(sweep([]));
+    await Promise.all(pendingSweeps.map(({ promise }) => promise));
+    await Promise.resolve();
+    await Promise.resolve();
+    vi.restoreAllMocks();
+  });
+
+  it("aborts and drains a superseded query before starting its replacement", async () => {
+    const first = deferredSweep();
+    const second = deferredSweep();
+    mockAcpSearchSessions
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const { result } = renderSessionSearch();
+
+    await setSearchQuery(result, "needle");
+    await act(async () => {
+      void result.current.search();
+    });
+    const firstSignal = capturedSearchOptions(0).signal;
+
+    await setSearchQuery(result, "other");
+    await act(async () => {
+      void result.current.search();
+    });
+    expect(firstSignal.aborted).toBe(true);
+    expect(mockAcpSearchSessions).toHaveBeenCalledTimes(1);
+
+    first.resolve(sweep([]));
+    await waitFor(() => expect(mockAcpSearchSessions).toHaveBeenCalledTimes(2));
+    second.resolve(sweep(["acp-1"]));
+    await act(async () => {
+      await second.promise;
+    });
+
+    expect(result.current.submittedQuery).toBe("other");
+    expect(result.current.error).toBeNull();
+  });
+
+  it("metadata-only search supersedes active content work", async () => {
+    const raw = deferredSweep();
+    mockAcpSearchSessions.mockImplementationOnce(
+      (_query: string, _targets: unknown, options: SearchOptionsArg) => {
+        options.onPhaseChange("reading");
+        return raw.promise;
+      },
+    );
+    const { result } = renderSessionSearch();
+
+    await setSearchQuery(result, "needle");
+    act(() => {
+      void result.current.search();
+    });
+    const signal = capturedSearchOptions(0).signal;
+
+    await act(async () => {
+      await result.current.search("other", { content: false });
+    });
+
+    expect(result.current.submittedQuery).toBe("other");
+    expect(result.current.isSearching).toBe(false);
+    await waitFor(() => expect(signal.aborted).toBe(true));
+
+    raw.resolve(sweep([]));
+    await raw.promise;
+    await act(async () => {
+      await result.current.searchMore([...sessions, newerSession]);
+    });
+    expect(mockAcpSearchSessions).toHaveBeenCalledTimes(1);
+    expect(result.current.submittedContentSearch).toBe(false);
+  });
+
+  it("serializes hook instances and drops a canceled queued replacement", async () => {
+    const first = deferredSweep();
+    const second = deferredSweep();
+    mockAcpSearchSessions
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const firstHook = renderSessionSearch();
+    const secondHook = renderSessionSearch();
+
+    await setSearchQuery(firstHook.result, "needle");
+    await act(async () => {
+      void firstHook.result.current.search();
+    });
+    await setSearchQuery(secondHook.result, "other");
+    await act(async () => {
+      void secondHook.result.current.search();
+    });
+    expect(mockAcpSearchSessions).toHaveBeenCalledTimes(1);
+    expect(capturedSearchOptions(0).signal.aborted).toBe(false);
+
+    // Replace the queued request before it reaches ACP. Only the latest query
+    // should start when the other hook's in-flight page drains.
+    await setSearchQuery(secondHook.result, "final");
+    await act(async () => {
+      void secondHook.result.current.search();
+    });
+
+    first.resolve(sweep(["acp-1"]));
+    await waitFor(() => expect(mockAcpSearchSessions).toHaveBeenCalledTimes(2));
+    expect(mockAcpSearchSessions).toHaveBeenLastCalledWith(
+      "final",
+      [searchTarget(sessions[0])],
+      searchOptions,
+    );
+    expect(
+      mockAcpSearchSessions.mock.calls.some(([query]) => query === "other"),
+    ).toBe(false);
+    second.resolve(sweep(["acp-1"]));
+    await act(async () => {
+      await second.promise;
+    });
+  });
+
+  it("scopes a shared discovery failure to each owner's targets", async () => {
+    let rejectSweep!: (error: Error) => void;
+    const rejected = new Promise<SearchSweep>((_resolve, reject) => {
+      rejectSweep = reject;
+    });
+    mockAcpSearchSessions.mockReturnValueOnce(rejected);
+    const thirdSession = { ...oldQueryOnlySession, title: "Needle third" };
+    const firstHook = renderSessionSearch([sessions[0]]);
+    const secondHook = renderSessionSearch([newerSession]);
+
+    await setSearchQuery(firstHook.result, "needle");
+    let firstRun!: Promise<void>;
+    act(() => {
+      firstRun = firstHook.result.current.search();
+    });
+    await setSearchQuery(secondHook.result, "needle");
+    let secondRun!: Promise<void>;
+    act(() => {
+      secondRun = secondHook.result.current.search();
+    });
+    secondHook.rerender({
+      currentSessions: [newerSession, thirdSession],
+    });
+    let pageRun!: Promise<void>;
+    act(() => {
+      pageRun = secondHook.result.current.searchMore([
+        newerSession,
+        thirdSession,
+      ]);
+    });
+    rejectSweep(new Error("search failed"));
+    await act(async () => {
+      await Promise.all([firstRun, secondRun, pageRun]);
+    });
+
+    expect(mockAcpSearchSessions).toHaveBeenCalledTimes(1);
+    expect(firstHook.result.current.progress).toMatchObject({
+      total: 1,
+      unreadable: 1,
+    });
+    expect(secondHook.result.current.progress).toMatchObject({
+      total: 2,
+      unreadable: 2,
+    });
+  });
+
+  it("releases the global page slot before export enrichment settles", async () => {
+    const first = deferredSweep();
+    const second = deferredSweep();
+    mockAcpSearchSessions
+      .mockImplementationOnce(
+        (_query: string, _targets: unknown, options: SearchOptionsArg) => {
+          options.onPhaseChange("reading");
+          return first.promise;
+        },
+      )
+      .mockReturnValueOnce(second.promise);
+    const firstHook = renderSessionSearch();
+    const secondHook = renderSessionSearch();
+
+    await setSearchQuery(firstHook.result, "needle");
+    act(() => {
+      void firstHook.result.current.search();
+    });
+    await setSearchQuery(secondHook.result, "other");
+    act(() => {
+      void secondHook.result.current.search();
+    });
+
+    expect(mockAcpSearchSessions).toHaveBeenCalledTimes(2);
+    first.resolve(sweep(["acp-1"]));
+    second.resolve(sweep(["acp-1"]));
+    await act(async () => {
+      await Promise.all([first.promise, second.promise]);
+    });
+  });
+
+  it("retries a timed-out export by joining its existing raw sweep", async () => {
+    const raw = deferredSweep();
+    mockAcpSearchSessions.mockImplementationOnce(
+      (_query: string, _targets: unknown, options: SearchOptionsArg) => {
+        options.onPhaseChange("reading");
+        return raw.promise;
+      },
+    );
+    vi.useFakeTimers();
+    try {
+      const { result } = renderSessionSearch();
+      await setSearchQuery(result, "needle");
+      act(() => {
+        void result.current.search();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(SESSION_SEARCH_TIMEOUT_MS);
+      });
+      expect(result.current.timedOut).toBe(true);
+      expect(capturedSearchOptions(0).signal.aborted).toBe(false);
+
+      let retryRun!: Promise<void>;
+      act(() => {
+        retryRun = result.current.search();
+      });
+      expect(mockAcpSearchSessions).toHaveBeenCalledTimes(1);
+
+      raw.resolve(
+        serverSweep(
+          [matchedInfo("acp-1")],
+          ["acp-1"],
+          [
+            {
+              sessionId: "acp-1",
+              snippet: "finished export",
+              messageId: "message-1",
+              matchCount: 1,
+            },
+          ],
+        ),
+      );
+      await act(async () => {
+        await retryRun;
+      });
+      expect(result.current.results[0]?.snippet).toBe("finished export");
+    } finally {
+      raw.resolve(sweep([]));
+      await raw.promise;
+      vi.useRealTimers();
+    }
+  });
+
+  it("preserves one owner's export retry when another owner cancels", async () => {
+    const raw = deferredSweep();
+    mockAcpSearchSessions.mockImplementationOnce(
+      (_query: string, _targets: unknown, options: SearchOptionsArg) => {
+        options.onPhaseChange("reading");
+        return raw.promise;
+      },
+    );
+    vi.useFakeTimers();
+    try {
+      const firstHook = renderSessionSearch();
+      const secondHook = renderSessionSearch();
+      await setSearchQuery(firstHook.result, "needle");
+      act(() => {
+        void firstHook.result.current.search();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+      await setSearchQuery(secondHook.result, "needle");
+      act(() => {
+        void secondHook.result.current.search();
+      });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(SESSION_SEARCH_TIMEOUT_MS - 1_000);
+      });
+      const signal = capturedSearchOptions(0).signal;
+      expect(firstHook.result.current.timedOut).toBe(true);
+      expect(secondHook.result.current.isSearching).toBe(true);
+
+      act(() => secondHook.result.current.clear());
+      expect(signal.aborted).toBe(false);
+      let retryRun!: Promise<void>;
+      act(() => {
+        retryRun = firstHook.result.current.search();
+      });
+      expect(mockAcpSearchSessions).toHaveBeenCalledTimes(1);
+
+      raw.resolve(sweep(["acp-1"]));
+      await act(async () => {
+        await retryRun;
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps each owner's export-retention deadline independent", async () => {
+    const raw = deferredSweep();
+    mockAcpSearchSessions.mockImplementationOnce(
+      (_query: string, _targets: unknown, options: SearchOptionsArg) => {
+        options.onPhaseChange("reading");
+        return raw.promise;
+      },
+    );
+    vi.useFakeTimers();
+    try {
+      const firstHook = renderSessionSearch();
+      const secondHook = renderSessionSearch();
+      await setSearchQuery(firstHook.result, "needle");
+      act(() => {
+        void firstHook.result.current.search();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+      await setSearchQuery(secondHook.result, "needle");
+      act(() => {
+        void secondHook.result.current.search();
+      });
+      const signal = capturedSearchOptions(0).signal;
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(
+          2 * SESSION_SEARCH_TIMEOUT_MS - 1_000,
+        );
+      });
+      expect(signal.aborted).toBe(false);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+      expect(signal.aborted).toBe(true);
+
+      raw.resolve(sweep([]));
+      await raw.promise;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("bounds timed-out export retention when no retry arrives", async () => {
+    const raw = deferredSweep();
+    const fresh = deferredSweep();
+    mockAcpSearchSessions
+      .mockImplementationOnce(
+        (_query: string, _targets: unknown, options: SearchOptionsArg) => {
+          options.onPhaseChange("reading");
+          return raw.promise;
+        },
+      )
+      .mockReturnValueOnce(fresh.promise);
+    vi.useFakeTimers();
+    try {
+      const { result } = renderSessionSearch();
+      await setSearchQuery(result, "needle");
+      act(() => {
+        void result.current.search();
+      });
+      const signal = capturedSearchOptions(0).signal;
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(SESSION_SEARCH_TIMEOUT_MS);
+      });
+      expect(signal.aborted).toBe(false);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(SESSION_SEARCH_TIMEOUT_MS);
+      });
+      expect(signal.aborted).toBe(true);
+
+      raw.resolve(sweep([]));
+      await raw.promise;
+      let freshRun!: Promise<void>;
+      act(() => {
+        freshRun = result.current.search();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(mockAcpSearchSessions).toHaveBeenCalledTimes(2);
+      fresh.resolve(sweep(["acp-1"]));
+      await act(async () => {
+        await freshRun;
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("enriches a new target without repeating joined server discovery", async () => {
+    const raw = deferredSweep();
+    mockAcpSearchSessions.mockReturnValueOnce(raw.promise);
+    const sessionSearchModule = await import("@/shared/api/sessionSearch");
+    const enrich = vi
+      .spyOn(sessionSearchModule, "searchSessionsViaExports")
+      .mockResolvedValue({
+        results: [
+          {
+            sessionId: "acp-2",
+            snippet: "needle in message",
+            messageId: "message-2",
+            matchCount: 1,
+          },
+          {
+            sessionId: "acp-3",
+            snippet: "needle on the next page",
+            messageId: "message-3",
+            matchCount: 1,
+          },
+        ],
+        searchedIds: ["acp-2", "acp-3"],
+        failedIds: [],
+      });
+    const thirdSession = {
+      ...oldQueryOnlySession,
+      title: "Needle third",
+    };
+    const firstHook = renderSessionSearch([sessions[0]]);
+    const secondHook = renderSessionSearch([newerSession]);
+
+    await setSearchQuery(firstHook.result, "needle");
+    let initialRun!: Promise<void>;
+    act(() => {
+      initialRun = firstHook.result.current.search();
+    });
+    await setSearchQuery(secondHook.result, "needle");
+    let joinedRun!: Promise<void>;
+    act(() => {
+      joinedRun = secondHook.result.current.search();
+    });
+    secondHook.rerender({
+      currentSessions: [newerSession, thirdSession],
+    });
+    let pageRun!: Promise<void>;
+    act(() => {
+      pageRun = secondHook.result.current.searchMore([
+        newerSession,
+        thirdSession,
+      ]);
+    });
+    expect(mockAcpSearchSessions).toHaveBeenCalledTimes(1);
+    act(() => capturedSearchOptions(0).onPhaseChange("reading"));
+    expect(firstHook.result.current.progress?.phase).toBe("reading");
+    expect(secondHook.result.current.progress?.phase).toBe("reading");
+
+    // Discovery began before acp-2 matched; its fresh local corpus promotes
+    // it without a second full-store walk.
+    raw.resolve(serverSweep([matchedInfo("acp-1")], ["acp-1"]));
+    await act(async () => {
+      await Promise.all([initialRun, joinedRun, pageRun]);
+    });
+
+    expect(mockAcpSearchSessions).toHaveBeenCalledTimes(1);
+    expect(enrich).toHaveBeenCalledWith(
+      "needle",
+      [searchTarget(newerSession), searchTarget(thirdSession)],
+      expect.objectContaining({
+        queryClient: expect.any(QueryClient),
+        signal: expect.any(AbortSignal),
+      }),
+    );
+    expect(
+      secondHook.result.current.results.map((item) => item.session.id),
+    ).toEqual(expect.arrayContaining(["acp-2", "acp-3"]));
+  });
+
+  it("keeps initial matches when searchMore joins with a page delta", async () => {
+    const raw = deferredSweep();
+    mockAcpSearchSessions.mockReturnValueOnce(raw.promise);
+    const sessionSearchModule = await import("@/shared/api/sessionSearch");
+    vi.spyOn(sessionSearchModule, "searchSessionsViaExports").mockResolvedValue(
+      {
+        results: [
+          {
+            sessionId: "acp-2",
+            snippet: "new page needle",
+            messageId: "page-message",
+            matchCount: 1,
+          },
+        ],
+        searchedIds: ["acp-2"],
+        failedIds: [],
+      },
+    );
+    const { result, rerender } = renderSessionSearch([sessions[0]]);
+
+    await setSearchQuery(result, "needle");
+    let initialRun!: Promise<void>;
+    act(() => {
+      initialRun = result.current.search();
+    });
+    rerender({ currentSessions: [...sessions, newerSession] });
+    let pageRun!: Promise<void>;
+    act(() => {
+      pageRun = result.current.searchMore([...sessions, newerSession]);
+    });
+    expect(result.current.results.map((item) => item.session.id)).toEqual([
+      "acp-2",
+      "acp-1",
+    ]);
+    expect(
+      result.current.results.every((item) => item.matchType === "metadata"),
+    ).toBe(true);
+
+    raw.resolve(
+      serverSweep(
+        [matchedInfo("acp-1"), matchedInfo("acp-2")],
+        ["acp-1"],
+        [
+          {
+            sessionId: "acp-1",
+            snippet: "initial needle",
+            messageId: "initial-message",
+            matchCount: 1,
+          },
+        ],
+      ),
+    );
+    await act(async () => {
+      await Promise.all([initialRun, pageRun]);
+    });
+
+    expect(mockAcpSearchSessions).toHaveBeenCalledTimes(1);
+    expect(result.current.results.map((item) => item.session.id)).toEqual([
+      "acp-2",
+      "acp-1",
+    ]);
+    expect(result.current.progress).toMatchObject({ searched: 2, total: 2 });
+
+    await act(async () => {
+      await result.current.searchMore([...sessions, newerSession]);
+    });
+    expect(mockAcpSearchSessions).toHaveBeenCalledTimes(1);
+  });
+
+  it("accumulates removals across joined resweeps", async () => {
+    const raw = deferredSweep();
+    mockAcpSearchSessions
+      .mockReturnValueOnce(raw.promise)
+      .mockResolvedValueOnce(
+        serverSweep(
+          [matchedInfo("acp-1"), matchedInfo("acp-3")],
+          ["acp-1", "acp-3"],
+        ),
+      );
+    const removedFirst = { ...sessions[0], title: "Untitled" };
+    const removedSecond = { ...newerSession, title: "Untitled" };
+    const retained = {
+      ...oldQueryOnlySession,
+      title: "Untitled",
+    };
+    const { result, rerender } = renderSessionSearch([
+      removedFirst,
+      removedSecond,
+      retained,
+    ]);
+
+    await setSearchQuery(result, "needle");
+    let initialRun!: Promise<void>;
+    act(() => {
+      initialRun = result.current.search();
+    });
+    rerender({ currentSessions: [removedSecond, retained] });
+    let firstResweep!: Promise<void>;
+    act(() => {
+      firstResweep = result.current.search();
+    });
+    rerender({ currentSessions: [retained] });
+    let secondResweep!: Promise<void>;
+    act(() => {
+      secondResweep = result.current.search();
+    });
+
+    raw.resolve(
+      serverSweep(
+        [matchedInfo("acp-1"), matchedInfo("acp-2"), matchedInfo("acp-3")],
+        ["acp-1", "acp-2", "acp-3"],
+      ),
+    );
+    await act(async () => {
+      await Promise.all([initialRun, firstResweep, secondResweep]);
+    });
+
+    expect(result.current.results.map((item) => item.session.id)).toEqual([
+      "acp-3",
+    ]);
+
+    act(() => result.current.clear());
+    rerender({ currentSessions: [removedFirst, retained] });
+    await searchFor(result, "needle");
+    expect(result.current.results.map((item) => item.session.id)).toEqual([
+      "acp-3",
+      "acp-1",
+    ]);
+  });
+
+  it("keeps removal tombstones through a failed joined resweep", async () => {
+    let rejectResweep!: (error: Error) => void;
+    const failedResweep = new Promise<SearchSweep>((_resolve, reject) => {
+      rejectResweep = reject;
+    });
+    mockAcpSearchSessions
+      .mockResolvedValueOnce(
+        serverSweep(
+          [matchedInfo("acp-1"), matchedInfo("acp-2")],
+          ["acp-1", "acp-2"],
+        ),
+      )
+      .mockReturnValueOnce(failedResweep)
+      .mockResolvedValueOnce(
+        serverSweep(
+          [matchedInfo("acp-1"), matchedInfo("acp-2")],
+          ["acp-1", "acp-2"],
+        ),
+      );
+    const removed = { ...sessions[0], title: "Untitled" };
+    const retained = { ...newerSession, title: "Untitled" };
+    const { result, rerender } = renderSessionSearch([removed, retained]);
+    await searchFor(result, "needle");
+
+    let staleRun!: Promise<void>;
+    act(() => {
+      staleRun = result.current.search();
+    });
+    rerender({ currentSessions: [retained] });
+    let currentRun!: Promise<void>;
+    act(() => {
+      currentRun = result.current.search();
+    });
+    rejectResweep(new Error("search failed"));
+    await act(async () => {
+      await Promise.all([staleRun, currentRun]);
+    });
+    expect(result.current.results.map((item) => item.session.id)).toEqual([
+      "acp-2",
+    ]);
+
+    act(() => result.current.clear());
+    rerender({ currentSessions: [removed, retained] });
+    await searchFor(result, "needle");
+    expect(result.current.results.map((item) => item.session.id)).toEqual([
+      "acp-2",
+      "acp-1",
+    ]);
+  });
+
+  it("removes a stale server hit when a joined target stops matching", async () => {
+    const raw = deferredSweep();
+    mockAcpSearchSessions.mockReturnValueOnce(raw.promise);
+    const sessionSearchModule = await import("@/shared/api/sessionSearch");
+    vi.spyOn(sessionSearchModule, "searchSessionsViaExports").mockResolvedValue(
+      {
+        results: [],
+        searchedIds: ["acp-1"],
+        failedIds: [],
+      },
+    );
+    const original = { ...sessions[0], title: "Untitled" };
+    const changed = {
+      ...original,
+      updatedAt: "2026-04-10T13:00:00Z",
+      messageCount: 2,
+    };
+    const firstHook = renderSessionSearch([original]);
+    const secondHook = renderSessionSearch([changed]);
+
+    await setSearchQuery(firstHook.result, "needle");
+    let initialRun!: Promise<void>;
+    act(() => {
+      initialRun = firstHook.result.current.search();
+    });
+    await setSearchQuery(secondHook.result, "needle");
+    let joinedRun!: Promise<void>;
+    act(() => {
+      joinedRun = secondHook.result.current.search();
+    });
+
+    raw.resolve(
+      serverSweep(
+        [matchedInfo("acp-1")],
+        ["acp-1"],
+        [
+          {
+            sessionId: "acp-1",
+            snippet: "old needle",
+            messageId: "old-message",
+            matchCount: 1,
+          },
+        ],
+      ),
+    );
+    await act(async () => {
+      await Promise.all([initialRun, joinedRun]);
+    });
+
+    expect(mockAcpSearchSessions).toHaveBeenCalledTimes(1);
+    expect(secondHook.result.current.results).toEqual([]);
+  });
+
+  it("updates progress when the API enters its reading phase", async () => {
+    const raw = deferredSweep();
+    mockAcpSearchSessions.mockReturnValueOnce(raw.promise);
+    const { result } = renderSessionSearch();
+
+    await setSearchQuery(result, "needle");
+    act(() => {
+      void result.current.search();
+    });
+    expect(result.current.progress?.phase).toBe("waiting");
+
+    act(() => capturedSearchOptions(0).onPhaseChange("reading"));
+    expect(result.current.progress?.phase).toBe("reading");
+
+    raw.resolve(sweep(["acp-1"]));
+    await act(async () => {
+      await raw.promise;
+    });
+  });
+
+  it("replaces an owner's export-retention timer with its latest timeout", async () => {
+    const raw = deferredSweep();
+    mockAcpSearchSessions.mockImplementationOnce(
+      (_query: string, _targets: unknown, options: SearchOptionsArg) => {
+        options.onPhaseChange("reading");
+        return raw.promise;
+      },
+    );
+    vi.useFakeTimers();
+    try {
+      const { result } = renderSessionSearch();
+      await setSearchQuery(result, "needle");
+      act(() => {
+        void result.current.search();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+      act(() => {
+        void result.current.search();
+      });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(SESSION_SEARCH_TIMEOUT_MS);
+      });
+      const signal = capturedSearchOptions(0).signal;
+      expect(signal.aborted).toBe(false);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(SESSION_SEARCH_TIMEOUT_MS - 1_000);
+      });
+      expect(signal.aborted).toBe(false);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+      expect(signal.aborted).toBe(true);
+
+      raw.resolve(sweep([]));
+      await raw.promise;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("gives a newer same-query waiter its own deadline", async () => {
+    const raw = deferredSweep();
+    const retry = deferredSweep();
+    mockAcpSearchSessions
+      .mockReturnValueOnce(raw.promise)
+      .mockReturnValueOnce(retry.promise);
+    vi.useFakeTimers();
+    try {
+      const { result } = renderSessionSearch();
+      await setSearchQuery(result, "needle");
+      act(() => {
+        void result.current.search();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(SESSION_SEARCH_TIMEOUT_MS - 1_000);
+      });
+
+      act(() => {
+        void result.current.search();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+      expect(result.current.timedOut).toBe(false);
+      expect(result.current.isSearching).toBe(true);
+      expect(capturedSearchOptions(0).signal.aborted).toBe(false);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(SESSION_SEARCH_TIMEOUT_MS - 1_000);
+      });
+      expect(result.current.timedOut).toBe(true);
+      expect(result.current.isSearching).toBe(false);
+      expect(capturedSearchOptions(0).signal.aborted).toBe(true);
+
+      await act(async () => {
+        await result.current.search("needle", { content: false });
+      });
+      expect(result.current.timedOut).toBe(true);
+
+      raw.resolve(sweep(["acp-1"]));
+      await act(async () => {
+        await raw.promise;
+      });
+      expect(result.current.results[0]).toMatchObject({
+        matchType: "metadata",
+      });
+
+      let retryRun!: Promise<void>;
+      act(() => {
+        retryRun = result.current.search();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(mockAcpSearchSessions).toHaveBeenCalledTimes(2);
+      expect(result.current.timedOut).toBe(false);
+      retry.resolve(
+        serverSweep(
+          [matchedInfo("acp-1")],
+          ["acp-1"],
+          [
+            {
+              sessionId: "acp-1",
+              snippet: "needle after retry",
+              messageId: "retry-message",
+              matchCount: 1,
+            },
+          ],
+        ),
+      );
+      await act(async () => {
+        await retryRun;
+      });
+      expect(result.current.results[0]?.snippet).toBe("needle after retry");
+    } finally {
+      raw.resolve(sweep([]));
+      retry.resolve(sweep([]));
+      await Promise.all([raw.promise, retry.promise]);
+      vi.useRealTimers();
+    }
+  });
+
+  it("surfaces an AbortError not caused by an owned signal", async () => {
+    mockAcpSearchSessions.mockRejectedValueOnce(
+      new DOMException("transport aborted", "AbortError"),
+    );
+    const { result } = renderSessionSearch();
+
+    await searchFor(result, "needle");
+
+    expect(result.current.error).toContain("transport aborted");
+    expect(result.current.timedOut).toBe(false);
+  });
+
+  it("aborts raw work when its hook unmounts", async () => {
+    const raw = deferredSweep();
+    mockAcpSearchSessions.mockImplementationOnce(
+      (_query: string, _targets: unknown, options: SearchOptionsArg) => {
+        options.onPhaseChange("reading");
+        return raw.promise;
+      },
+    );
+    const { result, unmount } = renderSessionSearch();
+
+    await setSearchQuery(result, "needle");
+    act(() => {
+      void result.current.search();
+    });
+    const signal = capturedSearchOptions(0).signal;
+    unmount();
+    await waitFor(() => expect(signal.aborted).toBe(true));
+
+    raw.resolve(sweep(["acp-1"]));
+    await raw.promise;
   });
 });
 
@@ -981,10 +1830,15 @@ describe("server-side discovery", () => {
     );
 
     const queryClient = new QueryClient();
+    const excludedStoredSession = {
+      ...oldQueryOnlySession,
+      id: "old-1",
+      title: "Untitled",
+    };
     const { result } = renderHook(
       () =>
         useSessionSearch({
-          sessions,
+          sessions: [...sessions, excludedStoredSession],
           resolvers,
           includeDiscoveredSession: (session) => session.id !== "old-1",
         }),
