@@ -691,6 +691,8 @@
     "summary": {
       "previousSteps_one": "{{count}} paso anterior",
       "previousSteps_other": "{{count}} pasos anteriores",
+      "activeAgents_one": "{{names}} está trabajando",
+      "activeAgents_other": "{{names}} están trabajando",
       "steps_one": "{{count}} paso",
       "steps_other": "{{count}} pasos"
     }
