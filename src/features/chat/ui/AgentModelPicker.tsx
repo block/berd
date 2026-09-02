@@ -79,8 +79,8 @@ type PopoverContentAlign = NonNullable<
   ComponentProps<typeof PopoverContent>["align"]
 >;
 const REASONING_EFFORT_COLUMN_TRANSITION_MS = 240;
-const PICKER_WIDTH_COMPACT_PX = 420;
-const PICKER_WIDTH_EXPANDED_PX = 596;
+const PICKER_WIDTH_COMPACT_PX = 452;
+const PICKER_WIDTH_EXPANDED_PX = 628;
 
 function toSentenceCaseLabel(value: string | undefined): string {
   const trimmed = value?.trim();
@@ -367,8 +367,13 @@ export function AgentModelPicker({
   };
 
   const handleModelSelect = (model: ModelOption) => {
-    recordModelSelection(selectedAgentId, model);
-    onModelChange?.(model.id, model);
+    const targetAgentId = model.agentId ?? selectedAgentId;
+    const selectedModel = { ...model, agentId: undefined };
+    recordModelSelection(targetAgentId, selectedModel);
+    onModelChange?.(selectedModel.id, {
+      ...selectedModel,
+      agentId: targetAgentId,
+    });
   };
 
   // Re-gate the provider column when the popover closes, so every reopen
@@ -500,7 +505,7 @@ export function AgentModelPicker({
           // gated single-column layout has no dead vertical space below the
           // model list.
           "flex max-h-[min(24rem,50vh)] flex-col overflow-hidden p-1 transition-[width] duration-[240ms] ease-[cubic-bezier(0.2,0,0,1)]",
-          isWidePicker ? "w-[37.25rem]" : "w-[26.25rem]",
+          isWidePicker ? "w-[39.25rem]" : "w-[28.25rem]",
         )}
         onInteractOutside={(event) => {
           classifyOutsideInteraction(event.target);
@@ -672,7 +677,7 @@ export function AgentModelPicker({
               data-col="model"
               className={cn(
                 "flex min-h-0 min-w-0 overflow-hidden p-1",
-                showAgentColumn ? "ml-1 w-56 shrink-0" : "flex-1",
+                showAgentColumn ? "ml-1 w-64 shrink-0" : "flex-1",
               )}
             >
               {modelsLoading ? (

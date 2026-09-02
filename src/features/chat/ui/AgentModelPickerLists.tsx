@@ -7,15 +7,25 @@ import {
   useRef,
   useState,
 } from "react";
-import { IconCheck, IconDots, IconSearch, IconX } from "@tabler/icons-react";
+import {
+  IconCheck,
+  IconDots,
+  IconSearch,
+  IconStar,
+  IconStarFilled,
+  IconX,
+} from "@tabler/icons-react";
 import { SearchBar } from "@/shared/ui/SearchBar";
 import { Button } from "@/shared/ui/button";
 import { ScrollArea } from "@/shared/ui/scroll-area";
+import { Separator } from "@/shared/ui/separator";
 import {
   formatProviderLabel,
   getProviderIcon,
 } from "@/shared/ui/icons/ProviderIcons";
 import type { ModelOption } from "../types";
+import { useStarredModels } from "../hooks/useStarredModels";
+import { modelStarKey } from "../lib/starredModels";
 import {
   getModelRecencyRank,
   type ModelRecencyMap,
@@ -46,6 +56,25 @@ function getGooseModelProviderLabel(model: ModelOption) {
   }
 
   return null;
+}
+
+function compareStarredModels(left: ModelOption, right: ModelOption): number {
+  const nameComparison = getModelDisplayName(left).localeCompare(
+    getModelDisplayName(right),
+  );
+  if (nameComparison !== 0) return nameComparison;
+
+  const agentComparison = (left.agentId ?? "").localeCompare(
+    right.agentId ?? "",
+  );
+  if (agentComparison !== 0) return agentComparison;
+
+  const providerComparison = (left.providerId ?? "").localeCompare(
+    right.providerId ?? "",
+  );
+  if (providerComparison !== 0) return providerComparison;
+
+  return left.id.localeCompare(right.id);
 }
 
 function compareModelsByProviderOrderAndName(
@@ -92,12 +121,17 @@ function sortModels(
   recency: { map: ModelRecencyMap; agentId: string },
 ) {
   return [...models].sort((left, right) => {
-    if (modelMatchesSelection(left, currentModelId, currentModelProviderId)) {
-      return -1;
-    }
-    if (modelMatchesSelection(right, currentModelId, currentModelProviderId)) {
-      return 1;
-    }
+    const leftSelected = modelMatchesSelection(
+      left,
+      currentModelId,
+      currentModelProviderId,
+    );
+    const rightSelected = modelMatchesSelection(
+      right,
+      currentModelId,
+      currentModelProviderId,
+    );
+    if (leftSelected !== rightSelected) return leftSelected ? -1 : 1;
 
     const leftRank = getModelRecencyRank(recency.map, recency.agentId, left);
     const rightRank = getModelRecencyRank(recency.map, recency.agentId, right);
@@ -127,7 +161,7 @@ interface ModelListProps {
    * would interrupt browsing.
    */
   onBrowseChange?: (browsing: boolean) => void;
-  t: (key: string) => string;
+  t: (key: string, options?: Record<string, string>) => string;
 }
 
 export interface RecommendedModelListHandle {
@@ -149,6 +183,7 @@ export const RecommendedModelList = forwardRef<
   },
   ref,
 ) {
+  const { starredModels, isStarred, toggleStar } = useStarredModels();
   const [searchOpen, setSearchOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const [query, setQuery] = useState("");
@@ -248,39 +283,82 @@ export const RecommendedModelList = forwardRef<
   }, [onBrowseChange]);
 
   const visibleModels = useMemo(() => {
-    if (!searchOpen && !showAll) {
-      return recommended;
-    }
+    const baseModels = !searchOpen && !showAll ? recommended : models;
     const normalizedQuery = query.trim().toLowerCase();
-    if (!normalizedQuery) {
-      return models;
-    }
-    return models.filter(
-      (model) =>
-        model.name.toLowerCase().includes(normalizedQuery) ||
-        model.id.toLowerCase().includes(normalizedQuery) ||
-        model.displayName?.toLowerCase().includes(normalizedQuery) ||
-        model.providerName?.toLowerCase().includes(normalizedQuery) ||
-        model.providerId?.toLowerCase().includes(normalizedQuery),
+    const matchesQuery = (model: ModelOption) =>
+      !normalizedQuery ||
+      model.name.toLowerCase().includes(normalizedQuery) ||
+      model.id.toLowerCase().includes(normalizedQuery) ||
+      model.displayName?.toLowerCase().includes(normalizedQuery) ||
+      model.providerName?.toLowerCase().includes(normalizedQuery) ||
+      model.providerId?.toLowerCase().includes(normalizedQuery);
+    const globalStarred = starredModels.map(({ agentId, model }) => ({
+      ...model,
+      agentId,
+    }));
+    const starredKeys = new Set(
+      globalStarred.map((model) =>
+        modelStarKey(
+          model.agentId ?? selectedAgentId,
+          model.providerId,
+          model.id,
+        ),
+      ),
     );
-  }, [models, query, recommended, searchOpen, showAll]);
+    return [
+      // The global starred section is always visible, even while browsing or
+      // filtering another agent's inventory.
+      ...globalStarred,
+      ...baseModels.filter(
+        (model) =>
+          !starredKeys.has(
+            modelStarKey(selectedAgentId, model.providerId, model.id),
+          ) && matchesQuery(model),
+      ),
+    ];
+  }, [
+    models,
+    query,
+    recommended,
+    searchOpen,
+    showAll,
+    starredModels,
+    selectedAgentId,
+  ]);
 
-  const sorted = useMemo(
-    () =>
-      sortModels(visibleModels, currentModelId, currentModelProviderId, {
+  const grouped = useMemo(() => {
+    const starred: ModelOption[] = [];
+    const unstarred: ModelOption[] = [];
+    for (const model of visibleModels) {
+      (model.agentId ? starred : unstarred).push(model);
+    }
+    return {
+      starred: [...starred].sort(compareStarredModels),
+      unstarred: sortModels(unstarred, currentModelId, currentModelProviderId, {
         map: recencyMap,
         agentId: selectedAgentId,
       }),
-    [
-      visibleModels,
-      currentModelId,
-      currentModelProviderId,
-      recencyMap,
-      selectedAgentId,
-    ],
-  );
+    };
+  }, [
+    visibleModels,
+    currentModelId,
+    currentModelProviderId,
+    recencyMap,
+    selectedAgentId,
+  ]);
+  const sorted = [...grouped.starred, ...grouped.unstarred];
 
-  const hasMore = models.length > recommended.length;
+  const recommendedKeys = new Set(
+    recommended.map((model) =>
+      modelStarKey(selectedAgentId, model.providerId, model.id),
+    ),
+  );
+  const hasMore = models.some(
+    (model) =>
+      !recommendedKeys.has(
+        modelStarKey(selectedAgentId, model.providerId, model.id),
+      ),
+  );
   const showSearchButton =
     hasMore || recommended.length > SEARCHABLE_LIST_THRESHOLD;
   const closeSearch = useCallback(() => {
@@ -369,44 +447,85 @@ export const RecommendedModelList = forwardRef<
           className="min-h-0 min-w-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:!block"
         >
           <div className="space-y-0.5 p-1 pr-3">
-            {sorted.map((model) => {
+            {sorted.map((model, index) => {
               const providerLabel = getGooseModelProviderLabel(model);
-              const providerIcon =
-                selectedAgentId === "goose" && model.providerId
+              const rowAgentId = model.agentId ?? selectedAgentId;
+              const providerIcon = model.agentId
+                ? getProviderIcon(model.agentId, "size-3.5")
+                : selectedAgentId === "goose" && model.providerId
                   ? getProviderIcon(model.providerId, "size-3.5")
                   : null;
-              const isSelected = modelMatchesSelection(
-                model,
-                currentModelId,
-                currentModelProviderId,
-              );
+              const isSelected =
+                rowAgentId === selectedAgentId &&
+                modelMatchesSelection(
+                  model,
+                  currentModelId,
+                  currentModelProviderId,
+                );
+              const starred = isStarred(rowAgentId, model);
+              const showDivider =
+                index === grouped.starred.length - 1 &&
+                grouped.unstarred.length > 0;
               return (
-                <PickerItem
-                  key={`${model.providerId ?? "model"}:${model.id}`}
-                  onClick={() => {
-                    onModelSelect(model);
-                    resetView();
-                  }}
-                  selected={isSelected}
-                  className="justify-between"
-                >
-                  <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-                    {providerIcon ? (
-                      <span
-                        className="shrink-0 text-muted-foreground"
-                        title={providerLabel ?? undefined}
-                      >
-                        {providerIcon}
-                      </span>
-                    ) : null}
-                    <div className="min-w-0 flex-1 truncate">
-                      {getModelDisplayName(model)}
-                    </div>
+                <div key={modelStarKey(rowAgentId, model.providerId, model.id)}>
+                  <div
+                    className="flex min-w-0 items-center gap-1"
+                    data-model-key={modelStarKey(
+                      rowAgentId,
+                      model.providerId,
+                      model.id,
+                    )}
+                    data-starred={starred || undefined}
+                  >
+                    <PickerItem
+                      onClick={() => {
+                        onModelSelect({ ...model, agentId: rowAgentId });
+                        resetView();
+                      }}
+                      selected={isSelected}
+                      className="w-auto flex-1 justify-between"
+                    >
+                      <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+                        {providerIcon ? (
+                          <span
+                            className="shrink-0 text-muted-foreground"
+                            title={providerLabel ?? undefined}
+                          >
+                            {providerIcon}
+                          </span>
+                        ) : null}
+                        <div className="min-w-0 flex-1 truncate">
+                          {getModelDisplayName(model)}
+                        </div>
+                      </div>
+                      {isSelected ? (
+                        <IconCheck className="size-4 shrink-0 text-muted-foreground" />
+                      ) : null}
+                    </PickerItem>
+                    <button
+                      type="button"
+                      onClick={() => toggleStar(rowAgentId, model)}
+                      className="flex size-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      aria-label={t(
+                        starred ? "toolbar.unstarModel" : "toolbar.starModel",
+                        { model: getModelDisplayName(model) },
+                      )}
+                      aria-pressed={starred}
+                    >
+                      {starred ? (
+                        <IconStarFilled className="size-4 text-foreground" />
+                      ) : (
+                        <IconStar className="size-4" />
+                      )}
+                    </button>
                   </div>
-                  {isSelected ? (
-                    <IconCheck className="size-4 shrink-0 text-muted-foreground" />
+                  {showDivider ? (
+                    <Separator
+                      className="my-1"
+                      data-testid="starred-models-divider"
+                    />
                   ) : null}
-                </PickerItem>
+                </div>
               );
             })}
             {hasMore && !searchOpen && !showAll ? (

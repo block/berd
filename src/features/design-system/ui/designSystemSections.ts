@@ -124,6 +124,7 @@ export const DESIGN_SYSTEM_COMPONENT_SECTIONS: Array<{
   { id: "component-progress", label: "Progress" },
   { id: "component-radio-group", label: "Radio Group" },
   { id: "component-scroll-area", label: "Scroll Area" },
+  { id: "component-separator", label: "Separator" },
   { id: "component-searchable-select", label: "Searchable Select" },
   { id: "component-search-bar", label: "Search Bar" },
   {
@@ -168,7 +169,6 @@ export const DESIGN_SYSTEM_UNUSED_COMPONENT_SECTIONS: Array<{
   { id: "component-page-columns", label: "Page Columns" },
   { id: "component-pagination", label: "Pagination" },
   { id: "component-resizable-handle", label: "Resizable Handle" },
-  { id: "component-separator", label: "Separator" },
   { id: "component-sidebar", label: "Sidebar" },
   { id: "component-table", label: "Table" },
   { id: "component-toggle", label: "Toggle" },
