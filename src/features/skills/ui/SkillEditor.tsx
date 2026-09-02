@@ -3,7 +3,17 @@ import { useTranslation } from "react-i18next";
 import { AlertCircle, Copy, Trash2 } from "lucide-react";
 import { cn } from "@/shared/lib/cn";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
-import { Button } from "@/shared/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/shared/ui/alert-dialog";
+import { Button, buttonVariants } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
 import { Label } from "@/shared/ui/label";
 import { Textarea } from "@/shared/ui/textarea";
@@ -64,6 +74,10 @@ function getDuplicateSourceName(message: string): string | null {
   return match?.[1] ?? match?.[2] ?? null;
 }
 
+function normalizeDescription(description: string): string {
+  return description.trim();
+}
+
 interface SkillEditorProps {
   isOpen: boolean;
   onClose: () => void;
@@ -88,6 +102,7 @@ export function SkillEditor({
   const [saveLocation, setSaveLocation] = useState(GLOBAL_VALUE);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<SkillEditorError | null>(null);
+  const [discardDialogOpen, setDiscardDialogOpen] = useState(false);
   const [formHasScrollBelow, setFormHasScrollBelow] = useState(false);
   // null = "no explicit pick yet"; the hero falls through to the deterministic
   // name-hash tone so the editor still has visual identity before the user
@@ -125,6 +140,7 @@ export function SkillEditor({
       // the cards in SkillsView show.
       setColor(editingSkill.color ?? null);
       setError(null);
+      setDiscardDialogOpen(false);
     } else if (isOpen) {
       setName("");
       setDescription("");
@@ -132,11 +148,32 @@ export function SkillEditor({
       setSaveLocation(initialProjectId ?? GLOBAL_VALUE);
       setColor(null);
       setError(null);
+      setDiscardDialogOpen(false);
+    } else {
+      setDiscardDialogOpen(false);
     }
   }
 
+  const initialName = editingSkill?.name ?? "";
+  const initialDescription = editingSkill?.description ?? "";
+  const initialInstructions = editingSkill?.instructions ?? "";
+  const initialSaveLocation = editingSkill
+    ? GLOBAL_VALUE
+    : (initialProjectId ?? GLOBAL_VALUE);
+  const initialColor = editingSkill?.color ?? null;
+  const heroToneSeed = name || editingSkill?.name || "new";
+  const currentEffectiveColor = color ?? resolveSkillPillTone(heroToneSeed);
+  const isDirty =
+    name !== initialName ||
+    normalizeDescription(description) !==
+      normalizeDescription(initialDescription) ||
+    instructions !== initialInstructions ||
+    saveLocation !== initialSaveLocation ||
+    color !== initialColor;
+
   const nameValid = isValidSkillName(name);
-  const canSave = nameValid && description.trim().length > 0 && !saving;
+  const canSave =
+    nameValid && normalizeDescription(description).length > 0 && !saving;
   const showNameValidationError = name.length > 0 && !nameValid;
   const nameInputDescribedBy = [
     showNameValidationError ? "skill-name-validation" : null,
@@ -154,7 +191,8 @@ export function SkillEditor({
     setError((current) => (current?.kind === "nameConflict" ? current : null));
   };
 
-  const handleClose = () => {
+  const discardAndClose = () => {
+    setDiscardDialogOpen(false);
     setName("");
     setDescription("");
     setInstructions("");
@@ -164,11 +202,19 @@ export function SkillEditor({
     onClose();
   };
 
+  const requestClose = () => {
+    if (saving) return;
+    if (isDirty) {
+      setDiscardDialogOpen(true);
+      return;
+    }
+    discardAndClose();
+  };
+
   // Effective tone: user pick wins, otherwise derive from the seed. Same
   // resolver used by SkillsView cards so an unpicked skill shows identical
   // color in both surfaces.
-  const heroToneSeed = name || editingSkill?.name || "new";
-  const effectiveColor = color ?? resolveSkillPillTone(heroToneSeed);
+  const effectiveColor = currentEffectiveColor;
   const fallbackPanelTone = resolveSkillPillTone(heroToneSeed);
   const selectedPanelColor =
     pillCssColor(effectiveColor) ??
@@ -187,7 +233,7 @@ export function SkillEditor({
         savedSkill = await updateSkill(
           editingSkill.path,
           name,
-          description.trim(),
+          normalizeDescription(description),
           instructions,
           effectiveColor,
         );
@@ -196,7 +242,7 @@ export function SkillEditor({
           saveLocation !== GLOBAL_VALUE ? saveLocation : undefined;
         savedSkill = await createSkill(
           name,
-          description.trim(),
+          normalizeDescription(description),
           instructions,
           effectiveColor,
           { projectId },
@@ -264,7 +310,7 @@ export function SkillEditor({
   const isBuiltIn = false;
 
   return (
-    <Sheet open={isOpen} onOpenChange={(open) => !open && handleClose()}>
+    <Sheet open={isOpen} onOpenChange={(open) => !open && requestClose()}>
       <SheetContent
         className={SHEET_CONTENT_CLASS}
         closeButtonClassName={CLOSE_BUTTON_CLASS}
@@ -486,7 +532,7 @@ export function SkillEditor({
                 type="button"
                 variant="ghost"
                 size="sm"
-                onClick={handleClose}
+                onClick={requestClose}
                 disabled={saving}
                 className="h-10 rounded-full px-4 text-sm hover:bg-[var(--surface-editor-control-hover)]"
               >
@@ -511,6 +557,29 @@ export function SkillEditor({
           </div>
         </form>
       </SheetContent>
+
+      <AlertDialog open={discardDialogOpen} onOpenChange={setDiscardDialogOpen}>
+        <AlertDialogContent className="max-w-sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("dialog.discardTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("dialog.discardDescription")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("dialog.keepEditing")}</AlertDialogCancel>
+            <AlertDialogAction
+              className={buttonVariants({
+                variant: "primary",
+                destructive: true,
+              })}
+              onClick={discardAndClose}
+            >
+              {t("dialog.discard")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Sheet>
   );
 }

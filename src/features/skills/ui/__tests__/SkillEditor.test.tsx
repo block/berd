@@ -1,6 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { resolveSkillPillTone } from "../../lib/resolveSkillPillTone";
 import { SkillEditor } from "../SkillEditor";
 
 vi.mock("../../api/skills", () => ({
@@ -61,6 +62,191 @@ describe("SkillEditor", () => {
         />,
       );
       expect(screen.getByText("Edit skill")).toBeInTheDocument();
+    });
+  });
+
+  // ── Closing ───────────────────────────────────────────────────────
+
+  describe("closing", () => {
+    it("closes immediately when no fields have changed", async () => {
+      const user = userEvent.setup();
+      const onClose = vi.fn();
+      render(<SkillEditor {...defaultProps} onClose={onClose} />);
+
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+      expect(onClose).toHaveBeenCalledOnce();
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    });
+
+    it("asks for confirmation before closing with unsaved input", async () => {
+      const user = userEvent.setup();
+      const onClose = vi.fn();
+      render(<SkillEditor {...defaultProps} onClose={onClose} />);
+
+      const nameInput = screen.getByPlaceholderText("my-skill-name");
+      await user.type(nameInput, "work-in-progress");
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+      expect(onClose).not.toHaveBeenCalled();
+      expect(
+        screen.getByRole("alertdialog", {
+          name: "Discard unsaved changes?",
+        }),
+      ).toBeInTheDocument();
+      expect(nameInput).toHaveValue("work-in-progress");
+    });
+
+    it("keeps the editor and its input when discard is canceled", async () => {
+      const user = userEvent.setup();
+      const onClose = vi.fn();
+      render(<SkillEditor {...defaultProps} onClose={onClose} />);
+
+      const nameInput = screen.getByPlaceholderText("my-skill-name");
+      await user.type(nameInput, "work-in-progress");
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+      await user.click(screen.getByRole("button", { name: "Keep editing" }));
+
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+      expect(nameInput).toHaveValue("work-in-progress");
+    });
+
+    it("discards input and closes after confirmation", async () => {
+      const user = userEvent.setup();
+      const onClose = vi.fn();
+      render(<SkillEditor {...defaultProps} onClose={onClose} />);
+
+      await user.type(
+        screen.getByPlaceholderText("my-skill-name"),
+        "work-in-progress",
+      );
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+      await user.click(screen.getByRole("button", { name: "Discard" }));
+
+      expect(onClose).toHaveBeenCalledOnce();
+    });
+
+    it("asks for confirmation when Escape would close dirty input", async () => {
+      const user = userEvent.setup();
+      const onClose = vi.fn();
+      render(<SkillEditor {...defaultProps} onClose={onClose} />);
+
+      await user.type(
+        screen.getByPlaceholderText("my-skill-name"),
+        "work-in-progress",
+      );
+      await act(async () => {
+        fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+      });
+
+      expect(onClose).not.toHaveBeenCalled();
+      expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
+    });
+
+    it("asks for confirmation when clicking outside dirty input", async () => {
+      const user = userEvent.setup();
+      const onClose = vi.fn();
+      render(<SkillEditor {...defaultProps} onClose={onClose} />);
+
+      await user.type(
+        screen.getByPlaceholderText("my-skill-name"),
+        "work-in-progress",
+      );
+      const overlay = document.querySelector<HTMLElement>(
+        '[data-slot="sheet-overlay"]',
+      );
+      expect(overlay).not.toBeNull();
+      if (!overlay) throw new Error("Expected the skill editor overlay");
+      await user.click(overlay);
+
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    });
+
+    it("treats pinning the derived color as an unsaved change", async () => {
+      const user = userEvent.setup();
+      const onClose = vi.fn();
+      const skillName = "code-review";
+      render(
+        <SkillEditor
+          {...defaultProps}
+          onClose={onClose}
+          editingSkill={{
+            name: skillName,
+            description: "Reviews code",
+            instructions: "Review carefully",
+            path: "/mock/.agents/skills/code-review",
+            fileLocation: "/mock/.agents/skills/code-review/SKILL.md",
+            color: null,
+          }}
+        />,
+      );
+
+      const derivedColor = resolveSkillPillTone(skillName);
+      await user.click(
+        screen.getByRole("button", { name: `Color ${derivedColor}` }),
+      );
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    });
+
+    it("ignores description whitespace that is trimmed when saved", async () => {
+      const user = userEvent.setup();
+      const onClose = vi.fn();
+      render(
+        <SkillEditor
+          {...defaultProps}
+          onClose={onClose}
+          editingSkill={{
+            name: "code-review",
+            description: "Reviews code",
+            instructions: "Review carefully",
+            path: "/mock/.agents/skills/code-review",
+            fileLocation: "/mock/.agents/skills/code-review/SKILL.md",
+            color: null,
+          }}
+        />,
+      );
+
+      const descriptionInput = screen.getByPlaceholderText(
+        "What it does and when to use it...",
+      );
+      await user.type(descriptionInput, "   ");
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+      expect(onClose).toHaveBeenCalledOnce();
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    });
+
+    it("asks for confirmation before discarding edits to an existing skill", async () => {
+      const user = userEvent.setup();
+      const onClose = vi.fn();
+      render(
+        <SkillEditor
+          {...defaultProps}
+          onClose={onClose}
+          editingSkill={{
+            name: "code-review",
+            description: "Reviews code",
+            instructions: "Review carefully",
+            path: "/mock/.agents/skills/code-review",
+            fileLocation: "/mock/.agents/skills/code-review/SKILL.md",
+            color: null,
+          }}
+        />,
+      );
+
+      const descriptionInput = screen.getByPlaceholderText(
+        "What it does and when to use it...",
+      );
+      await user.type(descriptionInput, " with extra care");
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.getByRole("alertdialog")).toBeInTheDocument();
     });
   });
 
