@@ -25,11 +25,12 @@ use berd_voice::protocol::{
 };
 use berd_voice::session::{PrepareOutcome, PrepareRequest, SessionCore};
 use berd_voice::{
+    estimated_spoken_through_utf8,
     local_assets::{
         LocalAssetLockError, LocalAssetRoots, LocalInstallError, LocalInstallErrorKind,
         LocalInstallPhase, LocalInstallProgress,
     },
-    ConfiguredTtsSlot, TtsBackend, TtsConfiguration, TtsConfigurationLease,
+    ConfiguredTtsSlot, DeliveryProgress, TtsBackend, TtsConfiguration, TtsConfigurationLease,
     TtsConfigurationRejection, TtsConfigurationRejectionKind, WavSynthesisErrorKind,
 };
 use serde::Serialize;
@@ -74,7 +75,7 @@ enum PlaybackEvent {
     #[cfg(test)]
     Started(u64),
     Completed(u64),
-    Interrupted(u64),
+    Interrupted(u64, u64),
     Failed(u64, String, bool),
 }
 
@@ -3280,13 +3281,17 @@ fn handle_playback_event(
                 writer,
             )?
         }
-        PlaybackEvent::Interrupted(speech_id) => {
+        PlaybackEvent::Interrupted(speech_id, spoken_through_utf8) => {
             let id = active.as_ref().map_or(0, |current| current.prepare_id);
             finish_playback(
                 core,
                 active,
                 speech_id,
-                SessionMessage::SpeechInterrupted { id, speech_id },
+                SessionMessage::SpeechInterrupted {
+                    id,
+                    speech_id,
+                    spoken_through_utf8,
+                },
                 writer,
             )?
         }
@@ -3361,7 +3366,14 @@ fn interrupt_active(
         let speech_id = current.speech_id;
         core.finish(speech_id);
         *active = None;
-        write_message(writer, &SessionMessage::SpeechInterrupted { id, speech_id })?;
+        write_message(
+            writer,
+            &SessionMessage::SpeechInterrupted {
+                id,
+                speech_id,
+                spoken_through_utf8: 0,
+            },
+        )?;
     }
     Ok(())
 }
@@ -3751,8 +3763,12 @@ fn spawn_playback(
 ) {
     thread::spawn(move || {
         let terminal = match play_tts(&text, backend.as_ref(), &output, &active) {
-            Ok(true) => PlaybackEvent::Completed(speech_id),
-            Ok(false) => PlaybackEvent::Interrupted(speech_id),
+            Ok((true, _)) => PlaybackEvent::Completed(speech_id),
+            Ok((false, delivery)) => PlaybackEvent::Interrupted(
+                speech_id,
+                u64::try_from(estimated_spoken_through_utf8(&text, &delivery))
+                    .expect("speech text is bounded well below u64"),
+            ),
             Err(failure) => {
                 PlaybackEvent::Failed(speech_id, failure.message, failure.output_quiescent)
             }
@@ -3766,10 +3782,16 @@ fn play_tts(
     backend: &dyn TtsBackend,
     output: &RemotePcmAudioOutput,
     active: &AtomicBool,
-) -> Result<bool, PlaybackFailure> {
+) -> Result<(bool, DeliveryProgress), PlaybackFailure> {
     if let Err(message) = output.start() {
         if message == AUDIO_CANCELLED {
-            return Ok(false);
+            return Ok((
+                false,
+                DeliveryProgress {
+                    sample_rate: backend.pcm_spec().sample_rate,
+                    segments: Vec::new(),
+                },
+            ));
         }
         return Err(PlaybackFailure {
             message,
@@ -3799,6 +3821,7 @@ fn synthesize_to_output(
         let _ = sender.send(PlaybackEvent::Started(speech_id));
         Ok(())
     })
+    .map(|(completed, _)| completed)
 }
 
 fn synthesize_to_output_with_finish(
@@ -3808,7 +3831,7 @@ fn synthesize_to_output_with_finish(
     active: &AtomicBool,
     finish_writes: &mut dyn FnMut() -> Result<(), String>,
     on_started: &mut dyn FnMut() -> Result<(), String>,
-) -> Result<bool, PlaybackFailure> {
+) -> Result<(bool, DeliveryProgress), PlaybackFailure> {
     use berd_voice::{DrainPolicy, DrainTimeoutOutcome, OutboundOutcome, OutboundPlayback};
 
     let spec = backend.pcm_spec();
@@ -3829,7 +3852,7 @@ fn synthesize_to_output_with_finish(
         })?
         == OutboundOutcome::Interrupted
     {
-        return Ok(false);
+        return Ok((false, playback.snapshot()));
     }
     if let Err(message) = finish_writes() {
         let output_quiescent = output.cancel_and_snapshot().is_ok();
@@ -3838,7 +3861,7 @@ fn synthesize_to_output_with_finish(
             output_quiescent,
         });
     }
-    playback
+    let outcome = playback
         .finish(
             DrainPolicy {
                 timeout: Some(Duration::from_secs(2)),
@@ -3847,11 +3870,11 @@ fn synthesize_to_output_with_finish(
             },
             &mut |_| Ok(()),
         )
-        .map(|outcome| outcome == OutboundOutcome::Completed)
         .map_err(|failure| PlaybackFailure {
             message: failure.message,
             output_quiescent: failure.output_quiescent,
-        })
+        })?;
+    Ok((outcome == OutboundOutcome::Completed, playback.snapshot()))
 }
 
 #[cfg(test)]
@@ -6135,7 +6158,7 @@ mod tests {
             messages(&output),
             [
                 json!({"type":"cancel_result","id":7,"outcome":"cancelled","speech_id":1}),
-                json!({"type":"speech_interrupted","id":7,"speech_id":1}),
+                json!({"type":"speech_interrupted","id":7,"speech_id":1,"spoken_through_utf8":0}),
                 json!({"type":"cancel_result","id":7,"outcome":"stale","speech_id":null}),
             ]
         );
@@ -6526,7 +6549,9 @@ mod tests {
         interrupt_active(&mut core, &mut active, &mut output).unwrap();
         let (sender, receiver) = mpsc::channel();
         sender.send(PlaybackEvent::Started(speech_id)).unwrap();
-        sender.send(PlaybackEvent::Interrupted(speech_id)).unwrap();
+        sender
+            .send(PlaybackEvent::Interrupted(speech_id, 0))
+            .unwrap();
 
         finish_shutdown_playback(
             &receiver,

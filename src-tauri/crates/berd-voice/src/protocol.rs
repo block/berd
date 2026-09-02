@@ -220,6 +220,7 @@ pub enum SessionMessage {
     SpeechInterrupted {
         id: u64,
         speech_id: u64,
+        spoken_through_utf8: u64,
     },
     SpeechFailed {
         id: u64,
@@ -351,6 +352,15 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&SessionMessage::RecognitionPending { active: false }).unwrap(),
             r#"{"type":"recognition_pending","active":false}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&SessionMessage::SpeechInterrupted {
+                id: 7,
+                speech_id: 8,
+                spoken_through_utf8: 12,
+            })
+            .unwrap(),
+            r#"{"type":"speech_interrupted","id":7,"speech_id":8,"spoken_through_utf8":12}"#
         );
         assert_eq!(
             serde_json::from_str::<SessionRequest>(

@@ -35,8 +35,8 @@ pub use configured_tts::{
 #[cfg(target_os = "macos")]
 pub use macos_audio_output::PocketAudioPlayer;
 pub use outbound::{
-    DeliveryProgress, DeliverySegment, DrainPolicy, DrainTimeoutOutcome, OutboundFailure,
-    OutboundOutcome, OutboundPlayback,
+    estimated_spoken_through_utf8, DeliveryProgress, DeliverySegment, DrainPolicy,
+    DrainTimeoutOutcome, OutboundFailure, OutboundOutcome, OutboundPlayback,
 };
 pub use parakeet::ParakeetRecognizer;
 pub use pocket::{

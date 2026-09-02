@@ -306,7 +306,7 @@ cancellation and shutdown terminals.
 {"type":"cancel_result","id":u64,"outcome":"cancelled"|"stale","speech_id":u64|null}
 {"type":"speech_started","id":u64,"speech_id":u64}
 {"type":"speech_completed","id":u64,"speech_id":u64}
-{"type":"speech_interrupted","id":u64,"speech_id":u64}
+{"type":"speech_interrupted","id":u64,"speech_id":u64,"spoken_through_utf8":u64}
 {"type":"speech_failed","id":u64,"speech_id":u64,"message":string}
 {"type":"fatal","message":string}
 ```
@@ -314,7 +314,7 @@ cancellation and shutdown terminals.
 `query_state.after` is an exclusive token cutoff; `0` requests all. `cancel.id`
 targets the originating `prepare_speak.id`. `cancel_result` is emitted first. A
 live held target then emits `not_admitted(cancelled)`; a live admitted target
-then emits `speech_interrupted`. Repeated or unknown cancellation is stale.
+then emits `speech_interrupted`. `spoken_through_utf8` is Berd Voice's conservative UTF-8 byte boundary through the last fully played word; hosts may use it to distinguish the estimated spoken prefix from the unspoken suffix without recreating delivery policy. Repeated or unknown cancellation is stale.
 Every speech event carries the originating prepare ID. `speech_started` appears
 only after the first PCM Chunk is accepted by the host, and exactly one terminal
 message follows every admission.

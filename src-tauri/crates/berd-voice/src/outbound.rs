@@ -21,6 +21,52 @@ pub struct DeliveryProgress {
     pub segments: Vec<DeliverySegment>,
 }
 
+/// Estimate a conservative UTF-8 byte boundary through the last fully played
+/// word. Hosts can render the remaining suffix as not spoken without owning a
+/// second delivery estimator.
+pub fn estimated_spoken_through_utf8(text: &str, delivery: &DeliveryProgress) -> usize {
+    let Some(segment) = delivery.segments.first() else {
+        return 0;
+    };
+    if delivery.segments.len() != 1 || segment.text != text || segment.total_frames == 0 {
+        return 0;
+    }
+    if segment.synthesis_complete && segment.played_frames >= segment.total_frames {
+        return text.len();
+    }
+
+    let character_count = text.chars().count();
+    let generated_cutoff = ((character_count as u128 * segment.played_frames as u128)
+        / segment.total_frames as u128) as usize;
+    let approximate_cutoff = if segment.synthesis_complete {
+        generated_cutoff
+    } else {
+        let duration_cutoff = ((segment.played_frames as u128 * 6)
+            / u128::from(delivery.sample_rate.max(1))) as usize;
+        generated_cutoff.min(duration_cutoff)
+    };
+
+    let mut character_index = 0;
+    let mut last_word_end = 0;
+    let mut in_word = false;
+    for (byte_index, character) in text.char_indices() {
+        if character_index >= approximate_cutoff {
+            break;
+        }
+        let is_word = character.is_alphanumeric();
+        if in_word && !is_word {
+            last_word_end = byte_index;
+        }
+        in_word = is_word;
+        character_index += 1;
+    }
+    if character_index >= character_count && in_word {
+        text.len()
+    } else {
+        last_word_end
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutboundOutcome {
     Completed,
@@ -401,6 +447,43 @@ mod tests {
     use crate::TtsPcmSpec;
     use std::sync::atomic::{AtomicU64, AtomicUsize};
     use std::sync::Mutex;
+
+    #[test]
+    fn spoken_through_estimate_uses_completed_word_utf8_boundary() {
+        let text = "Hello café world.";
+        let delivery = DeliveryProgress {
+            sample_rate: 24_000,
+            segments: vec![DeliverySegment {
+                text: text.into(),
+                played_frames: 14_000,
+                total_frames: 24_000,
+                synthesis_complete: true,
+            }],
+        };
+
+        let cutoff = estimated_spoken_through_utf8(text, &delivery);
+        assert_eq!(&text[..cutoff], "Hello");
+        assert!(text.is_char_boundary(cutoff));
+    }
+
+    #[test]
+    fn spoken_through_estimate_is_conservative_for_incomplete_synthesis() {
+        let text = "One two three four five six seven eight.";
+        let delivery = DeliveryProgress {
+            sample_rate: 24_000,
+            segments: vec![DeliverySegment {
+                text: text.into(),
+                played_frames: 24_000,
+                total_frames: 24_000,
+                synthesis_complete: false,
+            }],
+        };
+
+        assert_eq!(
+            &text[..estimated_spoken_through_utf8(text, &delivery)],
+            "One"
+        );
+    }
 
     struct FakeTts {
         chunks: Vec<Vec<f32>>,
