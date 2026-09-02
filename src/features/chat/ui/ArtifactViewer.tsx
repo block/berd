@@ -598,7 +598,14 @@ export function ArtifactViewer({
                 />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                {/* A deleted file cannot be handed to an editor, so the
+                    action is disabled rather than left as a dead click.
+                    Reveal stays enabled: file managers can still show the
+                    containing folder. */}
                 <DropdownMenuItem
+                  disabled={
+                    diskStatus === "diverged" && divergedKind === "missing"
+                  }
                   onSelect={() => {
                     void openResolvedPath(artifact.resolvedPath).catch(
                       () => {},
@@ -694,6 +701,12 @@ export function ArtifactViewer({
           <MarkdownBody
             markdownView={markdownView}
             textState={renderedTextState}
+            // A deleted file cannot be handed to an editor; the "file
+            // deleted" strip above is the whole answer (mirrors the strip
+            // hiding its Reload button for the same reason).
+            fileIsMissing={
+              diskStatus === "diverged" && divergedKind === "missing"
+            }
             onOpenExternally={() => {
               void openResolvedPath(artifact.resolvedPath).catch(() => {});
             }}
@@ -776,10 +789,13 @@ function ImageBody({
 function MarkdownBody({
   markdownView,
   textState,
+  fileIsMissing = false,
   onOpenExternally,
 }: {
   markdownView: MarkdownView;
   textState: TextState;
+  /** The file is gone from disk, so opening it externally cannot succeed. */
+  fileIsMissing?: boolean;
   onOpenExternally: () => void;
 }) {
   const { t } = useTranslation("chat");
@@ -797,9 +813,16 @@ function MarkdownBody({
         <p className="text-center text-sm text-muted-foreground">
           {t("artifactViewer.loadError")}
         </p>
-        <Button variant="outline" size="sm" onClick={onOpenExternally}>
-          {t("artifactViewer.openExternally")}
-        </Button>
+        {/* "Open in editor" is an escape hatch for files Berd can't render
+            itself (encoding, size, permissions) — but a DELETED file can't be
+            opened by anything, so offering it would be a guaranteed dead
+            click. Polling keeps watching; if the file reappears the view
+            heals and the action returns. */}
+        {!fileIsMissing ? (
+          <Button variant="outline" size="sm" onClick={onOpenExternally}>
+            {t("artifactViewer.openExternally")}
+          </Button>
+        ) : null}
       </div>
     );
   }
