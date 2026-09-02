@@ -234,6 +234,34 @@ pub fn command() -> Command {
                 ),
         ))
         .subcommand(control_plane_args(
+            Command::new("delete")
+                .about("Logically delete an app and retire its active route")
+                .long_about(
+                    "Request one owner-only Apps Platform logical deletion. The active route is \
+                     retired while uploaded versions, artifacts, and stack resources are retained. \
+                     --confirm-app-id must exactly match APP_ID.",
+                )
+                .arg(
+                    Arg::new("app-id")
+                        .value_name("APP_ID")
+                        .required(true)
+                        .help("App identifier returned by `bb apps list` or `bb apps create`"),
+                )
+                .arg(
+                    Arg::new("confirm-app-id")
+                        .long("confirm-app-id")
+                        .value_name("APP_ID")
+                        .required(true)
+                        .help("Repeat the exact app identifier to confirm logical deletion"),
+                )
+                .arg(
+                    Arg::new("environment")
+                        .long("environment")
+                        .value_name("ENVIRONMENT")
+                        .help("Optional Compose environment override"),
+                ),
+        ))
+        .subcommand(control_plane_args(
             Command::new("ready")
                 .about("Check readiness for an exact deployed app version")
                 .long_about(
@@ -336,6 +364,7 @@ fn dispatch(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
         Some(("create", create_matches)) => run_create(config, create_matches),
         Some(("deploy", deploy_matches)) => run_deploy(config, deploy_matches),
         Some(("rollback", rollback_matches)) => run_rollback(config, rollback_matches),
+        Some(("delete", delete_matches)) => run_delete(config, delete_matches),
         Some(("ready", ready_matches)) => run_ready(config, ready_matches),
         Some(("debug", debug_matches)) => run_debug(config, debug_matches),
         _ => anyhow::bail!("expected an apps subcommand"),
@@ -471,6 +500,29 @@ fn run_rollback(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     print_json(&response)
 }
 
+fn run_delete(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
+    let app_id = matches
+        .get_one::<String>("app-id")
+        .context("expected app id")?;
+    let confirm_app_id = matches
+        .get_one::<String>("confirm-app-id")
+        .context("expected delete confirmation app id")?;
+    validate_delete_confirmation(app_id, confirm_app_id)?;
+    let request = DeleteAppRequest {
+        environment: matches.get_one::<String>("environment").map(String::as_str),
+    };
+    let (client, credential) = control_plane_context(config, matches)?;
+    let response = client.delete_app(&credential, app_id, &request)?;
+    print_json(&response)
+}
+
+fn validate_delete_confirmation(app_id: &str, confirm_app_id: &str) -> Result<()> {
+    if confirm_app_id != app_id {
+        anyhow::bail!("delete requires --confirm-app-id to exactly match APP_ID ({app_id})");
+    }
+    Ok(())
+}
+
 fn run_ready(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     let app_id = matches
         .get_one::<String>("app-id")
@@ -532,6 +584,12 @@ struct RollbackRequest<'a> {
     environment: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     version_id: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+struct DeleteAppRequest<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    environment: Option<&'a str>,
 }
 
 #[derive(Default)]
@@ -854,6 +912,22 @@ impl ControlPlaneClient {
                 .json(request)
                 .build()
                 .context("build Apps Platform rollback request")
+        })
+    }
+
+    fn delete_app(
+        &self,
+        credential: &ComposeSessionCredential,
+        app_id: &str,
+        request: &DeleteAppRequest<'_>,
+    ) -> Result<Value> {
+        let url = self.app_url(app_id, &[])?;
+        let path = url.path().to_string();
+        self.authorized_json_request(credential, "DELETE", &path, |authorization| {
+            self.standard_request(self.client.delete(url.clone()), authorization)
+                .json(request)
+                .build()
+                .context("build Apps Platform delete request")
         })
     }
 
@@ -1992,6 +2066,101 @@ mod tests {
     }
 
     #[test]
+    fn bb_apps_delete_process_sends_confirmed_target_and_preserves_retention_details() {
+        let credential = "apps-e2e-only.delete.session+credential";
+        let deleted = json!({
+            "ok": true,
+            "app_id": "merchant/lookup app",
+            "environment": "staging/west",
+            "owner": "apps-user",
+            "deleted_by": "apps-user",
+            "deleted_at": "2026-09-02T20:00:00Z",
+            "active_route_ref": "s3://apps/merchant-lookup/staging/active.json",
+            "route_revision": 11,
+            "status": "idle",
+            "artifacts_retained": true,
+            "stack_retained": true,
+            "versions_retained": 3
+        });
+        let auth_server = ProcessServer::start(vec![process_auth_response()]);
+        let control_plane = ProcessServer::start(vec![ProcessResponse::json(deleted.clone())]);
+        let mut command = process_command(
+            &auth_server,
+            &control_plane,
+            &[
+                "apps",
+                "delete",
+                "merchant/lookup app",
+                "--confirm-app-id",
+                "merchant/lookup app",
+                "--environment",
+                "staging/west",
+                "--base-url",
+                APPROVED_TEST_BASE_URL,
+                "--client-version",
+                "0.2.0",
+                "--json",
+            ],
+            credential,
+        );
+
+        let output = command.output().expect("run Apps delete process command");
+        assert!(
+            output.status.success(),
+            "stderr was: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&process_stdout(&output))
+                .expect("parse delete process output"),
+            deleted
+        );
+        let auth_requests = auth_server.finish();
+        let requests = control_plane.finish();
+        assert_process_auth(&auth_requests[0], credential);
+        assert_eq!(requests.len(), 1);
+        assert_process_control_plane(
+            &requests[0],
+            "DELETE",
+            "/v1/agent/apps/merchant%2Flookup%20app",
+            credential,
+        );
+        assert_eq!(requests[0].body, json!({"environment": "staging/west"}));
+    }
+
+    #[test]
+    fn bb_apps_delete_rejects_mismatched_confirmation_before_auth_or_network() {
+        let credential = "apps-e2e-only.delete-mismatch.session+credential";
+        let auth_server = ProcessServer::start(vec![]);
+        let control_plane = ProcessServer::start(vec![]);
+        let mut command = process_command(
+            &auth_server,
+            &control_plane,
+            &[
+                "apps",
+                "delete",
+                "merchant-lookup",
+                "--confirm-app-id",
+                "different-app",
+                "--base-url",
+                APPROVED_TEST_BASE_URL,
+                "--json",
+            ],
+            credential,
+        );
+
+        let output = command
+            .output()
+            .expect("run Apps delete with mismatched confirmation");
+        assert!(!output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("--confirm-app-id to exactly match APP_ID (merchant-lookup)"));
+        assert!(!stderr.contains(credential));
+        assert!(auth_server.finish().is_empty());
+        assert!(control_plane.finish().is_empty());
+    }
+
+    #[test]
     fn bb_apps_ready_process_requests_exact_version_and_preserves_response() {
         let credential = "apps-e2e-only.ready.session+credential";
         let ready = json!({
@@ -2544,6 +2713,63 @@ mod tests {
         }
 
         server_thread.join().expect("join control-plane server");
+    }
+
+    #[test]
+    fn delete_supports_default_and_explicit_environment_requests() {
+        let server = Server::http("127.0.0.1:0").expect("bind control-plane server");
+        let base_url = format!("http://{}", server.server_addr());
+        let server_thread = thread::spawn(move || {
+            for expected_body in [json!({}), json!({"environment": "staging/west?cell=1"})] {
+                let mut request = server.recv().expect("receive delete request");
+                assert_eq!(request.method().as_str(), "DELETE");
+                assert_eq!(request.url(), "/v1/agent/apps/app%2Fwith%20space");
+                let mut body = String::new();
+                request
+                    .as_reader()
+                    .read_to_string(&mut body)
+                    .expect("read delete request body");
+                assert_eq!(
+                    serde_json::from_str::<Value>(&body).expect("parse delete request body"),
+                    expected_body
+                );
+                request
+                    .respond(
+                        Response::from_string(r#"{"ok":true}"#).with_header(
+                            Header::from_bytes("Content-Type", "application/json")
+                                .expect("build content type"),
+                        ),
+                    )
+                    .expect("respond to delete request");
+            }
+        });
+        let client = test_control_plane_client(&base_url, Duration::from_secs(2));
+        let credential = test_credential("delete_session_credential_123456");
+
+        for request in [
+            DeleteAppRequest { environment: None },
+            DeleteAppRequest {
+                environment: Some("staging/west?cell=1"),
+            },
+        ] {
+            client
+                .delete_app(&credential, "app/with space", &request)
+                .expect("request delete response");
+        }
+
+        server_thread.join().expect("join control-plane server");
+    }
+
+    #[test]
+    fn delete_confirmation_requires_an_exact_match() {
+        validate_delete_confirmation("merchant-lookup", "merchant-lookup")
+            .expect("accept exact app id confirmation");
+        for confirmation in ["different-app", "Merchant-Lookup", "merchant-lookup "] {
+            let error = validate_delete_confirmation("merchant-lookup", confirmation)
+                .expect_err("reject mismatched app id confirmation");
+            assert!(error.to_string().contains("exactly match APP_ID"));
+            assert!(!error.to_string().contains(confirmation));
+        }
     }
 
     #[test]
