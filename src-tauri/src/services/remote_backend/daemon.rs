@@ -760,6 +760,15 @@ mod tests {
             path_override: Option<&str>,
             home: &std::path::Path,
         ) -> std::process::Child {
+            spawn_script_source(args, path_override, home, BOOTSTRAP_SCRIPT)
+        }
+
+        fn spawn_script_source(
+            args: &[&str],
+            path_override: Option<&str>,
+            home: &std::path::Path,
+            script: &str,
+        ) -> std::process::Child {
             let nonce = "berd-test-nonce";
             let mut command = StdCommand::new("bash");
             command
@@ -781,7 +790,7 @@ mod tests {
                 .stdin
                 .take()
                 .unwrap()
-                .write_all(BOOTSTRAP_SCRIPT.as_bytes())
+                .write_all(script.as_bytes())
                 .unwrap();
             child
         }
@@ -795,6 +804,46 @@ mod tests {
                 .filter_map(|line| line.strip_prefix(&prefix).map(str::to_string))
                 .collect();
             (lines, out.status.code())
+        }
+
+        fn legacy_lock_holder_script(marker: &str, release: &str) -> String {
+            format!(
+                r#"#!/usr/bin/env bash
+set -u
+STATE_DIR="${{XDG_STATE_HOME:-$HOME/.local/state}}/berd/remote"
+LOCK_DIR="$STATE_DIR/daemon.lock"
+LOCK_OWNER="$LOCK_DIR/owner"
+b64() {{ printf %s "$1" | base64 | tr -d '\n'; }}
+process_identity() {{
+  if [ -r "/proc/$$/stat" ]; then
+    start="$(sed 's/^.*) //' "/proc/$$/stat" | awk '{{print $20}}')"
+    printf 'proc:%s' "$start"
+  else
+    ps -p "$$" -o lstart= -o command= | sed 's/^/ps:/'
+  fi
+}}
+mkdir -p "$STATE_DIR"
+while ! mkdir "$LOCK_DIR" 2>/dev/null; do sleep 0.01; done
+owner="$$ $(b64 "$(process_identity)")"
+printf '%s\n' "$owner" >"$LOCK_OWNER"
+: >"$STATE_DIR/{marker}"
+while [ ! -f "$STATE_DIR/{release}" ]; do sleep 0.01; done
+if [ "$(cat "$LOCK_OWNER" 2>/dev/null)" = "$owner" ]; then
+  rm -f "$LOCK_OWNER"
+  rmdir "$LOCK_DIR" 2>/dev/null || true
+fi
+"#
+            )
+        }
+
+        fn wait_for_path(path: &std::path::Path, message: &str) {
+            for _ in 0..500 {
+                if path.exists() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            panic!("{message}");
         }
 
         fn b64_arg(value: &str) -> String {
@@ -858,7 +907,9 @@ if [ "$1" = "serve" ]; then
   port=""
   while [ $# -gt 0 ]; do [ "$1" = "--port" ] && port="$2"; shift; done
   exec python3 -c 'import socket,sys,time
-sys.stderr.write("x" * (5 * 1024 * 1024) + "\nBOUNDED-TAIL\n"); sys.stderr.flush()
+for start in range(0, 80000, 1000):
+ sys.stderr.write("".join(f"{i:08d} " + "x" * 54 + "\n" for i in range(start, start + 1000)))
+sys.stderr.flush()
 s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
 s.bind(("127.0.0.1",int(sys.argv[1]))); s.listen(5); time.sleep(120)' "$port"
 fi
@@ -886,6 +937,28 @@ for _ in range(80):
  sys.stderr.write("z" * 65536); sys.stderr.flush(); time.sleep(0.005)
 open(os.path.join(os.environ["HOME"],"no-newline-complete"),"w").close()
 time.sleep(120)' "$port"
+fi
+"#,
+            )
+            .unwrap();
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        }
+
+        fn write_diagnostic_goose_shim(dir: &std::path::Path) -> std::path::PathBuf {
+            let path = dir.join("goose-diagnostic");
+            std::fs::write(
+                &path,
+                r#"#!/usr/bin/env bash
+if [ "$1" = "--version" ]; then echo "goose diagnostic"; exit 0; fi
+if [ "$1" = "serve" ]; then
+  port=""
+  while [ $# -gt 0 ]; do [ "$1" = "--port" ] && port="$2"; shift; done
+  exec python3 -c 'import socket,sys,time
+sys.stderr.write("IMPORTANT-STARTUP-DIAGNOSTIC\n"); sys.stderr.flush()
+s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+s.bind(("127.0.0.1",int(sys.argv[1]))); s.listen(5); time.sleep(120)' "$port"
 fi
 "#,
             )
@@ -1144,26 +1217,174 @@ fi
         }
 
         #[test]
-        fn synchronized_reclaimers_do_not_remove_a_successor_lock() {
+        fn a_crashed_legacy_reclaimer_does_not_block_future_daemon_operations() {
             let home = tempfile::tempdir().unwrap();
             let state_dir = home.path().join(".state/berd/remote");
             let lock_dir = state_dir.join("daemon.lock");
             std::fs::create_dir_all(&lock_dir).unwrap();
             std::fs::write(lock_dir.join("owner"), "999999 invalid-identity").unwrap();
 
-            let reclaimers = (0..6)
+            let paused_marker = state_dir.join("reclaim-paused");
+            let paused_script = BOOTSTRAP_SCRIPT.replace(
+                "  if mv \"$LEGACY_LOCK_DIR\" \"$legacy_claim\" 2>/dev/null; then",
+                "  : > \"$STATE_DIR/reclaim-paused\"\n  while [ ! -f \"$STATE_DIR/reclaim-continue\" ]; do sleep 0.01; done\n  if mv \"$LEGACY_LOCK_DIR\" \"$legacy_claim\" 2>/dev/null; then",
+            );
+            assert_ne!(paused_script, BOOTSTRAP_SCRIPT);
+            let mut reclaimer =
+                spawn_script_source(&["shutdown"], None, home.path(), &paused_script);
+            for _ in 0..500 {
+                if paused_marker.exists() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert!(
+                paused_marker.exists(),
+                "reclaimer never reached the stale legacy generation"
+            );
+            assert!(StdCommand::new("kill")
+                .arg("-KILL")
+                .arg(reclaimer.id().to_string())
+                .status()
+                .unwrap()
+                .success());
+            assert_eq!(reclaimer.wait().unwrap().code(), None);
+
+            // Neither the stale legacy lock nor the ownerless reclaim mutex
+            // used by the previous implementation participates in the unique
+            // ticket protocol.
+            std::fs::create_dir(state_dir.join("daemon.lock.reclaim")).unwrap();
+            let (lines, code) = run_script(&["shutdown"], None, home.path());
+            assert_eq!(code, Some(0), "lines: {lines:?}");
+            assert!(lines.iter().any(|line| line == "STOPPED"));
+        }
+
+        #[test]
+        fn legacy_reclaimer_does_not_claim_a_live_successor_generation() {
+            let home = tempfile::tempdir().unwrap();
+            let state_dir = home.path().join(".state/berd/remote");
+            let lock_dir = state_dir.join("daemon.lock");
+            std::fs::create_dir_all(&lock_dir).unwrap();
+            std::fs::write(lock_dir.join("owner"), "999999 invalid-identity").unwrap();
+
+            let paused_script = BOOTSTRAP_SCRIPT.replace(
+                "        legacy_guard=\"$LEGACY_LOCK_DIR/.berd-reclaim.$NONCE.$$.$compat_attempt\"",
+                "        : > \"$STATE_DIR/reclaim-paused\"\n        while [ ! -f \"$STATE_DIR/reclaim-continue\" ]; do sleep 0.01; done\n        legacy_guard=\"$LEGACY_LOCK_DIR/.berd-reclaim.$NONCE.$$.$compat_attempt\"",
+            );
+            assert_ne!(paused_script, BOOTSTRAP_SCRIPT);
+            let reclaimer = spawn_script_source(&["shutdown"], None, home.path(), &paused_script);
+            wait_for_path(
+                &state_dir.join("reclaim-paused"),
+                "reclaimer never paused before generation claim",
+            );
+
+            std::fs::remove_file(lock_dir.join("owner")).unwrap();
+            std::fs::remove_dir(&lock_dir).unwrap();
+            let successor_source = legacy_lock_holder_script("successor-held", "successor-release");
+            let successor =
+                spawn_script_source(&["shutdown"], None, home.path(), &successor_source);
+            wait_for_path(
+                &state_dir.join("successor-held"),
+                "live successor never acquired legacy lock",
+            );
+
+            std::fs::write(state_dir.join("reclaim-continue"), "").unwrap();
+            std::thread::sleep(Duration::from_millis(250));
+            assert!(
+                lock_dir.join("owner").exists(),
+                "successor owner was reclaimed"
+            );
+
+            std::fs::write(state_dir.join("successor-release"), "").unwrap();
+            assert_eq!(successor.wait_with_output().unwrap().status.code(), Some(0));
+            let (lines, code) = collect_script(reclaimer);
+            assert_eq!(code, Some(0), "lines: {lines:?}");
+            assert!(lines.iter().any(|line| line == "STOPPED"));
+        }
+
+        #[test]
+        fn legacy_holder_blocks_ticket_client_until_release() {
+            let home = tempfile::tempdir().unwrap();
+            let state_dir = home.path().join(".state/berd/remote");
+            let legacy_source = legacy_lock_holder_script("legacy-held", "legacy-release");
+            let legacy = spawn_script_source(&["shutdown"], None, home.path(), &legacy_source);
+            wait_for_path(
+                &state_dir.join("legacy-held"),
+                "legacy client never acquired",
+            );
+
+            let ticket_source = BOOTSTRAP_SCRIPT.replace(
+                "      lock_held=1\n      return 0",
+                "      lock_held=1\n      : > \"$STATE_DIR/ticket-held\"\n      while [ ! -f \"$STATE_DIR/ticket-release\" ]; do sleep 0.01; done\n      return 0",
+            );
+            assert_ne!(ticket_source, BOOTSTRAP_SCRIPT);
+            let ticket = spawn_script_source(&["shutdown"], None, home.path(), &ticket_source);
+            std::thread::sleep(Duration::from_millis(250));
+            assert!(
+                !state_dir.join("ticket-held").exists(),
+                "ticket client overlapped a live legacy holder"
+            );
+            std::fs::write(state_dir.join("legacy-release"), "").unwrap();
+            assert_eq!(legacy.wait_with_output().unwrap().status.code(), Some(0));
+            wait_for_path(
+                &state_dir.join("ticket-held"),
+                "ticket client never acquired",
+            );
+            std::fs::write(state_dir.join("ticket-release"), "").unwrap();
+            let (lines, code) = collect_script(ticket);
+            assert_eq!(code, Some(0), "lines: {lines:?}");
+        }
+
+        #[test]
+        fn ticket_holder_blocks_legacy_client_until_release() {
+            let home = tempfile::tempdir().unwrap();
+            let state_dir = home.path().join(".state/berd/remote");
+            let ticket_source = BOOTSTRAP_SCRIPT.replace(
+                "      lock_held=1\n      return 0",
+                "      lock_held=1\n      : > \"$STATE_DIR/ticket-held\"\n      while [ ! -f \"$STATE_DIR/ticket-release\" ]; do sleep 0.01; done\n      return 0",
+            );
+            assert_ne!(ticket_source, BOOTSTRAP_SCRIPT);
+            let ticket = spawn_script_source(&["shutdown"], None, home.path(), &ticket_source);
+            wait_for_path(
+                &state_dir.join("ticket-held"),
+                "ticket client never acquired",
+            );
+
+            let legacy_source = legacy_lock_holder_script("legacy-held", "legacy-release");
+            let legacy = spawn_script_source(&["shutdown"], None, home.path(), &legacy_source);
+            std::thread::sleep(Duration::from_millis(250));
+            assert!(
+                !state_dir.join("legacy-held").exists(),
+                "legacy client overlapped a live ticket holder"
+            );
+
+            std::fs::write(state_dir.join("ticket-release"), "").unwrap();
+            let (lines, code) = collect_script(ticket);
+            assert_eq!(code, Some(0), "lines: {lines:?}");
+            wait_for_path(
+                &state_dir.join("legacy-held"),
+                "legacy client never acquired",
+            );
+            std::fs::write(state_dir.join("legacy-release"), "").unwrap();
+            assert_eq!(legacy.wait_with_output().unwrap().status.code(), Some(0));
+        }
+
+        #[test]
+        fn synchronized_ticket_holders_serialize_daemon_mutations() {
+            let home = tempfile::tempdir().unwrap();
+            let state_dir = home.path().join(".state/berd/remote");
+
+            let holders = (0..6)
                 .map(|_| spawn_script(&["shutdown"], None, home.path()))
                 .collect::<Vec<_>>();
-            for child in reclaimers {
+            for child in holders {
                 let (lines, code) = collect_script(child);
                 assert_eq!(code, Some(0), "lines: {lines:?}");
             }
 
-            assert!(!lock_dir.exists(), "lock remained after all shutdowns");
-            let leftovers = std::fs::read_dir(&state_dir)
+            let leftovers = std::fs::read_dir(state_dir.join("daemon.locks"))
                 .unwrap()
                 .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-                .filter(|name| name.contains("daemon.lock"))
                 .collect::<Vec<_>>();
             assert!(
                 leftovers.is_empty(),
@@ -1223,11 +1444,25 @@ fi
             let bin = tempfile::tempdir().unwrap();
             let goose = write_noisy_goose_shim(bin.path());
             let goose_arg = b64_arg(&goose.to_string_lossy());
+            let state_dir = home.path().join(".state/berd/remote");
+            let log_path = state_dir.join("goose-serve.log");
+            std::fs::create_dir_all(log_path.parent().unwrap()).unwrap();
+            std::fs::write(&log_path, b"!").unwrap();
 
-            let (lines, code) = run_script(&["ensure", "-", &goose_arg], None, home.path());
+            let instrumented_script = BOOTSTRAP_SCRIPT.replace(
+                "      if ! tail -c \"$LOG_RETAIN_BYTES\" \"$writer_log\" >\"$writer_tmp\" 2>/dev/null; then",
+                "      printf x >>\"$STATE_DIR/log-rotations\"\n      if ! tail -c \"$LOG_RETAIN_BYTES\" \"$writer_log\" >\"$writer_tmp\" 2>/dev/null; then",
+            );
+            assert_ne!(instrumented_script, BOOTSTRAP_SCRIPT);
+            let (lines, code) = collect_script(spawn_script_source(
+                &["ensure", "-", &goose_arg],
+                None,
+                home.path(),
+                &instrumented_script,
+            ));
             assert_eq!(code, Some(0), "lines: {lines:?}");
-            let log_path = home.path().join(".state/berd/remote/goose-serve.log");
             let mut log_len = 0;
+            let mut retained_ids = Vec::new();
             for _ in 0..100 {
                 let contents = std::fs::read(&log_path).unwrap_or_default();
                 log_len = contents.len() as u64;
@@ -1235,7 +1470,12 @@ fi
                     log_len <= 4 * 1024 * 1024,
                     "log transiently grew to {log_len} bytes"
                 );
-                if contents.ends_with(b"BOUNDED-TAIL\n") {
+                retained_ids = contents
+                    .split(|byte| *byte == b'\n')
+                    .filter(|line| line.len() == 63 && line[8] == b' ')
+                    .filter_map(|line| std::str::from_utf8(&line[..8]).ok()?.parse::<u32>().ok())
+                    .collect();
+                if retained_ids.last() == Some(&79_999) {
                     break;
                 }
                 std::thread::sleep(Duration::from_millis(20));
@@ -1243,10 +1483,24 @@ fi
             assert!(log_len > 0);
             assert!(log_len <= 4 * 1024 * 1024, "log grew to {log_len} bytes");
             assert!(
-                std::fs::read(&log_path)
-                    .unwrap_or_default()
-                    .ends_with(b"BOUNDED-TAIL\n"),
-                "bounded writer did not retain the final record tail"
+                retained_ids.len() > 1,
+                "bounded writer did not retain complete sequence records"
+            );
+            assert_eq!(retained_ids.last(), Some(&79_999));
+            let first_gap = retained_ids
+                .windows(2)
+                .find(|pair| pair[1] != pair[0] + 1)
+                .map(|pair| (pair[0], pair[1]));
+            assert!(
+                first_gap.is_none(),
+                "bounded writer dropped a sequence record at {first_gap:?}"
+            );
+            let rotations = std::fs::read(state_dir.join("log-rotations"))
+                .map(|bytes| bytes.len())
+                .unwrap_or(0);
+            assert!(
+                rotations <= 2,
+                "5 MiB of output triggered {rotations} full-tail rewrites"
             );
 
             let (_, code) = run_script(&["shutdown"], None, home.path());
@@ -1286,6 +1540,38 @@ fi
                 "producer did not finish its no-newline burst"
             );
             assert!(std::fs::metadata(&log_path).unwrap().len() <= 4 * 1024 * 1024);
+
+            let (_, code) = run_script(&["shutdown"], None, home.path());
+            assert_eq!(code, Some(0));
+        }
+
+        #[test]
+        fn daemon_log_publishes_a_short_diagnostic_while_producer_is_alive() {
+            if !python3_available() {
+                eprintln!("skipping: python3 unavailable for the goose serve shim");
+                return;
+            }
+            let home = tempfile::tempdir().unwrap();
+            let bin = tempfile::tempdir().unwrap();
+            let goose = write_diagnostic_goose_shim(bin.path());
+            let goose_arg = b64_arg(&goose.to_string_lossy());
+
+            let (lines, code) = run_script(&["ensure", "-", &goose_arg], None, home.path());
+            assert_eq!(code, Some(0), "lines: {lines:?}");
+            let log_path = home.path().join(".state/berd/remote/goose-serve.log");
+            let mut visible = false;
+            for _ in 0..100 {
+                let contents = std::fs::read_to_string(&log_path).unwrap_or_default();
+                if contents.contains("IMPORTANT-STARTUP-DIAGNOSTIC") {
+                    visible = true;
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert!(
+                visible,
+                "live producer's startup diagnostic stayed buffered"
+            );
 
             let (_, code) = run_script(&["shutdown"], None, home.path());
             assert_eq!(code, Some(0));

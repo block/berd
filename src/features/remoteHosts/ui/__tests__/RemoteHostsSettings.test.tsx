@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
@@ -17,6 +17,7 @@ const shutdownHost = vi.fn(async () => {});
 const runDoctor = vi.fn(async () => {});
 const refreshConfigHosts = vi.fn(async () => {});
 const syncBackendSnapshot = vi.fn(async () => {});
+const forgetHost = vi.fn(async () => {});
 const setGoosePath = vi.fn((_host: string, _path: string | null) => true);
 
 function seedStore(overrides?: Partial<ReturnType<typeof baseState>>) {
@@ -26,10 +27,15 @@ function seedStore(overrides?: Partial<ReturnType<typeof baseState>>) {
 function baseState() {
   return {
     configHosts: [] as string[],
+    manualHosts: [] as string[],
     statusByHost: {},
     doctorByHost: {},
     doctorPendingByHost: {},
     doctorErrorByHost: {},
+    forgottenHosts: {},
+    lifecycleByHost: {},
+    forgetPendingByHost: {},
+    forgetErrorByHost: {},
     recentDirsByHost: {},
     goosePathByHost: {} as Record<string, string>,
     ensureHostConnected,
@@ -38,6 +44,7 @@ function baseState() {
     runDoctor,
     refreshConfigHosts,
     syncBackendSnapshot,
+    forgetHost,
     setGoosePath,
   };
 }
@@ -95,6 +102,99 @@ describe("RemoteHostsSettings", () => {
     });
     renderWithProviders(<RemoteHostsSettings />);
     expect(screen.getByText("user@adhoc")).toBeInTheDocument();
+  });
+
+  it("can forget a failed free-form host", async () => {
+    const user = userEvent.setup();
+    const host = "ssh broken.blox";
+    seedStore({
+      statusByHost: {
+        [host]: {
+          state: "failed",
+          error: {
+            kind: "invalid-host",
+            message: "host must not contain whitespace or control characters",
+          },
+        },
+      },
+    });
+    renderWithProviders(<RemoteHostsSettings />);
+
+    await user.click(
+      screen.getByRole("button", {
+        name: enSettings.remoteHosts.actions.forget,
+      }),
+    );
+
+    expect(forgetHost).toHaveBeenCalledWith(host);
+  });
+
+  it("disables Forget while pending", () => {
+    const host = "broken.blox";
+    seedStore({
+      statusByHost: { [host]: { state: "failed" } },
+      forgetPendingByHost: { [host]: true },
+    });
+    renderWithProviders(<RemoteHostsSettings />);
+
+    const button = screen.getByRole("button", {
+      name: enSettings.remoteHosts.actions.forgetting,
+    });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("data-feedback-state", "loading");
+    expect(button).toHaveAttribute("aria-busy", "true");
+    expect(
+      within(button)
+        .getAllByText(enSettings.remoteHosts.actions.forget)
+        .every((label) => label.getAttribute("aria-hidden") === "true"),
+    ).toBe(true);
+  });
+
+  it("keeps the row and explains a rejected Forget", async () => {
+    const user = userEvent.setup();
+    const host = "broken.blox";
+    forgetHost.mockImplementationOnce(async () => {
+      useRemoteHostStore.setState((state) => ({
+        forgetPendingByHost: {
+          ...state.forgetPendingByHost,
+          [host]: false,
+        },
+        forgetErrorByHost: {
+          ...state.forgetErrorByHost,
+          [host]: { kind: "internal", message: "still connecting" },
+        },
+      }));
+      throw new Error("still connecting");
+    });
+    seedStore({
+      statusByHost: { [host]: { state: "failed" } },
+    });
+    renderWithProviders(<RemoteHostsSettings />);
+
+    await user.click(
+      screen.getByRole("button", {
+        name: enSettings.remoteHosts.actions.forget,
+      }),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      enSettings.remoteHosts.forget.error,
+    );
+    expect(screen.getByText(host)).toBeInTheDocument();
+  });
+
+  it("does not offer Forget for an ssh-config host", () => {
+    seedStore({
+      configHosts: ["configured"],
+      statusByHost: { configured: { state: "failed" } },
+    });
+    renderWithProviders(<RemoteHostsSettings />);
+
+    expect(
+      screen.queryByRole("button", {
+        name: enSettings.remoteHosts.actions.forget,
+      }),
+    ).not.toBeInTheDocument();
   });
 
   it("connects a disconnected host via the row's Connect button", async () => {

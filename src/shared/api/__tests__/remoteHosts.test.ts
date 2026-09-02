@@ -102,11 +102,12 @@ describe("remote host goose binary override", () => {
   });
 
   it("scopes a confirmed takeover to the inspected daemon instance", async () => {
-    await shutdownRemoteHost("devbox", "instance-token");
+    await shutdownRemoteHost("devbox", "instance-token", 7);
 
     expect(mockedInvoke).toHaveBeenCalledWith("remote_backend_shutdown", {
       host: "devbox",
       expectedInstanceToken: "instance-token",
+      expectedGeneration: 7,
     });
   });
 });

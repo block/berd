@@ -553,6 +553,7 @@ pub fn run() {
             commands::remote_backend::list_ssh_config_hosts,
             commands::remote_backend::remote_backend_connect,
             commands::remote_backend::remote_backend_disconnect,
+            commands::remote_backend::remote_backend_forget,
             commands::remote_backend::remote_backend_shutdown,
             commands::remote_backend::list_remote_backends,
             commands::remote_backend::check_remote_host,

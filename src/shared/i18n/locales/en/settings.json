@@ -700,6 +700,7 @@
       "connect": "Connect",
       "disconnect": "Disconnect",
       "forget": "Forget",
+      "forgetting": "Forgetting...",
       "shutdown": "Stop remote backend",
       "takeover": "Stop and reconnect"
     },
@@ -721,6 +722,9 @@
       "notFound": "Not found"
     },
     "empty": "No hosts found in ~/.ssh/config.",
+    "forget": {
+      "error": "Couldn't forget this host. Disconnect it or wait for the current connection attempt to finish, then try again."
+    },
     "gooseBinary": {
       "clear": "Clear",
       "hint": "Overrides the PATH lookup for goose on this host. Changing it restarts the remote backend on the next connect.",

@@ -37,6 +37,7 @@ export interface RemoteBackendConnection {
   localPort: number;
   gooseVersion: string;
   daemonReused: boolean;
+  incarnation: string;
   generation: number;
 }
 
@@ -53,6 +54,8 @@ export const REMOTE_BACKEND_STATUS_EVENT = "berd:remote-backend-status";
 
 export interface RemoteBackendStatusPayload {
   host: string;
+  incarnation: string;
+  generation: number;
   state: RemoteBackendState;
   wsUrl?: string;
   httpBaseUrl?: string;
@@ -64,6 +67,8 @@ export interface RemoteBackendStatusPayload {
 /** One entry from the `list_remote_backends` snapshot. */
 export interface RemoteBackendSnapshotEntry {
   host: string;
+  incarnation: string;
+  generation: number;
   state: RemoteBackendState;
   wsUrl?: string;
   httpBaseUrl?: string;
@@ -124,14 +129,21 @@ export async function disconnectRemoteHost(
   });
 }
 
+/** Remove an inactive host from the backend registry. */
+export async function forgetRemoteHost(host: string): Promise<void> {
+  await invoke("remote_backend_forget", { host });
+}
+
 /** Stop the remote daemon on `host` and tear down the tunnel. */
 export async function shutdownRemoteHost(
   host: string,
   expectedInstanceToken?: string,
+  expectedGeneration?: number,
 ): Promise<void> {
   await invoke("remote_backend_shutdown", {
     host,
     expectedInstanceToken: expectedInstanceToken ?? null,
+    expectedGeneration: expectedGeneration ?? null,
   });
 }
 

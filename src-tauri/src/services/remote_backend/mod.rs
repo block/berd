@@ -84,6 +84,8 @@ pub enum RemoteBackendState {
 #[serde(rename_all = "camelCase")]
 pub struct RemoteBackendStatus {
     pub host: String,
+    pub incarnation: String,
+    pub generation: u64,
     #[serde(flatten)]
     pub state: RemoteBackendState,
 }
@@ -97,6 +99,9 @@ pub struct RemoteBackendConnection {
     pub local_port: u16,
     pub goose_version: String,
     pub daemon_reused: bool,
+    /// Unique identity for this registry slot. A forgotten host receives a
+    /// new incarnation even when its per-slot generation restarts.
+    pub incarnation: String,
     /// Slot generation that owns this tunnel. Callers use it to invalidate
     /// only the connection they established, never a newer replacement.
     pub generation: u64,
@@ -110,6 +115,7 @@ pub struct RemoteBackendRegistry {
 struct HostSlot {
     key: String,
     spec: RemoteHostSpec,
+    incarnation: String,
     /// Serializes establish attempts (user connects and supervisor
     /// reconnects) per host.
     connect_lock: tokio::sync::Mutex<()>,
@@ -118,6 +124,9 @@ struct HostSlot {
 
 struct SlotShared {
     state: RemoteBackendState,
+    /// Set before an inactive slot leaves the registry. Connect attempts that
+    /// already retained its Arc must observe this tombstone after admission.
+    forgotten: bool,
     /// Monotonic ownership token: each successful establish bumps it, and a
     /// supervisor only acts while its own generation is current. Explicit
     /// disconnects bump it to strand any racing supervisor.
@@ -138,9 +147,11 @@ impl RemoteBackendRegistry {
             Arc::new(HostSlot {
                 key: spec.key(),
                 spec: spec.clone(),
+                incarnation: uuid::Uuid::new_v4().to_string(),
                 connect_lock: tokio::sync::Mutex::new(()),
                 shared: Mutex::new(SlotShared {
                     state: RemoteBackendState::Disconnected,
+                    forgotten: false,
                     generation: 0,
                     daemon: None,
                     local_port: None,
@@ -163,11 +174,52 @@ impl RemoteBackendRegistry {
         let slots = self.slots.lock().expect("remote backend registry poisoned");
         slots
             .values()
-            .map(|slot| RemoteBackendStatus {
-                host: slot.key.clone(),
-                state: slot.shared.lock().expect("slot poisoned").state.clone(),
+            .map(|slot| {
+                let shared = slot.shared.lock().expect("slot poisoned");
+                RemoteBackendStatus {
+                    host: slot.key.clone(),
+                    incarnation: slot.incarnation.clone(),
+                    generation: shared.generation,
+                    state: shared.state.clone(),
+                }
             })
             .collect()
+    }
+
+    /// Remove an inactive host slot from the registry. The exact key is used
+    /// deliberately so malformed inputs from a failed connect can still be
+    /// forgotten instead of having to pass host parsing again.
+    pub async fn forget(&self, key: &str) -> bool {
+        let Some(slot) = self.existing_slot(key) else {
+            return true;
+        };
+
+        // Invalidate queued connection admission before waiting on the lock.
+        // A current establish already holding the lock publishes Connecting,
+        // so only an inactive slot can reach this point; a waiter that retained
+        // the Arc must observe the tombstone when it eventually acquires.
+        {
+            let mut shared = slot.shared.lock().expect("slot poisoned");
+            if !matches!(
+                shared.state,
+                RemoteBackendState::Disconnected | RemoteBackendState::Failed { .. }
+            ) {
+                return false;
+            }
+            shared.forgotten = true;
+            shared.generation += 1;
+        }
+
+        let _guard = slot.connect_lock.lock().await;
+        let mut slots = self.slots.lock().expect("remote backend registry poisoned");
+        let Some(registered) = slots.get(key) else {
+            return true;
+        };
+        if !Arc::ptr_eq(registered, &slot) {
+            return false;
+        }
+        slots.remove(key);
+        true
     }
 
     /// Best-effort synchronous tunnel teardown for app exit. Daemons are left
@@ -208,11 +260,12 @@ fn kill_tunnel_pid(pid: u32) {
 }
 
 fn set_state(app: &AppHandle, slot: &HostSlot, state: RemoteBackendState) {
-    {
+    let generation = {
         let mut shared = slot.shared.lock().expect("slot poisoned");
         shared.state = state.clone();
-    }
-    emit_status(app, &slot.key, &state);
+        shared.generation
+    };
+    emit_status(app, slot, generation, &state);
 }
 
 fn update_state_if_current(
@@ -240,13 +293,15 @@ fn set_state_if_current(
     if !update_state_if_current(&mut shared, generation, state.clone()) {
         return false;
     }
-    emit_status(app, &slot.key, &state);
+    emit_status(app, slot, generation, &state);
     true
 }
 
-fn emit_status(app: &AppHandle, host: &str, state: &RemoteBackendState) {
+fn emit_status(app: &AppHandle, slot: &HostSlot, generation: u64, state: &RemoteBackendState) {
     let payload = RemoteBackendStatus {
-        host: host.to_string(),
+        host: slot.key.clone(),
+        incarnation: slot.incarnation.clone(),
+        generation,
         state: state.clone(),
     };
     if let Err(error) = app.emit(REMOTE_BACKEND_STATUS_EVENT, &payload) {
@@ -281,7 +336,10 @@ fn extra_serve_args() -> Vec<String> {
     }
 }
 
-fn connection_from_shared(shared: &SlotShared) -> Option<RemoteBackendConnection> {
+fn connection_from_shared(
+    shared: &SlotShared,
+    incarnation: &str,
+) -> Option<RemoteBackendConnection> {
     let daemon = shared.daemon.as_ref()?;
     let local_port = shared.local_port?;
     if let RemoteBackendState::Ready {
@@ -297,6 +355,7 @@ fn connection_from_shared(shared: &SlotShared) -> Option<RemoteBackendConnection
             local_port,
             goose_version: daemon.goose_version.clone(),
             daemon_reused: daemon.reused,
+            incarnation: incarnation.to_string(),
             generation: shared.generation,
         })
     } else {
@@ -310,11 +369,24 @@ fn connection_from_shared(shared: &SlotShared) -> Option<RemoteBackendConnection
 fn cached_connection(
     shared: &SlotShared,
     requested_goose_path: Option<&str>,
+    incarnation: &str,
 ) -> Option<RemoteBackendConnection> {
     if shared.goose_path.as_deref() != requested_goose_path {
         return None;
     }
-    connection_from_shared(shared)
+    connection_from_shared(shared, incarnation)
+}
+
+async fn acquire_connect_admission(
+    slot: &HostSlot,
+) -> Result<tokio::sync::MutexGuard<'_, ()>, RemoteBackendError> {
+    let guard = slot.connect_lock.lock().await;
+    if slot.shared.lock().expect("slot poisoned").forgotten {
+        return Err(RemoteBackendError::internal(
+            "remote connection attempt was superseded",
+        ));
+    }
+    Ok(guard)
 }
 
 fn advance_generation_if_current(shared: &mut SlotShared, expected: u64) -> Option<u64> {
@@ -346,11 +418,19 @@ pub async fn connect(
     let goose_path = goose_path.map(daemon::normalize_goose_path).transpose()?;
     let slot = registry.slot(&spec);
 
-    let _guard = slot.connect_lock.lock().await;
+    let _guard = acquire_connect_admission(&slot).await?;
 
     {
         let mut shared = slot.shared.lock().expect("slot poisoned");
-        if let Some(existing) = cached_connection(&shared, goose_path.as_deref()) {
+        // Forget can tombstone an inactive slot after this connect acquires
+        // admission but before it publishes Connecting.
+        if shared.forgotten {
+            return Err(RemoteBackendError::internal(
+                "remote connection attempt was superseded",
+            ));
+        }
+        if let Some(existing) = cached_connection(&shared, goose_path.as_deref(), &slot.incarnation)
+        {
             return Ok(existing);
         }
         if shared.goose_path.as_deref() != goose_path.as_deref() {
@@ -460,7 +540,7 @@ async fn establish(
         let _ = tunnel.child.wait().await;
         return Ok(None);
     };
-    emit_status(app, &slot.key, &state);
+    emit_status(app, slot, generation, &state);
 
     let connection = RemoteBackendConnection {
         ws_url,
@@ -469,6 +549,7 @@ async fn establish(
         local_port,
         goose_version: daemon_info.goose_version.clone(),
         daemon_reused: daemon_info.reused,
+        incarnation: slot.incarnation.clone(),
         generation,
     };
 
@@ -600,11 +681,6 @@ fn spawn_supervisor(
     });
 }
 
-/// Kill the tunnel; the remote daemon keeps running.
-pub fn disconnect(app: &AppHandle, registry: &RemoteBackendRegistry, host_input: &str) {
-    disconnect_generation(app, registry, host_input, None);
-}
-
 /// Disconnect only when `expected_generation` still owns the host slot. This
 /// lets an initializer clean up work superseded while it was awaiting without
 /// tearing down a newer connection that won the race.
@@ -622,7 +698,7 @@ pub fn disconnect_generation(
     let Some(slot) = registry.existing_slot(&host_key) else {
         return false;
     };
-    {
+    let disconnected_generation = {
         let mut shared = slot.shared.lock().expect("slot poisoned");
         if expected_generation.is_some_and(|expected| shared.generation != expected) {
             return false;
@@ -632,10 +708,30 @@ pub fn disconnect_generation(
             kill_tunnel_pid(pid);
         }
         shared.local_port = None;
-    }
-    set_state(app, &slot, RemoteBackendState::Disconnected);
+        shared.generation
+    };
+    set_state_if_current(
+        app,
+        &slot,
+        disconnected_generation,
+        RemoteBackendState::Disconnected,
+    );
     record_diagnostic(DiagnosticLevel::Info, "disconnected", &host_key, None);
     true
+}
+
+fn validate_shutdown_generation(
+    slot: &HostSlot,
+    expected_generation: Option<u64>,
+) -> Result<(), RemoteBackendError> {
+    let shared = slot.shared.lock().expect("slot poisoned");
+    if expected_generation.is_some_and(|expected| shared.generation != expected) {
+        return Err(RemoteBackendError::new(
+            RemoteBackendErrorKind::DaemonChanged,
+            "Remote backend changed before shutdown completed",
+        ));
+    }
+    Ok(())
 }
 
 /// Stop the remote daemon, then drop the tunnel.
@@ -644,19 +740,26 @@ pub async fn shutdown(
     registry: &RemoteBackendRegistry,
     host_input: &str,
     expected_instance_token: Option<&str>,
+    expected_generation: Option<u64>,
 ) -> Result<(), RemoteBackendError> {
     let aliases = ssh_config::load_ssh_config_hosts();
     let spec = RemoteHostSpec::parse(host_input, &aliases)?;
     let slot = registry.slot(&spec);
     let shell_env = dir_env::capture_home_interactive_env().await;
 
-    // Wait out any in-flight establish, then invalidate its supervisor and
-    // drop its tunnel before touching the daemon. A new connect cannot start
-    // until shutdown releases this lock, so ensure_daemon cannot recreate the
-    // daemon after shutdown_daemon stops it.
+    // Wait out any in-flight establish and validate the local owner before
+    // touching either resource. Keep the tunnel intact until remote shutdown
+    // succeeds: a daemon identity mismatch must not leave a dead local path
+    // represented by the still-current Ready state.
     let _guard = slot.connect_lock.lock().await;
-    disconnect(app, registry, &spec.key());
+    validate_shutdown_generation(&slot, expected_generation)?;
     daemon::shutdown_daemon(&spec, &shell_env, expected_instance_token).await?;
+    if !disconnect_generation(app, registry, &spec.key(), expected_generation) {
+        return Err(RemoteBackendError::new(
+            RemoteBackendErrorKind::DaemonChanged,
+            "Remote backend changed before shutdown completed",
+        ));
+    }
     record_diagnostic(DiagnosticLevel::Info, "daemon_shutdown", &spec.key(), None);
     Ok(())
 }
@@ -714,10 +817,14 @@ mod tests {
     fn status_payload_flattens_state() {
         let status = RemoteBackendStatus {
             host: "devbox".to_string(),
+            incarnation: "slot-1".to_string(),
+            generation: 7,
             state: RemoteBackendState::Connecting,
         };
         let json = serde_json::to_value(&status).unwrap();
         assert_eq!(json["host"], "devbox");
+        assert_eq!(json["incarnation"], "slot-1");
+        assert_eq!(json["generation"], 7);
         assert_eq!(json["state"], "connecting");
     }
 
@@ -728,6 +835,7 @@ mod tests {
                 http_base_url: "http://127.0.0.1:5000".to_string(),
                 local_port: 5000,
             },
+            forgotten: false,
             generation: 1,
             daemon: Some(RemoteDaemonInfo {
                 pid: 10,
@@ -745,10 +853,11 @@ mod tests {
 
     #[test]
     fn cached_connection_is_reused_for_the_same_goose_path() {
-        assert!(cached_connection(&ready_shared(None), None).is_some());
+        assert!(cached_connection(&ready_shared(None), None, "slot-1").is_some());
         assert!(cached_connection(
             &ready_shared(Some("/opt/goose/bin/goose")),
-            Some("/opt/goose/bin/goose")
+            Some("/opt/goose/bin/goose"),
+            "slot-1"
         )
         .is_some());
     }
@@ -757,11 +866,18 @@ mod tests {
     fn cached_connection_is_refused_for_a_different_goose_path() {
         // Adding, removing, or swapping an override all force a fresh connect
         // because the bootstrap restarts the remote daemon.
-        assert!(cached_connection(&ready_shared(None), Some("/opt/goose/bin/goose")).is_none());
-        assert!(cached_connection(&ready_shared(Some("/opt/goose/bin/goose")), None).is_none());
+        assert!(
+            cached_connection(&ready_shared(None), Some("/opt/goose/bin/goose"), "slot-1")
+                .is_none()
+        );
+        assert!(
+            cached_connection(&ready_shared(Some("/opt/goose/bin/goose")), None, "slot-1")
+                .is_none()
+        );
         assert!(cached_connection(
             &ready_shared(Some("/opt/goose/bin/goose")),
-            Some("~/src/goose/target/release/goose")
+            Some("~/src/goose/target/release/goose"),
+            "slot-1"
         )
         .is_none());
     }
@@ -770,7 +886,7 @@ mod tests {
     fn cached_connection_is_none_while_not_ready() {
         let mut shared = ready_shared(None);
         shared.state = RemoteBackendState::Connecting;
-        assert!(cached_connection(&shared, None).is_none());
+        assert!(cached_connection(&shared, None, "slot-1").is_none());
     }
 
     #[test]
@@ -828,6 +944,25 @@ mod tests {
     }
 
     #[test]
+    fn shutdown_generation_mismatch_preserves_the_ready_tunnel() {
+        let spec = RemoteHostSpec::parse("devbox", &[]).unwrap();
+        let slot = HostSlot {
+            key: spec.key(),
+            spec,
+            incarnation: "slot-1".to_string(),
+            connect_lock: tokio::sync::Mutex::new(()),
+            shared: Mutex::new(ready_shared(None)),
+        };
+
+        let error = validate_shutdown_generation(&slot, Some(2)).unwrap_err();
+        assert_eq!(error.kind, RemoteBackendErrorKind::DaemonChanged);
+        let shared = slot.shared.lock().expect("slot poisoned");
+        assert_eq!(shared.generation, 1);
+        assert_eq!(shared.tunnel_pid, Some(99));
+        assert!(matches!(shared.state, RemoteBackendState::Ready { .. }));
+    }
+
+    #[test]
     fn snapshot_reports_registered_slots() {
         let registry = RemoteBackendRegistry::default();
         let spec = RemoteHostSpec::parse("devbox", &[]).unwrap();
@@ -835,5 +970,73 @@ mod tests {
         let snapshot = registry.snapshot();
         assert_eq!(snapshot.len(), 1);
         assert_eq!(snapshot[0].host, "devbox");
+    }
+
+    #[tokio::test]
+    async fn forget_removes_inactive_slot_by_its_exact_key() {
+        let registry = RemoteBackendRegistry::default();
+        let spec = RemoteHostSpec::parse("devbox", &[]).unwrap();
+        let slot = registry.slot(&spec);
+        slot.shared.lock().expect("slot poisoned").state = RemoteBackendState::Failed {
+            error: RemoteBackendError::internal("failed"),
+        };
+
+        assert!(registry.forget("devbox").await);
+        assert!(registry.snapshot().is_empty());
+    }
+
+    #[tokio::test]
+    async fn forget_preserves_active_slot() {
+        let registry = RemoteBackendRegistry::default();
+        let spec = RemoteHostSpec::parse("devbox", &[]).unwrap();
+        let slot = registry.slot(&spec);
+        slot.shared.lock().expect("slot poisoned").state = RemoteBackendState::Connecting;
+
+        assert!(!registry.forget("devbox").await);
+        assert_eq!(registry.snapshot().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn pending_connect_is_superseded_before_establishment_after_forget() {
+        let registry = Arc::new(RemoteBackendRegistry::default());
+        let spec = RemoteHostSpec::parse("devbox", &[]).unwrap();
+        let admitted = registry.slot(&spec);
+        let held = admitted.connect_lock.lock().await;
+
+        let side_effect_reached = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let connect_slot = Arc::clone(&admitted);
+        let connect_side_effect = Arc::clone(&side_effect_reached);
+        let pending_connect = tokio::spawn(async move {
+            let admission = acquire_connect_admission(&connect_slot).await;
+            if admission.is_ok() {
+                connect_side_effect.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+            admission.map(|_| ())
+        });
+        tokio::task::yield_now().await;
+
+        let forget_registry = Arc::clone(&registry);
+        let forgetting = tokio::spawn(async move { forget_registry.forget("devbox").await });
+        for _ in 0..100 {
+            if admitted.shared.lock().expect("slot poisoned").forgotten {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(admitted.shared.lock().expect("slot poisoned").forgotten);
+
+        drop(held);
+        let connect_error = pending_connect.await.unwrap().unwrap_err();
+        assert_eq!(
+            connect_error.message,
+            "remote connection attempt was superseded"
+        );
+        assert!(!side_effect_reached.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(forgetting.await.unwrap());
+        assert!(registry.snapshot().is_empty());
+
+        let replacement = registry.slot(&spec);
+        assert!(!Arc::ptr_eq(&admitted, &replacement));
+        assert!(!replacement.shared.lock().expect("slot poisoned").forgotten);
     }
 }

@@ -195,11 +195,15 @@ function RemoteHostRow({
   );
   const disconnect = useRemoteHostStore((state) => state.disconnect);
   const runDoctor = useRemoteHostStore((state) => state.runDoctor);
-  const isManualHost = useRemoteHostStore((state) =>
-    state.manualHosts.includes(host),
+  const isConfigHost = useRemoteHostStore((state) =>
+    state.configHosts.includes(host),
   );
-  const removeManualHost = useRemoteHostStore(
-    (state) => state.removeManualHost,
+  const forgetHost = useRemoteHostStore((state) => state.forgetHost);
+  const forgetPending = useRemoteHostStore(
+    (state) => state.forgetPendingByHost[host] === true,
+  );
+  const forgetError = useRemoteHostStore(
+    (state) => state.forgetErrorByHost[host],
   );
 
   const state = status?.state ?? "disconnected";
@@ -282,12 +286,18 @@ function RemoteHostRow({
           >
             {t("remoteHosts.actions.check")}
           </Button>
-          {isManualHost && !isConnected ? (
+          {!isConfigHost && (state === "failed" || state === "disconnected") ? (
             <Button
               type="button"
               variant="ghost"
               size="sm"
-              onClick={() => removeManualHost(host)}
+              feedbackState={forgetPending ? "loading" : "idle"}
+              loadingLabel={t("remoteHosts.actions.forgetting")}
+              loadingVisual="text"
+              preserveWidth
+              onClick={() => {
+                void forgetHost(host).catch(() => {});
+              }}
             >
               {t("remoteHosts.actions.forget")}
             </Button>
@@ -296,6 +306,11 @@ function RemoteHostRow({
       }
       details={
         <div className="space-y-3">
+          {forgetError ? (
+            <p className="text-xs text-destructive" role="alert">
+              {t("remoteHosts.forget.error")}
+            </p>
+          ) : null}
           {showDoctor ? (
             <DoctorReport
               probes={probes}

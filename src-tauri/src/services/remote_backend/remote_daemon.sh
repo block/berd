@@ -39,13 +39,13 @@ GOOSE_ARG="${4:--}"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/berd/remote"
 RECORD="$STATE_DIR/daemon.record"
 LOG="$STATE_DIR/goose-serve.log"
-LOCK_DIR="$STATE_DIR/daemon.lock"
-LOCK_OWNER="$LOCK_DIR/owner"
-LOCK_RECLAIM_DIR="$STATE_DIR/daemon.lock.reclaim"
+LOCK_ROOT="$STATE_DIR/daemon.locks"
+LEGACY_LOCK_DIR="$STATE_DIR/daemon.lock"
+LEGACY_LOCK_OWNER="$LEGACY_LOCK_DIR/owner"
 RECORD_FORMAT="v4"
 LOG_MAX_BYTES=$((4 * 1024 * 1024))
 LOG_RETAIN_BYTES=$((2 * 1024 * 1024))
-LOG_WRITE_CHUNK_BYTES=$((64 * 1024))
+LOG_SEGMENT_BYTES=$((LOG_RETAIN_BYTES - 64 * 1024))
 
 emit() { printf '%s %s\n' "$NONCE" "$*"; }
 
@@ -105,7 +105,8 @@ process_identity() {
 }
 
 lock_owner_is_current() {
-  IFS=' ' read -r lock_pid lock_b64identity lock_extra <"$LOCK_OWNER" 2>/dev/null || return 1
+  owner_path="$1"
+  IFS=' ' read -r lock_pid lock_b64identity lock_extra <"$owner_path" 2>/dev/null || return 1
   case "$lock_pid" in
   '' | *[!0-9]*) return 1 ;;
   esac
@@ -117,19 +118,19 @@ lock_owner_is_current() {
 }
 
 release_daemon_lock() {
-  [ "${lock_held:-0}" = "1" ] || return 0
-  if IFS= read -r current_lock_owner <"$LOCK_OWNER" 2>/dev/null &&
-    [ "$current_lock_owner" = "$our_lock_owner" ]; then
-    rm -f "$LOCK_OWNER"
-    rmdir "$LOCK_DIR" 2>/dev/null || true
+  if [ "${compat_lock_held:-0}" = "1" ] &&
+    IFS= read -r current_compat_owner <"$LEGACY_LOCK_OWNER" 2>/dev/null &&
+    [ "$current_compat_owner" = "$our_lock_owner" ]; then
+    rm -f "$LEGACY_LOCK_OWNER"
+    rmdir "$LEGACY_LOCK_DIR" 2>/dev/null || true
   fi
+  compat_lock_held=0
+  if IFS= read -r current_lock_owner <"$our_ticket/owner" 2>/dev/null &&
+    [ "$current_lock_owner" = "$our_lock_owner" ]; then
+    rm -rf -- "$our_ticket"
+  fi
+  [ -z "${pending_ticket:-}" ] || rm -rf -- "$pending_ticket"
   lock_held=0
-}
-
-release_reclaim_lock() {
-  [ "${reclaim_held:-0}" = "1" ] || return 0
-  rmdir "$LOCK_RECLAIM_DIR" 2>/dev/null || true
-  reclaim_held=0
 }
 
 terminate_uncommitted_daemon() {
@@ -166,45 +167,90 @@ terminate_uncommitted_daemon() {
 cleanup_daemon_mutation() {
   terminate_uncommitted_daemon
   release_daemon_lock
-  release_reclaim_lock
 }
 
-# Claim one stale lock generation before deleting it. The separate reclaim
-# mutex serializes observers: after its final owner re-check, no peer can
-# remove the old directory and let a new generation appear before this process
-# atomically renames it. Once renamed, cleanup is confined to the claimed path,
-# so partial `.owner.*` publications are removed without touching a successor.
-reclaim_stale_daemon_lock() {
-  if ! mkdir "$LOCK_RECLAIM_DIR" 2>/dev/null; then
-    return 1
-  fi
-  reclaim_held=1
+# Ticket clients also hold daemon.lock for the full mutation. Older Berd
+# clients know only this path, so retaining it as a compatibility gate makes
+# mixed-version rollouts mutually exclusive in both acquisition orders. The
+# ticket remains the generation-safe ordering protocol for current clients.
+acquire_legacy_compat_lock() {
+  compat_attempt=0
+  stale_observations=0
+  while [ "$compat_attempt" -lt 1200 ]; do
+    compat_attempt=$((compat_attempt + 1))
+    if mkdir "$LEGACY_LOCK_DIR" 2>/dev/null; then
+      compat_owner_tmp="$LEGACY_LOCK_DIR/.owner.$$"
+      if ! printf '%s\n' "$our_lock_owner" >"$compat_owner_tmp" ||
+        ! mv -f "$compat_owner_tmp" "$LEGACY_LOCK_OWNER"; then
+        rm -f "$compat_owner_tmp"
+        rmdir "$LEGACY_LOCK_DIR" 2>/dev/null || true
+        stale_observations=0
+        sleep 0.01
+        continue
+      fi
+      # Let an observer that saw the directory before owner publication finish
+      # its claim, then prove this exact generation still occupies the path.
+      sleep 0.01
+      if ! IFS= read -r current_compat_owner <"$LEGACY_LOCK_OWNER" 2>/dev/null ||
+        [ "$current_compat_owner" != "$our_lock_owner" ]; then
+        stale_observations=0
+        sleep 0.01
+        continue
+      fi
+      compat_lock_held=1
+      return 0
+    fi
 
-  if lock_owner_is_current; then
-    release_reclaim_lock
-    return 1
-  fi
-
-  claimed_lock="$STATE_DIR/.daemon.lock.reclaimed.$$.$lock_attempt"
-  if mv "$LOCK_DIR" "$claimed_lock" 2>/dev/null; then
-    rm -rf -- "$claimed_lock"
-  fi
-  release_reclaim_lock
-  return 0
+    if lock_owner_is_current "$LEGACY_LOCK_OWNER"; then
+      stale_observations=0
+    else
+      stale_observations=$((stale_observations + 1))
+      # A mkdir winner publishes its owner immediately. Repeated observations
+      # distinguish that window from a process that died before publication.
+      if [ "$stale_observations" -ge 20 ]; then
+        # Pin the directory generation before acting on it. Older clients
+        # release with rmdir, so this guard prevents the observed directory
+        # from disappearing and a live successor reusing the shared pathname.
+        # If replacement won before the guard, the owner recheck detects it.
+        legacy_guard="$LEGACY_LOCK_DIR/.berd-reclaim.$NONCE.$$.$compat_attempt"
+        if mkdir "$legacy_guard" 2>/dev/null; then
+          if lock_owner_is_current "$LEGACY_LOCK_OWNER"; then
+            rmdir "$legacy_guard" 2>/dev/null || true
+          else
+            legacy_claim="$STATE_DIR/.daemon.lock.legacy.$NONCE.$$.$compat_attempt"
+            if mv "$LEGACY_LOCK_DIR" "$legacy_claim" 2>/dev/null; then
+              rm -rf -- "$legacy_claim"
+            else
+              rmdir "$legacy_guard" 2>/dev/null || true
+            fi
+          fi
+        fi
+        stale_observations=0
+      fi
+    fi
+    sleep 0.1
+  done
+  emit "ERR state-dir"
+  exit 46
 }
 
-# `mkdir` is the portable cross-process atomic primitive available on both
-# Linux and macOS remotes. The lock covers every daemon.record read/mutation,
-# including shutdown from another Berd client using the same remote account.
+# Each invocation owns a path that is never reused (`NONCE` is a UUID). Stale
+# cleanup therefore removes the exact generation whose owner was inspected,
+# never a successor at a shared pathname. A Lamport bakery ticket orders
+# simultaneous contenders without introducing another reclaimable mutex: a
+# process first publishes `choosing`, then a number, and may enter only after
+# every live lower `(number, ticket-id)` pair has departed.
 acquire_daemon_lock() {
   umask 077
-  mkdir -p "$STATE_DIR" || {
+  mkdir -p "$STATE_DIR" "$LOCK_ROOT" || {
     emit "ERR state-dir"
     exit 46
   }
 
   lock_held=0
-  reclaim_held=0
+  compat_lock_held=0
+  our_ticket=""
+  pending_ticket=""
   uncommitted_pid=""
   uncommitted_logger_pid=""
   uncommitted_log_pipe=""
@@ -212,46 +258,101 @@ acquire_daemon_lock() {
   trap 'exit 129' HUP
   trap 'exit 130' INT
   trap 'exit 143' TERM
-  stale_observations=0
+  case "$NONCE" in
+  '' | *[!A-Za-z0-9._-]*)
+    emit "ERR state-dir"
+    exit 46
+    ;;
+  esac
+  our_identity="$(process_identity "$$")" || {
+    emit "ERR state-dir"
+    exit 46
+  }
+  our_lock_owner="$$ $(b64 "$our_identity")"
+
+  our_ticket_id="$NONCE.$$"
+  pending_ticket="$LOCK_ROOT/.pending.$our_ticket_id"
+  our_ticket="$LOCK_ROOT/ticket.$our_ticket_id"
+  rm -rf -- "$pending_ticket"
+  if ! mkdir "$pending_ticket" 2>/dev/null ||
+    ! printf '%s\n' "$our_lock_owner" >"$pending_ticket/owner" ||
+    ! : >"$pending_ticket/choosing" ||
+    ! mv "$pending_ticket" "$our_ticket" 2>/dev/null; then
+    rm -rf -- "$pending_ticket"
+    emit "ERR state-dir"
+    exit 46
+  fi
+
+  max_ticket_number=0
+  for observed_ticket in "$LOCK_ROOT"/ticket.*; do
+    [ -d "$observed_ticket" ] || continue
+    if ! lock_owner_is_current "$observed_ticket/owner"; then
+      rm -rf -- "$observed_ticket"
+      continue
+    fi
+    if IFS= read -r observed_number <"$observed_ticket/number" 2>/dev/null; then
+      case "$observed_number" in
+      '' | *[!0-9]*) ;;
+      *)
+        if [ "$observed_number" -gt "$max_ticket_number" ]; then
+          max_ticket_number="$observed_number"
+        fi
+        ;;
+      esac
+    fi
+  done
+  our_ticket_number=$((max_ticket_number + 1))
+  if ! printf '%s\n' "$our_ticket_number" >"$our_ticket/.number.$$" ||
+    ! mv "$our_ticket/.number.$$" "$our_ticket/number" 2>/dev/null ||
+    ! rm -f "$our_ticket/choosing"; then
+    rm -rf -- "$our_ticket"
+    emit "ERR state-dir"
+    exit 46
+  fi
+
   lock_attempt=0
   # A lock holder can spend about 80 seconds across five readiness attempts
   # and bounded cleanup. Wait longer than that critical section so a healthy
   # concurrent ensure cannot be mistaken for a wedged state-dir operation.
   while [ "$lock_attempt" -lt 1200 ]; do
     lock_attempt=$((lock_attempt + 1))
-    if mkdir "$LOCK_DIR" 2>/dev/null; then
-      our_identity="$(process_identity "$$")" || {
-        rmdir "$LOCK_DIR" 2>/dev/null || true
-        emit "ERR state-dir"
-        exit 46
-      }
-      our_lock_owner="$$ $(b64 "$our_identity")"
-      lock_owner_tmp="$LOCK_DIR/.owner.$$"
-      if ! printf '%s\n' "$our_lock_owner" >"$lock_owner_tmp" ||
-        ! mv -f "$lock_owner_tmp" "$LOCK_OWNER"; then
-        rm -f "$lock_owner_tmp"
-        rmdir "$LOCK_DIR" 2>/dev/null || true
-        emit "ERR state-dir"
-        exit 46
+    ticket_blocked=0
+    for observed_ticket in "$LOCK_ROOT"/ticket.*; do
+      [ -d "$observed_ticket" ] || continue
+      [ "$observed_ticket" != "$our_ticket" ] || continue
+      if ! lock_owner_is_current "$observed_ticket/owner"; then
+        rm -rf -- "$observed_ticket"
+        continue
       fi
+      if [ -e "$observed_ticket/choosing" ]; then
+        ticket_blocked=1
+        continue
+      fi
+      if ! IFS= read -r observed_number <"$observed_ticket/number" 2>/dev/null; then
+        ticket_blocked=1
+        continue
+      fi
+      case "$observed_number" in
+      '' | *[!0-9]*)
+        ticket_blocked=1
+        continue
+        ;;
+      esac
+      observed_id="${observed_ticket##*/ticket.}"
+      if [ "$observed_number" -lt "$our_ticket_number" ] ||
+        { [ "$observed_number" -eq "$our_ticket_number" ] && [[ "$observed_id" < "$our_ticket_id" ]]; }; then
+        ticket_blocked=1
+      fi
+    done
+    if [ "$ticket_blocked" = "0" ]; then
+      acquire_legacy_compat_lock
       lock_held=1
       return 0
-    fi
-
-    if lock_owner_is_current; then
-      stale_observations=0
-    else
-      stale_observations=$((stale_observations + 1))
-      # Allow the mkdir winner time to publish its owner before treating a
-      # missing/malformed owner as stale after an interrupted invocation.
-      if [ "$stale_observations" -ge 20 ]; then
-        reclaim_stale_daemon_lock || true
-        stale_observations=0
-      fi
     fi
     sleep 0.1
   done
 
+  rm -rf -- "$our_ticket"
   emit "ERR state-dir"
   exit 46
 }
@@ -325,45 +426,52 @@ trim_log_if_needed() {
   fi
 }
 
-prepare_log_for_append() {
-  append_log="$1"
-  append_bytes="$2"
-  [ -f "$append_log" ] || return 0
-  current_bytes="$(wc -c <"$append_log" 2>/dev/null | tr -d ' ')"
-  case "$current_bytes" in
-  '' | *[!0-9]*) return 0 ;;
-  esac
-  if [ $((current_bytes + append_bytes)) -gt "$LOG_MAX_BYTES" ]; then
-    log_tmp="$STATE_DIR/.goose-serve.log.$$"
-    if tail -c "$LOG_RETAIN_BYTES" "$append_log" >"$log_tmp" 2>/dev/null; then
-      mv -f "$log_tmp" "$append_log"
-    else
-      rm -f "$log_tmp"
-    fi
-  fi
-}
-
-# Consume fixed-size byte chunks rather than newline records. This bounds shell
-# memory for a huge line and continues rotating a producer that never emits a
-# newline. Each append reopens the path so atomic trims take effect.
+# `tee` writes every partial pipe read to its named output (the visible log)
+# before stdout. `head` closes that stdout counter after a roughly 2 MiB
+# segment, ending this tee only after the same bytes are visible. The 64 KiB reserve
+# covers the final in-flight pipe read, so a segment starting from the retained
+# 2 MiB tail cannot exceed the 4 MiB cap. Rotation happens per segment rather
+# than per small FIFO read.
 bounded_log_writer() {
   writer_log="$1"
-  writer_chunk="$STATE_DIR/.goose-serve.log.chunk.$$"
+  writer_tmp="$STATE_DIR/.goose-serve.log.rotate.$$"
+  writer_head_pid=""
+  # Preserve the Goose FIFO before backgrounding each counter pipeline;
+  # non-interactive Bash otherwise redirects an asynchronous stdin to null.
+  exec 3<&0
+  trap 'kill -TERM "$writer_head_pid" 2>/dev/null || true; wait "$writer_head_pid" 2>/dev/null || true; rm -f "$writer_tmp"; exit 143' TERM
+  trap 'kill -TERM "$writer_head_pid" 2>/dev/null || true; wait "$writer_head_pid" 2>/dev/null || true; rm -f "$writer_tmp"; exit 129' HUP
+  trap 'kill -TERM "$writer_head_pid" 2>/dev/null || true; wait "$writer_head_pid" 2>/dev/null || true; rm -f "$writer_tmp"; exit 130' INT
+
   while :; do
-    rm -f "$writer_chunk"
-    dd bs="$LOG_WRITE_CHUNK_BYTES" count=1 of="$writer_chunk" 2>/dev/null || true
-    writer_bytes="$(wc -c <"$writer_chunk" 2>/dev/null | tr -d ' ')"
+    writer_bytes="$(wc -c <"$writer_log" 2>/dev/null | tr -d ' ')"
     case "$writer_bytes" in
     '' | *[!0-9]*) writer_bytes=0 ;;
     esac
-    if [ "$writer_bytes" -eq 0 ]; then
-      rm -f "$writer_chunk"
-      break
+    if [ "$writer_bytes" -gt "$LOG_RETAIN_BYTES" ]; then
+      if ! tail -c "$LOG_RETAIN_BYTES" "$writer_log" >"$writer_tmp" 2>/dev/null; then
+        rm -f "$writer_tmp"
+        break
+      fi
+      if ! mv -f "$writer_tmp" "$writer_log"; then
+        rm -f "$writer_tmp"
+        break
+      fi
+      writer_bytes="$LOG_RETAIN_BYTES"
     fi
-    prepare_log_for_append "$writer_log" "$writer_bytes"
-    cat "$writer_chunk" >>"$writer_log"
+
+    tee -a "$writer_log" <&3 2>/dev/null | head -c "$LOG_SEGMENT_BYTES" >/dev/null 2>&1 &
+    writer_head_pid=$!
+    wait "$writer_head_pid" 2>/dev/null || true
+    writer_head_pid=""
+    writer_after="$(wc -c <"$writer_log" 2>/dev/null | tr -d ' ')"
+    case "$writer_after" in
+    '' | *[!0-9]*) writer_after="$writer_bytes" ;;
+    esac
+    [ "$writer_after" -gt "$writer_bytes" ] || break
   done
-  rm -f "$writer_chunk"
+  trim_log_if_needed "$writer_log"
+  rm -f "$writer_tmp"
 }
 
 # Confirms the PID is still the exact process that wrote this record. `kill -0`
