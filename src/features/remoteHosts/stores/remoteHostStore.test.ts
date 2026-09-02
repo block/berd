@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   RemoteBackendConnection,
+  RemoteBackendSnapshotEntry,
   RemoteToolProbe,
 } from "@/shared/api/remoteHosts";
 
@@ -53,6 +54,10 @@ function resetStore(): void {
     doctorByHost: {},
     doctorPendingByHost: {},
     doctorErrorByHost: {},
+    forgottenHosts: {},
+    lifecycleByHost: {},
+    forgetPendingByHost: {},
+    forgetErrorByHost: {},
     recentDirsByHost: {},
     goosePathByHost: {},
   });
@@ -134,6 +139,56 @@ describe("syncBackendSnapshot", () => {
     expect(useRemoteHostStore.getState().statusByHost.devbox).toEqual({
       state: "ready",
     });
+  });
+
+  it("does not restore a forgotten host from an older in-flight snapshot", async () => {
+    const host = "broken.blox";
+    let resolveSnapshot: (snapshot: RemoteBackendSnapshotEntry[]) => void =
+      () => {};
+    mocks.listRemoteBackends.mockImplementation(
+      () =>
+        new Promise<RemoteBackendSnapshotEntry[]>((resolve) => {
+          resolveSnapshot = resolve;
+        }),
+    );
+    useRemoteHostStore.setState({
+      statusByHost: { [host]: { state: "failed" } },
+    });
+
+    const syncing = useRemoteHostStore.getState().syncBackendSnapshot();
+    await useRemoteHostStore.getState().forgetHost(host);
+    resolveSnapshot([{ host, state: "failed" }]);
+    await syncing;
+
+    expect(useRemoteHostStore.getState().statusByHost).not.toHaveProperty(host);
+    expect(useRemoteHostStore.getState().forgottenHosts[host]).toBe(true);
+  });
+
+  it("rejects a pre-forget snapshot after an intentional reconnect", async () => {
+    const host = "broken.blox";
+    let resolveSnapshot: (snapshot: RemoteBackendSnapshotEntry[]) => void =
+      () => {};
+    mocks.listRemoteBackends.mockImplementation(
+      () =>
+        new Promise<RemoteBackendSnapshotEntry[]>((resolve) => {
+          resolveSnapshot = resolve;
+        }),
+    );
+    mocks.connectRemoteHost.mockResolvedValue(connection);
+    useRemoteHostStore.setState({
+      statusByHost: { [host]: { state: "failed" } },
+    });
+
+    const syncing = useRemoteHostStore.getState().syncBackendSnapshot();
+    await useRemoteHostStore.getState().forgetHost(host);
+    await useRemoteHostStore.getState().ensureHostConnected(host);
+    resolveSnapshot([{ host, state: "disconnected" }]);
+    await syncing;
+
+    expect(useRemoteHostStore.getState().statusByHost[host]).toEqual({
+      state: "ready",
+    });
+    expect(useRemoteHostStore.getState().forgottenHosts[host]).toBeUndefined();
   });
 });
 
@@ -554,6 +609,7 @@ describe("manual host persistence", () => {
     expect(state.doctorErrorByHost).not.toHaveProperty(host);
     expect(state.recentDirsByHost).not.toHaveProperty(host);
     expect(state.goosePathByHost).not.toHaveProperty(host);
+    expect(state.forgottenHosts[host]).toBe(true);
     expect(loadPersistedManualHosts()).toEqual(["keep.blox"]);
     expect(loadPersistedRecentDirs()).toEqual({});
     expect(loadPersistedGoosePaths()).toEqual({});
@@ -574,6 +630,70 @@ describe("manual host persistence", () => {
     expect(useRemoteHostStore.getState().statusByHost).toHaveProperty(
       "adhoc.blox",
     );
+    expect(
+      useRemoteHostStore.getState().forgetPendingByHost["adhoc.blox"],
+    ).toBe(false);
+    expect(
+      useRemoteHostStore.getState().forgetErrorByHost["adhoc.blox"],
+    ).toEqual({ kind: "internal", message: "active" });
+  });
+
+  it("ignores late status events until an intentional reconnect", async () => {
+    const host = "broken.blox";
+    useRemoteHostStore.setState({
+      statusByHost: { [host]: { state: "failed" } },
+    });
+
+    await useRemoteHostStore.getState().forgetHost(host);
+    useRemoteHostStore.getState().applyStatusEvent({
+      host,
+      state: "disconnected",
+    });
+    expect(useRemoteHostStore.getState().statusByHost).not.toHaveProperty(host);
+
+    mocks.connectRemoteHost.mockResolvedValue(connection);
+    await useRemoteHostStore.getState().ensureHostConnected(host);
+    useRemoteHostStore.getState().applyStatusEvent({
+      host,
+      state: "reconnecting",
+      attempt: 1,
+    });
+    expect(useRemoteHostStore.getState().statusByHost[host]).toEqual({
+      state: "reconnecting",
+      attempt: 1,
+    });
+  });
+
+  it("exposes forget pending and failure state and deduplicates submissions", async () => {
+    const host = "broken.blox";
+    let rejectForget: (error: unknown) => void = () => {};
+    mocks.forgetRemoteHost.mockImplementation(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectForget = reject;
+        }),
+    );
+    useRemoteHostStore.setState({
+      statusByHost: { [host]: { state: "failed" } },
+    });
+
+    const first = useRemoteHostStore.getState().forgetHost(host);
+    const firstResult = expect(first).rejects.toEqual({
+      kind: "internal",
+      message: "still connecting",
+    });
+    expect(useRemoteHostStore.getState().forgetPendingByHost[host]).toBe(true);
+    const duplicate = useRemoteHostStore.getState().forgetHost(host);
+    expect(mocks.forgetRemoteHost).toHaveBeenCalledTimes(1);
+
+    rejectForget({ kind: "internal", message: "still connecting" });
+    await firstResult;
+    await duplicate;
+    expect(useRemoteHostStore.getState().forgetPendingByHost[host]).toBe(false);
+    expect(useRemoteHostStore.getState().forgetErrorByHost[host]).toEqual({
+      kind: "internal",
+      message: "still connecting",
+    });
   });
 
   it("tolerates corrupted storage when loading manual hosts", () => {

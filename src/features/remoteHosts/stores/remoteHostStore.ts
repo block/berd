@@ -126,6 +126,12 @@ export interface RemoteHostStore {
   doctorByHost: Record<string, RemoteToolProbe[] | undefined>;
   doctorPendingByHost: Record<string, boolean>;
   doctorErrorByHost: Record<string, RemoteBackendErrorLike | undefined>;
+  /** Successful Forget tombstones, cleared only by an explicit new connect. */
+  forgottenHosts: Record<string, true>;
+  /** Monotonic local lifecycle used to reject snapshots admitted before a change. */
+  lifecycleByHost: Record<string, number>;
+  forgetPendingByHost: Record<string, boolean>;
+  forgetErrorByHost: Record<string, RemoteBackendErrorLike | undefined>;
   recentDirsByHost: Record<string, string[]>;
   /** Per-host goose binary override; absent means the remote login PATH. */
   goosePathByHost: Record<string, string>;
@@ -155,6 +161,10 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
   doctorByHost: {},
   doctorPendingByHost: {},
   doctorErrorByHost: {},
+  forgottenHosts: {},
+  lifecycleByHost: {},
+  forgetPendingByHost: {},
+  forgetErrorByHost: {},
   recentDirsByHost: loadPersistedRecentDirs(),
   goosePathByHost: loadPersistedGoosePaths(),
 
@@ -169,11 +179,21 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
   },
 
   syncBackendSnapshot: async () => {
+    // Keep the lifecycle object from admission time. Store updates replace it,
+    // so a Forget or explicit reconnect while IPC is in flight is observable.
+    const lifecycleAtStart = get().lifecycleByHost;
     try {
       const snapshot = await listRemoteBackends();
       set((state) => {
         const statusByHost = { ...state.statusByHost };
         for (const entry of snapshot) {
+          if (
+            state.forgottenHosts[entry.host] ||
+            (state.lifecycleByHost[entry.host] ?? 0) !==
+              (lifecycleAtStart[entry.host] ?? 0)
+          ) {
+            continue;
+          }
           statusByHost[entry.host] = {
             state: entry.state,
             ...(entry.attempt !== undefined ? { attempt: entry.attempt } : {}),
@@ -188,31 +208,54 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
   },
 
   applyStatusEvent: (payload) => {
-    set((state) => ({
-      statusByHost: {
-        ...state.statusByHost,
-        [payload.host]: {
-          state: payload.state,
-          ...(payload.attempt !== undefined
-            ? { attempt: payload.attempt }
-            : {}),
-          ...(payload.error ? { error: payload.error } : {}),
+    set((state) => {
+      if (state.forgottenHosts[payload.host]) return state;
+      return {
+        statusByHost: {
+          ...state.statusByHost,
+          [payload.host]: {
+            state: payload.state,
+            ...(payload.attempt !== undefined
+              ? { attempt: payload.attempt }
+              : {}),
+            ...(payload.error ? { error: payload.error } : {}),
+          },
         },
-      },
-    }));
+      };
+    });
   },
 
   ensureHostConnected: async (host) => {
-    if (get().statusByHost[host]?.state === "ready") return;
+    const current = get();
+    if (
+      current.statusByHost[host]?.state === "ready" &&
+      !current.forgottenHosts[host]
+    ) {
+      return;
+    }
 
-    // Optimistic: the Rust side serializes concurrent connects per host and
-    // emits status events, but reflect intent immediately in the UI.
-    set((state) => ({
-      statusByHost: {
-        ...state.statusByHost,
-        [host]: { state: "connecting" },
-      },
-    }));
+    // An explicit connection starts a new local lifecycle. This is the only
+    // operation that clears a successful Forget tombstone.
+    set((state) => {
+      const forgottenHosts = { ...state.forgottenHosts };
+      const forgetErrorByHost = { ...state.forgetErrorByHost };
+      delete forgottenHosts[host];
+      delete forgetErrorByHost[host];
+      return {
+        forgottenHosts,
+        forgetErrorByHost,
+        lifecycleByHost: {
+          ...state.lifecycleByHost,
+          [host]: (state.lifecycleByHost[host] ?? 0) + 1,
+        },
+        // Optimistic: Rust serializes concurrent connects per host, but the UI
+        // should reflect the user's new lifecycle immediately.
+        statusByHost: {
+          ...state.statusByHost,
+          [host]: { state: "connecting" },
+        },
+      };
+    });
     try {
       await connectRemoteHost(host);
       set((state) => {
@@ -292,7 +335,32 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
   },
 
   forgetHost: async (host) => {
-    await forgetRemoteHost(host);
+    if (get().forgetPendingByHost[host]) return;
+    set((state) => ({
+      forgetPendingByHost: {
+        ...state.forgetPendingByHost,
+        [host]: true,
+      },
+      forgetErrorByHost: {
+        ...state.forgetErrorByHost,
+        [host]: undefined,
+      },
+    }));
+    try {
+      await forgetRemoteHost(host);
+    } catch (error) {
+      set((state) => ({
+        forgetPendingByHost: {
+          ...state.forgetPendingByHost,
+          [host]: false,
+        },
+        forgetErrorByHost: {
+          ...state.forgetErrorByHost,
+          [host]: toRemoteBackendError(error),
+        },
+      }));
+      throw error;
+    }
     set((state) => {
       const manualHosts = state.manualHosts.filter(
         (candidate) => candidate !== host,
@@ -303,12 +371,17 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
       const doctorErrorByHost = { ...state.doctorErrorByHost };
       const recentDirsByHost = { ...state.recentDirsByHost };
       const goosePathByHost = { ...state.goosePathByHost };
+      const forgottenHosts = { ...state.forgottenHosts, [host]: true as const };
+      const forgetPendingByHost = { ...state.forgetPendingByHost };
+      const forgetErrorByHost = { ...state.forgetErrorByHost };
       delete statusByHost[host];
       delete doctorByHost[host];
       delete doctorPendingByHost[host];
       delete doctorErrorByHost[host];
       delete recentDirsByHost[host];
       delete goosePathByHost[host];
+      delete forgetPendingByHost[host];
+      delete forgetErrorByHost[host];
       persistManualHosts(manualHosts);
       persistRecentDirs(recentDirsByHost);
       persistGoosePaths(goosePathByHost);
@@ -318,6 +391,13 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
         doctorByHost,
         doctorPendingByHost,
         doctorErrorByHost,
+        forgottenHosts,
+        lifecycleByHost: {
+          ...state.lifecycleByHost,
+          [host]: (state.lifecycleByHost[host] ?? 0) + 1,
+        },
+        forgetPendingByHost,
+        forgetErrorByHost,
         recentDirsByHost,
         goosePathByHost,
       };

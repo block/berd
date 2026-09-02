@@ -199,6 +199,12 @@ function RemoteHostRow({
     state.configHosts.includes(host),
   );
   const forgetHost = useRemoteHostStore((state) => state.forgetHost);
+  const forgetPending = useRemoteHostStore(
+    (state) => state.forgetPendingByHost[host] === true,
+  );
+  const forgetError = useRemoteHostStore(
+    (state) => state.forgetErrorByHost[host],
+  );
 
   const state = status?.state ?? "disconnected";
   const isConnected = state === "ready" || state === "reconnecting";
@@ -285,17 +291,25 @@ function RemoteHostRow({
               type="button"
               variant="ghost"
               size="sm"
+              disabled={forgetPending}
               onClick={() => {
                 void forgetHost(host).catch(() => {});
               }}
             >
-              {t("remoteHosts.actions.forget")}
+              {forgetPending
+                ? t("remoteHosts.actions.forgetting")
+                : t("remoteHosts.actions.forget")}
             </Button>
           ) : null}
         </div>
       }
       details={
         <div className="space-y-3">
+          {forgetError ? (
+            <p className="text-xs text-destructive" role="alert">
+              {t("remoteHosts.forget.error")}
+            </p>
+          ) : null}
           {showDoctor ? (
             <DoctorReport
               probes={probes}

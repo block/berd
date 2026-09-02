@@ -32,6 +32,10 @@ function baseState() {
     doctorByHost: {},
     doctorPendingByHost: {},
     doctorErrorByHost: {},
+    forgottenHosts: {},
+    lifecycleByHost: {},
+    forgetPendingByHost: {},
+    forgetErrorByHost: {},
     recentDirsByHost: {},
     goosePathByHost: {} as Record<string, string>,
     ensureHostConnected,
@@ -123,6 +127,54 @@ describe("RemoteHostsSettings", () => {
     );
 
     expect(forgetHost).toHaveBeenCalledWith(host);
+  });
+
+  it("disables Forget while pending", () => {
+    const host = "broken.blox";
+    seedStore({
+      statusByHost: { [host]: { state: "failed" } },
+      forgetPendingByHost: { [host]: true },
+    });
+    renderWithProviders(<RemoteHostsSettings />);
+
+    expect(
+      screen.getByRole("button", {
+        name: enSettings.remoteHosts.actions.forgetting,
+      }),
+    ).toBeDisabled();
+  });
+
+  it("keeps the row and explains a rejected Forget", async () => {
+    const user = userEvent.setup();
+    const host = "broken.blox";
+    forgetHost.mockImplementationOnce(async () => {
+      useRemoteHostStore.setState((state) => ({
+        forgetPendingByHost: {
+          ...state.forgetPendingByHost,
+          [host]: false,
+        },
+        forgetErrorByHost: {
+          ...state.forgetErrorByHost,
+          [host]: { kind: "internal", message: "still connecting" },
+        },
+      }));
+      throw new Error("still connecting");
+    });
+    seedStore({
+      statusByHost: { [host]: { state: "failed" } },
+    });
+    renderWithProviders(<RemoteHostsSettings />);
+
+    await user.click(
+      screen.getByRole("button", {
+        name: enSettings.remoteHosts.actions.forget,
+      }),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      enSettings.remoteHosts.forget.error,
+    );
+    expect(screen.getByText(host)).toBeInTheDocument();
   });
 
   it("does not offer Forget for an ssh-config host", () => {
