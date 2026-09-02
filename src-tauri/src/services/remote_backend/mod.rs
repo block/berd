@@ -118,6 +118,9 @@ struct HostSlot {
 
 struct SlotShared {
     state: RemoteBackendState,
+    /// Set before an inactive slot leaves the registry. Connect attempts that
+    /// already retained its Arc must observe this tombstone after admission.
+    forgotten: bool,
     /// Monotonic ownership token: each successful establish bumps it, and a
     /// supervisor only acts while its own generation is current. Explicit
     /// disconnects bump it to strand any racing supervisor.
@@ -141,6 +144,7 @@ impl RemoteBackendRegistry {
                 connect_lock: tokio::sync::Mutex::new(()),
                 shared: Mutex::new(SlotShared {
                     state: RemoteBackendState::Disconnected,
+                    forgotten: false,
                     generation: 0,
                     daemon: None,
                     local_port: None,
@@ -173,19 +177,34 @@ impl RemoteBackendRegistry {
     /// Remove an inactive host slot from the registry. The exact key is used
     /// deliberately so malformed inputs from a failed connect can still be
     /// forgotten instead of having to pass host parsing again.
-    pub fn forget(&self, key: &str) -> bool {
-        let mut slots = self.slots.lock().expect("remote backend registry poisoned");
-        let Some(slot) = slots.get(key) else {
+    pub async fn forget(&self, key: &str) -> bool {
+        let Some(slot) = self.existing_slot(key) else {
             return true;
         };
-        let forgettable = matches!(
-            slot.shared.lock().expect("slot poisoned").state,
-            RemoteBackendState::Disconnected | RemoteBackendState::Failed { .. }
-        );
-        if forgettable {
-            slots.remove(key);
+
+        // Serialize with every establish/reconnect owner. A connect may have
+        // retained this Arc before waiting on the lock, so removal also leaves
+        // a tombstone and advances its generation for that admitted waiter.
+        let _guard = slot.connect_lock.lock().await;
+        let mut slots = self.slots.lock().expect("remote backend registry poisoned");
+        let Some(registered) = slots.get(key) else {
+            return true;
+        };
+        if !Arc::ptr_eq(registered, &slot) {
+            return false;
         }
-        forgettable
+        let mut shared = slot.shared.lock().expect("slot poisoned");
+        if !matches!(
+            shared.state,
+            RemoteBackendState::Disconnected | RemoteBackendState::Failed { .. }
+        ) {
+            return false;
+        }
+        shared.forgotten = true;
+        shared.generation += 1;
+        drop(shared);
+        slots.remove(key);
+        true
     }
 
     /// Best-effort synchronous tunnel teardown for app exit. Daemons are left
@@ -368,6 +387,11 @@ pub async fn connect(
 
     {
         let mut shared = slot.shared.lock().expect("slot poisoned");
+        if shared.forgotten {
+            return Err(RemoteBackendError::internal(
+                "remote connection attempt was superseded",
+            ));
+        }
         if let Some(existing) = cached_connection(&shared, goose_path.as_deref()) {
             return Ok(existing);
         }
@@ -746,6 +770,7 @@ mod tests {
                 http_base_url: "http://127.0.0.1:5000".to_string(),
                 local_port: 5000,
             },
+            forgotten: false,
             generation: 1,
             daemon: Some(RemoteDaemonInfo {
                 pid: 10,
@@ -855,8 +880,8 @@ mod tests {
         assert_eq!(snapshot[0].host, "devbox");
     }
 
-    #[test]
-    fn forget_removes_inactive_slot_by_its_exact_key() {
+    #[tokio::test]
+    async fn forget_removes_inactive_slot_by_its_exact_key() {
         let registry = RemoteBackendRegistry::default();
         let spec = RemoteHostSpec::parse("devbox", &[]).unwrap();
         let slot = registry.slot(&spec);
@@ -864,18 +889,33 @@ mod tests {
             error: RemoteBackendError::internal("failed"),
         };
 
-        assert!(registry.forget("devbox"));
+        assert!(registry.forget("devbox").await);
         assert!(registry.snapshot().is_empty());
     }
 
-    #[test]
-    fn forget_preserves_active_slot() {
+    #[tokio::test]
+    async fn forget_preserves_active_slot() {
         let registry = RemoteBackendRegistry::default();
         let spec = RemoteHostSpec::parse("devbox", &[]).unwrap();
         let slot = registry.slot(&spec);
         slot.shared.lock().expect("slot poisoned").state = RemoteBackendState::Connecting;
 
-        assert!(!registry.forget("devbox"));
+        assert!(!registry.forget("devbox").await);
         assert_eq!(registry.snapshot().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn pending_connect_observes_tombstone_after_forget() {
+        let registry = RemoteBackendRegistry::default();
+        let spec = RemoteHostSpec::parse("devbox", &[]).unwrap();
+        let admitted = registry.slot(&spec);
+
+        assert!(registry.forget("devbox").await);
+        let _guard = admitted.connect_lock.lock().await;
+        assert!(admitted.shared.lock().expect("slot poisoned").forgotten);
+
+        let replacement = registry.slot(&spec);
+        assert!(!Arc::ptr_eq(&admitted, &replacement));
+        assert!(!replacement.shared.lock().expect("slot poisoned").forgotten);
     }
 }

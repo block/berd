@@ -50,7 +50,7 @@ pub async fn remote_backend_forget(
     registry: State<'_, RemoteBackendRegistry>,
     host: String,
 ) -> Result<(), RemoteBackendError> {
-    if registry.forget(&host) {
+    if registry.forget(&host).await {
         Ok(())
     } else {
         Err(RemoteBackendError::internal(

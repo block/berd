@@ -45,8 +45,7 @@ LEGACY_LOCK_OWNER="$LEGACY_LOCK_DIR/owner"
 RECORD_FORMAT="v4"
 LOG_MAX_BYTES=$((4 * 1024 * 1024))
 LOG_RETAIN_BYTES=$((2 * 1024 * 1024))
-LOG_READ_BLOCK_BYTES=$((64 * 1024))
-LOG_READ_BLOCK_COUNT=64
+LOG_SEGMENT_BYTES=$((LOG_RETAIN_BYTES - 64 * 1024))
 
 emit() { printf '%s %s\n' "$NONCE" "$*"; }
 
@@ -119,11 +118,18 @@ lock_owner_is_current() {
 }
 
 release_daemon_lock() {
-  [ "${lock_held:-0}" = "1" ] || return 0
+  if [ "${compat_lock_held:-0}" = "1" ] &&
+    IFS= read -r current_compat_owner <"$LEGACY_LOCK_OWNER" 2>/dev/null &&
+    [ "$current_compat_owner" = "$our_lock_owner" ]; then
+    rm -f "$LEGACY_LOCK_OWNER"
+    rmdir "$LEGACY_LOCK_DIR" 2>/dev/null || true
+  fi
+  compat_lock_held=0
   if IFS= read -r current_lock_owner <"$our_ticket/owner" 2>/dev/null &&
     [ "$current_lock_owner" = "$our_lock_owner" ]; then
     rm -rf -- "$our_ticket"
   fi
+  [ -z "${pending_ticket:-}" ] || rm -rf -- "$pending_ticket"
   lock_held=0
 }
 
@@ -163,19 +169,56 @@ cleanup_daemon_mutation() {
   release_daemon_lock
 }
 
-# A pre-ticket script may have crashed while holding daemon.lock. Migrating
-# that one legacy path is safe for the ticket protocol because new owners never
-# reuse it; even a delayed legacy reclaimer cannot touch a ticket generation.
-clear_stale_legacy_lock() {
-  [ -d "$LEGACY_LOCK_DIR" ] || return 0
-  if lock_owner_is_current "$LEGACY_LOCK_OWNER"; then
-    return 1
-  fi
-  legacy_claim="$STATE_DIR/.daemon.lock.legacy.$NONCE.$$"
-  if mv "$LEGACY_LOCK_DIR" "$legacy_claim" 2>/dev/null; then
-    rm -rf -- "$legacy_claim"
-  fi
-  [ ! -d "$LEGACY_LOCK_DIR" ]
+# Ticket clients also hold daemon.lock for the full mutation. Older Berd
+# clients know only this path, so retaining it as a compatibility gate makes
+# mixed-version rollouts mutually exclusive in both acquisition orders. The
+# ticket remains the generation-safe ordering protocol for current clients.
+acquire_legacy_compat_lock() {
+  compat_attempt=0
+  stale_observations=0
+  while [ "$compat_attempt" -lt 1200 ]; do
+    compat_attempt=$((compat_attempt + 1))
+    if mkdir "$LEGACY_LOCK_DIR" 2>/dev/null; then
+      compat_owner_tmp="$LEGACY_LOCK_DIR/.owner.$$"
+      if ! printf '%s\n' "$our_lock_owner" >"$compat_owner_tmp" ||
+        ! mv -f "$compat_owner_tmp" "$LEGACY_LOCK_OWNER"; then
+        rm -f "$compat_owner_tmp"
+        rmdir "$LEGACY_LOCK_DIR" 2>/dev/null || true
+        stale_observations=0
+        sleep 0.01
+        continue
+      fi
+      # Let an observer that saw the directory before owner publication finish
+      # its claim, then prove this exact generation still occupies the path.
+      sleep 0.01
+      if ! IFS= read -r current_compat_owner <"$LEGACY_LOCK_OWNER" 2>/dev/null ||
+        [ "$current_compat_owner" != "$our_lock_owner" ]; then
+        stale_observations=0
+        sleep 0.01
+        continue
+      fi
+      compat_lock_held=1
+      return 0
+    fi
+
+    if lock_owner_is_current "$LEGACY_LOCK_OWNER"; then
+      stale_observations=0
+    else
+      stale_observations=$((stale_observations + 1))
+      # A mkdir winner publishes its owner immediately. Repeated observations
+      # distinguish that window from a process that died before publication.
+      if [ "$stale_observations" -ge 20 ]; then
+        legacy_claim="$STATE_DIR/.daemon.lock.legacy.$NONCE.$$.$compat_attempt"
+        if mv "$LEGACY_LOCK_DIR" "$legacy_claim" 2>/dev/null; then
+          rm -rf -- "$legacy_claim"
+        fi
+        stale_observations=0
+      fi
+    fi
+    sleep 0.1
+  done
+  emit "ERR state-dir"
+  exit 46
 }
 
 # Each invocation owns a path that is never reused (`NONCE` is a UUID). Stale
@@ -192,6 +235,7 @@ acquire_daemon_lock() {
   }
 
   lock_held=0
+  compat_lock_held=0
   our_ticket=""
   pending_ticket=""
   uncommitted_pid=""
@@ -212,17 +256,6 @@ acquire_daemon_lock() {
     exit 46
   }
   our_lock_owner="$$ $(b64 "$our_identity")"
-
-  legacy_attempt=0
-  while [ -d "$LEGACY_LOCK_DIR" ] && [ "$legacy_attempt" -lt 1200 ]; do
-    legacy_attempt=$((legacy_attempt + 1))
-    clear_stale_legacy_lock || true
-    [ ! -d "$LEGACY_LOCK_DIR" ] || sleep 0.1
-  done
-  if [ -d "$LEGACY_LOCK_DIR" ]; then
-    emit "ERR state-dir"
-    exit 46
-  fi
 
   our_ticket_id="$NONCE.$$"
   pending_ticket="$LOCK_ROOT/.pending.$our_ticket_id"
@@ -299,6 +332,7 @@ acquire_daemon_lock() {
       fi
     done
     if [ "$ticket_blocked" = "0" ]; then
+      acquire_legacy_compat_lock
       lock_held=1
       return 0
     fi
@@ -379,58 +413,52 @@ trim_log_if_needed() {
   fi
 }
 
-# `dd` performs many pipe reads per invocation, so a multi-megabyte pre-bind
-# burst is drained without a process per small FIFO read. Every consumed byte
-# first lands in the chunk file; rotation then carries that complete chunk into
-# the bounded tail, avoiding the userspace read-ahead loss caused by killing a
-# writer at RLIMIT_FSIZE.
+# `tee` writes every partial pipe read to its named output (the visible log)
+# before stdout. `head` closes that stdout counter after a roughly 2 MiB
+# segment, ending this tee only after the same bytes are visible. The 64 KiB reserve
+# covers the final in-flight pipe read, so a segment starting from the retained
+# 2 MiB tail cannot exceed the 4 MiB cap. Rotation happens per segment rather
+# than per small FIFO read.
 bounded_log_writer() {
   writer_log="$1"
-  writer_chunk="$STATE_DIR/.goose-serve.log.chunk.$$"
   writer_tmp="$STATE_DIR/.goose-serve.log.rotate.$$"
-  trap 'rm -f "$writer_chunk" "$writer_tmp"; exit 143' TERM
-  trap 'rm -f "$writer_chunk" "$writer_tmp"; exit 129' HUP
-  trap 'rm -f "$writer_chunk" "$writer_tmp"; exit 130' INT
+  writer_head_pid=""
+  # Preserve the Goose FIFO before backgrounding each counter pipeline;
+  # non-interactive Bash otherwise redirects an asynchronous stdin to null.
+  exec 3<&0
+  trap 'kill -TERM "$writer_head_pid" 2>/dev/null || true; wait "$writer_head_pid" 2>/dev/null || true; rm -f "$writer_tmp"; exit 143' TERM
+  trap 'kill -TERM "$writer_head_pid" 2>/dev/null || true; wait "$writer_head_pid" 2>/dev/null || true; rm -f "$writer_tmp"; exit 129' HUP
+  trap 'kill -TERM "$writer_head_pid" 2>/dev/null || true; wait "$writer_head_pid" 2>/dev/null || true; rm -f "$writer_tmp"; exit 130' INT
 
   while :; do
-    rm -f "$writer_chunk"
-    dd bs="$LOG_READ_BLOCK_BYTES" count="$LOG_READ_BLOCK_COUNT" of="$writer_chunk" 2>/dev/null || true
-    chunk_bytes="$(wc -c <"$writer_chunk" 2>/dev/null | tr -d ' ')"
-    case "$chunk_bytes" in
-    '' | *[!0-9]*) chunk_bytes=0 ;;
-    esac
-    [ "$chunk_bytes" -gt 0 ] || break
-
     writer_bytes="$(wc -c <"$writer_log" 2>/dev/null | tr -d ' ')"
     case "$writer_bytes" in
     '' | *[!0-9]*) writer_bytes=0 ;;
     esac
-    if [ "$chunk_bytes" -ge "$LOG_MAX_BYTES" ]; then
-      if ! tail -c "$LOG_MAX_BYTES" "$writer_chunk" >"$writer_tmp" 2>/dev/null; then
+    if [ "$writer_bytes" -gt "$LOG_RETAIN_BYTES" ]; then
+      if ! tail -c "$LOG_RETAIN_BYTES" "$writer_log" >"$writer_tmp" 2>/dev/null; then
         rm -f "$writer_tmp"
         break
       fi
-    elif [ $((writer_bytes + chunk_bytes)) -le "$LOG_MAX_BYTES" ]; then
-      cat "$writer_chunk" >>"$writer_log"
-      continue
-    else
-      carry_bytes=$((LOG_MAX_BYTES - chunk_bytes))
-      if ! tail -c "$carry_bytes" "$writer_log" >"$writer_tmp" 2>/dev/null; then
+      if ! mv -f "$writer_tmp" "$writer_log"; then
         rm -f "$writer_tmp"
         break
       fi
-      if ! cat "$writer_chunk" >>"$writer_tmp"; then
-        rm -f "$writer_tmp"
-        break
-      fi
+      writer_bytes="$LOG_RETAIN_BYTES"
     fi
-    if ! mv -f "$writer_tmp" "$writer_log"; then
-      rm -f "$writer_tmp"
-      break
-    fi
+
+    tee -a "$writer_log" <&3 2>/dev/null | head -c "$LOG_SEGMENT_BYTES" >/dev/null 2>&1 &
+    writer_head_pid=$!
+    wait "$writer_head_pid" 2>/dev/null || true
+    writer_head_pid=""
+    writer_after="$(wc -c <"$writer_log" 2>/dev/null | tr -d ' ')"
+    case "$writer_after" in
+    '' | *[!0-9]*) writer_after="$writer_bytes" ;;
+    esac
+    [ "$writer_after" -gt "$writer_bytes" ] || break
   done
   trim_log_if_needed "$writer_log"
-  rm -f "$writer_chunk" "$writer_tmp"
+  rm -f "$writer_tmp"
 }
 
 # Confirms the PID is still the exact process that wrote this record. `kill -0`
