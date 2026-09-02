@@ -73,7 +73,11 @@ pub struct PrepareAssistantSpeechRequest {
 }
 
 #[derive(Clone, Debug, Serialize)]
-#[serde(tag = "outcome", rename_all = "camelCase")]
+#[serde(
+    tag = "outcome",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum PrepareAssistantSpeechOutcome {
     Pending,
     NotAdmitted,
@@ -3751,6 +3755,18 @@ mod tests {
             serde_json::json!({
                 "type": "controlsDismissed",
                 "revision": 3,
+            }),
+        );
+    }
+
+    #[test]
+    fn prepared_speech_outcome_uses_renderer_field_names() {
+        assert_eq!(
+            serde_json::to_value(PrepareAssistantSpeechOutcome::Admitted { speech_id: 7 })
+                .expect("serialize admitted speech outcome"),
+            serde_json::json!({
+                "outcome": "admitted",
+                "speechId": 7,
             }),
         );
     }
