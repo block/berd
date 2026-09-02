@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { useRemoteHostStore } from "@/features/remoteHosts/stores/remoteHostStore";
 import { isRemoteBackendError } from "@/shared/api/remoteHosts";
@@ -29,13 +29,24 @@ export function AddRemoteHostDialog({
   const [hostDraft, setHostDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const attemptRef = useRef(0);
+
+  useEffect(
+    () => () => {
+      attemptRef.current += 1;
+    },
+    [],
+  );
 
   const handleOpenChange = (nextOpen: boolean) => {
-    if (!nextOpen && pending) return;
     onOpenChange(nextOpen);
     if (!nextOpen) {
+      // The backend connection may still finish, but closing the dialog must
+      // keep that late result from changing the composer's selected host.
+      attemptRef.current += 1;
       setHostDraft("");
       setError(null);
+      setPending(false);
     }
   };
 
@@ -51,29 +62,29 @@ export function AddRemoteHostDialog({
 
     setError(null);
     setPending(true);
+    const attempt = ++attemptRef.current;
     try {
       await useRemoteHostStore.getState().ensureHostConnected(host);
+      if (attemptRef.current !== attempt) return;
       onConnected(host);
-      onOpenChange(false);
-      setHostDraft("");
+      handleOpenChange(false);
     } catch (connectionError) {
+      if (attemptRef.current !== attempt) return;
       setError(
         isRemoteBackendError(connectionError)
           ? connectionError.message
           : String(connectionError),
       );
     } finally {
-      setPending(false);
+      if (attemptRef.current === attempt) {
+        setPending(false);
+      }
     }
   };
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent
-        size="md"
-        closeLabel={t("toolbar.remoteHost.add.close")}
-        showCloseButton={!pending}
-      >
+      <DialogContent size="md" closeLabel={t("toolbar.remoteHost.add.close")}>
         <form className="contents" onSubmit={handleSubmit}>
           <DialogHeader>
             <DialogTitle>{t("toolbar.remoteHost.add.title")}</DialogTitle>
@@ -111,7 +122,6 @@ export function AddRemoteHostDialog({
             <Button
               type="button"
               variant="outline"
-              disabled={pending}
               onClick={() => handleOpenChange(false)}
             >
               {t("toolbar.remoteHost.add.cancel")}

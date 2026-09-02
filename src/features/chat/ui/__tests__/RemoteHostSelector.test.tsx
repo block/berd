@@ -180,4 +180,45 @@ describe("RemoteHostSelector", () => {
       screen.getByRole("dialog", { name: /add ssh environment/i }),
     ).toBeInTheDocument();
   });
+
+  it("dismisses a pending connection and ignores its late success", async () => {
+    let resolveConnection: (value: {
+      incarnation: string;
+      generation: number;
+    }) => void = () => {};
+    mockConnectRemoteHost.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveConnection = resolve;
+        }),
+    );
+    const user = userEvent.setup();
+    const onHostChange = vi.fn();
+    render(
+      <RemoteHostSelector selectedHost={null} onHostChange={onHostChange} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /select computer/i }));
+    await user.click(
+      screen.getByRole("menuitem", { name: /add ssh environment/i }),
+    );
+    await user.type(
+      screen.getByRole("textbox", { name: /ssh host/i }),
+      "slow-box",
+    );
+    await user.click(screen.getByRole("button", { name: /^connect$/i }));
+    await user.click(screen.getByRole("button", { name: /^cancel$/i }));
+
+    expect(
+      screen.queryByRole("dialog", { name: /add ssh environment/i }),
+    ).not.toBeInTheDocument();
+
+    resolveConnection({ incarnation: "slot-slow", generation: 1 });
+    await waitFor(() => {
+      expect(
+        useRemoteHostStore.getState().statusByHost["slow-box"]?.state,
+      ).toBe("ready");
+    });
+    expect(onHostChange).not.toHaveBeenCalled();
+  });
 });
