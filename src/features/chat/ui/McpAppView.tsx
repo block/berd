@@ -6,6 +6,15 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import packageJson from "../../../../package.json";
+import { Button } from "@/shared/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/shared/ui/dialog";
 import {
   getClientForSession,
   getWireSessionId,
@@ -63,6 +72,16 @@ type ReadResourceResult = Awaited<
 >;
 type HostContextToolInfo = NonNullable<McpUiHostContext["toolInfo"]>;
 type HostContextTool = HostContextToolInfo["tool"];
+
+interface PendingAppMessage {
+  nonce: number;
+  sessionId: string;
+  toolCallId: string;
+  extensionName: string;
+  toolName: string;
+  text: string;
+  resolve: (result: { isError?: boolean }) => void;
+}
 
 function buildToolResult(
   toolResponse: ToolResponseContent | undefined,
@@ -134,9 +153,14 @@ export function McpAppView({
   >();
   const [containerWidth, setContainerWidth] = useState<number | null>(null);
   const [isIframeSizingPending, setIsIframeSizingPending] = useState(false);
+  const [pendingAppMessage, setPendingAppMessage] =
+    useState<PendingAppMessage | null>(null);
   const autoScrollTimersRef = useRef<number[]>([]);
   const iframeSizingRafRef = useRef<number[]>([]);
   const mcpRequestSourceCounterRef = useRef(0);
+  const appMessageNonceRef = useRef(0);
+  const appMessageInFlightRef = useRef(false);
+  const pendingAppMessageRef = useRef<PendingAppMessage | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const {
     enabled: rowStateEnabled,
@@ -163,10 +187,25 @@ export function McpAppView({
   const currentToolResult = initialToolResult;
 
   useTranscriptOpenOverlayProtection({
-    open: pendingOpenLinkUrl !== null,
+    open: pendingOpenLinkUrl !== null || pendingAppMessage !== null,
     overlayKind: "dialog",
-    overlayId: "mcp-link-safety",
+    overlayId: pendingAppMessage
+      ? "mcp-message-confirmation"
+      : "mcp-link-safety",
   });
+
+  const settlePendingAppMessage = useCallback(
+    (request: PendingAppMessage, result: { isError?: boolean }) => {
+      if (pendingAppMessageRef.current?.nonce !== request.nonce) {
+        return false;
+      }
+      pendingAppMessageRef.current = null;
+      setPendingAppMessage(null);
+      request.resolve(result);
+      return true;
+    },
+    [],
+  );
 
   const requestAutoScroll = useCallback(() => {
     if (!onAutoScrollRequest) {
@@ -208,6 +247,35 @@ export function McpAppView({
       iframeSizingRafRef.current = [];
     },
     [],
+  );
+
+  useEffect(() => {
+    const pending = pendingAppMessageRef.current;
+    if (
+      pending &&
+      (pending.sessionId !== payload.sessionId ||
+        pending.toolCallId !== payload.toolCallId ||
+        pending.extensionName !== payload.tool.extensionName ||
+        pending.toolName !== payload.tool.name)
+    ) {
+      settlePendingAppMessage(pending, { isError: true });
+    }
+  }, [
+    payload.sessionId,
+    payload.toolCallId,
+    payload.tool.extensionName,
+    payload.tool.name,
+    settlePendingAppMessage,
+  ]);
+
+  useEffect(
+    () => () => {
+      const pending = pendingAppMessageRef.current;
+      if (pending) {
+        settlePendingAppMessage(pending, { isError: true });
+      }
+    },
+    [settlePendingAppMessage],
   );
 
   useEffect(() => {
@@ -341,33 +409,106 @@ export function McpAppView({
 
   const handleMessage = useCallback(
     async ({ role, content }: MessageParams) => {
-      if (role !== "user" || !onSendMessage) {
+      if (
+        role !== "user" ||
+        !Array.isArray(content) ||
+        !onSendMessage ||
+        pendingAppMessageRef.current ||
+        appMessageInFlightRef.current
+      ) {
         return { isError: true };
       }
 
       const text = content
         .filter((block): block is { type: "text"; text: string } => {
           return (
+            typeof block === "object" &&
+            block !== null &&
             block.type === "text" &&
             typeof block.text === "string" &&
             block.text.trim().length > 0
           );
         })
-        .map((block) => block.text.trim())
+        .map((block) => block.text)
         .join("\n\n");
 
       if (!text) {
         return { isError: true };
       }
 
-      setMcpActivity("recent-message", true, {
-        sourceId: "mcp-message",
+      return new Promise<{ isError?: boolean }>((resolve) => {
+        const request: PendingAppMessage = {
+          nonce: ++appMessageNonceRef.current,
+          sessionId: payload.sessionId,
+          toolCallId: payload.toolCallId,
+          extensionName: payload.tool.extensionName,
+          toolName: payload.tool.name,
+          text,
+          resolve,
+        };
+        pendingAppMessageRef.current = request;
+        setPendingAppMessage(request);
       });
-      const accepted = await onSendMessage(text);
-      return accepted === false ? { isError: true } : {};
     },
-    [onSendMessage, setMcpActivity],
+    [
+      onSendMessage,
+      payload.sessionId,
+      payload.tool.extensionName,
+      payload.tool.name,
+      payload.toolCallId,
+    ],
   );
+
+  const rejectPendingAppMessage = useCallback(() => {
+    const pending = pendingAppMessageRef.current;
+    if (pending) {
+      settlePendingAppMessage(pending, { isError: true });
+    }
+  }, [settlePendingAppMessage]);
+
+  const confirmPendingAppMessage = useCallback(async () => {
+    const pending = pendingAppMessageRef.current;
+    if (
+      !pending ||
+      !onSendMessage ||
+      pending.sessionId !== payload.sessionId ||
+      pending.toolCallId !== payload.toolCallId ||
+      pending.extensionName !== payload.tool.extensionName ||
+      pending.toolName !== payload.tool.name
+    ) {
+      if (pending) {
+        settlePendingAppMessage(pending, { isError: true });
+      }
+      return;
+    }
+
+    // Clear authority before awaiting delivery so double-clicks and replayed
+    // app requests cannot spend the same confirmation twice.
+    pendingAppMessageRef.current = null;
+    appMessageInFlightRef.current = true;
+    setPendingAppMessage(null);
+    try {
+      const accepted = await onSendMessage(pending.text);
+      pending.resolve(accepted === false ? { isError: true } : {});
+      if (accepted !== false) {
+        setMcpActivity("recent-message", true, {
+          sourceId: `mcp-message:${pending.nonce}`,
+        });
+      }
+    } catch {
+      pending.resolve({ isError: true });
+    } finally {
+      appMessageInFlightRef.current = false;
+    }
+  }, [
+    onSendMessage,
+    payload.sessionId,
+    payload.tool.extensionName,
+    payload.tool.name,
+    payload.toolCallId,
+    setMcpActivity,
+    settlePendingAppMessage,
+  ]);
 
   const handleCallTool = useCallback(
     async ({
@@ -543,6 +684,41 @@ export function McpAppView({
           )}
         </div>
       )}
+      <Dialog
+        open={pendingAppMessage !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            rejectPendingAppMessage();
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("message.mcpAppMessageConfirmTitle")}</DialogTitle>
+            <DialogDescription>
+              {t("message.mcpAppMessageConfirmDescription", {
+                extension: pendingAppMessage?.extensionName,
+                tool: pendingAppMessage?.toolName,
+              })}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-64 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/40 p-3 text-sm">
+            {pendingAppMessage?.text}
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={rejectPendingAppMessage}
+              type="button"
+              variant="outline"
+            >
+              {t("message.mcpAppMessageCancel")}
+            </Button>
+            <Button onClick={confirmPendingAppMessage} type="button">
+              {t("message.mcpAppMessageSend")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <LinkSafetyModal
         isOpen={pendingOpenLinkUrl !== null}
         onClose={handleOpenLinkModalClose}
