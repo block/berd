@@ -74,6 +74,10 @@ function getDuplicateSourceName(message: string): string | null {
   return match?.[1] ?? match?.[2] ?? null;
 }
 
+function normalizeDescription(description: string): string {
+  return description.trim();
+}
+
 interface SkillEditorProps {
   isOpen: boolean;
   onClose: () => void;
@@ -159,17 +163,17 @@ export function SkillEditor({
   const initialColor = editingSkill?.color ?? null;
   const heroToneSeed = name || editingSkill?.name || "new";
   const currentEffectiveColor = color ?? resolveSkillPillTone(heroToneSeed);
-  const initialEffectiveColor =
-    initialColor ?? resolveSkillPillTone(initialName || "new");
   const isDirty =
     name !== initialName ||
-    description !== initialDescription ||
+    normalizeDescription(description) !==
+      normalizeDescription(initialDescription) ||
     instructions !== initialInstructions ||
     saveLocation !== initialSaveLocation ||
-    currentEffectiveColor !== initialEffectiveColor;
+    color !== initialColor;
 
   const nameValid = isValidSkillName(name);
-  const canSave = nameValid && description.trim().length > 0 && !saving;
+  const canSave =
+    nameValid && normalizeDescription(description).length > 0 && !saving;
   const showNameValidationError = name.length > 0 && !nameValid;
   const nameInputDescribedBy = [
     showNameValidationError ? "skill-name-validation" : null,
@@ -229,7 +233,7 @@ export function SkillEditor({
         savedSkill = await updateSkill(
           editingSkill.path,
           name,
-          description.trim(),
+          normalizeDescription(description),
           instructions,
           effectiveColor,
         );
@@ -238,7 +242,7 @@ export function SkillEditor({
           saveLocation !== GLOBAL_VALUE ? saveLocation : undefined;
         savedSkill = await createSkill(
           name,
-          description.trim(),
+          normalizeDescription(description),
           instructions,
           effectiveColor,
           { projectId },

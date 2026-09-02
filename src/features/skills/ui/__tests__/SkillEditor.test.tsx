@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { resolveSkillPillTone } from "../../lib/resolveSkillPillTone";
 import { SkillEditor } from "../SkillEditor";
 
 vi.mock("../../api/skills", () => ({
@@ -161,6 +162,63 @@ describe("SkillEditor", () => {
 
       expect(onClose).not.toHaveBeenCalled();
       expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    });
+
+    it("treats pinning the derived color as an unsaved change", async () => {
+      const user = userEvent.setup();
+      const onClose = vi.fn();
+      const skillName = "code-review";
+      render(
+        <SkillEditor
+          {...defaultProps}
+          onClose={onClose}
+          editingSkill={{
+            name: skillName,
+            description: "Reviews code",
+            instructions: "Review carefully",
+            path: "/mock/.agents/skills/code-review",
+            fileLocation: "/mock/.agents/skills/code-review/SKILL.md",
+            color: null,
+          }}
+        />,
+      );
+
+      const derivedColor = resolveSkillPillTone(skillName);
+      await user.click(
+        screen.getByRole("button", { name: `Color ${derivedColor}` }),
+      );
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    });
+
+    it("ignores description whitespace that is trimmed when saved", async () => {
+      const user = userEvent.setup();
+      const onClose = vi.fn();
+      render(
+        <SkillEditor
+          {...defaultProps}
+          onClose={onClose}
+          editingSkill={{
+            name: "code-review",
+            description: "Reviews code",
+            instructions: "Review carefully",
+            path: "/mock/.agents/skills/code-review",
+            fileLocation: "/mock/.agents/skills/code-review/SKILL.md",
+            color: null,
+          }}
+        />,
+      );
+
+      const descriptionInput = screen.getByPlaceholderText(
+        "What it does and when to use it...",
+      );
+      await user.type(descriptionInput, "   ");
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+      expect(onClose).toHaveBeenCalledOnce();
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     });
 
     it("asks for confirmation before discarding edits to an existing skill", async () => {
