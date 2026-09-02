@@ -221,4 +221,56 @@ describe("RemoteHostSelector", () => {
     });
     expect(onHostChange).not.toHaveBeenCalled();
   });
+
+  it("does not select a connection lifecycle superseded while the dialog waits", async () => {
+    const resolvers: Array<
+      (value: { incarnation: string; generation: number }) => void
+    > = [];
+    mockConnectRemoteHost.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolvers.push(resolve);
+        }),
+    );
+    const user = userEvent.setup();
+    const onHostChange = vi.fn();
+    render(
+      <RemoteHostSelector selectedHost={null} onHostChange={onHostChange} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /select computer/i }));
+    await user.click(
+      screen.getByRole("menuitem", { name: /add ssh environment/i }),
+    );
+    await user.type(
+      screen.getByRole("textbox", { name: /ssh host/i }),
+      "superseded-box",
+    );
+    await user.click(screen.getByRole("button", { name: /^connect$/i }));
+
+    const replacement = useRemoteHostStore
+      .getState()
+      .ensureHostConnected("superseded-box");
+    await waitFor(() => expect(resolvers).toHaveLength(2));
+    resolvers[1]?.({ incarnation: "slot-new", generation: 2 });
+    await expect(replacement).resolves.toBe(true);
+    resolvers[0]?.({ incarnation: "slot-old", generation: 1 });
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: /^connect$/i }),
+      ).not.toBeDisabled();
+    });
+    expect(onHostChange).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("dialog", { name: /add ssh environment/i }),
+    ).toBeInTheDocument();
+    expect(
+      useRemoteHostStore.getState().statusByHost["superseded-box"],
+    ).toEqual({
+      state: "ready",
+      incarnation: "slot-new",
+      generation: 2,
+    });
+  });
 });

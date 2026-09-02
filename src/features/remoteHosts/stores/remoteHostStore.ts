@@ -173,7 +173,8 @@ export interface RemoteHostStore {
   refreshConfigHosts: () => Promise<void>;
   syncBackendSnapshot: () => Promise<void>;
   applyStatusEvent: (payload: RemoteBackendStatusPayload) => void;
-  ensureHostConnected: (host: string) => Promise<void>;
+  /** Connect the host and report whether this exact lifecycle became current. */
+  ensureHostConnected: (host: string) => Promise<boolean>;
   disconnect: (host: string) => Promise<void>;
   shutdownHost: (host: string, expectedInstanceToken?: string) => Promise<void>;
   runDoctor: (host: string) => Promise<void>;
@@ -267,7 +268,7 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
   },
 
   ensureHostConnected: async (host) => {
-    const current = get();
+    let current = get();
     if (
       current.statusByHost[host]?.state === "ready" &&
       !current.forgottenHosts[host]
@@ -275,18 +276,30 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
       // A manually entered host can already be ready when it was restored
       // from the backend snapshot. Remember it even though no new connect is
       // required, otherwise it disappears from the selector after restart.
-      if (
-        !current.configHosts.includes(host) &&
-        !current.manualHosts.includes(host)
-      ) {
-        const manualHosts = [host, ...current.manualHosts].slice(
+      let accepted = false;
+      set((state) => {
+        if (
+          state.statusByHost[host]?.state !== "ready" ||
+          state.forgottenHosts[host]
+        ) {
+          return state;
+        }
+        accepted = true;
+        if (
+          state.configHosts.includes(host) ||
+          state.manualHosts.includes(host)
+        ) {
+          return state;
+        }
+        const manualHosts = [host, ...state.manualHosts].slice(
           0,
           MAX_MANUAL_HOSTS,
         );
         persistManualHosts(manualHosts);
-        set({ manualHosts });
-      }
-      return;
+        return { manualHosts };
+      });
+      if (accepted) return true;
+      current = get();
     }
 
     // An explicit connection starts a new local lifecycle. This is the only
@@ -327,6 +340,7 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
     });
     try {
       const connection = await connectRemoteHost(host);
+      let accepted = false;
       set((state) => {
         if (
           state.forgottenHosts[host] ||
@@ -335,6 +349,7 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
         ) {
           return state;
         }
+        accepted = true;
         // A host that connected but isn't in ~/.ssh/config was typed in
         // manually; remember it across restarts.
         const isKnown =
@@ -362,7 +377,9 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
           },
         };
       });
+      return accepted;
     } catch (error) {
+      let accepted = false;
       set((state) => {
         if (
           state.forgottenHosts[host] ||
@@ -371,6 +388,7 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
         ) {
           return state;
         }
+        accepted = true;
         const connectPendingLifecycleByHost = {
           ...state.connectPendingLifecycleByHost,
         };
@@ -392,6 +410,7 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
           },
         };
       });
+      if (!accepted) return false;
       throw error;
     }
   },
@@ -602,7 +621,10 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
  * action for callers outside React (e.g. session routing in chat).
  */
 export function ensureHostConnected(host: string): Promise<void> {
-  return useRemoteHostStore.getState().ensureHostConnected(host);
+  return useRemoteHostStore
+    .getState()
+    .ensureHostConnected(host)
+    .then(() => undefined);
 }
 
 let remoteHostStoreInitStarted = false;

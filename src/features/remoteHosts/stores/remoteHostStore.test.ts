@@ -738,6 +738,31 @@ describe("manual host persistence", () => {
     expect(loadPersistedManualHosts()).toEqual(["adhoc.blox"]);
   });
 
+  it("retains concurrent already-ready manual hosts in state and storage", async () => {
+    useRemoteHostStore.setState({
+      statusByHost: {
+        "alpha.blox": { ...backendIdentity, state: "ready" },
+        "beta.blox": {
+          incarnation: "slot-beta",
+          generation: 2,
+          state: "ready",
+        },
+      },
+    });
+
+    const accepted = await Promise.all([
+      useRemoteHostStore.getState().ensureHostConnected("alpha.blox"),
+      useRemoteHostStore.getState().ensureHostConnected("beta.blox"),
+    ]);
+
+    expect(accepted).toEqual([true, true]);
+    expect(useRemoteHostStore.getState().manualHosts).toEqual([
+      "beta.blox",
+      "alpha.blox",
+    ]);
+    expect(loadPersistedManualHosts()).toEqual(["beta.blox", "alpha.blox"]);
+  });
+
   it("does not record ssh-config hosts as manual", async () => {
     mocks.connectRemoteHost.mockResolvedValue(connection);
     useRemoteHostStore.setState({ configHosts: ["configured"] });

@@ -64,8 +64,10 @@ export function AddRemoteHostDialog({
     setPending(true);
     const attempt = ++attemptRef.current;
     try {
-      await useRemoteHostStore.getState().ensureHostConnected(host);
-      if (attemptRef.current !== attempt) return;
+      const accepted = await useRemoteHostStore
+        .getState()
+        .ensureHostConnected(host);
+      if (attemptRef.current !== attempt || !accepted) return;
       onConnected(host);
       handleOpenChange(false);
     } catch (connectionError) {
