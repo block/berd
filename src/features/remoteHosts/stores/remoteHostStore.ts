@@ -456,6 +456,7 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
 
   forgetHost: async (host) => {
     if (get().forgetPendingByHost[host]) return;
+    const admittedLifecycle = get().lifecycleByHost[host] ?? 0;
     set((state) => ({
       forgetPendingByHost: {
         ...state.forgetPendingByHost,
@@ -469,19 +470,29 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
     try {
       await forgetRemoteHost(host);
     } catch (error) {
-      set((state) => ({
-        forgetPendingByHost: {
+      set((state) => {
+        const forgetPendingByHost = {
           ...state.forgetPendingByHost,
           [host]: false,
-        },
-        forgetErrorByHost: {
-          ...state.forgetErrorByHost,
-          [host]: toRemoteBackendError(error),
-        },
-      }));
+        };
+        const forgetErrorByHost = { ...state.forgetErrorByHost };
+        if ((state.lifecycleByHost[host] ?? 0) === admittedLifecycle) {
+          forgetErrorByHost[host] = toRemoteBackendError(error);
+        } else {
+          delete forgetErrorByHost[host];
+        }
+        return { forgetPendingByHost, forgetErrorByHost };
+      });
       throw error;
     }
     set((state) => {
+      const forgetPendingByHost = { ...state.forgetPendingByHost };
+      delete forgetPendingByHost[host];
+      if ((state.lifecycleByHost[host] ?? 0) !== admittedLifecycle) {
+        // A newer explicit Connect owns this row. The old Forget result may
+        // clear its own pending marker, but must not erase the replacement.
+        return { forgetPendingByHost };
+      }
       const manualHosts = state.manualHosts.filter(
         (candidate) => candidate !== host,
       );
@@ -496,7 +507,6 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
       const retiredIncarnationsByHost = {
         ...state.retiredIncarnationsByHost,
       };
-      const forgetPendingByHost = { ...state.forgetPendingByHost };
       const forgetErrorByHost = { ...state.forgetErrorByHost };
       const forgottenIncarnation = statusByHost[host]?.incarnation;
       if (forgottenIncarnation) {
@@ -511,7 +521,6 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
       delete doctorByHost[host];
       delete doctorPendingByHost[host];
       delete doctorErrorByHost[host];
-      delete forgetPendingByHost[host];
       delete forgetErrorByHost[host];
       delete connectPendingLifecycleByHost[host];
       persistManualHosts(manualHosts);

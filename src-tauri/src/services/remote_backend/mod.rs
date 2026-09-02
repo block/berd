@@ -720,6 +720,20 @@ pub fn disconnect_generation(
     true
 }
 
+fn validate_shutdown_generation(
+    slot: &HostSlot,
+    expected_generation: Option<u64>,
+) -> Result<(), RemoteBackendError> {
+    let shared = slot.shared.lock().expect("slot poisoned");
+    if expected_generation.is_some_and(|expected| shared.generation != expected) {
+        return Err(RemoteBackendError::new(
+            RemoteBackendErrorKind::DaemonChanged,
+            "Remote backend changed before shutdown completed",
+        ));
+    }
+    Ok(())
+}
+
 /// Stop the remote daemon, then drop the tunnel.
 pub async fn shutdown(
     app: &AppHandle,
@@ -733,18 +747,19 @@ pub async fn shutdown(
     let slot = registry.slot(&spec);
     let shell_env = dir_env::capture_home_interactive_env().await;
 
-    // Wait out any in-flight establish, then invalidate its supervisor and
-    // drop its tunnel before touching the daemon. A new connect cannot start
-    // until shutdown releases this lock, so ensure_daemon cannot recreate the
-    // daemon after shutdown_daemon stops it.
+    // Wait out any in-flight establish and validate the local owner before
+    // touching either resource. Keep the tunnel intact until remote shutdown
+    // succeeds: a daemon identity mismatch must not leave a dead local path
+    // represented by the still-current Ready state.
     let _guard = slot.connect_lock.lock().await;
+    validate_shutdown_generation(&slot, expected_generation)?;
+    daemon::shutdown_daemon(&spec, &shell_env, expected_instance_token).await?;
     if !disconnect_generation(app, registry, &spec.key(), expected_generation) {
         return Err(RemoteBackendError::new(
             RemoteBackendErrorKind::DaemonChanged,
             "Remote backend changed before shutdown completed",
         ));
     }
-    daemon::shutdown_daemon(&spec, &shell_env, expected_instance_token).await?;
     record_diagnostic(DiagnosticLevel::Info, "daemon_shutdown", &spec.key(), None);
     Ok(())
 }
@@ -926,6 +941,25 @@ mod tests {
             },
         ));
         assert!(matches!(shared.state, RemoteBackendState::Disconnected));
+    }
+
+    #[test]
+    fn shutdown_generation_mismatch_preserves_the_ready_tunnel() {
+        let spec = RemoteHostSpec::parse("devbox", &[]).unwrap();
+        let slot = HostSlot {
+            key: spec.key(),
+            spec,
+            incarnation: "slot-1".to_string(),
+            connect_lock: tokio::sync::Mutex::new(()),
+            shared: Mutex::new(ready_shared(None)),
+        };
+
+        let error = validate_shutdown_generation(&slot, Some(2)).unwrap_err();
+        assert_eq!(error.kind, RemoteBackendErrorKind::DaemonChanged);
+        let shared = slot.shared.lock().expect("slot poisoned");
+        assert_eq!(shared.generation, 1);
+        assert_eq!(shared.tunnel_pid, Some(99));
+        assert!(matches!(shared.state, RemoteBackendState::Ready { .. }));
     }
 
     #[test]

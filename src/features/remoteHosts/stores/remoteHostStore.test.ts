@@ -390,6 +390,26 @@ describe("disconnect and shutdownHost", () => {
     });
   });
 
+  it("keeps an authoritative ready state when shutdown rejects before tunnel teardown", async () => {
+    const daemonChanged = {
+      kind: "daemon-changed",
+      message: "remote daemon changed",
+    };
+    mocks.shutdownRemoteHost.mockRejectedValue(daemonChanged);
+    useRemoteHostStore
+      .getState()
+      .applyStatusEvent({ host: "devbox", ...backendIdentity, state: "ready" });
+
+    await expect(
+      useRemoteHostStore.getState().shutdownHost("devbox"),
+    ).rejects.toBe(daemonChanged);
+
+    expect(useRemoteHostStore.getState().statusByHost.devbox).toEqual({
+      ...backendIdentity,
+      state: "ready",
+    });
+  });
+
   it("passes a conflict generation token to shutdown", async () => {
     mocks.shutdownRemoteHost.mockResolvedValue(undefined);
 
@@ -779,6 +799,43 @@ describe("manual host persistence", () => {
     expect(loadPersistedManualHosts()).toEqual(["keep.blox"]);
     expect(loadPersistedRecentDirs()).toEqual({ [host]: ["~/src"] });
     expect(loadPersistedGoosePaths()).toEqual({ [host]: "~/bin/goose" });
+  });
+
+  it("does not let a late Forget completion erase a newer connection", async () => {
+    const host = "adhoc.blox";
+    let resolveForget: () => void = () => {};
+    mocks.forgetRemoteHost.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveForget = resolve;
+        }),
+    );
+    useRemoteHostStore.setState({
+      lifecycleByHost: { [host]: 1 },
+      manualHosts: [host],
+      statusByHost: { [host]: { ...backendIdentity, state: "disconnected" } },
+    });
+
+    const forgetting = useRemoteHostStore.getState().forgetHost(host);
+    const replacement = {
+      ...connection,
+      incarnation: "slot-replacement",
+      generation: 7,
+    };
+    mocks.connectRemoteHost.mockResolvedValue(replacement);
+    await useRemoteHostStore.getState().ensureHostConnected(host);
+    resolveForget();
+    await forgetting;
+
+    const state = useRemoteHostStore.getState();
+    expect(state.statusByHost[host]).toEqual({
+      state: "ready",
+      incarnation: replacement.incarnation,
+      generation: replacement.generation,
+    });
+    expect(state.manualHosts).toContain(host);
+    expect(state.forgottenHosts[host]).toBeUndefined();
+    expect(state.forgetPendingByHost[host]).toBeUndefined();
   });
 
   it("keeps local state when the backend refuses to forget an active host", async () => {

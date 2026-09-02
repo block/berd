@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
@@ -137,11 +137,17 @@ describe("RemoteHostsSettings", () => {
     });
     renderWithProviders(<RemoteHostsSettings />);
 
+    const button = screen.getByRole("button", {
+      name: enSettings.remoteHosts.actions.forgetting,
+    });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("data-feedback-state", "loading");
+    expect(button).toHaveAttribute("aria-busy", "true");
     expect(
-      screen.getByRole("button", {
-        name: enSettings.remoteHosts.actions.forgetting,
-      }),
-    ).toBeDisabled();
+      within(button)
+        .getAllByText(enSettings.remoteHosts.actions.forget)
+        .every((label) => label.getAttribute("aria-hidden") === "true"),
+    ).toBe(true);
   });
 
   it("keeps the row and explains a rejected Forget", async () => {

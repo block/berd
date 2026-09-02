@@ -291,14 +291,15 @@ function RemoteHostRow({
               type="button"
               variant="ghost"
               size="sm"
-              disabled={forgetPending}
+              feedbackState={forgetPending ? "loading" : "idle"}
+              loadingLabel={t("remoteHosts.actions.forgetting")}
+              loadingVisual="text"
+              preserveWidth
               onClick={() => {
                 void forgetHost(host).catch(() => {});
               }}
             >
-              {forgetPending
-                ? t("remoteHosts.actions.forgetting")
-                : t("remoteHosts.actions.forget")}
+              {t("remoteHosts.actions.forget")}
             </Button>
           ) : null}
         </div>
