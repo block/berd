@@ -407,12 +407,23 @@ export function McpAppView({
     [containerWidth, inlineHeight, payload, resolvedTheme],
   );
 
+  const handleExclusiveOpenLink = useCallback(
+    async (...args: Parameters<typeof handleOpenLink>) => {
+      if (pendingAppMessageRef.current) {
+        return { isError: true };
+      }
+      return handleOpenLink(...args);
+    },
+    [handleOpenLink],
+  );
+
   const handleMessage = useCallback(
     async ({ role, content }: MessageParams) => {
       if (
         role !== "user" ||
         !Array.isArray(content) ||
         !onSendMessage ||
+        pendingOpenLinkUrl !== null ||
         pendingAppMessageRef.current ||
         appMessageInFlightRef.current
       ) {
@@ -452,6 +463,7 @@ export function McpAppView({
     },
     [
       onSendMessage,
+      pendingOpenLinkUrl,
       payload.sessionId,
       payload.tool.extensionName,
       payload.tool.name,
@@ -660,7 +672,7 @@ export function McpAppView({
             toolInput={currentToolInput}
             toolResult={currentToolResult}
             hostContext={hostContext}
-            onOpenLink={handleOpenLink}
+            onOpenLink={handleExclusiveOpenLink}
             onMessage={handleMessage}
             onCallTool={handleCallTool}
             onReadResource={handleReadResource}

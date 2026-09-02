@@ -283,6 +283,78 @@ describe("McpAppView nested tool calls", () => {
     expect(onSendMessage).toHaveBeenCalledWith("first");
   });
 
+  it("rejects an app message while link confirmation is pending", async () => {
+    const onSendMessage = vi.fn(() => true);
+    render(
+      <McpAppView
+        payload={createPayload()}
+        toolResponse={createToolResponse()}
+        onSendMessage={onSendMessage}
+      />,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-app-renderer")).toBeInTheDocument();
+    });
+
+    let linkPromise: Promise<unknown> | undefined;
+    await act(async () => {
+      linkPromise = getLatestAppRendererProps().onOpenLink?.(
+        { url: "https://example.com" },
+        {} as RequestHandlerExtra,
+      );
+    });
+    await screen.findByText("https://example.com/");
+
+    const result = await getLatestAppRendererProps().onMessage?.(
+      { role: "user", content: [{ type: "text", text: "blocked" }] },
+      {} as RequestHandlerExtra,
+    );
+
+    expect(result).toEqual({ isError: true });
+    expect(onSendMessage).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("button", { name: "Send message" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await expect(linkPromise).resolves.toEqual({ isError: true });
+  });
+
+  it("rejects an open link while app message confirmation is pending", async () => {
+    const onSendMessage = vi.fn(() => true);
+    render(
+      <McpAppView
+        payload={createPayload()}
+        toolResponse={createToolResponse()}
+        onSendMessage={onSendMessage}
+      />,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-app-renderer")).toBeInTheDocument();
+    });
+
+    let messagePromise: Promise<unknown> | undefined;
+    await act(async () => {
+      messagePromise = getLatestAppRendererProps().onMessage?.(
+        { role: "user", content: [{ type: "text", text: "pending" }] },
+        {} as RequestHandlerExtra,
+      );
+    });
+    await screen.findByRole("button", { name: "Send message" });
+
+    const result = await getLatestAppRendererProps().onOpenLink?.(
+      { url: "https://example.com" },
+      {} as RequestHandlerExtra,
+    );
+
+    expect(result).toEqual({ isError: true });
+    expect(screen.queryByText("https://example.com/")).not.toBeInTheDocument();
+    expect(openUrl).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await expect(messagePromise).resolves.toEqual({ isError: true });
+  });
+
   it("invalidates pending confirmation when its session or app identity changes", async () => {
     const onSendMessage = vi.fn(() => true);
     const { rerender } = render(
