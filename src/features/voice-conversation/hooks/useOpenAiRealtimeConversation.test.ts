@@ -17,6 +17,10 @@ const mocks = vi.hoisted(() => ({
   createInvalidToolCallOutput: vi.fn(),
   createPeer: vi.fn(),
   createSession: vi.fn(),
+  listenControls: vi.fn(),
+  publishActivity: vi.fn(),
+  publishMuted: vi.fn(),
+  rebindControls: vi.fn(),
   registerEmissary: vi.fn(),
   recordToolOutput: vi.fn(),
   activeEmissary: null as null | {
@@ -36,6 +40,9 @@ const mocks = vi.hoisted(() => ({
   },
   releaseBridge: vi.fn(),
   releaseMicrophone: vi.fn(),
+  setControlsSuppressed: vi.fn(),
+  startControls: vi.fn(),
+  stopControls: vi.fn(),
   sendRealtimeEvents: vi.fn(),
   steerPrompt: vi.fn(),
   requestToolOutput: vi.fn(),
@@ -50,7 +57,14 @@ vi.mock("@/shared/api/acpApi", () => ({
 vi.mock("@/shared/api/openaiRealtime", () => ({
   claimVoiceDictationMicrophone: mocks.claimMicrophone,
   createOpenAiRealtimeVoiceSession: mocks.createSession,
+  listenToOpenAiRealtimeVoiceControls: mocks.listenControls,
+  publishOpenAiRealtimeVoiceActivity: mocks.publishActivity,
+  publishOpenAiRealtimeVoiceMicrophoneMuted: mocks.publishMuted,
+  rebindOpenAiRealtimeVoiceControls: mocks.rebindControls,
   releaseVoiceDictationMicrophone: mocks.releaseMicrophone,
+  setOpenAiRealtimeVoiceControlsSuppressed: mocks.setControlsSuppressed,
+  startOpenAiRealtimeVoiceControls: mocks.startControls,
+  stopOpenAiRealtimeVoiceControls: mocks.stopControls,
 }));
 
 vi.mock("@/features/chat/lib/openaiRealtimeAudio", () => ({
@@ -341,7 +355,7 @@ class FakePeer extends EventTarget {
   }
 }
 
-class FakeAudio {
+class FakeAudio extends EventTarget {
   autoplay = false;
   readonly pause = vi.fn();
   readonly play = vi.fn().mockResolvedValue(undefined);
@@ -353,6 +367,14 @@ const originalMediaDevices = navigator.mediaDevices;
 let channel: FakeDataChannel;
 let peer: FakePeer;
 let track: MediaStreamTrack & { stop: ReturnType<typeof vi.fn> };
+let realtimeControlListener:
+  | ((control: {
+      sessionId: string;
+      revision: number;
+      action: "stop" | "mute";
+      muted?: boolean;
+    }) => void)
+  | undefined;
 
 function renderConversation(sessionId: string, onSend = vi.fn()) {
   return renderHook(() =>
@@ -436,6 +458,7 @@ beforeEach(() => {
   useChatStore.setState({ messagesBySession: {}, sessionStateById: {} });
   useChatSessionStore.setState({ sessions: [] });
   channel = new FakeDataChannel();
+  realtimeControlListener = undefined;
   peer = new FakePeer(channel);
   track = {
     enabled: true,
@@ -468,8 +491,34 @@ beforeEach(() => {
   });
   mocks.createPeer.mockReturnValue(peer);
   mocks.createSession.mockResolvedValue({ clientSecret: "test-secret" });
+  mocks.listenControls.mockImplementation(async (listener) => {
+    realtimeControlListener = listener;
+    return vi.fn();
+  });
+  mocks.publishActivity.mockResolvedValue(undefined);
+  mocks.publishMuted.mockResolvedValue(undefined);
+  mocks.rebindControls.mockResolvedValue({
+    available: true,
+    unavailableReason: null,
+    lifecycle: "running",
+    sessionId: "promoted-session",
+    ownerWindowLabel: "main",
+    microphoneMuted: false,
+    revision: 8,
+  });
   mocks.registerEmissary.mockReturnValue(mocks.releaseBridge);
   mocks.releaseMicrophone.mockResolvedValue(undefined);
+  mocks.setControlsSuppressed.mockResolvedValue(undefined);
+  mocks.startControls.mockImplementation(async (sessionId: string) => ({
+    available: true,
+    unavailableReason: null,
+    lifecycle: "running",
+    sessionId,
+    ownerWindowLabel: "main",
+    microphoneMuted: false,
+    revision: 7,
+  }));
+  mocks.stopControls.mockResolvedValue(undefined);
   mocks.requestToolOutput.mockImplementation((event) => ({
     status: "queued",
     events: [event],
@@ -600,6 +649,33 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     await act(async () => owner.result.current.onToggle());
   });
 
+  it("registers the active call before microphone setup finishes", async () => {
+    let resolveStream!: (stream: MediaStream) => void;
+    const delayedStream = {
+      getAudioTracks: () => [track],
+      getTracks: () => [track],
+    } as unknown as MediaStream;
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockReturnValueOnce(
+      new Promise<MediaStream>((resolve) => {
+        resolveStream = resolve;
+      }),
+    );
+    const owner = renderConversation("session-a");
+
+    act(() => {
+      void owner.result.current.onToggle();
+    });
+
+    await waitFor(() =>
+      expect(mocks.startControls).toHaveBeenCalledWith("session-a"),
+    );
+    expect(owner.result.current.state).toBe("starting");
+
+    act(() => resolveStream(delayedStream));
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+    await act(async () => owner.result.current.onToggle());
+  });
+
   it("keeps the process-wide conversation alive across owner unmount and remount", async () => {
     const originalOnSend = vi.fn().mockResolvedValue(true);
     const remountedOnSend = vi.fn().mockResolvedValue(true);
@@ -607,6 +683,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
 
     await act(async () => first.result.current.onToggle());
     await waitFor(() => expect(first.result.current.state).toBe("listening"));
+    expect(mocks.startControls).toHaveBeenCalledWith("session-a");
     expect(first.result.current.ownsActiveConversation).toBe(true);
 
     first.unmount();
@@ -639,6 +716,47 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     expect(track.stop).toHaveBeenCalledOnce();
     expect(mocks.releaseBridge).toHaveBeenCalledOnce();
     expect(mocks.releaseMicrophone).toHaveBeenCalledOnce();
+    expect(mocks.stopControls).toHaveBeenCalledWith("session-a", 7);
+  });
+
+  it("routes floating Realtime mute controls back to the owning media track", async () => {
+    const owner = renderConversation("session-a");
+    await act(async () => owner.result.current.onToggle());
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+
+    act(() => {
+      realtimeControlListener?.({
+        sessionId: "session-a",
+        revision: 7,
+        action: "mute",
+        muted: true,
+      });
+    });
+
+    expect(track.enabled).toBe(false);
+    expect(owner.result.current.microphoneMuted).toBe(true);
+    expect(mocks.publishMuted).toHaveBeenCalledWith("session-a", 7, true);
+
+    await act(async () => owner.result.current.onToggle());
+  });
+
+  it("routes floating Realtime hang-up controls to the active call", async () => {
+    const owner = renderConversation("session-a");
+    await act(async () => owner.result.current.onToggle());
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+
+    act(() => {
+      realtimeControlListener?.({
+        sessionId: "session-a",
+        revision: 7,
+        action: "stop",
+      });
+    });
+
+    await waitFor(() => expect(owner.result.current.state).toBe("off"));
+    expect(peer.close).toHaveBeenCalledOnce();
+    expect(track.stop).toHaveBeenCalledOnce();
+    expect(mocks.stopControls).toHaveBeenCalledWith("session-a", 7);
   });
 
   it("does not let another session steal the active conversation", async () => {
@@ -701,6 +819,11 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     );
     expect(owner.result.current.disabled).toBe(false);
     expect(mocks.activeEmissary?.sessionId).toBe("backend-session");
+    expect(mocks.rebindControls).toHaveBeenCalledWith(
+      "draft-session",
+      "backend-session",
+      7,
+    );
     await waitFor(() =>
       expect(mocks.appendSessionSystemPrompt).toHaveBeenCalledWith(
         "backend-session",

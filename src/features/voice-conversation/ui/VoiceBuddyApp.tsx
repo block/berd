@@ -12,6 +12,11 @@ import {
   type VoiceConversationEvent,
   type VoiceConversationStatus,
 } from "@/features/voice-conversation/api/voiceConversation";
+import {
+  getOpenAiRealtimeVoiceControlsStatus,
+  requestOpenAiRealtimeVoiceControl,
+  showOpenAiRealtimeVoiceControls,
+} from "@/shared/api/openaiRealtime";
 import { Button } from "@/shared/ui/button";
 import { VoiceConversationButton } from "@/shared/ui/voice-conversation-button";
 import { BerdIcon } from "@/shared/ui/icons/BerdIcon";
@@ -25,6 +30,8 @@ type VoiceControlsError =
   | "stop";
 
 export function VoiceBuddyApp() {
+  const realtime =
+    new URLSearchParams(window.location.search).get("voiceMode") === "realtime";
   const { t } = useTranslation("chat");
   const [status, setStatus] = useState<VoiceConversationStatus | null>(null);
   const [busyAction, setBusyAction] = useState<"open" | "mute" | "stop" | null>(
@@ -52,13 +59,14 @@ export function VoiceBuddyApp() {
 
   useLayoutEffect(() => {
     if (!initialized || !status?.sessionId) return;
-    void showVoiceConversationControls(status.sessionId, status.revision).catch(
-      (cause) => {
-        console.error("Failed to show floating voice controls", cause);
-        setError("show");
-      },
-    );
-  }, [initialized, status?.revision, status?.sessionId]);
+    const showControls = realtime
+      ? showOpenAiRealtimeVoiceControls
+      : showVoiceConversationControls;
+    void showControls(status.sessionId, status.revision).catch((cause) => {
+      console.error("Failed to show floating voice controls", cause);
+      setError("show");
+    });
+  }, [initialized, realtime, status?.revision, status?.sessionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -213,7 +221,9 @@ export function VoiceBuddyApp() {
 
       try {
         const muteGeneration = microphoneMuteGeneration.current;
-        const nextStatus = await getVoiceConversationStatus();
+        const nextStatus = await (realtime
+          ? getOpenAiRealtimeVoiceControlsStatus()
+          : getVoiceConversationStatus());
         if (!cancelled) {
           setStatus((current) => {
             if (current && current.revision > nextStatus.revision) {
@@ -289,7 +299,7 @@ export function VoiceBuddyApp() {
       cancelled = true;
       unlisten?.();
     };
-  }, []);
+  }, [realtime]);
 
   const microphoneMuted = status?.microphoneMuted ?? false;
   const controlsActive =
@@ -322,6 +332,28 @@ export function VoiceBuddyApp() {
 
   const toggleMute = () => {
     if (!status) return;
+    if (realtime) {
+      const muted = !microphoneMuted;
+      setStatus((current) =>
+        current ? { ...current, microphoneMuted: muted } : current,
+      );
+      void run("mute", "mute", async () => {
+        try {
+          await requestOpenAiRealtimeVoiceControl(
+            status.sessionId ?? "",
+            status.revision,
+            "mute",
+            muted,
+          );
+        } catch (cause) {
+          setStatus((current) =>
+            current ? { ...current, microphoneMuted: !muted } : current,
+          );
+          throw cause;
+        }
+      });
+      return;
+    }
     const generation = microphoneMuteGeneration.current;
     void run("mute", "mute", async () => {
       const nextStatus = await setVoiceConversationMicrophoneMuted(
@@ -408,7 +440,13 @@ export function VoiceBuddyApp() {
           onClick={() => {
             if (status) {
               void run("stop", "stop", () =>
-                stopVoiceConversationFromBuddy(status),
+                realtime
+                  ? requestOpenAiRealtimeVoiceControl(
+                      status.sessionId ?? "",
+                      status.revision,
+                      "stop",
+                    )
+                  : stopVoiceConversationFromBuddy(status),
               );
             }
           }}

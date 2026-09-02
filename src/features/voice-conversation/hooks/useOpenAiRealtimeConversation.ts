@@ -12,7 +12,14 @@ import { appendSessionSystemPrompt } from "@/shared/api/acpApi";
 import {
   claimVoiceDictationMicrophone,
   createOpenAiRealtimeVoiceSession,
+  listenToOpenAiRealtimeVoiceControls,
+  publishOpenAiRealtimeVoiceActivity,
+  publishOpenAiRealtimeVoiceMicrophoneMuted,
+  rebindOpenAiRealtimeVoiceControls,
   releaseVoiceDictationMicrophone,
+  setOpenAiRealtimeVoiceControlsSuppressed,
+  startOpenAiRealtimeVoiceControls,
+  stopOpenAiRealtimeVoiceControls,
 } from "@/shared/api/openaiRealtime";
 import {
   createSystemNotificationMessage,
@@ -44,6 +51,10 @@ import {
   getRealtimeVoicePreference,
   parseRealtimeSessionOverrides,
 } from "../lib/realtimeVoicePreference";
+import {
+  beginVoiceControlsVisibilityLease,
+  observeVoiceConversationControlVisibility,
+} from "./useVoiceConversationController";
 
 const MASTER_PROMPT_KEY = "berd-realtime-voice-master";
 const MICROPHONE_OWNER_ID = "berd:realtime-voice-conversation";
@@ -348,6 +359,8 @@ interface Snapshot {
   requestedStartSessionId: string | null;
   microphoneMuted: boolean;
   error: string | null;
+  controlsRevision: number;
+  ownerWindowLabel: string | null;
 }
 interface StartOptions {
   sessionId: string;
@@ -359,6 +372,8 @@ const OFF_SNAPSHOT: Snapshot = {
   requestedStartSessionId: null,
   microphoneMuted: false,
   error: null,
+  controlsRevision: 0,
+  ownerWindowLabel: null,
 };
 
 class OpenAiRealtimeConversationRuntime {
@@ -368,6 +383,7 @@ class OpenAiRealtimeConversationRuntime {
   private channel: RTCDataChannel | null = null;
   private stream: MediaStream | null = null;
   private audio: HTMLAudioElement | null = null;
+  private releaseControlsListener: (() => void) | null = null;
   private releaseBridge: (() => void) | null = null;
   private bridgeSender:
     | ((
@@ -429,6 +445,20 @@ class OpenAiRealtimeConversationRuntime {
     this.ownerMigration = this.ownerMigration
       .catch(() => undefined)
       .then(async () => {
+        if (this.snapshot.controlsRevision > 0) {
+          const controlsStatus = await rebindOpenAiRealtimeVoiceControls(
+            previousSessionId,
+            sessionId,
+            this.snapshot.controlsRevision,
+          );
+          if (this.snapshot.boundSessionId === sessionId) {
+            this.setSnapshot({
+              ...this.snapshot,
+              controlsRevision: controlsStatus.revision,
+              ownerWindowLabel: controlsStatus.ownerWindowLabel,
+            });
+          }
+        }
         await appendSessionSystemPrompt(
           previousSessionId,
           MASTER_PROMPT_KEY,
@@ -463,9 +493,45 @@ class OpenAiRealtimeConversationRuntime {
       requestedStartSessionId: null,
       microphoneMuted: false,
       error: null,
+      controlsRevision: 0,
+      ownerWindowLabel: null,
     });
     const isStale = () => this.activeRun !== runId;
     try {
+      this.releaseControlsListener = await listenToOpenAiRealtimeVoiceControls(
+        (control) => {
+          if (
+            control.sessionId !== this.snapshot.boundSessionId ||
+            control.revision !== this.snapshot.controlsRevision
+          )
+            return;
+          if (control.action === "stop") {
+            void this.stop(control.sessionId);
+          } else if (control.action === "mute" && control.muted !== undefined) {
+            this.setMicrophoneMuted(control.sessionId, control.muted);
+          }
+        },
+      );
+      if (isStale()) {
+        this.releaseControlsListener();
+        this.releaseControlsListener = null;
+        return;
+      }
+      const controlsStatus = await startOpenAiRealtimeVoiceControls(sessionId);
+      if (isStale()) {
+        this.releaseControlsListener();
+        this.releaseControlsListener = null;
+        await stopOpenAiRealtimeVoiceControls(
+          controlsStatus.sessionId ?? sessionId,
+          controlsStatus.revision,
+        ).catch(() => undefined);
+        return;
+      }
+      this.setSnapshot({
+        ...this.snapshot,
+        controlsRevision: controlsStatus.revision,
+        ownerWindowLabel: controlsStatus.ownerWindowLabel,
+      });
       await claimVoiceDictationMicrophone(MICROPHONE_OWNER_ID).catch(
         (error) => {
           if (!isUnavailableDevMicrophoneClaim(error)) throw error;
@@ -507,6 +573,15 @@ class OpenAiRealtimeConversationRuntime {
       this.channel = channel;
       this.stream = stream;
       this.audio = audio;
+      audio.addEventListener("playing", () =>
+        this.publishActivity("assistant-speaking"),
+      );
+      audio.addEventListener("pause", () =>
+        this.publishActivity("assistant-idle"),
+      );
+      audio.addEventListener("ended", () =>
+        this.publishActivity("assistant-idle"),
+      );
       stream.getAudioTracks().forEach((track) => {
         peer.addTrack(track, stream);
       });
@@ -611,6 +686,15 @@ class OpenAiRealtimeConversationRuntime {
           const ownerSessionId = this.snapshot.boundSessionId;
           if (!ownerSessionId || isStale()) return;
           const event: unknown = JSON.parse(String(message.data));
+          const eventType =
+            event && typeof event === "object" && "type" in event
+              ? String(event.type)
+              : "";
+          if (eventType === "input_audio_buffer.speech_started") {
+            this.publishActivity("user-speaking");
+          } else if (eventType === "input_audio_buffer.speech_stopped") {
+            this.publishActivity("user-idle");
+          }
           sendRealtimeEvents(transport, responses.handle(event));
           for (const bridgeEvent of protocol.handle(event)) {
             if (bridgeEvent.type === "transcript.started") {
@@ -879,7 +963,10 @@ class OpenAiRealtimeConversationRuntime {
         wakeExpert(ownerSessionId, "Handoff reminder", true, pendingIds);
       };
       this.registerBridge(this.snapshot.boundSessionId ?? sessionId);
-      this.setSnapshot({ ...this.snapshot, state: "listening" });
+      this.setSnapshot({
+        ...this.snapshot,
+        state: "listening",
+      });
     } catch (error) {
       if (!isStale()) await this.fail(sessionId, error);
     }
@@ -901,11 +988,25 @@ class OpenAiRealtimeConversationRuntime {
 
   toggleMute(sessionId: string): void {
     if (this.snapshot.boundSessionId !== sessionId) return;
-    const microphoneMuted = !this.snapshot.microphoneMuted;
+    this.setMicrophoneMuted(sessionId, !this.snapshot.microphoneMuted);
+  }
+
+  private setMicrophoneMuted(
+    sessionId: string,
+    microphoneMuted: boolean,
+  ): void {
+    if (this.snapshot.boundSessionId !== sessionId) return;
     this.stream?.getAudioTracks().forEach((track) => {
       track.enabled = !microphoneMuted;
     });
     this.setSnapshot({ ...this.snapshot, microphoneMuted });
+    if (this.snapshot.controlsRevision > 0) {
+      void publishOpenAiRealtimeVoiceMicrophoneMuted(
+        sessionId,
+        this.snapshot.controlsRevision,
+        microphoneMuted,
+      ).catch(() => undefined);
+    }
   }
 
   forwardTypedUserMessage(sessionId: string, text: string): void {
@@ -1052,6 +1153,8 @@ class OpenAiRealtimeConversationRuntime {
       requestedStartSessionId: null,
       microphoneMuted: false,
       error: message,
+      controlsRevision: 0,
+      ownerWindowLabel: null,
     });
     useChatStore
       .getState()
@@ -1068,6 +1171,8 @@ class OpenAiRealtimeConversationRuntime {
       track.stop();
     });
     this.audio?.pause();
+    this.releaseControlsListener?.();
+    this.releaseControlsListener = null;
     this.releaseBridge = null;
     this.bridgeSender = null;
     this.bridgeHandoffDismissal = null;
@@ -1079,6 +1184,12 @@ class OpenAiRealtimeConversationRuntime {
     this.peer = null;
     this.stream = null;
     this.audio = null;
+    if (this.snapshot.controlsRevision > 0) {
+      await stopOpenAiRealtimeVoiceControls(
+        sessionId,
+        this.snapshot.controlsRevision,
+      ).catch(() => undefined);
+    }
     await releaseVoiceDictationMicrophone(MICROPHONE_OWNER_ID).catch(
       () => undefined,
     );
@@ -1090,6 +1201,22 @@ class OpenAiRealtimeConversationRuntime {
   private setSnapshot(snapshot: Snapshot): void {
     this.snapshot = snapshot;
     for (const listener of this.listeners) listener();
+  }
+
+  private publishActivity(
+    activity:
+      | "user-speaking"
+      | "user-idle"
+      | "assistant-speaking"
+      | "assistant-idle",
+  ): void {
+    const { boundSessionId, controlsRevision } = this.snapshot;
+    if (!boundSessionId || controlsRevision === 0) return;
+    void publishOpenAiRealtimeVoiceActivity(
+      boundSessionId,
+      controlsRevision,
+      activity,
+    ).catch(() => undefined);
   }
 
   private registerBridge(sessionId: string): void {
@@ -1174,6 +1301,82 @@ export function useOpenAiRealtimeConversation(options: {
       runtime.rebindPromotedOwner(sessionId, onSend);
     else if (ownsActiveConversation) runtime.bindOwner(sessionId, onSend);
   }, [onSend, ownsActiveConversation, ownsPromotedConversation, sessionId]);
+  useEffect(() => {
+    if (
+      !window.__TAURI_INTERNALS__ ||
+      !snapshot.boundSessionId ||
+      !snapshot.ownerWindowLabel ||
+      snapshot.controlsRevision === 0
+    )
+      return;
+    let disposed = false;
+    let stopObserver: (() => void) | undefined;
+    const lease = beginVoiceControlsVisibilityLease();
+    const activeSessionId = snapshot.boundSessionId;
+    const ownerWindowLabel = snapshot.ownerWindowLabel;
+    const revision = snapshot.controlsRevision;
+    void import("@tauri-apps/api/window")
+      .then(async ({ getCurrentWindow }) => {
+        const stop = await observeVoiceConversationControlVisibility({
+          activeSessionId,
+          currentSessionId: sessionId,
+          ownerWindowLabel,
+          currentWindow: getCurrentWindow(),
+          report: (suppressed) =>
+            lease.run(() =>
+              setOpenAiRealtimeVoiceControlsSuppressed(
+                activeSessionId,
+                revision,
+                suppressed,
+              ),
+            ),
+          onError: (error) =>
+            console.warn(
+              "Could not synchronize Realtime floating voice controls",
+              error,
+            ),
+        });
+        if (disposed) stop();
+        else stopObserver = stop;
+      })
+      .catch((error) => {
+        void lease
+          .run(() =>
+            setOpenAiRealtimeVoiceControlsSuppressed(
+              activeSessionId,
+              revision,
+              false,
+            ),
+          )
+          .catch(() => undefined);
+        console.warn(
+          "Could not observe the Realtime voice owner window focus",
+          error,
+        );
+      });
+    return () => {
+      disposed = true;
+      if (stopObserver) {
+        stopObserver();
+        lease.invalidate();
+      } else {
+        void lease
+          .release(() =>
+            setOpenAiRealtimeVoiceControlsSuppressed(
+              activeSessionId,
+              revision,
+              false,
+            ),
+          )
+          .catch(() => undefined);
+      }
+    };
+  }, [
+    sessionId,
+    snapshot.boundSessionId,
+    snapshot.controlsRevision,
+    snapshot.ownerWindowLabel,
+  ]);
   useEffect(() => {
     if (
       !requestedStartMatchesSession ||
