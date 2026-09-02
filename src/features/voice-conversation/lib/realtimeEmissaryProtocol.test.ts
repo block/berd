@@ -3,6 +3,7 @@ import {
   DirectMessagePipe,
   REALTIME_EMISSARY_INSTRUCTIONS,
   REALTIME_MASTER_INSTRUCTIONS,
+  REALTIME_PROMPT_DOCUMENT,
   SEND_TO_EMISSARY_TOOL_DEFINITION,
   RealtimeEmissaryProtocol,
   RealtimeResponseCoordinator,
@@ -10,6 +11,7 @@ import {
   createInvalidToolCallOutput,
   createRealtimeEmissarySessionUpdate,
   createHandoffToolOutput,
+  createRealtimeRoleInstructions,
   sendRealtimeEvents,
 } from "./realtimeEmissaryProtocol";
 
@@ -39,19 +41,19 @@ describe("Realtime emissary session configuration", () => {
     expect(event.session.max_output_tokens).toBe("inf");
     expect(event.session.instructions).toBe(REALTIME_EMISSARY_INSTRUCTIONS);
     expect(event.session.instructions).toContain(
-      "automatically sends the master every finalized",
+      "receives every finalized user and Emissary transcript",
     );
     expect(event.session.instructions).toContain(
-      "never claim that you or the assistant cannot access",
+      "never disclaim a capability because the other part performs it",
     );
     expect(event.session.instructions).toContain(
-      "call handoff before giving any substantive spoken answer",
+      "it calls `handoff` _before_ any substantive spoken answer",
     );
     expect(event.session.instructions).toContain(
-      "Do not open another handoff merely to acknowledge, confirm, summarize",
+      "never opens a handoff merely to reply to the Master",
     );
     expect(event.session.instructions).toContain(
-      "The master decides whether its reply is silent context",
+      "never speaks merely to acknowledge `CONTEXT`, `DISMISS`, or an internal message",
     );
     expect(event.session.tools).toEqual([
       expect.objectContaining({
@@ -190,31 +192,31 @@ describe("Realtime emissary session configuration", () => {
 
   it("exports the master visibility and proactive-send contract", () => {
     expect(REALTIME_MASTER_INSTRUCTIONS).toContain(
-      "remain visible to the user in Berd's durable master transcript",
+      "response text land in the durable transcript",
     );
     expect(REALTIME_MASTER_INSTRUCTIONS).toContain(
-      "provide normal visible progress and result text",
+      "produce visible progress and result text",
     );
     expect(REALTIME_MASTER_INSTRUCTIONS).toContain(
-      "Separately call send_to_emissary",
+      "**Master → Emissary messages** (`send_to_emissary`)",
     );
     expect(REALTIME_MASTER_INSTRUCTIONS).toContain(
-      "mode context to silently update",
+      "`SAY`—asks the Emissary to speak useful information now",
     );
     expect(REALTIME_MASTER_INSTRUCTIONS).toContain(
-      "Completing your turn does not notify or wake the emissary",
+      "finishing a Master turn does not wake it",
     );
     expect(REALTIME_MASTER_INSTRUCTIONS).toContain(
-      "entire turn should be an empty, zero-token success",
+      "entire turn is an empty, zero-token success",
     );
     expect(REALTIME_MASTER_INSTRUCTIONS).toContain(
-      "no prose, no tools, and no coordination message",
+      "no prose, no tools, no coordination",
     );
     expect(REALTIME_MASTER_INSTRUCTIONS).toContain(
-      "small talk belong to the emissary",
+      "small talk belong to the Emissary",
     );
     expect(REALTIME_MASTER_INSTRUCTIONS).toContain(
-      "interrupted emissary transcripts as best-effort",
+      "interrupted Emissary transcripts as best-effort",
     );
     expect(SEND_TO_EMISSARY_TOOL_DEFINITION).toMatchObject({
       name: "send_to_emissary",
@@ -223,6 +225,48 @@ describe("Realtime emissary session configuration", () => {
         additionalProperties: false,
       },
     });
+  });
+
+  it("gives both roles the same one-assistant contract and canonical patterns", () => {
+    expect(REALTIME_PROMPT_DOCUMENT).toContain("two parts of one brain");
+    expect(REALTIME_PROMPT_DOCUMENT).toContain(
+      "one continuous conversation with one assistant",
+    );
+    expect(REALTIME_PROMPT_DOCUMENT).toContain("### 1. Simple question");
+    expect(REALTIME_PROMPT_DOCUMENT).toContain(
+      "### 2. Work that requires the Master",
+    );
+    expect(REALTIME_PROMPT_DOCUMENT).toContain("### 3. Useful elaboration");
+    expect(REALTIME_EMISSARY_INSTRUCTIONS.replace("Emissary", "{{ROLE}}")).toBe(
+      REALTIME_PROMPT_DOCUMENT,
+    );
+    expect(REALTIME_MASTER_INSTRUCTIONS.replace("Master", "{{ROLE}}")).toBe(
+      REALTIME_PROMPT_DOCUMENT,
+    );
+    expect(REALTIME_PROMPT_DOCUMENT).toContain(
+      "**Master:** `[no output: zero tokens, no tools, no coordination]`",
+    );
+    expect(REALTIME_PROMPT_DOCUMENT).toContain(
+      "**Emissary → Master, `HANDOFF handoff-7`:**",
+    );
+    expect(REALTIME_PROMPT_DOCUMENT).toContain(
+      "**Master → Emissary, `SAY`, resolves `handoff-7`:**",
+    );
+    expect(REALTIME_PROMPT_DOCUMENT).toContain(
+      "**Master → Emissary, `SAY`:** “A useful follow-up:",
+    );
+    expect(REALTIME_PROMPT_DOCUMENT).toContain(
+      "**User:** “How many months are in a year?”",
+    );
+    expect(REALTIME_PROMPT_DOCUMENT).toContain(
+      "You might wonder why the sky isn’t violet",
+    );
+  });
+
+  it("fails loudly when the editable prompt loses its single role slot", () => {
+    expect(() =>
+      createRealtimeRoleInstructions("Master", "# One assistant\n\nShared."),
+    ).toThrow("must contain exactly one {{ROLE}} placeholder");
   });
 });
 
