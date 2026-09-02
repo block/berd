@@ -963,6 +963,10 @@
     "realtimeNoiseReductionOff": "Desactivada",
     "realtimeOff": "Desactivado",
     "realtimePrefixPadding": "Audio previo a la voz (ms)",
+    "realtimePresentation": "Presentación de la conversación",
+    "realtimePresentationDebug": "Depuración — mostrar el enrutamiento de agentes",
+    "realtimePresentationDescription": "La depuración muestra con colores la voz del emisario y el enrutamiento privado. El modo sutil presenta un solo asistente y mantiene el enrutamiento en segundo plano.",
+    "realtimePresentationSubtle": "Sutil — un solo asistente",
     "realtimeReasoningEffort": "Esfuerzo de razonamiento",
     "realtimeReasoningEfforts": {
       "default": "Predeterminado del modelo",

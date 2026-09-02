@@ -88,9 +88,9 @@ describe("sanitizeReplayMessages", () => {
           },
         ],
         metadata: {
-          personaName: "Emissary",
           userVisible: true,
           agentVisible: false,
+          voiceConversationDebugEvent: "emissarySpeech",
         },
       },
       {
@@ -103,7 +103,7 @@ describe("sanitizeReplayMessages", () => {
             speech: { status: "interrupted", confidence: "low" },
           },
         ],
-        metadata: { personaName: "Emissary" },
+        metadata: { voiceConversationDebugEvent: "emissarySpeech" },
       },
       {
         id: "voice-batch:voice:2",
@@ -135,6 +135,7 @@ describe("sanitizeReplayMessages", () => {
           personaName: "Emissary → Master",
           userVisible: true,
           agentVisible: false,
+          voiceConversationDebugEvent: "emissaryToMaster",
         },
       },
     ]);

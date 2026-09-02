@@ -74,6 +74,8 @@ import {
   isMacSpeechAvailable,
   useVoiceInputPreference,
 } from "@/features/voice-conversation/lib/voiceInputPreference";
+import { useRealtimeVoicePreference } from "@/features/voice-conversation/lib/realtimeVoicePreference";
+import { presentRealtimeVoiceMessages } from "@/features/voice-conversation/lib/realtimeVoicePresentation";
 import { useVoiceOutputPreference } from "@/features/voice-conversation/lib/voiceOutputPreference";
 import { isVoiceSetupReady } from "@/features/voice-conversation/lib/voiceSetupReadiness";
 import { useVoiceConversationModePreference } from "@/features/voice-conversation/lib/voiceConversationModePreference";
@@ -310,6 +312,11 @@ export function ChatView({
     voiceMode.mode === "openai-realtime"
       ? realtimeVoiceConversation
       : chainedVoiceConversation;
+  const { preference: realtimeVoicePreference } = useRealtimeVoicePreference();
+  const presentedMessages = presentRealtimeVoiceMessages(
+    controller.messages,
+    realtimeVoicePreference.presentationMode,
+  );
   const isAgentBuilderOpen = agentBuilderOpenForLayout;
   const patchSession = useChatSessionStore((s) => s.patchSession);
   const agentBuilderContextState = effectiveSession?.agentBuilderContextState;
@@ -755,7 +762,7 @@ export function ChatView({
   const messageTimeline = (
     <ChatTranscriptSurface
       sessionId={timelineSessionId}
-      messages={controller.messages}
+      messages={presentedMessages}
       sessionCreatedAt={effectiveSession?.createdAt}
       sessionSurveySamplingRateBasisPoints={
         isReadOnly || !capabilities.feedbackSurveys
@@ -892,6 +899,9 @@ export function ChatView({
         >
           <div
             ref={conversationDropTargetRef}
+            data-realtime-voice-presentation={
+              realtimeVoicePreference.presentationMode
+            }
             className={cn(
               "relative flex min-h-0 flex-1 flex-col overflow-visible rounded-md bg-card",
               terminal.visible && !terminal.isFloating && "min-h-[280px]",

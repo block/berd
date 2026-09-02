@@ -28,6 +28,7 @@ import {
   parseRealtimeSessionOverrides,
   type RealtimeEagerness,
   type RealtimeNoiseReduction,
+  type RealtimePresentationMode,
   type RealtimeReasoningEffort,
   type RealtimeTurnDetection,
   useRealtimeVoicePreference,
@@ -175,6 +176,35 @@ export function RealtimeVoiceSettings() {
         </div>
         <p className="text-xs text-muted-foreground">
           {t("voice.realtimeApiKeyDescription")}
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="openai-realtime-presentation">
+          {t("voice.realtimePresentation")}
+        </Label>
+        <Select
+          value={preference.presentationMode}
+          onValueChange={(presentationMode) =>
+            update({
+              presentationMode: presentationMode as RealtimePresentationMode,
+            })
+          }
+        >
+          <SelectTrigger id="openai-realtime-presentation" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="debug">
+              {t("voice.realtimePresentationDebug")}
+            </SelectItem>
+            <SelectItem value="subtle">
+              {t("voice.realtimePresentationSubtle")}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          {t("voice.realtimePresentationDescription")}
         </p>
       </div>
 

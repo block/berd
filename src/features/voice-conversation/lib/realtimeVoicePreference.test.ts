@@ -11,6 +11,7 @@ describe("realtime voice preferences", () => {
   it("returns a stable default snapshot", () => {
     expect(getRealtimeVoicePreference()).toBe(getRealtimeVoicePreference());
     expect(getRealtimeVoicePreference()).toMatchObject({
+      presentationMode: "debug",
       model: "gpt-realtime-2.1",
       transcriptionModel: "gpt-realtime-whisper",
       voice: "marin",
@@ -28,6 +29,7 @@ describe("realtime voice preferences", () => {
       transcriptionModel: "gpt-live-transcribe",
       voice: "cedar",
       speed: 1.25,
+      presentationMode: "subtle" as const,
       turnDetection: "semantic_vad" as const,
       eagerness: "high" as const,
       sessionOverridesText: '{"audio":{"input":{"turn_detection":null}}}',

@@ -735,7 +735,9 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     );
     expect(
       useChatStore.getState().messagesBySession["backend-session"]?.[0],
-    ).toMatchObject({ metadata: { personaName: "Emissary" } });
+    ).toMatchObject({
+      metadata: { voiceConversationDebugEvent: "emissarySpeech" },
+    });
     expect(useChatStore.getState().messagesBySession["draft-session"]).toBe(
       undefined,
     );
@@ -901,7 +903,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     await act(async () => owner.result.current.onToggle());
   });
 
-  it("does not duplicate master routing commands in the transcript", async () => {
+  it("adds one explicit debug bubble for a master routing command", async () => {
     const owner = renderConversation("session-a");
     await act(async () => owner.result.current.onToggle());
     await waitFor(() => expect(owner.result.current.state).toBe("listening"));
@@ -920,10 +922,18 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       message: "[bridge cursor 1] There are 20 repos.",
       mode: "context",
     });
-
     expect(
-      useChatStore.getState().messagesBySession["session-a"] ?? [],
-    ).toHaveLength(0);
+      useChatStore.getState().messagesBySession["session-a"],
+    ).toMatchObject([
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "There are 20 repos." }],
+        metadata: {
+          personaName: "Master → Emissary · Context · sent",
+          voiceConversationDebugEvent: "masterToEmissaryContext",
+        },
+      },
+    ]);
 
     await act(async () => owner.result.current.onToggle());
   });
@@ -1160,7 +1170,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       metadata: {
         agentVisible: false,
         origin: "voice_conversation",
-        personaName: "Emissary",
+        voiceConversationDebugEvent: "emissarySpeech",
       },
     });
     await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
@@ -1199,7 +1209,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       ],
       metadata: {
         completionStatus: "inProgress",
-        personaName: "Emissary",
+        voiceConversationDebugEvent: "emissarySpeech",
       },
     });
 
@@ -1262,7 +1272,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     await waitFor(() =>
       expect(
         useChatStore.getState().messagesBySession["session-a"],
-      ).toHaveLength(4),
+      ).toHaveLength(5),
     );
     expect(onSend).toHaveBeenCalledOnce();
 
@@ -1332,7 +1342,10 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     const messages =
       useChatStore.getState().messagesBySession["session-a"] ?? [];
     expect(
-      messages.filter((message) => message.metadata?.personaName === "Routing"),
+      messages.filter(
+        (message) =>
+          message.metadata?.voiceConversationDebugEvent === "emissaryToMaster",
+      ),
     ).toHaveLength(2);
     expect(
       messages.filter(
@@ -1371,7 +1384,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     ).toMatchObject({
       role: "assistant",
       content: [{ type: "text", text: "hello user" }],
-      metadata: { personaName: "Emissary" },
+      metadata: { voiceConversationDebugEvent: "emissarySpeech" },
     });
     await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
     expect(onSend).toHaveBeenLastCalledWith(
@@ -1450,16 +1463,17 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       expect(
         useChatStore.getState().messagesBySession["session-a"]?.at(-1),
       ).toMatchObject({
-        role: "user",
+        role: "assistant",
         content: [
           {
             type: "text",
-            text: "Emissary handoff handoff-1 → Master\nPlease inspect the disk.",
+            text: "Please inspect the disk.",
           },
         ],
         metadata: {
           agentVisible: false,
-          personaName: "Routing",
+          personaName: "Emissary → Master · Handoff handoff-1",
+          voiceConversationDebugEvent: "emissaryToMaster",
         },
       }),
     );
@@ -1498,7 +1512,10 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     expect(onSend).not.toHaveBeenCalled();
     expect(
       useChatStore.getState().messagesBySession["session-a"]?.at(-1),
-    ).toMatchObject({ role: "user", metadata: { personaName: "Routing" } });
+    ).toMatchObject({
+      role: "assistant",
+      metadata: { voiceConversationDebugEvent: "emissaryToMaster" },
+    });
 
     await act(async () => owner.result.current.onToggle());
   });
@@ -1533,10 +1550,13 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       ).toMatchObject({
         content: [
           expect.objectContaining({
-            text: expect.stringContaining("Emissary handoff handoff-2"),
+            text: "Please inspect the disk.",
           }),
         ],
-        metadata: { personaName: "Routing" },
+        metadata: {
+          personaName: "Emissary → Master · Handoff handoff-2",
+          voiceConversationDebugEvent: "emissaryToMaster",
+        },
       }),
     );
 
@@ -1750,6 +1770,26 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       ),
       mode: "context",
     });
+    expect(
+      useChatStore
+        .getState()
+        .messagesBySession["session-a"]?.filter(
+          (message) =>
+            message.metadata?.voiceConversationDebugEvent === "masterDismissal",
+        ),
+    ).toMatchObject([
+      {
+        content: [
+          {
+            type: "text",
+            text: "handoff-1, handoff-2: The user withdrew both requests.",
+          },
+        ],
+        metadata: {
+          personaName: "Master → Emissary · Dismissed · sent",
+        },
+      },
+    ]);
 
     act(() =>
       mocks.activeEmissary?.completeMasterTurn({ reminderHandoffIds: [] }),
@@ -1791,6 +1831,26 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
         userVisible: false,
       },
     });
+    expect(
+      useChatStore
+        .getState()
+        .messagesBySession["session-a"]?.filter(
+          (message) =>
+            message.metadata?.voiceConversationDebugEvent === "handoffReminder",
+        ),
+    ).toMatchObject([
+      {
+        content: [
+          {
+            type: "text",
+            text: "- handoff-1: Please inspect the disk.",
+          },
+        ],
+        metadata: {
+          personaName: "Berd → Master · Handoff reminder 1/3",
+        },
+      },
+    ]);
 
     act(() =>
       mocks.activeEmissary?.completeMasterTurn({ reminderHandoffIds: [] }),

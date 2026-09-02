@@ -45,6 +45,9 @@ describe("RealtimeVoiceSettings", () => {
       screen.getByRole("combobox", { name: "Turn detection" }),
     ).toHaveTextContent("Server VAD (default)");
     expect(
+      screen.getByRole("combobox", { name: "Conversation presentation" }),
+    ).toHaveTextContent("Debug — show agent routing");
+    expect(
       screen.getByRole("switch", { name: "Interrupt when I speak" }),
     ).toBeChecked();
   });

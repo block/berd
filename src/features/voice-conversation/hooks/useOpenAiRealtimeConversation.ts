@@ -17,6 +17,7 @@ import {
 import {
   createSystemNotificationMessage,
   type Message,
+  type VoiceConversationDebugEvent,
 } from "@/shared/types/messages";
 import {
   connectOpenAiRealtimePeerConnection,
@@ -175,7 +176,7 @@ function createEmissaryTranscriptMessage(
       userVisible: true,
       agentVisible: false,
       origin: "voice_conversation",
-      personaName: "Emissary",
+      voiceConversationDebugEvent: "emissarySpeech",
       completionStatus: provisional ? "inProgress" : "completed",
     },
   };
@@ -200,25 +201,33 @@ function createUserTranscriptMessage(
   };
 }
 
-function createHandoffDebugMessage(handoffId: string, text: string): Message {
+function createCoordinationDebugMessage(
+  kind: VoiceConversationDebugEvent,
+  label: string,
+  text: string,
+): Message {
   return {
     id: crypto.randomUUID(),
-    role: "user",
+    role: "assistant",
     created: Date.now(),
-    content: [
-      {
-        type: "text",
-        text: `Emissary handoff ${handoffId} → Master\n${text}`,
-      },
-    ],
+    content: [{ type: "text", text }],
     metadata: {
       userVisible: true,
       agentVisible: false,
       origin: "voice_conversation",
-      personaName: "Routing",
+      personaName: label,
+      voiceConversationDebugEvent: kind,
       completionStatus: "completed",
     },
   };
+}
+
+function createHandoffDebugMessage(handoffId: string, text: string): Message {
+  return createCoordinationDebugMessage(
+    "emissaryToMaster",
+    `Emissary → Master · Handoff ${handoffId}`,
+    text,
+  );
 }
 
 function visibleMessageText(message: Message): string {
@@ -251,6 +260,7 @@ export function createRealtimeTranscriptReplayEvents(
       continue;
     }
     if (
+      message.metadata?.voiceConversationDebugEvent ||
       message.metadata?.personaName === "Routing" ||
       message.metadata?.personaName?.includes("→") ||
       (message.metadata?.completionStatus &&
@@ -744,6 +754,18 @@ class OpenAiRealtimeConversationRuntime {
           eventId: `berd-master-${exchange.outbound.id}`,
         });
         sendRealtimeEvents(transport, request.events);
+        useChatStore
+          .getState()
+          .addMessage(
+            this.snapshot.boundSessionId ?? sessionId,
+            createCoordinationDebugMessage(
+              mode === "say"
+                ? "masterToEmissarySay"
+                : "masterToEmissaryContext",
+              `Master → Emissary · ${mode === "say" ? "Say" : "Context"} · ${request.status}`,
+              message,
+            ),
+          );
         return { ...exchange, deliveryStatus: request.status };
       };
       this.bridgeHandoffDismissal = async (cursor, handoffIds, reason) => {
@@ -779,6 +801,16 @@ class OpenAiRealtimeConversationRuntime {
           eventId: `berd-master-dismissal-${exchange.outbound.id}`,
         });
         sendRealtimeEvents(transport, request.events);
+        useChatStore
+          .getState()
+          .addMessage(
+            this.snapshot.boundSessionId ?? sessionId,
+            createCoordinationDebugMessage(
+              "masterDismissal",
+              `Master → Emissary · Dismissed · ${request.status}`,
+              `${dismissedHandoffIds.join(", ")}: ${reason.trim()}`,
+            ),
+          );
         return {
           accepted: true,
           cursor: exchange.cursor,
@@ -815,6 +847,19 @@ class OpenAiRealtimeConversationRuntime {
           .join("\n");
         const reminder = `[Private handoff reminder]\nYou ended your turn without resolving the required handoffs below. Resolve them now with one or more send-to-emissary --mode say calls that name every answered handoff in --resolves, or dismiss obsolete handoffs explicitly. Berd will retry this reminder up to ${MAX_HANDOFF_REMINDER_ATTEMPTS} times. Do not redo completed work.\n${requests}`;
         const masterBound = queueMasterBoundEvent(reminder);
+        const reminderAttempt = Math.max(
+          ...pending.map(([, handoff]) => handoff.reminderAttempts),
+        );
+        useChatStore
+          .getState()
+          .addMessage(
+            ownerSessionId,
+            createCoordinationDebugMessage(
+              "handoffReminder",
+              `Berd → Master · Handoff reminder ${reminderAttempt}/${MAX_HANDOFF_REMINDER_ATTEMPTS}`,
+              requests,
+            ),
+          );
         this.deliverToMaster(
           ownerSessionId,
           `[Private handoff reminder; cursor ${masterBound.outbound.id}]${reminder.slice("[Private handoff reminder]".length)}`,

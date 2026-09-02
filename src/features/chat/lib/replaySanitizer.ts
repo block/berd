@@ -141,7 +141,7 @@ function restoreRealtimeVoiceMessages(message: Message): Message[] | null {
           ...message.metadata,
           userVisible: true,
           agentVisible: false,
-          personaName: "Emissary",
+          voiceConversationDebugEvent: "emissarySpeech",
           completionStatus: "completed",
         },
       });
@@ -158,6 +158,7 @@ function restoreRealtimeVoiceMessages(message: Message): Message[] | null {
         userVisible: true,
         agentVisible: false,
         personaName: "Emissary → Master",
+        voiceConversationDebugEvent: "emissaryToMaster",
         completionStatus: "completed",
       },
     });

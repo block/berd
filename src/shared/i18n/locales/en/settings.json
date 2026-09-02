@@ -964,6 +964,10 @@
     "realtimeNoiseReductionOff": "Off",
     "realtimeOff": "Off",
     "realtimePrefixPadding": "Speech lead-in (ms)",
+    "realtimePresentation": "Conversation presentation",
+    "realtimePresentationDebug": "Debug — show agent routing",
+    "realtimePresentationDescription": "Debug shows color-coded Emissary speech and private routing. Subtle presents one seamless assistant and keeps routing in the background.",
+    "realtimePresentationSubtle": "Subtle — one assistant",
     "realtimeReasoningEffort": "Reasoning effort",
     "realtimeReasoningEfforts": {
       "default": "Model default",

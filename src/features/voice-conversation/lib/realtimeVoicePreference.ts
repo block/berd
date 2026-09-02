@@ -4,6 +4,7 @@ import type { RealtimeSessionOverrides } from "./realtimeEmissaryProtocol";
 export type RealtimeTurnDetection = "server_vad" | "semantic_vad";
 export type RealtimeEagerness = "low" | "medium" | "high" | "auto";
 export type RealtimeNoiseReduction = "off" | "near_field" | "far_field";
+export type RealtimePresentationMode = "debug" | "subtle";
 export type RealtimeReasoningEffort =
   | "default"
   | "none"
@@ -12,6 +13,7 @@ export type RealtimeReasoningEffort =
   | "high";
 
 export interface RealtimeVoicePreference {
+  presentationMode: RealtimePresentationMode;
   model: string;
   transcriptionModel: string;
   voice: string;
@@ -33,6 +35,7 @@ export interface RealtimeVoicePreference {
 }
 
 const DEFAULT_PREFERENCE: RealtimeVoicePreference = {
+  presentationMode: import.meta.env.DEV ? "debug" : "subtle",
   model: "gpt-realtime-2.1",
   transcriptionModel: "gpt-realtime-whisper",
   voice: "marin",
@@ -115,6 +118,11 @@ export function getRealtimeVoicePreference(): RealtimeVoicePreference {
       DEFAULT_PREFERENCE.transcriptionModel,
     );
     cachedPreference = {
+      presentationMode: enumPreference(
+        parsed.presentationMode,
+        ["debug", "subtle"],
+        DEFAULT_PREFERENCE.presentationMode,
+      ),
       model:
         storedModel === "gpt-realtime" ? DEFAULT_PREFERENCE.model : storedModel,
       transcriptionModel:
