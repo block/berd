@@ -187,7 +187,7 @@ fn read_private_discovery_file(path: &Path) -> Result<String, String> {
             std::ptr::null(),
             OPEN_EXISTING,
             FILE_FLAG_OPEN_REPARSE_POINT,
-            0,
+            std::ptr::null_mut(),
         )
     };
     if handle == INVALID_HANDLE_VALUE {
@@ -265,11 +265,11 @@ fn read_private_discovery_file(path: &Path) -> Result<String, String> {
 /// Administrators can expose or replace the capability, so both fail closed.
 #[cfg(windows)]
 unsafe fn windows_discovery_permissions_are_private(
-    owner: windows_sys::Win32::Foundation::PSID,
+    owner: windows_sys::Win32::Security::PSID,
     dacl: *mut windows_sys::Win32::Security::ACL,
 ) -> Result<(), &'static str> {
     use std::mem::size_of;
-    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
     use windows_sys::Win32::Security::{
         EqualSid, GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER,
     };
@@ -278,13 +278,13 @@ unsafe fn windows_discovery_permissions_are_private(
     if owner.is_null() || dacl.is_null() {
         return Err("does not have an owner-private DACL");
     }
-    let mut token = 0;
+    let mut token: HANDLE = std::ptr::null_mut();
     if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
         return Err("cannot determine the current user");
     }
     let mut size = 0;
     unsafe { GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut size) };
-    if size < size_of::<TOKEN_USER>() {
+    if (size as usize) < size_of::<TOKEN_USER>() {
         unsafe { CloseHandle(token) };
         return Err("cannot determine the current user");
     }
@@ -311,7 +311,7 @@ unsafe fn windows_discovery_permissions_are_private(
         return Err("has a malformed DACL");
     }
     for _ in 0..acl.AceCount {
-        if offset.checked_add(8).map_or(true, |end| end > acl_size) {
+        if offset.checked_add(8).is_none_or(|end| end > acl_size) {
             return Err("has a malformed DACL");
         }
         let ace = unsafe { (dacl as *const u8).add(offset) };
@@ -321,13 +321,13 @@ unsafe fn windows_discovery_permissions_are_private(
             || ace_size % 4 != 0
             || offset
                 .checked_add(ace_size)
-                .map_or(true, |end| end > acl_size)
+                .is_none_or(|end| end > acl_size)
         {
             return Err("has a malformed DACL");
         }
         // ACCESS_ALLOWED_ACE_TYPE and ACCESS_ALLOWED_CALLBACK_ACE_TYPE.
         if matches!(ace_type, 0 | 9) {
-            let sid = unsafe { ace.add(8).cast() };
+            let sid = unsafe { ace.add(8).cast_mut().cast() };
             if !unsafe { windows_ace_sid_is_trusted(sid, ace_size - 8, current_user) } {
                 return Err("is accessible by other users");
             }
@@ -344,9 +344,9 @@ unsafe fn windows_discovery_permissions_are_private(
 
 #[cfg(windows)]
 unsafe fn windows_ace_sid_is_trusted(
-    sid: windows_sys::Win32::Foundation::PSID,
+    sid: windows_sys::Win32::Security::PSID,
     available_bytes: usize,
-    current_user: windows_sys::Win32::Foundation::PSID,
+    current_user: windows_sys::Win32::Security::PSID,
 ) -> bool {
     use windows_sys::Win32::Security::EqualSid;
 
@@ -364,7 +364,7 @@ unsafe fn windows_ace_sid_is_trusted(
     if revision != 1 || sid_len > available_bytes {
         return false;
     }
-    if unsafe { EqualSid(sid.cast(), current_user) } != 0 {
+    if unsafe { EqualSid(sid.cast_mut().cast(), current_user) } != 0 {
         return true;
     }
     // S-1-5-18 (LOCAL SYSTEM) and S-1-5-32-544 (BUILTIN\\Administrators)
