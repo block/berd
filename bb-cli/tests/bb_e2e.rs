@@ -3655,6 +3655,7 @@ fn bb_apps_help_distinguishes_external_and_internal_paths() {
         "list",
         "get",
         "versions",
+        "rollback",
         "ready",
         "debug",
     ] {
@@ -3715,7 +3716,12 @@ fn bb_apps_ready_and_debug_help_expose_their_arguments() {
         .expect("run bb apps ready help");
     let (ready_stdout, ready_stderr) = output_text(&ready);
     assert!(ready.status.success(), "stderr was: {ready_stderr}");
-    for expected in ["<APP_ID>", "--version-id <VERSION_ID>", "--base-url <URL>"] {
+    for expected in [
+        "<APP_ID>",
+        "--version-id <VERSION_ID>",
+        "--environment <ENVIRONMENT>",
+        "--base-url <URL>",
+    ] {
         assert!(
             ready_stdout.contains(expected),
             "ready help omitted {expected:?}: {ready_stdout}"
@@ -3731,6 +3737,7 @@ fn bb_apps_ready_and_debug_help_expose_their_arguments() {
     for expected in [
         "<APP_ID>",
         "--version-id <VERSION_ID>",
+        "--environment <ENVIRONMENT>",
         "--tail-lines <N>",
         "1-1000",
         "control-plane default: 200",
@@ -3738,6 +3745,29 @@ fn bb_apps_ready_and_debug_help_expose_their_arguments() {
         assert!(
             debug_stdout.contains(expected),
             "debug help omitted {expected:?}: {debug_stdout}"
+        );
+    }
+}
+
+#[test]
+fn bb_apps_rollback_help_exposes_optional_target_and_environment() {
+    let output = bb_command()
+        .args(["apps", "rollback", "--help"])
+        .output()
+        .expect("run bb apps rollback help");
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(output.status.success(), "stderr was: {stderr}");
+    for expected in [
+        "<APP_ID>",
+        "--version-id <VERSION_ID>",
+        "--environment <ENVIRONMENT>",
+        "previous version",
+        "--base-url <URL>",
+    ] {
+        assert!(
+            stdout.contains(expected),
+            "rollback help omitted {expected:?}: {stdout}"
         );
     }
 }

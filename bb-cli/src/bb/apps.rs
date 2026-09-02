@@ -207,6 +207,33 @@ pub fn command() -> Command {
                 ),
         ))
         .subcommand(control_plane_args(
+            Command::new("rollback")
+                .about("Roll back an app to a previous or selected version")
+                .long_about(
+                    "Request one Apps Platform rollback. Omit --version-id to select the previous \
+                     active version, or pass an uploaded version explicitly. The response preserves \
+                     the control-plane rollback, readiness, and next-call fields without hidden polling.",
+                )
+                .arg(
+                    Arg::new("app-id")
+                        .value_name("APP_ID")
+                        .required(true)
+                        .help("App identifier returned by `bb apps list` or `bb apps create`"),
+                )
+                .arg(
+                    Arg::new("environment")
+                        .long("environment")
+                        .value_name("ENVIRONMENT")
+                        .help("Optional Compose environment override"),
+                )
+                .arg(
+                    Arg::new("version-id")
+                        .long("version-id")
+                        .value_name("VERSION_ID")
+                        .help("Uploaded version to activate; omit to select the previous version"),
+                ),
+        ))
+        .subcommand(control_plane_args(
             Command::new("ready")
                 .about("Check readiness for an exact deployed app version")
                 .long_about(
@@ -226,6 +253,12 @@ pub fn command() -> Command {
                         .value_name("VERSION_ID")
                         .required(true)
                         .help("Exact version identifier returned by `bb apps deploy`"),
+                )
+                .arg(
+                    Arg::new("environment")
+                        .long("environment")
+                        .value_name("ENVIRONMENT")
+                        .help("Optional Compose environment override"),
                 ),
         ))
         .subcommand(control_plane_args(
@@ -247,6 +280,12 @@ pub fn command() -> Command {
                         .long("version-id")
                         .value_name("VERSION_ID")
                         .help("Optional version identifier to correlate with the active route"),
+                )
+                .arg(
+                    Arg::new("environment")
+                        .long("environment")
+                        .value_name("ENVIRONMENT")
+                        .help("Optional Compose environment override"),
                 )
                 .arg(
                     Arg::new("tail-lines")
@@ -296,6 +335,7 @@ fn dispatch(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
         Some(("versions", versions_matches)) => run_versions(config, versions_matches),
         Some(("create", create_matches)) => run_create(config, create_matches),
         Some(("deploy", deploy_matches)) => run_deploy(config, deploy_matches),
+        Some(("rollback", rollback_matches)) => run_rollback(config, rollback_matches),
         Some(("ready", ready_matches)) => run_ready(config, ready_matches),
         Some(("debug", debug_matches)) => run_debug(config, debug_matches),
         _ => anyhow::bail!("expected an apps subcommand"),
@@ -418,6 +458,19 @@ fn run_deploy(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     print_json(&response)
 }
 
+fn run_rollback(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
+    let app_id = matches
+        .get_one::<String>("app-id")
+        .context("expected app id")?;
+    let request = RollbackRequest {
+        environment: matches.get_one::<String>("environment").map(String::as_str),
+        version_id: matches.get_one::<String>("version-id").map(String::as_str),
+    };
+    let (client, credential) = control_plane_context(config, matches)?;
+    let response = client.rollback(&credential, app_id, &request)?;
+    print_json(&response)
+}
+
 fn run_ready(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     let app_id = matches
         .get_one::<String>("app-id")
@@ -425,8 +478,9 @@ fn run_ready(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     let version_id = matches
         .get_one::<String>("version-id")
         .context("expected version id")?;
+    let environment = matches.get_one::<String>("environment").map(String::as_str);
     let (client, credential) = control_plane_context(config, matches)?;
-    let response = client.ready(&credential, app_id, version_id)?;
+    let response = client.ready(&credential, app_id, version_id, environment)?;
     print_json(&response)
 }
 
@@ -434,10 +488,11 @@ fn run_debug(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     let app_id = matches
         .get_one::<String>("app-id")
         .context("expected app id")?;
+    let environment = matches.get_one::<String>("environment").map(String::as_str);
     let version_id = matches.get_one::<String>("version-id").map(String::as_str);
     let tail_lines = matches.get_one::<u16>("tail-lines").copied();
     let (client, credential) = control_plane_context(config, matches)?;
-    let response = client.debug(&credential, app_id, version_id, tail_lines)?;
+    let response = client.debug(&credential, app_id, environment, version_id, tail_lines)?;
     print_json(&response)
 }
 
@@ -469,6 +524,14 @@ struct PlanRequest<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     persistence: Option<&'a str>,
     client_version: &'a str,
+}
+
+#[derive(Serialize)]
+struct RollbackRequest<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    environment: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    version_id: Option<&'a str>,
 }
 
 #[derive(Default)]
@@ -778,28 +841,49 @@ impl ControlPlaneClient {
         })
     }
 
+    fn rollback(
+        &self,
+        credential: &ComposeSessionCredential,
+        app_id: &str,
+        request: &RollbackRequest<'_>,
+    ) -> Result<Value> {
+        let url = self.app_action_url(app_id, "rollback")?;
+        let path = url.path().to_string();
+        self.authorized_json_request(credential, "POST", &path, |authorization| {
+            self.standard_request(self.client.post(url.clone()), authorization)
+                .json(request)
+                .build()
+                .context("build Apps Platform rollback request")
+        })
+    }
+
     fn ready(
         &self,
         credential: &ComposeSessionCredential,
         app_id: &str,
         version_id: &str,
+        environment: Option<&str>,
     ) -> Result<Value> {
-        self.get_app_resource(
-            credential,
-            app_id,
-            "ready",
-            &[("version_id", version_id.to_string())],
-        )
+        let mut query = Vec::new();
+        if let Some(environment) = environment {
+            query.push(("environment", environment.to_string()));
+        }
+        query.push(("version_id", version_id.to_string()));
+        self.get_app_resource(credential, app_id, "ready", &query)
     }
 
     fn debug(
         &self,
         credential: &ComposeSessionCredential,
         app_id: &str,
+        environment: Option<&str>,
         version_id: Option<&str>,
         tail_lines: Option<u16>,
     ) -> Result<Value> {
         let mut query = Vec::new();
+        if let Some(environment) = environment {
+            query.push(("environment", environment.to_string()));
+        }
         if let Some(version_id) = version_id {
             query.push(("version_id", version_id.to_string()));
         }
@@ -1834,6 +1918,80 @@ mod tests {
     }
 
     #[test]
+    fn bb_apps_rollback_process_sends_target_and_preserves_readiness() {
+        let credential = "apps-e2e-only.rollback.session+credential";
+        let rollback = json!({
+            "ok": true,
+            "app_id": "merchant/lookup app",
+            "environment": "staging/west",
+            "version_id": "ver/122?stable=true",
+            "previous_version_id": "ver-123",
+            "deployment_id": "dpl-122",
+            "route_revision": 10,
+            "external_url": "https://merchant-lookup--bpsites.example/",
+            "readiness": {
+                "control_plane_url": "/v1/agent/apps/merchant-lookup/ready?environment=staging&version_id=ver-122",
+                "diagnostics_url": "/v1/agent/apps/merchant-lookup/debug?environment=staging&version_id=ver-122"
+            },
+            "next_api_calls": [{
+                "method": "GET",
+                "path": "/v1/agent/apps/merchant-lookup/ready?environment=staging&version_id=ver-122",
+                "when": "poll until ready is true"
+            }]
+        });
+        let auth_server = ProcessServer::start(vec![process_auth_response()]);
+        let control_plane = ProcessServer::start(vec![ProcessResponse::json(rollback.clone())]);
+        let mut command = process_command(
+            &auth_server,
+            &control_plane,
+            &[
+                "apps",
+                "rollback",
+                "merchant/lookup app",
+                "--environment",
+                "staging/west",
+                "--version-id",
+                "ver/122?stable=true",
+                "--base-url",
+                APPROVED_TEST_BASE_URL,
+                "--client-version",
+                "0.2.0",
+                "--json",
+            ],
+            credential,
+        );
+
+        let output = command.output().expect("run Apps rollback process command");
+        assert!(
+            output.status.success(),
+            "stderr was: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&process_stdout(&output))
+                .expect("parse rollback process output"),
+            rollback
+        );
+        let auth_requests = auth_server.finish();
+        let requests = control_plane.finish();
+        assert_process_auth(&auth_requests[0], credential);
+        assert_eq!(requests.len(), 1);
+        assert_process_control_plane(
+            &requests[0],
+            "POST",
+            "/v1/agent/apps/merchant%2Flookup%20app/rollback",
+            credential,
+        );
+        assert_eq!(
+            requests[0].body,
+            json!({
+                "environment": "staging/west",
+                "version_id": "ver/122?stable=true"
+            })
+        );
+    }
+
+    #[test]
     fn bb_apps_ready_process_requests_exact_version_and_preserves_response() {
         let credential = "apps-e2e-only.ready.session+credential";
         let ready = json!({
@@ -1865,6 +2023,8 @@ mod tests {
                 "merchant/lookup app",
                 "--version-id",
                 "ver/123?route=active",
+                "--environment",
+                "staging/west?cell=1",
                 "--base-url",
                 APPROVED_TEST_BASE_URL,
                 "--client-version",
@@ -1892,7 +2052,7 @@ mod tests {
         assert_process_control_plane(
             &requests[0],
             "GET",
-            "/v1/agent/apps/merchant%2Flookup%20app/ready?version_id=ver%2F123%3Froute%3Dactive",
+            "/v1/agent/apps/merchant%2Flookup%20app/ready?environment=staging%2Fwest%3Fcell%3D1&version_id=ver%2F123%3Froute%3Dactive",
             credential,
         );
         assert_eq!(requests[0].body, Value::Null);
@@ -1927,6 +2087,8 @@ mod tests {
                 "apps",
                 "debug",
                 "merchant-lookup",
+                "--environment",
+                "staging",
                 "--version-id",
                 "ver-123",
                 "--tail-lines",
@@ -1958,7 +2120,7 @@ mod tests {
         assert_process_control_plane(
             &requests[0],
             "GET",
-            "/v1/agent/apps/merchant-lookup/debug?version_id=ver-123&tail_lines=75",
+            "/v1/agent/apps/merchant-lookup/debug?environment=staging&version_id=ver-123&tail_lines=75",
             credential,
         );
         assert_eq!(requests[0].body, Value::Null);
@@ -2327,14 +2489,78 @@ mod tests {
     }
 
     #[test]
-    fn debug_builds_each_supported_query_shape() {
+    fn rollback_supports_previous_and_explicit_version_requests() {
+        let server = Server::http("127.0.0.1:0").expect("bind control-plane server");
+        let base_url = format!("http://{}", server.server_addr());
+        let server_thread = thread::spawn(move || {
+            for (expected_path, expected_body) in [
+                ("/v1/agent/apps/app%2Fwith%20space/rollback", json!({})),
+                (
+                    "/v1/agent/apps/app%2Fwith%20space/rollback",
+                    json!({
+                        "environment": "staging/west?cell=1",
+                        "version_id": "ver/123?stable=true"
+                    }),
+                ),
+            ] {
+                let mut request = server.recv().expect("receive rollback request");
+                assert_eq!(request.method().as_str(), "POST");
+                assert_eq!(request.url(), expected_path);
+                let mut body = String::new();
+                request
+                    .as_reader()
+                    .read_to_string(&mut body)
+                    .expect("read rollback request body");
+                assert_eq!(
+                    serde_json::from_str::<Value>(&body).expect("parse rollback request body"),
+                    expected_body
+                );
+                request
+                    .respond(
+                        Response::from_string(r#"{"ok":true}"#).with_header(
+                            Header::from_bytes("Content-Type", "application/json")
+                                .expect("build content type"),
+                        ),
+                    )
+                    .expect("respond to rollback request");
+            }
+        });
+        let client = test_control_plane_client(&base_url, Duration::from_secs(2));
+        let credential = test_credential("rollback_session_credential_123456");
+
+        for request in [
+            RollbackRequest {
+                environment: None,
+                version_id: None,
+            },
+            RollbackRequest {
+                environment: Some("staging/west?cell=1"),
+                version_id: Some("ver/123?stable=true"),
+            },
+        ] {
+            client
+                .rollback(&credential, "app/with space", &request)
+                .expect("request rollback response");
+        }
+
+        server_thread.join().expect("join control-plane server");
+    }
+
+    #[test]
+    fn ready_and_debug_build_each_supported_environment_query_shape() {
         let server = Server::http("127.0.0.1:0").expect("bind control-plane server");
         let base_url = format!("http://{}", server.server_addr());
         let expected_paths = [
+            "/v1/agent/apps/app/ready?version_id=ver-123",
+            "/v1/agent/apps/app/ready?environment=staging%2Fwest%3Fcell%3D1&version_id=ver%2F123%3Factive",
             "/v1/agent/apps/app/debug",
+            "/v1/agent/apps/app/debug?environment=staging%2Fwest%3Fcell%3D1",
             "/v1/agent/apps/app/debug?version_id=ver%2F123%3Factive",
             "/v1/agent/apps/app/debug?tail_lines=25",
-            "/v1/agent/apps/app/debug?version_id=ver-123&tail_lines=50",
+            "/v1/agent/apps/app/debug?environment=staging&version_id=ver-123",
+            "/v1/agent/apps/app/debug?environment=staging&tail_lines=50",
+            "/v1/agent/apps/app/debug?version_id=ver-123&tail_lines=75",
+            "/v1/agent/apps/app/debug?environment=staging&version_id=ver-123&tail_lines=100",
         ];
         let server_thread = thread::spawn(move || {
             for (index, expected_path) in expected_paths.into_iter().enumerate() {
@@ -2354,19 +2580,41 @@ mod tests {
         let client = test_control_plane_client(&base_url, Duration::from_secs(2));
         let credential = test_credential("debug_query_session_credential_123456");
 
-        for (index, (version_id, tail_lines)) in [
-            (None, None),
-            (Some("ver/123?active"), None),
-            (None, Some(25)),
-            (Some("ver-123"), Some(50)),
+        assert_eq!(
+            client
+                .ready(&credential, "app", "ver-123", None)
+                .expect("request default-environment ready response")["request"],
+            0
+        );
+        assert_eq!(
+            client
+                .ready(
+                    &credential,
+                    "app",
+                    "ver/123?active",
+                    Some("staging/west?cell=1"),
+                )
+                .expect("request explicit-environment ready response")["request"],
+            1
+        );
+
+        for (index, (environment, version_id, tail_lines)) in [
+            (None, None, None),
+            (Some("staging/west?cell=1"), None, None),
+            (None, Some("ver/123?active"), None),
+            (None, None, Some(25)),
+            (Some("staging"), Some("ver-123"), None),
+            (Some("staging"), None, Some(50)),
+            (None, Some("ver-123"), Some(75)),
+            (Some("staging"), Some("ver-123"), Some(100)),
         ]
         .into_iter()
         .enumerate()
         {
             let response = client
-                .debug(&credential, "app", version_id, tail_lines)
+                .debug(&credential, "app", environment, version_id, tail_lines)
                 .expect("request debug response");
-            assert_eq!(response["request"], index);
+            assert_eq!(response["request"], index + 2);
         }
 
         server_thread.join().expect("join control-plane server");
