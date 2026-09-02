@@ -101,4 +101,43 @@ describe("getVisibleTranscriptMessages voice no-op", () => {
       error,
     ]);
   });
+
+  it("never renders a transient empty-response fallback inside spoken Emissary text", () => {
+    const voice = message(
+      "voice",
+      "user",
+      "How many months are in a year?",
+      "voice_conversation",
+    );
+    const spoken: Message = {
+      id: "spoken",
+      role: "assistant",
+      created: 2,
+      content: [
+        {
+          type: "text",
+          text: `There are 12 months in a year.${VOICE_CONVERSATION_EMPTY_RESPONSE}`,
+          speech: { status: "spoken" },
+        },
+      ],
+      metadata: {
+        origin: "voice_conversation",
+        voiceConversationDebugEvent: "emissarySpeech",
+      },
+    };
+
+    expect(getVisibleTranscriptMessages([voice, spoken])).toEqual([
+      voice,
+      {
+        ...spoken,
+        content: [
+          {
+            type: "text",
+            text: "There are 12 months in a year.",
+            speech: { status: "spoken" },
+          },
+        ],
+      },
+    ]);
+  });
 });

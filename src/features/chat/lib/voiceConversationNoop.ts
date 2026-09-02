@@ -9,3 +9,15 @@ const VOICE_CONVERSATION_EMPTY_RESPONSES = new Set([
 export function isVoiceConversationEmptyResponse(text: string): boolean {
   return VOICE_CONVERSATION_EMPTY_RESPONSES.has(text.trim());
 }
+
+export function stripVoiceConversationEmptyResponseSuffix(
+  text: string,
+): string {
+  const trimmedEnd = text.trimEnd();
+  for (const fallback of VOICE_CONVERSATION_EMPTY_RESPONSES) {
+    if (trimmedEnd.endsWith(fallback)) {
+      return trimmedEnd.slice(0, -fallback.length).trimEnd();
+    }
+  }
+  return text;
+}
