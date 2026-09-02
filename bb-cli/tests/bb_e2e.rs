@@ -3652,6 +3652,9 @@ fn bb_apps_help_distinguishes_external_and_internal_paths() {
         "Cloudflare-backed internal App Kit",
         "bb tools appkit",
         "separate internal Compose workflow",
+        "list",
+        "get",
+        "versions",
         "ready",
         "debug",
     ] {
@@ -3659,6 +3662,48 @@ fn bb_apps_help_distinguishes_external_and_internal_paths() {
             stdout.contains(expected),
             "help did not explain {expected:?}: {stdout}"
         );
+    }
+}
+
+#[test]
+fn bb_apps_inspection_help_exposes_filters_and_app_ids() {
+    let list = bb_command()
+        .args(["apps", "list", "--help"])
+        .output()
+        .expect("run bb apps list help");
+    let (list_stdout, list_stderr) = output_text(&list);
+    assert!(list.status.success(), "stderr was: {list_stderr}");
+    for expected in [
+        "--scope <SCOPE>",
+        "manageable",
+        "owned",
+        "publisher",
+        "--include-deleted",
+        "--base-url <URL>",
+    ] {
+        assert!(
+            list_stdout.contains(expected),
+            "list help omitted {expected:?}: {list_stdout}"
+        );
+    }
+
+    for subcommand in ["get", "versions"] {
+        let output = bb_command()
+            .args(["apps", subcommand, "--help"])
+            .output()
+            .unwrap_or_else(|error| panic!("run bb apps {subcommand} help: {error}"));
+        let (stdout, stderr) = output_text(&output);
+        assert!(output.status.success(), "stderr was: {stderr}");
+        for expected in [
+            "<APP_ID>",
+            "--environment <ENVIRONMENT>",
+            "--base-url <URL>",
+        ] {
+            assert!(
+                stdout.contains(expected),
+                "{subcommand} help omitted {expected:?}: {stdout}"
+            );
+        }
     }
 }
 
