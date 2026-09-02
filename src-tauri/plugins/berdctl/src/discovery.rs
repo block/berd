@@ -137,7 +137,7 @@ mod windows_discovery_security {
     unsafe fn with_current_user_sid<T>(
         f: impl FnOnce(*mut c_void) -> std::io::Result<T>,
     ) -> std::io::Result<T> {
-        let mut token = 0;
+        let mut token: HANDLE = std::ptr::null_mut();
         // SAFETY: pseudo process handle is valid and `token` is writable.
         if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
             return Err(win_error("opening current process token", unsafe {

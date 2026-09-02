@@ -808,13 +808,19 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn handshake_retries_generation_mismatch_with_rotated_capability() {
-        let (port, requests, broker) = spawn_broker_sequence(vec![
-            (STALE_CAPABILITY, BrokerResponse::Ping { generation: 6 }),
-            (CURRENT_CAPABILITY, BrokerResponse::Ping { generation: 7 }),
-        ]);
+        let first_request = Arc::new(std::sync::Barrier::new(2));
+        let response_ready = Arc::new(std::sync::Barrier::new(2));
+        let (port, requests, broker) = spawn_broker_responses_with_sync(
+            vec![
+                (STALE_CAPABILITY, BrokerResponse::Ping { generation: 6 }),
+                (CURRENT_CAPABILITY, BrokerResponse::Ping { generation: 7 }),
+            ],
+            Some((first_request.clone(), response_ready.clone())),
+        );
         let lock_file = TempDiscoveryFile::new("generation-race", port, STALE_CAPABILITY);
         let path = lock_file.0.clone();
         let rewrite = thread::spawn(move || {
+            first_request.wait();
             let stale_ping = requests.recv().expect("record old-generation ping");
             assert_eq!(
                 stale_ping.authorization.as_deref(),
@@ -833,6 +839,7 @@ mod tests {
                 std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
                     .expect("keep rewritten discovery private");
             }
+            response_ready.wait();
             requests.recv().expect("record new-generation ping")
         });
 
