@@ -272,6 +272,20 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
       current.statusByHost[host]?.state === "ready" &&
       !current.forgottenHosts[host]
     ) {
+      // A manually entered host can already be ready when it was restored
+      // from the backend snapshot. Remember it even though no new connect is
+      // required, otherwise it disappears from the selector after restart.
+      if (
+        !current.configHosts.includes(host) &&
+        !current.manualHosts.includes(host)
+      ) {
+        const manualHosts = [host, ...current.manualHosts].slice(
+          0,
+          MAX_MANUAL_HOSTS,
+        );
+        persistManualHosts(manualHosts);
+        set({ manualHosts });
+      }
       return;
     }
 

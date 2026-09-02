@@ -251,6 +251,23 @@ describe("ensureHostConnected", () => {
     expect(mocks.connectRemoteHost).not.toHaveBeenCalled();
   });
 
+  it("remembers a manually entered host when its backend is already ready", async () => {
+    useRemoteHostStore.setState({ configHosts: ["configured"] });
+    useRemoteHostStore.getState().applyStatusEvent({
+      host: "workstation.blox",
+      ...backendIdentity,
+      state: "ready",
+    });
+
+    await useRemoteHostStore.getState().ensureHostConnected("workstation.blox");
+
+    expect(mocks.connectRemoteHost).not.toHaveBeenCalled();
+    expect(useRemoteHostStore.getState().manualHosts).toEqual([
+      "workstation.blox",
+    ]);
+    expect(loadPersistedManualHosts()).toEqual(["workstation.blox"]);
+  });
+
   it("connects and marks the host ready", async () => {
     let resolveConnect: (value: RemoteBackendConnection) => void = () => {};
     mocks.connectRemoteHost.mockImplementation(
