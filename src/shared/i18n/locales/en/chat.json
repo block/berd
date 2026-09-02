@@ -536,6 +536,17 @@
       "thisComputer": "This computer",
       "thisComputerDescription": "Run the session locally",
       "sshHosts": "SSH hosts",
+      "add": {
+        "action": "Add SSH environment",
+        "title": "Add SSH environment",
+        "description": "Connect using an SSH config alias or a user@host address.",
+        "hostLabel": "SSH host",
+        "hostPlaceholder": "user@host",
+        "emptyHost": "Enter an SSH host.",
+        "cancel": "Cancel",
+        "connect": "Connect",
+        "close": "Close add SSH environment dialog"
+      },
       "localTriggerTitle": "Runs on this computer",
       "remoteTriggerTitle": "Runs on {{host}} over SSH",
       "missingDirectory": "Choose a folder on the remote host before sending",

@@ -1,14 +1,15 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RemoteHostSelector } from "../RemoteHostSelector";
 import { useRemoteHostStore } from "@/features/remoteHosts/stores/remoteHostStore";
 
 const mockListSshConfigHosts = vi.fn();
+const mockConnectRemoteHost = vi.fn();
 
 vi.mock("@/shared/api/remoteHosts", () => ({
   listSshConfigHosts: (...args: unknown[]) => mockListSshConfigHosts(...args),
-  connectRemoteHost: vi.fn(),
+  connectRemoteHost: (...args: unknown[]) => mockConnectRemoteHost(...args),
   disconnectRemoteHost: vi.fn(),
   shutdownRemoteHost: vi.fn(),
   listRemoteBackends: vi.fn().mockResolvedValue([]),
@@ -23,9 +24,13 @@ describe("RemoteHostSelector", () => {
     // Opening the selector refreshes hosts from the SSH config, so the mock
     // must agree with the seeded store state.
     mockListSshConfigHosts.mockReset().mockResolvedValue(["devbox", "gpu-box"]);
+    mockConnectRemoteHost.mockReset().mockResolvedValue(undefined);
     useRemoteHostStore.setState({
       configHosts: ["devbox", "gpu-box"],
+      manualHosts: [],
       statusByHost: { devbox: { state: "ready" } },
+      forgottenHosts: {},
+      lifecycleByHost: {},
     });
   });
 
@@ -80,6 +85,69 @@ describe("RemoteHostSelector", () => {
 
     expect(
       screen.getByRole("menuitem", { name: /devbox/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("offers an add SSH environment action even when no hosts are configured", async () => {
+    mockListSshConfigHosts.mockResolvedValue([]);
+    useRemoteHostStore.setState({ configHosts: [], statusByHost: {} });
+    const user = userEvent.setup();
+    render(<RemoteHostSelector selectedHost={null} onHostChange={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: /select computer/i }));
+
+    expect(
+      screen.getByRole("menuitem", { name: /add ssh environment/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("connects and selects a host added from the environment dialog", async () => {
+    const user = userEvent.setup();
+    const onHostChange = vi.fn();
+    render(
+      <RemoteHostSelector selectedHost={null} onHostChange={onHostChange} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /select computer/i }));
+    await user.click(
+      screen.getByRole("menuitem", { name: /add ssh environment/i }),
+    );
+    await user.type(screen.getByRole("textbox", { name: /ssh host/i }), "blox");
+    await user.click(screen.getByRole("button", { name: /^connect$/i }));
+
+    await waitFor(() => {
+      expect(mockConnectRemoteHost).toHaveBeenCalledWith("blox");
+      expect(onHostChange).toHaveBeenCalledWith("blox");
+    });
+    expect(
+      screen.queryByRole("dialog", { name: /add ssh environment/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps the add dialog open with feedback when connecting fails", async () => {
+    mockConnectRemoteHost.mockRejectedValue(new Error("SSH host unavailable"));
+    const user = userEvent.setup();
+    const onHostChange = vi.fn();
+    render(
+      <RemoteHostSelector selectedHost={null} onHostChange={onHostChange} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /select computer/i }));
+    await user.click(
+      screen.getByRole("menuitem", { name: /add ssh environment/i }),
+    );
+    await user.type(
+      screen.getByRole("textbox", { name: /ssh host/i }),
+      "offline-box",
+    );
+    await user.click(screen.getByRole("button", { name: /^connect$/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "SSH host unavailable",
+    );
+    expect(onHostChange).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("dialog", { name: /add ssh environment/i }),
     ).toBeInTheDocument();
   });
 });
