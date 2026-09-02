@@ -57,7 +57,12 @@ describe("Realtime emissary session configuration", () => {
       expect.objectContaining({
         type: "function",
         name: "handoff",
-        parameters: expect.objectContaining({ additionalProperties: false }),
+        parameters: {
+          type: "object",
+          properties: { message: expect.any(Object) },
+          required: ["message"],
+          additionalProperties: false,
+        },
       }),
     ]);
   });
@@ -490,7 +495,7 @@ describe("RealtimeEmissaryProtocol", () => {
     protocol.handle({
       type: "response.function_call_arguments.delta",
       call_id: "call-1",
-      delta: '{"cursor":4,"message":"Please investigate',
+      delta: '{"message":"Please investigate',
     });
     protocol.handle({
       type: "response.function_call_arguments.delta",
@@ -507,7 +512,6 @@ describe("RealtimeEmissaryProtocol", () => {
       {
         type: "handoff",
         callId: "call-1",
-        cursor: 4,
         message: "Please investigate this.",
       },
     ]);
@@ -516,7 +520,7 @@ describe("RealtimeEmissaryProtocol", () => {
         type: "response.function_call_arguments.done",
         name: "handoff",
         call_id: "call-1",
-        arguments: '{"cursor":4,"message":"duplicate"}',
+        arguments: '{"message":"duplicate"}',
       }),
     ).toEqual([]);
   });
@@ -528,14 +532,14 @@ describe("RealtimeEmissaryProtocol", () => {
         type: "response.function_call_arguments.done",
         name: "handoff",
         call_id: "call-1",
-        arguments: '{"cursor":0,"message":"hello","unexpected":true}',
+        arguments: '{"message":"hello","unexpected":true}',
       }),
     ).toEqual([
       {
         type: "tool_call.invalid",
         callId: "call-1",
         toolName: "handoff",
-        error: "handoff accepts only cursor and message arguments",
+        error: "handoff accepts only a message argument",
       },
     ]);
   });
@@ -553,7 +557,7 @@ describe("RealtimeEmissaryProtocol", () => {
     protocol.handle({
       type: "response.function_call_arguments.delta",
       call_id: "call-broken",
-      delta: '{"cursor":0,"message":"Please inspect',
+      delta: '{"message":"Please inspect',
     });
 
     const [invalidCall] = protocol.handle({
@@ -1010,47 +1014,18 @@ describe("master message injection", () => {
     ]);
   });
 
-  it("reports a busy reverse direction without consuming its message", () => {
-    expect(
-      createHandoffToolOutput("call-1", {
-        accepted: false,
-        reason: "pipe_busy",
-        cursor: 0,
-        unreadPeerMessages: [],
-      }),
-    ).toEqual({
-      type: "conversation.item.create",
-      item: {
-        type: "function_call_output",
-        call_id: "call-1",
-        output:
-          '{"accepted":false,"reason":"pipe_busy","cursor":0,"unreadPeerMessages":[]}',
-      },
-    });
-  });
-
   it("includes an accepted handoff id in the tool result", () => {
     expect(
       createHandoffToolOutput("call-2", {
         accepted: true,
-        cursor: 0,
-        unreadPeerMessages: [],
         handoff_id: "handoff-4",
-        outbound: {
-          id: 4,
-          sender: "emissary",
-          recipient: "master",
-          senderCursor: 0,
-          message: "Inspect the folder.",
-        },
       }),
     ).toEqual({
       type: "conversation.item.create",
       item: {
         type: "function_call_output",
         call_id: "call-2",
-        output:
-          '{"accepted":true,"cursor":0,"unreadPeerMessages":[],"handoff_id":"handoff-4","outbound":{"id":4,"sender":"emissary","recipient":"master","senderCursor":0,"message":"Inspect the folder."}}',
+        output: '{"accepted":true,"handoff_id":"handoff-4"}',
       },
     });
   });

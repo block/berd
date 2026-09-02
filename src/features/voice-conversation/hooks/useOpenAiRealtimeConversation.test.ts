@@ -160,7 +160,7 @@ vi.mock("../lib/realtimeEmissaryProtocol", () => ({
   },
   REALTIME_MASTER_INSTRUCTIONS: "Master instructions",
   RealtimeEmissaryProtocol: class {
-    handle(event: { type?: string; cursor?: number }) {
+    handle(event: { type?: string }) {
       if (event.type === "test.transcript")
         return [
           {
@@ -280,7 +280,6 @@ vi.mock("../lib/realtimeEmissaryProtocol", () => ({
         return [
           {
             callId: "call-1",
-            cursor: 0,
             message: "Please inspect the disk.",
             type: "handoff",
           },
@@ -289,7 +288,6 @@ vi.mock("../lib/realtimeEmissaryProtocol", () => ({
         return [
           {
             callId: "call-2",
-            cursor: event.cursor ?? 0,
             message: "Please verify whether those repositories are symlinks.",
             type: "handoff",
           },
@@ -1294,7 +1292,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       );
       channel.dispatchEvent(
         new MessageEvent("message", {
-          data: JSON.stringify({ type: "test.handoff_followup", cursor: 4 }),
+          data: JSON.stringify({ type: "test.handoff_followup" }),
         }),
       );
     });
@@ -1566,15 +1564,10 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     });
 
     await waitFor(() =>
-      expect(mocks.createHandoffToolOutput).toHaveBeenCalledWith(
-        "call-1",
-        expect.objectContaining({
-          accepted: true,
-          handoff_id: "handoff-1",
-          unreadPeerMessages: [],
-          cursor: 0,
-        }),
-      ),
+      expect(mocks.createHandoffToolOutput).toHaveBeenCalledWith("call-1", {
+        accepted: true,
+        handoff_id: "handoff-1",
+      }),
     );
     expect(mocks.recordToolOutput).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1603,18 +1596,16 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     });
 
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
-    expect(mocks.createHandoffToolOutput).toHaveBeenLastCalledWith(
-      "call-2",
-      expect.objectContaining({
-        accepted: true,
-        handoff_id: "handoff-2",
-      }),
-    );
+    expect(mocks.createHandoffToolOutput).toHaveBeenLastCalledWith("call-2", {
+      accepted: true,
+      handoff_id: "handoff-2",
+    });
     await act(async () => owner.result.current.onToggle());
   });
 
-  it("wakes the emissary to recover from a rejected handoff", async () => {
-    const owner = renderConversation("session-a");
+  it("automatically orders a handoff after pending master context", async () => {
+    const onSend = vi.fn().mockResolvedValue(true);
+    const owner = renderConversation("session-a", onSend);
     await act(async () => owner.result.current.onToggle());
     await waitFor(() => expect(owner.result.current.state).toBe("listening"));
     await act(async () => {
@@ -1636,11 +1627,15 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       );
     });
 
-    await waitFor(() => expect(mocks.requestToolOutput).toHaveBeenCalledOnce());
-    expect(mocks.recordToolOutput).not.toHaveBeenCalled();
-    expect(mocks.createHandoffToolOutput).toHaveBeenCalledWith(
-      "call-1",
-      expect.objectContaining({ accepted: false, reason: "pipe_busy" }),
+    await waitFor(() => expect(mocks.recordToolOutput).toHaveBeenCalledOnce());
+    expect(mocks.requestToolOutput).not.toHaveBeenCalled();
+    expect(mocks.createHandoffToolOutput).toHaveBeenCalledWith("call-1", {
+      accepted: true,
+      handoff_id: "handoff-2",
+    });
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+    expect(onSend.mock.calls[0]?.[0]).toContain(
+      "[Handoff handoff-2 from emissary; cursor 2]",
     );
 
     await act(async () => owner.result.current.onToggle());
@@ -1806,7 +1801,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     await act(async () => owner.result.current.onToggle());
   });
 
-  it("fails loudly when a reminder turn still leaves its handoff unresolved", async () => {
+  it("fails loudly after three reminder attempts leave a handoff unresolved", async () => {
     const onSend = vi.fn().mockResolvedValue(true);
     const owner = renderConversation("session-a", onSend);
     await act(async () => owner.result.current.onToggle());
@@ -1822,13 +1817,26 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
 
     act(() =>
+      mocks.activeEmissary?.completeMasterTurn({ reminderHandoffIds: [] }),
+    );
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
+    for (const expectedCalls of [3, 4]) {
+      act(() =>
+        mocks.activeEmissary?.completeMasterTurn({
+          reminderHandoffIds: ["handoff-1"],
+        }),
+      );
+      await waitFor(() => expect(onSend).toHaveBeenCalledTimes(expectedCalls));
+      expect(owner.result.current.state).not.toBe("error");
+    }
+    act(() =>
       mocks.activeEmissary?.completeMasterTurn({
         reminderHandoffIds: ["handoff-1"],
       }),
     );
     await waitFor(() => expect(owner.result.current.state).toBe("error"));
     expect(owner.result.current.error).toContain(
-      "left required handoff-1 unresolved after its reminder turn",
+      "left required handoff-1 unresolved after 3 reminder attempts",
     );
   });
 });

@@ -48,6 +48,7 @@ const MASTER_PROMPT_KEY = "berd-realtime-voice-master";
 const MICROPHONE_OWNER_ID = "berd:realtime-voice-conversation";
 const MAX_REALTIME_REPLAY_ITEMS = 12;
 const HANDOFF_REMINDER_IDS_METADATA = "realtimeHandoffReminderIds";
+const MAX_HANDOFF_REMINDER_ATTEMPTS = 3;
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -321,7 +322,7 @@ function waitForDataChannelOpen(channel: RTCDataChannel): Promise<void> {
 function masterPrompt(sessionId: string): string {
   return `${REALTIME_MASTER_INSTRUCTIONS}
 
-Your send_to_emissary tool is the Berd CLI command below. The initial bridge cursor is 0. Always use the newest cursor from any Master-bound transcript, handoff, reminder, or prior tool result. A stale cursor means a newer event is already queued; wait for its normal delivery rather than bypassing it. Choose --mode context to silently update the emissary's context for a future natural turn. Choose --mode say only when the emissary should speak your message to the user now. A say may resolve several open handoffs by repeating --resolves for each handoff id. Context cannot resolve a handoff. Finishing your turn does not notify or wake the emissary, so send explicitly when needed.
+Your send_to_emissary tool is the Berd CLI command below. The initial bridge cursor is 0. Always use the newest cursor from any Master-bound transcript, handoff, reminder, or prior tool result. A stale cursor means a newer event is already queued; wait for its normal delivery rather than bypassing it. Choose --mode context to silently update the emissary's context for a future natural turn. Choose --mode say only when the emissary should speak your message to the user now. A say may resolve several open handoffs by repeating --resolves for each handoff id. Context cannot resolve a handoff. Finishing your turn does not notify or wake the emissary, so send explicitly when needed. Berd retries a private unresolved-handoff reminder up to three times before failing the voice session.
 
 berdctl session send-to-emissary --session-id ${JSON.stringify(sessionId)} --cursor <cursor> --mode <context|say> [--resolves <handoff-id> ...] --message <message> --json
 
@@ -378,7 +379,7 @@ class OpenAiRealtimeConversationRuntime {
     | null = null;
   private readonly openHandoffs = new Map<
     string,
-    { message: string; reminderSent: boolean }
+    { message: string; reminderAttempts: number }
   >();
   private activeRun = 0;
   private deliveryQueue = Promise.resolve();
@@ -523,7 +524,7 @@ class OpenAiRealtimeConversationRuntime {
             `The realtime event could not enter the master pipe (${exchange.reason}).`,
           );
         }
-        return exchange.outbound;
+        return exchange;
       };
       const transcriptMessageIds = new Map<string, string>();
       const upsertTranscriptMessage = (
@@ -599,7 +600,7 @@ class OpenAiRealtimeConversationRuntime {
                     }: ${bridgeEvent.text}`;
               const transcriptMessage = `[Voice transcript] ${transcriptLabel}`;
               const masterBound = queueMasterBoundEvent(transcriptMessage);
-              const masterTranscript = `[Voice transcript; cursor ${masterBound.id}] ${transcriptLabel}`;
+              const masterTranscript = `[Voice transcript; cursor ${masterBound.outbound.id}] ${transcriptLabel}`;
               if (bridgeEvent.speaker === "emissary") {
                 this.deliverToMaster(
                   ownerSessionId,
@@ -619,46 +620,36 @@ class OpenAiRealtimeConversationRuntime {
                 transcriptMessageId,
               );
             } else if (bridgeEvent.type === "handoff") {
-              const exchange = pipe.send({
-                sender: "emissary",
-                cursor: bridgeEvent.cursor,
-                message: bridgeEvent.message,
-              });
-              const handoffId = exchange.accepted
-                ? `handoff-${exchange.outbound.id}`
-                : undefined;
+              const exchange = queueMasterBoundEvent(bridgeEvent.message);
+              const handoffId = `handoff-${exchange.outbound.id}`;
               const toolOutput = createHandoffToolOutput(bridgeEvent.callId, {
-                ...exchange,
-                ...(handoffId ? { handoff_id: handoffId } : {}),
+                accepted: true,
+                handoff_id: handoffId,
               });
-              const toolFollowUp = exchange.accepted
-                ? responses.recordToolOutput(toolOutput)
-                : responses.requestToolOutput(toolOutput);
+              const toolFollowUp = responses.recordToolOutput(toolOutput);
               sendRealtimeEvents(transport, toolFollowUp.events);
-              if (exchange.accepted && handoffId) {
-                this.openHandoffs.set(handoffId, {
-                  message: exchange.outbound.message,
-                  reminderSent: false,
-                });
-                useChatStore
-                  .getState()
-                  .addMessage(
-                    ownerSessionId,
-                    createHandoffDebugMessage(
-                      handoffId,
-                      exchange.outbound.message,
-                    ),
-                  );
-                this.deliverToMaster(
+              this.openHandoffs.set(handoffId, {
+                message: exchange.outbound.message,
+                reminderAttempts: 0,
+              });
+              useChatStore
+                .getState()
+                .addMessage(
                   ownerSessionId,
-                  `[Handoff ${handoffId} from emissary; cursor ${exchange.outbound.id}] ${exchange.outbound.message}`,
-                  exchange.outbound.message,
-                  undefined,
-                  true,
-                  undefined,
-                  false,
+                  createHandoffDebugMessage(
+                    handoffId,
+                    exchange.outbound.message,
+                  ),
                 );
-              }
+              this.deliverToMaster(
+                ownerSessionId,
+                `[Handoff ${handoffId} from emissary; cursor ${exchange.outbound.id}] ${exchange.outbound.message}`,
+                exchange.outbound.message,
+                undefined,
+                true,
+                undefined,
+                false,
+              );
             } else if (bridgeEvent.type === "tool_call.invalid") {
               const toolFollowUp = responses.requestToolOutput(
                 createInvalidToolCallOutput(
@@ -798,35 +789,35 @@ class OpenAiRealtimeConversationRuntime {
       this.bridgeMasterTurnCompletion = ({ reminderHandoffIds }) => {
         const ownerSessionId = this.snapshot.boundSessionId;
         if (!ownerSessionId) return;
-        if (reminderHandoffIds.length > 0) {
-          const unresolved = reminderHandoffIds.filter((handoffId) =>
-            this.openHandoffs.has(handoffId),
-          );
-          if (unresolved.length > 0) {
-            void this.fail(
-              ownerSessionId,
-              new Error(
-                `The master left required ${unresolved.join(", ")} unresolved after its reminder turn.`,
-              ),
-            );
-            return;
-          }
-        }
-
+        const retrying = new Set(reminderHandoffIds);
         const pending = [...this.openHandoffs.entries()].filter(
-          ([, handoff]) => !handoff.reminderSent,
+          ([handoffId, handoff]) =>
+            handoff.reminderAttempts === 0 || retrying.has(handoffId),
         );
         if (pending.length === 0) return;
+        const exhausted = pending.filter(
+          ([, handoff]) =>
+            handoff.reminderAttempts >= MAX_HANDOFF_REMINDER_ATTEMPTS,
+        );
+        if (exhausted.length > 0) {
+          void this.fail(
+            ownerSessionId,
+            new Error(
+              `The master left required ${exhausted.map(([handoffId]) => handoffId).join(", ")} unresolved after ${MAX_HANDOFF_REMINDER_ATTEMPTS} reminder attempts.`,
+            ),
+          );
+          return;
+        }
         const pendingIds = pending.map(([handoffId]) => handoffId);
-        for (const [, handoff] of pending) handoff.reminderSent = true;
+        for (const [, handoff] of pending) handoff.reminderAttempts += 1;
         const requests = pending
           .map(([handoffId, handoff]) => `- ${handoffId}: ${handoff.message}`)
           .join("\n");
-        const reminder = `[Private handoff reminder]\nYou ended your turn without resolving the required handoffs below. Resolve them now with one or more send-to-emissary --mode say calls that name every answered handoff in --resolves, or dismiss obsolete handoffs explicitly. Do not redo completed work.\n${requests}`;
+        const reminder = `[Private handoff reminder]\nYou ended your turn without resolving the required handoffs below. Resolve them now with one or more send-to-emissary --mode say calls that name every answered handoff in --resolves, or dismiss obsolete handoffs explicitly. Berd will retry this reminder up to ${MAX_HANDOFF_REMINDER_ATTEMPTS} times. Do not redo completed work.\n${requests}`;
         const masterBound = queueMasterBoundEvent(reminder);
         this.deliverToMaster(
           ownerSessionId,
-          `[Private handoff reminder; cursor ${masterBound.id}]${reminder.slice("[Private handoff reminder]".length)}`,
+          `[Private handoff reminder; cursor ${masterBound.outbound.id}]${reminder.slice("[Private handoff reminder]".length)}`,
           "Handoff reminder",
           undefined,
           true,

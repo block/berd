@@ -20,7 +20,7 @@ Examples:
 - If the user asks whether those repositories are symbolic links, call handoff to verify it; do not say that you lack detailed information.
 - After receiving a useful master message, speak its result to the user directly. Do not open another handoff merely to acknowledge, confirm, summarize, or copy a master message back to the master.
 
-Every handoff call must include the latest bridge cursor. If a handoff fails because the pipe is busy in the other direction, do not retry yet: wait for Berd to deliver the pending master message normally, then retry with the cursor included in that message. The failed attempt did not create a handoff.
+Berd orders handoffs behind everything already delivered to you. A handoff needs only the concise unresolved request; do not track or supply bridge cursors yourself.
 
 Keep the spoken conversation natural and responsive. Represent the master's information accurately, and do not imply that you completed work performed by the master.`;
 
@@ -30,7 +30,7 @@ Berd sends every finalized user and emissary transcript turn through the same or
 
 While Realtime voice is active, Berd also delivers every ordinary typed user message directly to the emissary and interrupts any response currently being spoken. A typed message reaches you as an ordinary user turn; microphone transcripts are explicitly prefixed with "[Voice transcript]". Do not echo, paraphrase, or relay an ordinary typed user message through send_to_emissary unless you are adding genuinely new information the emissary needs.
 
-Your reasoning, ordinary assistant text, tool calls, and progress remain visible to the user in Berd's durable master transcript, but they are not visible to the emissary. On actionable turns, work normally in Berd: reason as needed, use the available tools, and provide normal visible progress and result text for the master transcript. Separately call send_to_emissary with mode context to silently update what the emissary knows for a future natural turn, or mode say when the emissary should speak your message to the user now. A say message may explicitly resolve one or more open handoff IDs; one combined say may resolve several handoffs. If an open handoff no longer needs a spoken answer because it is obsolete, superseded, or already handled, dismiss it explicitly with a reason. Berd delivers that reason to the emissary as silent context without waking it. Context messages never resolve handoffs. Do not assume your ordinary output was relayed. Completing your turn does not notify or wake the emissary, but Berd will give you one private reminder turn if you leave a handoff unresolved. Each finalized transcript gives you an opportunity to act, not an obligation to react. When no work, correction, or useful emissary guidance is needed, your entire turn should be an empty, zero-token success: no prose, no tools, and no coordination message. Ordinary conversation and small talk belong to the emissary. Proactively send relevant facts, decisions, progress, constraints, and useful follow-up questions rather than waiting to be asked. Never call send_to_emissary merely to acknowledge, confirm, or echo routine transcript content; acknowledgement-only coordination must be a zero-token no-op.
+Your reasoning, ordinary assistant text, tool calls, and progress remain visible to the user in Berd's durable master transcript, but they are not visible to the emissary. On actionable turns, work normally in Berd: reason as needed, use the available tools, and provide normal visible progress and result text for the master transcript. Separately call send_to_emissary with mode context to silently update what the emissary knows for a future natural turn, or mode say when the emissary should speak your message to the user now. A say message may explicitly resolve one or more open handoff IDs; one combined say may resolve several handoffs. If an open handoff no longer needs a spoken answer because it is obsolete, superseded, or already handled, dismiss it explicitly with a reason. Berd delivers that reason to the emissary as silent context without waking it. Context messages never resolve handoffs. Do not assume your ordinary output was relayed. Completing your turn does not notify or wake the emissary, but Berd will retry a private reminder up to three times if you leave a handoff unresolved. Each finalized transcript gives you an opportunity to act, not an obligation to react. When no work, correction, or useful emissary guidance is needed, your entire turn should be an empty, zero-token success: no prose, no tools, and no coordination message. Ordinary conversation and small talk belong to the emissary. Proactively send relevant facts, decisions, progress, constraints, and useful follow-up questions rather than waiting to be asked. Never call send_to_emissary merely to acknowledge, confirm, or echo routine transcript content; acknowledgement-only coordination must be a zero-token no-op.
 
 Treat interrupted emissary transcripts as best-effort streamed text that may not exactly match the audio the user heard. Keep direct coordination concise. Every direct-message tool call must include the newest cursor from any Master-bound transcript, handoff, reminder, or prior tool result. If a send fails because a newer event is already queued in the other direction, do not retry yet: wait for Berd to deliver that event normally, then retry with its cursor.`;
 
@@ -107,7 +107,6 @@ export type StartedRealtimeTranscript = {
 export type HandoffCall = {
   type: "handoff";
   callId: string;
-  cursor: number;
   message: string;
 };
 
@@ -251,18 +250,13 @@ export function createRealtimeEmissarySessionUpdate(
         parameters: {
           type: "object",
           properties: {
-            cursor: {
-              type: "integer",
-              minimum: 0,
-              description: "Latest bridge cursor received from the master.",
-            },
             message: {
               type: "string",
               description:
                 "The concise unresolved request the master now owns.",
             },
           },
-          required: ["cursor", "message"],
+          required: ["message"],
           additionalProperties: false,
         },
       },
@@ -577,8 +571,9 @@ export type DirectMessageExchange =
       cursor: number;
     };
 
-export type HandoffToolResult = DirectMessageExchange & {
-  handoff_id?: string;
+export type HandoffToolResult = {
+  accepted: true;
+  handoff_id: string;
 };
 
 /**
@@ -933,16 +928,15 @@ export class RealtimeEmissaryProtocol {
     if (!isRecord(parsed))
       throw new Error("handoff arguments must be an object");
     const keys = Object.keys(parsed).sort();
-    if (keys.length !== 2 || keys[0] !== "cursor" || keys[1] !== "message") {
-      throw new Error("handoff accepts only cursor and message arguments");
+    if (keys.length !== 1 || keys[0] !== "message") {
+      throw new Error("handoff accepts only a message argument");
     }
-    const cursor = requireCursor(parsed.cursor);
     const message = requireNonEmpty(parsed.message, "handoff message");
 
     this.completedCallIds.add(callId);
     this.argumentDeltas.delete(callId);
     this.callNames.delete(callId);
-    return { type: "handoff", callId, cursor, message };
+    return { type: "handoff", callId, message };
   }
 
   private invalidFunctionCall(
