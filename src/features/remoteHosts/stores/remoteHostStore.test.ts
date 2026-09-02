@@ -43,7 +43,13 @@ const connection: RemoteBackendConnection = {
   localPort: 4001,
   gooseVersion: "1.2.3",
   daemonReused: false,
+  incarnation: "slot-1",
   generation: 1,
+};
+
+const backendIdentity = {
+  incarnation: connection.incarnation,
+  generation: connection.generation,
 };
 
 function resetStore(): void {
@@ -56,6 +62,8 @@ function resetStore(): void {
     doctorErrorByHost: {},
     forgottenHosts: {},
     lifecycleByHost: {},
+    connectPendingLifecycleByHost: {},
+    retiredIncarnationsByHost: {},
     forgetPendingByHost: {},
     forgetErrorByHost: {},
     recentDirsByHost: {},
@@ -74,11 +82,13 @@ describe("applyStatusEvent", () => {
   it("updates statusByHost from status events", () => {
     useRemoteHostStore.getState().applyStatusEvent({
       host: "devbox",
+      ...backendIdentity,
       state: "reconnecting",
       attempt: 2,
     });
 
     expect(useRemoteHostStore.getState().statusByHost.devbox).toEqual({
+      ...backendIdentity,
       state: "reconnecting",
       attempt: 2,
     });
@@ -87,6 +97,7 @@ describe("applyStatusEvent", () => {
   it("clears a previous error when a ready event arrives", () => {
     useRemoteHostStore.getState().applyStatusEvent({
       host: "devbox",
+      ...backendIdentity,
       state: "failed",
       error: { kind: "host-unreachable", message: "no route" },
     });
@@ -96,12 +107,14 @@ describe("applyStatusEvent", () => {
 
     useRemoteHostStore.getState().applyStatusEvent({
       host: "devbox",
+      ...backendIdentity,
       state: "ready",
       wsUrl: connection.wsUrl,
       localPort: connection.localPort,
     });
 
     expect(useRemoteHostStore.getState().statusByHost.devbox).toEqual({
+      ...backendIdentity,
       state: "ready",
     });
   });
@@ -110,9 +123,11 @@ describe("applyStatusEvent", () => {
 describe("syncBackendSnapshot", () => {
   it("copies snapshot entries into statusByHost", async () => {
     mocks.listRemoteBackends.mockResolvedValue([
-      { host: "devbox", state: "ready" },
+      { host: "devbox", ...backendIdentity, state: "ready" },
       {
         host: "broken",
+        incarnation: "broken-slot",
+        generation: 3,
         state: "failed",
         error: { kind: "auth-failed", message: "denied" },
       },
@@ -121,8 +136,13 @@ describe("syncBackendSnapshot", () => {
     await useRemoteHostStore.getState().syncBackendSnapshot();
 
     const { statusByHost } = useRemoteHostStore.getState();
-    expect(statusByHost.devbox).toEqual({ state: "ready" });
+    expect(statusByHost.devbox).toEqual({
+      ...backendIdentity,
+      state: "ready",
+    });
     expect(statusByHost.broken).toEqual({
+      incarnation: "broken-slot",
+      generation: 3,
       state: "failed",
       error: { kind: "auth-failed", message: "denied" },
     });
@@ -131,12 +151,13 @@ describe("syncBackendSnapshot", () => {
   it("keeps the previous statuses when the snapshot fails", async () => {
     useRemoteHostStore
       .getState()
-      .applyStatusEvent({ host: "devbox", state: "ready" });
+      .applyStatusEvent({ host: "devbox", ...backendIdentity, state: "ready" });
     mocks.listRemoteBackends.mockRejectedValue(new Error("ipc down"));
 
     await useRemoteHostStore.getState().syncBackendSnapshot();
 
     expect(useRemoteHostStore.getState().statusByHost.devbox).toEqual({
+      ...backendIdentity,
       state: "ready",
     });
   });
@@ -152,12 +173,12 @@ describe("syncBackendSnapshot", () => {
         }),
     );
     useRemoteHostStore.setState({
-      statusByHost: { [host]: { state: "failed" } },
+      statusByHost: { [host]: { ...backendIdentity, state: "failed" } },
     });
 
     const syncing = useRemoteHostStore.getState().syncBackendSnapshot();
     await useRemoteHostStore.getState().forgetHost(host);
-    resolveSnapshot([{ host, state: "failed" }]);
+    resolveSnapshot([{ host, ...backendIdentity, state: "failed" }]);
     await syncing;
 
     expect(useRemoteHostStore.getState().statusByHost).not.toHaveProperty(host);
@@ -174,18 +195,24 @@ describe("syncBackendSnapshot", () => {
           resolveSnapshot = resolve;
         }),
     );
-    mocks.connectRemoteHost.mockResolvedValue(connection);
+    const replacementConnection = {
+      ...connection,
+      incarnation: "slot-2",
+    };
+    mocks.connectRemoteHost.mockResolvedValue(replacementConnection);
     useRemoteHostStore.setState({
-      statusByHost: { [host]: { state: "failed" } },
+      statusByHost: { [host]: { ...backendIdentity, state: "failed" } },
     });
 
     const syncing = useRemoteHostStore.getState().syncBackendSnapshot();
     await useRemoteHostStore.getState().forgetHost(host);
     await useRemoteHostStore.getState().ensureHostConnected(host);
-    resolveSnapshot([{ host, state: "disconnected" }]);
+    resolveSnapshot([{ host, ...backendIdentity, state: "disconnected" }]);
     await syncing;
 
     expect(useRemoteHostStore.getState().statusByHost[host]).toEqual({
+      incarnation: replacementConnection.incarnation,
+      generation: replacementConnection.generation,
       state: "ready",
     });
     expect(useRemoteHostStore.getState().forgottenHosts[host]).toBeUndefined();
@@ -217,7 +244,7 @@ describe("ensureHostConnected", () => {
   it("resolves without invoking connect when the host is already ready", async () => {
     useRemoteHostStore
       .getState()
-      .applyStatusEvent({ host: "devbox", state: "ready" });
+      .applyStatusEvent({ host: "devbox", ...backendIdentity, state: "ready" });
 
     await useRemoteHostStore.getState().ensureHostConnected("devbox");
 
@@ -243,8 +270,58 @@ describe("ensureHostConnected", () => {
 
     expect(mocks.connectRemoteHost).toHaveBeenCalledWith("devbox");
     expect(useRemoteHostStore.getState().statusByHost.devbox).toEqual({
+      ...backendIdentity,
       state: "ready",
     });
+  });
+
+  it("keeps the newest connection when two lifecycles complete out of order", async () => {
+    const resolvers: Array<(value: RemoteBackendConnection) => void> = [];
+    mocks.connectRemoteHost.mockImplementation(
+      () =>
+        new Promise<RemoteBackendConnection>((resolve) => {
+          resolvers.push(resolve);
+        }),
+    );
+
+    const older = useRemoteHostStore.getState().ensureHostConnected("devbox");
+    const newer = useRemoteHostStore.getState().ensureHostConnected("devbox");
+    const newestConnection = {
+      ...connection,
+      incarnation: "slot-new",
+      generation: 4,
+    };
+    resolvers[1]?.(newestConnection);
+    await newer;
+    resolvers[0]?.({ ...connection, incarnation: "slot-old", generation: 9 });
+    await older;
+
+    expect(useRemoteHostStore.getState().statusByHost.devbox).toEqual({
+      state: "ready",
+      incarnation: newestConnection.incarnation,
+      generation: newestConnection.generation,
+    });
+  });
+
+  it("does not publish a connection that completes after Forget", async () => {
+    const host = "forgotten.blox";
+    let resolveConnect: (value: RemoteBackendConnection) => void = () => {};
+    mocks.connectRemoteHost.mockImplementation(
+      () =>
+        new Promise<RemoteBackendConnection>((resolve) => {
+          resolveConnect = resolve;
+        }),
+    );
+
+    const pending = useRemoteHostStore.getState().ensureHostConnected(host);
+    await useRemoteHostStore.getState().forgetHost(host);
+    resolveConnect(connection);
+    await pending;
+
+    const state = useRemoteHostStore.getState();
+    expect(state.statusByHost).not.toHaveProperty(host);
+    expect(state.manualHosts).not.toContain(host);
+    expect(state.forgottenHosts[host]).toBe(true);
   });
 
   it("marks the host failed with the typed error and rethrows", async () => {
@@ -280,12 +357,13 @@ describe("disconnect and shutdownHost", () => {
     mocks.disconnectRemoteHost.mockResolvedValue(undefined);
     useRemoteHostStore
       .getState()
-      .applyStatusEvent({ host: "devbox", state: "ready" });
+      .applyStatusEvent({ host: "devbox", ...backendIdentity, state: "ready" });
 
     await useRemoteHostStore.getState().disconnect("devbox");
 
     expect(mocks.disconnectRemoteHost).toHaveBeenCalledWith("devbox");
     expect(useRemoteHostStore.getState().statusByHost.devbox).toEqual({
+      ...backendIdentity,
       state: "disconnected",
     });
   });
@@ -294,12 +372,13 @@ describe("disconnect and shutdownHost", () => {
     mocks.shutdownRemoteHost.mockResolvedValue(undefined);
     useRemoteHostStore
       .getState()
-      .applyStatusEvent({ host: "devbox", state: "ready" });
+      .applyStatusEvent({ host: "devbox", ...backendIdentity, state: "ready" });
 
     await useRemoteHostStore.getState().shutdownHost("devbox");
 
     expect(mocks.shutdownRemoteHost).toHaveBeenCalledWith("devbox");
     expect(useRemoteHostStore.getState().statusByHost.devbox).toEqual({
+      ...backendIdentity,
       state: "disconnected",
     });
   });
@@ -497,14 +576,19 @@ describe("initRemoteHostStore", () => {
   it("subscribes to status events, seeds state, and returns unsubscribe", async () => {
     const unlisten = vi.fn();
     let statusHandler:
-      | ((payload: { host: string; state: string }) => void)
+      | ((payload: {
+          host: string;
+          incarnation: string;
+          generation: number;
+          state: string;
+        }) => void)
       | undefined;
     mocks.listenRemoteBackendStatus.mockImplementation((handler) => {
       statusHandler = handler;
       return Promise.resolve(unlisten);
     });
     mocks.listRemoteBackends.mockResolvedValue([
-      { host: "devbox", state: "ready" },
+      { host: "devbox", ...backendIdentity, state: "ready" },
     ]);
     mocks.listSshConfigHosts.mockResolvedValue(["devbox"]);
 
@@ -512,11 +596,19 @@ describe("initRemoteHostStore", () => {
 
     expect(useRemoteHostStore.getState().configHosts).toEqual(["devbox"]);
     expect(useRemoteHostStore.getState().statusByHost.devbox).toEqual({
+      ...backendIdentity,
       state: "ready",
     });
 
-    statusHandler?.({ host: "devbox", state: "reconnecting" });
+    statusHandler?.({
+      host: "devbox",
+      ...backendIdentity,
+      generation: backendIdentity.generation + 1,
+      state: "reconnecting",
+    });
     expect(useRemoteHostStore.getState().statusByHost.devbox).toEqual({
+      ...backendIdentity,
+      generation: backendIdentity.generation + 1,
       state: "reconnecting",
     });
 
@@ -641,26 +733,61 @@ describe("manual host persistence", () => {
   it("ignores late status events until an intentional reconnect", async () => {
     const host = "broken.blox";
     useRemoteHostStore.setState({
-      statusByHost: { [host]: { state: "failed" } },
+      statusByHost: { [host]: { ...backendIdentity, state: "failed" } },
     });
 
     await useRemoteHostStore.getState().forgetHost(host);
     useRemoteHostStore.getState().applyStatusEvent({
       host,
+      ...backendIdentity,
       state: "disconnected",
     });
     expect(useRemoteHostStore.getState().statusByHost).not.toHaveProperty(host);
 
-    mocks.connectRemoteHost.mockResolvedValue(connection);
+    const replacementConnection = {
+      ...connection,
+      incarnation: "slot-2",
+    };
+    mocks.connectRemoteHost.mockResolvedValue(replacementConnection);
     await useRemoteHostStore.getState().ensureHostConnected(host);
     useRemoteHostStore.getState().applyStatusEvent({
       host,
+      incarnation: "slot-2",
+      generation: 2,
       state: "reconnecting",
       attempt: 1,
     });
     expect(useRemoteHostStore.getState().statusByHost[host]).toEqual({
+      incarnation: "slot-2",
+      generation: 2,
       state: "reconnecting",
       attempt: 1,
+    });
+  });
+
+  it("ignores a retired incarnation after a replacement reconnects", async () => {
+    const host = "broken.blox";
+    useRemoteHostStore.setState({
+      statusByHost: { [host]: { ...backendIdentity, state: "failed" } },
+    });
+    await useRemoteHostStore.getState().forgetHost(host);
+    mocks.connectRemoteHost.mockResolvedValue({
+      ...connection,
+      incarnation: "slot-2",
+    });
+    await useRemoteHostStore.getState().ensureHostConnected(host);
+
+    useRemoteHostStore.getState().applyStatusEvent({
+      host,
+      incarnation: connection.incarnation,
+      generation: 99,
+      state: "disconnected",
+    });
+
+    expect(useRemoteHostStore.getState().statusByHost[host]).toEqual({
+      state: "ready",
+      incarnation: "slot-2",
+      generation: connection.generation,
     });
   });
 

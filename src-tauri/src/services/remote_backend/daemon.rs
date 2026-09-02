@@ -1260,6 +1260,49 @@ fi
         }
 
         #[test]
+        fn legacy_reclaimer_does_not_claim_a_live_successor_generation() {
+            let home = tempfile::tempdir().unwrap();
+            let state_dir = home.path().join(".state/berd/remote");
+            let lock_dir = state_dir.join("daemon.lock");
+            std::fs::create_dir_all(&lock_dir).unwrap();
+            std::fs::write(lock_dir.join("owner"), "999999 invalid-identity").unwrap();
+
+            let paused_script = BOOTSTRAP_SCRIPT.replace(
+                "        legacy_guard=\"$LEGACY_LOCK_DIR/.berd-reclaim.$NONCE.$$.$compat_attempt\"",
+                "        : > \"$STATE_DIR/reclaim-paused\"\n        while [ ! -f \"$STATE_DIR/reclaim-continue\" ]; do sleep 0.01; done\n        legacy_guard=\"$LEGACY_LOCK_DIR/.berd-reclaim.$NONCE.$$.$compat_attempt\"",
+            );
+            assert_ne!(paused_script, BOOTSTRAP_SCRIPT);
+            let reclaimer = spawn_script_source(&["shutdown"], None, home.path(), &paused_script);
+            wait_for_path(
+                &state_dir.join("reclaim-paused"),
+                "reclaimer never paused before generation claim",
+            );
+
+            std::fs::remove_file(lock_dir.join("owner")).unwrap();
+            std::fs::remove_dir(&lock_dir).unwrap();
+            let successor_source = legacy_lock_holder_script("successor-held", "successor-release");
+            let successor =
+                spawn_script_source(&["shutdown"], None, home.path(), &successor_source);
+            wait_for_path(
+                &state_dir.join("successor-held"),
+                "live successor never acquired legacy lock",
+            );
+
+            std::fs::write(state_dir.join("reclaim-continue"), "").unwrap();
+            std::thread::sleep(Duration::from_millis(250));
+            assert!(
+                lock_dir.join("owner").exists(),
+                "successor owner was reclaimed"
+            );
+
+            std::fs::write(state_dir.join("successor-release"), "").unwrap();
+            assert_eq!(successor.wait_with_output().unwrap().status.code(), Some(0));
+            let (lines, code) = collect_script(reclaimer);
+            assert_eq!(code, Some(0), "lines: {lines:?}");
+            assert!(lines.iter().any(|line| line == "STOPPED"));
+        }
+
+        #[test]
         fn legacy_holder_blocks_ticket_client_until_release() {
             let home = tempfile::tempdir().unwrap();
             let state_dir = home.path().join(".state/berd/remote");

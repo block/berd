@@ -208,9 +208,22 @@ acquire_legacy_compat_lock() {
       # A mkdir winner publishes its owner immediately. Repeated observations
       # distinguish that window from a process that died before publication.
       if [ "$stale_observations" -ge 20 ]; then
-        legacy_claim="$STATE_DIR/.daemon.lock.legacy.$NONCE.$$.$compat_attempt"
-        if mv "$LEGACY_LOCK_DIR" "$legacy_claim" 2>/dev/null; then
-          rm -rf -- "$legacy_claim"
+        # Pin the directory generation before acting on it. Older clients
+        # release with rmdir, so this guard prevents the observed directory
+        # from disappearing and a live successor reusing the shared pathname.
+        # If replacement won before the guard, the owner recheck detects it.
+        legacy_guard="$LEGACY_LOCK_DIR/.berd-reclaim.$NONCE.$$.$compat_attempt"
+        if mkdir "$legacy_guard" 2>/dev/null; then
+          if lock_owner_is_current "$LEGACY_LOCK_OWNER"; then
+            rmdir "$legacy_guard" 2>/dev/null || true
+          else
+            legacy_claim="$STATE_DIR/.daemon.lock.legacy.$NONCE.$$.$compat_attempt"
+            if mv "$LEGACY_LOCK_DIR" "$legacy_claim" 2>/dev/null; then
+              rm -rf -- "$legacy_claim"
+            else
+              rmdir "$legacy_guard" 2>/dev/null || true
+            fi
+          fi
         fi
         stale_observations=0
       fi

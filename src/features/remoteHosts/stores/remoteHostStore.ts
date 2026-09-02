@@ -15,6 +15,7 @@ import {
   listSshConfigHosts,
   shutdownRemoteHost,
   type RemoteBackendErrorLike,
+  type RemoteBackendSnapshotEntry,
   type RemoteBackendState,
   type RemoteBackendStatusPayload,
   type RemoteToolProbe,
@@ -27,11 +28,39 @@ export const REMOTE_HOST_MANUAL_HOSTS_STORAGE_KEY =
 
 const MAX_RECENT_DIRS_PER_HOST = 8;
 const MAX_MANUAL_HOSTS = 16;
+const MAX_RETIRED_INCARNATIONS_PER_HOST = 8;
 
 export interface RemoteHostStatus {
   state: RemoteBackendState;
+  incarnation?: string;
+  generation?: number;
   attempt?: number;
   error?: RemoteBackendErrorLike;
+}
+
+function backendStatus(
+  payload: RemoteBackendStatusPayload | RemoteBackendSnapshotEntry,
+): RemoteHostStatus {
+  return {
+    state: payload.state,
+    incarnation: payload.incarnation,
+    generation: payload.generation,
+    ...(payload.attempt !== undefined ? { attempt: payload.attempt } : {}),
+    ...(payload.error ? { error: payload.error } : {}),
+  };
+}
+
+function acceptsBackendStatus(
+  current: RemoteHostStatus | undefined,
+  retiredIncarnations: string[] | undefined,
+  payload: RemoteBackendStatusPayload | RemoteBackendSnapshotEntry,
+): boolean {
+  if (retiredIncarnations?.includes(payload.incarnation)) return false;
+  if (!current?.incarnation) return true;
+  return (
+    current.incarnation === payload.incarnation &&
+    (current.generation ?? 0) <= payload.generation
+  );
 }
 
 function toRemoteBackendError(error: unknown): RemoteBackendErrorLike {
@@ -130,6 +159,10 @@ export interface RemoteHostStore {
   forgottenHosts: Record<string, true>;
   /** Monotonic local lifecycle used to reject snapshots admitted before a change. */
   lifecycleByHost: Record<string, number>;
+  /** Explicit connect lifecycle currently awaiting its backend result. */
+  connectPendingLifecycleByHost: Record<string, number>;
+  /** Forgotten backend slot identities that must never be admitted again. */
+  retiredIncarnationsByHost: Record<string, string[]>;
   forgetPendingByHost: Record<string, boolean>;
   forgetErrorByHost: Record<string, RemoteBackendErrorLike | undefined>;
   recentDirsByHost: Record<string, string[]>;
@@ -163,6 +196,8 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
   doctorErrorByHost: {},
   forgottenHosts: {},
   lifecycleByHost: {},
+  connectPendingLifecycleByHost: {},
+  retiredIncarnationsByHost: {},
   forgetPendingByHost: {},
   forgetErrorByHost: {},
   recentDirsByHost: loadPersistedRecentDirs(),
@@ -189,16 +224,18 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
         for (const entry of snapshot) {
           if (
             state.forgottenHosts[entry.host] ||
+            state.connectPendingLifecycleByHost[entry.host] !== undefined ||
             (state.lifecycleByHost[entry.host] ?? 0) !==
-              (lifecycleAtStart[entry.host] ?? 0)
+              (lifecycleAtStart[entry.host] ?? 0) ||
+            !acceptsBackendStatus(
+              statusByHost[entry.host],
+              state.retiredIncarnationsByHost[entry.host],
+              entry,
+            )
           ) {
             continue;
           }
-          statusByHost[entry.host] = {
-            state: entry.state,
-            ...(entry.attempt !== undefined ? { attempt: entry.attempt } : {}),
-            ...(entry.error ? { error: entry.error } : {}),
-          };
+          statusByHost[entry.host] = backendStatus(entry);
         }
         return { statusByHost };
       });
@@ -209,17 +246,21 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
 
   applyStatusEvent: (payload) => {
     set((state) => {
-      if (state.forgottenHosts[payload.host]) return state;
+      if (
+        state.forgottenHosts[payload.host] ||
+        state.connectPendingLifecycleByHost[payload.host] !== undefined ||
+        !acceptsBackendStatus(
+          state.statusByHost[payload.host],
+          state.retiredIncarnationsByHost[payload.host],
+          payload,
+        )
+      ) {
+        return state;
+      }
       return {
         statusByHost: {
           ...state.statusByHost,
-          [payload.host]: {
-            state: payload.state,
-            ...(payload.attempt !== undefined
-              ? { attempt: payload.attempt }
-              : {}),
-            ...(payload.error ? { error: payload.error } : {}),
-          },
+          [payload.host]: backendStatus(payload),
         },
       };
     });
@@ -236,9 +277,11 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
 
     // An explicit connection starts a new local lifecycle. This is the only
     // operation that clears a successful Forget tombstone.
+    const lifecycle = (current.lifecycleByHost[host] ?? 0) + 1;
     set((state) => {
       const forgottenHosts = { ...state.forgottenHosts };
       const forgetErrorByHost = { ...state.forgetErrorByHost };
+      const currentStatus = state.statusByHost[host];
       delete forgottenHosts[host];
       delete forgetErrorByHost[host];
       return {
@@ -246,19 +289,38 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
         forgetErrorByHost,
         lifecycleByHost: {
           ...state.lifecycleByHost,
-          [host]: (state.lifecycleByHost[host] ?? 0) + 1,
+          [host]: lifecycle,
+        },
+        connectPendingLifecycleByHost: {
+          ...state.connectPendingLifecycleByHost,
+          [host]: lifecycle,
         },
         // Optimistic: Rust serializes concurrent connects per host, but the UI
         // should reflect the user's new lifecycle immediately.
         statusByHost: {
           ...state.statusByHost,
-          [host]: { state: "connecting" },
+          [host]: {
+            state: "connecting",
+            ...(currentStatus?.incarnation
+              ? {
+                  incarnation: currentStatus.incarnation,
+                  generation: currentStatus.generation,
+                }
+              : {}),
+          },
         },
       };
     });
     try {
-      await connectRemoteHost(host);
+      const connection = await connectRemoteHost(host);
       set((state) => {
+        if (
+          state.forgottenHosts[host] ||
+          state.lifecycleByHost[host] !== lifecycle ||
+          state.connectPendingLifecycleByHost[host] !== lifecycle
+        ) {
+          return state;
+        }
         // A host that connected but isn't in ~/.ssh/config was typed in
         // manually; remember it across restarts.
         const isKnown =
@@ -269,21 +331,53 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
         if (!isKnown) {
           persistManualHosts(manualHosts);
         }
+        const connectPendingLifecycleByHost = {
+          ...state.connectPendingLifecycleByHost,
+        };
+        delete connectPendingLifecycleByHost[host];
         return {
           manualHosts,
+          connectPendingLifecycleByHost,
           statusByHost: {
             ...state.statusByHost,
-            [host]: { state: "ready" },
+            [host]: {
+              state: "ready",
+              incarnation: connection.incarnation,
+              generation: connection.generation,
+            },
           },
         };
       });
     } catch (error) {
-      set((state) => ({
-        statusByHost: {
-          ...state.statusByHost,
-          [host]: { state: "failed", error: toRemoteBackendError(error) },
-        },
-      }));
+      set((state) => {
+        if (
+          state.forgottenHosts[host] ||
+          state.lifecycleByHost[host] !== lifecycle ||
+          state.connectPendingLifecycleByHost[host] !== lifecycle
+        ) {
+          return state;
+        }
+        const connectPendingLifecycleByHost = {
+          ...state.connectPendingLifecycleByHost,
+        };
+        delete connectPendingLifecycleByHost[host];
+        return {
+          connectPendingLifecycleByHost,
+          statusByHost: {
+            ...state.statusByHost,
+            [host]: {
+              state: "failed",
+              ...(state.statusByHost[host]?.incarnation
+                ? {
+                    incarnation: state.statusByHost[host].incarnation,
+                    generation: state.statusByHost[host].generation,
+                  }
+                : {}),
+              error: toRemoteBackendError(error),
+            },
+          },
+        };
+      });
       throw error;
     }
   },
@@ -293,7 +387,7 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
     set((state) => ({
       statusByHost: {
         ...state.statusByHost,
-        [host]: { state: "disconnected" },
+        [host]: { ...state.statusByHost[host], state: "disconnected" },
       },
     }));
   },
@@ -307,7 +401,7 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
     set((state) => ({
       statusByHost: {
         ...state.statusByHost,
-        [host]: { state: "disconnected" },
+        [host]: { ...state.statusByHost[host], state: "disconnected" },
       },
     }));
   },
@@ -372,8 +466,23 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
       const recentDirsByHost = { ...state.recentDirsByHost };
       const goosePathByHost = { ...state.goosePathByHost };
       const forgottenHosts = { ...state.forgottenHosts, [host]: true as const };
+      const connectPendingLifecycleByHost = {
+        ...state.connectPendingLifecycleByHost,
+      };
+      const retiredIncarnationsByHost = {
+        ...state.retiredIncarnationsByHost,
+      };
       const forgetPendingByHost = { ...state.forgetPendingByHost };
       const forgetErrorByHost = { ...state.forgetErrorByHost };
+      const forgottenIncarnation = statusByHost[host]?.incarnation;
+      if (forgottenIncarnation) {
+        retiredIncarnationsByHost[host] = [
+          forgottenIncarnation,
+          ...(retiredIncarnationsByHost[host] ?? []).filter(
+            (candidate) => candidate !== forgottenIncarnation,
+          ),
+        ].slice(0, MAX_RETIRED_INCARNATIONS_PER_HOST);
+      }
       delete statusByHost[host];
       delete doctorByHost[host];
       delete doctorPendingByHost[host];
@@ -382,6 +491,7 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
       delete goosePathByHost[host];
       delete forgetPendingByHost[host];
       delete forgetErrorByHost[host];
+      delete connectPendingLifecycleByHost[host];
       persistManualHosts(manualHosts);
       persistRecentDirs(recentDirsByHost);
       persistGoosePaths(goosePathByHost);
@@ -396,6 +506,8 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
           ...state.lifecycleByHost,
           [host]: (state.lifecycleByHost[host] ?? 0) + 1,
         },
+        connectPendingLifecycleByHost,
+        retiredIncarnationsByHost,
         forgetPendingByHost,
         forgetErrorByHost,
         recentDirsByHost,
