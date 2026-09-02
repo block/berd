@@ -24,7 +24,10 @@ describe("RemoteHostSelector", () => {
     // Opening the selector refreshes hosts from the SSH config, so the mock
     // must agree with the seeded store state.
     mockListSshConfigHosts.mockReset().mockResolvedValue(["devbox", "gpu-box"]);
-    mockConnectRemoteHost.mockReset().mockResolvedValue(undefined);
+    mockConnectRemoteHost.mockReset().mockResolvedValue({
+      incarnation: "slot-1",
+      generation: 1,
+    });
     useRemoteHostStore.setState({
       configHosts: ["devbox", "gpu-box"],
       manualHosts: [],
@@ -73,6 +76,33 @@ describe("RemoteHostSelector", () => {
     await user.click(screen.getByRole("button", { name: /select computer/i }));
     await user.click(screen.getByRole("menuitem", { name: /this computer/i }));
     expect(onHostChange).toHaveBeenCalledWith(null);
+  });
+
+  it("treats aliases matching the former action sentinels as SSH hosts", async () => {
+    const aliases = ["__local__", "__add_ssh_environment__"];
+    mockListSshConfigHosts.mockResolvedValue(aliases);
+    useRemoteHostStore.setState({ configHosts: aliases });
+    const user = userEvent.setup();
+    const onHostChange = vi.fn();
+    const { unmount } = render(
+      <RemoteHostSelector selectedHost={null} onHostChange={onHostChange} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /select computer/i }));
+    await user.click(screen.getByRole("menuitem", { name: "__local__" }));
+    expect(onHostChange).toHaveBeenLastCalledWith("__local__");
+    unmount();
+
+    onHostChange.mockClear();
+    render(
+      <RemoteHostSelector selectedHost={null} onHostChange={onHostChange} />,
+    );
+    await user.click(screen.getByRole("button", { name: /select computer/i }));
+    await user.click(
+      screen.getByRole("menuitem", { name: "__add_ssh_environment__" }),
+    );
+    expect(onHostChange).toHaveBeenLastCalledWith("__add_ssh_environment__");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("still lists a selected host that is missing from the SSH config", async () => {

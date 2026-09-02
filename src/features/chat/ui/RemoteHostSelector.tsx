@@ -8,8 +8,13 @@ import {
 } from "./ChatInputSelector";
 import { useRemoteHostStore } from "@/features/remoteHosts/stores/remoteHostStore";
 
-const LOCAL_HOST_VALUE = "__local__";
-const ADD_HOST_VALUE = "__add_ssh_environment__";
+const LOCAL_HOST_VALUE = "action:local";
+const ADD_HOST_VALUE = "action:add-ssh-environment";
+const HOST_VALUE_PREFIX = "host:";
+
+function hostValue(host: string): string {
+  return `${HOST_VALUE_PREFIX}${host}`;
+}
 
 interface RemoteHostSelectorProps {
   selectedHost?: string | null;
@@ -62,7 +67,7 @@ export function RemoteHostSelector({
   };
 
   const hostItems: ChatInputSelectorItem[] = listedHosts.map((host) => ({
-    value: host,
+    value: hostValue(host),
     label: host,
     description: statusDescription(host),
     icon: <Server className="size-4 text-foreground" />,
@@ -73,7 +78,13 @@ export function RemoteHostSelector({
       setAddDialogOpen(true);
       return;
     }
-    onHostChange?.(value === LOCAL_HOST_VALUE ? null : value);
+    if (value === LOCAL_HOST_VALUE) {
+      onHostChange?.(null);
+      return;
+    }
+    if (value.startsWith(HOST_VALUE_PREFIX)) {
+      onHostChange?.(value.slice(HOST_VALUE_PREFIX.length));
+    }
   };
 
   const handleOpenChange = (nextOpen: boolean) => {
@@ -88,7 +99,7 @@ export function RemoteHostSelector({
     <>
       <ChatInputSelector
         ariaLabel={t("toolbar.remoteHost.selectHost")}
-        value={selectedHost ?? LOCAL_HOST_VALUE}
+        value={selectedHost ? hostValue(selectedHost) : LOCAL_HOST_VALUE}
         triggerLabel={selectedHost ?? t("toolbar.remoteHost.thisComputer")}
         triggerTitle={
           selectedHost
