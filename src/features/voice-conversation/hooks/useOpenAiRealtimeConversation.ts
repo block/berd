@@ -627,12 +627,13 @@ class OpenAiRealtimeConversationRuntime {
               const handoffId = exchange.accepted
                 ? `handoff-${exchange.outbound.id}`
                 : undefined;
-              const toolFollowUp = responses.requestToolOutput(
-                createHandoffToolOutput(bridgeEvent.callId, {
-                  ...exchange,
-                  ...(handoffId ? { handoff_id: handoffId } : {}),
-                }),
-              );
+              const toolOutput = createHandoffToolOutput(bridgeEvent.callId, {
+                ...exchange,
+                ...(handoffId ? { handoff_id: handoffId } : {}),
+              });
+              const toolFollowUp = exchange.accepted
+                ? responses.recordToolOutput(toolOutput)
+                : responses.requestToolOutput(toolOutput);
               sendRealtimeEvents(transport, toolFollowUp.events);
               if (exchange.accepted && handoffId) {
                 this.openHandoffs.set(handoffId, {

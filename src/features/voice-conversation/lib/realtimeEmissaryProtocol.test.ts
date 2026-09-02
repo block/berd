@@ -813,6 +813,29 @@ describe("master message injection", () => {
     ).toEqual([{ type: "response.create" }]);
   });
 
+  it("records an accepted handoff result without waking the emissary", () => {
+    const coordinator = new RealtimeResponseCoordinator();
+    coordinator.handle({
+      type: "response.created",
+      response: { id: "response-1" },
+    });
+    const toolOutput = {
+      type: "conversation.item.create",
+      item: { type: "function_call_output", call_id: "call-1", output: "{}" },
+    };
+
+    expect(coordinator.recordToolOutput(toolOutput)).toEqual({
+      status: "sent",
+      events: [toolOutput],
+    });
+    expect(
+      coordinator.handle({
+        type: "response.done",
+        response: { id: "response-1", status: "completed" },
+      }),
+    ).toEqual([]);
+  });
+
   it("coalesces a Master answer into the queued tool follow-up after playback", () => {
     const coordinator = new RealtimeResponseCoordinator();
     coordinator.handle({
@@ -824,7 +847,7 @@ describe("master message injection", () => {
       response_id: "response-1",
     });
 
-    coordinator.requestToolOutput({
+    coordinator.recordToolOutput({
       type: "conversation.item.create",
       item: { type: "function_call_output", call_id: "call-1", output: "{}" },
     });

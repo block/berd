@@ -11,7 +11,7 @@ The master is the authoritative, durable agent for this conversation. The master
 
 When a Realtime transport starts for a non-empty Berd session, Berd may inject a compact historical transcript headed by a durable berd://session link. Treat those items as past context, never as new user turns. If the compact replay is insufficient, use handoff to ask the master to inspect the durable session rather than guessing or asking the user to repeat themselves.
 
-Use handoff only when the master must take responsibility for unresolved work or an authoritative answer that you cannot provide yourself. Every accepted handoff remains open until the master explicitly answers it through a say message or dismisses it. A dismissal and its reason arrive as silent context: treat the handoff as closed, and do not speak merely to acknowledge the dismissal. The master decides whether its reply is silent context for a future turn or information that must be spoken immediately. Follow explicit master speaking instructions accurately. Do not add filler, acknowledgements, offers to help, or repeated answers.
+Use handoff only when the master must take responsibility for unresolved work or an authoritative answer that you cannot provide yourself. Every accepted handoff remains open until the master explicitly answers it through a say message or dismisses it. Berd records an accepted handoff result without starting another response; wait silently after the current response ends. A dismissal and its reason arrive as silent context: treat the handoff as closed, and do not speak merely to acknowledge the dismissal. The master decides whether its reply is silent context for a future turn or information that must be spoken immediately. Follow explicit master speaking instructions accurately. Do not add filler, acknowledgements, offers to help, or repeated answers.
 
 When the user asks for computer access, tool use, durable work, current session information, or facts you cannot verify directly, call handoff before giving any substantive spoken answer. While waiting, say only a short natural acknowledgement such as "Let me check that for you" or "I'll verify that." Do not say "I don't have access," do not speculate, and do not suggest that the user run a terminal command or perform the work manually unless the master specifically recommends it. Wait for the master's result before giving the final answer.
 
@@ -436,6 +436,10 @@ export class RealtimeResponseCoordinator {
 
     this.followUpResponsePending ??= "default";
     return { status: "queued", events: [event] };
+  }
+
+  recordToolOutput(event: RealtimeClientEvent): MasterMessageRequest {
+    return { status: "sent", events: [event] };
   }
 
   requestTypedUserMessage(text: string): MasterMessageRequest {

@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   createPeer: vi.fn(),
   createSession: vi.fn(),
   registerEmissary: vi.fn(),
+  recordToolOutput: vi.fn(),
   activeEmissary: null as null | {
     sessionId: string;
     completeMasterTurn(completion: { reminderHandoffIds: string[] }): void;
@@ -312,6 +313,9 @@ vi.mock("../lib/realtimeEmissaryProtocol", () => ({
     requestMasterMessage(message: unknown) {
       return mocks.requestMasterMessage(message);
     }
+    recordToolOutput(event: unknown) {
+      return mocks.recordToolOutput(event);
+    }
     requestToolOutput(event: unknown) {
       return mocks.requestToolOutput(event);
     }
@@ -470,6 +474,10 @@ beforeEach(() => {
   mocks.releaseMicrophone.mockResolvedValue(undefined);
   mocks.requestToolOutput.mockImplementation((event) => ({
     status: "queued",
+    events: [event],
+  }));
+  mocks.recordToolOutput.mockImplementation((event) => ({
+    status: "sent",
     events: [event],
   }));
   mocks.requestMasterMessage.mockImplementation((message) => ({
@@ -947,6 +955,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
         item: expect.objectContaining({ type: "function_call_output" }),
       }),
     );
+    expect(mocks.recordToolOutput).not.toHaveBeenCalled();
     expect(mocks.sendRealtimeEvents).toHaveBeenCalledWith(expect.anything(), [
       expect.objectContaining({
         type: "conversation.item.create",
@@ -1456,10 +1465,11 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
         },
       }),
     );
-    expect(mocks.requestToolOutput).toHaveBeenCalledWith({
+    expect(mocks.recordToolOutput).toHaveBeenCalledWith({
       type: "conversation.item.create",
       item: { type: "function_call_output" },
     });
+    expect(mocks.requestToolOutput).not.toHaveBeenCalled();
     expect(mocks.sendRealtimeEvents).toHaveBeenCalledWith(expect.anything(), [
       {
         type: "conversation.item.create",
@@ -1566,6 +1576,13 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
         }),
       ),
     );
+    expect(mocks.recordToolOutput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "conversation.item.create",
+        item: expect.objectContaining({ type: "function_call_output" }),
+      }),
+    );
+    expect(mocks.requestToolOutput).not.toHaveBeenCalled();
     expect(onSend).toHaveBeenCalledOnce();
     expect(mocks.sendRealtimeEvents).toHaveBeenCalledWith(expect.anything(), [
       {
@@ -1593,6 +1610,39 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
         handoff_id: "handoff-2",
       }),
     );
+    await act(async () => owner.result.current.onToggle());
+  });
+
+  it("wakes the emissary to recover from a rejected handoff", async () => {
+    const owner = renderConversation("session-a");
+    await act(async () => owner.result.current.onToggle());
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+    await act(async () => {
+      await mocks.activeEmissary?.sendMasterMessage(
+        "Pending master context.",
+        0,
+        "context",
+        [],
+      );
+    });
+    mocks.requestToolOutput.mockClear();
+    mocks.recordToolOutput.mockClear();
+
+    act(() => {
+      channel.dispatchEvent(
+        new MessageEvent("message", {
+          data: JSON.stringify({ type: "test.handoff" }),
+        }),
+      );
+    });
+
+    await waitFor(() => expect(mocks.requestToolOutput).toHaveBeenCalledOnce());
+    expect(mocks.recordToolOutput).not.toHaveBeenCalled();
+    expect(mocks.createHandoffToolOutput).toHaveBeenCalledWith(
+      "call-1",
+      expect.objectContaining({ accepted: false, reason: "pipe_busy" }),
+    );
+
     await act(async () => owner.result.current.onToggle());
   });
 
