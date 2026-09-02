@@ -221,6 +221,50 @@ describe("McpAppView nested tool calls", () => {
     await expect(resultPromise).resolves.toEqual({});
   });
 
+  it("refreshes one recent-message protection signal across approvals", async () => {
+    const registry = createTranscriptRowStateRegistry();
+    const onSendMessage = vi.fn(() => true);
+    render(
+      <TranscriptRowStateProvider
+        registry={registry}
+        sessionId="virtual-session"
+        rowId="mcp-row"
+      >
+        <McpAppView
+          payload={createPayload()}
+          toolResponse={createToolResponse()}
+          onSendMessage={onSendMessage}
+        />
+      </TranscriptRowStateProvider>,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-app-renderer")).toBeInTheDocument();
+    });
+
+    for (const text of ["first", "second"]) {
+      let resultPromise: Promise<{ isError?: boolean } | undefined> | undefined;
+      await act(async () => {
+        resultPromise = getLatestAppRendererProps().onMessage?.(
+          { role: "user", content: [{ type: "text", text }] },
+          {} as RequestHandlerExtra,
+        );
+      });
+      const sendButton = await screen.findByRole("button", {
+        name: "Send message",
+      });
+      await act(async () => {
+        fireEvent.click(sendButton);
+        await resultPromise;
+      });
+      await expect(resultPromise).resolves.toEqual({});
+    }
+
+    expect(onSendMessage).toHaveBeenCalledTimes(2);
+    expect(registry.cleanupSession("virtual-session")).toMatchObject({
+      removedProtectionSignalCount: 1,
+    });
+  });
+
   it("rejects a pending app message without sending it", async () => {
     const onSendMessage = vi.fn(() => true);
     render(

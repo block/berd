@@ -504,7 +504,7 @@ export function McpAppView({
       pending.resolve(accepted === false ? { isError: true } : {});
       if (accepted !== false) {
         setMcpActivity("recent-message", true, {
-          sourceId: `mcp-message:${pending.nonce}`,
+          sourceId: "mcp-message",
         });
       }
     } catch {
