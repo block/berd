@@ -11,12 +11,14 @@ const TTS_DELIVERY_FAILURE_OUTCOMES = new Set([
   "TTS delivery was blocked because the user was speaking; the assistant reply was not spoken.",
   "Native TTS could not deliver the assistant reply.",
 ]);
-const VOICE_TRANSCRIPT_BOUNDARY = /\n(?=\[Voice transcript\] )/;
-const USER_TRANSCRIPT = /^\[Voice transcript\] User said: ([\s\S]*)$/;
-const EMISSARY_TRANSCRIPT =
-  /^\[Voice transcript\] Emissary said( \(interrupted; best-effort transcript\))?: ([\s\S]*)$/;
-const EMISSARY_DIRECT_MESSAGE =
-  /^\[Direct message from emissary; cursor \d+\] ([\s\S]*)$/;
+const VOICE_TRANSCRIPT_BOUNDARY =
+  /\n(?=\[(?:Voice transcript(?:; cursor \d+)?|Handoff handoff-\d+ from (?:spokesperson|emissary); cursor \d+|Direct message from (?:spokesperson|emissary); cursor \d+)\] )/;
+const USER_TRANSCRIPT =
+  /^\[Voice transcript(?:; cursor \d+)?\] User said: ([\s\S]*)$/;
+const SPOKESPERSON_TRANSCRIPT =
+  /^\[Voice transcript(?:; cursor \d+)?\] (?:Spokesperson|Emissary) said( \(interrupted; best-effort transcript\))?: ([\s\S]*)$/;
+const SPOKESPERSON_DIRECT_MESSAGE =
+  /^\[(?:Direct message from (?:spokesperson|emissary)|Handoff handoff-\d+ from (?:spokesperson|emissary)); cursor \d+\] ([\s\S]*)$/;
 
 function visibleTextAfterTtsDeliveryNotices(text: string): string | null {
   if (!text.startsWith(TTS_DELIVERY_FAILURE_PREFIX)) {
@@ -101,9 +103,9 @@ function restoreRealtimeVoiceMessages(message: Message): Message[] | null {
   const restored: Message[] = [];
   for (const [index, segment] of segments.entries()) {
     const user = USER_TRANSCRIPT.exec(segment);
-    const emissary = EMISSARY_TRANSCRIPT.exec(segment);
-    const direct = EMISSARY_DIRECT_MESSAGE.exec(segment);
-    if (!user && !emissary && !direct) return null;
+    const spokesperson = SPOKESPERSON_TRANSCRIPT.exec(segment);
+    const direct = SPOKESPERSON_DIRECT_MESSAGE.exec(segment);
+    if (!user && !spokesperson && !direct) return null;
 
     const id = index === 0 ? message.id : `${message.id}:voice:${index}`;
     if (user) {
@@ -122,8 +124,8 @@ function restoreRealtimeVoiceMessages(message: Message): Message[] | null {
       continue;
     }
 
-    if (emissary) {
-      const interrupted = Boolean(emissary[1]);
+    if (spokesperson) {
+      const interrupted = Boolean(spokesperson[1]);
       restored.push({
         ...message,
         id,
@@ -131,10 +133,10 @@ function restoreRealtimeVoiceMessages(message: Message): Message[] | null {
         content: [
           {
             type: "text",
-            text: emissary[2],
+            text: spokesperson[2],
             speech: interrupted
               ? { status: "interrupted", confidence: "low" }
-              : { status: "spoken", spokenThrough: emissary[2].length },
+              : { status: "spoken", spokenThrough: spokesperson[2].length },
           },
         ],
         metadata: {
@@ -157,7 +159,7 @@ function restoreRealtimeVoiceMessages(message: Message): Message[] | null {
         ...message.metadata,
         userVisible: true,
         agentVisible: false,
-        personaName: "Emissary → Master",
+        personaName: "Spokesperson → Expert",
         voiceConversationDebugEvent: "emissaryToMaster",
         completionStatus: "completed",
       },

@@ -114,6 +114,46 @@ describe("sanitizeReplayMessages", () => {
     ]);
   });
 
+  it("restores a current Expert wake batch with cursors and a handoff", () => {
+    const message = createTextMessage(
+      "expert-wake",
+      "user",
+      "[Voice transcript; cursor 4] User said: Check my Development folder.\n" +
+        "[Voice transcript; cursor 5] Spokesperson said: Let me check that.\n" +
+        "[Handoff handoff-6 from spokesperson; cursor 6] Count the repositories.",
+    );
+    message.metadata = {
+      ...message.metadata,
+      origin: "voice_conversation",
+      userVisible: false,
+    };
+
+    expect(sanitizeReplayMessages([message])).toMatchObject([
+      {
+        role: "user",
+        content: [{ type: "text", text: "Check my Development folder." }],
+      },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "Let me check that.",
+            speech: { status: "spoken" },
+          },
+        ],
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "Count the repositories." }],
+        metadata: {
+          personaName: "Spokesperson → Expert",
+          voiceConversationDebugEvent: "emissaryToMaster",
+        },
+      },
+    ]);
+  });
+
   it("restores persisted direct Emissary messages as coordination bubbles", () => {
     const message = createTextMessage(
       "direct-message",
@@ -132,7 +172,7 @@ describe("sanitizeReplayMessages", () => {
         role: "assistant",
         content: [{ type: "text", text: "Check the transcript storage." }],
         metadata: {
-          personaName: "Emissary → Master",
+          personaName: "Spokesperson → Expert",
           userVisible: true,
           agentVisible: false,
           voiceConversationDebugEvent: "emissaryToMaster",

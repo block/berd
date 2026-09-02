@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { registerRealtimeEmissary } from "@/features/voice-conversation/lib/realtimeEmissaryBridge";
 import { CommandError } from "../types";
 import { dismissHandoffsSessionCommand } from "./dismissHandoffsSession";
-import { sendToEmissarySessionCommand } from "./sendToEmissarySession";
+import { sendToSpokespersonSessionCommand } from "./sendToSpokespersonSession";
 
 let releaseBridge: (() => void) | undefined;
 
@@ -13,7 +13,7 @@ afterEach(() => {
 });
 
 describe("Realtime handoff commands", () => {
-  it("forwards every resolved handoff id through send-to-emissary", async () => {
+  it("forwards every resolved handoff id through send-to-spokesperson", async () => {
     const sendMasterMessage = vi.fn().mockResolvedValue({
       accepted: true,
       cursor: 2,
@@ -32,7 +32,7 @@ describe("Realtime handoff commands", () => {
       dismissHandoffs: vi.fn(),
       completeMasterTurn: vi.fn(),
     });
-    const args = sendToEmissarySessionCommand.schema.parse({
+    const args = sendToSpokespersonSessionCommand.schema.parse({
       session_id: "session-1",
       cursor: 2,
       mode: "say",
@@ -41,7 +41,7 @@ describe("Realtime handoff commands", () => {
     });
 
     await expect(
-      sendToEmissarySessionCommand.execute(args, {}),
+      sendToSpokespersonSessionCommand.execute(args, {}),
     ).resolves.toEqual({
       session_id: "session-1",
       cursor: 2,
@@ -57,7 +57,7 @@ describe("Realtime handoff commands", () => {
     );
   });
 
-  it("reports unknown handoff ids from send-to-emissary", async () => {
+  it("reports unknown handoff ids from send-to-spokesperson", async () => {
     releaseBridge = registerRealtimeEmissary({
       sessionId: "session-1",
       sendMasterMessage: vi.fn().mockResolvedValue({
@@ -70,7 +70,7 @@ describe("Realtime handoff commands", () => {
       dismissHandoffs: vi.fn(),
       completeMasterTurn: vi.fn(),
     });
-    const args = sendToEmissarySessionCommand.schema.parse({
+    const args = sendToSpokespersonSessionCommand.schema.parse({
       session_id: "session-1",
       cursor: 2,
       mode: "say",
@@ -78,7 +78,7 @@ describe("Realtime handoff commands", () => {
       resolves: ["handoff-9"],
     });
 
-    const error = await sendToEmissarySessionCommand
+    const error = await sendToSpokespersonSessionCommand
       .execute(args, {})
       .catch((cause: unknown) => cause);
     expect(error).toBeInstanceOf(CommandError);

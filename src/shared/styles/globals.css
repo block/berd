@@ -12,7 +12,7 @@
 @source "../../../node_modules/streamdown/dist";
 
 /* Realtime coordination is product-internal. Debug presentation makes its
-   direction legible without replacing the Master's ordinary transcript. */
+   direction legible without replacing the Expert's ordinary transcript. */
 [data-realtime-voice-presentation="debug"]
   [data-realtime-voice-debug-event="emissaryToMaster"]
   [data-role="message-bubble-surface"] {

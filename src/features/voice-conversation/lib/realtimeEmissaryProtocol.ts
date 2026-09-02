@@ -1,17 +1,17 @@
-import promptDocument from "../prompts/master-emissary.md?raw";
+import promptDocument from "../prompts/expert-spokesperson.md?raw";
 
 export const REALTIME_USER_TRANSCRIPT_COMPLETED_EVENT =
   "conversation.item.input_audio_transcription.completed";
 export const REALTIME_EMISSARY_TRANSCRIPT_COMPLETED_EVENT =
   "response.output_audio_transcript.done";
 export const HANDOFF_TOOL_NAME = "handoff";
-export const SEND_TO_EMISSARY_TOOL_NAME = "send_to_emissary";
+export const SEND_TO_SPOKESPERSON_TOOL_NAME = "send_to_spokesperson";
 
 export const REALTIME_PROMPT_DOCUMENT = promptDocument.trim();
 const REALTIME_ROLE_PLACEHOLDER = "{{ROLE}}";
 
 export function createRealtimeRoleInstructions(
-  role: "Master" | "Emissary",
+  role: "Expert" | "Spokesperson",
   document = REALTIME_PROMPT_DOCUMENT,
 ): string {
   const normalized = document.replaceAll("\r\n", "\n").trim();
@@ -25,17 +25,17 @@ export function createRealtimeRoleInstructions(
   return normalized.replace(REALTIME_ROLE_PLACEHOLDER, role);
 }
 
-export const REALTIME_EMISSARY_INSTRUCTIONS =
-  createRealtimeRoleInstructions("Emissary");
-export const REALTIME_MASTER_INSTRUCTIONS =
-  createRealtimeRoleInstructions("Master");
+export const REALTIME_SPOKESPERSON_INSTRUCTIONS =
+  createRealtimeRoleInstructions("Spokesperson");
+export const REALTIME_EXPERT_INSTRUCTIONS =
+  createRealtimeRoleInstructions("Expert");
 
 export interface RealtimeEventTransport {
   send(data: string): void;
 }
 
 export interface RealtimeEmissarySessionOptions {
-  /** Appended after the non-replaceable master/emissary contract. */
+  /** Appended after the non-replaceable Expert/Spokesperson contract. */
   additionalInstructions?: string;
   /** Used to avoid sending model-specific session fields to older models. */
   model?: string;
@@ -139,11 +139,11 @@ type PendingEmissaryTranscript = {
   items: Map<string, PendingEmissaryTranscriptItem>;
 };
 
-export const SEND_TO_EMISSARY_TOOL_DEFINITION: RealtimeJsonObject = {
+export const SEND_TO_SPOKESPERSON_TOOL_DEFINITION: RealtimeJsonObject = {
   type: "function",
-  name: SEND_TO_EMISSARY_TOOL_NAME,
+  name: SEND_TO_SPOKESPERSON_TOOL_NAME,
   description:
-    "Send concise private coordination to the realtime emissary. Include the latest bridge cursor and retry only after processing unread peer messages returned by a stale send.",
+    "Send concise private coordination to the realtime Spokesperson. Include the latest bridge cursor and retry only after processing unread peer messages returned by a stale send.",
   parameters: {
     type: "object",
     properties: {
@@ -215,8 +215,8 @@ export function createRealtimeEmissarySessionUpdate(
       : {}),
     max_output_tokens: options.maxOutputTokens ?? "inf",
     instructions: additionalInstructions
-      ? `${REALTIME_EMISSARY_INSTRUCTIONS}\n\n${additionalInstructions}`
-      : REALTIME_EMISSARY_INSTRUCTIONS,
+      ? `${REALTIME_SPOKESPERSON_INSTRUCTIONS}\n\n${additionalInstructions}`
+      : REALTIME_SPOKESPERSON_INSTRUCTIONS,
     audio: {
       input: {
         format: { type: "audio/pcm", rate: 24_000 },
@@ -242,14 +242,14 @@ export function createRealtimeEmissarySessionUpdate(
         type: "function",
         name: HANDOFF_TOOL_NAME,
         description:
-          "Hand unresolved work or an authoritative question to the master. Every accepted handoff must eventually be answered or explicitly dismissed.",
+          "Hand unresolved work or an authoritative question to the Expert. Every accepted handoff must eventually be answered or explicitly dismissed.",
         parameters: {
           type: "object",
           properties: {
             message: {
               type: "string",
               description:
-                "The concise unresolved request the master now owns.",
+                "The concise unresolved request the Expert now owns.",
             },
           },
           required: ["message"],
@@ -287,8 +287,8 @@ function createMasterMessageItem(options: MasterMessage): RealtimeClientEvent {
   const message = requireNonEmpty(options.message, "master message");
   const text =
     options.mode === "say"
-      ? `The master agent has decided the following information must be spoken to the user now. Speak it naturally and accurately without adding filler or offering more help:\n${message}`
-      : `Private context from the master agent for a future natural turn. Do not respond to this item now:\n${message}`;
+      ? `The Expert has decided the following information must be spoken to the user now. Speak it naturally and accurately without adding filler or offering more help:\n${message}`
+      : `Private context from the Expert for a future natural turn. Do not respond to this item now:\n${message}`;
   const createItem: RealtimeServerEvent = {
     type: "conversation.item.create",
     item: {
@@ -312,7 +312,7 @@ function createMasterSayResponseEvent(): RealtimeClientEvent {
     type: "response.create",
     response: {
       instructions:
-        "Speak the master's latest SAY message to the user now. Be natural, concise, and accurate. Do not call tools.",
+        "Speak the Expert's latest SAY message to the user now. Be natural, concise, and accurate. Do not call tools.",
       tools: [],
       tool_choice: "none",
     },
@@ -1017,14 +1017,14 @@ function realtimeErrorMessage(event: RealtimeServerEvent): string {
 function assertSafeSessionOverrides(overrides: RealtimeSessionOverrides): void {
   if (overrides.instructions !== undefined) {
     throw new Error(
-      "sessionOverrides cannot replace the emissary instructions contract; use additionalInstructions",
+      "sessionOverrides cannot replace the Spokesperson instructions contract; use additionalInstructions",
     );
   }
   if (overrides.type !== undefined && overrides.type !== "realtime") {
-    throw new Error("emissary session type must remain realtime");
+    throw new Error("Spokesperson session type must remain realtime");
   }
   if (overrides.tool_choice !== undefined && overrides.tool_choice !== "auto") {
-    throw new Error("emissary handoff tool choice must remain auto");
+    throw new Error("Spokesperson handoff tool choice must remain auto");
   }
   if (overrides.tools === undefined) return;
   if (!Array.isArray(overrides.tools)) {

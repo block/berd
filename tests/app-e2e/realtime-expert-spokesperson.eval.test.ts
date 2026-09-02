@@ -20,11 +20,11 @@ const MUTE_MICROPHONE = 'button[aria-label="Mute microphone"]';
 const UNMUTE_MICROPHONE = 'button[aria-label="Unmute microphone"]';
 const STOP_GENERATION = 'button[aria-label="Stop generation"]';
 const TRANSCRIPT = "[data-chat-column]";
-const FINAL_EMISSARY_SPEECH = [
+const FINAL_SPOKESPERSON_SPEECH = [
   '[data-transcript-message-id] [data-voice-speech-status="spoken"]',
   '[data-transcript-message-id] [data-voice-speech-status="interrupted"]',
 ].join(",");
-const ACTIVE_EMISSARY_SPEECH =
+const ACTIVE_SPOKESPERSON_SPEECH =
   '[data-transcript-message-id] [data-voice-speech-status="speaking"]';
 const TRANSCRIPT_MESSAGES = "[data-transcript-message-id]";
 
@@ -35,14 +35,14 @@ const SETTLE_WINDOW_MS = 5_000;
 interface SettledTurn {
   transcript: string;
   finalizedSpeechCount: number;
-  masterHandoffCount: number;
-  masterEndedCount: number;
+  expertHandoffCount: number;
+  expertEndedCount: number;
 }
 
-const MASTER_HANDOFF_LABEL = "Master → Emissary";
-const MASTER_ENDED_LABEL = "Master ended turn";
-const EMISSARY_SPOKEN_LABEL = "Emissary\nSpoken";
-const EMISSARY_INTERRUPTED_LABEL = "Emissary\nInterrupted";
+const EXPERT_HANDOFF_LABEL = "Expert → Spokesperson";
+const EXPERT_ENDED_LABEL = "Expert ended turn";
+const SPOKESPERSON_SPOKEN_LABEL = "Spokesperson\nSpoken";
+const SPOKESPERSON_INTERRUPTED_LABEL = "Spokesperson\nInterrupted";
 const MISSING_ACTIVE_RUN_ERROR = "no active run to steer";
 
 function countOccurrences(text: string, needle: string): number {
@@ -73,50 +73,50 @@ async function waitForSettledTurn(
   driver: TestDriver,
   prior: Pick<
     SettledTurn,
-    "finalizedSpeechCount" | "masterHandoffCount" | "masterEndedCount"
+    "finalizedSpeechCount" | "expertHandoffCount" | "expertEndedCount"
   >,
 ): Promise<SettledTurn> {
-  await pollUntil("terminal Master turn visibility", async () => {
+  await pollUntil("terminal Expert turn visibility", async () => {
     const transcript = await driver.getText(TRANSCRIPT);
     return (
-      countOccurrences(transcript, MASTER_ENDED_LABEL) > prior.masterEndedCount
+      countOccurrences(transcript, EXPERT_ENDED_LABEL) > prior.expertEndedCount
     );
   });
 
-  await pollUntil("a Master-informed Emissary reply", async () => {
+  await pollUntil("an Expert-informed Spokesperson reply", async () => {
     const transcript = await driver.getText(TRANSCRIPT);
     const priorEndedIndex = nthOccurrenceEndIndex(
       transcript,
-      MASTER_ENDED_LABEL,
-      prior.masterEndedCount,
+      EXPERT_ENDED_LABEL,
+      prior.expertEndedCount,
     );
     const handoffIndex = transcript.indexOf(
-      MASTER_HANDOFF_LABEL,
+      EXPERT_HANDOFF_LABEL,
       priorEndedIndex,
     );
-    const endedIndex = transcript.indexOf(MASTER_ENDED_LABEL, priorEndedIndex);
+    const endedIndex = transcript.indexOf(EXPERT_ENDED_LABEL, priorEndedIndex);
     const coordinationIndex =
       handoffIndex >= 0 && handoffIndex < endedIndex
         ? handoffIndex
         : endedIndex;
     const afterCoordination = transcript.slice(coordinationIndex);
     return (
-      afterCoordination.includes(EMISSARY_SPOKEN_LABEL) ||
-      afterCoordination.includes(EMISSARY_INTERRUPTED_LABEL)
+      afterCoordination.includes(SPOKESPERSON_SPOKEN_LABEL) ||
+      afterCoordination.includes(SPOKESPERSON_INTERRUPTED_LABEL)
     );
   });
 
   let stableSince = Date.now();
   let priorTranscriptRows = await driver.count(TRANSCRIPT_MESSAGES);
-  let priorFinalizedSpeech = await driver.count(FINAL_EMISSARY_SPEECH);
+  let priorFinalizedSpeech = await driver.count(FINAL_SPOKESPERSON_SPEECH);
 
-  await pollUntil("the Master and Emissary turn to settle", async () => {
+  await pollUntil("the Expert and Spokesperson turn to settle", async () => {
     const [stopButtons, activeSpeech, transcriptRows, finalizedSpeech] =
       await Promise.all([
         driver.count(STOP_GENERATION),
-        driver.count(ACTIVE_EMISSARY_SPEECH),
+        driver.count(ACTIVE_SPOKESPERSON_SPEECH),
         driver.count(TRANSCRIPT_MESSAGES),
-        driver.count(FINAL_EMISSARY_SPEECH),
+        driver.count(FINAL_SPOKESPERSON_SPEECH),
       ]);
     const changed =
       transcriptRows !== priorTranscriptRows ||
@@ -133,9 +133,9 @@ async function waitForSettledTurn(
   const transcript = await driver.getText(TRANSCRIPT);
   return {
     transcript,
-    finalizedSpeechCount: await driver.count(FINAL_EMISSARY_SPEECH),
-    masterHandoffCount: countOccurrences(transcript, MASTER_HANDOFF_LABEL),
-    masterEndedCount: countOccurrences(transcript, MASTER_ENDED_LABEL),
+    finalizedSpeechCount: await driver.count(FINAL_SPOKESPERSON_SPEECH),
+    expertHandoffCount: countOccurrences(transcript, EXPERT_HANDOFF_LABEL),
+    expertEndedCount: countOccurrences(transcript, EXPERT_ENDED_LABEL),
   };
 }
 
@@ -159,8 +159,8 @@ function expectCompletedTurnOrdering(
   searchFrom = 0,
 ): void {
   const questionIndex = transcript.indexOf(question, searchFrom);
-  const handoffIndex = transcript.indexOf(MASTER_HANDOFF_LABEL, questionIndex);
-  const endedIndex = transcript.indexOf(MASTER_ENDED_LABEL, questionIndex);
+  const handoffIndex = transcript.indexOf(EXPERT_HANDOFF_LABEL, questionIndex);
+  const endedIndex = transcript.indexOf(EXPERT_ENDED_LABEL, questionIndex);
   expect(questionIndex).toBeGreaterThanOrEqual(searchFrom);
   expect(endedIndex).toBeGreaterThan(questionIndex);
   if (handoffIndex >= 0 && handoffIndex < endedIndex) {
@@ -168,15 +168,15 @@ function expectCompletedTurnOrdering(
   }
 }
 
-function expectVisibleMasterResult(
+function expectVisibleExpertResult(
   transcript: string,
   question: string,
   searchFrom = 0,
 ): void {
   const questionIndex = transcript.indexOf(question, searchFrom);
-  const endedIndex = transcript.indexOf(MASTER_ENDED_LABEL, questionIndex);
+  const endedIndex = transcript.indexOf(EXPERT_ENDED_LABEL, questionIndex);
   const turnTranscript = transcript.slice(questionIndex, endedIndex);
-  // The ordinary Master result must remain in the durable Berd transcript;
+  // The ordinary Expert result must remain in the durable Berd transcript;
   // coordination bubbles are additive and must not replace it. This scenario
   // has a numeric repository answer, while the question and acknowledgements
   // do not, making the result discriminating without requiring a specific
@@ -184,7 +184,7 @@ function expectVisibleMasterResult(
   expect(turnTranscript).toMatch(/\b\d+\s+(?:Git\s+)?repositories\b/i);
 }
 
-function expectNoMasterDeliveryErrors(transcript: string): void {
+function expectNoExpertDeliveryErrors(transcript: string): void {
   expect(transcript.toLowerCase()).not.toContain(MISSING_ACTIVE_RUN_ERROR);
 }
 
@@ -194,8 +194,8 @@ function expectAcceptableSpeechCount(
 ): void {
   const utterances = finalizedSpeechCount - priorSpeechCount;
   // A turn may be one answer, or a short acknowledgement followed by the
-  // The Emissary may acknowledge, give one waiting update, and then provide the
-  // Master-informed answer. More than three is evidence of a coordination loop.
+  // The Spokesperson may acknowledge, give one waiting update, and then provide the
+  // Expert-informed answer. More than three is evidence of a coordination loop.
   expect(utterances).toBeGreaterThanOrEqual(1);
   expect(utterances).toBeLessThanOrEqual(3);
 }
@@ -241,7 +241,7 @@ async function ensureMicrophoneMuted(driver: TestDriver): Promise<void> {
 const liveEvalEnabled = process.env.BERD_E2E_REALTIME_EVAL === "1";
 
 describe.skipIf(!liveEvalEnabled)(
-  "Realtime Master–Emissary live evaluation",
+  "Realtime Expert–Spokesperson live evaluation",
   () => {
     const driver = useTestDriver({
       reconnectAfterHomeNavigation: true,
@@ -273,22 +273,22 @@ describe.skipIf(!liveEvalEnabled)(
         const initialTranscript = await driver.getText(TRANSCRIPT);
         const initial = {
           transcript: initialTranscript,
-          finalizedSpeechCount: await driver.count(FINAL_EMISSARY_SPEECH),
-          masterHandoffCount: countOccurrences(
+          finalizedSpeechCount: await driver.count(FINAL_SPOKESPERSON_SPEECH),
+          expertHandoffCount: countOccurrences(
             initialTranscript,
-            MASTER_HANDOFF_LABEL,
+            EXPERT_HANDOFF_LABEL,
           ),
-          masterEndedCount: countOccurrences(
+          expertEndedCount: countOccurrences(
             initialTranscript,
-            MASTER_ENDED_LABEL,
+            EXPERT_ENDED_LABEL,
           ),
         };
 
         await sendTypedTurn(driver, FIRST_QUESTION);
         const firstTurn = await waitForSettledTurn(driver, initial);
         expectCompletedTurnOrdering(firstTurn.transcript, FIRST_QUESTION);
-        expectVisibleMasterResult(firstTurn.transcript, FIRST_QUESTION);
-        expectNoMasterDeliveryErrors(firstTurn.transcript);
+        expectVisibleExpertResult(firstTurn.transcript, FIRST_QUESTION);
+        expectNoExpertDeliveryErrors(firstTurn.transcript);
         expectAcceptableSpeechCount(
           firstTurn.finalizedSpeechCount,
           initial.finalizedSpeechCount,
@@ -306,12 +306,12 @@ describe.skipIf(!liveEvalEnabled)(
           SECOND_QUESTION,
           firstIndex + FIRST_QUESTION.length,
         );
-        expectVisibleMasterResult(
+        expectVisibleExpertResult(
           secondTurn.transcript,
           SECOND_QUESTION,
           firstIndex + FIRST_QUESTION.length,
         );
-        expectNoMasterDeliveryErrors(secondTurn.transcript);
+        expectNoExpertDeliveryErrors(secondTurn.transcript);
         expectAcceptableSpeechCount(
           secondTurn.finalizedSpeechCount,
           firstTurn.finalizedSpeechCount,

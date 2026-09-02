@@ -34,7 +34,7 @@ import {
   createInvalidToolCallOutput,
   DirectMessagePipe,
   type MasterMessageMode,
-  REALTIME_MASTER_INSTRUCTIONS,
+  REALTIME_EXPERT_INSTRUCTIONS,
   RealtimeEmissaryProtocol,
   RealtimeResponseCoordinator,
   sendRealtimeEvents,
@@ -225,7 +225,7 @@ function createCoordinationDebugMessage(
 function createHandoffDebugMessage(handoffId: string, text: string): Message {
   return createCoordinationDebugMessage(
     "emissaryToMaster",
-    `Emissary → Master · Handoff ${handoffId}`,
+    `Spokesperson → Expert · Handoff ${handoffId}`,
     text,
   );
 }
@@ -269,7 +269,7 @@ export function createRealtimeTranscriptReplayEvents(
       continue;
     // Only the final visible assistant block before the next user turn is
     // useful context. Progress narration and earlier replacements stay in the
-    // durable Master transcript but do not bloat a resumed voice frontend.
+    // durable Expert transcript but do not bloat a resumed voice frontend.
     pendingAssistant = { role: "assistant", text };
   }
   flushAssistant();
@@ -300,7 +300,7 @@ export function createRealtimeTranscriptReplayEvents(
         content: [
           {
             type: "input_text",
-            text: `This voice conversation is being resumed from Berd session ${sessionId}. Durable session link: berd://session/${sessionId}. The following items are a compact recent transcript, not new turns. Ask the master to inspect the durable session when older context is needed.`,
+            text: `This voice conversation is being resumed from Berd session ${sessionId}. Durable session link: berd://session/${sessionId}. The following items are a compact recent transcript, not new turns. Ask the Expert to inspect the durable session when older context is needed.`,
           },
         ],
       },
@@ -330,11 +330,11 @@ function waitForDataChannelOpen(channel: RTCDataChannel): Promise<void> {
 }
 
 function masterPrompt(sessionId: string): string {
-  return `${REALTIME_MASTER_INSTRUCTIONS}
+  return `${REALTIME_EXPERT_INSTRUCTIONS}
 
-Your send_to_emissary tool is the Berd CLI command below. The initial bridge cursor is 0. Always use the newest cursor from any Master-bound transcript, handoff, reminder, or prior tool result. A stale cursor means a newer event is already queued; wait for its normal delivery rather than bypassing it. Choose --mode context to silently update the emissary's context for a future natural turn. Choose --mode say only when the emissary should speak your message to the user now. A say may resolve several open handoffs by repeating --resolves for each handoff id. Context cannot resolve a handoff. Finishing your turn does not notify or wake the emissary, so send explicitly when needed. Berd retries a private unresolved-handoff reminder up to three times before failing the voice session.
+Your send_to_spokesperson tool is the Berd CLI command below. The initial bridge cursor is 0. Always use the newest cursor from any Expert-bound transcript, handoff, reminder, or prior tool result. A stale cursor means a newer event is already queued; wait for its normal delivery rather than bypassing it. Choose --mode context to silently update the Spokesperson's context for a future natural turn. Choose --mode say only when the Spokesperson should speak your message to the user now. A say may resolve several open handoffs by repeating --resolves for each handoff id. Context cannot resolve a handoff. Finishing your turn does not notify or wake the Spokesperson, so send explicitly when needed. Berd retries a private unresolved-handoff reminder up to three times before failing the voice session.
 
-berdctl session send-to-emissary --session-id ${JSON.stringify(sessionId)} --cursor <cursor> --mode <context|say> [--resolves <handoff-id> ...] --message <message> --json
+berdctl session send-to-spokesperson --session-id ${JSON.stringify(sessionId)} --cursor <cursor> --mode <context|say> [--resolves <handoff-id> ...] --message <message> --json
 
 If a handoff is obsolete, superseded, or already handled, dismiss it explicitly:
 
@@ -523,6 +523,7 @@ class OpenAiRealtimeConversationRuntime {
       const protocol = new RealtimeEmissaryProtocol();
       const responses = new RealtimeResponseCoordinator();
       const pipe = new DirectMessagePipe();
+      const pendingExpertEvents: string[] = [];
       const queueMasterBoundEvent = (message: string) => {
         const exchange = pipe.send({
           sender: "emissary",
@@ -531,10 +532,37 @@ class OpenAiRealtimeConversationRuntime {
         });
         if (!exchange.accepted) {
           throw new Error(
-            `The realtime event could not enter the master pipe (${exchange.reason}).`,
+            `The realtime event could not enter the Expert pipe (${exchange.reason}).`,
           );
         }
         return exchange;
+      };
+      const queueExpertEvent = (
+        message: string,
+        format: (cursor: number) => string,
+      ) => {
+        const exchange = queueMasterBoundEvent(message);
+        pendingExpertEvents.push(format(exchange.outbound.id));
+        return exchange;
+      };
+      const wakeExpert = (
+        ownerSessionId: string,
+        displayText: string,
+        queueUntilIdle = false,
+        reminderHandoffIds: string[] = [],
+      ) => {
+        if (pendingExpertEvents.length === 0) return;
+        const batch = pendingExpertEvents.splice(0);
+        this.deliverToMaster(
+          ownerSessionId,
+          batch.join("\n"),
+          displayText,
+          undefined,
+          true,
+          undefined,
+          queueUntilIdle,
+          reminderHandoffIds,
+        );
       };
       const transcriptMessageIds = new Map<string, string>();
       const upsertTranscriptMessage = (
@@ -594,43 +622,34 @@ class OpenAiRealtimeConversationRuntime {
             } else if (bridgeEvent.type === "transcript.updated") {
               upsertTranscriptMessage(ownerSessionId, bridgeEvent, true);
             } else if (bridgeEvent.type === "transcript.finalized") {
-              const transcriptMessageId = upsertTranscriptMessage(
-                ownerSessionId,
-                bridgeEvent,
-                false,
-              );
+              upsertTranscriptMessage(ownerSessionId, bridgeEvent, false);
               const interrupted = bridgeEvent.interrupted === true;
               const transcriptLabel =
                 bridgeEvent.speaker === "user"
                   ? `User said: ${bridgeEvent.text}`
-                  : `Emissary said${
+                  : `Spokesperson said${
                       interrupted
                         ? " (interrupted; best-effort transcript)"
                         : ""
                     }: ${bridgeEvent.text}`;
               const transcriptMessage = `[Voice transcript] ${transcriptLabel}`;
-              const masterBound = queueMasterBoundEvent(transcriptMessage);
-              const masterTranscript = `[Voice transcript; cursor ${masterBound.outbound.id}] ${transcriptLabel}`;
-              if (bridgeEvent.speaker === "emissary") {
-                this.deliverToMaster(
-                  ownerSessionId,
-                  masterTranscript,
-                  bridgeEvent.text,
-                  undefined,
-                  true,
-                );
-                continue;
-              }
-              this.deliverToMaster(
-                ownerSessionId,
-                masterTranscript,
-                bridgeEvent.text,
-                undefined,
-                false,
-                transcriptMessageId,
+              queueExpertEvent(
+                transcriptMessage,
+                (cursor) =>
+                  `[Voice transcript; cursor ${cursor}] ${transcriptLabel}`,
               );
+              if (bridgeEvent.speaker === "emissary") {
+                wakeExpert(ownerSessionId, bridgeEvent.text);
+              }
+              // User speech is durable and enters the ordered bridge now, but
+              // only Spokesperson speech or a handoff wakes the Expert. The
+              // local user bubble already owns its visible transcript.
             } else if (bridgeEvent.type === "handoff") {
-              const exchange = queueMasterBoundEvent(bridgeEvent.message);
+              const exchange = queueExpertEvent(
+                bridgeEvent.message,
+                (cursor) =>
+                  `[Handoff handoff-${cursor} from spokesperson; cursor ${cursor}] ${bridgeEvent.message}`,
+              );
               const handoffId = `handoff-${exchange.outbound.id}`;
               const toolOutput = createHandoffToolOutput(bridgeEvent.callId, {
                 accepted: true,
@@ -651,15 +670,7 @@ class OpenAiRealtimeConversationRuntime {
                     exchange.outbound.message,
                   ),
                 );
-              this.deliverToMaster(
-                ownerSessionId,
-                `[Handoff ${handoffId} from emissary; cursor ${exchange.outbound.id}] ${exchange.outbound.message}`,
-                exchange.outbound.message,
-                undefined,
-                true,
-                undefined,
-                false,
-              );
+              wakeExpert(ownerSessionId, exchange.outbound.message);
             } else if (bridgeEvent.type === "tool_call.invalid") {
               const toolFollowUp = responses.requestToolOutput(
                 createInvalidToolCallOutput(
@@ -762,7 +773,7 @@ class OpenAiRealtimeConversationRuntime {
               mode === "say"
                 ? "masterToEmissarySay"
                 : "masterToEmissaryContext",
-              `Master → Emissary · ${mode === "say" ? "Say" : "Context"} · ${request.status}`,
+              `Expert → Spokesperson · ${mode === "say" ? "Say" : "Context"} · ${request.status}`,
               message,
             ),
           );
@@ -807,7 +818,7 @@ class OpenAiRealtimeConversationRuntime {
             this.snapshot.boundSessionId ?? sessionId,
             createCoordinationDebugMessage(
               "masterDismissal",
-              `Master → Emissary · Dismissed · ${request.status}`,
+              `Expert → Spokesperson · Dismissed · ${request.status}`,
               `${dismissedHandoffIds.join(", ")}: ${reason.trim()}`,
             ),
           );
@@ -835,7 +846,7 @@ class OpenAiRealtimeConversationRuntime {
           void this.fail(
             ownerSessionId,
             new Error(
-              `The master left required ${exhausted.map(([handoffId]) => handoffId).join(", ")} unresolved after ${MAX_HANDOFF_REMINDER_ATTEMPTS} reminder attempts.`,
+              `The Expert left required ${exhausted.map(([handoffId]) => handoffId).join(", ")} unresolved after ${MAX_HANDOFF_REMINDER_ATTEMPTS} reminder attempts.`,
             ),
           );
           return;
@@ -845,8 +856,12 @@ class OpenAiRealtimeConversationRuntime {
         const requests = pending
           .map(([handoffId, handoff]) => `- ${handoffId}: ${handoff.message}`)
           .join("\n");
-        const reminder = `[Private handoff reminder]\nYou ended your turn without resolving the required handoffs below. Resolve them now with one or more send-to-emissary --mode say calls that name every answered handoff in --resolves, or dismiss obsolete handoffs explicitly. Berd will retry this reminder up to ${MAX_HANDOFF_REMINDER_ATTEMPTS} times. Do not redo completed work.\n${requests}`;
-        const masterBound = queueMasterBoundEvent(reminder);
+        const reminder = `[Private handoff reminder]\nYou ended your turn without resolving the required handoffs below. Resolve them now with one or more send-to-spokesperson --mode say calls that name every answered handoff in --resolves, or dismiss obsolete handoffs explicitly. Berd will retry this reminder up to ${MAX_HANDOFF_REMINDER_ATTEMPTS} times. Do not redo completed work.\n${requests}`;
+        const masterBound = queueExpertEvent(
+          reminder,
+          (cursor) =>
+            `[Private handoff reminder; cursor ${cursor}]${reminder.slice("[Private handoff reminder]".length)}`,
+        );
         const reminderAttempt = Math.max(
           ...pending.map(([, handoff]) => handoff.reminderAttempts),
         );
@@ -856,20 +871,12 @@ class OpenAiRealtimeConversationRuntime {
             ownerSessionId,
             createCoordinationDebugMessage(
               "handoffReminder",
-              `Berd → Master · Handoff reminder ${reminderAttempt}/${MAX_HANDOFF_REMINDER_ATTEMPTS}`,
+              `Berd → Expert · Handoff reminder ${reminderAttempt}/${MAX_HANDOFF_REMINDER_ATTEMPTS}`,
               requests,
             ),
           );
-        this.deliverToMaster(
-          ownerSessionId,
-          `[Private handoff reminder; cursor ${masterBound.outbound.id}]${reminder.slice("[Private handoff reminder]".length)}`,
-          "Handoff reminder",
-          undefined,
-          true,
-          undefined,
-          true,
-          pendingIds,
-        );
+        void masterBound;
+        wakeExpert(ownerSessionId, "Handoff reminder", true, pendingIds);
       };
       this.registerBridge(this.snapshot.boundSessionId ?? sessionId);
       this.setSnapshot({ ...this.snapshot, state: "listening" });
@@ -913,7 +920,7 @@ class OpenAiRealtimeConversationRuntime {
     } catch (error) {
       // Mirroring into the voice frontend is secondary to the ordinary Berd
       // send that invoked this callback. Never let a synchronous WebRTC/data
-      // channel failure abort the user's Master turn.
+      // channel failure abort the user's Expert turn.
       void this.fail(sessionId, error);
     }
   }
@@ -949,7 +956,7 @@ class OpenAiRealtimeConversationRuntime {
       .then(async () => {
         // History replay replaces the transcript wholesale. Dispatching a
         // realtime transcript while hydration is still active can therefore
-        // route the master's live ACP stream into the replay buffer, or let a
+        // route the Expert's live ACP stream into the replay buffer, or let a
         // subsequent replay replacement erase it. Preserve ordering in the
         // delivery queue and wait for hydration to publish before sending.
         await this.ownerMigration;
@@ -984,7 +991,7 @@ class OpenAiRealtimeConversationRuntime {
           );
           if (accepted === false)
             throw new Error(
-              "The master session did not accept the voice transcript.",
+              "The Expert session did not accept the voice transcript.",
             );
         };
         this.setSnapshot({ ...this.snapshot, state: "agent-working" });

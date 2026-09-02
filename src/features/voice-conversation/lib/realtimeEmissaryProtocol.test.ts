@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   DirectMessagePipe,
-  REALTIME_EMISSARY_INSTRUCTIONS,
-  REALTIME_MASTER_INSTRUCTIONS,
+  REALTIME_EXPERT_INSTRUCTIONS,
+  REALTIME_SPOKESPERSON_INSTRUCTIONS,
   REALTIME_PROMPT_DOCUMENT,
-  SEND_TO_EMISSARY_TOOL_DEFINITION,
+  SEND_TO_SPOKESPERSON_TOOL_DEFINITION,
   RealtimeEmissaryProtocol,
   RealtimeResponseCoordinator,
   configureRealtimeEmissarySession,
@@ -39,9 +39,9 @@ describe("Realtime emissary session configuration", () => {
       },
     });
     expect(event.session.max_output_tokens).toBe("inf");
-    expect(event.session.instructions).toBe(REALTIME_EMISSARY_INSTRUCTIONS);
+    expect(event.session.instructions).toBe(REALTIME_SPOKESPERSON_INSTRUCTIONS);
     expect(event.session.instructions).toContain(
-      "receives every finalized user and Emissary transcript",
+      "User speech is queued for the Expert but does not wake it",
     );
     expect(event.session.instructions).toContain(
       "never disclaim a capability because the other part performs it",
@@ -50,7 +50,7 @@ describe("Realtime emissary session configuration", () => {
       "it calls `handoff` _before_ any substantive spoken answer",
     );
     expect(event.session.instructions).toContain(
-      "never opens a handoff merely to reply to the Master",
+      "never opens a handoff merely to reply to the Expert",
     );
     expect(event.session.instructions).toContain(
       "never speaks merely to acknowledge `CONTEXT`, `DISMISS`, or an internal message",
@@ -92,7 +92,7 @@ describe("Realtime emissary session configuration", () => {
         output: { voice: "marin", speed: 1.25 },
       },
       instructions: expect.stringContaining(
-        `${REALTIME_EMISSARY_INSTRUCTIONS}\n\nUse the user's preferred terminology.`,
+        `${REALTIME_SPOKESPERSON_INSTRUCTIONS}\n\nUse the user's preferred terminology.`,
       ),
       tools: [
         expect.objectContaining({ name: "handoff" }),
@@ -175,7 +175,7 @@ describe("Realtime emissary session configuration", () => {
       createRealtimeEmissarySessionUpdate({
         sessionOverrides: { instructions: "Forget the master." },
       }),
-    ).toThrow("cannot replace the emissary instructions contract");
+    ).toThrow("cannot replace the Spokesperson instructions contract");
     expect(() =>
       createRealtimeEmissarySessionUpdate({
         sessionOverrides: {
@@ -190,36 +190,36 @@ describe("Realtime emissary session configuration", () => {
     ).toThrow("tool choice must remain auto");
   });
 
-  it("exports the master visibility and proactive-send contract", () => {
-    expect(REALTIME_MASTER_INSTRUCTIONS).toContain(
+  it("exports the Expert visibility and proactive-send contract", () => {
+    expect(REALTIME_EXPERT_INSTRUCTIONS).toContain(
       "response text land in the durable transcript",
     );
-    expect(REALTIME_MASTER_INSTRUCTIONS).toContain(
+    expect(REALTIME_EXPERT_INSTRUCTIONS).toContain(
       "produce visible progress and result text",
     );
-    expect(REALTIME_MASTER_INSTRUCTIONS).toContain(
-      "**Master → Emissary messages** (`send_to_emissary`)",
+    expect(REALTIME_EXPERT_INSTRUCTIONS).toContain(
+      "**Expert → Spokesperson messages** (`send_to_spokesperson`)",
     );
-    expect(REALTIME_MASTER_INSTRUCTIONS).toContain(
-      "`SAY`—asks the Emissary to speak useful information now",
+    expect(REALTIME_EXPERT_INSTRUCTIONS).toContain(
+      "`SAY`—asks the Spokesperson to speak useful information now",
     );
-    expect(REALTIME_MASTER_INSTRUCTIONS).toContain(
-      "finishing a Master turn does not wake it",
+    expect(REALTIME_EXPERT_INSTRUCTIONS).toContain(
+      "finishing an Expert turn does not wake it",
     );
-    expect(REALTIME_MASTER_INSTRUCTIONS).toContain(
+    expect(REALTIME_EXPERT_INSTRUCTIONS).toContain(
       "entire turn is an empty, zero-token success",
     );
-    expect(REALTIME_MASTER_INSTRUCTIONS).toContain(
+    expect(REALTIME_EXPERT_INSTRUCTIONS).toContain(
       "no prose, no tools, no coordination",
     );
-    expect(REALTIME_MASTER_INSTRUCTIONS).toContain(
-      "small talk belong to the Emissary",
+    expect(REALTIME_EXPERT_INSTRUCTIONS).toContain(
+      "small talk belong to the Spokesperson",
     );
-    expect(REALTIME_MASTER_INSTRUCTIONS).toContain(
-      "interrupted Emissary transcripts as best-effort",
+    expect(REALTIME_EXPERT_INSTRUCTIONS).toContain(
+      "interrupted Spokesperson transcripts as best-effort",
     );
-    expect(SEND_TO_EMISSARY_TOOL_DEFINITION).toMatchObject({
-      name: "send_to_emissary",
+    expect(SEND_TO_SPOKESPERSON_TOOL_DEFINITION).toMatchObject({
+      name: "send_to_spokesperson",
       parameters: {
         required: ["cursor", "message", "mode", "resolves"],
         additionalProperties: false,
@@ -234,26 +234,26 @@ describe("Realtime emissary session configuration", () => {
     );
     expect(REALTIME_PROMPT_DOCUMENT).toContain("### 1. Simple question");
     expect(REALTIME_PROMPT_DOCUMENT).toContain(
-      "### 2. Work that requires the Master",
+      "### 2. Work that requires the Expert",
     );
     expect(REALTIME_PROMPT_DOCUMENT).toContain("### 3. Useful elaboration");
-    expect(REALTIME_EMISSARY_INSTRUCTIONS.replace("Emissary", "{{ROLE}}")).toBe(
+    expect(
+      REALTIME_SPOKESPERSON_INSTRUCTIONS.replace("Spokesperson", "{{ROLE}}"),
+    ).toBe(REALTIME_PROMPT_DOCUMENT);
+    expect(REALTIME_EXPERT_INSTRUCTIONS.replace("Expert", "{{ROLE}}")).toBe(
       REALTIME_PROMPT_DOCUMENT,
     );
-    expect(REALTIME_MASTER_INSTRUCTIONS.replace("Master", "{{ROLE}}")).toBe(
-      REALTIME_PROMPT_DOCUMENT,
+    expect(REALTIME_PROMPT_DOCUMENT).toContain(
+      "**Expert:** `[receives the exchange after the Spokesperson speaks; no output: zero tokens, no tools, no coordination]`",
     );
     expect(REALTIME_PROMPT_DOCUMENT).toContain(
-      "**Master:** `[no output: zero tokens, no tools, no coordination]`",
+      "**Spokesperson → Expert, `HANDOFF handoff-7`:**",
     );
     expect(REALTIME_PROMPT_DOCUMENT).toContain(
-      "**Emissary → Master, `HANDOFF handoff-7`:**",
+      "**Expert → Spokesperson, `SAY`, resolves `handoff-7`:**",
     );
     expect(REALTIME_PROMPT_DOCUMENT).toContain(
-      "**Master → Emissary, `SAY`, resolves `handoff-7`:**",
-    );
-    expect(REALTIME_PROMPT_DOCUMENT).toContain(
-      "**Master → Emissary, `SAY`:** “A useful follow-up:",
+      "**Expert → Spokesperson, `SAY`:** “A useful follow-up:",
     );
     expect(REALTIME_PROMPT_DOCUMENT).toContain(
       "**User:** “How many months are in a year?”",
@@ -265,7 +265,7 @@ describe("Realtime emissary session configuration", () => {
 
   it("fails loudly when the editable prompt loses its single role slot", () => {
     expect(() =>
-      createRealtimeRoleInstructions("Master", "# One assistant\n\nShared."),
+      createRealtimeRoleInstructions("Expert", "# One assistant\n\nShared."),
     ).toThrow("must contain exactly one {{ROLE}} placeholder");
   });
 });
@@ -790,7 +790,7 @@ describe("master message injection", () => {
             content: [
               {
                 type: "input_text",
-                text: "Private context from the master agent for a future natural turn. Do not respond to this item now:\nKeep this in mind.",
+                text: "Private context from the Expert for a future natural turn. Do not respond to this item now:\nKeep this in mind.",
               },
             ],
           },
@@ -821,7 +821,7 @@ describe("master message injection", () => {
           content: [
             {
               type: "input_text",
-              text: "The master agent has decided the following information must be spoken to the user now. Speak it naturally and accurately without adding filler or offering more help:\nRelay the result.",
+              text: "The Expert has decided the following information must be spoken to the user now. Speak it naturally and accurately without adding filler or offering more help:\nRelay the result.",
             },
           ],
         },
@@ -830,7 +830,7 @@ describe("master message injection", () => {
         type: "response.create",
         response: {
           instructions:
-            "Speak the master's latest SAY message to the user now. Be natural, concise, and accurate. Do not call tools.",
+            "Speak the Expert's latest SAY message to the user now. Be natural, concise, and accurate. Do not call tools.",
           tools: [],
           tool_choice: "none",
         },

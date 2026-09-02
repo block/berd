@@ -45,15 +45,15 @@ Set `BERD_E2E_MODE=1`, `BERD_E2E_RUN_ROOT`, and the optional provider bootstrap
 environment above before invoking it; the app owns its random driver port and
 publishes readiness under the run root.
 
-## Live Realtime Master–Emissary evaluation
+## Live Realtime Expert–Spokesperson evaluation
 
-`tests/app-e2e/realtime-master-emissary.eval.test.ts` is an opt-in live
+`tests/app-e2e/realtime-expert-spokesperson.eval.test.ts` is an opt-in live
 evaluation driven by typed chat messages. It starts a fresh Realtime voice
 conversation, mutes its microphone so ambient audio cannot affect the run, asks
 how many repositories are in the user's Development folder, then asks whether
 any are symbolic links. It verifies that each typed question is followed in
-order by visible Master-to-Emissary coordination and a visible terminal Master
-turn. Each turn may contain one finalized Emissary answer or a brief
+order by visible Expert-to-Spokesperson coordination and a visible terminal Expert
+turn. Each turn may contain one finalized Spokesperson answer or a brief
 acknowledgement followed by the answer; more than two finalized utterances fails
 the evaluation as a likely coordination loop.
 
@@ -66,7 +66,7 @@ actions remain single-shot.
 
 This scenario intentionally uses the normal local dev profile, not isolated
 E2E mode: Realtime needs the Berd-owned API key stored from Voice settings, and
-the master needs the normal configured agent/tool environment for inspecting the
+the Expert needs the normal configured agent/tool environment for inspecting the
 real Development folder. Before running it, select **OpenAI Realtime** as the
 Voice mode and save the Realtime API key in Berd.
 
@@ -82,7 +82,7 @@ Then run only the live scenario in another terminal:
 APP_TEST_DRIVER_TOKEN=local-realtime-eval \
 BERD_E2E_REALTIME_EVAL=1 \
 pnpm exec vitest run --config vitest.app-e2e.config.ts \
-  tests/app-e2e/realtime-master-emissary.eval.test.ts
+  tests/app-e2e/realtime-expert-spokesperson.eval.test.ts
 ```
 
 Without `BERD_E2E_REALTIME_EVAL=1`, the live scenario is skipped so the normal

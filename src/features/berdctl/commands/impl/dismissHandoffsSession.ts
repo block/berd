@@ -7,14 +7,14 @@ const dismissHandoffsSessionSchema = z
     session_id: z
       .string()
       .min(1)
-      .describe("Id of the session that owns the live Realtime emissary."),
+      .describe("Id of the session that owns the live Realtime Spokesperson."),
     cursor: z
       .number()
       .int()
       .min(0)
       .max(4_294_967_295)
       .describe(
-        "Newest cursor from any Master-bound voice transcript, handoff, reminder, or bridge result.",
+        "Newest cursor from any Expert-bound voice transcript, handoff, reminder, or bridge result.",
       ),
     handoff_id: z
       .array(z.string().trim().min(1).max(100))
@@ -43,10 +43,10 @@ export const dismissHandoffsSessionCommand = defineCommand({
   destructive: false,
   summary: "Dismiss open voice handoffs without speaking",
   description:
-    "Explicitly close one or more open Realtime emissary handoffs and deliver " +
-    "the reason as silent context without waking the emissary. Use this only " +
+    "Explicitly close one or more open Realtime Spokesperson handoffs and deliver " +
+    "the reason as silent context without waking the Spokesperson. Use this only " +
     "when a spoken response is obsolete, superseded, or already handled. The " +
-    "command and its reason remain visible in the Master's normal Berd activity.",
+    "command and its reason remain visible in the Expert's normal Berd activity.",
   helpFooter: `Example:
   berdctl session dismiss-handoffs --session-id <session-id> --cursor 2 \
     --handoff-id handoff-1 --handoff-id handoff-2 \
@@ -55,24 +55,24 @@ export const dismissHandoffsSessionCommand = defineCommand({
 Result:
   {"session_id":"...","cursor":2,"dismissed_handoff_ids":["handoff-1","handoff-2"],"context_delivery_status":"sent"|"interrupting"|"queued"}
 
-Every id must still be open. A dismissal consumes pending emissary handoffs only
-when --cursor proves the Master received the complete pending batch, then
-atomically sends the dismissal reason back as silent context. Use send-to-emissary
+Every id must still be open. A dismissal consumes pending Spokesperson handoffs only
+when --cursor proves the Expert received the complete pending batch, then
+atomically sends the dismissal reason back as silent context. Use send-to-spokesperson
 --mode say instead when the user still needs an answer.`,
   schema: dismissHandoffsSessionSchema,
   execute: async (args): Promise<DismissHandoffsSessionResult> => {
     const { getActiveRealtimeEmissary } = await import(
       "@/features/voice-conversation/lib/realtimeEmissaryBridge"
     );
-    const emissary = getActiveRealtimeEmissary();
-    if (!emissary || emissary.sessionId !== args.session_id) {
+    const spokesperson = getActiveRealtimeEmissary();
+    if (!spokesperson || spokesperson.sessionId !== args.session_id) {
       throw new CommandError(
         "invalid_args",
-        `Session "${args.session_id}" has no live OpenAI Realtime voice emissary. Start Realtime voice in that session and retry.`,
+        `Session "${args.session_id}" has no live OpenAI Realtime voice Spokesperson. Start Realtime voice in that session and retry.`,
       );
     }
 
-    const dismissal = await emissary.dismissHandoffs(
+    const dismissal = await spokesperson.dismissHandoffs(
       args.cursor,
       args.handoff_id,
       args.reason,

@@ -1,9 +1,9 @@
 {
   "$comment": "GENERATED FILE — do not hand-edit; run `pnpm generate:berdctl-contract`. Client-neutral wire surface of the Berd desktop app's control API: POST /v1/call {\"command\": \"<group>\", \"args\": {\"action\": \"<action>\", ...fields}} against the loopback endpoint in the berdctl discovery file. protocolVersion mirrors PROTOCOL_VERSION in both discovery.rs copies (berdctl and plugin crate tests pin them equal). Per action: description, fields (flat wire model: name, required, kind, values, description, bounds), and schema (JSON Schema 2020-12 of the args object, minus the action discriminator). Derived from the authoritative zod schemas in the colocated command modules (src/features/berdctl/commands/impl/*.ts); the renderer registry's strict zod parse — not this file — is the trust boundary. vitest asserts freshness (src/features/berdctl/__tests__/apiSurface.test.ts).",
-  "protocolVersion": 4,
+  "protocolVersion": 5,
   "groups": {
     "sessions": {
-      "description": "Manage the user's chat sessions: create (fire-and-forget, on any installed agent harness), send, open, list, get, rename, move, move to group, clear project, send to a live voice emissary, dismiss voice handoffs, fork, archive.",
+      "description": "Manage the user's chat sessions: create (fire-and-forget, on any installed agent harness), send, open, list, get, rename, move, move to group, clear project, send to a live voice Spokesperson, dismiss voice handoffs, fork, archive.",
       "actions": {
         "create": {
           "description": "Create a new chat session on any installed agent harness and send the prompt in it. Fire-and-forget: returns the session id immediately and the session runs in the background without changing what the user sees; the user can open it themselves. Use --from to give the delegating session or tool a concise visible label on the initial message. Only check on it later (action \"get\") if the user asks.",
@@ -427,21 +427,21 @@
             "additionalProperties": false
           }
         },
-        "send_to_emissary": {
-          "description": "Inject a private coordination message into the OpenAI Realtime voice emissary owned by an existing Berd session. The emissary receives the message either as silent context for future turns or as a request to speak now. The command fails when the target session has no live Realtime voice conversation.",
+        "send_to_spokesperson": {
+          "description": "Inject a private coordination message into the OpenAI Realtime voice Spokesperson owned by an existing Berd session. The Spokesperson receives the message either as silent context for future turns or as a request to speak now. The command fails when the target session has no live Realtime voice conversation.",
           "fields": [
             {
               "name": "session_id",
               "required": true,
               "kind": "string",
-              "description": "Id of the session that owns the live Realtime emissary.",
+              "description": "Id of the session that owns the live Realtime Spokesperson.",
               "min": 1
             },
             {
               "name": "message",
               "required": true,
               "kind": "string",
-              "description": "Private coordination message to inject into the emissary.",
+              "description": "Private coordination message to inject into the Spokesperson.",
               "min": 1,
               "max": 20000
             },
@@ -449,7 +449,7 @@
               "name": "cursor",
               "required": true,
               "kind": "number",
-              "description": "Newest cursor from any Master-bound voice transcript, handoff, reminder, or bridge result.",
+              "description": "Newest cursor from any Expert-bound voice transcript, handoff, reminder, or bridge result.",
               "min": 0,
               "max": 4294967295
             },
@@ -457,7 +457,7 @@
               "name": "mode",
               "required": false,
               "kind": "string",
-              "description": "Delivery mode: context updates future turns silently; say asks the emissary to speak now.",
+              "description": "Delivery mode: context updates future turns silently; say asks the Spokesperson to speak now.",
               "values": ["context", "say"]
             },
             {
@@ -474,23 +474,23 @@
               "session_id": {
                 "type": "string",
                 "minLength": 1,
-                "description": "Id of the session that owns the live Realtime emissary."
+                "description": "Id of the session that owns the live Realtime Spokesperson."
               },
               "message": {
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 20000,
-                "description": "Private coordination message to inject into the emissary."
+                "description": "Private coordination message to inject into the Spokesperson."
               },
               "cursor": {
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 4294967295,
-                "description": "Newest cursor from any Master-bound voice transcript, handoff, reminder, or bridge result."
+                "description": "Newest cursor from any Expert-bound voice transcript, handoff, reminder, or bridge result."
               },
               "mode": {
                 "default": "say",
-                "description": "Delivery mode: context updates future turns silently; say asks the emissary to speak now.",
+                "description": "Delivery mode: context updates future turns silently; say asks the Spokesperson to speak now.",
                 "type": "string",
                 "enum": ["context", "say"]
               },
@@ -511,20 +511,20 @@
           }
         },
         "dismiss_handoffs": {
-          "description": "Explicitly close one or more open Realtime emissary handoffs and deliver the reason as silent context without waking the emissary. Use this only when a spoken response is obsolete, superseded, or already handled. The command and its reason remain visible in the Master's normal Berd activity.",
+          "description": "Explicitly close one or more open Realtime Spokesperson handoffs and deliver the reason as silent context without waking the Spokesperson. Use this only when a spoken response is obsolete, superseded, or already handled. The command and its reason remain visible in the Expert's normal Berd activity.",
           "fields": [
             {
               "name": "session_id",
               "required": true,
               "kind": "string",
-              "description": "Id of the session that owns the live Realtime emissary.",
+              "description": "Id of the session that owns the live Realtime Spokesperson.",
               "min": 1
             },
             {
               "name": "cursor",
               "required": true,
               "kind": "number",
-              "description": "Newest cursor from any Master-bound voice transcript, handoff, reminder, or bridge result.",
+              "description": "Newest cursor from any Expert-bound voice transcript, handoff, reminder, or bridge result.",
               "min": 0,
               "max": 4294967295
             },
@@ -550,13 +550,13 @@
               "session_id": {
                 "type": "string",
                 "minLength": 1,
-                "description": "Id of the session that owns the live Realtime emissary."
+                "description": "Id of the session that owns the live Realtime Spokesperson."
               },
               "cursor": {
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 4294967295,
-                "description": "Newest cursor from any Master-bound voice transcript, handoff, reminder, or bridge result."
+                "description": "Newest cursor from any Expert-bound voice transcript, handoff, reminder, or bridge result."
               },
               "handoff_id": {
                 "minItems": 1,
