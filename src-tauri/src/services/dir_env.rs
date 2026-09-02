@@ -167,6 +167,13 @@ pub async fn capture_terminal_env(dir: &Path) -> HashMap<String, String> {
     platform::capture_terminal_env(dir, HOME_ENV_CAPTURE_TIMEOUT).await
 }
 
+/// Resolve a control executable before any repository-local PATH is applied.
+/// Windows returns a canonical absolute path; other platforms preserve the
+/// existing PATH lookup behavior.
+pub(crate) fn resolve_control_executable(name: &str) -> Option<PathBuf> {
+    platform::resolve_control_executable(name)
+}
+
 pub async fn capture_home_interactive_env_with_timeout(
     timeout_duration: Duration,
 ) -> HashMap<String, String> {
@@ -385,7 +392,45 @@ mod tests {
         let git = platform::find_file_on_windows_path("git.exe", env_key::get(&env, "PATH"))
             .expect("trusted git");
 
-        assert_eq!(git, trusted_bin.join("git.exe"));
+        assert_eq!(
+            git,
+            trusted_bin
+                .join("git.exe")
+                .canonicalize()
+                .expect("canonical trusted Git")
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_control_executables_ignore_repository_hermit_bins() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repository_bin = temp.path().join("repo").join(".hermit").join("bin");
+        let trusted_bin = temp.path().join("trusted").join("bin");
+        std::fs::create_dir_all(&repository_bin).expect("repository Hermit bin");
+        std::fs::create_dir_all(&trusted_bin).expect("trusted bin");
+        for executable in ["git.exe", "gh.exe"] {
+            std::fs::write(repository_bin.join(executable), b"sentinel")
+                .expect("repository sentinel");
+            std::fs::write(trusted_bin.join(executable), b"trusted").expect("trusted executable");
+        }
+        let path = std::env::join_paths([repository_bin.clone(), trusted_bin.clone()])
+            .expect("fixture PATH")
+            .to_string_lossy()
+            .into_owned();
+        let env = HashMap::from([("Path".to_string(), path)]);
+
+        for executable in ["git", "gh"] {
+            assert_eq!(
+                platform::resolve_control_executable_in_env(executable, env.clone()),
+                Some(
+                    trusted_bin
+                        .join(format!("{executable}.exe"))
+                        .canonicalize()
+                        .expect("canonical trusted executable")
+                )
+            );
+        }
     }
 
     #[test]

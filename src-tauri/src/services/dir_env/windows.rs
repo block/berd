@@ -77,10 +77,29 @@ pub(crate) fn find_project_hermit_bin(dir: &Path) -> Option<PathBuf> {
     find_project_hermit_bin_within(start, &repo_root)
 }
 
+pub(crate) fn resolve_control_executable(name: &str) -> Option<PathBuf> {
+    resolve_control_executable_in_env(name, dedupe_env_case_insensitive(std::env::vars()))
+}
+
+pub(crate) fn resolve_control_executable_in_env(
+    name: &str,
+    mut env: HashMap<String, String>,
+) -> Option<PathBuf> {
+    strip_untrusted_windows_tool_state(&mut env);
+    let file_name = if name.to_ascii_lowercase().ends_with(".exe") {
+        name.to_string()
+    } else {
+        format!("{name}.exe")
+    };
+    find_file_on_windows_path(&file_name, env_key::get(&env, "PATH"))
+}
+
 pub(crate) fn find_file_on_windows_path(file_name: &str, path: Option<&str>) -> Option<PathBuf> {
     std::env::split_paths(path?)
         .map(|dir| dir.join(file_name))
-        .find(|candidate| candidate.is_file())
+        .find(|candidate| candidate.is_file())?
+        .canonicalize()
+        .ok()
 }
 
 fn prepend_dir_to_windows_path(env: &mut HashMap<String, String>, dir: &Path) {
