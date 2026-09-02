@@ -383,27 +383,53 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
   },
 
   disconnect: async (host) => {
-    await disconnectRemoteHost(host);
-    set((state) => ({
-      statusByHost: {
-        ...state.statusByHost,
-        [host]: { ...state.statusByHost[host], state: "disconnected" },
-      },
-    }));
+    const admitted = get();
+    const admittedLifecycle = admitted.lifecycleByHost[host] ?? 0;
+    const admittedStatus = admitted.statusByHost[host];
+    await disconnectRemoteHost(host, admittedStatus?.generation);
+    set((state) => {
+      const currentStatus = state.statusByHost[host];
+      if (
+        (state.lifecycleByHost[host] ?? 0) !== admittedLifecycle ||
+        currentStatus?.incarnation !== admittedStatus?.incarnation ||
+        currentStatus?.generation !== admittedStatus?.generation
+      ) {
+        return state;
+      }
+      return {
+        statusByHost: {
+          ...state.statusByHost,
+          [host]: { ...currentStatus, state: "disconnected" },
+        },
+      };
+    });
   },
 
   shutdownHost: async (host, expectedInstanceToken) => {
-    if (expectedInstanceToken) {
-      await shutdownRemoteHost(host, expectedInstanceToken);
-    } else {
-      await shutdownRemoteHost(host);
-    }
-    set((state) => ({
-      statusByHost: {
-        ...state.statusByHost,
-        [host]: { ...state.statusByHost[host], state: "disconnected" },
-      },
-    }));
+    const admitted = get();
+    const admittedLifecycle = admitted.lifecycleByHost[host] ?? 0;
+    const admittedStatus = admitted.statusByHost[host];
+    await shutdownRemoteHost(
+      host,
+      expectedInstanceToken,
+      admittedStatus?.generation,
+    );
+    set((state) => {
+      const currentStatus = state.statusByHost[host];
+      if (
+        (state.lifecycleByHost[host] ?? 0) !== admittedLifecycle ||
+        currentStatus?.incarnation !== admittedStatus?.incarnation ||
+        currentStatus?.generation !== admittedStatus?.generation
+      ) {
+        return state;
+      }
+      return {
+        statusByHost: {
+          ...state.statusByHost,
+          [host]: { ...currentStatus, state: "disconnected" },
+        },
+      };
+    });
   },
 
   runDoctor: async (host) => {
@@ -463,8 +489,6 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
       const doctorByHost = { ...state.doctorByHost };
       const doctorPendingByHost = { ...state.doctorPendingByHost };
       const doctorErrorByHost = { ...state.doctorErrorByHost };
-      const recentDirsByHost = { ...state.recentDirsByHost };
-      const goosePathByHost = { ...state.goosePathByHost };
       const forgottenHosts = { ...state.forgottenHosts, [host]: true as const };
       const connectPendingLifecycleByHost = {
         ...state.connectPendingLifecycleByHost,
@@ -487,14 +511,10 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
       delete doctorByHost[host];
       delete doctorPendingByHost[host];
       delete doctorErrorByHost[host];
-      delete recentDirsByHost[host];
-      delete goosePathByHost[host];
       delete forgetPendingByHost[host];
       delete forgetErrorByHost[host];
       delete connectPendingLifecycleByHost[host];
       persistManualHosts(manualHosts);
-      persistRecentDirs(recentDirsByHost);
-      persistGoosePaths(goosePathByHost);
       return {
         manualHosts,
         statusByHost,
@@ -510,8 +530,6 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
         retiredIncarnationsByHost,
         forgetPendingByHost,
         forgetErrorByHost,
-        recentDirsByHost,
-        goosePathByHost,
       };
     });
   },

@@ -138,10 +138,12 @@ export async function forgetRemoteHost(host: string): Promise<void> {
 export async function shutdownRemoteHost(
   host: string,
   expectedInstanceToken?: string,
+  expectedGeneration?: number,
 ): Promise<void> {
   await invoke("remote_backend_shutdown", {
     host,
     expectedInstanceToken: expectedInstanceToken ?? null,
+    expectedGeneration: expectedGeneration ?? null,
   });
 }
 

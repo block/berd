@@ -9,7 +9,7 @@ use tauri::{AppHandle, State};
 
 use crate::services::remote_backend::{
     self, daemon::RemoteDirListing, daemon::RemoteToolProbe, RemoteBackendConnection,
-    RemoteBackendError, RemoteBackendRegistry, RemoteBackendStatus,
+    RemoteBackendError, RemoteBackendErrorKind, RemoteBackendRegistry, RemoteBackendStatus,
 };
 
 #[tauri::command]
@@ -41,8 +41,16 @@ pub async fn remote_backend_disconnect(
     host: String,
     expected_generation: Option<u64>,
 ) -> Result<(), RemoteBackendError> {
-    remote_backend::disconnect_generation(&app, &registry, &host, expected_generation);
-    Ok(())
+    if remote_backend::disconnect_generation(&app, &registry, &host, expected_generation) {
+        Ok(())
+    } else if expected_generation.is_some() {
+        Err(RemoteBackendError::new(
+            RemoteBackendErrorKind::DaemonChanged,
+            "Remote backend changed before disconnect completed",
+        ))
+    } else {
+        Ok(())
+    }
 }
 
 #[tauri::command]
@@ -65,8 +73,16 @@ pub async fn remote_backend_shutdown(
     registry: State<'_, RemoteBackendRegistry>,
     host: String,
     expected_instance_token: Option<String>,
+    expected_generation: Option<u64>,
 ) -> Result<(), RemoteBackendError> {
-    remote_backend::shutdown(&app, &registry, &host, expected_instance_token.as_deref()).await
+    remote_backend::shutdown(
+        &app,
+        &registry,
+        &host,
+        expected_instance_token.as_deref(),
+        expected_generation,
+    )
+    .await
 }
 
 #[tauri::command]

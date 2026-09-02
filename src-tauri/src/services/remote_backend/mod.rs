@@ -681,11 +681,6 @@ fn spawn_supervisor(
     });
 }
 
-/// Kill the tunnel; the remote daemon keeps running.
-pub fn disconnect(app: &AppHandle, registry: &RemoteBackendRegistry, host_input: &str) {
-    disconnect_generation(app, registry, host_input, None);
-}
-
 /// Disconnect only when `expected_generation` still owns the host slot. This
 /// lets an initializer clean up work superseded while it was awaiting without
 /// tearing down a newer connection that won the race.
@@ -703,7 +698,7 @@ pub fn disconnect_generation(
     let Some(slot) = registry.existing_slot(&host_key) else {
         return false;
     };
-    {
+    let disconnected_generation = {
         let mut shared = slot.shared.lock().expect("slot poisoned");
         if expected_generation.is_some_and(|expected| shared.generation != expected) {
             return false;
@@ -713,8 +708,14 @@ pub fn disconnect_generation(
             kill_tunnel_pid(pid);
         }
         shared.local_port = None;
-    }
-    set_state(app, &slot, RemoteBackendState::Disconnected);
+        shared.generation
+    };
+    set_state_if_current(
+        app,
+        &slot,
+        disconnected_generation,
+        RemoteBackendState::Disconnected,
+    );
     record_diagnostic(DiagnosticLevel::Info, "disconnected", &host_key, None);
     true
 }
@@ -725,6 +726,7 @@ pub async fn shutdown(
     registry: &RemoteBackendRegistry,
     host_input: &str,
     expected_instance_token: Option<&str>,
+    expected_generation: Option<u64>,
 ) -> Result<(), RemoteBackendError> {
     let aliases = ssh_config::load_ssh_config_hosts();
     let spec = RemoteHostSpec::parse(host_input, &aliases)?;
@@ -736,7 +738,12 @@ pub async fn shutdown(
     // until shutdown releases this lock, so ensure_daemon cannot recreate the
     // daemon after shutdown_daemon stops it.
     let _guard = slot.connect_lock.lock().await;
-    disconnect(app, registry, &spec.key());
+    if !disconnect_generation(app, registry, &spec.key(), expected_generation) {
+        return Err(RemoteBackendError::new(
+            RemoteBackendErrorKind::DaemonChanged,
+            "Remote backend changed before shutdown completed",
+        ));
+    }
     daemon::shutdown_daemon(&spec, &shell_env, expected_instance_token).await?;
     record_diagnostic(DiagnosticLevel::Info, "daemon_shutdown", &spec.key(), None);
     Ok(())

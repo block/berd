@@ -361,7 +361,10 @@ describe("disconnect and shutdownHost", () => {
 
     await useRemoteHostStore.getState().disconnect("devbox");
 
-    expect(mocks.disconnectRemoteHost).toHaveBeenCalledWith("devbox");
+    expect(mocks.disconnectRemoteHost).toHaveBeenCalledWith(
+      "devbox",
+      backendIdentity.generation,
+    );
     expect(useRemoteHostStore.getState().statusByHost.devbox).toEqual({
       ...backendIdentity,
       state: "disconnected",
@@ -376,7 +379,11 @@ describe("disconnect and shutdownHost", () => {
 
     await useRemoteHostStore.getState().shutdownHost("devbox");
 
-    expect(mocks.shutdownRemoteHost).toHaveBeenCalledWith("devbox");
+    expect(mocks.shutdownRemoteHost).toHaveBeenCalledWith(
+      "devbox",
+      undefined,
+      backendIdentity.generation,
+    );
     expect(useRemoteHostStore.getState().statusByHost.devbox).toEqual({
       ...backendIdentity,
       state: "disconnected",
@@ -393,7 +400,74 @@ describe("disconnect and shutdownHost", () => {
     expect(mocks.shutdownRemoteHost).toHaveBeenCalledWith(
       "devbox",
       "opaque-generation",
+      undefined,
     );
+  });
+
+  it("does not publish a stale disconnect completion", async () => {
+    let resolveDisconnect: () => void = () => {};
+    mocks.disconnectRemoteHost.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveDisconnect = resolve;
+        }),
+    );
+    useRemoteHostStore.setState({
+      lifecycleByHost: { devbox: 1 },
+      statusByHost: { devbox: { ...backendIdentity, state: "ready" } },
+    });
+
+    const pending = useRemoteHostStore.getState().disconnect("devbox");
+    useRemoteHostStore.setState({
+      lifecycleByHost: { devbox: 2 },
+      statusByHost: {
+        devbox: { incarnation: "slot-2", generation: 2, state: "ready" },
+      },
+    });
+    resolveDisconnect();
+    await pending;
+
+    expect(mocks.disconnectRemoteHost).toHaveBeenCalledWith("devbox", 1);
+    expect(useRemoteHostStore.getState().statusByHost.devbox).toEqual({
+      incarnation: "slot-2",
+      generation: 2,
+      state: "ready",
+    });
+  });
+
+  it("does not publish a stale shutdown completion", async () => {
+    let resolveShutdown: () => void = () => {};
+    mocks.shutdownRemoteHost.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveShutdown = resolve;
+        }),
+    );
+    useRemoteHostStore.setState({
+      lifecycleByHost: { devbox: 1 },
+      statusByHost: { devbox: { ...backendIdentity, state: "ready" } },
+    });
+
+    const pending = useRemoteHostStore.getState().shutdownHost("devbox");
+    useRemoteHostStore.setState({
+      lifecycleByHost: { devbox: 2 },
+      statusByHost: {
+        devbox: { incarnation: "slot-2", generation: 2, state: "ready" },
+      },
+    });
+    resolveShutdown();
+    await pending;
+
+    expect(mocks.shutdownRemoteHost).toHaveBeenCalledWith(
+      "devbox",
+      undefined,
+      1,
+    );
+    expect(useRemoteHostStore.getState().statusByHost.devbox).toEqual({
+      incarnation: "slot-2",
+      generation: 2,
+      state: "ready",
+    });
   });
 });
 
@@ -659,7 +733,7 @@ describe("manual host persistence", () => {
     expect(useRemoteHostStore.getState().manualHosts).toEqual(["adhoc.blox"]);
   });
 
-  it("forgets a broken host and clears all of its local state", async () => {
+  it("forgets a broken host while preserving reusable preferences", async () => {
     const host = "ssh broken.blox";
     useRemoteHostStore.setState({
       manualHosts: [host, "keep.blox"],
@@ -699,12 +773,12 @@ describe("manual host persistence", () => {
     expect(state.doctorByHost).not.toHaveProperty(host);
     expect(state.doctorPendingByHost).not.toHaveProperty(host);
     expect(state.doctorErrorByHost).not.toHaveProperty(host);
-    expect(state.recentDirsByHost).not.toHaveProperty(host);
-    expect(state.goosePathByHost).not.toHaveProperty(host);
+    expect(state.recentDirsByHost[host]).toEqual(["~/src"]);
+    expect(state.goosePathByHost[host]).toBe("~/bin/goose");
     expect(state.forgottenHosts[host]).toBe(true);
     expect(loadPersistedManualHosts()).toEqual(["keep.blox"]);
-    expect(loadPersistedRecentDirs()).toEqual({});
-    expect(loadPersistedGoosePaths()).toEqual({});
+    expect(loadPersistedRecentDirs()).toEqual({ [host]: ["~/src"] });
+    expect(loadPersistedGoosePaths()).toEqual({ [host]: "~/bin/goose" });
   });
 
   it("keeps local state when the backend refuses to forget an active host", async () => {
