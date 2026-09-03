@@ -99,6 +99,7 @@ import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
 import { useAppStartup } from "./hooks/useAppStartup";
 import { useRemoteSessionExperimentReconciliation } from "@/features/chat/hooks/useRemoteSessionExperimentReconciliation";
 import { useCompletionNotifications } from "@/shared/hooks/useCompletionNotifications";
+import { MemoryProposalToasts } from "@/features/me/ui/MemoryProposalToasts";
 import { useHomeSessionStateSync } from "./hooks/useHomeSessionStateSync";
 import { useHomeWidgetStore } from "@/features/home/stores/homeWidgetStore";
 import { runPinnedPrompt } from "@/features/home/lib/runPinnedPrompt";
@@ -5380,6 +5381,7 @@ export function AppShell({
 
   return (
     <FocusRegionProvider>
+      <MemoryProposalToasts sessionlessOnly />
       <AppShellLayout
         topBar={{
           breadcrumbs: topBarBreadcrumbs,
