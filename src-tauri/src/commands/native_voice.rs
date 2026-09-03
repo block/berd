@@ -137,7 +137,6 @@ pub enum InterruptionSensitivity {
 }
 
 impl InterruptionSensitivity {
-    #[cfg(any(test, target_os = "macos"))]
     pub(crate) fn vad_threshold(self) -> f32 {
         match self {
             Self::Less => 0.8,
