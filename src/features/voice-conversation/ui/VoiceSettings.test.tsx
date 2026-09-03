@@ -11,6 +11,16 @@ import type { VoiceInputBackend } from "../lib/voiceInputPreference";
 import type { VoiceOutputBackend } from "../lib/voiceOutputPreference";
 import { VoiceSettings } from "./VoiceSettings";
 
+if (!HTMLElement.prototype.hasPointerCapture) {
+  HTMLElement.prototype.hasPointerCapture = () => false;
+}
+
+if (!HTMLElement.prototype.scrollIntoView) {
+  HTMLElement.prototype.scrollIntoView = () => {};
+}
+
+vi.mock("@/shared/lib/platform", () => ({ getPlatform: () => "mac" }));
+
 const setupState = vi.hoisted(() => ({
   current: null as PocketVoiceSetup | null,
 }));
@@ -257,6 +267,20 @@ describe("VoiceSettings", () => {
     renderWithProviders(<VoiceSettings />);
 
     expect(openAiStatusState.enabled).toBe(false);
+  });
+
+  it("keeps OpenAI voice playback selectable without inspecting credentials", async () => {
+    setupState.current = setup(pocketStatus());
+    renderWithProviders(<VoiceSettings />);
+
+    expect(openAiStatusState.enabled).toBe(false);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("combobox", { name: "Speech output" }));
+
+    expect(
+      screen.getByRole("option", { name: "OpenAI text-to-speech" }),
+    ).toBeInTheDocument();
   });
 
   it.each([

@@ -339,7 +339,7 @@ export function VoiceSettings() {
                     <SelectItem value="pocket">
                       {t("voice.backendPocket")}
                     </SelectItem>
-                    {openAiStatus?.ttsAvailable ? (
+                    {getPlatform() === "mac" ? (
                       <SelectItem value="openai">
                         {t("voice.backendOpenAiTts")}
                       </SelectItem>
