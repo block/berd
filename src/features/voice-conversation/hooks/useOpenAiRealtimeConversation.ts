@@ -1478,6 +1478,14 @@ export async function stopOpenAiRealtimeConversation(): Promise<void> {
   if (sessionId) await runtime.stop(sessionId);
 }
 
+export async function stopOpenAiRealtimeConversationForSession(
+  sessionId: string,
+): Promise<void> {
+  if (runtime.getSnapshot().boundSessionId === sessionId) {
+    await runtime.stop(sessionId);
+  }
+}
+
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {
     void runtime.dispose();
