@@ -113,6 +113,9 @@ if [[ "\${1:-}" == "install" ]]; then
   fi
   mkdir -p node_modules/.pnpm
   cp pnpm-lock.yaml node_modules/.pnpm/lock.yaml
+  if [[ "\${PNPM_INSTALL_FAIL:-0}" == "1" ]]; then
+    exit 43
+  fi
 elif [[ "\${1:-}" == "build" ]]; then
   mkdir -p dist
   touch dist/index.js dist/index.d.ts
@@ -251,6 +254,22 @@ describe("setup tooling regressions", () => {
     expect(await callsFor(fixture.calls)).toBe(
       `${join(fixture.root, "sdk")}:build\n`,
     );
+  });
+
+  it("retries dependency installation after an interrupted repair", async () => {
+    const fixture = await devDepsFixture();
+
+    const initial = fixture.run();
+    expect(initial.status, `${initial.stdout}\n${initial.stderr}`).toBe(0);
+
+    await writeFile(fixture.calls, "");
+    const failed = fixture.run(["--force"], { PNPM_INSTALL_FAIL: "1" });
+    expect(failed.status).toBe(43);
+
+    await writeFile(fixture.calls, "");
+    const retried = fixture.run();
+    expect(retried.status, `${retried.stdout}\n${retried.stderr}`).toBe(0);
+    expect(await callsFor(fixture.calls)).toBe(`${fixture.root}:install\n`);
   });
 
   it("retries an SDK build after an interrupted repair", async () => {

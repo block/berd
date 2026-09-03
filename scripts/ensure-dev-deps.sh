@@ -86,6 +86,7 @@ if [[ "$force" == "1" ]] \
   || [[ ! -f "$installed_lock" ]] \
   || ! cmp -s "$repo_root/pnpm-lock.yaml" "$installed_lock"; then
   echo "Preparing pnpm dependencies."
+  rm -f "$dependency_stamp"
   (cd "$repo_root" && "$pnpm_bin" install)
   dependency_inputs="$(dependency_inputs_hash)"
   write_stamp "$dependency_stamp" "$dependency_inputs"
