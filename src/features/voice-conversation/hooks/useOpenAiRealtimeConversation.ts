@@ -765,6 +765,7 @@ class OpenAiRealtimeConversationRuntime {
         displayText: string,
         queueUntilIdle = false,
         reminderHandoffIds: string[] = [],
+        continueAfterStop = false,
       ) => {
         if (pendingExpertEvents.length === 0) return false;
         const batch = pendingExpertEvents.splice(0);
@@ -777,6 +778,7 @@ class OpenAiRealtimeConversationRuntime {
           undefined,
           queueUntilIdle,
           reminderHandoffIds,
+          continueAfterStop,
         );
         return true;
       };
@@ -784,6 +786,9 @@ class OpenAiRealtimeConversationRuntime {
         return wakeExpert(
           this.snapshot.boundSessionId ?? sessionId,
           "Final voice transcript",
+          false,
+          [],
+          true,
         );
       };
       const transcriptMessageIds = new Map<string, string>();
@@ -1226,12 +1231,16 @@ class OpenAiRealtimeConversationRuntime {
     userMessageId?: string,
     queueUntilIdle = false,
     reminderHandoffIds: string[] = [],
+    continueAfterStop = false,
   ): void {
-    const signal = this.deliveryAbortController.signal;
+    const signal = continueAfterStop
+      ? undefined
+      : this.deliveryAbortController.signal;
+    const onSend = this.boundOnSend;
     this.deliveryQueue = this.deliveryQueue
       .catch(() => undefined)
       .then(async () => {
-        signal.throwIfAborted();
+        signal?.throwIfAborted();
         // History replay replaces the transcript wholesale. Dispatching a
         // realtime transcript while hydration is still active can therefore
         // route the Expert's live ACP stream into the replay buffer, or let a
@@ -1239,11 +1248,16 @@ class OpenAiRealtimeConversationRuntime {
         // delivery queue and wait for hydration to publish before sending.
         await this.ownerMigration;
         await this.historyReplay;
-        signal.throwIfAborted();
-        sessionId = this.snapshot.boundSessionId ?? sessionId;
+        signal?.throwIfAborted();
+        if (!continueAfterStop) {
+          sessionId = this.snapshot.boundSessionId ?? sessionId;
+        }
         await waitForSessionHydration(sessionId, signal);
         if (queueUntilIdle) await waitForMasterIdle(sessionId, signal);
-        if (this.snapshot.boundSessionId !== sessionId || !this.boundOnSend)
+        if (
+          !onSend ||
+          (!continueAfterStop && this.snapshot.boundSessionId !== sessionId)
+        )
           throw new Error("The realtime voice owner is no longer available.");
         const sendOptions = {
           displayText,
@@ -1262,7 +1276,7 @@ class OpenAiRealtimeConversationRuntime {
           ...(userMessageId ? { userMessageId } : {}),
         };
         const sendAsPrompt = async () => {
-          const accepted = await this.boundOnSend?.(
+          const accepted = await onSend(
             text,
             undefined,
             undefined,
@@ -1273,7 +1287,9 @@ class OpenAiRealtimeConversationRuntime {
               "The Expert session did not accept the voice transcript.",
             );
         };
-        this.setSnapshot({ ...this.snapshot, state: "agent-working" });
+        if (!continueAfterStop) {
+          this.setSnapshot({ ...this.snapshot, state: "agent-working" });
+        }
         for (;;) {
           const opportunity = await waitForMasterDeliveryOpportunity(
             sessionId,
@@ -1315,7 +1331,15 @@ class OpenAiRealtimeConversationRuntime {
           this.setSnapshot({ ...this.snapshot, state: "listening" });
       })
       .catch((error) => {
-        if (!isAbortError(error)) return this.fail(sessionId, error);
+        if (isAbortError(error)) return;
+        if (continueAfterStop) {
+          console.warn(
+            "Could not deliver the final Realtime transcript",
+            error,
+          );
+          return;
+        }
+        return this.fail(sessionId, error);
       });
   }
 

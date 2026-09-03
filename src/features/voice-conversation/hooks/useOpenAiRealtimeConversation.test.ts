@@ -1555,7 +1555,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     await act(async () => owner.result.current.onToggle());
   });
 
-  it("bounds final transcript flushing when the Expert queue is blocked", async () => {
+  it("releases media while a blocked final transcript continues delivering", async () => {
     const onSend = vi.fn().mockResolvedValue(true);
     useChatStore.getState().setSessionLoading("session-a", true);
     const owner = renderConversation("session-a", onSend);
@@ -1575,6 +1575,9 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     expect(owner.result.current.state).toBe("off");
     expect(track.stop).toHaveBeenCalledOnce();
     expect(onSend).not.toHaveBeenCalled();
+
+    act(() => useChatStore.getState().setSessionLoading("session-a", false));
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
   });
 
   it("forwards committed typed user text to the realtime emissary", async () => {
