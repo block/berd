@@ -22,7 +22,7 @@ use tokio::sync::mpsc as tokio_mpsc;
 use crate::{
     openai_realtime::{
         OpenAiRealtimeTranscriptionClient, OpenAiRealtimeTranscriptionConfig,
-        OpenAiRealtimeTranscriptionError, OpenAiRealtimeTranscriptionEvent,
+        OpenAiRealtimeTranscriptionError as TranscriptionError, OpenAiRealtimeTranscriptionEvent,
     },
     ParakeetRecognizer,
 };
@@ -1858,15 +1858,13 @@ fn openai_worker(
             }
             let event = match event {
                 Ok(event) => event,
-                Err(OpenAiRealtimeTranscriptionError::TranscriptionFailed {
-                    item_id,
-                    message,
-                }) => {
-                    if openai_transcription_failure_is_current(
+                Err(TranscriptionError::TranscriptionFailed { item_id, message }) => {
+                    let failure_is_current = openai_transcription_failure_is_current(
                         &item_id,
                         observed_epoch,
                         &committed,
-                    ) {
+                    );
+                    if failure_is_current {
                         let _ = pending.reset(&events);
                         let _ = events.blocking_send(VoiceInputEvent::Failed(message));
                         return;
@@ -2023,28 +2021,22 @@ fn openai_worker(
         };
         let event = match event {
             Ok(event) => event,
-            Err(OpenAiRealtimeTranscriptionError::TranscriptionFailed {
-                item_id,
-                message,
-            }) => {
-                if openai_transcription_failure_is_current(
-                    &item_id,
-                    observed_epoch,
-                    &committed,
-                ) {
+            Err(TranscriptionError::TranscriptionFailed { item_id, message }) => {
+                let failure_is_current =
+                    openai_transcription_failure_is_current(&item_id, observed_epoch, &committed);
+                if failure_is_current {
                     let _ = pending.reset(&events);
                     let _ = events.blocking_send(VoiceInputEvent::Failed(message));
                     break;
                 }
                 continue;
             }
-            Err(OpenAiRealtimeTranscriptionError::Provider(message)) => {
+            Err(TranscriptionError::Provider(message)) => {
                 let _ = pending.reset(&events);
                 let _ = events.blocking_send(VoiceInputEvent::Failed(message));
                 break;
             }
-            Err(OpenAiRealtimeTranscriptionError::Disconnected)
-            | Err(OpenAiRealtimeTranscriptionError::Socket(_)) => continue,
+            Err(TranscriptionError::Disconnected) | Err(TranscriptionError::Socket(_)) => continue,
         };
         if let Some(turn) = record_openai_event(
             event,

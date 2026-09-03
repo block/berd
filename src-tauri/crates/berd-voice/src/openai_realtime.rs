@@ -203,8 +203,8 @@ impl OpenAiRealtimeTranscriptionClient {
     }
 }
 
-type RealtimeJsonResult =
-    Result<serde_json::Value, OpenAiRealtimeTranscriptionError>;
+type RealtimeJson = serde_json::Value;
+type RealtimeJsonResult = Result<RealtimeJson, OpenAiRealtimeTranscriptionError>;
 
 fn provider_message(value: &serde_json::Value) -> &str {
     value
@@ -399,11 +399,8 @@ mod tests {
             .unwrap();
         let configuring = client.configure();
         tokio::pin!(configuring);
-        let early = tokio::time::timeout(
-            std::time::Duration::from_millis(20),
-            &mut configuring,
-        )
-        .await;
+        let deadline = std::time::Duration::from_millis(20);
+        let early = tokio::time::timeout(deadline, &mut configuring).await;
         assert!(early.is_err());
         acknowledge.send(()).unwrap();
         configuring.await.unwrap();
