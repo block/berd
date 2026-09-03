@@ -31,7 +31,9 @@ installed before startup; an unavailable model fails startup with installation
 guidance. Parakeet requires an explicit self-contained bundle.
 OpenAI credentials and optional endpoint/model configuration come only from the
 child environment, never arguments or wire messages. TTS and STT validation and
-initialization finish before `ready`.
+initialization finish before `ready`. STT must report readiness within 60
+seconds; otherwise the child emits a sanitized fatal event and performs bounded
+runtime cleanup before exiting.
 
 Siri startup preflight validates the exact case-sensitive installed name,
 normalized BCP-47 language, and a responsive sirittsd availability query. It

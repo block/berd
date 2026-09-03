@@ -52,6 +52,7 @@ const PCM_FRAME_BYTES: usize = INPUT_FRAME_SAMPLES * std::mem::size_of::<f32>();
 const MAX_FINAL_TEXT_BYTES: usize = 64 * 1024;
 const MAX_SPEAK_TEXT_BYTES: usize = 16 * 1024;
 const INPUT_QUEUE_CAPACITY: usize = 32;
+const INPUT_STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 const SHUTDOWN_PLAYBACK_TIMEOUT: Duration = Duration::from_secs(3);
 const TTS_CONFIGURATION_TIMEOUT: Duration = Duration::from_secs(120);
 const MAX_OPENAI_BENCHMARK_REQUESTS: usize = 20;
@@ -1388,13 +1389,18 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                         return Ok(());
                     }
                 };
-                if let Err(message) = wait_for_input_ready(&mut events) {
+                if let Err(message) =
+                    wait_for_input_ready(&mut events, INPUT_STARTUP_TIMEOUT)
+                {
                     runtime.cancel();
-                    write_protocol_fatal(
+                    let write_result = write_protocol_fatal(
                         &mut writer,
                         &public_stt_startup_error(&config.stt),
                         &format!("STT readiness failed: {message}"),
-                    )?;
+                    );
+                    let finish_result = finish_unready_input_runtime(runtime);
+                    write_result?;
+                    finish_result?;
                     return Ok(());
                 }
                 input_controls = Some(runtime.controls());
@@ -1834,13 +1840,28 @@ fn write_audio_control_request(
 
 fn wait_for_input_ready(
     events: &mut tokio::sync::mpsc::Receiver<VoiceInputEvent>,
+    timeout: Duration,
 ) -> Result<(), String> {
-    match events.blocking_recv() {
-        Some(VoiceInputEvent::Ready) => Ok(()),
-        Some(VoiceInputEvent::Failed(message)) => Err(message),
-        Some(_) => Err("voice input emitted data before readiness".into()),
-        None => Err("voice input stopped before readiness".into()),
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .map_err(|error| format!("initialize voice input readiness wait: {error}"))?;
+    match runtime.block_on(async { tokio::time::timeout(timeout, events.recv()).await }) {
+        Ok(Some(VoiceInputEvent::Ready)) => Ok(()),
+        Ok(Some(VoiceInputEvent::Failed(message))) => Err(message),
+        Ok(Some(_)) => Err("voice input emitted data before readiness".into()),
+        Ok(None) => Err("voice input stopped before readiness".into()),
+        Err(_) => Err("voice input readiness timed out".into()),
     }
+}
+
+fn finish_unready_input_runtime(runtime: VoiceInputRuntime) -> Result<(), String> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .map_err(|error| format!("initialize voice input startup cleanup: {error}"))?
+        .block_on(runtime.finish())
+        .map_err(|error| format!("finish unready voice input runtime: {error}"))
 }
 
 fn parse_args(args: &[String]) -> Result<SessionConfig, String> {
@@ -5882,13 +5903,29 @@ mod tests {
     fn ready_requires_the_runtime_ready_event() {
         let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
         sender.blocking_send(VoiceInputEvent::Ready).unwrap();
-        assert_eq!(wait_for_input_ready(&mut receiver), Ok(()));
+        assert_eq!(
+            wait_for_input_ready(&mut receiver, Duration::from_secs(1)),
+            Ok(())
+        );
 
         let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
         sender
             .blocking_send(VoiceInputEvent::Failed("not ready".into()))
             .unwrap();
-        assert_eq!(wait_for_input_ready(&mut receiver), Err("not ready".into()));
+        assert_eq!(
+            wait_for_input_ready(&mut receiver, Duration::from_secs(1)),
+            Err("not ready".into())
+        );
+    }
+
+    #[test]
+    fn stalled_input_startup_reaches_a_bounded_terminal_failure() {
+        let (_sender, mut receiver) = tokio::sync::mpsc::channel(1);
+
+        assert_eq!(
+            wait_for_input_ready(&mut receiver, Duration::from_millis(10)),
+            Err("voice input readiness timed out".into())
+        );
     }
 
     #[test]
