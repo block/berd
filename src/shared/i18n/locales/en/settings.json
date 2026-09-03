@@ -1110,5 +1110,51 @@
       "working": "Repeats the working sound while the agent is working.",
       "working-and-waiting": "Repeats the working sound while the agent is working and the waiting sound while it waits."
     }
+  },
+  "me": {
+    "addTopic": "Add topic",
+    "addTopicAction": "Add",
+    "cancel": "Cancel",
+    "closeTopic": "Close",
+    "create": "Create my file",
+    "description": "Approved details, preferences, and boundaries that can help agents work better with you across chats.",
+    "editTab": "Edit",
+    "editorLabel": "Edit your me.md",
+    "livesIn": "Approved memories stay in plain-text files on your computer at",
+    "loadError": "Couldn't read your file. It may have been moved or deleted.",
+    "newTopicDescription": "A topic is its own document. Agents read it only when that part of your life is what's going on.",
+    "newTopicError": "Couldn't create that topic. A topic with a similar name may already exist.",
+    "newTopicLabel": "Name your topic",
+    "newTopicPlaceholder": "Style, Family, Travel…",
+    "noTopics": "No topics yet. Topics hold deeper knowledge, like style, family, or work, that only loads when it's relevant.",
+    "offBanner": {
+      "description": "Berd won’t use your approved memories or suggest new ones. Memory files and pending proposals will stay on your computer unless you remove them."
+    },
+    "openTopic": "View",
+    "previewTab": "Preview",
+    "refresh": "Refresh",
+    "save": "Save",
+    "saveError": "Couldn't save your changes. Your edits are still here, so try again.",
+    "unsafeUnicodeError": "Memory text can't include hidden Unicode control characters.",
+    "spineTitle": "About you",
+    "title": "Memory",
+    "toggle": {
+      "description": "Memory helps Berd remember what matters about you and how you like to work. Berd may suggest memories from your chats, but nothing is saved without your approval. Review, edit, or delete anything at any time here.",
+      "label": "Use memory"
+    },
+    "topicsHint": "Topics provide more specific knowledge that only loads when it's relevant. Add or update them here.",
+    "topicsTitle": "Topics",
+    "unsavedChanges": "Unsaved changes",
+    "proposals": {
+      "title": "Memory proposed",
+      "description": "Review these suggestions before anything is added to your memory. You can edit the wording first.",
+      "review": "Review",
+      "dismiss": "Decline",
+      "approve": "Add to memory",
+      "editorLabel": "Edit proposed memory",
+      "credentialError": "Authentication and access data can't be saved to memory.",
+      "unsafeUnicodeError": "Memory text can't include hidden Unicode control characters.",
+      "approveError": "Couldn't add this memory. Try again."
+    }
   }
 }
