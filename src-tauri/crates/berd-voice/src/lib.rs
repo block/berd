@@ -17,6 +17,7 @@ pub mod mac_speech;
 mod macos_audio_output;
 pub mod openai;
 pub mod openai_realtime;
+pub mod openai_spokesperson;
 mod outbound;
 mod parakeet;
 pub mod parakeet_assets;

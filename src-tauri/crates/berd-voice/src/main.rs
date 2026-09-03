@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::{self, BufWriter, Read, Write};
 use std::os::fd::RawFd;
 use std::path::{Path, PathBuf};
@@ -14,10 +15,17 @@ use berd_voice::benchmark::{
     load_bundled_tts_prompt_manifest, SttBenchmarkEnvironment, SttBenchmarkMode,
     SttBenchmarkTarget, TtsBenchmarkMode, TtsBenchmarkPromptManifest, TtsBenchmarkTarget,
 };
+use berd_voice::expert_spokesperson::{
+    ExpertDirective, ExpertDirectiveMode, ExpertDirectiveOutcome, ExpertSpokespersonCore,
+    LiveSideEvent,
+};
 use berd_voice::input::{
     AssistantActivityGuard, InputDuringTtsSlot, InputDuringTtsSnapshot, VoiceInputConfig,
     VoiceInputControls, VoiceInputEngineConfig, VoiceInputEvent, VoiceInputFrame,
     VoiceInputRuntime, INPUT_FRAME_SAMPLES,
+};
+use berd_voice::openai_spokesperson::{
+    OpenAiSpokespersonConfig, OpenAiSpokespersonRuntime, SpokespersonCommand, SpokespersonEvent,
 };
 use berd_voice::protocol::{
     CancelOutcome, InputDuringTtsOutcome, NotAdmittedReason, OutputReadyOutcome, SessionMessage,
@@ -30,8 +38,9 @@ use berd_voice::{
         LocalAssetLockError, LocalAssetRoots, LocalInstallError, LocalInstallErrorKind,
         LocalInstallPhase, LocalInstallProgress,
     },
-    ConfiguredTtsSlot, DeliveryProgress, TtsBackend, TtsConfiguration, TtsConfigurationLease,
-    TtsConfigurationRejection, TtsConfigurationRejectionKind, WavSynthesisErrorKind,
+    ConfiguredTtsSlot, DeliveryProgress, PcmAudioOutput, TtsBackend, TtsConfiguration,
+    TtsConfigurationLease, TtsConfigurationRejection, TtsConfigurationRejectionKind, TtsPcmSpec,
+    TtsSettings, WavSynthesisErrorKind,
 };
 use serde::Serialize;
 
@@ -140,6 +149,14 @@ enum SttBackendConfig {
 struct SessionConfig {
     tts: TtsBackendConfig,
     stt: SttBackendConfig,
+    mode: SessionMode,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum SessionMode {
+    #[default]
+    Conventional,
+    ExpertSpokesperson,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -429,7 +446,13 @@ fn main() {
             let pcm_output_fd =
                 parse_pcm_output_fd(&args).unwrap_or_else(|error| usage_error(&error));
             let config = parse_args(&args).unwrap_or_else(|error| usage_error(&error));
-            if let Err(error) = run_session(config, pcm_output_fd) {
+            let result = match config.mode {
+                SessionMode::Conventional => run_session(config, pcm_output_fd),
+                SessionMode::ExpertSpokesperson => {
+                    run_expert_spokesperson_session(config, pcm_output_fd)
+                }
+            };
+            if let Err(error) = result {
                 eprintln!("berd-voice session failed: {error}");
                 std::process::exit(1);
             }
@@ -499,7 +522,8 @@ fn usage_error(error: &str) -> ! {
     eprintln!(
         "usage:\n  berd-voice session --pcm-output-fd FD [--tts-backend siri|openai|pocket] \
          [--model-dir PATH] [--voice ID] [--language BCP47] [--rate FLOAT] \
-         [--stt-backend macos|parakeet|openai] [--stt-model-dir PATH]\n  \
+         [--stt-backend macos|parakeet|openai] [--stt-model-dir PATH] \
+         [--mode conventional|expert-spokesperson]\n  \
          berd-voice synthesize --tts-backend siri|openai|pocket --voice ID \
          [--language BCP47] [--model MODEL] [--model-dir ABSOLUTE_PATH] [--rate FLOAT] \
          [--allow-paid-openai] --text TEXT --output PATH\n  \
@@ -1777,6 +1801,726 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
     }
 }
 
+enum LivePlaybackInput {
+    Samples(Vec<f32>),
+    Finish,
+}
+
+struct LivePlayback {
+    response_id: String,
+    speech_id: u64,
+    prepare_id: Option<u64>,
+    output: Arc<RemotePcmAudioOutput>,
+    active: Arc<AtomicBool>,
+    sender: SyncSender<LivePlaybackInput>,
+}
+
+struct LiveResponse {
+    prepare_id: Option<u64>,
+    speech_id: Option<u64>,
+    transcript: Option<String>,
+    playback_complete: bool,
+}
+
+fn run_expert_spokesperson_session(
+    _config: SessionConfig,
+    pcm_output_fd: RawFd,
+) -> Result<(), String> {
+    let (control_tx, control_rx) = mpsc::channel();
+    let (pcm_tx, pcm_rx) = mpsc::sync_channel(INPUT_QUEUE_CAPACITY);
+    thread::spawn(move || read_framed_requests(io::stdin().lock(), control_tx, pcm_tx));
+    let audio_transport = Arc::new(unsafe { AudioPipeTransport::from_raw_fd(pcm_output_fd)? });
+    let (audio_control_tx, audio_control_rx) = mpsc::channel();
+    let (playback_tx, playback_rx) = mpsc::channel::<Result<(String, u64), (String, String)>>();
+    let stdout = io::stdout();
+    let mut writer = BufWriter::new(stdout.lock());
+    let mut core = ExpertSpokespersonCore::default();
+    let mut runtime: Option<OpenAiSpokespersonRuntime> = None;
+    let mut runtime_events: Option<Receiver<SpokespersonEvent>> = None;
+    let mut initialized = false;
+    let mut pending_control = None;
+    let mut processed_pcm = 0_u64;
+    let mut next_live_token = 1_u64;
+    let mut emitted_live_token = 0_u64;
+    let mut next_speech_id = 1_u64;
+    let mut directive_speeches = HashMap::<u64, (u64, u64)>::new();
+    let mut responses = HashMap::<String, LiveResponse>::new();
+    let mut active: Option<LivePlayback> = None;
+
+    loop {
+        if let Some(events) = runtime_events.as_ref() {
+            while let Ok(event) = events.try_recv() {
+                match event {
+                    SpokespersonEvent::Ready => {}
+                    SpokespersonEvent::UserSpeaking(speaking) => {
+                        write_message(
+                            &mut writer,
+                            &SessionMessage::InputSpeaking { active: speaking },
+                        )?;
+                        if speaking {
+                            cancel_live_playback(&mut active);
+                        }
+                    }
+                    SpokespersonEvent::UserFinal(text) => {
+                        core.add_live_event(
+                            next_live_token,
+                            LiveSideEvent::UserTranscript { text },
+                        )
+                        .map_err(|error| format!("invalid live event token: {error:?}"))?;
+                        next_live_token += 1;
+                    }
+                    SpokespersonEvent::ResponseBound {
+                        response_id,
+                        directive_id,
+                    } => {
+                        let (prepare_id, speech_id) =
+                            directive_speeches.remove(&directive_id).ok_or_else(|| {
+                                "Spokesperson bound an unknown Expert directive".to_string()
+                            })?;
+                        responses.entry(response_id).or_insert(LiveResponse {
+                            prepare_id: Some(prepare_id),
+                            speech_id: Some(speech_id),
+                            transcript: None,
+                            playback_complete: false,
+                        });
+                    }
+                    SpokespersonEvent::AudioDelta {
+                        response_id,
+                        samples,
+                    } => {
+                        if active
+                            .as_ref()
+                            .is_none_or(|item| item.response_id != response_id)
+                        {
+                            if active.is_some() {
+                                return Err(
+                                    "Spokesperson produced overlapping audio responses".into()
+                                );
+                            }
+                            let response =
+                                responses
+                                    .entry(response_id.clone())
+                                    .or_insert(LiveResponse {
+                                        prepare_id: None,
+                                        speech_id: None,
+                                        transcript: None,
+                                        playback_complete: false,
+                                    });
+                            let speech_id = response.speech_id.unwrap_or_else(|| {
+                                let id = next_speech_id;
+                                next_speech_id += 1;
+                                response.speech_id = Some(id);
+                                id
+                            });
+                            if response.prepare_id.is_none() {
+                                write_message(
+                                    &mut writer,
+                                    &SessionMessage::SpokespersonSpeech { speech_id },
+                                )?;
+                            }
+                            active = Some(spawn_live_playback(
+                                response_id.clone(),
+                                speech_id,
+                                response.prepare_id,
+                                Arc::clone(&audio_transport),
+                                audio_control_tx.clone(),
+                                playback_tx.clone(),
+                            )?);
+                        }
+                        active
+                            .as_ref()
+                            .expect("audio delta creates playback")
+                            .sender
+                            .send(LivePlaybackInput::Samples(samples))
+                            .map_err(|_| "Spokesperson playback worker closed".to_string())?;
+                    }
+                    SpokespersonEvent::AudioDone { response_id } => {
+                        if let Some(playback) = active
+                            .as_ref()
+                            .filter(|item| item.response_id == response_id)
+                        {
+                            playback
+                                .sender
+                                .send(LivePlaybackInput::Finish)
+                                .map_err(|_| "Spokesperson playback worker closed".to_string())?;
+                        }
+                    }
+                    SpokespersonEvent::TranscriptDone { response_id, text } => {
+                        responses
+                            .entry(response_id.clone())
+                            .or_insert(LiveResponse {
+                                prepare_id: None,
+                                speech_id: None,
+                                transcript: None,
+                                playback_complete: false,
+                            })
+                            .transcript = Some(text);
+                        publish_live_response_if_complete(
+                            &response_id,
+                            &mut responses,
+                            &mut core,
+                            &mut next_live_token,
+                            &mut emitted_live_token,
+                            &mut writer,
+                        )?;
+                    }
+                    SpokespersonEvent::Handoff { call_id, message } => {
+                        core.add_live_event(
+                            next_live_token,
+                            LiveSideEvent::Handoff { call_id, message },
+                        )
+                        .map_err(|error| format!("invalid live event token: {error:?}"))?;
+                        next_live_token += 1;
+                        emit_live_events(&core, &mut emitted_live_token, &mut writer)?;
+                    }
+                    SpokespersonEvent::Failed(message) => {
+                        write_protocol_fatal(&mut writer, "Spokesperson failed", &message)?;
+                        cancel_live_playback(&mut active);
+                        return Ok(());
+                    }
+                    SpokespersonEvent::Closed => {
+                        if initialized {
+                            return Err("Spokesperson runtime closed unexpectedly".into());
+                        }
+                    }
+                }
+            }
+        }
+        while let Ok(request) = audio_control_rx.try_recv() {
+            let Some(playback) = active.as_ref() else {
+                return Err("Spokesperson audio control had no active playback".into());
+            };
+            match request {
+                AudioOutputControlRequest::Suspend { speech_id } => {
+                    write_message(&mut writer, &SessionMessage::AudioSuspend { speech_id })?
+                }
+                AudioOutputControlRequest::Resume { speech_id } => {
+                    write_message(&mut writer, &SessionMessage::AudioResume { speech_id })?
+                }
+            }
+            let _ = playback;
+        }
+        while let Ok(result) = playback_rx.try_recv() {
+            match result {
+                Ok((response_id, speech_id)) => {
+                    let playback = active.take().ok_or_else(|| {
+                        "completed Spokesperson playback was not active".to_string()
+                    })?;
+                    if playback.speech_id != speech_id || playback.response_id != response_id {
+                        return Err(
+                            "Spokesperson playback completion did not match active output".into(),
+                        );
+                    }
+                    let response = responses
+                        .get_mut(&response_id)
+                        .ok_or_else(|| "Spokesperson playback had no response state".to_string())?;
+                    response.playback_complete = true;
+                    if let Some(prepare_id) = response.prepare_id {
+                        write_message(
+                            &mut writer,
+                            &SessionMessage::SpeechCompleted {
+                                id: prepare_id,
+                                speech_id,
+                            },
+                        )?;
+                    }
+                    publish_live_response_if_complete(
+                        &response_id,
+                        &mut responses,
+                        &mut core,
+                        &mut next_live_token,
+                        &mut emitted_live_token,
+                        &mut writer,
+                    )?;
+                }
+                Err((response_id, message)) => {
+                    let playback = active.take();
+                    if let Some(prepare_id) = playback.as_ref().and_then(|item| item.prepare_id) {
+                        write_message(
+                            &mut writer,
+                            &SessionMessage::SpeechFailed {
+                                id: prepare_id,
+                                speech_id: playback.as_ref().expect("playback exists").speech_id,
+                                message: message.clone(),
+                            },
+                        )?;
+                    }
+                    return Err(format!(
+                        "Spokesperson playback {response_id} failed: {message}"
+                    ));
+                }
+            }
+        }
+
+        let Some(input) = receive_session_input(
+            &control_rx,
+            &pcm_rx,
+            &mut pending_control,
+            &mut processed_pcm,
+        ) else {
+            continue;
+        };
+        match input {
+            Input::Invalid(message) => {
+                write_protocol_fatal(&mut writer, "invalid session input", &message)?;
+                break;
+            }
+            Input::Eof | Input::Request(SessionRequest::Shutdown) => break,
+            Input::Pcm(_) if !initialized => {
+                write_protocol_fatal(
+                    &mut writer,
+                    "invalid session input",
+                    "PCM input requires an initialized session",
+                )?;
+                break;
+            }
+            Input::Pcm(frame) => runtime.as_ref().expect("initialized runtime").send(
+                SpokespersonCommand::InputPcm48Khz(frame.as_samples().to_vec()),
+            )?,
+            Input::Request(SessionRequest::Hello {
+                id,
+                input_during_tts,
+            }) => {
+                if initialized {
+                    write_protocol_fatal(
+                        &mut writer,
+                        "invalid hello",
+                        "hello may only be sent once",
+                    )?;
+                    break;
+                }
+                let config = OpenAiSpokespersonConfig::from_environment()?;
+                let snapshot = VoiceSessionSnapshot {
+                    tts: berd_voice::TtsConfigurationSnapshot {
+                        revision: 1,
+                        settings: TtsSettings::OpenAi {
+                            model: config.model.clone(),
+                            voice: config.voice.clone(),
+                            rate: config.speed,
+                        },
+                    },
+                    input_during_tts: InputDuringTtsSnapshot {
+                        revision: 1,
+                        policy: input_during_tts,
+                    },
+                };
+                let (created, events) = OpenAiSpokespersonRuntime::spawn(config)?;
+                match events.recv_timeout(Duration::from_secs(30)) {
+                    Ok(SpokespersonEvent::Ready) => {}
+                    Ok(SpokespersonEvent::Failed(message)) => return Err(message),
+                    Ok(_) => return Err("Spokesperson emitted an event before readiness".into()),
+                    Err(_) => return Err("Spokesperson startup timed out".into()),
+                }
+                runtime = Some(created);
+                runtime_events = Some(events);
+                initialized = true;
+                write_message(
+                    &mut writer,
+                    &SessionMessage::Ready {
+                        id,
+                        protocol: WIRE_MARKER,
+                        session: snapshot,
+                    },
+                )?;
+            }
+            Input::Request(_) if !initialized => {
+                write_protocol_fatal(
+                    &mut writer,
+                    "invalid session input",
+                    "hello must be the first request",
+                )?;
+                break;
+            }
+            Input::Request(SessionRequest::PrepareSpeak {
+                id,
+                acknowledgement,
+                text,
+            }) => {
+                match core.prepare_directive(ExpertDirective {
+                    acknowledgement,
+                    mode: ExpertDirectiveMode::Say,
+                    message: text,
+                }) {
+                    ExpertDirectiveOutcome::Pending(events) => {
+                        write_message(
+                            &mut writer,
+                            &SessionMessage::Pending {
+                                id,
+                                utterances: events.into_iter().map(pending_live_event).collect(),
+                            },
+                        )?;
+                    }
+                    ExpertDirectiveOutcome::Rejected(_) => {
+                        write_message(
+                            &mut writer,
+                            &SessionMessage::NotAdmitted {
+                                id,
+                                reason: NotAdmittedReason::EmptyText,
+                            },
+                        )?;
+                    }
+                    ExpertDirectiveOutcome::Accepted {
+                        confirmed_token,
+                        message,
+                        ..
+                    } => {
+                        let speech_id = next_speech_id;
+                        next_speech_id += 1;
+                        directive_speeches.insert(id, (id, speech_id));
+                        runtime.as_ref().expect("initialized runtime").send(
+                            SpokespersonCommand::ExpertSay {
+                                directive_id: id,
+                                text: message,
+                            },
+                        )?;
+                        write_message(
+                            &mut writer,
+                            &SessionMessage::Admitted {
+                                id,
+                                speech_id,
+                                confirmed_token,
+                            },
+                        )?;
+                    }
+                }
+            }
+            Input::Request(SessionRequest::OutputReady { id, speech_id }) => {
+                let valid = directive_speeches
+                    .get(&id)
+                    .is_some_and(|(_, expected)| *expected == speech_id)
+                    || responses.values().any(|response| {
+                        response.prepare_id == Some(id) && response.speech_id == Some(speech_id)
+                    });
+                write_message(
+                    &mut writer,
+                    &SessionMessage::OutputReadyResult {
+                        id,
+                        speech_id,
+                        outcome: if valid {
+                            OutputReadyOutcome::Accepted
+                        } else {
+                            OutputReadyOutcome::Stale
+                        },
+                    },
+                )?;
+            }
+            Input::Request(SessionRequest::QueryState { id, after }) => {
+                write_message(
+                    &mut writer,
+                    &SessionMessage::State {
+                        id,
+                        confirmed_token: core.confirmed_token(),
+                        utterances_after: core
+                            .events_after(after)
+                            .into_iter()
+                            .map(pending_live_event)
+                            .collect(),
+                    },
+                )?;
+            }
+            Input::Request(SessionRequest::AudioBeginAccepted { speech_id }) => {
+                handle_live_audio_ack(speech_id, AudioHostAck::BeginAccepted, active.as_ref())?;
+            }
+            Input::Request(SessionRequest::AudioChunkAccepted {
+                speech_id,
+                sequence,
+            }) => {
+                let started = handle_live_audio_ack(
+                    speech_id,
+                    AudioHostAck::ChunkAccepted { sequence },
+                    active.as_ref(),
+                )?;
+                if started {
+                    if let Some(prepare_id) = active.as_ref().and_then(|item| item.prepare_id) {
+                        write_message(
+                            &mut writer,
+                            &SessionMessage::SpeechStarted {
+                                id: prepare_id,
+                                speech_id,
+                            },
+                        )?;
+                    }
+                }
+            }
+            Input::Request(SessionRequest::AudioPlayed {
+                speech_id,
+                played_frames,
+            }) => {
+                handle_live_audio_ack(
+                    speech_id,
+                    AudioHostAck::Played { played_frames },
+                    active.as_ref(),
+                )?;
+            }
+            Input::Request(SessionRequest::AudioDrained {
+                speech_id,
+                sequence,
+                played_frames,
+            }) => {
+                handle_live_audio_ack(
+                    speech_id,
+                    AudioHostAck::Drained {
+                        sequence,
+                        played_frames,
+                    },
+                    active.as_ref(),
+                )?;
+            }
+            Input::Request(SessionRequest::AudioCancelled {
+                speech_id,
+                played_frames,
+            }) => {
+                handle_live_audio_ack(
+                    speech_id,
+                    AudioHostAck::Cancelled { played_frames },
+                    active.as_ref(),
+                )?;
+            }
+            Input::Request(SessionRequest::AudioFailed {
+                speech_id,
+                played_frames,
+                message,
+            }) => {
+                handle_live_audio_ack(
+                    speech_id,
+                    AudioHostAck::Failed {
+                        played_frames,
+                        message,
+                    },
+                    active.as_ref(),
+                )?;
+            }
+            Input::Request(SessionRequest::AudioBeginFailed {
+                speech_id,
+                played_frames,
+                message,
+            }) => {
+                handle_live_audio_ack(
+                    speech_id,
+                    AudioHostAck::BeginFailed {
+                        played_frames,
+                        message,
+                    },
+                    active.as_ref(),
+                )?;
+            }
+            Input::Request(SessionRequest::AudioSuspended {
+                speech_id,
+                played_frames,
+            }) => {
+                handle_live_audio_ack(
+                    speech_id,
+                    AudioHostAck::Suspended { played_frames },
+                    active.as_ref(),
+                )?;
+            }
+            Input::Request(SessionRequest::AudioResumed {
+                speech_id,
+                played_frames,
+            }) => {
+                handle_live_audio_ack(
+                    speech_id,
+                    AudioHostAck::Resumed { played_frames },
+                    active.as_ref(),
+                )?;
+            }
+            Input::Request(SessionRequest::Cancel { id }) => {
+                let outcome = if active
+                    .as_ref()
+                    .is_some_and(|item| item.prepare_id == Some(id))
+                {
+                    cancel_live_playback(&mut active);
+                    CancelOutcome::Cancelled
+                } else {
+                    CancelOutcome::Stale
+                };
+                write_message(
+                    &mut writer,
+                    &SessionMessage::CancelResult {
+                        id,
+                        outcome,
+                        speech_id: None,
+                    },
+                )?;
+            }
+            Input::Request(
+                SessionRequest::SetPaused { .. }
+                | SessionRequest::SetInputMuted { .. }
+                | SessionRequest::SetTtsSettings { .. }
+                | SessionRequest::SetInputDuringTts { .. }
+                | SessionRequest::ResetInput { .. },
+            ) => {
+                write_protocol_fatal(
+                    &mut writer,
+                    "unsupported request",
+                    "live settings are not yet available in Expert-Spokesperson mode",
+                )?;
+                break;
+            }
+        }
+    }
+    cancel_live_playback(&mut active);
+    if let Some(runtime) = runtime {
+        runtime.finish()?;
+    }
+    Ok(())
+}
+
+fn spawn_live_playback(
+    response_id: String,
+    speech_id: u64,
+    prepare_id: Option<u64>,
+    transport: Arc<AudioPipeTransport>,
+    control: mpsc::Sender<AudioOutputControlRequest>,
+    completed: mpsc::Sender<Result<(String, u64), (String, String)>>,
+) -> Result<LivePlayback, String> {
+    let active = Arc::new(AtomicBool::new(true));
+    let output = Arc::new(RemotePcmAudioOutput::new(
+        speech_id,
+        TtsPcmSpec {
+            sample_rate: 24_000,
+            playback_rate: 1.0,
+        },
+        transport,
+        Arc::clone(&active),
+        control,
+    )?);
+    let (sender, receiver) = mpsc::sync_channel::<LivePlaybackInput>(64);
+    let worker_output = Arc::clone(&output);
+    let worker_response_id = response_id.clone();
+    thread::spawn(move || {
+        let result = (|| {
+            worker_output.start()?;
+            while let Ok(input) = receiver.recv() {
+                match input {
+                    LivePlaybackInput::Samples(samples) => worker_output.write(&samples)?,
+                    LivePlaybackInput::Finish => {
+                        worker_output.finish_writes()?;
+                        let deadline = Instant::now() + Duration::from_secs(3);
+                        while !worker_output.is_drained() {
+                            worker_output.check_health()?;
+                            if Instant::now() >= deadline {
+                                return Err("Spokesperson playback drain timed out".to_string());
+                            }
+                            thread::sleep(Duration::from_millis(5));
+                        }
+                        return Ok((worker_response_id.clone(), speech_id));
+                    }
+                }
+            }
+            Err("Spokesperson playback input closed before completion".to_string())
+        })();
+        let _ = completed.send(result.map_err(|message| (worker_response_id, message)));
+    });
+    Ok(LivePlayback {
+        response_id,
+        speech_id,
+        prepare_id,
+        output,
+        active,
+        sender,
+    })
+}
+
+fn cancel_live_playback(active: &mut Option<LivePlayback>) {
+    if let Some(playback) = active.take() {
+        playback.active.store(false, Ordering::SeqCst);
+        playback.output.notify_cancel_requested();
+    }
+}
+
+fn handle_live_audio_ack(
+    speech_id: u64,
+    ack: AudioHostAck,
+    active: Option<&LivePlayback>,
+) -> Result<bool, String> {
+    let playback = active
+        .filter(|item| item.speech_id == speech_id)
+        .ok_or_else(|| "audio acknowledgement does not match Spokesperson playback".to_string())?;
+    playback.output.handle_ack(ack)
+}
+
+fn pending_live_event(
+    event: berd_voice::causal_inbox::CausalMessage<LiveSideEvent>,
+) -> berd_voice::protocol::PendingUtterance {
+    berd_voice::protocol::PendingUtterance {
+        token: event.token,
+        text: render_live_event(&event.payload),
+    }
+}
+
+fn render_live_event(event: &LiveSideEvent) -> String {
+    match event {
+        LiveSideEvent::UserTranscript { text } => format!("[Voice transcript] User said: {text}"),
+        LiveSideEvent::SpokespersonTranscript {
+            text,
+            interrupted: false,
+        } => {
+            format!("[Voice transcript] Spokesperson said: {text}")
+        }
+        LiveSideEvent::SpokespersonTranscript {
+            text,
+            interrupted: true,
+        } => {
+            format!("[Voice transcript] Spokesperson said (interrupted; best effort): {text}")
+        }
+        LiveSideEvent::Handoff { call_id, message } => {
+            format!("[Handoff {call_id} from spokesperson] {message}")
+        }
+    }
+}
+
+fn emit_live_events(
+    core: &ExpertSpokespersonCore,
+    emitted_token: &mut u64,
+    writer: &mut impl Write,
+) -> Result<(), String> {
+    for event in core.events_after(*emitted_token) {
+        write_message(
+            writer,
+            &SessionMessage::UserFinal {
+                token: event.token,
+                text: render_live_event(&event.payload),
+            },
+        )?;
+        *emitted_token = event.token;
+    }
+    Ok(())
+}
+
+fn publish_live_response_if_complete(
+    response_id: &str,
+    responses: &mut HashMap<String, LiveResponse>,
+    core: &mut ExpertSpokespersonCore,
+    next_live_token: &mut u64,
+    emitted_live_token: &mut u64,
+    writer: &mut impl Write,
+) -> Result<(), String> {
+    let ready = responses.get(response_id).is_some_and(|response| {
+        response.playback_complete
+            && response
+                .transcript
+                .as_ref()
+                .is_some_and(|text| !text.is_empty())
+    });
+    if !ready {
+        return Ok(());
+    }
+    let response = responses
+        .remove(response_id)
+        .expect("ready response exists");
+    core.add_live_event(
+        *next_live_token,
+        LiveSideEvent::SpokespersonTranscript {
+            text: response.transcript.expect("ready response has transcript"),
+            interrupted: false,
+        },
+    )
+    .map_err(|error| format!("invalid live event token: {error:?}"))?;
+    *next_live_token += 1;
+    emit_live_events(core, emitted_live_token, writer)
+}
+
 fn acknowledge_output_ready(
     current: &mut ActivePlayback,
     input_controls: Option<&VoiceInputControls>,
@@ -1874,6 +2618,7 @@ fn parse_args(args: &[String]) -> Result<SessionConfig, String> {
     let mut rate = None;
     let mut stt_backend = "macos";
     let mut stt_model_dir = None;
+    let mut mode = SessionMode::Conventional;
     let mut index = 2;
     while index < args.len() {
         let flag = args[index].as_str();
@@ -1894,6 +2639,13 @@ fn parse_args(args: &[String]) -> Result<SessionConfig, String> {
             }
             "--stt-backend" => stt_backend = value,
             "--stt-model-dir" => stt_model_dir = Some(PathBuf::from(value)),
+            "--mode" => {
+                mode = match value.as_str() {
+                    "conventional" => SessionMode::Conventional,
+                    "expert-spokesperson" => SessionMode::ExpertSpokesperson,
+                    _ => return Err("--mode must be conventional or expert-spokesperson".into()),
+                }
+            }
             "--pcm-output-fd" => {}
             _ => return Err(format!("unknown argument: {flag}")),
         }
@@ -1901,7 +2653,7 @@ fn parse_args(args: &[String]) -> Result<SessionConfig, String> {
     }
     let tts = build_tts_backend_config(backend, voice, language, model_dir, rate)?;
     let stt = build_stt_backend_config(stt_backend, stt_model_dir)?;
-    Ok(SessionConfig { tts, stt })
+    Ok(SessionConfig { tts, stt, mode })
 }
 
 fn parse_pcm_output_fd(args: &[String]) -> Result<RawFd, String> {
@@ -5117,6 +5869,7 @@ mod tests {
                     rate: 1.0,
                 },
                 stt: SttBackendConfig::Macos,
+                mode: SessionMode::Conventional,
             }
         );
 
@@ -5125,6 +5878,7 @@ mod tests {
             SessionConfig {
                 tts: TtsBackendConfig::OpenAi { rate: 1.0 },
                 stt: SttBackendConfig::Macos,
+                mode: SessionMode::Conventional,
             }
         );
     }
@@ -5199,6 +5953,7 @@ mod tests {
                     rate: 1.0,
                 },
                 stt: SttBackendConfig::Macos,
+                mode: SessionMode::Conventional,
             }
         );
         assert!(parse_args(&args(&[
@@ -5264,6 +6019,7 @@ mod tests {
                     rate: 1.0,
                 },
                 stt: SttBackendConfig::Macos,
+                mode: SessionMode::Conventional,
             }
         );
         assert!(parse_args(&args(&[
@@ -5322,7 +6078,8 @@ mod tests {
                 tts: TtsBackendConfig::OpenAi { rate: 1.0 },
                 stt: SttBackendConfig::Parakeet {
                     model_dir: PathBuf::from("/models/parakeet")
-                }
+                },
+                mode: SessionMode::Conventional,
             }
         );
         assert!(parse_args(&args(&[
@@ -5764,7 +6521,8 @@ mod tests {
                     language: "en-US".into(),
                     rate: 1.0
                 },
-                stt: SttBackendConfig::OpenAi
+                stt: SttBackendConfig::OpenAi,
+                mode: SessionMode::Conventional,
             }
         );
     }
