@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   getRealtimeVoicePreference,
-  parseRealtimeSessionOverrides,
   setRealtimeVoicePreference,
 } from "./realtimeVoicePreference";
 
@@ -32,7 +31,6 @@ describe("realtime voice preferences", () => {
       presentationMode: "subtle" as const,
       turnDetection: "semantic_vad" as const,
       eagerness: "high" as const,
-      sessionOverridesText: '{"audio":{"input":{"turn_detection":null}}}',
     };
     setRealtimeVoicePreference(preference);
     expect(getRealtimeVoicePreference()).toBe(preference);
@@ -48,12 +46,5 @@ describe("realtime voice preferences", () => {
     );
 
     expect(getRealtimeVoicePreference().speed).toBe(1);
-  });
-
-  it("accepts only JSON objects as advanced session overrides", () => {
-    expect(parseRealtimeSessionOverrides('{"max_output_tokens":128}')).toEqual({
-      max_output_tokens: 128,
-    });
-    expect(() => parseRealtimeSessionOverrides("[]")).toThrow("JSON object");
   });
 });

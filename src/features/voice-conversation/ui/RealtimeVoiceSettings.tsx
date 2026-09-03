@@ -25,7 +25,6 @@ import { Slider } from "@/shared/ui/slider";
 import { Switch } from "@/shared/ui/switch";
 import { Textarea } from "@/shared/ui/textarea";
 import {
-  parseRealtimeSessionOverrides,
   type RealtimeEagerness,
   type RealtimeNoiseReduction,
   type RealtimePresentationMode,
@@ -618,33 +617,6 @@ export function RealtimeVoiceSettings() {
             />
             <p className="text-xs text-muted-foreground">
               {t("voice.realtimeTranscriptionPromptDescription")}
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="openai-realtime-overrides">
-              {t("voice.realtimeAdvancedOptions")}
-            </Label>
-            <Textarea
-              id="openai-realtime-overrides"
-              className="min-h-40 font-mono text-xs"
-              value={preference.sessionOverridesText}
-              aria-invalid={(() => {
-                try {
-                  parseRealtimeSessionOverrides(
-                    preference.sessionOverridesText,
-                  );
-                  return undefined;
-                } catch {
-                  return true;
-                }
-              })()}
-              onChange={(event) =>
-                update({ sessionOverridesText: event.target.value })
-              }
-            />
-            <p className="text-xs text-muted-foreground">
-              {t("voice.realtimeAdvancedOptionsDescription")}
             </p>
           </div>
         </CollapsibleContent>

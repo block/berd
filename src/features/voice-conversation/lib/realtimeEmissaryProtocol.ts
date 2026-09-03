@@ -55,27 +55,7 @@ export interface RealtimeEmissarySessionOptions {
   noiseReduction?: "off" | "near_field" | "far_field";
   reasoningEffort?: "default" | "none" | "low" | "medium" | "high";
   maxOutputTokens?: number | null;
-  /**
-   * Additional Realtime session fields. This deliberately remains an
-   * extensible JSON object so new API options do not require transport or
-   * protocol changes before Settings can expose them.
-   */
-  sessionOverrides?: RealtimeSessionOverrides;
 }
-
-export type RealtimeJsonValue =
-  | boolean
-  | number
-  | string
-  | null
-  | RealtimeJsonValue[]
-  | RealtimeJsonObject;
-
-export type RealtimeJsonObject = {
-  [key: string]: RealtimeJsonValue | undefined;
-};
-
-export type RealtimeSessionOverrides = RealtimeJsonObject;
 
 export type FinalizedRealtimeTranscript = {
   type: "transcript.finalized";
@@ -142,13 +122,6 @@ type PendingEmissaryTranscript = {
 export function createRealtimeEmissarySessionUpdate(
   options: RealtimeEmissarySessionOptions = {},
 ): RealtimeServerEvent {
-  const overrides = options.sessionOverrides ?? {};
-  assertSafeSessionOverrides(overrides);
-  const additionalTools = overrides.tools ?? [];
-  const mergeableOverrides = { ...overrides };
-  delete mergeableOverrides.instructions;
-  delete mergeableOverrides.tools;
-
   const additionalInstructions = options.additionalInstructions?.trim();
   const transcriptionLanguage = options.transcriptionLanguage?.trim();
   const transcriptionPrompt = options.transcriptionPrompt?.trim();
@@ -224,14 +197,13 @@ export function createRealtimeEmissarySessionUpdate(
           additionalProperties: false,
         },
       },
-      ...(additionalTools as RealtimeJsonValue[]),
     ],
     tool_choice: "auto",
-  } satisfies RealtimeSessionOverrides;
+  };
 
   return {
     type: "session.update",
-    session: mergeRealtimeJson(defaults, mergeableOverrides),
+    session: defaults,
   };
 }
 
@@ -980,46 +952,4 @@ function realtimeErrorMessage(event: RealtimeServerEvent): string {
     optionalString(event.message) ??
     "OpenAI Realtime reported an unknown error"
   );
-}
-
-function assertSafeSessionOverrides(overrides: RealtimeSessionOverrides): void {
-  if (overrides.instructions !== undefined) {
-    throw new Error(
-      "sessionOverrides cannot replace the Spokesperson instructions contract; use additionalInstructions",
-    );
-  }
-  if (overrides.type !== undefined && overrides.type !== "realtime") {
-    throw new Error("Spokesperson session type must remain realtime");
-  }
-  if (overrides.tool_choice !== undefined && overrides.tool_choice !== "auto") {
-    throw new Error("Spokesperson handoff tool choice must remain auto");
-  }
-  if (overrides.tools === undefined) return;
-  if (!Array.isArray(overrides.tools)) {
-    throw new Error("sessionOverrides.tools must be an array");
-  }
-  for (const tool of overrides.tools) {
-    if (isRecord(tool) && optionalString(tool.name) === HANDOFF_TOOL_NAME) {
-      throw new Error("sessionOverrides cannot replace the handoff tool");
-    }
-  }
-}
-
-function mergeRealtimeJson(
-  base: RealtimeSessionOverrides,
-  overrides: RealtimeSessionOverrides,
-): RealtimeSessionOverrides {
-  const merged: RealtimeSessionOverrides = { ...base };
-  for (const [key, value] of Object.entries(overrides)) {
-    if (value === undefined) continue;
-    const current = merged[key];
-    merged[key] =
-      isRecord(current) && isRecord(value)
-        ? mergeRealtimeJson(
-            current as RealtimeSessionOverrides,
-            value as RealtimeSessionOverrides,
-          )
-        : value;
-  }
-  return merged;
 }

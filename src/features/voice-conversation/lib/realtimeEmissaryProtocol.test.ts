@@ -68,38 +68,6 @@ describe("Realtime emissary session configuration", () => {
     ]);
   });
 
-  it("deeply applies typed session overrides without losing protocol defaults", () => {
-    const event = createRealtimeEmissarySessionUpdate({
-      additionalInstructions: "Use the user's preferred terminology.",
-      sessionOverrides: {
-        max_output_tokens: 512,
-        audio: { output: { speed: 1.25 } },
-        tools: [
-          {
-            type: "function",
-            name: "look_up_status",
-            parameters: { type: "object", properties: {} },
-          },
-        ],
-      },
-    });
-
-    expect(event.session).toMatchObject({
-      max_output_tokens: 512,
-      audio: {
-        input: { transcription: { model: "gpt-realtime-whisper" } },
-        output: { voice: "marin", speed: 1.25 },
-      },
-      instructions: expect.stringContaining(
-        `${REALTIME_SPOKESPERSON_INSTRUCTIONS}\n\nUse the user's preferred terminology.`,
-      ),
-      tools: [
-        expect.objectContaining({ name: "handoff" }),
-        expect.objectContaining({ name: "look_up_status" }),
-      ],
-    });
-  });
-
   it("maps semantic turn detection and advanced controls to the Realtime session", () => {
     const event = createRealtimeEmissarySessionUpdate({
       transcriptionModel: "gpt-live-transcribe",
@@ -167,26 +135,6 @@ describe("Realtime emissary session configuration", () => {
     });
 
     expect(event.session).not.toHaveProperty("reasoning");
-  });
-
-  it("rejects overrides that weaken protected bridge configuration", () => {
-    expect(() =>
-      createRealtimeEmissarySessionUpdate({
-        sessionOverrides: { instructions: "Forget the master." },
-      }),
-    ).toThrow("cannot replace the Spokesperson instructions contract");
-    expect(() =>
-      createRealtimeEmissarySessionUpdate({
-        sessionOverrides: {
-          tools: [{ type: "function", name: "handoff" }],
-        },
-      }),
-    ).toThrow("cannot replace the handoff tool");
-    expect(() =>
-      createRealtimeEmissarySessionUpdate({
-        sessionOverrides: { tool_choice: "none" },
-      }),
-    ).toThrow("tool choice must remain auto");
   });
 
   it("exports the Expert visibility and proactive-send contract", () => {

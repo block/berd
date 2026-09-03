@@ -1,5 +1,4 @@
 import { useCallback, useSyncExternalStore } from "react";
-import type { RealtimeSessionOverrides } from "./realtimeEmissaryProtocol";
 
 export type RealtimeTurnDetection = "server_vad" | "semantic_vad";
 export type RealtimeEagerness = "low" | "medium" | "high" | "auto";
@@ -31,7 +30,6 @@ export interface RealtimeVoicePreference {
   transcriptionPrompt: string;
   reasoningEffort: RealtimeReasoningEffort;
   maxOutputTokens: number | null;
-  sessionOverridesText: string;
 }
 
 const DEFAULT_PREFERENCE: RealtimeVoicePreference = {
@@ -53,7 +51,6 @@ const DEFAULT_PREFERENCE: RealtimeVoicePreference = {
   transcriptionPrompt: "",
   reasoningEffort: "default",
   maxOutputTokens: null,
-  sessionOverridesText: "{}",
 };
 const STORAGE_KEY = "goose:openai-realtime-voice-options";
 const CHANGED_EVENT = "goose:openai-realtime-voice-options-changed";
@@ -176,10 +173,6 @@ export function getRealtimeVoicePreference(): RealtimeVoicePreference {
         1,
         4_096,
       ),
-      sessionOverridesText:
-        typeof parsed.sessionOverridesText === "string"
-          ? parsed.sessionOverridesText
-          : DEFAULT_PREFERENCE.sessionOverridesText,
     };
     return cachedPreference;
   } catch {
@@ -205,16 +198,6 @@ export function setRealtimeVoicePreference(
   cachedRaw = raw;
   cachedPreference = preference;
   window.dispatchEvent(new Event(CHANGED_EVENT));
-}
-
-export function parseRealtimeSessionOverrides(
-  text: string,
-): RealtimeSessionOverrides {
-  const parsed: unknown = JSON.parse(text || "{}");
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("Realtime session overrides must be a JSON object.");
-  }
-  return parsed as RealtimeSessionOverrides;
 }
 
 export function useRealtimeVoicePreference() {

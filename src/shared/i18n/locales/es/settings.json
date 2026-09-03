@@ -937,8 +937,6 @@
     "modeChained": "STT y TTS encadenados",
     "modeOpenAiRealtime": "OpenAI Realtime",
     "realtimeAdvanced": "Avanzado",
-    "realtimeAdvancedOptions": "Opciones avanzadas de sesión",
-    "realtimeAdvancedOptionsDescription": "JSON que se combina con la configuración de Realtime. No puede reemplazar las instrucciones ni las herramientas protegidas del emisario.",
     "realtimeApiKey": "Clave API de OpenAI",
     "realtimeApiKeyConfigured": "Configurada en el llavero de macOS",
     "realtimeApiKeyDescription": "Se guarda en el llavero de macOS y nunca se devuelve al renderizador.",

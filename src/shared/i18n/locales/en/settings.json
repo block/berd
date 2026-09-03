@@ -938,8 +938,6 @@
     "modeChained": "Chained STT and TTS",
     "modeOpenAiRealtime": "OpenAI Realtime",
     "realtimeAdvanced": "Advanced",
-    "realtimeAdvancedOptions": "Advanced session options",
-    "realtimeAdvancedOptionsDescription": "JSON merged into the Realtime session configuration. Protected Spokesperson instructions and tools cannot be replaced.",
     "realtimeApiKey": "OpenAI API key",
     "realtimeApiKeyConfigured": "Configured in macOS Keychain",
     "realtimeApiKeyDescription": "Stored in macOS Keychain and never returned to the renderer.",

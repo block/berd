@@ -86,7 +86,6 @@ vi.mock("../lib/realtimeEmissaryBridge", () => ({
 vi.mock("../lib/realtimeVoicePreference", () => ({
   getRealtimeVoicePreference: () => ({
     model: "gpt-realtime-2.1",
-    sessionOverridesText: "{}",
     speed: 1,
     transcriptionModel: "gpt-realtime-whisper",
     voice: "marin",
@@ -104,7 +103,6 @@ vi.mock("../lib/realtimeVoicePreference", () => ({
     reasoningEffort: "default",
     maxOutputTokens: null,
   }),
-  parseRealtimeSessionOverrides: () => ({}),
 }));
 
 vi.mock("../lib/realtimeEmissaryProtocol", () => ({
@@ -455,7 +453,11 @@ describe("createRealtimeTranscriptReplayEvents", () => {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.activeEmissary = null;
-  useChatStore.setState({ messagesBySession: {}, sessionStateById: {} });
+  useChatStore.setState({
+    messagesBySession: {},
+    queuedMessageBySession: {},
+    sessionStateById: {},
+  });
   useChatSessionStore.setState({ sessions: [] });
   channel = new FakeDataChannel();
   realtimeControlListener = undefined;
@@ -555,6 +557,27 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     expect(mocks.createSession).toHaveBeenCalledOnce();
 
     await act(async () => owner.result.current.onToggle());
+  });
+
+  it("stops the active realtime call when its voice mode is disabled", async () => {
+    const onSend = vi.fn();
+    const owner = renderHook(
+      ({ enabled }) =>
+        useOpenAiRealtimeConversation({
+          enabled,
+          onSend,
+          sessionId: "session-a",
+        }),
+      { initialProps: { enabled: true } },
+    );
+
+    await act(async () => owner.result.current.onToggle());
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+
+    owner.rerender({ enabled: false });
+
+    await waitFor(() => expect(owner.result.current.state).toBe("off"));
+    expect(mocks.stopControls).toHaveBeenCalledWith("session-a", 7);
   });
 
   it("starts a promoted session from a deferred request for its client id", async () => {
@@ -891,6 +914,36 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     await act(async () => owner.result.current.onToggle());
   });
 
+  it("does not let realtime delivery overtake an accepted composer message", async () => {
+    const onSend = vi.fn().mockResolvedValue(true);
+    mocks.steerPrompt.mockResolvedValue(true);
+    const owner = renderConversation("session-a", onSend);
+    await act(async () => owner.result.current.onToggle());
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+    act(() => {
+      useChatStore.getState().setChatState("session-a", "thinking");
+      useChatStore.getState().setActiveRunId("session-a", "run-1");
+      useChatStore.getState().enqueueTransportReadyMessage("session-a", {
+        persona: { kind: "inherit" },
+        text: "accepted first",
+      });
+      channel.dispatchEvent(
+        new MessageEvent("message", {
+          data: JSON.stringify({ type: "test.emissary" }),
+        }),
+      );
+    });
+
+    await Promise.resolve();
+    expect(mocks.steerPrompt).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+
+    act(() => useChatStore.setState({ queuedMessageBySession: {} }));
+    await waitFor(() => expect(mocks.steerPrompt).toHaveBeenCalledOnce());
+
+    await act(async () => owner.result.current.onToggle());
+  });
+
   it("does not let a master message overtake a queued transcript steer", async () => {
     let acceptSteer: (() => void) | undefined;
     mocks.steerPrompt.mockImplementationOnce(
@@ -1057,6 +1110,36 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
         },
       },
     ]);
+
+    await act(async () => owner.result.current.onToggle());
+  });
+
+  it("keeps a handoff open when its resolving delivery fails", async () => {
+    const owner = renderConversation("session-a");
+    await act(async () => owner.result.current.onToggle());
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+
+    act(() => {
+      channel.dispatchEvent(
+        new MessageEvent("message", {
+          data: JSON.stringify({ type: "test.handoff" }),
+        }),
+      );
+    });
+    await waitFor(() => expect(mocks.activeEmissary).not.toBeNull());
+
+    mocks.sendRealtimeEvents.mockImplementationOnce(() => {
+      throw new DOMException("channel closed", "InvalidStateError");
+    });
+    await expect(
+      mocks.activeEmissary?.sendMasterMessage("First attempt", 1, "say", [
+        "handoff-1",
+      ]),
+    ).rejects.toThrow("channel closed");
+
+    await expect(
+      mocks.activeEmissary?.sendMasterMessage("Retry", 1, "say", ["handoff-1"]),
+    ).resolves.toMatchObject({ accepted: true });
 
     await act(async () => owner.result.current.onToggle());
   });

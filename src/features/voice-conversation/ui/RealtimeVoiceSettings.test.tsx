@@ -52,7 +52,7 @@ describe("RealtimeVoiceSettings", () => {
     ).toBeChecked();
   });
 
-  it("reveals advanced session controls without replacing raw overrides", async () => {
+  it("reveals the supported advanced session controls", async () => {
     const user = userEvent.setup();
     renderWithProviders(<RealtimeVoiceSettings />);
 
@@ -70,6 +70,5 @@ describe("RealtimeVoiceSettings", () => {
     expect(
       screen.getByRole("slider", { name: "Voice activation threshold" }),
     ).toBeInTheDocument();
-    expect(screen.getByLabelText("Advanced session options")).toHaveValue("{}");
   });
 });

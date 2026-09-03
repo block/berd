@@ -47,10 +47,7 @@ import {
   sendRealtimeEvents,
   configureRealtimeEmissarySession,
 } from "../lib/realtimeEmissaryProtocol";
-import {
-  getRealtimeVoicePreference,
-  parseRealtimeSessionOverrides,
-} from "../lib/realtimeVoicePreference";
+import { getRealtimeVoicePreference } from "../lib/realtimeVoicePreference";
 import {
   beginVoiceControlsVisibilityLease,
   observeVoiceConversationControlVisibility,
@@ -112,7 +109,9 @@ type MasterDeliveryOpportunity = "send" | "steer";
 function masterDeliveryOpportunity(
   sessionId: string,
 ): MasterDeliveryOpportunity | null {
-  const runtime = useChatStore.getState().getSessionRuntime(sessionId);
+  const state = useChatStore.getState();
+  if ((state.queuedMessageBySession[sessionId]?.length ?? 0) > 0) return null;
+  const runtime = state.getSessionRuntime(sessionId);
   if (runtime.isRunCancellationPending) return null;
   // A chat state can cross the run boundary before activeRunId catches up.
   // Only an actual run id is sufficient proof that ACP can accept a steer.
@@ -795,9 +794,6 @@ class OpenAiRealtimeConversationRuntime {
         noiseReduction: preference.noiseReduction,
         reasoningEffort: preference.reasoningEffort,
         maxOutputTokens: preference.maxOutputTokens,
-        sessionOverrides: parseRealtimeSessionOverrides(
-          preference.sessionOverridesText,
-        ),
       });
       this.typedUserMessageSink = forwardTypedUserMessage;
       for (const text of this.pendingTypedUserMessages.splice(0)) {
@@ -840,15 +836,15 @@ class OpenAiRealtimeConversationRuntime {
         }
         const exchange = pipe.send({ sender: "master", cursor, message });
         if (!exchange.accepted) return exchange;
-        for (const handoffId of resolvedHandoffIds) {
-          this.openHandoffs.delete(handoffId);
-        }
         const request = responses.requestMasterMessage({
           message: `[bridge cursor ${exchange.outbound.id}] ${message}`,
           mode,
           eventId: `berd-master-${exchange.outbound.id}`,
         });
         sendRealtimeEvents(transport, request.events);
+        for (const handoffId of resolvedHandoffIds) {
+          this.openHandoffs.delete(handoffId);
+        }
         useChatStore
           .getState()
           .addMessage(
@@ -887,15 +883,15 @@ class OpenAiRealtimeConversationRuntime {
           message: dismissalContext,
         });
         if (!exchange.accepted) return exchange;
-        for (const handoffId of dismissedHandoffIds) {
-          this.openHandoffs.delete(handoffId);
-        }
         const request = responses.requestMasterMessage({
           message: `[bridge cursor ${exchange.outbound.id}] [Handoff dismissal] ${dismissalContext} This is silent context; do not speak merely to acknowledge it.`,
           mode: "context",
           eventId: `berd-master-dismissal-${exchange.outbound.id}`,
         });
         sendRealtimeEvents(transport, request.events);
+        for (const handoffId of dismissedHandoffIds) {
+          this.openHandoffs.delete(handoffId);
+        }
         useChatStore
           .getState()
           .addMessage(
@@ -1301,6 +1297,9 @@ export function useOpenAiRealtimeConversation(options: {
       runtime.rebindPromotedOwner(sessionId, onSend);
     else if (ownsActiveConversation) runtime.bindOwner(sessionId, onSend);
   }, [onSend, ownsActiveConversation, ownsPromotedConversation, sessionId]);
+  useEffect(() => {
+    if (!enabled && ownsActiveConversation) void runtime.stop(sessionId);
+  }, [enabled, ownsActiveConversation, sessionId]);
   useEffect(() => {
     if (
       !window.__TAURI_INTERNALS__ ||
