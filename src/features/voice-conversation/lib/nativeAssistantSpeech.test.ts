@@ -386,6 +386,31 @@ describe("native assistant speech stream", () => {
     );
   });
 
+  it("retires whitespace-only output held during user speech", async () => {
+    vi.useFakeTimers();
+    try {
+      useVoiceConversationStore.setState({ userSpeaking: true });
+      startNativeAssistantSpeech("session-1", vi.fn());
+      useChatStore
+        .getState()
+        .setMessages("session-1", [
+          assistant([{ type: "text", text: "   " }], "completed"),
+        ]);
+
+      useVoiceConversationStore.setState({ userSpeaking: false });
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.runAllTimersAsync();
+      finalizeVoiceTranscript("voice-after-inert-output");
+      await vi.runAllTimersAsync();
+
+      expect(mocks.prepareAssistantSpeech).not.toHaveBeenCalled();
+      expect(mocks.start).not.toHaveBeenCalled();
+      expect(takeVoicePlaybackNotices("session-1")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("prepares playback with the assistant response's exact causal transcript", async () => {
     finalizeVoiceTranscript("voice-k1");
     startNativeAssistantSpeech("session-1", vi.fn());

@@ -1667,6 +1667,13 @@ export function startNativeAssistantSpeech(
         utteranceOwnsMessage &&
         !utterance.nativeStartQueued
       ) {
+        for (const target of utterance.targets) {
+          heldSpeech?.targets.delete(targetKey(target));
+        }
+        if (heldSpeech?.targets.size === 0) {
+          heldSpeech = null;
+          heldReleaseReady = false;
+        }
         activeUtterance = null;
         continue;
       }
