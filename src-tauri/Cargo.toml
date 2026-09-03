@@ -15,6 +15,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 # stays excluded (a plain path dependency, as before this workspace existed).
 [workspace]
 members = [
+  "crates/berd-memory",
   "crates/berd-monitor",
   "crates/berd-call",
   "crates/berdctl",
@@ -33,7 +34,9 @@ anyhow = "1"
 base64 = "0.22"
 builderbot-auth = { path = "../crates/builderbot-auth", features = ["blocking-client"] }
 bytes = "1"
+bzip2 = "0.6"
 berd-call = { path = "crates/berd-call", features = ["static"] }
+berd-memory = { path = "crates/berd-memory" }
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "6.0.0"
 dunce = "1"
@@ -84,6 +87,7 @@ tokio = { version = "1.50.0", features = ["full"] }
 url = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
+cap-std = "3.4.5"
 
 [target.'cfg(windows)'.dependencies]
 keyring = { version = "3.6.3", default-features = false, features = ["windows-native"] }
