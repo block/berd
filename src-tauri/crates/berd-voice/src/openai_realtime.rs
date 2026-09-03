@@ -177,9 +177,7 @@ impl OpenAiRealtimeTranscriptionClient {
         }
     }
 
-    async fn next_json(
-        &mut self,
-    ) -> Result<serde_json::Value, OpenAiRealtimeTranscriptionError> {
+    async fn next_json(&mut self) -> RealtimeJsonResult {
         loop {
             let message = match self.socket.next().await {
                 Some(Ok(Message::Text(text))) => text,
@@ -204,6 +202,9 @@ impl OpenAiRealtimeTranscriptionClient {
             .map_err(|error| error.to_string())
     }
 }
+
+type RealtimeJsonResult =
+    Result<serde_json::Value, OpenAiRealtimeTranscriptionError>;
 
 fn provider_message(value: &serde_json::Value) -> &str {
     value
@@ -398,12 +399,12 @@ mod tests {
             .unwrap();
         let configuring = client.configure();
         tokio::pin!(configuring);
-        assert!(tokio::time::timeout(
+        let early = tokio::time::timeout(
             std::time::Duration::from_millis(20),
-            &mut configuring
+            &mut configuring,
         )
-        .await
-        .is_err());
+        .await;
+        assert!(early.is_err());
         acknowledge.send(()).unwrap();
         configuring.await.unwrap();
         server.await.unwrap();

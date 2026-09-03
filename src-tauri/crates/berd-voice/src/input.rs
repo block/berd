@@ -1861,16 +1861,18 @@ fn openai_worker(
                 Err(OpenAiRealtimeTranscriptionError::TranscriptionFailed {
                     item_id,
                     message,
-                }) if openai_transcription_failure_is_current(
-                    &item_id,
-                    observed_epoch,
-                    &committed,
-                ) => {
-                    let _ = pending.reset(&events);
-                    let _ = events.blocking_send(VoiceInputEvent::Failed(message));
-                    return;
+                }) => {
+                    if openai_transcription_failure_is_current(
+                        &item_id,
+                        observed_epoch,
+                        &committed,
+                    ) {
+                        let _ = pending.reset(&events);
+                        let _ = events.blocking_send(VoiceInputEvent::Failed(message));
+                        return;
+                    }
+                    continue;
                 }
-                Err(OpenAiRealtimeTranscriptionError::TranscriptionFailed { .. }) => continue,
                 Err(error) => {
                     let _ = pending.reset(&events);
                     let _ = events.blocking_send(VoiceInputEvent::Failed(error.to_string()));
@@ -2024,16 +2026,18 @@ fn openai_worker(
             Err(OpenAiRealtimeTranscriptionError::TranscriptionFailed {
                 item_id,
                 message,
-            }) if openai_transcription_failure_is_current(
-                &item_id,
-                observed_epoch,
-                &committed,
-            ) => {
-                let _ = pending.reset(&events);
-                let _ = events.blocking_send(VoiceInputEvent::Failed(message));
-                break;
+            }) => {
+                if openai_transcription_failure_is_current(
+                    &item_id,
+                    observed_epoch,
+                    &committed,
+                ) {
+                    let _ = pending.reset(&events);
+                    let _ = events.blocking_send(VoiceInputEvent::Failed(message));
+                    break;
+                }
+                continue;
             }
-            Err(OpenAiRealtimeTranscriptionError::TranscriptionFailed { .. }) => continue,
             Err(OpenAiRealtimeTranscriptionError::Provider(message)) => {
                 let _ = pending.reset(&events);
                 let _ = events.blocking_send(VoiceInputEvent::Failed(message));
@@ -3172,9 +3176,9 @@ mod tests {
         assert!(!openai_transcription_failure_is_current(
             "current", 3, &committed
         ));
-        assert!(!openai_transcription_failure_is_current(
-            "discarded", 2, &committed
-        ));
+        let discarded_is_current =
+            openai_transcription_failure_is_current("discarded", 2, &committed);
+        assert!(!discarded_is_current);
     }
 
     #[test]
