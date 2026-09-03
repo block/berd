@@ -5,7 +5,6 @@ import { getPlatform } from "@/shared/lib/platform";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
 import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import { Button } from "@/shared/ui/button";
-import { Label } from "@/shared/ui/label";
 import { RadioGroup, RadioGroupCard } from "@/shared/ui/radio-group";
 import { SettingsRow } from "@/shared/ui/settings-row";
 import {
@@ -21,8 +20,6 @@ import {
   clearOpenAiTtsApiKey,
   setOpenAiSttApiKey,
   setOpenAiPlaybackSpeed,
-  setOpenAiSpeechModel,
-  setOpenAiTranscriptionModel,
   setOpenAiTtsApiKey,
 } from "../api/openAiVoice";
 import { usePocketVoiceSetup } from "../hooks/usePocketVoiceSetup";
@@ -53,57 +50,6 @@ const INTERRUPTION_MODES: VoiceInterruptionMode[] = [
   "allowInterruptions",
   "preventFeedback",
 ];
-const OPENAI_TRANSCRIPTION_MODELS = [
-  "gpt-realtime-whisper",
-  "gpt-live-transcribe",
-  "gpt-transcribe",
-  "gpt-4o-transcribe",
-  "gpt-4o-mini-transcribe",
-] as const;
-const OPENAI_SPEECH_MODELS = ["gpt-4o-mini-tts", "tts-1-hd", "tts-1"] as const;
-
-function OpenAiModelSelect({
-  defaultModel,
-  disabled,
-  id,
-  label,
-  models,
-  onChange,
-  value,
-}: {
-  defaultModel: string;
-  disabled: boolean;
-  id: string;
-  label: string;
-  models: readonly string[];
-  onChange(value: string): void;
-  value: string;
-}) {
-  const { t } = useTranslation("settings");
-
-  return (
-    <div className="space-y-2">
-      <Label htmlFor={id}>{label}</Label>
-      <Select value={value} disabled={disabled} onValueChange={onChange}>
-        <SelectTrigger id={id} className="w-full">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {!models.includes(value) ? (
-            <SelectItem value={value}>{value}</SelectItem>
-          ) : null}
-          {models.map((model) => (
-            <SelectItem key={model} value={model}>
-              {model === defaultModel
-                ? t("voice.defaultOption", { value: model })
-                : model}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
-  );
-}
 
 function readinessDescriptionKey(
   inputReady: boolean,
@@ -152,12 +98,6 @@ export function VoiceSettings() {
   const { status: openAiStatus, error: openAiError } = useOpenAiVoiceSetup();
   const [openAiSpeed, setOpenAiSpeed] = useState(1);
   const [openAiSpeedError, setOpenAiSpeedError] = useState<string | null>(null);
-  const [openAiSttModelError, setOpenAiSttModelError] = useState<string | null>(
-    null,
-  );
-  const [openAiTtsModelError, setOpenAiTtsModelError] = useState<string | null>(
-    null,
-  );
   useEffect(() => {
     if (openAiStatus) setOpenAiSpeed(openAiStatus.playbackSpeed);
   }, [openAiStatus]);
@@ -339,29 +279,6 @@ export function VoiceSettings() {
                       onSave={setOpenAiSttApiKey}
                       onClear={clearOpenAiSttApiKey}
                     />
-                    {openAiStatus ? (
-                      <OpenAiModelSelect
-                        id="openai-transcription-model"
-                        defaultModel="gpt-live-transcribe"
-                        label={t("voice.openAiSttModel")}
-                        value={openAiStatus.transcriptionModel}
-                        models={OPENAI_TRANSCRIPTION_MODELS}
-                        disabled={
-                          openAiStatus.sttConfigurationSource === "environment"
-                        }
-                        onChange={(model) => {
-                          setOpenAiSttModelError(null);
-                          void setOpenAiTranscriptionModel(model).catch(
-                            (cause) =>
-                              setOpenAiSttModelError(
-                                cause instanceof Error
-                                  ? cause.message
-                                  : String(cause),
-                              ),
-                          );
-                        }}
-                      />
-                    ) : null}
                     <p className="text-xs text-muted-foreground">
                       {openAiError ??
                         openAiStatus?.sttUnavailableReason ??
@@ -376,11 +293,6 @@ export function VoiceSettings() {
                     {openAiStatus?.sttConfigurationSource === "environment" ? (
                       <p className="text-xs text-muted-foreground">
                         {t("voice.openAiEnvironmentOverride")}
-                      </p>
-                    ) : null}
-                    {openAiSttModelError ? (
-                      <p className="text-xs text-destructive" role="alert">
-                        {openAiSttModelError}
                       </p>
                     ) : null}
                   </div>
@@ -447,28 +359,6 @@ export function VoiceSettings() {
                       onSave={setOpenAiTtsApiKey}
                       onClear={clearOpenAiTtsApiKey}
                     />
-                    {openAiStatus ? (
-                      <OpenAiModelSelect
-                        id="openai-speech-model"
-                        defaultModel="gpt-4o-mini-tts"
-                        label={t("voice.openAiTtsModel")}
-                        value={openAiStatus.speechModel}
-                        models={OPENAI_SPEECH_MODELS}
-                        disabled={
-                          openAiStatus.ttsConfigurationSource === "environment"
-                        }
-                        onChange={(model) => {
-                          setOpenAiTtsModelError(null);
-                          void setOpenAiSpeechModel(model).catch((cause) =>
-                            setOpenAiTtsModelError(
-                              cause instanceof Error
-                                ? cause.message
-                                : String(cause),
-                            ),
-                          );
-                        }}
-                      />
-                    ) : null}
                     <p className="text-xs text-muted-foreground">
                       {openAiError ??
                         openAiStatus?.ttsUnavailableReason ??
@@ -509,11 +399,6 @@ export function VoiceSettings() {
                     {openAiSpeedError ? (
                       <p className="text-xs text-destructive" role="alert">
                         {openAiSpeedError}
-                      </p>
-                    ) : null}
-                    {openAiTtsModelError ? (
-                      <p className="text-xs text-destructive" role="alert">
-                        {openAiTtsModelError}
                       </p>
                     ) : null}
                   </div>

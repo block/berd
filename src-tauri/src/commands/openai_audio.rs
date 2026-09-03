@@ -13,7 +13,7 @@ use futures_util::StreamExt;
 use reqwest::header::CONTENT_TYPE;
 #[cfg(target_os = "macos")]
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::json;
 use tauri::Emitter;
 use tauri::{AppHandle, State};
@@ -40,20 +40,11 @@ const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 const DEFAULT_TRANSCRIPTION_MODEL: &str = "gpt-live-transcribe";
 const DEFAULT_TTS_MODEL: &str = "gpt-4o-mini-tts";
 const DEFAULT_TTS_VOICE: &str = "marin";
-const SUPPORTED_TRANSCRIPTION_MODELS: &[&str] = &[
-    "gpt-realtime-whisper",
-    "gpt-live-transcribe",
-    "gpt-transcribe",
-    "gpt-4o-transcribe",
-    "gpt-4o-mini-transcribe",
-];
-const SUPPORTED_TTS_MODELS: &[&str] = &["gpt-4o-mini-tts", "tts-1-hd", "tts-1"];
 const BASE_URL_ENV: &str = "BERD_OPENAI_VOICE_BASE_URL";
 const STT_MODEL_ENV: &str = "BERD_OPENAI_STT_MODEL";
 const TTS_MODEL_ENV: &str = "BERD_OPENAI_TTS_MODEL";
 const TTS_VOICE_ENV: &str = "BERD_OPENAI_TTS_VOICE";
 const SETTINGS_CHANGED_EVENT: &str = "openai-voice:settings-changed";
-static VOICE_SETTINGS_LOCK: Mutex<()> = Mutex::new(());
 #[cfg(target_os = "macos")]
 const TTS_SAMPLE_RATE: u32 = 24_000;
 // Avoid starting the audio device from a tiny first network chunk that can drain
@@ -139,18 +130,6 @@ pub struct OpenAiVoiceStatus {
 enum OpenAiVoiceConfigurationSource {
     Default,
     Environment,
-    Settings,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct StoredOpenAiVoiceSettings {
-    #[serde(default)]
-    playback_speed: Option<f32>,
-    #[serde(default)]
-    transcription_model: Option<String>,
-    #[serde(default)]
-    speech_model: Option<String>,
 }
 
 #[cfg(target_os = "macos")]
@@ -254,15 +233,11 @@ pub(crate) fn realtime_endpoint() -> Result<String, String> {
 }
 
 pub(crate) fn transcription_model() -> String {
-    env_trimmed(STT_MODEL_ENV)
-        .or_else(|| stored_voice_settings().ok()?.transcription_model)
-        .unwrap_or_else(|| DEFAULT_TRANSCRIPTION_MODEL.to_string())
+    env_trimmed(STT_MODEL_ENV).unwrap_or_else(|| DEFAULT_TRANSCRIPTION_MODEL.to_string())
 }
 
 fn speech_model() -> String {
-    env_trimmed(TTS_MODEL_ENV)
-        .or_else(|| stored_voice_settings().ok()?.speech_model)
-        .unwrap_or_else(|| DEFAULT_TTS_MODEL.to_string())
+    env_trimmed(TTS_MODEL_ENV).unwrap_or_else(|| DEFAULT_TTS_MODEL.to_string())
 }
 
 fn speech_voice() -> String {
@@ -275,12 +250,6 @@ fn tts_configuration_source() -> OpenAiVoiceConfigurationSource {
         .any(|name| env_trimmed(name).is_some())
     {
         OpenAiVoiceConfigurationSource::Environment
-    } else if stored_voice_settings()
-        .ok()
-        .and_then(|settings| settings.speech_model)
-        .is_some()
-    {
-        OpenAiVoiceConfigurationSource::Settings
     } else {
         OpenAiVoiceConfigurationSource::Default
     }
@@ -292,12 +261,6 @@ fn stt_configuration_source() -> OpenAiVoiceConfigurationSource {
         .any(|name| env_trimmed(name).is_some())
     {
         OpenAiVoiceConfigurationSource::Environment
-    } else if stored_voice_settings()
-        .ok()
-        .and_then(|settings| settings.transcription_model)
-        .is_some()
-    {
-        OpenAiVoiceConfigurationSource::Settings
     } else {
         OpenAiVoiceConfigurationSource::Default
     }
@@ -326,76 +289,35 @@ fn authorized_headers(key: &str) -> Result<HeaderMap, String> {
     Ok(headers)
 }
 
-fn voice_settings_path() -> Result<std::path::PathBuf, String> {
+fn speed_settings_path() -> Result<std::path::PathBuf, String> {
     Ok(crate::services::goose_config::config_path()?
         .parent()
         .ok_or_else(|| "Could not resolve Goose's configuration directory".to_string())?
         .join("openai-voice-settings.json"))
 }
 
-fn stored_voice_settings() -> Result<StoredOpenAiVoiceSettings, String> {
-    let _guard = VOICE_SETTINGS_LOCK
-        .lock()
-        .map_err(|_| "OpenAI voice settings lock was poisoned".to_string())?;
-    stored_voice_settings_unlocked()
+fn stored_playback_speed() -> f32 {
+    speed_settings_path()
+        .ok()
+        .and_then(|path| std::fs::read(path).ok())
+        .and_then(|data| serde_json::from_slice::<serde_json::Value>(&data).ok())
+        .and_then(|value| value.get("playbackSpeed")?.as_f64())
+        .map(|speed| speed as f32)
+        .filter(|speed| speed.is_finite() && (0.75..=2.0).contains(speed))
+        .unwrap_or(1.0)
 }
 
-fn stored_voice_settings_unlocked() -> Result<StoredOpenAiVoiceSettings, String> {
-    let path = voice_settings_path()?;
-    match std::fs::read(&path) {
-        Ok(data) => serde_json::from_slice(&data)
-            .map_err(|error| format!("read OpenAI voice settings: {error}")),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            Ok(StoredOpenAiVoiceSettings::default())
-        }
-        Err(error) => Err(format!("read OpenAI voice settings: {error}")),
-    }
-}
-
-fn update_voice_settings(
-    update: impl FnOnce(&mut StoredOpenAiVoiceSettings),
-) -> Result<(), String> {
-    let _guard = VOICE_SETTINGS_LOCK
-        .lock()
-        .map_err(|_| "OpenAI voice settings lock was poisoned".to_string())?;
-    let mut settings = stored_voice_settings_unlocked()?;
-    update(&mut settings);
-    persist_voice_settings(&settings)
-}
-
-fn persist_voice_settings(settings: &StoredOpenAiVoiceSettings) -> Result<(), String> {
-    let path = voice_settings_path()?;
+fn persist_playback_speed(speed: f32) -> Result<(), String> {
+    let path = speed_settings_path()?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|error| format!("create OpenAI voice settings directory: {error}"))?;
     }
     std::fs::write(
         &path,
-        serde_json::to_vec_pretty(settings)
-            .map_err(|error| format!("serialize OpenAI voice settings: {error}"))?,
+        serde_json::to_vec_pretty(&json!({ "playbackSpeed": speed })).unwrap(),
     )
     .map_err(|error| format!("write OpenAI voice settings: {error}"))
-}
-
-fn stored_playback_speed() -> f32 {
-    stored_voice_settings()
-        .ok()
-        .and_then(|settings| settings.playback_speed)
-        .filter(|speed| speed.is_finite() && (0.75..=2.0).contains(speed))
-        .unwrap_or(1.0)
-}
-
-fn persist_playback_speed(speed: f32) -> Result<(), String> {
-    update_voice_settings(|settings| settings.playback_speed = Some(speed))
-}
-
-fn validate_model(model: &str, supported: &[&str], purpose: &str) -> Result<String, String> {
-    let model = model.trim();
-    if supported.contains(&model) {
-        Ok(model.to_string())
-    } else {
-        Err(format!("Unsupported OpenAI {purpose} model: {model}"))
-    }
 }
 
 #[cfg(target_os = "macos")]
@@ -677,22 +599,6 @@ pub fn set_openai_playback_speed(
         .map_err(|_| "OpenAI voice playback state lock was poisoned".to_string())?
         .speed = speed;
     Ok(())
-}
-
-#[tauri::command]
-pub fn set_openai_transcription_model(app: AppHandle, model: String) -> Result<(), String> {
-    let model = validate_model(&model, SUPPORTED_TRANSCRIPTION_MODELS, "speech-to-text")?;
-    update_voice_settings(|settings| settings.transcription_model = Some(model))?;
-    app.emit(SETTINGS_CHANGED_EVENT, ())
-        .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))
-}
-
-#[tauri::command]
-pub fn set_openai_speech_model(app: AppHandle, model: String) -> Result<(), String> {
-    let model = validate_model(&model, SUPPORTED_TTS_MODELS, "text-to-speech")?;
-    update_voice_settings(|settings| settings.speech_model = Some(model))?;
-    app.emit(SETTINGS_CHANGED_EVENT, ())
-        .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))
 }
 
 fn stop_openai_voice_for_owner(
@@ -1412,39 +1318,6 @@ mod tests {
         assert_eq!(STT_MODEL_ENV, "BERD_OPENAI_STT_MODEL");
         assert_eq!(TTS_MODEL_ENV, "BERD_OPENAI_TTS_MODEL");
         assert_eq!(TTS_VOICE_ENV, "BERD_OPENAI_TTS_VOICE");
-    }
-
-    #[test]
-    fn stored_settings_migrate_the_existing_playback_only_shape() {
-        let settings: StoredOpenAiVoiceSettings =
-            serde_json::from_str(r#"{"playbackSpeed":1.25}"#).expect("stored settings");
-
-        assert_eq!(settings.playback_speed, Some(1.25));
-        assert_eq!(settings.transcription_model, None);
-        assert_eq!(settings.speech_model, None);
-    }
-
-    #[test]
-    fn model_preferences_accept_only_supported_dropdown_values() {
-        assert_eq!(
-            validate_model(
-                "gpt-realtime-whisper",
-                SUPPORTED_TRANSCRIPTION_MODELS,
-                "speech-to-text",
-            )
-            .unwrap(),
-            "gpt-realtime-whisper"
-        );
-        assert_eq!(
-            validate_model("tts-1-hd", SUPPORTED_TTS_MODELS, "text-to-speech").unwrap(),
-            "tts-1-hd"
-        );
-        assert!(validate_model(
-            "not-a-model",
-            SUPPORTED_TRANSCRIPTION_MODELS,
-            "speech-to-text",
-        )
-        .is_err());
     }
 
     #[test]
