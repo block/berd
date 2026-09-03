@@ -116,6 +116,10 @@ if [[ "\${1:-}" == "install" ]]; then
 elif [[ "\${1:-}" == "build" ]]; then
   mkdir -p dist
   touch dist/index.js dist/index.d.ts
+  if [[ "\${PNPM_BUILD_FAIL:-0}" == "1" ]]; then
+    exit 42
+  fi
+  touch dist/resolve-binary.js dist/resolve-binary.d.ts
 fi
 `,
     ),
@@ -229,6 +233,41 @@ describe("setup tooling regressions", () => {
     expect(forced.status, `${forced.stdout}\n${forced.stderr}`).toBe(0);
     expect(await callsFor(fixture.calls)).toBe(
       `${fixture.root}:install\n${join(fixture.root, "sdk")}:build\n`,
+    );
+  });
+
+  it("rebuilds when a package-exported SDK artifact is missing", async () => {
+    const fixture = await devDepsFixture();
+
+    const initial = fixture.run();
+    expect(initial.status, `${initial.stdout}\n${initial.stderr}`).toBe(0);
+
+    await Promise.all([
+      writeFile(fixture.calls, ""),
+      rm(join(fixture.root, "sdk/dist/resolve-binary.js")),
+    ]);
+    const repaired = fixture.run();
+    expect(repaired.status, `${repaired.stdout}\n${repaired.stderr}`).toBe(0);
+    expect(await callsFor(fixture.calls)).toBe(
+      `${join(fixture.root, "sdk")}:build\n`,
+    );
+  });
+
+  it("retries an SDK build after an interrupted repair", async () => {
+    const fixture = await devDepsFixture();
+
+    const initial = fixture.run();
+    expect(initial.status, `${initial.stdout}\n${initial.stderr}`).toBe(0);
+
+    await writeFile(fixture.calls, "");
+    const failed = fixture.run(["--force"], { PNPM_BUILD_FAIL: "1" });
+    expect(failed.status).toBe(42);
+
+    await writeFile(fixture.calls, "");
+    const retried = fixture.run();
+    expect(retried.status, `${retried.stdout}\n${retried.stderr}`).toBe(0);
+    expect(await callsFor(fixture.calls)).toBe(
+      `${join(fixture.root, "sdk")}:build\n`,
     );
   });
 

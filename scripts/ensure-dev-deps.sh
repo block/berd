@@ -72,6 +72,13 @@ sdk_inputs_hash() {
     "$repo_root/sdk/src"
 }
 
+sdk_outputs_current() {
+  local output
+  for output in index.js index.d.ts resolve-binary.js resolve-binary.d.ts; do
+    [[ -f "$repo_root/sdk/dist/$output" ]] || return 1
+  done
+}
+
 dependency_inputs="$(dependency_inputs_hash)"
 
 if [[ "$force" == "1" ]] \
@@ -90,9 +97,9 @@ sdk_inputs="$(sdk_inputs_hash)"
 
 if [[ "$force" == "1" ]] \
   || ! stamp_matches "$sdk_stamp" "$sdk_inputs" \
-  || [[ ! -f "$repo_root/sdk/dist/index.js" ]] \
-  || [[ ! -f "$repo_root/sdk/dist/index.d.ts" ]]; then
+  || ! sdk_outputs_current; then
   echo "Building @aaif/goose-sdk."
+  rm -f "$sdk_stamp"
   (cd "$repo_root/sdk" && "$pnpm_bin" build)
   # Schema generation is part of the SDK build and may update derived source
   # files, so record the inputs after the successful build.
