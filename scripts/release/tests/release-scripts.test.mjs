@@ -128,6 +128,19 @@ describe("managed Goose build profile", () => {
   });
 });
 
+describe("shared Cargo package cache", () => {
+  it("keeps Cargo dependency and binary paths stable across worktrees", async () => {
+    const hermitConfig = await readFile(join(repo, "bin/hermit.hcl"), "utf8");
+
+    expect(hermitConfig).toMatch(
+      /"CARGO_HOME": "\$\{HOME\}\/\.cache\/berd\/cargo-home"/,
+    );
+    expect(hermitConfig).toMatch(
+      /"PATH": "\$\{HOME\}\/\.cache\/berd\/cargo-home\/bin:\$\{PATH\}"/,
+    );
+  });
+});
+
 describe("Docker Linux build environment", () => {
   it("forwards host build configuration when Docker replaces the environment", async () => {
     const dir = await tempDir();
