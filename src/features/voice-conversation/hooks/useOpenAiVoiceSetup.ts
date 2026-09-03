@@ -10,13 +10,17 @@ export function useOpenAiVoiceSetup(enabled = true) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      setStatus(null);
+      setError(null);
+      return;
+    }
     let active = true;
     let refreshGeneration = 0;
     let unsubscribe: (() => void) | null = null;
-    const refresh = () => {
+    const refresh = (coalesce = false) => {
       const generation = ++refreshGeneration;
-      void getOpenAiVoiceStatus().then(
+      void getOpenAiVoiceStatus(coalesce ? { coalesce: true } : undefined).then(
         (next) => {
           if (active && generation === refreshGeneration) {
             setStatus(next);
@@ -31,11 +35,11 @@ export function useOpenAiVoiceSetup(enabled = true) {
         },
       );
     };
-    void listenToOpenAiVoiceSettings(refresh).then(
+    void listenToOpenAiVoiceSettings(() => refresh()).then(
       (nextUnsubscribe) => {
         if (active) {
           unsubscribe = nextUnsubscribe;
-          refresh();
+          refresh(true);
         } else nextUnsubscribe();
       },
       () => {

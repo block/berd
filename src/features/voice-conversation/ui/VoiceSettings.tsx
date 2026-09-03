@@ -95,16 +95,18 @@ export function VoiceSettings() {
   const { t } = useTranslation("settings");
   const setup = usePocketVoiceSetup();
   const macSpeechSetup = useMacSpeechSetup();
-  const { status: openAiStatus, error: openAiError } = useOpenAiVoiceSetup();
   const [openAiSpeed, setOpenAiSpeed] = useState(1);
   const [openAiSpeedError, setOpenAiSpeedError] = useState<string | null>(null);
-  useEffect(() => {
-    if (openAiStatus) setOpenAiSpeed(openAiStatus.playbackSpeed);
-  }, [openAiStatus]);
   const input = useVoiceInputPreference(
     isMacSpeechAvailable(macSpeechSetup.status, macSpeechSetup.loading),
   );
   const output = useVoiceOutputPreference();
+  const { status: openAiStatus, error: openAiError } = useOpenAiVoiceSetup(
+    input.backend === "openai" || output.backend === "openai",
+  );
+  useEffect(() => {
+    if (openAiStatus) setOpenAiSpeed(openAiStatus.playbackSpeed);
+  }, [openAiStatus]);
   const interruption = useVoiceInterruptionPreference();
   const mode = useVoiceConversationModePreference();
   const siriSetup = useSiriVoiceSetup(output.backend === "siri");
@@ -141,22 +143,27 @@ export function VoiceSettings() {
   const pocketStatusLoaded =
     (input.backend !== "parakeet" && output.backend !== "pocket") ||
     setup.status !== null;
-  const readinessKey = !pocketStatusLoaded
-    ? null
-    : !inputReady && output.backend === "siri" && !siriOutputLoaded
-      ? input.backend === "macos"
-        ? "voice.notReadyMacInput"
-        : "voice.notReadyInput"
-      : output.backend === "siri" && !siriOutputLoaded
-        ? null
-        : input.backend === null
+  const openAiStatusLoaded =
+    (input.backend !== "openai" && output.backend !== "openai") ||
+    openAiStatus !== null ||
+    openAiError !== null;
+  const readinessKey =
+    !pocketStatusLoaded || !openAiStatusLoaded
+      ? null
+      : !inputReady && output.backend === "siri" && !siriOutputLoaded
+        ? input.backend === "macos"
+          ? "voice.notReadyMacInput"
+          : "voice.notReadyInput"
+        : output.backend === "siri" && !siriOutputLoaded
           ? null
-          : readinessDescriptionKey(
-              inputReady,
-              outputReady,
-              output.backend,
-              input.backend,
-            );
+          : input.backend === null
+            ? null
+            : readinessDescriptionKey(
+                inputReady,
+                outputReady,
+                output.backend,
+                input.backend,
+              );
 
   return (
     <SettingsPage
@@ -337,7 +344,7 @@ export function VoiceSettings() {
                     <SelectItem value="pocket">
                       {t("voice.backendPocket")}
                     </SelectItem>
-                    {openAiStatus?.ttsAvailable ? (
+                    {getPlatform() === "mac" ? (
                       <SelectItem value="openai">
                         {t("voice.backendOpenAiTts")}
                       </SelectItem>
