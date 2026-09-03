@@ -6,6 +6,7 @@ pub const MAC_SPEECH_RECOGNITION_FINISH_TIMEOUT_SECONDS: u64 = 5;
 mod asset_verification;
 mod audio_output;
 pub mod benchmark;
+pub mod causal_inbox;
 mod configured_tts;
 pub mod input;
 pub mod local_assets;

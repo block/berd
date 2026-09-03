@@ -1,6 +1,7 @@
-use std::collections::HashSet;
-
-use crate::protocol::{NotAdmittedReason, PendingUtterance};
+use crate::{
+    causal_inbox::{CausalInbox, CausalMessage},
+    protocol::{NotAdmittedReason, PendingUtterance},
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PlaybackState {
@@ -30,10 +31,7 @@ pub enum PrepareOutcome {
 
 #[derive(Debug)]
 pub struct SessionCore {
-    utterances: Vec<PendingUtterance>,
-    individually_confirmed: HashSet<u64>,
-    highest_utterance_token: u64,
-    confirmed_token: u64,
+    utterances: CausalInbox<String>,
     user_speaking: bool,
     recognition_pending: bool,
     paused: bool,
@@ -45,10 +43,7 @@ pub struct SessionCore {
 impl Default for SessionCore {
     fn default() -> Self {
         Self {
-            utterances: Vec::new(),
-            individually_confirmed: HashSet::new(),
-            highest_utterance_token: 0,
-            confirmed_token: 0,
+            utterances: CausalInbox::default(),
             user_speaking: false,
             recognition_pending: false,
             paused: false,
@@ -61,38 +56,24 @@ impl Default for SessionCore {
 
 impl SessionCore {
     pub fn add_final(&mut self, token: u64, text: String) -> Result<(), String> {
-        let previous = self.highest_utterance_token;
-        if token == 0 || token <= previous {
-            return Err(format!(
-                "user_final token {token} must be greater than {previous}"
-            ));
-        }
-        self.highest_utterance_token = token;
-        self.utterances.push(PendingUtterance { token, text });
-        Ok(())
+        self.utterances.push(token, text).map_err(|error| {
+            format!(
+                "user_final token {} must be greater than {}",
+                error.token, error.previous
+            )
+        })
     }
 
     /// Confirms one exact finalized-input token after a host's delivery trust
     /// decision succeeds. This does not imply that earlier inputs were delivered.
     pub fn confirm_exact(&mut self, token: u64) -> bool {
-        if token == 0
-            || !self
-                .utterances
-                .iter()
-                .any(|utterance| utterance.token == token)
-        {
-            return false;
-        }
-        self.individually_confirmed.insert(token)
+        self.utterances.confirm_exact(token)
     }
 
     /// Removes a finalized input that the host has terminally abandoned.
     /// Discarding never confirms that input or any input before it.
     pub fn discard_final(&mut self, token: u64) -> bool {
-        let previous_len = self.utterances.len();
-        self.utterances.retain(|utterance| utterance.token != token);
-        self.individually_confirmed.remove(&token);
-        self.utterances.len() != previous_len
+        self.utterances.discard(token)
     }
 
     /// Applies an exact causal cutoff while requiring every retained input at
@@ -107,14 +88,7 @@ impl SessionCore {
         }
 
         let cutoff = request.acknowledgement.unwrap_or(0);
-        let pending: Vec<_> = self
-            .utterances
-            .iter()
-            .filter(|utterance| {
-                utterance.token > cutoff || !self.individually_confirmed.contains(&utterance.token)
-            })
-            .cloned()
-            .collect();
+        let pending = pending_utterances(self.utterances.messages_unconfirmed_through(cutoff));
         if !pending.is_empty() {
             return PrepareOutcome::Pending(pending);
         }
@@ -146,12 +120,7 @@ impl SessionCore {
         }
 
         let cutoff = self.apply_acknowledgement(request.acknowledgement);
-        let pending: Vec<_> = self
-            .utterances
-            .iter()
-            .filter(|utterance| utterance.token > cutoff)
-            .cloned()
-            .collect();
+        let pending = pending_utterances(self.utterances.messages_after(cutoff));
         if !pending.is_empty() {
             return PrepareOutcome::Pending(pending);
         }
@@ -196,20 +165,16 @@ impl SessionCore {
         self.active_speech_id = Some(speech_id);
         PrepareOutcome::Admitted {
             speech_id,
-            confirmed_token: self.confirmed_token,
+            confirmed_token: self.confirmed_token(),
             text,
         }
     }
     pub fn utterances_after(&self, token: u64) -> Vec<PendingUtterance> {
-        self.utterances
-            .iter()
-            .filter(|item| item.token > token)
-            .cloned()
-            .collect()
+        pending_utterances(self.utterances.messages_after(token))
     }
 
     pub fn confirmed_token(&self) -> u64 {
-        self.confirmed_token
+        self.utterances.confirmed_token()
     }
     pub fn user_speaking(&self) -> bool {
         self.user_speaking
@@ -218,23 +183,18 @@ impl SessionCore {
         self.recognition_pending
     }
     fn apply_acknowledgement(&mut self, acknowledgement: Option<u64>) -> u64 {
-        let Some(token) = acknowledgement else {
-            return self.confirmed_token;
-        };
-        if token == 0 {
-            return 0;
-        }
-        if self
-            .utterances
-            .iter()
-            .any(|utterance| utterance.token == token)
-        {
-            self.confirmed_token = self.confirmed_token.max(token);
-            token
-        } else {
-            self.confirmed_token
-        }
+        self.utterances.acknowledge(acknowledgement)
     }
+}
+
+fn pending_utterances(messages: Vec<CausalMessage<String>>) -> Vec<PendingUtterance> {
+    messages
+        .into_iter()
+        .map(|message| PendingUtterance {
+            token: message.token,
+            text: message.payload,
+        })
+        .collect()
 }
 
 #[cfg(test)]
