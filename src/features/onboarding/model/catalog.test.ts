@@ -37,6 +37,7 @@ describe("onboarding catalog", () => {
       "copilot-acp",
       "amp-acp",
       "cursor-agent",
+      "pi-acp",
     ]);
   });
 });

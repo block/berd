@@ -37,7 +37,7 @@ berd-voice = { path = "crates/berd-voice", features = ["static"] }
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "6.0.0"
 dunce = "1"
-doctor = { git = "https://github.com/block/builderbot", rev = "73ff9a0521dcc784c9514911a655187e5dd3b6ca" }
+doctor = { git = "https://github.com/block/builderbot", rev = "3fb5fa839c4fbfd5edaa118042c2c8bfed845e7a" }
 etcetera = "0.11.0"
 flate2 = "1"
 tempfile = "3"

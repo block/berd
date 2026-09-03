@@ -1682,7 +1682,7 @@ dependencies = [
 [[package]]
 name = "doctor"
 version = "0.1.0"
-source = "git+https://github.com/block/builderbot?rev=73ff9a0521dcc784c9514911a655187e5dd3b6ca#73ff9a0521dcc784c9514911a655187e5dd3b6ca"
+source = "git+https://github.com/block/builderbot?rev=3fb5fa839c4fbfd5edaa118042c2c8bfed845e7a#3fb5fa839c4fbfd5edaa118042c2c8bfed845e7a"
 dependencies = [
  "dirs",
  "futures",
@@ -2809,7 +2809,7 @@ dependencies = [
  "tokio",
  "tower-service",
  "tracing",
- "windows-registry 0.6.1",
+ "windows-registry",
 ]
 
 [[package]]
@@ -4343,7 +4343,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.45.0",
 ]
 
 [[package]]
@@ -6710,7 +6710,7 @@ dependencies = [
  "thiserror 2.0.20",
  "tracing",
  "url",
- "windows-registry 0.5.3",
+ "windows-registry",
  "windows-result 0.3.4",
 ]
 
@@ -7031,7 +7031,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -8451,17 +8451,6 @@ dependencies = [
  "windows-link 0.1.3",
  "windows-result 0.3.4",
  "windows-strings 0.4.2",
-]
-
-[[package]]
-name = "windows-registry"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02752bf7fbdcce7f2a27a742f798510f3e5ad88dbe84871e5168e2120c3d5720"
-dependencies = [
- "windows-link 0.2.1",
- "windows-result 0.4.1",
- "windows-strings 0.5.1",
 ]
 
 [[package]]
