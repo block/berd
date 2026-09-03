@@ -1,0 +1,5 @@
+[profile.dev]
+# Preserve file and line information for backtraces while avoiding the cost of
+# generating per-variable debug information. Override with
+# CARGO_PROFILE_DEV_DEBUG=2 when inspecting locals in a native debugger.
+debug = "line-tables-only"
