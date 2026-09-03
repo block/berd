@@ -433,7 +433,9 @@
     "shortcuts": "Atajos de teclado",
     "system": "Sistema",
     "updates": "Actualizaciones",
-    "voice": "Voz"
+    "voice": "Voz",
+    "me": "Memoria",
+    "memoryProposalsPending": "{{count}} propuestas de memoria por revisar"
   },
   "navigation": {
     "title": "Navegación"
@@ -1098,5 +1100,51 @@
     "useVoice": "Usar {{voice}}",
     "voice": "Voz",
     "voiceLabel": "Voz de Pocket TTS"
+  },
+  "me": {
+    "addTopic": "Añadir tema",
+    "addTopicAction": "Añadir",
+    "cancel": "Cancelar",
+    "closeTopic": "Cerrar",
+    "create": "Crear mi archivo",
+    "description": "Detalles, preferencias y límites aprobados que ayudan a los agentes a trabajar mejor contigo entre chats.",
+    "editTab": "Editar",
+    "editorLabel": "Editar tu me.md",
+    "livesIn": "Los recuerdos aprobados permanecen en archivos de texto sin formato en tu equipo, en",
+    "loadError": "No se pudo leer tu archivo. Es posible que se haya movido o eliminado.",
+    "newTopicDescription": "Un tema es su propio documento. Los agentes lo leen solo cuando esa parte de tu vida es lo que está pasando.",
+    "newTopicError": "No se pudo crear ese tema. Puede que ya exista un tema con un nombre similar.",
+    "newTopicLabel": "Nombra tu tema",
+    "newTopicPlaceholder": "Estilo, Familia, Viajes…",
+    "noTopics": "Aún no hay temas. Los temas guardan conocimiento más profundo, como estilo, familia o trabajo, que solo se carga cuando es relevante.",
+    "offBanner": {
+      "description": "Berd no usará tus recuerdos aprobados ni sugerirá otros nuevos. Los archivos de memoria y las propuestas pendientes permanecerán en tu equipo a menos que los elimines."
+    },
+    "openTopic": "Ver",
+    "previewTab": "Vista previa",
+    "refresh": "Actualizar",
+    "save": "Guardar",
+    "saveError": "No se pudieron guardar tus cambios. Tus ediciones siguen aquí, inténtalo de nuevo.",
+    "unsafeUnicodeError": "El texto de memoria no puede incluir caracteres de control Unicode ocultos.",
+    "spineTitle": "Sobre ti",
+    "title": "Memoria",
+    "toggle": {
+      "description": "La memoria ayuda a Berd a recordar lo que te importa y cómo prefieres trabajar. Berd puede sugerir recuerdos de tus chats, pero nada se guarda sin tu aprobación. Revisa, edita o elimina cualquier cosa aquí en cualquier momento.",
+      "label": "Usar memoria"
+    },
+    "topicsHint": "Los temas proporcionan conocimientos más específicos que solo se cargan cuando son relevantes. Añádelos o actualízalos aquí.",
+    "topicsTitle": "Temas",
+    "unsavedChanges": "Cambios sin guardar",
+    "proposals": {
+      "title": "Memoria propuesta",
+      "description": "Revisa estas sugerencias antes de que se agregue algo a tu memoria. Puedes editar el texto primero.",
+      "review": "Revisar",
+      "dismiss": "Rechazar",
+      "approve": "Agregar a la memoria",
+      "editorLabel": "Editar memoria propuesta",
+      "credentialError": "Los datos de autenticación y acceso no se pueden guardar en la memoria.",
+      "unsafeUnicodeError": "El texto de memoria no puede incluir caracteres de control Unicode ocultos.",
+      "approveError": "No se pudo agregar esta memoria. Inténtalo de nuevo."
+    }
   }
 }
