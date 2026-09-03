@@ -76,6 +76,72 @@ async function callsFor(path) {
   return readFile(path, "utf8").catch(() => "");
 }
 
+async function devDepsFixture() {
+  const root = await mkdtemp(join(tmpdir(), "berd-dev-deps-"));
+  tempDirs.push(root);
+  const scriptDir = join(root, "scripts");
+  const sdkDir = join(root, "sdk");
+  const fakePnpm = join(root, "fake-pnpm");
+  const calls = join(root, "pnpm-calls");
+
+  await Promise.all([
+    mkdir(scriptDir),
+    mkdir(join(sdkDir, "schema"), { recursive: true }),
+    mkdir(join(sdkDir, "src"), { recursive: true }),
+  ]);
+  await Promise.all([
+    copyFile(
+      join(repo, "scripts/ensure-dev-deps.sh"),
+      join(scriptDir, "ensure-dev-deps.sh"),
+    ),
+    writeFile(join(root, "package.json"), '{"name":"fixture"}\n'),
+    writeFile(join(root, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n"),
+    writeFile(join(root, "pnpm-workspace.yaml"), "packages: ['.', 'sdk']\n"),
+    writeFile(join(sdkDir, "package.json"), '{"name":"sdk"}\n'),
+    writeFile(join(sdkDir, "tsconfig.json"), "{}\n"),
+    writeFile(join(sdkDir, "generate-schema.ts"), "export {};\n"),
+    writeFile(join(sdkDir, "schema/schema.json"), "{}\n"),
+    writeFile(join(sdkDir, "src/index.ts"), "export {};\n"),
+    writeFile(
+      fakePnpm,
+      `#!/bin/bash
+set -euo pipefail
+printf '%s:%s\\n' "$PWD" "$*" >> "${calls}"
+if [[ "\${1:-}" == "install" ]]; then
+  if [[ "\${PNPM_REWRITE_LOCK:-0}" == "1" ]] && ! grep -q autoInstallPeers pnpm-lock.yaml; then
+    printf 'settings:\n  autoInstallPeers: true\n' >> pnpm-lock.yaml
+  fi
+  mkdir -p node_modules/.pnpm
+  cp pnpm-lock.yaml node_modules/.pnpm/lock.yaml
+  if [[ "\${PNPM_INSTALL_FAIL:-0}" == "1" ]]; then
+    exit 43
+  fi
+elif [[ "\${1:-}" == "build" ]]; then
+  mkdir -p dist
+  touch dist/index.js dist/index.d.ts
+  if [[ "\${PNPM_BUILD_FAIL:-0}" == "1" ]]; then
+    exit 42
+  fi
+  touch dist/resolve-binary.js dist/resolve-binary.d.ts
+fi
+`,
+    ),
+  ]);
+  await Promise.all([
+    chmod(join(scriptDir, "ensure-dev-deps.sh"), 0o755),
+    chmod(fakePnpm, 0o755),
+  ]);
+
+  const run = (args = [], env = {}) =>
+    spawnSync(join(scriptDir, "ensure-dev-deps.sh"), args, {
+      cwd: root,
+      encoding: "utf8",
+      env: { ...process.env, PNPM_BIN: fakePnpm, ...env },
+    });
+
+  return { root, calls, run };
+}
+
 afterEach(async () => {
   await Promise.all(
     tempDirs
@@ -85,20 +151,142 @@ afterEach(async () => {
 });
 
 describe("setup tooling regressions", () => {
-  it("uses the SDK's direct build commands through the pnpm setup recipe", async () => {
-    const [sdkPackage, justfile] = await Promise.all([
+  it("routes full setup and incremental dev preparation through the dependency guard", async () => {
+    const [sdkPackage, justfile, ensureDevDeps] = await Promise.all([
       readFile(join(repo, "sdk/package.json"), "utf8"),
       readFile(justfilePath, "utf8"),
+      readFile(join(repo, "scripts/ensure-dev-deps.sh"), "utf8"),
     ]);
 
     expect(JSON.parse(sdkPackage).scripts.build).toBe(
       "tsx generate-schema.ts && tsc",
     );
     expect(justfile).toMatch(
-      /_setup-dev-deps:\n {4}pnpm install\n {4}cd sdk && pnpm build\n/,
+      /_setup-dev-deps:\n {4}\.\/scripts\/ensure-dev-deps\.sh --force\n/,
+    );
+    expect(justfile).toMatch(
+      /_ensure-dev-deps:\n {4}\.\/scripts\/ensure-dev-deps\.sh\n/,
     );
     expect(justfile).toMatch(
       /_install-lefthook:\n {4}\.\/scripts\/install-lefthook\.sh\n/,
+    );
+    expect(ensureDevDeps).toContain('"$pnpm_bin" install');
+    expect(ensureDevDeps).toContain('"$pnpm_bin" build');
+  });
+
+  it("records dependency inputs after pnpm updates the lockfile", async () => {
+    const fixture = await devDepsFixture();
+
+    const initial = fixture.run([], { PNPM_REWRITE_LOCK: "1" });
+    expect(initial.status, `${initial.stdout}\n${initial.stderr}`).toBe(0);
+
+    await writeFile(fixture.calls, "");
+    const warm = fixture.run();
+    expect(warm.status, `${warm.stdout}\n${warm.stderr}`).toBe(0);
+    expect(warm.stdout).toContain("skipping install");
+    expect(warm.stdout).toContain("skipping build");
+    expect(await callsFor(fixture.calls)).toBe("");
+  });
+
+  it("skips current dependencies and rebuilds only stale SDK inputs", async () => {
+    const fixture = await devDepsFixture();
+
+    const first = fixture.run();
+    expect(first.status, `${first.stdout}\n${first.stderr}`).toBe(0);
+    expect(await callsFor(fixture.calls)).toBe(
+      `${fixture.root}:install\n${join(fixture.root, "sdk")}:build\n`,
+    );
+
+    await writeFile(fixture.calls, "");
+    const warm = fixture.run();
+    expect(warm.status, `${warm.stdout}\n${warm.stderr}`).toBe(0);
+    expect(warm.stdout).toContain("skipping install");
+    expect(warm.stdout).toContain("skipping build");
+    expect(await callsFor(fixture.calls)).toBe("");
+
+    await writeFile(fixture.calls, "");
+    await writeFile(
+      join(fixture.root, "pnpm-lock.yaml"),
+      "lockfileVersion: '9.0'\nsettings:\n  autoInstallPeers: true\n",
+    );
+    const dependencyChange = fixture.run();
+    expect(
+      dependencyChange.status,
+      `${dependencyChange.stdout}\n${dependencyChange.stderr}`,
+    ).toBe(0);
+    expect(await callsFor(fixture.calls)).toBe(
+      `${fixture.root}:install\n${join(fixture.root, "sdk")}:build\n`,
+    );
+
+    await writeFile(fixture.calls, "");
+    await writeFile(
+      join(fixture.root, "sdk/src/index.ts"),
+      "export const changed = true;\n",
+    );
+    const sdkChange = fixture.run();
+    expect(sdkChange.status, `${sdkChange.stdout}\n${sdkChange.stderr}`).toBe(
+      0,
+    );
+    expect(await callsFor(fixture.calls)).toBe(
+      `${join(fixture.root, "sdk")}:build\n`,
+    );
+
+    await writeFile(fixture.calls, "");
+    const forced = fixture.run(["--force"]);
+    expect(forced.status, `${forced.stdout}\n${forced.stderr}`).toBe(0);
+    expect(await callsFor(fixture.calls)).toBe(
+      `${fixture.root}:install\n${join(fixture.root, "sdk")}:build\n`,
+    );
+  });
+
+  it("rebuilds when a package-exported SDK artifact is missing", async () => {
+    const fixture = await devDepsFixture();
+
+    const initial = fixture.run();
+    expect(initial.status, `${initial.stdout}\n${initial.stderr}`).toBe(0);
+
+    await Promise.all([
+      writeFile(fixture.calls, ""),
+      rm(join(fixture.root, "sdk/dist/resolve-binary.js")),
+    ]);
+    const repaired = fixture.run();
+    expect(repaired.status, `${repaired.stdout}\n${repaired.stderr}`).toBe(0);
+    expect(await callsFor(fixture.calls)).toBe(
+      `${join(fixture.root, "sdk")}:build\n`,
+    );
+  });
+
+  it("retries dependency installation after an interrupted repair", async () => {
+    const fixture = await devDepsFixture();
+
+    const initial = fixture.run();
+    expect(initial.status, `${initial.stdout}\n${initial.stderr}`).toBe(0);
+
+    await writeFile(fixture.calls, "");
+    const failed = fixture.run(["--force"], { PNPM_INSTALL_FAIL: "1" });
+    expect(failed.status).toBe(43);
+
+    await writeFile(fixture.calls, "");
+    const retried = fixture.run();
+    expect(retried.status, `${retried.stdout}\n${retried.stderr}`).toBe(0);
+    expect(await callsFor(fixture.calls)).toBe(`${fixture.root}:install\n`);
+  });
+
+  it("retries an SDK build after an interrupted repair", async () => {
+    const fixture = await devDepsFixture();
+
+    const initial = fixture.run();
+    expect(initial.status, `${initial.stdout}\n${initial.stderr}`).toBe(0);
+
+    await writeFile(fixture.calls, "");
+    const failed = fixture.run(["--force"], { PNPM_BUILD_FAIL: "1" });
+    expect(failed.status).toBe(42);
+
+    await writeFile(fixture.calls, "");
+    const retried = fixture.run();
+    expect(retried.status, `${retried.stdout}\n${retried.stderr}`).toBe(0);
+    expect(await callsFor(fixture.calls)).toBe(
+      `${join(fixture.root, "sdk")}:build\n`,
     );
   });
 

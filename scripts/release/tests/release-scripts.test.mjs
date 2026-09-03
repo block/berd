@@ -167,7 +167,7 @@ describe("managed Goose build profile", () => {
       /_bundle-debug-unix:[\s\S]*if \[\[ -z "\$\{GOOSE_BIN:-\}" \]\]; then[\s\S]*GOOSE_BUILD_PROFILE=debug \.\/scripts\/ensure-local-goose\.sh/,
     );
     expect(justfile).toMatch(
-      /dev:[\s\S]*GOOSE_BUILD_PROFILE=debug just setup[\s\S]*GOOSE_BUILD_PROFILE=debug \.\/scripts\/ensure-local-goose\.sh --check-bin/,
+      /dev:[\s\S]*just _ensure-dev-deps[\s\S]*GOOSE_DEV_MODE=required GOOSE_BUILD_PROFILE=debug \.\/scripts\/ensure-local-goose\.sh --print-bin/,
     );
     expect(devE2e).toContain("GOOSE_BUILD_PROFILE=debug just setup");
     expect(schema).toContain("GOOSE_BUILD_PROFILE=debug");
