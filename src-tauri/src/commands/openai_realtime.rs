@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::json;
 use tauri::{State, WebviewWindow};
 
@@ -13,19 +13,12 @@ const OPENAI_REALTIME_CLIENT_SECRETS_URL: &str =
 #[serde(rename_all = "camelCase")]
 pub struct OpenAiRealtimeStatus {
     configured: bool,
-    voice_configured: bool,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenAiRealtimeSession {
     client_secret: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SaveOpenAiRealtimeApiKeyRequest {
-    api_key: String,
 }
 
 fn stored_openai_api_key() -> Result<Option<String>, String> {
@@ -38,15 +31,7 @@ pub async fn get_openai_realtime_status() -> Result<OpenAiRealtimeStatus, String
 
     Ok(OpenAiRealtimeStatus {
         configured,
-        voice_configured: configured,
     })
-}
-
-#[tauri::command]
-pub async fn save_openai_realtime_api_key(
-    request: SaveOpenAiRealtimeApiKeyRequest,
-) -> Result<(), String> {
-    openai_voice_credentials::store(OpenAiVoiceCredential::Realtime, &request.api_key)
 }
 
 #[tauri::command]
@@ -62,27 +47,17 @@ pub async fn create_openai_realtime_voice_session(
         .send()
         .await
         .map_err(|error| format!("Failed to create OpenAI Realtime voice session: {error}"))?;
-    let status = response.status();
-    let body = response
-        .text()
-        .await
-        .map_err(|error| format!("Failed to read OpenAI Realtime response: {error}"))?;
-    if !status.is_success() {
-        return Err(format!(
-            "OpenAI Realtime session creation failed ({status}): {body}"
-        ));
-    }
-    let value: serde_json::Value = serde_json::from_str(&body)
-        .map_err(|error| format!("OpenAI Realtime returned invalid JSON: {error}"))?;
-
-    Ok(OpenAiRealtimeSession {
-        client_secret: parse_client_secret(&value)?,
-    })
+    parse_session_response(response, "voice").await
 }
 
 #[tauri::command]
 pub async fn create_openai_realtime_session() -> Result<OpenAiRealtimeSession, String> {
-    create_openai_realtime_voice_session(None).await
+    let api_key = openai_voice_credentials::require(OpenAiVoiceCredential::Realtime)?;
+    let response = realtime_transcription_client_secret_request(&reqwest::Client::new(), &api_key)
+        .send()
+        .await
+        .map_err(|error| format!("Failed to create OpenAI Realtime transcription session: {error}"))?;
+    parse_session_response(response, "transcription").await
 }
 
 fn realtime_client_secret_request(
@@ -99,6 +74,48 @@ fn realtime_client_secret_request(
                 "model": model,
             }
         }))
+}
+
+fn realtime_transcription_client_secret_request(
+    client: &reqwest::Client,
+    api_key: &str,
+) -> reqwest::RequestBuilder {
+    client
+        .post(OPENAI_REALTIME_CLIENT_SECRETS_URL)
+        .bearer_auth(api_key)
+        .json(&json!({
+            "session": {
+                "type": "transcription",
+                "audio": {
+                    "input": {
+                        "format": { "type": "audio/pcm", "rate": 24_000 },
+                        "transcription": { "model": "gpt-realtime-whisper" },
+                        "turn_detection": { "type": "server_vad" }
+                    }
+                }
+            }
+        }))
+}
+
+async fn parse_session_response(
+    response: reqwest::Response,
+    kind: &str,
+) -> Result<OpenAiRealtimeSession, String> {
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|error| format!("Failed to read OpenAI Realtime response: {error}"))?;
+    if !status.is_success() {
+        return Err(format!(
+            "OpenAI Realtime {kind} session creation failed ({status}): {body}"
+        ));
+    }
+    let value: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|error| format!("OpenAI Realtime returned invalid JSON: {error}"))?;
+    Ok(OpenAiRealtimeSession {
+        client_secret: parse_client_secret(&value)?,
+    })
 }
 
 #[tauri::command]
@@ -160,7 +177,10 @@ fn client_secret_value(value: &serde_json::Value) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_client_secret, realtime_client_secret_request};
+    use super::{
+        parse_client_secret, realtime_client_secret_request,
+        realtime_transcription_client_secret_request,
+    };
     use serde_json::json;
 
     #[test]
@@ -224,6 +244,29 @@ mod tests {
                     "model": "gpt-realtime-test",
                 }
             })
+        );
+    }
+
+    #[test]
+    fn dictation_client_secret_enables_input_transcription() {
+        let request = realtime_transcription_client_secret_request(
+            &reqwest::Client::new(),
+            "sk-test-secret",
+        )
+        .build()
+        .expect("build request");
+        let body: serde_json::Value = serde_json::from_slice(
+            request
+                .body()
+                .and_then(|body| body.as_bytes())
+                .expect("JSON body"),
+        )
+        .expect("parse request body");
+
+        assert_eq!(body["session"]["type"], "transcription");
+        assert_eq!(
+            body["session"]["audio"]["input"]["transcription"]["model"],
+            "gpt-realtime-whisper"
         );
     }
 }

@@ -35,9 +35,7 @@ export interface RealtimeEventTransport {
 }
 
 export interface RealtimeEmissarySessionOptions {
-  /** Appended after the non-replaceable Expert/Spokesperson contract. */
-  additionalInstructions?: string;
-  /** Used to avoid sending model-specific session fields to older models. */
+  /** Reasoning configuration is emitted only for model families that support it. */
   model?: string;
   transcriptionModel?: string;
   transcriptionLanguage?: string;
@@ -122,7 +120,6 @@ type PendingEmissaryTranscript = {
 export function createRealtimeEmissarySessionUpdate(
   options: RealtimeEmissarySessionOptions = {},
 ): RealtimeServerEvent {
-  const additionalInstructions = options.additionalInstructions?.trim();
   const transcriptionLanguage = options.transcriptionLanguage?.trim();
   const transcriptionPrompt = options.transcriptionPrompt?.trim();
   const supportsReasoning =
@@ -155,9 +152,7 @@ export function createRealtimeEmissarySessionUpdate(
       ? { reasoning: { effort: options.reasoningEffort } }
       : {}),
     max_output_tokens: options.maxOutputTokens ?? "inf",
-    instructions: additionalInstructions
-      ? `${REALTIME_SPOKESPERSON_INSTRUCTIONS}\n\n${additionalInstructions}`
-      : REALTIME_SPOKESPERSON_INSTRUCTIONS,
+    instructions: REALTIME_SPOKESPERSON_INSTRUCTIONS,
     audio: {
       input: {
         format: { type: "audio/pcm", rate: 24_000 },
@@ -247,12 +242,11 @@ function createMasterMessageItem(options: MasterMessage): RealtimeClientEvent {
   return createItem;
 }
 
-function createMasterSayResponseEvent(): RealtimeClientEvent {
+function createMasterSayResponseEvent(message: string): RealtimeClientEvent {
   return {
     type: "response.create",
     response: {
-      instructions:
-        "Speak the Expert's latest SAY message to the user now. Be natural, concise, and accurate. Do not call tools.",
+      instructions: `Speak this Expert message to the user now, preserving its meaning: ${requireNonEmpty(message, "master message")} Be natural, concise, and accurate. Do not call tools.`,
       tools: [],
       tool_choice: "none",
     },
@@ -309,6 +303,7 @@ type MasterMessage = {
   message: string;
   mode: MasterMessageMode;
   eventId?: string;
+  resolvedHandoffIds?: string[];
 };
 
 export type MasterMessageRequest = {
@@ -320,7 +315,14 @@ type ActiveResponse = {
   id?: string;
   generationDone: boolean;
   outputActive: boolean;
+  outputProduced: boolean;
+  succeeded: boolean;
+  say?: MasterMessage;
 };
+
+type PendingResponse =
+  | { mode: "default" }
+  | { mode: "say"; message: MasterMessage };
 
 /**
  * Serializes master-triggered responses with the default-conversation response
@@ -330,7 +332,9 @@ type ActiveResponse = {
  */
 export class RealtimeResponseCoordinator {
   private activeResponse: ActiveResponse | undefined;
-  private followUpResponsePending: "default" | "say" | undefined;
+  private pendingResponses: PendingResponse[] = [];
+  private completedHandoffIds: string[] = [];
+  private failedHandoffIds: string[] = [];
 
   requestMasterMessage(message: MasterMessage): MasterMessageRequest {
     requireNonEmpty(message.message, "master message");
@@ -338,21 +342,31 @@ export class RealtimeResponseCoordinator {
       return { status: "sent", events: [createMasterMessageItem(message)] };
     }
     if (!this.activeResponse) {
-      this.activeResponse = awaitingCreatedResponse();
+      this.activeResponse = awaitingCreatedResponse(message);
       return {
         status: "sent",
         events: [
           createMasterMessageItem(message),
-          createMasterSayResponseEvent(),
+          createMasterSayResponseEvent(message.message),
         ],
       };
     }
 
-    this.followUpResponsePending = "say";
+    this.pendingResponses.push({ mode: "say", message });
     return {
       status: "queued",
       events: [createMasterMessageItem(message)],
     };
+  }
+
+  requestResponse(): MasterMessageRequest {
+    if (!this.activeResponse) {
+      this.activeResponse = awaitingCreatedResponse();
+      return { status: "sent", events: [{ type: "response.create" }] };
+    }
+
+    this.queueDefaultResponse();
+    return { status: "queued", events: [] };
   }
 
   requestToolOutput(event: RealtimeClientEvent): MasterMessageRequest {
@@ -364,7 +378,7 @@ export class RealtimeResponseCoordinator {
       };
     }
 
-    this.followUpResponsePending ??= "default";
+    this.queueDefaultResponse();
     return { status: "queued", events: [event] };
   }
 
@@ -386,7 +400,7 @@ export class RealtimeResponseCoordinator {
       };
     }
 
-    this.followUpResponsePending ??= "default";
+    this.queueDefaultResponse();
     const events: RealtimeClientEvent[] = [];
     if (this.activeResponse.id && !this.activeResponse.generationDone) {
       events.push({
@@ -411,17 +425,25 @@ export class RealtimeResponseCoordinator {
         const responseId = nestedResponseId(event);
         if (!responseId)
           throw new Error("response.created is missing response.id");
+        const requestedSay = this.activeResponse?.id
+          ? undefined
+          : this.activeResponse?.say;
         if (this.activeResponse?.id) {
           // Server VAD owns microphone barge-in and may create the replacement
           // response before the cancelled response's terminal events arrive.
           // Conversation items already queued for a follow-up are visible to
           // this replacement response, so it also satisfies that pending wake.
-          this.followUpResponsePending = undefined;
+          this.pendingResponses = this.pendingResponses.filter(
+            (pending) => pending.mode === "say",
+          );
         }
         this.activeResponse = {
           id: responseId,
           generationDone: false,
           outputActive: false,
+          outputProduced: false,
+          succeeded: false,
+          say: requestedSay,
         };
         return [];
       }
@@ -429,12 +451,14 @@ export class RealtimeResponseCoordinator {
         const active = this.matchActiveResponse(event);
         if (!active) return [];
         active.outputActive = true;
+        active.outputProduced = true;
         return [];
       }
       case "response.done": {
         const active = this.matchActiveResponse(event);
         if (!active) return [];
         active.generationDone = true;
+        active.succeeded = nestedResponseStatus(event) === "completed";
         if (!active.outputActive) return this.finishActiveResponse();
         return [];
       }
@@ -463,24 +487,56 @@ export class RealtimeResponseCoordinator {
   }
 
   private finishActiveResponse(): RealtimeClientEvent[] {
+    const completed = this.activeResponse;
     this.activeResponse = undefined;
-    if (!this.followUpResponsePending) return [];
-    const responseMode = this.followUpResponsePending;
-    this.followUpResponsePending = undefined;
-    this.activeResponse = awaitingCreatedResponse();
+    if (completed?.say) {
+      const target =
+        completed.succeeded && completed.outputProduced
+          ? this.completedHandoffIds
+          : this.failedHandoffIds;
+      target.push(...(completed.say.resolvedHandoffIds ?? []));
+    }
+    const pending = this.pendingResponses.shift();
+    if (!pending) return [];
+    this.activeResponse = awaitingCreatedResponse(
+      pending.mode === "say" ? pending.message : undefined,
+    );
     return [
-      responseMode === "say"
-        ? createMasterSayResponseEvent()
+      pending.mode === "say"
+        ? createMasterSayResponseEvent(pending.message.message)
         : { type: "response.create" },
     ];
   }
+
+  takeCompletedHandoffIds(): string[] {
+    return this.completedHandoffIds.splice(0);
+  }
+
+  takeFailedHandoffIds(): string[] {
+    return this.failedHandoffIds.splice(0);
+  }
+
+  private queueDefaultResponse(): void {
+    if (!this.pendingResponses.some((pending) => pending.mode === "default")) {
+      this.pendingResponses.push({ mode: "default" });
+    }
+  }
 }
 
-function awaitingCreatedResponse(): ActiveResponse {
+function awaitingCreatedResponse(say?: MasterMessage): ActiveResponse {
   return {
     generationDone: false,
     outputActive: false,
+    outputProduced: false,
+    succeeded: false,
+    say,
   };
+}
+
+function nestedResponseStatus(event: RealtimeServerEvent): string | undefined {
+  return isRecord(event.response)
+    ? optionalString(event.response.status)
+    : undefined;
 }
 
 export type DirectMessagePeer = "master" | "emissary";

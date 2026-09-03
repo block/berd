@@ -404,7 +404,7 @@ class OpenAiRealtimeConversationRuntime {
     | null = null;
   private readonly openHandoffs = new Map<
     string,
-    { message: string; reminderAttempts: number }
+    { message: string; reminderAttempts: number; resolving: boolean }
   >();
   private activeRun = 0;
   private deliveryQueue = Promise.resolve();
@@ -540,14 +540,26 @@ class OpenAiRealtimeConversationRuntime {
       const pendingDraft =
         useChatSessionStore.getState().getSession(sessionId)?.creationState ===
         "pending";
-      const [stream, session] = await Promise.all([
-        navigator.mediaDevices.getUserMedia({
+      const streamPromise = navigator.mediaDevices
+        .getUserMedia({
           audio: {
             autoGainControl: true,
             echoCancellation: true,
             noiseSuppression: true,
           },
-        }),
+        })
+        .then((stream) => {
+          if (isStale()) {
+            stream.getTracks().forEach((track) => {
+              track.stop();
+            });
+          } else {
+            this.stream = stream;
+          }
+          return stream;
+        });
+      const [stream, session] = await Promise.all([
+        streamPromise,
         createOpenAiRealtimeVoiceSession(preference.model),
         pendingDraft
           ? Promise.resolve()
@@ -570,7 +582,6 @@ class OpenAiRealtimeConversationRuntime {
       audio.autoplay = true;
       this.peer = peer;
       this.channel = channel;
-      this.stream = stream;
       this.audio = audio;
       audio.addEventListener("playing", () =>
         this.publishActivity("assistant-speaking"),
@@ -582,6 +593,7 @@ class OpenAiRealtimeConversationRuntime {
         this.publishActivity("assistant-idle"),
       );
       stream.getAudioTracks().forEach((track) => {
+        track.enabled = !this.snapshot.microphoneMuted;
         peer.addTrack(track, stream);
       });
       peer.addEventListener("track", (event) => {
@@ -695,6 +707,13 @@ class OpenAiRealtimeConversationRuntime {
             this.publishActivity("user-idle");
           }
           sendRealtimeEvents(transport, responses.handle(event));
+          for (const handoffId of responses.takeCompletedHandoffIds()) {
+            this.openHandoffs.delete(handoffId);
+          }
+          for (const handoffId of responses.takeFailedHandoffIds()) {
+            const handoff = this.openHandoffs.get(handoffId);
+            if (handoff) handoff.resolving = false;
+          }
           for (const bridgeEvent of protocol.handle(event)) {
             if (bridgeEvent.type === "transcript.started") {
               upsertTranscriptMessage(
@@ -723,6 +742,11 @@ class OpenAiRealtimeConversationRuntime {
               );
               if (bridgeEvent.speaker === "emissary") {
                 wakeExpert(ownerSessionId, bridgeEvent.text);
+              } else if (!preference.createResponse) {
+                sendRealtimeEvents(
+                  transport,
+                  responses.requestResponse().events,
+                );
               }
               // User speech is durable and enters the ordered bridge now, but
               // only Spokesperson speech or a handoff wakes the Expert. The
@@ -743,6 +767,7 @@ class OpenAiRealtimeConversationRuntime {
               this.openHandoffs.set(handoffId, {
                 message: exchange.outbound.message,
                 reminderAttempts: 0,
+                resolving: false,
               });
               useChatStore
                 .getState()
@@ -838,10 +863,12 @@ class OpenAiRealtimeConversationRuntime {
           message: `[bridge cursor ${exchange.outbound.id}] ${message}`,
           mode,
           eventId: `berd-master-${exchange.outbound.id}`,
+          resolvedHandoffIds,
         });
         sendRealtimeEvents(transport, request.events);
         for (const handoffId of resolvedHandoffIds) {
-          this.openHandoffs.delete(handoffId);
+          const handoff = this.openHandoffs.get(handoffId);
+          if (handoff) handoff.resolving = true;
         }
         useChatStore
           .getState()
@@ -912,7 +939,8 @@ class OpenAiRealtimeConversationRuntime {
         const retrying = new Set(reminderHandoffIds);
         const pending = [...this.openHandoffs.entries()].filter(
           ([handoffId, handoff]) =>
-            handoff.reminderAttempts === 0 || retrying.has(handoffId),
+            !handoff.resolving &&
+            (handoff.reminderAttempts === 0 || retrying.has(handoffId)),
         );
         if (pending.length === 0) return;
         const exhausted = pending.filter(

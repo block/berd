@@ -1012,9 +1012,14 @@ pub fn stop_openai_realtime_voice_controls(
     {
         return Ok(());
     }
+    let owner_window_label = active
+        .as_ref()
+        .map(|(_, owner_window_label, _)| owner_window_label.clone())
+        .unwrap_or_default();
     if !state.finish(&session_id, expected_revision)? {
         return Ok(());
     }
+    restore_hidden_owner(&app, &owner_window_label);
     if let Some(controls) = app.get_webview_window(WINDOW_LABEL) {
         let _ = controls.emit(
             super::native_voice::EVENT_NAME,

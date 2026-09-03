@@ -61,22 +61,22 @@ atomically sends the dismissal reason back as silent context. Use send-to-spokes
 --mode say instead when the user still needs an answer.`,
   schema: dismissHandoffsSessionSchema,
   execute: async (args): Promise<DismissHandoffsSessionResult> => {
-    const { getActiveRealtimeEmissary } = await import(
+    const { dismissActiveRealtimeHandoffs } = await import(
       "@/features/voice-conversation/lib/realtimeEmissaryBridge"
     );
-    const spokesperson = getActiveRealtimeEmissary();
-    if (!spokesperson || spokesperson.sessionId !== args.session_id) {
+    const dismissal = await dismissActiveRealtimeHandoffs(
+      args.session_id,
+      args.cursor,
+      args.handoff_id,
+      args.reason,
+    );
+    if (!dismissal) {
       throw new CommandError(
         "invalid_args",
         `Session "${args.session_id}" has no live OpenAI Realtime voice Spokesperson. Start Realtime voice in that session and retry.`,
       );
     }
 
-    const dismissal = await spokesperson.dismissHandoffs(
-      args.cursor,
-      args.handoff_id,
-      args.reason,
-    );
     if (!dismissal.accepted) {
       throw new CommandError(
         "invalid_args",

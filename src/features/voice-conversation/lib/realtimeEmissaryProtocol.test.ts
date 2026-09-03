@@ -682,14 +682,24 @@ describe("master message injection", () => {
         type: "response.done",
         response: { id: "response-2", status: "completed" },
       }),
-    ).toEqual([]);
+    ).toEqual([
+      {
+        type: "response.create",
+        response: {
+          instructions:
+            "Speak this Expert message to the user now, preserving its meaning: Queued master context. Be natural, concise, and accurate. Do not call tools.",
+          tools: [],
+          tool_choice: "none",
+        },
+      },
+    ]);
 
     expect(
       coordinator.requestMasterMessage({
         message: "A later result.",
         mode: "say",
       }),
-    ).toMatchObject({ status: "sent" });
+    ).toMatchObject({ status: "queued" });
   });
 
   it("creates no emissary event for empty master output", () => {
@@ -770,12 +780,93 @@ describe("master message injection", () => {
         type: "response.create",
         response: {
           instructions:
-            "Speak the Expert's latest SAY message to the user now. Be natural, concise, and accurate. Do not call tools.",
+            "Speak this Expert message to the user now, preserving its meaning: Relay the result. Be natural, concise, and accurate. Do not call tools.",
           tools: [],
           tool_choice: "none",
         },
       },
     ]);
+  });
+
+  it("speaks queued SAY messages separately and resolves handoffs after playback", () => {
+    const coordinator = new RealtimeResponseCoordinator();
+    coordinator.requestMasterMessage({
+      message: "First answer.",
+      mode: "say",
+      resolvedHandoffIds: ["handoff-1"],
+    });
+    expect(
+      coordinator.requestMasterMessage({
+        message: "Second answer.",
+        mode: "say",
+        resolvedHandoffIds: ["handoff-2"],
+      }).status,
+    ).toBe("queued");
+
+    coordinator.handle({
+      type: "response.created",
+      response: { id: "response-1" },
+    });
+    coordinator.handle({
+      type: "output_audio_buffer.started",
+      response_id: "response-1",
+    });
+    coordinator.handle({
+      type: "response.done",
+      response: { id: "response-1", status: "completed" },
+    });
+    expect(
+      coordinator.handle({
+        type: "output_audio_buffer.stopped",
+        response_id: "response-1",
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        type: "response.create",
+        response: expect.objectContaining({
+          instructions: expect.stringContaining("Second answer."),
+        }),
+      }),
+    ]);
+    expect(coordinator.takeCompletedHandoffIds()).toEqual(["handoff-1"]);
+
+    coordinator.handle({
+      type: "response.created",
+      response: { id: "response-2" },
+    });
+    coordinator.handle({
+      type: "output_audio_buffer.started",
+      response_id: "response-2",
+    });
+    coordinator.handle({
+      type: "output_audio_buffer.stopped",
+      response_id: "response-2",
+    });
+    coordinator.handle({
+      type: "response.done",
+      response: { id: "response-2", status: "completed" },
+    });
+    expect(coordinator.takeCompletedHandoffIds()).toEqual(["handoff-2"]);
+  });
+
+  it("keeps a handoff unresolved when its SAY produces no audio", () => {
+    const coordinator = new RealtimeResponseCoordinator();
+    coordinator.requestMasterMessage({
+      message: "Answer.",
+      mode: "say",
+      resolvedHandoffIds: ["handoff-1"],
+    });
+    coordinator.handle({
+      type: "response.created",
+      response: { id: "response-1" },
+    });
+    coordinator.handle({
+      type: "response.done",
+      response: { id: "response-1", status: "completed" },
+    });
+
+    expect(coordinator.takeCompletedHandoffIds()).toEqual([]);
+    expect(coordinator.takeFailedHandoffIds()).toEqual(["handoff-1"]);
   });
 
   it("serializes a tool-output follow-up behind the response that called the tool", () => {

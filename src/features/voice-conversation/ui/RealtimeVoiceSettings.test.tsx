@@ -5,27 +5,24 @@ import { i18n } from "@/shared/i18n";
 import { renderWithProviders } from "@/test/render";
 import { RealtimeVoiceSettings } from "./RealtimeVoiceSettings";
 
-const realtimeApiMocks = vi.hoisted(() => ({
-  getStatus: vi.fn(() =>
-    Promise.resolve({
-      voiceConfigured: true,
-      configurationSource: "keychain" as const,
-      baseUrlSource: "default" as const,
-    }),
-  ),
-  saveApiKey: vi.fn(() => Promise.resolve()),
+const openAiVoiceMocks = vi.hoisted(() => ({
+  clearApiKey: vi.fn(() => Promise.resolve()),
+  getStatus: vi.fn(() => Promise.resolve({ sttConfigured: true })),
+  listenToSettings: vi.fn(() => Promise.resolve(() => undefined)),
+  setApiKey: vi.fn(() => Promise.resolve()),
 }));
 
-vi.mock("@/shared/api/openaiRealtime", () => ({
-  getOpenAiRealtimeStatus: realtimeApiMocks.getStatus,
-  saveOpenAiRealtimeApiKey: realtimeApiMocks.saveApiKey,
+vi.mock("../api/openAiVoice", () => ({
+  clearOpenAiSttApiKey: openAiVoiceMocks.clearApiKey,
+  getOpenAiVoiceStatus: openAiVoiceMocks.getStatus,
+  listenToOpenAiVoiceSettings: openAiVoiceMocks.listenToSettings,
+  setOpenAiSttApiKey: openAiVoiceMocks.setApiKey,
 }));
 
 describe("RealtimeVoiceSettings", () => {
   beforeEach(async () => {
     window.localStorage.clear();
-    realtimeApiMocks.getStatus.mockClear();
-    realtimeApiMocks.saveApiKey.mockClear();
+    vi.clearAllMocks();
     await i18n.changeLanguage("en");
   });
 
@@ -50,6 +47,19 @@ describe("RealtimeVoiceSettings", () => {
     expect(
       screen.getByRole("switch", { name: "Interrupt when I speak" }),
     ).toBeChecked();
+  });
+
+  it("stores the Realtime key through the shared OpenAI voice credential path", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<RealtimeVoiceSettings />);
+
+    await user.type(
+      screen.getByLabelText("OpenAI Realtime API key"),
+      " sk-shared ",
+    );
+    await user.click(screen.getByRole("button", { name: "Save key" }));
+
+    expect(openAiVoiceMocks.setApiKey).toHaveBeenCalledWith(" sk-shared ");
   });
 
   it("reveals the supported advanced session controls", async () => {

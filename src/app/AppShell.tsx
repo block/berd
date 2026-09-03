@@ -4248,10 +4248,7 @@ export function AppShell({
     let cancelled = false;
     let unlisten: (() => void) | null = null;
     void listenToVoiceConversationOpenSession((sessionId) => {
-      const voice = useVoiceConversationStore.getState().status;
-      if (voice.lifecycle === "running" && voice.sessionId === sessionId) {
-        handleSelectSession(sessionId);
-      }
+      handleSelectSession(sessionId);
     })
       .then((cleanup) => {
         if (cancelled) cleanup();

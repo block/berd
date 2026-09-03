@@ -606,7 +606,6 @@ pub fn run() {
             commands::openai_realtime::get_openai_realtime_status,
             commands::openai_realtime::create_openai_realtime_session,
             commands::openai_realtime::create_openai_realtime_voice_session,
-            commands::openai_realtime::save_openai_realtime_api_key,
             commands::openai_realtime::claim_voice_dictation_microphone,
             commands::openai_realtime::release_voice_dictation_microphone,
             commands::agent_setup::start_agent_setup,

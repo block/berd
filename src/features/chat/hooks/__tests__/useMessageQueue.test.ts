@@ -1510,7 +1510,7 @@ describe("useMessageQueue", () => {
     act(() => {
       expect(
         result.current.enqueue(
-          "[Direct message from emissary; cursor 3] Check the result",
+          "[Handoff handoff-3 from spokesperson; cursor 3] Check the result",
           undefined,
           undefined,
           {

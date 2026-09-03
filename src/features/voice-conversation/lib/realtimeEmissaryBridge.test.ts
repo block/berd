@@ -1,9 +1,37 @@
 import { describe, expect, it, vi } from "vitest";
+const eventListeners = vi.hoisted(
+  () => new Map<string, Set<(event: { payload: unknown }) => void>>(),
+);
+
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn(
+    async (event: string, listener: (event: { payload: unknown }) => void) => {
+      const listeners = eventListeners.get(event) ?? new Set();
+      listeners.add(listener);
+      eventListeners.set(event, listeners);
+      return () => listeners.delete(listener);
+    },
+  ),
+  emit: vi.fn(async (event: string, payload: unknown) => {
+    for (const listener of eventListeners.get(event) ?? []) {
+      await listener({ payload });
+    }
+  }),
+}));
+
+vi.mock("@/shared/api/openaiRealtime", () => ({
+  getOpenAiRealtimeVoiceControlsStatus: vi.fn(async () => ({
+    lifecycle: "running",
+    sessionId: "session-in-another-window",
+  })),
+}));
+
 import {
   completeActiveRealtimeMasterTurn,
   getActiveRealtimeEmissary,
   hasActiveRealtimeEmissary,
   registerRealtimeEmissary,
+  sendToActiveRealtimeSpokesperson,
 } from "./realtimeEmissaryBridge";
 
 describe("realtime emissary bridge registration", () => {
@@ -37,5 +65,127 @@ describe("realtime emissary bridge registration", () => {
     release();
     expect(getActiveRealtimeEmissary()).toBeNull();
     expect(hasActiveRealtimeEmissary("session-1")).toBe(false);
+  });
+
+  it("accepts a bridge response from another renderer", async () => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: {},
+    });
+    const requests = eventListeners.get(
+      "voice-conversation:spokesperson-bridge-request",
+    );
+    const remoteResponder = async ({ payload }: { payload: unknown }) => {
+      const request = payload as { id: string };
+      for (const listener of eventListeners.get(
+        "voice-conversation:spokesperson-bridge-response",
+      ) ?? []) {
+        await listener({
+          payload: {
+            id: request.id,
+            delivery: {
+              accepted: false,
+              reason: "stale_cursor",
+              cursor: 4,
+            },
+          },
+        });
+      }
+    };
+    const listeners = requests ?? new Set();
+    listeners.add(remoteResponder);
+    eventListeners.set(
+      "voice-conversation:spokesperson-bridge-request",
+      listeners,
+    );
+
+    await expect(
+      sendToActiveRealtimeSpokesperson(
+        "session-in-another-window",
+        "Answer",
+        3,
+        "say",
+        [],
+      ),
+    ).resolves.toEqual({
+      accepted: false,
+      reason: "stale_cursor",
+      cursor: 4,
+    });
+
+    listeners.delete(remoteResponder);
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: undefined,
+    });
+  });
+
+  it("routes a process event to the renderer that owns the Spokesperson", async () => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: {},
+    });
+    const sendMasterMessage = vi.fn().mockResolvedValue({
+      accepted: false,
+      reason: "stale_cursor",
+      cursor: 6,
+    });
+    const release = registerRealtimeEmissary({
+      sessionId: "popup-session",
+      sendMasterMessage,
+      dismissHandoffs: vi.fn(),
+      completeMasterTurn: vi.fn(),
+    });
+    await Promise.resolve();
+    const responses: unknown[] = [];
+    const responseListener = ({ payload }: { payload: unknown }) => {
+      responses.push(payload);
+    };
+    const responseListeners =
+      eventListeners.get("voice-conversation:spokesperson-bridge-response") ??
+      new Set();
+    responseListeners.add(responseListener);
+    eventListeners.set(
+      "voice-conversation:spokesperson-bridge-response",
+      responseListeners,
+    );
+
+    for (const listener of eventListeners.get(
+      "voice-conversation:spokesperson-bridge-request",
+    ) ?? []) {
+      await listener({
+        payload: {
+          id: "request-1",
+          action: "send",
+          sessionId: "popup-session",
+          message: "Answer the user",
+          cursor: 5,
+          mode: "say",
+          resolves: ["handoff-5"],
+        },
+      });
+    }
+
+    expect(sendMasterMessage).toHaveBeenCalledWith(
+      "Answer the user",
+      5,
+      "say",
+      ["handoff-5"],
+    );
+    expect(responses).toContainEqual({
+      id: "request-1",
+      delivery: {
+        accepted: false,
+        reason: "stale_cursor",
+        cursor: 6,
+      },
+    });
+
+    responseListeners.delete(responseListener);
+    release();
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: undefined,
+    });
   });
 });

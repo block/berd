@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   createInvalidToolCallOutput: vi.fn(),
   createPeer: vi.fn(),
   createSession: vi.fn(),
+  createResponse: true,
   listenControls: vi.fn(),
   publishActivity: vi.fn(),
   publishMuted: vi.fn(),
@@ -47,6 +48,7 @@ const mocks = vi.hoisted(() => ({
   steerPrompt: vi.fn(),
   requestToolOutput: vi.fn(),
   requestMasterMessage: vi.fn(),
+  requestResponse: vi.fn(),
   requestTypedUserMessage: vi.fn(),
 }));
 
@@ -92,7 +94,7 @@ vi.mock("../lib/realtimeVoicePreference", () => ({
     turnDetection: "server_vad",
     eagerness: "auto",
     interruptResponse: true,
-    createResponse: true,
+    createResponse: mocks.createResponse,
     vadThreshold: 0.5,
     prefixPaddingMs: 300,
     silenceDurationMs: 500,
@@ -317,6 +319,15 @@ vi.mock("../lib/realtimeEmissaryProtocol", () => ({
     handle() {
       return [];
     }
+    takeCompletedHandoffIds() {
+      return [];
+    }
+    takeFailedHandoffIds() {
+      return [];
+    }
+    requestResponse() {
+      return mocks.requestResponse();
+    }
     requestMasterMessage(message: unknown) {
       return mocks.requestMasterMessage(message);
     }
@@ -450,6 +461,7 @@ describe("createRealtimeTranscriptReplayEvents", () => {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.activeEmissary = null;
+  mocks.createResponse = true;
   useChatStore.setState({
     messagesBySession: {},
     queuedMessageBySession: {},
@@ -530,6 +542,10 @@ beforeEach(() => {
     status: "sent",
     events: [{ type: "conversation.item.create", message }],
   }));
+  mocks.requestResponse.mockReturnValue({
+    status: "sent",
+    events: [{ type: "response.create" }],
+  });
   mocks.requestTypedUserMessage.mockReturnValue({
     status: "interrupting",
     events: [{ type: "response.cancel" }, { type: "conversation.item.create" }],
@@ -690,10 +706,29 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       expect(mocks.startControls).toHaveBeenCalledWith("session-a"),
     );
     expect(owner.result.current.state).toBe("starting");
+    act(() => {
+      realtimeControlListener?.({
+        sessionId: "session-a",
+        revision: 7,
+        action: "mute",
+        muted: true,
+      });
+    });
 
     act(() => resolveStream(delayedStream));
     await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+    expect(track.enabled).toBe(false);
     await act(async () => owner.result.current.onToggle());
+  });
+
+  it("stops a captured microphone stream when parallel startup fails", async () => {
+    mocks.createSession.mockRejectedValueOnce(new Error("token failed"));
+    const owner = renderConversation("session-a");
+
+    await act(async () => owner.result.current.onToggle());
+
+    await waitFor(() => expect(owner.result.current.state).toBe("error"));
+    expect(track.stop).toHaveBeenCalledOnce();
   });
 
   it("keeps the process-wide conversation alive across owner unmount and remount", async () => {
@@ -1093,6 +1128,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       eventId: "berd-master-1",
       message: "[bridge cursor 1] There are 20 repos.",
       mode: "context",
+      resolvedHandoffIds: [],
     });
     expect(
       useChatStore.getState().messagesBySession["session-a"],
@@ -1200,6 +1236,28 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       content: [{ type: "text", text: "hello master" }],
       metadata: { origin: "voice_conversation" },
     });
+
+    await act(async () => owner.result.current.onToggle());
+  });
+
+  it("manually requests the Spokesperson response when automatic VAD responses are disabled", async () => {
+    mocks.createResponse = false;
+    const owner = renderConversation("session-a");
+    await act(async () => owner.result.current.onToggle());
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+
+    act(() => {
+      channel.dispatchEvent(
+        new MessageEvent("message", {
+          data: JSON.stringify({ type: "test.transcript" }),
+        }),
+      );
+    });
+
+    expect(mocks.requestResponse).toHaveBeenCalledOnce();
+    expect(mocks.sendRealtimeEvents).toHaveBeenCalledWith(expect.anything(), [
+      { type: "response.create" },
+    ]);
 
     await act(async () => owner.result.current.onToggle());
   });

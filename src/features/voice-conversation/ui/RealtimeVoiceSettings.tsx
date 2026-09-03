@@ -1,19 +1,13 @@
 import { ChevronRight } from "lucide-react";
-import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
-import {
-  getOpenAiRealtimeStatus,
-  saveOpenAiRealtimeApiKey,
-} from "@/shared/api/openaiRealtime";
 import { Button } from "@/shared/ui/button";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/shared/ui/collapsible";
-import { Input } from "@/shared/ui/input";
 import { Label } from "@/shared/ui/label";
+import { Input } from "@/shared/ui/input";
 import {
   Select,
   SelectContent,
@@ -32,6 +26,9 @@ import {
   type RealtimeTurnDetection,
   useRealtimeVoicePreference,
 } from "../lib/realtimeVoicePreference";
+import { clearOpenAiSttApiKey, setOpenAiSttApiKey } from "../api/openAiVoice";
+import { useOpenAiVoiceSetup } from "../hooks/useOpenAiVoiceSetup";
+import { OpenAiApiKeyField } from "./OpenAiApiKeyField";
 
 const REALTIME_MODELS = [
   "gpt-realtime-2.1",
@@ -116,31 +113,7 @@ function SettingSwitch({
 export function RealtimeVoiceSettings() {
   const { t } = useTranslation("settings");
   const { preference, setPreference } = useRealtimeVoicePreference();
-  const [apiKey, setApiKey] = useState("");
-  const [configured, setConfigured] = useState(false);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    void getOpenAiRealtimeStatus()
-      .then((status) => setConfigured(status.voiceConfigured))
-      .catch(() => setConfigured(false));
-  }, []);
-
-  const saveKey = async () => {
-    setSaving(true);
-    try {
-      await saveOpenAiRealtimeApiKey(apiKey);
-      setApiKey("");
-      setConfigured(true);
-      toast.success(t("voice.realtimeApiKeySaved"));
-    } catch (error) {
-      toast.error(t("voice.realtimeApiKeySaveFailed"), {
-        description: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      setSaving(false);
-    }
-  };
+  const { status: openAiStatus } = useOpenAiVoiceSetup();
 
   const update = (patch: Partial<typeof preference>) => {
     setPreference({ ...preference, ...patch });
@@ -149,30 +122,12 @@ export function RealtimeVoiceSettings() {
   return (
     <section className="space-y-5 py-2 pr-4">
       <div className="space-y-2">
-        <Label htmlFor="openai-realtime-api-key">
-          {t("voice.realtimeApiKey")}
-        </Label>
-        <div className="flex gap-2">
-          <Input
-            id="openai-realtime-api-key"
-            type="password"
-            autoComplete="off"
-            value={apiKey}
-            placeholder={
-              configured
-                ? t("voice.realtimeApiKeyConfigured")
-                : t("voice.realtimeApiKeyPlaceholder")
-            }
-            onChange={(event) => setApiKey(event.target.value)}
-          />
-          <Button
-            type="button"
-            disabled={!apiKey.trim() || saving}
-            onClick={() => void saveKey()}
-          >
-            {saving ? t("voice.realtimeSaving") : t("voice.realtimeSaveKey")}
-          </Button>
-        </div>
+        <OpenAiApiKeyField
+          label={t("voice.realtimeApiKey")}
+          configured={openAiStatus?.sttConfigured ?? false}
+          onSave={setOpenAiSttApiKey}
+          onClear={clearOpenAiSttApiKey}
+        />
         <p className="text-xs text-muted-foreground">
           {t("voice.realtimeApiKeyDescription")}
         </p>

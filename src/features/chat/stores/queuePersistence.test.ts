@@ -121,7 +121,7 @@ describe("queuePersistence", () => {
             kind: "transport-ready",
             recordId: "emissary-coordination",
             payload: {
-              text: "[Direct message from emissary; cursor 3] Check this",
+              text: "[Handoff handoff-3 from spokesperson; cursor 3] Check this",
               showInComposer: false,
               sendOptions: {
                 userMessageMetadata: {

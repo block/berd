@@ -76,23 +76,23 @@ reminder fails with reason "pipe_busy" without consuming that pending event.
 Wait for Berd to deliver it normally, then retry with its cursor.`,
   schema: sendToSpokespersonSessionSchema,
   execute: async (args): Promise<SendToSpokespersonSessionResult> => {
-    const { getActiveRealtimeEmissary } = await import(
+    const { sendToActiveRealtimeSpokesperson } = await import(
       "@/features/voice-conversation/lib/realtimeEmissaryBridge"
     );
-    const spokesperson = getActiveRealtimeEmissary();
-    if (!spokesperson || spokesperson.sessionId !== args.session_id) {
+    const delivery = await sendToActiveRealtimeSpokesperson(
+      args.session_id,
+      args.message,
+      args.cursor,
+      args.mode,
+      args.resolves,
+    );
+    if (!delivery) {
       throw new CommandError(
         "invalid_args",
         `Session "${args.session_id}" has no live OpenAI Realtime voice Spokesperson. Start Realtime voice in that session and retry.`,
       );
     }
 
-    const delivery = await spokesperson.sendMasterMessage(
-      args.message,
-      args.cursor,
-      args.mode,
-      args.resolves,
-    );
     if (!delivery.accepted) {
       throw new CommandError(
         "invalid_args",

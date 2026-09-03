@@ -63,12 +63,12 @@ describe("sanitizeReplayMessages", () => {
     ]);
   });
 
-  it("restores batched realtime transcripts to user and spoken Emissary bubbles", () => {
+  it("restores batched realtime transcripts to user and spoken Spokesperson bubbles", () => {
     const message = createTextMessage(
       "voice-batch",
       "user",
-      "[Voice transcript] Emissary said: Let me check.\n" +
-        "[Voice transcript] Emissary said (interrupted; best-effort transcript): One moment.\n" +
+      "[Voice transcript] Spokesperson said: Let me check.\n" +
+        "[Voice transcript] Spokesperson said (interrupted; best-effort transcript): One moment.\n" +
         "[Voice transcript] User said: What did you find?",
     );
     message.metadata = {
@@ -154,11 +154,11 @@ describe("sanitizeReplayMessages", () => {
     ]);
   });
 
-  it("restores persisted direct Emissary messages as coordination bubbles", () => {
+  it("restores persisted Spokesperson handoffs as coordination bubbles", () => {
     const message = createTextMessage(
       "direct-message",
       "user",
-      "[Direct message from emissary; cursor 1] Check the transcript storage.",
+      "[Handoff handoff-1 from spokesperson; cursor 1] Check the transcript storage.",
     );
     message.metadata = {
       ...message.metadata,
