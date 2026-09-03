@@ -3891,9 +3891,11 @@ fn bb_apps_access_help_exposes_get_and_full_policy_replacement() {
         "organization",
         "restricted",
         "--viewer <IDENTITY>",
+        "--clear-viewers",
         "--environment <ENVIRONMENT>",
         "complete access policy",
-        "Omitting --viewer clears",
+        "exact caller value",
+        "bb apps list --json",
         "owner",
         "--base-url <URL>",
     ] {
@@ -3902,6 +3904,29 @@ fn bb_apps_access_help_exposes_get_and_full_policy_replacement() {
             "access set help omitted {expected:?}: {set_stdout}"
         );
     }
+}
+
+#[test]
+fn bb_apps_access_set_requires_explicit_restricted_viewer_clearing_before_auth_or_network() {
+    let output = bb_command()
+        .args([
+            "apps",
+            "access",
+            "set",
+            "merchant-lookup",
+            "--visibility",
+            "restricted",
+            "--base-url",
+            "https://compose-ctrl.test.blockstaging.build",
+        ])
+        .output()
+        .expect("run bb apps access set without a viewer or clearing confirmation");
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(!output.status.success());
+    assert!(stdout.is_empty(), "stdout was: {stdout}");
+    assert!(stderr.contains("requires at least one --viewer"));
+    assert!(stderr.contains("--clear-viewers"));
 }
 
 #[test]

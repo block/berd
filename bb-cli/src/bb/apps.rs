@@ -366,9 +366,10 @@ pub fn command() -> Command {
                         .about("Replace an app's visibility and explicit viewer list")
                         .long_about(
                             "Replace an app's complete access policy. For restricted visibility, \
-                             repeat --viewer for each explicit viewer. Omitting --viewer clears the \
-                             explicit viewer list; the owner and approved publishers remain effective \
-                             viewers. Only the original owner may update access.",
+                             repeat --viewer for each explicit viewer, or pass --clear-viewers to \
+                             explicitly clear the list. The owner and approved publishers remain \
+                             effective viewers. Only the original owner may update access. Ask each \
+                             intended viewer to copy the exact caller value from `bb apps list --json`.",
                         )
                         .arg(
                             Arg::new("app-id")
@@ -389,7 +390,20 @@ pub fn command() -> Command {
                                 .long("viewer")
                                 .value_name("IDENTITY")
                                 .action(clap::ArgAction::Append)
-                                .help("Explicit viewer identity; repeat for each viewer"),
+                                .help(
+                                    "Exact case-sensitive Apps Platform user subject (for example, \
+                                     auth0|...); ask the viewer to copy `caller` from `bb apps list \
+                                     --json`; repeat for each viewer",
+                                ),
+                        )
+                        .arg(
+                            Arg::new("clear-viewers")
+                                .long("clear-viewers")
+                                .action(clap::ArgAction::SetTrue)
+                                .conflicts_with("viewer")
+                                .help(
+                                    "Confirm replacing the explicit viewer list with an empty list",
+                                ),
                         )
                         .arg(
                             Arg::new("environment")
@@ -664,12 +678,17 @@ fn run_access_set(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     let visibility = matches
         .get_one::<String>("visibility")
         .context("expected access visibility")?;
-    let viewers = matches
+    let viewers: Vec<&str> = matches
         .get_many::<String>("viewer")
         .into_iter()
         .flatten()
         .map(String::as_str)
         .collect();
+    if visibility == "restricted" && viewers.is_empty() && !matches.get_flag("clear-viewers") {
+        anyhow::bail!(
+            "restricted visibility requires at least one --viewer or explicit --clear-viewers confirmation"
+        );
+    }
     let request = AccessRequest {
         visibility,
         viewers,
@@ -2075,6 +2094,71 @@ mod tests {
                 "viewers": ["auth0|bob", "auth0|carol"],
                 "environment": "staging/west"
             })
+        );
+    }
+
+    #[test]
+    fn bb_apps_access_process_explicitly_clears_restricted_viewers() {
+        let credential = "apps-e2e-only.access.clear.session+credential";
+        let updated = json!({
+            "ok": true,
+            "app_id": "merchant-lookup",
+            "environment": "production",
+            "owner": "auth0|owner",
+            "visibility": "restricted",
+            "viewers": [],
+            "effective_viewers": ["auth0|owner"]
+        });
+        let auth_server = ProcessServer::start(vec![process_auth_response()]);
+        let control_plane = ProcessServer::start(vec![ProcessResponse::json(updated.clone())]);
+        let mut command = process_command(
+            &auth_server,
+            &control_plane,
+            &[
+                "apps",
+                "access",
+                "set",
+                "merchant-lookup",
+                "--visibility",
+                "restricted",
+                "--clear-viewers",
+                "--base-url",
+                APPROVED_TEST_BASE_URL,
+                "--client-version",
+                "0.2.0",
+                "--json",
+            ],
+            credential,
+        );
+
+        let output = command
+            .output()
+            .expect("run Apps access explicit viewer clearing command");
+        assert!(
+            output.status.success(),
+            "stderr was: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&process_stdout(&output))
+                .expect("parse access clearing output"),
+            updated
+        );
+
+        let auth_requests = auth_server.finish();
+        assert_eq!(auth_requests.len(), 1);
+        assert_process_auth(&auth_requests[0], credential);
+        let requests = control_plane.finish();
+        assert_eq!(requests.len(), 1);
+        assert_process_control_plane(
+            &requests[0],
+            "PUT",
+            "/v1/agent/apps/merchant-lookup/access",
+            credential,
+        );
+        assert_eq!(
+            requests[0].body,
+            json!({"visibility": "restricted", "viewers": []})
         );
     }
 
