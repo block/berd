@@ -31,10 +31,12 @@ import {
   createOpenAiRealtimePeerConnection,
 } from "@/features/chat/lib/openaiRealtimeAudio";
 import {
+  type ActiveRealtimeEmissary,
   type HandoffDismissal,
   type MasterMessageDelivery,
   type RealtimeMasterTurnCompletion,
   registerRealtimeEmissary,
+  waitForRealtimeEmissaryBridgeReady,
 } from "../lib/realtimeEmissaryBridge";
 import {
   createHandoffToolOutput,
@@ -494,6 +496,11 @@ class OpenAiRealtimeConversationRuntime {
   private historyReplay = Promise.resolve();
   private bridgeCallScope = createBridgeCallScope();
   private flushPendingExpertEvents: (() => boolean) | null = null;
+  private bridgeReady: Promise<ActiveRealtimeEmissary | null> =
+    Promise.resolve(null);
+  private resolveBridgeReady:
+    | ((bridge: ActiveRealtimeEmissary | null) => void)
+    | null = null;
 
   readonly subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -567,6 +574,9 @@ class OpenAiRealtimeConversationRuntime {
 
     const runId = ++this.activeRun;
     this.resetDeliveryQueue();
+    this.bridgeReady = new Promise((resolve) => {
+      this.resolveBridgeReady = resolve;
+    });
     this.bridgeCallScope = createBridgeCallScope();
     this.failureInProgress = false;
     this.openHandoffs.clear();
@@ -602,6 +612,9 @@ class OpenAiRealtimeConversationRuntime {
         this.releaseControlsListener = null;
         return;
       }
+      this.registerBridge(sessionId);
+      await waitForRealtimeEmissaryBridgeReady();
+      if (isStale()) return;
       const controlsStatus = await startOpenAiRealtimeVoiceControls(sessionId);
       if (isStale()) {
         this.releaseControlsListener();
@@ -1100,7 +1113,21 @@ class OpenAiRealtimeConversationRuntime {
         void masterBound;
         wakeExpert(ownerSessionId, "Handoff reminder", true, pendingIds);
       };
-      this.registerBridge(this.snapshot.boundSessionId ?? sessionId);
+      const bridgeSessionId = this.snapshot.boundSessionId ?? sessionId;
+      if (
+        !this.bridgeSender ||
+        !this.bridgeHandoffDismissal ||
+        !this.bridgeMasterTurnCompletion
+      ) {
+        throw new Error("The Realtime Spokesperson bridge did not initialize.");
+      }
+      this.resolveBridgeReady?.({
+        sessionId: bridgeSessionId,
+        sendMasterMessage: this.bridgeSender,
+        dismissHandoffs: this.bridgeHandoffDismissal,
+        completeMasterTurn: this.bridgeMasterTurnCompletion,
+      });
+      this.resolveBridgeReady = null;
       this.setSnapshot({
         ...this.snapshot,
         state: "listening",
@@ -1321,6 +1348,8 @@ class OpenAiRealtimeConversationRuntime {
   private async cleanupResources(sessionId: string): Promise<void> {
     this.activeRun += 1;
     this.resetDeliveryQueue();
+    this.resolveBridgeReady?.(null);
+    this.resolveBridgeReady = null;
     await this.ownerMigration.catch(() => undefined);
     const activeSessionId = this.snapshot.boundSessionId ?? sessionId;
     const controlsRevision = this.snapshot.controlsRevision;
@@ -1389,18 +1418,25 @@ class OpenAiRealtimeConversationRuntime {
   }
 
   private registerBridge(sessionId: string): void {
-    if (
-      !this.bridgeSender ||
-      !this.bridgeHandoffDismissal ||
-      !this.bridgeMasterTurnCompletion
-    )
-      return;
+    const bridgeReady = this.bridgeReady;
     this.releaseBridge?.();
     this.releaseBridge = registerRealtimeEmissary({
       sessionId,
-      sendMasterMessage: this.bridgeSender,
-      dismissHandoffs: this.bridgeHandoffDismissal,
-      completeMasterTurn: this.bridgeMasterTurnCompletion,
+      async sendMasterMessage(message, cursor, mode, resolves) {
+        const bridge = await bridgeReady;
+        if (!bridge) throw new Error("The Realtime Spokesperson stopped.");
+        return bridge.sendMasterMessage(message, cursor, mode, resolves);
+      },
+      async dismissHandoffs(cursor, handoffIds, reason) {
+        const bridge = await bridgeReady;
+        if (!bridge) throw new Error("The Realtime Spokesperson stopped.");
+        return bridge.dismissHandoffs(cursor, handoffIds, reason);
+      },
+      completeMasterTurn(completion) {
+        void bridgeReady.then((bridge) =>
+          bridge?.completeMasterTurn(completion),
+        );
+      },
     });
   }
 }

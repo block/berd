@@ -418,6 +418,11 @@ export class RealtimeResponseCoordinator {
           ? undefined
           : this.activeResponse?.say;
         if (this.activeResponse?.id) {
+          if (this.activeResponse.say) {
+            this.failedHandoffIds.push(
+              ...(this.activeResponse.say.resolvedHandoffIds ?? []),
+            );
+          }
           // Server VAD owns microphone barge-in and may create the replacement
           // response before the cancelled response's terminal events arrive.
           // Conversation items already queued for a follow-up are visible to

@@ -46,6 +46,7 @@ const mocks = vi.hoisted(() => ({
   setControlsSuppressed: vi.fn(),
   startControls: vi.fn(),
   stopControls: vi.fn(),
+  waitForBridgeReady: vi.fn(),
   sendRealtimeEvents: vi.fn(),
   steerPrompt: vi.fn(),
   requestToolOutput: vi.fn(),
@@ -84,6 +85,7 @@ vi.mock("../lib/realtimeEmissaryBridge", () => ({
     mocks.activeEmissary = emissary;
     return mocks.registerEmissary();
   },
+  waitForRealtimeEmissaryBridgeReady: mocks.waitForBridgeReady,
 }));
 
 vi.mock("../lib/realtimeVoicePreference", () => ({
@@ -546,6 +548,7 @@ beforeEach(() => {
     revision: 7,
   }));
   mocks.stopControls.mockResolvedValue(undefined);
+  mocks.waitForBridgeReady.mockResolvedValue(undefined);
   mocks.requestToolOutput.mockImplementation((event) => ({
     status: "queued",
     events: [event],
@@ -755,6 +758,10 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       expect(mocks.startControls).toHaveBeenCalledWith("session-a"),
     );
     expect(owner.result.current.state).toBe("starting");
+    expect(mocks.activeEmissary?.sessionId).toBe("session-a");
+    expect(() =>
+      mocks.activeEmissary?.completeMasterTurn({ reminderHandoffIds: [] }),
+    ).not.toThrow();
     act(() => {
       realtimeControlListener?.({
         sessionId: "session-a",
@@ -767,6 +774,30 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     act(() => resolveStream(delayedStream));
     await waitFor(() => expect(owner.result.current.state).toBe("listening"));
     expect(track.enabled).toBe(false);
+    await act(async () => owner.result.current.onToggle());
+  });
+
+  it("publishes running controls only after the cross-renderer bridge is ready", async () => {
+    let resolveBridge!: () => void;
+    mocks.waitForBridgeReady.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        resolveBridge = resolve;
+      }),
+    );
+    const owner = renderConversation("session-a");
+
+    act(() => {
+      void owner.result.current.onToggle();
+    });
+
+    await waitFor(() => expect(mocks.activeEmissary).not.toBeNull());
+    expect(mocks.startControls).not.toHaveBeenCalled();
+
+    act(() => resolveBridge());
+    await waitFor(() =>
+      expect(mocks.startControls).toHaveBeenCalledWith("session-a"),
+    );
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
     await act(async () => owner.result.current.onToggle());
   });
 

@@ -695,6 +695,27 @@ describe("master message injection", () => {
     ).toMatchObject({ status: "queued" });
   });
 
+  it("releases handoffs from a SAY displaced by a server-VAD response", () => {
+    const coordinator = new RealtimeResponseCoordinator();
+    coordinator.requestMasterMessage({
+      message: "The answer is 21.",
+      mode: "say",
+      resolvedHandoffIds: ["handoff-1"],
+    });
+    coordinator.handle({
+      type: "response.created",
+      response: { id: "response-1" },
+    });
+
+    coordinator.handle({
+      type: "response.created",
+      response: { id: "response-2" },
+    });
+
+    expect(coordinator.takeCompletedHandoffIds()).toEqual([]);
+    expect(coordinator.takeFailedHandoffIds()).toEqual(["handoff-1"]);
+  });
+
   it("creates no emissary event for empty master output", () => {
     const coordinator = new RealtimeResponseCoordinator();
 

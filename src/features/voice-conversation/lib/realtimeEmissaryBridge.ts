@@ -98,8 +98,9 @@ type RemoteBridgeResponse = {
   error?: string;
 };
 
-function ensureRemoteListener(): void {
-  if (!window.__TAURI_INTERNALS__ || remoteListener) return;
+function ensureRemoteListener(): Promise<void> {
+  if (!window.__TAURI_INTERNALS__) return Promise.resolve();
+  if (remoteListener) return remoteListener.then(() => undefined);
   const registration = listen<RemoteBridgeRequest>(
     REMOTE_REQUEST_EVENT,
     async ({ payload }) => {
@@ -151,6 +152,7 @@ function ensureRemoteListener(): void {
     if (remoteListener === registration) remoteListener = null;
     console.error("Could not listen for remote Spokesperson messages", error);
   });
+  return registration.then(() => undefined);
 }
 
 async function requestRemoteBridge(
@@ -198,10 +200,14 @@ export function registerRealtimeEmissary(
   emissary: ActiveRealtimeEmissary,
 ): () => void {
   activeEmissary = emissary;
-  ensureRemoteListener();
+  void ensureRemoteListener().catch(() => undefined);
   return () => {
     if (activeEmissary === emissary) activeEmissary = null;
   };
+}
+
+export async function waitForRealtimeEmissaryBridgeReady(): Promise<void> {
+  await ensureRemoteListener();
 }
 
 export async function sendToActiveRealtimeSpokesperson(

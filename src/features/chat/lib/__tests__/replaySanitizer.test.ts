@@ -115,12 +115,13 @@ describe("sanitizeReplayMessages", () => {
   });
 
   it("restores a current Expert wake batch with cursors and a handoff", () => {
+    const handoffId = "handoff-123e4567-e89b-12d3-a456-426614174000-6";
     const message = createTextMessage(
       "expert-wake",
       "user",
       "[Voice transcript; cursor 4] User said: Check my Development folder.\n" +
         "[Voice transcript; cursor 5] Spokesperson said: Let me check that.\n" +
-        "[Handoff handoff-6 from spokesperson; cursor 6] Count the repositories.",
+        `[Handoff ${handoffId} from spokesperson; cursor 6] Count the repositories.`,
     );
     message.metadata = {
       ...message.metadata,
@@ -155,10 +156,11 @@ describe("sanitizeReplayMessages", () => {
   });
 
   it("restores persisted Spokesperson handoffs as coordination bubbles", () => {
+    const handoffId = "handoff-123e4567-e89b-12d3-a456-426614174000-1";
     const message = createTextMessage(
       "direct-message",
       "user",
-      "[Handoff handoff-1 from spokesperson; cursor 1] Check the transcript storage.",
+      `[Handoff ${handoffId} from spokesperson; cursor 1] Check the transcript storage.`,
     );
     message.metadata = {
       ...message.metadata,

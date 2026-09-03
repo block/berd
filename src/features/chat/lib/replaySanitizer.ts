@@ -12,13 +12,13 @@ const TTS_DELIVERY_FAILURE_OUTCOMES = new Set([
   "Native TTS could not deliver the assistant reply.",
 ]);
 const VOICE_TRANSCRIPT_BOUNDARY =
-  /\n(?=\[(?:Voice transcript(?:; cursor \d+)?|Handoff handoff-\d+ from spokesperson; cursor \d+)\] )/;
+  /\n(?=\[(?:Voice transcript(?:; cursor \d+)?|Handoff handoff-[A-Za-z0-9-]+ from spokesperson; cursor \d+)\] )/;
 const USER_TRANSCRIPT =
   /^\[Voice transcript(?:; cursor \d+)?\] User said: ([\s\S]*)$/;
 const SPOKESPERSON_TRANSCRIPT =
   /^\[Voice transcript(?:; cursor \d+)?\] Spokesperson said( \(interrupted; best-effort transcript\))?: ([\s\S]*)$/;
 const SPOKESPERSON_DIRECT_MESSAGE =
-  /^\[Handoff handoff-\d+ from spokesperson; cursor \d+\] ([\s\S]*)$/;
+  /^\[Handoff handoff-[A-Za-z0-9-]+ from spokesperson; cursor \d+\] ([\s\S]*)$/;
 
 function visibleTextAfterTtsDeliveryNotices(text: string): string | null {
   if (!text.startsWith(TTS_DELIVERY_FAILURE_PREFIX)) {
