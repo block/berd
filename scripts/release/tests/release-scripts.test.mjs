@@ -58,6 +58,33 @@ describe("Tauri Cargo target isolation", () => {
     expect(result.status).toBe(0);
     expect(result.stdout.trim()).toBe(override);
   });
+
+  it("preserves the shared Unix bundle target contract", async () => {
+    const home = join(await tempDir(), "home");
+    const justfile = await readFile(join(repo, "justfile"), "utf8");
+    const result = run(
+      "bash",
+      ["scripts/resolve-tauri-cargo-target-dir.sh", "bundle"],
+      {
+        BERD_TAURI_CARGO_TARGET_DIR: "",
+        HOME: home,
+        XDG_CACHE_HOME: "",
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe(
+      process.platform === "darwin"
+        ? join(home, "Library/Caches/berd-tauri/cargo-target")
+        : join(home, ".cache/berd-tauri/cargo-target"),
+    );
+    expect(justfile).toMatch(
+      /_bundle-unix:[\s\S]*resolve-tauri-cargo-target-dir\.sh bundle/,
+    );
+    expect(justfile).toMatch(
+      /_bundle-debug-unix:[\s\S]*resolve-tauri-cargo-target-dir\.sh bundle/,
+    );
+  });
 });
 
 describe("managed Goose build profile", () => {

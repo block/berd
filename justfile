@@ -333,7 +333,7 @@ _bundle-unix:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)"
+    TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh bundle)"
     if [[ -z "${GOOSE_BIN:-}" ]]; then
       GOOSE_DEV_MODE=required GOOSE_BUILD_PROFILE=release ./scripts/ensure-local-goose.sh
     fi
@@ -412,7 +412,7 @@ _bundle-debug-unix:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)"
+    TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh bundle)"
     if [[ -z "${GOOSE_BIN:-}" ]]; then
       GOOSE_DEV_MODE=required GOOSE_BUILD_PROFILE=debug ./scripts/ensure-local-goose.sh
     fi
