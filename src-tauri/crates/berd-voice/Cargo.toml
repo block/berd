@@ -8,6 +8,10 @@ license = "Apache-2.0 AND CC-BY-4.0"
 repository = "https://github.com/block/berd"
 description = "Device-local voice primitives for Berd"
 
+[[bin]]
+name = "berd-voice"
+path = "src/main.rs"
+
 [features]
 default = ["static"]
 static = ["sherpa-onnx/static"]

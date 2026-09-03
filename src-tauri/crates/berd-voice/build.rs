@@ -2,10 +2,10 @@ fn main() {
     #[cfg(target_os = "macos")]
     {
         if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
-            println!("cargo:rerun-if-changed=../../native/siri_tts_bridge.h");
-            println!("cargo:rerun-if-changed=../../native/siri_tts_bridge.m");
+            println!("cargo:rerun-if-changed=native/siri_tts_bridge.h");
+            println!("cargo:rerun-if-changed=native/siri_tts_bridge.m");
             cc::Build::new()
-                .file("../../native/siri_tts_bridge.m")
+                .file("native/siri_tts_bridge.m")
                 .flag("-fobjc-arc")
                 .compile("berd_siri_tts_bridge");
             swift_rs::SwiftLinker::new("14.0")
