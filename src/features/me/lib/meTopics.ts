@@ -4,8 +4,8 @@ import {
   listDirectoryEntries,
   pathExists,
   readTextFile,
-  writeTextFile,
 } from "@/shared/api/system";
+import { saveMemoryDocument } from "./saveMemoryDocument";
 
 /**
  * Topic docs: the spokes of the memory-v2 hub-and-spokes shape. Every
@@ -112,8 +112,12 @@ export async function listTopics(): Promise<TopicDoc[]> {
 }
 
 /** Save a user edit to a topic document. */
-export async function saveTopic(path: string, contents: string): Promise<void> {
-  await writeTextFile(path, contents);
+export async function saveTopic(
+  path: string,
+  contents: string,
+  topic: string,
+): Promise<void> {
+  await saveMemoryDocument({ path, contents, topic });
 }
 
 /** Turn a display name into a topic file name: "Side projects" → side-projects.md */

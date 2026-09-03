@@ -11,6 +11,7 @@ import { IconLayoutSidebarLeftCollapse } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { ChatSearchBar } from "./ChatSearchBar";
 import { ChatTranscriptSurface } from "./ChatTranscriptSurface";
+import { MemoryProposalToasts } from "@/features/me/ui/MemoryProposalToasts";
 import { RemoteHostConnectionBanner } from "./RemoteHostConnectionBanner";
 import { LoadingBerd } from "./LoadingBerd";
 import { ChatRightRail } from "./ChatRightRail";
@@ -725,6 +726,7 @@ export function ChatView({
           />
         ) : null}
         <SecurityConfirmationPanel sessionId={sessionId} />
+        <MemoryProposalToasts sessionId={sessionId} />
         <ConversationComposerCapability
           binding={composerBinding}
           onUserTextCommitted={

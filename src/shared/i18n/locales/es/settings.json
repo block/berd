@@ -65,23 +65,23 @@
     }
   },
   "archive": {
-    "title": "Archivo",
     "autoArchive": {
-      "sectionTitle": "Archivado automático",
-      "label": "Archivar chats inactivos",
-      "description": "Archiva automáticamente los chats después de este tiempo sin mensajes. Los chats fijados en Inicio nunca se archivan automáticamente.",
-      "confirmTitle": "¿Activar el archivado automático?",
-      "confirmDescription": "Berd archivará los chats no fijados {{duration}} sin volver a preguntar. Puedes restaurarlos desde Archivo o desactivar esta opción cuando quieras.",
       "confirmAction": "Activar",
+      "confirmDescription": "Berd archivará los chats no fijados {{duration}} sin volver a preguntar. Puedes restaurarlos desde Archivo o desactivar esta opción cuando quieras.",
+      "confirmTitle": "¿Activar el archivado automático?",
+      "description": "Archiva automáticamente los chats después de este tiempo sin mensajes. Los chats fijados en Inicio nunca se archivan automáticamente.",
+      "label": "Archivar chats inactivos",
       "options": {
-        "never": "Nunca",
         "1-day": "Después de 1 día",
-        "7-days": "Después de 7 días",
         "14-days": "Después de 14 días",
         "30-days": "Después de 30 días",
-        "90-days": "Después de 90 días"
-      }
-    }
+        "7-days": "Después de 7 días",
+        "90-days": "Después de 90 días",
+        "never": "Nunca"
+      },
+      "sectionTitle": "Archivado automático"
+    },
+    "title": "Archivo"
   },
   "chats": {
     "empty": "No hay chats archivados.",
@@ -105,6 +105,9 @@
     "title": "Compactación"
   },
   "connections": {
+    "askAgent": "Agregar conexión",
+    "askAgentPrompt": "Ayúdame a agregar una conexión. Primero pregunta si quiero un servicio administrado por la empresa o un MCP local; después explica la configuración y los requisitos de acceso. Pregunta antes de cambiar cualquier configuración y nunca muestres ni copies credenciales.",
+    "askAgentTitle": "Agregar una conexión",
     "configure": "Configurar",
     "connect": "Conectar",
     "connectError": "No se pudo abrir el flujo de conexión. Inténtalo de nuevo.",
@@ -119,12 +122,20 @@
     "expiresToday": "Caduca hoy",
     "expiresTomorrow": "Caduca mañana",
     "extendAccess": "Ampliar acceso",
+    "localError": {
+      "description": "Inténtalo de nuevo en unos instantes.",
+      "partialDescription": "Berd no pudo leer todas las fuentes de configuración local.",
+      "partialTitle": "Es posible que falten algunos MCP locales",
+      "retry": "Intentar de nuevo",
+      "retrying": "Intentando…",
+      "title": "No se pudieron cargar tus MCP locales"
+    },
     "noResults": "Ninguna conexión coincide con tu búsqueda.",
     "reconnect": "Reconectar",
     "search": "Buscar conexiones",
     "sections": {
-      "managed": "Administradas por la empresa",
-      "local": "Locales"
+      "local": "Locales",
+      "managed": "Administradas por la empresa"
     },
     "status": {
       "active": "Activa",
@@ -132,18 +143,7 @@
       "expired": "Caducada"
     },
     "title": "Conexiones",
-    "worksWith": "Funciona con: {{harnesses}}",
-    "localError": {
-      "title": "No se pudieron cargar tus MCP locales",
-      "description": "Inténtalo de nuevo en unos instantes.",
-      "partialTitle": "Es posible que falten algunos MCP locales",
-      "partialDescription": "Berd no pudo leer todas las fuentes de configuración local.",
-      "retry": "Intentar de nuevo",
-      "retrying": "Intentando…"
-    },
-    "askAgent": "Agregar conexión",
-    "askAgentTitle": "Agregar una conexión",
-    "askAgentPrompt": "Ayúdame a agregar una conexión. Primero pregunta si quiero un servicio administrado por la empresa o un MCP local; después explica la configuración y los requisitos de acceso. Pregunta antes de cambiar cualquier configuración y nunca muestres ni copies credenciales."
+    "worksWith": "Funciona con: {{harnesses}}"
   },
   "deleteProject": {
     "description": "Este proyecto y todos sus datos se eliminarán de forma permanente.",
@@ -211,9 +211,9 @@
       "description": "Muestra la superficie de tareas y automatizaciones de Builderbot.",
       "title": "Builderbot"
     },
-    "relatedPullRequests": {
-      "description": "Muestra PR Inbox y el estado actual de las solicitudes de incorporación enlazadas en un chat.",
-      "title": "PR Inbox"
+    "chatOnCanvas": {
+      "description": "Expande los chats fijados en tarjetas de conversación en vivo en Inicio, donde puedes leer y responder.",
+      "title": "Chat en el lienzo"
     },
     "defaultLabel": "predeterminado",
     "description": "Activa funciones de Berd en desarrollo en este dispositivo. Los experimentos pueden cambiar, fallar o desaparecer.",
@@ -234,6 +234,10 @@
     "promptPins": {
       "description": "Fija prompts guardados en Inicio que se ejecutan con un clic, opcionalmente con un agente adjunto.",
       "title": "Pins de prompts"
+    },
+    "relatedPullRequests": {
+      "description": "Muestra PR Inbox y el estado actual de las solicitudes de incorporación enlazadas en un chat.",
+      "title": "PR Inbox"
     },
     "remoteSshSessions": {
       "description": "Ejecuta sesiones en una máquina remota por SSH usando los hosts de tu configuración SSH. Berd inicia un daemon de Goose en el host remoto y crea un túnel hacia él.",
@@ -260,10 +264,6 @@
     "voiceConversation": {
       "description": "Prueba conversaciones de voz bidireccionales continuas en chats de Goose.",
       "title": "Conversaciones de voz"
-    },
-    "chatOnCanvas": {
-      "title": "Chat en el lienzo",
-      "description": "Expande los chats fijados en tarjetas de conversación en vivo en Inicio, donde puedes leer y responder."
     }
   },
   "extensions": {
@@ -416,6 +416,51 @@
     },
     "title": "General"
   },
+  "me": {
+    "addTopic": "Añadir tema",
+    "addTopicAction": "Añadir",
+    "cancel": "Cancelar",
+    "closeTopic": "Cerrar",
+    "create": "Crear mi archivo",
+    "description": "Detalles, preferencias y límites aprobados que ayudan a los agentes a trabajar mejor contigo entre chats.",
+    "editTab": "Editar",
+    "editorLabel": "Editar tu me.md",
+    "livesIn": "Los recuerdos aprobados permanecen en archivos de texto sin formato en tu equipo, en",
+    "loadError": "No se pudo leer tu archivo. Es posible que se haya movido o eliminado.",
+    "newTopicDescription": "Un tema es su propio documento. Los agentes lo leen solo cuando esa parte de tu vida es lo que está pasando.",
+    "newTopicError": "No se pudo crear ese tema. Puede que ya exista un tema con un nombre similar.",
+    "newTopicLabel": "Nombra tu tema",
+    "newTopicPlaceholder": "Estilo, Familia, Viajes…",
+    "noTopics": "Aún no hay temas. Los temas guardan conocimiento más profundo, como estilo, familia o trabajo, que solo se carga cuando es relevante.",
+    "offBanner": {
+      "description": "Berd no usará tus recuerdos aprobados ni sugerirá otros nuevos. Los archivos de memoria y las propuestas pendientes permanecerán en tu equipo a menos que los elimines."
+    },
+    "openTopic": "Ver",
+    "previewTab": "Vista previa",
+    "projectionHint": "Berd también pone los recuerdos a disposición de herramientas de agentes compatibles mediante un archivo local en ~/.agents/AGENTS.md.",
+    "refresh": "Actualizar",
+    "save": "Guardar",
+    "saveError": "No se pudieron guardar tus cambios. Tus ediciones siguen aquí, inténtalo de nuevo.",
+    "spineTitle": "Sobre ti",
+    "title": "Memoria",
+    "toggle": {
+      "description": "La memoria ayuda a Berd y a otras herramientas de agentes a recordar lo que te importa y cómo prefieres trabajar. Berd puede sugerir recuerdos de tus chats, pero no se guarda nada sin tu aprobación. Revisa, edita o elimina cualquier cosa aquí en cualquier momento.",
+      "label": "Usar memoria"
+    },
+    "topicsHint": "Los temas aportan conocimiento más específico que solo se carga cuando es relevante. Los agentes pueden agregar o actualizar temas al conocerte.",
+    "topicsTitle": "Temas",
+    "unsavedChanges": "Cambios sin guardar",
+    "proposals": {
+      "title": "Memoria propuesta",
+      "description": "Revisa estas sugerencias antes de que se agregue algo a tu memoria. Puedes editar el texto primero.",
+      "review": "Revisar",
+      "dismiss": "Rechazar",
+      "approve": "Agregar a la memoria",
+      "editorLabel": "Editar memoria propuesta",
+      "credentialError": "Los datos de autenticación y acceso no se pueden guardar en la memoria.",
+      "approveError": "No se pudo agregar esta memoria. Inténtalo de nuevo."
+    }
+  },
   "nav": {
     "appearance": "Apariencia",
     "archive": "Archivo",
@@ -426,6 +471,7 @@
     "experiments": "Experimentos",
     "extensions": "Extensiones",
     "general": "General",
+    "me": "Memoria",
     "notifications": "Notificaciones",
     "providers": "Proveedores de IA",
     "providersUpdateAvailable": "Actualización disponible",
@@ -433,7 +479,8 @@
     "shortcuts": "Atajos de teclado",
     "system": "Sistema",
     "updates": "Actualizaciones",
-    "voice": "Voz"
+    "voice": "Voz",
+    "memoryProposalsPending": "{{count}} propuestas de memoria por revisar"
   },
   "navigation": {
     "title": "Navegación"
@@ -996,8 +1043,6 @@
     "chooseVoiceLabel": "Elige una voz: {{voice}}",
     "chooseVoiceTitle": "Elige una voz",
     "download": "Descargar modelo",
-    "downloadVoice": "Descargar {{voice}}",
-    "downloadingVoice": "Descargando {{voice}}",
     "downloadPhase": {
       "complete": "Instalado",
       "downloading": "Descargando",
@@ -1007,13 +1052,9 @@
       "verifying": "Verificando modelo"
     },
     "downloadProgress": "{{downloaded}} de {{total}}",
+    "downloadVoice": "Descargar {{voice}}",
+    "downloadingVoice": "Descargando {{voice}}",
     "inputBackendDescription": "Elige cómo Berd transcribe tu voz.",
-    "macSpeechDownloading": "Descargando el modelo de dictado… {{progress}} %",
-    "macSpeechLoading": "Comprobando el reconocimiento de voz de macOS…",
-    "macSpeechLocaleUnsupported": "El reconocimiento de voz de Apple no admite {{locale}}.",
-    "macSpeechModel": "Dictado en el dispositivo",
-    "macSpeechNotInstalled": "No instalado para {{locale}}",
-    "macSpeechSystemLocale": "el idioma del sistema",
     "interruptionDescription": "Elige qué ocurre cuando hablas mientras Berd habla.",
     "interruptionMode": "Interrupciones",
     "interruptionModeDescriptions": {
@@ -1026,10 +1067,19 @@
       "automatic": "Automático",
       "preventFeedback": "Evitar retroalimentación"
     },
+    "macSpeechDownloading": "Descargando el modelo de dictado… {{progress}} %",
+    "macSpeechLoading": "Comprobando el reconocimiento de voz de macOS…",
+    "macSpeechLocaleUnsupported": "El reconocimiento de voz de Apple no admite {{locale}}.",
+    "macSpeechModel": "Dictado en el dispositivo",
+    "macSpeechNotInstalled": "No instalado para {{locale}}",
+    "macSpeechSystemLocale": "el idioma del sistema",
+    "microphonePermissionDenied": "El acceso al micrófono está desactivado para Berd. Permite el acceso en Ajustes del Sistema para usar la conversación por voz.",
+    "microphonePermissionTitle": "Se requiere acceso al micrófono",
     "modelInstalled": "Instalado",
     "modelInstalledSize": "{{size}} · Instalado",
     "modelMissingSize": "No instalado · descarga de {{size}}",
     "modelNotInstalled": "No instalado",
+    "noVoiceSelected": "No hay ninguna voz seleccionada",
     "notReadyInput": "Parakeet STT no está instalado. Descárgalo abajo para usar la conversación por voz.",
     "notReadyInputAndOpenAiOutput": "Parakeet STT no está instalado y falta la clave API compartida de voz de OpenAI. Completa ambos pasos abajo para usar la conversación por voz.",
     "notReadyInputAndPocketOutput": "Parakeet STT y Pocket TTS no están instalados. Descarga ambos abajo para usar la conversación por voz.",
@@ -1047,9 +1097,6 @@
     "notReadyPocketOutput": "Pocket TTS no está instalado. Descárgalo abajo para usar la conversación por voz.",
     "notReadySiriOutput": "No hay ninguna voz de Siri instalada seleccionada. Descarga o selecciona una abajo para usar la conversación por voz.",
     "notReadyTitle": "La conversación por voz no está lista",
-    "microphonePermissionDenied": "El acceso al micrófono está desactivado para Berd. Permite el acceso en Ajustes del Sistema para usar la conversación por voz.",
-    "microphonePermissionTitle": "Se requiere acceso al micrófono",
-    "noVoiceSelected": "No hay ninguna voz seleccionada",
     "openMicrophoneSettings": "Abrir ajustes del micrófono",
     "openMicrophoneSettingsError": "No se pudieron abrir los ajustes del micrófono. Abre Ajustes del Sistema y selecciona Privacidad y seguridad > Micrófono.",
     "openAiApiKeyConfigured": "Guardada de forma segura y compartida por la transcripción y la reproducción de voz de OpenAI.",
@@ -1078,6 +1125,7 @@
     "removingModel": "Eliminando modelo…",
     "retryDownload": "Reintentar descarga del modelo",
     "saveApiKey": "Guardar clave",
+    "selectedVoice": "Voz seleccionada: {{voice}}",
     "settingsDescription": "Elige cómo habla Berd, instala el reconocimiento de voz y escucha las voces disponibles.",
     "siriLanguage": "Idioma",
     "siriLoading": "Cargando voces de Siri…",
@@ -1085,7 +1133,6 @@
     "siriUnsupported": "Las voces de Siri solo están disponibles en macOS.",
     "speechInput": "Entrada de voz",
     "speechOutput": "Salida de voz",
-    "selectedVoice": "Voz seleccionada: {{voice}}",
     "useVoice": "Usar {{voice}}",
     "voice": "Voz",
     "voiceLabel": "Voz de Pocket TTS"
