@@ -1,3 +1,6 @@
+import { toast } from "sonner";
+import { i18n } from "@/shared/i18n";
+
 export const STARRED_MODELS_ENTRY_PREFIX = "goose:starredModels:v1:entry:";
 export const LEGACY_STARRED_MODELS_STORAGE_KEY = "goose:starredModels:v1";
 const STARRED_MODELS_ENTRY_VALUE = "1";
@@ -95,7 +98,9 @@ function persistStarEntry(starKey: string, starred: boolean): void {
       window.localStorage.removeItem(storageKey);
     }
   } catch {
-    // localStorage may be unavailable or over quota.
+    // The write did not land (storage unavailable or over quota). Tell the
+    // user instead of letting the toggle silently bounce back.
+    toast.error(i18n.t("chat:notifications.starredModelsPersistError"));
   }
 
   window.dispatchEvent(new CustomEvent(STARRED_MODELS_CHANGED_EVENT));
@@ -118,7 +123,9 @@ export function toggleModelStar(scopeId: string, modelId: string): void {
       window.localStorage.getItem(starredModelStorageKey(starKey)) !== null;
     persistStarEntry(starKey, !starred);
   } catch {
-    // localStorage may be unavailable; leave stored state untouched.
+    // Storage is unavailable, so the toggle cannot be applied at all. The
+    // write path reports its own failures; report this one too.
+    toast.error(i18n.t("chat:notifications.starredModelsPersistError"));
   }
 }
 

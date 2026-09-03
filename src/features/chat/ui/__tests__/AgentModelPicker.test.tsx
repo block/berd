@@ -16,6 +16,18 @@ import {
   recordModelSelection,
 } from "../../lib/modelRecency";
 import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
+import { toast } from "sonner";
+
+vi.mock("sonner", () => ({
+  toast: {
+    error: vi.fn(),
+    success: vi.fn(),
+    info: vi.fn(),
+    warning: vi.fn(),
+    message: vi.fn(),
+    dismiss: vi.fn(),
+  },
+}));
 
 class ResizeObserverStub {
   observe() {}
@@ -1755,6 +1767,7 @@ describe("AgentModelPicker starred models", () => {
   beforeEach(() => {
     localStorage.clear();
     __resetStarredModelsCacheForTests();
+    vi.mocked(toast.error).mockClear();
   });
 
   afterEach(() => {
@@ -1998,5 +2011,101 @@ describe("AgentModelPicker starred models", () => {
         starredModelStorageKey(modelStarKey("goose", "another")),
       ),
     ).toBe("1");
+  });
+
+  it("surfaces a persist failure when starring cannot be saved", async () => {
+    const setItemSpy = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
+        throw new DOMException("quota exceeded", "QuotaExceededError");
+      });
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="preferred"
+        currentModelName="Preferred"
+        availableModels={models}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    try {
+      await user.click(
+        screen.getByRole("button", { name: /choose agent and model/i }),
+      );
+      const picker = screen.getByRole("dialog");
+      await user.click(
+        within(picker).getByRole("button", { name: "View more" }),
+      );
+      await user.click(
+        within(picker).getByRole("button", { name: "Star Another" }),
+      );
+
+      expect(vi.mocked(toast.error)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(toast.error)).toHaveBeenCalledWith(
+        expect.stringMatching(/starred/i),
+      );
+      expect(
+        localStorage.getItem(
+          starredModelStorageKey(modelStarKey("goose", "another")),
+        ),
+      ).toBeNull();
+      // The optimistic toggle must not stick when the write failed.
+      expect(
+        within(picker).getByRole("button", { name: "Star Another" }),
+      ).toHaveAttribute("aria-pressed", "false");
+    } finally {
+      setItemSpy.mockRestore();
+    }
+  });
+
+  it("surfaces a persist failure when unstarring cannot be saved", async () => {
+    seedStar("goose", "other");
+    __resetStarredModelsCacheForTests();
+    const removeItemSpy = vi
+      .spyOn(Storage.prototype, "removeItem")
+      .mockImplementation(() => {
+        throw new DOMException("quota exceeded", "QuotaExceededError");
+      });
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="preferred"
+        currentModelName="Preferred"
+        availableModels={models}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    try {
+      await user.click(
+        screen.getByRole("button", { name: /choose agent and model/i }),
+      );
+      const picker = screen.getByRole("dialog");
+      await user.click(
+        within(picker).getByRole("button", { name: "Unstar Other" }),
+      );
+
+      expect(vi.mocked(toast.error)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(toast.error)).toHaveBeenCalledWith(
+        expect.stringMatching(/starred/i),
+      );
+      expect(
+        localStorage.getItem(
+          starredModelStorageKey(modelStarKey("goose", "other")),
+        ),
+      ).toBe("1");
+      expect(
+        within(picker).getByRole("button", { name: "Unstar Other" }),
+      ).toHaveAttribute("aria-pressed", "true");
+    } finally {
+      removeItemSpy.mockRestore();
+    }
   });
 });
