@@ -123,12 +123,8 @@ fn fallback_summary(reference: &PullRequestRef) -> PullRequestSummary {
     }
 }
 
-async fn fetch_summary(
-    reference: PullRequestRef,
-    cwd: &Path,
-    env: Option<&HashMap<String, String>>,
-) -> PullRequestSummary {
-    let mut command = Command::new("gh");
+fn build_gh_command(gh: &Path, reference: &PullRequestRef, cwd: &Path) -> Command {
+    let mut command = Command::new(gh);
     command
         .args([
             "pr",
@@ -140,6 +136,20 @@ async fn fetch_summary(
         .current_dir(cwd)
         .env("GH_PROMPT_DISABLED", "1")
         .kill_on_drop(true);
+    command
+}
+
+async fn fetch_summary(
+    reference: PullRequestRef,
+    cwd: &Path,
+    env: Option<&HashMap<String, String>>,
+    gh: Option<&Path>,
+) -> PullRequestSummary {
+    let Some(gh) = gh else {
+        log::debug!("Trusted GitHub CLI executable was not found");
+        return fallback_summary(&reference);
+    };
+    let mut command = build_gh_command(gh, &reference, cwd);
     if let Some(env) = env {
         command.env_clear().envs(env).env("GH_PROMPT_DISABLED", "1");
     }
@@ -204,12 +214,16 @@ pub async fn get_pull_request_summaries(
         .filter(|path| path.is_dir())
         .or_else(dirs::home_dir)
         .ok_or_else(|| "Could not resolve a directory for GitHub CLI".to_string())?;
+    // Resolve before capturing the project environment, which can prepend the
+    // repository's Hermit bin on Windows.
+    let gh = dir_env::resolve_control_executable("gh");
     let env = dir_env::capture_dir_env(&cwd, ENV_CAPTURE_TIMEOUT).await;
 
     Ok(stream::iter(references.into_iter().map(|reference| {
         let cwd = cwd.clone();
         let env = env.clone();
-        async move { fetch_summary(reference, &cwd, env.as_ref()).await }
+        let gh = gh.clone();
+        async move { fetch_summary(reference, &cwd, env.as_ref(), gh.as_deref()).await }
     }))
     .buffered(GH_CONCURRENCY)
     .collect()
@@ -219,6 +233,30 @@ pub async fn get_pull_request_summaries(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn gh_command_program_is_not_resolved_from_captured_path() {
+        let reference = parse_github_pull_request_url("https://github.com/block/berd/pull/1")
+            .expect("pull request");
+        let trusted_gh = PathBuf::from(r"C:\Program Files\GitHub CLI\gh.exe");
+        let project_bin = PathBuf::from(r"C:\repo\.hermit\bin");
+        let path = std::env::join_paths([project_bin.clone(), PathBuf::from(r"C:\Windows")])
+            .expect("captured PATH");
+        let mut command = build_gh_command(&trusted_gh, &reference, Path::new(r"C:\repo"));
+        command.env_clear().env("Path", path);
+
+        assert_eq!(command.as_std().get_program(), trusted_gh.as_os_str());
+        let command_path = command
+            .as_std()
+            .get_envs()
+            .find_map(|(key, value)| key.eq_ignore_ascii_case("PATH").then_some(value).flatten())
+            .expect("command PATH");
+        assert_eq!(
+            std::env::split_paths(command_path).next().as_deref(),
+            Some(project_bin.as_path())
+        );
+    }
 
     fn check(conclusion: Option<&str>, status: Option<&str>, state: Option<&str>) -> GhStatusCheck {
         GhStatusCheck {
