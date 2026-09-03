@@ -309,9 +309,9 @@ describe("ensureHostConnected", () => {
       generation: 4,
     };
     resolvers[1]?.(newestConnection);
-    await newer;
+    await expect(newer).resolves.toBe("connected");
     resolvers[0]?.({ ...connection, incarnation: "slot-old", generation: 9 });
-    await older;
+    await expect(older).resolves.toBe("superseded");
 
     expect(useRemoteHostStore.getState().statusByHost.devbox).toEqual({
       state: "ready",
@@ -755,7 +755,7 @@ describe("manual host persistence", () => {
       useRemoteHostStore.getState().ensureHostConnected("beta.blox"),
     ]);
 
-    expect(accepted).toEqual([true, true]);
+    expect(accepted).toEqual(["connected", "connected"]);
     expect(useRemoteHostStore.getState().manualHosts).toEqual([
       "beta.blox",
       "alpha.blox",

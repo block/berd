@@ -38,6 +38,8 @@ export interface RemoteHostStatus {
   error?: RemoteBackendErrorLike;
 }
 
+export type RemoteHostConnectOutcome = "connected" | "superseded";
+
 function backendStatus(
   payload: RemoteBackendStatusPayload | RemoteBackendSnapshotEntry,
 ): RemoteHostStatus {
@@ -174,7 +176,7 @@ export interface RemoteHostStore {
   syncBackendSnapshot: () => Promise<void>;
   applyStatusEvent: (payload: RemoteBackendStatusPayload) => void;
   /** Connect the host and report whether this exact lifecycle became current. */
-  ensureHostConnected: (host: string) => Promise<boolean>;
+  ensureHostConnected: (host: string) => Promise<RemoteHostConnectOutcome>;
   disconnect: (host: string) => Promise<void>;
   shutdownHost: (host: string, expectedInstanceToken?: string) => Promise<void>;
   runDoctor: (host: string) => Promise<void>;
@@ -298,7 +300,7 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
         persistManualHosts(manualHosts);
         return { manualHosts };
       });
-      if (accepted) return true;
+      if (accepted) return "connected";
       current = get();
     }
 
@@ -377,7 +379,7 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
           },
         };
       });
-      return accepted;
+      return accepted ? "connected" : "superseded";
     } catch (error) {
       let accepted = false;
       set((state) => {
@@ -410,7 +412,7 @@ export const useRemoteHostStore = create<RemoteHostStore>((set, get) => ({
           },
         };
       });
-      if (!accepted) return false;
+      if (!accepted) return "superseded";
       throw error;
     }
   },

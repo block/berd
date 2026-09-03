@@ -64,10 +64,14 @@ export function AddRemoteHostDialog({
     setPending(true);
     const attempt = ++attemptRef.current;
     try {
-      const accepted = await useRemoteHostStore
+      const outcome = await useRemoteHostStore
         .getState()
         .ensureHostConnected(host);
-      if (attemptRef.current !== attempt || !accepted) return;
+      if (attemptRef.current !== attempt) return;
+      if (outcome === "superseded") {
+        setError(t("toolbar.remoteHost.add.superseded"));
+        return;
+      }
       onConnected(host);
       handleOpenChange(false);
     } catch (connectionError) {

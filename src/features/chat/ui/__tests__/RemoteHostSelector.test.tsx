@@ -245,7 +245,7 @@ describe("RemoteHostSelector", () => {
       .ensureHostConnected("superseded-box");
     await waitFor(() => expect(resolvers).toHaveLength(2));
     resolvers[1]?.({ incarnation: "slot-new", generation: 2 });
-    await expect(replacement).resolves.toBe(true);
+    await expect(replacement).resolves.toBe("connected");
     resolvers[0]?.({ incarnation: "slot-old", generation: 1 });
 
     await waitFor(() => {
@@ -257,6 +257,11 @@ describe("RemoteHostSelector", () => {
     expect(
       screen.getByRole("dialog", { name: /add ssh host/i }),
     ).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "This SSH connection changed while connecting. Try again or cancel.",
+    );
+    expect(screen.getByRole("button", { name: /^connect$/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /^cancel$/i })).toBeEnabled();
     expect(
       useRemoteHostStore.getState().statusByHost["superseded-box"],
     ).toEqual({
