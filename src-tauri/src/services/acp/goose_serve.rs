@@ -213,8 +213,18 @@ impl GooseServeProcess {
             berdctl_paths.app_data_dir.as_deref(),
             berdctl_paths.berdctl_bin.as_deref(),
         );
-        if let Some(config_path) = distro_config_path.as_deref() {
-            apply_additional_config_files_env(&mut command, &shell_env, config_path);
+        // Berd-owned config fragments handed to goosed: the distro bundle
+        // config (if any) plus the memory MCP registration (absent when
+        // memory is toggled off or the sidecar is missing).
+        let mut berd_config_paths: Vec<PathBuf> = Vec::new();
+        if let Some(config_path) = distro_config_path {
+            berd_config_paths.push(config_path);
+        }
+        if let Some(fragment) = crate::services::memory_mcp::ensure_fragment(&app_handle) {
+            berd_config_paths.push(fragment);
+        }
+        if !berd_config_paths.is_empty() {
+            apply_additional_config_files_env(&mut command, &shell_env, &berd_config_paths);
         }
         super::security_env::apply(&mut command);
         match runtime_config_for_spawn(&app_handle).await {
@@ -1156,16 +1166,21 @@ fn parse_goose_search_paths_env(value: &str) -> Result<Vec<String>, serde_json::
 fn apply_additional_config_files_env(
     command: &mut Command,
     shell_env: &HashMap<String, String>,
-    config_path: &std::path::Path,
+    berd_config_paths: &[PathBuf],
 ) {
     let process_value = std::env::var_os(goose_config::ADDITIONAL_CONFIG_FILES_ENV);
-    let config_files = goose_config::additional_config_files_from_values(
+    let mut config_files = goose_config::additional_config_files_from_values(
         process_value.as_deref(),
         shell_env
             .get(goose_config::ADDITIONAL_CONFIG_FILES_ENV)
             .map(std::ffi::OsStr::new),
-        Some(config_path),
+        berd_config_paths.first().map(PathBuf::as_path),
     );
+    for path in berd_config_paths.iter().skip(1) {
+        if !config_files.paths.contains(path) {
+            config_files.paths.push(path.clone());
+        }
+    }
 
     command.env(
         goose_config::ADDITIONAL_CONFIG_FILES_ENV,
