@@ -244,10 +244,6 @@ export async function dismissActiveRealtimeHandoffs(
   return response?.dismissal ?? null;
 }
 
-export function getActiveRealtimeEmissary(): ActiveRealtimeEmissary | null {
-  return activeEmissary;
-}
-
 export async function hasActiveRealtimeEmissary(
   sessionId: string,
 ): Promise<boolean> {

@@ -1,6 +1,6 @@
 {
   "$comment": "GENERATED FILE — do not hand-edit; run `pnpm generate:berdctl-contract`. Client-neutral wire surface of the Berd desktop app's control API: POST /v1/call {\"command\": \"<group>\", \"args\": {\"action\": \"<action>\", ...fields}} against the loopback endpoint in the berdctl discovery file. protocolVersion mirrors PROTOCOL_VERSION in both discovery.rs copies (berdctl and plugin crate tests pin them equal). Per action: description, fields (flat wire model: name, required, kind, values, description, bounds), and schema (JSON Schema 2020-12 of the args object, minus the action discriminator). Derived from the authoritative zod schemas in the colocated command modules (src/features/berdctl/commands/impl/*.ts); the renderer registry's strict zod parse — not this file — is the trust boundary. vitest asserts freshness (src/features/berdctl/__tests__/apiSurface.test.ts).",
-  "protocolVersion": 5,
+  "protocolVersion": 4,
   "groups": {
     "sessions": {
       "description": "Manage the user's chat sessions: create (fire-and-forget, on any installed agent harness), send, open, list, get, rename, move, move to group, clear project, send to a live voice Spokesperson, dismiss voice handoffs, fork, archive.",

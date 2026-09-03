@@ -28,7 +28,6 @@ vi.mock("@/shared/api/openaiRealtime", () => ({
 
 import {
   completeActiveRealtimeMasterTurn,
-  getActiveRealtimeEmissary,
   hasActiveRealtimeEmissary,
   registerRealtimeEmissary,
   sendToActiveRealtimeSpokesperson,
@@ -49,7 +48,6 @@ describe("realtime emissary bridge registration", () => {
     };
     const release = registerRealtimeEmissary(emissary);
 
-    expect(getActiveRealtimeEmissary()).toBe(emissary);
     await expect(
       emissary.sendMasterMessage("update", 1, "context", []),
     ).resolves.toMatchObject({ accepted: false, cursor: 2 });
@@ -63,7 +61,6 @@ describe("realtime emissary bridge registration", () => {
     await expect(hasActiveRealtimeEmissary("session-2")).resolves.toBe(false);
 
     release();
-    expect(getActiveRealtimeEmissary()).toBeNull();
     await expect(hasActiveRealtimeEmissary("session-1")).resolves.toBe(false);
   });
 

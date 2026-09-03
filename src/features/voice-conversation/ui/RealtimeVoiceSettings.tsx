@@ -60,17 +60,14 @@ function voiceLabel(voice: string): string {
   return `${voice.charAt(0).toUpperCase()}${voice.slice(1)}`;
 }
 
-function boundedNumber(
+function boundedInteger(
   value: string,
   minimum: number,
   maximum: number,
 ): number | null {
   const parsed = Number(value);
-  return value.trim() &&
-    Number.isFinite(parsed) &&
-    parsed >= minimum &&
-    parsed <= maximum
-    ? parsed
+  return value.trim() && Number.isFinite(parsed)
+    ? Math.min(maximum, Math.max(minimum, Math.round(parsed)))
     : null;
 }
 
@@ -445,7 +442,7 @@ export function RealtimeVoiceSettings() {
                 onChange={(event) =>
                   event.target.value
                     ? (() => {
-                        const maxOutputTokens = boundedNumber(
+                        const maxOutputTokens = boundedInteger(
                           event.target.value,
                           1,
                           4_096,
@@ -496,7 +493,7 @@ export function RealtimeVoiceSettings() {
                     step={50}
                     value={preference.silenceDurationMs}
                     onChange={(event) => {
-                      const silenceDurationMs = boundedNumber(
+                      const silenceDurationMs = boundedInteger(
                         event.target.value,
                         100,
                         3_000,
@@ -518,7 +515,7 @@ export function RealtimeVoiceSettings() {
                     step={50}
                     value={preference.prefixPaddingMs}
                     onChange={(event) => {
-                      const prefixPaddingMs = boundedNumber(
+                      const prefixPaddingMs = boundedInteger(
                         event.target.value,
                         0,
                         2_000,
@@ -542,7 +539,7 @@ export function RealtimeVoiceSettings() {
                     onChange={(event) =>
                       event.target.value
                         ? (() => {
-                            const idleTimeoutMs = boundedNumber(
+                            const idleTimeoutMs = boundedInteger(
                               event.target.value,
                               1_000,
                               120_000,

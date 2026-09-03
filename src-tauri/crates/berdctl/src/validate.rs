@@ -192,7 +192,7 @@ mod tests {
     use crate::contract::Contract;
 
     const MINIMAL_API: &str = r#"{
-        "protocolVersion": 5,
+        "protocolVersion": 4,
         "groups": {
             "sessions": {
                 "description": "Manage the user's chat sessions.",
@@ -374,7 +374,7 @@ mod tests {
 
     #[test]
     fn mismatched_protocol_version_is_reported() {
-        let api = MINIMAL_API.replace("\"protocolVersion\": 5", "\"protocolVersion\": 999");
+        let api = MINIMAL_API.replace("\"protocolVersion\": 4", "\"protocolVersion\": 999");
         let errors = errors_for(&api, MINIMAL_SURFACE);
         assert_one_error_containing(&errors, "protocolVersion 999 does not match");
     }

@@ -276,14 +276,9 @@ mod tests {
             ("session", "move") => vec!["--session-id", "s", "--project-id", "p"],
             ("session", "move-to-group") => vec!["--session-id", "s", "--group-id", "g"],
             ("session", "clear-project") => vec!["--session-id", "s"],
-            ("session", "send-to-spokesperson") => vec![
-                "--session-id",
-                "s",
-                "--cursor",
-                "0",
-                "--message",
-                "status",
-            ],
+            ("session", "send-to-spokesperson") => {
+                vec!["--session-id", "s", "--cursor", "0", "--message", "status"]
+            }
             ("session", "dismiss-handoffs") => vec![
                 "--session-id",
                 "s",

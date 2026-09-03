@@ -47,4 +47,23 @@ describe("realtime voice preferences", () => {
 
     expect(getRealtimeVoicePreference().speed).toBe(1);
   });
+
+  it("rounds and clamps persisted integer-only settings", () => {
+    window.localStorage.setItem(
+      "goose:openai-realtime-voice-options",
+      JSON.stringify({
+        prefixPaddingMs: -20.4,
+        silenceDurationMs: 3_500.6,
+        idleTimeoutMs: 1_499.5,
+        maxOutputTokens: 4_500.2,
+      }),
+    );
+
+    expect(getRealtimeVoicePreference()).toMatchObject({
+      prefixPaddingMs: 0,
+      silenceDurationMs: 3_000,
+      idleTimeoutMs: 1_500,
+      maxOutputTokens: 4_096,
+    });
+  });
 });

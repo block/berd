@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "@/shared/i18n";
@@ -53,10 +53,7 @@ describe("RealtimeVoiceSettings", () => {
     const user = userEvent.setup();
     renderWithProviders(<RealtimeVoiceSettings />);
 
-    await user.type(
-      screen.getByLabelText("OpenAI Realtime API key"),
-      " sk-shared ",
-    );
+    await user.type(screen.getByLabelText("OpenAI API key"), " sk-shared ");
     await user.click(screen.getByRole("button", { name: "Save key" }));
 
     expect(openAiVoiceMocks.setApiKey).toHaveBeenCalledWith(" sk-shared ");
@@ -80,5 +77,36 @@ describe("RealtimeVoiceSettings", () => {
     expect(
       screen.getByRole("slider", { name: "Voice activation threshold" }),
     ).toBeInTheDocument();
+  });
+
+  it("rounds and clamps integer-only advanced controls", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<RealtimeVoiceSettings />);
+
+    await user.click(screen.getByRole("button", { name: "Advanced" }));
+    fireEvent.change(screen.getByLabelText("Maximum response tokens"), {
+      target: { value: "5000.4" },
+    });
+    fireEvent.change(screen.getByLabelText("End pause (ms)"), {
+      target: { value: "250.7" },
+    });
+    fireEvent.change(screen.getByLabelText("Speech lead-in (ms)"), {
+      target: { value: "-20" },
+    });
+    fireEvent.change(screen.getByLabelText("Idle timeout (ms)"), {
+      target: { value: "1499.5" },
+    });
+
+    expect(
+      JSON.parse(
+        window.localStorage.getItem("goose:openai-realtime-voice-options") ??
+          "{}",
+      ),
+    ).toMatchObject({
+      maxOutputTokens: 4_096,
+      silenceDurationMs: 251,
+      prefixPaddingMs: 0,
+      idleTimeoutMs: 1_500,
+    });
   });
 });

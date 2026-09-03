@@ -86,16 +86,24 @@ function numberPreference(
     : fallback;
 }
 
+function integerPreference(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+  fallback: number,
+): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(maximum, Math.max(minimum, Math.round(value)))
+    : fallback;
+}
+
 function optionalIntegerPreference(
   value: unknown,
   minimum: number,
   maximum: number,
 ): number | null {
-  return typeof value === "number" &&
-    Number.isInteger(value) &&
-    value >= minimum &&
-    value <= maximum
-    ? value
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(maximum, Math.max(minimum, Math.round(value)))
     : null;
 }
 
@@ -138,8 +146,8 @@ export function getRealtimeVoicePreference(): RealtimeVoicePreference {
           ? parsed.createResponse
           : DEFAULT_PREFERENCE.createResponse,
       vadThreshold: numberPreference(parsed.vadThreshold, 0, 1, 0.5),
-      prefixPaddingMs: numberPreference(parsed.prefixPaddingMs, 0, 2_000, 300),
-      silenceDurationMs: numberPreference(
+      prefixPaddingMs: integerPreference(parsed.prefixPaddingMs, 0, 2_000, 300),
+      silenceDurationMs: integerPreference(
         parsed.silenceDurationMs,
         100,
         3_000,

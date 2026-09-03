@@ -29,9 +29,7 @@ fn stored_openai_api_key() -> Result<Option<String>, String> {
 pub async fn get_openai_realtime_status() -> Result<OpenAiRealtimeStatus, String> {
     let configured = stored_openai_api_key()?.is_some();
 
-    Ok(OpenAiRealtimeStatus {
-        configured,
-    })
+    Ok(OpenAiRealtimeStatus { configured })
 }
 
 #[tauri::command]
@@ -56,7 +54,9 @@ pub async fn create_openai_realtime_session() -> Result<OpenAiRealtimeSession, S
     let response = realtime_transcription_client_secret_request(&reqwest::Client::new(), &api_key)
         .send()
         .await
-        .map_err(|error| format!("Failed to create OpenAI Realtime transcription session: {error}"))?;
+        .map_err(|error| {
+            format!("Failed to create OpenAI Realtime transcription session: {error}")
+        })?;
     parse_session_response(response, "transcription").await
 }
 
@@ -249,12 +249,10 @@ mod tests {
 
     #[test]
     fn dictation_client_secret_enables_input_transcription() {
-        let request = realtime_transcription_client_secret_request(
-            &reqwest::Client::new(),
-            "sk-test-secret",
-        )
-        .build()
-        .expect("build request");
+        let request =
+            realtime_transcription_client_secret_request(&reqwest::Client::new(), "sk-test-secret")
+                .build()
+                .expect("build request");
         let body: serde_json::Value = serde_json::from_slice(
             request
                 .body()
