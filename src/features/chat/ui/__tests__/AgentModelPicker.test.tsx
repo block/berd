@@ -2108,4 +2108,89 @@ describe("AgentModelPicker starred models", () => {
       removeItemSpy.mockRestore();
     }
   });
+  it("renders a starred current model unstarred once its provider drops it", async () => {
+    seedStar("prov-a", "ghost");
+    __resetStarredModelsCacheForTests();
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="ghost"
+        currentModelName="Ghost"
+        currentModelProviderId="prov-a"
+        availableModels={[
+          {
+            id: "preferred",
+            name: "Preferred",
+            recommended: true,
+            providerId: "prov-a",
+          },
+          { id: "other", name: "Other", providerId: "prov-a" },
+        ]}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    screen.getByRole("dialog");
+
+    // The dropped selection stays visible so the user can see what is in use...
+    const ghostRow = document.querySelector(
+      '[data-model-key=\'["prov-a","ghost"]\']',
+    );
+    expect(ghostRow).toBeInTheDocument();
+    // ...but it is no longer a favorite: no star state, no toggle, no divider.
+    expect(ghostRow).not.toHaveAttribute("data-starred");
+    expect(
+      within(ghostRow as HTMLElement).queryByRole("button", {
+        name: /star ghost/i,
+      }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("starred-models-divider"),
+    ).not.toBeInTheDocument();
+    // The stored entry survives so the star returns if the model does.
+    expect(
+      localStorage.getItem(
+        starredModelStorageKey(modelStarKey("prov-a", "ghost")),
+      ),
+    ).toBe("1");
+  });
+
+  it("hides a starred model that is no longer in the available list", async () => {
+    seedStar("goose", "ghost");
+    __resetStarredModelsCacheForTests();
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="preferred"
+        currentModelName="Preferred"
+        availableModels={[
+          { id: "preferred", name: "Preferred", recommended: true },
+          { id: "other", name: "Other" },
+        ]}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+
+    expect(
+      document.querySelector('[data-model-key=\'["goose","ghost"]\']'),
+    ).not.toBeInTheDocument();
+    expect(
+      localStorage.getItem(
+        starredModelStorageKey(modelStarKey("goose", "ghost")),
+      ),
+    ).toBe("1");
+  });
 });

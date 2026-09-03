@@ -703,6 +703,7 @@ export function AgentModelPicker({
                   key={selectedAgentId}
                   ref={modelListRef}
                   models={displayedModels}
+                  catalogModels={availableModels}
                   currentModelId={currentModelId}
                   currentModelProviderId={currentModelProviderId}
                   selectedAgentId={selectedAgentId}

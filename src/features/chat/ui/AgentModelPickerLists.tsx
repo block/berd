@@ -134,6 +134,14 @@ function sortModels(
 
 interface ModelListProps {
   models: ModelOption[];
+  /**
+   * The authoritative catalog the rows were built from, without any
+   * synthesized rows for the current selection. Starred state is only
+   * honored for models present here, so favorited models a provider no
+   * longer serves stop rendering as starred. Omit to treat every row as
+   * existing.
+   */
+  catalogModels?: ModelOption[];
   currentModelId: string | null;
   currentModelProviderId: string | null;
   selectedAgentId: string;
@@ -157,6 +165,7 @@ export const RecommendedModelList = forwardRef<
 >(function RecommendedModelList(
   {
     models,
+    catalogModels,
     currentModelId,
     currentModelProviderId,
     selectedAgentId,
@@ -166,7 +175,33 @@ export const RecommendedModelList = forwardRef<
   },
   ref,
 ) {
-  const { isStarred, toggleStar, starredKeys } = useStarredModels();
+  const { toggleStar, starredKeys } = useStarredModels();
+  // Rows include a synthesized entry for the current selection when the
+  // catalog no longer serves it. Honoring starred state only for catalog
+  // models keeps a favorited model a provider dropped from rendering as
+  // starred; the stored entry survives so the star returns if the model does.
+  const existingModelKeys = useMemo(() => {
+    if (!catalogModels) {
+      return null;
+    }
+    return new Set(
+      catalogModels.map((model) =>
+        modelStarKey(model.providerId ?? selectedAgentId, model.id),
+      ),
+    );
+  }, [catalogModels, selectedAgentId]);
+  const liveStarredKeys = useMemo(() => {
+    if (!existingModelKeys) {
+      return starredKeys;
+    }
+    const live = new Set<string>();
+    for (const key of starredKeys) {
+      if (existingModelKeys.has(key)) {
+        live.add(key);
+      }
+    }
+    return live;
+  }, [existingModelKeys, starredKeys]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const [query, setQuery] = useState("");
@@ -191,7 +226,7 @@ export const RecommendedModelList = forwardRef<
   const recencyMap = useModelRecency();
   const recommended = useMemo(() => {
     const starred = models.filter((model) =>
-      starredKeys.has(
+      liveStarredKeys.has(
         modelStarKey(model.providerId ?? selectedAgentId, model.id),
       ),
     );
@@ -208,7 +243,7 @@ export const RecommendedModelList = forwardRef<
             currentModelId,
             currentModelProviderId,
           ) &&
-          !starredKeys.has(
+          !liveStarredKeys.has(
             modelStarKey(
               entry.model.providerId ?? selectedAgentId,
               entry.model.id,
@@ -229,7 +264,9 @@ export const RecommendedModelList = forwardRef<
       .filter(
         (m) =>
           !recent.some((r) => r.id === m.id && r.providerId === m.providerId) &&
-          !starredKeys.has(modelStarKey(m.providerId ?? selectedAgentId, m.id)),
+          !liveStarredKeys.has(
+            modelStarKey(m.providerId ?? selectedAgentId, m.id),
+          ),
       );
     const shortlist = [...recent, ...rec];
     if (
@@ -251,7 +288,7 @@ export const RecommendedModelList = forwardRef<
     }
     const unstarredFallback = models.filter(
       (model) =>
-        !starredKeys.has(
+        !liveStarredKeys.has(
           modelStarKey(model.providerId ?? selectedAgentId, model.id),
         ),
     );
@@ -265,7 +302,7 @@ export const RecommendedModelList = forwardRef<
     currentModelProviderId,
     recencyMap,
     selectedAgentId,
-    starredKeys,
+    liveStarredKeys,
   ]);
 
   useEffect(() => {
@@ -313,7 +350,7 @@ export const RecommendedModelList = forwardRef<
     const unstarred: ModelOption[] = [];
     for (const model of visibleModels) {
       const scopeId = model.providerId ?? selectedAgentId;
-      (starredKeys.has(modelStarKey(scopeId, model.id))
+      (liveStarredKeys.has(modelStarKey(scopeId, model.id))
         ? starred
         : unstarred
       ).push(model);
@@ -334,7 +371,7 @@ export const RecommendedModelList = forwardRef<
     currentModelProviderId,
     recencyMap,
     selectedAgentId,
-    starredKeys,
+    liveStarredKeys,
   ]);
   const sorted = [...grouped.starred, ...grouped.unstarred];
 
@@ -449,15 +486,18 @@ export const RecommendedModelList = forwardRef<
                 currentModelProviderId,
               );
               const scopeId = model.providerId ?? selectedAgentId;
-              const starred = isStarred(scopeId, model.id);
+              const modelKey = modelStarKey(scopeId, model.id);
+              const starred = liveStarredKeys.has(modelKey);
+              const existsInCatalog =
+                !existingModelKeys || existingModelKeys.has(modelKey);
               const showStarredDivider =
                 index === grouped.starred.length - 1 &&
                 grouped.unstarred.length > 0;
               return (
-                <div key={modelStarKey(scopeId, model.id)}>
+                <div key={modelKey}>
                   <div
                     className="group flex min-w-0 items-center gap-1"
-                    data-model-key={modelStarKey(scopeId, model.id)}
+                    data-model-key={modelKey}
                     data-starred={starred || undefined}
                   >
                     <PickerItem
@@ -485,28 +525,30 @@ export const RecommendedModelList = forwardRef<
                         <IconCheck className="size-4 shrink-0 text-muted-foreground" />
                       ) : null}
                     </PickerItem>
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      selected={starred}
-                      onClick={() => toggleStar(scopeId, model.id)}
-                      // Hover-reveal keeps rows calm; keyboard users still
-                      // reach the control through row focus
-                      // (group-focus-within) or direct focus. The idle
-                      // (unstarred) star rests on the ghost icon contract's
-                      // muted-foreground — ≈5.7:1 light / ≈6.1:1 dark against
-                      // the popover, above the 3:1 WCAG non-text bar
-                      // (enforced in globals.test.ts) — and favorited rows
-                      // soften to foreground/80 via the selected flag.
-                      className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
-                      aria-label={t(
-                        starred ? "toolbar.unstarModel" : "toolbar.starModel",
-                        { model: getModelDisplayName(model) },
-                      )}
-                      aria-pressed={starred}
-                    >
-                      {starred ? <IconStarFilled /> : <IconStar />}
-                    </Button>
+                    {existsInCatalog ? (
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        selected={starred}
+                        onClick={() => toggleStar(scopeId, model.id)}
+                        // Hover-reveal keeps rows calm; keyboard users still
+                        // reach the control through row focus
+                        // (group-focus-within) or direct focus. The idle
+                        // (unstarred) star rests on the ghost icon contract's
+                        // muted-foreground — ≈5.7:1 light / ≈6.1:1 dark against
+                        // the popover, above the 3:1 WCAG non-text bar
+                        // (enforced in globals.test.ts) — and favorited rows
+                        // soften to foreground/80 via the selected flag.
+                        className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
+                        aria-label={t(
+                          starred ? "toolbar.unstarModel" : "toolbar.starModel",
+                          { model: getModelDisplayName(model) },
+                        )}
+                        aria-pressed={starred}
+                      >
+                        {starred ? <IconStarFilled /> : <IconStar />}
+                      </Button>
+                    ) : null}
                   </div>
                   {showStarredDivider ? (
                     <Separator
