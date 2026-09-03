@@ -118,7 +118,7 @@ describe("RemoteHostSelector", () => {
     ).toBeInTheDocument();
   });
 
-  it("offers an add SSH environment action even when no hosts are configured", async () => {
+  it("offers an add SSH host action even when no hosts are configured", async () => {
     mockListSshConfigHosts.mockResolvedValue([]);
     useRemoteHostStore.setState({ configHosts: [], statusByHost: {} });
     const user = userEvent.setup();
@@ -127,7 +127,7 @@ describe("RemoteHostSelector", () => {
     await user.click(screen.getByRole("button", { name: /select computer/i }));
 
     expect(
-      screen.getByRole("menuitem", { name: /add ssh environment/i }),
+      screen.getByRole("menuitem", { name: /add ssh host/i }),
     ).toBeInTheDocument();
   });
 
@@ -139,9 +139,7 @@ describe("RemoteHostSelector", () => {
     );
 
     await user.click(screen.getByRole("button", { name: /select computer/i }));
-    await user.click(
-      screen.getByRole("menuitem", { name: /add ssh environment/i }),
-    );
+    await user.click(screen.getByRole("menuitem", { name: /add ssh host/i }));
     await user.type(screen.getByRole("textbox", { name: /ssh host/i }), "blox");
     await user.click(screen.getByRole("button", { name: /^connect$/i }));
 
@@ -150,7 +148,7 @@ describe("RemoteHostSelector", () => {
       expect(onHostChange).toHaveBeenCalledWith("blox");
     });
     expect(
-      screen.queryByRole("dialog", { name: /add ssh environment/i }),
+      screen.queryByRole("dialog", { name: /add ssh host/i }),
     ).not.toBeInTheDocument();
   });
 
@@ -163,9 +161,7 @@ describe("RemoteHostSelector", () => {
     );
 
     await user.click(screen.getByRole("button", { name: /select computer/i }));
-    await user.click(
-      screen.getByRole("menuitem", { name: /add ssh environment/i }),
-    );
+    await user.click(screen.getByRole("menuitem", { name: /add ssh host/i }));
     await user.type(
       screen.getByRole("textbox", { name: /ssh host/i }),
       "offline-box",
@@ -177,7 +173,7 @@ describe("RemoteHostSelector", () => {
     );
     expect(onHostChange).not.toHaveBeenCalled();
     expect(
-      screen.getByRole("dialog", { name: /add ssh environment/i }),
+      screen.getByRole("dialog", { name: /add ssh host/i }),
     ).toBeInTheDocument();
   });
 
@@ -199,9 +195,7 @@ describe("RemoteHostSelector", () => {
     );
 
     await user.click(screen.getByRole("button", { name: /select computer/i }));
-    await user.click(
-      screen.getByRole("menuitem", { name: /add ssh environment/i }),
-    );
+    await user.click(screen.getByRole("menuitem", { name: /add ssh host/i }));
     await user.type(
       screen.getByRole("textbox", { name: /ssh host/i }),
       "slow-box",
@@ -210,7 +204,7 @@ describe("RemoteHostSelector", () => {
     await user.click(screen.getByRole("button", { name: /^cancel$/i }));
 
     expect(
-      screen.queryByRole("dialog", { name: /add ssh environment/i }),
+      screen.queryByRole("dialog", { name: /add ssh host/i }),
     ).not.toBeInTheDocument();
 
     resolveConnection({ incarnation: "slot-slow", generation: 1 });
@@ -239,9 +233,7 @@ describe("RemoteHostSelector", () => {
     );
 
     await user.click(screen.getByRole("button", { name: /select computer/i }));
-    await user.click(
-      screen.getByRole("menuitem", { name: /add ssh environment/i }),
-    );
+    await user.click(screen.getByRole("menuitem", { name: /add ssh host/i }));
     await user.type(
       screen.getByRole("textbox", { name: /ssh host/i }),
       "superseded-box",
@@ -263,7 +255,7 @@ describe("RemoteHostSelector", () => {
     });
     expect(onHostChange).not.toHaveBeenCalled();
     expect(
-      screen.getByRole("dialog", { name: /add ssh environment/i }),
+      screen.getByRole("dialog", { name: /add ssh host/i }),
     ).toBeInTheDocument();
     expect(
       useRemoteHostStore.getState().statusByHost["superseded-box"],
