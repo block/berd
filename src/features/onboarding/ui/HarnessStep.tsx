@@ -14,6 +14,7 @@ const PROVIDER_ICON_SIZES: Record<CuratedHarnessId, string> = {
   "copilot-acp": "size-[100px]",
   "amp-acp": "size-[92px]",
   "cursor-agent": "size-[90px]",
+  "pi-acp": "size-[92px]",
 };
 
 interface HarnessStepProps {
