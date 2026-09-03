@@ -24,7 +24,7 @@ pub(crate) const EVENT_NAME: &str = "voice-conversation:event";
 const MAX_PENDING_TRANSCRIPTS: usize = 64;
 const MAX_TRANSCRIPT_DELIVERY_ATTEMPTS: u8 = 3;
 const VAD_THRESHOLD: f32 = 0.5;
-const INPUT_STARTUP_TIMEOUT: Duration = Duration::from_secs(12);
+const INPUT_STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub(crate) fn output_latency_grace_elapsed(
     playback_drained: bool,
@@ -1514,7 +1514,7 @@ pub async fn start_native_voice_conversation(
         Ok(Some(berd_voice::input::VoiceInputEvent::Failed(error))) => Err(error),
         Ok(Some(_)) => Err("Voice input emitted activity before it was ready.".to_string()),
         Ok(None) => Err("Voice input stopped before it was ready.".to_string()),
-        Err(_) => Err("Voice input did not become ready within 12 seconds.".to_string()),
+        Err(_) => Err("Voice input did not become ready within 60 seconds.".to_string()),
     };
     if let Err(error) = readiness {
         let error = state.finish_uninstalled_pipeline(pipeline, error).await;
@@ -3192,11 +3192,7 @@ mod tests {
     fn replacement_stop_requires_the_target_session_window() {
         assert!(caller_owns_target("main", None, true));
         assert!(!caller_owns_target("main", None, false));
-        assert!(!caller_owns_target(
-            "main",
-            Some("session:target"),
-            true,
-        ));
+        assert!(!caller_owns_target("main", Some("session:target"), true,));
         assert!(caller_owns_target(
             "session:target",
             Some("session:target"),
@@ -3207,11 +3203,7 @@ mod tests {
             Some("session:target"),
             true,
         ));
-        assert!(!caller_owns_target(
-            "voice-buddy",
-            None,
-            true,
-        ));
+        assert!(!caller_owns_target("voice-buddy", None, true,));
     }
 
     #[test]

@@ -1652,6 +1652,7 @@ export function startNativeAssistantSpeech(
         crossedToolBoundary &&
         utterance &&
         utteranceOwnsMessage &&
+        utterance.nativeStartQueued &&
         !utterance.finishing
       ) {
         queueStreamCommand(
@@ -1659,6 +1660,15 @@ export function startNativeAssistantSpeech(
           () => streamBackend.flush(utterance.id),
           onFailure,
         );
+      }
+      if (
+        completed &&
+        utterance &&
+        utteranceOwnsMessage &&
+        !utterance.nativeStartQueued
+      ) {
+        activeUtterance = null;
+        continue;
       }
       if (
         completed &&

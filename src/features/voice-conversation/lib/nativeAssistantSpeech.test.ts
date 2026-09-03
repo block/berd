@@ -335,6 +335,57 @@ describe("native assistant speech stream", () => {
     );
   });
 
+  it("completes whitespace-only output without addressing a native stream", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore.getState().setMessages("session-1", [
+      assistant(
+        [
+          { type: "text", text: "   " },
+          {
+            type: "toolRequest",
+            id: "tool-1",
+            name: "noop",
+            arguments: {},
+            status: "completed",
+          },
+        ],
+        "completed",
+      ),
+    ]);
+
+    await new Promise((resolve) => window.setTimeout(resolve, 10));
+    expect(mocks.prepareAssistantSpeech).not.toHaveBeenCalled();
+    expect(mocks.flush).not.toHaveBeenCalled();
+    expect(mocks.finish).not.toHaveBeenCalled();
+
+    useChatStore.getState().setMessages("session-1", [
+      assistant(
+        [
+          { type: "text", text: "   " },
+          {
+            type: "toolRequest",
+            id: "tool-1",
+            name: "noop",
+            arguments: {},
+            status: "completed",
+          },
+        ],
+        "completed",
+      ),
+      assistant(
+        [{ type: "text", text: "The next response speaks." }],
+        "completed",
+        "assistant-2",
+      ),
+    ]);
+    await vi.waitFor(() =>
+      expect(mocks.append).toHaveBeenCalledWith(
+        mocks.start.mock.calls[0]?.[0],
+        "The next response speaks.",
+      ),
+    );
+  });
+
   it("prepares playback with the assistant response's exact causal transcript", async () => {
     finalizeVoiceTranscript("voice-k1");
     startNativeAssistantSpeech("session-1", vi.fn());
