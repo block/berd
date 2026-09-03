@@ -279,10 +279,9 @@ vi.mock("@/features/terminal/ui/TerminalPanel", () => ({
 // placement is load-bearing: see "keeps the artifact viewer panel inside the
 // artifact policy provider" below. The marker stamps the provider's props so
 // tests can also assert the enclosing provider received real data — nesting
-// alone would pass even with e.g. messages={[]}. Note the marker renders for
-// every provider (ChatView's outer one AND ChatTranscriptSurface's inner
-// one), so assertions must use closest()/within(), never a singular
-// getByTestId.
+// alone would pass even with e.g. messages={[]}. ChatView owns the single
+// provider for the chat row (ChatTranscriptSurface intentionally does not
+// mount one), and the boundary test asserts exactly one marker renders.
 vi.mock("../../hooks/ArtifactPolicyContext", () => ({
   ArtifactPolicyProvider: ({
     children,

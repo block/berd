@@ -830,13 +830,15 @@ export function ChatView({
   });
 
   return (
-    // The provider must wrap the whole chat row — not just the transcript —
-    // because siblings of the transcript consume the artifact context too:
-    // ArtifactViewerPanel ("Open in editor"), the right rail's
-    // ArtifactsWidget (row opens), and ArtifactAutoOpenMount (the artifact
-    // list). ChatTranscriptSurface renders its own provider for the
-    // transcript, but without this outer one its siblings get the inert
-    // default context and their actions silently no-op.
+    // The single artifact policy owner for this session boundary. It must
+    // wrap the whole chat row because the transcript AND its siblings
+    // consume the context: ArtifactViewerPanel ("Open in editor"), the
+    // right rail's ArtifactsWidget (row opens), and ArtifactAutoOpenMount
+    // (the artifact list). ChatTranscriptSurface intentionally does NOT own
+    // artifact policy — a nested provider would derive a second artifact
+    // inventory and split the per-path open debounce (enforced by the
+    // provider-boundary tests). Consumers outside the provider get the
+    // inert default context and silently no-op.
     // The identity, messages, and cwd must describe one session snapshot:
     // timelineSessionId (the controller's effective session) rather than the
     // raw requested sessionId, which can briefly disagree with
