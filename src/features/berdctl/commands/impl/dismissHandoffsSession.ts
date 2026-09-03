@@ -83,7 +83,6 @@ atomically sends the dismissal reason back as silent context. Use send-to-spokes
         JSON.stringify({
           reason: dismissal.reason,
           cursor: dismissal.cursor,
-          unread_peer_messages: dismissal.unreadPeerMessages,
           ...(dismissal.reason === "unknown_handoff"
             ? { handoff_ids: dismissal.handoffIds }
             : {}),

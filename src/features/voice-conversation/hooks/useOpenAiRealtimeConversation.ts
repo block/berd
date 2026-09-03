@@ -817,7 +817,6 @@ class OpenAiRealtimeConversationRuntime {
           return {
             accepted: false,
             reason: "context_cannot_resolve",
-            unreadPeerMessages: [],
             cursor: pipe.cursor("master"),
             handoffIds: resolvedHandoffIds,
           };
@@ -829,7 +828,6 @@ class OpenAiRealtimeConversationRuntime {
           return {
             accepted: false,
             reason: "unknown_handoff",
-            unreadPeerMessages: [],
             cursor: pipe.cursor("master"),
             handoffIds: unknownHandoffIds,
           };
@@ -868,7 +866,6 @@ class OpenAiRealtimeConversationRuntime {
           return {
             accepted: false,
             reason: "unknown_handoff",
-            unreadPeerMessages: [],
             cursor: pipe.cursor("master"),
             handoffIds: unknownHandoffIds,
           };

@@ -63,7 +63,6 @@ describe("Realtime handoff commands", () => {
       sendMasterMessage: vi.fn().mockResolvedValue({
         accepted: false,
         reason: "unknown_handoff",
-        unreadPeerMessages: [],
         cursor: 2,
         handoffIds: ["handoff-9"],
       }),
@@ -86,7 +85,6 @@ describe("Realtime handoff commands", () => {
     expect(JSON.parse((error as Error).message)).toEqual({
       reason: "unknown_handoff",
       cursor: 2,
-      unread_peer_messages: [],
       handoff_ids: ["handoff-9"],
     });
   });

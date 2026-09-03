@@ -496,14 +496,12 @@ export type DirectBridgeMessage = {
 export type DirectMessageExchange =
   | {
       accepted: true;
-      unreadPeerMessages: [];
       outbound: DirectBridgeMessage;
       cursor: number;
     }
   | {
       accepted: false;
       reason: "pipe_busy" | "stale_cursor";
-      unreadPeerMessages: [];
       cursor: number;
     };
 
@@ -546,7 +544,6 @@ export class DirectMessagePipe {
         return {
           accepted: false,
           reason: "pipe_busy",
-          unreadPeerMessages: [],
           cursor: this.consumedCursor[options.sender],
         };
       }
@@ -558,7 +555,6 @@ export class DirectMessagePipe {
       return {
         accepted: false,
         reason: "stale_cursor",
-        unreadPeerMessages: [],
         cursor,
       };
     }
@@ -573,7 +569,6 @@ export class DirectMessagePipe {
     this.pending.push(outbound);
     return {
       accepted: true,
-      unreadPeerMessages: [],
       outbound,
       cursor,
     };

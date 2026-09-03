@@ -7,7 +7,6 @@ import type {
 export type HandoffDispositionFailure = {
   accepted: false;
   reason: "unknown_handoff" | "context_cannot_resolve";
-  unreadPeerMessages: [];
   cursor: number;
   handoffIds: string[];
 };

@@ -11,7 +11,6 @@ describe("realtime emissary bridge registration", () => {
     const sendMasterMessage = vi.fn().mockResolvedValue({
       accepted: false,
       reason: "stale_cursor",
-      unreadPeerMessages: [],
       cursor: 2,
     });
     const emissary = {

@@ -1044,7 +1044,6 @@ describe("DirectMessagePipe", () => {
     ).toEqual({
       accepted: false,
       reason: "pipe_busy",
-      unreadPeerMessages: [],
       cursor: 0,
     });
     expect(
@@ -1069,7 +1068,6 @@ describe("DirectMessagePipe", () => {
     ).toEqual({
       accepted: false,
       reason: "pipe_busy",
-      unreadPeerMessages: [],
       cursor: 0,
     });
     expect(
@@ -1100,7 +1098,6 @@ describe("DirectMessagePipe", () => {
     ).toEqual({
       accepted: false,
       reason: "pipe_busy",
-      unreadPeerMessages: [],
       cursor: 0,
     });
     const reply = pipe.send({
@@ -1110,7 +1107,6 @@ describe("DirectMessagePipe", () => {
     });
     expect(reply).toMatchObject({
       accepted: true,
-      unreadPeerMessages: [],
       cursor: 1,
       outbound: {
         sender: "emissary",

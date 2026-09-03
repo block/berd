@@ -139,7 +139,6 @@ vi.mock("../lib/realtimeEmissaryProtocol", () => ({
             accepted: false,
             reason: "pipe_busy",
             cursor: this.consumed[options.sender],
-            unreadPeerMessages: [],
           };
         }
         this.consumed[options.sender] = latest.id;
@@ -150,7 +149,6 @@ vi.mock("../lib/realtimeEmissaryProtocol", () => ({
           accepted: false,
           reason: "stale_cursor",
           cursor: this.consumed[options.sender],
-          unreadPeerMessages: [],
         };
       }
       const id = this.nextId++;
@@ -165,7 +163,6 @@ vi.mock("../lib/realtimeEmissaryProtocol", () => ({
       return {
         accepted: true,
         cursor: this.consumed[options.sender],
-        unreadPeerMessages: [],
         outbound,
       };
     }
@@ -974,7 +971,6 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     ).resolves.toEqual({
       accepted: false,
       reason: "pipe_busy",
-      unreadPeerMessages: [],
       cursor: 0,
     });
     expect(mocks.requestMasterMessage).not.toHaveBeenCalled();
@@ -1931,7 +1927,6 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     ).resolves.toEqual({
       accepted: false,
       reason: "context_cannot_resolve",
-      unreadPeerMessages: [],
       cursor: 0,
       handoffIds: ["handoff-1"],
     });

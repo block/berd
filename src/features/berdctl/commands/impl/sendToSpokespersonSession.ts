@@ -99,7 +99,6 @@ Wait for Berd to deliver it normally, then retry with its cursor.`,
         JSON.stringify({
           reason: delivery.reason,
           cursor: delivery.cursor,
-          unread_peer_messages: delivery.unreadPeerMessages,
           ...(delivery.reason === "unknown_handoff" ||
           delivery.reason === "context_cannot_resolve"
             ? { handoff_ids: delivery.handoffIds }
