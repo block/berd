@@ -10,11 +10,10 @@ export const SEND_TO_SPOKESPERSON_TOOL_NAME = "send_to_spokesperson";
 export const REALTIME_PROMPT_DOCUMENT = promptDocument.trim();
 const REALTIME_ROLE_PLACEHOLDER = "{{ROLE}}";
 
-export function createRealtimeRoleInstructions(
+function createRealtimeRoleInstructions(
   role: "Expert" | "Spokesperson",
-  document = REALTIME_PROMPT_DOCUMENT,
 ): string {
-  const normalized = document.replaceAll("\r\n", "\n").trim();
+  const normalized = REALTIME_PROMPT_DOCUMENT.replaceAll("\r\n", "\n").trim();
   const placeholderCount =
     normalized.split(REALTIME_ROLE_PLACEHOLDER).length - 1;
   if (placeholderCount !== 1) {
@@ -357,16 +356,6 @@ export class RealtimeResponseCoordinator {
       status: "queued",
       events: [createMasterMessageItem(message)],
     };
-  }
-
-  requestResponse(): MasterMessageRequest {
-    if (!this.activeResponse) {
-      this.activeResponse = awaitingCreatedResponse();
-      return { status: "sent", events: [{ type: "response.create" }] };
-    }
-
-    this.queueDefaultResponse();
-    return { status: "queued", events: [] };
   }
 
   requestToolOutput(event: RealtimeClientEvent): MasterMessageRequest {

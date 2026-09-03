@@ -216,6 +216,7 @@ function waitForMasterRunBoundary(
 
 const MAX_BRIDGE_CURSOR = 4_294_967_295;
 const BRIDGE_CURSOR_RESERVE = 1_000_000;
+const FINAL_TRANSCRIPT_FLUSH_TIMEOUT_MS = 100;
 
 function createBridgeCallScope(): { id: string; initialCursor: number } {
   const id = crypto.randomUUID();
@@ -1118,7 +1119,14 @@ class OpenAiRealtimeConversationRuntime {
       return;
     this.setSnapshot({ ...this.snapshot, state: "stopping" });
     const flushedPendingEvents = this.flushPendingExpertEvents?.() ?? false;
-    if (flushedPendingEvents) await this.deliveryQueue.catch(() => undefined);
+    if (flushedPendingEvents) {
+      await Promise.race([
+        this.deliveryQueue.catch(() => undefined),
+        new Promise<void>((resolve) => {
+          window.setTimeout(resolve, FINAL_TRANSCRIPT_FLUSH_TIMEOUT_MS);
+        }),
+      ]);
+    }
     await this.cleanupResources(sessionId);
     this.boundOnSend = null;
     this.failureInProgress = false;

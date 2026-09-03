@@ -48,12 +48,12 @@ export const dismissHandoffsSessionCommand = defineCommand({
     "when a spoken response is obsolete, superseded, or already handled. The " +
     "command and its reason remain visible in the Expert's normal Berd activity.",
   helpFooter: `Example:
-  berdctl session dismiss-handoffs --session-id <session-id> --cursor 2 \
-    --handoff-id handoff-1 --handoff-id handoff-2 \
+  berdctl session dismiss-handoffs --session-id <session-id> --cursor <latest-cursor> \
+    --handoff-id <handoff-id> \
     --reason "The user's follow-up superseded both requests." --json
 
 Result:
-  {"session_id":"...","cursor":2,"dismissed_handoff_ids":["handoff-1","handoff-2"],"context_delivery_status":"sent"|"interrupting"|"queued"}
+  {"session_id":"...","cursor":<latest-cursor>,"dismissed_handoff_ids":["<handoff-id>"],"context_delivery_status":"sent"|"interrupting"|"queued"}
 
 Every id must still be open. A dismissal consumes pending Spokesperson handoffs only
 when --cursor proves the Expert received the complete pending batch, then

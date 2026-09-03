@@ -521,14 +521,18 @@ export async function dispatchPrompt(
     }
 
     finishPromptSuccessfully();
-    if (await hasActiveRealtimeEmissary(sessionId)) {
-      await settleMasterTranscriptDelivery(sessionId);
-      if (!finalMasterTextSince(sessionId, assistantTextBeforeTurn)) {
-        await recoverMissingMasterTranscript(sessionId, acpPrompt);
+    try {
+      if (await hasActiveRealtimeEmissary(sessionId)) {
+        await settleMasterTranscriptDelivery(sessionId);
+        if (!finalMasterTextSince(sessionId, assistantTextBeforeTurn)) {
+          await recoverMissingMasterTranscript(sessionId, acpPrompt);
+        }
+        await completeActiveRealtimeMasterTurn(sessionId, {
+          reminderHandoffIds: realtimeHandoffReminderIds(acpGooseMetadata),
+        });
       }
-      await completeActiveRealtimeMasterTurn(sessionId, {
-        reminderHandoffIds: realtimeHandoffReminderIds(acpGooseMetadata),
-      });
+    } catch (error) {
+      console.warn("Could not complete the Realtime Expert turn", error);
     }
   } catch (err) {
     const isVoiceConversationNoop =
@@ -537,14 +541,18 @@ export async function dispatchPrompt(
       isVoiceConversationEmptyResponse(formatAcpErrorMessage(err));
     if (isVoiceConversationNoop) {
       finishPromptSuccessfully();
-      if (await hasActiveRealtimeEmissary(sessionId)) {
-        await settleMasterTranscriptDelivery(sessionId);
-        if (!finalMasterTextSince(sessionId, assistantTextBeforeTurn)) {
-          await recoverMissingMasterTranscript(sessionId, dispatchedPrompt);
+      try {
+        if (await hasActiveRealtimeEmissary(sessionId)) {
+          await settleMasterTranscriptDelivery(sessionId);
+          if (!finalMasterTextSince(sessionId, assistantTextBeforeTurn)) {
+            await recoverMissingMasterTranscript(sessionId, dispatchedPrompt);
+          }
+          await completeActiveRealtimeMasterTurn(sessionId, {
+            reminderHandoffIds: realtimeHandoffReminderIds(acpGooseMetadata),
+          });
         }
-        await completeActiveRealtimeMasterTurn(sessionId, {
-          reminderHandoffIds: realtimeHandoffReminderIds(acpGooseMetadata),
-        });
+      } catch (error) {
+        console.warn("Could not complete the Realtime Expert turn", error);
       }
       if (isCurrent()) {
         setError(sessionId, null);

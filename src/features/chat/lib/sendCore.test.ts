@@ -316,6 +316,46 @@ describe("dispatchPrompt realtime Master transcript recovery", () => {
     release();
   });
 
+  it("keeps a completed Expert turn successful when Realtime completion fails", async () => {
+    const release = registerRealtimeEmissary({
+      sessionId: "session-1",
+      sendMasterMessage: vi.fn(),
+      dismissHandoffs: vi.fn(),
+      completeMasterTurn: () => {
+        throw new Error("Realtime owner disappeared");
+      },
+    });
+    mocks.acpSendMessage.mockImplementationOnce(
+      (
+        sessionId: string,
+        _prompt: string,
+        options: {
+          onPromptDispatching(): void;
+          onPromptDispatched(): void;
+        },
+      ) => {
+        options.onPromptDispatching();
+        options.onPromptDispatched();
+        useChatStore.getState().addMessage(sessionId, {
+          id: "master-final",
+          role: "assistant",
+          created: Date.now(),
+          content: [{ type: "text", text: "The Expert finished." }],
+          metadata: { completionStatus: "completed" },
+        });
+        return Promise.resolve();
+      },
+    );
+
+    await expect(
+      dispatchPrompt("session-1", "Complete the work", {}),
+    ).resolves.toBeUndefined();
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1").error,
+    ).toBeNull();
+    release();
+  });
+
   it("returns private reminder handoff ids to the realtime bridge", async () => {
     const completeMasterTurn = vi.fn();
     const release = registerRealtimeEmissary({

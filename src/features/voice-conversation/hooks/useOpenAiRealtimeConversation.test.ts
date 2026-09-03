@@ -50,7 +50,6 @@ const mocks = vi.hoisted(() => ({
   steerPrompt: vi.fn(),
   requestToolOutput: vi.fn(),
   requestMasterMessage: vi.fn(),
-  requestResponse: vi.fn(),
   requestTypedUserMessage: vi.fn(),
 }));
 
@@ -330,9 +329,6 @@ vi.mock("../lib/realtimeEmissaryProtocol", () => ({
     takeFailedHandoffIds() {
       return [];
     }
-    requestResponse() {
-      return mocks.requestResponse();
-    }
     requestMasterMessage(message: unknown) {
       return mocks.requestMasterMessage(message);
     }
@@ -481,6 +477,7 @@ beforeEach(() => {
   mocks.activeEmissary = null;
   mocks.createResponse = true;
   useChatStore.setState({
+    loadingSessionIds: new Set(),
     messagesBySession: {},
     queuedMessageBySession: {},
     sessionStateById: {},
@@ -561,10 +558,6 @@ beforeEach(() => {
     status: "sent",
     events: [{ type: "conversation.item.create", message }],
   }));
-  mocks.requestResponse.mockReturnValue({
-    status: "sent",
-    events: [{ type: "response.create" }],
-  });
   mocks.requestTypedUserMessage.mockReturnValue({
     status: "interrupting",
     events: [{ type: "response.cancel" }, { type: "conversation.item.create" }],
@@ -1424,8 +1417,6 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       );
     });
 
-    expect(mocks.requestResponse).not.toHaveBeenCalled();
-
     await act(async () => owner.result.current.onToggle());
   });
 
@@ -1531,6 +1522,28 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     });
     await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
     await act(async () => owner.result.current.onToggle());
+  });
+
+  it("bounds final transcript flushing when the Expert queue is blocked", async () => {
+    const onSend = vi.fn().mockResolvedValue(true);
+    useChatStore.getState().setSessionLoading("session-a", true);
+    const owner = renderConversation("session-a", onSend);
+    await act(async () => owner.result.current.onToggle());
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+
+    act(() => {
+      channel.dispatchEvent(
+        new MessageEvent("message", {
+          data: JSON.stringify({ type: "test.transcript" }),
+        }),
+      );
+    });
+
+    await act(async () => owner.result.current.onToggle());
+
+    expect(owner.result.current.state).toBe("off");
+    expect(track.stop).toHaveBeenCalledOnce();
+    expect(onSend).not.toHaveBeenCalled();
   });
 
   it("forwards committed typed user text to the realtime emissary", async () => {

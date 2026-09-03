@@ -59,12 +59,12 @@ export const sendToSpokespersonSessionCommand = defineCommand({
     "message either as silent context for future turns or as a request to speak now. " +
     "The command fails when the target session has no live Realtime voice conversation.",
   helpFooter: `Example:
-  berdctl session send-to-spokesperson --session-id <session-id> --cursor 0 \\
-    --mode say --resolves handoff-1 \\
+  berdctl session send-to-spokesperson --session-id <session-id> --cursor <latest-cursor> \\
+    --mode say --resolves <handoff-id> \\
     --message "The build failed because the signing certificate expired." --json
 
 Result:
-  {"session_id":"...","cursor":0,"delivery_status":"sent"|"interrupting"|"queued","mode":"context"|"say","resolved_handoff_ids":["handoff-1"]}
+  {"session_id":"...","cursor":<latest-cursor>,"delivery_status":"sent"|"interrupting"|"queued","mode":"context"|"say","resolved_handoff_ids":["<handoff-id>"]}
 
 Use --mode context to update the Spokesperson's future context without starting a
 response. Use --mode say when the Spokesperson should speak the message now.

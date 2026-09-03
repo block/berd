@@ -10,7 +10,6 @@ import {
   createInvalidToolCallOutput,
   createRealtimeEmissarySessionUpdate,
   createHandoffToolOutput,
-  createRealtimeRoleInstructions,
   sendRealtimeEvents,
 } from "./realtimeEmissaryProtocol";
 
@@ -201,12 +200,6 @@ describe("Realtime emissary session configuration", () => {
     expect(REALTIME_PROMPT_DOCUMENT).toContain(
       "You might wonder why the sky isn’t violet",
     );
-  });
-
-  it("fails loudly when the editable prompt loses its single role slot", () => {
-    expect(() =>
-      createRealtimeRoleInstructions("Expert", "# One assistant\n\nShared."),
-    ).toThrow("must contain exactly one {{ROLE}} placeholder");
   });
 });
 
