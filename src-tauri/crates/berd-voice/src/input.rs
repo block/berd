@@ -1654,6 +1654,16 @@ fn record_openai_event(
     }
 }
 
+fn openai_transcription_failure_is_current(
+    item_id: &str,
+    current_epoch: u64,
+    committed: &VecDeque<OpenAiCommittedTurn>,
+) -> bool {
+    committed
+        .iter()
+        .any(|turn| turn.item_id == item_id && turn.mute_epoch == current_epoch)
+}
+
 fn openai_live_result_expired(
     pending_commits: &VecDeque<OpenAiPendingCommit>,
     committed: &VecDeque<OpenAiCommittedTurn>,
@@ -1848,6 +1858,19 @@ fn openai_worker(
             }
             let event = match event {
                 Ok(event) => event,
+                Err(OpenAiRealtimeTranscriptionError::TranscriptionFailed {
+                    item_id,
+                    message,
+                }) if openai_transcription_failure_is_current(
+                    &item_id,
+                    observed_epoch,
+                    &committed,
+                ) => {
+                    let _ = pending.reset(&events);
+                    let _ = events.blocking_send(VoiceInputEvent::Failed(message));
+                    return;
+                }
+                Err(OpenAiRealtimeTranscriptionError::TranscriptionFailed { .. }) => continue,
                 Err(error) => {
                     let _ = pending.reset(&events);
                     let _ = events.blocking_send(VoiceInputEvent::Failed(error.to_string()));
@@ -1998,6 +2021,19 @@ fn openai_worker(
         };
         let event = match event {
             Ok(event) => event,
+            Err(OpenAiRealtimeTranscriptionError::TranscriptionFailed {
+                item_id,
+                message,
+            }) if openai_transcription_failure_is_current(
+                &item_id,
+                observed_epoch,
+                &committed,
+            ) => {
+                let _ = pending.reset(&events);
+                let _ = events.blocking_send(VoiceInputEvent::Failed(message));
+                break;
+            }
+            Err(OpenAiRealtimeTranscriptionError::TranscriptionFailed { .. }) => continue,
             Err(OpenAiRealtimeTranscriptionError::Provider(message)) => {
                 let _ = pending.reset(&events);
                 let _ = events.blocking_send(VoiceInputEvent::Failed(message));
@@ -3120,6 +3156,25 @@ mod tests {
         assert_eq!(turn.mute_epoch, 1);
         assert_eq!(turn.settle_deadline, deadline);
         assert!(committed.is_empty());
+    }
+
+    #[test]
+    fn openai_transcription_failures_only_apply_to_the_current_epoch() {
+        let committed = VecDeque::from([OpenAiCommittedTurn {
+            item_id: "current".to_string(),
+            mute_epoch: 2,
+            settle_deadline: Instant::now() + OPENAI_LIVE_RESULT_TIMEOUT,
+        }]);
+
+        assert!(openai_transcription_failure_is_current(
+            "current", 2, &committed
+        ));
+        assert!(!openai_transcription_failure_is_current(
+            "current", 3, &committed
+        ));
+        assert!(!openai_transcription_failure_is_current(
+            "discarded", 2, &committed
+        ));
     }
 
     #[test]

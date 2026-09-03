@@ -34,6 +34,7 @@ pub enum OpenAiRealtimeTranscriptionEvent {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum OpenAiRealtimeTranscriptionError {
+    TranscriptionFailed { item_id: String, message: String },
     Provider(String),
     Disconnected,
     Socket(String),
@@ -42,7 +43,9 @@ pub enum OpenAiRealtimeTranscriptionError {
 impl std::fmt::Display for OpenAiRealtimeTranscriptionError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Provider(message) => formatter.write_str(message),
+            Self::TranscriptionFailed { message, .. } | Self::Provider(message) => {
+                formatter.write_str(message)
+            }
             Self::Disconnected => {
                 formatter.write_str("OpenAI realtime transcription disconnected.")
             }
@@ -98,7 +101,18 @@ impl OpenAiRealtimeTranscriptionClient {
                 }}
             }
         }))
-        .await
+        .await?;
+
+        loop {
+            let value = self.next_json().await.map_err(|error| error.to_string())?;
+            match value.get("type").and_then(|value| value.as_str()) {
+                Some("session.updated") => return Ok(()),
+                Some("error") => {
+                    return Err(provider_message(&value).to_string());
+                }
+                _ => {}
+            }
+        }
     }
 
     pub async fn append_pcm16le_24khz(&mut self, pcm: &[u8]) -> Result<(), String> {
@@ -125,19 +139,7 @@ impl OpenAiRealtimeTranscriptionClient {
         &mut self,
     ) -> Result<OpenAiRealtimeTranscriptionEvent, OpenAiRealtimeTranscriptionError> {
         loop {
-            let message = match self.socket.next().await {
-                Some(Ok(Message::Text(text))) => text,
-                Some(Ok(Message::Close(_))) | None => {
-                    return Err(OpenAiRealtimeTranscriptionError::Disconnected)
-                }
-                Some(Ok(_)) => continue,
-                Some(Err(error)) => {
-                    return Err(OpenAiRealtimeTranscriptionError::Socket(error.to_string()))
-                }
-            };
-            let Ok(value) = serde_json::from_str::<serde_json::Value>(&message) else {
-                continue;
-            };
+            let value = self.next_json().await?;
             match value.get("type").and_then(|value| value.as_str()) {
                 Some("input_audio_buffer.committed") => {
                     if let Some(item_id) = value.get("item_id").and_then(|value| value.as_str()) {
@@ -157,16 +159,40 @@ impl OpenAiRealtimeTranscriptionClient {
                         });
                     }
                 }
-                Some("conversation.item.input_audio_transcription.failed") | Some("error") => {
+                Some("conversation.item.input_audio_transcription.failed") => {
+                    if let Some(item_id) = value.get("item_id").and_then(|value| value.as_str()) {
+                        return Err(OpenAiRealtimeTranscriptionError::TranscriptionFailed {
+                            item_id: item_id.to_string(),
+                            message: provider_message(&value).to_string(),
+                        });
+                    }
+                }
+                Some("error") => {
                     return Err(OpenAiRealtimeTranscriptionError::Provider(
-                        value
-                            .pointer("/error/message")
-                            .and_then(|value| value.as_str())
-                            .unwrap_or("OpenAI realtime transcription failed.")
-                            .to_string(),
-                    ))
+                        provider_message(&value).to_string(),
+                    ));
                 }
                 _ => {}
+            }
+        }
+    }
+
+    async fn next_json(
+        &mut self,
+    ) -> Result<serde_json::Value, OpenAiRealtimeTranscriptionError> {
+        loop {
+            let message = match self.socket.next().await {
+                Some(Ok(Message::Text(text))) => text,
+                Some(Ok(Message::Close(_))) | None => {
+                    return Err(OpenAiRealtimeTranscriptionError::Disconnected);
+                }
+                Some(Ok(_)) => continue,
+                Some(Err(error)) => {
+                    return Err(OpenAiRealtimeTranscriptionError::Socket(error.to_string()));
+                }
+            };
+            if let Ok(value) = serde_json::from_str(&message) {
+                return Ok(value);
             }
         }
     }
@@ -177,6 +203,13 @@ impl OpenAiRealtimeTranscriptionClient {
             .await
             .map_err(|error| error.to_string())
     }
+}
+
+fn provider_message(value: &serde_json::Value) -> &str {
+    value
+        .pointer("/error/message")
+        .and_then(|value| value.as_str())
+        .unwrap_or("OpenAI realtime transcription failed.")
 }
 
 #[cfg(test)]
@@ -242,6 +275,12 @@ mod tests {
                 configured.pointer("/session/audio/input/turn_detection"),
                 Some(&Value::Null)
             );
+            socket
+                .send(Message::Text(
+                    json!({"type":"session.updated"}).to_string().into(),
+                ))
+                .await
+                .unwrap();
 
             let appended = receive_json(&mut socket).await;
             assert_eq!(
@@ -257,12 +296,6 @@ mod tests {
                 json!({"type":"input_audio_buffer.commit"})
             );
 
-            socket
-                .send(Message::Text(
-                    json!({"type":"session.updated"}).to_string().into(),
-                ))
-                .await
-                .unwrap();
             socket.send(Message::Text("not json".into())).await.unwrap();
             socket
                 .send(Message::Text(
@@ -286,9 +319,13 @@ mod tests {
                 .unwrap();
             socket
                 .send(Message::Text(
-                    json!({"type":"error","error":{"message":"provider failed"}})
-                        .to_string()
-                        .into(),
+                    json!({
+                        "type":"conversation.item.input_audio_transcription.failed",
+                        "item_id":"item-1",
+                        "error":{"message":"turn failed"}
+                    })
+                    .to_string()
+                    .into(),
                 ))
                 .await
                 .unwrap();
@@ -326,8 +363,49 @@ mod tests {
         );
         assert_eq!(
             client.next_event().await.unwrap_err(),
-            OpenAiRealtimeTranscriptionError::Provider("provider failed".into())
+            OpenAiRealtimeTranscriptionError::TranscriptionFailed {
+                item_id: "item-1".into(),
+                message: "turn failed".into(),
+            }
         );
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn configure_waits_for_provider_acknowledgement() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("ws://{}", listener.local_addr().unwrap());
+        let (acknowledge, acknowledged) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            assert_eq!(receive_json(&mut socket).await["type"], "session.update");
+            acknowledged.await.unwrap();
+            socket
+                .send(Message::Text(
+                    json!({"type":"session.updated"}).to_string().into(),
+                ))
+                .await
+                .unwrap();
+        });
+        let config = OpenAiRealtimeTranscriptionConfig::new(
+            endpoint,
+            "test-key".into(),
+            "test-model".into(),
+        );
+        let mut client = OpenAiRealtimeTranscriptionClient::connect(config)
+            .await
+            .unwrap();
+        let configuring = client.configure();
+        tokio::pin!(configuring);
+        assert!(tokio::time::timeout(
+            std::time::Duration::from_millis(20),
+            &mut configuring
+        )
+        .await
+        .is_err());
+        acknowledge.send(()).unwrap();
+        configuring.await.unwrap();
         server.await.unwrap();
     }
 

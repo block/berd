@@ -2604,13 +2604,18 @@ fn store_final_if_active(
         .flatten();
     admission.add_final(reference, transcript.text.clone())?;
     if let Some(evicted) = evicted.as_ref() {
-        let evicted_reference = VoiceTranscriptReference {
-            lifecycle_id: evicted.lifecycle_id.clone(),
-            id: evicted.id.clone(),
-            revision: evicted.revision,
-        };
-        if !admission.discard(&evicted_reference)? {
-            return Err("The evicted voice transcript is not tracked by admission.".to_string());
+        if evicted.session_id == transcript.session_id
+            && evicted.lifecycle_id == transcript.lifecycle_id
+            && evicted.revision == transcript.revision
+        {
+            let evicted_reference = VoiceTranscriptReference {
+                lifecycle_id: evicted.lifecycle_id.clone(),
+                id: evicted.id.clone(),
+                revision: evicted.revision,
+            };
+            if !admission.discard(&evicted_reference)? {
+                return Err("The evicted voice transcript is not tracked by admission.".to_string());
+            }
         }
         pending.pop_front();
     }
@@ -2810,6 +2815,41 @@ mod tests {
         assert_eq!(admission.next_token, 1);
         assert_eq!(admission.tokens.len(), 1);
         assert_eq!(admission.core.utterances_after(0).len(), 1);
+    }
+
+    #[test]
+    fn current_final_evicts_superseded_lifecycle_recovery_without_current_admission() {
+        let runtime = Mutex::new(Runtime {
+            session_id: Some("session-new".into()),
+            lifecycle_id: Some("lifecycle-new".into()),
+            revision: 5,
+            ..Runtime::default()
+        });
+        let pending = Mutex::new(
+            (0..MAX_PENDING_TRANSCRIPTS)
+                .map(|index| {
+                    pending_transcript("session-old", "lifecycle-old", &format!("old-{index}"), 4)
+                })
+                .collect(),
+        );
+        let admission = BerdAdmissionCoordinator::default();
+
+        let result = store_final_if_active(
+            &runtime,
+            &pending,
+            &admission,
+            "session-new",
+            5,
+            pending_transcript("session-new", "lifecycle-new", "new", 5),
+            || {},
+        )
+        .expect("store current final while evicting stale recovery");
+
+        assert!(matches!(result, StoredFinal::Stored { evicted: Some(_) }));
+        let pending = pending.lock().unwrap();
+        assert_eq!(pending.len(), MAX_PENDING_TRANSCRIPTS);
+        assert_eq!(pending.front().unwrap().id, "old-1");
+        assert_eq!(pending.back().unwrap().id, "new");
     }
 
     #[tokio::test]
