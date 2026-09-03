@@ -38,19 +38,6 @@ afterEach(async () => {
   );
 });
 
-describe("shared Cargo package cache", () => {
-  it("keeps Cargo dependency and binary paths stable across worktrees", async () => {
-    const hermitConfig = await readFile(join(repo, "bin/hermit.hcl"), "utf8");
-
-    expect(hermitConfig).toMatch(
-      /"CARGO_HOME": "\$\{HOME\}\/\.cache\/berd\/cargo-home"/,
-    );
-    expect(hermitConfig).toMatch(
-      /"PATH": "\$\{HOME\}\/\.cache\/berd\/cargo-home\/bin:\$\{PATH\}"/,
-    );
-  });
-});
-
 describe("managed Goose build profile", () => {
   it("defaults development to debug and makes release selection profile-aware", async () => {
     const script = await readFile(
@@ -138,6 +125,19 @@ describe("managed Goose build profile", () => {
     expect(windowsSetup).toContain('$GooseBuildProfile = "debug"');
     expect(windowsDev).toContain('$env:GOOSE_BUILD_PROFILE = "debug"');
     expect(windowsStage).toContain('$env:GOOSE_BUILD_PROFILE = "debug"');
+  });
+});
+
+describe("shared Cargo package cache", () => {
+  it("keeps Cargo dependency and binary paths stable across worktrees", async () => {
+    const hermitConfig = await readFile(join(repo, "bin/hermit.hcl"), "utf8");
+
+    expect(hermitConfig).toMatch(
+      /"CARGO_HOME": "\$\{HOME\}\/\.cache\/berd\/cargo-home"/,
+    );
+    expect(hermitConfig).toMatch(
+      /"PATH": "\$\{HOME\}\/\.cache\/berd\/cargo-home\/bin:\$\{PATH\}"/,
+    );
   });
 });
 
