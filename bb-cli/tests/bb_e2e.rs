@@ -3656,6 +3656,7 @@ fn bb_apps_help_distinguishes_external_and_internal_paths() {
         "get",
         "versions",
         "rollback",
+        "delete",
         "ready",
         "debug",
     ] {
@@ -3770,6 +3771,77 @@ fn bb_apps_rollback_help_exposes_optional_target_and_environment() {
             "rollback help omitted {expected:?}: {stdout}"
         );
     }
+}
+
+#[test]
+fn bb_apps_delete_help_exposes_exact_confirmation_and_retention_behavior() {
+    let output = bb_command()
+        .args(["apps", "delete", "--help"])
+        .output()
+        .expect("run bb apps delete help");
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(output.status.success(), "stderr was: {stderr}");
+    for expected in [
+        "<APP_ID>",
+        "--confirm-app-id <APP_ID>",
+        "--environment <ENVIRONMENT>",
+        "--confirm-environment <ENVIRONMENT>",
+        "owner-only",
+        "retained",
+        "--base-url <URL>",
+    ] {
+        assert!(
+            stdout.contains(expected),
+            "delete help omitted {expected:?}: {stdout}"
+        );
+    }
+}
+
+#[test]
+fn bb_apps_delete_requires_confirmation_before_auth_or_network() {
+    let output = bb_command()
+        .args([
+            "apps",
+            "delete",
+            "merchant-lookup",
+            "--base-url",
+            "https://compose-ctrl.test.blockstaging.build",
+        ])
+        .output()
+        .expect("run bb apps delete without confirmation");
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(!output.status.success());
+    assert!(stdout.is_empty(), "stdout was: {stdout}");
+    assert!(stderr.contains("--confirm-app-id <APP_ID>"));
+    assert!(stderr.contains("--environment <ENVIRONMENT>"));
+    assert!(stderr.contains("--confirm-environment <ENVIRONMENT>"));
+    assert!(stderr.contains("required"));
+}
+
+#[test]
+fn bb_apps_delete_requires_an_explicit_environment() {
+    let output = bb_command()
+        .args([
+            "apps",
+            "delete",
+            "merchant-lookup",
+            "--confirm-app-id",
+            "merchant-lookup",
+            "--confirm-environment",
+            "production",
+            "--base-url",
+            "https://compose-ctrl.test.blockstaging.build",
+        ])
+        .output()
+        .expect("run bb apps delete without environment");
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(!output.status.success());
+    assert!(stdout.is_empty(), "stdout was: {stdout}");
+    assert!(stderr.contains("--environment <ENVIRONMENT>"));
+    assert!(stderr.contains("required"));
 }
 
 #[test]
