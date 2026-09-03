@@ -126,6 +126,43 @@ describe("ArtifactsWidget open actions through the real provider", () => {
   });
 });
 
+describe("one policy owner per session boundary", () => {
+  it("shares the per-path open debounce across consumer surfaces", async () => {
+    // The viewer and the right-rail widget render under ONE provider (as in
+    // ChatView's chat row). Opening the same path quickly from both surfaces
+    // must hand it to the OS once: a second provider would own a separate
+    // debounce map and let the duplicate through.
+    const user = userEvent.setup();
+    renderWithRealProvider(
+      <>
+        <ArtifactViewer
+          artifact={{
+            resolvedPath: "/p/data.csv",
+            filename: "data.csv",
+            revision: 0,
+          }}
+          onClose={vi.fn()}
+        />
+        <ArtifactsWidget isOpen onToggleOpen={vi.fn()} />
+      </>,
+      "/p/data.csv",
+    );
+
+    // Surface 1: the viewer's ⋯ menu.
+    await user.click(screen.getByRole("button", { name: /file actions/i }));
+    await user.click(screen.getByRole("menuitem", { name: /open in editor/i }));
+    await vi.waitFor(() => {
+      expect(mockOpenPath).toHaveBeenCalledTimes(1);
+    });
+
+    // Surface 2: the artifacts widget row, immediately after.
+    await user.click(screen.getByRole("button", { name: /data\.csv/i }));
+    // Give any (incorrect) second hand-off a chance to fire.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(mockOpenPath).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("openResolvedPath failure handling", () => {
   it("does not let a failed hand-off consume the retry debounce", async () => {
     const user = userEvent.setup();

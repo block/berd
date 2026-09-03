@@ -137,137 +137,139 @@ export function ChatCanvasCard({
   };
 
   return (
-    <section
-      aria-label={title}
-      data-canvas-chat-focused={isFocused ? "true" : "false"}
-      className="flex h-full min-h-0 w-full cursor-default flex-col overflow-hidden rounded-md bg-card text-foreground shadow-mini [--chat-composer-max-width:100%] [--chat-transcript-container-max-width:100%] [--chat-transcript-inline-padding:0.75rem] [--chat-transcript-max-width:100%] [--chat-user-message-max-width:85%]"
+    // One ArtifactPolicyProvider per rendered session boundary: the card's
+    // transcript AND composer share it, so both see the same artifact
+    // inventory and one per-path open debounce. Full messages (not the
+    // bounded projection) so composer @-mentions and artifact actions cover
+    // the whole session, not just the visible excerpt.
+    <ArtifactPolicyProvider
+      messages={transcript.messages}
+      sessionCwd={transcript.sessionArtifactCwd ?? null}
+      sessionId={session.id}
     >
-      <header
-        data-home-widget-drag-handle="true"
-        className="flex h-11 shrink-0 cursor-grab items-center gap-2 border-b border-border px-3 active:cursor-grabbing"
+      <section
+        aria-label={title}
+        data-canvas-chat-focused={isFocused ? "true" : "false"}
+        className="flex h-full min-h-0 w-full cursor-default flex-col overflow-hidden rounded-md bg-card text-foreground shadow-mini [--chat-composer-max-width:100%] [--chat-transcript-container-max-width:100%] [--chat-transcript-inline-padding:0.75rem] [--chat-transcript-max-width:100%] [--chat-user-message-max-width:85%]"
       >
-        {showActivity ? <ActiveChatBerdIndicator size={14} /> : null}
-        {project ? (
-          <ProjectIcon
-            icon={project.icon}
-            color={project.color}
-            projectId={project.id}
-            className="size-4 shrink-0"
-            imageClassName="size-4 shrink-0"
-          />
-        ) : null}
-        <h2 className="min-w-0 flex-1 truncate text-sm font-medium">{title}</h2>
-        <div
-          className="flex shrink-0 items-center gap-1"
-          onPointerDown={(event) => event.stopPropagation()}
+        <header
+          data-home-widget-drag-handle="true"
+          className="flex h-11 shrink-0 cursor-grab items-center gap-2 border-b border-border px-3 active:cursor-grabbing"
         >
-          <Button
-            type="button"
-            variant="subtle"
-            size="icon-sm"
-            aria-label={t("home:widgets.chatPin.collapseAria", { title })}
-            title={t("home:widgets.chatPin.collapseAria", { title })}
-            onClick={onCollapse}
+          {showActivity ? <ActiveChatBerdIndicator size={14} /> : null}
+          {project ? (
+            <ProjectIcon
+              icon={project.icon}
+              color={project.color}
+              projectId={project.id}
+              className="size-4 shrink-0"
+              imageClassName="size-4 shrink-0"
+            />
+          ) : null}
+          <h2 className="min-w-0 flex-1 truncate text-sm font-medium">
+            {title}
+          </h2>
+          <div
+            className="flex shrink-0 items-center gap-1"
+            onPointerDown={(event) => event.stopPropagation()}
           >
-            <IconArrowsMinimize aria-hidden="true" />
-          </Button>
-          <Button
-            type="button"
-            variant="subtle"
-            size="icon-sm"
-            aria-label={t("home:widgets.chatPin.openFullAria", { title })}
-            title={t("home:widgets.chatPin.openFullAria", { title })}
-            onClick={onOpenFullChat}
-          >
-            <IconArrowsMaximize aria-hidden="true" />
-          </Button>
-        </div>
-      </header>
-      {/* biome-ignore lint/a11y/noStaticElementInteractions: transcript body click grants ephemeral canvas composer focus after the canvas gesture classifier. */}
-      {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard users focus the composer directly; this handler classifies pointer click ownership only. */}
-      <div
-        data-canvas-chat-activation="transcript"
-        data-home-canvas-interactive="true"
-        className="relative flex min-h-0 flex-1 cursor-text flex-col select-text touch-pan-y"
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={focusAndMarkRead}
-      >
-        <ChatTranscriptSurface
-          sessionId={session.id}
-          messages={boundedTranscript.messages}
-          streamingMessageId={streamingMessageId}
-          isLoadingHistory={transcript.isLoadingHistory}
-          selectedPersona={transcript.selectedPersona}
-          sessionCwd={transcript.sessionArtifactCwd}
-          rendererPolicy="classic"
-          startContent={
-            boundedTranscript.hasOmittedExchanges ? (
-              <div
-                data-testid="canvas-chat-history-boundary"
-                className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3 text-xs text-muted-foreground"
-              >
-                <span>{t("home:widgets.chatPin.earlierMessages")}</span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="xs"
-                  flush
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onOpenFullChat();
-                  }}
+            <Button
+              type="button"
+              variant="subtle"
+              size="icon-sm"
+              aria-label={t("home:widgets.chatPin.collapseAria", { title })}
+              title={t("home:widgets.chatPin.collapseAria", { title })}
+              onClick={onCollapse}
+            >
+              <IconArrowsMinimize aria-hidden="true" />
+            </Button>
+            <Button
+              type="button"
+              variant="subtle"
+              size="icon-sm"
+              aria-label={t("home:widgets.chatPin.openFullAria", { title })}
+              title={t("home:widgets.chatPin.openFullAria", { title })}
+              onClick={onOpenFullChat}
+            >
+              <IconArrowsMaximize aria-hidden="true" />
+            </Button>
+          </div>
+        </header>
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: transcript body click grants ephemeral canvas composer focus after the canvas gesture classifier. */}
+        {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard users focus the composer directly; this handler classifies pointer click ownership only. */}
+        <div
+          data-canvas-chat-activation="transcript"
+          data-home-canvas-interactive="true"
+          className="relative flex min-h-0 flex-1 cursor-text flex-col select-text touch-pan-y"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={focusAndMarkRead}
+        >
+          <ChatTranscriptSurface
+            sessionId={session.id}
+            messages={boundedTranscript.messages}
+            streamingMessageId={streamingMessageId}
+            isLoadingHistory={transcript.isLoadingHistory}
+            selectedPersona={transcript.selectedPersona}
+            sessionCwd={transcript.sessionArtifactCwd}
+            rendererPolicy="classic"
+            startContent={
+              boundedTranscript.hasOmittedExchanges ? (
+                <div
+                  data-testid="canvas-chat-history-boundary"
+                  className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3 text-xs text-muted-foreground"
                 >
-                  {t("home:widgets.chatPin.openFull")}
-                </Button>
-              </div>
-            ) : null
-          }
-          footerStatus={
-            showActivity && !transcript.isLoadingHistory ? (
-              <div
-                className={cn(
-                  "flex h-8 items-center gap-2 rounded-full bg-surface-chat-responding-pill-bg px-3 text-surface-chat-responding-pill-fg shadow-[var(--shadow-chat)]",
-                  "[--shimmer-ink:var(--color-surface-chat-responding-pill-fg)]",
-                )}
-              >
-                <ActiveChatBerdIndicator size={14} />
-                <LoadingBerd
-                  chatState={
-                    chatState as
-                      | "thinking"
-                      | "streaming"
-                      | "waiting"
-                      | "compacting"
-                  }
-                  className="mb-0 px-0"
-                  motionPreset="responding"
-                />
-              </div>
-            ) : null
-          }
-        />
-      </div>
-      {/* biome-ignore lint/a11y/noStaticElementInteractions: this normal-flow surface classifies pointer ownership while its nested composer controls retain keyboard semantics. */}
-      {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard activation is handled by the nested composer controls and focus capture. */}
-      <div
-        data-home-canvas-interactive="true"
-        className="shrink-0 cursor-default px-2 pb-2"
-        onPointerDown={(event) => {
-          event.stopPropagation();
-          activateComposerFromPointer();
-        }}
-        onClick={(event) => event.stopPropagation()}
-        onFocusCapture={activateComposerFromFocus}
-      >
-        {/* The composer is a sibling of ChatTranscriptSurface, so it sits
-            outside the transcript's own ArtifactPolicyProvider. Its @-file
-            mentions read the session artifact list from context; without a
-            provider here they silently see an empty list. Full messages (not
-            the bounded projection) so mentions cover the whole session. */}
-        <ArtifactPolicyProvider
-          messages={transcript.messages}
-          sessionCwd={transcript.sessionArtifactCwd ?? null}
-          sessionId={session.id}
+                  <span>{t("home:widgets.chatPin.earlierMessages")}</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    flush
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onOpenFullChat();
+                    }}
+                  >
+                    {t("home:widgets.chatPin.openFull")}
+                  </Button>
+                </div>
+              ) : null
+            }
+            footerStatus={
+              showActivity && !transcript.isLoadingHistory ? (
+                <div
+                  className={cn(
+                    "flex h-8 items-center gap-2 rounded-full bg-surface-chat-responding-pill-bg px-3 text-surface-chat-responding-pill-fg shadow-[var(--shadow-chat)]",
+                    "[--shimmer-ink:var(--color-surface-chat-responding-pill-fg)]",
+                  )}
+                >
+                  <ActiveChatBerdIndicator size={14} />
+                  <LoadingBerd
+                    chatState={
+                      chatState as
+                        | "thinking"
+                        | "streaming"
+                        | "waiting"
+                        | "compacting"
+                    }
+                    className="mb-0 px-0"
+                    motionPreset="responding"
+                  />
+                </div>
+              ) : null
+            }
+          />
+        </div>
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: this normal-flow surface classifies pointer ownership while its nested composer controls retain keyboard semantics. */}
+        {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard activation is handled by the nested composer controls and focus capture. */}
+        <div
+          data-home-canvas-interactive="true"
+          className="shrink-0 cursor-default px-2 pb-2"
+          onPointerDown={(event) => {
+            event.stopPropagation();
+            activateComposerFromPointer();
+          }}
+          onClick={(event) => event.stopPropagation()}
+          onFocusCapture={activateComposerFromFocus}
         >
           <CanvasCardComposer
             session={session}
@@ -275,8 +277,8 @@ export function ChatCanvasCard({
             onCreateProject={onCreateProject}
             onWorkspaceNameRequest={onWorkspaceNameRequest}
           />
-        </ArtifactPolicyProvider>
-      </div>
-    </section>
+        </div>
+      </section>
+    </ArtifactPolicyProvider>
   );
 }

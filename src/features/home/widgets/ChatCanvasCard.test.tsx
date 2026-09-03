@@ -24,6 +24,25 @@ vi.mock("@/features/chat/capabilities/ConversationComposerCapability", () => ({
   ConversationComposerCapability: mocks.composer,
 }));
 
+// Structural marker so tests can assert provider boundaries: exactly one
+// policy owner must cover both the transcript and the composer.
+vi.mock("@/features/chat/hooks/ArtifactPolicyContext", () => ({
+  ArtifactPolicyProvider: ({
+    children,
+    sessionId,
+  }: {
+    children: ReactNode;
+    sessionId?: string | null;
+  }) => (
+    <div
+      data-testid="artifact-policy-provider"
+      data-session-id={sessionId ?? ""}
+    >
+      {children}
+    </div>
+  ),
+}));
+
 vi.mock("@/features/chat/hooks/useChatTranscriptReadModel", () => ({
   useChatTranscriptReadModel: () => ({
     messages: mocks.messages,
@@ -471,5 +490,37 @@ describe("ChatCanvasCard focus", () => {
         .getByRole("region", { name: "Canvas chat" })
         .querySelector("header svg"),
     ).toBeInTheDocument();
+  });
+});
+
+describe("ChatCanvasCard artifact policy boundary", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.messages = [];
+    mocks.isLoadingHistory = false;
+    mocks.chatState = "idle";
+  });
+
+  it("mounts one provider covering both the transcript and the composer", () => {
+    renderCard(false);
+
+    // Exactly one policy owner for the card's session boundary…
+    const providers = screen.getAllByTestId("artifact-policy-provider");
+    expect(providers).toHaveLength(1);
+    expect(providers[0].dataset.sessionId).toBe("canvas-session");
+
+    // …and both consumer surfaces live inside it, sharing one artifact
+    // inventory and one per-path open debounce.
+    const provider = providers[0];
+    expect(
+      screen
+        .getByTestId("transcript")
+        .closest("[data-testid='artifact-policy-provider']"),
+    ).toBe(provider);
+    expect(
+      screen
+        .getByTestId("canvas-composer")
+        .closest("[data-testid='artifact-policy-provider']"),
+    ).toBe(provider);
   });
 });

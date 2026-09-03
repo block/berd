@@ -11,7 +11,6 @@ import type { Persona } from "@/shared/types/agents";
 import type { Message } from "@/shared/types/messages";
 import { scheduleAfterNextPaint } from "@/app/lib/scheduleAfterNextPaint";
 import { useChatStore } from "@/features/chat/stores/chatStore";
-import { ArtifactPolicyProvider } from "@/features/chat/hooks/ArtifactPolicyContext";
 import type { TranscriptSearchBackend } from "@/features/chat/lib/transcriptSearchBackend";
 import { useSessionFeedbackSurvey } from "../response-feedback/useSessionFeedbackSurvey";
 import { ChatLoadingSkeleton } from "./ChatLoadingSkeleton";
@@ -162,30 +161,29 @@ export function ChatTranscriptSurface({
     </div>
   );
 
+  // No ArtifactPolicyProvider here: exactly one provider is mounted per
+  // rendered session boundary, owned by the surface that composes the
+  // transcript with its siblings (ChatView's chat row, ChatCanvasCard).
+  // Two providers for one visible session would derive artifact inventory
+  // twice and split the per-path open debounce across surfaces.
   return (
-    <ArtifactPolicyProvider
-      messages={timelineMessages}
-      sessionCwd={sessionCwd ?? null}
+    <VirtualMessageTimelineGate
       sessionId={sessionId}
-    >
-      <VirtualMessageTimelineGate
-        sessionId={sessionId}
-        messages={timelineMessages}
-        streamingMessageId={streamingMessageId}
-        sessionFeedbackSurvey={sessionFeedbackSurvey}
-        scrollTargetMessageId={scrollTargetMessageId}
-        scrollTargetQuery={scrollTargetQuery}
-        onScrollTargetHandled={onScrollTargetHandled}
-        searchContentRef={searchContentRef}
-        searchBackendRef={searchBackendRef}
-        showPlaceholder={showLoading}
-        placeholder={placeholder}
-        startContent={startContent}
-        footer={footer}
-        footerStatus={footerStatus}
-        rendererPolicy={rendererPolicy}
-        {...callbacks}
-      />
-    </ArtifactPolicyProvider>
+      messages={timelineMessages}
+      streamingMessageId={streamingMessageId}
+      sessionFeedbackSurvey={sessionFeedbackSurvey}
+      scrollTargetMessageId={scrollTargetMessageId}
+      scrollTargetQuery={scrollTargetQuery}
+      onScrollTargetHandled={onScrollTargetHandled}
+      searchContentRef={searchContentRef}
+      searchBackendRef={searchBackendRef}
+      showPlaceholder={showLoading}
+      placeholder={placeholder}
+      startContent={startContent}
+      footer={footer}
+      footerStatus={footerStatus}
+      rendererPolicy={rendererPolicy}
+      {...callbacks}
+    />
   );
 }
