@@ -1389,9 +1389,8 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                         return Ok(());
                     }
                 };
-                if let Err(message) =
-                    wait_for_input_ready(&mut events, INPUT_STARTUP_TIMEOUT)
-                {
+                let readiness = wait_for_input_ready(&mut events, INPUT_STARTUP_TIMEOUT);
+                if let Err(message) = readiness {
                     runtime.cancel();
                     let write_result = write_protocol_fatal(
                         &mut writer,
