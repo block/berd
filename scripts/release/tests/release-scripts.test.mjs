@@ -50,6 +50,7 @@ describe("shared Cargo package cache", () => {
     );
   });
 });
+
 describe("managed Goose build profile", () => {
   it("defaults development to debug and makes release selection profile-aware", async () => {
     const script = await readFile(
