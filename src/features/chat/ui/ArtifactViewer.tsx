@@ -158,6 +158,10 @@ export function ArtifactViewer({
   const [diskStatus, setDiskStatus] = useState<DiskStatus>("checking");
   const diskStatusRef = useRef<DiskStatus>(diskStatus);
   const [divergedKind, setDivergedKind] = useState<FileStatErrorKind>("other");
+  // Known-gone from disk (initial load or polling verdict). Gates every
+  // affordance that targets the file itself: the error body's "Open in
+  // editor" and both OS hand-offs in the ⋯ menu.
+  const fileIsMissing = diskStatus === "diverged" && divergedKind === "missing";
   const divergenceStrikesRef = useRef(0);
   const [imageDiskRevision, setImageDiskRevision] = useState(0);
   const imageDiskRevisionRef = useRef(0);
@@ -598,14 +602,14 @@ export function ArtifactViewer({
                 />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                {/* A deleted file cannot be handed to an editor, so the
-                    action is disabled rather than left as a dead click.
-                    Reveal stays enabled: file managers can still show the
-                    containing folder. */}
+                {/* Both OS hand-offs target the file itself, so a deleted
+                    file makes them guaranteed dead clicks (the editor can't
+                    open it; revealItemInDir receives the missing path and
+                    its rejection is swallowed). Disable rather than hide so
+                    the menu shape stays stable; polling keeps watching the
+                    path and re-enables both if the file reappears. */}
                 <DropdownMenuItem
-                  disabled={
-                    diskStatus === "diverged" && divergedKind === "missing"
-                  }
+                  disabled={fileIsMissing}
                   onSelect={() => {
                     void openResolvedPath(artifact.resolvedPath).catch(
                       () => {},
@@ -616,6 +620,7 @@ export function ArtifactViewer({
                   {t("artifactViewer.openExternally")}
                 </DropdownMenuItem>
                 <DropdownMenuItem
+                  disabled={fileIsMissing}
                   onSelect={() => {
                     void revealInFileManager(artifact.resolvedPath).catch(
                       () => {},
@@ -704,9 +709,7 @@ export function ArtifactViewer({
             // A deleted file cannot be handed to an editor; the "file
             // deleted" strip above is the whole answer (mirrors the strip
             // hiding its Reload button for the same reason).
-            fileIsMissing={
-              diskStatus === "diverged" && divergedKind === "missing"
-            }
+            fileIsMissing={fileIsMissing}
             onOpenExternally={() => {
               void openResolvedPath(artifact.resolvedPath).catch(() => {});
             }}

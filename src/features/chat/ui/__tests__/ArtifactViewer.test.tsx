@@ -701,8 +701,13 @@ describe("ArtifactViewer divergence grace period", () => {
     ).toBeInTheDocument();
   });
 
-  it("disables the header menu's 'Open in editor' once the file is deleted", async () => {
+  it("disables both OS hand-offs in the header menu once the file is deleted", async () => {
+    // Both menu actions target the file itself, so a deleted file makes each
+    // a guaranteed dead click: the editor cannot open a missing path, and
+    // revealItemInDir receives the missing path (not the parent directory)
+    // with its rejection swallowed.
     mockOpenResolvedPath.mockClear();
+    mockRevealInFileManager.mockClear();
     await renderLoadedViewer();
 
     mockStatFile.mockRejectedValue({
@@ -724,15 +729,45 @@ describe("ArtifactViewer divergence grace period", () => {
     const openItem = screen.getByRole("menuitem", {
       name: /open in editor/i,
     });
+    const revealItem = screen.getByRole("menuitem", { name: /reveal in/i });
     expect(openItem).toHaveAttribute("aria-disabled", "true");
-    // Reveal stays available: the file manager can still show the folder.
-    expect(
-      screen.getByRole("menuitem", { name: /reveal in/i }),
-    ).not.toHaveAttribute("aria-disabled", "true");
+    expect(revealItem).toHaveAttribute("aria-disabled", "true");
 
-    // A click on the disabled item must not reach the OS hand-off.
+    // Clicks on the disabled items must not reach either OS boundary —
+    // aria-disabled alone doesn't prove the handler is inert.
     await user.click(openItem);
+    await user.click(revealItem);
     expect(mockOpenResolvedPath).not.toHaveBeenCalled();
+    expect(mockRevealInFileManager).not.toHaveBeenCalled();
+  });
+
+  it("re-enables both OS hand-offs when the deleted file reappears", async () => {
+    // Polling keeps watching the path: recovery must restore the actions,
+    // otherwise disabling on deletion would be a one-way trap.
+    mockRevealInFileManager.mockClear();
+    await renderLoadedViewer();
+
+    mockStatFile.mockRejectedValue({
+      kind: "missing",
+      message: "no such file",
+    });
+    await advancePollCycle();
+    await advancePollCycle();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "File deleted from disk.",
+    );
+
+    mockStatFile.mockResolvedValue({ byteSize: "20", modifiedAtNs: "1" });
+    await advancePollCycle();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+
+    vi.useRealTimers();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /file actions/i }));
+    const revealItem = screen.getByRole("menuitem", { name: /reveal in/i });
+    expect(revealItem).not.toHaveAttribute("aria-disabled", "true");
+    await user.click(revealItem);
+    expect(mockRevealInFileManager).toHaveBeenCalledWith("/p/report.md");
   });
 
   it("reports an unreadable file with a reload action", async () => {
