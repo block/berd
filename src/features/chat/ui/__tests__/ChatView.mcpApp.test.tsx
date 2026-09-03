@@ -587,6 +587,45 @@ describe("ChatView MCP app messaging", () => {
     expect(Number(provider?.dataset.messageCount)).toBeGreaterThan(0);
   });
 
+  it("keys the artifact policy provider by the controller's effective session, not the requested id", () => {
+    // During session replacement/reconciliation the requested sessionId can
+    // briefly disagree with the session snapshot the controller serves. The
+    // provider governs filesystem policy and viewer-store identity for its
+    // whole subtree, so its id must describe the same snapshot as the
+    // messages and cwd it receives — the effective session's id.
+    const controller = mocks.useChatSessionController(
+      "ignored",
+    ) as unknown as Record<string, unknown>;
+    mocks.useChatSessionController.mockReturnValue({
+      ...controller,
+      session: {
+        id: "session-effective",
+        title: "Reconciled",
+        workingDir: "/tmp/project",
+        createdAt: "2026-05-27T00:00:00.000Z",
+        updatedAt: "2026-05-27T00:00:00.000Z",
+        messageCount: 1,
+        intent: null,
+      },
+    });
+
+    render(
+      <ChatView
+        sessionId="session-requested"
+        activeSession={chatSessionWithWorkingDir("/tmp/project")}
+      />,
+    );
+
+    const panel = screen.getByTestId("artifact-viewer-panel");
+    const provider = panel.closest(
+      "[data-testid='artifact-policy-provider']",
+    ) as HTMLElement | null;
+    expect(provider?.dataset.sessionId).toBe("session-effective");
+    // The viewer panel reads the viewer store under the same effective
+    // identity that openInApp writes to.
+    expect(panel.dataset.sessionId).toBe("session-effective");
+  });
+
   it("gates session surveys through the dedicated build capability", () => {
     vi.stubEnv("VITE_FEEDBACK", "0");
     vi.stubEnv("VITE_FEEDBACK_SURVEYS", "1");

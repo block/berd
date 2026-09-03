@@ -831,15 +831,19 @@ export function ChatView({
     // list). ChatTranscriptSurface renders its own provider for the
     // transcript, but without this outer one its siblings get the inert
     // default context and their actions silently no-op.
+    // The identity, messages, and cwd must describe one session snapshot:
+    // timelineSessionId (the controller's effective session) rather than the
+    // raw requested sessionId, which can briefly disagree with
+    // controller.messages during session replacement or reconciliation.
     <ArtifactPolicyProvider
       messages={controller.messages}
       sessionCwd={controller.sessionArtifactCwd}
-      sessionId={sessionId}
+      sessionId={timelineSessionId}
     >
       <ArtifactAutoOpenMount
         // Remote artifacts cannot be read locally, so never auto-open the
         // viewer for them; a null session absorbs appearances silently.
-        sessionId={sessionIsRemote ? null : sessionId}
+        sessionId={sessionIsRemote ? null : timelineSessionId}
         isHistoryLoading={controller.isLoadingHistory}
         sessionCwd={controller.sessionArtifactCwd}
       />
@@ -988,7 +992,9 @@ export function ChatView({
         </div>
 
         {sessionId && !isAgentBuilderSession ? (
-          <ArtifactViewerPanel sessionId={sessionId} />
+          // Keyed by the same effective identity the providers use, so the
+          // panel reads the viewer-store entry that openInApp writes.
+          <ArtifactViewerPanel sessionId={timelineSessionId} />
         ) : null}
 
         <ChatRightRail
