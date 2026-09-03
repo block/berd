@@ -11,7 +11,7 @@ import {
 import { useRemoteHostStore } from "@/features/remoteHosts/stores/remoteHostStore";
 import { RemoteHostsSettings } from "../RemoteHostsSettings";
 
-const ensureHostConnected = vi.fn(async () => {});
+const ensureHostConnected = vi.fn(async () => "connected" as const);
 const disconnect = vi.fn(async () => {});
 const shutdownHost = vi.fn(async () => {});
 const runDoctor = vi.fn(async () => {});

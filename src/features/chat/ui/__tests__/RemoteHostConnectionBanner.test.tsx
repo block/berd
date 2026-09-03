@@ -78,6 +78,7 @@ describe("RemoteHostConnectionBanner", () => {
   it("reconnects the host and reloads the session transcript", async () => {
     const ensureHostConnected = vi.fn(async () => {
       setHostState("ready");
+      return "connected" as const;
     });
     const original = useRemoteHostStore.getState().ensureHostConnected;
     useRemoteHostStore.setState({ ensureHostConnected });

@@ -251,6 +251,23 @@ describe("ensureHostConnected", () => {
     expect(mocks.connectRemoteHost).not.toHaveBeenCalled();
   });
 
+  it("remembers a manually entered host when its backend is already ready", async () => {
+    useRemoteHostStore.setState({ configHosts: ["configured"] });
+    useRemoteHostStore.getState().applyStatusEvent({
+      host: "workstation.blox",
+      ...backendIdentity,
+      state: "ready",
+    });
+
+    await useRemoteHostStore.getState().ensureHostConnected("workstation.blox");
+
+    expect(mocks.connectRemoteHost).not.toHaveBeenCalled();
+    expect(useRemoteHostStore.getState().manualHosts).toEqual([
+      "workstation.blox",
+    ]);
+    expect(loadPersistedManualHosts()).toEqual(["workstation.blox"]);
+  });
+
   it("connects and marks the host ready", async () => {
     let resolveConnect: (value: RemoteBackendConnection) => void = () => {};
     mocks.connectRemoteHost.mockImplementation(
@@ -292,9 +309,9 @@ describe("ensureHostConnected", () => {
       generation: 4,
     };
     resolvers[1]?.(newestConnection);
-    await newer;
+    await expect(newer).resolves.toBe("connected");
     resolvers[0]?.({ ...connection, incarnation: "slot-old", generation: 9 });
-    await older;
+    await expect(older).resolves.toBe("superseded");
 
     expect(useRemoteHostStore.getState().statusByHost.devbox).toEqual({
       state: "ready",
@@ -719,6 +736,31 @@ describe("manual host persistence", () => {
 
     expect(useRemoteHostStore.getState().manualHosts).toEqual(["adhoc.blox"]);
     expect(loadPersistedManualHosts()).toEqual(["adhoc.blox"]);
+  });
+
+  it("retains concurrent already-ready manual hosts in state and storage", async () => {
+    useRemoteHostStore.setState({
+      statusByHost: {
+        "alpha.blox": { ...backendIdentity, state: "ready" },
+        "beta.blox": {
+          incarnation: "slot-beta",
+          generation: 2,
+          state: "ready",
+        },
+      },
+    });
+
+    const accepted = await Promise.all([
+      useRemoteHostStore.getState().ensureHostConnected("alpha.blox"),
+      useRemoteHostStore.getState().ensureHostConnected("beta.blox"),
+    ]);
+
+    expect(accepted).toEqual(["connected", "connected"]);
+    expect(useRemoteHostStore.getState().manualHosts).toEqual([
+      "beta.blox",
+      "alpha.blox",
+    ]);
+    expect(loadPersistedManualHosts()).toEqual(["beta.blox", "alpha.blox"]);
   });
 
   it("does not record ssh-config hosts as manual", async () => {

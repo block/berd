@@ -1,12 +1,20 @@
-import { Laptop, Server } from "lucide-react";
+import { useState } from "react";
+import { Laptop, Plus, Server } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { AddRemoteHostDialog } from "./AddRemoteHostDialog";
 import {
   ChatInputSelector,
   type ChatInputSelectorItem,
 } from "./ChatInputSelector";
 import { useRemoteHostStore } from "@/features/remoteHosts/stores/remoteHostStore";
 
-const LOCAL_HOST_VALUE = "__local__";
+const LOCAL_HOST_VALUE = "action:local";
+const ADD_HOST_VALUE = "action:add-ssh-environment";
+const HOST_VALUE_PREFIX = "host:";
+
+function hostValue(host: string): string {
+  return `${HOST_VALUE_PREFIX}${host}`;
+}
 
 interface RemoteHostSelectorProps {
   selectedHost?: string | null;
@@ -33,6 +41,7 @@ export function RemoteHostSelector({
   modal,
 }: RemoteHostSelectorProps) {
   const { t } = useTranslation("chat");
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
   const configHosts = useRemoteHostStore((state) => state.configHosts);
   const manualHosts = useRemoteHostStore((state) => state.manualHosts);
   const statusByHost = useRemoteHostStore((state) => state.statusByHost);
@@ -58,14 +67,24 @@ export function RemoteHostSelector({
   };
 
   const hostItems: ChatInputSelectorItem[] = listedHosts.map((host) => ({
-    value: host,
+    value: hostValue(host),
     label: host,
     description: statusDescription(host),
     icon: <Server className="size-4 text-foreground" />,
   }));
 
   const handleValueChange = (value: string) => {
-    onHostChange?.(value === LOCAL_HOST_VALUE ? null : value);
+    if (value === ADD_HOST_VALUE) {
+      setAddDialogOpen(true);
+      return;
+    }
+    if (value === LOCAL_HOST_VALUE) {
+      onHostChange?.(null);
+      return;
+    }
+    if (value.startsWith(HOST_VALUE_PREFIX)) {
+      onHostChange?.(value.slice(HOST_VALUE_PREFIX.length));
+    }
   };
 
   const handleOpenChange = (nextOpen: boolean) => {
@@ -77,52 +96,72 @@ export function RemoteHostSelector({
   };
 
   return (
-    <ChatInputSelector
-      ariaLabel={t("toolbar.remoteHost.selectHost")}
-      value={selectedHost ?? LOCAL_HOST_VALUE}
-      triggerLabel={selectedHost ?? t("toolbar.remoteHost.thisComputer")}
-      triggerTitle={
-        selectedHost
-          ? t("toolbar.remoteHost.remoteTriggerTitle", { host: selectedHost })
-          : t("toolbar.remoteHost.localTriggerTitle")
-      }
-      icon={
-        selectedHost ? (
-          <Server className="size-4" />
-        ) : (
-          <Laptop className="size-4" />
-        )
-      }
-      open={open}
-      onOpenChange={handleOpenChange}
-      onRequestComposerFocus={onRequestComposerFocus}
-      triggerIconOnly={triggerIconOnly}
-      triggerVariant="toolbar"
-      menuLabel={t("toolbar.remoteHost.chooseHost")}
-      contentWidth="wide"
-      disabled={disabled}
-      modal={modal}
-      sections={[
-        {
-          items: [
-            {
-              value: LOCAL_HOST_VALUE,
-              label: t("toolbar.remoteHost.thisComputer"),
-              description: t("toolbar.remoteHost.thisComputerDescription"),
-              icon: <Laptop className="size-4 text-foreground" />,
-            },
-          ],
-        },
-        ...(hostItems.length > 0
-          ? [
+    <>
+      <ChatInputSelector
+        ariaLabel={t("toolbar.remoteHost.selectHost")}
+        value={selectedHost ? hostValue(selectedHost) : LOCAL_HOST_VALUE}
+        triggerLabel={selectedHost ?? t("toolbar.remoteHost.thisComputer")}
+        triggerTitle={
+          selectedHost
+            ? t("toolbar.remoteHost.remoteTriggerTitle", {
+                host: selectedHost,
+              })
+            : t("toolbar.remoteHost.localTriggerTitle")
+        }
+        icon={
+          selectedHost ? (
+            <Server className="size-4" />
+          ) : (
+            <Laptop className="size-4" />
+          )
+        }
+        open={open}
+        onOpenChange={handleOpenChange}
+        onRequestComposerFocus={onRequestComposerFocus}
+        triggerIconOnly={triggerIconOnly}
+        triggerVariant="toolbar"
+        menuLabel={t("toolbar.remoteHost.chooseHost")}
+        contentWidth="wide"
+        disabled={disabled}
+        modal={modal}
+        sections={[
+          {
+            items: [
               {
-                label: t("toolbar.remoteHost.sshHosts"),
-                items: hostItems,
+                value: LOCAL_HOST_VALUE,
+                label: t("toolbar.remoteHost.thisComputer"),
+                description: t("toolbar.remoteHost.thisComputerDescription"),
+                icon: <Laptop className="size-4 text-foreground" />,
               },
-            ]
-          : []),
-      ]}
-      onValueChange={handleValueChange}
-    />
+            ],
+          },
+          ...(hostItems.length > 0
+            ? [
+                {
+                  label: t("toolbar.remoteHost.sshHosts"),
+                  items: hostItems,
+                },
+              ]
+            : []),
+          {
+            items: [
+              {
+                value: ADD_HOST_VALUE,
+                label: t("toolbar.remoteHost.add.action"),
+                icon: <Plus className="size-4 text-foreground" />,
+              },
+            ],
+          },
+        ]}
+        onValueChange={handleValueChange}
+        preservesExternalFocus={(value) => value === ADD_HOST_VALUE}
+      />
+
+      <AddRemoteHostDialog
+        open={addDialogOpen}
+        onOpenChange={setAddDialogOpen}
+        onConnected={(host) => onHostChange?.(host)}
+      />
+    </>
   );
 }

@@ -536,6 +536,18 @@
       "thisComputer": "This computer",
       "thisComputerDescription": "Run the session locally",
       "sshHosts": "SSH hosts",
+      "add": {
+        "action": "Add SSH host",
+        "title": "Add SSH host",
+        "description": "Connect using an SSH config alias or a user@host address.",
+        "hostLabel": "SSH host",
+        "hostPlaceholder": "user@host",
+        "emptyHost": "Enter an SSH host.",
+        "superseded": "This SSH connection changed while connecting. Try again or cancel.",
+        "cancel": "Cancel",
+        "connect": "Connect",
+        "close": "Close add SSH host dialog"
+      },
       "localTriggerTitle": "Runs on this computer",
       "remoteTriggerTitle": "Runs on {{host}} over SSH",
       "missingDirectory": "Choose a folder on the remote host before sending",
