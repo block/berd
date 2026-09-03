@@ -370,7 +370,6 @@ export async function dispatchPrompt(
 
   const promptOwner = claimSessionPrompt(sessionId);
   const assistantTextBeforeTurn = assistantTextSnapshot(sessionId);
-  let realtimeVoiceActive = false;
   const isCurrent = () => ownsSessionPrompt(sessionId, promptOwner);
   let userMessageCommitted = false;
   let preCommitRejected = false;
@@ -511,7 +510,6 @@ export async function dispatchPrompt(
       ),
       onPromptDispatching: commitUserMessage,
       onPromptDispatched: () => {
-        realtimeVoiceActive = hasActiveRealtimeEmissary(sessionId);
         onPromptDispatched?.();
       },
     });
@@ -523,12 +521,12 @@ export async function dispatchPrompt(
     }
 
     finishPromptSuccessfully();
-    if (realtimeVoiceActive) {
+    if (await hasActiveRealtimeEmissary(sessionId)) {
       await settleMasterTranscriptDelivery(sessionId);
       if (!finalMasterTextSince(sessionId, assistantTextBeforeTurn)) {
         await recoverMissingMasterTranscript(sessionId, acpPrompt);
       }
-      completeActiveRealtimeMasterTurn(sessionId, {
+      await completeActiveRealtimeMasterTurn(sessionId, {
         reminderHandoffIds: realtimeHandoffReminderIds(acpGooseMetadata),
       });
     }
@@ -539,12 +537,12 @@ export async function dispatchPrompt(
       isVoiceConversationEmptyResponse(formatAcpErrorMessage(err));
     if (isVoiceConversationNoop) {
       finishPromptSuccessfully();
-      if (realtimeVoiceActive) {
+      if (await hasActiveRealtimeEmissary(sessionId)) {
         await settleMasterTranscriptDelivery(sessionId);
         if (!finalMasterTextSince(sessionId, assistantTextBeforeTurn)) {
           await recoverMissingMasterTranscript(sessionId, dispatchedPrompt);
         }
-        completeActiveRealtimeMasterTurn(sessionId, {
+        await completeActiveRealtimeMasterTurn(sessionId, {
           reminderHandoffIds: realtimeHandoffReminderIds(acpGooseMetadata),
         });
       }

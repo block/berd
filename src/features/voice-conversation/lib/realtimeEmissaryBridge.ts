@@ -62,6 +62,17 @@ const REMOTE_RESPONSE_TIMEOUT_MS = 10_000;
 type RemoteBridgeRequest =
   | {
       id: string;
+      action: "hasActive";
+      sessionId: string;
+    }
+  | {
+      id: string;
+      action: "complete";
+      sessionId: string;
+      completion: RealtimeMasterTurnCompletion;
+    }
+  | {
+      id: string;
       action: "send";
       sessionId: string;
       message: string;
@@ -80,6 +91,8 @@ type RemoteBridgeRequest =
 
 type RemoteBridgeResponse = {
   id: string;
+  active?: boolean;
+  completed?: boolean;
   delivery?: MasterMessageDelivery;
   dismissal?: HandoffDismissal;
   error?: string;
@@ -94,25 +107,36 @@ function ensureRemoteListener(): void {
       if (!spokesperson || spokesperson.sessionId !== payload.sessionId) return;
       let response: RemoteBridgeResponse;
       try {
-        response =
-          payload.action === "send"
-            ? {
-                id: payload.id,
-                delivery: await spokesperson.sendMasterMessage(
-                  payload.message,
-                  payload.cursor,
-                  payload.mode,
-                  payload.resolves,
-                ),
-              }
-            : {
-                id: payload.id,
-                dismissal: await spokesperson.dismissHandoffs(
-                  payload.cursor,
-                  payload.handoffIds,
-                  payload.reason,
-                ),
-              };
+        switch (payload.action) {
+          case "hasActive":
+            response = { id: payload.id, active: true };
+            break;
+          case "complete":
+            spokesperson.completeMasterTurn(payload.completion);
+            response = { id: payload.id, completed: true };
+            break;
+          case "send":
+            response = {
+              id: payload.id,
+              delivery: await spokesperson.sendMasterMessage(
+                payload.message,
+                payload.cursor,
+                payload.mode,
+                payload.resolves,
+              ),
+            };
+            break;
+          case "dismiss":
+            response = {
+              id: payload.id,
+              dismissal: await spokesperson.dismissHandoffs(
+                payload.cursor,
+                payload.handoffIds,
+                payload.reason,
+              ),
+            };
+            break;
+        }
       } catch (error) {
         response = {
           id: payload.id,
@@ -131,6 +155,8 @@ function ensureRemoteListener(): void {
 
 async function requestRemoteBridge(
   request:
+    | Omit<Extract<RemoteBridgeRequest, { action: "hasActive" }>, "id">
+    | Omit<Extract<RemoteBridgeRequest, { action: "complete" }>, "id">
     | Omit<Extract<RemoteBridgeRequest, { action: "send" }>, "id">
     | Omit<Extract<RemoteBridgeRequest, { action: "dismiss" }>, "id">,
 ): Promise<RemoteBridgeResponse | null> {
@@ -222,14 +248,29 @@ export function getActiveRealtimeEmissary(): ActiveRealtimeEmissary | null {
   return activeEmissary;
 }
 
-export function hasActiveRealtimeEmissary(sessionId: string): boolean {
-  return activeEmissary?.sessionId === sessionId;
+export async function hasActiveRealtimeEmissary(
+  sessionId: string,
+): Promise<boolean> {
+  if (activeEmissary?.sessionId === sessionId) return true;
+  const response = await requestRemoteBridge({
+    action: "hasActive",
+    sessionId,
+  });
+  return response?.active === true;
 }
 
-export function completeActiveRealtimeMasterTurn(
+export async function completeActiveRealtimeMasterTurn(
   sessionId: string,
   completion: RealtimeMasterTurnCompletion,
-): void {
-  if (activeEmissary?.sessionId !== sessionId) return;
-  activeEmissary.completeMasterTurn(completion);
+): Promise<boolean> {
+  if (activeEmissary?.sessionId === sessionId) {
+    activeEmissary.completeMasterTurn(completion);
+    return true;
+  }
+  const response = await requestRemoteBridge({
+    action: "complete",
+    sessionId,
+    completion,
+  });
+  return response?.completed === true;
 }

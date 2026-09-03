@@ -362,6 +362,57 @@ describe("dispatchPrompt realtime Master transcript recovery", () => {
     release();
   });
 
+  it("completes a realtime lifecycle that joins an existing Master run", async () => {
+    let finishPrompt: (() => void) | undefined;
+    mocks.acpSendMessage.mockImplementationOnce(
+      (
+        sessionId: string,
+        _prompt: string,
+        options: {
+          onPromptDispatching(): void;
+          onPromptDispatched(): void;
+        },
+      ) => {
+        options.onPromptDispatching();
+        options.onPromptDispatched();
+        return new Promise<void>((resolve) => {
+          finishPrompt = () => {
+            useChatStore.getState().addMessage(sessionId, {
+              id: "master-final-after-realtime-start",
+              role: "assistant",
+              created: Date.now(),
+              content: [{ type: "text", text: "The Expert finished." }],
+              metadata: {
+                agentVisible: true,
+                userVisible: true,
+                completionStatus: "completed",
+              },
+            });
+            resolve();
+          };
+        });
+      },
+    );
+
+    const prompt = dispatchPrompt("session-1", "Already running", {});
+    await vi.waitFor(() => expect(finishPrompt).toBeTypeOf("function"));
+
+    const completeMasterTurn = vi.fn();
+    const release = registerRealtimeEmissary({
+      sessionId: "session-1",
+      sendMasterMessage: vi.fn(),
+      dismissHandoffs: vi.fn(),
+      completeMasterTurn,
+    });
+    finishPrompt?.();
+    await prompt;
+
+    expect(completeMasterTurn).toHaveBeenCalledWith({
+      reminderHandoffIds: [],
+    });
+    release();
+  });
+
   it("keeps a new-session Master turn owned until hydration publishes its final text", async () => {
     const release = registerRealtimeEmissary({
       sessionId: "session-1",

@@ -53,18 +53,18 @@ describe("realtime emissary bridge registration", () => {
     await expect(
       emissary.sendMasterMessage("update", 1, "context", []),
     ).resolves.toMatchObject({ accepted: false, cursor: 2 });
-    completeActiveRealtimeMasterTurn("session-1", {
+    await completeActiveRealtimeMasterTurn("session-1", {
       reminderHandoffIds: ["handoff-1"],
     });
     expect(emissary.completeMasterTurn).toHaveBeenCalledWith({
       reminderHandoffIds: ["handoff-1"],
     });
-    expect(hasActiveRealtimeEmissary("session-1")).toBe(true);
-    expect(hasActiveRealtimeEmissary("session-2")).toBe(false);
+    await expect(hasActiveRealtimeEmissary("session-1")).resolves.toBe(true);
+    await expect(hasActiveRealtimeEmissary("session-2")).resolves.toBe(false);
 
     release();
     expect(getActiveRealtimeEmissary()).toBeNull();
-    expect(hasActiveRealtimeEmissary("session-1")).toBe(false);
+    await expect(hasActiveRealtimeEmissary("session-1")).resolves.toBe(false);
   });
 
   it("accepts a bridge response from another renderer", async () => {
@@ -130,11 +130,12 @@ describe("realtime emissary bridge registration", () => {
       reason: "stale_cursor",
       cursor: 6,
     });
+    const completeMasterTurn = vi.fn();
     const release = registerRealtimeEmissary({
       sessionId: "popup-session",
       sendMasterMessage,
       dismissHandoffs: vi.fn(),
-      completeMasterTurn: vi.fn(),
+      completeMasterTurn,
     });
     await Promise.resolve();
     const responses: unknown[] = [];
@@ -181,8 +182,93 @@ describe("realtime emissary bridge registration", () => {
       },
     });
 
+    for (const listener of eventListeners.get(
+      "voice-conversation:spokesperson-bridge-request",
+    ) ?? []) {
+      await listener({
+        payload: {
+          id: "presence-1",
+          action: "hasActive",
+          sessionId: "popup-session",
+        },
+      });
+      await listener({
+        payload: {
+          id: "completion-1",
+          action: "complete",
+          sessionId: "popup-session",
+          completion: { reminderHandoffIds: ["handoff-8"] },
+        },
+      });
+    }
+
+    expect(responses).toContainEqual({ id: "presence-1", active: true });
+    expect(responses).toContainEqual({ id: "completion-1", completed: true });
+    expect(completeMasterTurn).toHaveBeenCalledWith({
+      reminderHandoffIds: ["handoff-8"],
+    });
+
     responseListeners.delete(responseListener);
     release();
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: undefined,
+    });
+  });
+
+  it("routes presence and turn completion to another renderer", async () => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: {},
+    });
+    const received: unknown[] = [];
+    const ownerListener = async ({ payload }: { payload: unknown }) => {
+      const request = payload as {
+        id: string;
+        action: "hasActive" | "complete";
+        completion?: { reminderHandoffIds: string[] };
+      };
+      received.push(request);
+      const response =
+        request.action === "hasActive"
+          ? { id: request.id, active: true }
+          : { id: request.id, completed: true };
+      for (const listener of eventListeners.get(
+        "voice-conversation:spokesperson-bridge-response",
+      ) ?? []) {
+        await listener({ payload: response });
+      }
+    };
+    const requests =
+      eventListeners.get("voice-conversation:spokesperson-bridge-request") ??
+      new Set();
+    requests.add(ownerListener);
+    eventListeners.set(
+      "voice-conversation:spokesperson-bridge-request",
+      requests,
+    );
+
+    await expect(
+      hasActiveRealtimeEmissary("session-in-another-window"),
+    ).resolves.toBe(true);
+    await expect(
+      completeActiveRealtimeMasterTurn("session-in-another-window", {
+        reminderHandoffIds: ["handoff-7"],
+      }),
+    ).resolves.toBe(true);
+    expect(received).toEqual([
+      expect.objectContaining({
+        action: "hasActive",
+        sessionId: "session-in-another-window",
+      }),
+      expect.objectContaining({
+        action: "complete",
+        sessionId: "session-in-another-window",
+        completion: { reminderHandoffIds: ["handoff-7"] },
+      }),
+    ]);
+
+    requests.delete(ownerListener);
     Object.defineProperty(window, "__TAURI_INTERNALS__", {
       configurable: true,
       value: undefined,
