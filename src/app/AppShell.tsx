@@ -99,6 +99,7 @@ import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
 import { useAppStartup } from "./hooks/useAppStartup";
 import { useRemoteSessionExperimentReconciliation } from "@/features/chat/hooks/useRemoteSessionExperimentReconciliation";
 import { useCompletionNotifications } from "@/shared/hooks/useCompletionNotifications";
+import { useMemoryNoticer } from "@/features/me/hooks/useMemoryNoticer";
 import { MemoryProposalToasts } from "@/features/me/ui/MemoryProposalToasts";
 import { useHomeSessionStateSync } from "./hooks/useHomeSessionStateSync";
 import { useHomeWidgetStore } from "@/features/home/stores/homeWidgetStore";
@@ -1047,6 +1048,7 @@ export function AppShell({
   );
 
   useCompletionNotifications(handleNavigateToSession);
+  useMemoryNoticer();
 
   useEffect(() => {
     let didCancel = false;
