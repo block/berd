@@ -71,6 +71,10 @@ impl VoiceInputFrame {
     fn samples(&self) -> &[f32; INPUT_FRAME_SAMPLES] {
         &self.0
     }
+
+    pub fn as_samples(&self) -> &[f32; INPUT_FRAME_SAMPLES] {
+        &self.0
+    }
 }
 
 pub enum VoiceInputEngineConfig {

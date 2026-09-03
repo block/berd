@@ -4,6 +4,7 @@ use crate::causal_inbox::{CausalInbox, CausalMessage, InvalidCausalToken};
 pub enum LiveSideEvent {
     UserTranscript { text: String },
     SpokespersonTranscript { text: String, interrupted: bool },
+    Handoff { call_id: String, message: String },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,6 +72,14 @@ impl ExpertSpokespersonCore {
             mode: directive.mode,
             message,
         }
+    }
+
+    pub fn confirmed_token(&self) -> u64 {
+        self.live_events.confirmed_token()
+    }
+
+    pub fn events_after(&self, token: u64) -> Vec<CausalMessage<LiveSideEvent>> {
+        self.live_events.messages_after(token)
     }
 }
 

@@ -175,6 +175,13 @@ pub enum SessionMessage {
         token: u64,
         text: String,
     },
+    /// Announces output initiated by the live Spokesperson rather than by an
+    /// Expert `prepare_speak` request. The host accepts the following audio
+    /// Begin record automatically; the ordinary audio acknowledgement contract
+    /// remains unchanged.
+    SpokespersonSpeech {
+        speech_id: u64,
+    },
     Pending {
         id: u64,
         utterances: Vec<PendingUtterance>,
