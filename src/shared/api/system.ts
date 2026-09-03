@@ -203,3 +203,71 @@ export function fileStatErrorKind(error: unknown): FileStatErrorKind {
 export async function statFile(path: string): Promise<FileStatPayload> {
   return invoke("stat_file", { path });
 }
+
+/**
+ * Create a text file (and any missing parent directories) only if it does
+ * not already exist. Fails rather than overwriting existing content.
+ */
+export async function createTextFile(
+  path: string,
+  contents: string,
+): Promise<void> {
+  return invoke("create_memory_text_file", { path, contents });
+}
+
+/**
+ * Overwrite a UTF-8 text file, creating parent directories as needed. For
+ * user-initiated edits of user-owned files (e.g. the Settings → Me editor)
+ * — agent writes must not route through this.
+ */
+export async function isMemoryContentApproved(
+  path: string,
+  contents: string,
+): Promise<boolean> {
+  return invoke("is_memory_content_approved", { path, contents });
+}
+
+export async function writeTextFile(
+  path: string,
+  contents: string,
+): Promise<void> {
+  return invoke("write_memory_text_file", { path, contents });
+}
+
+/** Publish or remove Berd's managed block in ~/.agents/AGENTS.md. */
+export async function writeMemoryAgentsProjection(
+  block: string | null,
+): Promise<void> {
+  await invoke("write_memory_agents_projection", { block });
+}
+
+/** Append noticer candidates under the backend-owned memory queue lock. */
+export async function appendMemoryProposals(
+  candidates: Array<{
+    content: string;
+    topic: string | null;
+    sessionId: string | null;
+  }>,
+): Promise<number> {
+  return invoke("append_memory_proposals", { candidates });
+}
+
+export async function approveMemoryProposal(
+  id: string,
+  content: string,
+  topic: string | null,
+): Promise<{ approved: boolean; refreshProjection: boolean }> {
+  return invoke("approve_memory_proposal", { id, content, topic });
+}
+
+/** Remove one proposal; declines retain only a salted suppression fingerprint. */
+export async function resolveMemoryProposal(
+  id: string,
+  declined?: { content: string; topic: string | null },
+): Promise<void> {
+  await invoke("resolve_memory_proposal", {
+    id,
+    declinedContent: declined?.content ?? null,
+    declinedTopic: declined?.topic ?? null,
+  });
+}
