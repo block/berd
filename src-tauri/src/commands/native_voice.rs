@@ -395,6 +395,7 @@ impl BerdAdmissionCoordinator {
         }
     }
 
+    #[cfg(any(test, target_os = "macos"))]
     fn claim(
         self: &Arc<Self>,
         speech_id: u64,
@@ -442,6 +443,7 @@ impl BerdAdmissionCoordinator {
         Ok(true)
     }
 
+    #[cfg(any(test, target_os = "macos"))]
     fn finish(&self, speech_id: u64) {
         if let Ok(mut inner) = self.inner.lock() {
             if inner
@@ -484,11 +486,13 @@ impl BerdAdmissionCoordinator {
 }
 
 #[must_use = "voice admission remains active until the backend terminal path drops this guard"]
+#[cfg(any(test, target_os = "macos"))]
 pub(crate) struct AdmissionPlaybackGuard {
     coordinator: Arc<BerdAdmissionCoordinator>,
     speech_id: u64,
 }
 
+#[cfg(any(test, target_os = "macos"))]
 impl Drop for AdmissionPlaybackGuard {
     fn drop(&mut self) {
         self.coordinator.finish(self.speech_id);
@@ -616,6 +620,7 @@ impl NativeVoiceState {
         Ok(runtime.admission.clone())
     }
 
+    #[cfg(target_os = "macos")]
     pub(crate) fn claim_assistant_speech(
         &self,
         session_id: &str,
