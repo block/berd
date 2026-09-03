@@ -109,26 +109,17 @@ export function getRealtimeVoicePreference(): RealtimeVoicePreference {
     if (raw === cachedRaw) return cachedPreference;
     const parsed = JSON.parse(raw ?? "{}");
     cachedRaw = raw;
-    const storedModel = stringPreference(
-      parsed.model,
-      DEFAULT_PREFERENCE.model,
-    );
-    const storedTranscriptionModel = stringPreference(
-      parsed.transcriptionModel,
-      DEFAULT_PREFERENCE.transcriptionModel,
-    );
     cachedPreference = {
       presentationMode: enumPreference(
         parsed.presentationMode,
         ["debug", "subtle"],
         DEFAULT_PREFERENCE.presentationMode,
       ),
-      model:
-        storedModel === "gpt-realtime" ? DEFAULT_PREFERENCE.model : storedModel,
-      transcriptionModel:
-        storedTranscriptionModel === "gpt-4o-mini-transcribe"
-          ? DEFAULT_PREFERENCE.transcriptionModel
-          : storedTranscriptionModel,
+      model: stringPreference(parsed.model, DEFAULT_PREFERENCE.model),
+      transcriptionModel: stringPreference(
+        parsed.transcriptionModel,
+        DEFAULT_PREFERENCE.transcriptionModel,
+      ),
       voice: stringPreference(parsed.voice, DEFAULT_PREFERENCE.voice),
       speed: numberPreference(parsed.speed, 0.25, 1.5, 1),
       turnDetection: enumPreference(

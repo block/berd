@@ -4,7 +4,6 @@ import {
   REALTIME_EXPERT_INSTRUCTIONS,
   REALTIME_SPOKESPERSON_INSTRUCTIONS,
   REALTIME_PROMPT_DOCUMENT,
-  SEND_TO_SPOKESPERSON_TOOL_DEFINITION,
   RealtimeEmissaryProtocol,
   RealtimeResponseCoordinator,
   configureRealtimeEmissarySession,
@@ -218,13 +217,6 @@ describe("Realtime emissary session configuration", () => {
     expect(REALTIME_EXPERT_INSTRUCTIONS).toContain(
       "interrupted Spokesperson transcripts as best-effort",
     );
-    expect(SEND_TO_SPOKESPERSON_TOOL_DEFINITION).toMatchObject({
-      name: "send_to_spokesperson",
-      parameters: {
-        required: ["cursor", "message", "mode", "resolves"],
-        additionalProperties: false,
-      },
-    });
   });
 
   it("gives both roles the same one-assistant contract and canonical patterns", () => {

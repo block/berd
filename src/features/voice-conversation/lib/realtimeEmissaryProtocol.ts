@@ -139,38 +139,6 @@ type PendingEmissaryTranscript = {
   items: Map<string, PendingEmissaryTranscriptItem>;
 };
 
-export const SEND_TO_SPOKESPERSON_TOOL_DEFINITION: RealtimeJsonObject = {
-  type: "function",
-  name: SEND_TO_SPOKESPERSON_TOOL_NAME,
-  description:
-    "Send concise private coordination to the realtime Spokesperson. Include the latest bridge cursor and retry only after processing unread peer messages returned by a stale send.",
-  parameters: {
-    type: "object",
-    properties: {
-      cursor: {
-        type: "integer",
-        minimum: 0,
-        description: "Latest bridge cursor received from the other agent.",
-      },
-      message: { type: "string" },
-      mode: {
-        type: "string",
-        enum: ["context", "say"],
-        description:
-          "Use context for silent future guidance or say to request immediate speech.",
-      },
-      resolves: {
-        type: "array",
-        items: { type: "string" },
-        description:
-          "Open handoff ids resolved by this say message. Context messages cannot resolve handoffs.",
-      },
-    },
-    required: ["cursor", "message", "mode", "resolves"],
-    additionalProperties: false,
-  },
-};
-
 export function createRealtimeEmissarySessionUpdate(
   options: RealtimeEmissarySessionOptions = {},
 ): RealtimeServerEvent {

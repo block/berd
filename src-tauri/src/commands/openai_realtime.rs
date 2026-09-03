@@ -5,7 +5,6 @@ use tauri::{State, WebviewWindow};
 use super::openai_voice_credentials::{self, OpenAiVoiceCredential};
 use super::voice_capture::VoiceCaptureState;
 
-const DEFAULT_TRANSCRIPTION_MODEL: &str = "gpt-realtime-whisper";
 const DEFAULT_REALTIME_MODEL: &str = "gpt-realtime-2.1";
 const OPENAI_REALTIME_CLIENT_SECRETS_URL: &str =
     "https://api.openai.com/v1/realtime/client_secrets";
@@ -15,24 +14,18 @@ const OPENAI_REALTIME_CLIENT_SECRETS_URL: &str =
 pub struct OpenAiRealtimeStatus {
     configured: bool,
     voice_configured: bool,
-    transcription_model: String,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenAiRealtimeSession {
     client_secret: String,
-    transcription_model: String,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveOpenAiRealtimeApiKeyRequest {
     api_key: String,
-}
-
-fn transcription_model() -> String {
-    DEFAULT_TRANSCRIPTION_MODEL.to_string()
 }
 
 fn stored_openai_api_key() -> Result<Option<String>, String> {
@@ -46,7 +39,6 @@ pub async fn get_openai_realtime_status() -> Result<OpenAiRealtimeStatus, String
     Ok(OpenAiRealtimeStatus {
         configured,
         voice_configured: configured,
-        transcription_model: transcription_model(),
     })
 }
 
@@ -85,7 +77,6 @@ pub async fn create_openai_realtime_voice_session(
 
     Ok(OpenAiRealtimeSession {
         client_secret: parse_client_secret(&value)?,
-        transcription_model: transcription_model(),
     })
 }
 

@@ -41,21 +41,6 @@ describe("realtime voice preferences", () => {
     ).not.toContain("apiKey");
   });
 
-  it("migrates the former default model selections", () => {
-    window.localStorage.setItem(
-      "goose:openai-realtime-voice-options",
-      JSON.stringify({
-        model: "gpt-realtime",
-        transcriptionModel: "gpt-4o-mini-transcribe",
-      }),
-    );
-
-    expect(getRealtimeVoicePreference()).toMatchObject({
-      model: "gpt-realtime-2.1",
-      transcriptionModel: "gpt-realtime-whisper",
-    });
-  });
-
   it("falls back to normal speed when persisted speed is out of range", () => {
     window.localStorage.setItem(
       "goose:openai-realtime-voice-options",

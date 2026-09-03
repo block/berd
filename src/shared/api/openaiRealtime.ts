@@ -7,7 +7,6 @@ import { shareInFlight } from "@/shared/lib/shareInFlight";
 export interface OpenAiRealtimeStatus {
   configured: boolean;
   voiceConfigured: boolean;
-  transcriptionModel: string;
 }
 
 export async function saveOpenAiRealtimeApiKey(apiKey: string): Promise<void> {
@@ -24,7 +23,6 @@ export async function createOpenAiRealtimeVoiceSession(
 
 export interface OpenAiRealtimeSession {
   clientSecret: string;
-  transcriptionModel: string;
 }
 
 export type OpenAiRealtimeVoiceControl = {
