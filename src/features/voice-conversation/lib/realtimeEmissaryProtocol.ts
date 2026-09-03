@@ -577,12 +577,17 @@ export type HandoffToolResult = {
  * pending messages.
  */
 export class DirectMessagePipe {
-  private nextMessageId = 1;
+  private nextMessageId: number;
   private pending: DirectBridgeMessage[] = [];
-  private readonly consumedCursor: Record<DirectMessagePeer, number> = {
-    master: 0,
-    emissary: 0,
-  };
+  private readonly consumedCursor: Record<DirectMessagePeer, number>;
+
+  constructor(initialCursor = 0) {
+    this.nextMessageId = initialCursor + 1;
+    this.consumedCursor = {
+      master: initialCursor,
+      emissary: initialCursor,
+    };
+  }
 
   send(options: {
     sender: DirectMessagePeer;

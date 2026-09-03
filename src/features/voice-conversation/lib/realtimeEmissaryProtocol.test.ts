@@ -1107,6 +1107,23 @@ describe("master message injection", () => {
 });
 
 describe("DirectMessagePipe", () => {
+  it("starts each call in its assigned cursor namespace", () => {
+    const pipe = new DirectMessagePipe(12_000_000);
+
+    expect(pipe.cursor("master")).toBe(12_000_000);
+    expect(pipe.cursor("emissary")).toBe(12_000_000);
+    expect(
+      pipe.send({
+        sender: "emissary",
+        cursor: 12_000_000,
+        message: "Call-scoped message.",
+      }),
+    ).toMatchObject({
+      accepted: true,
+      outbound: { id: 12_000_001, senderCursor: 12_000_000 },
+    });
+  });
+
   it("allows the active sender to queue multiple messages", () => {
     const pipe = new DirectMessagePipe();
     const first = pipe.send({
