@@ -2154,6 +2154,12 @@ async function canonicalGates() {
 }
 
 describe("Block feature gate propagation", () => {
+  it("supports an empty base feature set", () => {
+    const result = run("bash", ["scripts/block-feature-gates.sh"]);
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe("");
+  });
+
   it("maps every updater-off default to the fail-closed Cargo posture", () => {
     const result = run("bash", ["scripts/block-feature-gates.sh", "berdctl"]);
     expect(result.status).toBe(0);

@@ -48,8 +48,11 @@ describe("realtime emissary bridge registration", () => {
     );
 
     const result = hasActiveRealtimeEmissary("remote-session");
+    const expectedTimeout = expect(result).rejects.toThrow(
+      "Timed out checking the OpenAI Realtime voice status.",
+    );
     await vi.advanceTimersByTimeAsync(1_000);
-    await expect(result).resolves.toBe(false);
+    await expectedTimeout;
 
     vi.useRealTimers();
     Object.defineProperty(window, "__TAURI_INTERNALS__", {

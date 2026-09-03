@@ -437,7 +437,6 @@ describe("dispatchPrompt realtime Master transcript recovery", () => {
   });
 
   it("completes a realtime lifecycle that joins an existing Master run", async () => {
-    setVoiceConversationMode("openai-realtime");
     let finishPrompt: (() => void) | undefined;
     mocks.acpSendMessage.mockImplementationOnce(
       (
@@ -472,6 +471,7 @@ describe("dispatchPrompt realtime Master transcript recovery", () => {
     const prompt = dispatchPrompt("session-1", "Already running", {});
     await vi.waitFor(() => expect(finishPrompt).toBeTypeOf("function"));
 
+    setVoiceConversationMode("openai-realtime");
     const completeMasterTurn = vi.fn();
     const release = registerRealtimeEmissary({
       sessionId: "session-1",

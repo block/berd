@@ -23,4 +23,4 @@ done
 [[ "${VITE_TELEMETRY_ENFORCED:-0}" == "1" ]] && features+=(block-telemetry-enforced)
 [[ "${VITE_VOICE_DICTATION:-0}" == "1" ]] && features+=(block-voice-dictation)
 
-(IFS=,; echo "${features[*]}")
+(IFS=,; echo "${features[*]:-}")

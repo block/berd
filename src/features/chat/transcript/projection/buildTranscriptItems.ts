@@ -1765,7 +1765,7 @@ function getAssistantFragmentChromeEstimate(
 export function getVisibleTranscriptMessages(
   messages: readonly Message[],
 ): readonly Message[] {
-  if (!messages.some(isVoiceConversationUserTurn)) {
+  if (!messages.some(needsVoiceTranscriptSanitization)) {
     return messages.filter(isVisibleTranscriptMessage);
   }
 
@@ -1790,6 +1790,15 @@ export function getVisibleTranscriptMessages(
     }
     return [message];
   });
+}
+
+function needsVoiceTranscriptSanitization(message: Message): boolean {
+  return (
+    isVoiceConversationUserTurn(message) ||
+    message.content.some(
+      (content) => content.type === "text" && content.speech !== undefined,
+    )
+  );
 }
 
 function sanitizeVoiceSpeechFallback(message: Message): Message {

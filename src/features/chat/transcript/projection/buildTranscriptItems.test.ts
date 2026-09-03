@@ -160,4 +160,34 @@ describe("getVisibleTranscriptMessages voice no-op", () => {
       },
     ]);
   });
+
+  it("sanitizes spoken assistant text even when the user typed during a voice call", () => {
+    const user = message("user", "user", "Are you still there?");
+    const spoken: Message = {
+      id: "spoken",
+      role: "assistant",
+      created: 2,
+      content: [
+        {
+          type: "text",
+          text: `Yes, I'm here.${VOICE_CONVERSATION_EMPTY_RESPONSE}`,
+          speech: { status: "spoken" },
+        },
+      ],
+    };
+
+    expect(getVisibleTranscriptMessages([user, spoken])).toEqual([
+      user,
+      {
+        ...spoken,
+        content: [
+          {
+            type: "text",
+            text: "Yes, I'm here.",
+            speech: { status: "spoken" },
+          },
+        ],
+      },
+    ]);
+  });
 });

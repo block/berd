@@ -167,15 +167,17 @@ async function requestRemoteBridge(
   let timeout: number | undefined;
   const status = await Promise.race([
     getOpenAiRealtimeVoiceControlsStatus(),
-    new Promise<null>((resolve) => {
+    new Promise<never>((_resolve, reject) => {
       timeout = window.setTimeout(
-        () => resolve(null),
+        () =>
+          reject(
+            new Error("Timed out checking the OpenAI Realtime voice status."),
+          ),
         REALTIME_STATUS_TIMEOUT_MS,
       );
     }),
   ]).finally(() => window.clearTimeout(timeout));
   if (
-    !status ||
     status.lifecycle !== "running" ||
     status.sessionId !== request.sessionId
   ) {

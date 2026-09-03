@@ -414,6 +414,29 @@ export async function dispatchPrompt(
     }
   };
 
+  const completeRealtimeTurnIfActive = async (prompt: string) => {
+    const shouldCoordinateAtCompletion =
+      shouldCoordinateRealtime ||
+      hasLocalActiveRealtimeEmissary(sessionId) ||
+      getVoiceConversationMode() === "openai-realtime";
+    if (
+      !shouldCoordinateAtCompletion ||
+      !(await hasActiveRealtimeEmissary(sessionId))
+    ) {
+      return;
+    }
+    await settleMasterTranscriptDelivery(sessionId);
+    if (
+      assistantTextBeforeTurn &&
+      !finalMasterTextSince(sessionId, assistantTextBeforeTurn)
+    ) {
+      await recoverMissingMasterTranscript(sessionId, prompt);
+    }
+    await completeActiveRealtimeMasterTurn(sessionId, {
+      reminderHandoffIds: realtimeHandoffReminderIds(acpGooseMetadata),
+    });
+  };
+
   try {
     // Preparation can be superseded or aborted. Complete it before committing
     // local transcript state so a retained queued record can retry without
@@ -529,19 +552,7 @@ export async function dispatchPrompt(
 
     finishPromptSuccessfully();
     try {
-      if (
-        shouldCoordinateRealtime &&
-        assistantTextBeforeTurn &&
-        (await hasActiveRealtimeEmissary(sessionId))
-      ) {
-        await settleMasterTranscriptDelivery(sessionId);
-        if (!finalMasterTextSince(sessionId, assistantTextBeforeTurn)) {
-          await recoverMissingMasterTranscript(sessionId, acpPrompt);
-        }
-        await completeActiveRealtimeMasterTurn(sessionId, {
-          reminderHandoffIds: realtimeHandoffReminderIds(acpGooseMetadata),
-        });
-      }
+      await completeRealtimeTurnIfActive(acpPrompt);
     } catch (error) {
       console.warn("Could not complete the Realtime Expert turn", error);
     }
@@ -553,19 +564,7 @@ export async function dispatchPrompt(
     if (isVoiceConversationNoop) {
       finishPromptSuccessfully();
       try {
-        if (
-          shouldCoordinateRealtime &&
-          assistantTextBeforeTurn &&
-          (await hasActiveRealtimeEmissary(sessionId))
-        ) {
-          await settleMasterTranscriptDelivery(sessionId);
-          if (!finalMasterTextSince(sessionId, assistantTextBeforeTurn)) {
-            await recoverMissingMasterTranscript(sessionId, dispatchedPrompt);
-          }
-          await completeActiveRealtimeMasterTurn(sessionId, {
-            reminderHandoffIds: realtimeHandoffReminderIds(acpGooseMetadata),
-          });
-        }
+        await completeRealtimeTurnIfActive(dispatchedPrompt);
       } catch (error) {
         console.warn("Could not complete the Realtime Expert turn", error);
       }
