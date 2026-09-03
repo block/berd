@@ -500,7 +500,9 @@ export function AgentModelPicker({
           // gated single-column layout has no dead vertical space below the
           // model list.
           "flex max-h-[min(24rem,50vh)] flex-col overflow-hidden p-1 transition-[width] duration-[240ms] ease-[cubic-bezier(0.2,0,0,1)]",
-          isWidePicker ? "w-[39.25rem]" : "w-[28.25rem]",
+          isWidePicker
+            ? "w-[min(39.25rem,calc(100vw-1.5rem))]"
+            : "w-[min(28.25rem,calc(100vw-1.5rem))]",
         )}
         onInteractOutside={(event) => {
           classifyOutsideInteraction(event.target);

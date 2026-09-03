@@ -880,7 +880,7 @@ describe("AgentModelPicker", () => {
     const picker = screen.getByRole("dialog");
     expect(searchButton.parentElement).toHaveTextContent("Model");
     expect(searchButton).toHaveClass("mr-3", "h-6", "w-6");
-    expect(picker).toHaveClass("w-[28.25rem]");
+    expect(picker).toHaveClass("w-[min(28.25rem,calc(100vw-1.5rem))]");
     expect(within(picker).getByText("Claude Sonnet 4")).toBeInTheDocument();
     expect(within(picker).queryByText("GPT-4o mini")).not.toBeInTheDocument();
     expect(
@@ -942,7 +942,7 @@ describe("AgentModelPicker", () => {
     expect(
       within(picker).queryByText("gpt-4o-mini-2024-07-18"),
     ).not.toBeInTheDocument();
-    expect(picker).toHaveClass("w-[28.25rem]");
+    expect(picker).toHaveClass("w-[min(28.25rem,calc(100vw-1.5rem))]");
 
     if (modelViewport) {
       modelViewport.scrollTop = 120;
@@ -1413,11 +1413,11 @@ describe("AgentModelPicker", () => {
       await openPicker(user);
 
       const content = document.querySelector('[data-slot="popover-content"]');
-      expect(content).toHaveClass("w-[28.25rem]");
+      expect(content).toHaveClass("w-[min(28.25rem,calc(100vw-1.5rem))]");
 
       await user.click(screen.getByRole("button", { name: /switch agent/i }));
 
-      expect(content).toHaveClass("w-[39.25rem]");
+      expect(content).toHaveClass("w-[min(39.25rem,calc(100vw-1.5rem))]");
     });
 
     it("hides the switch-agent button when the only agent is ready", async () => {

@@ -456,7 +456,7 @@ export const RecommendedModelList = forwardRef<
               return (
                 <div key={modelStarKey(scopeId, model.id)}>
                   <div
-                    className="flex min-w-0 items-center gap-1"
+                    className="group flex min-w-0 items-center gap-1"
                     data-model-key={modelStarKey(scopeId, model.id)}
                     data-starred={starred || undefined}
                   >
@@ -488,7 +488,7 @@ export const RecommendedModelList = forwardRef<
                     <button
                       type="button"
                       onClick={() => toggleStar(scopeId, model.id)}
-                      className="flex size-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="flex size-7 shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       aria-label={t(
                         starred ? "toolbar.unstarModel" : "toolbar.starModel",
                         { model: getModelDisplayName(model) },
@@ -496,9 +496,9 @@ export const RecommendedModelList = forwardRef<
                       aria-pressed={starred}
                     >
                       {starred ? (
-                        <IconStarFilled className="size-4 text-foreground" />
+                        <IconStarFilled className="size-4 shrink-0 text-foreground/80" />
                       ) : (
-                        <IconStar className="size-4" />
+                        <IconStar className="size-4 shrink-0 text-muted-foreground" />
                       )}
                     </button>
                   </div>
