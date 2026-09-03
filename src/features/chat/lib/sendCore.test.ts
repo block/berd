@@ -5,6 +5,7 @@ import type { SessionChatRuntime } from "@/shared/types/chat";
 import { QueuedMessageOwnershipLostError } from "./preCommitSendRejection";
 import { dispatchPrompt } from "./sendCore";
 import { registerRealtimeEmissary } from "@/features/voice-conversation/lib/realtimeEmissaryBridge";
+import { setVoiceConversationMode } from "@/features/voice-conversation/lib/voiceConversationModePreference";
 
 const mocks = vi.hoisted(() => ({
   acpExportSession: vi.fn(),
@@ -19,6 +20,7 @@ vi.mock("@/shared/api/acp", () => ({
 describe("dispatchPrompt pre-commit rejection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.removeItem("goose:voice-conversation-mode");
     mocks.acpExportSession.mockResolvedValue("{}");
     useChatStore.setState({
       messagesBySession: {},
@@ -29,6 +31,38 @@ describe("dispatchPrompt pre-commit rejection", () => {
       isConnected: false,
     });
     useChatSessionStore.setState({ sessions: [], activeSessionId: null });
+  });
+
+  it("does not inspect prior assistant text for an ordinary text prompt", async () => {
+    const inaccessibleText = { type: "text" } as {
+      type: "text";
+      text: string;
+    };
+    Object.defineProperty(inaccessibleText, "text", {
+      get: () => {
+        throw new Error("ordinary text sends must not scan transcript content");
+      },
+    });
+    useChatStore.getState().addMessage("session-1", {
+      id: "prior-assistant",
+      role: "assistant",
+      created: 1,
+      content: [inaccessibleText],
+    });
+    mocks.acpSendMessage.mockImplementationOnce(
+      (
+        _sessionId: string,
+        _prompt: string,
+        options: { onPromptDispatching(): void },
+      ) => {
+        options.onPromptDispatching();
+        return Promise.resolve();
+      },
+    );
+
+    await expect(
+      dispatchPrompt("session-1", "ordinary text", {}),
+    ).resolves.toBeUndefined();
   });
 
   it("preserves the complete newer-owner runtime on ownership loss", async () => {
@@ -403,6 +437,7 @@ describe("dispatchPrompt realtime Master transcript recovery", () => {
   });
 
   it("completes a realtime lifecycle that joins an existing Master run", async () => {
+    setVoiceConversationMode("openai-realtime");
     let finishPrompt: (() => void) | undefined;
     mocks.acpSendMessage.mockImplementationOnce(
       (

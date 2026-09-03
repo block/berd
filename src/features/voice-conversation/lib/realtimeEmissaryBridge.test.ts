@@ -2,6 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 const eventListeners = vi.hoisted(
   () => new Map<string, Set<(event: { payload: unknown }) => void>>(),
 );
+const apiMocks = vi.hoisted(() => ({
+  getVoiceControlsStatus: vi.fn(async () => ({
+    lifecycle: "running",
+    sessionId: "session-in-another-window",
+  })),
+}));
 
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(
@@ -20,10 +26,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 
 vi.mock("@/shared/api/openaiRealtime", () => ({
-  getOpenAiRealtimeVoiceControlsStatus: vi.fn(async () => ({
-    lifecycle: "running",
-    sessionId: "session-in-another-window",
-  })),
+  getOpenAiRealtimeVoiceControlsStatus: () => apiMocks.getVoiceControlsStatus(),
 }));
 
 import {
@@ -34,6 +37,27 @@ import {
 } from "./realtimeEmissaryBridge";
 
 describe("realtime emissary bridge registration", () => {
+  it("bounds a stalled remote voice-status lookup", async () => {
+    vi.useFakeTimers();
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: {},
+    });
+    apiMocks.getVoiceControlsStatus.mockImplementationOnce(
+      () => new Promise(() => undefined),
+    );
+
+    const result = hasActiveRealtimeEmissary("remote-session");
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expect(result).resolves.toBe(false);
+
+    vi.useRealTimers();
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: undefined,
+    });
+  });
+
   it("routes only to the current live session and releases by identity", async () => {
     const sendMasterMessage = vi.fn().mockResolvedValue({
       accepted: false,

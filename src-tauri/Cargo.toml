@@ -142,10 +142,6 @@ devtools = ["tauri/devtools"]
 # restricted build is expressed by ADDING these (never with
 # --no-default-features + re-listing everything you want to keep).
 #
-# no-voice-dictation: disables Berd's native chained dictation implementation.
-# Browser-owned OpenAI Realtime voice remains available because it uses
-# getUserMedia/WebRTC and does not depend on the native dictation engine.
-no-voice-dictation = []
 # no-bb-cli-install: the app never auto-installs or offers to symlink the
 # bundled berdctl into /usr/local/bin/bb. The bundled binary still ships for
 # direct `berdctl` use (gated separately by the `berdctl` protocol-server

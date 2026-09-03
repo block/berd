@@ -58,6 +58,7 @@ let remoteListener: Promise<UnlistenFn> | null = null;
 const REMOTE_REQUEST_EVENT = "voice-conversation:spokesperson-bridge-request";
 const REMOTE_RESPONSE_EVENT = "voice-conversation:spokesperson-bridge-response";
 const REMOTE_RESPONSE_TIMEOUT_MS = 10_000;
+const REALTIME_STATUS_TIMEOUT_MS = 1_000;
 
 type RemoteBridgeRequest =
   | {
@@ -163,8 +164,18 @@ async function requestRemoteBridge(
     | Omit<Extract<RemoteBridgeRequest, { action: "dismiss" }>, "id">,
 ): Promise<RemoteBridgeResponse | null> {
   if (!window.__TAURI_INTERNALS__) return null;
-  const status = await getOpenAiRealtimeVoiceControlsStatus();
+  let timeout: number | undefined;
+  const status = await Promise.race([
+    getOpenAiRealtimeVoiceControlsStatus(),
+    new Promise<null>((resolve) => {
+      timeout = window.setTimeout(
+        () => resolve(null),
+        REALTIME_STATUS_TIMEOUT_MS,
+      );
+    }),
+  ]).finally(() => window.clearTimeout(timeout));
   if (
+    !status ||
     status.lifecycle !== "running" ||
     status.sessionId !== request.sessionId
   ) {
@@ -204,6 +215,10 @@ export function registerRealtimeEmissary(
   return () => {
     if (activeEmissary === emissary) activeEmissary = null;
   };
+}
+
+export function hasLocalActiveRealtimeEmissary(sessionId: string): boolean {
+  return activeEmissary?.sessionId === sessionId;
 }
 
 export async function waitForRealtimeEmissaryBridgeReady(): Promise<void> {

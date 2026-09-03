@@ -527,7 +527,6 @@ describe("build-macos Block-service feature seam", () => {
     expect(script).not.toContain(
       'VITE_AUTH_GATE_VALUE="$VITE_BUILDERBOT_VALUE"',
     );
-    expect(script).toContain("no-voice-dictation");
     expect(script).toContain('if [[ "$VITE_AGENT_TOOLS_VALUE" == "1" ]]; then');
     expect(script).toContain(
       'jq \'.bundle.resources["../resources/bb"] = "bb"\'',
@@ -2158,7 +2157,7 @@ describe("Block feature gate propagation", () => {
   it("maps every updater-off default to the fail-closed Cargo posture", () => {
     const result = run("bash", ["scripts/block-feature-gates.sh", "berdctl"]);
     expect(result.status).toBe(0);
-    expect(result.stdout.trim()).toBe("berdctl,no-voice-dictation");
+    expect(result.stdout.trim()).toBe("berdctl");
   });
 
   it("maps every renderer gate to its matching Cargo feature", () => {

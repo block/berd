@@ -38,7 +38,9 @@ import { isVoiceConversationEmptyResponse } from "@/features/chat/lib/voiceConve
 import {
   completeActiveRealtimeMasterTurn,
   hasActiveRealtimeEmissary,
+  hasLocalActiveRealtimeEmissary,
 } from "@/features/voice-conversation/lib/realtimeEmissaryBridge";
+import { getVoiceConversationMode } from "@/features/voice-conversation/lib/voiceConversationModePreference";
 import {
   type ChatAttachmentDraft,
   type Message,
@@ -369,7 +371,12 @@ export async function dispatchPrompt(
   }
 
   const promptOwner = claimSessionPrompt(sessionId);
-  const assistantTextBeforeTurn = assistantTextSnapshot(sessionId);
+  const shouldCoordinateRealtime =
+    hasLocalActiveRealtimeEmissary(sessionId) ||
+    getVoiceConversationMode() === "openai-realtime";
+  const assistantTextBeforeTurn = shouldCoordinateRealtime
+    ? assistantTextSnapshot(sessionId)
+    : undefined;
   const isCurrent = () => ownsSessionPrompt(sessionId, promptOwner);
   let userMessageCommitted = false;
   let preCommitRejected = false;
@@ -522,7 +529,11 @@ export async function dispatchPrompt(
 
     finishPromptSuccessfully();
     try {
-      if (await hasActiveRealtimeEmissary(sessionId)) {
+      if (
+        shouldCoordinateRealtime &&
+        assistantTextBeforeTurn &&
+        (await hasActiveRealtimeEmissary(sessionId))
+      ) {
         await settleMasterTranscriptDelivery(sessionId);
         if (!finalMasterTextSince(sessionId, assistantTextBeforeTurn)) {
           await recoverMissingMasterTranscript(sessionId, acpPrompt);
@@ -542,7 +553,11 @@ export async function dispatchPrompt(
     if (isVoiceConversationNoop) {
       finishPromptSuccessfully();
       try {
-        if (await hasActiveRealtimeEmissary(sessionId)) {
+        if (
+          shouldCoordinateRealtime &&
+          assistantTextBeforeTurn &&
+          (await hasActiveRealtimeEmissary(sessionId))
+        ) {
           await settleMasterTranscriptDelivery(sessionId);
           if (!finalMasterTextSince(sessionId, assistantTextBeforeTurn)) {
             await recoverMissingMasterTranscript(sessionId, dispatchedPrompt);

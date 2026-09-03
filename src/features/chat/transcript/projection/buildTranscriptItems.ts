@@ -1765,6 +1765,10 @@ function getAssistantFragmentChromeEstimate(
 export function getVisibleTranscriptMessages(
   messages: readonly Message[],
 ): readonly Message[] {
+  if (!messages.some(isVoiceConversationUserTurn)) {
+    return messages.filter(isVisibleTranscriptMessage);
+  }
+
   return messages.flatMap((message, index) => {
     if (!isVisibleTranscriptMessage(message)) return [];
     const isEmptyResponseFallback =
@@ -1827,7 +1831,12 @@ function sanitizeVoiceSpeechFallback(message: Message): Message {
 function isVoiceConversationUserTurn(message: Message): boolean {
   return (
     message.metadata?.origin === "voice_conversation" ||
-    getTextContent(message).trimStart().startsWith("[Voice transcript] ")
+    (message.role === "user" &&
+      message.content.some(
+        (content) =>
+          content.type === "text" &&
+          content.text.trimStart().startsWith("[Voice transcript] "),
+      ))
   );
 }
 

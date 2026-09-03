@@ -19,6 +19,26 @@ function message(
 }
 
 describe("getVisibleTranscriptMessages voice no-op", () => {
+  it("does not inspect assistant text in a transcript without voice turns", () => {
+    const inaccessibleText = { type: "text" } as {
+      type: "text";
+      text: string;
+    };
+    Object.defineProperty(inaccessibleText, "text", {
+      get: () => {
+        throw new Error("text-only projection must use the fast path");
+      },
+    });
+    const assistant: Message = {
+      id: "assistant",
+      role: "assistant",
+      created: 1,
+      content: [inaccessibleText],
+    };
+
+    expect(getVisibleTranscriptMessages([assistant])).toEqual([assistant]);
+  });
+
   it("hides the backend empty-response fallback after a voice turn", () => {
     const voice = message(
       "voice",
