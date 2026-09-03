@@ -1,12 +1,14 @@
 //! Native speech recognition for Desktop voice conversations.
 
+#[cfg(any(test, target_os = "macos"))]
+use std::time::Instant;
 use std::{
     collections::{HashMap, VecDeque},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use serde::{Deserialize, Serialize};
@@ -547,7 +549,6 @@ pub struct NativeVoiceState {
 }
 
 #[must_use = "assistant speech policy ends when the guard is dropped"]
-#[cfg(any(test, target_os = "macos"))]
 pub(crate) struct AssistantSpeechGuard {
     _activity: Option<berd_voice::input::AssistantActivityGuard>,
 }
@@ -764,7 +765,6 @@ impl NativeVoiceState {
             .is_ok_and(|blocks| blocks.contains_key(session_id))
     }
 
-    #[cfg(any(test, target_os = "macos"))]
     pub(crate) fn begin_assistant_speech(
         &self,
         sensitivity: InterruptionSensitivity,

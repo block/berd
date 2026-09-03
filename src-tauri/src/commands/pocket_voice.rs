@@ -13,13 +13,15 @@ use std::time::{Duration, Instant, SystemTime};
 
 use berd_voice::input::InputDuringTtsPolicy;
 use berd_voice::local_assets::{self, LocalAssetRoots, LocalInstallPhase};
+#[cfg(any(test, target_os = "macos"))]
+use berd_voice::DeliveryProgress as VoiceDeliveryProgress;
 #[cfg(target_os = "macos")]
 use berd_voice::SAMPLE_RATE;
 #[cfg(target_os = "macos")]
 use berd_voice::{
-    load_pocket_voice_style, load_text_to_speech, ConfiguredTtsSlot,
-    DeliveryProgress as VoiceDeliveryProgress, DrainPolicy, DrainTimeoutOutcome, OutboundFailure,
-    OutboundOutcome, OutboundPlayback, TtsBackend, TtsConfiguration,
+    load_pocket_voice_style, load_text_to_speech, ConfiguredTtsSlot, DrainPolicy,
+    DrainTimeoutOutcome, OutboundFailure, OutboundOutcome, OutboundPlayback, TtsBackend,
+    TtsConfiguration,
 };
 use berd_voice::{parakeet_assets, pocket_assets};
 #[cfg(target_os = "macos")]
@@ -34,7 +36,6 @@ use rodio::DeviceTrait;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-#[cfg(target_os = "macos")]
 use super::native_voice::AssistantSpeechGuard;
 #[cfg(any(test, target_os = "macos"))]
 use super::native_voice::{output_latency_grace_elapsed, output_latency_grace_remaining};
