@@ -492,6 +492,7 @@ class OpenAiRealtimeConversationRuntime {
   private ownerMigration = Promise.resolve();
   private historyReplay = Promise.resolve();
   private bridgeCallScope = createBridgeCallScope();
+  private flushPendingExpertEvents: (() => boolean) | null = null;
 
   readonly subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -751,7 +752,7 @@ class OpenAiRealtimeConversationRuntime {
         queueUntilIdle = false,
         reminderHandoffIds: string[] = [],
       ) => {
-        if (pendingExpertEvents.length === 0) return;
+        if (pendingExpertEvents.length === 0) return false;
         const batch = pendingExpertEvents.splice(0);
         this.deliverToMaster(
           ownerSessionId,
@@ -762,6 +763,13 @@ class OpenAiRealtimeConversationRuntime {
           undefined,
           queueUntilIdle,
           reminderHandoffIds,
+        );
+        return true;
+      };
+      this.flushPendingExpertEvents = () => {
+        return wakeExpert(
+          this.snapshot.boundSessionId ?? sessionId,
+          "Final voice transcript",
         );
       };
       const transcriptMessageIds = new Map<string, string>();
@@ -856,11 +864,6 @@ class OpenAiRealtimeConversationRuntime {
               );
               if (bridgeEvent.speaker === "emissary") {
                 wakeExpert(ownerSessionId, bridgeEvent.text);
-              } else if (!preference.createResponse) {
-                sendRealtimeEvents(
-                  transport,
-                  responses.requestResponse().events,
-                );
               }
               // User speech is durable and enters the ordered bridge now, but
               // only Spokesperson speech or a handoff wakes the Expert. The
@@ -1114,6 +1117,8 @@ class OpenAiRealtimeConversationRuntime {
     )
       return;
     this.setSnapshot({ ...this.snapshot, state: "stopping" });
+    const flushedPendingEvents = this.flushPendingExpertEvents?.() ?? false;
+    if (flushedPendingEvents) await this.deliveryQueue.catch(() => undefined);
     await this.cleanupResources(sessionId);
     this.boundOnSend = null;
     this.failureInProgress = false;
@@ -1170,6 +1175,7 @@ class OpenAiRealtimeConversationRuntime {
     this.openHandoffs.clear();
     this.typedUserMessageSink = null;
     this.pendingTypedUserMessages = [];
+    this.flushPendingExpertEvents = null;
     this.failureInProgress = false;
     this.resetDeliveryQueue();
     this.historyReplay = Promise.resolve();
@@ -1326,6 +1332,7 @@ class OpenAiRealtimeConversationRuntime {
     this.openHandoffs.clear();
     this.typedUserMessageSink = null;
     this.pendingTypedUserMessages = [];
+    this.flushPendingExpertEvents = null;
     this.channel = null;
     this.peer = null;
     this.stream = null;

@@ -784,10 +784,13 @@ export function AppShell({
     ) {
       return;
     }
-    // The native process survives renderer reloads and may be owned by another
-    // window, so an explicit on-to-off transition must clean up active use.
-    // Mounting with the experiment already off performs no Voice native work.
-    void stopVoiceConversation().catch(() => undefined);
+    // Voice resources can survive renderer navigation or be owned by another
+    // window, so an explicit on-to-off transition must stop both pipelines.
+    // Mounting with the experiment already off performs no voice cleanup.
+    void Promise.allSettled([
+      stopVoiceConversation(),
+      stopOpenAiRealtimeConversation(),
+    ]);
   }, [capabilities.voiceConversation, stopVoiceConversation]);
   const sessions = useChatSessionStore(selectSessions);
   const activeSessionId = useChatSessionStore(selectActiveSessionId);

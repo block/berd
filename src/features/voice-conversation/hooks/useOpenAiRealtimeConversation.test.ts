@@ -6,6 +6,7 @@ import {
   createRealtimeTranscriptReplayEvents,
   requestOpenAiRealtimeConversationStart,
   resetOpenAiRealtimeConversationRuntimeForTests,
+  stopOpenAiRealtimeConversation,
   useOpenAiRealtimeConversation,
 } from "./useOpenAiRealtimeConversation";
 
@@ -1376,7 +1377,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     await act(async () => owner.result.current.onToggle());
   });
 
-  it("renders user speech normally without waking the Expert", async () => {
+  it("renders user speech normally and flushes it to the Expert on hang-up", async () => {
     const onSend = vi.fn().mockResolvedValue(true);
     const owner = renderConversation("session-a", onSend);
     await act(async () => owner.result.current.onToggle());
@@ -1400,10 +1401,16 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       metadata: { origin: "voice_conversation" },
     });
 
-    await act(async () => owner.result.current.onToggle());
+    await act(async () => stopOpenAiRealtimeConversation());
+    expect(onSend).toHaveBeenCalledWith(
+      expect.stringContaining("User said: hello master"),
+      undefined,
+      undefined,
+      expect.objectContaining({ displayText: "Final voice transcript" }),
+    );
   });
 
-  it("manually requests the Spokesperson response when automatic VAD responses are disabled", async () => {
+  it("does not request a Spokesperson response when automatic responses are disabled", async () => {
     mocks.createResponse = false;
     const owner = renderConversation("session-a");
     await act(async () => owner.result.current.onToggle());
@@ -1417,10 +1424,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       );
     });
 
-    expect(mocks.requestResponse).toHaveBeenCalledOnce();
-    expect(mocks.sendRealtimeEvents).toHaveBeenCalledWith(expect.anything(), [
-      { type: "response.create" },
-    ]);
+    expect(mocks.requestResponse).not.toHaveBeenCalled();
 
     await act(async () => owner.result.current.onToggle());
   });
