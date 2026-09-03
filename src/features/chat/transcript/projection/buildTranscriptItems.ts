@@ -1,11 +1,16 @@
-import type {
-  Message,
-  MessageContent,
-  MessageMetadata,
-  ReasoningContent,
-  TextContent,
-  ThinkingContent,
+import {
+  getTextContent,
+  type Message,
+  type MessageContent,
+  type MessageMetadata,
+  type ReasoningContent,
+  type TextContent,
+  type ThinkingContent,
 } from "@/shared/types/messages";
+import {
+  isVoiceConversationEmptyResponse,
+  stripVoiceConversationEmptyResponseSuffix,
+} from "@/features/chat/lib/voiceConversationNoop";
 import {
   classifyTranscriptMeasurementPolicy,
   type TranscriptMeasurementPolicyDecision,
@@ -125,11 +130,7 @@ export function buildTranscriptItems({
   // of the assistant's work turn, so they should not reset this set.
   let displayedReasoningSignatures = new Set<string>();
 
-  for (const message of messages) {
-    if (!isVisibleTranscriptMessage(message)) {
-      continue;
-    }
-
+  for (const message of getVisibleTranscriptMessages(messages)) {
     const visibleContent = expandReasoningContentSections(
       getUserVisibleMessageContent(message.content),
     );
@@ -1764,7 +1765,88 @@ function getAssistantFragmentChromeEstimate(
 export function getVisibleTranscriptMessages(
   messages: readonly Message[],
 ): readonly Message[] {
-  return messages.filter(isVisibleTranscriptMessage);
+  if (!messages.some(needsVoiceTranscriptSanitization)) {
+    return messages.filter(isVisibleTranscriptMessage);
+  }
+
+  return messages.flatMap((message, index) => {
+    if (!isVisibleTranscriptMessage(message)) return [];
+    const isEmptyResponseFallback =
+      (message.role === "assistant" &&
+        isVoiceConversationEmptyResponse(getTextContent(message))) ||
+      message.content.some(
+        (content) =>
+          content.type === "systemNotification" &&
+          isVoiceConversationEmptyResponse(content.text),
+      );
+    if (!isEmptyResponseFallback) {
+      return [sanitizeVoiceSpeechFallback(message)];
+    }
+
+    for (let prior = index - 1; prior >= 0; prior -= 1) {
+      const priorMessage = messages[prior];
+      if (priorMessage?.role !== "user") continue;
+      return isVoiceConversationUserTurn(priorMessage) ? [] : [message];
+    }
+    return [message];
+  });
+}
+
+function needsVoiceTranscriptSanitization(message: Message): boolean {
+  return (
+    isVoiceConversationUserTurn(message) ||
+    message.content.some(
+      (content) => content.type === "text" && content.speech !== undefined,
+    )
+  );
+}
+
+function sanitizeVoiceSpeechFallback(message: Message): Message {
+  const hasSpeech = message.content.some(
+    (content) => content.type === "text" && content.speech !== undefined,
+  );
+  if (!hasSpeech) return message;
+
+  let changed = false;
+  const content: MessageContent[] = [];
+  for (const block of message.content) {
+    if (
+      block.type === "systemNotification" &&
+      isVoiceConversationEmptyResponse(block.text)
+    ) {
+      changed = true;
+      continue;
+    }
+    if (block.type !== "text") {
+      content.push(block);
+      continue;
+    }
+    if (!block.speech && isVoiceConversationEmptyResponse(block.text)) {
+      changed = true;
+      continue;
+    }
+    const text = stripVoiceConversationEmptyResponseSuffix(block.text);
+    if (text === block.text) {
+      content.push(block);
+      continue;
+    }
+    changed = true;
+    if (text) content.push({ ...block, text });
+  }
+
+  return changed ? { ...message, content } : message;
+}
+
+function isVoiceConversationUserTurn(message: Message): boolean {
+  return (
+    message.metadata?.origin === "voice_conversation" ||
+    (message.role === "user" &&
+      message.content.some(
+        (content) =>
+          content.type === "text" &&
+          content.text.trimStart().startsWith("[Voice transcript] "),
+      ))
+  );
 }
 
 function isVisibleTranscriptMessage(message: Message): boolean {

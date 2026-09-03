@@ -1299,6 +1299,12 @@ pub async fn start_native_voice_conversation(
     if session_id.is_empty() || session_id.len() > 256 {
         return Err("session id must be between 1 and 256 bytes".to_string());
     }
+    if app
+        .try_state::<super::voice_buddy::RealtimeVoiceControlsState>()
+        .is_some_and(|state| state.active_target().is_some())
+    {
+        return Err("An OpenAI Realtime voice conversation is already active.".to_string());
+    }
     if input_backend == VoiceInputBackend::Macos
         && !mac_speech::status_async().await?.model_installed
     {

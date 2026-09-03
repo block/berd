@@ -77,7 +77,7 @@ try {
     Assert-Equal "process args: trailing backslash doubled inside quotes" (Join-WindowsProcessArguments -Arguments @("C:\Program Files\")) '"C:\Program Files\\"'
     Assert-Equal "process args: embedded quote escaped" (Join-WindowsProcessArguments -Arguments @('say "hi"')) '"say \"hi\""'
 
-    Assert-Equal "public app feature defaults fail closed" (Get-BerdAppFeatures) "berdctl,app-test-driver,no-voice-dictation"
+    Assert-Equal "public app feature defaults fail closed" (Get-BerdAppFeatures) "berdctl,app-test-driver"
     $featureGateNames = @("VITE_AGENT_TOOLS", "VITE_AUTOMATIONS", "VITE_BUILDERBOT", "VITE_FEEDBACK", "VITE_MANAGED_CONNECTIONS", "VITE_SKILL_DISCOVERY", "VITE_TELEMETRY_ENFORCED", "VITE_VOICE_DICTATION")
     $savedFeatureGates = @{}
     foreach ($name in $featureGateNames) {

@@ -65,6 +65,7 @@ import {
 import type { TranscriptSearchBackend } from "@/features/chat/lib/transcriptSearchBackend";
 import type { GlobalComposerHandoffRect } from "@/shared/ui/GlobalComposerPill";
 import { useVoiceConversationController } from "@/features/voice-conversation/hooks/useVoiceConversationController";
+import { useOpenAiRealtimeConversation } from "@/features/voice-conversation/hooks/useOpenAiRealtimeConversation";
 import { usePocketVoiceSetup } from "@/features/voice-conversation/hooks/usePocketVoiceSetup";
 import { useMacSpeechSetup } from "@/features/voice-conversation/hooks/useMacSpeechSetup";
 import { useOpenAiVoiceSetup } from "@/features/voice-conversation/hooks/useOpenAiVoiceSetup";
@@ -73,8 +74,11 @@ import {
   isMacSpeechAvailable,
   useVoiceInputPreference,
 } from "@/features/voice-conversation/lib/voiceInputPreference";
+import { useRealtimeVoicePreference } from "@/features/voice-conversation/lib/realtimeVoicePreference";
+import { presentRealtimeVoiceMessages } from "@/features/voice-conversation/lib/realtimeVoicePresentation";
 import { useVoiceOutputPreference } from "@/features/voice-conversation/lib/voiceOutputPreference";
 import { isVoiceSetupReady } from "@/features/voice-conversation/lib/voiceSetupReadiness";
+import { useVoiceConversationModePreference } from "@/features/voice-conversation/lib/voiceConversationModePreference";
 import { useProfileCapabilities } from "@/shared/profile/capabilities";
 import { requestOpenSettings } from "@/features/settings/lib/settingsEvents";
 import {
@@ -242,6 +246,7 @@ export function ChatView({
     isMacSpeechAvailable(macSpeechSetup.status, macSpeechSetup.loading),
   );
   const voiceOutput = useVoiceOutputPreference();
+  const voiceMode = useVoiceConversationModePreference();
   const openAiVoiceSetup = useOpenAiVoiceSetup(
     capabilities.voiceConversation &&
       (voiceInput.backend === "openai" || voiceOutput.backend === "openai"),
@@ -269,13 +274,13 @@ export function ChatView({
       controller.isLoadingHistory ||
       !controller.workspaceContextReady ||
       controller.queue.queuedMessage !== null);
-  const voiceConversation = useVoiceConversationController({
+  const chainedVoiceConversation = useVoiceConversationController({
     sessionId,
     // Voice delivery only needs to wait for admission. Holding its per-session
     // queue through the full run would prevent later utterances from steering
     // the active run.
     onSend,
-    enabled: capabilities.voiceConversation,
+    enabled: capabilities.voiceConversation && voiceMode.mode === "chained",
     isGooseSession: controller.selectedProvider === "goose",
     pocketReady: voiceReady,
     inputBackend: voiceInput.backend,
@@ -293,6 +298,25 @@ export function ChatView({
     routeUnavailable: voiceAdmissionPermanentlyBlocked,
     disabled: admissionBlocked || voiceDeliveryTemporarilyBlocked,
   });
+  const realtimeVoiceConversation = useOpenAiRealtimeConversation({
+    sessionId,
+    onSend,
+    enabled:
+      capabilities.voiceConversation &&
+      voiceMode.mode === "openai-realtime" &&
+      controller.selectedProvider === "goose",
+    readOnly: Boolean(readOnlyStatus),
+    disabled: admissionBlocked || voiceDeliveryTemporarilyBlocked,
+  });
+  const voiceConversation =
+    voiceMode.mode === "openai-realtime"
+      ? realtimeVoiceConversation
+      : chainedVoiceConversation;
+  const { preference: realtimeVoicePreference } = useRealtimeVoicePreference();
+  const presentedMessages = presentRealtimeVoiceMessages(
+    controller.messages,
+    realtimeVoicePreference.presentationMode,
+  );
   const isAgentBuilderOpen = agentBuilderOpenForLayout;
   const patchSession = useChatSessionStore((s) => s.patchSession);
   const agentBuilderContextState = effectiveSession?.agentBuilderContextState;
@@ -703,6 +727,12 @@ export function ChatView({
         <SecurityConfirmationPanel sessionId={sessionId} />
         <ConversationComposerCapability
           binding={composerBinding}
+          onUserTextCommitted={
+            realtimeVoiceConversation.active &&
+            realtimeVoiceConversation.ownsActiveConversation
+              ? realtimeVoiceConversation.onTypedUserMessageCommitted
+              : undefined
+          }
           renderingPolicy={{
             presentation: {
               surface: "bare",
@@ -732,7 +762,7 @@ export function ChatView({
   const messageTimeline = (
     <ChatTranscriptSurface
       sessionId={timelineSessionId}
-      messages={controller.messages}
+      messages={presentedMessages}
       sessionCreatedAt={effectiveSession?.createdAt}
       sessionSurveySamplingRateBasisPoints={
         isReadOnly || !capabilities.feedbackSurveys
@@ -869,6 +899,9 @@ export function ChatView({
         >
           <div
             ref={conversationDropTargetRef}
+            data-realtime-voice-presentation={
+              realtimeVoicePreference.presentationMode
+            }
             className={cn(
               "relative flex min-h-0 flex-1 flex-col overflow-visible rounded-md bg-card",
               terminal.visible && !terminal.isFloating && "min-h-[280px]",

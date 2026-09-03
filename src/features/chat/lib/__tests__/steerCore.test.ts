@@ -16,6 +16,7 @@ vi.mock("@/shared/i18n", () => ({
 }));
 
 import { steerPromptInSession } from "../steerCore";
+import { VOICE_CONVERSATION_EMPTY_RESPONSE } from "../voiceConversationNoop";
 
 function oversizedImageDraft() {
   return {
@@ -149,6 +150,24 @@ describe("steerPromptInSession commit callback", () => {
     expect(messages.some((message) => message.role === "user")).toBe(false);
   });
 
+  it("can return a recoverable steer rejection without leaking an error row", async () => {
+    mockAcpSteerMessage.mockRejectedValue(new Error("no active run to steer"));
+
+    await expect(
+      steerPromptInSession(
+        "session-1",
+        "follow-up voice transcript",
+        undefined,
+        { userMessageMetadata: { origin: "voice_conversation" } },
+        { throwOnError: true, reportErrorInTranscript: false },
+      ),
+    ).rejects.toThrow("no active run to steer");
+
+    expect(
+      useChatStore.getState().messagesBySession["session-1"] ?? [],
+    ).toEqual([]);
+  });
+
   it("fires when delivery was established despite an acknowledgement error", async () => {
     const onUserMessageCommitted = vi.fn();
     mockAcpSteerMessage.mockImplementation(async () => {
@@ -176,5 +195,81 @@ describe("steerPromptInSession commit callback", () => {
 
     expect(accepted).toBe(true);
     expect(onUserMessageCommitted).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("steerPromptInSession voice no-op", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useChatStore.setState({
+      messagesBySession: {},
+      sessionStateById: {},
+      activeSessionId: null,
+      isConnected: true,
+    });
+  });
+
+  it("preserves a provisional voice transcript's original ordering timestamp", async () => {
+    useChatStore.getState().addMessage("session-1", {
+      id: "voice-user",
+      role: "user",
+      created: 100,
+      content: [{ type: "text", text: "provisional" }],
+      metadata: { origin: "voice_conversation" },
+    });
+    mockAcpSteerMessage.mockResolvedValue({
+      runId: "run-1",
+      messageId: "voice-user",
+    });
+
+    const accepted = await steerPromptInSession(
+      "session-1",
+      "final transcript",
+      undefined,
+      {
+        displayText: "final transcript",
+        userMessageId: "voice-user",
+        userMessageMetadata: { origin: "voice_conversation" },
+      },
+      { throwOnError: true },
+    );
+
+    expect(accepted).toBe(true);
+    expect(
+      useChatStore
+        .getState()
+        .messagesBySession["session-1"]?.find(
+          (message) => message.id === "voice-user",
+        ),
+    ).toMatchObject({ created: 100 });
+  });
+
+  it("keeps the transcript and suppresses the known empty master response", async () => {
+    mockAcpSteerMessage.mockRejectedValue(
+      new Error(VOICE_CONVERSATION_EMPTY_RESPONSE),
+    );
+
+    const accepted = await steerPromptInSession(
+      "session-1",
+      "[Voice transcript] User said: Nice weather today.",
+      undefined,
+      {
+        displayText: "User said: Nice weather today.",
+        userMessageMetadata: { origin: "voice_conversation" },
+      },
+      { throwOnError: true },
+    );
+
+    expect(accepted).toBe(true);
+    const messages =
+      useChatStore.getState().messagesBySession["session-1"] ?? [];
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      role: "user",
+      metadata: { origin: "voice_conversation", delivery: "steer" },
+    });
+    expect(messages[0].content[0]).toMatchObject({
+      text: "User said: Nice weather today.",
+    });
   });
 });

@@ -12,6 +12,10 @@ struct CompletionNotificationRequest {
     sound: Option<String>,
 }
 
+fn voice_session_is_active(native_active: bool, realtime_active: bool) -> bool {
+    native_active || realtime_active
+}
+
 #[cfg(target_os = "macos")]
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,11 +32,15 @@ struct CompletionNotificationState {
 pub fn show_completion_notification(
     app: AppHandle,
     voice_state: State<'_, crate::commands::native_voice::NativeVoiceState>,
+    realtime_voice_state: State<'_, crate::commands::voice_buddy::RealtimeVoiceControlsState>,
     session_id: String,
     body: String,
     sound: Option<String>,
 ) -> Result<(), String> {
-    if voice_state.is_active_for_session(&session_id) {
+    if voice_session_is_active(
+        voice_state.is_active_for_session(&session_id),
+        realtime_voice_state.is_active_for_session(&session_id),
+    ) {
         return Ok(());
     }
     show_platform_completion_notification(
@@ -48,9 +56,26 @@ pub fn show_completion_notification(
 #[tauri::command]
 pub fn should_suppress_completion_notification(
     voice_state: State<'_, crate::commands::native_voice::NativeVoiceState>,
+    realtime_voice_state: State<'_, crate::commands::voice_buddy::RealtimeVoiceControlsState>,
     session_id: String,
 ) -> bool {
-    voice_state.is_active_for_session(&session_id)
+    voice_session_is_active(
+        voice_state.is_active_for_session(&session_id),
+        realtime_voice_state.is_active_for_session(&session_id),
+    )
+}
+
+#[cfg(test)]
+mod voice_presence_tests {
+    use super::voice_session_is_active;
+
+    #[test]
+    fn either_voice_backend_suppresses_session_completion() {
+        assert!(voice_session_is_active(true, false));
+        assert!(voice_session_is_active(false, true));
+        assert!(voice_session_is_active(true, true));
+        assert!(!voice_session_is_active(false, false));
+    }
 }
 
 #[cfg(target_os = "macos")]

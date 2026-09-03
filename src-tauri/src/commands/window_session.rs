@@ -681,6 +681,10 @@ pub fn open_session_window(
                 &app_for_close,
                 &label_for_close,
             );
+            crate::commands::voice_buddy::handle_realtime_voice_owner_window_destroyed(
+                &app_for_close,
+                &label_for_close,
+            );
             reg_for_close.release_label(&label_for_close);
             let _ = emit_snapshot(&app_for_close, &reg_for_close);
         }

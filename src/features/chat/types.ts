@@ -69,6 +69,8 @@ export interface ChatSendOptions {
   /** Persona-only prompt captured while workspace context is still loading. */
   capturedPersonaSystemPrompt?: string;
   displayText?: string;
+  /** Reuses a provisional local transcript row when the send commits. */
+  userMessageId?: string;
   assistantPrompt?: string;
   chips?: MessageChip[];
   userMessageMetadata?: Partial<MessageMetadata>;
@@ -101,6 +103,8 @@ export interface ChatInputVoiceConversation {
   disabled?: boolean;
   onToggle: () => void | Promise<void>;
   onMicrophoneMuteToggle: () => void | Promise<void>;
+  /** Mirrors a committed typed user turn into an active voice frontend. */
+  onTypedUserMessageCommitted?: (text: string) => void;
 }
 
 export interface ChatInputComposerActions {

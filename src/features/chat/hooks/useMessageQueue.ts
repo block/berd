@@ -1,7 +1,13 @@
 import { useEffect, useCallback, useMemo, useRef } from "react";
+import { toast } from "sonner";
+import { i18n } from "@/shared/i18n";
 import type { ChatState } from "@/shared/types/chat";
 import { isPromiseLike } from "@/shared/lib/isPromiseLike";
-import type { ChatAttachmentDraft } from "@/shared/types/messages";
+import {
+  type ChatAttachmentDraft,
+  createSystemNotificationMessage,
+} from "@/shared/types/messages";
+import { stopOpenAiRealtimeConversationForSession } from "@/features/voice-conversation/hooks/useOpenAiRealtimeConversation";
 import {
   assertQueuedMessageAttemptOwned,
   becameQueuedMessageTargetAttemptable,
@@ -41,8 +47,10 @@ interface QueueAttemptLease {
 const queueAttemptLeaseBySession = new Map<string, QueueAttemptLease>();
 
 // LAWS/CHAT.md: the queue must resume sending when the session becomes ready.
-// Rejected attempts back off but never abandon the record — a rejection can be
-// silent (pre-commit ownership/readiness races around draft promotion) with no
+// Rejected attempts back off. User-visible records remain available for manual
+// recovery; exhausted transport-only records fail visibly and are removed so
+// they cannot silently strand later messages. A rejection can be silent
+// (pre-commit ownership/readiness races around draft promotion) with no
 // follow-up store transition to re-trigger the drain.
 const MAX_AUTO_RETRY_DELAY_MS = 30_000;
 
@@ -290,7 +298,10 @@ export function useMessageQueue(
 
         if (accepted === false) {
           let retryPayload = latestQueuedMessage.payload;
-          if (retryPayload.showInComposer === false) {
+          if (
+            retryPayload.showInComposer === false &&
+            retryPayload.sendOptions?.userMessageMetadata?.userVisible !== false
+          ) {
             retryPayload = {
               ...retryPayload,
               showInComposer: true,
@@ -320,13 +331,37 @@ export function useMessageQueue(
             count: rejections,
           };
           if (rejections >= MAX_CONSECUTIVE_REJECTIONS) {
-            // Stop automatically. The record stays queued and showInComposer
-            // was forced true above, so it is visible and the user can resend.
             autoRetryRef.current = null;
             if (retryTimerRef.current !== null) {
               clearTimeout(retryTimerRef.current);
               retryTimerRef.current = null;
             }
+            if (
+              retryPayload.sendOptions?.userMessageMetadata?.userVisible ===
+              false
+            ) {
+              const failureMessage = i18n.t(
+                "chat:queue.voiceCoordinationFailed",
+              );
+              useChatStore
+                .getState()
+                .addMessage(
+                  sessionId,
+                  createSystemNotificationMessage(failureMessage, "error"),
+                );
+              toast.error(i18n.t("chat:queue.voiceCoordinationFailedTitle"), {
+                description: failureMessage,
+              });
+              useChatStore
+                .getState()
+                .dismissQueuedMessage(sessionId, latestQueuedMessage.recordId);
+              void stopOpenAiRealtimeConversationForSession(sessionId).catch(
+                () => undefined,
+              );
+            }
+            // Visible records remain queued so the user can edit, resend, or
+            // dismiss them. Hidden transport records are removed above so an
+            // exhausted internal retry cannot block the rest of the queue.
             return;
           }
           const scheduleAutoRetry = () => {
@@ -589,6 +624,13 @@ export function useMessageQueue(
           personaName,
           attachments,
           sendOptions,
+          // Transport-only messages (including Emissary → Master
+          // coordination) may briefly use the reliable queue at a run
+          // boundary, but they must never leak into the user's composer.
+          showInComposer:
+            sendOptions?.userMessageMetadata?.userVisible === false
+              ? false
+              : undefined,
         }),
       );
     },

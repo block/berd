@@ -439,6 +439,8 @@
     "sendAnyway": "Send anyway",
     "backgroundSendFailed": "The queued message could not be sent. Retry it or edit the message.",
     "backgroundSendFailedTitle": "Queued message failed",
+    "voiceCoordinationFailed": "An internal voice update could not be delivered, so the voice conversation was stopped. Start voice again to continue.",
+    "voiceCoordinationFailedTitle": "Voice conversation stopped",
     "configureWorktree": "Configure your new worktree?",
     "configureWorkspaces": "Configure new project workspaces?",
     "configureWorkspacePlan": "Configure {{worktreeLabel}}?",

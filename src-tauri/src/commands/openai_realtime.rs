@@ -1,100 +1,121 @@
-#[cfg(not(feature = "no-voice-dictation"))]
-use crate::services::kgoose::KgooseContext;
-use crate::{
-    commands::runtime_config::RuntimeConfigState,
-    services::{distro_bundle::DistroBundleState, kgoose},
-};
 use serde::Serialize;
-#[cfg(not(feature = "no-voice-dictation"))]
 use serde_json::json;
 use tauri::{State, WebviewWindow};
 
+use super::openai_voice_credentials::{self, OpenAiVoiceCredential};
 use super::voice_capture::VoiceCaptureState;
 
-#[cfg(not(feature = "no-voice-dictation"))]
-const OPENAI_REALTIME_CLIENT_SECRETS_ENDPOINT: &str = "transcribe/v1/realtime-client-secret";
-const DEFAULT_TRANSCRIPTION_MODEL: &str = "gpt-realtime-whisper";
+const DEFAULT_REALTIME_MODEL: &str = "gpt-realtime-2.1";
+const OPENAI_REALTIME_CLIENT_SECRETS_URL: &str =
+    "https://api.openai.com/v1/realtime/client_secrets";
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenAiRealtimeStatus {
     configured: bool,
-    transcription_model: String,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenAiRealtimeSession {
     client_secret: String,
-    transcription_model: String,
 }
 
-fn non_empty_env(name: &str) -> Option<String> {
-    std::env::var(name)
-        .ok()
+fn stored_openai_api_key() -> Result<Option<String>, String> {
+    openai_voice_credentials::read(OpenAiVoiceCredential::Realtime)
+}
+
+#[tauri::command]
+pub async fn get_openai_realtime_status() -> Result<OpenAiRealtimeStatus, String> {
+    let configured = stored_openai_api_key()?.is_some();
+
+    Ok(OpenAiRealtimeStatus { configured })
+}
+
+#[tauri::command]
+pub async fn create_openai_realtime_voice_session(
+    model: Option<String>,
+) -> Result<OpenAiRealtimeSession, String> {
+    let api_key = openai_voice_credentials::require(OpenAiVoiceCredential::Realtime)?;
+    let model = model
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
-}
-
-fn transcription_model() -> String {
-    non_empty_env("OPENAI_REALTIME_TRANSCRIPTION_MODEL")
-        .unwrap_or_else(|| DEFAULT_TRANSCRIPTION_MODEL.to_string())
-}
-
-fn openai_realtime_configured(
-    runtime_config: &crate::commands::runtime_config::RuntimeConfig,
-    distro_state: &DistroBundleState,
-) -> bool {
-    cfg!(not(feature = "no-voice-dictation"))
-        && kgoose::is_configured(runtime_config.kgoose.as_ref(), distro_state.kgoose_config())
+        .unwrap_or_else(|| DEFAULT_REALTIME_MODEL.to_string());
+    let response = realtime_client_secret_request(&reqwest::Client::new(), &api_key, &model)
+        .send()
+        .await
+        .map_err(|error| format!("Failed to create OpenAI Realtime voice session: {error}"))?;
+    parse_session_response(response, "voice").await
 }
 
 #[tauri::command]
-pub async fn get_openai_realtime_status(
-    distro_state: State<'_, DistroBundleState>,
-    runtime_config_state: State<'_, RuntimeConfigState>,
-) -> Result<OpenAiRealtimeStatus, String> {
-    let runtime_config = runtime_config_state
-        .ready_config(distro_state.inner())
-        .await?;
-
-    Ok(OpenAiRealtimeStatus {
-        configured: openai_realtime_configured(&runtime_config, distro_state.inner()),
-        transcription_model: transcription_model(),
-    })
+pub async fn create_openai_realtime_session() -> Result<OpenAiRealtimeSession, String> {
+    let api_key = openai_voice_credentials::require(OpenAiVoiceCredential::Realtime)?;
+    let response = realtime_transcription_client_secret_request(&reqwest::Client::new(), &api_key)
+        .send()
+        .await
+        .map_err(|error| {
+            format!("Failed to create OpenAI Realtime transcription session: {error}")
+        })?;
+    parse_session_response(response, "transcription").await
 }
 
-#[tauri::command]
-pub async fn create_openai_realtime_session(
-    _distro_state: State<'_, DistroBundleState>,
-    _runtime_config_state: State<'_, RuntimeConfigState>,
+fn realtime_client_secret_request(
+    client: &reqwest::Client,
+    api_key: &str,
+    model: &str,
+) -> reqwest::RequestBuilder {
+    client
+        .post(OPENAI_REALTIME_CLIENT_SECRETS_URL)
+        .bearer_auth(api_key)
+        .json(&json!({
+            "session": {
+                "type": "realtime",
+                "model": model,
+            }
+        }))
+}
+
+fn realtime_transcription_client_secret_request(
+    client: &reqwest::Client,
+    api_key: &str,
+) -> reqwest::RequestBuilder {
+    client
+        .post(OPENAI_REALTIME_CLIENT_SECRETS_URL)
+        .bearer_auth(api_key)
+        .json(&json!({
+            "session": {
+                "type": "transcription",
+                "audio": {
+                    "input": {
+                        "format": { "type": "audio/pcm", "rate": 24_000 },
+                        "transcription": { "model": "gpt-realtime-whisper" },
+                        "turn_detection": { "type": "server_vad" }
+                    }
+                }
+            }
+        }))
+}
+
+async fn parse_session_response(
+    response: reqwest::Response,
+    kind: &str,
 ) -> Result<OpenAiRealtimeSession, String> {
-    #[cfg(feature = "no-voice-dictation")]
-    {
-        Err("OpenAI realtime sessions are unsupported because voice dictation is disabled in this build.".to_string())
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|error| format!("Failed to read OpenAI Realtime response: {error}"))?;
+    if !status.is_success() {
+        return Err(format!(
+            "OpenAI Realtime {kind} session creation failed ({status}): {body}"
+        ));
     }
-
-    #[cfg(not(feature = "no-voice-dictation"))]
-    {
-        let transcription_model = transcription_model();
-        let runtime_config = _runtime_config_state
-            .ready_config(_distro_state.inner())
-            .await?;
-        let kgoose = KgooseContext::new(_distro_state.inner(), &runtime_config);
-        let value = kgoose
-            .post_json(
-                OPENAI_REALTIME_CLIENT_SECRETS_ENDPOINT,
-                json!({ "language": "en" }),
-            )
-            .await
-            .map_err(|error| format!("Failed to create OpenAI realtime session: {error}"))?;
-        let client_secret = parse_client_secret(&value)?;
-
-        Ok(OpenAiRealtimeSession {
-            client_secret,
-            transcription_model,
-        })
-    }
+    let value: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|error| format!("OpenAI Realtime returned invalid JSON: {error}"))?;
+    Ok(OpenAiRealtimeSession {
+        client_secret: parse_client_secret(&value)?,
+    })
 }
 
 #[tauri::command]
@@ -132,7 +153,6 @@ pub fn release_voice_dictation_microphone(
     Ok(())
 }
 
-#[cfg(not(feature = "no-voice-dictation"))]
 fn parse_client_secret(value: &serde_json::Value) -> Result<String, String> {
     let client_secret = value.get("client_secret").and_then(client_secret_value);
     let top_level_value = value.get("value").and_then(|value| value.as_str());
@@ -143,13 +163,11 @@ fn parse_client_secret(value: &serde_json::Value) -> Result<String, String> {
         .or(top_level_secret)
         .map(ToString::to_string)
         .ok_or_else(|| {
-            format!(
-                "OpenAI realtime client secret response did not include a recognized secret field: {value}"
-            )
+            "OpenAI realtime client secret response did not include a recognized secret field."
+                .to_string()
         })
 }
 
-#[cfg(not(feature = "no-voice-dictation"))]
 fn client_secret_value(value: &serde_json::Value) -> Option<&str> {
     value
         .get("value")
@@ -159,76 +177,12 @@ fn client_secret_value(value: &serde_json::Value) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    use super::openai_realtime_configured;
-    #[cfg(not(feature = "no-voice-dictation"))]
-    use super::parse_client_secret;
-    use crate::{
-        commands::runtime_config::{default_runtime_config, RuntimeConfig, RuntimeKgooseConfig},
-        services::distro_bundle::{DistroBundleState, KgooseDistroConfig},
-        test_support::env_lock,
+    use super::{
+        parse_client_secret, realtime_client_secret_request,
+        realtime_transcription_client_secret_request,
     };
-    #[cfg(not(feature = "no-voice-dictation"))]
     use serde_json::json;
-    use std::env;
 
-    #[test]
-    fn status_is_unconfigured_without_explicit_kgoose_endpoint() {
-        let _guard = env_lock().lock().expect("env lock");
-        env::remove_var("KGOOSE_BASE_URL");
-        let runtime_config = default_runtime_config();
-
-        assert!(!openai_realtime_configured(
-            &runtime_config,
-            &DistroBundleState::empty_for_tests(),
-        ));
-    }
-
-    #[test]
-    fn status_tracks_explicit_runtime_endpoint() {
-        let _guard = env_lock().lock().expect("env lock");
-        env::remove_var("KGOOSE_BASE_URL");
-        let mut runtime_config = default_runtime_config();
-        runtime_config.kgoose = Some(RuntimeKgooseConfig {
-            base_url: Some("https://kgoose.example.test/".to_string()),
-            path: None,
-        });
-
-        assert_eq!(
-            openai_realtime_configured(&runtime_config, &DistroBundleState::empty_for_tests(),),
-            cfg!(not(feature = "no-voice-dictation")),
-        );
-    }
-
-    #[test]
-    fn status_tracks_explicit_distro_endpoint() {
-        let _guard = env_lock().lock().expect("env lock");
-        env::remove_var("KGOOSE_BASE_URL");
-        let runtime_config: RuntimeConfig = default_runtime_config();
-        let distro_state = DistroBundleState::with_kgoose_for_tests(KgooseDistroConfig {
-            base_url: Some("https://kgoose.example.test/".to_string()),
-            path: None,
-        });
-
-        assert_eq!(
-            openai_realtime_configured(&runtime_config, &distro_state),
-            cfg!(not(feature = "no-voice-dictation")),
-        );
-    }
-
-    #[test]
-    fn status_tracks_explicit_environment_endpoint() {
-        let _guard = env_lock().lock().expect("env lock");
-        env::set_var("KGOOSE_BASE_URL", "https://kgoose.example.test/");
-        let runtime_config = default_runtime_config();
-
-        assert_eq!(
-            openai_realtime_configured(&runtime_config, &DistroBundleState::empty_for_tests(),),
-            cfg!(not(feature = "no-voice-dictation")),
-        );
-        env::remove_var("KGOOSE_BASE_URL");
-    }
-
-    #[cfg(not(feature = "no-voice-dictation"))]
     #[test]
     fn parses_supported_client_secret_shapes() {
         assert_eq!(
@@ -249,9 +203,68 @@ mod tests {
         );
     }
 
-    #[cfg(not(feature = "no-voice-dictation"))]
     #[test]
     fn rejects_missing_client_secret() {
         assert!(parse_client_secret(&json!({ "ok": true })).is_err());
+    }
+
+    #[test]
+    fn client_secret_request_uses_only_the_standard_openai_endpoint() {
+        let request = realtime_client_secret_request(
+            &reqwest::Client::new(),
+            "sk-test-secret",
+            "gpt-realtime-test",
+        )
+        .build()
+        .expect("build request");
+
+        assert_eq!(
+            request.url().as_str(),
+            "https://api.openai.com/v1/realtime/client_secrets"
+        );
+        assert_eq!(
+            request
+                .headers()
+                .get(reqwest::header::AUTHORIZATION)
+                .and_then(|value| value.to_str().ok()),
+            Some("Bearer sk-test-secret")
+        );
+        let body: serde_json::Value = serde_json::from_slice(
+            request
+                .body()
+                .and_then(|body| body.as_bytes())
+                .expect("JSON body"),
+        )
+        .expect("parse request body");
+        assert_eq!(
+            body,
+            json!({
+                "session": {
+                    "type": "realtime",
+                    "model": "gpt-realtime-test",
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn dictation_client_secret_enables_input_transcription() {
+        let request =
+            realtime_transcription_client_secret_request(&reqwest::Client::new(), "sk-test-secret")
+                .build()
+                .expect("build request");
+        let body: serde_json::Value = serde_json::from_slice(
+            request
+                .body()
+                .and_then(|body| body.as_bytes())
+                .expect("JSON body"),
+        )
+        .expect("parse request body");
+
+        assert_eq!(body["session"]["type"], "transcription");
+        assert_eq!(
+            body["session"]["audio"]["input"]["transcription"]["model"],
+            "gpt-realtime-whisper"
+        );
     }
 }

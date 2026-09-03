@@ -8,12 +8,13 @@ const LEGACY_TTS_KEYCHAIN_ACCOUNT: &str = "tts-api-key";
 pub(crate) enum OpenAiVoiceCredential {
     SpeechToText,
     TextToSpeech,
+    Realtime,
 }
 
 impl OpenAiVoiceCredential {
     const fn account(self) -> &'static str {
         match self {
-            Self::SpeechToText | Self::TextToSpeech => KEYCHAIN_ACCOUNT,
+            Self::SpeechToText | Self::TextToSpeech | Self::Realtime => KEYCHAIN_ACCOUNT,
         }
     }
 
@@ -24,6 +25,9 @@ impl OpenAiVoiceCredential {
             }
             Self::TextToSpeech => {
                 "OpenAI text-to-speech is not configured. Add the shared OpenAI voice API key in Voice settings, then try again."
+            }
+            Self::Realtime => {
+                "OpenAI Realtime voice is not configured. Add the shared OpenAI voice API key in Voice settings, then try again."
             }
         }
     }
@@ -109,6 +113,7 @@ mod tests {
     fn speech_services_use_the_shared_voice_keychain_account() {
         assert_eq!(OpenAiVoiceCredential::SpeechToText.account(), "api-key");
         assert_eq!(OpenAiVoiceCredential::TextToSpeech.account(), "api-key");
+        assert_eq!(OpenAiVoiceCredential::Realtime.account(), "api-key");
     }
 
     #[test]

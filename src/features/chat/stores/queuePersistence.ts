@@ -47,7 +47,8 @@ function normalizeQueuedRecord(
   const { editing: _editing, restored: _restored, ...persisted } = record;
   const normalizedPayload = normalizeQueuedPayload(persisted.payload);
   const restoredPayload =
-    normalizedPayload.showInComposer === false
+    normalizedPayload.showInComposer === false &&
+    normalizedPayload.sendOptions?.userMessageMetadata?.userVisible !== false
       ? { ...normalizedPayload, showInComposer: true }
       : normalizedPayload;
   if (persisted.kind !== "deferred") {

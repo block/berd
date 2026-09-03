@@ -513,9 +513,6 @@ function Get-BerdAppFeatures {
         }
         if ($value -eq "1") { $features.Add($gate.Feature) }
     }
-    if ([Environment]::GetEnvironmentVariable("VITE_VOICE_DICTATION", "Process") -ne "1") {
-        $features.Add("no-voice-dictation")
-    }
     return ($features -join ",")
 }
 

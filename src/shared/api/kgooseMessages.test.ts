@@ -3,6 +3,7 @@ import {
   applyKgooseMessageDelta,
   asKgooseMessagesResponse,
   asKgooseStreamResponse,
+  messagesFromKgooseSessionExport,
 } from "./kgooseMessages";
 
 vi.stubGlobal("crypto", {
@@ -105,6 +106,66 @@ describe("kgoose message helpers", () => {
         }),
       ],
     });
+  });
+
+  it("maps Goose session exports with thinking and tool results", () => {
+    const messages = messagesFromKgooseSessionExport({
+      conversation: [
+        {
+          id: "assistant-work",
+          role: "assistant",
+          created: 1_788_111_505,
+          content: [
+            { type: "thinking", thinking: "Inspect the folder." },
+            {
+              type: "toolRequest",
+              id: "call-1",
+              toolCall: {
+                status: "success",
+                value: { name: "shell", arguments: { command: "find" } },
+              },
+            },
+          ],
+        },
+        {
+          id: "tool-result",
+          role: "user",
+          created: 1_788_111_505,
+          content: [
+            {
+              type: "toolResponse",
+              id: "call-1",
+              toolResult: {
+                status: "success",
+                value: {
+                  content: [{ type: "text", text: "21" }],
+                  isError: false,
+                },
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(messages).toMatchObject([
+      {
+        id: "assistant-work",
+        role: "assistant",
+        created: 1_788_111_505_000,
+        content: [
+          { type: "thinking", text: "Inspect the folder." },
+          {
+            type: "toolRequest",
+            id: "call-1",
+            toolName: "shell",
+            arguments: { command: "find" },
+            status: "completed",
+          },
+          { type: "toolResponse", id: "call-1", result: "21" },
+        ],
+      },
+    ]);
   });
 
   it("renders known tool names with their human-readable label", () => {

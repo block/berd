@@ -60,6 +60,7 @@ import {
   getSubagentToolCallContext,
   resolveSubagentContext,
 } from "@/features/chat/lib/subagentToolCalls";
+import { getSessionPromptOwner } from "@/features/chat/lib/sessionPromptOwnership";
 import { applyChatSessionConfigOptionsSnapshot } from "./sessionConfigSnapshotAdapter";
 import { perfLog } from "@/shared/lib/perfLog";
 import {
@@ -230,8 +231,14 @@ export async function handleSessionNotification(
 ): Promise<void> {
   const sessionId = notification.sessionId;
   const { update } = notification;
-  const isReplay = useChatStore.getState().loadingSessionIds.has(sessionId);
-
+  // A newly-created session can still be hydrating when its first local prompt
+  // starts. Notifications from that owned prompt are live output, even while
+  // the history-loading flag is set. Routing them into the replay buffer loses
+  // them when replay has already taken its snapshot (realtime voice makes this
+  // race easy to hit because it can dispatch immediately after session start).
+  const isReplay =
+    useChatStore.getState().loadingSessionIds.has(sessionId) &&
+    getSessionPromptOwner(sessionId) === null;
   if (isReplay) {
     const sid = sessionId.slice(0, 8);
     let perf = replayPerf.get(sessionId);

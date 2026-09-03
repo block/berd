@@ -438,6 +438,8 @@
     "sendAnyway": "Enviar de todos modos",
     "backgroundSendFailed": "No se pudo enviar el mensaje en cola. Reinténtalo o edita el mensaje.",
     "backgroundSendFailedTitle": "No se pudo enviar el mensaje en cola",
+    "voiceCoordinationFailed": "No se pudo entregar una actualización interna de voz, por lo que se detuvo la conversación de voz. Inicia la voz de nuevo para continuar.",
+    "voiceCoordinationFailedTitle": "Conversación de voz detenida",
     "configureWorktree": "¿Configurar un worktree nuevo?",
     "configureWorkspaces": "¿Configurar espacios de trabajo nuevos para el proyecto?",
     "configureWorkspacePlan": "¿Configurar {{worktreeLabel}}?",

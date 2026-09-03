@@ -9,6 +9,9 @@ const mocks = vi.hoisted(() => ({
   setMuted: vi.fn(),
   show: vi.fn(),
   stop: vi.fn(),
+  getRealtimeStatus: vi.fn(),
+  requestRealtimeControl: vi.fn(),
+  showRealtime: vi.fn(),
 }));
 
 vi.mock("react-i18next", () => ({
@@ -21,6 +24,11 @@ vi.mock("@/features/voice-conversation/api/voiceConversation", () => ({
   setVoiceConversationMicrophoneMuted: mocks.setMuted,
   showVoiceConversationControls: mocks.show,
   stopVoiceConversationFromBuddy: mocks.stop,
+}));
+vi.mock("@/shared/api/openaiRealtime", () => ({
+  getOpenAiRealtimeVoiceControlsStatus: mocks.getRealtimeStatus,
+  requestOpenAiRealtimeVoiceControl: mocks.requestRealtimeControl,
+  showOpenAiRealtimeVoiceControls: mocks.showRealtime,
 }));
 
 import { VoiceBuddyApp } from "./VoiceBuddyApp";
@@ -53,6 +61,48 @@ describe("VoiceBuddyApp", () => {
     }));
     mocks.show.mockReset().mockResolvedValue(undefined);
     mocks.stop.mockReset().mockResolvedValue(undefined);
+    mocks.getRealtimeStatus.mockReset().mockResolvedValue(runningStatus);
+    mocks.requestRealtimeControl.mockReset().mockResolvedValue(undefined);
+    mocks.showRealtime.mockReset().mockResolvedValue(undefined);
+  });
+
+  it("uses renderer-owned Realtime controls when opened for that voice mode", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/?voiceBuddy=1&voiceMode=realtime&voiceRevision=3",
+    );
+    const user = userEvent.setup();
+    render(<VoiceBuddyApp />);
+
+    await waitFor(() =>
+      expect(mocks.showRealtime).toHaveBeenCalledWith("session-a", 3),
+    );
+    expect(mocks.getRealtimeStatus).toHaveBeenCalledOnce();
+    expect(mocks.getStatus).not.toHaveBeenCalled();
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "toolbar.voiceConversation.muteMicrophone",
+      }),
+    );
+    expect(mocks.requestRealtimeControl).toHaveBeenCalledWith(
+      "session-a",
+      3,
+      "mute",
+      true,
+    );
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "toolbar.voiceConversation.buddy.hangUp",
+      }),
+    );
+    expect(mocks.requestRealtimeControl).toHaveBeenCalledWith(
+      "session-a",
+      3,
+      "stop",
+    );
   });
 
   it("shows live user and assistant speaking activity", async () => {

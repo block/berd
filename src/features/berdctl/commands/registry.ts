@@ -6,6 +6,7 @@ import { attachProjectFolderCommand } from "./impl/attachProjectFolder";
 import { attachSessionFolderCommand } from "./impl/attachSessionFolder";
 import { detachProjectFolderCommand } from "./impl/detachProjectFolder";
 import { detachSessionFolderCommand } from "./impl/detachSessionFolder";
+import { dismissHandoffsSessionCommand } from "./impl/dismissHandoffsSession";
 import { listSessionFoldersCommand } from "./impl/listSessionFolders";
 import { replaceSessionFolderCommand } from "./impl/replaceSessionFolder";
 import { setSessionFolderCwdCommand } from "./impl/setSessionFolderCwd";
@@ -31,6 +32,7 @@ import { openFeedbackCommand } from "./impl/openFeedback";
 import { openSessionCommand } from "./impl/openSession";
 import { renameSessionCommand } from "./impl/renameSession";
 import { sendSessionCommand } from "./impl/sendSession";
+import { sendToSpokespersonSessionCommand } from "./impl/sendToSpokespersonSession";
 import { setProjectStartupModeCommand } from "./impl/setProjectStartupMode";
 import { submitFeedbackCommand } from "./impl/submitFeedback";
 import { commandBridgeTimeoutMs } from "./timeouts";
@@ -57,11 +59,11 @@ export const ALL_TOOL_GROUPS = {
     description:
       "Manage the user's chat sessions: create (fire-and-forget, on any " +
       "installed agent harness), send, open, list, get, rename, move, " +
-      "move to group, clear project, fork, archive.",
+      "move to group, clear project, send to a live voice Spokesperson, dismiss voice handoffs, fork, archive.",
     cli: {
       noun: "session",
       about:
-        "Manage chat sessions: create, send, open, list, get, rename, move, move to group, clear project, fork, archive",
+        "Manage chat sessions: create, send, open, list, get, rename, move, move to group, clear project, send to Spokesperson, dismiss handoffs, fork, archive",
       verbs: {
         create: "create",
         send: "send",
@@ -72,6 +74,8 @@ export const ALL_TOOL_GROUPS = {
         move: "move",
         "move-to-group": "move_to_group",
         "clear-project": "clear_project",
+        "send-to-spokesperson": "send_to_spokesperson",
+        "dismiss-handoffs": "dismiss_handoffs",
         fork: "fork",
         archive: "archive",
       },
@@ -86,6 +90,8 @@ export const ALL_TOOL_GROUPS = {
       move: moveSessionCommand,
       move_to_group: moveSessionToGroupCommand,
       clear_project: clearSessionProjectCommand,
+      send_to_spokesperson: sendToSpokespersonSessionCommand,
+      dismiss_handoffs: dismissHandoffsSessionCommand,
       fork: forkSessionCommand,
       archive: archiveSessionCommand,
     },

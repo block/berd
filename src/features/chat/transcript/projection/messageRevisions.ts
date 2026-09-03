@@ -440,6 +440,7 @@ function renderMetadataRevision(metadata: MessageMetadata | undefined): string {
     metadata.completionStatus ?? "",
     metadata.delivery ?? "",
     metadata.origin ?? "",
+    metadata.voiceConversationDebugEvent ?? "",
     stableValueRevision(metadata.attachments ?? []),
     stableValueRevision(metadata.chips ?? []),
     metadata.personaId ?? "",
@@ -464,6 +465,7 @@ function heightMetadataRevision(metadata: MessageMetadata | undefined): string {
     metadata.completionStatus ?? "",
     metadata.delivery ?? "",
     metadata.origin ?? "",
+    metadata.voiceConversationDebugEvent ?? "",
     stableValueRevision(metadata.attachments ?? []),
     stableValueRevision(metadata.chips ?? []),
     metadata.personaName ?? "",
@@ -480,6 +482,7 @@ function hasDefaultRevisionMetadata(metadata: MessageMetadata): boolean {
     !metadata.completionStatus &&
     !metadata.delivery &&
     !metadata.origin &&
+    !metadata.voiceConversationDebugEvent &&
     !metadata.attachments?.length &&
     !metadata.chips?.length &&
     !metadata.personaId &&

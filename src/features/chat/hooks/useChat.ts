@@ -207,6 +207,7 @@ export function useChat(
           attachments,
           assistantPrompt: sendOptions?.assistantPrompt,
           displayText: sendOptions?.displayText,
+          userMessageId: sendOptions?.userMessageId,
           chips: sendOptions?.chips,
           userMessageMetadata: sendOptions?.userMessageMetadata,
           acpGooseMetadata: sendOptions?.acpGooseMetadata,

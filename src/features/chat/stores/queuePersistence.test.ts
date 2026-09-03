@@ -113,6 +113,43 @@ describe("queuePersistence", () => {
     });
   });
 
+  it("keeps restored transport-only voice coordination hidden", async () => {
+    mockInvoke.mockResolvedValue(
+      JSON.stringify({
+        s1: [
+          {
+            kind: "transport-ready",
+            recordId: "emissary-coordination",
+            payload: {
+              text: "[Handoff handoff-3 from spokesperson; cursor 3] Check this",
+              showInComposer: false,
+              sendOptions: {
+                userMessageMetadata: {
+                  origin: "voice_conversation",
+                  userVisible: false,
+                },
+              },
+            },
+          },
+        ],
+      }),
+    );
+
+    await expect(loadPersistedMessageQueues()).resolves.toMatchObject({
+      s1: [
+        {
+          payload: {
+            showInComposer: false,
+            sendOptions: {
+              userMessageMetadata: { userVisible: false },
+            },
+          },
+          restored: true,
+        },
+      ],
+    });
+  });
+
   it("strips legacy provider/model fields without losing the prompt", async () => {
     mockInvoke.mockResolvedValue(
       JSON.stringify({

@@ -22,6 +22,7 @@ import {
 } from "./attachments";
 import { isSessionRunning } from "./sessionActivity";
 import { getSessionPromptOwner } from "./sessionPromptOwnership";
+import { isVoiceConversationEmptyResponse } from "./voiceConversationNoop";
 import { i18n } from "@/shared/i18n";
 
 function formatSteerErrorMessage(error: unknown): string {
@@ -36,7 +37,10 @@ export async function steerPromptInSession(
   text: string,
   attachments?: ChatAttachmentDraft[],
   sendOptions?: ChatSendOptions,
-  options: { throwOnError?: boolean } = {},
+  options: {
+    throwOnError?: boolean;
+    reportErrorInTranscript?: boolean;
+  } = {},
 ): Promise<boolean> {
   const sessionRunsRemotely = Boolean(
     useChatSessionStore.getState().getSession(sessionId)?.remoteHost,
@@ -80,6 +84,7 @@ export async function steerPromptInSession(
     buildMessageAttachments(dispatchAttachments),
     sendOptions?.chips,
   );
+  if (sendOptions?.userMessageId) userMessage.id = sendOptions.userMessageId;
   userMessage.metadata = {
     ...userMessage.metadata,
     ...sendOptions?.userMessageMetadata,
@@ -103,7 +108,19 @@ export async function steerPromptInSession(
   );
   const acpPrompt = promptWithPaths || (images?.length ? " " : promptWithPaths);
   const chatStore = useChatStore.getState();
-  chatStore.addMessage(sessionId, userMessage);
+  if (
+    sendOptions?.userMessageId &&
+    chatStore.messagesBySession[sessionId]?.some(
+      (message) => message.id === sendOptions.userMessageId,
+    )
+  ) {
+    chatStore.updateMessage(sessionId, userMessage.id, (existing) => ({
+      ...userMessage,
+      created: existing.created,
+    }));
+  } else {
+    chatStore.addMessage(sessionId, userMessage);
+  }
   chatStore.setPendingInterventionBoundary(sessionId, {
     interventionMessageId: userMessage.id,
   });
@@ -175,13 +192,29 @@ export async function steerPromptInSession(
     });
   } catch (err) {
     const liveStore = useChatStore.getState();
+    const errorMessage = formatSteerErrorMessage(err);
     const liveMessage = liveStore.messagesBySession[sessionId]?.find(
       (message) =>
         message.id === userMessage.id ||
         message.metadata?.steeringRequestId === userMessage.id,
     );
     const deliveryWasEstablished = liveMessage?.metadata?.delivery === "steer";
-    if (!deliveryWasEstablished) {
+    const emptyVoiceTurnIsNoop =
+      sendOptions?.userMessageMetadata?.origin === "voice_conversation" &&
+      isVoiceConversationEmptyResponse(errorMessage);
+    if (emptyVoiceTurnIsNoop) {
+      const liveMessageId = liveMessage?.id ?? userMessage.id;
+      liveStore.updateMessage(sessionId, liveMessageId, (message) => ({
+        ...message,
+        metadata: { ...message.metadata, delivery: "steer" },
+      }));
+      if (
+        liveStore.getSessionRuntime(sessionId).pendingInterventionBoundary
+          ?.interventionMessageId === liveMessageId
+      ) {
+        liveStore.setPendingInterventionBoundary(sessionId, null);
+      }
+    } else if (!deliveryWasEstablished) {
       const liveMessageId = liveMessage?.id ?? userMessage.id;
       liveStore.removeMessage(sessionId, liveMessageId);
       if (
@@ -190,11 +223,12 @@ export async function steerPromptInSession(
       ) {
         liveStore.setPendingInterventionBoundary(sessionId, null);
       }
-      const errorMessage = formatSteerErrorMessage(err);
-      liveStore.addMessage(
-        sessionId,
-        createSystemNotificationMessage(errorMessage, "error"),
-      );
+      if (options.reportErrorInTranscript !== false) {
+        liveStore.addMessage(
+          sessionId,
+          createSystemNotificationMessage(errorMessage, "error"),
+        );
+      }
       if (options.throwOnError) {
         throw new Error(errorMessage);
       }

@@ -250,6 +250,11 @@ import {
 } from "@/features/voice-conversation/lib/voiceInputPreference";
 import { useVoiceOutputPreference } from "@/features/voice-conversation/lib/voiceOutputPreference";
 import { isVoiceSetupReady } from "@/features/voice-conversation/lib/voiceSetupReadiness";
+import { getVoiceConversationMode } from "@/features/voice-conversation/lib/voiceConversationModePreference";
+import {
+  requestOpenAiRealtimeConversationStart,
+  stopOpenAiRealtimeConversation,
+} from "@/features/voice-conversation/hooks/useOpenAiRealtimeConversation";
 import { useProfileCapabilities } from "@/shared/profile/capabilities";
 import { getOptimisticArtifactCwd } from "@/shared/artifacts/sessionArtifactLocation";
 import {
@@ -779,10 +784,13 @@ export function AppShell({
     ) {
       return;
     }
-    // The native process survives renderer reloads and may be owned by another
-    // window, so an explicit on-to-off transition must clean up active use.
-    // Mounting with the experiment already off performs no Voice native work.
-    void stopVoiceConversation().catch(() => undefined);
+    // Voice resources can survive renderer navigation or be owned by another
+    // window, so an explicit on-to-off transition must stop both pipelines.
+    // Mounting with the experiment already off performs no voice cleanup.
+    void Promise.allSettled([
+      stopVoiceConversation(),
+      stopOpenAiRealtimeConversation(),
+    ]);
   }, [capabilities.voiceConversation, stopVoiceConversation]);
   const sessions = useChatSessionStore(selectSessions);
   const activeSessionId = useChatSessionStore(selectActiveSessionId);
@@ -3384,7 +3392,8 @@ export function AppShell({
   const handleGlobalVoiceConversationStart = useCallback(
     (payload: GlobalComposerExpandPayload): Promise<boolean> => {
       if (!capabilities.voiceConversation) return Promise.resolve(false);
-      if (!globalVoiceReady) {
+      const realtimeMode = getVoiceConversationMode() === "openai-realtime";
+      if (!realtimeMode && !globalVoiceReady) {
         return new Promise<boolean>((resolve) => {
           guardAppNavigation(
             () => {
@@ -3402,7 +3411,11 @@ export function AppShell({
         ? projects.find((candidate) => candidate.id === options.projectId)
         : undefined;
       const chatOptions = {
-        activate: false,
+        // Realtime voice belongs to the chat the user is about to see. Use
+        // the ordinary optimistic chat lifecycle so the mounted transcript
+        // owns the same ACP notification stream as a normal Berd session.
+        // The realtime runtime follows the draft id through promotion.
+        activate: realtimeMode,
         reuseExistingDraft: false,
         executionTarget: options?.executionTarget,
         reasoningEffort: options?.reasoningEffort,
@@ -3411,6 +3424,9 @@ export function AppShell({
       };
 
       const createAndStart = async () => {
+        if (realtimeMode) {
+          await stopOpenAiRealtimeConversation();
+        }
         const voice = useVoiceConversationStore.getState();
         if (
           voice.status.lifecycle === "starting" ||
@@ -3453,7 +3469,8 @@ export function AppShell({
         chatState.setDraft(sessionId, payload.text);
         chatState.setSkillDrafts(sessionId, payload.selectedSkills);
         chatState.setDraftAttachments(sessionId, options?.attachments ?? []);
-        requestVoiceConversationStart(sessionId);
+        if (realtimeMode) requestOpenAiRealtimeConversationStart(session.id);
+        else requestVoiceConversationStart(sessionId);
         handleNavigateToSession(sessionId);
         resetGlobalComposerTransition();
         return true;
@@ -4234,10 +4251,7 @@ export function AppShell({
     let cancelled = false;
     let unlisten: (() => void) | null = null;
     void listenToVoiceConversationOpenSession((sessionId) => {
-      const voice = useVoiceConversationStore.getState().status;
-      if (voice.lifecycle === "running" && voice.sessionId === sessionId) {
-        handleSelectSession(sessionId);
-      }
+      handleSelectSession(sessionId);
     })
       .then((cleanup) => {
         if (cancelled) cleanup();
