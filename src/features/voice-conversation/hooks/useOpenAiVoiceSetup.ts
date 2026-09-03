@@ -35,7 +35,7 @@ export function useOpenAiVoiceSetup(enabled = true) {
         },
       );
     };
-    void listenToOpenAiVoiceSettings(refresh).then(
+    void listenToOpenAiVoiceSettings(() => refresh()).then(
       (nextUnsubscribe) => {
         if (active) {
           unsubscribe = nextUnsubscribe;

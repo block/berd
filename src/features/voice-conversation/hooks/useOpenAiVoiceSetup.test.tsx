@@ -6,7 +6,7 @@ import { useOpenAiVoiceSetup } from "./useOpenAiVoiceSetup";
 const mocks = vi.hoisted(() => ({
   getStatus:
     vi.fn<(options?: { coalesce?: boolean }) => Promise<OpenAiVoiceStatus>>(),
-  settingsChanged: null as (() => void) | null,
+  settingsChanged: null as ((event?: unknown) => void) | null,
   finishListening: null as (() => void) | null,
   listenerError: null as Error | null,
 }));
@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../api/openAiVoice", () => ({
   getOpenAiVoiceStatus: (options?: { coalesce?: boolean }) =>
     mocks.getStatus(options),
-  listenToOpenAiVoiceSettings: (listener: () => void) => {
+  listenToOpenAiVoiceSettings: (listener: (event?: unknown) => void) => {
     mocks.settingsChanged = listener;
     if (mocks.listenerError) return Promise.reject(mocks.listenerError);
     return new Promise<() => void>((resolve) => {
@@ -70,7 +70,13 @@ describe("useOpenAiVoiceSetup", () => {
     await waitFor(() => expect(mocks.getStatus).toHaveBeenCalledTimes(1));
     expect(mocks.getStatus).toHaveBeenLastCalledWith({ coalesce: true });
 
-    act(() => mocks.settingsChanged?.());
+    act(() =>
+      mocks.settingsChanged?.({
+        event: "openai-voice:settings-changed",
+        id: 1,
+        payload: null,
+      }),
+    );
     expect(mocks.getStatus).toHaveBeenLastCalledWith(undefined);
     refreshed.resolve(status(true));
     await waitFor(() =>
