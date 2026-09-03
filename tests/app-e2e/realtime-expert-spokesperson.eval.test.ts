@@ -193,9 +193,9 @@ function expectAcceptableSpeechCount(
   priorSpeechCount: number,
 ): void {
   const utterances = finalizedSpeechCount - priorSpeechCount;
-  // A turn may be one answer, or a short acknowledgement followed by the
-  // The Spokesperson may acknowledge, give one waiting update, and then provide the
-  // Expert-informed answer. More than three is evidence of a coordination loop.
+  // The Spokesperson may answer directly, or acknowledge, give one waiting
+  // update, and then provide the Expert-informed answer. More than three is
+  // evidence of a coordination loop.
   expect(utterances).toBeGreaterThanOrEqual(1);
   expect(utterances).toBeLessThanOrEqual(3);
 }

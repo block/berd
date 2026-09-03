@@ -53,11 +53,11 @@ conversation, mutes its microphone so ambient audio cannot affect the run, asks
 how many repositories are in the user's Development folder, then asks whether
 any are symbolic links. It verifies that each typed question is followed in
 order by visible Expert-to-Spokesperson coordination and a visible terminal Expert
-turn. Each turn may contain one finalized Spokesperson answer or a brief
-acknowledgement followed by the answer; more than two finalized utterances fails
-the evaluation as a likely coordination loop.
+turn. Each turn may contain one finalized Spokesperson answer, or an
+acknowledgement and waiting update before the answer. More than three finalized
+utterances fails the evaluation as a likely coordination loop.
 
-The legacy app-test-driver protocol serves one command per TCP connection, so
+The app-test-driver protocol serves one command per TCP connection, so
 the client opens a fresh authenticated connection for every command. Home
 navigation and promotion of its composer draft may temporarily replace the app
 webview; this eval waits for the expected destination after those two known
