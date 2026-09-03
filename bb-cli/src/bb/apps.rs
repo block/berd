@@ -33,6 +33,8 @@ use super::auth_login::verify_stored_session;
 use super::auth_storage::default_session_storage;
 use super::display::{print_json, terminal_safe_text, Style};
 use super::runner;
+#[cfg(test)]
+use super::skills_api::failure_info;
 use super::skills_api::{exit_codes, failure};
 use super::skills_config::SkillsConfig;
 
@@ -239,7 +241,8 @@ pub fn command() -> Command {
                 .long_about(
                     "Request one owner-only Apps Platform logical deletion. The active route is \
                      retired while uploaded versions, artifacts, and stack resources are retained. \
-                     --confirm-app-id must exactly match APP_ID.",
+                     --confirm-app-id and --confirm-environment must exactly match APP_ID and \
+                     --environment.",
                 )
                 .arg(
                     Arg::new("app-id")
@@ -258,7 +261,15 @@ pub fn command() -> Command {
                     Arg::new("environment")
                         .long("environment")
                         .value_name("ENVIRONMENT")
-                        .help("Optional Compose environment override"),
+                        .required(true)
+                        .help("Exact Compose environment containing the app"),
+                )
+                .arg(
+                    Arg::new("confirm-environment")
+                        .long("confirm-environment")
+                        .value_name("ENVIRONMENT")
+                        .required(true)
+                        .help("Repeat the exact environment to confirm logical deletion"),
                 ),
         ))
         .subcommand(control_plane_args(
@@ -507,18 +518,32 @@ fn run_delete(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     let confirm_app_id = matches
         .get_one::<String>("confirm-app-id")
         .context("expected delete confirmation app id")?;
-    validate_delete_confirmation(app_id, confirm_app_id)?;
-    let request = DeleteAppRequest {
-        environment: matches.get_one::<String>("environment").map(String::as_str),
-    };
+    let environment = matches
+        .get_one::<String>("environment")
+        .context("expected delete environment")?;
+    let confirm_environment = matches
+        .get_one::<String>("confirm-environment")
+        .context("expected delete confirmation environment")?;
+    validate_delete_confirmation(app_id, environment, confirm_app_id, confirm_environment)?;
+    let request = DeleteAppRequest { environment };
     let (client, credential) = control_plane_context(config, matches)?;
     let response = client.delete_app(&credential, app_id, &request)?;
     print_json(&response)
 }
 
-fn validate_delete_confirmation(app_id: &str, confirm_app_id: &str) -> Result<()> {
+fn validate_delete_confirmation(
+    app_id: &str,
+    environment: &str,
+    confirm_app_id: &str,
+    confirm_environment: &str,
+) -> Result<()> {
     if confirm_app_id != app_id {
         anyhow::bail!("delete requires --confirm-app-id to exactly match APP_ID ({app_id})");
+    }
+    if confirm_environment != environment {
+        anyhow::bail!(
+            "delete requires --confirm-environment to exactly match --environment ({environment})"
+        );
     }
     Ok(())
 }
@@ -588,8 +613,7 @@ struct RollbackRequest<'a> {
 
 #[derive(Serialize)]
 struct DeleteAppRequest<'a> {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    environment: Option<&'a str>,
+    environment: &'a str,
 }
 
 #[derive(Default)]
@@ -923,12 +947,33 @@ impl ControlPlaneClient {
     ) -> Result<Value> {
         let url = self.app_url(app_id, &[])?;
         let path = url.path().to_string();
-        self.authorized_json_request(credential, "DELETE", &path, |authorization| {
-            self.standard_request(self.client.delete(url.clone()), authorization)
-                .json(request)
-                .build()
-                .context("build Apps Platform delete request")
-        })
+        let authorization = credential.authorization_header();
+        let http_request = self
+            .standard_request(self.client.delete(url), authorization)
+            .json(request)
+            .build()
+            .context("build Apps Platform delete request")?;
+        self.style.verbose(&format!("DELETE {path}"));
+        let response = self
+            .execute_request(http_request)
+            .map_err(|_| delete_outcome_unknown())?;
+        let status = response.status();
+        let body = read_limited_response_body(
+            response,
+            CONTROL_PLANE_RESPONSE_MAX_BYTES,
+            "Apps Platform control-plane",
+        )
+        .map_err(|_| delete_outcome_unknown())?;
+        self.style
+            .verbose(&format!("DELETE {path} -> {status} ({} bytes)", body.len()));
+        if !status.is_success() {
+            return Err(control_plane_http_failure(
+                "DELETE", &path, status, &body, credential,
+            ));
+        }
+        let mut value = serde_json::from_str(&body).map_err(|_| delete_outcome_unknown())?;
+        redact_json_value(&mut value, credential).map_err(|_| delete_outcome_unknown())?;
+        Ok(value)
     }
 
     fn ready(
@@ -1249,6 +1294,17 @@ fn network_failure(method: &str, path: &str, error: reqwest::Error) -> anyhow::E
         exit_codes::NETWORK,
         "network_error",
         format!("{method} {path} failed before receiving a response: {error}"),
+    )
+}
+
+fn delete_outcome_unknown() -> anyhow::Error {
+    failure(
+        exit_codes::NETWORK,
+        "delete_outcome_unknown",
+        "The delete may have succeeded, but no complete JSON success response was received.\n\
+         next_action: Before retrying, verify the same APP_ID and ENVIRONMENT with \
+         `bb apps get <APP_ID> --environment <ENVIRONMENT>`; a successful delete reports \
+         `app.status` as `deleted`.",
     )
 }
 
@@ -2095,6 +2151,8 @@ mod tests {
                 "merchant/lookup app",
                 "--environment",
                 "staging/west",
+                "--confirm-environment",
+                "staging/west",
                 "--base-url",
                 APPROVED_TEST_BASE_URL,
                 "--client-version",
@@ -2142,6 +2200,10 @@ mod tests {
                 "merchant-lookup",
                 "--confirm-app-id",
                 "different-app",
+                "--environment",
+                "production",
+                "--confirm-environment",
+                "production",
                 "--base-url",
                 APPROVED_TEST_BASE_URL,
                 "--json",
@@ -2155,6 +2217,42 @@ mod tests {
         assert!(!output.status.success());
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains("--confirm-app-id to exactly match APP_ID (merchant-lookup)"));
+        assert!(!stderr.contains(credential));
+        assert!(auth_server.finish().is_empty());
+        assert!(control_plane.finish().is_empty());
+    }
+
+    #[test]
+    fn bb_apps_delete_rejects_mismatched_environment_before_auth_or_network() {
+        let credential = "apps-e2e-only.delete-environment-mismatch.session+credential";
+        let auth_server = ProcessServer::start(vec![]);
+        let control_plane = ProcessServer::start(vec![]);
+        let mut command = process_command(
+            &auth_server,
+            &control_plane,
+            &[
+                "apps",
+                "delete",
+                "merchant-lookup",
+                "--confirm-app-id",
+                "merchant-lookup",
+                "--environment",
+                "staging",
+                "--confirm-environment",
+                "production",
+                "--base-url",
+                APPROVED_TEST_BASE_URL,
+                "--json",
+            ],
+            credential,
+        );
+
+        let output = command
+            .output()
+            .expect("run Apps delete with mismatched environment confirmation");
+        assert!(!output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("--confirm-environment to exactly match --environment (staging)"));
         assert!(!stderr.contains(credential));
         assert!(auth_server.finish().is_empty());
         assert!(control_plane.finish().is_empty());
@@ -2716,60 +2814,107 @@ mod tests {
     }
 
     #[test]
-    fn delete_supports_default_and_explicit_environment_requests() {
+    fn delete_sends_the_explicit_environment() {
         let server = Server::http("127.0.0.1:0").expect("bind control-plane server");
         let base_url = format!("http://{}", server.server_addr());
         let server_thread = thread::spawn(move || {
-            for expected_body in [json!({}), json!({"environment": "staging/west?cell=1"})] {
-                let mut request = server.recv().expect("receive delete request");
-                assert_eq!(request.method().as_str(), "DELETE");
-                assert_eq!(request.url(), "/v1/agent/apps/app%2Fwith%20space");
-                let mut body = String::new();
-                request
-                    .as_reader()
-                    .read_to_string(&mut body)
-                    .expect("read delete request body");
-                assert_eq!(
-                    serde_json::from_str::<Value>(&body).expect("parse delete request body"),
-                    expected_body
-                );
-                request
-                    .respond(
-                        Response::from_string(r#"{"ok":true}"#).with_header(
-                            Header::from_bytes("Content-Type", "application/json")
-                                .expect("build content type"),
-                        ),
-                    )
-                    .expect("respond to delete request");
-            }
+            let mut request = server.recv().expect("receive delete request");
+            assert_eq!(request.method().as_str(), "DELETE");
+            assert_eq!(request.url(), "/v1/agent/apps/app%2Fwith%20space");
+            let mut body = String::new();
+            request
+                .as_reader()
+                .read_to_string(&mut body)
+                .expect("read delete request body");
+            assert_eq!(
+                serde_json::from_str::<Value>(&body).expect("parse delete request body"),
+                json!({"environment": "staging/west?cell=1"})
+            );
+            request
+                .respond(
+                    Response::from_string(r#"{"ok":true}"#).with_header(
+                        Header::from_bytes("Content-Type", "application/json")
+                            .expect("build content type"),
+                    ),
+                )
+                .expect("respond to delete request");
         });
         let client = test_control_plane_client(&base_url, Duration::from_secs(2));
         let credential = test_credential("delete_session_credential_123456");
 
-        for request in [
-            DeleteAppRequest { environment: None },
-            DeleteAppRequest {
-                environment: Some("staging/west?cell=1"),
-            },
-        ] {
-            client
-                .delete_app(&credential, "app/with space", &request)
-                .expect("request delete response");
-        }
+        client
+            .delete_app(
+                &credential,
+                "app/with space",
+                &DeleteAppRequest {
+                    environment: "staging/west?cell=1",
+                },
+            )
+            .expect("request delete response");
 
         server_thread.join().expect("join control-plane server");
     }
 
     #[test]
-    fn delete_confirmation_requires_an_exact_match() {
-        validate_delete_confirmation("merchant-lookup", "merchant-lookup")
-            .expect("accept exact app id confirmation");
+    fn delete_confirmation_requires_exact_app_and_environment_matches() {
+        validate_delete_confirmation("merchant-lookup", "staging", "merchant-lookup", "staging")
+            .expect("accept exact delete target confirmation");
         for confirmation in ["different-app", "Merchant-Lookup", "merchant-lookup "] {
-            let error = validate_delete_confirmation("merchant-lookup", confirmation)
-                .expect_err("reject mismatched app id confirmation");
+            let error =
+                validate_delete_confirmation("merchant-lookup", "staging", confirmation, "staging")
+                    .expect_err("reject mismatched app id confirmation");
             assert!(error.to_string().contains("exactly match APP_ID"));
             assert!(!error.to_string().contains(confirmation));
         }
+        for confirmation in ["production", "Staging", "staging "] {
+            let error = validate_delete_confirmation(
+                "merchant-lookup",
+                "staging",
+                "merchant-lookup",
+                confirmation,
+            )
+            .expect_err("reject mismatched environment confirmation");
+            assert!(error.to_string().contains("exactly match --environment"));
+            assert!(!error.to_string().contains(confirmation));
+        }
+    }
+
+    #[test]
+    fn delete_reports_unknown_outcome_for_an_unreadable_success_response() {
+        let server = Server::http("127.0.0.1:0").expect("bind control-plane server");
+        let base_url = format!("http://{}", server.server_addr());
+        let server_thread = thread::spawn(move || {
+            let request = server.recv().expect("receive delete request");
+            assert_eq!(request.method().as_str(), "DELETE");
+            request
+                .respond(Response::from_string("not-json"))
+                .expect("respond with unreadable success body");
+        });
+        let client = test_control_plane_client(&base_url, Duration::from_secs(2));
+        let credential_value = "delete_unknown_session_credential_123456";
+        let credential = test_credential(credential_value);
+
+        let error = client
+            .delete_app(
+                &credential,
+                "merchant-lookup",
+                &DeleteAppRequest {
+                    environment: "staging",
+                },
+            )
+            .expect_err("reject unreadable delete success response");
+        let (exit_code, payload) = failure_info(&error);
+        assert_eq!(exit_code, exit_codes::NETWORK);
+        assert_eq!(payload["error"]["code"], "delete_outcome_unknown");
+        let message = payload["error"]["message"]
+            .as_str()
+            .expect("outcome error message");
+        assert!(message.contains("may have succeeded"));
+        assert!(message.contains("bb apps get <APP_ID> --environment <ENVIRONMENT>"));
+        assert!(message.contains("app.status"));
+        assert!(!message.contains(credential_value));
+
+        server_thread.join().expect("join control-plane server");
     }
 
     #[test]

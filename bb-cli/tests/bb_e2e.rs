@@ -3786,6 +3786,7 @@ fn bb_apps_delete_help_exposes_exact_confirmation_and_retention_behavior() {
         "<APP_ID>",
         "--confirm-app-id <APP_ID>",
         "--environment <ENVIRONMENT>",
+        "--confirm-environment <ENVIRONMENT>",
         "owner-only",
         "retained",
         "--base-url <URL>",
@@ -3814,6 +3815,32 @@ fn bb_apps_delete_requires_confirmation_before_auth_or_network() {
     assert!(!output.status.success());
     assert!(stdout.is_empty(), "stdout was: {stdout}");
     assert!(stderr.contains("--confirm-app-id <APP_ID>"));
+    assert!(stderr.contains("--environment <ENVIRONMENT>"));
+    assert!(stderr.contains("--confirm-environment <ENVIRONMENT>"));
+    assert!(stderr.contains("required"));
+}
+
+#[test]
+fn bb_apps_delete_requires_an_explicit_environment() {
+    let output = bb_command()
+        .args([
+            "apps",
+            "delete",
+            "merchant-lookup",
+            "--confirm-app-id",
+            "merchant-lookup",
+            "--confirm-environment",
+            "production",
+            "--base-url",
+            "https://compose-ctrl.test.blockstaging.build",
+        ])
+        .output()
+        .expect("run bb apps delete without environment");
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(!output.status.success());
+    assert!(stdout.is_empty(), "stdout was: {stdout}");
+    assert!(stderr.contains("--environment <ENVIRONMENT>"));
     assert!(stderr.contains("required"));
 }
 
