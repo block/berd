@@ -127,7 +127,7 @@ describe("useOpenAiVoiceSetup", () => {
     expect(result.current.error).toBe("Keychain unavailable");
   });
 
-  it("does not expose cached readiness while disabled", async () => {
+  it("does not reuse cached readiness after being disabled", async () => {
     mocks.listenerError = new Error("listener unavailable");
     mocks.getStatus.mockResolvedValue(status(true));
     const { result, rerender } = renderHook(
@@ -141,5 +141,16 @@ describe("useOpenAiVoiceSetup", () => {
     rerender({ enabled: false });
 
     expect(result.current).toEqual({ status: null, error: null });
+
+    const reloaded = deferred<OpenAiVoiceStatus>();
+    mocks.getStatus.mockReturnValueOnce(reloaded.promise);
+    rerender({ enabled: true });
+
+    expect(result.current).toEqual({ status: null, error: null });
+
+    reloaded.resolve(status(false));
+    await waitFor(() =>
+      expect(result.current.status?.ttsConfigured).toBe(false),
+    );
   });
 });

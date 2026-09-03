@@ -19,7 +19,11 @@ if (!HTMLElement.prototype.scrollIntoView) {
   HTMLElement.prototype.scrollIntoView = () => {};
 }
 
-vi.mock("@/shared/lib/platform", () => ({ getPlatform: () => "mac" }));
+const platformState = vi.hoisted(() => ({ current: "mac" }));
+
+vi.mock("@/shared/lib/platform", () => ({
+  getPlatform: () => platformState.current,
+}));
 
 const setupState = vi.hoisted(() => ({
   current: null as PocketVoiceSetup | null,
@@ -62,6 +66,7 @@ const microphonePermissionState = vi.hoisted(() => ({
 }));
 const openAiStatusState = vi.hoisted(() => ({
   enabled: null as boolean | null,
+  loaded: true,
   current: {
     sttConfigured: true,
     ttsConfigured: true,
@@ -95,7 +100,8 @@ vi.mock("../hooks/useOpenAiVoiceSetup", () => ({
   useOpenAiVoiceSetup: (enabled: boolean) => {
     openAiStatusState.enabled = enabled;
     return {
-      status: enabled ? openAiStatusState.current : null,
+      status:
+        enabled && openAiStatusState.loaded ? openAiStatusState.current : null,
       error: null,
     };
   },
@@ -221,6 +227,8 @@ describe("VoiceSettings", () => {
     microphonePermissionState.openSettings.mockReset();
     inputState.backend = "parakeet";
     outputState.backend = "pocket";
+    platformState.current = "mac";
+    openAiStatusState.loaded = true;
     macSpeechSetupState.current = {
       status: {
         supported: false,
@@ -280,6 +288,32 @@ describe("VoiceSettings", () => {
 
     expect(
       screen.getByRole("option", { name: "OpenAI text-to-speech" }),
+    ).toBeInTheDocument();
+  });
+
+  it("does not offer OpenAI voice playback on unsupported platforms", async () => {
+    platformState.current = "linux";
+    setupState.current = setup(pocketStatus());
+    renderWithProviders(<VoiceSettings />);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("combobox", { name: "Speech output" }));
+
+    expect(
+      screen.queryByRole("option", { name: "OpenAI text-to-speech" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("waits for OpenAI credential status before showing readiness guidance", () => {
+    outputState.backend = "openai";
+    openAiStatusState.loaded = false;
+    setupState.current = setup(pocketStatus({ parakeetInstalled: true }));
+
+    renderWithProviders(<VoiceSettings />);
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Checking OpenAI voice settings…"),
     ).toBeInTheDocument();
   });
 

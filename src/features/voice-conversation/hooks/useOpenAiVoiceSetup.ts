@@ -10,7 +10,11 @@ export function useOpenAiVoiceSetup(enabled = true) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      setStatus(null);
+      setError(null);
+      return;
+    }
     let active = true;
     let refreshGeneration = 0;
     let unsubscribe: (() => void) | null = null;

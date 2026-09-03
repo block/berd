@@ -143,22 +143,27 @@ export function VoiceSettings() {
   const pocketStatusLoaded =
     (input.backend !== "parakeet" && output.backend !== "pocket") ||
     setup.status !== null;
-  const readinessKey = !pocketStatusLoaded
-    ? null
-    : !inputReady && output.backend === "siri" && !siriOutputLoaded
-      ? input.backend === "macos"
-        ? "voice.notReadyMacInput"
-        : "voice.notReadyInput"
-      : output.backend === "siri" && !siriOutputLoaded
-        ? null
-        : input.backend === null
+  const openAiStatusLoaded =
+    (input.backend !== "openai" && output.backend !== "openai") ||
+    openAiStatus !== null ||
+    openAiError !== null;
+  const readinessKey =
+    !pocketStatusLoaded || !openAiStatusLoaded
+      ? null
+      : !inputReady && output.backend === "siri" && !siriOutputLoaded
+        ? input.backend === "macos"
+          ? "voice.notReadyMacInput"
+          : "voice.notReadyInput"
+        : output.backend === "siri" && !siriOutputLoaded
           ? null
-          : readinessDescriptionKey(
-              inputReady,
-              outputReady,
-              output.backend,
-              input.backend,
-            );
+          : input.backend === null
+            ? null
+            : readinessDescriptionKey(
+                inputReady,
+                outputReady,
+                output.backend,
+                input.backend,
+              );
 
   return (
     <SettingsPage
