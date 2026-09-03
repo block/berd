@@ -26,6 +26,7 @@ const MAX_TRANSCRIPT_DELIVERY_ATTEMPTS: u8 = 3;
 const VAD_THRESHOLD: f32 = 0.5;
 const INPUT_STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 
+#[cfg(any(test, target_os = "macos"))]
 pub(crate) fn output_latency_grace_elapsed(
     playback_drained: bool,
     guard_active: bool,
@@ -41,6 +42,7 @@ pub(crate) fn output_latency_grace_elapsed(
     now.saturating_duration_since(drained_at) >= output_latency_grace
 }
 
+#[cfg(any(test, target_os = "macos"))]
 pub(crate) fn output_latency_grace_remaining(
     guard_active: bool,
     playback_drained_at: Option<Instant>,

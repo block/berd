@@ -17,14 +17,13 @@ use serde_json::json;
 use tauri::{AppHandle, Emitter, State};
 
 #[cfg(target_os = "macos")]
-use super::{
-    native_voice::{
-        output_latency_grace_elapsed, output_latency_grace_remaining, AssistantSpeechGuard,
-    },
-    pocket_voice::{
-        effective_output_device_name, playback_latency_safety_duration,
-        resolve_input_during_tts_policy, selected_output_device,
-    },
+use super::native_voice::AssistantSpeechGuard;
+#[cfg(any(test, target_os = "macos"))]
+use super::native_voice::{output_latency_grace_elapsed, output_latency_grace_remaining};
+#[cfg(target_os = "macos")]
+use super::pocket_voice::{
+    effective_output_device_name, playback_latency_safety_duration,
+    resolve_input_during_tts_policy, selected_output_device,
 };
 use super::{
     native_voice::{InterruptionSensitivity, NativeVoiceState},

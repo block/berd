@@ -7,7 +7,7 @@ use std::fs;
 use std::os::raw::c_char;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-#[cfg(any(test, target_os = "macos"))]
+#[cfg(target_os = "macos")]
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 #[cfg(any(test, target_os = "macos"))]
@@ -18,10 +18,11 @@ use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 use tauri::{AppHandle, Manager};
 
-use super::native_voice::{
-    output_latency_grace_elapsed, output_latency_grace_remaining, AssistantSpeechGuard,
-    InterruptionSensitivity, NativeVoiceState,
-};
+#[cfg(target_os = "macos")]
+use super::native_voice::AssistantSpeechGuard;
+#[cfg(any(test, target_os = "macos"))]
+use super::native_voice::{output_latency_grace_elapsed, output_latency_grace_remaining};
+use super::native_voice::{InterruptionSensitivity, NativeVoiceState};
 use super::pocket_voice::VoiceInterruptionMode;
 #[cfg(target_os = "macos")]
 use super::pocket_voice::{
@@ -30,9 +31,12 @@ use super::pocket_voice::{
 };
 #[cfg(target_os = "macos")]
 use berd_voice::input::InputDuringTtsPolicy;
+#[cfg(target_os = "macos")]
 use berd_voice::siri::{
-    download_voice as download_managed_siri_voice, load_voice_catalog, validate_installed_voice,
-    SiriDownloadAvailabilityWait, SiriVoice, SiriVoiceIdentity,
+    download_voice as download_managed_siri_voice, SiriDownloadAvailabilityWait,
+};
+use berd_voice::siri::{
+    load_voice_catalog, validate_installed_voice, SiriVoice, SiriVoiceIdentity,
 };
 #[cfg(any(test, target_os = "macos"))]
 use berd_voice::DeliveryProgress as VoiceDeliveryProgress;
@@ -128,7 +132,7 @@ fn delivery_with_played_audio(delivery: VoiceDeliveryProgress) -> Option<VoiceDe
 
 #[cfg(target_os = "macos")]
 const SIRI_STREAM_EVENT: &str = "siri-voice:stream-event";
-#[cfg(target_os = "macos")]
+#[cfg(any(test, target_os = "macos"))]
 const SIRI_OUTPUT_DRAIN_MARGIN: Duration = Duration::from_secs(60);
 #[cfg(target_os = "macos")]
 const PLAYBACK_PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);

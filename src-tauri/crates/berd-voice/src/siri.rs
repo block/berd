@@ -1,5 +1,6 @@
 //! Safe Siri voice management and device-free sirittsd synthesis primitives.
 
+#[cfg(any(test, target_os = "macos"))]
 use std::collections::{BTreeSet, VecDeque};
 #[cfg(target_os = "macos")]
 use std::ffi::{c_char, c_void, CStr, CString};
@@ -188,6 +189,7 @@ impl fmt::Display for SiriVoiceDownloadError {
 
 impl std::error::Error for SiriVoiceDownloadError {}
 
+#[cfg(any(test, target_os = "macos"))]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RawSiriVoice {
@@ -244,6 +246,7 @@ pub fn normalize_language(value: &str) -> Result<String, String> {
     Ok(normalized.join("-"))
 }
 
+#[cfg(any(test, target_os = "macos"))]
 fn parse_catalog_json(json: &str) -> Result<Vec<SiriVoice>, String> {
     serde_json::from_str::<Vec<RawSiriVoice>>(json)
         .map_err(|error| format!("decode Siri voice catalog: {error}"))?
@@ -260,6 +263,7 @@ fn parse_catalog_json(json: &str) -> Result<Vec<SiriVoice>, String> {
         .collect()
 }
 
+#[cfg(any(test, target_os = "macos"))]
 fn parse_languages_json(json: &str) -> Result<Vec<String>, String> {
     let raw = serde_json::from_str::<Vec<String>>(json)
         .map_err(|error| format!("decode Siri voice languages: {error}"))?;

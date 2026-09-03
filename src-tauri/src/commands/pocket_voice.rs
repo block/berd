@@ -34,11 +34,12 @@ use rodio::DeviceTrait;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
+#[cfg(target_os = "macos")]
+use super::native_voice::AssistantSpeechGuard;
+#[cfg(any(test, target_os = "macos"))]
+use super::native_voice::{output_latency_grace_elapsed, output_latency_grace_remaining};
 use super::{
-    native_voice::{
-        output_latency_grace_elapsed, output_latency_grace_remaining, AssistantSpeechGuard,
-        InterruptionSensitivity, NativeVoiceState,
-    },
+    native_voice::{InterruptionSensitivity, NativeVoiceState},
     voice_capture::VoiceCaptureState,
 };
 #[cfg(target_os = "macos")]

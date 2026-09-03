@@ -41,7 +41,6 @@ pub mod openai_audio;
 pub mod openai_realtime;
 mod openai_voice_credentials;
 pub mod path_resolver;
-#[cfg(target_os = "macos")]
 pub mod pocket_voice;
 pub mod pr_tracker;
 pub mod project_icons;
