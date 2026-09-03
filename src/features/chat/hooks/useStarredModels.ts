@@ -2,8 +2,8 @@ import { useCallback, useSyncExternalStore } from "react";
 import {
   getStarredModelKeys,
   modelStarKey,
+  STARRED_MODELS_ENTRY_PREFIX,
   STARRED_MODELS_EVENT,
-  STARRED_MODELS_KEY,
   toggleModelStar,
 } from "../lib/starredModels";
 
@@ -28,7 +28,13 @@ function subscribe(callback: () => void): () => void {
     callback();
   };
   const handleStorage = (event: StorageEvent) => {
-    if (event.key === null || event.key === STARRED_MODELS_KEY) {
+    // Star entries live under per-key storage, so any entry write or removal
+    // in another window changes the set. `key === null` covers localStorage
+    // clears.
+    if (
+      event.key === null ||
+      event.key.startsWith(STARRED_MODELS_ENTRY_PREFIX)
+    ) {
       handleChange();
     }
   };

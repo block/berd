@@ -3,7 +3,11 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __resetStarredModelsCacheForTests } from "../../hooks/useStarredModels";
-import { modelStarKey, STARRED_MODELS_KEY } from "../../lib/starredModels";
+import {
+  LEGACY_STARRED_MODELS_STORAGE_KEY,
+  modelStarKey,
+  starredModelStorageKey,
+} from "../../lib/starredModels";
 import { AgentModelPicker } from "../AgentModelPicker";
 import {
   getModelRecencyMap,
@@ -1765,6 +1769,13 @@ describe("AgentModelPicker starred models", () => {
     { id: "another", name: "Another" },
   ];
 
+  const seedStar = (scopeId: string, modelId: string) => {
+    localStorage.setItem(
+      starredModelStorageKey(modelStarKey(scopeId, modelId)),
+      "1",
+    );
+  };
+
   it("shows star actions on the preferred shortlist", async () => {
     const user = userEvent.setup();
     render(
@@ -1794,10 +1805,7 @@ describe("AgentModelPicker starred models", () => {
   });
 
   it("always shows a non-recommended star above the preferred shortlist", async () => {
-    localStorage.setItem(
-      STARRED_MODELS_KEY,
-      JSON.stringify([modelStarKey("goose", "other")]),
-    );
+    seedStar("goose", "other");
     __resetStarredModelsCacheForTests();
     const user = userEvent.setup();
     render(
@@ -1863,10 +1871,7 @@ describe("AgentModelPicker starred models", () => {
   });
 
   it("renders star actions through the shared Button contract with a ≥3:1 idle treatment", async () => {
-    localStorage.setItem(
-      STARRED_MODELS_KEY,
-      JSON.stringify([modelStarKey("goose", "other")]),
-    );
+    seedStar("goose", "other");
     __resetStarredModelsCacheForTests();
     const user = userEvent.setup();
     render(
@@ -1903,5 +1908,95 @@ describe("AgentModelPicker starred models", () => {
     expect(starredToggle).toHaveAttribute("aria-pressed", "true");
     expect(starredToggle).toHaveClass("text-foreground/80");
     expect(starredToggle).not.toHaveClass("text-muted-foreground");
+  });
+
+  it("migrates the legacy aggregate entry into per-key entries", async () => {
+    localStorage.setItem(
+      LEGACY_STARRED_MODELS_STORAGE_KEY,
+      JSON.stringify([modelStarKey("goose", "other"), 42, null]),
+    );
+    __resetStarredModelsCacheForTests();
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="preferred"
+        currentModelName="Preferred"
+        availableModels={models}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+
+    expect(
+      document.querySelector(
+        `[data-model-key='${modelStarKey("goose", "other")}']`,
+      ),
+    ).toBeInTheDocument();
+    expect(localStorage.getItem(LEGACY_STARRED_MODELS_STORAGE_KEY)).toBeNull();
+    expect(
+      localStorage.getItem(
+        starredModelStorageKey(modelStarKey("goose", "other")),
+      ),
+    ).toBe("1");
+  });
+
+  it("stores each star as its own entry so one toggle cannot drop another", async () => {
+    seedStar("goose", "other");
+    __resetStarredModelsCacheForTests();
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="preferred"
+        currentModelName="Preferred"
+        availableModels={models}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    const picker = screen.getByRole("dialog");
+    await user.click(within(picker).getByRole("button", { name: "View more" }));
+    await user.click(
+      within(picker).getByRole("button", { name: "Star Another" }),
+    );
+
+    // Starring one model must leave every other star entry untouched; an
+    // aggregate rewrite from a stale snapshot would drop "other" here.
+    expect(
+      localStorage.getItem(
+        starredModelStorageKey(modelStarKey("goose", "other")),
+      ),
+    ).toBe("1");
+    expect(
+      localStorage.getItem(
+        starredModelStorageKey(modelStarKey("goose", "another")),
+      ),
+    ).toBe("1");
+
+    await user.click(
+      within(picker).getByRole("button", { name: "Unstar Other" }),
+    );
+
+    expect(
+      localStorage.getItem(
+        starredModelStorageKey(modelStarKey("goose", "other")),
+      ),
+    ).toBeNull();
+    expect(
+      localStorage.getItem(
+        starredModelStorageKey(modelStarKey("goose", "another")),
+      ),
+    ).toBe("1");
   });
 });
