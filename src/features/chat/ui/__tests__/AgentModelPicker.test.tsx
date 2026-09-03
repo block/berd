@@ -1861,4 +1861,47 @@ describe("AgentModelPicker starred models", () => {
     expect(onModelChange).not.toHaveBeenCalled();
     expect(screen.getByTestId("starred-models-divider")).toBeInTheDocument();
   });
+
+  it("renders star actions through the shared Button contract with a ≥3:1 idle treatment", async () => {
+    localStorage.setItem(
+      STARRED_MODELS_KEY,
+      JSON.stringify([modelStarKey("goose", "other")]),
+    );
+    __resetStarredModelsCacheForTests();
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="preferred"
+        currentModelName="Preferred"
+        availableModels={models}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    const picker = screen.getByRole("dialog");
+
+    // Unstarred rows idle on the ghost icon contract's muted-foreground; the
+    // pairing against the popover surface is enforced in globals.test.ts.
+    const idleStar = within(picker).getByRole("button", {
+      name: "Star Preferred",
+    });
+    expect(idleStar).toHaveAttribute("data-slot", "button");
+    expect(idleStar).toHaveAttribute("aria-pressed", "false");
+    expect(idleStar).toHaveClass("text-muted-foreground");
+    expect(idleStar).not.toHaveClass("text-foreground/80");
+
+    const starredToggle = within(picker).getByRole("button", {
+      name: "Unstar Other",
+    });
+    expect(starredToggle).toHaveAttribute("data-slot", "button");
+    expect(starredToggle).toHaveAttribute("aria-pressed", "true");
+    expect(starredToggle).toHaveClass("text-foreground/80");
+    expect(starredToggle).not.toHaveClass("text-muted-foreground");
+  });
 });

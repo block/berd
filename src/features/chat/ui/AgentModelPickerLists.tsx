@@ -485,22 +485,28 @@ export const RecommendedModelList = forwardRef<
                         <IconCheck className="size-4 shrink-0 text-muted-foreground" />
                       ) : null}
                     </PickerItem>
-                    <button
-                      type="button"
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      selected={starred}
                       onClick={() => toggleStar(scopeId, model.id)}
-                      className="flex size-7 shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      // Hover-reveal keeps rows calm; keyboard users still
+                      // reach the control through row focus
+                      // (group-focus-within) or direct focus. The idle
+                      // (unstarred) star rests on the ghost icon contract's
+                      // muted-foreground — ≈5.7:1 light / ≈6.1:1 dark against
+                      // the popover, above the 3:1 WCAG non-text bar
+                      // (enforced in globals.test.ts) — and favorited rows
+                      // soften to foreground/80 via the selected flag.
+                      className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
                       aria-label={t(
                         starred ? "toolbar.unstarModel" : "toolbar.starModel",
                         { model: getModelDisplayName(model) },
                       )}
                       aria-pressed={starred}
                     >
-                      {starred ? (
-                        <IconStarFilled className="size-4 shrink-0 text-foreground/80" />
-                      ) : (
-                        <IconStar className="size-4 shrink-0 text-muted-foreground" />
-                      )}
-                    </button>
+                      {starred ? <IconStarFilled /> : <IconStar />}
+                    </Button>
                   </div>
                   {showStarredDivider ? (
                     <Separator
