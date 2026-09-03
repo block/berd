@@ -174,11 +174,11 @@ describe("AgentWorkPanel", () => {
       container.querySelector('[data-active-agent-facepile=""]'),
     ).toHaveAccessibleName("Rivet is working");
 
-    const terminalContent = [
+    const failedWaitContent = [
       ...baseContent,
       {
         type: "toolRequest" as const,
-        id: "load-rivet",
+        id: "load-rivet-failed",
         name: "load",
         toolName: "load",
         arguments: { source: "20260902_72" },
@@ -186,7 +186,30 @@ describe("AgentWorkPanel", () => {
       },
       {
         type: "toolResponse" as const,
-        id: "load-rivet",
+        id: "load-rivet-failed",
+        name: "load",
+        result: "Unable to wait for task",
+        isError: true,
+      },
+    ];
+    rerender(<AgentWorkPanel payload={makePayload(failedWaitContent)} />);
+    expect(
+      container.querySelector('[data-active-agent-facepile=""]'),
+    ).toHaveAccessibleName("Rivet is working");
+
+    const terminalContent = [
+      ...failedWaitContent,
+      {
+        type: "toolRequest" as const,
+        id: "load-rivet-complete",
+        name: "load",
+        toolName: "load",
+        arguments: { source: "20260902_72" },
+        status: "completed" as const,
+      },
+      {
+        type: "toolResponse" as const,
+        id: "load-rivet-complete",
         name: "load",
         result: "Review complete",
         isError: false,

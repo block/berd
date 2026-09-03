@@ -272,7 +272,11 @@ function getActiveDelegatedAgentNames(
     }
 
     if (item.request.toolName === "load" && info.taskId) {
-      if (info.activity === "waiting" && item.response) {
+      if (
+        info.activity === "waiting" &&
+        item.response &&
+        !item.response.isError
+      ) {
         activeTaskAgents.delete(info.taskId);
       } else if (
         info.activity === "cancelling" &&
