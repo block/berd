@@ -3760,15 +3760,20 @@ mod tests {
     }
 
     #[test]
-    fn prepared_speech_outcome_uses_renderer_field_names() {
-        assert_eq!(
+    fn prepared_speech_outcomes_match_the_shared_renderer_contract() {
+        let expected: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/contracts/voice/prepare-assistant-speech-outcomes.json"
+        ))
+        .expect("parse shared prepared speech contract");
+        let actual = serde_json::json!([
+            serde_json::to_value(PrepareAssistantSpeechOutcome::Pending)
+                .expect("serialize pending outcome"),
+            serde_json::to_value(PrepareAssistantSpeechOutcome::NotAdmitted)
+                .expect("serialize not-admitted outcome"),
             serde_json::to_value(PrepareAssistantSpeechOutcome::Admitted { speech_id: 7 })
-                .expect("serialize admitted speech outcome"),
-            serde_json::json!({
-                "outcome": "admitted",
-                "speechId": 7,
-            }),
-        );
+                .expect("serialize admitted outcome"),
+        ]);
+        assert_eq!(actual, expected);
     }
 
     #[test]

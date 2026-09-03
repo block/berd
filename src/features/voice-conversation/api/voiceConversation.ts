@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { z } from "zod";
 import { getRendererInstance } from "@/shared/lib/rendererInstance";
 import {
   startNativeMicrophone,
@@ -493,10 +494,23 @@ export interface VoiceTranscriptReference {
   revision: number;
 }
 
-export type PrepareAssistantSpeechOutcome =
-  | { outcome: "pending" }
-  | { outcome: "notAdmitted" }
-  | { outcome: "admitted"; speechId: number };
+export const prepareAssistantSpeechOutcomeSchema = z.discriminatedUnion(
+  "outcome",
+  [
+    z.object({ outcome: z.literal("pending") }).strict(),
+    z.object({ outcome: z.literal("notAdmitted") }).strict(),
+    z
+      .object({
+        outcome: z.literal("admitted"),
+        speechId: z.number().int().nonnegative(),
+      })
+      .strict(),
+  ],
+);
+
+export type PrepareAssistantSpeechOutcome = z.infer<
+  typeof prepareAssistantSpeechOutcomeSchema
+>;
 
 export async function prepareVoiceConversationAssistantSpeech(
   sessionId: string,
@@ -505,7 +519,7 @@ export async function prepareVoiceConversationAssistantSpeech(
   acknowledgement: VoiceTranscriptReference | null,
 ): Promise<PrepareAssistantSpeechOutcome> {
   const { rendererId, rendererEpoch } = await getRendererInstance();
-  return invoke<PrepareAssistantSpeechOutcome>(
+  const outcome = await invoke<unknown>(
     "prepare_native_voice_assistant_speech",
     {
       request: {
@@ -518,6 +532,7 @@ export async function prepareVoiceConversationAssistantSpeech(
       },
     },
   );
+  return prepareAssistantSpeechOutcomeSchema.parse(outcome);
 }
 
 export async function cancelVoiceConversationAssistantSpeech(

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import preparedSpeechOutcomes from "../../../../tests/contracts/voice/prepare-assistant-speech-outcomes.json";
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -37,6 +38,7 @@ import {
   getVoiceConversationStatus,
   listenToVoiceConversation,
   openVoiceConversationSession,
+  prepareAssistantSpeechOutcomeSchema,
   prepareVoiceConversationAssistantSpeech,
   cancelVoiceConversationAssistantSpeech,
   reconcileVoiceConversationMicrophone,
@@ -67,6 +69,21 @@ describe("voice conversation API", () => {
     });
     mocks.setMicrophoneMuted.mockReset();
     mocks.stopMicrophone.mockReset();
+  });
+
+  it("shares the real prepared-speech wire contract and rejects drift", async () => {
+    const outcomes = prepareAssistantSpeechOutcomeSchema
+      .array()
+      .parse(preparedSpeechOutcomes);
+    expect(outcomes).toEqual(preparedSpeechOutcomes);
+
+    mocks.invoke.mockResolvedValueOnce({
+      outcome: "admitted",
+      speech_id: 7,
+    });
+    await expect(
+      prepareVoiceConversationAssistantSpeech("session-1", 1, "hello", null),
+    ).rejects.toThrow();
   });
 
   it("prepares and cancels assistant speech through the active renderer", async () => {
