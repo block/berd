@@ -316,6 +316,31 @@ export function resolveAssistantCancellation(
 }
 
 /**
+ * Sending a message to an archived chat restores it: the archive flag clears
+ * locally and on the backend before any prompt preparation or dispatch, so
+ * the conversation moves back to the active list instead of replying while
+ * hidden. Best-effort: a failed restore logs a warning and the send proceeds;
+ * the backend still surfaces its own error if the archived session cannot
+ * accept the prompt.
+ */
+async function restoreArchivedSessionBeforeSend(
+  sessionId: string,
+): Promise<void> {
+  const sessionStore = useChatSessionStore.getState();
+  if (!sessionStore.getSession(sessionId)?.archivedAt) {
+    return;
+  }
+  try {
+    await sessionStore.unarchiveSession(sessionId);
+  } catch (error) {
+    console.warn(
+      `[send] failed to restore archived session ${sessionId}`,
+      error,
+    );
+  }
+}
+
+/**
  * Foreground send core: commits the user message, drives the
  * thinking-to-streaming-to-idle chat-state transitions, patches the session
  * title, and dispatches the prompt over ACP.
@@ -442,6 +467,7 @@ export async function dispatchPrompt(
     // local transcript state so a retained queued record can retry without
     // duplicating the user turn.
     throwIfAborted(signal);
+    await restoreArchivedSessionBeforeSend(sessionId);
     await prepare?.();
     throwIfAborted(signal);
 

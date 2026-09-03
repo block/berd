@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
+import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import type { SessionChatRuntime } from "@/shared/types/chat";
 import { QueuedMessageOwnershipLostError } from "./preCommitSendRejection";
 import { dispatchPrompt } from "./sendCore";
@@ -10,11 +11,20 @@ import { setVoiceConversationMode } from "@/features/voice-conversation/lib/voic
 const mocks = vi.hoisted(() => ({
   acpExportSession: vi.fn(),
   acpSendMessage: vi.fn(),
+  unarchiveSession: vi.fn(),
 }));
 
 vi.mock("@/shared/api/acp", () => ({
   acpExportSession: (...args: unknown[]) => mocks.acpExportSession(...args),
   acpSendMessage: (...args: unknown[]) => mocks.acpSendMessage(...args),
+}));
+
+vi.mock("@/shared/api/acpApi", () => ({
+  archiveSession: vi.fn().mockResolvedValue(undefined),
+  unarchiveSession: (...args: unknown[]) => mocks.unarchiveSession(...args),
+  renameSession: vi.fn().mockResolvedValue(undefined),
+  updateSessionProject: vi.fn().mockResolvedValue(undefined),
+  updateWorkingDir: vi.fn().mockResolvedValue(undefined),
 }));
 
 describe("dispatchPrompt pre-commit rejection", () => {
@@ -632,5 +642,86 @@ describe("dispatchPrompt realtime Master transcript recovery", () => {
       },
     ]);
     release();
+  });
+});
+
+describe("dispatchPrompt archived session restore", () => {
+  const ARCHIVED_AT = "2026-04-02T00:00:00.000Z";
+
+  function seedSession(overrides: Partial<ChatSession> = {}): ChatSession {
+    const session: ChatSession = {
+      id: "session-1",
+      title: "Test Session",
+      createdAt: "2026-04-01T00:00:00.000Z",
+      updatedAt: "2026-04-01T00:00:00.000Z",
+      messageCount: 1,
+      ...overrides,
+    };
+    useChatSessionStore.setState((state) => ({
+      sessions: [
+        session,
+        ...state.sessions.filter((candidate) => candidate.id !== session.id),
+      ],
+    }));
+    return session;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.acpSendMessage.mockResolvedValue(undefined);
+    mocks.unarchiveSession.mockResolvedValue(undefined);
+    useChatSessionStore.setState({
+      sessions: [],
+      activeSessionId: null,
+      activeWorkspaceBySession: {},
+      archiveMutationBySessionId: {},
+    });
+  });
+
+  it("restores an archived session before dispatching the prompt", async () => {
+    seedSession({ archivedAt: ARCHIVED_AT });
+
+    await dispatchPrompt("session-1", "hello again", {});
+
+    expect(mocks.unarchiveSession).toHaveBeenCalledTimes(1);
+    expect(mocks.unarchiveSession).toHaveBeenCalledWith("session-1");
+    expect(
+      useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+    ).toBeUndefined();
+    expect(mocks.acpSendMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.unarchiveSession.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.acpSendMessage.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("leaves active sessions untouched", async () => {
+    seedSession();
+
+    await dispatchPrompt("session-1", "hello", {});
+
+    expect(mocks.unarchiveSession).not.toHaveBeenCalled();
+    expect(mocks.acpSendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("still dispatches when the restore fails", async () => {
+    seedSession({ archivedAt: ARCHIVED_AT });
+    mocks.unarchiveSession.mockRejectedValue(new Error("backend down"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      await dispatchPrompt("session-1", "hello again", {});
+      expect(mocks.acpSendMessage).toHaveBeenCalledTimes(1);
+      // The store rolls the optimistic unarchive back when the backend call
+      // fails.
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+      ).toBe(ARCHIVED_AT);
+      expect(warn).toHaveBeenCalledWith(
+        "[send] failed to restore archived session session-1",
+        expect.any(Error),
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
