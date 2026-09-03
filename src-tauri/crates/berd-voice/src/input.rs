@@ -1,4 +1,4 @@
-//! Berd v2 voice-input runtime.
+//! Host-independent voice-input runtime.
 //!
 //! Hosts provide exact normalized PCM frames and own capture devices and final
 //! transcript delivery. This module owns recognition, VAD, mute/reset epochs,
@@ -576,8 +576,8 @@ async fn finish_worker(
 }
 
 fn reap_dropped_worker(worker: thread::JoinHandle<()>) {
-    // Preserve the pre-existing best-effort Drop behavior. Explicit bounded
-    // finish uses the typed quarantine path above instead.
+    // Drop must not block on a native recognizer. Explicit shutdown uses the
+    // bounded quarantine path above when the caller needs a completion result.
     let _ = thread::Builder::new()
         .name("berd-voice-input-reaper".to_string())
         .spawn(move || {
@@ -1624,10 +1624,7 @@ fn record_openai_event(
 ) -> Option<OpenAiCommittedTurn> {
     match event {
         OpenAiRealtimeTranscriptionEvent::Committed { item_id } => {
-            let pending = pending_commits.pop_front().unwrap_or(OpenAiPendingCommit {
-                mute_epoch: current_epoch,
-                settle_deadline: Instant::now() + OPENAI_LIVE_RESULT_TIMEOUT,
-            });
+            let pending = pending_commits.pop_front()?;
             let turn = OpenAiCommittedTurn {
                 item_id,
                 mute_epoch: pending.mute_epoch,
@@ -3122,6 +3119,24 @@ mod tests {
 
         assert_eq!(turn.mute_epoch, 1);
         assert_eq!(turn.settle_deadline, deadline);
+        assert!(committed.is_empty());
+    }
+
+    #[test]
+    fn openai_unmatched_commits_are_not_assigned_to_the_current_epoch() {
+        let mut committed = VecDeque::new();
+
+        let turn = record_openai_event(
+            OpenAiRealtimeTranscriptionEvent::Committed {
+                item_id: "unmatched".to_string(),
+            },
+            2,
+            &mut VecDeque::new(),
+            &mut committed,
+            &mut HashMap::new(),
+        );
+
+        assert!(turn.is_none());
         assert!(committed.is_empty());
     }
 

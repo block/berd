@@ -34,10 +34,11 @@ use rodio::DeviceTrait;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-#[cfg(target_os = "macos")]
-use super::native_voice::AssistantSpeechGuard;
 use super::{
-    native_voice::{InterruptionSensitivity, NativeVoiceState},
+    native_voice::{
+        output_latency_grace_elapsed, output_latency_grace_remaining, AssistantSpeechGuard,
+        InterruptionSensitivity, NativeVoiceState,
+    },
     voice_capture::VoiceCaptureState,
 };
 #[cfg(target_os = "macos")]
@@ -2003,7 +2004,7 @@ fn run_pocket_voice_stream(
                     player.completed_source_frames(),
                     playback_rate,
                 );
-                let post_drain = pocket_assistant_speech_grace_remaining(
+                let post_drain = output_latency_grace_remaining(
                     assistant_speech.is_some(),
                     playback_drained_at,
                     output_latency_grace,
@@ -2092,7 +2093,7 @@ fn update_pocket_assistant_speech(
     output_latency_grace: Duration,
     now: Instant,
 ) {
-    if pocket_assistant_speech_grace_elapsed(
+    if output_latency_grace_elapsed(
         playback_drained,
         assistant_speech.is_some(),
         playback_drained_at,
@@ -2101,37 +2102,6 @@ fn update_pocket_assistant_speech(
     ) {
         assistant_speech.take();
     }
-}
-
-#[cfg(any(test, target_os = "macos"))]
-fn pocket_assistant_speech_grace_elapsed(
-    playback_drained: bool,
-    guard_active: bool,
-    playback_drained_at: &mut Option<Instant>,
-    output_latency_grace: Duration,
-    now: Instant,
-) -> bool {
-    if !guard_active || !playback_drained {
-        *playback_drained_at = None;
-        return false;
-    }
-    let drained_at = *playback_drained_at.get_or_insert(now);
-    now.saturating_duration_since(drained_at) >= output_latency_grace
-}
-
-#[cfg(any(test, target_os = "macos"))]
-fn pocket_assistant_speech_grace_remaining(
-    guard_active: bool,
-    playback_drained_at: Option<Instant>,
-    output_latency_grace: Duration,
-    now: Instant,
-) -> Duration {
-    if !guard_active {
-        return Duration::ZERO;
-    }
-    playback_drained_at.map_or(output_latency_grace, |drained_at| {
-        output_latency_grace.saturating_sub(now.saturating_duration_since(drained_at))
-    })
 }
 
 #[cfg(any(test, target_os = "macos"))]
@@ -2748,7 +2718,7 @@ mod tests {
         let grace = Duration::from_millis(500);
         let mut drained_at = None;
 
-        assert!(!pocket_assistant_speech_grace_elapsed(
+        assert!(!output_latency_grace_elapsed(
             true,
             true,
             &mut drained_at,
@@ -2758,21 +2728,21 @@ mod tests {
         reset_pocket_drain_grace(&mut drained_at);
         assert_eq!(drained_at, None);
 
-        assert!(!pocket_assistant_speech_grace_elapsed(
+        assert!(!output_latency_grace_elapsed(
             true,
             true,
             &mut drained_at,
             grace,
             started + Duration::from_millis(600),
         ));
-        assert!(!pocket_assistant_speech_grace_elapsed(
+        assert!(!output_latency_grace_elapsed(
             true,
             true,
             &mut drained_at,
             grace,
             started + Duration::from_millis(900),
         ));
-        assert!(pocket_assistant_speech_grace_elapsed(
+        assert!(output_latency_grace_elapsed(
             true,
             true,
             &mut drained_at,
@@ -2780,7 +2750,7 @@ mod tests {
             started + Duration::from_millis(1_100),
         ));
 
-        assert!(!pocket_assistant_speech_grace_elapsed(
+        assert!(!output_latency_grace_elapsed(
             true,
             false,
             &mut drained_at,
@@ -2796,7 +2766,7 @@ mod tests {
         let grace = Duration::from_millis(100);
         let mut drained_at = None;
 
-        assert!(!pocket_assistant_speech_grace_elapsed(
+        assert!(!output_latency_grace_elapsed(
             false,
             true,
             &mut drained_at,
@@ -2804,14 +2774,14 @@ mod tests {
             started + Duration::from_secs(10),
         ));
         assert_eq!(drained_at, None);
-        assert!(!pocket_assistant_speech_grace_elapsed(
+        assert!(!output_latency_grace_elapsed(
             true,
             true,
             &mut drained_at,
             grace,
             started + Duration::from_secs(10),
         ));
-        assert!(pocket_assistant_speech_grace_elapsed(
+        assert!(output_latency_grace_elapsed(
             true,
             true,
             &mut drained_at,
@@ -2857,11 +2827,11 @@ mod tests {
         let route_grace = Duration::from_millis(500);
 
         assert_eq!(
-            pocket_assistant_speech_grace_remaining(true, None, route_grace, timed_out_at,),
+            output_latency_grace_remaining(true, None, route_grace, timed_out_at,),
             route_grace
         );
         assert_eq!(
-            pocket_assistant_speech_grace_remaining(
+            output_latency_grace_remaining(
                 true,
                 Some(timed_out_at - Duration::from_millis(200)),
                 route_grace,
@@ -2870,7 +2840,7 @@ mod tests {
             Duration::from_millis(300)
         );
         assert_eq!(
-            pocket_assistant_speech_grace_remaining(
+            output_latency_grace_remaining(
                 true,
                 Some(timed_out_at - route_grace),
                 route_grace,
@@ -2879,7 +2849,7 @@ mod tests {
             Duration::ZERO
         );
         assert_eq!(
-            pocket_assistant_speech_grace_remaining(false, None, route_grace, timed_out_at,),
+            output_latency_grace_remaining(false, None, route_grace, timed_out_at,),
             Duration::ZERO
         );
     }

@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
@@ -19,6 +19,8 @@ pub enum OpenAiPcmOutcome {
     Completed,
     Cancelled,
 }
+
+const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Streams OpenAI's 24 kHz mono PCM response as unit-scale `f32` frames.
 ///
@@ -72,6 +74,7 @@ where
 
     let mut stream = response.bytes_stream();
     let mut remainder = Vec::new();
+    let mut last_data = Instant::now();
     loop {
         if !active.load(Ordering::SeqCst) {
             return Ok(OpenAiPcmOutcome::Cancelled);
@@ -79,12 +82,16 @@ where
         let item = match tokio::time::timeout(Duration::from_millis(50), stream.next()).await {
             Ok(item) => item,
             Err(_) => {
+                if last_data.elapsed() >= STREAM_IDLE_TIMEOUT {
+                    return Err("OpenAI speech audio stream timed out".to_string());
+                }
                 on_frames(&[])?;
                 continue;
             }
         };
         let Some(item) = item else { break };
         let item = item.map_err(|error| format_request_error("stream speech audio", error))?;
+        last_data = Instant::now();
         remainder.extend_from_slice(&item);
         let sample_bytes = remainder.len() / 2 * 2;
         if sample_bytes != 0 {

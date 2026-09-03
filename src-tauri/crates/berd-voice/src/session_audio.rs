@@ -299,6 +299,9 @@ impl RemotePcmAudioOutput {
             if state.phase != Phase::Streaming {
                 return Err("remote PCM output cannot end before streaming is ready".into());
             }
+            if state.total_frames == 0 {
+                return Err("remote PCM output produced no audio frames".into());
+            }
             state.phase = Phase::Ended;
             state.ended_sequence = Some(state.next_sequence - 1);
             (state.next_sequence - 1, state.total_frames)
@@ -1525,6 +1528,21 @@ mod tests {
             .handle_ack(AudioHostAck::ChunkAccepted { sequence: 1 })
             .unwrap();
         worker.join().unwrap().unwrap();
+    }
+
+    #[test]
+    fn empty_output_fails_before_emitting_audio_end() {
+        let (output, mut host) = fixture();
+        start(&output, &mut host);
+
+        assert_eq!(
+            output.finish_writes().unwrap_err(),
+            "remote PCM output produced no audio frames"
+        );
+        host.set_read_timeout(Some(Duration::from_millis(20)))
+            .unwrap();
+        let mut byte = [0];
+        assert!(host.read(&mut byte).is_err());
     }
 
     #[test]

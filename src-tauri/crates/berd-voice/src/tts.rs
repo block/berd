@@ -135,7 +135,6 @@ impl OpenAiTts {
     pub fn new(config: OpenAiSpeechConfig) -> Result<Self, String> {
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(15))
-            .timeout(Duration::from_secs(120))
             .build()
             .map_err(|error| error.to_string())?;
         Ok(Self { client, config })

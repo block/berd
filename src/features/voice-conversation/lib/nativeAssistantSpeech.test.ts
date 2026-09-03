@@ -308,6 +308,33 @@ describe("native assistant speech stream", () => {
     });
   });
 
+  it("waits for speakable text before requesting admission", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [assistant([{ type: "text", text: "   " }])]);
+
+    await new Promise((resolve) => window.setTimeout(resolve, 10));
+    expect(mocks.prepareAssistantSpeech).not.toHaveBeenCalled();
+    expect(mocks.start).not.toHaveBeenCalled();
+
+    useChatStore
+      .getState()
+      .appendStreamingText("session-1", "assistant-1", "Hello.");
+    await vi.waitFor(() =>
+      expect(mocks.prepareAssistantSpeech).toHaveBeenCalledWith(
+        "session-1",
+        1,
+        "   Hello.",
+        null,
+      ),
+    );
+    expect(mocks.append).toHaveBeenCalledWith(
+      mocks.start.mock.calls[0]?.[0],
+      "Hello.",
+    );
+  });
+
   it("prepares playback with the assistant response's exact causal transcript", async () => {
     finalizeVoiceTranscript("voice-k1");
     startNativeAssistantSpeech("session-1", vi.fn());
@@ -3010,7 +3037,7 @@ describe("native assistant speech stream", () => {
     );
   });
 
-  it("hydrates causal ownership from an existing voice transcript", async () => {
+  it("does not reuse a transcript reference from a prior voice lifecycle", async () => {
     useChatStore.getState().setMessages("session-1", [voiceUser("voice-k1")]);
     startNativeAssistantSpeech("session-1", vi.fn());
     useChatStore
@@ -3024,15 +3051,12 @@ describe("native assistant speech stream", () => {
         ),
       ]);
 
-    await vi.waitFor(() =>
-      expect(mocks.append).toHaveBeenCalledWith(
-        mocks.start.mock.calls[0]?.[0],
-        "Recovered-turn reply.",
-      ),
-    );
+    await new Promise((resolve) => window.setTimeout(resolve, 10));
+    expect(mocks.prepareAssistantSpeech).not.toHaveBeenCalled();
+    expect(mocks.append).not.toHaveBeenCalled();
     expect(
       useVoiceConversationStore.getState().latestFinalizedTranscriptKey,
-    ).toBe(["session-1", "lifecycle-1", "1", "voice-k1"].join("\0"));
+    ).toBeNull();
   });
 
   it("plays each completed reply held during user speech in its own stream", async () => {

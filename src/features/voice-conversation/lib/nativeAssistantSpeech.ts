@@ -1045,16 +1045,6 @@ export function startNativeAssistantSpeech(
       textOrdinal += 1;
     }
   }
-  if (
-    initialVoice.latestFinalizedTranscriptKey === null &&
-    precedingTranscriptKey !== null &&
-    precedingTranscriptKey !== MALFORMED_VOICE_TRANSCRIPT_KEY
-  ) {
-    useVoiceConversationStore.setState({
-      latestFinalizedTranscriptKey: precedingTranscriptKey,
-    });
-  }
-
   let heldSpeech: HeldSpeech | null = null;
   let resumableInterruption: ResumableInterruption | null = null;
   let heldReleaseReady = false;
@@ -1596,7 +1586,8 @@ export function startNativeAssistantSpeech(
 
         if (
           invalidatedMessages.has(message.id) ||
-          causalTranscriptKey !== finalizedTranscriptKey
+          (causalTranscriptKey !== null &&
+            causalTranscriptKey !== finalizedTranscriptKey)
         ) {
           suppressTarget(slot, target, content.text);
           continue;
@@ -1629,6 +1620,7 @@ export function startNativeAssistantSpeech(
             targetEnd: targetStart + delta.length,
           });
         }
+        if (utterance.text.trim().length === 0) continue;
         queueNativeStart(utterance);
         queueStreamCommand(
           utterance,

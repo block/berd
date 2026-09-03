@@ -6,7 +6,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use serde::{Deserialize, Serialize};
@@ -24,6 +24,36 @@ pub(crate) const EVENT_NAME: &str = "voice-conversation:event";
 const MAX_PENDING_TRANSCRIPTS: usize = 64;
 const MAX_TRANSCRIPT_DELIVERY_ATTEMPTS: u8 = 3;
 const VAD_THRESHOLD: f32 = 0.5;
+const INPUT_STARTUP_TIMEOUT: Duration = Duration::from_secs(12);
+
+pub(crate) fn output_latency_grace_elapsed(
+    playback_drained: bool,
+    guard_active: bool,
+    playback_drained_at: &mut Option<Instant>,
+    output_latency_grace: Duration,
+    now: Instant,
+) -> bool {
+    if !guard_active || !playback_drained {
+        *playback_drained_at = None;
+        return false;
+    }
+    let drained_at = *playback_drained_at.get_or_insert(now);
+    now.saturating_duration_since(drained_at) >= output_latency_grace
+}
+
+pub(crate) fn output_latency_grace_remaining(
+    guard_active: bool,
+    playback_drained_at: Option<Instant>,
+    output_latency_grace: Duration,
+    now: Instant,
+) -> Duration {
+    if !guard_active {
+        return Duration::ZERO;
+    }
+    playback_drained_at.map_or(output_latency_grace, |drained_at| {
+        output_latency_grace.saturating_sub(now.saturating_duration_since(drained_at))
+    })
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "kebab-case")]
@@ -1388,7 +1418,7 @@ pub async fn start_native_voice_conversation(
         );
     }
     let openai_api_key = if input_backend == VoiceInputBackend::Openai {
-        Some(super::openai_audio::api_key()?)
+        Some(super::openai_audio::stt_api_key()?)
     } else {
         None
     };
@@ -1470,7 +1500,6 @@ pub async fn start_native_voice_conversation(
             speech_vad_threshold: VAD_THRESHOLD,
             controls: state.input_controls.clone(),
         });
-    drop(parakeet_assets);
     let (pipeline, mut events) = match pipeline {
         Ok(result) => result,
         Err(error) => {
@@ -1480,6 +1509,21 @@ pub async fn start_native_voice_conversation(
             return Err(error);
         }
     };
+    let readiness = match tokio::time::timeout(INPUT_STARTUP_TIMEOUT, events.recv()).await {
+        Ok(Some(berd_voice::input::VoiceInputEvent::Ready)) => Ok(()),
+        Ok(Some(berd_voice::input::VoiceInputEvent::Failed(error))) => Err(error),
+        Ok(Some(_)) => Err("Voice input emitted activity before it was ready.".to_string()),
+        Ok(None) => Err("Voice input stopped before it was ready.".to_string()),
+        Err(_) => Err("Voice input did not become ready within 12 seconds.".to_string()),
+    };
+    if let Err(error) = readiness {
+        let error = state.finish_uninstalled_pipeline(pipeline, error).await;
+        if microphone_claimed {
+            capture.release_microphone(&window_label, &renderer_id, renderer_epoch, &owner_id);
+        }
+        return Err(error);
+    }
+    drop(parakeet_assets);
     let input_controls = pipeline.controls();
     if let Err(error) = validate_voice_target_session(
         capture.inner(),
@@ -1652,7 +1696,9 @@ pub async fn start_native_voice_conversation(
                 break;
             }
             match event {
-                berd_voice::input::VoiceInputEvent::Ready => {}
+                berd_voice::input::VoiceInputEvent::Ready => {
+                    log::warn!("Voice input emitted duplicate readiness");
+                }
                 berd_voice::input::VoiceInputEvent::SpeakingChanged(speaking) => {
                     admission.set_user_speaking(speaking);
                     let event = NativeVoiceEvent::Activity {
@@ -1902,8 +1948,7 @@ pub async fn stop_native_voice_conversation_for_replacement(
     Ok(status(&app, &state).await)
 }
 
-#[cfg(test)]
-fn replacement_caller_matches_target(
+fn caller_owns_target(
     caller_window_label: &str,
     target_owner: Option<&str>,
     owns_foreground_session: bool,
@@ -1924,16 +1969,22 @@ fn validate_voice_target_session(
     renderer_id: &str,
     renderer_epoch: u64,
     target_session_id: &str,
-    _foreground_generation: Option<u64>,
+    foreground_generation: Option<u64>,
 ) -> Result<(), String> {
-    capture.activate_renderer(webview_window.label(), renderer_id, renderer_epoch)?;
     let target_owner = window_sessions.label_for(target_session_id);
-    let caller_owns_target = match target_owner.as_deref() {
-        Some(owner_window_label) => owner_window_label == webview_window.label(),
-        None => webview_window.label() == "main",
-    };
-    if !caller_owns_target {
-        return Err("The target session belongs to a different Berd window.".to_string());
+    let owns_foreground_session = capture.foreground_session_matches_generation(
+        webview_window.label(),
+        renderer_id,
+        renderer_epoch,
+        target_session_id,
+        foreground_generation,
+    )?;
+    if !caller_owns_target(
+        webview_window.label(),
+        target_owner.as_deref(),
+        owns_foreground_session,
+    ) {
+        return Err("The target session is no longer in the foreground.".to_string());
     }
     Ok(())
 }
@@ -2019,6 +2070,20 @@ impl NativeVoiceState {
         capture: &VoiceCaptureState,
     ) -> Result<(), String> {
         self.stop_active_inner(app, capture, None).await.map(|_| ())
+    }
+
+    pub(crate) async fn stop_active_then<T, F>(
+        &self,
+        app: &AppHandle,
+        capture: &VoiceCaptureState,
+        action: F,
+    ) -> Result<T, String>
+    where
+        F: FnOnce() -> Result<T, String>,
+    {
+        let _stop_guard = self.stop_serial.lock().await;
+        self.stop_active_inner_locked(app, capture, None).await?;
+        action()
     }
 
     pub async fn stop_active_for_lifecycle(
@@ -3125,24 +3190,24 @@ mod tests {
 
     #[test]
     fn replacement_stop_requires_the_target_session_window() {
-        assert!(replacement_caller_matches_target("main", None, true));
-        assert!(!replacement_caller_matches_target("main", None, false));
-        assert!(!replacement_caller_matches_target(
+        assert!(caller_owns_target("main", None, true));
+        assert!(!caller_owns_target("main", None, false));
+        assert!(!caller_owns_target(
             "main",
             Some("session:target"),
             true,
         ));
-        assert!(replacement_caller_matches_target(
+        assert!(caller_owns_target(
             "session:target",
             Some("session:target"),
             true,
         ));
-        assert!(!replacement_caller_matches_target(
+        assert!(!caller_owns_target(
             "session:other",
             Some("session:target"),
             true,
         ));
-        assert!(!replacement_caller_matches_target(
+        assert!(!caller_owns_target(
             "voice-buddy",
             None,
             true,

@@ -18,9 +18,10 @@ use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 use tauri::{AppHandle, Manager};
 
-#[cfg(target_os = "macos")]
-use super::native_voice::AssistantSpeechGuard;
-use super::native_voice::{InterruptionSensitivity, NativeVoiceState};
+use super::native_voice::{
+    output_latency_grace_elapsed, output_latency_grace_remaining, AssistantSpeechGuard,
+    InterruptionSensitivity, NativeVoiceState,
+};
 use super::pocket_voice::VoiceInterruptionMode;
 #[cfg(target_os = "macos")]
 use super::pocket_voice::{
@@ -611,7 +612,7 @@ fn update_siri_assistant_speech(
     output_latency_grace: Duration,
     now: Instant,
 ) {
-    if siri_assistant_speech_grace_elapsed(
+    if output_latency_grace_elapsed(
         playback_drained,
         assistant_speech.is_some(),
         playback_drained_at,
@@ -620,37 +621,6 @@ fn update_siri_assistant_speech(
     ) {
         assistant_speech.take();
     }
-}
-
-#[cfg(any(test, target_os = "macos"))]
-fn siri_assistant_speech_grace_elapsed(
-    playback_drained: bool,
-    guard_active: bool,
-    playback_drained_at: &mut Option<Instant>,
-    output_latency_grace: Duration,
-    now: Instant,
-) -> bool {
-    if !playback_drained || !guard_active {
-        *playback_drained_at = None;
-        return false;
-    }
-    let drained_at = *playback_drained_at.get_or_insert(now);
-    now.saturating_duration_since(drained_at) >= output_latency_grace
-}
-
-#[cfg(any(test, target_os = "macos"))]
-fn siri_assistant_speech_grace_remaining(
-    guard_active: bool,
-    playback_drained_at: Option<Instant>,
-    output_latency_grace: Duration,
-    now: Instant,
-) -> Duration {
-    if !guard_active {
-        return Duration::ZERO;
-    }
-    playback_drained_at.map_or(output_latency_grace, |drained_at| {
-        output_latency_grace.saturating_sub(now.saturating_duration_since(drained_at))
-    })
 }
 
 #[cfg(any(test, target_os = "macos"))]
@@ -790,7 +760,7 @@ fn run_siri_stream(
                     .iter()
                     .map(|segment| segment.total_frames)
                     .sum();
-                let post_drain = siri_assistant_speech_grace_remaining(
+                let post_drain = output_latency_grace_remaining(
                     assistant_speech.is_some(),
                     playback_drained_at,
                     output_latency_grace,
@@ -1445,11 +1415,11 @@ mod tests {
         let now = Instant::now();
         let grace = Duration::from_millis(500);
         assert_eq!(
-            siri_assistant_speech_grace_remaining(true, None, grace, now),
+            output_latency_grace_remaining(true, None, grace, now),
             grace
         );
         assert_eq!(
-            siri_assistant_speech_grace_remaining(
+            output_latency_grace_remaining(
                 true,
                 Some(now - Duration::from_millis(200)),
                 grace,
@@ -1458,12 +1428,12 @@ mod tests {
             Duration::from_millis(300)
         );
         assert_eq!(
-            siri_assistant_speech_grace_remaining(false, None, grace, now),
+            output_latency_grace_remaining(false, None, grace, now),
             Duration::ZERO
         );
 
         let mut drained_at = None;
-        assert!(!siri_assistant_speech_grace_elapsed(
+        assert!(!output_latency_grace_elapsed(
             false,
             true,
             &mut drained_at,

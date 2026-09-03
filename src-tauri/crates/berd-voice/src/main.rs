@@ -2308,14 +2308,14 @@ fn tts_benchmark_target(
     openai_endpoint_from_environment: bool,
 ) -> TtsBenchmarkTarget {
     match config {
-        TtsBackendConfig::OpenAi { .. } => TtsBenchmarkTarget {
+        TtsBackendConfig::OpenAi { rate, .. } => TtsBenchmarkTarget {
             backend: "openai".into(),
             model: Some(
                 std::env::var("OPENAI_TTS_MODEL").unwrap_or_else(|_| "gpt-4o-mini-tts".into()),
             ),
             voice: Some(std::env::var("OPENAI_TTS_VOICE").unwrap_or_else(|_| "marin".into())),
             language: None,
-            rate: Some(1.0),
+            rate: Some(*rate),
             endpoint_source: Some(
                 if openai_endpoint_from_environment {
                     "OPENAI_BASE_URL_environment"
@@ -5508,13 +5508,10 @@ mod tests {
     }
 
     #[test]
-    fn openai_tts_target_reports_only_endpoint_source() {
-        assert_eq!(
-            tts_benchmark_target(&TtsBackendConfig::OpenAi { rate: 1.0 }, false)
-                .endpoint_source
-                .as_deref(),
-            Some("built_in_default")
-        );
+    fn openai_tts_target_reports_rate_and_endpoint_source() {
+        let target = tts_benchmark_target(&TtsBackendConfig::OpenAi { rate: 1.75 }, false);
+        assert_eq!(target.rate, Some(1.75));
+        assert_eq!(target.endpoint_source.as_deref(), Some("built_in_default"));
         assert_eq!(
             tts_benchmark_target(&TtsBackendConfig::OpenAi { rate: 1.0 }, true)
                 .endpoint_source
