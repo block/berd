@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CausalMessage<T> {
     pub token: u64,
     pub payload: T,
