@@ -79,10 +79,10 @@ describe("Tauri Cargo target isolation", () => {
         : join(home, ".cache/berd-tauri/cargo-target"),
     );
     expect(justfile).toMatch(
-      /_bundle-unix:[\s\S]*resolve-tauri-cargo-target-dir\.sh bundle/,
+      /^_bundle-unix:\n(?:(?: {4}.*)?\n)* {4}TAURI_CARGO_TARGET_DIR=.*resolve-tauri-cargo-target-dir\.sh bundle/m,
     );
     expect(justfile).toMatch(
-      /_bundle-debug-unix:[\s\S]*resolve-tauri-cargo-target-dir\.sh bundle/,
+      /^_bundle-debug-unix:\n(?:(?: {4}.*)?\n)* {4}TAURI_CARGO_TARGET_DIR=.*resolve-tauri-cargo-target-dir\.sh bundle/m,
     );
   });
 });
