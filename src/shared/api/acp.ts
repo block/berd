@@ -33,6 +33,7 @@ import { resolveManagedGooseProviderSelection } from "@/shared/runtime-config/mo
 import { getStyleGuidelinesPrompt } from "@/shared/preferences/styleGuidelinesPreference";
 import { getBerdctlPreamble } from "@/features/berdctl/appPreamble";
 import { INTERACTION_NORMS_PREAMBLE } from "@/shared/api/interactionNorms";
+import { getMePreamble } from "@/features/me/lib/mePreamble";
 import { perfLog } from "@/shared/lib/perfLog";
 import {
   applySessionConfigOptionsSnapshot,
@@ -189,6 +190,7 @@ async function acpSendMessageNow(
   // in-band on the first prompt under that agent instead. See acpPersonaHandoff.
   const isGooseManaged = !providerId || isGooseManagedProvider(providerId);
   const berdctlPreamble = await getBerdctlPreamble();
+  const mePreamble = isGooseManaged ? null : await getMePreamble();
   let personaHandoffClaim: PersonaHandoffClaim | null = null;
   if (isGooseManaged) {
     await appendBerdStyleGuidelinesPrompt(
@@ -216,9 +218,16 @@ async function acpSendMessageNow(
       systemPrompt?.trim() ? systemPrompt : "",
     );
   } else {
-    const appPreamble = [INTERACTION_NORMS_PREAMBLE, berdctlPreamble]
-      .filter((part): part is string => Boolean(part?.trim()))
-      .join("\n\n");
+    const appPreamble =
+      [
+        INTERACTION_NORMS_PREAMBLE,
+        berdctlPreamble,
+        // External harnesses do not inherit Goose's global hints, so hand the
+        // memory preamble off in-band for them.
+        mePreamble,
+      ]
+        .filter((part): part is string => Boolean(part?.trim()))
+        .join("\n\n") || null;
     personaHandoffClaim = preparePersonaHandoff(
       sessionId,
       providerId,
