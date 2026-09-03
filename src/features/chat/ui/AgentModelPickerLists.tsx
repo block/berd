@@ -246,7 +246,7 @@ export const RecommendedModelList = forwardRef<
         modelMatchesSelection(model, currentModelId, currentModelProviderId),
       );
       if (current) {
-        return [current, ...shortlist];
+        return [...starred, current, ...shortlist];
       }
     }
     const unstarredFallback = models.filter(
