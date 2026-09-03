@@ -440,6 +440,7 @@ try {
     Assert-Equal "Windows externalBin stages goosed" ($windowsExternalBin -contains "binaries/goosed") $true
     Assert-Equal "Windows externalBin stages berdctl" ($windowsExternalBin -contains "binaries/berdctl") $true
     Assert-Equal "Windows externalBin stages berd-monitor" ($windowsExternalBin -contains "binaries/berd-monitor") $true
+    Assert-Equal "Windows externalBin stages berd-memory-mcp" ($windowsExternalBin -contains "binaries/berd-memory-mcp") $true
     Assert-Equal "Windows externalBin excludes catch" ($windowsExternalBin -contains "binaries/catch") $false
 
     # Tauri merges platform overlays into the base config with json_patch (RFC
@@ -456,6 +457,10 @@ try {
     Assert-Equal "merged Windows externalBin stages goosed" ($mergedExternalBin -contains "binaries/goosed") $true
     Assert-Equal "merged Windows externalBin stages berdctl" ($mergedExternalBin -contains "binaries/berdctl") $true
     Assert-Equal "merged Windows externalBin stages berd-monitor" ($mergedExternalBin -contains "binaries/berd-monitor") $true
+    # The memory MCP server resolves beside the app when BERD_MEMORY_MCP_BIN is
+    # unset, so an overlay missing it means Windows users get no memory tools
+    # even though staging ran.
+    Assert-Equal "merged Windows externalBin stages berd-memory-mcp" ($mergedExternalBin -contains "binaries/berd-memory-mcp") $true
     Assert-Equal "merged Windows externalBin drops catch" ($mergedExternalBin -contains "binaries/catch") $false
 
     # ── Windows bundle recipes route through native staging ──────

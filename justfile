@@ -358,6 +358,7 @@ _bundle-unix:
     fi
     GOOSE_BUILD_PROFILE=release ./scripts/prepare-goose-sidecar.sh
     VITE_FEEDBACK="${VITE_FEEDBACK:-0}" CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-berdctl-sidecar.sh
+    CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-memory-sidecar.sh
     ./scripts/prepare-catch-sidecar.sh
 
     CARGO_FEATURES_CSV="$(./scripts/block-feature-gates.sh berdctl)"
@@ -437,6 +438,7 @@ _bundle-debug-unix:
     fi
     GOOSE_BUILD_PROFILE=debug ./scripts/prepare-goose-sidecar.sh
     VITE_FEEDBACK="${VITE_FEEDBACK:-0}" CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-berdctl-sidecar.sh
+    CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-memory-sidecar.sh
     ./scripts/prepare-catch-sidecar.sh
 
     CARGO_FEATURES_CSV="$(./scripts/block-feature-gates.sh berdctl,devtools)"
@@ -523,6 +525,12 @@ dev:
     export BERD_MONITOR_BIN="${CARGO_TARGET_DIR}/debug/berd-monitor"
     echo "Using berdctl CLI: ${BERDCTL_BIN}"
     echo "Using berd-monitor CLI: ${BERD_MONITOR_BIN}"
+
+    # Same story for the memory MCP server: workspace member, resolved at
+    # runtime via BERD_MEMORY_MCP_BIN in dev builds.
+    (cd src-tauri && cargo build -p berd-memory)
+    export BERD_MEMORY_MCP_BIN="${CARGO_TARGET_DIR}/debug/berd-memory-mcp"
+    echo "Using memory MCP server: ${BERD_MEMORY_MCP_BIN}"
 
     if [[ "${VITE_AGENT_TOOLS:-0}" == "1" ]]; then
         ./scripts/prepare-bb-cli-resource.sh
@@ -638,7 +646,7 @@ stage-sidecar:
 
 [unix]
 _stage-sidecar-unix:
-    TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)" && GOOSE_BUILD_PROFILE=debug ./scripts/prepare-goose-sidecar.sh && CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-berdctl-sidecar.sh && ./scripts/prepare-catch-sidecar.sh
+    TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)" && GOOSE_BUILD_PROFILE=debug ./scripts/prepare-goose-sidecar.sh && CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-berdctl-sidecar.sh && CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-memory-sidecar.sh && ./scripts/prepare-catch-sidecar.sh
 
 [windows]
 _stage-sidecar-windows:
