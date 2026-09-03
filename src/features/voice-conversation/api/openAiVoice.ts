@@ -56,11 +56,17 @@ export function listenToOpenAiVoiceSettings(
 }
 
 export function startOpenAiVoiceStream(
+  sessionId: string,
+  expectedRevision: number,
+  speechId: number,
   streamId: string,
   interruptionMode: VoiceInterruptionMode,
   interruptionSensitivity: VoiceInterruptionSensitivity,
-): Promise<void> {
-  return invoke("start_openai_voice_stream", {
+): Promise<boolean> {
+  return invoke<boolean>("start_openai_voice_stream", {
+    sessionId,
+    expectedRevision,
+    speechId,
     streamId,
     interruptionMode,
     interruptionSensitivity,

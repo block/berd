@@ -2,21 +2,28 @@
 
 use std::collections::VecDeque;
 use std::fs;
-use std::io::Read;
 #[cfg(target_os = "macos")]
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_os = "macos")]
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
+use berd_voice::input::InputDuringTtsPolicy;
+use berd_voice::local_assets::{self, LocalAssetRoots, LocalInstallPhase};
+#[cfg(any(test, target_os = "macos"))]
+use berd_voice::DeliveryProgress as VoiceDeliveryProgress;
 #[cfg(target_os = "macos")]
 use berd_voice::SAMPLE_RATE;
 #[cfg(target_os = "macos")]
-use berd_voice::{load_text_to_speech, load_voice_style, PocketTts, VoiceStyle};
-use futures_util::StreamExt;
+use berd_voice::{
+    load_pocket_voice_style, load_text_to_speech, ConfiguredTtsSlot, DrainPolicy,
+    DrainTimeoutOutcome, OutboundFailure, OutboundOutcome, OutboundPlayback, TtsBackend,
+    TtsConfiguration,
+};
+use berd_voice::{parakeet_assets, pocket_assets};
 #[cfg(target_os = "macos")]
 use objc2_core_audio::{
     kAudioDevicePropertyScopeOutput, kAudioDevicePropertyStreams, kAudioDeviceTransportTypeBuiltIn,
@@ -27,29 +34,25 @@ use objc2_core_audio::{
 #[cfg(target_os = "macos")]
 use rodio::DeviceTrait;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 #[cfg(target_os = "macos")]
 use super::native_voice::AssistantSpeechGuard;
-#[cfg(target_os = "macos")]
-use super::pocket_audio_player::PocketAudioPlayer;
+#[cfg(any(test, target_os = "macos"))]
+use super::native_voice::{output_latency_grace_elapsed, output_latency_grace_remaining};
 use super::{
     native_voice::{InterruptionSensitivity, NativeVoiceState},
     voice_capture::VoiceCaptureState,
 };
-use tokio::io::AsyncWriteExt;
+#[cfg(target_os = "macos")]
+use berd_voice::PocketAudioPlayer;
 
-const CACHE_VERSION: &str = "native-voice-v2";
-const VERIFIED_MARKER: &str = ".verified";
+const CACHE_VERSION: &str = pocket_assets::MODEL_ID;
 const POCKET_EVENT: &str = "pocket-voice:event";
 #[cfg(target_os = "macos")]
 const POCKET_STREAM_EVENT: &str = "pocket-voice:stream-event";
 const DEFAULT_VOICE: &str = "mary";
 const DOWNLOAD_PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
-const DOWNLOAD_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
-const DOWNLOAD_READ_TIMEOUT: Duration = Duration::from_secs(30);
-const DOWNLOAD_TOTAL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 #[cfg(target_os = "macos")]
 const STREAMING_EMIT_FRAMES: usize = 12;
 #[cfg(target_os = "macos")]
@@ -64,8 +67,6 @@ const AIRPLAY_PLAYBACK_LATENCY_SAFETY_DURATION: Duration = Duration::from_secs(2
 const UNKNOWN_PLAYBACK_LATENCY_SAFETY_DURATION: Duration = Duration::from_secs(2);
 #[cfg(any(test, target_os = "macos"))]
 const POCKET_SOURCE_COMPLETION_TIMEOUT: Duration = Duration::from_secs(2);
-#[cfg(any(test, target_os = "macos"))]
-const MIN_POCKET_PLAYBACK_SPEED: f32 = 0.75;
 
 #[cfg(target_os = "macos")]
 fn playback_latency_safety_duration_for_transport(transport: Option<u32>) -> Duration {
@@ -100,86 +101,14 @@ pub(crate) fn playback_latency_safety_duration(output_device: Option<&str>) -> D
         device_id.and_then(|id| get_device_transport_type(id).ok()),
     )
 }
-const PARAKEET_ARCHIVE: Artifact = Artifact {
-    filename: "parakeet.tar.bz2",
-    size: 104_337_827,
-    sha256: "17f945007b52ccd8b7200ffc7c5652e9e8e961dfdf479cefcabd06cf5703630b",
-    url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet_tdt_ctc_110m-en-36000-int8.tar.bz2",
-};
-const PARAKEET_ARCHIVE_DIR: &str = "sherpa-onnx-nemo-parakeet_tdt_ctc_110m-en-36000-int8";
-const PARAKEET_MODEL_SIZE: u64 = 131_652_171;
-const PARAKEET_MODEL_SHA256: &str =
-    "9177a9146cf32ee0cc8152276ef95116f312018d316be37ccf57f7efea81fc1a";
-const PARAKEET_TOKENS_SIZE: u64 = 9_953;
-const PARAKEET_TOKENS_SHA256: &str =
-    "450e56bd2f036fe5b6aa821865838cc5aa9d8b0106134ce9a9ba0664abe6cd10";
-const PARAKEET_LICENSE: &str = "\
-NVIDIA Parakeet TDT-CTC 110M (English)
-© NVIDIA Corporation.
-
-Licensed under the Creative Commons Attribution 4.0 International License:
-https://creativecommons.org/licenses/by/4.0/
-
-Original model: https://huggingface.co/nvidia/parakeet-tdt_ctc-110m
-ONNX conversion: https://github.com/k2-fsa/sherpa-onnx
-";
-
-#[derive(Clone, Copy)]
-struct Artifact {
-    filename: &'static str,
-    size: u64,
-    sha256: &'static str,
-    url: &'static str,
-}
-
-struct DownloadSpec<'a> {
-    url: &'a str,
-    destination: &'a Path,
-    expected_size: u64,
-    expected_sha256: &'a str,
-}
-
-const MODEL_ARTIFACTS: &[Artifact] = &[
-    Artifact { filename: "bundle.json", size: 24_381, sha256: "bab643150f437f37df080a710520ff39ed9ebd9a339f8ebdc739f7eddfc28b3f", url: "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/58a6d00cf13d239b6748cb0769f35c580a8f606c/onnx/english_2026-04/bundle.json" },
-    Artifact { filename: "bos_before_voice.npy", size: 4_224, sha256: "f46edf4f7007b7ba4ea58831f49d003e59e167b4641c44bb3addfe9231a780b1", url: "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/58a6d00cf13d239b6748cb0769f35c580a8f606c/onnx/english_2026-04/bos_before_voice.npy" },
-    Artifact { filename: "tokenizer.model", size: 59_339, sha256: "d461765ae179566678c93091c5fa6f2984c31bbe990bf1aa62d92c64d91bc3f6", url: "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/58a6d00cf13d239b6748cb0769f35c580a8f606c/onnx/english_2026-04/tokenizer.model" },
-    Artifact { filename: "flow_lm_main_int8.onnx", size: 76_341_079, sha256: "f9bd8106b79a0192c1c43399ab938fb24900a95c1c599870d75a884e99000116", url: "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/58a6d00cf13d239b6748cb0769f35c580a8f606c/onnx/english_2026-04/flow_lm_main_int8.onnx" },
-    Artifact { filename: "flow_lm_flow_int8.onnx", size: 9_962_530, sha256: "3dd781ee5abee9e195320bf0106bebd6372a852b3b36352524ee78b40554635d", url: "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/58a6d00cf13d239b6748cb0769f35c580a8f606c/onnx/english_2026-04/flow_lm_flow_int8.onnx" },
-    Artifact { filename: "mimi_decoder_int8.onnx", size: 22_684_077, sha256: "3630450a3297a101792a6ac66619ebc70ab916b265e6220c2afaef8b1673f925", url: "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/58a6d00cf13d239b6748cb0769f35c580a8f606c/onnx/english_2026-04/mimi_decoder_int8.onnx" },
-    Artifact { filename: "mimi_encoder.onnx", size: 39_768_446, sha256: "853e2ca623b8782d94c3745ec6133bfdff7ce33d9b11128bd29ea03f28d76e3d", url: "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/58a6d00cf13d239b6748cb0769f35c580a8f606c/onnx/english_2026-04/mimi_encoder.onnx" },
-    Artifact { filename: "text_conditioner.onnx", size: 16_388_344, sha256: "4ecee995fb69f85c7a7493d11f7b5ee15d9950facc7ab3f5c9c49ef1e03847bb", url: "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/58a6d00cf13d239b6748cb0769f35c580a8f606c/onnx/english_2026-04/text_conditioner.onnx" },
-    Artifact { filename: "LICENSE", size: 18_655, sha256: "fe7b4ce83b8381cc5b216bbb4af73c570688d1b819c73bbaed8ca401f4677cd6", url: "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/58a6d00cf13d239b6748cb0769f35c580a8f606c/onnx/LICENSE" },
-];
+type PocketVoice = pocket_assets::PocketVoiceDescriptor;
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct PocketVoice {
+struct PocketVoiceOption {
     id: &'static str,
     name: &'static str,
-    #[serde(skip_serializing)]
-    filename: &'static str,
-    #[serde(skip_serializing)]
-    size_bytes: u64,
-    #[serde(skip_serializing)]
-    sha256: &'static str,
-    #[serde(skip_serializing)]
-    url: &'static str,
 }
-
-const VOICES: &[PocketVoice] = &[
-    PocketVoice { id: "anna", name: "Anna", filename: "anna.wav", size_bytes: 804_630, sha256: "0a6de25cf12bf1540beb85979f306a92be81fecc051c547c5395e7e5237a3856", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p228_023_enhanced.wav" },
-    PocketVoice { id: "vera", name: "Vera", filename: "vera.wav", size_bytes: 691_416, sha256: "309cf91a895830f15842b398f69a4962cb1f7e0bfab10e25dd27838e826c204b", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p229_023_enhanced.wav" },
-    PocketVoice { id: "fantine", name: "Fantine", filename: "fantine.wav", size_bytes: 674_852, sha256: "5f07d4e2a3f20a15572aae885156b43ef3fc12ef3812996fd135680d9956448b", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p244_023_enhanced.wav" },
-    PocketVoice { id: "charles", name: "Charles", filename: "charles.wav", size_bytes: 639_272, sha256: "6b681a429198f16e378d53bccb08d06939da7b00144a7696111d4f8f76be7756", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p254_023_enhanced.wav" },
-    PocketVoice { id: "paul", name: "Paul", filename: "paul.wav", size_bytes: 717_182, sha256: "7aba504fe0b3b16478b69eb27ce6007e3cb42b0c1915b5f1c6a6024ae37d679b", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p259_023_enhanced.wav" },
-    PocketVoice { id: "eponine", name: "Eponine", filename: "eponine.wav", size_bytes: 716_330, sha256: "a13c27fb47627b05223691a0ef2974358a18c886e6c2f9d2762ff1d02c20926b", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p262_023_enhanced.wav" },
-    PocketVoice { id: "azelma", name: "Azelma", filename: "azelma.wav", size_bytes: 823_852, sha256: "60e3d26cdf2efdec5df712152c839928f4d5522821e6554ae11fd96c57ab1026", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p303_023_enhanced.wav" },
-    PocketVoice { id: "george", name: "George", filename: "george.wav", size_bytes: 642_692, sha256: "29a41f93bf5236e5b21501091d7774c255d5f3d4e62fa4f9fdf0a92a793c84ae", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p315_023_enhanced.wav" },
-    PocketVoice { id: "mary", name: "Mary", filename: "mary.wav", size_bytes: 639_084, sha256: "a35b0468382218e9f37a9a7494d1e4b74deaf18d7ced22265b4e325bb55c183f", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p333_023_enhanced.wav" },
-    PocketVoice { id: "jane", name: "Jane", filename: "jane.wav", size_bytes: 759_340, sha256: "2f12e7f155eb3118f55425394f1b049e5b1b67bdc9b3932c8ba4521420aeb84a", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p339_023_enhanced.wav" },
-    PocketVoice { id: "michael", name: "Michael", filename: "michael.wav", size_bytes: 751_140, sha256: "b6743e9195e5e3fd34fe9d1633ae93f7ffab787b249e45f6467d7d6f7a6ee6ad", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p360_023_enhanced.wav" },
-    PocketVoice { id: "eve", name: "Eve", filename: "eve.wav", size_bytes: 671_872, sha256: "396e7cbd066b0f3fb6d67fa26e7904076958239d736d4390f15b5fe88feb14cd", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p361_023_enhanced.wav" },
-];
 
 #[derive(Clone, Debug, Default)]
 pub struct PocketVoiceState {
@@ -191,14 +120,13 @@ pub struct PocketVoiceState {
 #[derive(Debug, Default)]
 struct PlaybackRuntime {
     active: Option<Arc<AtomicBool>>,
-    playback_rate: Option<Arc<AtomicU32>>,
     #[cfg(target_os = "macos")]
     stream: Option<ActivePocketStream>,
 }
 
 struct PlaybackSession {
     active: Arc<AtomicBool>,
-    playback_rate: Arc<AtomicU32>,
+    playback_rate: f32,
 }
 
 #[cfg(target_os = "macos")]
@@ -236,87 +164,6 @@ struct PocketStreamEvent {
     state: PocketStreamEventState,
     error: Option<String>,
     delivery: Option<VoiceDeliveryProgress>,
-}
-
-#[cfg(any(test, target_os = "macos"))]
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct VoiceDeliverySegment {
-    text: String,
-    played_frames: u64,
-    total_frames: u64,
-    synthesis_complete: bool,
-}
-
-#[cfg(any(test, target_os = "macos"))]
-#[derive(Clone, Debug, Serialize)]
-struct VoiceDeliveryProgress {
-    #[serde(rename = "sampleRate")]
-    sample_rate: u32,
-    segments: Vec<VoiceDeliverySegment>,
-}
-
-#[cfg(any(test, target_os = "macos"))]
-#[derive(Debug, Default)]
-struct PlaybackDeliveryLedger {
-    segments: Vec<(String, u64, bool)>,
-}
-
-#[cfg(any(test, target_os = "macos"))]
-impl PlaybackDeliveryLedger {
-    fn begin_segment(&mut self, text: String) {
-        self.segments.push((text, 0, false));
-    }
-
-    fn append_frames(&mut self, frames: usize) {
-        let frames = frames as u64;
-        if frames == 0 {
-            return;
-        }
-        if let Some((_, total, synthesis_complete)) = self.segments.last_mut() {
-            if !*synthesis_complete {
-                *total = total.saturating_add(frames);
-            }
-        }
-    }
-
-    fn complete_segment(&mut self, final_total_frames: u64) {
-        if let Some((_, total, synthesis_complete)) = self.segments.last_mut() {
-            *total = (*total).max(final_total_frames);
-            *synthesis_complete = true;
-        }
-    }
-
-    fn total_frames(&self) -> u64 {
-        self.segments
-            .iter()
-            .map(|(_, total_frames, _)| *total_frames)
-            .sum()
-    }
-
-    fn snapshot_consumed_frames(&self, consumed_frames: u64) -> VoiceDeliveryProgress {
-        let mut segment_start = 0_u64;
-        let segments = self
-            .segments
-            .iter()
-            .map(|(text, total_frames, synthesis_complete)| {
-                let played_frames = consumed_frames
-                    .saturating_sub(segment_start)
-                    .min(*total_frames);
-                segment_start = segment_start.saturating_add(*total_frames);
-                VoiceDeliverySegment {
-                    text: text.clone(),
-                    played_frames,
-                    total_frames: *total_frames,
-                    synthesis_complete: *synthesis_complete,
-                }
-            })
-            .collect();
-        VoiceDeliveryProgress {
-            sample_rate: berd_voice::SAMPLE_RATE,
-            segments,
-        }
-    }
 }
 
 #[cfg(target_os = "macos")]
@@ -429,7 +276,7 @@ pub struct PocketVoiceStatus {
     error: Option<String>,
     selected_voice: String,
     playback_speed: f32,
-    voices: &'static [PocketVoice],
+    voices: Vec<PocketVoiceOption>,
 }
 
 fn default_playback_speed() -> f32 {
@@ -447,32 +294,32 @@ fn settings(base: &Path) -> PocketSettings {
 }
 
 fn pocket_download_bytes() -> u64 {
-    MODEL_ARTIFACTS.iter().map(|item| item.size).sum::<u64>()
-        + VOICES.iter().map(|item| item.size_bytes).sum::<u64>()
+    pocket_assets::download_bytes()
 }
 
 fn parakeet_download_bytes() -> u64 {
-    PARAKEET_ARCHIVE.size
+    parakeet_assets::download_bytes()
 }
 
+#[cfg(test)]
 fn pocket_published_bytes() -> u64 {
     pocket_download_bytes()
 }
 
 #[cfg(test)]
 fn parakeet_published_bytes() -> u64 {
-    PARAKEET_MODEL_SIZE + PARAKEET_TOKENS_SIZE + PARAKEET_LICENSE.len() as u64
+    parakeet_assets::published_bytes()
 }
 
 fn pocket_disk_bytes(base: &Path) -> Option<u64> {
     let version = base.join(CACHE_VERSION);
-    MODEL_ARTIFACTS
+    pocket_assets::model_artifacts()
         .iter()
-        .map(|item| version.join(item.filename))
+        .map(|item| version.join(item.relative_path))
         .chain(
-            VOICES
+            pocket_assets::voices()
                 .iter()
-                .map(|voice| version.join("voices").join(voice.filename)),
+                .map(|voice| version.join(voice.relative_path)),
         )
         .try_fold(0_u64, |total, path| {
             total.checked_add(fs::metadata(path).ok()?.len())
@@ -481,20 +328,12 @@ fn pocket_disk_bytes(base: &Path) -> Option<u64> {
 
 fn parakeet_disk_bytes(base: &Path) -> Option<u64> {
     let stt = base.join(CACHE_VERSION).join("stt");
-    [
-        stt.join("model.int8.onnx"),
-        stt.join("tokens.txt"),
-        stt.join("MODEL_LICENSE.txt"),
-    ]
-    .into_iter()
-    .try_fold(0_u64, |total, path| {
-        total.checked_add(fs::metadata(path).ok()?.len())
-    })
-}
-
-#[cfg(test)]
-fn total_bytes() -> u64 {
-    pocket_download_bytes() + parakeet_download_bytes()
+    parakeet_assets::published_assets()
+        .iter()
+        .map(|asset| stt.join(asset.relative_path))
+        .try_fold(0_u64, |total, path| {
+            total.checked_add(fs::metadata(path).ok()?.len())
+        })
 }
 
 fn cache_base(app: &AppHandle) -> Result<PathBuf, String> {
@@ -504,9 +343,18 @@ fn cache_base(app: &AppHandle) -> Result<PathBuf, String> {
         .map_err(|error| format!("resolve Pocket TTS data directory: {error}"))
 }
 
+fn local_asset_roots(base: &Path) -> Result<LocalAssetRoots, String> {
+    LocalAssetRoots::new(
+        base,
+        base.join(CACHE_VERSION),
+        base.join(CACHE_VERSION).join("stt"),
+    )
+    .map_err(|error| error.to_string())
+}
+
 fn selected_voice(base: &Path) -> String {
     Some(settings(base).selected_voice)
-        .filter(|id| VOICES.iter().any(|voice| voice.id == id))
+        .filter(|id| pocket_assets::voices().iter().any(|voice| voice.id == id))
         .unwrap_or_else(|| DEFAULT_VOICE.to_string())
 }
 
@@ -654,21 +502,21 @@ pub(crate) enum VoiceInterruptionMode {
 }
 
 #[cfg_attr(not(any(test, target_os = "macos")), allow(dead_code))]
-pub(crate) fn should_suppress_capture(
+pub(crate) fn resolve_input_during_tts_policy(
     mode: VoiceInterruptionMode,
     output_device: Option<&str>,
-) -> bool {
+) -> InputDuringTtsPolicy {
     match mode {
         // Automatic is best-effort because macOS cannot classify every external route.
         // Prevent feedback remains the reliable fallback when this heuristic misses one.
-        VoiceInterruptionMode::Automatic => output_device_uses_speakers(output_device),
-        VoiceInterruptionMode::AllowInterruptions => false,
-        VoiceInterruptionMode::PreventFeedback => true,
+        VoiceInterruptionMode::Automatic if output_device_uses_speakers(output_device) => {
+            InputDuringTtsPolicy::SuppressInput
+        }
+        VoiceInterruptionMode::Automatic | VoiceInterruptionMode::AllowInterruptions => {
+            InputDuringTtsPolicy::AllowBargeIn
+        }
+        VoiceInterruptionMode::PreventFeedback => InputDuringTtsPolicy::SuppressInput,
     }
-}
-
-fn file_has_size(path: &Path, size: u64) -> bool {
-    fs::metadata(path).is_ok_and(|metadata| metadata.len() == size)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -714,21 +562,10 @@ fn pocket_installation_valid(base: &Path) -> bool {
         pocket_installation_fingerprint(base),
         &POCKET_INSTALLATION_VALIDATION,
         || {
-            MODEL_ARTIFACTS.iter().all(|item| {
-                verify_file(
-                    &base.join(CACHE_VERSION).join(item.filename),
-                    item.size,
-                    item.sha256,
-                )
-                .is_ok()
-            }) && VOICES.iter().all(|voice| {
-                verify_file(
-                    &base.join(CACHE_VERSION).join("voices").join(voice.filename),
-                    voice.size_bytes,
-                    voice.sha256,
-                )
-                .is_ok()
-            })
+            matches!(
+                pocket_assets::inspect(&base.join(CACHE_VERSION)),
+                Ok(pocket_assets::PocketAssetStatus::Ready { .. })
+            )
         },
     )
 }
@@ -739,59 +576,52 @@ fn parakeet_installation_valid(base: &Path) -> bool {
         parakeet_installation_fingerprint(base),
         &PARAKEET_INSTALLATION_VALIDATION,
         || {
-            verify_file(
-                &base.join(CACHE_VERSION).join("stt").join("model.int8.onnx"),
-                PARAKEET_MODEL_SIZE,
-                PARAKEET_MODEL_SHA256,
+            matches!(
+                parakeet_assets::inspect(&base.join(CACHE_VERSION).join("stt")),
+                Ok(parakeet_assets::ParakeetAssetStatus::Ready { .. })
             )
-            .is_ok()
-                && verify_file(
-                    &base.join(CACHE_VERSION).join("stt").join("tokens.txt"),
-                    PARAKEET_TOKENS_SIZE,
-                    PARAKEET_TOKENS_SHA256,
-                )
-                .is_ok()
         },
     )
 }
 
-fn verified_version(base: &Path) -> Option<PathBuf> {
+fn lock_local_assets_for_read(base: &Path) -> Result<local_assets::LocalAssetReadGuard, String> {
+    let roots = local_asset_roots(base)?;
+    local_assets::try_lock_for_read(&roots).map_err(|error| error.to_string())
+}
+
+fn version_root(base: &Path) -> Option<PathBuf> {
     let version = base.join(CACHE_VERSION);
-    if !matches!(
-        fs::read_to_string(version.join(VERIFIED_MARKER)).as_deref(),
-        Ok(CACHE_VERSION)
-    ) {
+    if !version.is_dir() {
         return None;
     }
     Some(version)
 }
 
 fn pocket_installation_fingerprint(base: &Path) -> Option<InstallationFingerprint> {
-    let version = verified_version(base)?;
-    let mut files: Vec<(PathBuf, u64)> = MODEL_ARTIFACTS
+    let version = version_root(base)?;
+    let mut files: Vec<(PathBuf, u64)> = pocket_assets::model_artifacts()
         .iter()
-        .map(|item| (version.join(item.filename), item.size))
+        .map(|item| (version.join(item.relative_path), item.size_bytes))
         .collect();
-    files.extend(VOICES.iter().map(|voice| {
-        (
-            version.join("voices").join(voice.filename),
-            voice.size_bytes,
-        )
-    }));
+    files.extend(
+        pocket_assets::voices()
+            .iter()
+            .map(|voice| (version.join(voice.relative_path), voice.size_bytes)),
+    );
     fingerprint_files(files)
 }
 
 fn parakeet_installation_fingerprint(base: &Path) -> Option<InstallationFingerprint> {
-    let version = verified_version(base)?;
-    let mut files = vec![
-        (
-            version.join("stt").join("model.int8.onnx"),
-            PARAKEET_MODEL_SIZE,
-        ),
-        (version.join("stt").join("tokens.txt"), PARAKEET_TOKENS_SIZE),
-    ];
-    let license = version.join("stt").join("MODEL_LICENSE.txt");
-    files.push((license.clone(), fs::metadata(&license).ok()?.len()));
+    let version = version_root(base)?;
+    let files = parakeet_assets::published_assets()
+        .iter()
+        .map(|asset| {
+            (
+                version.join("stt").join(asset.relative_path),
+                asset.size_bytes,
+            )
+        })
+        .collect::<Vec<_>>();
     fingerprint_files(files)
 }
 
@@ -822,6 +652,7 @@ fn pocket_voice_status(
     state: &PocketVoiceState,
 ) -> Result<PocketVoiceStatus, String> {
     let base = cache_base(app)?;
+    let _assets = lock_local_assets_for_read(&base)?;
     let runtime = state
         .install
         .lock()
@@ -866,13 +697,22 @@ fn pocket_voice_status(
         }),
         selected_voice: selected_voice(&base),
         playback_speed: playback_speed(&base),
-        voices: VOICES,
+        voices: pocket_assets::voices()
+            .iter()
+            .map(|voice| PocketVoiceOption {
+                id: voice.id,
+                name: voice.name,
+            })
+            .collect(),
     })
 }
 
 #[tauri::command]
 pub fn select_pocket_voice(app: AppHandle, voice_id: String) -> Result<(), String> {
-    if !VOICES.iter().any(|voice| voice.id == voice_id) {
+    if !pocket_assets::voices()
+        .iter()
+        .any(|voice| voice.id == voice_id)
+    {
         return Err(format!("Unknown Pocket voice: {voice_id}"));
     }
     let base = cache_base(&app)?;
@@ -889,11 +729,7 @@ pub fn select_pocket_voice(app: AppHandle, voice_id: String) -> Result<(), Strin
 }
 
 #[tauri::command]
-pub fn set_pocket_playback_speed(
-    app: AppHandle,
-    state: State<'_, PocketVoiceState>,
-    speed: f32,
-) -> Result<(), String> {
+pub fn set_pocket_playback_speed(app: AppHandle, speed: f32) -> Result<(), String> {
     if !speed.is_finite() || !(0.75..=2.0).contains(&speed) {
         return Err("Pocket playback speed must be between 0.75 and 2.0".to_string());
     }
@@ -907,19 +743,7 @@ pub fn set_pocket_playback_speed(
     let temporary = base.join("settings.json.tmp");
     fs::write(&temporary, data).map_err(|error| format!("write Pocket settings: {error}"))?;
     fs::rename(&temporary, base.join("settings.json"))
-        .map_err(|error| format!("publish Pocket settings: {error}"))?;
-    update_active_playback_speed(&state, speed)
-}
-
-fn update_active_playback_speed(state: &PocketVoiceState, speed: f32) -> Result<(), String> {
-    let playback = state
-        .playback
-        .lock()
-        .map_err(|_| "Pocket TTS playback state lock was poisoned".to_string())?;
-    if let Some(playback_rate) = playback.playback_rate.as_ref() {
-        playback_rate.store(speed.to_bits(), Ordering::SeqCst);
-    }
-    Ok(())
+        .map_err(|error| format!("publish Pocket settings: {error}"))
 }
 
 #[tauri::command]
@@ -930,12 +754,15 @@ pub async fn preview_pocket_voice(
     voice_id: String,
 ) -> Result<(), String> {
     let base = cache_base(&app)?;
-    let voice = VOICES
+    let voice = pocket_assets::voices()
         .iter()
         .find(|voice| voice.id == voice_id)
         .copied()
         .ok_or_else(|| format!("Unknown Pocket voice: {voice_id}"))?;
-    if !pocket_installation_valid(&base) {
+    let assets = lock_local_assets_for_read(&base)?;
+    let installed = pocket_installation_valid(&base);
+    drop(assets);
+    if !installed {
         return Err("Pocket TTS must be downloaded before previewing a voice".to_string());
     }
     let session = begin_playback(
@@ -945,16 +772,19 @@ pub async fn preview_pocket_voice(
     )?;
     let output_device = selected_output_device();
     let effective_output_device = effective_output_device_name(output_device.as_deref());
-    let capture_suppression =
+    let assistant_speech =
         output_device_uses_speakers(effective_output_device.as_deref()).then(|| {
             log::info!("[voice-echo-guard] speaker output detected");
-            native_voice.suppress_capture()
+            native_voice.begin_assistant_speech(
+                InterruptionSensitivity::Balanced,
+                InputDuringTtsPolicy::SuppressInput,
+            )
         });
 
     let playback = state.playback.clone();
     let playback_active = session.active.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let _capture_suppression = capture_suppression;
+        let _assistant_speech = assistant_speech;
         let result = synthesize_and_stream(
             &base,
             voice,
@@ -982,11 +812,14 @@ pub async fn speak_pocket_voice(
         return Ok(());
     }
     let base = cache_base(&app)?;
-    if !pocket_installation_valid(&base) {
+    let assets = lock_local_assets_for_read(&base)?;
+    let installed = pocket_installation_valid(&base);
+    drop(assets);
+    if !installed {
         return Err("Pocket TTS installation is incomplete or corrupt".to_string());
     }
     let voice_id = selected_voice(&base);
-    let voice = VOICES
+    let voice = pocket_assets::voices()
         .iter()
         .find(|voice| voice.id == voice_id)
         .copied()
@@ -994,16 +827,19 @@ pub async fn speak_pocket_voice(
     let session = begin_playback(&state, "Pocket voice playback is already active", &base)?;
     let output_device = selected_output_device();
     let effective_output_device = effective_output_device_name(output_device.as_deref());
-    let capture_suppression =
+    let assistant_speech =
         output_device_uses_speakers(effective_output_device.as_deref()).then(|| {
             log::info!("[voice-echo-guard] speaker output detected");
-            native_voice.suppress_capture()
+            native_voice.begin_assistant_speech(
+                InterruptionSensitivity::Balanced,
+                InputDuringTtsPolicy::SuppressInput,
+            )
         });
 
     let playback = state.playback.clone();
     let playback_active = session.active.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let _capture_suppression = capture_suppression;
+        let _assistant_speech = assistant_speech;
         let result = synthesize_and_stream(
             &base,
             voice,
@@ -1020,20 +856,27 @@ pub async fn speak_pocket_voice(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri injects three runtime dependencies beside the stream payload.
 pub fn start_pocket_voice_stream(
     app: AppHandle,
     state: State<'_, PocketVoiceState>,
     native_voice: State<'_, NativeVoiceState>,
+    session_id: String,
+    expected_revision: u64,
+    speech_id: u64,
     stream_id: String,
     interruption_mode: VoiceInterruptionMode,
     interruption_sensitivity: InterruptionSensitivity,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     #[cfg(not(target_os = "macos"))]
     {
         let _ = (
             app,
             state,
             native_voice,
+            session_id,
+            expected_revision,
+            speech_id,
             stream_id,
             interruption_mode,
             interruption_sensitivity,
@@ -1047,11 +890,14 @@ pub fn start_pocket_voice_stream(
             return Err("Pocket voice stream id cannot be empty".to_string());
         }
         let base = cache_base(&app)?;
-        if !pocket_installation_valid(&base) {
+        let assets = lock_local_assets_for_read(&base)?;
+        let installed = pocket_installation_valid(&base);
+        drop(assets);
+        if !installed {
             return Err("Pocket TTS installation is incomplete or corrupt".to_string());
         }
         let voice_id = selected_voice(&base);
-        let voice = VOICES
+        let voice = pocket_assets::voices()
             .iter()
             .find(|voice| voice.id == voice_id)
             .copied()
@@ -1059,8 +905,8 @@ pub fn start_pocket_voice_stream(
         let session = begin_playback(&state, "Pocket voice playback is already active", &base)?;
         let output_device = selected_output_device();
         let effective_output_device = effective_output_device_name(output_device.as_deref());
-        let suppress_capture =
-            should_suppress_capture(interruption_mode, effective_output_device.as_deref());
+        let input_during_tts =
+            resolve_input_during_tts_policy(interruption_mode, effective_output_device.as_deref());
         let (sender, receiver) = mpsc::channel();
         {
             let mut playback = state
@@ -1077,10 +923,21 @@ pub fn start_pocket_voice_stream(
             active,
             playback_rate,
         } = session;
+        let Some(admission) = native_voice.claim_assistant_speech(
+            &session_id,
+            expected_revision,
+            speech_id,
+            active.clone(),
+        )?
+        else {
+            finish_playback(&state.playback, &active);
+            return Ok(false);
+        };
         let playback = state.playback.clone();
         let playback_active = active.clone();
         let native_voice_state = native_voice.inner().clone();
         tauri::async_runtime::spawn_blocking(move || {
+            let admission_guard = admission;
             let result = run_with_playback_cleanup(&playback, &playback_active, || {
                 run_pocket_voice_stream(
                     &app,
@@ -1093,7 +950,7 @@ pub fn start_pocket_voice_stream(
                     receiver,
                     native_voice_state,
                     interruption_sensitivity,
-                    suppress_capture,
+                    input_during_tts,
                 )
             });
             let (event_state, error, delivery) = match result {
@@ -1111,9 +968,10 @@ pub fn start_pocket_voice_stream(
             // A terminal event hands stream ownership back to the renderer,
             // which may immediately start a replacement stream. Release the
             // backend playback token before publishing that handoff.
+            drop(admission_guard);
             emit_pocket_stream_event(&app, &stream_id, event_state, error, delivery);
         });
-        Ok(())
+        Ok(true)
     }
 }
 
@@ -1343,6 +1201,36 @@ async fn wait_for_install_idle(state: &PocketVoiceState) -> Result<(), String> {
 }
 
 fn remove_cached_model(base: &Path, model: VoiceModelKind) -> Result<(), String> {
+    remove_cached_model_with(
+        base,
+        model,
+        pocket_installation_valid,
+        parakeet_installation_valid,
+        |mutation, source, destination| {
+            pocket_assets::stage_verified_bundle(mutation, source, destination)
+                .map_err(|error| error.to_string())
+        },
+        |mutation, source, destination| {
+            parakeet_assets::stage_verified_bundle(mutation, source, destination)
+                .map_err(|error| error.to_string())
+        },
+    )
+}
+
+fn remove_cached_model_with(
+    base: &Path,
+    model: VoiceModelKind,
+    pocket_ready: impl Fn(&Path) -> bool,
+    parakeet_ready: impl Fn(&Path) -> bool,
+    stage_pocket: impl Fn(&local_assets::LocalAssetMutationGuard, &Path, &Path) -> Result<(), String>,
+    stage_parakeet: impl Fn(&local_assets::LocalAssetMutationGuard, &Path, &Path) -> Result<(), String>,
+) -> Result<(), String> {
+    let roots = local_asset_roots(base)?;
+    let mutation =
+        local_assets::lock_for_mutation_blocking(&roots).map_err(|error| error.to_string())?;
+    mutation
+        .recover_interrupted_publication()
+        .map_err(|error| error.to_string())?;
     let final_dir = base.join(CACHE_VERSION);
     if !final_dir.exists() {
         return Ok(());
@@ -1350,34 +1238,27 @@ fn remove_cached_model(base: &Path, model: VoiceModelKind) -> Result<(), String>
 
     let operation_id = uuid::Uuid::new_v4();
     let staging = base.join(format!("{CACHE_VERSION}.remove-{operation_id}"));
-    let previous = base.join(format!("{CACHE_VERSION}.removed-{operation_id}"));
+    // Use the shared transaction prefix so a later mutation can recover if this
+    // process exits after retiring the live bundle.
+    let previous = base.join(format!(".voice-backup-{operation_id}"));
     fs::create_dir_all(&staging)
         .map_err(|error| format!("stage retained voice model assets: {error}"))?;
 
-    let retained_paths: Vec<PathBuf> = match model {
-        VoiceModelKind::Pocket => vec![PathBuf::from("stt")],
-        VoiceModelKind::Parakeet => MODEL_ARTIFACTS
-            .iter()
-            .map(|artifact| PathBuf::from(artifact.filename))
-            .chain(std::iter::once(PathBuf::from("voices")))
-            .collect(),
+    let retained_any = match model {
+        VoiceModelKind::Pocket => parakeet_ready(base),
+        VoiceModelKind::Parakeet => pocket_ready(base),
     };
-    let mut retained_any = false;
-    let stage_result = (|| {
-        for relative in retained_paths {
-            let source = final_dir.join(&relative);
-            if !source.exists() {
-                continue;
-            }
-            retained_any = true;
-            clone_cache_path(&source, &staging.join(relative))?;
+    let stage_result = match model {
+        VoiceModelKind::Pocket if retained_any => stage_parakeet(
+            &mutation,
+            roots.parakeet_bundle_root(),
+            &staging.join("stt"),
+        ),
+        VoiceModelKind::Parakeet if retained_any => {
+            stage_pocket(&mutation, roots.pocket_bundle_root(), &staging)
         }
-        if retained_any {
-            fs::write(staging.join(VERIFIED_MARKER), CACHE_VERSION)
-                .map_err(|error| format!("verify retained voice model cache: {error}"))?;
-        }
-        Ok::<(), String>(())
-    })();
+        _ => Ok(()),
+    };
     if let Err(error) = stage_result {
         let _ = fs::remove_dir_all(&staging);
         return Err(error);
@@ -1391,33 +1272,45 @@ fn remove_cached_model(base: &Path, model: VoiceModelKind) -> Result<(), String>
         .map_err(|error| format!("retire voice model cache atomically: {error}"))?;
     if retained_any {
         if let Err(error) = fs::rename(&staging, &final_dir) {
-            let _ = fs::rename(&previous, &final_dir);
-            let _ = fs::remove_dir_all(&staging);
-            return Err(format!(
-                "publish retained voice model cache atomically: {error}"
-            ));
+            if let Err(rollback_error) = fs::rename(&previous, &final_dir) {
+                return Err(format!(
+                    "publish retained voice model cache failed ({error}); restoring the prior cache also failed ({rollback_error}); recovery data remains at {} and {}",
+                    previous.display(),
+                    staging.display(),
+                ));
+            }
+            fs::remove_dir_all(&staging)
+                .map_err(|cleanup| format!("clean failed removal staging cache: {cleanup}"))?;
+            return Err(format!("publish retained voice model cache: {error}"));
+        }
+        let retained_ready = match model {
+            VoiceModelKind::Pocket => parakeet_ready(base),
+            VoiceModelKind::Parakeet => pocket_ready(base),
+        };
+        if !retained_ready {
+            let failed = base.join(format!("{CACHE_VERSION}.remove-failed-{operation_id}"));
+            fs::rename(&final_dir, &failed).map_err(|error| {
+                format!(
+                    "preserve invalid retained model cache: {error}; recovery data remains at {} and {}",
+                    final_dir.display(),
+                    previous.display(),
+                )
+            })?;
+            fs::rename(&previous, &final_dir).map_err(|error| {
+                format!(
+                    "restore prior model cache after verification failure: {error}; recovery data remains at {} and {}",
+                    previous.display(),
+                    failed.display(),
+                )
+            })?;
+            fs::remove_dir_all(&failed)
+                .map_err(|error| format!("clean invalid retained model cache: {error}"))?;
+            return Err("Retained voice model cache failed pinned-file verification".to_string());
         }
     }
     fs::remove_dir_all(&previous)
         .map_err(|error| format!("delete retired voice model cache: {error}"))?;
     Ok(())
-}
-
-fn clone_cache_path(source: &Path, destination: &Path) -> Result<(), String> {
-    if source.is_dir() {
-        fs::create_dir_all(destination)
-            .map_err(|error| format!("create retained cache directory: {error}"))?;
-        for entry in fs::read_dir(source)
-            .map_err(|error| format!("read retained cache directory: {error}"))?
-        {
-            let entry = entry.map_err(|error| format!("read retained cache entry: {error}"))?;
-            clone_cache_path(&entry.path(), &destination.join(entry.file_name()))?;
-        }
-        return Ok(());
-    }
-    fs::hard_link(source, destination)
-        .or_else(|_| fs::copy(source, destination).map(|_| ()))
-        .map_err(|error| format!("retain voice model asset {}: {error}", source.display()))
 }
 
 fn begin_playback(
@@ -1448,9 +1341,8 @@ fn begin_playback_runtime(
         return Err(already_active.to_string());
     }
     let active = Arc::new(AtomicBool::new(true));
-    let playback_rate = Arc::new(AtomicU32::new(current_playback_speed().to_bits()));
+    let playback_rate = current_playback_speed();
     playback.active = Some(active.clone());
-    playback.playback_rate = Some(playback_rate.clone());
     drop(install);
     Ok(PlaybackSession {
         active,
@@ -1486,7 +1378,6 @@ fn finish_playback(playback: &std::sync::Mutex<PlaybackRuntime>, completed: &Arc
             .is_some_and(|active| Arc::ptr_eq(active, completed))
         {
             playback.active = None;
-            playback.playback_rate = None;
             #[cfg(target_os = "macos")]
             {
                 playback.stream = None;
@@ -1526,6 +1417,7 @@ fn queue_model_install(
     model: VoiceModelKind,
 ) -> Result<bool, String> {
     let base = cache_base(app)?;
+    let _assets = lock_local_assets_for_read(&base)?;
     let already_installed = match model {
         VoiceModelKind::Pocket => pocket_installation_valid(&base),
         VoiceModelKind::Parakeet => parakeet_installation_valid(&base),
@@ -1766,6 +1658,7 @@ fn advance_model_progress(
     Ok(true)
 }
 
+#[cfg(test)]
 fn increment_model_progress(
     runtime: &mut InstallRuntime,
     model: VoiceModelKind,
@@ -1838,341 +1731,132 @@ async fn install_one_model(
     attempt_id: u64,
 ) -> Result<(), String> {
     let base = cache_base(app)?;
-    fs::create_dir_all(&base).map_err(|error| format!("create Pocket cache: {error}"))?;
-    let staging = base.join(format!("{CACHE_VERSION}.partial-{}", uuid::Uuid::new_v4()));
-    fs::create_dir_all(&staging)
-        .map_err(|error| format!("create voice model staging directory: {error}"))?;
-    let current = base.join(CACHE_VERSION);
-    if current.exists() {
-        for entry in fs::read_dir(&current)
-            .map_err(|error| format!("read current voice model cache: {error}"))?
-        {
-            let entry = entry.map_err(|error| format!("read voice model cache entry: {error}"))?;
-            if entry.file_name() == VERIFIED_MARKER {
-                continue;
-            }
-            clone_cache_path(&entry.path(), &staging.join(entry.file_name()))?;
+    let roots = local_asset_roots(&base)?;
+    let mut callback_error = None;
+    let mut last_phase = None;
+    let mut on_progress = |progress: local_assets::LocalInstallProgress| {
+        if callback_error.is_some() {
+            return;
         }
-    }
+        let phase = match progress.phase {
+            LocalInstallPhase::Downloading => VoiceModelDownloadPhase::Downloading,
+            LocalInstallPhase::Extracting => VoiceModelDownloadPhase::Extracting,
+            LocalInstallPhase::Verifying => VoiceModelDownloadPhase::Verifying,
+            LocalInstallPhase::Publishing => VoiceModelDownloadPhase::Publishing,
+            LocalInstallPhase::Complete => VoiceModelDownloadPhase::Complete,
+        };
+        if let Err(error) = set_model_progress(
+            state,
+            model,
+            attempt_id,
+            phase,
+            Some(progress.downloaded_bytes),
+        ) {
+            callback_error = Some(error);
+            return;
+        }
+        let phase_changed = last_phase.replace(phase) != Some(phase);
+        let should_emit = if phase == VoiceModelDownloadPhase::Downloading && !phase_changed {
+            state
+                .install
+                .lock()
+                .map(|mut runtime| {
+                    should_emit_download_progress_at(
+                        &mut runtime,
+                        model,
+                        attempt_id,
+                        Instant::now(),
+                    )
+                })
+                .unwrap_or(false)
+        } else {
+            true
+        };
+        if should_emit {
+            emit_pocket_status(app, state);
+        }
+    };
     match model {
         VoiceModelKind::Pocket => {
-            for artifact in MODEL_ARTIFACTS {
-                let _ = fs::remove_file(staging.join(artifact.filename));
-            }
-            let _ = fs::remove_dir_all(staging.join("voices"));
+            pocket_assets::install(&roots, &mut on_progress)
+                .await
+                .map(|outcome| {
+                    if let pocket_assets::PocketInstallOutcome::Installed {
+                        cleanup_pending: Some(path),
+                        ..
+                    } = outcome
+                    {
+                        log::warn!(
+                            "Pocket assets installed; prior backup cleanup remains at {}",
+                            path.display()
+                        );
+                    }
+                })
         }
-        VoiceModelKind::Parakeet => {
-            let _ = fs::remove_dir_all(staging.join("stt"));
-        }
-    }
-    let client = voice_download_client(
-        DOWNLOAD_CONNECT_TIMEOUT,
-        DOWNLOAD_READ_TIMEOUT,
-        DOWNLOAD_TOTAL_TIMEOUT,
-    )?;
-    let install_result = async {
-        match model {
-            VoiceModelKind::Parakeet => {
-                let archive = staging.join(PARAKEET_ARCHIVE.filename);
-                download_artifact(
-                    app,
-                    state,
-                    model,
-                    attempt_id,
-                    &client,
-                    DownloadSpec {
-                        url: PARAKEET_ARCHIVE.url,
-                        destination: &archive,
-                        expected_size: PARAKEET_ARCHIVE.size,
-                        expected_sha256: PARAKEET_ARCHIVE.sha256,
-                    },
-                )
-                .await?;
-                set_model_progress(
-                    state,
-                    model,
-                    attempt_id,
-                    VoiceModelDownloadPhase::Extracting,
-                    Some(PARAKEET_ARCHIVE.size),
-                )?;
-                emit_pocket_status(app, state);
-                extract_parakeet(&archive, &staging).await?;
-                tokio::fs::remove_file(&archive)
-                    .await
-                    .map_err(|error| format!("remove Parakeet archive: {error}"))?;
-                set_model_progress(
-                    state,
-                    model,
-                    attempt_id,
-                    VoiceModelDownloadPhase::Verifying,
-                    Some(parakeet_download_bytes()),
-                )?;
-                emit_pocket_status(app, state);
-            }
-            VoiceModelKind::Pocket => {
-                tokio::fs::create_dir_all(staging.join("voices"))
-                    .await
-                    .map_err(|error| format!("create Pocket staging directory: {error}"))?;
-                for item in MODEL_ARTIFACTS {
-                    download_artifact(
-                        app,
-                        state,
-                        model,
-                        attempt_id,
-                        &client,
-                        DownloadSpec {
-                            url: item.url,
-                            destination: &staging.join(item.filename),
-                            expected_size: item.size,
-                            expected_sha256: item.sha256,
-                        },
-                    )
-                    .await?;
-                }
-                for voice in VOICES {
-                    download_artifact(
-                        app,
-                        state,
-                        model,
-                        attempt_id,
-                        &client,
-                        DownloadSpec {
-                            url: voice.url,
-                            destination: &staging.join("voices").join(voice.filename),
-                            expected_size: voice.size_bytes,
-                            expected_sha256: voice.sha256,
-                        },
-                    )
-                    .await?;
-                }
-                set_model_progress(
-                    state,
-                    model,
-                    attempt_id,
-                    VoiceModelDownloadPhase::Verifying,
-                    Some(pocket_published_bytes()),
-                )?;
-                emit_pocket_status(app, state);
-            }
-        }
-        tokio::fs::write(staging.join(VERIFIED_MARKER), CACHE_VERSION)
+        VoiceModelKind::Parakeet => parakeet_assets::install(&roots, &mut on_progress)
             .await
-            .map_err(|error| format!("mark verified voice model installation: {error}"))?;
-        set_model_progress(
-            state,
-            model,
-            attempt_id,
-            VoiceModelDownloadPhase::Publishing,
-            None,
-        )?;
-        emit_pocket_status(app, state);
-        publish_staging(&base, &staging)?;
-        let published = match model {
-            VoiceModelKind::Pocket => pocket_installation_valid(&base),
-            VoiceModelKind::Parakeet => parakeet_installation_valid(&base),
-        };
-        if !published {
-            return Err("Published voice model failed pinned-file verification".to_string());
-        }
-        set_model_progress(
-            state,
-            model,
-            attempt_id,
-            VoiceModelDownloadPhase::Complete,
-            Some(match model {
-                VoiceModelKind::Pocket => pocket_download_bytes(),
-                VoiceModelKind::Parakeet => parakeet_download_bytes(),
+            .map(|outcome| {
+                if let parakeet_assets::ParakeetInstallOutcome::Installed {
+                    cleanup_pending: Some(path),
+                    ..
+                } = outcome
+                {
+                    log::warn!(
+                        "Parakeet assets installed; prior backup cleanup remains at {}",
+                        path.display()
+                    );
+                }
             }),
-        )?;
-        emit_pocket_status(app, state);
-        Ok::<(), String>(())
     }
-    .await;
-    if let Err(error) = install_result {
-        let _ = tokio::fs::remove_dir_all(&staging).await;
+    .map_err(|error| error.to_string())?;
+    if let Some(error) = callback_error {
         return Err(error);
     }
+    normalize_successful_install(state, model, attempt_id)?;
+    emit_pocket_status(app, state);
     Ok(())
 }
 
-fn voice_download_client(
-    connect_timeout: Duration,
-    read_timeout: Duration,
-    total_timeout: Duration,
-) -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
-        .connect_timeout(connect_timeout)
-        .read_timeout(read_timeout)
-        .timeout(total_timeout)
-        .build()
-        .map_err(|error| format!("create Pocket download client: {error}"))
-}
-
-async fn extract_parakeet(archive: &Path, staging: &Path) -> Result<(), String> {
-    let archive = archive.to_path_buf();
-    let staging = staging.to_path_buf();
-    tauri::async_runtime::spawn_blocking(move || {
-        let extraction = staging.join("parakeet-extract");
-        fs::create_dir_all(&extraction)
-            .map_err(|error| format!("create Parakeet extraction directory: {error}"))?;
-        let compressed =
-            fs::File::open(&archive).map_err(|error| format!("open Parakeet archive: {error}"))?;
-        let decoder = bzip2::read::BzDecoder::new(compressed);
-        let mut archive = tar::Archive::new(decoder);
-        archive
-            .unpack(&extraction)
-            .map_err(|error| format!("extract Parakeet archive: {error}"))?;
-        let source = extraction.join(PARAKEET_ARCHIVE_DIR);
-        verify_file(
-            &source.join("model.int8.onnx"),
-            PARAKEET_MODEL_SIZE,
-            PARAKEET_MODEL_SHA256,
-        )?;
-        verify_file(
-            &source.join("tokens.txt"),
-            PARAKEET_TOKENS_SIZE,
-            PARAKEET_TOKENS_SHA256,
-        )?;
-        let destination = staging.join("stt");
-        fs::create_dir_all(&destination)
-            .map_err(|error| format!("create Parakeet staging directory: {error}"))?;
-        fs::rename(
-            source.join("model.int8.onnx"),
-            destination.join("model.int8.onnx"),
-        )
-        .map_err(|error| format!("stage Parakeet model: {error}"))?;
-        fs::rename(source.join("tokens.txt"), destination.join("tokens.txt"))
-            .map_err(|error| format!("stage Parakeet tokens: {error}"))?;
-        fs::write(destination.join("MODEL_LICENSE.txt"), PARAKEET_LICENSE)
-            .map_err(|error| format!("write Parakeet attribution: {error}"))?;
-        fs::remove_dir_all(&extraction)
-            .map_err(|error| format!("remove Parakeet extraction directory: {error}"))
-    })
-    .await
-    .map_err(|error| format!("Parakeet extraction task failed: {error}"))?
-}
-
-fn verify_file(path: &Path, expected_size: u64, expected_sha256: &str) -> Result<(), String> {
-    if !file_has_size(path, expected_size) {
-        return Err(format!("Voice asset size mismatch for {}", path.display()));
+fn normalize_successful_install(
+    state: &PocketVoiceState,
+    model: VoiceModelKind,
+    attempt_id: u64,
+) -> Result<(), String> {
+    let mut runtime = state
+        .install
+        .lock()
+        .map_err(|_| "Pocket TTS install state lock was poisoned".to_string())?;
+    let Some(progress) = model_progress_mut(&mut runtime, model) else {
+        return Err("Voice model progress was not initialized".to_string());
+    };
+    if progress.attempt_id != attempt_id {
+        return Ok(());
     }
-    let mut file =
-        fs::File::open(path).map_err(|error| format!("open {}: {error}", path.display()))?;
-    let mut hasher = Sha256::new();
-    let mut buffer = [0_u8; 64 * 1024];
-    loop {
-        let read = file
-            .read(&mut buffer)
-            .map_err(|error| format!("read {}: {error}", path.display()))?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
-    let actual = format!("{:x}", hasher.finalize());
-    if actual != expected_sha256 {
-        return Err(format!(
-            "Voice asset checksum mismatch for {}: expected {expected_sha256}, got {actual}",
-            path.display()
-        ));
-    }
+    // AlreadyReady may be discovered during either locked recheck without any
+    // network transfer by this attempt. Complete the host projection while
+    // retaining the honest downloaded byte count instead of fabricating it.
+    progress.phase = VoiceModelDownloadPhase::Complete;
     Ok(())
 }
 
 pub fn parakeet_model_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let base = cache_base(app)?;
+    let _assets = lock_local_assets_for_read(&base)?;
     if !parakeet_installation_valid(&base) {
         return Err("Native voice installation is incomplete or corrupt".to_string());
     }
     Ok(base.join(CACHE_VERSION).join("stt"))
 }
 
-fn publish_staging(base: &Path, staging: &Path) -> Result<(), String> {
-    let final_dir = base.join(CACHE_VERSION);
-    let previous = base.join(format!("{CACHE_VERSION}.previous"));
-    let _ = fs::remove_dir_all(&previous);
-    if final_dir.exists() {
-        fs::rename(&final_dir, &previous)
-            .map_err(|error| format!("retire incomplete Pocket cache: {error}"))?;
-    }
-    if let Err(error) = fs::rename(staging, &final_dir) {
-        if previous.exists() {
-            let _ = fs::rename(&previous, &final_dir);
-        }
-        return Err(format!("publish Pocket cache atomically: {error}"));
-    }
-    let _ = fs::remove_dir_all(previous);
-    Ok(())
-}
-
-async fn download_artifact(
+pub fn parakeet_model_for_loading(
     app: &AppHandle,
-    state: &PocketVoiceState,
-    model: VoiceModelKind,
-    attempt_id: u64,
-    client: &reqwest::Client,
-    spec: DownloadSpec<'_>,
-) -> Result<(), String> {
-    let DownloadSpec {
-        url,
-        destination,
-        expected_size,
-        expected_sha256,
-    } = spec;
-    let response = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|error| format!("download {url}: {error}"))?
-        .error_for_status()
-        .map_err(|error| format!("download {url}: {error}"))?;
-    let mut file = tokio::fs::File::create(destination)
-        .await
-        .map_err(|error| format!("create {}: {error}", destination.display()))?;
-    let mut stream = response.bytes_stream();
-    let mut size = 0_u64;
-    let mut hasher = Sha256::new();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|error| format!("read {url}: {error}"))?;
-        size = size
-            .checked_add(chunk.len() as u64)
-            .ok_or_else(|| format!("download size overflow for {url}"))?;
-        if size > expected_size {
-            return Err(format!("download exceeded pinned size for {url}"));
-        }
-        hasher.update(&chunk);
-        file.write_all(&chunk)
-            .await
-            .map_err(|error| format!("write {}: {error}", destination.display()))?;
-        let should_emit = {
-            let mut runtime = state
-                .install
-                .lock()
-                .map_err(|_| "Pocket TTS install state lock was poisoned".to_string())?;
-            increment_model_progress(&mut runtime, model, attempt_id, chunk.len() as u64)?
-                && should_emit_download_progress_at(&mut runtime, model, attempt_id, Instant::now())
-        };
-        if should_emit {
-            emit_pocket_status(app, state);
-        }
+) -> Result<(PathBuf, local_assets::LocalAssetReadGuard), String> {
+    let base = cache_base(app)?;
+    let assets = lock_local_assets_for_read(&base)?;
+    if !parakeet_installation_valid(&base) {
+        return Err("Native voice installation is incomplete or corrupt".to_string());
     }
-    file.flush()
-        .await
-        .map_err(|error| format!("flush {}: {error}", destination.display()))?;
-    if size != expected_size {
-        return Err(format!(
-            "size mismatch for {}: expected {expected_size}, got {size}",
-            destination.display()
-        ));
-    }
-    let actual_sha256 = format!("{:x}", hasher.finalize());
-    if actual_sha256 != expected_sha256 {
-        return Err(format!(
-            "checksum mismatch for {}: expected {expected_sha256}, got {actual_sha256}",
-            destination.display()
-        ));
-    }
-    Ok(())
+    Ok((base.join(CACHE_VERSION).join("stt"), assets))
 }
 
 #[cfg(target_os = "macos")]
@@ -2203,36 +1887,33 @@ fn run_pocket_voice_stream(
     voice: PocketVoice,
     output_device: Option<&str>,
     active: Arc<AtomicBool>,
-    playback_rate: Arc<AtomicU32>,
+    playback_rate: f32,
     receiver: mpsc::Receiver<PocketStreamCommand>,
     native_voice: NativeVoiceState,
     interruption_sensitivity: InterruptionSensitivity,
-    suppress_capture: bool,
+    input_during_tts: InputDuringTtsPolicy,
 ) -> Result<PocketStreamOutcome, PocketStreamFailure> {
     let version = base.join(CACHE_VERSION);
-    let engine = load_text_to_speech(
-        version
-            .to_str()
-            .ok_or_else(|| "Pocket model path is not valid UTF-8".to_string())?,
-    )?;
-    let style = load_voice_style(&version.join("voices").join(voice.filename))?;
-    let mut applied_rate_bits = playback_rate.load(Ordering::SeqCst);
-    let player = PocketAudioPlayer::new(
-        SAMPLE_RATE,
-        f32::from_bits(applied_rate_bits),
-        output_device,
-    )?;
+    let _assets = lock_local_assets_for_read(base)?;
+    let tts = ConfiguredTtsSlot::new(TtsConfiguration::pocket(
+        version,
+        CACHE_VERSION.into(),
+        voice.id.into(),
+        playback_rate,
+    ))?;
+    let tts = tts.lease()?;
+    drop(_assets);
+    let backend = tts.backend();
+    let player = PocketAudioPlayer::new(SAMPLE_RATE, playback_rate, output_device)?;
+    let mut playback = OutboundPlayback::new(&player, &active, SAMPLE_RATE, 0)?;
     let mut pending = String::new();
     let mut first_chunk_pending = true;
-    let mut playback_started = false;
     let mut assistant_speech = None::<AssistantSpeechGuard>;
     let mut playback_drained_at = None;
     let output_latency_grace = playback_latency_safety_duration(output_device);
-    let mut delivery_ledger = PlaybackDeliveryLedger::default();
     let mut last_progress_emit = Instant::now();
 
     let result: Result<PocketStreamOutcome, String> = (|| loop {
-        sync_pocket_playback_rate(&player, &playback_rate, &mut applied_rate_bits)?;
         update_pocket_assistant_speech(
             player.is_empty(),
             &mut assistant_speech,
@@ -2240,15 +1921,12 @@ fn run_pocket_voice_stream(
             output_latency_grace,
             Instant::now(),
         );
-        if !active.load(Ordering::SeqCst) {
-            let delivery = pocket_delivery_snapshot(&delivery_ledger, &player);
-            player.stop();
+        if !playback.poll().map_err(|failure| failure.message)? {
             return Ok(PocketStreamOutcome {
                 state: PocketStreamEventState::Interrupted,
-                delivery: Some(delivery),
+                delivery: Some(playback.snapshot()),
             });
         }
-        player.ensure_healthy()?;
         let command = receiver.recv_timeout(Duration::from_millis(20));
         match command {
             Ok(PocketStreamCommand::Append(text)) => {
@@ -2256,31 +1934,21 @@ fn run_pocket_voice_stream(
                 if !synthesize_pocket_stream_ready(
                     app,
                     stream_id,
-                    &engine,
-                    &style,
-                    &active,
-                    &player,
-                    &playback_rate,
-                    &mut applied_rate_bits,
+                    backend.as_ref(),
+                    &mut playback,
                     &mut pending,
                     &mut first_chunk_pending,
-                    &mut playback_started,
                     &native_voice,
                     interruption_sensitivity,
-                    suppress_capture,
+                    input_during_tts,
                     &mut assistant_speech,
                     &mut playback_drained_at,
-                    &mut delivery_ledger,
                     &mut last_progress_emit,
                     false,
                 )? {
-                    let delivery = capture_before_stop(
-                        || pocket_delivery_snapshot(&delivery_ledger, &player),
-                        || player.stop(),
-                    );
                     return Ok(PocketStreamOutcome {
                         state: PocketStreamEventState::Interrupted,
-                        delivery: Some(delivery),
+                        delivery: Some(playback.snapshot()),
                     });
                 }
             }
@@ -2288,31 +1956,21 @@ fn run_pocket_voice_stream(
                 if !synthesize_pocket_stream_ready(
                     app,
                     stream_id,
-                    &engine,
-                    &style,
-                    &active,
-                    &player,
-                    &playback_rate,
-                    &mut applied_rate_bits,
+                    backend.as_ref(),
+                    &mut playback,
                     &mut pending,
                     &mut first_chunk_pending,
-                    &mut playback_started,
                     &native_voice,
                     interruption_sensitivity,
-                    suppress_capture,
+                    input_during_tts,
                     &mut assistant_speech,
                     &mut playback_drained_at,
-                    &mut delivery_ledger,
                     &mut last_progress_emit,
                     true,
                 )? {
-                    let delivery = capture_before_stop(
-                        || pocket_delivery_snapshot(&delivery_ledger, &player),
-                        || player.stop(),
-                    );
                     return Ok(PocketStreamOutcome {
                         state: PocketStreamEventState::Interrupted,
-                        delivery: Some(delivery),
+                        delivery: Some(playback.snapshot()),
                     });
                 }
             }
@@ -2320,104 +1978,93 @@ fn run_pocket_voice_stream(
                 if !synthesize_pocket_stream_ready(
                     app,
                     stream_id,
-                    &engine,
-                    &style,
-                    &active,
-                    &player,
-                    &playback_rate,
-                    &mut applied_rate_bits,
+                    backend.as_ref(),
+                    &mut playback,
                     &mut pending,
                     &mut first_chunk_pending,
-                    &mut playback_started,
                     &native_voice,
                     interruption_sensitivity,
-                    suppress_capture,
+                    input_during_tts,
                     &mut assistant_speech,
                     &mut playback_drained_at,
-                    &mut delivery_ledger,
                     &mut last_progress_emit,
                     true,
                 )? {
-                    let delivery = capture_before_stop(
-                        || pocket_delivery_snapshot(&delivery_ledger, &player),
-                        || player.stop(),
-                    );
                     return Ok(PocketStreamOutcome {
                         state: PocketStreamEventState::Interrupted,
-                        delivery: Some(delivery),
+                        delivery: Some(playback.snapshot()),
                     });
                 }
                 // Playback speed can change while buffers drain. Use the slowest
                 // supported rate so a later slowdown cannot truncate valid audio.
                 let drain_timeout = pocket_native_drain_timeout(
-                    delivery_ledger.total_frames(),
+                    playback
+                        .snapshot()
+                        .segments
+                        .iter()
+                        .map(|segment| segment.total_frames)
+                        .sum(),
                     player.completed_source_frames(),
-                    MIN_POCKET_PLAYBACK_SPEED,
+                    playback_rate,
                 );
-                let drain_started = Instant::now();
-                let mut completion_timed_out = false;
-                loop {
-                    if !active.load(Ordering::SeqCst) {
-                        let delivery = pocket_delivery_snapshot(&delivery_ledger, &player);
-                        player.stop();
-                        return Ok(PocketStreamOutcome {
-                            state: PocketStreamEventState::Interrupted,
-                            delivery: Some(delivery),
-                        });
-                    }
-                    sync_pocket_playback_rate_before_timeout(completion_timed_out, || {
-                        sync_pocket_playback_rate(&player, &playback_rate, &mut applied_rate_bits)
-                    })?;
-                    if !completion_timed_out {
-                        player.ensure_healthy()?;
-                        match pocket_native_drain_status(
-                            player.is_empty(),
-                            drain_started.elapsed(),
-                            drain_timeout,
-                        ) {
-                            PocketNativeDrainStatus::Waiting => {}
-                            PocketNativeDrainStatus::Drained => {
-                                player.ensure_healthy()?;
+                let post_drain = output_latency_grace_remaining(
+                    assistant_speech.is_some(),
+                    playback_drained_at,
+                    output_latency_grace,
+                    Instant::now(),
+                );
+                let outcome = playback
+                    .finish(
+                        DrainPolicy {
+                            poll_interval: Duration::from_millis(10),
+                            timeout: Some(drain_timeout),
+                            timeout_outcome: DrainTimeoutOutcome::Complete,
+                            post_drain,
+                        },
+                        &mut |delivery| {
+                            update_pocket_assistant_speech(
+                                player.is_empty(),
+                                &mut assistant_speech,
+                                &mut playback_drained_at,
+                                output_latency_grace,
+                                Instant::now(),
+                            );
+                            if last_progress_emit.elapsed() >= PLAYBACK_PROGRESS_EMIT_INTERVAL {
+                                emit_pocket_stream_event(
+                                    app,
+                                    stream_id,
+                                    PocketStreamEventState::Progress,
+                                    None,
+                                    Some(delivery.clone()),
+                                );
+                                last_progress_emit = Instant::now();
                             }
-                            PocketNativeDrainStatus::TimedOut => {
-                                log::warn!("Pocket native buffer completion bookkeeping timed out");
-                                player.stop();
-                                reset_pocket_drain_grace(&mut playback_drained_at);
-                                completion_timed_out = true;
-                            }
-                        }
-                    }
-                    let playback_drained = completion_timed_out || player.is_empty();
-                    if playback_drained {
-                        update_pocket_assistant_speech(
-                            playback_drained,
-                            &mut assistant_speech,
-                            &mut playback_drained_at,
-                            output_latency_grace,
-                            Instant::now(),
-                        );
-                        if assistant_speech.is_none() {
-                            break;
-                        }
-                    }
-                    std::thread::sleep(Duration::from_millis(10));
+                            Ok(())
+                        },
+                    )
+                    .map_err(|failure| failure.message)?;
+                if outcome == OutboundOutcome::Interrupted {
+                    return Ok(PocketStreamOutcome {
+                        state: PocketStreamEventState::Interrupted,
+                        delivery: Some(playback.snapshot()),
+                    });
                 }
+                assistant_speech.take();
                 return Ok(PocketStreamOutcome {
                     state: PocketStreamEventState::Completed,
                     delivery: None,
                 });
             }
             Ok(PocketStreamCommand::Stop) | Err(mpsc::RecvTimeoutError::Disconnected) => {
-                let delivery = pocket_delivery_snapshot(&delivery_ledger, &player);
                 active.store(false, Ordering::SeqCst);
-                player.stop();
+                playback.interrupt().map_err(|failure| failure.message)?;
                 return Ok(PocketStreamOutcome {
                     state: PocketStreamEventState::Interrupted,
-                    delivery: Some(delivery),
+                    delivery: Some(playback.snapshot()),
                 });
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                if playback_started
+                if playback.started()
                     && last_progress_emit.elapsed() >= PLAYBACK_PROGRESS_EMIT_INTERVAL
                 {
                     emit_pocket_stream_event(
@@ -2425,7 +2072,7 @@ fn run_pocket_voice_stream(
                         stream_id,
                         PocketStreamEventState::Progress,
                         None,
-                        Some(pocket_delivery_snapshot(&delivery_ledger, &player)),
+                        Some(playback.snapshot()),
                     );
                     last_progress_emit = Instant::now();
                 }
@@ -2435,30 +2082,10 @@ fn run_pocket_voice_stream(
 
     assistant_speech.take();
     result.map_err(|error| {
-        let delivery = delivery_with_played_audio(capture_before_stop(
-            || pocket_delivery_snapshot(&delivery_ledger, &player),
-            || player.stop(),
-        ));
+        let delivery = delivery_with_played_audio(playback.snapshot());
+        let _ = playback.interrupt();
         PocketStreamFailure { error, delivery }
     })
-}
-
-#[cfg(target_os = "macos")]
-fn pocket_delivery_snapshot(
-    ledger: &PlaybackDeliveryLedger,
-    player: &PocketAudioPlayer,
-) -> VoiceDeliveryProgress {
-    ledger.snapshot_consumed_frames(player.played_frames())
-}
-
-#[cfg(any(test, target_os = "macos"))]
-fn capture_before_stop(
-    snapshot: impl FnOnce() -> VoiceDeliveryProgress,
-    stop: impl FnOnce(),
-) -> VoiceDeliveryProgress {
-    let delivery = snapshot();
-    stop();
-    delivery
 }
 
 #[cfg(target_os = "macos")]
@@ -2469,7 +2096,7 @@ fn update_pocket_assistant_speech(
     output_latency_grace: Duration,
     now: Instant,
 ) {
-    if pocket_assistant_speech_grace_elapsed(
+    if output_latency_grace_elapsed(
         playback_drained,
         assistant_speech.is_some(),
         playback_drained_at,
@@ -2478,22 +2105,6 @@ fn update_pocket_assistant_speech(
     ) {
         assistant_speech.take();
     }
-}
-
-#[cfg(any(test, target_os = "macos"))]
-fn pocket_assistant_speech_grace_elapsed(
-    playback_drained: bool,
-    guard_active: bool,
-    playback_drained_at: &mut Option<Instant>,
-    output_latency_grace: Duration,
-    now: Instant,
-) -> bool {
-    if !guard_active || !playback_drained {
-        *playback_drained_at = None;
-        return false;
-    }
-    let drained_at = *playback_drained_at.get_or_insert(now);
-    now.saturating_duration_since(drained_at) >= output_latency_grace
 }
 
 #[cfg(any(test, target_os = "macos"))]
@@ -2537,56 +2148,14 @@ fn pocket_native_drain_timeout(
         .saturating_add(POCKET_SOURCE_COMPLETION_TIMEOUT)
 }
 
-#[cfg(any(test, target_os = "macos"))]
-fn sync_pocket_playback_rate_before_timeout(
-    completion_timed_out: bool,
-    sync: impl FnOnce() -> Result<(), String>,
-) -> Result<(), String> {
-    if completion_timed_out {
-        Ok(())
-    } else {
-        sync()
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn sync_pocket_playback_rate(
-    player: &PocketAudioPlayer,
-    playback_rate: &AtomicU32,
-    applied_rate_bits: &mut u32,
-) -> Result<(), String> {
-    let requested_rate_bits = playback_rate.load(Ordering::SeqCst);
-    if requested_rate_bits != *applied_rate_bits {
-        player.set_rate(f32::from_bits(requested_rate_bits))?;
-        *applied_rate_bits = requested_rate_bits;
-    }
-    Ok(())
-}
-
 #[cfg(target_os = "macos")]
 #[allow(clippy::too_many_arguments)]
-fn mark_pocket_playback_started(
-    app: &AppHandle,
-    stream_id: &str,
-    native_voice: &NativeVoiceState,
-    interruption_sensitivity: InterruptionSensitivity,
-    suppress_capture: bool,
-    playback_started: &mut bool,
-    assistant_speech: &mut Option<AssistantSpeechGuard>,
-) -> Result<(), String> {
-    if assistant_speech.is_none() {
-        *assistant_speech =
-            Some(native_voice.begin_assistant_speech(interruption_sensitivity, suppress_capture));
-    }
-    if !*playback_started {
-        *playback_started = true;
-        emit_pocket_stream_event(app, stream_id, PocketStreamEventState::Started, None, None);
-        println!("VOICE_CONVERSATION_PLAYBACK_STARTED");
-        std::io::stdout()
-            .flush()
-            .map_err(|error| format!("signal Pocket playback start: {error}"))?;
-    }
-    Ok(())
+fn mark_pocket_playback_started(app: &AppHandle, stream_id: &str) -> Result<(), String> {
+    emit_pocket_stream_event(app, stream_id, PocketStreamEventState::Started, None, None);
+    println!("VOICE_CONVERSATION_PLAYBACK_STARTED");
+    std::io::stdout()
+        .flush()
+        .map_err(|error| format!("signal Pocket playback start: {error}"))
 }
 
 #[cfg(target_os = "macos")]
@@ -2594,91 +2163,56 @@ fn mark_pocket_playback_started(
 fn synthesize_pocket_stream_ready(
     app: &AppHandle,
     stream_id: &str,
-    engine: &PocketTts,
-    style: &VoiceStyle,
-    active: &Arc<AtomicBool>,
-    player: &PocketAudioPlayer,
-    playback_rate: &AtomicU32,
-    applied_rate_bits: &mut u32,
+    backend: &dyn TtsBackend,
+    playback: &mut OutboundPlayback<'_>,
     pending: &mut String,
     first_chunk_pending: &mut bool,
-    playback_started: &mut bool,
     native_voice: &NativeVoiceState,
     interruption_sensitivity: InterruptionSensitivity,
-    suppress_capture: bool,
+    input_during_tts: InputDuringTtsPolicy,
     assistant_speech: &mut Option<AssistantSpeechGuard>,
     playback_drained_at: &mut Option<Instant>,
-    delivery_ledger: &mut PlaybackDeliveryLedger,
     last_progress_emit: &mut Instant,
     flush: bool,
 ) -> Result<bool, String> {
-    let split = engine.take_streaming_text_chunks(pending, *first_chunk_pending, flush)?;
+    let split = berd_voice::take_streaming_text_chunks(pending, *first_chunk_pending, flush)?;
     *pending = split.pending;
     *first_chunk_pending = split.first_chunk_pending;
     for text in split.ready {
-        if !active.load(Ordering::SeqCst) {
-            return Ok(false);
-        }
         let text = text.trim().to_string();
-        delivery_ledger.begin_segment(text.clone());
-        let mut segment_frames = 0_u64;
-        let mut callback_error = None;
-        let completed =
-            engine.synth_chunk_streaming(&text, style, STREAMING_EMIT_FRAMES, &mut |samples| {
-                if !active.load(Ordering::SeqCst) {
-                    return false;
-                }
-                if samples.is_empty() {
-                    return true;
-                }
-                if let Err(error) =
-                    sync_pocket_playback_rate(player, playback_rate, applied_rate_bits)
-                {
-                    callback_error = Some(error);
-                    return false;
-                }
-                if let Err(error) = player.ensure_healthy() {
-                    callback_error = Some(error);
-                    return false;
-                }
-                if let Err(error) = mark_pocket_playback_started(
-                    app,
-                    stream_id,
-                    native_voice,
-                    interruption_sensitivity,
-                    suppress_capture,
-                    playback_started,
-                    assistant_speech,
-                ) {
-                    callback_error = Some(error);
-                    return false;
-                }
-                if let Err(error) = player.enqueue(&samples) {
-                    callback_error = Some(error);
-                    return false;
-                }
-                reset_pocket_drain_grace(playback_drained_at);
-                segment_frames = segment_frames.saturating_add(samples.len() as u64);
-                delivery_ledger.append_frames(samples.len());
-                if last_progress_emit.elapsed() >= PLAYBACK_PROGRESS_EMIT_INTERVAL {
-                    emit_pocket_stream_event(
-                        app,
-                        stream_id,
-                        PocketStreamEventState::Progress,
-                        None,
-                        Some(pocket_delivery_snapshot(delivery_ledger, player)),
-                    );
-                    *last_progress_emit = Instant::now();
-                }
-                true
-            })?;
-        if let Some(error) = callback_error {
-            return Err(error);
-        }
-        if !completed {
+        let outcome = playback
+            .synthesize_segment(
+                backend,
+                &text,
+                &mut |_| {
+                    if assistant_speech.is_none() {
+                        *assistant_speech = Some(
+                            native_voice
+                                .begin_assistant_speech(interruption_sensitivity, input_during_tts),
+                        );
+                    }
+                    reset_pocket_drain_grace(playback_drained_at);
+                    Ok(())
+                },
+                &mut || mark_pocket_playback_started(app, stream_id),
+                &mut |delivery| {
+                    if last_progress_emit.elapsed() >= PLAYBACK_PROGRESS_EMIT_INTERVAL {
+                        emit_pocket_stream_event(
+                            app,
+                            stream_id,
+                            PocketStreamEventState::Progress,
+                            None,
+                            Some(delivery.clone()),
+                        );
+                        *last_progress_emit = Instant::now();
+                    }
+                    Ok(())
+                },
+            )
+            .map_err(|failure: OutboundFailure| failure.message)?;
+        if outcome == OutboundOutcome::Interrupted {
             return Ok(false);
         }
-        delivery_ledger.complete_segment(segment_frames);
     }
     Ok(true)
 }
@@ -2690,24 +2224,21 @@ fn synthesize_and_stream(
     text: &str,
     output_device: Option<&str>,
     active: Arc<AtomicBool>,
-    playback_rate: Arc<AtomicU32>,
+    playback_rate: f32,
 ) -> Result<(), String> {
     use std::sync::Mutex;
     use std::time::Duration;
 
     let version = base.join(CACHE_VERSION);
+    let assets = lock_local_assets_for_read(base)?;
     let engine = load_text_to_speech(
         version
             .to_str()
             .ok_or_else(|| "Pocket model path is not valid UTF-8".to_string())?,
     )?;
-    let style = load_voice_style(&version.join("voices").join(voice.filename))?;
-    let mut applied_rate_bits = playback_rate.load(Ordering::SeqCst);
-    let player = PocketAudioPlayer::new(
-        SAMPLE_RATE,
-        f32::from_bits(applied_rate_bits),
-        output_device,
-    )?;
+    let style = load_pocket_voice_style(&version, voice.id)?;
+    drop(assets);
+    let player = PocketAudioPlayer::new(SAMPLE_RATE, playback_rate, output_device)?;
     let callback_error = Arc::new(Mutex::new(None::<String>));
     let playback_started = Arc::new(AtomicBool::new(false));
     let mut total_source_frames = 0_u64;
@@ -2722,15 +2253,7 @@ fn synthesize_and_stream(
         if samples.is_empty() {
             return true;
         }
-        if let Err(error) =
-            sync_pocket_playback_rate(&player, &playback_rate, &mut applied_rate_bits)
-        {
-            if let Ok(mut callback_error) = callback_error_slot.lock() {
-                *callback_error = Some(error);
-            }
-            return false;
-        }
-        if let Err(error) = player.ensure_healthy() {
+        if let Err(error) = player.check_health() {
             if let Ok(mut callback_error) = callback_error_slot.lock() {
                 *callback_error = Some(error);
             }
@@ -2772,21 +2295,20 @@ fn synthesize_and_stream(
     let drain_timeout = pocket_native_drain_timeout(
         total_source_frames,
         player.completed_source_frames(),
-        MIN_POCKET_PLAYBACK_SPEED,
+        playback_rate,
     );
     let drain_started = Instant::now();
     loop {
-        sync_pocket_playback_rate(&player, &playback_rate, &mut applied_rate_bits)?;
         if !active.load(Ordering::SeqCst) {
             player.stop();
             break;
         }
-        player.ensure_healthy()?;
+        player.check_health()?;
         match pocket_native_drain_status(player.is_empty(), drain_started.elapsed(), drain_timeout)
         {
             PocketNativeDrainStatus::Waiting => {}
             PocketNativeDrainStatus::Drained => {
-                player.ensure_healthy()?;
+                player.check_health()?;
                 break;
             }
             PocketNativeDrainStatus::TimedOut => {
@@ -2807,7 +2329,7 @@ fn synthesize_and_stream(
     _text: &str,
     _output_device: Option<&str>,
     _active: Arc<AtomicBool>,
-    _playback_rate: Arc<AtomicU32>,
+    _playback_rate: f32,
 ) -> Result<(), String> {
     Err("Pocket voice playback is currently supported on macOS only".to_string())
 }
@@ -2815,91 +2337,20 @@ fn synthesize_and_stream(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use berd_voice::DeliverySegment as VoiceDeliverySegment;
 
     #[test]
-    fn active_playback_observes_live_speed_changes() {
+    fn playback_snapshots_speed_when_the_utterance_begins() {
         let state = PocketVoiceState::default();
         let session =
             begin_playback_runtime(&state, "already active", || 1.0).expect("start playback");
-        assert_eq!(
-            f32::from_bits(session.playback_rate.load(Ordering::SeqCst)),
-            1.0
-        );
-
-        update_active_playback_speed(&state, 1.75).expect("update active playback");
-        assert_eq!(
-            f32::from_bits(session.playback_rate.load(Ordering::SeqCst)),
-            1.75
-        );
+        assert_eq!(session.playback_rate, 1.0);
 
         finish_playback(&state.playback, &session.active);
-        update_active_playback_speed(&state, 0.75).expect("ignore completed playback");
-        assert_eq!(
-            f32::from_bits(session.playback_rate.load(Ordering::SeqCst)),
-            1.75
-        );
-    }
-
-    #[test]
-    fn playback_ledger_maps_consumed_frames_to_text_segments_conservatively() {
-        let mut ledger = PlaybackDeliveryLedger::default();
-        ledger.begin_segment("First sentence.".to_string());
-        ledger.append_frames(4_800);
-        assert!(!ledger.snapshot_consumed_frames(0).segments[0].synthesis_complete);
-        ledger.complete_segment(4_800);
-        ledger.begin_segment("Second sentence.".to_string());
-        ledger.append_frames(4_800);
-        ledger.complete_segment(4_800);
-
-        let progress = ledger.snapshot_consumed_frames(3_600);
-        assert_eq!(progress.segments[0].played_frames, 3_600);
-        assert_eq!(progress.segments[0].total_frames, 4_800);
-        assert!(progress.segments[0].synthesis_complete);
-        assert_eq!(progress.segments[1].played_frames, 0);
-        assert_eq!(progress.segments[1].total_frames, 4_800);
-        assert!(progress.segments[1].synthesis_complete);
-    }
-
-    #[test]
-    fn playback_ledger_maps_native_consumed_frames_across_segments() {
-        let mut ledger = PlaybackDeliveryLedger::default();
-        ledger.begin_segment("First sentence.".to_string());
-        ledger.append_frames(4_800);
-        ledger.complete_segment(4_800);
-        ledger.begin_segment("Second sentence.".to_string());
-        ledger.append_frames(4_800);
-        ledger.complete_segment(4_800);
-
-        let progress = ledger.snapshot_consumed_frames(7_200);
-        assert_eq!(progress.segments[0].played_frames, 4_800);
-        assert_eq!(progress.segments[1].played_frames, 2_400);
-    }
-
-    #[test]
-    fn interruption_and_failure_capture_delivery_before_stopping_playback() {
-        use std::cell::RefCell;
-
-        let mut ledger = PlaybackDeliveryLedger::default();
-        ledger.begin_segment("Played piece.".to_string());
-        ledger.append_frames(4_800);
-        ledger.complete_segment(4_800);
-        ledger.begin_segment("Queued audio.".to_string());
-        ledger.append_frames(4_800);
-        ledger.append_frames(4_800);
-        ledger.complete_segment(9_600);
-        let calls = RefCell::new(Vec::new());
-
-        let delivery = capture_before_stop(
-            || {
-                calls.borrow_mut().push("snapshot");
-                ledger.snapshot_consumed_frames(3_600)
-            },
-            || calls.borrow_mut().push("stop"),
-        );
-
-        assert_eq!(&*calls.borrow(), &["snapshot", "stop"]);
-        assert_eq!(delivery.segments[0].played_frames, 3_600);
-        assert_eq!(delivery.segments[1].played_frames, 0);
+        let next =
+            begin_playback_runtime(&state, "already active", || 1.75).expect("next playback");
+        assert_eq!(session.playback_rate, 1.0);
+        assert_eq!(next.playback_rate, 1.75);
     }
 
     #[test]
@@ -2945,27 +2396,11 @@ mod tests {
     }
 
     #[test]
-    fn manifest_has_unique_paths_and_expected_total() {
-        let mut names = std::collections::HashSet::new();
-        for artifact in MODEL_ARTIFACTS {
-            assert!(names.insert(artifact.filename));
-            assert_eq!(artifact.url.matches("/resolve/").count(), 1);
-        }
-        for voice in VOICES {
-            assert!(names.insert(voice.filename));
-            assert_eq!(voice.url.matches("/resolve/").count(), 1);
-        }
-        assert_eq!(VOICES.len(), 12);
-        assert_eq!(total_bytes(), 278_120_564);
-    }
-
-    #[test]
     fn invalid_install_rejects_missing_and_corrupt_files() {
         let directory = tempfile::tempdir().expect("temporary directory");
         assert!(!installation_valid(directory.path()));
         let version = directory.path().join(CACHE_VERSION);
         fs::create_dir_all(version.join("voices")).expect("create fixture");
-        fs::write(version.join(VERIFIED_MARKER), CACHE_VERSION).expect("write verified marker");
         fs::write(version.join("bundle.json"), b"wrong").expect("write corrupt fixture");
         assert!(!installation_valid(directory.path()));
     }
@@ -2978,16 +2413,16 @@ mod tests {
         fs::create_dir_all(version.join("stt")).expect("create Parakeet fixture");
 
         let mut expected_pocket_bytes = 0;
-        for artifact in MODEL_ARTIFACTS {
-            let contents = vec![b'p'; artifact.filename.len()];
+        for artifact in pocket_assets::model_artifacts() {
+            let contents = vec![b'p'; artifact.relative_path.len()];
             expected_pocket_bytes += contents.len() as u64;
-            fs::write(version.join(artifact.filename), contents)
+            fs::write(version.join(artifact.relative_path), contents)
                 .expect("write Pocket artifact fixture");
         }
-        for voice in VOICES {
-            let contents = vec![b'v'; voice.filename.len()];
+        for voice in pocket_assets::voices() {
+            let contents = vec![b'v'; voice.relative_path.len()];
             expected_pocket_bytes += contents.len() as u64;
-            fs::write(version.join("voices").join(voice.filename), contents)
+            fs::write(version.join(voice.relative_path), contents)
                 .expect("write Pocket voice fixture");
         }
 
@@ -3003,64 +2438,6 @@ mod tests {
             Some(expected_pocket_bytes)
         );
         assert_eq!(parakeet_disk_bytes(directory.path()), Some(18));
-    }
-
-    #[test]
-    fn verification_rejects_same_length_corruption() {
-        let directory = tempfile::tempdir().expect("temporary directory");
-        let path = directory.path().join("asset.bin");
-        fs::write(&path, b"same-size-a").expect("write original fixture");
-        let expected_sha256 = format!("{:x}", Sha256::digest(b"same-size-a"));
-        verify_file(&path, 11, &expected_sha256).expect("verify original fixture");
-
-        fs::write(&path, b"same-size-b").expect("write corrupt fixture");
-        assert!(verify_file(&path, 11, &expected_sha256)
-            .expect_err("same-length corruption must fail")
-            .contains("checksum mismatch"));
-    }
-
-    #[tokio::test]
-    async fn voice_download_client_times_out_a_stalled_partial_body() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind partial response server");
-        let address = listener.local_addr().expect("server address");
-        let server = tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.expect("accept request");
-            socket
-                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nx")
-                .await
-                .expect("write partial response");
-            tokio::time::sleep(Duration::from_secs(1)).await;
-        });
-        let client = voice_download_client(
-            Duration::from_millis(100),
-            Duration::from_millis(100),
-            Duration::from_secs(1),
-        )
-        .expect("build timeout client");
-        let response = client
-            .get(format!("http://{address}/model"))
-            .send()
-            .await
-            .expect("receive response headers");
-        let mut stream = response.bytes_stream();
-        assert_eq!(
-            stream
-                .next()
-                .await
-                .expect("first body chunk")
-                .expect("read first body chunk")
-                .as_ref(),
-            b"x"
-        );
-        let error = stream
-            .next()
-            .await
-            .expect("stalled body must terminate")
-            .expect_err("stalled body must time out");
-        assert!(error.is_timeout(), "unexpected error: {error}");
-        server.abort();
     }
 
     #[test]
@@ -3107,25 +2484,6 @@ mod tests {
     }
 
     #[test]
-    fn failed_atomic_publication_restores_previous_cache() {
-        let directory = tempfile::tempdir().expect("temporary directory");
-        let final_dir = directory.path().join(CACHE_VERSION);
-        fs::create_dir_all(&final_dir).expect("create previous cache");
-        fs::write(final_dir.join("sentinel"), b"previous").expect("write previous cache");
-
-        let missing_staging = directory.path().join("missing-staging");
-        assert!(publish_staging(directory.path(), &missing_staging).is_err());
-        assert_eq!(
-            fs::read(final_dir.join("sentinel")).expect("restored cache"),
-            b"previous"
-        );
-        assert!(!directory
-            .path()
-            .join(format!("{CACHE_VERSION}.previous"))
-            .exists());
-    }
-
-    #[test]
     fn pocket_multi_file_progress_is_monotonic_for_one_attempt() {
         let mut runtime = InstallRuntime::default();
         let total = pocket_published_bytes();
@@ -3133,10 +2491,10 @@ mod tests {
             .expect("begin Pocket attempt");
         let mut observed = vec![0];
 
-        for size in MODEL_ARTIFACTS
+        for size in pocket_assets::model_artifacts()
             .iter()
-            .map(|artifact| artifact.size)
-            .chain(VOICES.iter().map(|voice| voice.size_bytes))
+            .map(|artifact| artifact.size_bytes)
+            .chain(pocket_assets::voices().iter().map(|voice| voice.size_bytes))
         {
             assert!(increment_model_progress(
                 &mut runtime,
@@ -3277,35 +2635,50 @@ mod tests {
     }
 
     #[test]
-    fn interruption_mode_selects_capture_suppression_policy() {
-        assert!(should_suppress_capture(
-            VoiceInterruptionMode::Automatic,
-            Some("MacBook Pro Speakers"),
-        ));
-        assert!(!should_suppress_capture(
-            VoiceInterruptionMode::Automatic,
-            Some("AirPods Pro"),
-        ));
-        assert!(!should_suppress_capture(
-            VoiceInterruptionMode::Automatic,
-            Some("USB Headphones"),
-        ));
-        assert!(!should_suppress_capture(
-            VoiceInterruptionMode::Automatic,
-            Some("Studio Display Audio"),
-        ));
-        assert!(!should_suppress_capture(
-            VoiceInterruptionMode::Automatic,
-            None,
-        ));
-        assert!(!should_suppress_capture(
-            VoiceInterruptionMode::AllowInterruptions,
-            Some("MacBook Pro Speakers"),
-        ));
-        assert!(should_suppress_capture(
-            VoiceInterruptionMode::PreventFeedback,
-            Some("AirPods Pro"),
-        ));
+    fn interruption_mode_resolves_shared_input_policy() {
+        assert_eq!(
+            resolve_input_during_tts_policy(
+                VoiceInterruptionMode::Automatic,
+                Some("MacBook Pro Speakers"),
+            ),
+            InputDuringTtsPolicy::SuppressInput
+        );
+        assert_eq!(
+            resolve_input_during_tts_policy(VoiceInterruptionMode::Automatic, Some("AirPods Pro"),),
+            InputDuringTtsPolicy::AllowBargeIn
+        );
+        assert_eq!(
+            resolve_input_during_tts_policy(
+                VoiceInterruptionMode::Automatic,
+                Some("USB Headphones"),
+            ),
+            InputDuringTtsPolicy::AllowBargeIn
+        );
+        assert_eq!(
+            resolve_input_during_tts_policy(
+                VoiceInterruptionMode::Automatic,
+                Some("Studio Display Audio"),
+            ),
+            InputDuringTtsPolicy::AllowBargeIn
+        );
+        assert_eq!(
+            resolve_input_during_tts_policy(VoiceInterruptionMode::Automatic, None,),
+            InputDuringTtsPolicy::AllowBargeIn
+        );
+        assert_eq!(
+            resolve_input_during_tts_policy(
+                VoiceInterruptionMode::AllowInterruptions,
+                Some("MacBook Pro Speakers"),
+            ),
+            InputDuringTtsPolicy::AllowBargeIn
+        );
+        assert_eq!(
+            resolve_input_during_tts_policy(
+                VoiceInterruptionMode::PreventFeedback,
+                Some("AirPods Pro"),
+            ),
+            InputDuringTtsPolicy::SuppressInput
+        );
     }
 
     #[cfg(target_os = "macos")]
@@ -3348,7 +2721,7 @@ mod tests {
         let grace = Duration::from_millis(500);
         let mut drained_at = None;
 
-        assert!(!pocket_assistant_speech_grace_elapsed(
+        assert!(!output_latency_grace_elapsed(
             true,
             true,
             &mut drained_at,
@@ -3358,21 +2731,21 @@ mod tests {
         reset_pocket_drain_grace(&mut drained_at);
         assert_eq!(drained_at, None);
 
-        assert!(!pocket_assistant_speech_grace_elapsed(
+        assert!(!output_latency_grace_elapsed(
             true,
             true,
             &mut drained_at,
             grace,
             started + Duration::from_millis(600),
         ));
-        assert!(!pocket_assistant_speech_grace_elapsed(
+        assert!(!output_latency_grace_elapsed(
             true,
             true,
             &mut drained_at,
             grace,
             started + Duration::from_millis(900),
         ));
-        assert!(pocket_assistant_speech_grace_elapsed(
+        assert!(output_latency_grace_elapsed(
             true,
             true,
             &mut drained_at,
@@ -3380,7 +2753,7 @@ mod tests {
             started + Duration::from_millis(1_100),
         ));
 
-        assert!(!pocket_assistant_speech_grace_elapsed(
+        assert!(!output_latency_grace_elapsed(
             true,
             false,
             &mut drained_at,
@@ -3388,6 +2761,36 @@ mod tests {
             started + Duration::from_secs(1),
         ));
         assert_eq!(drained_at, None);
+    }
+
+    #[test]
+    fn playback_drain_grace_never_starts_before_output_is_empty() {
+        let started = Instant::now();
+        let grace = Duration::from_millis(100);
+        let mut drained_at = None;
+
+        assert!(!output_latency_grace_elapsed(
+            false,
+            true,
+            &mut drained_at,
+            grace,
+            started + Duration::from_secs(10),
+        ));
+        assert_eq!(drained_at, None);
+        assert!(!output_latency_grace_elapsed(
+            true,
+            true,
+            &mut drained_at,
+            grace,
+            started + Duration::from_secs(10),
+        ));
+        assert!(output_latency_grace_elapsed(
+            true,
+            true,
+            &mut drained_at,
+            grace,
+            started + Duration::from_secs(10) + grace,
+        ));
     }
 
     #[test]
@@ -3409,66 +2812,49 @@ mod tests {
     }
 
     #[test]
-    fn native_drain_timeout_covers_a_live_slowdown() {
+    fn native_drain_timeout_uses_the_snapshotted_playback_rate() {
         let fastest_timeout = pocket_native_drain_timeout(72_000, 24_000, 2.0);
-        let live_rate_timeout =
-            pocket_native_drain_timeout(72_000, 24_000, MIN_POCKET_PLAYBACK_SPEED);
-        assert!(live_rate_timeout > fastest_timeout);
+        let snapshotted_rate = 0.75;
+        let snapshotted_timeout = pocket_native_drain_timeout(72_000, 24_000, snapshotted_rate);
+        assert!(snapshotted_timeout > fastest_timeout);
         assert_eq!(
-            live_rate_timeout,
-            Duration::from_secs_f64(2.0 / f64::from(MIN_POCKET_PLAYBACK_SPEED))
+            snapshotted_timeout,
+            Duration::from_secs_f64(2.0 / f64::from(snapshotted_rate))
                 .saturating_add(POCKET_SOURCE_COMPLETION_TIMEOUT)
         );
     }
 
     #[test]
-    fn post_timeout_grace_ignores_live_rate_changes() {
-        let mut sync_count = 0;
-        sync_pocket_playback_rate_before_timeout(false, || {
-            sync_count += 1;
-            Ok(())
-        })
-        .expect("sync while native playback is active");
-        sync_pocket_playback_rate_before_timeout(true, || {
-            sync_count += 1;
-            Err("stopped player rejected rate change".to_string())
-        })
-        .expect("ignore rate change after native timeout");
-        assert_eq!(sync_count, 1);
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn native_drain_timeout_releases_guard_after_route_grace() {
-        let native_voice = NativeVoiceState::default();
-        let mut assistant_speech =
-            Some(native_voice.begin_assistant_speech(InterruptionSensitivity::More, false));
-        let mut drained_at = Some(Instant::now());
+    fn native_drain_timeout_preserves_remaining_route_grace() {
         let timed_out_at = Instant::now();
         let route_grace = Duration::from_millis(500);
 
-        reset_pocket_drain_grace(&mut drained_at);
-        update_pocket_assistant_speech(
-            true,
-            &mut assistant_speech,
-            &mut drained_at,
-            route_grace,
-            timed_out_at,
+        assert_eq!(
+            output_latency_grace_remaining(true, None, route_grace, timed_out_at,),
+            route_grace
         );
-        assert!(assistant_speech.is_some());
-
-        update_pocket_assistant_speech(
-            true,
-            &mut assistant_speech,
-            &mut drained_at,
-            route_grace,
-            timed_out_at + route_grace,
+        assert_eq!(
+            output_latency_grace_remaining(
+                true,
+                Some(timed_out_at - Duration::from_millis(200)),
+                route_grace,
+                timed_out_at,
+            ),
+            Duration::from_millis(300)
         );
-        assert!(assistant_speech.is_none());
-
-        assistant_speech =
-            Some(native_voice.begin_assistant_speech(InterruptionSensitivity::More, false));
-        assert!(assistant_speech.is_some());
+        assert_eq!(
+            output_latency_grace_remaining(
+                true,
+                Some(timed_out_at - route_grace),
+                route_grace,
+                timed_out_at,
+            ),
+            Duration::ZERO
+        );
+        assert_eq!(
+            output_latency_grace_remaining(false, None, route_grace, timed_out_at,),
+            Duration::ZERO
+        );
     }
 
     #[test]
@@ -3493,7 +2879,7 @@ mod tests {
             &mut runtime,
             VoiceModelKind::Parakeet,
             attempt_id,
-            PARAKEET_ARCHIVE.size - first_chunk,
+            parakeet_assets::ARCHIVE.size_bytes - first_chunk,
         )
         .expect("finish Parakeet archive");
         advance_model_progress(
@@ -3501,7 +2887,7 @@ mod tests {
             VoiceModelKind::Parakeet,
             attempt_id,
             VoiceModelDownloadPhase::Extracting,
-            Some(PARAKEET_ARCHIVE.size),
+            Some(parakeet_assets::ARCHIVE.size_bytes),
         )
         .expect("extract Parakeet");
         let after_archive = runtime
@@ -3666,51 +3052,76 @@ mod tests {
         }
     }
 
-    fn write_removal_fixture(base: &Path) {
+    #[test]
+    fn initial_already_ready_is_normalized_to_complete_without_fake_download_bytes() {
+        let state = PocketVoiceState::default();
+        let attempt_id = {
+            let mut runtime = state.install.lock().expect("install state");
+            begin_model_attempt(&mut runtime, VoiceModelKind::Pocket, 100, true)
+                .expect("begin install")
+        };
+        normalize_successful_install(&state, VoiceModelKind::Pocket, attempt_id)
+            .expect("normalize success");
+        let runtime = state.install.lock().expect("install state");
+        let progress = model_progress(&runtime, VoiceModelKind::Pocket).expect("progress");
+        assert_eq!(progress.phase, VoiceModelDownloadPhase::Complete);
+        assert_eq!(progress.downloaded_bytes, 0);
+        assert_eq!(progress.total_bytes, 100);
+    }
+
+    fn remove_fixture_model(base: &Path, model: VoiceModelKind) {
         let version = base.join(CACHE_VERSION);
-        fs::create_dir_all(version.join("voices")).expect("create Pocket fixture");
-        fs::create_dir_all(version.join("stt")).expect("create Parakeet fixture");
-        for artifact in MODEL_ARTIFACTS {
-            fs::write(version.join(artifact.filename), b"pocket")
-                .expect("write Pocket artifact fixture");
-        }
-        fs::write(version.join("voices").join("mary.wav"), b"voice").expect("write voice fixture");
-        fs::write(version.join("stt").join("model.int8.onnx"), b"parakeet")
-            .expect("write Parakeet fixture");
-        fs::write(version.join("stt").join("tokens.txt"), b"tokens")
-            .expect("write Parakeet token fixture");
-        fs::write(version.join("stt").join("MODEL_LICENSE.txt"), b"license")
-            .expect("write Parakeet license fixture");
-        fs::write(version.join(VERIFIED_MARKER), CACHE_VERSION).expect("write verified marker");
+        fs::create_dir_all(version.join("stt")).expect("create combined fixture");
+        fs::write(version.join("pocket-ready"), b"pocket").expect("write Pocket fixture");
+        fs::write(version.join("stt/parakeet-ready"), b"parakeet").expect("write Parakeet fixture");
+        remove_cached_model_with(
+            base,
+            model,
+            |base| base.join(CACHE_VERSION).join("pocket-ready").is_file(),
+            |base| {
+                base.join(CACHE_VERSION)
+                    .join("stt/parakeet-ready")
+                    .is_file()
+            },
+            |_mutation, source, destination| {
+                fs::create_dir_all(destination)
+                    .map_err(|error| format!("create Pocket stage: {error}"))?;
+                fs::copy(
+                    source.join("pocket-ready"),
+                    destination.join("pocket-ready"),
+                )
+                .map_err(|error| format!("copy Pocket stage: {error}"))?;
+                Ok(())
+            },
+            |_mutation, source, destination| {
+                fs::create_dir_all(destination)
+                    .map_err(|error| format!("create Parakeet stage: {error}"))?;
+                fs::copy(
+                    source.join("parakeet-ready"),
+                    destination.join("parakeet-ready"),
+                )
+                .map_err(|error| format!("copy Parakeet stage: {error}"))?;
+                Ok(())
+            },
+        )
+        .expect("remove fixture model");
     }
 
     #[test]
-    fn pocket_removal_atomically_preserves_parakeet_assets() {
+    fn pocket_removal_preserves_only_the_ready_parakeet_counterpart() {
         let directory = tempfile::tempdir().expect("temporary directory");
-        write_removal_fixture(directory.path());
-
-        remove_cached_model(directory.path(), VoiceModelKind::Pocket)
-            .expect("remove Pocket assets");
-
+        remove_fixture_model(directory.path(), VoiceModelKind::Pocket);
         let version = directory.path().join(CACHE_VERSION);
-        assert!(version.join("stt").join("model.int8.onnx").exists());
-        assert!(version.join(VERIFIED_MARKER).exists());
-        assert!(!version.join("voices").exists());
-        assert!(!version.join(MODEL_ARTIFACTS[0].filename).exists());
+        assert!(version.join("stt/parakeet-ready").is_file());
+        assert!(!version.join("pocket-ready").exists());
     }
 
     #[test]
-    fn parakeet_removal_atomically_preserves_pocket_assets() {
+    fn parakeet_removal_preserves_only_the_ready_pocket_counterpart() {
         let directory = tempfile::tempdir().expect("temporary directory");
-        write_removal_fixture(directory.path());
-
-        remove_cached_model(directory.path(), VoiceModelKind::Parakeet)
-            .expect("remove Parakeet assets");
-
+        remove_fixture_model(directory.path(), VoiceModelKind::Parakeet);
         let version = directory.path().join(CACHE_VERSION);
-        assert!(version.join("voices").join("mary.wav").exists());
-        assert!(version.join(MODEL_ARTIFACTS[0].filename).exists());
-        assert!(version.join(VERIFIED_MARKER).exists());
+        assert!(version.join("pocket-ready").is_file());
         assert!(!version.join("stt").exists());
     }
 

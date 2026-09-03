@@ -33,6 +33,8 @@ const mocks = vi.hoisted(() => ({
         speaking: boolean,
       ) => Promise<void>
     >(),
+  prepareAssistantSpeech: vi.fn(),
+  cancelAssistantSpeech: vi.fn(),
   streamHandler: null as ((event: PocketVoiceStreamEvent) => void) | null,
   siriStart:
     vi.fn<
@@ -70,14 +72,22 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("../api/voiceConversation", () => ({
   setVoiceConversationAssistantSpeaking: mocks.setAssistantSpeaking,
+  prepareVoiceConversationAssistantSpeech: mocks.prepareAssistantSpeech,
+  cancelVoiceConversationAssistantSpeech: mocks.cancelAssistantSpeech,
 }));
 
 vi.mock("../api/pocketVoice", () => ({
   startPocketVoiceStream: (
+    _sessionId: string,
+    _expectedRevision: number,
+    _speechId: number,
     streamId: string,
     interruptionMode: typeof mocks.interruptionMode,
     interruptionSensitivity: "less" | "balanced" | "more",
-  ) => mocks.start(streamId, interruptionMode, interruptionSensitivity),
+  ) =>
+    mocks
+      .start(streamId, interruptionMode, interruptionSensitivity)
+      .then(() => true),
   appendPocketVoiceStream: (streamId: string, text: string) =>
     mocks.append(streamId, text),
   flushPocketVoiceStream: (streamId: string) => mocks.flush(streamId),
@@ -93,10 +103,16 @@ vi.mock("../api/pocketVoice", () => ({
 
 vi.mock("../api/openAiVoice", () => ({
   startOpenAiVoiceStream: (
+    _sessionId: string,
+    _expectedRevision: number,
+    _speechId: number,
     streamId: string,
     interruptionMode: typeof mocks.interruptionMode,
     interruptionSensitivity: "less" | "balanced" | "more",
-  ) => mocks.openAiStart(streamId, interruptionMode, interruptionSensitivity),
+  ) =>
+    mocks
+      .openAiStart(streamId, interruptionMode, interruptionSensitivity)
+      .then(() => true),
   appendOpenAiVoiceStream: (streamId: string, text: string) =>
     mocks.openAiAppend(streamId, text),
   flushOpenAiVoiceStream: (streamId: string) => mocks.openAiFlush(streamId),
@@ -112,12 +128,17 @@ vi.mock("../api/openAiVoice", () => ({
 
 vi.mock("../api/siriVoice", () => ({
   startSiriVoiceStream: (
+    _sessionId: string,
+    _expectedRevision: number,
+    _speechId: number,
     streamId: string,
     voice: { name: string; language: string },
     interruptionMode: typeof mocks.interruptionMode,
     interruptionSensitivity: "less" | "balanced" | "more",
   ) =>
-    mocks.siriStart(streamId, voice, interruptionMode, interruptionSensitivity),
+    mocks
+      .siriStart(streamId, voice, interruptionMode, interruptionSensitivity)
+      .then(() => true),
   appendSiriVoiceStream: (streamId: string, text: string) =>
     mocks.siriAppend(streamId, text),
   flushSiriVoiceStream: (streamId: string) => mocks.siriFlush(streamId),
@@ -209,6 +230,10 @@ describe("native assistant speech stream", () => {
     mocks.finish.mockReset().mockResolvedValue();
     mocks.stop.mockReset().mockResolvedValue(true);
     mocks.setAssistantSpeaking.mockReset().mockResolvedValue(undefined);
+    mocks.prepareAssistantSpeech
+      .mockReset()
+      .mockResolvedValue({ outcome: "admitted", speechId: 7 });
+    mocks.cancelAssistantSpeech.mockReset().mockResolvedValue(true);
     mocks.streamHandler = null;
     mocks.siriStart.mockReset().mockResolvedValue();
     mocks.siriAppend.mockReset().mockResolvedValue();
@@ -281,6 +306,196 @@ describe("native assistant speech stream", () => {
         " text.",
       );
     });
+  });
+
+  it("waits for speakable text before requesting admission", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [assistant([{ type: "text", text: "   " }])]);
+
+    await new Promise((resolve) => window.setTimeout(resolve, 10));
+    expect(mocks.prepareAssistantSpeech).not.toHaveBeenCalled();
+    expect(mocks.start).not.toHaveBeenCalled();
+
+    useChatStore
+      .getState()
+      .appendStreamingText("session-1", "assistant-1", "Hello.");
+    await vi.waitFor(() =>
+      expect(mocks.prepareAssistantSpeech).toHaveBeenCalledWith(
+        "session-1",
+        1,
+        "   Hello.",
+        null,
+      ),
+    );
+    expect(mocks.append).toHaveBeenCalledWith(
+      mocks.start.mock.calls[0]?.[0],
+      "Hello.",
+    );
+  });
+
+  it("completes whitespace-only output without addressing a native stream", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore.getState().setMessages("session-1", [
+      assistant(
+        [
+          { type: "text", text: "   " },
+          {
+            type: "toolRequest",
+            id: "tool-1",
+            name: "noop",
+            arguments: {},
+            status: "completed",
+          },
+        ],
+        "completed",
+      ),
+    ]);
+
+    await new Promise((resolve) => window.setTimeout(resolve, 10));
+    expect(mocks.prepareAssistantSpeech).not.toHaveBeenCalled();
+    expect(mocks.flush).not.toHaveBeenCalled();
+    expect(mocks.finish).not.toHaveBeenCalled();
+
+    useChatStore.getState().setMessages("session-1", [
+      assistant(
+        [
+          { type: "text", text: "   " },
+          {
+            type: "toolRequest",
+            id: "tool-1",
+            name: "noop",
+            arguments: {},
+            status: "completed",
+          },
+        ],
+        "completed",
+      ),
+      assistant(
+        [{ type: "text", text: "The next response speaks." }],
+        "completed",
+        "assistant-2",
+      ),
+    ]);
+    await vi.waitFor(() =>
+      expect(mocks.append).toHaveBeenCalledWith(
+        mocks.start.mock.calls[0]?.[0],
+        "The next response speaks.",
+      ),
+    );
+  });
+
+  it("retires whitespace-only output held during user speech", async () => {
+    vi.useFakeTimers();
+    try {
+      useVoiceConversationStore.setState({ userSpeaking: true });
+      startNativeAssistantSpeech("session-1", vi.fn());
+      useChatStore
+        .getState()
+        .setMessages("session-1", [
+          assistant([{ type: "text", text: "   " }], "completed"),
+        ]);
+
+      useVoiceConversationStore.setState({ userSpeaking: false });
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.runAllTimersAsync();
+      finalizeVoiceTranscript("voice-after-inert-output");
+      await vi.runAllTimersAsync();
+
+      expect(mocks.prepareAssistantSpeech).not.toHaveBeenCalled();
+      expect(mocks.start).not.toHaveBeenCalled();
+      expect(takeVoicePlaybackNotices("session-1")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("prepares playback with the assistant response's exact causal transcript", async () => {
+    finalizeVoiceTranscript("voice-k1");
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        voiceUser("voice-k1"),
+        assistant([{ type: "text", text: "Causal reply." }]),
+      ]);
+
+    await vi.waitFor(() =>
+      expect(mocks.prepareAssistantSpeech).toHaveBeenCalledWith(
+        "session-1",
+        1,
+        "Causal reply.",
+        {
+          lifecycleId: "lifecycle-1",
+          id: "voice-k1",
+          revision: 1,
+        },
+      ),
+    );
+    expect(mocks.start).toHaveBeenCalled();
+  });
+
+  it("does not start a response rejected by authoritative pending input", async () => {
+    mocks.prepareAssistantSpeech.mockResolvedValueOnce({ outcome: "pending" });
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "Stale reply." }]),
+      ]);
+
+    await vi.waitFor(() =>
+      expect(mocks.prepareAssistantSpeech).toHaveBeenCalled(),
+    );
+    expect(mocks.start).not.toHaveBeenCalled();
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+    ).toMatchObject({ speech: { status: "notSpoken" } });
+  });
+
+  it("does not reinterpret a late pending result after the utterance was interrupted", async () => {
+    let resolvePrepare: ((outcome: { outcome: "pending" }) => void) | undefined;
+    mocks.prepareAssistantSpeech.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolvePrepare = resolve;
+        }),
+    );
+    const terminalStatuses: string[] = [];
+    let previousStatus: string | undefined;
+    const unsubscribe = useChatStore.subscribe((state) => {
+      const content = state.messagesBySession["session-1"]?.[0]?.content[0];
+      const status =
+        content && "speech" in content ? content.speech?.status : undefined;
+      if (status && status !== previousStatus) terminalStatuses.push(status);
+      previousStatus = status;
+    });
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "Held reply." }]),
+      ]);
+
+    await vi.waitFor(() => expect(resolvePrepare).toBeDefined());
+    useVoiceConversationStore.setState({ userSpeaking: true });
+    await vi.waitFor(() =>
+      expect(
+        useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+      ).toMatchObject({ speech: { status: "interrupted" } }),
+    );
+    const terminalStatus =
+      useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0];
+
+    resolvePrepare?.({ outcome: "pending" });
+    await vi.waitFor(() => expect(mocks.start).not.toHaveBeenCalled());
+
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+    ).toEqual(terminalStatus);
+    expect(terminalStatuses).toEqual(["interrupted"]);
+    unsubscribe();
   });
 
   it("routes ordering and cancellation through OpenAI when selected", async () => {
@@ -2898,7 +3113,7 @@ describe("native assistant speech stream", () => {
     );
   });
 
-  it("hydrates causal ownership from an existing voice transcript", async () => {
+  it("does not reuse a transcript reference from a prior voice lifecycle", async () => {
     useChatStore.getState().setMessages("session-1", [voiceUser("voice-k1")]);
     startNativeAssistantSpeech("session-1", vi.fn());
     useChatStore
@@ -2912,15 +3127,12 @@ describe("native assistant speech stream", () => {
         ),
       ]);
 
-    await vi.waitFor(() =>
-      expect(mocks.append).toHaveBeenCalledWith(
-        mocks.start.mock.calls[0]?.[0],
-        "Recovered-turn reply.",
-      ),
-    );
+    await new Promise((resolve) => window.setTimeout(resolve, 10));
+    expect(mocks.prepareAssistantSpeech).not.toHaveBeenCalled();
+    expect(mocks.append).not.toHaveBeenCalled();
     expect(
       useVoiceConversationStore.getState().latestFinalizedTranscriptKey,
-    ).toBe(["session-1", "lifecycle-1", "1", "voice-k1"].join("\0"));
+    ).toBeNull();
   });
 
   it("plays each completed reply held during user speech in its own stream", async () => {

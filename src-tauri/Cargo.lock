@@ -7,20 +7,16 @@ name = "Berd"
 version = "0.6.2"
 dependencies = [
  "anyhow",
- "audioadapter-buffers",
  "base64 0.22.1",
  "berd-voice",
  "block2",
  "builderbot-auth",
  "bytes",
- "bzip2 0.6.1",
- "cc",
  "chrono",
  "coreaudio-rs",
  "dirs",
  "doctor",
  "dunce",
- "earshot",
  "etcetera 0.11.0",
  "fern",
  "flate2",
@@ -45,13 +41,10 @@ dependencies = [
  "portable-pty",
  "reqwest 0.13.4",
  "rodio",
- "rubato",
- "rustls",
  "semver",
  "serde",
  "serde_json",
  "sha2",
- "sherpa-onnx",
  "sqlx",
  "swift-rs",
  "sysinfo",
@@ -74,7 +67,6 @@ dependencies = [
  "tempfile",
  "time",
  "tokio",
- "tokio-tungstenite",
  "toml 1.1.4+spec-1.1.0",
  "url",
  "uuid",
@@ -601,14 +593,35 @@ dependencies = [
 name = "berd-voice"
 version = "0.1.0"
 dependencies = [
+ "audioadapter-buffers",
+ "base64 0.22.1",
+ "bzip2 0.6.1",
+ "cc",
+ "claxon",
+ "coreaudio-rs",
+ "earshot",
+ "fs2",
+ "futures-util",
+ "hound",
+ "libc",
  "ort",
  "ort-sys",
  "rand 0.10.2",
+ "reqwest 0.13.4",
+ "rubato",
+ "rustls",
  "sentencepiece-model",
  "serde",
  "serde_json",
+ "sha2",
  "sherpa-onnx",
+ "swift-rs",
+ "tar",
+ "tempfile",
  "tokenizers",
+ "tokio",
+ "tokio-tungstenite",
+ "uuid",
 ]
 
 [[package]]
@@ -998,6 +1011,12 @@ name = "clap_lex"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
+
+[[package]]
+name = "claxon"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4bfbf56724aa9eca8afa4fcfadeb479e722935bb2a0900c2d37e0cc477af0688"
 
 [[package]]
 name = "clipboard-win"
@@ -2662,6 +2681,12 @@ checksum = "cc627f471c528ff0c4a49e1d5e60450c8f6461dd6d10ba9dcd3a61d3dff7728d"
 dependencies = [
  "windows-sys 0.61.2",
 ]
+
+[[package]]
+name = "hound"
+version = "3.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62adaabb884c94955b19907d60019f4e145d091c75345379e70d1ee696f7854f"
 
 [[package]]
 name = "html5ever"

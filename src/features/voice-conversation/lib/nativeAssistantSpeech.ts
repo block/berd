@@ -33,7 +33,12 @@ import {
   type SiriVoiceStreamEvent,
   type SiriVoiceSelection,
 } from "../api/siriVoice";
-import { setVoiceConversationAssistantSpeaking } from "../api/voiceConversation";
+import {
+  cancelVoiceConversationAssistantSpeech,
+  prepareVoiceConversationAssistantSpeech,
+  setVoiceConversationAssistantSpeaking,
+  type VoiceTranscriptReference,
+} from "../api/voiceConversation";
 import {
   FIXED_INTERRUPTION_SENSITIVITY,
   getVoiceInterruptionPreference,
@@ -68,13 +73,16 @@ type ActiveUtterance = {
   targetSpans: SpeechTargetSpan[];
   text: string;
   finishing: boolean;
+  nativeStartQueued: boolean;
   nativeStartInvoked: boolean;
+  speechId: number | null;
   interruptionRequested: boolean;
   resumptionDiscarded: boolean;
   interruptionFallback: ReturnType<typeof setTimeout> | null;
   interruptionCause: InterruptionCause | null;
   latestDelivery: VoiceDeliveryProgress | null;
   causalTranscriptKey: string | null;
+  causalTranscriptReference: VoiceTranscriptReference | null;
   status: SpeechStatus | null;
   onFailure: SpeechFailureHandler;
   onInterrupted: (
@@ -169,6 +177,30 @@ function voiceTranscriptKeyForMessage(
     metadata.voiceConversationRevision,
     metadata.voiceUtteranceId,
   ].join("\0");
+}
+
+function voiceTranscriptReferenceForMessage(
+  message: ReturnType<
+    typeof useChatStore.getState
+  >["messagesBySession"][string][number],
+): VoiceTranscriptReference | null {
+  const metadata = message.metadata;
+  if (
+    metadata?.origin !== "voice_conversation" ||
+    typeof metadata.voiceConversationLifecycleId !== "string" ||
+    metadata.voiceConversationLifecycleId.length === 0 ||
+    typeof metadata.voiceConversationRevision !== "number" ||
+    !Number.isInteger(metadata.voiceConversationRevision) ||
+    typeof metadata.voiceUtteranceId !== "string" ||
+    metadata.voiceUtteranceId.length === 0
+  ) {
+    return null;
+  }
+  return {
+    lifecycleId: metadata.voiceConversationLifecycleId,
+    id: metadata.voiceUtteranceId,
+    revision: metadata.voiceConversationRevision,
+  };
 }
 
 function reportAssistantActivity(
@@ -753,6 +785,13 @@ function interruptActiveUtterance(
   if (utterance && !utterance.interruptionRequested) {
     utterance.interruptionRequested = true;
     utterance.interruptionCause = cause;
+    if (utterance.speechId !== null) {
+      void cancelVoiceConversationAssistantSpeech(
+        utterance.sessionId,
+        utterance.voiceRevision,
+        utterance.speechId,
+      ).catch(() => false);
+    }
   }
   if (utterance && !terminalEventExpected) {
     finalizeInterruptedUtterance(
@@ -879,7 +918,9 @@ export function startNativeAssistantSpeech(
     outputBackend === "siri"
       ? {
           start: (
+            speechId: number,
             streamId: string,
+            voiceRevision: number,
             interruptionMode: VoiceInterruptionMode,
             interruptionSensitivity: VoiceInterruptionSensitivity,
           ) => {
@@ -889,6 +930,9 @@ export function startNativeAssistantSpeech(
               );
             }
             return startSiriVoiceStream(
+              sessionId,
+              voiceRevision,
+              speechId,
               streamId,
               activeSiriVoice,
               interruptionMode,
@@ -903,7 +947,21 @@ export function startNativeAssistantSpeech(
         }
       : outputBackend === "openai"
         ? {
-            start: startOpenAiVoiceStream,
+            start: (
+              speechId: number,
+              streamId: string,
+              voiceRevision: number,
+              interruptionMode: VoiceInterruptionMode,
+              interruptionSensitivity: VoiceInterruptionSensitivity,
+            ) =>
+              startOpenAiVoiceStream(
+                sessionId,
+                voiceRevision,
+                speechId,
+                streamId,
+                interruptionMode,
+                interruptionSensitivity,
+              ),
             append: appendOpenAiVoiceStream,
             flush: flushOpenAiVoiceStream,
             finish: finishOpenAiVoiceStream,
@@ -911,7 +969,21 @@ export function startNativeAssistantSpeech(
             listen: listenToOpenAiVoiceStream,
           }
         : {
-            start: startPocketVoiceStream,
+            start: (
+              speechId: number,
+              streamId: string,
+              voiceRevision: number,
+              interruptionMode: VoiceInterruptionMode,
+              interruptionSensitivity: VoiceInterruptionSensitivity,
+            ) =>
+              startPocketVoiceStream(
+                sessionId,
+                voiceRevision,
+                speechId,
+                streamId,
+                interruptionMode,
+                interruptionSensitivity,
+              ),
             append: appendPocketVoiceStream,
             flush: flushPocketVoiceStream,
             finish: finishPocketVoiceStream,
@@ -933,6 +1005,7 @@ export function startNativeAssistantSpeech(
   const toolCountByMessage = new Map<string, number>();
   const consumedTextBySlot = new Map<string, string>();
   const causalTranscriptKeyByMessage = new Map<string, string | null>();
+  const transcriptReferenceByKey = new Map<string, VoiceTranscriptReference>();
   const invalidatedMessages = new Set<string>();
   const completedMessages = new Set<string>();
   const interruptedMessages = new Set<string>();
@@ -947,6 +1020,9 @@ export function startNativeAssistantSpeech(
       );
       if (voiceTranscriptKey !== null) {
         precedingTranscriptKey = voiceTranscriptKey;
+        const reference = voiceTranscriptReferenceForMessage(message);
+        if (reference)
+          transcriptReferenceByKey.set(voiceTranscriptKey, reference);
       }
     } else if (message.role === "assistant") {
       causalTranscriptKeyByMessage.set(message.id, precedingTranscriptKey);
@@ -969,16 +1045,6 @@ export function startNativeAssistantSpeech(
       textOrdinal += 1;
     }
   }
-  if (
-    initialVoice.latestFinalizedTranscriptKey === null &&
-    precedingTranscriptKey !== null &&
-    precedingTranscriptKey !== MALFORMED_VOICE_TRANSCRIPT_KEY
-  ) {
-    useVoiceConversationStore.setState({
-      latestFinalizedTranscriptKey: precedingTranscriptKey,
-    });
-  }
-
   let heldSpeech: HeldSpeech | null = null;
   let resumableInterruption: ResumableInterruption | null = null;
   let heldReleaseReady = false;
@@ -1001,6 +1067,9 @@ export function startNativeAssistantSpeech(
         );
         if (voiceTranscriptKey !== null) {
           causalTranscriptKey = voiceTranscriptKey;
+          const reference = voiceTranscriptReferenceForMessage(message);
+          if (reference)
+            transcriptReferenceByKey.set(voiceTranscriptKey, reference);
         }
       } else if (
         message.role === "assistant" &&
@@ -1204,13 +1273,19 @@ export function startNativeAssistantSpeech(
       targetSpans: [],
       text: "",
       finishing: false,
+      nativeStartQueued: false,
       nativeStartInvoked: false,
+      speechId: null,
       interruptionRequested: false,
       resumptionDiscarded: false,
       interruptionFallback: null,
       interruptionCause: null,
       latestDelivery: null,
       causalTranscriptKey,
+      causalTranscriptReference:
+        causalTranscriptKey === null
+          ? null
+          : (transcriptReferenceByKey.get(causalTranscriptKey) ?? null),
       status: null,
       onFailure: (text, error) => {
         for (const utteranceTarget of utterance.targets) {
@@ -1250,6 +1325,12 @@ export function startNativeAssistantSpeech(
       onTerminal: () => queueMicrotask(inspect),
     };
     activeUtterance = utterance;
+    return utterance;
+  };
+
+  const queueNativeStart = (utterance: ActiveUtterance) => {
+    if (utterance.nativeStartQueued) return;
+    utterance.nativeStartQueued = true;
     queueStreamCommand(
       utterance,
       async () => {
@@ -1260,23 +1341,82 @@ export function startNativeAssistantSpeech(
         ) {
           return;
         }
-        utterance.nativeStartInvoked = true;
-        await streamBackend.start(
-          utterance.id,
-          utterance.interruptionMode,
-          utterance.interruptionSensitivity,
+        const prepared = await prepareVoiceConversationAssistantSpeech(
+          utterance.sessionId,
+          utterance.voiceRevision,
+          utterance.text,
+          utterance.causalTranscriptReference,
         );
         if (
           utterance.interruptionRequested ||
           activeUtterance?.id !== utterance.id
         ) {
-          await streamBackend.stop();
+          if (prepared.outcome === "admitted") {
+            await cancelVoiceConversationAssistantSpeech(
+              utterance.sessionId,
+              utterance.voiceRevision,
+              prepared.speechId,
+            );
+          }
           return;
+        }
+        if (prepared.outcome === "pending") {
+          commandEpoch += 1;
+          for (const target of utterance.targets) {
+            const content = targetContent(utterance.sessionId, target);
+            suppressTarget(
+              targetKey(target),
+              target,
+              content?.text ?? utterance.text,
+            );
+          }
+          if (activeUtterance?.id === utterance.id) {
+            activeUtterance = null;
+          }
+          restoreListeningIfConversationIsRunning(utterance);
+          utterance.onTerminal();
+          return;
+        }
+        if (prepared.outcome === "notAdmitted") {
+          interruptActiveUtterance(false, "voiceStopped");
+          return;
+        }
+        utterance.speechId = prepared.speechId;
+        let started: boolean;
+        try {
+          // Once the native start command has been invoked, interruption must
+          // preserve terminal ownership until that command resolves or emits
+          // its stream terminal event.
+          utterance.nativeStartInvoked = true;
+          started = await streamBackend.start(
+            prepared.speechId,
+            utterance.id,
+            utterance.voiceRevision,
+            utterance.interruptionMode,
+            utterance.interruptionSensitivity,
+          );
+        } catch (error) {
+          await cancelVoiceConversationAssistantSpeech(
+            utterance.sessionId,
+            utterance.voiceRevision,
+            prepared.speechId,
+          ).catch(() => false);
+          throw error;
+        }
+        if (!started) {
+          utterance.nativeStartInvoked = false;
+          interruptActiveUtterance(false, "userSpeaking");
+          return;
+        }
+        if (
+          utterance.interruptionRequested ||
+          activeUtterance?.id !== utterance.id
+        ) {
+          await streamBackend.stop();
         }
       },
       onFailure,
     );
-    return utterance;
   };
 
   const inspectNow = () => {
@@ -1446,7 +1586,8 @@ export function startNativeAssistantSpeech(
 
         if (
           invalidatedMessages.has(message.id) ||
-          causalTranscriptKey !== finalizedTranscriptKey
+          (causalTranscriptKey !== null &&
+            causalTranscriptKey !== finalizedTranscriptKey)
         ) {
           suppressTarget(slot, target, content.text);
           continue;
@@ -1479,6 +1620,8 @@ export function startNativeAssistantSpeech(
             targetEnd: targetStart + delta.length,
           });
         }
+        if (utterance.text.trim().length === 0) continue;
+        queueNativeStart(utterance);
         queueStreamCommand(
           utterance,
           () => streamBackend.append(utterance.id, delta),
@@ -1509,6 +1652,7 @@ export function startNativeAssistantSpeech(
         crossedToolBoundary &&
         utterance &&
         utteranceOwnsMessage &&
+        utterance.nativeStartQueued &&
         !utterance.finishing
       ) {
         queueStreamCommand(
@@ -1516,6 +1660,22 @@ export function startNativeAssistantSpeech(
           () => streamBackend.flush(utterance.id),
           onFailure,
         );
+      }
+      if (
+        completed &&
+        utterance &&
+        utteranceOwnsMessage &&
+        !utterance.nativeStartQueued
+      ) {
+        for (const target of utterance.targets) {
+          heldSpeech?.targets.delete(targetKey(target));
+        }
+        if (heldSpeech?.targets.size === 0) {
+          heldSpeech = null;
+          heldReleaseReady = false;
+        }
+        activeUtterance = null;
+        continue;
       }
       if (
         completed &&

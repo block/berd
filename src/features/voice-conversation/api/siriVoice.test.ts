@@ -48,6 +48,9 @@ describe("Siri voice API", () => {
     const voice = { name: "Samantha", language: "en-US" };
 
     await startSiriVoiceStream(
+      "session-1",
+      4,
+      7,
       "stream-1",
       voice,
       "allowInterruptions",
@@ -55,6 +58,9 @@ describe("Siri voice API", () => {
     );
 
     expect(mocks.invoke).toHaveBeenCalledWith("start_siri_voice_stream", {
+      sessionId: "session-1",
+      expectedRevision: 4,
+      speechId: 7,
       streamId: "stream-1",
       voice,
       interruptionMode: "allowInterruptions",

@@ -2,9 +2,15 @@
 name = "berd-voice"
 version = "0.1.0"
 edition = "2021"
-license = "Apache-2.0"
+# Rust sources are Apache-2.0; the embedded LibriSpeech benchmark fixture is
+# CC-BY-4.0 and carries its attribution notice in every benchmark report.
+license = "Apache-2.0 AND CC-BY-4.0"
 repository = "https://github.com/block/berd"
 description = "Device-local voice primitives for Berd"
+
+[[bin]]
+name = "berd-voice"
+path = "src/main.rs"
 
 [features]
 default = ["static"]
@@ -12,11 +18,49 @@ static = ["sherpa-onnx/static"]
 shared = ["sherpa-onnx/shared"]
 
 [dependencies]
+audioadapter-buffers = "3.0"
+base64 = "0.22"
+bzip2 = "0.6"
+claxon = "0.4.3"
+earshot = "1.0"
+fs2 = "0.4"
+futures-util = "0.3"
+hound = "3.5"
+libc = "0.2"
 ort = { version = "=2.0.0-rc.12", default-features = false, features = ["api-24", "ndarray", "std"] }
 ort-sys = { version = "=2.0.0-rc.12", features = ["disable-linking"] }
 rand = "0.10"
+reqwest = { version = "0.13.3", default-features = false, features = ["json", "rustls", "stream"] }
+rubato = "3.0"
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
 sentencepiece-model = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
+tar = "0.4"
+tempfile = "3"
+# Held below 1.13: sherpa-onnx-sys downloads prebuilt native libs into a
+# version-stamped dir under the target dir, and rust-cache strips the files out
+# of it when saving. The restored empty skeleton defeats the build script's
+# `lib_dir.is_dir()` early return, so it never re-downloads and linking fails
+# with "could not find native static library `sherpa-onnx-c-api`". CI's Linux
+# cache is poisoned for v1.13.5; this pin resolves to a path the cache has
+# never gutted. Tilde, not caret — `^1.12` floats back to 1.13.5.
+#
+# NOTE: sherpa-onnx-sys is the crate whose version actually names that path,
+# and it declares `^1.12.40`, so nothing in this manifest constrains it — it is
+# held at 1.12.40 by Cargo.lock alone. A bare `cargo update` floats it back to
+# 1.13.5 and reintroduces the CI failure; re-pin it with
+# `cargo update -p sherpa-onnx-sys --precise 1.12.40`.
 sherpa-onnx = { version = "~1.12.40", default-features = false }
 tokenizers = { version = "0.22", default-features = false, features = ["fancy-regex"] }
+tokio = { version = "1", features = ["fs", "io-util", "rt-multi-thread", "macros", "net", "sync", "time"] }
+tokio-tungstenite = { version = "0.27", features = ["rustls-tls-webpki-roots"] }
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+coreaudio-rs = "0.14.2"
+
+[target.'cfg(target_os = "macos")'.build-dependencies]
+cc = "1"
+swift-rs = { version = "1.0.7", features = ["build"] }

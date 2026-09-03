@@ -296,14 +296,26 @@ typedef void (^BerdAudioHandler)(
 @implementation BerdSiriDeliverySegment
 @end
 
-@interface BerdSiriSpeechPlayer : NSObject
-@property(nonatomic, strong) dispatch_queue_t queue;
-@property(nonatomic, strong) AVAudioEngine *engine;
-@property(nonatomic, strong) AVAudioPlayerNode *player;
+/// Stateful sirittsd packet decoder. Both the app-owned streaming player and
+/// the standalone berd-voice session use this one normalization path.
+@interface BerdSiriAudioDecoder : NSObject
 @property(nonatomic, strong) AVAudioConverter *opusConverter;
 @property(nonatomic, strong) AVAudioFormat *opusSourceFormat;
 @property(nonatomic, strong) AVAudioConverter *pcmConverter;
 @property(nonatomic, strong) AVAudioFormat *pcmSourceFormat;
+- (AVAudioPCMBuffer *)decodeData:(NSData *)data
+                          format:(AudioStreamBasicDescription)description
+                     packetCount:(UInt32)packetCount
+              packetDescriptions:(NSData *)packetDescriptions
+                           error:(NSError **)error;
+- (NSArray<AVAudioPCMBuffer *> *)finishConversion:(NSError **)error;
+@end
+
+@interface BerdSiriSpeechPlayer : NSObject
+@property(nonatomic, strong) dispatch_queue_t queue;
+@property(nonatomic, strong) AVAudioEngine *engine;
+@property(nonatomic, strong) AVAudioPlayerNode *player;
+@property(nonatomic, strong) BerdSiriAudioDecoder *decoder;
 @property(nonatomic, strong) BerdSiriSynthesisSession *session;
 @property(nonatomic, strong) NSMutableArray<BerdSiriDeliverySegment *> *pendingTexts;
 @property(nonatomic, strong) NSMutableArray<BerdSiriDeliverySegment *> *deliverySegments;
@@ -327,32 +339,7 @@ typedef void (^BerdAudioHandler)(
 - (NSString *)deliveryJSON;
 @end
 
-@implementation BerdSiriSpeechPlayer
-- (instancetype)init {
-    self = [super init];
-    if (self) {
-        _queue = dispatch_queue_create("com.block.berd.sirittsd", DISPATCH_QUEUE_SERIAL);
-        dispatch_queue_set_specific(_queue, BerdSiriSpeechQueueKey,
-                                    BerdSiriSpeechQueueKey, NULL);
-        _completionSemaphore = dispatch_semaphore_create(0);
-        _pendingTexts = [NSMutableArray array];
-        _deliverySegments = [NSMutableArray array];
-    }
-    return self;
-}
-- (void)finish:(NSError *)error {
-    if (self.finished) return;
-    self.finished = YES;
-    self.error = error;
-    self.progressGeneration += 1;
-    dispatch_semaphore_signal(self.completionSemaphore);
-}
-- (void)finishIfReady {
-    if (self.inputFinished && !self.session && self.pendingTexts.count == 0 &&
-        self.pendingBuffers == 0) {
-        [self finish:self.error];
-    }
-}
+@implementation BerdSiriAudioDecoder
 - (AVAudioPCMBuffer *)decodeData:(NSData *)data
                           format:(AudioStreamBasicDescription)description
                      packetCount:(UInt32)packetCount
@@ -505,6 +492,35 @@ typedef void (^BerdAudioHandler)(
     self.opusSourceFormat = nil;
     return buffers;
 }
+@end
+
+@implementation BerdSiriSpeechPlayer
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        _queue = dispatch_queue_create("com.block.berd.sirittsd", DISPATCH_QUEUE_SERIAL);
+        dispatch_queue_set_specific(_queue, BerdSiriSpeechQueueKey,
+                                    BerdSiriSpeechQueueKey, NULL);
+        _completionSemaphore = dispatch_semaphore_create(0);
+        _pendingTexts = [NSMutableArray array];
+        _deliverySegments = [NSMutableArray array];
+        _decoder = [BerdSiriAudioDecoder new];
+    }
+    return self;
+}
+- (void)finish:(NSError *)error {
+    if (self.finished) return;
+    self.finished = YES;
+    self.error = error;
+    self.progressGeneration += 1;
+    dispatch_semaphore_signal(self.completionSemaphore);
+}
+- (void)finishIfReady {
+    if (self.inputFinished && !self.session && self.pendingTexts.count == 0 &&
+        self.pendingBuffers == 0) {
+        [self finish:self.error];
+    }
+}
 - (BOOL)ensurePlayer:(NSError **)error {
     if (self.player) return YES;
     self.engine = [AVAudioEngine new];
@@ -557,7 +573,7 @@ typedef void (^BerdAudioHandler)(
     if (self.finished || !data.length) return;
     self.progressGeneration += 1;
     NSError *error = nil;
-    AVAudioPCMBuffer *buffer = [self decodeData:data format:format packetCount:packetCount
+    AVAudioPCMBuffer *buffer = [self.decoder decodeData:data format:format packetCount:packetCount
                             packetDescriptions:packetDescriptions error:&error];
     if (error || !buffer) {
         if (error) [self finish:error];
@@ -595,7 +611,7 @@ typedef void (^BerdAudioHandler)(
             if (!error) {
                 NSError *conversionError = nil;
                 NSArray<AVAudioPCMBuffer *> *buffers =
-                    [weakSelf finishConversion:&conversionError];
+                    [weakSelf.decoder finishConversion:&conversionError];
                 if (!buffers) {
                     [weakSelf finish:conversionError];
                     return;
@@ -694,7 +710,6 @@ typedef void (^BerdAudioHandler)(
 @property(nonatomic, strong) AVAudioFormat *format;
 @property(nonatomic, assign) uint64_t pendingBuffers;
 @property(nonatomic, assign) uint64_t completedSourceFrames;
-@property(nonatomic, assign) BOOL playbackFailed;
 @property(nonatomic, assign) BOOL stopped;
 - (instancetype)initWithSampleRate:(double)sampleRate
                               rate:(float)rate
@@ -703,7 +718,6 @@ typedef void (^BerdAudioHandler)(
 - (BOOL)enqueueSamples:(const float *)samples
             frameCount:(AVAudioFrameCount)frameCount
                  error:(NSError **)error;
-- (BOOL)setPlaybackRate:(float)rate error:(NSError **)error;
 - (uint64_t)completedSourceFramesSnapshot;
 - (void)stop;
 @end
@@ -716,30 +730,20 @@ typedef void (^BerdAudioHandler)(
     self = [super init];
     if (!self) return nil;
     if (!(sampleRate > 0) || !isfinite(rate) || rate < 0.75f || rate > 2.0f) {
-        if (error) *error = BerdError(30, @"Pocket playback speed or sample rate is invalid.");
+        if (error) *error = BerdError(30, @"PCM playback speed or sample rate is invalid.");
         return nil;
     }
 
     _engine = [AVAudioEngine new];
-    _player = [AVAudioPlayerNode new];
-    _timePitch = [AVAudioUnitTimePitch new];
-    _timePitch.rate = rate;
-    _timePitch.pitch = 0.0f;
-    _timePitch.bypass = fabsf(rate - 1.0f) <= 0.0001f;
-    _format = [[AVAudioFormat alloc] initWithCommonFormat:AVAudioPCMFormatFloat32
-                                              sampleRate:sampleRate
-                                                channels:1
-                                             interleaved:NO];
-    if (!_format) {
-        if (error) *error = BerdError(31, @"Could not create the Pocket PCM format.");
-        return nil;
-    }
+    // This output has an explicit stop lifecycle. Keep the engine alive while
+    // a streaming backend is producing its first PCM buffer; otherwise macOS
+    // may auto-shut down a freshly recreated engine during that synthesis gap.
+    _engine.autoShutdownEnabled = NO;
 
-    [_engine attachNode:_player];
-    [_engine attachNode:_timePitch];
-    [_engine connect:_player to:_timePitch format:_format];
-    [_engine connect:_timePitch to:_engine.mainMixerNode format:_format];
-
+    // Select the physical route before connecting the graph. AVAudioEngine
+    // negotiates the main mixer's channel layout while nodes are connected;
+    // changing from the default stereo device to a multi-channel device after
+    // that point can stop the engine as soon as playback begins.
     if (outputDeviceID != kAudioObjectUnknown) {
         AudioUnit outputUnit = _engine.outputNode.audioUnit;
         OSStatus status = AudioUnitSetProperty(outputUnit,
@@ -754,6 +758,25 @@ typedef void (^BerdAudioHandler)(
         }
     }
 
+    _player = [AVAudioPlayerNode new];
+    _timePitch = [AVAudioUnitTimePitch new];
+    _timePitch.rate = rate;
+    _timePitch.pitch = 0.0f;
+    _timePitch.bypass = fabsf(rate - 1.0f) <= 0.0001f;
+    _format = [[AVAudioFormat alloc] initWithCommonFormat:AVAudioPCMFormatFloat32
+                                              sampleRate:sampleRate
+                                                channels:1
+                                             interleaved:NO];
+    if (!_format) {
+        if (error) *error = BerdError(31, @"Could not create the PCM playback format.");
+        return nil;
+    }
+
+    [_engine attachNode:_player];
+    [_engine attachNode:_timePitch];
+    [_engine connect:_player to:_timePitch format:_format];
+    [_engine connect:_timePitch to:_engine.mainMixerNode format:_format];
+
     [_engine prepare];
     if (![_engine startAndReturnError:error]) return nil;
     return self;
@@ -764,7 +787,7 @@ typedef void (^BerdAudioHandler)(
                  error:(NSError **)error {
     @synchronized (self) {
         if (self.stopped) {
-            if (error) *error = BerdError(NSUserCancelledError, @"Pocket playback stopped.");
+            if (error) *error = BerdError(NSUserCancelledError, @"PCM playback stopped.");
             return NO;
         }
     }
@@ -772,7 +795,7 @@ typedef void (^BerdAudioHandler)(
     AVAudioPCMBuffer *buffer = [[AVAudioPCMBuffer alloc]
         initWithPCMFormat:self.format frameCapacity:frameCount];
     if (!buffer || !buffer.floatChannelData[0]) {
-        if (error) *error = BerdError(34, @"Could not allocate a Pocket playback buffer.");
+        if (error) *error = BerdError(34, @"Could not allocate a PCM playback buffer.");
         return NO;
     }
     buffer.frameLength = frameCount;
@@ -781,15 +804,20 @@ typedef void (^BerdAudioHandler)(
     __weak typeof(self) weakSelf = self;
     [self.player scheduleBuffer:buffer
         completionCallbackType:AVAudioPlayerNodeCompletionDataPlayedBack
-              completionHandler:^(__unused AVAudioPlayerNodeCompletionCallbackType type) {
+              completionHandler:^(AVAudioPlayerNodeCompletionCallbackType type) {
                   BerdPocketAudioPlayer *strongSelf = weakSelf;
                   if (!strongSelf) return;
                   @synchronized (strongSelf) {
-                      BOOL playing = strongSelf.engine.isRunning && strongSelf.player.isPlaying;
-                      if (!strongSelf.stopped && playing) {
+                      // `AVAudioPlayerNode.stop` may synchronously run this
+                      // callback while holding AVFAudio's realtime-messenger
+                      // lock. Calling `engine.isRunning` or `player.isPlaying`
+                      // here attempts to reacquire that lock and deadlocks
+                      // cancellation. `stop` sets this flag before stopping
+                      // either node, so it is also the authoritative delivery
+                      // distinction for disposed versus played buffers.
+                      if (!strongSelf.stopped &&
+                          type == AVAudioPlayerNodeCompletionDataPlayedBack) {
                           strongSelf.completedSourceFrames += frameCount;
-                      } else if (!strongSelf.stopped) {
-                          strongSelf.playbackFailed = YES;
                       }
                       strongSelf.pendingBuffers = strongSelf.pendingBuffers > 0
                           ? strongSelf.pendingBuffers - 1
@@ -797,22 +825,6 @@ typedef void (^BerdAudioHandler)(
                   }
               }];
     if (!self.player.isPlaying) [self.player play];
-    return YES;
-}
-
-- (BOOL)setPlaybackRate:(float)rate error:(NSError **)error {
-    if (!isfinite(rate) || rate < 0.75f || rate > 2.0f) {
-        if (error) *error = BerdError(38, @"Pocket playback speed is invalid.");
-        return NO;
-    }
-    @synchronized (self) {
-        if (self.stopped) {
-            if (error) *error = BerdError(NSUserCancelledError, @"Pocket playback stopped.");
-            return NO;
-        }
-        self.timePitch.rate = rate;
-        self.timePitch.bypass = fabsf(rate - 1.0f) <= 0.0001f;
-    }
     return YES;
 }
 
@@ -917,7 +929,7 @@ static NSDictionary<NSString *, id> *BerdDownloadedVoiceSync(
         NSString *candidateLanguage = candidate[@"language"];
         NSString *normalizedCandidate =
             [[candidateLanguage stringByReplacingOccurrencesOfString:@"_" withString:@"-"] lowercaseString];
-        if ([candidateName caseInsensitiveCompare:voiceName] == NSOrderedSame &&
+        if ([candidateName isEqualToString:voiceName] &&
             [normalizedCandidate isEqualToString:normalizedLanguage]) {
             return candidate;
         }
@@ -926,7 +938,7 @@ static NSDictionary<NSString *, id> *BerdDownloadedVoiceSync(
 }
 
 static NSArray<NSDictionary<NSString *, id> *> *BerdDiscoverVoices(
-    NSString *languagePrefix,
+    NSString *languageFilter,
     NSError **error
 ) {
     if (!BerdLoadFramework(
@@ -952,8 +964,8 @@ static NSArray<NSDictionary<NSString *, id> *> *BerdDiscoverVoices(
         return nil;
     }
     NSArray *resources = ((SendObject)objc_msgSend)(manager, voicesSelector, nil);
-    NSString *normalizedPrefix =
-        [[languagePrefix stringByReplacingOccurrencesOfString:@"_" withString:@"-"] lowercaseString];
+    NSString *normalizedFilter =
+        [[languageFilter stringByReplacingOccurrencesOfString:@"_" withString:@"-"] lowercaseString];
     NSMutableDictionary<NSString *, NSDictionary<NSString *, id> *> *byKey =
         [NSMutableDictionary dictionary];
     for (id resource in resources ?: @[]) {
@@ -962,11 +974,10 @@ static NSArray<NSDictionary<NSString *, id> *> *BerdDiscoverVoices(
         NSString *language = [resource valueForKey:@"language"] ?: @"";
         NSString *normalizedLanguage =
             [[language stringByReplacingOccurrencesOfString:@"_" withString:@"-"] lowercaseString];
-        if (normalizedPrefix.length && ![normalizedLanguage isEqualToString:normalizedPrefix]) continue;
+        if (normalizedFilter.length && ![normalizedLanguage isEqualToString:normalizedFilter]) continue;
         NSString *name = [resource valueForKey:@"name"] ?: @"";
         if (!name.length || !language.length) continue;
-        NSString *key = [NSString stringWithFormat:@"%@|%@", name.lowercaseString,
-                                                   normalizedLanguage];
+        NSString *key = [NSString stringWithFormat:@"%@|%@", name, normalizedLanguage];
         byKey[key] = @{
             @"name" : name,
             @"language" : language,
@@ -1056,15 +1067,15 @@ static BOOL BerdTriggerDownload(NSString *language, NSError **error) {
     return YES;
 }
 
-char *berd_siri_tts_catalog_json(const char *languagePrefix, char **errorOut) {
+char *berd_siri_tts_catalog_json(const char *languageValue, char **errorOut) {
     @autoreleasepool {
         if (errorOut) *errorOut = NULL;
-        NSString *prefix = languagePrefix
-            ? [NSString stringWithUTF8String:languagePrefix]
+        NSString *language = languageValue
+            ? [NSString stringWithUTF8String:languageValue]
             : @"";
         NSError *error = nil;
         NSArray<NSDictionary<NSString *, id> *> *candidates =
-            BerdDiscoverVoices(prefix, &error);
+            BerdDiscoverVoices(language, &error);
         if (!candidates) {
             BerdSetError(errorOut, error);
             return NULL;
@@ -1075,15 +1086,19 @@ char *berd_siri_tts_catalog_json(const char *languagePrefix, char **errorOut) {
         for (NSDictionary *candidate in candidates) {
             NSString *name = candidate[@"name"];
             NSString *language = candidate[@"language"];
-            NSString *key = [NSString stringWithFormat:@"%@|%@", name.lowercaseString,
-                                                       language.lowercaseString];
+            NSString *normalizedLanguage =
+                [[language stringByReplacingOccurrencesOfString:@"_" withString:@"-"] lowercaseString];
+            NSString *key = [NSString stringWithFormat:@"%@|%@", name, normalizedLanguage];
             dispatch_group_enter(group);
             BerdDownloadedVoices(language, name, ^(NSArray *voices, NSError *failure) {
                 BOOL exact = NO;
                 if (!failure) {
                     for (NSDictionary *voice in voices) {
-                        if ([voice[@"name"] caseInsensitiveCompare:name] == NSOrderedSame &&
-                            [voice[@"language"] caseInsensitiveCompare:language] == NSOrderedSame) {
+                        NSString *downloadedLanguage =
+                            [[voice[@"language"] stringByReplacingOccurrencesOfString:@"_"
+                                                                            withString:@"-"] lowercaseString];
+                        if ([voice[@"name"] isEqualToString:name] &&
+                            [downloadedLanguage isEqualToString:normalizedLanguage]) {
                             exact = YES;
                             break;
                         }
@@ -1097,14 +1112,18 @@ char *berd_siri_tts_catalog_json(const char *languagePrefix, char **errorOut) {
             group,
             dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4 * NSEC_PER_SEC))
         );
+        NSDictionary<NSString *, NSNumber *> *installedSnapshot = nil;
+        @synchronized (installed) { installedSnapshot = [installed copy]; }
 
         NSMutableArray *result = [NSMutableArray arrayWithCapacity:candidates.count];
         for (NSDictionary *candidate in candidates) {
+            NSString *normalizedLanguage =
+                [[candidate[@"language"] stringByReplacingOccurrencesOfString:@"_"
+                                                                     withString:@"-"] lowercaseString];
             NSString *key = [NSString stringWithFormat:@"%@|%@",
-                [candidate[@"name"] lowercaseString],
-                [candidate[@"language"] lowercaseString]];
+                candidate[@"name"], normalizedLanguage];
             NSMutableDictionary *voice = [candidate mutableCopy];
-            voice[@"installed"] = installed[key] ?: @NO;
+            voice[@"installed"] = installedSnapshot[key] ?: @NO;
             [result addObject:voice];
         }
         NSData *json = [NSJSONSerialization dataWithJSONObject:result options:0 error:&error];
@@ -1275,6 +1294,180 @@ bool berd_siri_tts_play_sample(
     }
 }
 
+bool berd_siri_tts_validate_voice(
+    const char *languageValue,
+    const char *voiceNameValue,
+    char **errorOut
+) {
+    @autoreleasepool {
+        if (errorOut) *errorOut = NULL;
+        if (!languageValue || !voiceNameValue) {
+            BerdSetError(errorOut, BerdError(20, @"A Siri voice name and language are required."));
+            return false;
+        }
+        NSString *language = [NSString stringWithUTF8String:languageValue];
+        NSString *voiceName = [NSString stringWithUTF8String:voiceNameValue];
+        NSError *error = nil;
+        if (BerdDownloadedVoiceSync(language, voiceName, &error)) return true;
+        BerdSetError(errorOut, error ?: BerdError(21,
+            [NSString stringWithFormat:@"Siri voice %@ (%@) is not installed.",
+                                       voiceName, language]));
+        return false;
+    }
+}
+
+static BOOL BerdEmitSiriPCMBuffer(
+    AVAudioPCMBuffer *buffer,
+    BerdSiriTTSPcmFrames pcmFrames,
+    void *context,
+    NSError **error
+) {
+    if (!buffer.frameLength) return YES;
+    if (![buffer.format isEqual:BerdSiriPlaybackFormat()] || !buffer.floatChannelData) {
+        if (error) *error = BerdError(27, @"Siri audio was not normalized to mono Float32 PCM.");
+        return NO;
+    }
+    if (pcmFrames && !pcmFrames(buffer.floatChannelData[0], buffer.frameLength, context)) {
+        if (error) *error = BerdError(NSUserCancelledError, @"Siri synthesis cancelled.");
+        return NO;
+    }
+    return YES;
+}
+
+/// Owns the borrowed Rust callback boundary while a synchronous synthesis call
+/// is active. Callers serialize emit/close with the decoder lock, so a queued
+/// XPC callback can observe closure but can never retain a usable raw context
+/// after the blocking FFI call returns.
+@interface BerdSiriPCMCallbackGate : NSObject
+@property(nonatomic, assign) BerdSiriTTSPcmFrames pcmFrames;
+@property(nonatomic, assign) void *context;
+@property(nonatomic, assign) BOOL closed;
+- (instancetype)initWithFrames:(BerdSiriTTSPcmFrames)pcmFrames context:(void *)context;
+- (BOOL)emitBuffer:(AVAudioPCMBuffer *)buffer error:(NSError **)error;
+- (void)close;
+@end
+
+@implementation BerdSiriPCMCallbackGate
+- (instancetype)initWithFrames:(BerdSiriTTSPcmFrames)pcmFrames context:(void *)context {
+    self = [super init];
+    if (self) {
+        _pcmFrames = pcmFrames;
+        _context = context;
+    }
+    return self;
+}
+- (BOOL)emitBuffer:(AVAudioPCMBuffer *)buffer error:(NSError **)error {
+    if (self.closed) return YES;
+    return BerdEmitSiriPCMBuffer(buffer, self.pcmFrames, self.context, error);
+}
+- (void)close {
+    self.closed = YES;
+    self.pcmFrames = NULL;
+    self.context = NULL;
+}
+@end
+
+static bool BerdCountTestPCMFrames(
+    const float *samples,
+    uint32_t frameCount,
+    void *context
+) {
+    (void)samples;
+    (void)frameCount;
+    (*(uint32_t *)context) += 1;
+    return true;
+}
+
+bool berd_siri_tts_test_closed_pcm_gate_ignores_late_callback(void) {
+    @autoreleasepool {
+        uint32_t callbacks = 0;
+        BerdSiriPCMCallbackGate *gate = [[BerdSiriPCMCallbackGate alloc]
+            initWithFrames:BerdCountTestPCMFrames context:&callbacks];
+        [gate close];
+        NSError *error = nil;
+        BOOL accepted = [gate emitBuffer:nil error:&error];
+        return accepted && !error && callbacks == 0 && gate.pcmFrames == NULL &&
+            gate.context == NULL;
+    }
+}
+
+bool berd_siri_tts_synthesize_pcm(
+    const char *textValue,
+    const char *languageValue,
+    const char *voiceNameValue,
+    float rate,
+    BerdSiriTTSShouldStop shouldStop,
+    BerdSiriTTSPcmFrames pcmFrames,
+    void *context,
+    char **errorOut
+) {
+    @autoreleasepool {
+        if (errorOut) *errorOut = NULL;
+        if (!textValue || !languageValue || !voiceNameValue || !pcmFrames) {
+            BerdSetError(errorOut, BerdError(20,
+                @"Text, voice name, language, and a PCM receiver are required."));
+            return false;
+        }
+        NSString *text = [NSString stringWithUTF8String:textValue];
+        NSString *language = [NSString stringWithUTF8String:languageValue];
+        NSString *voiceName = [NSString stringWithUTF8String:voiceNameValue];
+        BerdSiriAudioDecoder *decoder = [BerdSiriAudioDecoder new];
+        BerdSiriPCMCallbackGate *pcmGate = [[BerdSiriPCMCallbackGate alloc]
+            initWithFrames:pcmFrames context:context];
+        dispatch_semaphore_t completion = dispatch_semaphore_create(0);
+        __block NSError *terminalError = nil;
+        __block BerdSiriSynthesisSession *session = nil;
+        session = [[BerdSiriSynthesisSession alloc]
+            initWithAudioHandler:^(NSData *data, AudioStreamBasicDescription format,
+                                   UInt32 packetCount, NSData *descriptions) {
+                @synchronized (decoder) {
+                    if (pcmGate.closed || terminalError) return;
+                    NSError *decodeError = nil;
+                    AVAudioPCMBuffer *buffer = [decoder decodeData:data format:format
+                        packetCount:packetCount packetDescriptions:descriptions
+                        error:&decodeError];
+                    if (decodeError ||
+                        (buffer && ![pcmGate emitBuffer:buffer error:&decodeError])) {
+                        terminalError = decodeError;
+                    }
+                }
+            }];
+        [session synthesizeText:text language:language voiceName:voiceName rate:rate
+                      completion:^(NSError *error) {
+            @synchronized (decoder) {
+                if (!terminalError && error) terminalError = error;
+                if (!terminalError) {
+                    NSError *flushError = nil;
+                    NSArray<AVAudioPCMBuffer *> *buffers = [decoder finishConversion:&flushError];
+                    if (!buffers) terminalError = flushError;
+                    for (AVAudioPCMBuffer *buffer in buffers ?: @[]) {
+                        if (![pcmGate emitBuffer:buffer error:&flushError]) {
+                            terminalError = flushError;
+                            break;
+                        }
+                    }
+                }
+                // The reply can race audio callbacks already queued by XPC. Close
+                // their path to the borrowed Rust context before waking the
+                // blocking caller; later callbacks may decode no further PCM.
+                [pcmGate close];
+            }
+            dispatch_semaphore_signal(completion);
+        }];
+        while (dispatch_semaphore_wait(
+            completion,
+            dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10 * NSEC_PER_MSEC))) != 0) {
+            if (shouldStop && shouldStop(context)) [session cancel];
+        }
+        session = nil;
+        if (terminalError && terminalError.code != NSUserCancelledError) {
+            BerdSetError(errorOut, terminalError);
+            return false;
+        }
+        return true;
+    }
+}
+
 void *berd_siri_tts_stream_create(
     const char *languageValue,
     const char *voiceNameValue,
@@ -1426,7 +1619,7 @@ void *berd_pocket_audio_player_create(
                outputDeviceID:outputDeviceID
                         error:&error];
         if (!player) {
-            BerdSetError(errorOut, error ?: BerdError(35, @"Could not start Pocket playback."));
+            BerdSetError(errorOut, error ?: BerdError(35, @"Could not start PCM playback."));
             return NULL;
         }
         return (__bridge_retained void *)player;
@@ -1442,29 +1635,14 @@ bool berd_pocket_audio_player_enqueue(
     @autoreleasepool {
         if (errorOut) *errorOut = NULL;
         if (!playerValue) {
-            BerdSetError(errorOut, BerdError(36, @"Pocket playback is unavailable."));
+            BerdSetError(errorOut, BerdError(36, @"PCM playback is unavailable."));
             return false;
         }
         NSError *error = nil;
         BOOL enqueued = [(__bridge BerdPocketAudioPlayer *)playerValue
             enqueueSamples:samples frameCount:frameCount error:&error];
-        if (!enqueued) BerdSetError(errorOut, error ?: BerdError(37, @"Could not queue Pocket audio."));
+        if (!enqueued) BerdSetError(errorOut, error ?: BerdError(37, @"Could not queue PCM audio."));
         return enqueued;
-    }
-}
-
-bool berd_pocket_audio_player_set_rate(void *playerValue, float rate, char **errorOut) {
-    @autoreleasepool {
-        if (errorOut) *errorOut = NULL;
-        if (!playerValue) {
-            BerdSetError(errorOut, BerdError(36, @"Pocket playback is unavailable."));
-            return false;
-        }
-        NSError *error = nil;
-        BOOL updated = [(__bridge BerdPocketAudioPlayer *)playerValue
-            setPlaybackRate:rate error:&error];
-        if (!updated) BerdSetError(errorOut, error ?: BerdError(38, @"Could not update Pocket playback speed."));
-        return updated;
     }
 }
 
@@ -1483,7 +1661,7 @@ bool berd_pocket_audio_player_failed(void *playerValue) {
     if (!playerValue) return true;
     BerdPocketAudioPlayer *player = (__bridge BerdPocketAudioPlayer *)playerValue;
     @synchronized (player) {
-        return player.playbackFailed || (!player.stopped && !player.engine.isRunning);
+        return !player.stopped && !player.engine.isRunning;
     }
 }
 

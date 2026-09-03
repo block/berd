@@ -690,6 +690,8 @@ pub fn run() {
             commands::native_voice::get_native_voice_conversation_status,
             commands::native_voice::block_native_voice_conversation_starts,
             commands::native_voice::release_native_voice_conversation_start_block,
+            commands::native_voice::prepare_native_voice_assistant_speech,
+            commands::native_voice::cancel_native_voice_assistant_speech,
             commands::native_voice::set_native_voice_microphone_muted,
             commands::native_voice::set_native_voice_assistant_speaking,
             commands::native_voice::drain_native_voice_conversation_transcripts,

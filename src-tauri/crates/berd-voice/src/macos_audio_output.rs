@@ -1,8 +1,8 @@
-//! Safe ownership wrapper for the macOS AVAudioUnitTimePitch Pocket player.
+//! Safe ownership wrapper for the shared macOS AVAudioUnitTimePitch PCM player.
 
 use std::ffi::{c_char, c_void, CStr};
 
-const MAX_POCKET_PLAYBACK_SPEED: f32 = 2.0;
+use crate::PcmAudioOutput;
 
 unsafe extern "C" {
     fn berd_pocket_audio_player_create(
@@ -17,11 +17,6 @@ unsafe extern "C" {
         frame_count: u32,
         error_out: *mut *mut c_char,
     ) -> bool;
-    fn berd_pocket_audio_player_set_rate(
-        player: *mut c_void,
-        rate: f32,
-        error_out: *mut *mut c_char,
-    ) -> bool;
     fn berd_pocket_audio_player_completed_source_frames(player: *mut c_void) -> u64;
     fn berd_pocket_audio_player_pending_buffers(player: *mut c_void) -> u64;
     fn berd_pocket_audio_player_failed(player: *mut c_void) -> bool;
@@ -30,13 +25,13 @@ unsafe extern "C" {
     fn berd_siri_tts_free_string(value: *mut c_char);
 }
 
-pub(super) struct PocketAudioPlayer {
+pub struct PocketAudioPlayer {
     raw: *mut c_void,
     delivery_safety_frames: u64,
 }
 
 impl PocketAudioPlayer {
-    pub(super) fn new(
+    pub fn new(
         sample_rate: u32,
         rate: f32,
         output_device_name: Option<&str>,
@@ -55,35 +50,20 @@ impl PocketAudioPlayer {
             berd_pocket_audio_player_create(sample_rate, rate, output_device_id, &mut error)
         };
         if raw.is_null() {
-            return Err(take_error(error, "Could not start native Pocket playback"));
+            return Err(take_error(error, "Could not start native PCM playback"));
         }
         Ok(Self {
             raw,
-            delivery_safety_frames: delivery_safety_frames(sample_rate, MAX_POCKET_PLAYBACK_SPEED),
+            delivery_safety_frames: delivery_safety_frames(sample_rate, rate),
         })
     }
 
-    pub(super) fn set_rate(&self, rate: f32) -> Result<(), String> {
-        let mut error = std::ptr::null_mut();
-        // SAFETY: `self.raw` is a live retained player and the bridge validates
-        // the rate before updating the connected time-pitch unit.
-        let updated = unsafe { berd_pocket_audio_player_set_rate(self.raw, rate, &mut error) };
-        if updated {
-            Ok(())
-        } else {
-            Err(take_error(
-                error,
-                "Could not update native Pocket playback speed",
-            ))
-        }
-    }
-
-    pub(super) fn enqueue(&self, samples: &[f32]) -> Result<(), String> {
+    pub fn enqueue(&self, samples: &[f32]) -> Result<(), String> {
         if samples.is_empty() {
             return Ok(());
         }
         let frame_count = u32::try_from(samples.len())
-            .map_err(|_| "Pocket audio chunk is too large to queue".to_string())?;
+            .map_err(|_| "PCM audio chunk is too large to queue".to_string())?;
         let mut error = std::ptr::null_mut();
         // SAFETY: The bridge copies `frame_count` samples before returning and
         // `self.raw` remains retained for this wrapper's lifetime.
@@ -93,34 +73,56 @@ impl PocketAudioPlayer {
         if enqueued {
             Ok(())
         } else {
-            Err(take_error(error, "Could not queue native Pocket audio"))
+            Err(take_error(error, "Could not queue native PCM audio"))
         }
     }
 
-    pub(super) fn played_frames(&self) -> u64 {
+    pub fn played_frames(&self) -> u64 {
         // SAFETY: `self.raw` is a live retained player. The bridge counts only
         // source buffers confirmed played back, so idle queue gaps add nothing.
         apply_delivery_safety(self.completed_source_frames(), self.delivery_safety_frames)
     }
 
-    pub(super) fn completed_source_frames(&self) -> u64 {
+    pub fn completed_source_frames(&self) -> u64 {
         // SAFETY: `self.raw` is a live retained player.
         unsafe { berd_pocket_audio_player_completed_source_frames(self.raw) }
     }
 
-    pub(super) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         // SAFETY: `self.raw` is a live retained player.
         unsafe { berd_pocket_audio_player_pending_buffers(self.raw) == 0 }
     }
 
-    pub(super) fn ensure_healthy(&self) -> Result<(), String> {
+    pub fn check_health(&self) -> Result<(), String> {
         // SAFETY: `self.raw` is a live retained player.
         playback_health(unsafe { berd_pocket_audio_player_failed(self.raw) })
     }
 
-    pub(super) fn stop(&self) {
+    pub fn stop(&self) {
         // SAFETY: `self.raw` is a live retained player and stop is idempotent.
         unsafe { berd_pocket_audio_player_stop(self.raw) };
+    }
+}
+
+impl PcmAudioOutput for PocketAudioPlayer {
+    fn write(&self, samples: &[f32]) -> Result<(), String> {
+        self.enqueue(samples)
+    }
+
+    fn cancel(&self) {
+        self.stop();
+    }
+
+    fn is_drained(&self) -> bool {
+        self.is_empty()
+    }
+
+    fn check_health(&self) -> Result<(), String> {
+        PocketAudioPlayer::check_health(self)
+    }
+
+    fn played_frames(&self) -> u64 {
+        PocketAudioPlayer::played_frames(self)
     }
 }
 
@@ -134,7 +136,7 @@ fn apply_delivery_safety(completed_source_frames: u64, safety_frames: u64) -> u6
 
 fn playback_health(failed: bool) -> Result<(), String> {
     if failed {
-        Err("Pocket audio output stopped unexpectedly".to_string())
+        Err("PCM audio output stopped unexpectedly".to_string())
     } else {
         Ok(())
     }
@@ -163,7 +165,12 @@ fn take_error(error: *mut c_char, fallback: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_delivery_safety, delivery_safety_frames, playback_health, MAX_POCKET_PLAYBACK_SPEED,
+        apply_delivery_safety, delivery_safety_frames, playback_health, PocketAudioPlayer,
+    };
+    use crate::wait_until_drained;
+    use std::{
+        sync::atomic::AtomicBool,
+        time::{Duration, Instant},
     };
 
     #[test]
@@ -190,18 +197,36 @@ mod tests {
     }
 
     #[test]
-    fn live_rate_changes_reserve_maximum_delivery_safety() {
-        let safety = delivery_safety_frames(24_000, MAX_POCKET_PLAYBACK_SPEED);
-        assert_eq!(safety, 4_800);
-        assert_eq!(apply_delivery_safety(10_000, safety), 5_200);
-    }
-
-    #[test]
     fn unexpected_output_stops_fail_playback() {
         assert!(playback_health(false).is_ok());
         assert_eq!(
             playback_health(true).expect_err("unexpected stop must fail"),
-            "Pocket audio output stopped unexpectedly"
+            "PCM audio output stopped unexpectedly"
         );
+    }
+
+    #[test]
+    #[ignore = "opens the default CoreAudio output and queues silent PCM"]
+    fn cancelling_queued_silence_returns_promptly() {
+        let output = PocketAudioPlayer::new(48_000, 1.0, None).unwrap();
+        output.enqueue(&vec![0.0; 48_000 * 30]).unwrap();
+        let started = Instant::now();
+        output.stop();
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    #[ignore = "requires BERD_MULTICHANNEL_TEST_OUTPUT_DEVICE naming a multi-channel CoreAudio output"]
+    fn configured_multichannel_output_plays_pcm() {
+        let device = std::env::var("BERD_MULTICHANNEL_TEST_OUTPUT_DEVICE").unwrap();
+        for frame_count in [4_800, 48_000 * 3] {
+            let output = PocketAudioPlayer::new(48_000, 1.0, Some(&device)).unwrap();
+            output.enqueue(&vec![0.0; frame_count]).unwrap();
+            assert!(
+                wait_until_drained(&output, &AtomicBool::new(true), Duration::from_millis(5),)
+                    .unwrap()
+            );
+        }
     }
 }
