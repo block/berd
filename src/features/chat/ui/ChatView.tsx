@@ -129,7 +129,6 @@ export function ChatView({
 }: ChatViewProps) {
   const { t } = useTranslation("chat");
   useRegisterSecurityConfirmationSurface(sessionId);
-  const isArtifactViewerOpen = useOpenArtifact(sessionId) !== null;
   const mountStart = useRef(performance.now());
   const terminalRootRef = useRef<HTMLDivElement | null>(null);
   const chatColumnRef = useRef<HTMLDivElement | null>(null);
@@ -206,6 +205,14 @@ export function ChatView({
   ]);
   const workspaceRepository = useWorkspaceRepository();
   const effectiveSession = controller.session ?? activeSession ?? null;
+  // The effective session identity: during session replacement or
+  // reconciliation the requested sessionId can briefly disagree with the
+  // snapshot the controller serves. Every artifact-store read/write and
+  // every layout decision derived from viewer state must use THIS id, so
+  // the panel, the policy provider, and the width math all describe the
+  // same store entry. (Audited: all useOpenArtifact call sites in ChatView.)
+  const timelineSessionId = effectiveSession?.id ?? sessionId;
+  const isArtifactViewerOpen = useOpenArtifact(timelineSessionId) !== null;
   const isReadOnly = Boolean(readOnlyStatus);
   // A remote session's cwd and artifact paths live on its SSH host: the
   // in-chat terminal (a local PTY), local folder pickers, and local file
@@ -759,7 +766,6 @@ export function ChatView({
     </div>
   );
 
-  const timelineSessionId = effectiveSession?.id ?? sessionId;
   const messageTimeline = (
     <ChatTranscriptSurface
       sessionId={timelineSessionId}

@@ -15,6 +15,7 @@ import {
 } from "@/app/contexts/TopBarActionsContext";
 import { TERMINAL_FALLBACK_CWD_STORAGE_KEY } from "@/features/terminal/lib/terminalCwdPreference";
 import type { ChatSession } from "../../stores/chatSessionStore";
+import { useArtifactViewerStore } from "../../stores/artifactViewerStore";
 import { useSecurityConfirmationStore } from "@/features/security/stores/securityConfirmationStore";
 import { DEFAULT_RUNTIME_CONFIG } from "@/shared/runtime-config/schema";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
@@ -585,6 +586,10 @@ describe("ChatView MCP app messaging", () => {
     // fed real session data, not an accidental wrapper with empty props.
     expect(provider?.dataset.sessionId).toBe("session-1");
     expect(Number(provider?.dataset.messageCount)).toBeGreaterThan(0);
+    // Exactly ONE policy owner per rendered session boundary: a second
+    // (nested) provider would derive artifact inventory twice and split the
+    // per-path open debounce across surfaces.
+    expect(screen.getAllByTestId("artifact-policy-provider")).toHaveLength(1);
   });
 
   it("keys the artifact policy provider by the controller's effective session, not the requested id", () => {
@@ -624,6 +629,68 @@ describe("ChatView MCP app messaging", () => {
     // The viewer panel reads the viewer store under the same effective
     // identity that openInApp writes to.
     expect(panel.dataset.sessionId).toBe("session-effective");
+  });
+
+  it("derives viewer-open layout from the effective session's store entry", () => {
+    // The panel renders under the effective session id, so the layout math
+    // (isArtifactViewerOpen) must read the same store entry. If it read the
+    // requested id instead, an open viewer would get no reserved width — or
+    // a stale requested-session entry would reserve an empty column.
+    const controller = mocks.useChatSessionController(
+      "ignored",
+    ) as unknown as Record<string, unknown>;
+    mocks.useChatSessionController.mockReturnValue({
+      ...controller,
+      session: {
+        id: "session-effective",
+        title: "Reconciled",
+        workingDir: "/tmp/project",
+        createdAt: "2026-05-27T00:00:00.000Z",
+        updatedAt: "2026-05-27T00:00:00.000Z",
+        messageCount: 1,
+        intent: null,
+      },
+    });
+    // Viewer state exists ONLY for the effective session.
+    useArtifactViewerStore.getState().open("session-effective", {
+      resolvedPath: "/tmp/project/report.md",
+      filename: "report.md",
+    });
+
+    const { unmount } = render(
+      <ChatView
+        sessionId="session-requested"
+        activeSession={chatSessionWithWorkingDir("/tmp/project")}
+      />,
+    );
+
+    // The conversation column reserves its viewer-open floor: layout agrees
+    // with the rendered panel about which store entry is authoritative.
+    const chatColumn = document.querySelector(
+      "[data-chat-column]",
+    ) as HTMLElement;
+    expect(chatColumn.style.minWidth).not.toBe("");
+
+    unmount();
+    useArtifactViewerStore.getState().close("session-effective");
+
+    // Inverse: stale viewer state under the REQUESTED id must not reserve
+    // space — the effective session has nothing open.
+    useArtifactViewerStore.getState().open("session-requested", {
+      resolvedPath: "/tmp/project/stale.md",
+      filename: "stale.md",
+    });
+    render(
+      <ChatView
+        sessionId="session-requested"
+        activeSession={chatSessionWithWorkingDir("/tmp/project")}
+      />,
+    );
+    const chatColumnAfter = document.querySelector(
+      "[data-chat-column]",
+    ) as HTMLElement;
+    expect(chatColumnAfter.style.minWidth).toBe("");
+    useArtifactViewerStore.getState().close("session-requested");
   });
 
   it("gates session surveys through the dedicated build capability", () => {
