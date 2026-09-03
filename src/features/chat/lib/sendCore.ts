@@ -323,7 +323,7 @@ export function resolveAssistantCancellation(
  * the backend still surfaces its own error if the archived session cannot
  * accept the prompt.
  */
-async function restoreArchivedSessionBeforeSend(
+export async function restoreArchivedSessionBeforeSend(
   sessionId: string,
 ): Promise<void> {
   const sessionStore = useChatSessionStore.getState();

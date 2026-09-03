@@ -22,6 +22,7 @@ import {
 } from "./attachments";
 import { isSessionRunning } from "./sessionActivity";
 import { getSessionPromptOwner } from "./sessionPromptOwnership";
+import { restoreArchivedSessionBeforeSend } from "./sendCore";
 import { isVoiceConversationEmptyResponse } from "./voiceConversationNoop";
 import { i18n } from "@/shared/i18n";
 
@@ -42,6 +43,9 @@ export async function steerPromptInSession(
     reportErrorInTranscript?: boolean;
   } = {},
 ): Promise<boolean> {
+  // Steering is a send: restore an archived chat before injecting into the
+  // run, mirroring dispatchPrompt. Best-effort; see sendCore for details.
+  await restoreArchivedSessionBeforeSend(sessionId);
   const sessionRunsRemotely = Boolean(
     useChatSessionStore.getState().getSession(sessionId)?.remoteHost,
   );
