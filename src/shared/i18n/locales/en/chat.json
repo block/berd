@@ -707,6 +707,8 @@
     "summary": {
       "previousSteps_one": "{{count}} previous step",
       "previousSteps_other": "{{count}} previous steps",
+      "activeAgents_one": "{{names}} is working",
+      "activeAgents_other": "{{names}} are working",
       "steps_one": "{{count}} step",
       "steps_other": "{{count}} steps"
     }

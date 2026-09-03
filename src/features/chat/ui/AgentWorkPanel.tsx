@@ -31,6 +31,8 @@ import type { TranscriptAgentWorkPayload } from "@/features/chat/transcript/proj
 import { useTranscriptRowStateAdapter } from "@/features/chat/transcript/row-state";
 import { ToolCallAdapter } from "./ToolCallAdapter";
 import { VoiceSpeechStatusIndicator } from "./VoiceSpeechStatusIndicator";
+import { getSubagentToolCallInfo } from "@/features/chat/lib/subagentToolCalls";
+import { ActiveAgentFacepile } from "./AgentIdentityAvatar";
 
 interface ToolTimelineItem {
   kind: "tool";
@@ -197,6 +199,104 @@ function getActivePreviewState(
     hiddenItems,
     hiddenStepCount: hiddenItems.length,
   };
+}
+
+const GOOSE_TASK_ID_PATTERN = /\b\d{8}_\w+\b/g;
+
+function taskIdsFromToolResult(item: ToolTimelineItem): string[] {
+  if (!item.response) return [];
+  let structuredText = "";
+  if (item.response.structuredContent !== undefined) {
+    try {
+      structuredText = JSON.stringify(item.response.structuredContent);
+    } catch {
+      // The plain result can still carry the task id.
+    }
+  }
+  const text = `${item.response.result} ${structuredText}`;
+  return [...new Set(text.match(GOOSE_TASK_ID_PATTERN) ?? [])];
+}
+
+function addUniqueAgentName(
+  names: string[],
+  seen: Set<string>,
+  value?: string,
+) {
+  const name = value?.trim();
+  if (!name) return;
+  const key = name.toLocaleLowerCase();
+  if (seen.has(key)) return;
+  seen.add(key);
+  names.push(name);
+}
+
+function getActiveDelegatedAgentNames(
+  items: readonly AgentWorkTimelineItem[],
+): string[] {
+  const activeTaskAgents = new Map<string, string>();
+  const activeToolAgents: string[] = [];
+  const seenActiveTools = new Set<string>();
+
+  for (const item of items) {
+    if (item.kind !== "tool" || !item.request) continue;
+    const status = getToolStatus(item);
+    const info = getSubagentToolCallInfo({
+      toolName: item.request.toolName,
+      arguments: item.request.arguments ?? {},
+    });
+    if (!info) continue;
+
+    const agentNames = info.agentNames ?? [
+      info.agentName ?? item.request.subagentAgentName,
+    ];
+    const isRunningTool = status === "pending" || status === "in_progress";
+
+    if (info.activity === "delegating" && isRunningTool) {
+      for (const name of agentNames) {
+        addUniqueAgentName(activeToolAgents, seenActiveTools, name);
+      }
+    }
+
+    if (
+      item.request.toolName === "delegate" &&
+      item.request.arguments?.async === true &&
+      item.response &&
+      !item.response.isError
+    ) {
+      const agentName = agentNames[0]?.trim();
+      if (agentName) {
+        for (const taskId of taskIdsFromToolResult(item)) {
+          activeTaskAgents.set(taskId, agentName);
+        }
+      }
+    }
+
+    if (item.request.toolName === "load" && info.taskId) {
+      if (
+        info.activity === "waiting" &&
+        item.response &&
+        !item.response.isError
+      ) {
+        activeTaskAgents.delete(info.taskId);
+      } else if (
+        info.activity === "cancelling" &&
+        item.response &&
+        !item.response.isError
+      ) {
+        activeTaskAgents.delete(info.taskId);
+      }
+    }
+  }
+
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (const name of activeTaskAgents.values()) {
+    addUniqueAgentName(names, seen, name);
+  }
+  for (const name of activeToolAgents) {
+    addUniqueAgentName(names, seen, name);
+  }
+  return names;
 }
 
 function getRailColor(
@@ -390,7 +490,7 @@ export function AgentWorkPanel({
   payload: TranscriptAgentWorkPayload;
   settleOnMount?: boolean;
 }) {
-  const { t } = useTranslation("chat");
+  const { t, i18n } = useTranslation("chat");
   const prefersReducedMotion = useReducedMotion();
   const { markRowInteracted, pinScrollAnchor } = useTranscriptRowStateAdapter();
   const items = useMemo(
@@ -461,6 +561,10 @@ export function AgentWorkPanel({
   const hiddenItems = activePreviewState?.hiddenItems ?? [];
   const hiddenStepCount = activePreviewState?.hiddenStepCount ?? 0;
   const shouldShowPreviousSteps = isActiveWorkPreview && hiddenStepCount > 0;
+  const activeDelegatedAgentNames = useMemo(
+    () => getActiveDelegatedAgentNames(items),
+    [items],
+  );
 
   return (
     <Collapsible
@@ -559,6 +663,16 @@ export function AgentWorkPanel({
                           count: hiddenStepCount,
                         })}
                       </span>
+                      <ActiveAgentFacepile
+                        agentNames={activeDelegatedAgentNames}
+                        label={t("agent_work.summary.activeAgents", {
+                          count: activeDelegatedAgentNames.length,
+                          names: new Intl.ListFormat(i18n.resolvedLanguage, {
+                            style: "long",
+                            type: "conjunction",
+                          }).format(activeDelegatedAgentNames),
+                        })}
+                      />
                     </Button>
                   </CollapsibleTrigger>
                   <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
