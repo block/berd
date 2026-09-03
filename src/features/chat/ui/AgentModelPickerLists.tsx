@@ -7,10 +7,20 @@ import {
   useRef,
   useState,
 } from "react";
-import { IconCheck, IconDots, IconSearch, IconX } from "@tabler/icons-react";
+import {
+  IconCheck,
+  IconDots,
+  IconSearch,
+  IconStar,
+  IconStarFilled,
+  IconX,
+} from "@tabler/icons-react";
+import { useStarredModels } from "../hooks/useStarredModels";
+import { modelStarKey } from "../lib/starredModels";
 import { SearchBar } from "@/shared/ui/SearchBar";
 import { Button } from "@/shared/ui/button";
 import { ScrollArea } from "@/shared/ui/scroll-area";
+import { Separator } from "@/shared/ui/separator";
 import {
   formatProviderLabel,
   getProviderIcon,
@@ -92,11 +102,18 @@ function sortModels(
   recency: { map: ModelRecencyMap; agentId: string },
 ) {
   return [...models].sort((left, right) => {
-    if (modelMatchesSelection(left, currentModelId, currentModelProviderId)) {
-      return -1;
-    }
-    if (modelMatchesSelection(right, currentModelId, currentModelProviderId)) {
-      return 1;
+    const leftSelected = modelMatchesSelection(
+      left,
+      currentModelId,
+      currentModelProviderId,
+    );
+    const rightSelected = modelMatchesSelection(
+      right,
+      currentModelId,
+      currentModelProviderId,
+    );
+    if (leftSelected !== rightSelected) {
+      return leftSelected ? -1 : 1;
     }
 
     const leftRank = getModelRecencyRank(recency.map, recency.agentId, left);
@@ -127,7 +144,7 @@ interface ModelListProps {
    * would interrupt browsing.
    */
   onBrowseChange?: (browsing: boolean) => void;
-  t: (key: string) => string;
+  t: (key: string, options?: Record<string, string>) => string;
 }
 
 export interface RecommendedModelListHandle {
@@ -149,6 +166,7 @@ export const RecommendedModelList = forwardRef<
   },
   ref,
 ) {
+  const { isStarred, toggleStar, starredKeys } = useStarredModels();
   const [searchOpen, setSearchOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const [query, setQuery] = useState("");
@@ -172,6 +190,11 @@ export const RecommendedModelList = forwardRef<
   }, [resetScroll]);
   const recencyMap = useModelRecency();
   const recommended = useMemo(() => {
+    const starred = models.filter((model) =>
+      starredKeys.has(
+        modelStarKey(model.providerId ?? selectedAgentId, model.id),
+      ),
+    );
     const recent = models
       .map((m) => ({
         model: m,
@@ -184,6 +207,12 @@ export const RecommendedModelList = forwardRef<
             entry.model,
             currentModelId,
             currentModelProviderId,
+          ) &&
+          !starredKeys.has(
+            modelStarKey(
+              entry.model.providerId ?? selectedAgentId,
+              entry.model.id,
+            ),
           ),
       )
       .sort((left, right) => {
@@ -199,30 +228,44 @@ export const RecommendedModelList = forwardRef<
       .filter((m) => m.recommended)
       .filter(
         (m) =>
-          !recent.some((r) => r.id === m.id && r.providerId === m.providerId),
+          !recent.some((r) => r.id === m.id && r.providerId === m.providerId) &&
+          !starredKeys.has(modelStarKey(m.providerId ?? selectedAgentId, m.id)),
       );
     const shortlist = [...recent, ...rec];
     if (
       currentModelId &&
-      shortlist.length > 0 &&
+      starred.length + shortlist.length > 0 &&
+      !starred.some((m) =>
+        modelMatchesSelection(m, currentModelId, currentModelProviderId),
+      ) &&
       !shortlist.some((m) =>
         modelMatchesSelection(m, currentModelId, currentModelProviderId),
       )
     ) {
-      const current = models.find((m) =>
-        modelMatchesSelection(m, currentModelId, currentModelProviderId),
+      const current = models.find((model) =>
+        modelMatchesSelection(model, currentModelId, currentModelProviderId),
       );
       if (current) {
         return [current, ...shortlist];
       }
     }
-    return shortlist.length > 0 ? shortlist : models;
+    const unstarredFallback = models.filter(
+      (model) =>
+        !starredKeys.has(
+          modelStarKey(model.providerId ?? selectedAgentId, model.id),
+        ),
+    );
+    return [
+      ...starred,
+      ...(shortlist.length > 0 ? shortlist : unstarredFallback),
+    ];
   }, [
     models,
     currentModelId,
     currentModelProviderId,
     recencyMap,
     selectedAgentId,
+    starredKeys,
   ]);
 
   useEffect(() => {
@@ -265,22 +308,47 @@ export const RecommendedModelList = forwardRef<
     );
   }, [models, query, recommended, searchOpen, showAll]);
 
-  const sorted = useMemo(
-    () =>
-      sortModels(visibleModels, currentModelId, currentModelProviderId, {
+  const grouped = useMemo(() => {
+    const starred: ModelOption[] = [];
+    const unstarred: ModelOption[] = [];
+    for (const model of visibleModels) {
+      const scopeId = model.providerId ?? selectedAgentId;
+      (starredKeys.has(modelStarKey(scopeId, model.id))
+        ? starred
+        : unstarred
+      ).push(model);
+    }
+    return {
+      starred: sortModels(starred, currentModelId, currentModelProviderId, {
         map: recencyMap,
         agentId: selectedAgentId,
       }),
-    [
-      visibleModels,
-      currentModelId,
-      currentModelProviderId,
-      recencyMap,
-      selectedAgentId,
-    ],
-  );
+      unstarred: sortModels(unstarred, currentModelId, currentModelProviderId, {
+        map: recencyMap,
+        agentId: selectedAgentId,
+      }),
+    };
+  }, [
+    visibleModels,
+    currentModelId,
+    currentModelProviderId,
+    recencyMap,
+    selectedAgentId,
+    starredKeys,
+  ]);
+  const sorted = [...grouped.starred, ...grouped.unstarred];
 
-  const hasMore = models.length > recommended.length;
+  const recommendedKeys = new Set(
+    recommended.map((model) =>
+      modelStarKey(model.providerId ?? selectedAgentId, model.id),
+    ),
+  );
+  const hasMore = models.some(
+    (model) =>
+      !recommendedKeys.has(
+        modelStarKey(model.providerId ?? selectedAgentId, model.id),
+      ),
+  );
   const showSearchButton =
     hasMore || recommended.length > SEARCHABLE_LIST_THRESHOLD;
   const closeSearch = useCallback(() => {
@@ -369,7 +437,7 @@ export const RecommendedModelList = forwardRef<
           className="min-h-0 min-w-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:!block"
         >
           <div className="space-y-0.5 p-1 pr-3">
-            {sorted.map((model) => {
+            {sorted.map((model, index) => {
               const providerLabel = getGooseModelProviderLabel(model);
               const providerIcon =
                 selectedAgentId === "goose" && model.providerId
@@ -380,33 +448,67 @@ export const RecommendedModelList = forwardRef<
                 currentModelId,
                 currentModelProviderId,
               );
+              const scopeId = model.providerId ?? selectedAgentId;
+              const starred = isStarred(scopeId, model.id);
+              const showStarredDivider =
+                index === grouped.starred.length - 1 &&
+                grouped.unstarred.length > 0;
               return (
-                <PickerItem
-                  key={`${model.providerId ?? "model"}:${model.id}`}
-                  onClick={() => {
-                    onModelSelect(model);
-                    resetView();
-                  }}
-                  selected={isSelected}
-                  className="justify-between"
-                >
-                  <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-                    {providerIcon ? (
-                      <span
-                        className="shrink-0 text-muted-foreground"
-                        title={providerLabel ?? undefined}
-                      >
-                        {providerIcon}
-                      </span>
-                    ) : null}
-                    <div className="min-w-0 flex-1 truncate">
-                      {getModelDisplayName(model)}
-                    </div>
+                <div key={modelStarKey(scopeId, model.id)}>
+                  <div
+                    className="flex min-w-0 items-center gap-1"
+                    data-model-key={modelStarKey(scopeId, model.id)}
+                    data-starred={starred || undefined}
+                  >
+                    <PickerItem
+                      onClick={() => {
+                        onModelSelect(model);
+                        resetView();
+                      }}
+                      selected={isSelected}
+                      className="w-auto flex-1 justify-between"
+                    >
+                      <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+                        {providerIcon ? (
+                          <span
+                            className="shrink-0 text-muted-foreground"
+                            title={providerLabel ?? undefined}
+                          >
+                            {providerIcon}
+                          </span>
+                        ) : null}
+                        <div className="min-w-0 flex-1 truncate">
+                          {getModelDisplayName(model)}
+                        </div>
+                      </div>
+                      {isSelected ? (
+                        <IconCheck className="size-4 shrink-0 text-muted-foreground" />
+                      ) : null}
+                    </PickerItem>
+                    <button
+                      type="button"
+                      onClick={() => toggleStar(scopeId, model.id)}
+                      className="flex size-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      aria-label={t(
+                        starred ? "toolbar.unstarModel" : "toolbar.starModel",
+                        { model: getModelDisplayName(model) },
+                      )}
+                      aria-pressed={starred}
+                    >
+                      {starred ? (
+                        <IconStarFilled className="size-4 text-foreground" />
+                      ) : (
+                        <IconStar className="size-4" />
+                      )}
+                    </button>
                   </div>
-                  {isSelected ? (
-                    <IconCheck className="size-4 shrink-0 text-muted-foreground" />
+                  {showStarredDivider ? (
+                    <Separator
+                      className="my-1"
+                      data-testid="starred-models-divider"
+                    />
                   ) : null}
-                </PickerItem>
+                </div>
               );
             })}
             {hasMore && !searchOpen && !showAll ? (

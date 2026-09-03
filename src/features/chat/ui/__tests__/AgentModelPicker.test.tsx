@@ -1,7 +1,9 @@
 import type { ComponentProps } from "react";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { __resetStarredModelsCacheForTests } from "../../hooks/useStarredModels";
+import { modelStarKey, STARRED_MODELS_KEY } from "../../lib/starredModels";
 import { AgentModelPicker } from "../AgentModelPicker";
 import {
   getModelRecencyMap,
@@ -232,7 +234,7 @@ describe("AgentModelPicker", () => {
     await user.click(trigger);
 
     const explicitModel = screen.getByRole("button", {
-      name: /Claude Opus 4\.8/,
+      name: /^Claude Opus 4\.8$/,
     });
     expect(explicitModel).toHaveClass("bg-accent");
     expect(
@@ -269,7 +271,7 @@ describe("AgentModelPicker", () => {
       screen.queryByRole("button", { name: /synthetic-model/i }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /GPT-5\.5/i }),
+      screen.getByRole("button", { name: /^GPT-5\.5$/i }),
     ).toBeInTheDocument();
   });
 
@@ -878,7 +880,7 @@ describe("AgentModelPicker", () => {
     const picker = screen.getByRole("dialog");
     expect(searchButton.parentElement).toHaveTextContent("Model");
     expect(searchButton).toHaveClass("mr-3", "h-6", "w-6");
-    expect(picker).toHaveClass("w-[26.25rem]");
+    expect(picker).toHaveClass("w-[28.25rem]");
     expect(within(picker).getByText("Claude Sonnet 4")).toBeInTheDocument();
     expect(within(picker).queryByText("GPT-4o mini")).not.toBeInTheDocument();
     expect(
@@ -940,7 +942,7 @@ describe("AgentModelPicker", () => {
     expect(
       within(picker).queryByText("gpt-4o-mini-2024-07-18"),
     ).not.toBeInTheDocument();
-    expect(picker).toHaveClass("w-[26.25rem]");
+    expect(picker).toHaveClass("w-[28.25rem]");
 
     if (modelViewport) {
       modelViewport.scrollTop = 120;
@@ -967,7 +969,7 @@ describe("AgentModelPicker", () => {
     ).not.toBeInTheDocument();
 
     await user.click(
-      within(picker).getByRole("button", { name: /GPT-4o mini/ }),
+      within(picker).getByRole("button", { name: /^GPT-4o mini$/ }),
     );
 
     // The selection is recorded as recently used, so it joins the compact
@@ -1411,11 +1413,11 @@ describe("AgentModelPicker", () => {
       await openPicker(user);
 
       const content = document.querySelector('[data-slot="popover-content"]');
-      expect(content).toHaveClass("w-[26.25rem]");
+      expect(content).toHaveClass("w-[28.25rem]");
 
       await user.click(screen.getByRole("button", { name: /switch agent/i }));
 
-      expect(content).toHaveClass("w-[37.25rem]");
+      expect(content).toHaveClass("w-[39.25rem]");
     });
 
     it("hides the switch-agent button when the only agent is ready", async () => {
@@ -1742,5 +1744,121 @@ describe("AgentModelPicker", () => {
         "Zeta Model",
       ]);
     });
+  });
+});
+
+describe("AgentModelPicker starred models", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    __resetStarredModelsCacheForTests();
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+    __resetStarredModelsCacheForTests();
+  });
+
+  const models = [
+    { id: "preferred", name: "Preferred", recommended: true },
+    { id: "also-preferred", name: "Also Preferred", recommended: true },
+    { id: "other", name: "Other" },
+    { id: "another", name: "Another" },
+  ];
+
+  it("shows star actions on the preferred shortlist", async () => {
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="preferred"
+        currentModelName="Preferred"
+        availableModels={models}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    const picker = screen.getByRole("dialog");
+
+    expect(
+      within(picker).getByRole("button", { name: "Star Preferred" }),
+    ).toBeInTheDocument();
+    expect(
+      within(picker).getByRole("button", { name: "Star Also Preferred" }),
+    ).toBeInTheDocument();
+    expect(within(picker).queryByText("Other")).not.toBeInTheDocument();
+  });
+
+  it("always shows a non-recommended star above the preferred shortlist", async () => {
+    localStorage.setItem(
+      STARRED_MODELS_KEY,
+      JSON.stringify([modelStarKey("goose", "other")]),
+    );
+    __resetStarredModelsCacheForTests();
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="preferred"
+        currentModelName="Preferred"
+        availableModels={models}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    const starredRow = document.querySelector(
+      `[data-model-key='${modelStarKey("goose", "other")}']`,
+    );
+    const divider = screen.getByTestId("starred-models-divider");
+    const preferredRow = document.querySelector(
+      `[data-model-key='${modelStarKey("goose", "preferred")}']`,
+    );
+
+    expect(starredRow).toBeInTheDocument();
+    expect(preferredRow).toBeInTheDocument();
+    expect(starredRow?.compareDocumentPosition(divider)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(divider.compareDocumentPosition(preferredRow as Element)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(screen.queryByText("Another")).not.toBeInTheDocument();
+  });
+
+  it("groups stars in View more without selecting the model", async () => {
+    const user = userEvent.setup();
+    const onModelChange = vi.fn();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="preferred"
+        currentModelName="Preferred"
+        availableModels={models}
+        onModelChange={onModelChange}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    const picker = screen.getByRole("dialog");
+    await user.click(within(picker).getByRole("button", { name: "View more" }));
+    await user.click(
+      within(picker).getByRole("button", { name: "Star Other" }),
+    );
+
+    expect(onModelChange).not.toHaveBeenCalled();
+    expect(screen.getByTestId("starred-models-divider")).toBeInTheDocument();
   });
 });

@@ -636,7 +636,9 @@
         "agent-speaking": "Agent is speaking…",
         "error": "Voice conversation error: {{error}}"
       }
-    }
+    },
+    "starModel": "Star {{model}}",
+    "unstarModel": "Unstar {{model}}"
   },
   "tools": {
     "content": "Content",
