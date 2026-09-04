@@ -181,10 +181,8 @@ const mocks = vi.hoisted(() => ({
   releaseMicrophone: vi.fn(),
   setControlsSuppressed: vi.fn(),
   startControls: vi.fn(),
-  startProtocol: vi.fn(),
   startRuntime: vi.fn(),
   stopControls: vi.fn(),
-  stopProtocol: vi.fn(),
   stopRuntime: vi.fn(),
   sendRuntimeEvent: vi.fn(),
   startNativeMicrophone: vi.fn(),
@@ -259,10 +257,8 @@ vi.mock("@/shared/api/openaiRealtime", () => ({
   releaseVoiceDictationMicrophone: mocks.releaseMicrophone,
   setOpenAiRealtimeVoiceControlsSuppressed: mocks.setControlsSuppressed,
   startOpenAiRealtimeVoiceControls: mocks.startControls,
-  startOpenAiRealtimeSpokespersonProtocol: mocks.startProtocol,
   startOpenAiRealtimeSpokespersonRuntime: mocks.startRuntime,
   stopOpenAiRealtimeVoiceControls: mocks.stopControls,
-  stopOpenAiRealtimeSpokespersonProtocol: mocks.stopProtocol,
   stopOpenAiRealtimeSpokespersonRuntime: mocks.stopRuntime,
   unknownOpenAiRealtimeHandoffIds: mocks.unknownHandoffIds,
 }));
@@ -471,13 +467,21 @@ beforeEach(() => {
     channel.addEventListener("message", forwardMessage);
     return () => channel.removeEventListener("message", forwardMessage);
   });
-  mocks.startRuntime.mockImplementation(async (sessionId: string) => {
-    realtimeRuntimeSessionId = sessionId;
-    realtimeRuntimeListener?.({
-      sessionId,
-      event: { type: "berd.realtime.ready" },
-    });
-  });
+  mocks.startRuntime.mockImplementation(
+    async (sessionId: string, initialCursor: number) => {
+      mocks.pipeInitialCursors.push(initialCursor);
+      // Keep existing hook assertions independent of the randomized call
+      // namespace. The Rust pipe tests cover nonzero initial cursors directly.
+      mocks.pipeNextId = 1;
+      mocks.pipePending = [];
+      mocks.pipeConsumed = { master: 0, emissary: 0 };
+      realtimeRuntimeSessionId = sessionId;
+      realtimeRuntimeListener?.({
+        sessionId,
+        event: { type: "berd.realtime.ready" },
+      });
+    },
+  );
   mocks.stopRuntime.mockResolvedValue(undefined);
   mocks.sendRuntimeEvent.mockResolvedValue(undefined);
   mocks.startNativeMicrophone.mockImplementation(async () => {
@@ -627,16 +631,6 @@ beforeEach(() => {
     microphoneMuted: false,
     revision: 7,
   }));
-  mocks.startProtocol.mockImplementation(
-    async (_sessionId: string, initialCursor: number) => {
-      mocks.pipeInitialCursors.push(initialCursor);
-      // Keep existing hook assertions independent of the randomized call
-      // namespace. The Rust pipe tests cover nonzero initial cursors directly.
-      mocks.pipeNextId = 1;
-      mocks.pipePending = [];
-      mocks.pipeConsumed = { master: 0, emissary: 0 };
-    },
-  );
   mocks.enqueueSpokespersonMessage.mockImplementation(
     async (_sessionId: string, message: string) => {
       const latest = mocks.pipePending.at(-1);
@@ -655,7 +649,6 @@ beforeEach(() => {
     async () => mocks.pipeConsumed.master,
   );
   mocks.stopControls.mockResolvedValue(undefined);
-  mocks.stopProtocol.mockResolvedValue(undefined);
   mocks.waitForBridgeReady.mockResolvedValue(undefined);
   mocks.requestToolOutput.mockImplementation((event) => ({
     status: "queued",

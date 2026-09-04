@@ -19,10 +19,12 @@ export interface OpenAiRealtimeRuntimeEvent {
 
 export function startOpenAiRealtimeSpokespersonRuntime(
   sessionId: string,
+  initialCursor: number,
   options: unknown,
 ): Promise<void> {
   return invoke("start_openai_realtime_spokesperson_runtime", {
     sessionId,
+    initialCursor,
     options,
   });
 }
@@ -171,16 +173,6 @@ export type OpenAiRealtimePipeExchange =
       cursor: number;
     };
 
-export function startOpenAiRealtimeSpokespersonProtocol(
-  sessionId: string,
-  initialCursor: number,
-): Promise<void> {
-  return invoke("start_openai_realtime_spokesperson_protocol", {
-    sessionId,
-    initialCursor,
-  });
-}
-
 export function enqueueOpenAiRealtimeSpokespersonMessage(
   sessionId: string,
   message: string,
@@ -321,12 +313,6 @@ export function requestOpenAiRealtimeTypedUserMessage(
     sessionId,
     text,
   });
-}
-
-export function stopOpenAiRealtimeSpokespersonProtocol(
-  sessionId: string,
-): Promise<void> {
-  return invoke("stop_openai_realtime_spokesperson_protocol", { sessionId });
 }
 
 export type OpenAiRealtimeVoiceControl = {

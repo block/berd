@@ -36,10 +36,8 @@ import {
   setOpenAiRealtimeVoiceControlsSuppressed,
   startOpenAiRealtimeVoiceControls,
   startOpenAiRealtimeSpokespersonRuntime,
-  startOpenAiRealtimeSpokespersonProtocol,
   stopOpenAiRealtimeVoiceControls,
   stopOpenAiRealtimeSpokespersonRuntime,
-  stopOpenAiRealtimeSpokespersonProtocol,
   unknownOpenAiRealtimeHandoffIds,
   type OpenAiRealtimeTranscriptSeedTurn,
 } from "@/shared/api/openaiRealtime";
@@ -412,7 +410,7 @@ class OpenAiRealtimeConversationRuntime {
   private readonly listeners = new Set<() => void>();
   private nativeMicrophone: NativeMicrophone | null = null;
   private releaseRuntimeListener: (() => void) | null = null;
-  private realtimeProtocolSessionId: string | null = null;
+  private realtimeRuntimeSessionId: string | null = null;
   private realtimeProtocolQueue = Promise.resolve();
   private realtimeRuntimeSendQueue = Promise.resolve();
   private releaseControlsListener: (() => void) | null = null;
@@ -613,11 +611,6 @@ class OpenAiRealtimeConversationRuntime {
           );
         },
       };
-      await startOpenAiRealtimeSpokespersonProtocol(
-        sessionId,
-        this.bridgeCallScope.initialCursor,
-      );
-      this.realtimeProtocolSessionId = sessionId;
       let markRuntimeReady: (() => void) | null = null;
       const runtimeReady = new Promise<void>((resolve) => {
         markRuntimeReady = resolve;
@@ -898,7 +891,12 @@ class OpenAiRealtimeConversationRuntime {
         reasoningEffort: preference.reasoningEffort,
         maxOutputTokens: preference.maxOutputTokens,
       };
-      await startOpenAiRealtimeSpokespersonRuntime(sessionId, runtimeOptions);
+      await startOpenAiRealtimeSpokespersonRuntime(
+        sessionId,
+        this.bridgeCallScope.initialCursor,
+        runtimeOptions,
+      );
+      this.realtimeRuntimeSessionId = sessionId;
       await Promise.race([
         runtimeReady,
         new Promise<never>((_, reject) => {
@@ -1346,8 +1344,8 @@ class OpenAiRealtimeConversationRuntime {
     this.releaseBridge?.();
     this.nativeMicrophone?.stop();
     this.releaseRuntimeListener?.();
-    const realtimeProtocolSessionId = this.realtimeProtocolSessionId;
-    this.realtimeProtocolSessionId = null;
+    const realtimeRuntimeSessionId = this.realtimeRuntimeSessionId;
+    this.realtimeRuntimeSessionId = null;
     this.releaseControlsListener?.();
     this.releaseControlsListener = null;
     this.releaseBridge = null;
@@ -1365,12 +1363,9 @@ class OpenAiRealtimeConversationRuntime {
         controlsRevision,
       ).catch(() => undefined);
     }
-    if (realtimeProtocolSessionId) {
+    if (realtimeRuntimeSessionId) {
       await stopOpenAiRealtimeSpokespersonRuntime(
-        realtimeProtocolSessionId,
-      ).catch(() => undefined);
-      await stopOpenAiRealtimeSpokespersonProtocol(
-        realtimeProtocolSessionId,
+        realtimeRuntimeSessionId,
       ).catch(() => undefined);
     }
     await releaseVoiceDictationMicrophone(MICROPHONE_OWNER_ID).catch(
