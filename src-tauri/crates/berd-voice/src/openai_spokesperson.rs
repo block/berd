@@ -49,8 +49,16 @@ impl OpenAiSpokespersonConfig {
 #[derive(Debug)]
 pub enum SpokespersonCommand {
     InputPcm48Khz(Vec<f32>),
-    ExpertSay { directive_id: u64, text: String },
-    ExpertContext { text: String },
+    ResetInput {
+        completed: std::sync::mpsc::SyncSender<Result<(), String>>,
+    },
+    ExpertSay {
+        directive_id: u64,
+        text: String,
+    },
+    ExpertContext {
+        text: String,
+    },
     Shutdown,
 }
 
@@ -139,6 +147,14 @@ impl OpenAiSpokespersonRuntime {
         self.commands
             .send(command)
             .map_err(|_| "Spokesperson runtime is closed".into())
+    }
+
+    pub fn reset_input(&self) -> Result<(), String> {
+        let (completed, result) = std::sync::mpsc::sync_channel(1);
+        self.send(SpokespersonCommand::ResetInput { completed })?;
+        result
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .map_err(|_| "Spokesperson input reset timed out".to_string())?
     }
 
     pub fn finish(mut self) -> Result<(), String> {
@@ -232,6 +248,13 @@ async fn run(
                             "type": "input_audio_buffer.append",
                             "audio": BASE64.encode(pcm),
                         })).await?;
+                    }
+                    Some(SpokespersonCommand::ResetInput { completed }) => {
+                        let result = send_json(&mut socket, serde_json::json!({
+                            "type": "input_audio_buffer.clear",
+                        })).await;
+                        let _ = completed.send(result.clone());
+                        result?;
                     }
                     Some(SpokespersonCommand::ExpertContext { text }) => {
                         send_expert_item(&mut socket, &text, false).await?;
@@ -538,6 +561,9 @@ mod tests {
             );
 
             let item = receive_json(&mut socket).await;
+            assert_eq!(item["type"], "input_audio_buffer.clear");
+
+            let item = receive_json(&mut socket).await;
             assert_eq!(item["type"], "conversation.item.create");
             assert!(item
                 .pointer("/item/content/0/text")
@@ -667,6 +693,12 @@ mod tests {
                 1.0, 1.0, -1.0, -1.0,
             ]))
             .unwrap();
+        let (reset_completed, reset_result) = std::sync::mpsc::sync_channel(1);
+        commands
+            .send(SpokespersonCommand::ResetInput {
+                completed: reset_completed,
+            })
+            .unwrap();
         commands
             .send(SpokespersonCommand::ExpertSay {
                 directive_id: 7,
@@ -681,6 +713,7 @@ mod tests {
         })
         .await
         .unwrap();
+        assert_eq!(reset_result.recv().unwrap(), Ok(()));
         assert!(matches!(received[0], SpokespersonEvent::UserSpeaking(true)));
         assert!(matches!(
             received[1],

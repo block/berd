@@ -2054,6 +2054,81 @@ fn stage_live_audio_delta(
     Ok(LiveAudioDelta::Queued)
 }
 
+fn spokesperson_pcm_allowed(
+    input_muted: bool,
+    playback_active: bool,
+    input_policy: InputDuringTtsSnapshot,
+) -> bool {
+    !(input_muted
+        || playback_active
+            && input_policy.policy == berd_voice::input::InputDuringTtsPolicy::SuppressInput)
+}
+
+fn set_spokesperson_input_muted(
+    id: u64,
+    muted: bool,
+    input_muted: &mut bool,
+    mut reset_input: impl FnMut() -> Result<(), String>,
+    writer: &mut impl Write,
+) -> Result<(), String> {
+    *input_muted = muted;
+    if muted {
+        reset_input()?;
+    }
+    write_message(
+        writer,
+        &SessionMessage::InputMuteApplied { id, active: muted },
+    )
+}
+
+fn reset_spokesperson_input(
+    id: u64,
+    mut reset_input: impl FnMut() -> Result<(), String>,
+    writer: &mut impl Write,
+) -> Result<(), String> {
+    reset_input()?;
+    write_message(writer, &SessionMessage::InputResetApplied { id })
+}
+
+fn set_spokesperson_input_policy(
+    id: u64,
+    expected_revision: u64,
+    policy: berd_voice::input::InputDuringTtsPolicy,
+    slot: &InputDuringTtsSlot,
+    writer: &mut impl Write,
+) -> Result<(), String> {
+    let (outcome, snapshot) = match slot.update(expected_revision, policy) {
+        Ok(snapshot) => (InputDuringTtsOutcome::Applied, snapshot),
+        Err(snapshot) => (InputDuringTtsOutcome::Rejected, snapshot),
+    };
+    write_message(
+        writer,
+        &SessionMessage::InputDuringTtsResult {
+            id,
+            outcome,
+            snapshot,
+        },
+    )
+}
+
+fn reject_spokesperson_tts_settings(
+    id: u64,
+    snapshot: &berd_voice::TtsConfigurationSnapshot,
+    writer: &mut impl Write,
+) -> Result<(), String> {
+    write_message(
+        writer,
+        &SessionMessage::TtsSettingsResult {
+            id,
+            outcome: TtsSettingsOutcome::Rejected,
+            snapshot: snapshot.clone(),
+            message: Some(
+                "live voice and rate changes are unavailable in Expert-Spokesperson mode".into(),
+            ),
+        },
+    )
+}
+
 fn run_expert_spokesperson_session(
     _config: SessionConfig,
     pcm_output_fd: RawFd,
@@ -2081,6 +2156,9 @@ fn run_expert_spokesperson_session(
     let mut waiting_responses = VecDeque::<String>::new();
     let mut active: Option<LivePlayback> = None;
     let mut turn_gate = ExpertTurnGate::default();
+    let mut session_tts: Option<berd_voice::TtsConfigurationSnapshot> = None;
+    let mut input_during_tts_slot: Option<InputDuringTtsSlot> = None;
+    let mut input_muted = false;
 
     loop {
         if let Some(events) = runtime_events.as_ref() {
@@ -2449,9 +2527,20 @@ fn run_expert_spokesperson_session(
                 )?;
                 break;
             }
-            Input::Pcm(frame) => runtime.as_ref().expect("initialized runtime").send(
-                SpokespersonCommand::InputPcm48Khz(frame.as_samples().to_vec()),
-            )?,
+            Input::Pcm(frame) => {
+                if spokesperson_pcm_allowed(
+                    input_muted,
+                    active.is_some(),
+                    input_during_tts_slot
+                        .as_ref()
+                        .expect("hello initialized input policy")
+                        .snapshot()?,
+                ) {
+                    runtime.as_ref().expect("initialized runtime").send(
+                        SpokespersonCommand::InputPcm48Khz(frame.as_samples().to_vec()),
+                    )?;
+                }
+            }
             Input::Request(SessionRequest::Hello {
                 id,
                 input_during_tts,
@@ -2465,19 +2554,18 @@ fn run_expert_spokesperson_session(
                     break;
                 }
                 let config = OpenAiSpokespersonConfig::from_environment()?;
+                let tts = berd_voice::TtsConfigurationSnapshot {
+                    revision: 1,
+                    settings: TtsSettings::OpenAi {
+                        model: config.model.clone(),
+                        voice: config.voice.clone(),
+                        rate: config.speed,
+                    },
+                };
+                let input_policy = InputDuringTtsSlot::new(input_during_tts);
                 let snapshot = VoiceSessionSnapshot {
-                    tts: berd_voice::TtsConfigurationSnapshot {
-                        revision: 1,
-                        settings: TtsSettings::OpenAi {
-                            model: config.model.clone(),
-                            voice: config.voice.clone(),
-                            rate: config.speed,
-                        },
-                    },
-                    input_during_tts: InputDuringTtsSnapshot {
-                        revision: 1,
-                        policy: input_during_tts,
-                    },
+                    tts: tts.clone(),
+                    input_during_tts: input_policy.snapshot()?,
                 };
                 let (created, events) = OpenAiSpokespersonRuntime::spawn(config)?;
                 match events.recv_timeout(Duration::from_secs(30)) {
@@ -2488,6 +2576,8 @@ fn run_expert_spokesperson_session(
                 }
                 runtime = Some(created);
                 runtime_events = Some(events);
+                session_tts = Some(tts);
+                input_during_tts_slot = Some(input_policy);
                 initialized = true;
                 write_message(
                     &mut writer,
@@ -2727,20 +2817,47 @@ fn run_expert_spokesperson_session(
                     )?;
                 }
             }
-            Input::Request(
-                SessionRequest::SetPaused { .. }
-                | SessionRequest::SetInputMuted { .. }
-                | SessionRequest::SetTtsSettings { .. }
-                | SessionRequest::SetInputDuringTts { .. }
-                | SessionRequest::ResetInput { .. },
-            ) => {
-                write_protocol_fatal(
+            Input::Request(SessionRequest::SetInputMuted { id, active: muted }) => {
+                set_spokesperson_input_muted(
+                    id,
+                    muted,
+                    &mut input_muted,
+                    || runtime.as_ref().expect("initialized runtime").reset_input(),
                     &mut writer,
-                    "unsupported request",
-                    "live settings are not yet available in Expert-Spokesperson mode",
                 )?;
-                break;
             }
+            Input::Request(SessionRequest::ResetInput { id }) => {
+                reset_spokesperson_input(
+                    id,
+                    || runtime.as_ref().expect("initialized runtime").reset_input(),
+                    &mut writer,
+                )?;
+            }
+            Input::Request(SessionRequest::SetInputDuringTts {
+                id,
+                expected_revision,
+                policy,
+            }) => {
+                set_spokesperson_input_policy(
+                    id,
+                    expected_revision,
+                    policy,
+                    input_during_tts_slot
+                        .as_ref()
+                        .expect("hello initialized input policy"),
+                    &mut writer,
+                )?;
+            }
+            Input::Request(SessionRequest::SetTtsSettings { id, .. }) => {
+                reject_spokesperson_tts_settings(
+                    id,
+                    session_tts
+                        .as_ref()
+                        .expect("hello initialized TTS snapshot"),
+                    &mut writer,
+                )?;
+            }
+            Input::Request(SessionRequest::SetPaused { .. }) => {}
         }
     }
     cancel_live_playback(&mut active);
@@ -5630,6 +5747,93 @@ mod tests {
             .unwrap_err(),
             "Spokesperson queued more than 15 seconds of audio in total"
         );
+    }
+
+    #[test]
+    fn spokesperson_input_controls_are_nonfatal_revisioned_and_gate_pcm() {
+        let mut muted = false;
+        let mut reset_count = 0;
+        let mut output = Vec::new();
+        set_spokesperson_input_muted(
+            1,
+            true,
+            &mut muted,
+            || {
+                reset_count += 1;
+                Ok(())
+            },
+            &mut output,
+        )
+        .unwrap();
+        reset_spokesperson_input(
+            2,
+            || {
+                reset_count += 1;
+                Ok(())
+            },
+            &mut output,
+        )
+        .unwrap();
+
+        let slot = InputDuringTtsSlot::new(InputDuringTtsPolicy::AllowBargeIn);
+        set_spokesperson_input_policy(
+            3,
+            1,
+            InputDuringTtsPolicy::SuppressInput,
+            &slot,
+            &mut output,
+        )
+        .unwrap();
+        set_spokesperson_input_policy(4, 1, InputDuringTtsPolicy::AllowBargeIn, &slot, &mut output)
+            .unwrap();
+
+        assert!(muted);
+        assert_eq!(reset_count, 2);
+        assert!(!spokesperson_pcm_allowed(
+            false,
+            true,
+            slot.snapshot().unwrap()
+        ));
+        assert!(spokesperson_pcm_allowed(
+            false,
+            false,
+            slot.snapshot().unwrap()
+        ));
+        assert!(!spokesperson_pcm_allowed(
+            true,
+            false,
+            slot.snapshot().unwrap()
+        ));
+        let messages = messages(&output);
+        assert_eq!(
+            messages[0],
+            json!({"type":"input_mute_applied","id":1,"active":true})
+        );
+        assert_eq!(messages[1], json!({"type":"input_reset_applied","id":2}));
+        assert_eq!(messages[2]["outcome"], "applied");
+        assert_eq!(messages[2]["snapshot"]["revision"], 2);
+        assert_eq!(messages[3]["outcome"], "rejected");
+        assert_eq!(messages[3]["snapshot"]["revision"], 2);
+    }
+
+    #[test]
+    fn spokesperson_tts_settings_are_read_only_without_terminating_the_session() {
+        let snapshot = berd_voice::TtsConfigurationSnapshot {
+            revision: 1,
+            settings: TtsSettings::OpenAi {
+                model: "gpt-realtime".into(),
+                voice: "marin".into(),
+                rate: 1.0,
+            },
+        };
+        let mut output = Vec::new();
+        reject_spokesperson_tts_settings(7, &snapshot, &mut output).unwrap();
+
+        let messages = messages(&output);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["type"], "tts_settings_result");
+        assert_eq!(messages[0]["outcome"], "rejected");
+        assert_eq!(messages[0]["snapshot"]["revision"], 1);
     }
 
     #[test]
