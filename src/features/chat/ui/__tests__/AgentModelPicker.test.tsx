@@ -1913,6 +1913,12 @@ describe("AgentModelPicker starred models", () => {
     expect(idleStar).toHaveAttribute("aria-pressed", "false");
     expect(idleStar).toHaveClass("text-muted-foreground");
     expect(idleStar).not.toHaveClass("text-foreground/80");
+    // A named group keeps outer picker hover/focus states from revealing
+    // every row's star at once.
+    expect(idleStar).toHaveClass("group-hover/model-row:opacity-100");
+    expect(idleStar).toHaveClass("group-focus-within/model-row:opacity-100");
+    expect(idleStar).not.toHaveClass("group-hover:opacity-100");
+    expect(idleStar).not.toHaveClass("group-focus-within:opacity-100");
 
     const starredToggle = within(picker).getByRole("button", {
       name: "Unstar Other",

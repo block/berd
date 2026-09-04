@@ -496,7 +496,7 @@ export const RecommendedModelList = forwardRef<
               return (
                 <div key={modelKey}>
                   <div
-                    className="group flex min-w-0 items-center gap-1"
+                    className="group/model-row flex min-w-0 items-center gap-1"
                     data-model-key={modelKey}
                     data-starred={starred || undefined}
                   >
@@ -533,13 +533,13 @@ export const RecommendedModelList = forwardRef<
                         onClick={() => toggleStar(scopeId, model.id)}
                         // Hover-reveal keeps rows calm; keyboard users still
                         // reach the control through row focus
-                        // (group-focus-within) or direct focus. The idle
+                        // (group-focus-within/model-row) or direct focus. The idle
                         // (unstarred) star rests on the ghost icon contract's
                         // muted-foreground — ≈5.7:1 light / ≈6.1:1 dark against
                         // the popover, above the 3:1 WCAG non-text bar
                         // (enforced in globals.test.ts) — and favorited rows
                         // soften to foreground/80 via the selected flag.
-                        className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
+                        className="shrink-0 opacity-0 transition-opacity group-hover/model-row:opacity-100 group-focus-within/model-row:opacity-100 focus-visible:opacity-100"
                         aria-label={t(
                           starred ? "toolbar.unstarModel" : "toolbar.starModel",
                           { model: getModelDisplayName(model) },
