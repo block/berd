@@ -84,6 +84,8 @@ impl OpenAiSpokespersonConfig {
 
 #[derive(Debug)]
 pub enum SpokespersonCommand {
+    /// Send a provider protocol event produced by the shared coordinator.
+    Provider(serde_json::Value),
     InputPcm48Khz(Vec<f32>),
     ResetInput {
         completed: std::sync::mpsc::SyncSender<Result<(), String>>,
@@ -530,6 +532,9 @@ async fn run_inner(
             }
             command = commands.recv() => {
                 match command {
+                    Some(SpokespersonCommand::Provider(event)) => {
+                        send_json(&mut socket, event).await?;
+                    }
                     Some(SpokespersonCommand::InputPcm48Khz(samples)) => {
                         let pcm = downsample_pcm16(&samples);
                         send_json(&mut socket, serde_json::json!({
@@ -1264,7 +1269,11 @@ mod tests {
                 .unwrap();
             let update = receive_json(&mut socket).await;
             acknowledge_initial_session(&mut socket, &update, "test-model").await;
-            let _ = socket.next().await;
+            let forwarded = receive_json(&mut socket).await;
+            assert_eq!(
+                forwarded,
+                json!({ "type": "response.create", "response": { "metadata": { "probe": true } } })
+            );
         });
 
         let (runtime, events) = OpenAiSpokespersonRuntime::spawn_observed(test_config(
@@ -1288,6 +1297,13 @@ mod tests {
                 if event["type"] == "session.updated"
         ));
         assert!(matches!(ready, SpokespersonEvent::Ready));
+
+        runtime
+            .send(SpokespersonCommand::Provider(json!({
+                "type": "response.create",
+                "response": { "metadata": { "probe": true } }
+            })))
+            .unwrap();
 
         runtime.finish().unwrap();
         server.await.unwrap();
