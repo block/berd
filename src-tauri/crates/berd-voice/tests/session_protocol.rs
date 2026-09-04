@@ -3,11 +3,14 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
+use futures_util::StreamExt;
 use serde_json::{json, Value};
+use tokio::net::TcpListener;
+use tokio_tungstenite::{accept_async, tungstenite::Message};
 
 struct ChildGuard(Option<Child>);
 
@@ -20,6 +23,78 @@ impl Drop for ChildGuard {
     }
 }
 
+struct ExpertSpokespersonTestSession {
+    child: ChildGuard,
+    stdin: Option<ChildStdin>,
+    output: mpsc::Receiver<Value>,
+    _audio_host: UnixStream,
+}
+
+impl ExpertSpokespersonTestSession {
+    fn start(endpoint: String) -> Self {
+        let (mut command, _pcm, audio_host) = session_command();
+        let mut child = ChildGuard(Some(
+            command
+                .args(["--mode", "expert-spokesperson", "--tts-backend", "openai"])
+                .env("OPENAI_API_KEY", "test-key")
+                .env("OPENAI_REALTIME_ENDPOINT", endpoint)
+                .env("OPENAI_REALTIME_MODEL", "test-model")
+                .env("OPENAI_REALTIME_VOICE", "old-voice")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        ));
+        let process = child.0.as_mut().unwrap();
+        let stdin = process.stdin.take().unwrap();
+        let output = spawn_session_message_reader(process.stdout.take().unwrap());
+        let mut session = Self {
+            child,
+            stdin: Some(stdin),
+            output,
+            _audio_host: audio_host,
+        };
+        session.send(json!({
+            "type":"hello","id":1,"input_during_tts":"allow_barge_in"
+        }));
+        assert_eq!(session.recv(Duration::from_secs(2))["type"], "ready");
+        session
+    }
+
+    fn send(&mut self, message: Value) {
+        let stdin = self.stdin.as_mut().expect("session input remains open");
+        write_session_json(stdin, &message);
+        stdin.flush().unwrap();
+    }
+
+    fn send_pcm(&mut self, value: f32) {
+        let stdin = self.stdin.as_mut().expect("session input remains open");
+        write_session_pcm(stdin, value);
+    }
+
+    fn flush(&mut self) {
+        self.stdin.as_mut().unwrap().flush().unwrap();
+    }
+
+    fn recv(&self, timeout: Duration) -> Value {
+        self.output.recv_timeout(timeout).unwrap()
+    }
+
+    fn shutdown(mut self) {
+        self.send(json!({"type":"shutdown"}));
+        self.wait();
+    }
+
+    fn wait(mut self) -> Vec<Value> {
+        self.stdin.take();
+        let status = self.child.0.as_mut().unwrap().wait().unwrap();
+        self.child.0 = None;
+        assert!(status.success());
+        self.output.iter().collect()
+    }
+}
+
 fn write_session_json(writer: &mut impl Write, value: &Value) {
     let payload = serde_json::to_vec(value).unwrap();
     writer.write_all(b"BV").unwrap();
@@ -28,6 +103,74 @@ fn write_session_json(writer: &mut impl Write, value: &Value) {
         .write_all(&(payload.len() as u32).to_le_bytes())
         .unwrap();
     writer.write_all(&payload).unwrap();
+}
+
+fn write_session_pcm(writer: &mut impl Write, value: f32) {
+    writer.write_all(b"BV").unwrap();
+    writer.write_all(&[2, 2]).unwrap();
+    writer.write_all(&(960_u32 * 4).to_le_bytes()).unwrap();
+    for _ in 0..960 {
+        writer.write_all(&value.to_le_bytes()).unwrap();
+    }
+}
+
+fn spawn_session_message_reader(stdout: ChildStdout) -> mpsc::Receiver<Value> {
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut stdout = BufReader::new(stdout);
+        loop {
+            let mut line = String::new();
+            match stdout.read_line(&mut line) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {
+                    let Ok(message) = serde_json::from_str(&line) else {
+                        break;
+                    };
+                    if sender.send(message).is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+    });
+    receiver
+}
+
+async fn receive_realtime_json(
+    socket: &mut tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
+) -> Value {
+    let Message::Text(text) = socket.next().await.unwrap().unwrap() else {
+        panic!("expected Realtime JSON")
+    };
+    serde_json::from_str(&text).unwrap()
+}
+
+async fn send_realtime_json(
+    socket: &mut tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
+    value: Value,
+) {
+    use futures_util::SinkExt;
+    socket
+        .send(Message::Text(value.to_string().into()))
+        .await
+        .unwrap();
+}
+
+async fn acknowledge_realtime_session(
+    socket: &mut tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
+    update: &Value,
+) {
+    send_realtime_json(
+        socket,
+        json!({
+            "type":"session.updated",
+            "session": {
+                "model":"test-model",
+                "audio": { "output": update["session"]["audio"]["output"].clone() }
+            }
+        }),
+    )
+    .await;
 }
 
 fn session_command() -> (Command, File, UnixStream) {
@@ -196,6 +339,689 @@ fn framed_hello_reports_input_initialization_failure_before_ready() {
     let message: Value = serde_json::from_str(&line).unwrap();
     assert_eq!(message["type"], "fatal");
     assert!(!message["message"].as_str().unwrap().is_empty());
+}
+
+#[test]
+fn expert_spokesperson_voice_change_swaps_atomically_and_flushes_gated_pcm_once() {
+    let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
+    let (clear_seen_tx, clear_seen_rx) = mpsc::sync_channel(1);
+    let (release_clear_tx, release_clear_rx) = mpsc::sync_channel(1);
+    let server = std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async move {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                endpoint_tx
+                    .send(format!("ws://{}/", listener.local_addr().unwrap()))
+                    .unwrap();
+
+                let (old_stream, _) = listener.accept().await.unwrap();
+                let mut old = accept_async(old_stream).await.unwrap();
+                let initial = receive_realtime_json(&mut old).await;
+                assert_eq!(initial["type"], "session.update");
+                assert_eq!(initial["session"]["audio"]["output"]["voice"], "old-voice");
+                acknowledge_realtime_session(&mut old, &initial).await;
+
+                let (candidate_stream, _) = listener.accept().await.unwrap();
+                let mut candidate = accept_async(candidate_stream).await.unwrap();
+                let replacement = receive_realtime_json(&mut candidate).await;
+                assert_eq!(replacement["type"], "session.update");
+                assert_eq!(
+                    replacement["session"]["audio"]["output"]["voice"],
+                    "new-voice"
+                );
+                assert_eq!(replacement["session"]["audio"]["output"]["speed"], 1.25);
+                acknowledge_realtime_session(&mut candidate, &replacement).await;
+
+                loop {
+                    let request = receive_realtime_json(&mut old).await;
+                    if request["type"] == "input_audio_buffer.clear" {
+                        assert!(request["event_id"]
+                            .as_str()
+                            .unwrap()
+                            .starts_with("berd-cutover-"));
+                        break;
+                    }
+                }
+                clear_seen_tx.send(()).unwrap();
+                tokio::task::spawn_blocking(move || release_clear_rx.recv().unwrap())
+                    .await
+                    .unwrap();
+                send_realtime_json(&mut old, json!({"type":"input_audio_buffer.cleared"})).await;
+
+                let gated_pcm = receive_realtime_json(&mut candidate).await;
+                assert_eq!(gated_pcm["type"], "input_audio_buffer.append");
+                assert!(!gated_pcm["audio"].as_str().unwrap().is_empty());
+                if let Ok(Some(Ok(Message::Text(text)))) =
+                    tokio::time::timeout(Duration::from_millis(100), candidate.next()).await
+                {
+                    let message: Value = serde_json::from_str(&text).unwrap();
+                    assert_ne!(message["type"], "input_audio_buffer.append");
+                }
+            });
+    });
+    let endpoint = endpoint_rx.recv().unwrap();
+
+    let mut session = ExpertSpokespersonTestSession::start(endpoint);
+    session.send(json!({
+            "type":"set_tts_settings",
+            "id":2,
+            "expected_revision":1,
+            "settings":{"backend":"openai","model":"test-model","voice":"new-voice","rate":1.25}
+    }));
+    clear_seen_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    session.send_pcm(0.125);
+    session.flush();
+    session.send(json!({
+        "type":"set_tts_settings",
+        "id":3,
+        "expected_revision":1,
+        "settings":{"backend":"openai","model":"test-model","voice":"third-voice","rate":1.0}
+    }));
+    let concurrent = session.recv(Duration::from_secs(2));
+    assert_eq!(concurrent["type"], "tts_settings_result");
+    assert_eq!(concurrent["id"], 3);
+    assert_eq!(concurrent["outcome"], "rejected");
+    assert_eq!(concurrent["snapshot"]["revision"], 1);
+    assert_eq!(concurrent["snapshot"]["voice"], "old-voice");
+    release_clear_tx.send(()).unwrap();
+
+    let applied = session.recv(Duration::from_secs(2));
+    assert_eq!(applied["type"], "tts_settings_result");
+    assert_eq!(applied["id"], 2);
+    assert_eq!(applied["outcome"], "applied");
+    assert_eq!(applied["snapshot"]["revision"], 2);
+    assert_eq!(applied["snapshot"]["voice"], "new-voice");
+    assert_eq!(applied["snapshot"]["rate"], 1.25);
+
+    session.shutdown();
+    server.join().unwrap();
+}
+
+#[test]
+fn user_activity_during_voice_cutover_rolls_back_and_flushes_gated_pcm_once() {
+    let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
+    let (clear_seen_tx, clear_seen_rx) = mpsc::sync_channel(1);
+    let (release_activity_tx, release_activity_rx) = mpsc::sync_channel(1);
+    let (rollback_seen_tx, rollback_seen_rx) = mpsc::sync_channel(1);
+    let server = std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async move {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                endpoint_tx
+                    .send(format!("ws://{}/", listener.local_addr().unwrap()))
+                    .unwrap();
+
+                let (old_stream, _) = listener.accept().await.unwrap();
+                let mut old = accept_async(old_stream).await.unwrap();
+                let old_update = receive_realtime_json(&mut old).await;
+                assert_eq!(old_update["type"], "session.update");
+                acknowledge_realtime_session(&mut old, &old_update).await;
+
+                let (candidate_stream, _) = listener.accept().await.unwrap();
+                let mut candidate = accept_async(candidate_stream).await.unwrap();
+                let candidate_update = receive_realtime_json(&mut candidate).await;
+                assert_eq!(candidate_update["type"], "session.update");
+                acknowledge_realtime_session(&mut candidate, &candidate_update).await;
+
+                let clear = receive_realtime_json(&mut old).await;
+                assert_eq!(clear["type"], "input_audio_buffer.clear");
+                clear_seen_tx.send(()).unwrap();
+                tokio::task::spawn_blocking(move || release_activity_rx.recv().unwrap())
+                    .await
+                    .unwrap();
+
+                send_realtime_json(
+                    &mut old,
+                    json!({"type":"input_audio_buffer.speech_started","item_id":"user-cutover"}),
+                )
+                .await;
+                send_realtime_json(
+                    &mut old,
+                    json!({"type":"input_audio_buffer.speech_stopped","item_id":"user-cutover"}),
+                )
+                .await;
+                send_realtime_json(
+                    &mut old,
+                    json!({
+                        "type":"input_audio_buffer.committed",
+                        "item_id":"user-cutover"
+                    }),
+                )
+                .await;
+                send_realtime_json(&mut old, json!({"type":"input_audio_buffer.cleared"})).await;
+                send_realtime_json(
+                    &mut old,
+                    json!({
+                        "type":"conversation.item.input_audio_transcription.completed",
+                        "item_id":"user-cutover",
+                        "transcript":"keep the old voice"
+                    }),
+                )
+                .await;
+
+                let append =
+                    tokio::time::timeout(Duration::from_secs(2), receive_realtime_json(&mut old))
+                        .await
+                        .expect("held PCM should return to the authoritative runtime");
+                assert_eq!(append["type"], "input_audio_buffer.append");
+                let response =
+                    tokio::time::timeout(Duration::from_secs(2), receive_realtime_json(&mut old))
+                        .await
+                        .expect("settled user input should receive a response after rollback");
+                assert_eq!(response["type"], "response.create");
+                assert!(tokio::time::timeout(Duration::from_millis(100), old.next())
+                    .await
+                    .is_err());
+                rollback_seen_tx.send(()).unwrap();
+                let _ = candidate.next().await;
+            });
+    });
+    let endpoint = endpoint_rx.recv().unwrap();
+
+    let mut session = ExpertSpokespersonTestSession::start(endpoint);
+    session.send(json!({
+            "type":"set_tts_settings",
+            "id":2,
+            "expected_revision":1,
+            "settings":{"backend":"openai","model":"test-model","voice":"new-voice","rate":1.0}
+    }));
+    clear_seen_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    session.send_pcm(0.25);
+    session.flush();
+    release_activity_tx.send(()).unwrap();
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    let mut saw_user = false;
+    let mut saw_rejection = false;
+    while !(saw_user && saw_rejection) {
+        let remaining = deadline
+            .checked_duration_since(std::time::Instant::now())
+            .expect("rollback did not publish user input and settings rejection promptly");
+        let message = session.recv(remaining);
+        saw_user |= message["type"] == "user_final";
+        if message["type"] == "tts_settings_result" {
+            assert_eq!(message["outcome"], "rejected");
+            assert_eq!(message["snapshot"]["revision"], 1);
+            assert_eq!(message["snapshot"]["voice"], "old-voice");
+            saw_rejection = true;
+        }
+    }
+    rollback_seen_rx
+        .recv_timeout(Duration::from_secs(2))
+        .unwrap();
+    session.shutdown();
+    server.join().unwrap();
+}
+
+#[test]
+fn expert_spokesperson_voice_candidate_mismatch_preserves_old_snapshot() {
+    let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
+    let server = std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async move {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                endpoint_tx
+                    .send(format!("ws://{}/", listener.local_addr().unwrap()))
+                    .unwrap();
+                let (old_stream, _) = listener.accept().await.unwrap();
+                let mut old = accept_async(old_stream).await.unwrap();
+                let old_update = receive_realtime_json(&mut old).await;
+                assert_eq!(old_update["type"], "session.update");
+                acknowledge_realtime_session(&mut old, &old_update).await;
+
+                let (candidate_stream, _) = listener.accept().await.unwrap();
+                let mut candidate = accept_async(candidate_stream).await.unwrap();
+                let update = receive_realtime_json(&mut candidate).await;
+                assert_eq!(update["session"]["audio"]["output"]["voice"], "bad-voice");
+                send_realtime_json(
+                    &mut candidate,
+                    json!({
+                        "type":"session.updated",
+                        "session": {
+                            "model":"test-model",
+                            "audio":{"output":{"voice":"old-voice","speed":1.0}}
+                        }
+                    }),
+                )
+                .await;
+                let _ = candidate.next().await;
+                let _ = old.next().await;
+            });
+    });
+    let endpoint = endpoint_rx.recv().unwrap();
+    let mut session = ExpertSpokespersonTestSession::start(endpoint);
+    session.send(json!({
+            "type":"set_tts_settings",
+            "id":2,
+            "expected_revision":1,
+            "settings":{"backend":"openai","model":"test-model","voice":"bad-voice","rate":1.0}
+    }));
+    let rejected = session.recv(Duration::from_secs(2));
+    assert_eq!(rejected["type"], "tts_settings_result");
+    assert_eq!(rejected["outcome"], "rejected");
+    assert_eq!(rejected["snapshot"]["revision"], 1);
+    assert_eq!(rejected["snapshot"]["voice"], "old-voice");
+    assert!(rejected["message"]
+        .as_str()
+        .unwrap()
+        .contains("did not apply"));
+    session.shutdown();
+    server.join().unwrap();
+}
+
+#[test]
+fn candidate_close_during_voice_cutover_rejects_without_activating_it() {
+    let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
+    let server = std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async move {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                endpoint_tx
+                    .send(format!("ws://{}/", listener.local_addr().unwrap()))
+                    .unwrap();
+                let (old_stream, _) = listener.accept().await.unwrap();
+                let mut old = accept_async(old_stream).await.unwrap();
+                let old_update = receive_realtime_json(&mut old).await;
+                acknowledge_realtime_session(&mut old, &old_update).await;
+
+                let (candidate_stream, _) = listener.accept().await.unwrap();
+                let mut candidate = accept_async(candidate_stream).await.unwrap();
+                let candidate_update = receive_realtime_json(&mut candidate).await;
+                acknowledge_realtime_session(&mut candidate, &candidate_update).await;
+                assert_eq!(
+                    receive_realtime_json(&mut old).await["type"],
+                    "input_audio_buffer.clear"
+                );
+                candidate.close(None).await.unwrap();
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                send_realtime_json(&mut old, json!({"type":"input_audio_buffer.cleared"})).await;
+                let _ = old.next().await;
+            });
+    });
+    let endpoint = endpoint_rx.recv().unwrap();
+    let mut session = ExpertSpokespersonTestSession::start(endpoint);
+    session.send(json!({
+            "type":"set_tts_settings",
+            "id":2,
+            "expected_revision":1,
+            "settings":{"backend":"openai","model":"test-model","voice":"new-voice","rate":1.0}
+    }));
+    let result = session.recv(Duration::from_secs(2));
+    assert_eq!(result["type"], "tts_settings_result");
+    assert_eq!(result["outcome"], "rejected");
+    assert_eq!(result["snapshot"]["revision"], 1);
+    assert_eq!(result["snapshot"]["voice"], "old-voice");
+    session.shutdown();
+    server.join().unwrap();
+}
+
+#[test]
+fn voice_cutover_pcm_overflow_rolls_back_every_frame_to_the_old_runtime() {
+    let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
+    let (clear_seen_tx, clear_seen_rx) = mpsc::sync_channel(1);
+    let (frames_sent_tx, frames_sent_rx) = mpsc::sync_channel(1);
+    let (frames_seen_tx, frames_seen_rx) = mpsc::sync_channel(1);
+    let server = std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async move {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                endpoint_tx
+                    .send(format!("ws://{}/", listener.local_addr().unwrap()))
+                    .unwrap();
+                let (old_stream, _) = listener.accept().await.unwrap();
+                let mut old = accept_async(old_stream).await.unwrap();
+                let old_update = receive_realtime_json(&mut old).await;
+                acknowledge_realtime_session(&mut old, &old_update).await;
+                let (candidate_stream, _) = listener.accept().await.unwrap();
+                let mut candidate = accept_async(candidate_stream).await.unwrap();
+                let candidate_update = receive_realtime_json(&mut candidate).await;
+                acknowledge_realtime_session(&mut candidate, &candidate_update).await;
+                assert_eq!(
+                    receive_realtime_json(&mut old).await["type"],
+                    "input_audio_buffer.clear"
+                );
+                clear_seen_tx.send(()).unwrap();
+                tokio::task::spawn_blocking(move || frames_sent_rx.recv().unwrap())
+                    .await
+                    .unwrap();
+                send_realtime_json(&mut old, json!({"type":"input_audio_buffer.cleared"})).await;
+                for _ in 0..33 {
+                    let append = tokio::time::timeout(
+                        Duration::from_secs(2),
+                        receive_realtime_json(&mut old),
+                    )
+                    .await
+                    .expect("every frame should return to the old runtime");
+                    assert_eq!(append["type"], "input_audio_buffer.append");
+                }
+                frames_seen_tx.send(()).unwrap();
+                let _ = candidate.next().await;
+            });
+    });
+    let endpoint = endpoint_rx.recv().unwrap();
+    let mut session = ExpertSpokespersonTestSession::start(endpoint);
+    session.send(json!({
+            "type":"set_tts_settings","id":2,"expected_revision":1,
+            "settings":{"backend":"openai","model":"test-model","voice":"new-voice","rate":1.0}
+    }));
+    clear_seen_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    for index in 0..33 {
+        session.send_pcm(index as f32 / 100.0);
+    }
+    session.flush();
+    frames_sent_tx.send(()).unwrap();
+    let rejected = session.recv(Duration::from_secs(3));
+    assert_eq!(rejected["type"], "tts_settings_result");
+    assert_eq!(rejected["outcome"], "rejected");
+    assert_eq!(rejected["snapshot"]["voice"], "old-voice");
+    frames_seen_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    session.shutdown();
+    server.join().unwrap();
+}
+
+#[test]
+fn reset_input_during_voice_cutover_rolls_back_then_clears_the_old_runtime() {
+    let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
+    let (cutover_seen_tx, cutover_seen_rx) = mpsc::sync_channel(1);
+    let (reset_seen_tx, reset_seen_rx) = mpsc::sync_channel(1);
+    let server = std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async move {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                endpoint_tx
+                    .send(format!("ws://{}/", listener.local_addr().unwrap()))
+                    .unwrap();
+                let (old_stream, _) = listener.accept().await.unwrap();
+                let mut old = accept_async(old_stream).await.unwrap();
+                let old_update = receive_realtime_json(&mut old).await;
+                acknowledge_realtime_session(&mut old, &old_update).await;
+                let (candidate_stream, _) = listener.accept().await.unwrap();
+                let mut candidate = accept_async(candidate_stream).await.unwrap();
+                let candidate_update = receive_realtime_json(&mut candidate).await;
+                acknowledge_realtime_session(&mut candidate, &candidate_update).await;
+                let cutover_clear = receive_realtime_json(&mut old).await;
+                assert_eq!(cutover_clear["type"], "input_audio_buffer.clear");
+                cutover_seen_tx.send(()).unwrap();
+                tokio::task::spawn_blocking(move || reset_seen_rx.recv().unwrap())
+                    .await
+                    .unwrap();
+                send_realtime_json(&mut old, json!({"type":"input_audio_buffer.cleared"})).await;
+                let reset_clear =
+                    tokio::time::timeout(Duration::from_secs(2), receive_realtime_json(&mut old))
+                        .await
+                        .expect("ordered reset should run after the voice cutover abort");
+                assert_eq!(reset_clear["type"], "input_audio_buffer.clear");
+                assert_ne!(reset_clear["event_id"], cutover_clear["event_id"]);
+                send_realtime_json(&mut old, json!({"type":"input_audio_buffer.cleared"})).await;
+                let _ = candidate.next().await;
+                let _ = old.next().await;
+            });
+    });
+    let endpoint = endpoint_rx.recv().unwrap();
+    let mut session = ExpertSpokespersonTestSession::start(endpoint);
+    session.send(json!({
+            "type":"set_tts_settings","id":2,"expected_revision":1,
+            "settings":{"backend":"openai","model":"test-model","voice":"new-voice","rate":1.0}
+    }));
+    cutover_seen_rx
+        .recv_timeout(Duration::from_secs(2))
+        .unwrap();
+    session.send(json!({"type":"reset_input","id":3}));
+    reset_seen_tx.send(()).unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    let mut saw_rejection = false;
+    let mut saw_reset = false;
+    while !(saw_rejection && saw_reset) {
+        let remaining = deadline
+            .checked_duration_since(std::time::Instant::now())
+            .expect("voice rollback and input reset did not both complete");
+        let message = session.recv(remaining);
+        saw_rejection |= message["type"] == "tts_settings_result"
+            && message["outcome"] == "rejected"
+            && message["snapshot"]["voice"] == "old-voice";
+        saw_reset |= message == json!({"type":"input_reset_applied","id":3});
+    }
+    session.shutdown();
+    server.join().unwrap();
+}
+
+#[test]
+fn unresolved_handoff_rejects_voice_change_without_starting_a_candidate() {
+    let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
+    let (emit_handoff_tx, emit_handoff_rx) = mpsc::sync_channel(1);
+    let server = std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async move {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                endpoint_tx
+                    .send(format!("ws://{}/", listener.local_addr().unwrap()))
+                    .unwrap();
+                let (old_stream, _) = listener.accept().await.unwrap();
+                let mut old = accept_async(old_stream).await.unwrap();
+                let old_update = receive_realtime_json(&mut old).await;
+                assert_eq!(old_update["type"], "session.update");
+                acknowledge_realtime_session(&mut old, &old_update).await;
+                tokio::task::spawn_blocking(move || emit_handoff_rx.recv().unwrap())
+                    .await
+                    .unwrap();
+                send_realtime_json(
+                    &mut old,
+                    json!({"type":"response.created","response":{"id":"response-handoff"}}),
+                )
+                .await;
+                send_realtime_json(
+                    &mut old,
+                    json!({"type":"response.output_item.added","item":{"call_id":"call-1","name":"handoff"}}),
+                )
+                .await;
+                send_realtime_json(
+                    &mut old,
+                    json!({
+                        "type":"response.function_call_arguments.done",
+                        "call_id":"call-1",
+                        "arguments":"{\"message\":\"inspect the computer\"}"
+                    }),
+                )
+                .await;
+                send_realtime_json(
+                    &mut old,
+                    json!({"type":"response.done","response":{"id":"response-handoff","status":"completed"}}),
+                )
+                .await;
+                assert!(tokio::time::timeout(Duration::from_millis(250), listener.accept())
+                    .await
+                    .is_err());
+                let _ = old.next().await;
+            });
+    });
+    let endpoint = endpoint_rx.recv().unwrap();
+    let mut session = ExpertSpokespersonTestSession::start(endpoint);
+    emit_handoff_tx.send(()).unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let remaining = deadline
+            .checked_duration_since(std::time::Instant::now())
+            .expect("handoff was not published promptly");
+        let message = session.recv(remaining);
+        if message["type"] == "user_final" {
+            assert_eq!(message["origin"], "handoff");
+            break;
+        }
+    }
+    session.send(json!({
+            "type":"set_tts_settings",
+            "id":2,
+            "expected_revision":1,
+            "settings":{"backend":"openai","model":"test-model","voice":"new-voice","rate":1.0}
+    }));
+    let rejected = session.recv(Duration::from_secs(2));
+    assert_eq!(rejected["type"], "tts_settings_result");
+    assert_eq!(rejected["outcome"], "rejected");
+    assert_eq!(rejected["snapshot"]["voice"], "old-voice");
+    assert!(rejected["message"]
+        .as_str()
+        .unwrap()
+        .contains("between turns"));
+    session.shutdown();
+    server.join().unwrap();
+}
+
+#[test]
+fn voice_cutover_timeout_is_terminal_and_never_reports_a_settings_result() {
+    let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
+    let server = std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async move {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                endpoint_tx
+                    .send(format!("ws://{}/", listener.local_addr().unwrap()))
+                    .unwrap();
+                let (old_stream, _) = listener.accept().await.unwrap();
+                let mut old = accept_async(old_stream).await.unwrap();
+                let old_update = receive_realtime_json(&mut old).await;
+                assert_eq!(old_update["type"], "session.update");
+                acknowledge_realtime_session(&mut old, &old_update).await;
+                let (candidate_stream, _) = listener.accept().await.unwrap();
+                let mut candidate = accept_async(candidate_stream).await.unwrap();
+                let candidate_update = receive_realtime_json(&mut candidate).await;
+                assert_eq!(candidate_update["type"], "session.update");
+                acknowledge_realtime_session(&mut candidate, &candidate_update).await;
+                assert_eq!(
+                    receive_realtime_json(&mut old).await["type"],
+                    "input_audio_buffer.clear"
+                );
+                let _ = old.next().await;
+                let _ = candidate.next().await;
+            });
+    });
+    let endpoint = endpoint_rx.recv().unwrap();
+    let mut session = ExpertSpokespersonTestSession::start(endpoint);
+    session.send(json!({
+            "type":"set_tts_settings",
+            "id":2,
+            "expected_revision":1,
+            "settings":{"backend":"openai","model":"test-model","voice":"new-voice","rate":1.0}
+    }));
+    let fatal = session.recv(Duration::from_secs(6));
+    assert_eq!(fatal["type"], "fatal");
+    assert_eq!(fatal["message"], "Spokesperson failed");
+    assert!(session
+        .wait()
+        .iter()
+        .all(|message| message["type"] != "tts_settings_result"));
+    server.join().unwrap();
+}
+
+#[test]
+fn user_final_promptly_aborts_a_stalled_voice_candidate_and_replies_on_old_runtime() {
+    let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
+    let (candidate_seen_tx, candidate_seen_rx) = mpsc::sync_channel(1);
+    let server = std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async move {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                endpoint_tx
+                    .send(format!("ws://{}/", listener.local_addr().unwrap()))
+                    .unwrap();
+                let (old_stream, _) = listener.accept().await.unwrap();
+                let mut old = accept_async(old_stream).await.unwrap();
+                let old_update = receive_realtime_json(&mut old).await;
+                assert_eq!(old_update["type"], "session.update");
+                acknowledge_realtime_session(&mut old, &old_update).await;
+                let (mut stalled_candidate, _) = listener.accept().await.unwrap();
+                candidate_seen_tx.send(()).unwrap();
+                send_realtime_json(
+                    &mut old,
+                    json!({"type":"input_audio_buffer.speech_started","item_id":"user-1"}),
+                )
+                .await;
+                send_realtime_json(
+                    &mut old,
+                    json!({"type":"input_audio_buffer.speech_stopped","item_id":"user-1"}),
+                )
+                .await;
+                send_realtime_json(
+                    &mut old,
+                    json!({
+                        "type":"conversation.item.input_audio_transcription.completed",
+                        "item_id":"user-1",
+                        "transcript":"answer me now"
+                    }),
+                )
+                .await;
+                let response =
+                    tokio::time::timeout(Duration::from_secs(2), receive_realtime_json(&mut old))
+                        .await
+                        .expect("old runtime should promptly receive replacement response request");
+                assert_eq!(response["type"], "response.create");
+                use tokio::io::AsyncReadExt;
+                let mut pending_handshake = Vec::new();
+                tokio::time::timeout(
+                    Duration::from_secs(2),
+                    stalled_candidate.read_to_end(&mut pending_handshake),
+                )
+                .await
+                .expect("stalled candidate should be cancelled promptly")
+                .unwrap();
+                assert!(!pending_handshake.is_empty());
+                let _ = old.next().await;
+            });
+    });
+    let endpoint = endpoint_rx.recv().unwrap();
+    let mut session = ExpertSpokespersonTestSession::start(endpoint);
+    session.send(json!({
+            "type":"set_tts_settings",
+            "id":2,
+            "expected_revision":1,
+            "settings":{"backend":"openai","model":"test-model","voice":"new-voice","rate":1.0}
+    }));
+    candidate_seen_rx
+        .recv_timeout(Duration::from_secs(2))
+        .unwrap();
+    let mut saw_user = false;
+    let mut saw_rejection = false;
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    while !(saw_user && saw_rejection) {
+        let remaining = deadline
+            .checked_duration_since(std::time::Instant::now())
+            .expect("session did not report user input and voice rejection promptly");
+        let message = session.recv(remaining);
+        saw_user |= message["type"] == "user_final";
+        if message["type"] == "tts_settings_result" {
+            assert_eq!(message["outcome"], "rejected");
+            assert_eq!(message["snapshot"]["voice"], "old-voice");
+            saw_rejection = true;
+        }
+    }
+    session.shutdown();
+    server.join().unwrap();
 }
 
 #[test]
