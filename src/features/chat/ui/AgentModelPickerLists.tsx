@@ -829,7 +829,6 @@ export const RecommendedModelList = forwardRef<
                           starred ? "toolbar.unstarModel" : "toolbar.starModel",
                           { model: getModelDisplayName(model) },
                         )}
-                        aria-pressed={starred}
                       >
                         <motion.span
                           className="flex"

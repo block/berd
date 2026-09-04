@@ -730,6 +730,7 @@ export const designSystemComponentManifest = [
       "aria-disabled:opacity-50",
       "aria-expanded:bg-transparent",
       "aria-expanded:text-foreground",
+      "aria-pressed",
       "data-[disabled=true]:opacity-50",
       "data-[state=open]:bg-transparent",
       "data-[state=open]:text-foreground",

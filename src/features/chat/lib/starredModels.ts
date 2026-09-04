@@ -2,7 +2,6 @@ import { toast } from "sonner";
 import { i18n } from "@/shared/i18n";
 
 export const STARRED_MODELS_ENTRY_PREFIX = "goose:starredModels:v1:entry:";
-export const LEGACY_STARRED_MODELS_STORAGE_KEY = "goose:starredModels:v1";
 const STARRED_MODELS_ENTRY_VALUE = "1";
 const STARRED_MODELS_CHANGED_EVENT = "goose:starred-models-changed";
 
@@ -17,44 +16,12 @@ export function starredModelStorageKey(starKey: string): string {
   return STARRED_MODELS_ENTRY_PREFIX + encodeURIComponent(starKey);
 }
 
-/**
- * One-shot migration from the pre-#287 aggregate format (one array under a
- * single key). Idempotent and safe to race across windows: entry writes are
- * identical values, and removing the legacy key twice is a no-op.
- */
-function migrateLegacyStarredModels(): void {
-  const legacy = window.localStorage.getItem(LEGACY_STARRED_MODELS_STORAGE_KEY);
-  if (legacy === null) {
-    return;
-  }
-
-  window.localStorage.removeItem(LEGACY_STARRED_MODELS_STORAGE_KEY);
-
-  try {
-    const parsed: unknown = JSON.parse(legacy);
-    if (!Array.isArray(parsed)) {
-      return;
-    }
-    for (const item of parsed) {
-      if (typeof item === "string") {
-        window.localStorage.setItem(
-          starredModelStorageKey(item),
-          STARRED_MODELS_ENTRY_VALUE,
-        );
-      }
-    }
-  } catch {
-    // Unreadable legacy value; the key has already been removed.
-  }
-}
-
 function readStarredModels(): StarredModelSet {
   if (typeof window === "undefined") {
     return new Set();
   }
 
   try {
-    migrateLegacyStarredModels();
     const storage = window.localStorage;
     const starred = new Set<string>();
     for (let i = 0; i < storage.length; i += 1) {
@@ -121,7 +88,6 @@ export function toggleModelStar(scopeId: string, modelId: string): boolean {
   const starKey = modelStarKey(scopeId, modelId);
 
   try {
-    migrateLegacyStarredModels();
     const starred =
       window.localStorage.getItem(starredModelStorageKey(starKey)) !== null;
     return persistStarEntry(starKey, !starred);

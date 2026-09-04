@@ -624,7 +624,7 @@
       }
     },
     "starModel": "Destacar {{model}}",
-    "unstarModel": "Quitar destaque de {{model}}"
+    "unstarModel": "Quitar {{model}} de destacados"
   },
   "tools": {
     "content": "Contenido",

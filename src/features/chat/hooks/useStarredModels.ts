@@ -41,6 +41,9 @@ function subscribe(callback: () => void): () => void {
 
   window.addEventListener(STARRED_MODELS_EVENT, handleChange);
   window.addEventListener("storage", handleStorage);
+  // No listener exists while the store has no subscribers. Invalidate after
+  // attaching both listeners so a remount rereads changes made during that gap.
+  cachedSnapshot = null;
   return () => {
     window.removeEventListener(STARRED_MODELS_EVENT, handleChange);
     window.removeEventListener("storage", handleStorage);

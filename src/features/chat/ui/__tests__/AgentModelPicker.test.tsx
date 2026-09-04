@@ -3,11 +3,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __resetStarredModelsCacheForTests } from "../../hooks/useStarredModels";
-import {
-  LEGACY_STARRED_MODELS_STORAGE_KEY,
-  modelStarKey,
-  starredModelStorageKey,
-} from "../../lib/starredModels";
+import { modelStarKey, starredModelStorageKey } from "../../lib/starredModels";
 import { AgentModelPicker } from "../AgentModelPicker";
 import {
   getModelRecencyMap,
@@ -2001,42 +1997,6 @@ describe("AgentModelPicker starred models", () => {
       "animate-in",
       "fade-in",
     );
-  });
-
-  it("migrates the legacy aggregate entry into per-key entries", async () => {
-    localStorage.setItem(
-      LEGACY_STARRED_MODELS_STORAGE_KEY,
-      JSON.stringify([modelStarKey("goose", "other"), 42, null]),
-    );
-    __resetStarredModelsCacheForTests();
-    const user = userEvent.setup();
-    render(
-      <AgentModelPicker
-        agents={AGENTS}
-        selectedAgentId="goose"
-        onAgentChange={vi.fn()}
-        currentModelId="preferred"
-        currentModelName="Preferred"
-        availableModels={models}
-        onModelChange={vi.fn()}
-      />,
-    );
-
-    await user.click(
-      screen.getByRole("button", { name: /choose agent and model/i }),
-    );
-
-    expect(
-      document.querySelector(
-        `[data-model-key='${modelStarKey("goose", "other")}']`,
-      ),
-    ).toBeInTheDocument();
-    expect(localStorage.getItem(LEGACY_STARRED_MODELS_STORAGE_KEY)).toBeNull();
-    expect(
-      localStorage.getItem(
-        starredModelStorageKey(modelStarKey("goose", "other")),
-      ),
-    ).toBe("1");
   });
 
   it("stores each star as its own entry so one toggle cannot drop another", async () => {

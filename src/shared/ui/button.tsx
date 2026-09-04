@@ -359,6 +359,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       disabled,
       onClick,
       "aria-disabled": ariaDisabled,
+      "aria-pressed": ariaPressed,
       ...props
     },
     ref,
@@ -557,6 +558,11 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         data-slot="button"
         data-feedback-state={feedbackState}
         aria-busy={isLoading}
+        aria-pressed={
+          resolvedEmphasis === "ghost" && selected !== undefined
+            ? resolvedSelected
+            : ariaPressed
+        }
         aria-disabled={
           asChild && resolvedDisabled
             ? true
