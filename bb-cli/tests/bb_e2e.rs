@@ -3659,6 +3659,7 @@ fn bb_apps_help_distinguishes_external_and_internal_paths() {
         "delete",
         "ready",
         "debug",
+        "egress",
     ] {
         assert!(
             stdout.contains(expected),
@@ -3948,6 +3949,95 @@ fn bb_apps_access_set_requires_visibility_before_auth_or_network() {
     assert!(stdout.is_empty(), "stdout was: {stdout}");
     assert!(stderr.contains("--visibility <VISIBILITY>"));
     assert!(stderr.contains("required"));
+}
+
+#[test]
+fn bb_apps_egress_help_exposes_list_add_remove_and_runtime_rules() {
+    let egress_output = bb_command()
+        .args(["apps", "egress", "--help"])
+        .output()
+        .expect("run bb apps egress help");
+    let (egress_stdout, egress_stderr) = output_text(&egress_output);
+    assert!(
+        egress_output.status.success(),
+        "stderr was: {egress_stderr}"
+    );
+    for expected in [
+        "list",
+        "add",
+        "remove",
+        "approved publishers",
+        "fetch-js and process",
+    ] {
+        assert!(
+            egress_stdout.contains(expected),
+            "egress help omitted {expected:?}: {egress_stdout}"
+        );
+    }
+
+    let list_output = bb_command()
+        .args(["apps", "egress", "list", "--help"])
+        .output()
+        .expect("run bb apps egress list help");
+    let (list_stdout, list_stderr) = output_text(&list_output);
+    assert!(list_output.status.success(), "stderr was: {list_stderr}");
+    for expected in [
+        "<APP_ID>",
+        "platform allowlist",
+        "attributed egress hosts",
+        "static apps",
+        "--environment <ENVIRONMENT>",
+        "--base-url <URL>",
+    ] {
+        assert!(
+            list_stdout.contains(expected),
+            "egress list help omitted {expected:?}: {list_stdout}"
+        );
+    }
+
+    for action in ["add", "remove"] {
+        let output = bb_command()
+            .args(["apps", "egress", action, "--help"])
+            .output()
+            .expect("run bb apps egress mutation help");
+        let (stdout, stderr) = output_text(&output);
+        assert!(output.status.success(), "stderr was: {stderr}");
+        for expected in [
+            "<APP_ID>",
+            "--host <HOST>",
+            "exact public DNS host",
+            "--environment <ENVIRONMENT>",
+            "--base-url <URL>",
+        ] {
+            assert!(
+                stdout.contains(expected),
+                "egress {action} help omitted {expected:?}: {stdout}"
+            );
+        }
+    }
+}
+
+#[test]
+fn bb_apps_egress_mutations_require_host_before_auth_or_network() {
+    for action in ["add", "remove"] {
+        let output = bb_command()
+            .args([
+                "apps",
+                "egress",
+                action,
+                "merchant-lookup",
+                "--base-url",
+                APPROVED_APPS_BASE_URL,
+            ])
+            .output()
+            .expect("run bb apps egress mutation without host");
+        let (stdout, stderr) = output_text(&output);
+
+        assert!(!output.status.success());
+        assert!(stdout.is_empty(), "stdout was: {stdout}");
+        assert!(stderr.contains("--host <HOST>"));
+        assert!(stderr.contains("required"));
+    }
 }
 
 #[test]

@@ -413,6 +413,95 @@ pub fn command() -> Command {
                         ),
                 )),
         )
+        .subcommand(
+            Command::new("egress")
+                .about("Inspect or manage an app's outbound HTTPS destinations")
+                .long_about(
+                    "Inspect or manage an Apps Platform app's egress allowlist. The owner and \
+                     approved publishers may read and mutate it. Listing is available for every \
+                     runtime profile; add and remove apply only to fetch-js and process apps.",
+                )
+                .subcommand_required(true)
+                .arg_required_else_help(true)
+                .disable_help_subcommand(true)
+                .subcommand(control_plane_args(
+                    Command::new("list")
+                        .about("List platform-managed and app-specific egress hosts")
+                        .long_about(
+                            "List the read-only platform allowlist and the app's attributed egress \
+                             hosts. This remains available for static apps even though their saved \
+                             hosts do not affect serving.",
+                        )
+                        .arg(
+                            Arg::new("app-id")
+                                .value_name("APP_ID")
+                                .required(true)
+                                .help("App identifier returned by `bb apps list` or `bb apps create`"),
+                        )
+                        .arg(
+                            Arg::new("environment")
+                                .long("environment")
+                                .value_name("ENVIRONMENT")
+                                .help("Optional Compose environment override"),
+                        ),
+                ))
+                .subcommand(control_plane_args(
+                    Command::new("add")
+                        .about("Allow outbound HTTPS to one public DNS host")
+                        .long_about(
+                            "Add one exact public DNS host to a fetch-js or process app's egress \
+                             allowlist. Pass a host only, without a scheme, port, path, wildcard, or \
+                             IP address. Traffic is restricted to TLS on port 443. Re-adding a host \
+                             is idempotent and keeps its original attribution.",
+                        )
+                        .arg(
+                            Arg::new("app-id")
+                                .value_name("APP_ID")
+                                .required(true)
+                                .help("App identifier returned by `bb apps list` or `bb apps create`"),
+                        )
+                        .arg(
+                            Arg::new("host")
+                                .long("host")
+                                .value_name("HOST")
+                                .required(true)
+                                .help("Exact public DNS host to allow, such as api.example.com"),
+                        )
+                        .arg(
+                            Arg::new("environment")
+                                .long("environment")
+                                .value_name("ENVIRONMENT")
+                                .help("Optional Compose environment override"),
+                        ),
+                ))
+                .subcommand(control_plane_args(
+                    Command::new("remove")
+                        .about("Remove one outbound HTTPS destination")
+                        .long_about(
+                            "Remove one exact public DNS host from a fetch-js or process app's \
+                             egress allowlist. Removing a host that is already absent is idempotent.",
+                        )
+                        .arg(
+                            Arg::new("app-id")
+                                .value_name("APP_ID")
+                                .required(true)
+                                .help("App identifier returned by `bb apps list` or `bb apps create`"),
+                        )
+                        .arg(
+                            Arg::new("host")
+                                .long("host")
+                                .value_name("HOST")
+                                .required(true)
+                                .help("Exact public DNS host to remove"),
+                        )
+                        .arg(
+                            Arg::new("environment")
+                                .long("environment")
+                                .value_name("ENVIRONMENT")
+                                .help("Optional Compose environment override"),
+                        ),
+                )),
+        )
 }
 
 fn control_plane_args(command: Command) -> Command {
@@ -458,6 +547,7 @@ fn dispatch(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
         Some(("ready", ready_matches)) => run_ready(config, ready_matches),
         Some(("debug", debug_matches)) => run_debug(config, debug_matches),
         Some(("access", access_matches)) => run_access(config, access_matches),
+        Some(("egress", egress_matches)) => run_egress(config, egress_matches),
         _ => anyhow::bail!("expected an apps subcommand"),
     }
 }
@@ -699,6 +789,44 @@ fn run_access_set(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     print_json(&response)
 }
 
+fn run_egress(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
+    match matches.subcommand() {
+        Some(("list", list_matches)) => run_egress_list(config, list_matches),
+        Some(("add", add_matches)) => run_egress_mutation(config, add_matches, true),
+        Some(("remove", remove_matches)) => run_egress_mutation(config, remove_matches, false),
+        _ => anyhow::bail!("expected an egress subcommand"),
+    }
+}
+
+fn run_egress_list(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
+    let app_id = matches
+        .get_one::<String>("app-id")
+        .context("expected app id")?;
+    let environment = matches.get_one::<String>("environment").map(String::as_str);
+    let (client, credential) = control_plane_context(config, matches)?;
+    let response = client.list_egress(&credential, app_id, environment)?;
+    print_json(&response)
+}
+
+fn run_egress_mutation(config: &SkillsConfig, matches: &ArgMatches, add: bool) -> Result<()> {
+    let app_id = matches
+        .get_one::<String>("app-id")
+        .context("expected app id")?;
+    let request = EgressRequest {
+        host: matches
+            .get_one::<String>("host")
+            .context("expected egress host")?,
+        environment: matches.get_one::<String>("environment").map(String::as_str),
+    };
+    let (client, credential) = control_plane_context(config, matches)?;
+    let response = if add {
+        client.add_egress_host(&credential, app_id, &request)?
+    } else {
+        client.remove_egress_host(&credential, app_id, &request)?
+    };
+    print_json(&response)
+}
+
 fn control_plane_context(
     config: &SkillsConfig,
     matches: &ArgMatches,
@@ -746,6 +874,13 @@ struct DeleteAppRequest<'a> {
 struct AccessRequest<'a> {
     visibility: &'a str,
     viewers: Vec<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    environment: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+struct EgressRequest<'a> {
+    host: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     environment: Option<&'a str>,
 }
@@ -1171,6 +1306,50 @@ impl ControlPlaneClient {
                 .json(request)
                 .build()
                 .context("build Apps Platform access update request")
+        })
+    }
+
+    fn list_egress(
+        &self,
+        credential: &ComposeSessionCredential,
+        app_id: &str,
+        environment: Option<&str>,
+    ) -> Result<Value> {
+        let query = environment
+            .map(|environment| vec![("environment", environment.to_string())])
+            .unwrap_or_default();
+        self.get_app_resource(credential, app_id, "egress", &query)
+    }
+
+    fn add_egress_host(
+        &self,
+        credential: &ComposeSessionCredential,
+        app_id: &str,
+        request: &EgressRequest<'_>,
+    ) -> Result<Value> {
+        let url = self.app_resource_url(app_id, "egress", &[])?;
+        let path = url.path().to_string();
+        self.authorized_json_request(credential, "POST", &path, |authorization| {
+            self.standard_request(self.client.post(url.clone()), authorization)
+                .json(request)
+                .build()
+                .context("build Apps Platform egress add request")
+        })
+    }
+
+    fn remove_egress_host(
+        &self,
+        credential: &ComposeSessionCredential,
+        app_id: &str,
+        request: &EgressRequest<'_>,
+    ) -> Result<Value> {
+        let url = self.app_resource_url(app_id, "egress", &[])?;
+        let path = url.path().to_string();
+        self.authorized_json_request(credential, "DELETE", &path, |authorization| {
+            self.standard_request(self.client.delete(url.clone()), authorization)
+                .json(request)
+                .build()
+                .context("build Apps Platform egress remove request")
         })
     }
 
@@ -2160,6 +2339,155 @@ mod tests {
             requests[0].body,
             json!({"visibility": "restricted", "viewers": []})
         );
+    }
+
+    #[test]
+    fn bb_apps_egress_process_lists_adds_and_removes_hosts() {
+        let credential = "apps-e2e-only.egress.session+credential";
+        let listed = json!({
+            "ok": true,
+            "app_id": "merchant/lookup app",
+            "environment": "staging/west",
+            "owner": "auth0|owner",
+            "workspace_id": "workspace-123",
+            "global_hosts": ["kgoose.sqprod.co"],
+            "app_hosts": [],
+            "max_app_hosts": 20
+        });
+        let added = json!({
+            "ok": true,
+            "app_id": "merchant/lookup app",
+            "environment": "staging/west",
+            "owner": "auth0|owner",
+            "workspace_id": "workspace-123",
+            "host": "api.example.com",
+            "global_hosts": ["kgoose.sqprod.co"],
+            "app_hosts": [{
+                "host": "api.example.com",
+                "added_by": "auth0|publisher",
+                "added_at": "2026-09-04T12:00:00Z"
+            }],
+            "max_app_hosts": 20
+        });
+        let removed = json!({
+            "ok": true,
+            "app_id": "merchant/lookup app",
+            "environment": "production",
+            "owner": "auth0|owner",
+            "workspace_id": "workspace-123",
+            "host": "api.example.com",
+            "global_hosts": ["kgoose.sqprod.co"],
+            "app_hosts": [],
+            "max_app_hosts": 20
+        });
+        let auth_server = ProcessServer::start(vec![
+            process_auth_response(),
+            process_auth_response(),
+            process_auth_response(),
+        ]);
+        let control_plane = ProcessServer::start(vec![
+            ProcessResponse::json(listed.clone()),
+            ProcessResponse::json(added.clone()),
+            ProcessResponse::json(removed.clone()),
+        ]);
+
+        for (args, expected) in [
+            (
+                vec![
+                    "apps",
+                    "egress",
+                    "list",
+                    "merchant/lookup app",
+                    "--environment",
+                    "staging/west",
+                    "--base-url",
+                    APPROVED_TEST_BASE_URL,
+                    "--client-version",
+                    "0.2.0",
+                    "--json",
+                ],
+                listed,
+            ),
+            (
+                vec![
+                    "apps",
+                    "egress",
+                    "add",
+                    "merchant/lookup app",
+                    "--host",
+                    "API.Example.COM.",
+                    "--environment",
+                    "staging/west",
+                    "--base-url",
+                    APPROVED_TEST_BASE_URL,
+                    "--client-version",
+                    "0.2.0",
+                    "--json",
+                ],
+                added,
+            ),
+            (
+                vec![
+                    "apps",
+                    "egress",
+                    "remove",
+                    "merchant/lookup app",
+                    "--host",
+                    "api.example.com",
+                    "--base-url",
+                    APPROVED_TEST_BASE_URL,
+                    "--client-version",
+                    "0.2.0",
+                    "--json",
+                ],
+                removed,
+            ),
+        ] {
+            let mut command = process_command(&auth_server, &control_plane, &args, credential);
+            let output = command.output().expect("run Apps egress process command");
+            assert!(
+                output.status.success(),
+                "stderr was: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(
+                serde_json::from_str::<Value>(&process_stdout(&output))
+                    .expect("parse egress process output"),
+                expected
+            );
+        }
+
+        let auth_requests = auth_server.finish();
+        assert_eq!(auth_requests.len(), 3);
+        for request in &auth_requests {
+            assert_process_auth(request, credential);
+        }
+        let requests = control_plane.finish();
+        assert_eq!(requests.len(), 3);
+        assert_process_control_plane(
+            &requests[0],
+            "GET",
+            "/v1/agent/apps/merchant%2Flookup%20app/egress?environment=staging%2Fwest",
+            credential,
+        );
+        assert_eq!(requests[0].body, Value::Null);
+        assert_process_control_plane(
+            &requests[1],
+            "POST",
+            "/v1/agent/apps/merchant%2Flookup%20app/egress",
+            credential,
+        );
+        assert_eq!(
+            requests[1].body,
+            json!({"host": "API.Example.COM.", "environment": "staging/west"})
+        );
+        assert_process_control_plane(
+            &requests[2],
+            "DELETE",
+            "/v1/agent/apps/merchant%2Flookup%20app/egress",
+            credential,
+        );
+        assert_eq!(requests[2].body, json!({"host": "api.example.com"}));
     }
 
     #[test]
@@ -3512,6 +3840,99 @@ mod tests {
         ];
         for (index, response) in responses.into_iter().enumerate() {
             assert_eq!(response.expect("request access response")["request"], index);
+        }
+
+        server_thread.join().expect("join control-plane server");
+    }
+
+    #[test]
+    fn egress_list_add_and_remove_support_each_environment_shape() {
+        let server = Server::http("127.0.0.1:0").expect("bind control-plane server");
+        let base_url = format!("http://{}", server.server_addr());
+        let server_thread = thread::spawn(move || {
+            for (index, (method, expected_path, expected_body)) in [
+                ("GET", "/v1/agent/apps/app/egress", None),
+                (
+                    "GET",
+                    "/v1/agent/apps/app/egress?environment=staging%2Fwest%3Fcell%3D1",
+                    None,
+                ),
+                (
+                    "POST",
+                    "/v1/agent/apps/app/egress",
+                    Some(json!({"host": "api.example.com"})),
+                ),
+                (
+                    "POST",
+                    "/v1/agent/apps/app/egress",
+                    Some(json!({
+                        "host": "hooks.example.com",
+                        "environment": "staging/west?cell=1"
+                    })),
+                ),
+                (
+                    "DELETE",
+                    "/v1/agent/apps/app/egress",
+                    Some(json!({"host": "api.example.com"})),
+                ),
+                (
+                    "DELETE",
+                    "/v1/agent/apps/app/egress",
+                    Some(json!({
+                        "host": "hooks.example.com",
+                        "environment": "staging/west?cell=1"
+                    })),
+                ),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let mut request = server.recv().expect("receive egress request");
+                assert_eq!(request.method().as_str(), method);
+                assert_eq!(request.url(), expected_path);
+                let mut body = String::new();
+                request
+                    .as_reader()
+                    .read_to_string(&mut body)
+                    .expect("read egress request body");
+                match expected_body {
+                    Some(expected_body) => assert_eq!(
+                        serde_json::from_str::<Value>(&body).expect("parse egress request body"),
+                        expected_body
+                    ),
+                    None => assert!(body.is_empty(), "GET egress body was: {body}"),
+                }
+                request
+                    .respond(
+                        Response::from_string(format!(r#"{{"request":{index}}}"#)).with_header(
+                            Header::from_bytes("Content-Type", "application/json")
+                                .expect("build content type"),
+                        ),
+                    )
+                    .expect("respond to egress request");
+            }
+        });
+        let client = test_control_plane_client(&base_url, Duration::from_secs(2));
+        let credential = test_credential("egress_environment_session_credential_123456");
+        let default_host = EgressRequest {
+            host: "api.example.com",
+            environment: None,
+        };
+        let explicit_host = EgressRequest {
+            host: "hooks.example.com",
+            environment: Some("staging/west?cell=1"),
+        };
+
+        let responses = [
+            client.list_egress(&credential, "app", None),
+            client.list_egress(&credential, "app", Some("staging/west?cell=1")),
+            client.add_egress_host(&credential, "app", &default_host),
+            client.add_egress_host(&credential, "app", &explicit_host),
+            client.remove_egress_host(&credential, "app", &default_host),
+            client.remove_egress_host(&credential, "app", &explicit_host),
+        ];
+        for (index, response) in responses.into_iter().enumerate() {
+            assert_eq!(response.expect("request egress response")["request"], index);
         }
 
         server_thread.join().expect("join control-plane server");
