@@ -1045,7 +1045,7 @@ impl RealtimeResponseCoordinator {
         mut message: RealtimeExpertMessage,
     ) -> Result<RealtimeCoordinatorResult, String> {
         message.message = require_non_empty(&message.message, "Expert message")?;
-        let item = expert_message_item(&message);
+        let item = realtime_expert_message_item(&message);
         if matches!(message.mode, RealtimeExpertMessageMode::Context) {
             return Ok(RealtimeCoordinatorResult {
                 status: RealtimeRequestStatus::Sent,
@@ -1053,7 +1053,7 @@ impl RealtimeResponseCoordinator {
             });
         }
         if self.active_response.is_none() {
-            let response = expert_say_response(&message.message)?;
+            let response = realtime_expert_say_response(&message.message, None)?;
             self.active_response = Some(awaiting_created_response(Some(message)));
             return Ok(RealtimeCoordinatorResult {
                 status: RealtimeRequestStatus::Sent,
@@ -1237,7 +1237,7 @@ impl RealtimeResponseCoordinator {
         };
         let event = match pending {
             PendingResponse::Default => json!({ "type": "response.create" }),
-            PendingResponse::Say(message) => expert_say_response(&message.message)?,
+            PendingResponse::Say(message) => realtime_expert_say_response(&message.message, None)?,
         };
         let pending = self.pending_responses.remove(0);
         self.active_response = Some(awaiting_created_response(match pending {
@@ -1491,10 +1491,10 @@ fn awaiting_created_response(say: Option<RealtimeExpertMessage>) -> ActiveRespon
     }
 }
 
-fn expert_message_item(message: &RealtimeExpertMessage) -> Value {
+pub fn realtime_expert_message_item(message: &RealtimeExpertMessage) -> Value {
     let text = match message.mode {
         RealtimeExpertMessageMode::Say => format!(
-            "The Expert has decided the following information must be spoken to the user now. Speak it naturally and accurately without adding filler or offering more help:\n{}",
+            "The Expert offers the following information for a response opportunity. Speak it naturally and accurately if a response is useful now; silence remains valid. Do not add filler or offer more help:\n{}",
             message.message
         ),
         RealtimeExpertMessageMode::Context => format!(
@@ -1516,18 +1516,27 @@ fn expert_message_item(message: &RealtimeExpertMessage) -> Value {
     event
 }
 
-fn expert_say_response(message: &str) -> Result<Value, String> {
+pub fn realtime_expert_say_response(
+    message: &str,
+    directive_id: Option<u64>,
+) -> Result<Value, String> {
     let message = require_non_empty(message, "Expert message")?;
-    Ok(json!({
+    let mut response = json!({
         "type": "response.create",
         "response": {
             "instructions": format!(
-                "Speak this Expert message to the user now, preserving its meaning: {message} Be natural, concise, and accurate. Do not call tools."
+                "Consider this Expert message for the user: {message} If a response is useful now, speak naturally, concisely, and accurately while preserving its meaning. Silence is valid. Do not call tools."
             ),
             "tools": [],
             "tool_choice": "none",
         },
-    }))
+    });
+    if let Some(directive_id) = directive_id {
+        response["response"]["metadata"] = json!({
+            "berd_expert_directive_id": directive_id.to_string(),
+        });
+    }
+    Ok(response)
 }
 
 fn require_non_empty(value: &str, field: &str) -> Result<String, String> {
@@ -1603,6 +1612,34 @@ mod tests {
         assert!(instructions.contains("--session-id \"session-a\""));
         assert!(instructions.contains("initial bridge cursor is 42"));
         assert!(instructions.contains("Realtime call is call-a"));
+    }
+
+    #[test]
+    fn expert_say_payload_offers_speech_without_requiring_it() {
+        let message = RealtimeExpertMessage {
+            message: "The build is green.".into(),
+            mode: RealtimeExpertMessageMode::Say,
+            event_id: Some("event-1".into()),
+            resolved_handoff_ids: Vec::new(),
+        };
+        let item = realtime_expert_message_item(&message);
+        let item_text = item
+            .pointer("/item/content/0/text")
+            .unwrap()
+            .as_str()
+            .unwrap();
+        assert!(item_text.contains("response opportunity"));
+        assert!(item_text.contains("silence remains valid"));
+        assert_eq!(item["event_id"], "event-1");
+
+        let response = realtime_expert_say_response(&message.message, Some(41)).unwrap();
+        let instructions = response["response"]["instructions"].as_str().unwrap();
+        assert!(instructions.contains("If a response is useful"));
+        assert!(instructions.contains("Silence is valid"));
+        assert_eq!(
+            response["response"]["metadata"]["berd_expert_directive_id"],
+            "41"
+        );
     }
 
     #[test]

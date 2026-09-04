@@ -9,9 +9,10 @@ use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
 
 use crate::expert_spokesperson::SemanticTurn;
 use crate::openai_realtime_protocol::{
-    realtime_transcript_seed_item, spokesperson_session_update, RealtimeProtocolEvent,
-    RealtimeProtocolReducer, RealtimeSpokespersonSessionOptions, RealtimeTranscriptSeedTurn,
-    RealtimeTranscriptSpeaker,
+    realtime_expert_message_item, realtime_expert_say_response, realtime_transcript_seed_item,
+    spokesperson_session_update, RealtimeExpertMessage, RealtimeExpertMessageMode,
+    RealtimeProtocolEvent, RealtimeProtocolReducer, RealtimeSpokespersonSessionOptions,
+    RealtimeTranscriptSeedTurn, RealtimeTranscriptSpeaker,
 };
 
 const DEFAULT_ENDPOINT: &str = "wss://api.openai.com/v1/realtime";
@@ -524,7 +525,16 @@ async fn run(
                         }
                     }
                     Some(SpokespersonCommand::ExpertContext { text }) => {
-                        send_expert_item(&mut socket, &text, false).await?;
+                        send_json(
+                            &mut socket,
+                            realtime_expert_message_item(&RealtimeExpertMessage {
+                                message: text,
+                                mode: RealtimeExpertMessageMode::Context,
+                                event_id: None,
+                                resolved_handoff_ids: Vec::new(),
+                            }),
+                        )
+                        .await?;
                     }
                     Some(SpokespersonCommand::UpdateSpeed { request_id, speed }) => {
                         if !speed.is_finite() || !(0.25..=1.5).contains(&speed) {
@@ -631,18 +641,21 @@ async fn run(
                         });
                     }
                     Some(SpokespersonCommand::ExpertSay { directive_id, text }) => {
-                        send_expert_item(&mut socket, &text, true).await?;
-                        send_json(&mut socket, serde_json::json!({
-                            "type": "response.create",
-                            "response": {
-                                "instructions": format!("Speak this Expert message naturally and accurately without adding filler: {text}"),
-                                "metadata": {
-                                    "berd_expert_directive_id": directive_id.to_string()
-                                },
-                                "tools": [],
-                                "tool_choice": "none"
-                            }
-                        })).await?;
+                        send_json(
+                            &mut socket,
+                            realtime_expert_message_item(&RealtimeExpertMessage {
+                                message: text.clone(),
+                                mode: RealtimeExpertMessageMode::Say,
+                                event_id: None,
+                                resolved_handoff_ids: Vec::new(),
+                            }),
+                        )
+                        .await?;
+                        send_json(
+                            &mut socket,
+                            realtime_expert_say_response(&text, Some(directive_id))?,
+                        )
+                        .await?;
                     }
                     Some(SpokespersonCommand::Shutdown) | None => {
                         let _ = socket.close(None).await;
@@ -1008,31 +1021,6 @@ async fn run(
             }
         }
     }
-}
-
-async fn send_expert_item<S>(
-    socket: &mut tokio_tungstenite::WebSocketStream<S>,
-    text: &str,
-    say: bool,
-) -> Result<(), String>
-where
-    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
-{
-    let prefix = if say {
-        "Expert message to speak now"
-    } else {
-        "Private Expert context; do not respond now"
-    };
-    send_json(
-        socket,
-        serde_json::json!({
-            "type": "conversation.item.create",
-            "item": { "type": "message", "role": "system", "content": [{
-                "type": "input_text", "text": format!("{prefix}:\n{text}")
-            }] }
-        }),
-    )
-    .await
 }
 
 async fn send_next_seed_item<S>(
@@ -1783,7 +1771,7 @@ mod tests {
                 .unwrap()
                 .as_str()
                 .unwrap()
-                .contains("speak now"));
+                .contains("response opportunity"));
             let response_create = receive_json(&mut socket).await;
             assert_eq!(response_create["type"], "response.create");
             assert_eq!(
