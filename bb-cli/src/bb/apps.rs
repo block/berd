@@ -334,6 +334,85 @@ pub fn command() -> Command {
                         .help("Log lines to collect per container (1-1000; control-plane default: 200)"),
                 ),
         ))
+        .subcommand(
+            Command::new("access")
+                .about("Read or update an app's viewer access policy")
+                .long_about(
+                    "Read or update an Apps Platform app's visibility and explicit viewer list. \
+                     Approved publishers may read access settings, while only the original owner \
+                     may update them.",
+                )
+                .subcommand_required(true)
+                .arg_required_else_help(true)
+                .disable_help_subcommand(true)
+                .subcommand(control_plane_args(
+                    Command::new("get")
+                        .about("Get an app's current visibility and viewer access")
+                        .arg(
+                            Arg::new("app-id")
+                                .value_name("APP_ID")
+                                .required(true)
+                                .help("App identifier returned by `bb apps list` or `bb apps create`"),
+                        )
+                        .arg(
+                            Arg::new("environment")
+                                .long("environment")
+                                .value_name("ENVIRONMENT")
+                                .help("Optional Compose environment override"),
+                        ),
+                ))
+                .subcommand(control_plane_args(
+                    Command::new("set")
+                        .about("Replace an app's visibility and explicit viewer list")
+                        .long_about(
+                            "Replace an app's complete access policy. For restricted visibility, \
+                             repeat --viewer for each explicit viewer, or pass --clear-viewers to \
+                             explicitly clear the list. The owner and approved publishers remain \
+                             effective viewers. Only the original owner may update access. Ask each \
+                             intended viewer to copy the exact caller value from `bb apps list --json`.",
+                        )
+                        .arg(
+                            Arg::new("app-id")
+                                .value_name("APP_ID")
+                                .required(true)
+                                .help("App identifier returned by `bb apps list` or `bb apps create`"),
+                        )
+                        .arg(
+                            Arg::new("visibility")
+                                .long("visibility")
+                                .value_name("VISIBILITY")
+                                .value_parser(["organization", "restricted"])
+                                .required(true)
+                                .help("Who may view the app"),
+                        )
+                        .arg(
+                            Arg::new("viewer")
+                                .long("viewer")
+                                .value_name("IDENTITY")
+                                .action(clap::ArgAction::Append)
+                                .help(
+                                    "Exact case-sensitive Apps Platform user subject (for example, \
+                                     auth0|...); ask the viewer to copy `caller` from `bb apps list \
+                                     --json`; repeat for each viewer",
+                                ),
+                        )
+                        .arg(
+                            Arg::new("clear-viewers")
+                                .long("clear-viewers")
+                                .action(clap::ArgAction::SetTrue)
+                                .conflicts_with("viewer")
+                                .help(
+                                    "Confirm replacing the explicit viewer list with an empty list",
+                                ),
+                        )
+                        .arg(
+                            Arg::new("environment")
+                                .long("environment")
+                                .value_name("ENVIRONMENT")
+                                .help("Optional Compose environment override"),
+                        ),
+                )),
+        )
 }
 
 fn control_plane_args(command: Command) -> Command {
@@ -378,6 +457,7 @@ fn dispatch(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
         Some(("delete", delete_matches)) => run_delete(config, delete_matches),
         Some(("ready", ready_matches)) => run_ready(config, ready_matches),
         Some(("debug", debug_matches)) => run_debug(config, debug_matches),
+        Some(("access", access_matches)) => run_access(config, access_matches),
         _ => anyhow::bail!("expected an apps subcommand"),
     }
 }
@@ -573,6 +653,52 @@ fn run_debug(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     print_json(&response)
 }
 
+fn run_access(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
+    match matches.subcommand() {
+        Some(("get", get_matches)) => run_access_get(config, get_matches),
+        Some(("set", set_matches)) => run_access_set(config, set_matches),
+        _ => anyhow::bail!("expected an access subcommand"),
+    }
+}
+
+fn run_access_get(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
+    let app_id = matches
+        .get_one::<String>("app-id")
+        .context("expected app id")?;
+    let environment = matches.get_one::<String>("environment").map(String::as_str);
+    let (client, credential) = control_plane_context(config, matches)?;
+    let response = client.get_access(&credential, app_id, environment)?;
+    print_json(&response)
+}
+
+fn run_access_set(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
+    let app_id = matches
+        .get_one::<String>("app-id")
+        .context("expected app id")?;
+    let visibility = matches
+        .get_one::<String>("visibility")
+        .context("expected access visibility")?;
+    let viewers: Vec<&str> = matches
+        .get_many::<String>("viewer")
+        .into_iter()
+        .flatten()
+        .map(String::as_str)
+        .collect();
+    if visibility == "restricted" && viewers.is_empty() && !matches.get_flag("clear-viewers") {
+        anyhow::bail!(
+            "restricted visibility requires at least one --viewer or explicit --clear-viewers confirmation"
+        );
+    }
+    let request = AccessRequest {
+        visibility,
+        viewers,
+        environment: matches.get_one::<String>("environment").map(String::as_str),
+    };
+    let (client, credential) = control_plane_context(config, matches)?;
+    let response = client.set_access(&credential, app_id, &request)?;
+    print_json(&response)
+}
+
 fn control_plane_context(
     config: &SkillsConfig,
     matches: &ArgMatches,
@@ -614,6 +740,14 @@ struct RollbackRequest<'a> {
 #[derive(Serialize)]
 struct DeleteAppRequest<'a> {
     environment: &'a str,
+}
+
+#[derive(Serialize)]
+struct AccessRequest<'a> {
+    visibility: &'a str,
+    viewers: Vec<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    environment: Option<&'a str>,
 }
 
 #[derive(Default)]
@@ -1010,6 +1144,34 @@ impl ControlPlaneClient {
             query.push(("tail_lines", tail_lines.to_string()));
         }
         self.get_app_resource(credential, app_id, "debug", &query)
+    }
+
+    fn get_access(
+        &self,
+        credential: &ComposeSessionCredential,
+        app_id: &str,
+        environment: Option<&str>,
+    ) -> Result<Value> {
+        let query = environment
+            .map(|environment| vec![("environment", environment.to_string())])
+            .unwrap_or_default();
+        self.get_app_resource(credential, app_id, "access", &query)
+    }
+
+    fn set_access(
+        &self,
+        credential: &ComposeSessionCredential,
+        app_id: &str,
+        request: &AccessRequest<'_>,
+    ) -> Result<Value> {
+        let url = self.app_resource_url(app_id, "access", &[])?;
+        let path = url.path().to_string();
+        self.authorized_json_request(credential, "PUT", &path, |authorization| {
+            self.standard_request(self.client.put(url.clone()), authorization)
+                .json(request)
+                .build()
+                .context("build Apps Platform access update request")
+        })
     }
 
     fn get_app_resource(
@@ -1804,6 +1966,199 @@ mod tests {
             "GET",
             "/v1/agent/apps/merchant%2Flookup%20app?environment=staging",
             credential,
+        );
+    }
+
+    #[test]
+    fn bb_apps_access_process_gets_and_replaces_the_complete_policy() {
+        let credential = "apps-e2e-only.access.session+credential";
+        let current = json!({
+            "ok": true,
+            "app_id": "merchant/lookup app",
+            "environment": "staging/west",
+            "owner": "auth0|owner",
+            "visibility": "restricted",
+            "viewers": ["auth0|alice"],
+            "effective_viewers": ["auth0|owner", "auth0|publisher", "auth0|alice"]
+        });
+        let updated = json!({
+            "ok": true,
+            "app_id": "merchant/lookup app",
+            "environment": "staging/west",
+            "owner": "auth0|owner",
+            "visibility": "restricted",
+            "viewers": ["auth0|bob", "auth0|carol"],
+            "effective_viewers": ["auth0|owner", "auth0|publisher", "auth0|bob", "auth0|carol"]
+        });
+        let auth_server =
+            ProcessServer::start(vec![process_auth_response(), process_auth_response()]);
+        let control_plane = ProcessServer::start(vec![
+            ProcessResponse::json(current.clone()),
+            ProcessResponse::json(updated.clone()),
+        ]);
+
+        let mut get_command = process_command(
+            &auth_server,
+            &control_plane,
+            &[
+                "apps",
+                "access",
+                "get",
+                "merchant/lookup app",
+                "--environment",
+                "staging/west",
+                "--base-url",
+                APPROVED_TEST_BASE_URL,
+                "--client-version",
+                "0.2.0",
+                "--json",
+            ],
+            credential,
+        );
+        let get_output = get_command
+            .output()
+            .expect("run Apps access get process command");
+        assert!(
+            get_output.status.success(),
+            "stderr was: {}",
+            String::from_utf8_lossy(&get_output.stderr)
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&process_stdout(&get_output))
+                .expect("parse access get process output"),
+            current
+        );
+
+        let mut set_command = process_command(
+            &auth_server,
+            &control_plane,
+            &[
+                "apps",
+                "access",
+                "set",
+                "merchant/lookup app",
+                "--visibility",
+                "restricted",
+                "--viewer",
+                "auth0|bob",
+                "--viewer",
+                "auth0|carol",
+                "--environment",
+                "staging/west",
+                "--base-url",
+                APPROVED_TEST_BASE_URL,
+                "--client-version",
+                "0.2.0",
+                "--json",
+            ],
+            credential,
+        );
+        let set_output = set_command
+            .output()
+            .expect("run Apps access set process command");
+        assert!(
+            set_output.status.success(),
+            "stderr was: {}",
+            String::from_utf8_lossy(&set_output.stderr)
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&process_stdout(&set_output))
+                .expect("parse access set process output"),
+            updated
+        );
+
+        let auth_requests = auth_server.finish();
+        assert_eq!(auth_requests.len(), 2);
+        for request in &auth_requests {
+            assert_process_auth(request, credential);
+        }
+        let requests = control_plane.finish();
+        assert_eq!(requests.len(), 2);
+        assert_process_control_plane(
+            &requests[0],
+            "GET",
+            "/v1/agent/apps/merchant%2Flookup%20app/access?environment=staging%2Fwest",
+            credential,
+        );
+        assert_eq!(requests[0].body, Value::Null);
+        assert_process_control_plane(
+            &requests[1],
+            "PUT",
+            "/v1/agent/apps/merchant%2Flookup%20app/access",
+            credential,
+        );
+        assert_eq!(
+            requests[1].body,
+            json!({
+                "visibility": "restricted",
+                "viewers": ["auth0|bob", "auth0|carol"],
+                "environment": "staging/west"
+            })
+        );
+    }
+
+    #[test]
+    fn bb_apps_access_process_explicitly_clears_restricted_viewers() {
+        let credential = "apps-e2e-only.access.clear.session+credential";
+        let updated = json!({
+            "ok": true,
+            "app_id": "merchant-lookup",
+            "environment": "production",
+            "owner": "auth0|owner",
+            "visibility": "restricted",
+            "viewers": [],
+            "effective_viewers": ["auth0|owner"]
+        });
+        let auth_server = ProcessServer::start(vec![process_auth_response()]);
+        let control_plane = ProcessServer::start(vec![ProcessResponse::json(updated.clone())]);
+        let mut command = process_command(
+            &auth_server,
+            &control_plane,
+            &[
+                "apps",
+                "access",
+                "set",
+                "merchant-lookup",
+                "--visibility",
+                "restricted",
+                "--clear-viewers",
+                "--base-url",
+                APPROVED_TEST_BASE_URL,
+                "--client-version",
+                "0.2.0",
+                "--json",
+            ],
+            credential,
+        );
+
+        let output = command
+            .output()
+            .expect("run Apps access explicit viewer clearing command");
+        assert!(
+            output.status.success(),
+            "stderr was: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&process_stdout(&output))
+                .expect("parse access clearing output"),
+            updated
+        );
+
+        let auth_requests = auth_server.finish();
+        assert_eq!(auth_requests.len(), 1);
+        assert_process_auth(&auth_requests[0], credential);
+        let requests = control_plane.finish();
+        assert_eq!(requests.len(), 1);
+        assert_process_control_plane(
+            &requests[0],
+            "PUT",
+            "/v1/agent/apps/merchant-lookup/access",
+            credential,
+        );
+        assert_eq!(
+            requests[0].body,
+            json!({"visibility": "restricted", "viewers": []})
         );
     }
 
@@ -3079,6 +3434,104 @@ mod tests {
         }
 
         server_thread.join().expect("join control-plane server");
+    }
+
+    #[test]
+    fn access_get_and_set_support_each_environment_and_viewer_shape() {
+        let server = Server::http("127.0.0.1:0").expect("bind control-plane server");
+        let base_url = format!("http://{}", server.server_addr());
+        let server_thread = thread::spawn(move || {
+            for (index, (method, expected_path, expected_body)) in [
+                ("GET", "/v1/agent/apps/app/access", None),
+                (
+                    "GET",
+                    "/v1/agent/apps/app/access?environment=staging%2Fwest%3Fcell%3D1",
+                    None,
+                ),
+                (
+                    "PUT",
+                    "/v1/agent/apps/app/access",
+                    Some(json!({"visibility": "organization", "viewers": []})),
+                ),
+                (
+                    "PUT",
+                    "/v1/agent/apps/app/access",
+                    Some(json!({
+                        "visibility": "restricted",
+                        "viewers": ["auth0|alice", "auth0|bob"],
+                        "environment": "staging/west?cell=1"
+                    })),
+                ),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let mut request = server.recv().expect("receive access request");
+                assert_eq!(request.method().as_str(), method);
+                assert_eq!(request.url(), expected_path);
+                let mut body = String::new();
+                request
+                    .as_reader()
+                    .read_to_string(&mut body)
+                    .expect("read access request body");
+                match expected_body {
+                    Some(expected_body) => assert_eq!(
+                        serde_json::from_str::<Value>(&body).expect("parse access request body"),
+                        expected_body
+                    ),
+                    None => assert!(body.is_empty(), "GET access body was: {body}"),
+                }
+                request
+                    .respond(
+                        Response::from_string(format!(r#"{{"request":{index}}}"#)).with_header(
+                            Header::from_bytes("Content-Type", "application/json")
+                                .expect("build content type"),
+                        ),
+                    )
+                    .expect("respond to access request");
+            }
+        });
+        let client = test_control_plane_client(&base_url, Duration::from_secs(2));
+        let credential = test_credential("access_environment_session_credential_123456");
+
+        let organization = AccessRequest {
+            visibility: "organization",
+            viewers: vec![],
+            environment: None,
+        };
+        let restricted = AccessRequest {
+            visibility: "restricted",
+            viewers: vec!["auth0|alice", "auth0|bob"],
+            environment: Some("staging/west?cell=1"),
+        };
+        let responses = [
+            client.get_access(&credential, "app", None),
+            client.get_access(&credential, "app", Some("staging/west?cell=1")),
+            client.set_access(&credential, "app", &organization),
+            client.set_access(&credential, "app", &restricted),
+        ];
+        for (index, response) in responses.into_iter().enumerate() {
+            assert_eq!(response.expect("request access response")["request"], index);
+        }
+
+        server_thread.join().expect("join control-plane server");
+    }
+
+    #[test]
+    fn access_set_rejects_unknown_visibility_before_auth_or_network() {
+        let error = command()
+            .try_get_matches_from([
+                "apps",
+                "access",
+                "set",
+                "app",
+                "--visibility",
+                "public",
+                "--base-url",
+                APPROVED_TEST_BASE_URL,
+            ])
+            .expect_err("reject unknown access visibility");
+        assert_eq!(error.kind(), clap::error::ErrorKind::InvalidValue);
     }
 
     #[test]
