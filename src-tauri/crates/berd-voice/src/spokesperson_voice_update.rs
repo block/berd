@@ -17,6 +17,13 @@ pub enum VoiceUpdatePhase {
     InputBarrier,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum VoiceUpdatePurpose {
+    Settings,
+    Renewal,
+    ExpiryRecovery { cause: String },
+}
+
 pub struct VoiceUpdateTransaction {
     pub id: u64,
     pub base_revision: u64,
@@ -27,6 +34,7 @@ pub struct VoiceUpdateTransaction {
     phase: VoiceUpdatePhase,
     held_input: VecDeque<Box<VoiceInputFrame>>,
     ready_deadline: Instant,
+    purpose: VoiceUpdatePurpose,
 }
 
 pub struct VoiceUpdateRequest {
@@ -42,12 +50,14 @@ pub struct ActivatedVoiceUpdate {
     pub runtime: OpenAiSpokespersonRuntime,
     pub events: Receiver<SpokespersonEvent>,
     pub held_input: VecDeque<Box<VoiceInputFrame>>,
+    pub purpose: VoiceUpdatePurpose,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum VoiceUpdateAction {
     None,
     BeginInputBarrier,
+    Activate,
     Reject(String),
 }
 
@@ -65,6 +75,24 @@ impl VoiceUpdateTransaction {
         quiescent: bool,
         runtime_config: &OpenAiSpokespersonConfig,
         semantic_transcript: Vec<SemanticTurn>,
+    ) -> Result<Self, String> {
+        Self::start_with_purpose(
+            request,
+            current_revision,
+            quiescent,
+            runtime_config,
+            semantic_transcript,
+            VoiceUpdatePurpose::Settings,
+        )
+    }
+
+    pub fn start_with_purpose(
+        request: VoiceUpdateRequest,
+        current_revision: u64,
+        quiescent: bool,
+        runtime_config: &OpenAiSpokespersonConfig,
+        semantic_transcript: Vec<SemanticTurn>,
+        purpose: VoiceUpdatePurpose,
     ) -> Result<Self, String> {
         if current_revision != request.base_revision {
             return Err(format!(
@@ -110,11 +138,8 @@ impl VoiceUpdateTransaction {
             phase: VoiceUpdatePhase::Building,
             held_input: VecDeque::new(),
             ready_deadline: Instant::now() + READY_TIMEOUT,
+            purpose,
         })
-    }
-
-    pub fn phase(&self) -> VoiceUpdatePhase {
-        self.phase
     }
 
     pub fn next_action(&self, now: Instant, safe: bool) -> VoiceUpdateAction {
@@ -131,7 +156,13 @@ impl VoiceUpdateTransaction {
         match self.events.try_recv() {
             Ok(SpokespersonEvent::Ready) if self.phase == VoiceUpdatePhase::Building => {
                 match self.events.try_recv() {
-                    Err(TryRecvError::Empty) => VoiceUpdateAction::BeginInputBarrier,
+                    Err(TryRecvError::Empty) => {
+                        if matches!(self.purpose, VoiceUpdatePurpose::ExpiryRecovery { .. }) {
+                            VoiceUpdateAction::Activate
+                        } else {
+                            VoiceUpdateAction::BeginInputBarrier
+                        }
+                    }
                     Ok(SpokespersonEvent::Failed(message)) => VoiceUpdateAction::Reject(message),
                     Ok(SpokespersonEvent::Closed) | Err(TryRecvError::Disconnected) => {
                         VoiceUpdateAction::Reject(
@@ -198,6 +229,27 @@ impl VoiceUpdateTransaction {
         }
     }
 
+    pub fn should_hold_input(&self) -> bool {
+        self.phase == VoiceUpdatePhase::InputBarrier
+            || matches!(self.purpose, VoiceUpdatePurpose::ExpiryRecovery { .. })
+    }
+
+    pub fn purpose(&self) -> &VoiceUpdatePurpose {
+        &self.purpose
+    }
+
+    pub fn recover_from_expiry(&mut self, cause: String) -> Result<(), String> {
+        if self.phase != VoiceUpdatePhase::Building {
+            return Err(cause);
+        }
+        if matches!(self.purpose, VoiceUpdatePurpose::Renewal) {
+            self.purpose = VoiceUpdatePurpose::ExpiryRecovery { cause };
+            Ok(())
+        } else {
+            Err(cause)
+        }
+    }
+
     pub fn abort(mut self, old: &OpenAiSpokespersonRuntime) -> Result<u64, String> {
         if self.phase == VoiceUpdatePhase::InputBarrier {
             old.abort_input_cutover()?;
@@ -220,6 +272,7 @@ impl VoiceUpdateTransaction {
             runtime: self.runtime.take().expect("ready candidate runtime exists"),
             events: self.events,
             held_input: self.held_input,
+            purpose: self.purpose,
         }
     }
 

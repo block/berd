@@ -7,6 +7,7 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use futures_util::StreamExt;
 use serde_json::{json, Value};
 use tokio::net::TcpListener;
@@ -25,14 +26,33 @@ impl Drop for ChildGuard {
 
 struct ExpertSpokespersonTestSession {
     child: ChildGuard,
-    stdin: Option<ChildStdin>,
+    stdin: Option<Arc<Mutex<ChildStdin>>>,
     output: mpsc::Receiver<Value>,
-    _audio_host: UnixStream,
+    audio_host: Option<std::thread::JoinHandle<()>>,
 }
 
 impl ExpertSpokespersonTestSession {
     fn start(endpoint: String) -> Self {
+        Self::start_with_renew_after(endpoint, None)
+    }
+
+    fn start_with_renew_after(endpoint: String, renew_after_ms: Option<u64>) -> Self {
+        Self::start_with_options(endpoint, renew_after_ms, None, None)
+    }
+
+    fn start_with_options(
+        endpoint: String,
+        renew_after_ms: Option<u64>,
+        played_frame_limit: Option<u64>,
+        played_ready: Option<mpsc::SyncSender<()>>,
+    ) -> Self {
         let (mut command, _pcm, audio_host) = session_command();
+        if let Some(renew_after_ms) = renew_after_ms {
+            command.env(
+                "BERD_VOICE_REALTIME_RENEW_AFTER_MS",
+                renew_after_ms.to_string(),
+            );
+        }
         let mut child = ChildGuard(Some(
             command
                 .args(["--mode", "expert-spokesperson", "--tts-backend", "openai"])
@@ -47,13 +67,19 @@ impl ExpertSpokespersonTestSession {
                 .unwrap(),
         ));
         let process = child.0.as_mut().unwrap();
-        let stdin = process.stdin.take().unwrap();
+        let stdin = Arc::new(Mutex::new(process.stdin.take().unwrap()));
         let output = spawn_session_message_reader(process.stdout.take().unwrap());
+        let audio_host = spawn_audio_host_with_played_limit(
+            audio_host,
+            Arc::clone(&stdin),
+            played_frame_limit,
+            played_ready,
+        );
         let mut session = Self {
             child,
             stdin: Some(stdin),
             output,
-            _audio_host: audio_host,
+            audio_host: Some(audio_host),
         };
         session.send(json!({
             "type":"hello","id":1,"input_during_tts":"allow_barge_in"
@@ -63,27 +89,47 @@ impl ExpertSpokespersonTestSession {
     }
 
     fn send(&mut self, message: Value) {
-        let stdin = self.stdin.as_mut().expect("session input remains open");
-        write_session_json(stdin, &message);
+        let mut stdin = self
+            .stdin
+            .as_ref()
+            .expect("session input remains open")
+            .lock()
+            .unwrap();
+        write_session_json(&mut *stdin, &message);
         stdin.flush().unwrap();
     }
 
     fn send_pcm(&mut self, value: f32) {
-        let stdin = self.stdin.as_mut().expect("session input remains open");
-        write_session_pcm(stdin, value);
+        let mut stdin = self
+            .stdin
+            .as_ref()
+            .expect("session input remains open")
+            .lock()
+            .unwrap();
+        write_session_pcm(&mut *stdin, value);
     }
 
     fn flush(&mut self) {
-        self.stdin.as_mut().unwrap().flush().unwrap();
+        self.stdin
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .flush()
+            .unwrap();
     }
 
     fn recv(&self, timeout: Duration) -> Value {
         self.output.recv_timeout(timeout).unwrap()
     }
 
-    fn shutdown(mut self) {
+    fn shutdown(self) {
+        let _ = self.shutdown_and_collect();
+    }
+
+    fn shutdown_and_collect(mut self) -> Vec<Value> {
         self.send(json!({"type":"shutdown"}));
-        self.wait();
+        self.wait()
     }
 
     fn wait(mut self) -> Vec<Value> {
@@ -91,6 +137,7 @@ impl ExpertSpokespersonTestSession {
         let status = self.child.0.as_mut().unwrap().wait().unwrap();
         self.child.0 = None;
         assert!(status.success());
+        self.audio_host.take().unwrap().join().unwrap();
         self.output.iter().collect()
     }
 }
@@ -195,8 +242,17 @@ fn session_command() -> (Command, File, UnixStream) {
 }
 
 fn spawn_audio_host(
+    reader: UnixStream,
+    stdin: Arc<Mutex<std::process::ChildStdin>>,
+) -> std::thread::JoinHandle<()> {
+    spawn_audio_host_with_played_limit(reader, stdin, None, None)
+}
+
+fn spawn_audio_host_with_played_limit(
     mut reader: UnixStream,
     stdin: Arc<Mutex<std::process::ChildStdin>>,
+    played_frame_limit: Option<u64>,
+    mut played_ready: Option<mpsc::SyncSender<()>>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let mut current = None::<(u64, u64, u64)>;
@@ -229,6 +285,7 @@ fn spawn_audio_host(
                     assert_eq!(sequence, state.1 + 1);
                     state.1 = sequence;
                     state.2 += frames;
+                    let reached_limit = played_frame_limit.is_some_and(|limit| state.2 >= limit);
                     let mut writer = stdin.lock().unwrap();
                     write_session_json(
                         &mut *writer,
@@ -236,9 +293,14 @@ fn spawn_audio_host(
                     );
                     write_session_json(
                         &mut *writer,
-                        &json!({"type":"audio_played","speech_id":speech_id,"played_frames":state.2}),
+                        &json!({"type":"audio_played","speech_id":speech_id,"played_frames":played_frame_limit.map_or(state.2, |limit| state.2.min(limit))}),
                     );
                     writer.flush().unwrap();
+                    if reached_limit {
+                        if let Some(ready) = played_ready.take() {
+                            let _ = ready.send(());
+                        }
+                    }
                     continue;
                 }
                 3 => {
@@ -256,7 +318,9 @@ fn spawn_audio_host(
                     let played_frames = current
                         .take()
                         .filter(|state| state.0 == speech_id)
-                        .map_or(0, |state| state.2);
+                        .map_or(0, |state| {
+                            played_frame_limit.map_or(state.2, |limit| state.2.min(limit))
+                        });
                     json!({"type":"audio_cancelled","speech_id":speech_id,"played_frames":played_frames})
                 }
                 kind => panic!("unknown audio record kind {kind}"),
@@ -339,6 +403,463 @@ fn framed_hello_reports_input_initialization_failure_before_ready() {
     let message: Value = serde_json::from_str(&line).unwrap();
     assert_eq!(message["type"], "fatal");
     assert!(!message["message"].as_str().unwrap().is_empty());
+}
+
+#[test]
+fn expert_spokesperson_renews_before_provider_expiry_without_changing_settings() {
+    let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
+    let (suspended_tx, suspended_rx) = mpsc::sync_channel(1);
+    let (audio_ready_tx, audio_ready_rx) = mpsc::sync_channel(1);
+    let (release_speech_tx, release_speech_rx) = mpsc::sync_channel(1);
+    let (renewed_tx, renewed_rx) = mpsc::sync_channel(1);
+    let server = std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async move {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                endpoint_tx
+                    .send(format!("ws://{}/", listener.local_addr().unwrap()))
+                    .unwrap();
+                let (old_stream, _) = listener.accept().await.unwrap();
+                let mut old = accept_async(old_stream).await.unwrap();
+                let initial = receive_realtime_json(&mut old).await;
+                acknowledge_realtime_session(&mut old, &initial).await;
+                send_realtime_json(
+                    &mut old,
+                    json!({"type":"input_audio_buffer.speech_started","item_id":"user-1"}),
+                )
+                .await;
+                send_realtime_json(
+                    &mut old,
+                    json!({"type":"input_audio_buffer.speech_stopped","item_id":"user-1"}),
+                )
+                .await;
+                send_realtime_json(
+                    &mut old,
+                    json!({"type":"conversation.item.input_audio_transcription.completed","item_id":"user-1","transcript":"remember this"}),
+                )
+                .await;
+                assert_eq!(receive_realtime_json(&mut old).await["type"], "response.create");
+                send_realtime_json(
+                    &mut old,
+                    json!({"type":"response.created","response":{"id":"response-1"}}),
+                )
+                .await;
+                let audio = BASE64.encode(vec![0_u8; 24_000]);
+                for _ in 0..2 {
+                    send_realtime_json(
+                        &mut old,
+                        json!({"type":"response.output_audio.delta","response_id":"response-1","item_id":"assistant-1","content_index":0,"delta":audio}),
+                    )
+                    .await;
+                }
+                send_realtime_json(
+                    &mut old,
+                    json!({"type":"response.output_audio_transcript.done","response_id":"response-1","transcript":"heard words UNSAID SUFFIX"}),
+                )
+                .await;
+                tokio::task::spawn_blocking(move || release_speech_rx.recv().unwrap()).await.unwrap();
+                send_realtime_json(&mut old, json!({"type":"input_audio_buffer.speech_started","item_id":"user-2"})).await;
+                tokio::task::spawn_blocking(move || suspended_rx.recv().unwrap()).await.unwrap();
+                send_realtime_json(&mut old, json!({"type":"input_audio_buffer.speech_stopped","item_id":"user-2"})).await;
+                send_realtime_json(&mut old, json!({"type":"conversation.item.input_audio_transcription.completed","item_id":"user-2","transcript":"interrupt now"})).await;
+                assert_eq!(receive_realtime_json(&mut old).await["type"], "response.cancel");
+                let truncate = receive_realtime_json(&mut old).await;
+                assert_eq!(truncate["type"], "conversation.item.truncate");
+                send_realtime_json(&mut old, json!({"type":"conversation.item.truncated","item_id":"assistant-1","content_index":0})).await;
+                send_realtime_json(&mut old, json!({"type":"response.done","response":{"id":"response-1","status":"cancelled"}})).await;
+                assert_eq!(receive_realtime_json(&mut old).await["type"], "response.create");
+                send_realtime_json(&mut old, json!({"type":"response.created","response":{"id":"response-2"}})).await;
+                send_realtime_json(&mut old, json!({"type":"response.output_audio_transcript.done","response_id":"response-2","transcript":"after interruption"})).await;
+                send_realtime_json(&mut old, json!({"type":"response.done","response":{"id":"response-2","status":"completed"}})).await;
+
+                let (candidate_stream, _) =
+                    tokio::time::timeout(Duration::from_secs(2), listener.accept())
+                        .await
+                        .expect("renewal candidate should connect before provider expiry")
+                        .unwrap();
+                let mut candidate = accept_async(candidate_stream).await.unwrap();
+                let replacement = receive_realtime_json(&mut candidate).await;
+                assert_eq!(replacement["type"], "session.update");
+                assert_eq!(
+                    replacement["session"]["audio"]["output"]["voice"],
+                    "old-voice"
+                );
+                assert_eq!(replacement["session"]["audio"]["output"]["speed"], 1.0);
+                acknowledge_realtime_session(&mut candidate, &replacement).await;
+                let user_seed = receive_realtime_json(&mut candidate).await;
+                assert_eq!(user_seed["item"]["role"], "user");
+                assert_eq!(user_seed["item"]["content"][0]["text"], "remember this");
+                send_realtime_json(
+                    &mut candidate,
+                    json!({"type":"conversation.item.created","item":{"id":user_seed["item"]["id"]}}),
+                )
+                .await;
+                let spokesperson_seed = receive_realtime_json(&mut candidate).await;
+                assert_eq!(spokesperson_seed["item"]["role"], "assistant");
+                assert_eq!(spokesperson_seed["item"]["content"][0]["text"], "heard words [interrupted]");
+                assert!(!spokesperson_seed["item"]["content"][0]["text"]
+                    .as_str()
+                    .unwrap()
+                    .contains("UNSAID SUFFIX"));
+                send_realtime_json(
+                    &mut candidate,
+                    json!({"type":"conversation.item.created","item":{"id":spokesperson_seed["item"]["id"]}}),
+                )
+                .await;
+                for (role, text) in [("user", "interrupt now"), ("assistant", "after interruption")] {
+                    let seed = receive_realtime_json(&mut candidate).await;
+                    assert_eq!(seed["item"]["role"], role);
+                    assert_eq!(seed["item"]["content"][0]["text"], text);
+                    send_realtime_json(&mut candidate, json!({"type":"conversation.item.created","item":{"id":seed["item"]["id"]}})).await;
+                }
+                let clear = receive_realtime_json(&mut old).await;
+                assert_eq!(clear["type"], "input_audio_buffer.clear");
+                send_realtime_json(&mut old, json!({"type":"input_audio_buffer.cleared"})).await;
+                let _ = old.next().await;
+                renewed_tx.send(()).unwrap();
+                let _ = candidate.next().await;
+            });
+    });
+    let endpoint = endpoint_rx.recv().unwrap();
+    let mut session = ExpertSpokespersonTestSession::start_with_options(
+        endpoint,
+        Some(1_000),
+        Some(12_000),
+        Some(audio_ready_tx),
+    );
+    audio_ready_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    release_speech_tx.send(()).unwrap();
+    let mut messages = Vec::new();
+    loop {
+        let message = session.recv(Duration::from_secs(2));
+        let is_suspend = message["type"] == "audio_suspend";
+        let speech_id = message["speech_id"].as_u64();
+        messages.push(message);
+        if is_suspend {
+            assert!(speech_id.is_some());
+            session.send(json!({"type":"audio_suspended","speech_id":speech_id.unwrap(),"played_frames":12000}));
+            session.send(json!({"type":"query_state","id":99,"after":0}));
+            loop {
+                let barrier = session.recv(Duration::from_secs(2));
+                let done = barrier["type"] == "state" && barrier["id"] == 99;
+                messages.push(barrier);
+                if done {
+                    break;
+                }
+            }
+            suspended_tx.send(()).unwrap();
+            break;
+        }
+    }
+    renewed_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    messages.extend(session.shutdown_and_collect());
+    assert!(messages
+        .iter()
+        .all(|message| message["type"] != "tts_settings_result"));
+    server.join().unwrap();
+}
+
+#[test]
+fn expert_spokesperson_recovers_from_provider_expiry_and_preserves_pcm_once() {
+    let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
+    let (candidate_seen_tx, candidate_seen_rx) = mpsc::sync_channel(1);
+    let (release_candidate_tx, release_candidate_rx) = mpsc::sync_channel(1);
+    let server = std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async move {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                endpoint_tx
+                    .send(format!("ws://{}/", listener.local_addr().unwrap()))
+                    .unwrap();
+                let (old_stream, _) = listener.accept().await.unwrap();
+                let mut old = accept_async(old_stream).await.unwrap();
+                let initial = receive_realtime_json(&mut old).await;
+                acknowledge_realtime_session(&mut old, &initial).await;
+                send_realtime_json(
+                    &mut old,
+                    json!({
+                        "type":"error",
+                        "error":{"message":"Your session hit the maximum duration of 60 minutes."}
+                    }),
+                )
+                .await;
+
+                let (candidate_stream, _) = listener.accept().await.unwrap();
+                let mut candidate = accept_async(candidate_stream).await.unwrap();
+                let replacement = receive_realtime_json(&mut candidate).await;
+                candidate_seen_tx.send(()).unwrap();
+                tokio::task::spawn_blocking(move || release_candidate_rx.recv().unwrap())
+                    .await
+                    .unwrap();
+                acknowledge_realtime_session(&mut candidate, &replacement).await;
+                let pcm = tokio::time::timeout(
+                    Duration::from_secs(2),
+                    receive_realtime_json(&mut candidate),
+                )
+                .await
+                .expect("held PCM should reach the recovered runtime");
+                assert_eq!(pcm["type"], "input_audio_buffer.append");
+                if let Ok(Some(Ok(Message::Text(text)))) =
+                    tokio::time::timeout(Duration::from_millis(100), candidate.next()).await
+                {
+                    let message: Value = serde_json::from_str(&text).unwrap();
+                    assert_ne!(message["type"], "input_audio_buffer.append");
+                }
+                let _ = candidate.next().await;
+            });
+    });
+    let endpoint = endpoint_rx.recv().unwrap();
+    let mut session = ExpertSpokespersonTestSession::start(endpoint);
+    candidate_seen_rx
+        .recv_timeout(Duration::from_secs(2))
+        .unwrap();
+    session.send_pcm(0.25);
+    session.flush();
+    release_candidate_tx.send(()).unwrap();
+    std::thread::sleep(Duration::from_millis(100));
+    session.shutdown();
+    server.join().unwrap();
+}
+
+#[test]
+fn expert_spokesperson_expiry_recovery_failure_reports_the_specific_terminal() {
+    let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
+    let server = std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async move {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                endpoint_tx
+                    .send(format!("ws://{}/", listener.local_addr().unwrap()))
+                    .unwrap();
+                let (old_stream, _) = listener.accept().await.unwrap();
+                let mut old = accept_async(old_stream).await.unwrap();
+                let initial = receive_realtime_json(&mut old).await;
+                acknowledge_realtime_session(&mut old, &initial).await;
+                send_realtime_json(
+                    &mut old,
+                    json!({
+                        "type":"error",
+                        "error":{"message":"Your session hit the maximum duration of 60 minutes."}
+                    }),
+                )
+                .await;
+                let (candidate_stream, _) = listener.accept().await.unwrap();
+                let candidate = accept_async(candidate_stream).await.unwrap();
+                drop(candidate);
+            });
+    });
+    let endpoint = endpoint_rx.recv().unwrap();
+    let session = ExpertSpokespersonTestSession::start(endpoint);
+    let fatal = session.recv(Duration::from_secs(2));
+    assert_eq!(fatal["type"], "fatal");
+    assert_eq!(fatal["message"], "Spokesperson session renewal failed");
+    assert!(session
+        .wait()
+        .iter()
+        .all(|message| message["type"] != "tts_settings_result"));
+    server.join().unwrap();
+}
+
+#[test]
+fn provider_expiry_during_user_voice_change_never_silently_activates_the_candidate() {
+    let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
+    let (recovery_ready_tx, recovery_ready_rx) = mpsc::sync_channel(1);
+    let (pcm_seen_tx, pcm_seen_rx) = mpsc::sync_channel(1);
+    let server = std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async move {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                endpoint_tx
+                    .send(format!("ws://{}/", listener.local_addr().unwrap()))
+                    .unwrap();
+                let (old_stream, _) = listener.accept().await.unwrap();
+                let mut old = accept_async(old_stream).await.unwrap();
+                let initial = receive_realtime_json(&mut old).await;
+                acknowledge_realtime_session(&mut old, &initial).await;
+                let (candidate_stream, _) = listener.accept().await.unwrap();
+                let mut candidate = accept_async(candidate_stream).await.unwrap();
+                let update = receive_realtime_json(&mut candidate).await;
+                assert_eq!(update["session"]["audio"]["output"]["voice"], "new-voice");
+                send_realtime_json(
+                    &mut old,
+                    json!({"type":"error","error":{"code":"session_expired","message":"provider session expired"}}),
+                )
+                .await;
+                let _ = candidate.next().await;
+                let (recovery_stream, _) = listener.accept().await.unwrap();
+                let mut recovery = accept_async(recovery_stream).await.unwrap();
+                let recovery_update = receive_realtime_json(&mut recovery).await;
+                assert_eq!(
+                    recovery_update["session"]["audio"]["output"]["voice"],
+                    "old-voice"
+                );
+                acknowledge_realtime_session(&mut recovery, &recovery_update).await;
+                recovery_ready_tx.send(()).unwrap();
+                let pcm = receive_realtime_json(&mut recovery).await;
+                assert_eq!(pcm["type"], "input_audio_buffer.append");
+                pcm_seen_tx.send(()).unwrap();
+                let _ = recovery.next().await;
+            });
+    });
+    let endpoint = endpoint_rx.recv().unwrap();
+    let mut session = ExpertSpokespersonTestSession::start(endpoint);
+    session.send(json!({
+        "type":"set_tts_settings",
+        "id":2,
+        "expected_revision":1,
+        "settings":{"backend":"openai","model":"test-model","voice":"new-voice","rate":1.0}
+    }));
+    let rejected = session.recv(Duration::from_secs(2));
+    assert_eq!(rejected["type"], "tts_settings_result");
+    assert_eq!(rejected["id"], 2);
+    assert_eq!(rejected["outcome"], "rejected");
+    assert_eq!(rejected["snapshot"]["revision"], 1);
+    assert_eq!(rejected["snapshot"]["voice"], "old-voice");
+    recovery_ready_rx
+        .recv_timeout(Duration::from_secs(2))
+        .unwrap();
+    session.send_pcm(0.25);
+    session.flush();
+    pcm_seen_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    session.send(json!({
+        "type":"set_tts_settings",
+        "id":3,
+        "expected_revision":2,
+        "settings":{"backend":"openai","model":"test-model","voice":"old-voice","rate":1.0}
+    }));
+    let authoritative = session.recv(Duration::from_secs(2));
+    assert_eq!(
+        authoritative["type"], "tts_settings_result",
+        "unexpected post-recovery message: {authoritative}"
+    );
+    assert_eq!(authoritative["id"], 3);
+    assert_eq!(authoritative["outcome"], "rejected");
+    assert_eq!(authoritative["snapshot"]["revision"], 1);
+    assert_eq!(authoritative["snapshot"]["voice"], "old-voice");
+    assert!(session.shutdown_and_collect().iter().all(|message| {
+        message["type"] != "tts_settings_result"
+            || message["id"] != 2
+            || message["outcome"] != "applied"
+    }));
+    server.join().unwrap();
+}
+
+#[test]
+fn unresolved_handoff_at_provider_expiry_fails_without_starting_a_replacement() {
+    let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
+    let server = std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async move {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                endpoint_tx
+                    .send(format!("ws://{}/", listener.local_addr().unwrap()))
+                    .unwrap();
+                let (old_stream, _) = listener.accept().await.unwrap();
+                let mut old = accept_async(old_stream).await.unwrap();
+                let initial = receive_realtime_json(&mut old).await;
+                acknowledge_realtime_session(&mut old, &initial).await;
+                send_realtime_json(
+                    &mut old,
+                    json!({
+                        "type":"response.function_call_arguments.done",
+                        "call_id":"handoff-1",
+                        "name":"handoff",
+                        "arguments":"{\"message\":\"please inspect the repository\"}"
+                    }),
+                )
+                .await;
+                send_realtime_json(
+                    &mut old,
+                    json!({
+                        "type":"error",
+                        "error":{"code":"session_expired","message":"provider session expired"}
+                    }),
+                )
+                .await;
+                assert!(
+                    tokio::time::timeout(Duration::from_millis(300), listener.accept())
+                        .await
+                        .is_err()
+                );
+            });
+    });
+    let endpoint = endpoint_rx.recv().unwrap();
+    let session = ExpertSpokespersonTestSession::start(endpoint);
+    let handoff = session.recv(Duration::from_secs(2));
+    assert_eq!(handoff["type"], "user_final");
+    assert_eq!(handoff["origin"], "handoff");
+    let fatal = session.recv(Duration::from_secs(2));
+    assert_eq!(fatal["type"], "fatal");
+    assert_eq!(
+        fatal["message"],
+        "Spokesperson session expired before it could renew"
+    );
+    assert!(session.wait().is_empty());
+    server.join().unwrap();
+}
+
+#[test]
+fn expiry_recovery_pcm_overflow_is_terminal_instead_of_losing_held_input() {
+    let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
+    let (candidate_seen_tx, candidate_seen_rx) = mpsc::sync_channel(1);
+    let server = std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async move {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                endpoint_tx
+                    .send(format!("ws://{}/", listener.local_addr().unwrap()))
+                    .unwrap();
+                let (old_stream, _) = listener.accept().await.unwrap();
+                let mut old = accept_async(old_stream).await.unwrap();
+                let initial = receive_realtime_json(&mut old).await;
+                acknowledge_realtime_session(&mut old, &initial).await;
+                send_realtime_json(
+                    &mut old,
+                    json!({
+                        "type":"error",
+                        "error":{"code":"session_expired","message":"provider session expired"}
+                    }),
+                )
+                .await;
+                let (candidate_stream, _) = listener.accept().await.unwrap();
+                let mut candidate = accept_async(candidate_stream).await.unwrap();
+                let _ = receive_realtime_json(&mut candidate).await;
+                candidate_seen_tx.send(()).unwrap();
+                let _ = candidate.next().await;
+            });
+    });
+    let endpoint = endpoint_rx.recv().unwrap();
+    let mut session = ExpertSpokespersonTestSession::start(endpoint);
+    candidate_seen_rx
+        .recv_timeout(Duration::from_secs(2))
+        .unwrap();
+    for _ in 0..33 {
+        session.send_pcm(0.25);
+    }
+    session.flush();
+    let fatal = session.recv(Duration::from_secs(2));
+    assert_eq!(fatal["type"], "fatal");
+    assert_eq!(fatal["message"], "Spokesperson session renewal failed");
+    session.wait();
+    server.join().unwrap();
 }
 
 #[test]
