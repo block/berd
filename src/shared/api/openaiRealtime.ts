@@ -26,6 +26,40 @@ export function createOpenAiRealtimeSpokespersonSessionUpdate(
   });
 }
 
+export function createOpenAiRealtimeExpertInstructions(
+  sessionId: string,
+  initialCursor: number,
+  callId: string,
+): Promise<string> {
+  return invoke("create_openai_realtime_expert_instructions", {
+    sessionId,
+    initialCursor,
+    callId,
+  });
+}
+
+export function createOpenAiRealtimeHandoffToolOutput(
+  callId: string,
+  handoffId: string,
+): Promise<Record<string, unknown>> {
+  return invoke("create_openai_realtime_handoff_tool_output", {
+    callId,
+    handoffId,
+  });
+}
+
+export function createOpenAiRealtimeInvalidToolOutput(
+  callId: string,
+  toolName: string,
+  error: string,
+): Promise<Record<string, unknown>> {
+  return invoke("create_openai_realtime_invalid_tool_output", {
+    callId,
+    toolName,
+    error,
+  });
+}
+
 export type OpenAiRealtimeTranscriptSeedTurn =
   | { role: "user"; text: string }
   | { role: "spokesperson"; text: string; interrupted: boolean }

@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   createInvalidToolCallOutput: vi.fn(),
   createPeer: vi.fn(),
   createSession: vi.fn(),
+  createExpertInstructions: vi.fn(),
   createTranscriptSeed: vi.fn(),
   createResponse: true,
   completeExpertTurn: vi.fn(),
@@ -200,6 +201,20 @@ vi.mock("@/shared/api/openaiRealtime", () => ({
   claimVoiceDictationMicrophone: mocks.claimMicrophone,
   completeOpenAiRealtimeExpertTurn: mocks.completeExpertTurn,
   createOpenAiRealtimeVoiceSession: mocks.createSession,
+  createOpenAiRealtimeExpertInstructions: mocks.createExpertInstructions,
+  createOpenAiRealtimeHandoffToolOutput: (callId: string, handoffId: string) =>
+    Promise.resolve(
+      mocks.createHandoffToolOutput(callId, {
+        accepted: true,
+        handoff_id: handoffId,
+      }),
+    ),
+  createOpenAiRealtimeInvalidToolOutput: (
+    callId: string,
+    toolName: string,
+    error: string,
+  ) =>
+    Promise.resolve(mocks.createInvalidToolCallOutput(callId, toolName, error)),
   createOpenAiRealtimeTranscriptSeed: mocks.createTranscriptSeed,
   dismissOpenAiRealtimeHandoffs: mocks.dismissHandoffs,
   enqueueOpenAiRealtimeSpokespersonMessage: mocks.enqueueSpokespersonMessage,
@@ -284,9 +299,6 @@ vi.mock("../lib/realtimeVoicePreference", () => ({
 
 vi.mock("../lib/realtimeEmissaryProtocol", () => ({
   configureRealtimeEmissarySession: vi.fn(),
-  createInvalidToolCallOutput: mocks.createInvalidToolCallOutput,
-  createHandoffToolOutput: mocks.createHandoffToolOutput,
-  REALTIME_EXPERT_INSTRUCTIONS: "Expert instructions",
   sendRealtimeEvents: mocks.sendRealtimeEvents,
 }));
 
@@ -451,6 +463,10 @@ beforeEach(() => {
   });
   mocks.createPeer.mockReturnValue(peer);
   mocks.createSession.mockResolvedValue({ clientSecret: "test-secret" });
+  mocks.createExpertInstructions.mockImplementation(
+    async (sessionId: string) =>
+      `Expert instructions\nberdctl session send-to-spokesperson --session-id ${JSON.stringify(sessionId)} --mode <context|say>`,
+  );
   mocks.createTranscriptSeed.mockResolvedValue([]);
   mocks.listenControls.mockImplementation(async (listener) => {
     realtimeControlListener = listener;

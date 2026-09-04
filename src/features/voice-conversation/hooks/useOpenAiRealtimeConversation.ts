@@ -12,6 +12,9 @@ import { appendSessionSystemPrompt } from "@/shared/api/acpApi";
 import {
   claimVoiceDictationMicrophone,
   completeOpenAiRealtimeExpertTurn,
+  createOpenAiRealtimeExpertInstructions,
+  createOpenAiRealtimeHandoffToolOutput,
+  createOpenAiRealtimeInvalidToolOutput,
   createOpenAiRealtimeVoiceSession,
   createOpenAiRealtimeTranscriptSeed,
   dismissOpenAiRealtimeHandoffs,
@@ -55,10 +58,7 @@ import {
   waitForRealtimeEmissaryBridgeReady,
 } from "../lib/realtimeEmissaryBridge";
 import {
-  createHandoffToolOutput,
-  createInvalidToolCallOutput,
   type MasterMessageMode,
-  REALTIME_EXPERT_INSTRUCTIONS,
   sendRealtimeEvents,
   configureRealtimeEmissarySession,
 } from "../lib/realtimeEmissaryProtocol";
@@ -401,22 +401,6 @@ function waitForDataChannelOpen(channel: RTCDataChannel): Promise<void> {
   });
 }
 
-function masterPrompt(
-  sessionId: string,
-  initialCursor: number,
-  callId: string,
-): string {
-  return `${REALTIME_EXPERT_INSTRUCTIONS}
-
-Your send_to_spokesperson tool is the Berd CLI command below. This Realtime call is ${callId}, and its initial bridge cursor is ${initialCursor}. Always use the newest cursor from any Expert-bound transcript, handoff, reminder, or prior tool result. A stale cursor means a newer event is already queued; wait for its normal delivery rather than bypassing it. Choose --mode context to silently update the Spokesperson's context for a future natural turn. Choose --mode say only when the Spokesperson should speak your message to the user now. A say may resolve several open handoffs by repeating --resolves for each handoff id. Context cannot resolve a handoff. Finishing your turn does not notify or wake the Spokesperson, so send explicitly when needed. Resolve every required handoff before ending your turn; the host may privately remind you if one remains.
-
-berdctl session send-to-spokesperson --session-id ${JSON.stringify(sessionId)} --cursor <cursor> --mode <context|say> [--resolves <handoff-id> ...] --message <message> --json
-
-If a handoff is obsolete, superseded, or already handled, dismiss it explicitly:
-
-berdctl session dismiss-handoffs --session-id ${JSON.stringify(sessionId)} --cursor <cursor> --handoff-id <handoff-id> [--handoff-id <handoff-id> ...] --reason <reason> --json`;
-}
-
 type RuntimeState = ChatInputVoiceConversation["state"];
 interface Snapshot {
   state: RuntimeState;
@@ -538,7 +522,7 @@ class OpenAiRealtimeConversationRuntime {
         await appendSessionSystemPrompt(
           sessionId,
           MASTER_PROMPT_KEY,
-          masterPrompt(
+          await createOpenAiRealtimeExpertInstructions(
             sessionId,
             this.bridgeCallScope.initialCursor,
             this.bridgeCallScope.id,
@@ -647,13 +631,15 @@ class OpenAiRealtimeConversationRuntime {
         createOpenAiRealtimeVoiceSession(preference.model),
         pendingDraft
           ? Promise.resolve()
-          : appendSessionSystemPrompt(
+          : createOpenAiRealtimeExpertInstructions(
               sessionId,
-              MASTER_PROMPT_KEY,
-              masterPrompt(
+              this.bridgeCallScope.initialCursor,
+              this.bridgeCallScope.id,
+            ).then((instructions) =>
+              appendSessionSystemPrompt(
                 sessionId,
-                this.bridgeCallScope.initialCursor,
-                this.bridgeCallScope.id,
+                MASTER_PROMPT_KEY,
+                instructions,
               ),
             ),
       ]).then(([stream, session]) => [stream, session] as const);
@@ -921,10 +907,10 @@ class OpenAiRealtimeConversationRuntime {
                 pendingExpertEvents.push(
                   `[Handoff ${handoffId} from spokesperson; cursor ${exchange.outbound.id}] ${bridgeEvent.message}`,
                 );
-                const toolOutput = createHandoffToolOutput(bridgeEvent.callId, {
-                  accepted: true,
-                  handoff_id: handoffId,
-                });
+                const toolOutput = await createOpenAiRealtimeHandoffToolOutput(
+                  bridgeEvent.callId,
+                  handoffId,
+                );
                 const toolFollowUp = await requestOpenAiRealtimeToolOutput(
                   sessionId,
                   toolOutput,
@@ -949,7 +935,7 @@ class OpenAiRealtimeConversationRuntime {
               } else if (bridgeEvent.type === "tool_call.invalid") {
                 const toolFollowUp = await requestOpenAiRealtimeToolOutput(
                   sessionId,
-                  createInvalidToolCallOutput(
+                  await createOpenAiRealtimeInvalidToolOutput(
                     bridgeEvent.callId,
                     bridgeEvent.toolName,
                     bridgeEvent.error,
