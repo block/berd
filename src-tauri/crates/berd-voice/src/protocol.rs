@@ -93,6 +93,16 @@ pub enum SessionRequest {
 pub struct PendingUtterance {
     pub token: u64,
     pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<UtteranceOrigin>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum UtteranceOrigin {
+    User,
+    Spokesperson,
+    Handoff,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
@@ -174,6 +184,8 @@ pub enum SessionMessage {
     UserFinal {
         token: u64,
         text: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        origin: Option<UtteranceOrigin>,
     },
     /// Announces output initiated by the live Spokesperson rather than by an
     /// Expert `prepare_speak` request. The host accepts the following audio
@@ -347,10 +359,20 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&SessionMessage::UserFinal {
                 token: 6,
-                text: "words".into()
+                text: "words".into(),
+                origin: None,
             })
             .unwrap(),
             r#"{"type":"user_final","token":6,"text":"words"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&SessionMessage::UserFinal {
+                token: 7,
+                text: "[Voice transcript] Spokesperson said: hello".into(),
+                origin: Some(UtteranceOrigin::Spokesperson),
+            })
+            .unwrap(),
+            r#"{"type":"user_final","token":7,"text":"[Voice transcript] Spokesperson said: hello","origin":"spokesperson"}"#
         );
         assert_eq!(
             serde_json::to_string(&SessionMessage::InputSpeaking { active: true }).unwrap(),

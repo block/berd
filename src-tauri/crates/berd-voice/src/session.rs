@@ -193,6 +193,7 @@ fn pending_utterances(messages: Vec<CausalMessage<String>>) -> Vec<PendingUttera
         .map(|message| PendingUtterance {
             token: message.token,
             text: message.payload,
+            origin: None,
         })
         .collect()
 }

@@ -3338,9 +3338,21 @@ fn handle_live_audio_ack(
 fn pending_live_event(
     event: berd_voice::causal_inbox::CausalMessage<LiveSideEvent>,
 ) -> berd_voice::protocol::PendingUtterance {
+    let origin = live_event_origin(&event.payload);
     berd_voice::protocol::PendingUtterance {
         token: event.token,
         text: render_live_event(&event.payload),
+        origin: Some(origin),
+    }
+}
+
+fn live_event_origin(event: &LiveSideEvent) -> berd_voice::protocol::UtteranceOrigin {
+    match event {
+        LiveSideEvent::UserTranscript { .. } => berd_voice::protocol::UtteranceOrigin::User,
+        LiveSideEvent::SpokespersonTranscript { .. } => {
+            berd_voice::protocol::UtteranceOrigin::Spokesperson
+        }
+        LiveSideEvent::Handoff { .. } => berd_voice::protocol::UtteranceOrigin::Handoff,
     }
 }
 
@@ -3376,6 +3388,7 @@ fn emit_live_events(
             &SessionMessage::UserFinal {
                 token: event.token,
                 text: render_live_event(&event.payload),
+                origin: Some(live_event_origin(&event.payload)),
             },
         )?;
         *emitted_token = event.token;
@@ -4909,7 +4922,14 @@ fn store_and_publish_voice_final(
     *next_token = next;
     core.add_final(token, text.clone())?;
     mark_stored();
-    write_message(writer, &SessionMessage::UserFinal { token, text })?;
+    write_message(
+        writer,
+        &SessionMessage::UserFinal {
+            token,
+            text,
+            origin: None,
+        },
+    )?;
     interrupt_active(core, active, writer)
 }
 
@@ -5664,6 +5684,7 @@ mod tests {
         let messages = messages(&output);
         assert_eq!(messages[0]["type"], "user_final");
         assert_eq!(messages[0]["token"], 1);
+        assert_eq!(messages[0]["origin"], "user");
         assert_eq!(messages[1]["type"], "state");
         assert_eq!(messages[1]["confirmed_token"], 1);
     }
