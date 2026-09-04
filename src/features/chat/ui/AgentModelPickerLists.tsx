@@ -835,20 +835,20 @@ export const RecommendedModelList = forwardRef<
                             activeStarAnimation?.phase === "out"
                               ? {
                                   rotate: starred
-                                    ? [0, 0, -360, -360]
-                                    : [0, 0, 360, 360],
+                                    ? [0, 0, -180, -180]
+                                    : [0, 0, 180, 180],
                                   scale: [1, 0.78, 1.18, 0.9],
                                   opacity: [1, 1, 0.7, 0],
                                 }
                               : activeStarAnimation?.phase === "moving"
                                 ? {
-                                    rotate: -360,
+                                    rotate: -180,
                                     scale: 0.9,
                                     opacity: 0,
                                   }
                                 : activeStarAnimation?.phase === "in"
                                   ? {
-                                      rotate: [-360, -180, 0, 0],
+                                      rotate: [-180, -90, 0, 0],
                                       scale: [0.9, 1.18, 0.96, 1],
                                       opacity: [0, 0, 0.7, 1],
                                     }
