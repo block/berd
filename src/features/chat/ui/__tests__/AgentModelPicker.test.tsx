@@ -1924,7 +1924,7 @@ describe("AgentModelPicker starred models", () => {
       "animate-in",
       "fade-in",
       "opacity-100",
-      "duration-75",
+      "duration-150",
     );
     expect(idleStar).not.toHaveClass("transition-opacity");
     await user.unhover(preferredRow as HTMLElement);

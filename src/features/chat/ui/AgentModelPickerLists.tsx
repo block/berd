@@ -564,7 +564,7 @@ export const RecommendedModelList = forwardRef<
                           "shrink-0 opacity-0 focus-visible:opacity-100",
                           (hoveredModelKey === modelKey ||
                             focusedModelKey === modelKey) &&
-                            "animate-in fade-in opacity-100 duration-75",
+                            "animate-in fade-in opacity-100 duration-150",
                         )}
                         aria-label={t(
                           starred ? "toolbar.unstarModel" : "toolbar.starModel",
