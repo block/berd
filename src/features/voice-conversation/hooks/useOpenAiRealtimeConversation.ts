@@ -11,13 +11,17 @@ import { useChatStore } from "@/features/chat/stores/chatStore";
 import { appendSessionSystemPrompt } from "@/shared/api/acpApi";
 import {
   claimVoiceDictationMicrophone,
+  completeOpenAiRealtimeExpertTurn,
   createOpenAiRealtimeVoiceSession,
+  dismissOpenAiRealtimeHandoffs,
   enqueueOpenAiRealtimeSpokespersonMessage,
   getOpenAiRealtimeExpertPipeCursor,
   listenToOpenAiRealtimeVoiceControls,
+  markOpenAiRealtimeHandoffsResolving,
   publishOpenAiRealtimeVoiceActivity,
   publishOpenAiRealtimeVoiceMicrophoneMuted,
   rebindOpenAiRealtimeVoiceControls,
+  registerOpenAiRealtimeHandoff,
   reduceOpenAiRealtimeSpokespersonEvent,
   requestOpenAiRealtimeExpertMessage,
   requestOpenAiRealtimeToolOutput,
@@ -29,6 +33,7 @@ import {
   startOpenAiRealtimeSpokespersonProtocol,
   stopOpenAiRealtimeVoiceControls,
   stopOpenAiRealtimeSpokespersonProtocol,
+  unknownOpenAiRealtimeHandoffIds,
 } from "@/shared/api/openaiRealtime";
 import {
   createSystemNotificationMessage,
@@ -493,10 +498,6 @@ class OpenAiRealtimeConversationRuntime {
   private bridgeMasterTurnCompletion:
     | ((completion: RealtimeMasterTurnCompletion) => void)
     | null = null;
-  private readonly openHandoffs = new Map<
-    string,
-    { message: string; reminderAttempts: number; resolving: boolean }
-  >();
   private activeRun = 0;
   private deliveryQueue = Promise.resolve();
   private deliveryAbortController = new AbortController();
@@ -592,7 +593,6 @@ class OpenAiRealtimeConversationRuntime {
     this.bridgeCallScope = createBridgeCallScope();
     this.failureInProgress = false;
     this.realtimeProtocolQueue = Promise.resolve();
-    this.openHandoffs.clear();
     this.boundOnSend = onSend;
     this.pendingTypedUserMessages = [];
     this.setSnapshot({
@@ -885,13 +885,6 @@ class OpenAiRealtimeConversationRuntime {
             const ownerSessionId = this.snapshot.boundSessionId;
             if (!ownerSessionId || isStale()) return;
             sendRealtimeEvents(transport, reduction.clientEvents);
-            for (const handoffId of reduction.completedHandoffIds) {
-              this.openHandoffs.delete(handoffId);
-            }
-            for (const handoffId of reduction.failedHandoffIds) {
-              const handoff = this.openHandoffs.get(handoffId);
-              if (handoff) handoff.resolving = false;
-            }
             for (const bridgeEvent of reduction.protocolEvents) {
               if (bridgeEvent.type === "transcript.started") {
                 upsertTranscriptMessage(
@@ -966,11 +959,11 @@ class OpenAiRealtimeConversationRuntime {
                   false,
                 );
                 sendRealtimeEvents(transport, toolFollowUp.events);
-                this.openHandoffs.set(handoffId, {
-                  message: exchange.outbound.message,
-                  reminderAttempts: 0,
-                  resolving: false,
-                });
+                await registerOpenAiRealtimeHandoff(
+                  sessionId,
+                  handoffId,
+                  exchange.outbound.message,
+                );
                 useChatStore
                   .getState()
                   .addMessage(
@@ -1051,8 +1044,9 @@ class OpenAiRealtimeConversationRuntime {
             handoffIds: resolvedHandoffIds,
           };
         }
-        const unknownHandoffIds = resolvedHandoffIds.filter(
-          (handoffId) => !this.openHandoffs.has(handoffId),
+        const unknownHandoffIds = await unknownOpenAiRealtimeHandoffIds(
+          sessionId,
+          resolvedHandoffIds,
         );
         if (unknownHandoffIds.length > 0) {
           return {
@@ -1081,10 +1075,10 @@ class OpenAiRealtimeConversationRuntime {
         const { exchange, request } = delivery;
         if (!request) throw new Error("Expert delivery was not prepared.");
         sendRealtimeEvents(transport, request.events);
-        for (const handoffId of resolvedHandoffIds) {
-          const handoff = this.openHandoffs.get(handoffId);
-          if (handoff) handoff.resolving = true;
-        }
+        await markOpenAiRealtimeHandoffsResolving(
+          sessionId,
+          resolvedHandoffIds,
+        );
         useChatStore
           .getState()
           .addMessage(
@@ -1101,8 +1095,9 @@ class OpenAiRealtimeConversationRuntime {
       };
       this.bridgeHandoffDismissal = async (cursor, handoffIds, reason) => {
         const dismissedHandoffIds = [...new Set(handoffIds)];
-        const unknownHandoffIds = dismissedHandoffIds.filter(
-          (handoffId) => !this.openHandoffs.has(handoffId),
+        const unknownHandoffIds = await unknownOpenAiRealtimeHandoffIds(
+          sessionId,
+          dismissedHandoffIds,
         );
         if (unknownHandoffIds.length > 0) {
           return {
@@ -1134,9 +1129,7 @@ class OpenAiRealtimeConversationRuntime {
         const { exchange, request } = delivery;
         if (!request) throw new Error("Handoff dismissal was not prepared.");
         sendRealtimeEvents(transport, request.events);
-        for (const handoffId of dismissedHandoffIds) {
-          this.openHandoffs.delete(handoffId);
-        }
+        await dismissOpenAiRealtimeHandoffs(sessionId, dismissedHandoffIds);
         useChatStore
           .getState()
           .addMessage(
@@ -1157,52 +1150,37 @@ class OpenAiRealtimeConversationRuntime {
       this.bridgeMasterTurnCompletion = ({ reminderHandoffIds }) => {
         const ownerSessionId = this.snapshot.boundSessionId;
         if (!ownerSessionId) return;
-        const retrying = new Set(reminderHandoffIds);
-        const pending = [...this.openHandoffs.entries()].filter(
-          ([handoffId, handoff]) =>
-            !handoff.resolving &&
-            (handoff.reminderAttempts === 0 || retrying.has(handoffId)),
-        );
-        if (pending.length === 0) return;
-        const exhausted = pending.filter(
-          ([, handoff]) =>
-            handoff.reminderAttempts >= MAX_HANDOFF_REMINDER_ATTEMPTS,
-        );
-        if (exhausted.length > 0) {
-          void this.fail(
-            ownerSessionId,
-            new Error(
-              `The Expert left required ${exhausted.map(([handoffId]) => handoffId).join(", ")} unresolved after ${MAX_HANDOFF_REMINDER_ATTEMPTS} reminder attempts.`,
-            ),
-          );
-          return;
-        }
-        const pendingIds = pending.map(([handoffId]) => handoffId);
-        for (const [, handoff] of pending) handoff.reminderAttempts += 1;
-        const requests = pending
-          .map(([handoffId, handoff]) => `- ${handoffId}: ${handoff.message}`)
-          .join("\n");
-        const reminder = `[Private handoff reminder]\nYou ended your turn without resolving the required handoffs below. Resolve them now with one or more send-to-spokesperson --mode say calls that name every answered handoff in --resolves, or dismiss obsolete handoffs explicitly. Berd will retry this reminder up to ${MAX_HANDOFF_REMINDER_ATTEMPTS} times. Do not redo completed work.\n${requests}`;
-        const reminderAttempt = Math.max(
-          ...pending.map(([, handoff]) => handoff.reminderAttempts),
-        );
-        useChatStore
-          .getState()
-          .addMessage(
-            ownerSessionId,
-            createCoordinationDebugMessage(
-              "handoffReminder",
-              `Berd → Expert · Handoff reminder ${reminderAttempt}/${MAX_HANDOFF_REMINDER_ATTEMPTS}`,
-              requests,
-            ),
-          );
         void enqueueProtocolOperation(async () => {
-          await queueExpertEvent(
-            reminder,
-            (cursor) =>
-              `[Private handoff reminder; cursor ${cursor}]${reminder.slice("[Private handoff reminder]".length)}`,
+          const reminder = await completeOpenAiRealtimeExpertTurn(
+            sessionId,
+            reminderHandoffIds,
+            MAX_HANDOFF_REMINDER_ATTEMPTS,
           );
-          wakeExpert(ownerSessionId, "Handoff reminder", true, pendingIds);
+          if (reminder.status === "none") return;
+          if (reminder.status === "exhausted") {
+            throw new Error(reminder.message);
+          }
+          useChatStore
+            .getState()
+            .addMessage(
+              ownerSessionId,
+              createCoordinationDebugMessage(
+                "handoffReminder",
+                `Berd → Expert · Handoff reminder ${reminder.attempt}/${MAX_HANDOFF_REMINDER_ATTEMPTS}`,
+                reminder.requests,
+              ),
+            );
+          await queueExpertEvent(
+            reminder.message,
+            (cursor) =>
+              `[Private handoff reminder; cursor ${cursor}]${reminder.message.slice("[Private handoff reminder]".length)}`,
+          );
+          wakeExpert(
+            ownerSessionId,
+            "Handoff reminder",
+            true,
+            reminder.handoffIds,
+          );
         });
       };
       const bridgeSessionId = this.snapshot.boundSessionId ?? sessionId;
@@ -1301,7 +1279,6 @@ class OpenAiRealtimeConversationRuntime {
     this.bridgeSender = null;
     this.bridgeHandoffDismissal = null;
     this.bridgeMasterTurnCompletion = null;
-    this.openHandoffs.clear();
     this.typedUserMessageSink = null;
     this.pendingTypedUserMessages = [];
     this.flushPendingExpertEvents = null;
@@ -1481,7 +1458,6 @@ class OpenAiRealtimeConversationRuntime {
     this.bridgeSender = null;
     this.bridgeHandoffDismissal = null;
     this.bridgeMasterTurnCompletion = null;
-    this.openHandoffs.clear();
     this.typedUserMessageSink = null;
     this.pendingTypedUserMessages = [];
     this.flushPendingExpertEvents = null;

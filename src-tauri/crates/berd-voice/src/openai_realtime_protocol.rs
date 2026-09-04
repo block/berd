@@ -1133,6 +1133,230 @@ impl RealtimeResponseCoordinator {
     }
 }
 
+/// Complete transport-independent Expert-Spokesperson protocol state for one
+/// OpenAI Realtime session. Native Berd and external adapters should own only
+/// their transport and presentation concerns around this core.
+#[derive(Debug)]
+pub struct RealtimeExpertSpokespersonSession {
+    reducer: RealtimeProtocolReducer,
+    responses: RealtimeResponseCoordinator,
+    pipe: RealtimeMessagePipe,
+    open_handoffs: HashMap<String, RealtimeOpenHandoff>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RealtimeOpenHandoff {
+    message: String,
+    reminder_attempts: u8,
+    resolving: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum RealtimeHandoffReminder {
+    None,
+    Reminder {
+        handoff_ids: Vec<String>,
+        attempt: u8,
+        requests: String,
+        message: String,
+    },
+    Exhausted {
+        handoff_ids: Vec<String>,
+        message: String,
+    },
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RealtimeSessionReduction {
+    pub protocol_events: Vec<RealtimeProtocolEvent>,
+    pub client_events: Vec<Value>,
+    pub completed_handoff_ids: Vec<String>,
+    pub failed_handoff_ids: Vec<String>,
+}
+
+impl RealtimeExpertSpokespersonSession {
+    pub fn new(initial_cursor: u64) -> Self {
+        Self {
+            reducer: RealtimeProtocolReducer::default(),
+            responses: RealtimeResponseCoordinator::default(),
+            pipe: RealtimeMessagePipe::new(initial_cursor),
+            open_handoffs: HashMap::new(),
+        }
+    }
+
+    pub fn handle_provider_event(
+        &mut self,
+        event: &Value,
+    ) -> Result<RealtimeSessionReduction, String> {
+        let response_update = self.responses.handle(event)?;
+        for handoff_id in &response_update.completed_handoff_ids {
+            self.open_handoffs.remove(handoff_id);
+        }
+        for handoff_id in &response_update.failed_handoff_ids {
+            if let Some(handoff) = self.open_handoffs.get_mut(handoff_id) {
+                handoff.resolving = false;
+            }
+        }
+        Ok(RealtimeSessionReduction {
+            protocol_events: self.reducer.handle(event)?,
+            client_events: response_update.events,
+            completed_handoff_ids: response_update.completed_handoff_ids,
+            failed_handoff_ids: response_update.failed_handoff_ids,
+        })
+    }
+
+    pub fn enqueue_spokesperson_message(
+        &mut self,
+        message: &str,
+    ) -> Result<RealtimePipeExchange, String> {
+        let cursor = self.pipe.delivery_cursor(RealtimePipePeer::Spokesperson);
+        self.pipe
+            .send(RealtimePipePeer::Spokesperson, cursor, message)
+    }
+
+    pub fn send_expert_pipe_message(
+        &mut self,
+        cursor: u64,
+        message: &str,
+    ) -> Result<RealtimePipeExchange, String> {
+        self.pipe.send(RealtimePipePeer::Expert, cursor, message)
+    }
+
+    pub fn expert_pipe_cursor(&self) -> u64 {
+        self.pipe.cursor(RealtimePipePeer::Expert)
+    }
+
+    pub fn request_expert_message(
+        &mut self,
+        message: RealtimeExpertMessage,
+    ) -> Result<RealtimeCoordinatorResult, String> {
+        self.responses.request_expert_message(message)
+    }
+
+    pub fn request_tool_output(
+        &mut self,
+        event: Value,
+        request_response: bool,
+    ) -> RealtimeCoordinatorResult {
+        self.responses.request_tool_output(event, request_response)
+    }
+
+    pub fn request_typed_user_message(
+        &mut self,
+        text: &str,
+    ) -> Result<RealtimeCoordinatorResult, String> {
+        self.responses.request_typed_user_message(text)
+    }
+
+    pub fn register_handoff(&mut self, handoff_id: &str, message: &str) -> Result<(), String> {
+        let handoff_id = require_non_empty(handoff_id, "handoff id")?;
+        let message = require_non_empty(message, "handoff message")?;
+        self.open_handoffs.insert(
+            handoff_id,
+            RealtimeOpenHandoff {
+                message,
+                reminder_attempts: 0,
+                resolving: false,
+            },
+        );
+        Ok(())
+    }
+
+    pub fn unknown_handoff_ids(&self, handoff_ids: &[String]) -> Vec<String> {
+        handoff_ids
+            .iter()
+            .filter(|handoff_id| !self.open_handoffs.contains_key(*handoff_id))
+            .cloned()
+            .collect()
+    }
+
+    pub fn mark_handoffs_resolving(&mut self, handoff_ids: &[String]) -> Result<(), String> {
+        let unknown = self.unknown_handoff_ids(handoff_ids);
+        if !unknown.is_empty() {
+            return Err(format!("unknown handoff: {}", unknown.join(", ")));
+        }
+        for handoff_id in handoff_ids {
+            self.open_handoffs
+                .get_mut(handoff_id)
+                .expect("handoff was validated")
+                .resolving = true;
+        }
+        Ok(())
+    }
+
+    pub fn dismiss_handoffs(&mut self, handoff_ids: &[String]) -> Result<(), String> {
+        let unknown = self.unknown_handoff_ids(handoff_ids);
+        if !unknown.is_empty() {
+            return Err(format!("unknown handoff: {}", unknown.join(", ")));
+        }
+        for handoff_id in handoff_ids {
+            self.open_handoffs.remove(handoff_id);
+        }
+        Ok(())
+    }
+
+    pub fn complete_expert_turn(
+        &mut self,
+        retrying_handoff_ids: &[String],
+        max_attempts: u8,
+    ) -> RealtimeHandoffReminder {
+        let retrying = retrying_handoff_ids.iter().collect::<HashSet<_>>();
+        let mut pending = self
+            .open_handoffs
+            .iter_mut()
+            .filter(|(handoff_id, handoff)| {
+                !handoff.resolving
+                    && (handoff.reminder_attempts == 0 || retrying.contains(handoff_id))
+            })
+            .collect::<Vec<_>>();
+        pending.sort_by(|(left, _), (right, _)| left.cmp(right));
+        if pending.is_empty() {
+            return RealtimeHandoffReminder::None;
+        }
+        let exhausted = pending
+            .iter()
+            .filter(|(_, handoff)| handoff.reminder_attempts >= max_attempts)
+            .map(|(handoff_id, _)| (*handoff_id).clone())
+            .collect::<Vec<_>>();
+        if !exhausted.is_empty() {
+            return RealtimeHandoffReminder::Exhausted {
+                message: format!(
+                    "The Expert left required {} unresolved after {max_attempts} reminder attempts.",
+                    exhausted.join(", ")
+                ),
+                handoff_ids: exhausted,
+            };
+        }
+        let requests = pending
+            .iter()
+            .map(|(handoff_id, handoff)| format!("- {handoff_id}: {}", handoff.message))
+            .collect::<Vec<_>>()
+            .join("\n");
+        for (_, handoff) in &mut pending {
+            handoff.reminder_attempts = handoff.reminder_attempts.saturating_add(1);
+        }
+        let attempt = pending
+            .iter()
+            .map(|(_, handoff)| handoff.reminder_attempts)
+            .max()
+            .unwrap_or(1);
+        let handoff_ids = pending
+            .iter()
+            .map(|(handoff_id, _)| (*handoff_id).clone())
+            .collect::<Vec<_>>();
+        RealtimeHandoffReminder::Reminder {
+            message: format!(
+                "[Private handoff reminder]\nYou ended your turn without resolving the required handoffs below. Resolve them now with one or more send-to-spokesperson --mode say calls that name every answered handoff in --resolves, or dismiss obsolete handoffs explicitly. Berd will retry this reminder up to {max_attempts} times. Do not redo completed work.\n{requests}"
+            ),
+            handoff_ids,
+            attempt,
+            requests,
+        }
+    }
+}
+
 fn awaiting_created_response(say: Option<RealtimeExpertMessage>) -> ActiveResponse {
     ActiveResponse {
         id: None,
@@ -1706,6 +1930,86 @@ mod tests {
                 "First complete part. Second".into(),
                 RealtimeTranscriptEvidence::HostPlayedFrames,
             )
+        );
+    }
+
+    #[test]
+    fn shared_session_owns_handoff_reminders_and_exhaustion() {
+        let mut session = RealtimeExpertSpokespersonSession::new(0);
+        session
+            .register_handoff("handoff-1", "Inspect the project state")
+            .unwrap();
+
+        let first = session.complete_expert_turn(&[], 3);
+        assert!(matches!(
+            first,
+            RealtimeHandoffReminder::Reminder {
+                attempt: 1,
+                ref handoff_ids,
+                ref requests,
+                ..
+            } if handoff_ids == &["handoff-1"] && requests.contains("Inspect the project state")
+        ));
+        assert!(matches!(
+            session.complete_expert_turn(&["handoff-1".into()], 3),
+            RealtimeHandoffReminder::Reminder { attempt: 2, .. }
+        ));
+        assert!(matches!(
+            session.complete_expert_turn(&["handoff-1".into()], 3),
+            RealtimeHandoffReminder::Reminder { attempt: 3, .. }
+        ));
+        assert!(matches!(
+            session.complete_expert_turn(&["handoff-1".into()], 3),
+            RealtimeHandoffReminder::Exhausted { ref handoff_ids, .. }
+                if handoff_ids == &["handoff-1"]
+        ));
+    }
+
+    #[test]
+    fn resolving_handoff_is_silent_until_playback_succeeds_or_fails() {
+        let mut session = RealtimeExpertSpokespersonSession::new(0);
+        session.register_handoff("handoff-1", "Question").unwrap();
+        session
+            .mark_handoffs_resolving(&["handoff-1".into()])
+            .unwrap();
+        assert_eq!(
+            session.complete_expert_turn(&[], 3),
+            RealtimeHandoffReminder::None
+        );
+
+        session
+            .request_expert_message(RealtimeExpertMessage {
+                message: "Answer".into(),
+                mode: RealtimeExpertMessageMode::Say,
+                event_id: None,
+                resolved_handoff_ids: vec!["handoff-1".into()],
+            })
+            .unwrap();
+        session
+            .handle_provider_event(
+                &json!({ "type": "response.created", "response": { "id": "response-1" } }),
+            )
+            .unwrap();
+        session
+            .handle_provider_event(
+                &json!({ "type": "output_audio_buffer.started", "response_id": "response-1" }),
+            )
+            .unwrap();
+        session
+            .handle_provider_event(&json!({
+                "type": "response.done",
+                "response": { "id": "response-1", "status": "completed" },
+            }))
+            .unwrap();
+        let reduction = session
+            .handle_provider_event(
+                &json!({ "type": "output_audio_buffer.stopped", "response_id": "response-1" }),
+            )
+            .unwrap();
+        assert_eq!(reduction.completed_handoff_ids, ["handoff-1"]);
+        assert_eq!(
+            session.unknown_handoff_ids(&["handoff-1".into()]),
+            ["handoff-1"]
         );
     }
 }
