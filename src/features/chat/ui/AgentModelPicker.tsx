@@ -80,8 +80,6 @@ type PopoverContentAlign = NonNullable<
   ComponentProps<typeof PopoverContent>["align"]
 >;
 const REASONING_EFFORT_COLUMN_TRANSITION_MS = 240;
-const PICKER_WIDTH_COMPACT_PX = 452;
-const PICKER_WIDTH_EXPANDED_PX = 628;
 
 function toSentenceCaseLabel(value: string | undefined): string {
   const trimmed = value?.trim();
@@ -187,7 +185,7 @@ export function AgentModelPicker({
   reasoningEffort,
   contentAlign = "start",
   contentCollisionPadding = 16,
-  providerColumnMode = "visible",
+  providerColumnMode = "gated",
 }: AgentModelPickerProps) {
   const { t } = useTranslation("chat");
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
@@ -211,7 +209,6 @@ export function AgentModelPicker({
   });
   const modelListRef = useRef<RecommendedModelListHandle>(null);
   const [providerRevealed, setProviderRevealed] = useState(false);
-  const [modelBrowsing, setModelBrowsing] = useState(false);
   const [resolvedContentAlign, setResolvedContentAlign] =
     useState<PopoverContentAlign>("start");
   const [latchedReasoningEffortConfig, setLatchedReasoningEffortConfig] =
@@ -396,29 +393,19 @@ export function AgentModelPicker({
   useEffect(() => {
     if (!open) {
       setProviderRevealed(false);
-      setModelBrowsing(false);
     }
   }, [open]);
 
   const showAgentColumn = providerColumnMode === "visible" || providerRevealed;
-  // A sole ready agent leaves nothing to reveal, but a sole not-ready agent
-  // still needs the footer: the hidden column's Connect/Install row is the
-  // only setup path from this picker.
-  const hasAgentNeedingSetup = agents.some(
-    (agent) => agent.readiness && agent.readiness !== "ready",
-  );
-  // Browsing the full model list (search or "View more") is a model-picking
-  // task; the reveal button would swap the whole popover out from under it.
+  // Keep the reveal action anchored below the scrolling model area whenever
+  // the panel is gated. Agent discovery may temporarily report one agent; it
+  // must not remove the user's route to the full agent panel.
   const showSwitchProviderFooter =
-    providerColumnMode === "gated" &&
-    !providerRevealed &&
-    !modelBrowsing &&
-    (agents.length > 1 || hasAgentNeedingSetup);
+    providerColumnMode === "gated" && !providerRevealed;
   const showReasoningEffortColumn = showReasoningEffort;
-  const isWidePicker = showReasoningEffortColumn && showAgentColumn;
-  const pickerWidth = isWidePicker
-    ? PICKER_WIDTH_EXPANDED_PX
-    : PICKER_WIDTH_COMPACT_PX;
+  // Model changes can add or remove reasoning controls. Keep the popover width
+  // fixed for the current panel mode so those changes do not resize it.
+  const isWidePicker = showAgentColumn;
 
   // Land keyboard focus in the revealed column, since the reveal button that
   // held focus unmounts with it.
@@ -435,20 +422,12 @@ export function AgentModelPicker({
   }, [providerRevealed]);
 
   const resolveContentAlign = useCallback((): PopoverContentAlign => {
-    if (contentAlign !== "smart") {
-      return contentAlign;
-    }
-
-    const triggerRect = triggerRef.current?.getBoundingClientRect();
-    if (!triggerRect) {
-      return "start";
-    }
-
-    const leftAlignedRightEdge = triggerRect.left + pickerWidth;
-    return leftAlignedRightEdge <= window.innerWidth - contentCollisionPadding
-      ? "start"
-      : "center";
-  }, [contentAlign, contentCollisionPadding, pickerWidth]);
+    // Center alignment follows the trigger's center, so a model label changing
+    // the trigger width makes the open popover jump left or right. Anchor smart
+    // placement to the trigger's stable leading edge instead; Radix still
+    // shifts the content when needed to keep it inside the viewport.
+    return contentAlign === "smart" ? "start" : contentAlign;
+  }, [contentAlign]);
 
   useEffect(() => {
     if (open) {
@@ -724,14 +703,11 @@ export function AgentModelPicker({
                   ref={modelListRef}
                   models={displayedModels}
                   favoriteModels={favoriteModels}
-                  catalogModels={
-                    favoriteModels?.map(({ model }) => model) ?? availableModels
-                  }
+                  catalogModels={availableModels}
                   currentModelId={currentModelId}
                   currentModelProviderId={currentModelProviderId}
                   selectedAgentId={selectedAgentId}
                   onModelSelect={handleModelSelect}
-                  onBrowseChange={setModelBrowsing}
                   t={t}
                 />
               ) : (

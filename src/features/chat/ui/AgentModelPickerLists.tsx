@@ -60,6 +60,24 @@ function getGooseModelProviderLabel(model: ModelOption) {
   return null;
 }
 
+function compareModelsAlphabetically(left: ModelOption, right: ModelOption) {
+  const byName = getModelDisplayName(left).localeCompare(
+    getModelDisplayName(right),
+    undefined,
+    { sensitivity: "base" },
+  );
+  if (byName !== 0) {
+    return byName;
+  }
+
+  const byId = left.id.localeCompare(right.id);
+  if (byId !== 0) {
+    return byId;
+  }
+
+  return (left.providerId ?? "").localeCompare(right.providerId ?? "");
+}
+
 function compareModelsByProviderOrderAndName(
   left: ModelOption,
   right: ModelOption,
@@ -239,6 +257,13 @@ export const RecommendedModelList = forwardRef<
         : existingModelKeys,
     [existingModelKeys, favoriteModels],
   );
+  const [starAnimation, setStarAnimation] = useState<{
+    modelKey: string;
+    scopeId: string;
+    modelId: string;
+    hasSelectedAgentDestination: boolean;
+    state: StarAnimation;
+  } | null>(null);
   const liveStarredKeys = useMemo(() => {
     if (!favoriteModelKeys) {
       return starredKeys;
@@ -255,21 +280,41 @@ export const RecommendedModelList = forwardRef<
     const candidates =
       favoriteModels ??
       models.map((model) => ({ agentId: selectedAgentId, model }));
-    return candidates.filter(({ agentId, model }) =>
-      liveStarredKeys.has(modelStarKey(model.providerId ?? agentId, model.id)),
-    );
-  }, [favoriteModels, liveStarredKeys, models, selectedAgentId]);
+    return candidates.filter(({ agentId, model }) => {
+      const modelKey = modelStarKey(model.providerId ?? agentId, model.id);
+      return (
+        liveStarredKeys.has(modelKey) ||
+        (starAnimation?.modelKey === modelKey &&
+          !starAnimation.hasSelectedAgentDestination &&
+          starAnimation.state.phase === "moving" &&
+          !starAnimation.state.targetStarred)
+      );
+    });
+  }, [favoriteModels, liveStarredKeys, models, selectedAgentId, starAnimation]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const [hoveredModelKey, setHoveredModelKey] = useState<string | null>(null);
   const [focusedModelKey, setFocusedModelKey] = useState<string | null>(null);
-  const [starAnimation, setStarAnimation] = useState<{
-    modelKey: string;
-    scopeId: string;
-    modelId: string;
-    state: StarAnimation;
-  } | null>(null);
   const [query, setQuery] = useState("");
+  const pointerPositionRef = useRef<{ x: number; y: number } | null>(null);
+  const rowElementsRef = useRef(new Map<string, HTMLElement>());
+  const reconcileRowHover = useCallback(() => {
+    const pointer = pointerPositionRef.current;
+    if (!pointer) {
+      setHoveredModelKey(null);
+      return;
+    }
+    const hoveredEntry = Array.from(rowElementsRef.current).find(([, row]) => {
+      const bounds = row.getBoundingClientRect();
+      return (
+        pointer.x >= bounds.left &&
+        pointer.x <= bounds.right &&
+        pointer.y >= bounds.top &&
+        pointer.y <= bounds.bottom
+      );
+    });
+    setHoveredModelKey(hoveredEntry?.[0] ?? null);
+  }, []);
   useEffect(() => {
     if (!starAnimation || prefersReducedMotion) {
       return;
@@ -280,7 +325,6 @@ export const RecommendedModelList = forwardRef<
           starAnimation.scopeId,
           starAnimation.modelId,
         );
-        setHoveredModelKey(null);
         setStarAnimation(
           changed
             ? {
@@ -294,20 +338,24 @@ export const RecommendedModelList = forwardRef<
     }
     if (starAnimation.state.phase === "moving") {
       const timer = window.setTimeout(() => {
-        setStarAnimation(
-          starAnimation.state.targetStarred
-            ? {
-                ...starAnimation,
-                state: { ...starAnimation.state, phase: "in" },
-              }
-            : null,
-        );
+        if (starAnimation.state.targetStarred) {
+          setStarAnimation({
+            ...starAnimation,
+            state: { ...starAnimation.state, phase: "in" },
+          });
+        } else {
+          reconcileRowHover();
+          setStarAnimation(null);
+        }
       }, 240);
       return () => window.clearTimeout(timer);
     }
-    const timer = window.setTimeout(() => setStarAnimation(null), 240);
+    const timer = window.setTimeout(() => {
+      reconcileRowHover();
+      setStarAnimation(null);
+    }, 240);
     return () => window.clearTimeout(timer);
-  }, [prefersReducedMotion, starAnimation, toggleStar]);
+  }, [prefersReducedMotion, reconcileRowHover, starAnimation, toggleStar]);
   const inputRef = useRef<HTMLInputElement>(null);
   const searchButtonRef = useRef<HTMLButtonElement>(null);
   const restoreSearchButtonFocusRef = useRef(false);
@@ -461,16 +509,19 @@ export const RecommendedModelList = forwardRef<
     const unstarred: ModelOption[] = [];
     for (const model of visibleModels) {
       const scopeId = getModelScopeId(model);
-      (liveStarredKeys.has(modelStarKey(scopeId, model.id))
+      const modelKey = modelStarKey(scopeId, model.id);
+      const retainedForeignFavorite =
+        starAnimation?.modelKey === modelKey &&
+        !starAnimation.hasSelectedAgentDestination &&
+        starAnimation.state.phase === "moving" &&
+        !starAnimation.state.targetStarred;
+      (liveStarredKeys.has(modelKey) || retainedForeignFavorite
         ? starred
         : unstarred
       ).push(model);
     }
     return {
-      starred: sortModels(starred, currentModelId, currentModelProviderId, {
-        map: recencyMap,
-        agentId: selectedAgentId,
-      }),
+      starred: [...starred].sort(compareModelsAlphabetically),
       unstarred: sortModels(unstarred, currentModelId, currentModelProviderId, {
         map: recencyMap,
         agentId: selectedAgentId,
@@ -484,6 +535,7 @@ export const RecommendedModelList = forwardRef<
     selectedAgentId,
     liveStarredKeys,
     getModelScopeId,
+    starAnimation,
   ]);
   const sorted = [...grouped.starred, ...grouped.unstarred];
   const layoutItems: Array<
@@ -635,11 +687,15 @@ export const RecommendedModelList = forwardRef<
               const modelKey = modelStarKey(scopeId, model.id);
               const starred = liveStarredKeys.has(modelKey);
               const existsInCatalog =
-                !existingModelKeys || existingModelKeys.has(modelKey);
+                !favoriteModelKeys || favoriteModelKeys.has(modelKey);
               const activeStarAnimation =
                 starAnimation?.modelKey === modelKey
                   ? starAnimation.state
                   : null;
+              const idleStarVisible =
+                starred ||
+                hoveredModelKey === modelKey ||
+                focusedModelKey === modelKey;
               const handleStarClick = () => {
                 if (starAnimation) {
                   return;
@@ -652,6 +708,8 @@ export const RecommendedModelList = forwardRef<
                   modelKey,
                   scopeId,
                   modelId: model.id,
+                  hasSelectedAgentDestination:
+                    existingModelKeys?.has(modelKey) ?? true,
                   state: { phase: "out", targetStarred: !starred },
                 });
               };
@@ -659,18 +717,56 @@ export const RecommendedModelList = forwardRef<
                 <motion.div
                   key={modelKey}
                   layout={prefersReducedMotion ? false : "position"}
-                  transition={layoutTransition}
+                  animate={
+                    activeStarAnimation?.phase === "moving" &&
+                    activeStarAnimation.targetStarred === false &&
+                    !starAnimation?.hasSelectedAgentDestination
+                      ? { opacity: 0, height: 0 }
+                      : { opacity: 1, height: "auto" }
+                  }
+                  transition={{
+                    ...layoutTransition,
+                    opacity: { duration: 0.15 },
+                    height: { duration: 0.24, ease: "easeInOut" },
+                  }}
                 >
                   <div
+                    ref={(element) => {
+                      if (element) {
+                        rowElementsRef.current.set(modelKey, element);
+                      } else {
+                        rowElementsRef.current.delete(modelKey);
+                      }
+                    }}
                     className="flex min-w-0 items-center gap-1"
                     data-model-key={modelKey}
                     data-starred={starred || undefined}
-                    onPointerEnter={() => setHoveredModelKey(modelKey)}
-                    onPointerLeave={() =>
-                      setHoveredModelKey((current) =>
-                        current === modelKey ? null : current,
-                      )
-                    }
+                    onPointerMove={(event) => {
+                      pointerPositionRef.current = {
+                        x: event.clientX,
+                        y: event.clientY,
+                      };
+                    }}
+                    onPointerEnter={(event) => {
+                      pointerPositionRef.current = {
+                        x: event.clientX,
+                        y: event.clientY,
+                      };
+                      if (starAnimation?.modelKey !== modelKey) {
+                        setHoveredModelKey(modelKey);
+                      }
+                    }}
+                    onPointerLeave={(event) => {
+                      pointerPositionRef.current = {
+                        x: event.clientX,
+                        y: event.clientY,
+                      };
+                      if (starAnimation?.modelKey !== modelKey) {
+                        setHoveredModelKey((current) =>
+                          current === modelKey ? null : current,
+                        );
+                      }
+                    }}
                     onFocusCapture={() => setFocusedModelKey(modelKey)}
                     onBlurCapture={(event) => {
                       if (!event.currentTarget.contains(event.relatedTarget)) {
@@ -722,15 +818,9 @@ export const RecommendedModelList = forwardRef<
                         // (enforced in globals.test.ts) — and favorited rows
                         // soften to foreground/80 via the selected flag.
                         className={cn(
-                          "shrink-0 opacity-0 focus-visible:opacity-100",
-                          (starred ||
-                            activeStarAnimation?.phase === "out" ||
-                            activeStarAnimation?.phase === "in" ||
-                            hoveredModelKey === modelKey ||
-                            focusedModelKey === modelKey) &&
-                            "animate-in fade-in opacity-100 duration-150",
+                          "shrink-0",
                           activeStarAnimation?.phase === "moving" &&
-                            "pointer-events-none opacity-0",
+                            "pointer-events-none",
                         )}
                         aria-label={t(
                           starred ? "toolbar.unstarModel" : "toolbar.starModel",
@@ -750,19 +840,31 @@ export const RecommendedModelList = forwardRef<
                                   scale: [1, 0.78, 1.18, 0.9],
                                   opacity: [1, 1, 0.7, 0],
                                 }
-                              : activeStarAnimation?.phase === "in"
+                              : activeStarAnimation?.phase === "moving"
                                 ? {
-                                    rotate: [-360, -180, 0, 0],
-                                    scale: [0.9, 1.18, 0.96, 1],
-                                    opacity: [0, 0, 0.7, 1],
+                                    rotate: -360,
+                                    scale: 0.9,
+                                    opacity: 0,
                                   }
-                                : {
-                                    rotate: 0,
-                                    scale: 1,
-                                    opacity: 1,
-                                  }
+                                : activeStarAnimation?.phase === "in"
+                                  ? {
+                                      rotate: [-360, -180, 0, 0],
+                                      scale: [0.9, 1.18, 0.96, 1],
+                                      opacity: [0, 0, 0.7, 1],
+                                    }
+                                  : {
+                                      rotate: 0,
+                                      scale: 1,
+                                      opacity: idleStarVisible ? 1 : 0,
+                                    }
                           }
-                          transition={STAR_SPIN_TRANSITION}
+                          transition={
+                            activeStarAnimation
+                              ? STAR_SPIN_TRANSITION
+                              : idleStarVisible && !starred
+                                ? { opacity: { duration: 0.15 } }
+                                : { opacity: { duration: 0 } }
+                          }
                         >
                           {starred ? <IconStarFilled /> : <IconStar />}
                         </motion.span>

@@ -94,6 +94,7 @@ describe("AgentModelPicker", () => {
         onAgentChange={onAgentChange}
         availableModels={[]}
         onModelChange={vi.fn()}
+        providerColumnMode="visible"
         onRequestComposerFocus={onRequestComposerFocus}
       />,
     );
@@ -138,6 +139,7 @@ describe("AgentModelPicker", () => {
         onAgentChange={onAgentChange}
         availableModels={[]}
         onModelChange={vi.fn()}
+        providerColumnMode="visible"
       />,
     );
 
@@ -527,6 +529,10 @@ describe("AgentModelPicker", () => {
     );
 
     expect(screen.getByText("Reasoning effort")).toBeInTheDocument();
+    const picker = screen.getByRole("dialog");
+    const initialWidthClass = Array.from(picker.classList).find((className) =>
+      className.startsWith("w-[min("),
+    );
 
     rerender(
       <AgentModelPicker
@@ -579,6 +585,11 @@ describe("AgentModelPicker", () => {
       },
       { timeout: 500 },
     );
+    expect(
+      Array.from(picker.classList).find((className) =>
+        className.startsWith("w-[min("),
+      ),
+    ).toBe(initialWidthClass);
   });
 
   it("passes the clicked model option through for duplicate model ids", async () => {
@@ -1011,6 +1022,7 @@ describe("AgentModelPicker", () => {
           { id: "gpt-4o-mini", name: "GPT-4o mini" },
         ]}
         onModelChange={vi.fn()}
+        providerColumnMode="visible"
       />,
     );
 
@@ -1081,6 +1093,7 @@ describe("AgentModelPicker", () => {
           { id: "gpt-4o-mini", name: "GPT-4o mini" },
         ]}
         onModelChange={vi.fn()}
+        providerColumnMode="visible"
       />,
     );
 
@@ -1307,7 +1320,7 @@ describe("AgentModelPicker", () => {
       ).toHaveFocus();
     });
 
-    it("hides the switch-agent button while searching models", async () => {
+    it("keeps the switch-agent footer while searching models", async () => {
       const user = userEvent.setup();
       renderGated({ availableModels: BROWSABLE_MODELS });
 
@@ -1315,8 +1328,8 @@ describe("AgentModelPicker", () => {
       await user.click(screen.getByRole("button", { name: /search models/i }));
 
       expect(
-        screen.queryByRole("button", { name: /switch agent/i }),
-      ).toBeNull();
+        screen.getByRole("button", { name: /switch agent/i }),
+      ).toBeInTheDocument();
 
       await user.keyboard("{Escape}");
 
@@ -1325,7 +1338,7 @@ describe("AgentModelPicker", () => {
       ).toBeInTheDocument();
     });
 
-    it("hides the switch-agent button while browsing all models", async () => {
+    it("keeps the switch-agent footer while browsing all models", async () => {
       const user = userEvent.setup();
       renderGated({ availableModels: BROWSABLE_MODELS });
 
@@ -1333,8 +1346,8 @@ describe("AgentModelPicker", () => {
       await user.click(screen.getByRole("button", { name: /view more/i }));
 
       expect(
-        screen.queryByRole("button", { name: /switch agent/i }),
-      ).toBeNull();
+        screen.getByRole("button", { name: /switch agent/i }),
+      ).toBeInTheDocument();
 
       await user.keyboard("{Escape}");
       await waitFor(() => {
@@ -1436,15 +1449,15 @@ describe("AgentModelPicker", () => {
       expect(content).toHaveClass("w-[min(39.25rem,calc(100vw-1.5rem))]");
     });
 
-    it("hides the switch-agent button when the only agent is ready", async () => {
+    it("keeps the switch-agent footer during partial agent discovery", async () => {
       const user = userEvent.setup();
       renderGated({ agents: [{ id: "goose", label: "Goose" }] });
 
       await openPicker(user);
 
       expect(
-        screen.queryByRole("button", { name: /switch agent/i }),
-      ).toBeNull();
+        screen.getByRole("button", { name: /switch agent/i }),
+      ).toBeInTheDocument();
     });
 
     it("keeps the switch-agent button when the only agent needs setup", async () => {
@@ -1480,7 +1493,7 @@ describe("AgentModelPicker", () => {
       window.removeEventListener(OPEN_SETTINGS_EVENT, openSettings);
     });
 
-    it("keeps the agent column visible by default", async () => {
+    it("hides the agent column behind Switch agent by default", async () => {
       const user = userEvent.setup();
 
       render(
@@ -1499,11 +1512,16 @@ describe("AgentModelPicker", () => {
 
       expect(document.querySelector('[data-col="agent"]')).toHaveAttribute(
         "data-hidden",
+        "true",
+      );
+      expect(screen.queryByRole("button", { name: "Claude Code" })).toBeNull();
+
+      await user.click(screen.getByRole("button", { name: /switch agent/i }));
+
+      expect(document.querySelector('[data-col="agent"]')).toHaveAttribute(
+        "data-hidden",
         "false",
       );
-      expect(
-        screen.queryByRole("button", { name: /switch agent/i }),
-      ).toBeNull();
       expect(
         screen.getByRole("button", { name: "Claude Code" }),
       ).toBeInTheDocument();
@@ -1916,22 +1934,23 @@ describe("AgentModelPicker starred models", () => {
     expect(idleStar).toHaveClass("text-muted-foreground");
     expect(idleStar).toHaveClass("hover:text-muted-foreground");
     expect(idleStar).not.toHaveClass("text-foreground/80");
-    expect(idleStar).toHaveClass("opacity-0");
-    expect(idleStar).not.toHaveClass("transition-opacity");
+    expect(idleStar).not.toHaveClass(
+      "opacity-0",
+      "opacity-100",
+      "transition-opacity",
+      "animate-in",
+      "fade-in",
+    );
 
     const preferredRow = idleStar.closest("[data-model-key]");
     expect(preferredRow).not.toBeNull();
+    const idleStarIcon = idleStar.firstElementChild;
+    expect(idleStarIcon).toBeInTheDocument();
     await user.hover(preferredRow as HTMLElement);
-    expect(idleStar).toHaveClass(
-      "animate-in",
-      "fade-in",
-      "opacity-100",
-      "duration-150",
-    );
-    expect(idleStar).not.toHaveClass("transition-opacity");
-    await user.unhover(preferredRow as HTMLElement);
-    expect(idleStar).not.toHaveClass("opacity-100");
+    expect(idleStar.firstElementChild).toBe(idleStarIcon);
     expect(idleStar).not.toHaveClass("animate-in", "fade-in");
+    await user.unhover(preferredRow as HTMLElement);
+    expect(idleStar.firstElementChild).toBe(idleStarIcon);
 
     const starredToggle = within(picker).getByRole("button", {
       name: "Unstar Other",
@@ -1940,8 +1959,48 @@ describe("AgentModelPicker starred models", () => {
     expect(starredToggle).toHaveAttribute("aria-pressed", "true");
     expect(starredToggle).toHaveClass("text-foreground/80");
     expect(starredToggle).toHaveClass("hover:text-foreground/80");
-    expect(starredToggle).toHaveClass("opacity-100", "animate-in", "fade-in");
+    expect(starredToggle).not.toHaveClass(
+      "opacity-0",
+      "opacity-100",
+      "animate-in",
+      "fade-in",
+    );
     expect(starredToggle).not.toHaveClass("text-muted-foreground");
+  });
+
+  it("does not restart the hover fade during a star click animation", async () => {
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="preferred"
+        currentModelName="Preferred"
+        availableModels={models}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    const star = screen.getByRole("button", { name: "Star Preferred" });
+    const row = star.closest("[data-model-key]");
+    expect(row).not.toBeNull();
+    const starIcon = star.firstElementChild;
+    await user.hover(row as HTMLElement);
+    expect(star.firstElementChild).toBe(starIcon);
+
+    await user.click(star);
+    expect(star).toHaveAttribute("data-star-animation-phase", "out");
+    expect(star.firstElementChild).toBe(starIcon);
+    expect(star).not.toHaveClass(
+      "opacity-0",
+      "opacity-100",
+      "animate-in",
+      "fade-in",
+    );
   });
 
   it("migrates the legacy aggregate entry into per-key entries", async () => {
@@ -2231,6 +2290,105 @@ describe("AgentModelPicker starred models", () => {
         starredModelStorageKey(modelStarKey("goose", "ghost")),
       ),
     ).toBe("1");
+  });
+
+  it("sorts favorites alphabetically across agents and providers", async () => {
+    seedStar("claude-acp", "zebra");
+    seedStar("goose", "alpha");
+    seedStar("codex-acp", "middle");
+    __resetStarredModelsCacheForTests();
+    const user = userEvent.setup();
+    const favoriteModels = [
+      {
+        agentId: "claude-acp",
+        model: { id: "zebra", name: "zebra" },
+      },
+      {
+        agentId: "goose",
+        model: { id: "alpha", name: "Alpha", providerId: "goose" },
+      },
+      {
+        agentId: "codex-acp",
+        model: { id: "middle", name: "Middle" },
+      },
+    ];
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="preferred"
+        currentModelName="Preferred"
+        availableModels={models}
+        favoriteModels={favoriteModels}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    const picker = screen.getByRole("dialog");
+    const favoriteKeys = Array.from(
+      picker.querySelectorAll('[data-starred="true"]'),
+    ).map((row) => row.getAttribute("data-model-key"));
+    expect(favoriteKeys).toEqual([
+      modelStarKey("goose", "alpha"),
+      modelStarKey("codex-acp", "middle"),
+      modelStarKey("claude-acp", "zebra"),
+    ]);
+  });
+
+  it("keeps one stable row when unstarring Claude default", async () => {
+    seedStar("claude-acp", "default");
+    __resetStarredModelsCacheForTests();
+    const user = userEvent.setup();
+    const selectedModels = [
+      { id: "default", name: "Default" },
+      { id: "sonnet", name: "Sonnet" },
+    ];
+    const favoriteModels = [
+      {
+        agentId: "claude-acp",
+        // A distinct object mirrors the combined-catalog copy used by the app.
+        model: { id: "default", name: "Default" },
+      },
+    ];
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="claude-acp"
+        onAgentChange={vi.fn()}
+        currentModelId="default"
+        currentModelName="Default"
+        availableModels={selectedModels}
+        favoriteModels={favoriteModels}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    const picker = screen.getByRole("dialog");
+    await user.click(
+      within(picker).getByRole("button", { name: "Unstar Default" }),
+    );
+    await waitFor(() =>
+      expect(
+        localStorage.getItem(
+          starredModelStorageKey(modelStarKey("claude-acp", "default")),
+        ),
+      ).toBeNull(),
+    );
+
+    expect(
+      Array.from(picker.querySelectorAll("[data-model-key]")).filter(
+        (row) =>
+          row.getAttribute("data-model-key") ===
+          modelStarKey("claude-acp", "default"),
+      ),
+    ).toHaveLength(1);
   });
 
   it("keeps favorites from other agents visible and switches before selecting", async () => {
