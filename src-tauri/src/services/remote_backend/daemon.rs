@@ -12,7 +12,9 @@ use std::time::Duration;
 
 use base64::Engine as _;
 use serde::Serialize;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncWriteExt, BufReader};
+
+use super::bounded_output::{read_bounded_lines, BoundedLineError, LineLimitKind, LineLimits};
 
 use super::error::{
     classify_script_exit, classify_ssh_stderr, RemoteBackendError, RemoteBackendErrorKind,
@@ -28,7 +30,18 @@ const BOOTSTRAP_SCRIPT: &str = include_str!("remote_daemon.sh");
 // above their combined bounded lifetime so cancellation cannot strand an
 // unrecorded PID.
 const SCRIPT_TIMEOUT: Duration = Duration::from_secs(300);
+
+// `listdir` is the largest legal response: DIR + 2,000 entries + LIST-DONE.
+// A 16 KiB encoded record covers a 4 KiB resolved path and filesystem
+// components far beyond common 255-byte limits. Two MiB covers all 2,002
+// legal records with substantial encoding headroom.
+const MAX_PROTOCOL_RECORDS: usize = 2_002;
+const MAX_LINE_BYTES: usize = 16 * 1024;
+const MAX_STDOUT_BYTES: usize = 4 * 1024 * 1024;
+const MAX_PROTOCOL_BYTES: usize = 2 * 1024 * 1024;
+const MAX_STDERR_STREAM_BYTES: usize = 1024 * 1024;
 const MAX_STDERR_BYTES: usize = 16 * 1024;
+const MAX_DIAGNOSTIC_LOG_LINES: usize = 8;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -241,12 +254,142 @@ fn remote_command_line(
     line
 }
 
+fn append_to_bounded_tail(tail: &mut String, text: &str, max_bytes: usize) {
+    if max_bytes == 0 {
+        return;
+    }
+    let line_budget = max_bytes - 1;
+    let mut start = text.len().saturating_sub(line_budget);
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    let text = &text[start..];
+    let required = text.len() + 1;
+    if tail.len() + required > max_bytes {
+        let excess = tail.len() + required - max_bytes;
+        let mut drain_end = excess.min(tail.len());
+        while !tail.is_char_boundary(drain_end) {
+            drain_end += 1;
+        }
+        tail.drain(..drain_end);
+    }
+    tail.push_str(text);
+    tail.push('\n');
+}
+
+fn stream_task_error(stream: &str, error: &BoundedLineError) -> RemoteBackendError {
+    let operation = if stream == "stdin" { "write" } else { "read" };
+    let detail = match error {
+        BoundedLineError::Limit(_) => error.to_string(),
+        BoundedLineError::Io(source) => format!("{operation} failed: {source}"),
+    };
+    let action = if stream == "stdin" {
+        "delivery failed"
+    } else {
+        "output rejected"
+    };
+    RemoteBackendError::new(
+        RemoteBackendErrorKind::RemoteScriptFailed,
+        format!("ssh {stream} {action}: {detail}"),
+    )
+}
+
+struct ProtocolCollector {
+    lines: Vec<String>,
+    retained_bytes: usize,
+}
+
+impl ProtocolCollector {
+    fn new() -> Self {
+        Self {
+            lines: Vec::new(),
+            retained_bytes: 0,
+        }
+    }
+
+    fn push(&mut self, protocol: &[u8]) -> Result<(), BoundedLineError> {
+        if self.lines.len() >= MAX_PROTOCOL_RECORDS {
+            return Err(BoundedLineError::Limit(LineLimitKind::ProtocolRecords));
+        }
+        self.retained_bytes = self
+            .retained_bytes
+            .checked_add(protocol.len())
+            .filter(|total| *total <= MAX_PROTOCOL_BYTES)
+            .ok_or(BoundedLineError::Limit(LineLimitKind::RetainedBytes))?;
+        let protocol = std::str::from_utf8(protocol)
+            .map_err(|_| BoundedLineError::Limit(LineLimitKind::ProtocolEncoding))?;
+        self.lines.push(protocol.to_owned());
+        Ok(())
+    }
+}
+
+struct ScriptChildGuard(Option<tokio::process::Child>);
+
+enum WaitError {
+    Io(std::io::Error),
+    Timeout,
+}
+
+impl ScriptChildGuard {
+    fn child_mut(&mut self) -> &mut tokio::process::Child {
+        self.0.as_mut().expect("script child already consumed")
+    }
+
+    async fn wait_until(
+        mut self,
+        deadline: tokio::time::Instant,
+    ) -> Result<std::process::ExitStatus, WaitError> {
+        let mut child = self.0.take().expect("script child already consumed");
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(status),
+            Ok(None) => {}
+            Err(error) => return Err(WaitError::Io(error)),
+        }
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        match tokio::time::timeout(remaining, child.wait()).await {
+            Ok(Ok(status)) => Ok(status),
+            Ok(Err(error)) => Err(WaitError::Io(error)),
+            Err(_) => {
+                let _ = child.start_kill();
+                let _ = child.wait().await;
+                Err(WaitError::Timeout)
+            }
+        }
+    }
+
+    async fn terminate_and_reap(mut self) {
+        if let Some(mut child) = self.0.take() {
+            let _ = child.start_kill();
+            let _ = child.wait().await;
+        }
+    }
+}
+
+impl Drop for ScriptChildGuard {
+    fn drop(&mut self) {
+        if let Some(child) = self.0.as_mut() {
+            let _ = child.start_kill();
+        }
+    }
+}
+
 pub(crate) async fn run_remote_script(
     spec: &RemoteHostSpec,
     shell_env: &HashMap<String, String>,
     mode: &str,
     arg: Option<&str>,
     goose_arg: Option<&str>,
+) -> Result<ScriptOutput, RemoteBackendError> {
+    run_remote_script_with_timeout(spec, shell_env, mode, arg, goose_arg, SCRIPT_TIMEOUT).await
+}
+
+async fn run_remote_script_with_timeout(
+    spec: &RemoteHostSpec,
+    shell_env: &HashMap<String, String>,
+    mode: &str,
+    arg: Option<&str>,
+    goose_arg: Option<&str>,
+    timeout: Duration,
 ) -> Result<ScriptOutput, RemoteBackendError> {
     let nonce = format!("berd-{}", uuid::Uuid::new_v4());
 
@@ -262,7 +405,7 @@ pub(crate) async fn run_remote_script(
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 
-    let mut child = command.spawn().map_err(|error| {
+    let child = command.spawn().map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
             RemoteBackendError::new(
                 RemoteBackendErrorKind::SshNotFound,
@@ -272,77 +415,146 @@ pub(crate) async fn run_remote_script(
             RemoteBackendError::internal(format!("failed to spawn ssh: {error}"))
         }
     })?;
+    let mut child = ScriptChildGuard(Some(child));
 
     let mut stdin = child
+        .child_mut()
         .stdin
         .take()
         .ok_or_else(|| RemoteBackendError::internal("ssh stdin unavailable"))?;
     let stdout = child
+        .child_mut()
         .stdout
         .take()
         .ok_or_else(|| RemoteBackendError::internal("ssh stdout unavailable"))?;
     let stderr = child
+        .child_mut()
         .stderr
         .take()
         .ok_or_else(|| RemoteBackendError::internal("ssh stderr unavailable"))?;
 
-    let run = async {
+    let deadline = tokio::time::Instant::now() + timeout;
+    let write_stdin = async {
         stdin
             .write_all(BOOTSTRAP_SCRIPT.as_bytes())
             .await
-            .map_err(|error| {
-                RemoteBackendError::internal(format!("failed to send bootstrap script: {error}"))
-            })?;
+            .map_err(BoundedLineError::Io)?;
         drop(stdin);
-
-        let nonce_prefix = format!("{nonce} ");
-        let stdout_task = async {
-            let mut lines = Vec::new();
-            let mut reader = BufReader::new(stdout).lines();
-            while let Ok(Some(line)) = reader.next_line().await {
-                if let Some(protocol) = line.strip_prefix(&nonce_prefix) {
-                    lines.push(protocol.to_string());
-                } else if !line.trim().is_empty() {
-                    log::debug!("[remote-backend noise] {}", redact_log_line(&line));
-                }
-            }
-            lines
-        };
-        let stderr_task = async {
-            let mut collected = String::new();
-            let mut reader = BufReader::new(stderr).lines();
-            while let Ok(Some(line)) = reader.next_line().await {
-                let redacted = redact_log_line(&line);
-                log::warn!("[remote-backend ssh stderr] {redacted}");
-                if collected.len() < MAX_STDERR_BYTES {
-                    collected.push_str(&redacted);
-                    collected.push('\n');
-                }
-            }
-            collected
-        };
-
-        let (lines, stderr_text) = tokio::join!(stdout_task, stderr_task);
-        let status = child.wait().await.map_err(|error| {
-            RemoteBackendError::internal(format!("failed to await ssh: {error}"))
-        })?;
-        Ok::<ScriptOutput, RemoteBackendError>(ScriptOutput {
-            lines,
-            stderr: stderr_text,
-            exit_code: status.code(),
-        })
+        Ok::<_, BoundedLineError>(())
     };
 
-    match tokio::time::timeout(SCRIPT_TIMEOUT, run).await {
-        Ok(result) => result,
-        Err(_) => Err(RemoteBackendError::new(
-            RemoteBackendErrorKind::ReadyTimeout,
-            format!(
-                "ssh to {} timed out after {}s",
-                spec.destination(),
-                SCRIPT_TIMEOUT.as_secs()
-            ),
-        )),
+    let nonce_prefix = format!("{nonce} ").into_bytes();
+    let stdout_task = async {
+        let mut collector = ProtocolCollector::new();
+        let mut noise_lines = 0_usize;
+        read_bounded_lines(
+            BufReader::new(stdout),
+            LineLimits {
+                max_line_bytes: MAX_LINE_BYTES,
+                max_stream_bytes: MAX_STDOUT_BYTES,
+            },
+            |line| {
+                if let Some(protocol) = line.strip_prefix(nonce_prefix.as_slice()) {
+                    collector.push(protocol)?;
+                } else if !line.iter().all(u8::is_ascii_whitespace) {
+                    if noise_lines < MAX_DIAGNOSTIC_LOG_LINES {
+                        log::debug!(
+                            "[remote-backend noise] {}",
+                            redact_log_line(&String::from_utf8_lossy(line))
+                        );
+                    }
+                    noise_lines = noise_lines.saturating_add(1);
+                }
+                Ok(())
+            },
+        )
+        .await?;
+        if noise_lines > MAX_DIAGNOSTIC_LOG_LINES {
+            log::debug!(
+                "[remote-backend noise] suppressed {} additional lines",
+                noise_lines - MAX_DIAGNOSTIC_LOG_LINES
+            );
+        }
+        Ok::<_, BoundedLineError>(collector.lines)
+    };
+    let stderr_task = async {
+        let mut collected = String::new();
+        let mut logged_lines = 0_usize;
+        read_bounded_lines(
+            BufReader::new(stderr),
+            LineLimits {
+                max_line_bytes: MAX_LINE_BYTES,
+                max_stream_bytes: MAX_STDERR_STREAM_BYTES,
+            },
+            |line| {
+                let redacted = redact_log_line(&String::from_utf8_lossy(line));
+                if logged_lines < MAX_DIAGNOSTIC_LOG_LINES {
+                    log::warn!("[remote-backend ssh stderr] {redacted}");
+                }
+                logged_lines = logged_lines.saturating_add(1);
+                append_to_bounded_tail(&mut collected, &redacted, MAX_STDERR_BYTES);
+                Ok(())
+            },
+        )
+        .await?;
+        if logged_lines > MAX_DIAGNOSTIC_LOG_LINES {
+            log::warn!(
+                "[remote-backend ssh stderr] suppressed {} additional lines",
+                logged_lines - MAX_DIAGNOSTIC_LOG_LINES
+            );
+        }
+        Ok::<_, BoundedLineError>(collected)
+    };
+
+    let collected = tokio::time::timeout_at(deadline, async {
+        write_stdin.await.map_err(|error| ("stdin", error))?;
+        tokio::try_join!(
+            async { stdout_task.await.map_err(|error| ("stdout", error)) },
+            async { stderr_task.await.map_err(|error| ("stderr", error)) },
+        )
+    })
+    .await;
+    match collected {
+        Ok(Ok((lines, stderr_text))) => {
+            let status = match child.wait_until(deadline).await {
+                Ok(status) => status,
+                Err(WaitError::Io(error)) => {
+                    return Err(RemoteBackendError::internal(format!(
+                        "failed to await ssh: {error}"
+                    )))
+                }
+                Err(WaitError::Timeout) => {
+                    return Err(RemoteBackendError::new(
+                        RemoteBackendErrorKind::ReadyTimeout,
+                        format!(
+                            "ssh to {} timed out after {}s",
+                            spec.destination(),
+                            timeout.as_secs()
+                        ),
+                    ));
+                }
+            };
+            Ok(ScriptOutput {
+                lines,
+                stderr: stderr_text,
+                exit_code: status.code(),
+            })
+        }
+        Ok(Err((stream, error))) => {
+            child.terminate_and_reap().await;
+            Err(stream_task_error(stream, &error))
+        }
+        Err(_) => {
+            child.terminate_and_reap().await;
+            Err(RemoteBackendError::new(
+                RemoteBackendErrorKind::ReadyTimeout,
+                format!(
+                    "ssh to {} timed out after {}s",
+                    spec.destination(),
+                    timeout.as_secs()
+                ),
+            ))
+        }
     }
 }
 
@@ -723,6 +935,129 @@ mod tests {
     #[test]
     fn require_success_passes_on_zero() {
         assert!(require_success(&output(&["READY"], Some(0), "")).is_ok());
+    }
+
+    #[test]
+    fn stderr_tail_stays_bounded_and_retains_recent_diagnostics() {
+        let mut tail = String::new();
+        append_to_bounded_tail(&mut tail, &"x".repeat(20), 16);
+        append_to_bounded_tail(&mut tail, "recent", 16);
+        assert!(tail.len() <= 16);
+        assert!(tail.ends_with("recent\n"));
+    }
+
+    #[test]
+    fn protocol_record_limit_accepts_exact_boundary_and_rejects_one_more() {
+        let mut collector = ProtocolCollector::new();
+        for _ in 0..MAX_PROTOCOL_RECORDS {
+            collector.push(b"E F eA==").unwrap();
+        }
+        assert_eq!(collector.lines.len(), MAX_PROTOCOL_RECORDS);
+        assert!(matches!(
+            collector.push(b"LIST-DONE"),
+            Err(BoundedLineError::Limit(LineLimitKind::ProtocolRecords))
+        ));
+    }
+
+    #[test]
+    fn retained_protocol_limit_rejects_before_copy() {
+        let mut collector = ProtocolCollector::new();
+        collector.retained_bytes = MAX_PROTOCOL_BYTES;
+        assert!(matches!(
+            collector.push(b"x"),
+            Err(BoundedLineError::Limit(LineLimitKind::RetainedBytes))
+        ));
+        assert!(collector.lines.is_empty());
+    }
+
+    #[test]
+    fn invalid_protocol_encoding_is_not_reported_as_a_size_limit() {
+        let mut collector = ProtocolCollector::new();
+        assert!(matches!(
+            collector.push(b"\xff"),
+            Err(BoundedLineError::Limit(LineLimitKind::ProtocolEncoding))
+        ));
+        assert!(collector.lines.is_empty());
+    }
+
+    #[test]
+    fn stream_task_errors_identify_the_pipe_and_operation() {
+        let limit = BoundedLineError::Limit(LineLimitKind::StreamBytes);
+        assert_eq!(
+            stream_task_error("stdout", &limit).message,
+            "ssh stdout output rejected: stream byte limit exceeded"
+        );
+        assert_eq!(
+            stream_task_error("stderr", &limit).message,
+            "ssh stderr output rejected: stream byte limit exceeded"
+        );
+        let io = BoundedLineError::Io(std::io::Error::new(
+            std::io::ErrorKind::BrokenPipe,
+            "closed",
+        ));
+        assert_eq!(
+            stream_task_error("stdin", &io).message,
+            "ssh stdin delivery failed: write failed: closed"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn elapsed_deadline_accepts_a_child_that_already_exited() {
+        let mut command = tokio::process::Command::new("sh");
+        command.arg("-c").arg("exit 0").kill_on_drop(true);
+        let child = command.spawn().unwrap();
+        let guard = ScriptChildGuard(Some(child));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let result = guard
+            .wait_until(tokio::time::Instant::now() - Duration::from_millis(1))
+            .await;
+        let status = match result {
+            Ok(status) => status,
+            Err(_) => panic!("an already-exited child must not be reported as timed out"),
+        };
+        assert!(status.success());
+    }
+
+    #[tokio::test]
+    async fn timeout_kills_and_reaps_the_ssh_child() {
+        #[cfg(not(unix))]
+        return;
+        #[cfg(unix)]
+        {
+            let mut command = tokio::process::Command::new("sh");
+            command.arg("-c").arg("sleep 120").kill_on_drop(true);
+            let child = command.spawn().unwrap();
+            let pid = child.id().unwrap();
+            let guard = ScriptChildGuard(Some(child));
+
+            let result = guard
+                .wait_until(tokio::time::Instant::now() + Duration::from_millis(50))
+                .await;
+            assert!(matches!(result, Err(WaitError::Timeout)));
+            let status = std::process::Command::new("kill")
+                .args(["-0", &pid.to_string()])
+                .status()
+                .unwrap();
+            assert!(!status.success(), "timed-out ssh child {pid} survived");
+        }
+    }
+
+    #[test]
+    fn accepts_exact_maximum_listdir_protocol_envelope() {
+        let mut lines = Vec::with_capacity(MAX_PROTOCOL_RECORDS);
+        lines.push(format!("DIR {}", b64("/remote/path")));
+        for index in 0..2_000 {
+            lines.push(format!("E F {}", b64(&format!("entry-{index}"))));
+        }
+        lines.push("LIST-DONE".to_string());
+
+        assert_eq!(lines.len(), MAX_PROTOCOL_RECORDS);
+        assert!(lines.iter().map(String::len).sum::<usize>() <= MAX_PROTOCOL_BYTES);
+        let listing = parse_dir_listing(&lines).unwrap();
+        assert_eq!(listing.resolved_path, "/remote/path");
+        assert_eq!(listing.entries.len(), 2_000);
     }
 
     #[test]
