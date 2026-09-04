@@ -446,6 +446,7 @@ async fn run(
     let mut call_names = HashMap::<String, String>::new();
     let mut call_arguments = HashMap::<String, String>::new();
     let mut speed_update: Option<PendingSpeedUpdate> = None;
+    let mut cancellation_events = HashMap::<String, String>::new();
     let mut pending_truncations = HashMap::<(String, u64), PendingTruncation>::new();
     let mut pending_input_cutover: Option<PendingInputCutover> = None;
     let mut pending_input_reset: Option<PendingInputReset> = None;
@@ -557,10 +558,15 @@ async fn run(
                     }
                     Some(SpokespersonCommand::CancelResponses { response_ids }) => {
                         for response_id in response_ids {
+                            let event_id = format!("berd-cancel-{next_control_event_id}");
+                            next_control_event_id = next_control_event_id.checked_add(1)
+                                .ok_or("Spokesperson control event space is exhausted")?;
                             send_json(&mut socket, serde_json::json!({
+                                "event_id": event_id,
                                 "type": "response.cancel",
                                 "response_id": response_id,
                             })).await?;
+                            cancellation_events.insert(event_id, response_id);
                         }
                     }
                     Some(SpokespersonCommand::CreateUserResponse) => {
@@ -990,6 +996,10 @@ async fn run(
                     }
                     "error" => {
                         let message = value.pointer("/error/message").and_then(|value| value.as_str()).unwrap_or("OpenAI Realtime failed").to_string();
+                        let cancellation = value
+                            .pointer("/error/event_id")
+                            .and_then(|value| value.as_str())
+                            .and_then(|event_id| cancellation_events.remove(event_id));
                         if pending_input_reset.as_ref().is_some_and(|reset| {
                             value.pointer("/error/event_id").and_then(|value| value.as_str())
                                 == Some(reset.event_id.as_str())
@@ -1025,6 +1035,12 @@ async fn run(
                             .any(|truncation| value.pointer("/error/event_id").and_then(|value| value.as_str()) == Some(truncation.event_id.as_str()))
                         {
                             return Err(format!("Spokesperson output truncation failed: {message}"));
+                        } else if let Some(response_id) = cancellation {
+                            if message != "Cancellation failed: no active response found" {
+                                return Err(format!(
+                                    "Spokesperson response {response_id} cancellation failed: {message}"
+                                ));
+                            }
                         } else if value.pointer("/error/code").and_then(|value| value.as_str())
                             == Some("session_expired")
                             || message == "Your session hit the maximum duration of 60 minutes."
@@ -1707,13 +1723,13 @@ mod tests {
             assert_eq!(cancel["response_id"], "response-old");
             let truncate = receive_json(&mut socket).await;
             assert_eq!(truncate["type"], "conversation.item.truncate");
-            assert_eq!(truncate["event_id"], "berd-truncate-1");
+            assert_eq!(truncate["event_id"], "berd-truncate-2");
             assert_eq!(truncate["item_id"], "assistant-old");
             assert_eq!(truncate["content_index"], 0);
             assert_eq!(truncate["audio_end_ms"], 500);
             let second = receive_json(&mut socket).await;
             assert_eq!(second["type"], "conversation.item.truncate");
-            assert_eq!(second["event_id"], "berd-truncate-2");
+            assert_eq!(second["event_id"], "berd-truncate-3");
             assert_eq!(second["item_id"], "assistant-second");
             assert_eq!(second["content_index"], 1);
             assert_eq!(second["audio_end_ms"], 0);

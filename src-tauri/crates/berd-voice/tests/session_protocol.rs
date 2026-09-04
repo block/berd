@@ -1700,9 +1700,23 @@ fn handoff_suppresses_acknowledgement_and_queued_voice_change_applies_before_exp
                 let cancel = receive_realtime_json(&mut old).await;
                 assert_eq!(cancel["type"], "response.cancel");
                 assert_eq!(cancel["response_id"], "response-handoff");
+                assert!(cancel["event_id"]
+                    .as_str()
+                    .is_some_and(|event_id| event_id.starts_with("berd-cancel-")));
                 assert!(tokio::time::timeout(Duration::from_millis(100), listener.accept())
                     .await
                     .is_err());
+                send_realtime_json(
+                    &mut old,
+                    json!({
+                        "type":"error",
+                        "error":{
+                            "event_id":cancel["event_id"],
+                            "message":"Cancellation failed: no active response found"
+                        }
+                    }),
+                )
+                .await;
                 send_realtime_json(
                     &mut old,
                     json!({
