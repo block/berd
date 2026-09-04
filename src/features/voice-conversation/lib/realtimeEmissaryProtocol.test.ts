@@ -45,8 +45,9 @@ describe("Realtime emissary session configuration", () => {
       "never disclaim a capability because the other part performs it",
     );
     expect(event.session.instructions).toContain(
-      "it calls `handoff` _before_ any substantive spoken answer",
+      "it calls `handoff` _before_ any spoken answer and waits silently for the Expert",
     );
+    expect(event.session.instructions).not.toContain("brief acknowledgement");
     expect(event.session.instructions).toContain(
       "never opens a handoff merely to reply to the Expert",
     );

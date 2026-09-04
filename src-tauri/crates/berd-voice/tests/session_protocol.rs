@@ -1102,6 +1102,7 @@ fn unresolved_handoff_at_provider_expiry_fails_without_starting_a_replacement() 
                     &mut old,
                     json!({
                         "type":"response.function_call_arguments.done",
+                        "response_id":"response-handoff",
                         "call_id":"handoff-1",
                         "name":"handoff",
                         "arguments":"{\"message\":\"please inspect the repository\"}"
@@ -1650,9 +1651,11 @@ fn reset_input_during_voice_cutover_rolls_back_then_clears_the_old_runtime() {
 }
 
 #[test]
-fn unresolved_handoff_rejects_voice_change_without_starting_a_candidate() {
+fn handoff_suppresses_acknowledgement_and_queued_voice_change_applies_before_expert_answer() {
     let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
     let (emit_handoff_tx, emit_handoff_rx) = mpsc::sync_channel(1);
+    let (settings_sent_tx, settings_sent_rx) = mpsc::sync_channel(1);
+    let (one_response_tx, one_response_rx) = mpsc::sync_channel(1);
     let server = std::thread::spawn(move || {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -1685,20 +1688,125 @@ fn unresolved_handoff_rejects_voice_change_without_starting_a_candidate() {
                     &mut old,
                     json!({
                         "type":"response.function_call_arguments.done",
+                        "response_id":"response-handoff",
                         "call_id":"call-1",
                         "arguments":"{\"message\":\"inspect the computer\"}"
                     }),
                 )
                 .await;
-                send_realtime_json(
-                    &mut old,
-                    json!({"type":"response.done","response":{"id":"response-handoff","status":"completed"}}),
-                )
-                .await;
-                assert!(tokio::time::timeout(Duration::from_millis(250), listener.accept())
+                tokio::task::spawn_blocking(move || settings_sent_rx.recv().unwrap())
+                    .await
+                    .unwrap();
+                let cancel = receive_realtime_json(&mut old).await;
+                assert_eq!(cancel["type"], "response.cancel");
+                assert_eq!(cancel["response_id"], "response-handoff");
+                assert!(tokio::time::timeout(Duration::from_millis(100), listener.accept())
                     .await
                     .is_err());
+                send_realtime_json(
+                    &mut old,
+                    json!({
+                        "type":"response.output_audio.delta",
+                        "response_id":"response-handoff",
+                        "item_id":"assistant-ack",
+                        "output_index":0,
+                        "content_index":0,
+                        "delta":BASE64.encode(vec![0_u8; 8_192])
+                    }),
+                )
+                .await;
+                send_realtime_json(
+                    &mut old,
+                    json!({
+                        "type":"response.output_audio_transcript.done",
+                        "response_id":"response-handoff",
+                        "item_id":"assistant-ack",
+                        "output_index":0,
+                        "content_index":0,
+                        "transcript":"Let me check that for you."
+                    }),
+                )
+                .await;
+                let truncate = receive_realtime_json(&mut old).await;
+                assert_eq!(truncate["type"], "conversation.item.truncate");
+                assert_eq!(truncate["item_id"], "assistant-ack");
+                assert_eq!(truncate["audio_end_ms"], 0);
+                send_realtime_json(
+                    &mut old,
+                    json!({"type":"conversation.item.truncated","item_id":"assistant-ack","content_index":0}),
+                )
+                .await;
+                send_realtime_json(
+                    &mut old,
+                    json!({"type":"response.done","response":{"id":"response-handoff","status":"cancelled"}}),
+                )
+                .await;
+                let (candidate_stream, _) = listener.accept().await.unwrap();
+                let mut candidate = accept_async(candidate_stream).await.unwrap();
+                let candidate_update = receive_realtime_json(&mut candidate).await;
+                assert_eq!(
+                    candidate_update["session"]["audio"]["output"]["voice"],
+                    "new-voice"
+                );
+                acknowledge_realtime_session(&mut candidate, &candidate_update).await;
+                let clear = receive_realtime_json(&mut old).await;
+                assert_eq!(clear["type"], "input_audio_buffer.clear");
+                send_realtime_json(&mut old, json!({"type":"input_audio_buffer.cleared"})).await;
                 let _ = old.next().await;
+
+                let expert_item = receive_realtime_json(&mut candidate).await;
+                assert_eq!(expert_item["type"], "conversation.item.create");
+                assert_eq!(
+                    expert_item["item"]["content"][0]["text"],
+                    "Expert message to speak now:\nThe answer is 21."
+                );
+                let create = receive_realtime_json(&mut candidate).await;
+                assert_eq!(create["type"], "response.create");
+                send_realtime_json(
+                    &mut candidate,
+                    json!({
+                        "type":"response.created",
+                        "response":{
+                            "id":"response-expert",
+                            "metadata":create["response"]["metadata"].clone()
+                        }
+                    }),
+                )
+                .await;
+                send_realtime_json(
+                    &mut candidate,
+                    json!({
+                        "type":"response.output_audio.delta",
+                        "response_id":"response-expert",
+                        "item_id":"assistant-expert",
+                        "output_index":0,
+                        "content_index":0,
+                        "delta":BASE64.encode(vec![0_u8; 8_192])
+                    }),
+                )
+                .await;
+                send_realtime_json(
+                    &mut candidate,
+                    json!({
+                        "type":"response.output_audio_transcript.done",
+                        "response_id":"response-expert",
+                        "item_id":"assistant-expert",
+                        "output_index":0,
+                        "content_index":0,
+                        "transcript":"The answer is 21."
+                    }),
+                )
+                .await;
+                send_realtime_json(
+                    &mut candidate,
+                    json!({"type":"response.done","response":{"id":"response-expert","status":"completed"}}),
+                )
+                .await;
+                assert!(tokio::time::timeout(Duration::from_millis(100), receive_realtime_json(&mut candidate))
+                    .await
+                    .is_err(), "one Expert answer must create exactly one response");
+                one_response_tx.send(()).unwrap();
+                let _ = candidate.next().await;
             });
     });
     let endpoint = endpoint_rx.recv().unwrap();
@@ -1716,20 +1824,237 @@ fn unresolved_handoff_rejects_voice_change_without_starting_a_candidate() {
         }
     }
     session.send(json!({
-            "type":"set_tts_settings",
-            "id":2,
-            "expected_revision":1,
-            "settings":{"backend":"openai","model":"test-model","voice":"new-voice","rate":1.0}
+        "type":"set_tts_settings",
+        "id":8,
+        "expected_revision":2,
+        "settings":{"backend":"openai","model":"test-model","voice":"new-voice","rate":1.0}
     }));
+    let stale = loop {
+        let message = session.recv(Duration::from_secs(2));
+        assert_ne!(
+            message["text"],
+            "[Voice transcript] Spokesperson said: Let me check that for you."
+        );
+        if message["type"] == "tts_settings_result" {
+            break message;
+        }
+    };
+    assert_eq!(stale["id"], 8);
+    assert_eq!(stale["outcome"], "rejected");
+    assert_eq!(stale["snapshot"]["revision"], 1);
+    session.send(json!({
+        "type":"set_tts_settings",
+        "id":2,
+        "expected_revision":1,
+        "settings":{"backend":"openai","model":"test-model","voice":"new-voice","rate":1.0}
+    }));
+    session.send(json!({
+        "type":"set_tts_settings",
+        "id":9,
+        "expected_revision":1,
+        "settings":{"backend":"openai","model":"test-model","voice":"other-voice","rate":1.0}
+    }));
+    let concurrent = loop {
+        let message = session.recv(Duration::from_secs(2));
+        assert_ne!(
+            message["text"],
+            "[Voice transcript] Spokesperson said: Let me check that for you."
+        );
+        if message["type"] == "tts_settings_result" {
+            break message;
+        }
+    };
+    assert_eq!(concurrent["id"], 9);
+    assert_eq!(concurrent["outcome"], "rejected");
+    assert_eq!(concurrent["snapshot"]["revision"], 1);
+    settings_sent_tx.send(()).unwrap();
+    let applied = session.recv(Duration::from_secs(3));
+    assert_eq!(applied["type"], "tts_settings_result");
+    assert_eq!(applied["outcome"], "applied");
+    assert_eq!(applied["snapshot"]["revision"], 2);
+    assert_eq!(applied["snapshot"]["voice"], "new-voice");
+    session.send(json!({
+        "type":"prepare_speak",
+        "id":3,
+        "acknowledgement":1,
+        "text":"The answer is 21."
+    }));
+    let admitted = session.recv(Duration::from_secs(2));
+    assert_eq!(admitted["type"], "admitted");
+    session.send(json!({
+        "type":"output_ready",
+        "id":3,
+        "speech_id":admitted["speech_id"]
+    }));
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    let mut terminals = 0;
+    while terminals == 0 {
+        let message = session.recv(
+            deadline
+                .checked_duration_since(std::time::Instant::now())
+                .expect("Expert answer did not reach a terminal"),
+        );
+        assert_ne!(message["type"], "fatal");
+        assert_ne!(
+            message["text"],
+            "[Voice transcript] Spokesperson said: Let me check that for you."
+        );
+        terminals += usize::from(message["type"] == "speech_completed" && message["id"] == 3);
+    }
+    assert_eq!(terminals, 1);
+    one_response_rx
+        .recv_timeout(Duration::from_secs(2))
+        .unwrap();
+    session.shutdown();
+    server.join().unwrap();
+}
+
+#[test]
+fn queued_settings_reject_before_clean_shutdown() {
+    let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
+    let server = std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async move {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                endpoint_tx
+                    .send(format!("ws://{}/", listener.local_addr().unwrap()))
+                    .unwrap();
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut socket = accept_async(stream).await.unwrap();
+                let update = receive_realtime_json(&mut socket).await;
+                acknowledge_realtime_session(&mut socket, &update).await;
+                send_realtime_json(
+                    &mut socket,
+                    json!({"type":"response.created","response":{"id":"response-handoff"}}),
+                )
+                .await;
+                send_realtime_json(
+                    &mut socket,
+                    json!({"type":"response.created","response":{"id":"response-busy"}}),
+                )
+                .await;
+                send_realtime_json(
+                    &mut socket,
+                    json!({
+                        "type":"response.output_audio.delta",
+                        "response_id":"response-busy",
+                        "item_id":"assistant-busy",
+                        "output_index":0,
+                        "content_index":0,
+                        "delta":BASE64.encode(vec![0_u8; 8_192])
+                    }),
+                )
+                .await;
+                let _ = socket.next().await;
+                assert!(
+                    tokio::time::timeout(Duration::from_millis(100), listener.accept())
+                        .await
+                        .is_err()
+                );
+            });
+    });
+    let endpoint = endpoint_rx.recv().unwrap();
+    let mut session = ExpertSpokespersonTestSession::start(endpoint);
+    loop {
+        if session.recv(Duration::from_secs(2))["type"] == "spokesperson_speech" {
+            break;
+        }
+    }
+    session.send(json!({
+        "type":"set_tts_settings",
+        "id":2,
+        "expected_revision":1,
+        "settings":{"backend":"openai","model":"test-model","voice":"new-voice","rate":1.0}
+    }));
+    session.send(json!({"type":"shutdown"}));
+    let messages = session.wait();
+    let rejected = messages
+        .iter()
+        .find(|message| message["type"] == "tts_settings_result" && message["id"] == 2)
+        .expect("queued settings receive a correlated shutdown terminal");
+    assert_eq!(rejected["outcome"], "rejected");
+    assert_eq!(rejected["snapshot"]["revision"], 1);
+    assert!(messages.iter().all(|message| {
+        message["type"] != "tts_settings_result" || message["outcome"] != "applied"
+    }));
+    server.join().unwrap();
+}
+
+#[test]
+fn queued_rate_rejects_before_a_closed_runtime_terminal_is_reported() {
+    let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+    let server = std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async move {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                endpoint_tx
+                    .send(format!("ws://{}/", listener.local_addr().unwrap()))
+                    .unwrap();
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut socket = accept_async(stream).await.unwrap();
+                let update = receive_realtime_json(&mut socket).await;
+                acknowledge_realtime_session(&mut socket, &update).await;
+                send_realtime_json(
+                    &mut socket,
+                    json!({
+                        "type":"response.function_call_arguments.done",
+                        "response_id":"response-handoff",
+                        "call_id":"handoff-closed-runtime",
+                        "name":"handoff",
+                        "arguments":"{\"message\":\"inspect the failure\"}"
+                    }),
+                )
+                .await;
+                let cancel = receive_realtime_json(&mut socket).await;
+                assert_eq!(cancel["type"], "response.cancel");
+                assert_eq!(cancel["response_id"], "response-handoff");
+                release_rx.await.unwrap();
+                send_realtime_json(
+                    &mut socket,
+                    json!({
+                        "type":"response.done",
+                        "response":{"id":"response-handoff","status":"cancelled"}
+                    }),
+                )
+                .await;
+                socket.close(None).await.unwrap();
+            });
+    });
+    let endpoint = endpoint_rx.recv().unwrap();
+    let mut session = ExpertSpokespersonTestSession::start(endpoint);
+    let handoff = session.recv(Duration::from_secs(2));
+    assert_eq!(handoff["type"], "user_final");
+    assert_eq!(handoff["origin"], "handoff");
+    session.send(json!({
+        "type":"set_tts_settings",
+        "id":2,
+        "expected_revision":1,
+        "settings":{"backend":"openai","model":"test-model","voice":"old-voice","rate":1.25}
+    }));
+    release_tx.send(()).unwrap();
+
     let rejected = session.recv(Duration::from_secs(2));
     assert_eq!(rejected["type"], "tts_settings_result");
+    assert_eq!(rejected["id"], 2);
     assert_eq!(rejected["outcome"], "rejected");
-    assert_eq!(rejected["snapshot"]["voice"], "old-voice");
-    assert!(rejected["message"]
-        .as_str()
-        .unwrap()
-        .contains("between turns"));
-    session.shutdown();
+    assert_eq!(rejected["snapshot"]["revision"], 1);
+    assert_eq!(rejected["snapshot"]["rate"], 1.0);
+    let fatal = session.recv(Duration::from_secs(2));
+    assert_eq!(fatal["type"], "fatal");
+    assert_eq!(
+        fatal["message"],
+        "Spokesperson connection was lost during an active turn"
+    );
+    assert!(session.wait().iter().all(|message| {
+        message["type"] != "tts_settings_result" || message["outcome"] != "applied"
+    }));
     server.join().unwrap();
 }
 

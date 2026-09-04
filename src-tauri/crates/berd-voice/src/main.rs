@@ -2128,6 +2128,7 @@ struct LiveResponse {
     server_finished: bool,
     playback_complete: bool,
     interrupted: bool,
+    handoff_suppressed: bool,
     speech_terminal_sent: bool,
 }
 
@@ -2150,6 +2151,7 @@ impl LiveResponse {
             server_finished: false,
             playback_complete: false,
             interrupted: false,
+            handoff_suppressed: false,
             speech_terminal_sent: false,
         }
     }
@@ -2415,15 +2417,22 @@ fn prepare_spokesperson_rate_update(
         }
     };
     match rate {
-        Ok(rate) => {
-            send_update(id, rate)?;
-            *pending = Some(PendingSpokespersonRateUpdate {
+        Ok(rate) => match send_update(id, rate) {
+            Ok(()) => {
+                *pending = Some(PendingSpokespersonRateUpdate {
+                    id,
+                    base_revision: expected_revision,
+                    settings,
+                });
+                Ok(())
+            }
+            Err(message) => reject_spokesperson_tts_settings(
                 id,
-                base_revision: expected_revision,
-                settings,
-            });
-            Ok(())
-        }
+                snapshot,
+                format!("Spokesperson settings update could not begin: {message}"),
+                writer,
+            ),
+        },
         Err(message) => reject_spokesperson_tts_settings(id, snapshot, message, writer),
     }
 }
@@ -2496,15 +2505,55 @@ fn spokesperson_settings_are_quiescent(
         && !expert_output_reserved(directive_speeches, cancelled_directives, active, responses)
 }
 
+fn queued_spokesperson_settings_are_ready(
+    gate: &ExpertTurnGate,
+    active: Option<&LivePlayback>,
+    responses: &HashMap<String, LiveResponse>,
+    directive_speeches: &HashMap<u64, DirectiveSpeech>,
+    cancelled_directives: &HashSet<u64>,
+) -> bool {
+    !gate.is_busy(active.is_some(), responses.len())
+        && !expert_output_reserved(directive_speeches, cancelled_directives, active, responses)
+        && !live_truncation_pending(responses)
+}
+
+fn validate_queued_spokesperson_settings(
+    request: &PendingSpokespersonRateUpdate,
+    snapshot: &berd_voice::TtsConfigurationSnapshot,
+    runtime_config: &OpenAiSpokespersonConfig,
+) -> Result<(), String> {
+    if request.base_revision != snapshot.revision {
+        return Err(format!(
+            "stale TTS configuration revision: expected {}, current {}",
+            request.base_revision, snapshot.revision
+        ));
+    }
+    match &request.settings {
+        TtsSettings::OpenAi { model, .. } if model != &runtime_config.model => {
+            Err("Spokesperson model cannot change during a session".into())
+        }
+        TtsSettings::OpenAi { voice, .. } if voice.trim().is_empty() => {
+            Err("Spokesperson voice must not be empty".into())
+        }
+        TtsSettings::OpenAi { rate, .. } if !rate.is_finite() || !(0.25..=1.5).contains(rate) => {
+            Err("Expert-Spokesperson rate must be between 0.25 and 1.5".into())
+        }
+        TtsSettings::OpenAi { .. } => Ok(()),
+        _ => Err("Expert-Spokesperson requires OpenAI voice settings".into()),
+    }
+}
+
 fn spokesperson_voice_update_is_safe(
     update: &VoiceUpdateTransaction,
     core: &ExpertSpokespersonCore,
     snapshot: &berd_voice::TtsConfigurationSnapshot,
     quiescent: bool,
 ) -> bool {
+    let handoff_safe =
+        !core.has_unresolved_handoff() || matches!(update.purpose(), VoiceUpdatePurpose::Settings);
     core.semantic_revision() == update.semantic_revision
         && snapshot.revision == update.base_revision
-        && !core.has_unresolved_handoff()
+        && handoff_safe
         && quiescent
 }
 
@@ -2593,6 +2642,7 @@ fn run_expert_spokesperson_session(
     let mut input_during_tts_slot: Option<InputDuringTtsSlot> = None;
     let mut input_muted = false;
     let mut pending_user_response = false;
+    let mut queued_tts_settings: Option<PendingSpokespersonRateUpdate> = None;
     let mut pending_rate_update = None;
     let mut pending_voice_update: Option<VoiceUpdateTransaction> = None;
     let mut spokesperson_renew_at: Option<Instant> = None;
@@ -2700,6 +2750,68 @@ fn run_expert_spokesperson_session(
                 }
             }
         }
+        if queued_tts_settings.is_some()
+            && pending_rate_update.is_none()
+            && pending_voice_update.is_none()
+            && queued_spokesperson_settings_are_ready(
+                &turn_gate,
+                active.as_ref(),
+                &responses,
+                &directive_speeches,
+                &cancelled_directives,
+            )
+        {
+            let request = queued_tts_settings
+                .take()
+                .expect("matched queued settings request");
+            let snapshot = session_tts.as_ref().expect("initialized TTS snapshot");
+            let same_voice = matches!(
+                (&snapshot.settings, &request.settings),
+                (
+                    TtsSettings::OpenAi { voice: current, .. },
+                    TtsSettings::OpenAi { voice: requested, .. }
+                ) if current == requested
+            );
+            if same_voice {
+                prepare_spokesperson_rate_update(
+                    request,
+                    true,
+                    snapshot,
+                    &mut pending_rate_update,
+                    |request_id, rate| {
+                        runtime.as_ref().expect("initialized runtime").send(
+                            SpokespersonCommand::UpdateSpeed {
+                                request_id,
+                                speed: rate,
+                            },
+                        )
+                    },
+                    &mut writer,
+                )?;
+            } else {
+                let id = request.id;
+                pending_voice_update = match VoiceUpdateTransaction::start(
+                    VoiceUpdateRequest {
+                        id,
+                        base_revision: request.base_revision,
+                        settings: request.settings,
+                        semantic_revision: core.semantic_revision(),
+                    },
+                    snapshot.revision,
+                    true,
+                    runtime_config
+                        .as_ref()
+                        .expect("initialized Spokesperson config"),
+                    core.semantic_transcript(),
+                ) {
+                    Ok(update) => Some(update),
+                    Err(message) => {
+                        reject_spokesperson_tts_settings(id, snapshot, message, &mut writer)?;
+                        None
+                    }
+                };
+            }
+        }
         if let Some(events) = runtime_events.as_ref() {
             if let Ok(event) = events.try_recv() {
                 match event {
@@ -2735,6 +2847,7 @@ fn run_expert_spokesperson_session(
                                 || !cancelled_directives.is_empty()
                                 || pending_rate_update.is_some()
                                 || pending_voice_update.is_some()
+                                || queued_tts_settings.is_some()
                                 || live_truncation_pending(&responses),
                             || {
                                 runtime
@@ -2801,6 +2914,7 @@ fn run_expert_spokesperson_session(
                                 || !cancelled_directives.is_empty()
                                 || pending_rate_update.is_some()
                                 || pending_voice_update.is_some()
+                                || queued_tts_settings.is_some()
                                 || live_truncation_pending(&responses),
                             || {
                                 runtime
@@ -2883,6 +2997,7 @@ fn run_expert_spokesperson_session(
                                 || !cancelled_directives.is_empty()
                                 || pending_rate_update.is_some()
                                 || pending_voice_update.is_some()
+                                || queued_tts_settings.is_some()
                                 || live_truncation_pending(&responses),
                             || {
                                 runtime
@@ -3086,6 +3201,7 @@ fn run_expert_spokesperson_session(
                                 || !cancelled_directives.is_empty()
                                 || pending_rate_update.is_some()
                                 || pending_voice_update.is_some()
+                                || queued_tts_settings.is_some()
                                 || live_truncation_pending(&responses),
                             || {
                                 runtime
@@ -3173,6 +3289,7 @@ fn run_expert_spokesperson_session(
                                 || !cancelled_directives.is_empty()
                                 || pending_rate_update.is_some()
                                 || pending_voice_update.is_some()
+                                || queued_tts_settings.is_some()
                                 || live_truncation_pending(&responses),
                             || {
                                 runtime
@@ -3182,7 +3299,11 @@ fn run_expert_spokesperson_session(
                             },
                         )?;
                     }
-                    SpokespersonEvent::Handoff { call_id, message } => {
+                    SpokespersonEvent::Handoff {
+                        response_id,
+                        call_id,
+                        message,
+                    } => {
                         record_and_emit_live_event(
                             &mut core,
                             &mut next_live_token,
@@ -3190,6 +3311,39 @@ fn run_expert_spokesperson_session(
                             LiveSideEvent::Handoff { call_id, message },
                             &mut writer,
                         )?;
+                        let active_response_id =
+                            active.as_ref().map(|playback| playback.response_id.clone());
+                        if active_response_id.as_deref() == Some(response_id.as_str()) {
+                            cancel_live_playback(&mut active);
+                        }
+                        let interrupted = HashSet::from([response_id.clone()]);
+                        interrupt_live_responses(
+                            &interrupted,
+                            active_response_id.as_deref(),
+                            &mut responses,
+                            &mut waiting_responses,
+                        );
+                        let response = responses
+                            .entry(response_id.clone())
+                            .or_insert_with(|| LiveResponse::new(None, None));
+                        response.handoff_suppressed = true;
+                        let runtime_open = runtime
+                            .as_ref()
+                            .expect("initialized runtime")
+                            .send(SpokespersonCommand::CancelResponses {
+                                response_ids: vec![response_id.clone()],
+                            })
+                            .is_ok();
+                        require_live_response_truncation(response)?;
+                        if runtime_open
+                            && active_response_id.as_deref() != Some(response_id.as_str())
+                        {
+                            send_live_response_truncation(
+                                &response_id,
+                                response,
+                                runtime.as_ref().expect("initialized runtime"),
+                            )?;
+                        }
                     }
                     event @ (SpokespersonEvent::Expired(_) | SpokespersonEvent::SessionLost(_)) => {
                         let (message, connection_lost) = match event {
@@ -3197,6 +3351,15 @@ fn run_expert_spokesperson_session(
                             SpokespersonEvent::SessionLost(message) => (message, true),
                             _ => unreachable!("matched a session terminal event"),
                         };
+                        if let Some(request) = queued_tts_settings.take() {
+                            reject_spokesperson_tts_settings(
+                                request.id,
+                                session_tts.as_ref().expect("initialized TTS snapshot"),
+                                "Spokesperson session ended before the queued settings update could begin"
+                                    .into(),
+                                &mut writer,
+                            )?;
+                        }
                         let quiescent = spokesperson_settings_are_quiescent(
                             &turn_gate,
                             active.as_ref(),
@@ -3296,6 +3459,15 @@ fn run_expert_spokesperson_session(
                         }
                     }
                     SpokespersonEvent::Failed(message) => {
+                        if let Some(request) = queued_tts_settings.take() {
+                            reject_spokesperson_tts_settings(
+                                request.id,
+                                session_tts.as_ref().expect("initialized TTS snapshot"),
+                                "Spokesperson failed before the queued settings update could begin"
+                                    .into(),
+                                &mut writer,
+                            )?;
+                        }
                         write_protocol_fatal(&mut writer, "Spokesperson failed", &message)?;
                         cancel_live_playback(&mut active);
                         break;
@@ -3425,6 +3597,7 @@ fn run_expert_spokesperson_session(
                 || !cancelled_directives.is_empty()
                 || pending_rate_update.is_some()
                 || pending_voice_update.is_some()
+                || queued_tts_settings.is_some()
                 || live_truncation_pending(&responses),
             || {
                 runtime
@@ -3440,7 +3613,10 @@ fn run_expert_spokesperson_session(
             &responses,
         ) {
             if let Some(request) = turn_gate.take_ready(
-                active.is_some() || pending_rate_update.is_some() || pending_voice_update.is_some(),
+                active.is_some()
+                    || pending_rate_update.is_some()
+                    || pending_voice_update.is_some()
+                    || queued_tts_settings.is_some(),
                 responses.len(),
             ) {
                 submit_expert_prepare(
@@ -3467,7 +3643,18 @@ fn run_expert_spokesperson_session(
                 write_protocol_fatal(&mut writer, "invalid session input", &message)?;
                 break;
             }
-            Input::Eof | Input::Request(SessionRequest::Shutdown) => break,
+            Input::Eof => break,
+            Input::Request(SessionRequest::Shutdown) => {
+                if let Some(request) = queued_tts_settings.take() {
+                    reject_spokesperson_tts_settings(
+                        request.id,
+                        session_tts.as_ref().expect("initialized TTS snapshot"),
+                        "session shut down before the queued settings update could begin".into(),
+                        &mut writer,
+                    )?;
+                }
+                break;
+            }
             Input::Pcm(_) if !initialized => {
                 write_protocol_fatal(
                     &mut writer,
@@ -3602,7 +3789,9 @@ fn run_expert_spokesperson_session(
                         active.as_ref(),
                         &responses,
                     ),
-                    pending_rate_update.is_some() || pending_voice_update.is_some(),
+                    pending_rate_update.is_some()
+                        || pending_voice_update.is_some()
+                        || queued_tts_settings.is_some(),
                     active.is_some(),
                     responses.len(),
                 );
@@ -3870,84 +4059,36 @@ fn run_expert_spokesperson_session(
                 expected_revision,
                 settings,
             }) => {
-                let quiescent = !core.has_unresolved_handoff()
-                    && spokesperson_settings_are_quiescent(
-                        &turn_gate,
-                        active.as_ref(),
-                        &responses,
-                        &directive_speeches,
-                        &cancelled_directives,
-                        pending_user_response,
-                    );
-                let current_voice = match &session_tts
-                    .as_ref()
-                    .expect("hello initialized TTS snapshot")
-                    .settings
-                {
-                    TtsSettings::OpenAi { voice, .. } => Some(voice.as_str()),
-                    _ => None,
-                };
-                let requested_voice = match &settings {
-                    TtsSettings::OpenAi { voice, .. } => Some(voice.clone()),
-                    _ => None,
-                };
                 let request = PendingSpokespersonRateUpdate {
                     id,
                     base_revision: expected_revision,
                     settings,
                 };
-                if pending_voice_update.is_some() {
-                    reject_spokesperson_tts_settings(
-                        id,
-                        session_tts.as_ref().expect("initialized TTS snapshot"),
-                        "another Spokesperson voice update is in progress".into(),
-                        &mut writer,
-                    )?;
-                } else if current_voice == requested_voice.as_deref() {
-                    prepare_spokesperson_rate_update(
-                        request,
-                        quiescent,
-                        session_tts.as_ref().expect("initialized TTS snapshot"),
-                        &mut pending_rate_update,
-                        |request_id, rate| {
-                            runtime.as_ref().expect("initialized runtime").send(
-                                SpokespersonCommand::UpdateSpeed {
-                                    request_id,
-                                    speed: rate,
-                                },
-                            )
-                        },
-                        &mut writer,
-                    )?;
-                } else if pending_rate_update.is_some() {
+                if queued_tts_settings.is_some()
+                    || pending_voice_update.is_some()
+                    || pending_rate_update.is_some()
+                {
                     reject_spokesperson_tts_settings(
                         id,
                         session_tts.as_ref().expect("initialized TTS snapshot"),
                         "another Spokesperson settings update is in progress".into(),
                         &mut writer,
                     )?;
+                } else if let Err(message) = validate_queued_spokesperson_settings(
+                    &request,
+                    session_tts.as_ref().expect("initialized TTS snapshot"),
+                    runtime_config
+                        .as_ref()
+                        .expect("initialized Spokesperson config"),
+                ) {
+                    reject_spokesperson_tts_settings(
+                        id,
+                        session_tts.as_ref().expect("initialized TTS snapshot"),
+                        message,
+                        &mut writer,
+                    )?;
                 } else {
-                    let snapshot = session_tts.as_ref().expect("initialized TTS snapshot");
-                    let id = request.id;
-                    match VoiceUpdateTransaction::start(
-                        VoiceUpdateRequest {
-                            id: request.id,
-                            base_revision: request.base_revision,
-                            settings: request.settings,
-                            semantic_revision: core.semantic_revision(),
-                        },
-                        snapshot.revision,
-                        quiescent,
-                        runtime_config
-                            .as_ref()
-                            .expect("initialized Spokesperson config"),
-                        core.semantic_transcript(),
-                    ) {
-                        Ok(update) => pending_voice_update = Some(update),
-                        Err(message) => {
-                            reject_spokesperson_tts_settings(id, snapshot, message, &mut writer)?
-                        }
-                    }
+                    queued_tts_settings = Some(request);
                 }
             }
             Input::Request(SessionRequest::SetPaused { .. }) => {}
@@ -4425,6 +4566,10 @@ fn publish_live_response_if_complete(
         .remove(response_id)
         .expect("ready response exists");
     let transcript = delivered_live_transcript(&response);
+    if response.handoff_suppressed && transcript.is_empty() {
+        core.finish_spokesperson_turn(response_id, String::new(), false);
+        return Ok(());
+    }
     core.finish_spokesperson_turn(response_id, transcript.clone(), response.interrupted);
     record_and_emit_live_event(
         core,
