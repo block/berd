@@ -45,7 +45,7 @@ export type OpenAiRealtimeProtocolEvent =
       speaker: "user" | "spokesperson";
       text: string;
       interrupted: boolean;
-      evidence: "provider_final" | "provider_delta";
+      evidence: "provider_final" | "provider_delta" | "host_played_frames";
     }
   | {
       type: "handoff";
@@ -129,6 +129,71 @@ export function getOpenAiRealtimeExpertPipeCursor(
   sessionId: string,
 ): Promise<number> {
   return invoke("get_openai_realtime_expert_pipe_cursor", { sessionId });
+}
+
+export function registerOpenAiRealtimeHandoff(
+  sessionId: string,
+  handoffId: string,
+  message: string,
+): Promise<void> {
+  return invoke("register_openai_realtime_handoff", {
+    sessionId,
+    handoffId,
+    message,
+  });
+}
+
+export function unknownOpenAiRealtimeHandoffIds(
+  sessionId: string,
+  handoffIds: string[],
+): Promise<string[]> {
+  return invoke("unknown_openai_realtime_handoff_ids", {
+    sessionId,
+    handoffIds,
+  });
+}
+
+export function markOpenAiRealtimeHandoffsResolving(
+  sessionId: string,
+  handoffIds: string[],
+): Promise<void> {
+  return invoke("mark_openai_realtime_handoffs_resolving", {
+    sessionId,
+    handoffIds,
+  });
+}
+
+export function dismissOpenAiRealtimeHandoffs(
+  sessionId: string,
+  handoffIds: string[],
+): Promise<void> {
+  return invoke("dismiss_openai_realtime_handoffs", {
+    sessionId,
+    handoffIds,
+  });
+}
+
+export type OpenAiRealtimeHandoffReminder =
+  | { status: "none" }
+  | {
+      status: "reminder";
+      handoffIds: string[];
+      attempt: number;
+      requests: string;
+      message: string;
+    }
+  | { status: "exhausted"; handoffIds: string[]; message: string };
+
+export function completeOpenAiRealtimeExpertTurn(
+  sessionId: string,
+  retryingHandoffIds: string[],
+  maxAttempts: number,
+): Promise<OpenAiRealtimeHandoffReminder> {
+  return invoke("complete_openai_realtime_expert_turn", {
+    sessionId,
+    retryingHandoffIds,
+    maxAttempts,
+  });
 }
 
 export function reduceOpenAiRealtimeSpokespersonEvent(

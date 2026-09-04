@@ -19,6 +19,8 @@ const mocks = vi.hoisted(() => ({
   createPeer: vi.fn(),
   createSession: vi.fn(),
   createResponse: true,
+  completeExpertTurn: vi.fn(),
+  dismissHandoffs: vi.fn(),
   enqueueSpokespersonMessage: vi.fn(),
   getExpertPipeCursor: vi.fn(),
   listenControls: vi.fn(),
@@ -148,7 +150,12 @@ const mocks = vi.hoisted(() => ({
     message: string;
   }>,
   pipeConsumed: { master: 0, emissary: 0 },
+  openHandoffs: new Map<
+    string,
+    { message: string; reminderAttempts: number; resolving: boolean }
+  >(),
   rebindControls: vi.fn(),
+  registerHandoff: vi.fn(),
   registerEmissary: vi.fn(),
   recordToolOutput: vi.fn(),
   activeEmissary: null as null | {
@@ -176,10 +183,12 @@ const mocks = vi.hoisted(() => ({
   waitForBridgeReady: vi.fn(),
   sendRealtimeEvents: vi.fn(),
   sendExpertPipeMessage: vi.fn(),
+  markHandoffsResolving: vi.fn(),
   steerPrompt: vi.fn(),
   requestToolOutput: vi.fn(),
   requestMasterMessage: vi.fn(),
   requestTypedUserMessage: vi.fn(),
+  unknownHandoffIds: vi.fn(),
 }));
 
 vi.mock("@/shared/api/acpApi", () => ({
@@ -188,13 +197,17 @@ vi.mock("@/shared/api/acpApi", () => ({
 
 vi.mock("@/shared/api/openaiRealtime", () => ({
   claimVoiceDictationMicrophone: mocks.claimMicrophone,
+  completeOpenAiRealtimeExpertTurn: mocks.completeExpertTurn,
   createOpenAiRealtimeVoiceSession: mocks.createSession,
+  dismissOpenAiRealtimeHandoffs: mocks.dismissHandoffs,
   enqueueOpenAiRealtimeSpokespersonMessage: mocks.enqueueSpokespersonMessage,
   getOpenAiRealtimeExpertPipeCursor: mocks.getExpertPipeCursor,
   listenToOpenAiRealtimeVoiceControls: mocks.listenControls,
+  markOpenAiRealtimeHandoffsResolving: mocks.markHandoffsResolving,
   publishOpenAiRealtimeVoiceActivity: mocks.publishActivity,
   publishOpenAiRealtimeVoiceMicrophoneMuted: mocks.publishMuted,
   rebindOpenAiRealtimeVoiceControls: mocks.rebindControls,
+  registerOpenAiRealtimeHandoff: mocks.registerHandoff,
   reduceOpenAiRealtimeSpokespersonEvent: async (
     sessionId: string,
     event: { type?: string },
@@ -225,6 +238,7 @@ vi.mock("@/shared/api/openaiRealtime", () => ({
   startOpenAiRealtimeSpokespersonProtocol: mocks.startProtocol,
   stopOpenAiRealtimeVoiceControls: mocks.stopControls,
   stopOpenAiRealtimeSpokespersonProtocol: mocks.stopProtocol,
+  unknownOpenAiRealtimeHandoffIds: mocks.unknownHandoffIds,
 }));
 
 vi.mock("@/features/chat/lib/openaiRealtimeAudio", () => ({
@@ -270,236 +284,7 @@ vi.mock("../lib/realtimeEmissaryProtocol", () => ({
   configureRealtimeEmissarySession: vi.fn(),
   createInvalidToolCallOutput: mocks.createInvalidToolCallOutput,
   createHandoffToolOutput: mocks.createHandoffToolOutput,
-  DirectMessagePipe: class {
-    private nextId = 1;
-    private pending: Array<{
-      id: number;
-      sender: "master" | "emissary";
-      recipient: "master" | "emissary";
-      senderCursor: number;
-      message: string;
-    }> = [];
-    private consumed = { master: 0, emissary: 0 };
-    constructor(initialCursor = 0) {
-      mocks.pipeInitialCursors.push(initialCursor);
-    }
-    cursor(peer: "master" | "emissary") {
-      return this.consumed[peer];
-    }
-    deliveryCursor(peer: "master" | "emissary") {
-      const latest = this.pending.at(-1);
-      return latest?.recipient === peer ? latest.id : this.consumed[peer];
-    }
-    send(options: {
-      sender: "master" | "emissary";
-      cursor: number;
-      message: string;
-    }) {
-      const active = this.pending[0];
-      if (active && active.sender !== options.sender) {
-        const latest = this.pending.at(-1);
-        if (!latest || options.cursor !== latest.id) {
-          return {
-            accepted: false,
-            reason: "pipe_busy",
-            cursor: this.consumed[options.sender],
-          };
-        }
-        this.consumed[options.sender] = latest.id;
-        this.pending = [];
-      }
-      if (options.cursor !== this.consumed[options.sender]) {
-        return {
-          accepted: false,
-          reason: "stale_cursor",
-          cursor: this.consumed[options.sender],
-        };
-      }
-      const id = this.nextId++;
-      const outbound = {
-        id,
-        sender: options.sender,
-        recipient: options.sender === "master" ? "emissary" : "master",
-        senderCursor: this.consumed[options.sender],
-        message: options.message,
-      } as const;
-      this.pending.push(outbound);
-      return {
-        accepted: true,
-        cursor: this.consumed[options.sender],
-        outbound,
-      };
-    }
-  },
   REALTIME_EXPERT_INSTRUCTIONS: "Expert instructions",
-  RealtimeEmissaryProtocol: class {
-    handle(event: { type?: string }) {
-      if (event.type === "test.transcript")
-        return [
-          {
-            interrupted: false,
-            itemId: "user-item-1",
-            speaker: "user",
-            text: "hello master",
-            type: "transcript.finalized",
-          },
-        ];
-      if (event.type === "test.transcript_repository")
-        return [
-          {
-            interrupted: false,
-            itemId: "user-item-repository",
-            speaker: "user",
-            text: "how many repos are in my development folder?",
-            type: "transcript.finalized",
-          },
-        ];
-      if (event.type === "test.transcript_followup")
-        return [
-          {
-            interrupted: false,
-            itemId: "user-item-2",
-            speaker: "user",
-            text: "are any of them symbolic links?",
-            type: "transcript.finalized",
-          },
-        ];
-      if (event.type === "test.transcript_partial")
-        return [
-          {
-            itemId: "user-item-1",
-            speaker: "user",
-            text: "hello",
-            type: "transcript.updated",
-          },
-        ];
-      if (event.type === "test.transcript_corrected")
-        return [
-          {
-            itemId: "user-item-1",
-            speaker: "user",
-            text: "hello master",
-            type: "transcript.finalized",
-          },
-        ];
-      if (event.type === "test.emissary")
-        return [
-          {
-            interrupted: false,
-            itemId: "emissary-item-1",
-            speaker: "emissary",
-            text: "hello user",
-            type: "transcript.finalized",
-          },
-        ];
-      if (event.type === "test.emissary_partial_first")
-        return [
-          {
-            itemId: "emissary-item-multi",
-            speaker: "emissary",
-            text: "Let me think about that.",
-            type: "transcript.updated",
-          },
-        ];
-      if (event.type === "test.emissary_partial_second")
-        return [
-          {
-            itemId: "emissary-item-multi",
-            speaker: "emissary",
-            text: "Let me think about that. I received a compact transcript.",
-            type: "transcript.updated",
-          },
-        ];
-      if (event.type === "test.emissary_result")
-        return [
-          {
-            interrupted: false,
-            itemId: "emissary-item-2",
-            speaker: "emissary",
-            text: "You have 21 repositories.",
-            type: "transcript.finalized",
-          },
-        ];
-      if (event.type === "test.emissary_followup_ack")
-        return [
-          {
-            interrupted: false,
-            itemId: "emissary-item-3",
-            speaker: "emissary",
-            text: "I'll verify that.",
-            type: "transcript.finalized",
-          },
-        ];
-      if (event.type === "test.emissary_symlink_result")
-        return [
-          {
-            interrupted: false,
-            itemId: "emissary-item-4",
-            speaker: "emissary",
-            text: "None of those repositories are symbolic links.",
-            type: "transcript.finalized",
-          },
-        ];
-      if (event.type === "test.emissary_interrupted")
-        return [
-          {
-            interrupted: true,
-            speaker: "emissary",
-            text: "partially heard",
-            type: "transcript.finalized",
-          },
-        ];
-      if (event.type === "test.handoff")
-        return [
-          {
-            callId: "call-1",
-            message: "Please inspect the disk.",
-            type: "handoff",
-          },
-        ];
-      if (event.type === "test.handoff_followup")
-        return [
-          {
-            callId: "call-2",
-            message: "Please verify whether those repositories are symlinks.",
-            type: "handoff",
-          },
-        ];
-      if (event.type === "test.invalid_tool_call")
-        return [
-          {
-            callId: "call-broken",
-            error: "JSON Parse error: Unterminated string",
-            toolName: "handoff",
-            type: "tool_call.invalid",
-          },
-        ];
-      return [];
-    }
-  },
-  RealtimeResponseCoordinator: class {
-    handle() {
-      return [];
-    }
-    takeCompletedHandoffIds() {
-      return [];
-    }
-    takeFailedHandoffIds() {
-      return [];
-    }
-    requestMasterMessage(message: unknown) {
-      return mocks.requestMasterMessage(message);
-    }
-    recordToolOutput(event: unknown) {
-      return mocks.recordToolOutput(event);
-    }
-    requestToolOutput(event: unknown) {
-      return mocks.requestToolOutput(event);
-    }
-    requestTypedUserMessage(text: string) {
-      return mocks.requestTypedUserMessage(text);
-    }
-  },
   sendRealtimeEvents: mocks.sendRealtimeEvents,
 }));
 
@@ -682,6 +467,74 @@ beforeEach(() => {
   mocks.publishActivity.mockResolvedValue(undefined);
   mocks.publishMuted.mockResolvedValue(undefined);
   mocks.pipeInitialCursors.length = 0;
+  mocks.openHandoffs.clear();
+  mocks.registerHandoff.mockImplementation(
+    async (_sessionId: string, handoffId: string, message: string) => {
+      mocks.openHandoffs.set(handoffId, {
+        message,
+        reminderAttempts: 0,
+        resolving: false,
+      });
+    },
+  );
+  mocks.unknownHandoffIds.mockImplementation(
+    async (_sessionId: string, handoffIds: string[]) =>
+      handoffIds.filter((handoffId) => !mocks.openHandoffs.has(handoffId)),
+  );
+  mocks.markHandoffsResolving.mockImplementation(
+    async (_sessionId: string, handoffIds: string[]) => {
+      for (const handoffId of handoffIds) {
+        const handoff = mocks.openHandoffs.get(handoffId);
+        if (handoff) handoff.resolving = true;
+      }
+    },
+  );
+  mocks.dismissHandoffs.mockImplementation(
+    async (_sessionId: string, handoffIds: string[]) => {
+      for (const handoffId of handoffIds) mocks.openHandoffs.delete(handoffId);
+    },
+  );
+  mocks.completeExpertTurn.mockImplementation(
+    async (
+      _sessionId: string,
+      retryingHandoffIds: string[],
+      maxAttempts: number,
+    ) => {
+      const retrying = new Set(retryingHandoffIds);
+      const pending = [...mocks.openHandoffs.entries()].filter(
+        ([handoffId, handoff]) =>
+          !handoff.resolving &&
+          (handoff.reminderAttempts === 0 || retrying.has(handoffId)),
+      );
+      if (pending.length === 0) return { status: "none" };
+      const exhausted = pending.filter(
+        ([, handoff]) => handoff.reminderAttempts >= maxAttempts,
+      );
+      if (exhausted.length > 0) {
+        const handoffIds = exhausted.map(([handoffId]) => handoffId);
+        return {
+          status: "exhausted",
+          handoffIds,
+          message: `The Expert left required ${handoffIds.join(", ")} unresolved after ${maxAttempts} reminder attempts.`,
+        };
+      }
+      for (const [, handoff] of pending) handoff.reminderAttempts += 1;
+      const handoffIds = pending.map(([handoffId]) => handoffId);
+      const requests = pending
+        .map(([handoffId, handoff]) => `- ${handoffId}: ${handoff.message}`)
+        .join("\n");
+      const attempt = Math.max(
+        ...pending.map(([, handoff]) => handoff.reminderAttempts),
+      );
+      return {
+        status: "reminder",
+        handoffIds,
+        attempt,
+        requests,
+        message: `[Private handoff reminder]\nYou ended your turn without resolving the required handoffs below. Resolve them now with one or more send-to-spokesperson --mode say calls that name every answered handoff in --resolves, or dismiss obsolete handoffs explicitly. Berd will retry this reminder up to ${maxAttempts} times. Do not redo completed work.\n${requests}`,
+      };
+    },
+  );
   const sendPipeMessage = (
     sender: "master" | "emissary",
     cursor: number,

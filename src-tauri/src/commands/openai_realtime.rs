@@ -1,7 +1,7 @@
 use berd_voice::openai_realtime_protocol::{
     spokesperson_session_update, RealtimeCoordinatorResult, RealtimeExpertMessage,
-    RealtimeMessagePipe, RealtimePipeExchange, RealtimePipePeer, RealtimeProtocolEvent,
-    RealtimeProtocolReducer, RealtimeResponseCoordinator, RealtimeSpokespersonSessionOptions,
+    RealtimeExpertSpokespersonSession, RealtimeHandoffReminder, RealtimePipeExchange,
+    RealtimeSessionReduction, RealtimeSpokespersonSessionOptions,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -17,33 +17,7 @@ const OPENAI_REALTIME_CLIENT_SECRETS_URL: &str =
 
 #[derive(Default)]
 pub struct OpenAiRealtimeProtocolState {
-    sessions: Mutex<HashMap<String, OpenAiRealtimeProtocolSession>>,
-}
-
-#[derive(Debug)]
-struct OpenAiRealtimeProtocolSession {
-    reducer: RealtimeProtocolReducer,
-    responses: RealtimeResponseCoordinator,
-    pipe: RealtimeMessagePipe,
-}
-
-impl OpenAiRealtimeProtocolSession {
-    fn new(initial_cursor: u64) -> Self {
-        Self {
-            reducer: RealtimeProtocolReducer::default(),
-            responses: RealtimeResponseCoordinator::default(),
-            pipe: RealtimeMessagePipe::new(initial_cursor),
-        }
-    }
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OpenAiRealtimeReduction {
-    protocol_events: Vec<RealtimeProtocolEvent>,
-    client_events: Vec<serde_json::Value>,
-    completed_handoff_ids: Vec<String>,
-    failed_handoff_ids: Vec<String>,
+    sessions: Mutex<HashMap<String, RealtimeExpertSpokespersonSession>>,
 }
 
 #[derive(Serialize)]
@@ -117,7 +91,7 @@ pub fn start_openai_realtime_spokesperson_protocol(
         .map_err(|_| "OpenAI Realtime protocol state is unavailable".to_string())?
         .insert(
             session_id,
-            OpenAiRealtimeProtocolSession::new(initial_cursor),
+            RealtimeExpertSpokespersonSession::new(initial_cursor),
         );
     Ok(())
 }
@@ -129,10 +103,7 @@ pub fn enqueue_openai_realtime_spokesperson_message(
     message: String,
 ) -> Result<RealtimePipeExchange, String> {
     with_protocol_session(state, session_id, |session| {
-        let cursor = session.pipe.delivery_cursor(RealtimePipePeer::Spokesperson);
-        session
-            .pipe
-            .send(RealtimePipePeer::Spokesperson, cursor, &message)
+        session.enqueue_spokesperson_message(&message)
     })
 }
 
@@ -144,9 +115,7 @@ pub fn send_openai_realtime_expert_pipe_message(
     message: String,
 ) -> Result<RealtimePipeExchange, String> {
     with_protocol_session(state, session_id, |session| {
-        session
-            .pipe
-            .send(RealtimePipePeer::Expert, cursor, &message)
+        session.send_expert_pipe_message(cursor, &message)
     })
 }
 
@@ -155,8 +124,67 @@ pub fn get_openai_realtime_expert_pipe_cursor(
     state: State<'_, OpenAiRealtimeProtocolState>,
     session_id: String,
 ) -> Result<u64, String> {
+    with_protocol_session(
+        state,
+        session_id,
+        |session| Ok(session.expert_pipe_cursor()),
+    )
+}
+
+#[tauri::command]
+pub fn register_openai_realtime_handoff(
+    state: State<'_, OpenAiRealtimeProtocolState>,
+    session_id: String,
+    handoff_id: String,
+    message: String,
+) -> Result<(), String> {
     with_protocol_session(state, session_id, |session| {
-        Ok(session.pipe.cursor(RealtimePipePeer::Expert))
+        session.register_handoff(&handoff_id, &message)
+    })
+}
+
+#[tauri::command]
+pub fn unknown_openai_realtime_handoff_ids(
+    state: State<'_, OpenAiRealtimeProtocolState>,
+    session_id: String,
+    handoff_ids: Vec<String>,
+) -> Result<Vec<String>, String> {
+    with_protocol_session(state, session_id, |session| {
+        Ok(session.unknown_handoff_ids(&handoff_ids))
+    })
+}
+
+#[tauri::command]
+pub fn mark_openai_realtime_handoffs_resolving(
+    state: State<'_, OpenAiRealtimeProtocolState>,
+    session_id: String,
+    handoff_ids: Vec<String>,
+) -> Result<(), String> {
+    with_protocol_session(state, session_id, |session| {
+        session.mark_handoffs_resolving(&handoff_ids)
+    })
+}
+
+#[tauri::command]
+pub fn dismiss_openai_realtime_handoffs(
+    state: State<'_, OpenAiRealtimeProtocolState>,
+    session_id: String,
+    handoff_ids: Vec<String>,
+) -> Result<(), String> {
+    with_protocol_session(state, session_id, |session| {
+        session.dismiss_handoffs(&handoff_ids)
+    })
+}
+
+#[tauri::command]
+pub fn complete_openai_realtime_expert_turn(
+    state: State<'_, OpenAiRealtimeProtocolState>,
+    session_id: String,
+    retrying_handoff_ids: Vec<String>,
+    max_attempts: u8,
+) -> Result<RealtimeHandoffReminder, String> {
+    with_protocol_session(state, session_id, |session| {
+        Ok(session.complete_expert_turn(&retrying_handoff_ids, max_attempts))
     })
 }
 
@@ -165,7 +193,7 @@ pub fn reduce_openai_realtime_spokesperson_event(
     state: State<'_, OpenAiRealtimeProtocolState>,
     session_id: String,
     event: serde_json::Value,
-) -> Result<OpenAiRealtimeReduction, String> {
+) -> Result<RealtimeSessionReduction, String> {
     let session_id = non_empty_session_id(session_id)?;
     let mut sessions = state
         .sessions
@@ -174,13 +202,7 @@ pub fn reduce_openai_realtime_spokesperson_event(
     let session = sessions
         .get_mut(&session_id)
         .ok_or_else(|| "OpenAI Realtime protocol session is not active".to_string())?;
-    let response_update = session.responses.handle(&event)?;
-    Ok(OpenAiRealtimeReduction {
-        protocol_events: session.reducer.handle(&event)?,
-        client_events: response_update.events,
-        completed_handoff_ids: response_update.completed_handoff_ids,
-        failed_handoff_ids: response_update.failed_handoff_ids,
-    })
+    session.handle_provider_event(&event)
 }
 
 #[tauri::command]
@@ -190,7 +212,7 @@ pub fn request_openai_realtime_expert_message(
     message: RealtimeExpertMessage,
 ) -> Result<RealtimeCoordinatorResult, String> {
     with_protocol_session(state, session_id, |session| {
-        session.responses.request_expert_message(message)
+        session.request_expert_message(message)
     })
 }
 
@@ -202,9 +224,7 @@ pub fn request_openai_realtime_tool_output(
     request_response: bool,
 ) -> Result<RealtimeCoordinatorResult, String> {
     with_protocol_session(state, session_id, |session| {
-        Ok(session
-            .responses
-            .request_tool_output(event, request_response))
+        Ok(session.request_tool_output(event, request_response))
     })
 }
 
@@ -215,7 +235,7 @@ pub fn request_openai_realtime_typed_user_message(
     text: String,
 ) -> Result<RealtimeCoordinatorResult, String> {
     with_protocol_session(state, session_id, |session| {
-        session.responses.request_typed_user_message(&text)
+        session.request_typed_user_message(&text)
     })
 }
 
@@ -245,7 +265,7 @@ fn non_empty_session_id(session_id: String) -> Result<String, String> {
 fn with_protocol_session<T>(
     state: State<'_, OpenAiRealtimeProtocolState>,
     session_id: String,
-    operation: impl FnOnce(&mut OpenAiRealtimeProtocolSession) -> Result<T, String>,
+    operation: impl FnOnce(&mut RealtimeExpertSpokespersonSession) -> Result<T, String>,
 ) -> Result<T, String> {
     let session_id = non_empty_session_id(session_id)?;
     let mut sessions = state
