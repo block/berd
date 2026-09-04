@@ -25,7 +25,7 @@ use berd_voice::input::{
     VoiceInputRuntime, INPUT_FRAME_SAMPLES,
 };
 use berd_voice::openai_realtime_protocol::{
-    expert_transcript_message, resolve_interrupted_spokesperson_transcript,
+    expert_handoff_message, expert_transcript_message, resolve_interrupted_spokesperson_transcript,
     RealtimeInterruptedTranscriptInput, RealtimeTranscriptAudioPart, RealtimeTranscriptSpeaker,
 };
 use berd_voice::openai_spokesperson::{
@@ -4254,7 +4254,7 @@ fn pending_live_event(
     let origin = live_event_origin(&event.payload);
     berd_voice::protocol::PendingUtterance {
         token: event.token,
-        text: render_live_event(&event.payload),
+        text: render_live_event(event.token, &event.payload),
         origin: Some(origin),
     }
 }
@@ -4269,7 +4269,7 @@ fn live_event_origin(event: &LiveSideEvent) -> berd_voice::protocol::UtteranceOr
     }
 }
 
-fn render_live_event(event: &LiveSideEvent) -> String {
+fn render_live_event(token: u64, event: &LiveSideEvent) -> String {
     match event {
         LiveSideEvent::UserTranscript { text } => {
             expert_transcript_message(RealtimeTranscriptSpeaker::User, text, false)
@@ -4278,7 +4278,7 @@ fn render_live_event(event: &LiveSideEvent) -> String {
             expert_transcript_message(RealtimeTranscriptSpeaker::Spokesperson, text, *interrupted)
         }
         LiveSideEvent::Handoff { call_id, message } => {
-            format!("[Handoff {call_id} from spokesperson] {message}")
+            expert_handoff_message(call_id, token, message)
         }
     }
 }
@@ -4293,7 +4293,7 @@ fn emit_live_events(
             writer,
             &SessionMessage::UserFinal {
                 token: event.token,
-                text: render_live_event(&event.payload),
+                text: render_live_event(event.token, &event.payload),
                 origin: Some(live_event_origin(&event.payload)),
             },
         )?;
