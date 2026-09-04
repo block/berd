@@ -177,10 +177,11 @@ pub fn register_openai_realtime_handoff(
     state: State<'_, OpenAiRealtimeProtocolState>,
     session_id: String,
     handoff_id: String,
+    cursor: u64,
     message: String,
-) -> Result<(), String> {
+) -> Result<String, String> {
     with_protocol_session(state, session_id, |session| {
-        session.register_handoff(&handoff_id, &message)
+        session.register_handoff(&handoff_id, cursor, &message)
     })
 }
 

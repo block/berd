@@ -97,6 +97,7 @@ export type OpenAiRealtimeProtocolEvent =
       text: string;
       interrupted: boolean;
       evidence: "provider_final" | "provider_delta" | "host_played_frames";
+      expertMessage: string;
     }
   | {
       type: "handoff";
@@ -185,11 +186,13 @@ export function getOpenAiRealtimeExpertPipeCursor(
 export function registerOpenAiRealtimeHandoff(
   sessionId: string,
   handoffId: string,
+  cursor: number,
   message: string,
-): Promise<void> {
-  return invoke("register_openai_realtime_handoff", {
+): Promise<string> {
+  return invoke<string>("register_openai_realtime_handoff", {
     sessionId,
     handoffId,
+    cursor,
     message,
   });
 }

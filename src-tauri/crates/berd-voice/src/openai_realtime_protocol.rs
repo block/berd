@@ -436,6 +436,7 @@ pub enum RealtimeProtocolEvent {
         text: String,
         interrupted: bool,
         evidence: RealtimeTranscriptEvidence,
+        expert_message: String,
     },
     #[serde(rename = "handoff", rename_all = "camelCase")]
     Handoff {
@@ -797,8 +798,31 @@ impl RealtimeProtocolReducer {
             text: text.into(),
             interrupted,
             evidence,
+            expert_message: expert_transcript_message(speaker, text, interrupted),
         }
     }
+}
+
+pub fn expert_transcript_message(
+    speaker: RealtimeTranscriptSpeaker,
+    text: &str,
+    interrupted: bool,
+) -> String {
+    match (speaker, interrupted) {
+        (RealtimeTranscriptSpeaker::User, _) => {
+            format!("[Voice transcript] User said: {text}")
+        }
+        (RealtimeTranscriptSpeaker::Spokesperson, false) => {
+            format!("[Voice transcript] Spokesperson said: {text}")
+        }
+        (RealtimeTranscriptSpeaker::Spokesperson, true) => {
+            format!("[Voice transcript] Spokesperson said (interrupted; best effort): {text}")
+        }
+    }
+}
+
+pub fn expert_handoff_message(handoff_id: &str, cursor: u64, message: &str) -> String {
+    format!("[Handoff {handoff_id} from spokesperson; cursor {cursor}] {message}")
 }
 
 fn combined_spokesperson_transcript(
@@ -1373,9 +1397,15 @@ impl RealtimeExpertSpokespersonSession {
         self.responses.request_typed_user_message(text)
     }
 
-    pub fn register_handoff(&mut self, handoff_id: &str, message: &str) -> Result<(), String> {
+    pub fn register_handoff(
+        &mut self,
+        handoff_id: &str,
+        cursor: u64,
+        message: &str,
+    ) -> Result<String, String> {
         let handoff_id = require_non_empty(handoff_id, "handoff id")?;
         let message = require_non_empty(message, "handoff message")?;
+        let expert_message = expert_handoff_message(&handoff_id, cursor, &message);
         self.open_handoffs.insert(
             handoff_id,
             RealtimeOpenHandoff {
@@ -1384,7 +1414,7 @@ impl RealtimeExpertSpokespersonSession {
                 resolving: false,
             },
         );
-        Ok(())
+        Ok(expert_message)
     }
 
     pub fn unknown_handoff_ids(&self, handoff_ids: &[String]) -> Vec<String> {
@@ -1739,6 +1769,7 @@ mod tests {
                     text: "The heard prefix".into(),
                     interrupted: true,
                     evidence: RealtimeTranscriptEvidence::ProviderDelta,
+                    expert_message: "[Voice transcript] Spokesperson said (interrupted; best effort): The heard prefix".into(),
                 },
                 RealtimeProtocolEvent::PlaybackInterrupted {
                     response_id: "response-1".into(),
@@ -1782,6 +1813,7 @@ mod tests {
                 text: "First. Second.".into(),
                 interrupted: false,
                 evidence: RealtimeTranscriptEvidence::ProviderFinal,
+                expert_message: "[Voice transcript] Spokesperson said: First. Second.".into(),
             }]
         );
     }
@@ -2149,7 +2181,7 @@ mod tests {
     fn shared_session_owns_handoff_reminders_and_exhaustion() {
         let mut session = RealtimeExpertSpokespersonSession::new(0);
         session
-            .register_handoff("handoff-1", "Inspect the project state")
+            .register_handoff("handoff-1", 7, "Inspect the project state")
             .unwrap();
 
         let first = session.complete_expert_turn(&[], 3);
@@ -2217,7 +2249,9 @@ mod tests {
     #[test]
     fn resolving_handoff_is_silent_until_playback_succeeds_or_fails() {
         let mut session = RealtimeExpertSpokespersonSession::new(0);
-        session.register_handoff("handoff-1", "Question").unwrap();
+        session
+            .register_handoff("handoff-1", 1, "Question")
+            .unwrap();
         session
             .mark_handoffs_resolving(&["handoff-1".into()])
             .unwrap();
