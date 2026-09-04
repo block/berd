@@ -39,7 +39,7 @@ describe("Realtime emissary session configuration", () => {
     expect(event.session.max_output_tokens).toBe("inf");
     expect(event.session.instructions).toBe(REALTIME_SPOKESPERSON_INSTRUCTIONS);
     expect(event.session.instructions).toContain(
-      "User speech is queued for the Expert but does not wake it",
+      "The host delivers relevant conversation events to the Expert",
     );
     expect(event.session.instructions).toContain(
       "never disclaim a capability because the other part performs it",
@@ -51,7 +51,7 @@ describe("Realtime emissary session configuration", () => {
       "never opens a handoff merely to reply to the Expert",
     );
     expect(event.session.instructions).toContain(
-      "never speaks merely to acknowledge `CONTEXT`, `DISMISS`, or an internal message",
+      "never speaks merely to acknowledge silent context, a closed handoff, or an internal message",
     );
     expect(event.session.tools).toEqual([
       expect.objectContaining({
@@ -144,10 +144,10 @@ describe("Realtime emissary session configuration", () => {
       "produce visible progress and result text",
     );
     expect(REALTIME_EXPERT_INSTRUCTIONS).toContain(
-      "**Expert → Spokesperson messages** (`send_to_spokesperson`)",
+      "**Expert → Spokesperson delivery intents.**",
     );
     expect(REALTIME_EXPERT_INSTRUCTIONS).toContain(
-      "`SAY`—asks the Spokesperson to speak useful information now",
+      "`SAY` asks the Spokesperson to speak useful information now",
     );
     expect(REALTIME_EXPERT_INSTRUCTIONS).toContain(
       "finishing an Expert turn does not wake it",
@@ -164,6 +164,22 @@ describe("Realtime emissary session configuration", () => {
     expect(REALTIME_EXPERT_INSTRUCTIONS).toContain(
       "interrupted Spokesperson transcripts as best-effort",
     );
+  });
+
+  it("keeps delivery timing host-neutral and handoff enforcement durable", () => {
+    expect(REALTIME_PROMPT_DOCUMENT).toContain(
+      "The host delivers relevant conversation events to the Expert",
+    );
+    expect(REALTIME_PROMPT_DOCUMENT).toContain(
+      "prevents an Expert turn from completing while a required handoff remains unresolved",
+    );
+    expect(REALTIME_PROMPT_DOCUMENT).toContain(
+      "there is no fixed timer or retry count",
+    );
+    expect(REALTIME_PROMPT_DOCUMENT).not.toContain(
+      "User speech is queued for the Expert but does not wake it",
+    );
+    expect(REALTIME_PROMPT_DOCUMENT).not.toContain("up to three times");
   });
 
   it("gives both roles the same one-assistant contract and canonical patterns", () => {
@@ -183,16 +199,16 @@ describe("Realtime emissary session configuration", () => {
       REALTIME_PROMPT_DOCUMENT,
     );
     expect(REALTIME_PROMPT_DOCUMENT).toContain(
-      "**Expert:** `[receives the exchange after the Spokesperson speaks; no output: zero tokens, no tools, no coordination]`",
+      "**Expert:** `[receives the ordered exchange; no output: zero tokens, no tools, no coordination]`",
     );
     expect(REALTIME_PROMPT_DOCUMENT).toContain(
       "**Spokesperson → Expert, `HANDOFF handoff-7`:**",
     );
     expect(REALTIME_PROMPT_DOCUMENT).toContain(
-      "**Expert → Spokesperson, `SAY`, resolves `handoff-7`:**",
+      "**Expert → Spokesperson, spoken answer resolving `handoff-7`:**",
     );
     expect(REALTIME_PROMPT_DOCUMENT).toContain(
-      "**Expert → Spokesperson, `SAY`:** “A useful follow-up:",
+      "**Expert → Spokesperson, spoken elaboration:** “A useful follow-up:",
     );
     expect(REALTIME_PROMPT_DOCUMENT).toContain(
       "**User:** “How many months are in a year?”",

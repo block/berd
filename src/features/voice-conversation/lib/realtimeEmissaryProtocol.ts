@@ -1,4 +1,4 @@
-import promptDocument from "../prompts/expert-spokesperson.md?raw";
+import promptDocument from "../../../../src-tauri/crates/berd-voice/prompts/expert-spokesperson.md?raw";
 
 export const REALTIME_USER_TRANSCRIPT_COMPLETED_EVENT =
   "conversation.item.input_audio_transcription.completed";
@@ -7,21 +7,22 @@ export const REALTIME_EMISSARY_TRANSCRIPT_COMPLETED_EVENT =
 export const HANDOFF_TOOL_NAME = "handoff";
 export const SEND_TO_SPOKESPERSON_TOOL_NAME = "send_to_spokesperson";
 
-export const REALTIME_PROMPT_DOCUMENT = promptDocument.trim();
+export const REALTIME_PROMPT_DOCUMENT = promptDocument
+  .replaceAll("\r\n", "\n")
+  .trim();
 const REALTIME_ROLE_PLACEHOLDER = "{{ROLE}}";
 
 function createRealtimeRoleInstructions(
   role: "Expert" | "Spokesperson",
 ): string {
-  const normalized = REALTIME_PROMPT_DOCUMENT.replaceAll("\r\n", "\n").trim();
   const placeholderCount =
-    normalized.split(REALTIME_ROLE_PLACEHOLDER).length - 1;
+    REALTIME_PROMPT_DOCUMENT.split(REALTIME_ROLE_PLACEHOLDER).length - 1;
   if (placeholderCount !== 1) {
     throw new Error(
       `Realtime prompt must contain exactly one ${REALTIME_ROLE_PLACEHOLDER} placeholder.`,
     );
   }
-  return normalized.replace(REALTIME_ROLE_PLACEHOLDER, role);
+  return REALTIME_PROMPT_DOCUMENT.replace(REALTIME_ROLE_PLACEHOLDER, role);
 }
 
 export const REALTIME_SPOKESPERSON_INSTRUCTIONS =
