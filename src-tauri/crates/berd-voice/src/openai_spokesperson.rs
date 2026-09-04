@@ -824,7 +824,7 @@ async fn run(
                             let _ = reset.completed.send(Ok(()));
                         }
                     }
-                    "conversation.item.created" => {
+                    "conversation.item.added" | "conversation.item.created" => {
                         let item_id = value.pointer("/item/id").and_then(|value| value.as_str());
                         if pending_seed_item.as_deref() == item_id {
                             pending_seed_item = None;
@@ -1224,7 +1224,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn replacement_seed_is_ordered_and_ready_only_after_provider_acknowledges_it() {
+    async fn replacement_seed_accepts_current_and_legacy_provider_acknowledgements() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let endpoint = format!("ws://{}/", listener.local_addr().unwrap());
         let server = tokio::spawn(async move {
@@ -1248,7 +1248,17 @@ mod tests {
                 .contains("unsaid suffix"));
             send_json(
                 &mut socket,
-                json!({"type":"conversation.item.created","item":{"id":assistant["item"]["id"]}}),
+                json!({"type":"conversation.item.added","item":{"id":"unrelated-item"}}),
+            )
+            .await;
+            assert!(
+                tokio::time::timeout(Duration::from_millis(100), socket.next())
+                    .await
+                    .is_err()
+            );
+            send_json(
+                &mut socket,
+                json!({"type":"conversation.item.added","item":{"id":assistant["item"]["id"]}}),
             )
             .await;
 
