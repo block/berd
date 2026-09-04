@@ -1305,6 +1305,8 @@ pub struct RealtimeExpertSpokespersonSession {
     responses: RealtimeResponseCoordinator,
     pipe: RealtimeMessagePipe,
     open_handoffs: HashMap<String, RealtimeOpenHandoff>,
+    call_scope: String,
+    pending_expert_events: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1337,15 +1339,41 @@ pub struct RealtimeSessionReduction {
     pub client_events: Vec<Value>,
     pub completed_handoff_ids: Vec<String>,
     pub failed_handoff_ids: Vec<String>,
+    pub expert_delivery: Option<RealtimeExpertDelivery>,
+    pub accepted_handoffs: Vec<RealtimeAcceptedHandoff>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RealtimeExpertDelivery {
+    pub message: String,
+    pub display_text: String,
+    pub handoff_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RealtimeAcceptedHandoff {
+    pub handoff_id: String,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RealtimeExpertTurnCompletion {
+    pub reminder: RealtimeHandoffReminder,
+    pub expert_delivery: Option<RealtimeExpertDelivery>,
 }
 
 impl RealtimeExpertSpokespersonSession {
-    pub fn new(initial_cursor: u64) -> Self {
+    pub fn new(initial_cursor: u64, call_scope: impl Into<String>) -> Self {
         Self {
             reducer: RealtimeProtocolReducer::default(),
             responses: RealtimeResponseCoordinator::default(),
             pipe: RealtimeMessagePipe::new(initial_cursor),
             open_handoffs: HashMap::new(),
+            call_scope: call_scope.into(),
+            pending_expert_events: Vec::new(),
         }
     }
 
@@ -1362,15 +1390,115 @@ impl RealtimeExpertSpokespersonSession {
                 handoff.resolving = false;
             }
         }
+        let protocol_events = self.reducer.handle(event)?;
+        let mut client_events = response_update.events;
+        let mut expert_delivery = None;
+        let mut accepted_handoffs = Vec::new();
+        for protocol_event in &protocol_events {
+            match protocol_event {
+                RealtimeProtocolEvent::TranscriptFinalized {
+                    speaker,
+                    text,
+                    expert_message,
+                    ..
+                } => {
+                    let exchange = self.enqueue_spokesperson_message(expert_message)?;
+                    let cursor = accepted_exchange_cursor(exchange, "transcript")?;
+                    self.pending_expert_events.push(expert_message.replace(
+                        "[Voice transcript]",
+                        &format!("[Voice transcript; cursor {cursor}]"),
+                    ));
+                    if *speaker == RealtimeTranscriptSpeaker::Spokesperson {
+                        expert_delivery = self.take_expert_delivery(text, Vec::new());
+                    }
+                }
+                RealtimeProtocolEvent::Handoff {
+                    call_id, message, ..
+                } => {
+                    let exchange = self.enqueue_spokesperson_message(message)?;
+                    let cursor = accepted_exchange_cursor(exchange, "handoff")?;
+                    let handoff_id = format!("handoff-{}-{cursor}", self.call_scope);
+                    let expert_handoff = self.register_handoff(&handoff_id, cursor, message)?;
+                    self.pending_expert_events.push(expert_handoff);
+                    let tool_output = accepted_handoff_tool_output(call_id, &handoff_id)?;
+                    client_events.extend(self.responses.request_tool_output(tool_output, false).events);
+                    accepted_handoffs.push(RealtimeAcceptedHandoff {
+                        handoff_id: handoff_id.clone(),
+                        message: message.clone(),
+                    });
+                    expert_delivery = self.take_expert_delivery(message, vec![handoff_id]);
+                }
+                RealtimeProtocolEvent::InvalidToolCall {
+                    call_id,
+                    tool_name,
+                    error,
+                } => {
+                    let tool_output = invalid_tool_call_output(call_id, tool_name, error)?;
+                    client_events.extend(self.responses.request_tool_output(tool_output, true).events);
+                }
+                _ => {}
+            }
+        }
         Ok(RealtimeSessionReduction {
-            protocol_events: self.reducer.handle(event)?,
-            client_events: response_update.events,
+            protocol_events,
+            client_events,
             completed_handoff_ids: response_update.completed_handoff_ids,
             failed_handoff_ids: response_update.failed_handoff_ids,
+            expert_delivery,
+            accepted_handoffs,
         })
     }
 
-    pub fn enqueue_spokesperson_message(
+    pub fn flush_expert_events(&mut self, display_text: &str) -> Option<RealtimeExpertDelivery> {
+        self.take_expert_delivery(display_text, Vec::new())
+    }
+
+    pub fn complete_expert_turn_with_delivery(
+        &mut self,
+        retrying_handoff_ids: &[String],
+        max_attempts: u8,
+    ) -> Result<RealtimeExpertTurnCompletion, String> {
+        let reminder = self.complete_expert_turn(retrying_handoff_ids, max_attempts);
+        let expert_delivery = if let RealtimeHandoffReminder::Reminder {
+            handoff_ids,
+            message,
+            ..
+        } = &reminder
+        {
+            let exchange = self.enqueue_spokesperson_message(message)?;
+            let cursor = accepted_exchange_cursor(exchange, "handoff reminder")?;
+            self.pending_expert_events.push(format!(
+                "[Private handoff reminder; cursor {cursor}]{}",
+                message
+                    .strip_prefix("[Private handoff reminder]")
+                    .unwrap_or(message)
+            ));
+            self.take_expert_delivery("Handoff reminder", handoff_ids.clone())
+        } else {
+            None
+        };
+        Ok(RealtimeExpertTurnCompletion {
+            reminder,
+            expert_delivery,
+        })
+    }
+
+    fn take_expert_delivery(
+        &mut self,
+        display_text: &str,
+        handoff_ids: Vec<String>,
+    ) -> Option<RealtimeExpertDelivery> {
+        if self.pending_expert_events.is_empty() {
+            return None;
+        }
+        Some(RealtimeExpertDelivery {
+            message: std::mem::take(&mut self.pending_expert_events).join("\n"),
+            display_text: display_text.into(),
+            handoff_ids,
+        })
+    }
+
+    fn enqueue_spokesperson_message(
         &mut self,
         message: &str,
     ) -> Result<RealtimePipeExchange, String> {
@@ -1398,14 +1526,6 @@ impl RealtimeExpertSpokespersonSession {
         self.responses.request_expert_message(message)
     }
 
-    pub fn request_tool_output(
-        &mut self,
-        event: Value,
-        request_response: bool,
-    ) -> RealtimeCoordinatorResult {
-        self.responses.request_tool_output(event, request_response)
-    }
-
     pub fn request_typed_user_message(
         &mut self,
         text: &str,
@@ -1413,7 +1533,7 @@ impl RealtimeExpertSpokespersonSession {
         self.responses.request_typed_user_message(text)
     }
 
-    pub fn register_handoff(
+    fn register_handoff(
         &mut self,
         handoff_id: &str,
         cursor: u64,
@@ -1523,6 +1643,16 @@ impl RealtimeExpertSpokespersonSession {
             attempt,
             requests,
         }
+    }
+}
+
+fn accepted_exchange_cursor(exchange: RealtimePipeExchange, kind: &str) -> Result<u64, String> {
+    match exchange {
+        RealtimePipeExchange::Accepted(accepted) => Ok(accepted.outbound.id),
+        RealtimePipeExchange::Rejected(rejected) => Err(format!(
+            "The realtime {kind} could not enter the Expert pipe ({:?}).",
+            rejected.reason
+        )),
     }
 }
 
@@ -2225,8 +2355,100 @@ mod tests {
     }
 
     #[test]
+    fn shared_session_batches_user_context_until_spokesperson_playback_finishes() {
+        let mut session = RealtimeExpertSpokespersonSession::new(10, "call-a");
+        let user = session
+            .handle_provider_event(&json!({
+                "type": "conversation.item.input_audio_transcription.completed",
+                "item_id": "user-1",
+                "transcript": "What changed?",
+            }))
+            .unwrap();
+        assert!(user.expert_delivery.is_none());
+
+        session
+            .handle_provider_event(&json!({
+                "type": "response.output_audio_transcript.delta",
+                "response_id": "response-1",
+                "item_id": "assistant-1",
+                "delta": "I will check.",
+            }))
+            .unwrap();
+        session
+            .handle_provider_event(&json!({
+                "type": "response.output_audio_transcript.done",
+                "response_id": "response-1",
+                "item_id": "assistant-1",
+                "transcript": "I will check.",
+            }))
+            .unwrap();
+        let finished = session
+            .handle_provider_event(&json!({
+                "type": "output_audio_buffer.stopped",
+                "response_id": "response-1",
+            }))
+            .unwrap();
+        let delivery = finished.expert_delivery.unwrap();
+        assert_eq!(delivery.display_text, "I will check.");
+        assert!(delivery.message.contains(
+            "[Voice transcript; cursor 11] User said: What changed?"
+        ));
+        assert!(delivery.message.contains(
+            "[Voice transcript; cursor 12] Spokesperson said: I will check."
+        ));
+        assert!(session.flush_expert_events("unused").is_none());
+    }
+
+    #[test]
+    fn shared_session_accepts_handoff_and_wakes_expert_atomically() {
+        let mut session = RealtimeExpertSpokespersonSession::new(4, "call-a");
+        let reduction = session
+            .handle_provider_event(&json!({
+                "type": "response.function_call_arguments.done",
+                "call_id": "provider-call",
+                "name": "handoff",
+                "arguments": r#"{"message":"Inspect the repository"}"#,
+            }))
+            .unwrap();
+
+        assert_eq!(
+            reduction.accepted_handoffs,
+            [RealtimeAcceptedHandoff {
+                handoff_id: "handoff-call-a-5".into(),
+                message: "Inspect the repository".into(),
+            }]
+        );
+        assert!(reduction.client_events.iter().any(|event| {
+            event.pointer("/item/call_id") == Some(&json!("provider-call"))
+        }));
+        let delivery = reduction.expert_delivery.unwrap();
+        assert_eq!(delivery.handoff_ids, ["handoff-call-a-5"]);
+        assert_eq!(delivery.display_text, "Inspect the repository");
+        assert!(delivery.message.contains(
+            "[Handoff handoff-call-a-5 from spokesperson; cursor 5] Inspect the repository"
+        ));
+    }
+
+    #[test]
+    fn shared_session_flushes_a_user_only_tail() {
+        let mut session = RealtimeExpertSpokespersonSession::new(0, "call-a");
+        session
+            .handle_provider_event(&json!({
+                "type": "conversation.item.input_audio_transcription.completed",
+                "item_id": "user-1",
+                "transcript": "One last thought",
+            }))
+            .unwrap();
+
+        let delivery = session.flush_expert_events("Final voice transcript").unwrap();
+        assert_eq!(delivery.display_text, "Final voice transcript");
+        assert!(delivery.message.contains("User said: One last thought"));
+        assert!(session.flush_expert_events("Final voice transcript").is_none());
+    }
+
+    #[test]
     fn shared_session_owns_handoff_reminders_and_exhaustion() {
-        let mut session = RealtimeExpertSpokespersonSession::new(0);
+        let mut session = RealtimeExpertSpokespersonSession::new(0, "test-call");
         session
             .register_handoff("handoff-1", 7, "Inspect the project state")
             .unwrap();
@@ -2254,6 +2476,29 @@ mod tests {
             RealtimeHandoffReminder::Exhausted { ref handoff_ids, .. }
                 if handoff_ids == &["handoff-1"]
         ));
+    }
+
+    #[test]
+    fn shared_session_delivers_reminders_through_the_same_expert_batch() {
+        let mut session = RealtimeExpertSpokespersonSession::new(0, "test-call");
+        session
+            .register_handoff("handoff-1", 1, "Inspect the project state")
+            .unwrap();
+
+        let completion = session
+            .complete_expert_turn_with_delivery(&[], 3)
+            .unwrap();
+        assert!(matches!(
+            completion.reminder,
+            RealtimeHandoffReminder::Reminder { attempt: 1, .. }
+        ));
+        let delivery = completion.expert_delivery.unwrap();
+        assert_eq!(delivery.display_text, "Handoff reminder");
+        assert_eq!(delivery.handoff_ids, ["handoff-1"]);
+        assert!(delivery
+            .message
+            .starts_with("[Private handoff reminder; cursor 1]"));
+        assert!(session.flush_expert_events("unused").is_none());
     }
 
     #[test]
@@ -2295,7 +2540,7 @@ mod tests {
 
     #[test]
     fn resolving_handoff_is_silent_until_playback_succeeds_or_fails() {
-        let mut session = RealtimeExpertSpokespersonSession::new(0);
+        let mut session = RealtimeExpertSpokespersonSession::new(0, "test-call");
         session
             .register_handoff("handoff-1", 1, "Question")
             .unwrap();

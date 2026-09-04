@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
+import type { OpenAiRealtimeProtocolEvent } from "@/shared/api/openaiRealtime";
 import {
   collectRealtimeTranscriptSeedTurns,
   requestOpenAiRealtimeConversationStart,
@@ -21,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   completeExpertTurn: vi.fn(),
   dismissHandoffs: vi.fn(),
   enqueueSpokespersonMessage: vi.fn(),
+  flushExpertEvents: vi.fn(),
   getExpertPipeCursor: vi.fn(),
   listenControls: vi.fn(),
   listenRuntime: vi.fn(),
@@ -154,6 +156,8 @@ const mocks = vi.hoisted(() => ({
     message: string;
   }>,
   pipeConsumed: { master: 0, emissary: 0 },
+  pendingExpertEvents: [] as string[],
+  realtimeCallScope: "test-call",
   openHandoffs: new Map<
     string,
     { message: string; reminderAttempts: number; resolving: boolean }
@@ -220,7 +224,7 @@ vi.mock("@/shared/api/openaiRealtime", () => ({
     Promise.resolve(mocks.createInvalidToolCallOutput(callId, toolName, error)),
   createOpenAiRealtimeTranscriptSeed: mocks.createTranscriptSeed,
   dismissOpenAiRealtimeHandoffs: mocks.dismissHandoffs,
-  enqueueOpenAiRealtimeSpokespersonMessage: mocks.enqueueSpokespersonMessage,
+  flushOpenAiRealtimeExpertEvents: mocks.flushExpertEvents,
   getOpenAiRealtimeExpertPipeCursor: mocks.getExpertPipeCursor,
   listenToOpenAiRealtimeVoiceControls: mocks.listenControls,
   listenToOpenAiRealtimeSpokespersonRuntime: mocks.listenRuntime,
@@ -228,28 +232,89 @@ vi.mock("@/shared/api/openaiRealtime", () => ({
   publishOpenAiRealtimeVoiceActivity: mocks.publishActivity,
   publishOpenAiRealtimeVoiceMicrophoneMuted: mocks.publishMuted,
   rebindOpenAiRealtimeVoiceControls: mocks.rebindControls,
-  registerOpenAiRealtimeHandoff: mocks.registerHandoff,
   reduceOpenAiRealtimeSpokespersonEvent: async (
     sessionId: string,
     event: { type?: string },
-  ) => ({
-    protocolEvents: await mocks.reduceProtocol(sessionId, event),
-    clientEvents: [],
-    completedHandoffIds: [],
-    failedHandoffIds: [],
-  }),
+  ) => {
+    const protocolEvents = (await mocks.reduceProtocol(
+      sessionId,
+      event,
+    )) as OpenAiRealtimeProtocolEvent[];
+    const clientEvents: unknown[] = [];
+    const acceptedHandoffs: Array<{
+      handoffId: string;
+      message: string;
+    }> = [];
+    let expertDelivery:
+      | { message: string; displayText: string; handoffIds: string[] }
+      | undefined;
+    for (const protocolEvent of protocolEvents) {
+      if (protocolEvent.type === "transcript.finalized") {
+        const exchange = await mocks.enqueueSpokespersonMessage(
+          sessionId,
+          protocolEvent.expertMessage,
+        );
+        if (!exchange.accepted)
+          throw new Error("Expert pipe rejected transcript");
+        mocks.pendingExpertEvents.push(
+          protocolEvent.expertMessage.replace(
+            "[Voice transcript]",
+            `[Voice transcript; cursor ${exchange.outbound.id}]`,
+          ),
+        );
+        if (protocolEvent.speaker === "spokesperson") {
+          expertDelivery = {
+            message: mocks.pendingExpertEvents.splice(0).join("\n"),
+            displayText: protocolEvent.text,
+            handoffIds: [],
+          };
+        }
+      } else if (protocolEvent.type === "handoff") {
+        const exchange = await mocks.enqueueSpokespersonMessage(
+          sessionId,
+          protocolEvent.message,
+        );
+        if (!exchange.accepted) throw new Error("Expert pipe rejected handoff");
+        const handoffId = `handoff-${mocks.realtimeCallScope}-${exchange.outbound.id}`;
+        mocks.pendingExpertEvents.push(
+          await mocks.registerHandoff(
+            sessionId,
+            handoffId,
+            exchange.outbound.id,
+            exchange.outbound.message,
+          ),
+        );
+        const toolOutput = mocks.createHandoffToolOutput(protocolEvent.callId, {
+          accepted: true,
+          handoff_id: handoffId,
+        });
+        clientEvents.push(...mocks.recordToolOutput(toolOutput).events);
+        acceptedHandoffs.push({ handoffId, message: protocolEvent.message });
+        expertDelivery = {
+          message: mocks.pendingExpertEvents.splice(0).join("\n"),
+          displayText: protocolEvent.message,
+          handoffIds: [handoffId],
+        };
+      } else if (protocolEvent.type === "tool_call.invalid") {
+        const toolOutput = mocks.createInvalidToolCallOutput(
+          protocolEvent.callId,
+          protocolEvent.toolName,
+          protocolEvent.error,
+        );
+        clientEvents.push(...mocks.requestToolOutput(toolOutput).events);
+      }
+    }
+    return {
+      protocolEvents,
+      clientEvents,
+      completedHandoffIds: [],
+      failedHandoffIds: [],
+      expertDelivery,
+      acceptedHandoffs,
+    };
+  },
   requestOpenAiRealtimeExpertMessage: (_sessionId: string, message: unknown) =>
     Promise.resolve(mocks.requestMasterMessage(message)),
-  requestOpenAiRealtimeToolOutput: (
-    _sessionId: string,
-    event: unknown,
-    requestResponse: boolean,
-  ) =>
-    Promise.resolve(
-      requestResponse
-        ? mocks.requestToolOutput(event)
-        : mocks.recordToolOutput(event),
-    ),
   requestOpenAiRealtimeTypedUserMessage: (_sessionId: string, text: string) =>
     Promise.resolve(mocks.requestTypedUserMessage(text)),
   sendOpenAiRealtimeExpertPipeMessage: mocks.sendExpertPipeMessage,
@@ -468,13 +533,15 @@ beforeEach(() => {
     return () => channel.removeEventListener("message", forwardMessage);
   });
   mocks.startRuntime.mockImplementation(
-    async (sessionId: string, initialCursor: number) => {
+    async (sessionId: string, initialCursor: number, callId: string) => {
       mocks.pipeInitialCursors.push(initialCursor);
       // Keep existing hook assertions independent of the randomized call
       // namespace. The Rust pipe tests cover nonzero initial cursors directly.
       mocks.pipeNextId = 1;
       mocks.pipePending = [];
       mocks.pipeConsumed = { master: 0, emissary: 0 };
+      mocks.pendingExpertEvents = [];
+      mocks.realtimeCallScope = callId;
       realtimeRuntimeSessionId = sessionId;
       realtimeRuntimeListener?.({
         sessionId,
@@ -501,6 +568,7 @@ beforeEach(() => {
   mocks.publishActivity.mockResolvedValue(undefined);
   mocks.publishMuted.mockResolvedValue(undefined);
   mocks.pipeInitialCursors.length = 0;
+  mocks.pendingExpertEvents = [];
   mocks.openHandoffs.clear();
   mocks.registerHandoff.mockImplementation(
     async (
@@ -546,16 +614,18 @@ beforeEach(() => {
           !handoff.resolving &&
           (handoff.reminderAttempts === 0 || retrying.has(handoffId)),
       );
-      if (pending.length === 0) return { status: "none" };
+      if (pending.length === 0) return { reminder: { status: "none" } };
       const exhausted = pending.filter(
         ([, handoff]) => handoff.reminderAttempts >= maxAttempts,
       );
       if (exhausted.length > 0) {
         const handoffIds = exhausted.map(([handoffId]) => handoffId);
         return {
-          status: "exhausted",
-          handoffIds,
-          message: `The Expert left required ${handoffIds.join(", ")} unresolved after ${maxAttempts} reminder attempts.`,
+          reminder: {
+            status: "exhausted",
+            handoffIds,
+            message: `The Expert left required ${handoffIds.join(", ")} unresolved after ${maxAttempts} reminder attempts.`,
+          },
         };
       }
       for (const [, handoff] of pending) handoff.reminderAttempts += 1;
@@ -566,12 +636,26 @@ beforeEach(() => {
       const attempt = Math.max(
         ...pending.map(([, handoff]) => handoff.reminderAttempts),
       );
+      const message = `[Private handoff reminder]\nYou ended your turn without resolving the required handoffs below. Resolve them now with one or more send-to-spokesperson --mode say calls that name every answered handoff in --resolves, or dismiss obsolete handoffs explicitly. Berd will retry this reminder up to ${maxAttempts} times. Do not redo completed work.\n${requests}`;
+      const exchange = await mocks.enqueueSpokespersonMessage(
+        _sessionId,
+        message,
+      );
+      if (!exchange.accepted) throw new Error("Expert pipe rejected reminder");
+      const expertMessage = `[Private handoff reminder; cursor ${exchange.outbound.id}]${message.slice("[Private handoff reminder]".length)}`;
       return {
-        status: "reminder",
-        handoffIds,
-        attempt,
-        requests,
-        message: `[Private handoff reminder]\nYou ended your turn without resolving the required handoffs below. Resolve them now with one or more send-to-spokesperson --mode say calls that name every answered handoff in --resolves, or dismiss obsolete handoffs explicitly. Berd will retry this reminder up to ${maxAttempts} times. Do not redo completed work.\n${requests}`,
+        reminder: {
+          status: "reminder",
+          handoffIds,
+          attempt,
+          requests,
+          message,
+        },
+        expertDelivery: {
+          message: expertMessage,
+          displayText: "Handoff reminder",
+          handoffIds,
+        },
       };
     },
   );
@@ -641,6 +725,14 @@ beforeEach(() => {
       return sendPipeMessage("emissary", cursor, message);
     },
   );
+  mocks.flushExpertEvents.mockImplementation(async () => {
+    if (mocks.pendingExpertEvents.length === 0) return null;
+    return {
+      message: mocks.pendingExpertEvents.splice(0).join("\n"),
+      displayText: "Final voice transcript",
+      handoffIds: [],
+    };
+  });
   mocks.sendExpertPipeMessage.mockImplementation(
     async (_sessionId: string, cursor: number, message: string) =>
       sendPipeMessage("master", cursor, message),
