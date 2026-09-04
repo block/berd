@@ -1,11 +1,13 @@
-use std::collections::HashMap;
-use std::time::Duration;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::thread;
+use std::time::Duration;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
+
+use crate::expert_spokesperson::SemanticTurn;
 
 const DEFAULT_ENDPOINT: &str = "wss://api.openai.com/v1/realtime";
 const DEFAULT_MODEL: &str = "gpt-realtime-2.1";
@@ -16,6 +18,7 @@ const SPOKESPERSON_INSTRUCTIONS: &str = r#"You are the spoken, realtime part of 
 
 /// Connection settings for the live Spokesperson. This deliberately does not
 /// implement `Debug` because it contains an API key.
+#[derive(Clone)]
 pub struct OpenAiSpokespersonConfig {
     pub endpoint: String,
     pub api_key: String,
@@ -23,6 +26,7 @@ pub struct OpenAiSpokespersonConfig {
     pub transcription_model: String,
     pub voice: String,
     pub speed: f32,
+    pub semantic_transcript: Vec<SemanticTurn>,
 }
 
 impl OpenAiSpokespersonConfig {
@@ -44,6 +48,7 @@ impl OpenAiSpokespersonConfig {
                 .and_then(|value| value.parse().ok())
                 .filter(|value| (0.25..=1.5).contains(value))
                 .unwrap_or(1.0),
+            semantic_transcript: Vec::new(),
         })
     }
 }
@@ -68,6 +73,12 @@ pub enum SpokespersonCommand {
     UpdateSpeed {
         request_id: u64,
         speed: f32,
+    },
+    BeginInputCutover {
+        request_id: u64,
+    },
+    AbortInputCutover {
+        completed: std::sync::mpsc::SyncSender<Result<(), String>>,
     },
     TruncateOutput {
         response_id: String,
@@ -125,6 +136,10 @@ pub enum SpokespersonEvent {
         speed: f32,
         result: Result<(), String>,
     },
+    InputCutoverFinished {
+        request_id: u64,
+        result: Result<(), String>,
+    },
     OutputTruncated {
         response_id: String,
     },
@@ -161,6 +176,44 @@ struct PendingTruncation {
     deadline: tokio::time::Instant,
 }
 
+struct PendingInputCutover {
+    request_id: u64,
+    event_id: String,
+    cleared: bool,
+    deadline: tokio::time::Instant,
+    abort_completion: Option<std::sync::mpsc::SyncSender<Result<(), String>>>,
+}
+
+struct PendingInputReset {
+    event_id: String,
+    deadline: tokio::time::Instant,
+    completed: std::sync::mpsc::SyncSender<Result<(), String>>,
+}
+
+fn complete_input_cutover_if_ready(
+    pending: &mut Option<PendingInputCutover>,
+    started_items: &HashSet<String>,
+    committed_items: &HashSet<String>,
+    events: &std::sync::mpsc::Sender<SpokespersonEvent>,
+) -> Result<(), String> {
+    if pending.as_ref().is_some_and(|cutover| {
+        cutover.abort_completion.is_none()
+            && cutover.cleared
+            && started_items.is_empty()
+            && committed_items.is_empty()
+    }) {
+        let request_id = pending.take().expect("ready input cutover").request_id;
+        send_event(
+            events,
+            SpokespersonEvent::InputCutoverFinished {
+                request_id,
+                result: Ok(()),
+            },
+        )?;
+    }
+    Ok(())
+}
+
 fn expire_speed_update(
     pending: &mut Option<PendingSpeedUpdate>,
     now: tokio::time::Instant,
@@ -177,8 +230,33 @@ fn expire_speed_update(
 }
 
 fn speed_error_matches(pending: &PendingSpeedUpdate, event: &serde_json::Value) -> bool {
-    event.pointer("/error/event_id").and_then(|value| value.as_str())
+    event
+        .pointer("/error/event_id")
+        .and_then(|value| value.as_str())
         == Some(pending.event_id.as_str())
+}
+
+fn validate_effective_session(
+    event: &serde_json::Value,
+    config: &OpenAiSpokespersonConfig,
+) -> Result<(), String> {
+    let model = event
+        .pointer("/session/model")
+        .and_then(|value| value.as_str());
+    let voice = event
+        .pointer("/session/audio/output/voice")
+        .and_then(|value| value.as_str());
+    let speed = event
+        .pointer("/session/audio/output/speed")
+        .and_then(serde_json::Value::as_f64)
+        .map(|value| value as f32);
+    if model != Some(config.model.as_str())
+        || voice != Some(config.voice.as_str())
+        || !speed.is_some_and(|speed| (speed - config.speed).abs() <= f32::EPSILON)
+    {
+        return Err("OpenAI Realtime did not apply the requested model, voice, and speed".into());
+    }
+    Ok(())
 }
 
 fn truncation_timed_out(
@@ -238,6 +316,14 @@ impl OpenAiSpokespersonRuntime {
             .map_err(|_| "Spokesperson input reset timed out".to_string())?
     }
 
+    pub fn abort_input_cutover(&self) -> Result<(), String> {
+        let (completed, result) = std::sync::mpsc::sync_channel(1);
+        self.send(SpokespersonCommand::AbortInputCutover { completed })?;
+        result
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .map_err(|_| "Spokesperson input cutover abort timed out".to_string())?
+    }
+
     pub fn finish(mut self) -> Result<(), String> {
         let _ = self.commands.send(SpokespersonCommand::Shutdown);
         self.worker
@@ -249,7 +335,7 @@ impl OpenAiSpokespersonRuntime {
 }
 
 async fn run(
-    config: OpenAiSpokespersonConfig,
+    mut config: OpenAiSpokespersonConfig,
     mut commands: mpsc::UnboundedReceiver<SpokespersonCommand>,
     events: &std::sync::mpsc::Sender<SpokespersonEvent>,
 ) -> Result<(), String> {
@@ -270,9 +356,19 @@ async fn run(
             .parse()
             .map_err(|_| "OpenAI API key is not a valid header value")?,
     );
-    let (mut socket, _) = tokio_tungstenite::connect_async(request)
-        .await
-        .map_err(|error| format!("connect OpenAI Realtime: {error}"))?;
+    let connection = tokio::time::timeout(
+        Duration::from_secs(30),
+        tokio_tungstenite::connect_async(request),
+    );
+    let (mut socket, _) = tokio::select! {
+        result = connection => result
+            .map_err(|_| "connect OpenAI Realtime timed out".to_string())?
+            .map_err(|error| format!("connect OpenAI Realtime: {error}"))?,
+        command = commands.recv() => match command {
+            Some(SpokespersonCommand::Shutdown) | None => return Ok(()),
+            Some(_) => return Err("Spokesperson command arrived before readiness".into()),
+        }
+    };
     send_json(
         &mut socket,
         serde_json::json!({
@@ -321,6 +417,13 @@ async fn run(
     let mut call_arguments = HashMap::<String, String>::new();
     let mut speed_update: Option<PendingSpeedUpdate> = None;
     let mut pending_truncations = HashMap::<(String, u64), PendingTruncation>::new();
+    let mut pending_input_cutover: Option<PendingInputCutover> = None;
+    let mut pending_input_reset: Option<PendingInputReset> = None;
+    let mut started_input_items = HashSet::<String>::new();
+    let mut committed_input_items = HashSet::<String>::new();
+    let mut seed_turns = VecDeque::from(std::mem::take(&mut config.semantic_transcript));
+    let mut pending_seed_item: Option<String> = None;
+    let mut initial_session_ready = false;
     let mut next_control_event_id = 1_u64;
     loop {
         let speed_update_deadline = speed_update.as_ref().map(|update| update.deadline);
@@ -328,7 +431,48 @@ async fn run(
             .values()
             .map(|truncation| truncation.deadline)
             .min();
+        let cutover_deadline = pending_input_cutover
+            .as_ref()
+            .map(|cutover| cutover.deadline);
+        let reset_deadline = pending_input_reset.as_ref().map(|reset| reset.deadline);
         tokio::select! {
+            _ = async {
+                match reset_deadline {
+                    Some(deadline) => tokio::time::sleep_until(deadline).await,
+                    None => std::future::pending().await,
+                }
+            }, if reset_deadline.is_some() => {
+                if pending_input_reset
+                    .as_ref()
+                    .is_some_and(|reset| tokio::time::Instant::now() >= reset.deadline)
+                {
+                    let reset = pending_input_reset.take().expect("expired input reset");
+                    let _ = reset.completed.send(Err("Spokesperson input reset timed out".into()));
+                    return Err("Spokesperson input reset timed out; provider input state is indeterminate".into());
+                }
+            }
+            _ = async {
+                match cutover_deadline {
+                    Some(deadline) => tokio::time::sleep_until(deadline).await,
+                    None => std::future::pending().await,
+                }
+            }, if cutover_deadline.is_some() => {
+                if pending_input_cutover
+                    .as_ref()
+                    .is_some_and(|cutover| tokio::time::Instant::now() >= cutover.deadline)
+                {
+                    let mut cutover = pending_input_cutover
+                        .take()
+                        .expect("expired input cutover");
+                    if let Some(completed) = cutover.abort_completion.take() {
+                        let _ = completed.send(Err("Spokesperson input cutover timed out".into()));
+                    }
+                    return Err(format!(
+                        "Spokesperson input cutover {} timed out; provider input state is indeterminate",
+                        cutover.request_id
+                    ));
+                }
+            }
             _ = async {
                 match speed_update_deadline {
                     Some(deadline) => tokio::time::sleep_until(deadline).await,
@@ -362,11 +506,24 @@ async fn run(
                         })).await?;
                     }
                     Some(SpokespersonCommand::ResetInput { completed }) => {
-                        let result = send_json(&mut socket, serde_json::json!({
-                            "type": "input_audio_buffer.clear",
-                        })).await;
-                        let _ = completed.send(result.clone());
-                        result?;
+                        if pending_input_cutover.is_some() || pending_input_reset.is_some() {
+                            let _ = completed.send(Err(
+                                "another Spokesperson input clear is in progress".into(),
+                            ));
+                        } else {
+                            let event_id = format!("berd-reset-{next_control_event_id}");
+                            next_control_event_id = next_control_event_id.checked_add(1)
+                                .ok_or("Spokesperson control event space is exhausted")?;
+                            send_json(&mut socket, serde_json::json!({
+                                "event_id": event_id,
+                                "type": "input_audio_buffer.clear",
+                            })).await?;
+                            pending_input_reset = Some(PendingInputReset {
+                                event_id,
+                                deadline: tokio::time::Instant::now() + CONTROL_ACK_TIMEOUT,
+                                completed,
+                            });
+                        }
                     }
                     Some(SpokespersonCommand::CancelResponses { response_ids }) => {
                         for response_id in response_ids {
@@ -415,6 +572,51 @@ async fn run(
                                 speed,
                                 deadline: tokio::time::Instant::now() + CONTROL_ACK_TIMEOUT,
                             });
+                        }
+                    }
+                    Some(SpokespersonCommand::BeginInputCutover { request_id }) => {
+                        if pending_input_cutover.is_some() || pending_input_reset.is_some() {
+                            return Err("Spokesperson input cutover was requested twice".into());
+                        }
+                        let event_id = format!("berd-cutover-{next_control_event_id}");
+                        next_control_event_id = next_control_event_id.checked_add(1)
+                            .ok_or("Spokesperson control event space is exhausted")?;
+                        send_json(&mut socket, serde_json::json!({
+                            "event_id": event_id,
+                            "type": "input_audio_buffer.clear",
+                        })).await?;
+                        pending_input_cutover = Some(PendingInputCutover {
+                            request_id,
+                            event_id,
+                            cleared: false,
+                            deadline: tokio::time::Instant::now() + CONTROL_ACK_TIMEOUT,
+                            abort_completion: None,
+                        });
+                    }
+                    Some(SpokespersonCommand::AbortInputCutover { completed }) => {
+                        if pending_input_cutover
+                            .as_ref()
+                            .is_some_and(|cutover| cutover.cleared)
+                        {
+                            let request_id = pending_input_cutover
+                                .take()
+                                .expect("cleared input cutover")
+                                .request_id;
+                            let _ = completed.send(Ok(()));
+                            send_event(events, SpokespersonEvent::InputCutoverFinished {
+                                request_id,
+                                result: Err("Spokesperson input cutover was aborted".into()),
+                            })?;
+                        } else if let Some(cutover) = pending_input_cutover.as_mut() {
+                            if cutover.abort_completion.is_some() {
+                                let _ = completed.send(Err(
+                                    "Spokesperson input cutover abort is already pending".into(),
+                                ));
+                            } else {
+                                cutover.abort_completion = Some(completed);
+                            }
+                        } else {
+                            let _ = completed.send(Ok(()));
                         }
                     }
                     Some(SpokespersonCommand::TruncateOutput {
@@ -501,12 +703,25 @@ async fn run(
                                 speed: update.speed,
                                 result,
                             })?;
-                        } else {
-                            send_event(events, SpokespersonEvent::Ready)?;
+                        } else if !initial_session_ready {
+                            validate_effective_session(&value, &config)?;
+                            initial_session_ready = true;
+                            send_next_seed_item(
+                                &mut socket,
+                                &mut seed_turns,
+                                &mut pending_seed_item,
+                                &mut next_control_event_id,
+                            ).await?;
+                            if pending_seed_item.is_none() {
+                                send_event(events, SpokespersonEvent::Ready)?;
+                            }
                         }
                     }
                     "input_audio_buffer.speech_started" | "input_audio_buffer.speech_stopped" => {
                         if let Some(item_id) = string(&value, "item_id") {
+                            if kind.ends_with("speech_started") {
+                                started_input_items.insert(item_id.into());
+                            }
                             send_event(events, SpokespersonEvent::UserSpeaking {
                                 active: kind.ends_with("speech_started"),
                                 item_id: item_id.into(),
@@ -517,6 +732,8 @@ async fn run(
                         if let (Some(item_id), Some(text)) =
                             (string(&value, "item_id"), string(&value, "transcript"))
                         {
+                            started_input_items.remove(item_id);
+                            committed_input_items.remove(item_id);
                             let text = text.trim();
                             if text.is_empty() {
                                 send_event(events, SpokespersonEvent::UserTurnDiscarded {
@@ -528,13 +745,82 @@ async fn run(
                                     text: text.into(),
                                 })?;
                             }
+                            complete_input_cutover_if_ready(
+                                &mut pending_input_cutover,
+                                &started_input_items,
+                                &committed_input_items,
+                                events,
+                            )?;
                         }
                     }
                     "conversation.item.input_audio_transcription.failed" => {
                         if let Some(item_id) = string(&value, "item_id") {
+                            started_input_items.remove(item_id);
+                            committed_input_items.remove(item_id);
                             send_event(events, SpokespersonEvent::UserTurnDiscarded {
                                 item_id: item_id.into(),
                             })?;
+                            complete_input_cutover_if_ready(
+                                &mut pending_input_cutover,
+                                &started_input_items,
+                                &committed_input_items,
+                                events,
+                            )?;
+                        }
+                    }
+                    "input_audio_buffer.committed" => {
+                        if let Some(item_id) = string(&value, "item_id") {
+                            committed_input_items.insert(item_id.into());
+                        }
+                    }
+                    "input_audio_buffer.cleared" => {
+                        let abandoned: Vec<_> = started_input_items
+                            .difference(&committed_input_items)
+                            .cloned()
+                            .collect();
+                        for item_id in abandoned {
+                            started_input_items.remove(&item_id);
+                            send_event(events, SpokespersonEvent::UserSpeaking {
+                                active: false,
+                                item_id: item_id.clone(),
+                            })?;
+                            send_event(events, SpokespersonEvent::UserTurnDiscarded { item_id })?;
+                        }
+                        if let Some(cutover) = pending_input_cutover.as_mut() {
+                            if let Some(completed) = cutover.abort_completion.take() {
+                                let request_id = cutover.request_id;
+                                let _ = completed.send(Ok(()));
+                                pending_input_cutover = None;
+                                send_event(events, SpokespersonEvent::InputCutoverFinished {
+                                    request_id,
+                                    result: Err("Spokesperson input cutover was aborted".into()),
+                                })?;
+                                continue;
+                            }
+                            cutover.cleared = true;
+                            complete_input_cutover_if_ready(
+                                &mut pending_input_cutover,
+                                &started_input_items,
+                                &committed_input_items,
+                                events,
+                            )?;
+                        } else if let Some(reset) = pending_input_reset.take() {
+                            let _ = reset.completed.send(Ok(()));
+                        }
+                    }
+                    "conversation.item.created" => {
+                        let item_id = value.pointer("/item/id").and_then(|value| value.as_str());
+                        if pending_seed_item.as_deref() == item_id {
+                            pending_seed_item = None;
+                            send_next_seed_item(
+                                &mut socket,
+                                &mut seed_turns,
+                                &mut pending_seed_item,
+                                &mut next_control_event_id,
+                            ).await?;
+                            if pending_seed_item.is_none() {
+                                send_event(events, SpokespersonEvent::Ready)?;
+                            }
                         }
                     }
                     "response.created" => {
@@ -639,7 +925,27 @@ async fn run(
                     }
                     "error" => {
                         let message = value.pointer("/error/message").and_then(|value| value.as_str()).unwrap_or("OpenAI Realtime failed").to_string();
-                        if speed_update
+                        if pending_input_reset.as_ref().is_some_and(|reset| {
+                            value.pointer("/error/event_id").and_then(|value| value.as_str())
+                                == Some(reset.event_id.as_str())
+                        }) {
+                            let reset = pending_input_reset.take().expect("matched input reset");
+                            let _ = reset.completed.send(Err(message));
+                        } else if pending_input_cutover.as_ref().is_some_and(|cutover| {
+                            value.pointer("/error/event_id").and_then(|value| value.as_str())
+                                == Some(cutover.event_id.as_str())
+                        }) {
+                            let mut cutover = pending_input_cutover
+                                .take()
+                                .expect("matched pending input cutover");
+                            if let Some(completed) = cutover.abort_completion.take() {
+                                let _ = completed.send(Err(message.clone()));
+                            }
+                            send_event(events, SpokespersonEvent::InputCutoverFinished {
+                                request_id: cutover.request_id,
+                                result: Err(message),
+                            })?;
+                        } else if speed_update
                             .as_ref()
                             .is_some_and(|update| speed_error_matches(update, &value))
                         {
@@ -688,6 +994,56 @@ where
         }),
     )
     .await
+}
+
+async fn send_next_seed_item<S>(
+    socket: &mut tokio_tungstenite::WebSocketStream<S>,
+    turns: &mut VecDeque<SemanticTurn>,
+    pending_item: &mut Option<String>,
+    next_control_event_id: &mut u64,
+) -> Result<(), String>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    let Some(turn) = turns.pop_front() else {
+        return Ok(());
+    };
+    let item_id = format!("berd-seed-{next_control_event_id}");
+    *next_control_event_id = next_control_event_id
+        .checked_add(1)
+        .ok_or("Spokesperson seed item space is exhausted")?;
+    let (role, content_type, text) = match turn {
+        SemanticTurn::User(text) => ("user", "input_text", text),
+        SemanticTurn::Spokesperson { text, interrupted } => (
+            "assistant",
+            "output_text",
+            if interrupted {
+                format!("{text} [interrupted]")
+            } else {
+                text
+            },
+        ),
+        SemanticTurn::Expert(text) => (
+            "system",
+            "input_text",
+            format!("Private Expert context; do not respond now:\n{text}"),
+        ),
+    };
+    send_json(
+        socket,
+        serde_json::json!({
+            "type": "conversation.item.create",
+            "item": {
+                "id": item_id,
+                "type": "message",
+                "role": role,
+                "content": [{ "type": content_type, "text": text }]
+            }
+        }),
+    )
+    .await?;
+    *pending_item = Some(item_id);
+    Ok(())
 }
 
 async fn send_json<S>(
@@ -771,6 +1127,7 @@ mod tests {
         OpenAiSpokespersonRuntime, PendingSpeedUpdate, PendingTruncation, SpokespersonCommand,
         SpokespersonEvent, SpokespersonResponseStatus, CONTROL_ACK_TIMEOUT,
     };
+    use crate::expert_spokesperson::SemanticTurn;
 
     #[allow(clippy::result_large_err)]
     fn require_test_authorization(
@@ -801,6 +1158,24 @@ mod tests {
             .unwrap();
     }
 
+    async fn acknowledge_initial_session(
+        socket: &mut WebSocketStream<tokio::net::TcpStream>,
+        update: &Value,
+        model: &str,
+    ) {
+        send_json(
+            socket,
+            json!({
+                "type":"session.updated",
+                "session": {
+                    "model": model,
+                    "audio": { "output": update["session"]["audio"]["output"].clone() }
+                }
+            }),
+        )
+        .await;
+    }
+
     #[test]
     fn normalizes_host_pcm_for_realtime() {
         let bytes = downsample_pcm16(&[1.0, 1.0, -1.0, -1.0]);
@@ -808,6 +1183,307 @@ mod tests {
         assert_eq!(samples.len(), 2);
         assert!(samples[0] > 0.99);
         assert!(samples[1] < -0.99);
+    }
+
+    #[tokio::test]
+    async fn replacement_seed_is_ordered_and_ready_only_after_provider_acknowledges_it() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("ws://{}/", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_hdr_async(stream, require_test_authorization)
+                .await
+                .unwrap();
+            let update = receive_json(&mut socket).await;
+            assert_eq!(update["type"], "session.update");
+            acknowledge_initial_session(&mut socket, &update, "test-model").await;
+
+            let assistant = receive_json(&mut socket).await;
+            assert_eq!(assistant["item"]["role"], "assistant");
+            assert_eq!(
+                assistant["item"]["content"][0]["text"],
+                "The heard prefix [interrupted]"
+            );
+            assert!(!assistant["item"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("unsaid suffix"));
+            send_json(
+                &mut socket,
+                json!({"type":"conversation.item.created","item":{"id":assistant["item"]["id"]}}),
+            )
+            .await;
+
+            let user = receive_json(&mut socket).await;
+            assert_eq!(user["item"]["role"], "user");
+            assert_eq!(user["item"]["content"][0]["text"], "interrupting user");
+            send_json(
+                &mut socket,
+                json!({"type":"conversation.item.created","item":{"id":user["item"]["id"]}}),
+            )
+            .await;
+
+            let expert = receive_json(&mut socket).await;
+            assert_eq!(expert["item"]["role"], "system");
+            assert!(expert["item"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("verified result"));
+            send_json(
+                &mut socket,
+                json!({"type":"conversation.item.created","item":{"id":expert["item"]["id"]}}),
+            )
+            .await;
+            let _ = socket.next().await;
+        });
+
+        let (runtime, events) = OpenAiSpokespersonRuntime::spawn(OpenAiSpokespersonConfig {
+            endpoint,
+            api_key: "test-key".into(),
+            model: "test-model".into(),
+            transcription_model: "test-transcription".into(),
+            voice: "new-voice".into(),
+            speed: 1.25,
+            semantic_transcript: vec![
+                SemanticTurn::Spokesperson {
+                    text: "The heard prefix".into(),
+                    interrupted: true,
+                },
+                SemanticTurn::User("interrupting user".into()),
+                SemanticTurn::Expert("verified result".into()),
+            ],
+        })
+        .unwrap();
+        let ready = tokio::task::spawn_blocking(move || {
+            events.recv_timeout(Duration::from_secs(2)).unwrap()
+        })
+        .await
+        .unwrap();
+        assert!(matches!(ready, SpokespersonEvent::Ready));
+        runtime.finish().unwrap();
+        server.await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn input_cutover_waits_for_committed_transcription_terminal() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("ws://{}/", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_hdr_async(stream, require_test_authorization)
+                .await
+                .unwrap();
+            let update = receive_json(&mut socket).await;
+            assert_eq!(update["type"], "session.update");
+            acknowledge_initial_session(&mut socket, &update, "test-model").await;
+            let clear = receive_json(&mut socket).await;
+            assert_eq!(clear["type"], "input_audio_buffer.clear");
+            assert!(clear["event_id"]
+                .as_str()
+                .unwrap()
+                .starts_with("berd-cutover-"));
+            send_json(
+                &mut socket,
+                json!({"type":"input_audio_buffer.speech_started","item_id":"item-1"}),
+            )
+            .await;
+            send_json(
+                &mut socket,
+                json!({"type":"input_audio_buffer.committed","item_id":"item-1"}),
+            )
+            .await;
+            send_json(&mut socket, json!({"type":"input_audio_buffer.cleared"})).await;
+            tokio::time::sleep(Duration::from_millis(120)).await;
+            send_json(
+                &mut socket,
+                json!({
+                    "type":"conversation.item.input_audio_transcription.completed",
+                    "item_id":"item-1",
+                    "transcript":"changed conversation"
+                }),
+            )
+            .await;
+            let _ = socket.next().await;
+        });
+
+        let (runtime, events) = OpenAiSpokespersonRuntime::spawn(OpenAiSpokespersonConfig {
+            endpoint,
+            api_key: "test-key".into(),
+            model: "test-model".into(),
+            transcription_model: "test-transcription".into(),
+            voice: "old-voice".into(),
+            speed: 1.0,
+            semantic_transcript: Vec::new(),
+        })
+        .unwrap();
+        assert!(matches!(
+            events.recv_timeout(Duration::from_secs(2)).unwrap(),
+            SpokespersonEvent::Ready
+        ));
+        runtime
+            .send(SpokespersonCommand::BeginInputCutover { request_id: 41 })
+            .unwrap();
+        assert!(matches!(
+            events.recv_timeout(Duration::from_secs(2)).unwrap(),
+            SpokespersonEvent::UserSpeaking { active: true, .. }
+        ));
+        assert!(events.recv_timeout(Duration::from_millis(60)).is_err());
+        assert!(matches!(
+            events.recv_timeout(Duration::from_secs(2)).unwrap(),
+            SpokespersonEvent::UserFinal { .. }
+        ));
+        assert!(matches!(
+            events.recv_timeout(Duration::from_secs(2)).unwrap(),
+            SpokespersonEvent::InputCutoverFinished {
+                request_id: 41,
+                result: Ok(())
+            }
+        ));
+        runtime.finish().unwrap();
+        server.await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cleared_uncommitted_speech_is_discarded_before_cutover_completes() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("ws://{}/", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_hdr_async(stream, require_test_authorization)
+                .await
+                .unwrap();
+            let update = receive_json(&mut socket).await;
+            assert_eq!(update["type"], "session.update");
+            acknowledge_initial_session(&mut socket, &update, "test-model").await;
+            assert_eq!(
+                receive_json(&mut socket).await["type"],
+                "input_audio_buffer.clear"
+            );
+            send_json(
+                &mut socket,
+                json!({"type":"input_audio_buffer.speech_started","item_id":"item-abandoned"}),
+            )
+            .await;
+            send_json(&mut socket, json!({"type":"input_audio_buffer.cleared"})).await;
+            let _ = socket.next().await;
+        });
+
+        let (runtime, events) = OpenAiSpokespersonRuntime::spawn(OpenAiSpokespersonConfig {
+            endpoint,
+            api_key: "test-key".into(),
+            model: "test-model".into(),
+            transcription_model: "test-transcription".into(),
+            voice: "old-voice".into(),
+            speed: 1.0,
+            semantic_transcript: Vec::new(),
+        })
+        .unwrap();
+        assert!(matches!(
+            events.recv_timeout(Duration::from_secs(2)).unwrap(),
+            SpokespersonEvent::Ready
+        ));
+        runtime
+            .send(SpokespersonCommand::BeginInputCutover { request_id: 9 })
+            .unwrap();
+        assert!(matches!(
+            events.recv_timeout(Duration::from_secs(2)).unwrap(),
+            SpokespersonEvent::UserSpeaking { active: true, .. }
+        ));
+        assert!(matches!(
+            events.recv_timeout(Duration::from_secs(2)).unwrap(),
+            SpokespersonEvent::UserSpeaking { active: false, .. }
+        ));
+        assert!(matches!(
+            events.recv_timeout(Duration::from_secs(2)).unwrap(),
+            SpokespersonEvent::UserTurnDiscarded { .. }
+        ));
+        assert!(matches!(
+            events.recv_timeout(Duration::from_secs(2)).unwrap(),
+            SpokespersonEvent::InputCutoverFinished {
+                request_id: 9,
+                result: Ok(())
+            }
+        ));
+        runtime.finish().unwrap();
+        server.await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn ordinary_reset_settles_started_input_before_the_next_cutover() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("ws://{}/", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_hdr_async(stream, require_test_authorization)
+                .await
+                .unwrap();
+            let update = receive_json(&mut socket).await;
+            assert_eq!(update["type"], "session.update");
+            acknowledge_initial_session(&mut socket, &update, "test-model").await;
+            assert_eq!(
+                receive_json(&mut socket).await["type"],
+                "input_audio_buffer.clear"
+            );
+            send_json(
+                &mut socket,
+                json!({"type":"input_audio_buffer.speech_started","item_id":"reset-item"}),
+            )
+            .await;
+            send_json(&mut socket, json!({"type":"input_audio_buffer.cleared"})).await;
+            assert_eq!(
+                receive_json(&mut socket).await["type"],
+                "input_audio_buffer.clear"
+            );
+            send_json(&mut socket, json!({"type":"input_audio_buffer.cleared"})).await;
+            let _ = socket.next().await;
+        });
+        let (runtime, events) = OpenAiSpokespersonRuntime::spawn(OpenAiSpokespersonConfig {
+            endpoint,
+            api_key: "test-key".into(),
+            model: "test-model".into(),
+            transcription_model: "test-transcription".into(),
+            voice: "old-voice".into(),
+            speed: 1.0,
+            semantic_transcript: Vec::new(),
+        })
+        .unwrap();
+        assert!(matches!(
+            events.recv_timeout(Duration::from_secs(2)).unwrap(),
+            SpokespersonEvent::Ready
+        ));
+        let reset_runtime = runtime.commands.clone();
+        let reset = tokio::task::spawn_blocking(move || {
+            let (completed, result) = std::sync::mpsc::sync_channel(1);
+            reset_runtime
+                .send(SpokespersonCommand::ResetInput { completed })
+                .unwrap();
+            result.recv_timeout(Duration::from_secs(2)).unwrap()
+        });
+        assert!(matches!(
+            events.recv_timeout(Duration::from_secs(2)).unwrap(),
+            SpokespersonEvent::UserSpeaking { active: true, .. }
+        ));
+        assert!(matches!(
+            events.recv_timeout(Duration::from_secs(2)).unwrap(),
+            SpokespersonEvent::UserSpeaking { active: false, .. }
+        ));
+        assert!(matches!(
+            events.recv_timeout(Duration::from_secs(2)).unwrap(),
+            SpokespersonEvent::UserTurnDiscarded { .. }
+        ));
+        reset.await.unwrap().unwrap();
+        runtime
+            .send(SpokespersonCommand::BeginInputCutover { request_id: 11 })
+            .unwrap();
+        assert!(matches!(
+            events.recv_timeout(Duration::from_secs(2)).unwrap(),
+            SpokespersonEvent::InputCutoverFinished {
+                request_id: 11,
+                result: Ok(())
+            }
+        ));
+        runtime.finish().unwrap();
+        server.await.unwrap();
     }
 
     #[test]
@@ -899,6 +1575,7 @@ mod tests {
                 transcription_model: "test-transcription".into(),
                 voice: "test-voice".into(),
                 speed: 1.0,
+                semantic_transcript: Vec::new(),
             },
             command_rx,
             &events,
@@ -906,7 +1583,10 @@ mod tests {
         .await
         .unwrap_err();
 
-        assert!(error.contains("code 1008: response already active"), "{error}");
+        assert!(
+            error.contains("code 1008: response already active"),
+            "{error}"
+        );
         server.await.unwrap();
     }
 
@@ -919,8 +1599,9 @@ mod tests {
             let mut socket = accept_hdr_async(stream, require_test_authorization)
                 .await
                 .unwrap();
-            assert_eq!(receive_json(&mut socket).await["type"], "session.update");
-            send_json(&mut socket, json!({"type":"session.updated"})).await;
+            let update = receive_json(&mut socket).await;
+            assert_eq!(update["type"], "session.update");
+            acknowledge_initial_session(&mut socket, &update, "test-model").await;
 
             let cancel = receive_json(&mut socket).await;
             assert_eq!(cancel["type"], "response.cancel");
@@ -931,9 +1612,11 @@ mod tests {
             assert_eq!(truncate["item_id"], "assistant-old");
             assert_eq!(truncate["content_index"], 0);
             assert_eq!(truncate["audio_end_ms"], 500);
-            assert!(tokio::time::timeout(Duration::from_millis(20), socket.next())
-                .await
-                .is_err());
+            assert!(
+                tokio::time::timeout(Duration::from_millis(20), socket.next())
+                    .await
+                    .is_err()
+            );
             send_json(
                 &mut socket,
                 json!({
@@ -953,6 +1636,7 @@ mod tests {
             transcription_model: "test-transcription".into(),
             voice: "test-voice".into(),
             speed: 1.0,
+            semantic_transcript: Vec::new(),
         })
         .unwrap();
         let (ready, events) = tokio::task::spawn_blocking(move || {
@@ -1015,7 +1699,7 @@ mod tests {
                 configured.pointer("/session/audio/output/voice"),
                 Some(&json!("test-voice"))
             );
-            send_json(&mut socket, json!({"type":"session.updated"})).await;
+            acknowledge_initial_session(&mut socket, &configured, "test-model").await;
 
             let appended = receive_json(&mut socket).await;
             assert_eq!(appended["type"], "input_audio_buffer.append");
@@ -1029,11 +1713,15 @@ mod tests {
 
             let item = receive_json(&mut socket).await;
             assert_eq!(item["type"], "input_audio_buffer.clear");
+            send_json(&mut socket, json!({"type":"input_audio_buffer.cleared"})).await;
 
             let speed = receive_json(&mut socket).await;
             assert_eq!(speed["type"], "session.update");
-            assert_eq!(speed["event_id"], "berd-speed-1");
-            assert_eq!(speed.pointer("/session/audio/output/speed"), Some(&json!(1.5)));
+            assert_eq!(speed["event_id"], "berd-speed-2");
+            assert_eq!(
+                speed.pointer("/session/audio/output/speed"),
+                Some(&json!(1.5))
+            );
             send_json(
                 &mut socket,
                 json!({"type":"input_audio_buffer.speech_started","item_id":"item-during-update"}),
@@ -1177,6 +1865,7 @@ mod tests {
                     transcription_model: "test-transcription".into(),
                     voice: "test-voice".into(),
                     speed: 1.25,
+                    semantic_transcript: Vec::new(),
                 },
                 command_rx,
                 &events,

@@ -40,17 +40,21 @@ use berd_voice::{
         LocalInstallPhase, LocalInstallProgress,
     },
     ConfiguredTtsSlot, DeliveryProgress, DeliverySegment, PcmAudioOutput, TtsBackend,
-    TtsConfiguration,
-    TtsConfigurationLease, TtsConfigurationRejection, TtsConfigurationRejectionKind, TtsPcmSpec,
-    TtsSettings, WavSynthesisErrorKind,
+    TtsConfiguration, TtsConfigurationLease, TtsConfigurationRejection,
+    TtsConfigurationRejectionKind, TtsPcmSpec, TtsSettings, WavSynthesisErrorKind,
 };
 use serde::Serialize;
 
 mod session_audio;
+mod spokesperson_voice_update;
 
 use session_audio::{
     AudioHostAck, AudioOutputControlRequest, AudioPipeTransport, RemotePcmAudioOutput,
     AUDIO_CANCELLED,
+};
+use spokesperson_voice_update::{
+    VoiceBarrierAction, VoiceUpdateAction, VoiceUpdatePhase, VoiceUpdateRequest,
+    VoiceUpdateTransaction,
 };
 
 const WIRE_MARKER: u32 = 2;
@@ -1834,6 +1838,20 @@ struct PendingSpokespersonRateUpdate {
     settings: TtsSettings,
 }
 
+fn rollback_spokesperson_voice_update(
+    pending: &mut Option<VoiceUpdateTransaction>,
+    old_runtime: &OpenAiSpokespersonRuntime,
+    snapshot: &berd_voice::TtsConfigurationSnapshot,
+    message: String,
+    writer: &mut impl Write,
+) -> Result<(), String> {
+    let Some(update) = pending.take() else {
+        return Ok(());
+    };
+    let id = update.abort(old_runtime)?;
+    reject_spokesperson_tts_settings(id, snapshot, message, writer)
+}
+
 enum ExpertPrepareRouting {
     Ready(PendingExpertPrepare),
     Held,
@@ -2257,7 +2275,10 @@ fn prepare_spokesperson_rate_update(
                     Ok(*rate)
                 }
             }
-            _ => Err("live voice changes are unavailable in Expert-Spokesperson mode".into()),
+            (TtsSettings::OpenAi { .. }, TtsSettings::OpenAi { .. }) => {
+                Err("Spokesperson model cannot change during a session".into())
+            }
+            _ => Err("Expert-Spokesperson requires OpenAI voice settings".into()),
         }
     };
     match rate {
@@ -2282,7 +2303,10 @@ fn complete_spokesperson_rate_update(
     snapshot: &mut berd_voice::TtsConfigurationSnapshot,
     writer: &mut impl Write,
 ) -> Result<(), String> {
-    if pending.as_ref().is_none_or(|update| update.id != request_id) {
+    if pending
+        .as_ref()
+        .is_none_or(|update| update.id != request_id)
+    {
         return Ok(());
     }
     let update = pending.take().expect("matched pending rate update");
@@ -2336,12 +2360,19 @@ fn spokesperson_settings_are_quiescent(
     !pending_user_response
         && gate.pending_prepare.is_none()
         && !gate.is_busy(active.is_some(), responses.len())
-        && !expert_output_reserved(
-            directive_speeches,
-            cancelled_directives,
-            active,
-            responses,
-        )
+        && !expert_output_reserved(directive_speeches, cancelled_directives, active, responses)
+}
+
+fn spokesperson_voice_update_is_safe(
+    update: &VoiceUpdateTransaction,
+    core: &ExpertSpokespersonCore,
+    snapshot: &berd_voice::TtsConfigurationSnapshot,
+    quiescent: bool,
+) -> bool {
+    core.semantic_revision() == update.semantic_revision
+        && snapshot.revision == update.base_revision
+        && !core.has_unresolved_handoff()
+        && quiescent
 }
 
 fn apply_spokesperson_startup_settings(
@@ -2404,6 +2435,7 @@ fn run_expert_spokesperson_session(
     let mut core = ExpertSpokespersonCore::default();
     let mut runtime: Option<OpenAiSpokespersonRuntime> = None;
     let mut runtime_events: Option<Receiver<SpokespersonEvent>> = None;
+    let mut runtime_config: Option<OpenAiSpokespersonConfig> = None;
     let mut initialized = false;
     let mut pending_control = None;
     let mut processed_pcm = 0_u64;
@@ -2421,10 +2453,41 @@ fn run_expert_spokesperson_session(
     let mut input_muted = false;
     let mut pending_user_response = false;
     let mut pending_rate_update = None;
+    let mut pending_voice_update: Option<VoiceUpdateTransaction> = None;
 
     loop {
         if fail_timed_out_user_response_start(&turn_gate, Instant::now(), &mut writer)? {
             return Ok(());
+        }
+        if let Some(update) = pending_voice_update.as_ref() {
+            let quiescent = spokesperson_settings_are_quiescent(
+                &turn_gate,
+                active.as_ref(),
+                &responses,
+                &directive_speeches,
+                &cancelled_directives,
+                pending_user_response,
+            );
+            let safe = spokesperson_voice_update_is_safe(
+                update,
+                &core,
+                session_tts.as_ref().expect("initialized TTS snapshot"),
+                quiescent,
+            );
+            match update.next_action(Instant::now(), safe) {
+                VoiceUpdateAction::None => {}
+                VoiceUpdateAction::BeginInputBarrier => pending_voice_update
+                    .as_mut()
+                    .expect("voice update exists")
+                    .begin_input_barrier(runtime.as_ref().expect("initialized runtime"))?,
+                VoiceUpdateAction::Reject(message) => rollback_spokesperson_voice_update(
+                    &mut pending_voice_update,
+                    runtime.as_ref().expect("initialized runtime"),
+                    session_tts.as_ref().expect("initialized TTS snapshot"),
+                    message,
+                    &mut writer,
+                )?,
+            }
         }
         if let Some(events) = runtime_events.as_ref() {
             if let Ok(event) = events.try_recv() {
@@ -2460,6 +2523,7 @@ fn run_expert_spokesperson_session(
                             !directive_speeches.is_empty()
                                 || !cancelled_directives.is_empty()
                                 || pending_rate_update.is_some()
+                                || pending_voice_update.is_some()
                                 || live_truncation_pending(&responses),
                             || {
                                 runtime
@@ -2514,9 +2578,10 @@ fn run_expert_spokesperson_session(
                             &mut core,
                             &mut next_live_token,
                             &mut emitted_live_token,
-                            LiveSideEvent::UserTranscript { text },
+                            LiveSideEvent::UserTranscript { text: text.clone() },
                             &mut writer,
                         )?;
+                        core.record_user_turn(text);
                         pending_user_response = true;
                         dispatch_pending_user_response(
                             &mut pending_user_response,
@@ -2524,6 +2589,7 @@ fn run_expert_spokesperson_session(
                             !directive_speeches.is_empty()
                                 || !cancelled_directives.is_empty()
                                 || pending_rate_update.is_some()
+                                || pending_voice_update.is_some()
                                 || live_truncation_pending(&responses),
                             || {
                                 runtime
@@ -2535,6 +2601,7 @@ fn run_expert_spokesperson_session(
                     }
                     SpokespersonEvent::ResponseStarted { response_id } => {
                         turn_gate.response_started(&response_id, responses.len())?;
+                        core.reserve_spokesperson_turn(response_id.clone());
                         responses
                             .entry(response_id)
                             .or_insert_with(|| LiveResponse::new(None, None));
@@ -2604,6 +2671,7 @@ fn run_expert_spokesperson_session(
                             !directive_speeches.is_empty()
                                 || !cancelled_directives.is_empty()
                                 || pending_rate_update.is_some()
+                                || pending_voice_update.is_some()
                                 || live_truncation_pending(&responses),
                             || {
                                 runtime
@@ -2747,6 +2815,7 @@ fn run_expert_spokesperson_session(
                             !directive_speeches.is_empty()
                                 || !cancelled_directives.is_empty()
                                 || pending_rate_update.is_some()
+                                || pending_voice_update.is_some()
                                 || live_truncation_pending(&responses),
                             || {
                                 runtime
@@ -2755,6 +2824,79 @@ fn run_expert_spokesperson_session(
                                     .send(SpokespersonCommand::CreateUserResponse)
                             },
                         )?;
+                    }
+                    SpokespersonEvent::InputCutoverFinished { request_id, result } => {
+                        let action = pending_voice_update.as_ref().map_or(
+                            VoiceBarrierAction::Ignore,
+                            |update| {
+                                let quiescent = spokesperson_settings_are_quiescent(
+                                    &turn_gate,
+                                    active.as_ref(),
+                                    &responses,
+                                    &directive_speeches,
+                                    &cancelled_directives,
+                                    pending_user_response,
+                                );
+                                let safe = spokesperson_voice_update_is_safe(
+                                    update,
+                                    &core,
+                                    session_tts.as_ref().expect("initialized TTS snapshot"),
+                                    quiescent,
+                                );
+                                match update.next_action(Instant::now(), safe) {
+                                    VoiceUpdateAction::Reject(message) => {
+                                        VoiceBarrierAction::Reject(message)
+                                    }
+                                    _ => update.finish_barrier(request_id, result, safe),
+                                }
+                            },
+                        );
+                        if action == VoiceBarrierAction::Activate {
+                            let update = pending_voice_update
+                                .take()
+                                .expect("matched pending voice update");
+                            let activated = update.activate();
+                            let old_runtime = runtime
+                                .replace(activated.runtime)
+                                .expect("initialized runtime");
+                            runtime_events = Some(activated.events);
+                            old_runtime.finish()?;
+                            for frame in activated.held_input {
+                                runtime.as_ref().expect("activated runtime").send(
+                                    SpokespersonCommand::InputPcm48Khz(frame.as_samples().to_vec()),
+                                )?;
+                            }
+                            let snapshot = session_tts.as_mut().expect("initialized TTS snapshot");
+                            snapshot.revision = snapshot
+                                .revision
+                                .checked_add(1)
+                                .ok_or("TTS configuration revision overflow")?;
+                            snapshot.settings = activated.settings.clone();
+                            if let TtsSettings::OpenAi { voice, rate, .. } = &activated.settings {
+                                let config = runtime_config
+                                    .as_mut()
+                                    .expect("initialized Spokesperson config");
+                                config.voice = voice.clone();
+                                config.speed = *rate;
+                            }
+                            write_message(
+                                &mut writer,
+                                &SessionMessage::TtsSettingsResult {
+                                    id: activated.id,
+                                    outcome: TtsSettingsOutcome::Applied,
+                                    snapshot: snapshot.clone(),
+                                    message: None,
+                                },
+                            )?;
+                        } else if let VoiceBarrierAction::Reject(message) = action {
+                            rollback_spokesperson_voice_update(
+                                &mut pending_voice_update,
+                                runtime.as_ref().expect("initialized runtime"),
+                                session_tts.as_ref().expect("initialized TTS snapshot"),
+                                message,
+                                &mut writer,
+                            )?;
+                        }
                     }
                     SpokespersonEvent::OutputTruncated { response_id } => {
                         if let Some(response) = responses.get_mut(&response_id) {
@@ -2774,6 +2916,7 @@ fn run_expert_spokesperson_session(
                             !directive_speeches.is_empty()
                                 || !cancelled_directives.is_empty()
                                 || pending_rate_update.is_some()
+                                || pending_voice_update.is_some()
                                 || live_truncation_pending(&responses),
                             || {
                                 runtime
@@ -2795,7 +2938,7 @@ fn run_expert_spokesperson_session(
                     SpokespersonEvent::Failed(message) => {
                         write_protocol_fatal(&mut writer, "Spokesperson failed", &message)?;
                         cancel_live_playback(&mut active);
-                        return Ok(());
+                        break;
                     }
                     SpokespersonEvent::Closed => {
                         if initialized {
@@ -2912,6 +3055,21 @@ fn run_expert_spokesperson_session(
                 &mut writer,
             )?;
         }
+        dispatch_pending_user_response(
+            &mut pending_user_response,
+            &mut turn_gate,
+            !directive_speeches.is_empty()
+                || !cancelled_directives.is_empty()
+                || pending_rate_update.is_some()
+                || pending_voice_update.is_some()
+                || live_truncation_pending(&responses),
+            || {
+                runtime
+                    .as_ref()
+                    .expect("initialized runtime")
+                    .send(SpokespersonCommand::CreateUserResponse)
+            },
+        )?;
         if !expert_output_reserved(
             &directive_speeches,
             &cancelled_directives,
@@ -2919,7 +3077,7 @@ fn run_expert_spokesperson_session(
             &responses,
         ) {
             if let Some(request) = turn_gate.take_ready(
-                active.is_some() || pending_rate_update.is_some(),
+                active.is_some() || pending_rate_update.is_some() || pending_voice_update.is_some(),
                 responses.len(),
             ) {
                 submit_expert_prepare(
@@ -2964,9 +3122,29 @@ fn run_expert_spokesperson_session(
                         .expect("hello initialized input policy")
                         .snapshot()?,
                 ) {
-                    runtime.as_ref().expect("initialized runtime").send(
-                        SpokespersonCommand::InputPcm48Khz(frame.as_samples().to_vec()),
-                    )?;
+                    if let Some(update) = pending_voice_update
+                        .as_mut()
+                        .filter(|update| update.phase() == VoiceUpdatePhase::InputBarrier)
+                    {
+                        if let Err(frame) = update.hold_input(frame, INPUT_QUEUE_CAPACITY) {
+                            rollback_spokesperson_voice_update(
+                                &mut pending_voice_update,
+                                runtime.as_ref().expect("initialized runtime"),
+                                session_tts.as_ref().expect("initialized TTS snapshot"),
+                                "Spokesperson voice change could not keep up with microphone input"
+                                    .into(),
+                                &mut writer,
+                            )?;
+                            runtime.as_ref().expect("initialized runtime").send(
+                                SpokespersonCommand::InputPcm48Khz(frame.as_samples().to_vec()),
+                            )?;
+                            continue;
+                        }
+                    } else {
+                        runtime.as_ref().expect("initialized runtime").send(
+                            SpokespersonCommand::InputPcm48Khz(frame.as_samples().to_vec()),
+                        )?;
+                    }
                 }
             }
             Input::Request(SessionRequest::Hello {
@@ -2996,7 +3174,8 @@ fn run_expert_spokesperson_session(
                     tts: tts.clone(),
                     input_during_tts: input_policy.snapshot()?,
                 };
-                let (created, events) = OpenAiSpokespersonRuntime::spawn(spokesperson_config)?;
+                let (created, events) =
+                    OpenAiSpokespersonRuntime::spawn(spokesperson_config.clone())?;
                 match events.recv_timeout(Duration::from_secs(30)) {
                     Ok(SpokespersonEvent::Ready) => {}
                     Ok(SpokespersonEvent::Failed(message)) => return Err(message),
@@ -3005,6 +3184,7 @@ fn run_expert_spokesperson_session(
                 }
                 runtime = Some(created);
                 runtime_events = Some(events);
+                runtime_config = Some(spokesperson_config);
                 session_tts = Some(tts);
                 input_during_tts_slot = Some(input_policy);
                 initialized = true;
@@ -3044,7 +3224,7 @@ fn run_expert_spokesperson_session(
                         active.as_ref(),
                         &responses,
                     ),
-                    pending_rate_update.is_some(),
+                    pending_rate_update.is_some() || pending_voice_update.is_some(),
                     active.is_some(),
                     responses.len(),
                 );
@@ -3248,6 +3428,15 @@ fn run_expert_spokesperson_session(
                 }
             }
             Input::Request(SessionRequest::SetInputMuted { id, active: muted }) => {
+                if pending_voice_update.is_some() {
+                    rollback_spokesperson_voice_update(
+                        &mut pending_voice_update,
+                        runtime.as_ref().expect("initialized runtime"),
+                        session_tts.as_ref().expect("initialized TTS snapshot"),
+                        "Spokesperson voice change was superseded by an input control".into(),
+                        &mut writer,
+                    )?;
+                }
                 set_spokesperson_input_muted(
                     id,
                     muted,
@@ -3257,6 +3446,15 @@ fn run_expert_spokesperson_session(
                 )?;
             }
             Input::Request(SessionRequest::ResetInput { id }) => {
+                if pending_voice_update.is_some() {
+                    rollback_spokesperson_voice_update(
+                        &mut pending_voice_update,
+                        runtime.as_ref().expect("initialized runtime"),
+                        session_tts.as_ref().expect("initialized TTS snapshot"),
+                        "Spokesperson voice change was superseded by an input reset".into(),
+                        &mut writer,
+                    )?;
+                }
                 reset_spokesperson_input(
                     id,
                     || runtime.as_ref().expect("initialized runtime").reset_input(),
@@ -3268,6 +3466,15 @@ fn run_expert_spokesperson_session(
                 expected_revision,
                 policy,
             }) => {
+                if pending_voice_update.is_some() {
+                    rollback_spokesperson_voice_update(
+                        &mut pending_voice_update,
+                        runtime.as_ref().expect("initialized runtime"),
+                        session_tts.as_ref().expect("initialized TTS snapshot"),
+                        "Spokesperson voice change was superseded by an input policy update".into(),
+                        &mut writer,
+                    )?;
+                }
                 set_spokesperson_input_policy(
                     id,
                     expected_revision,
@@ -3283,41 +3490,93 @@ fn run_expert_spokesperson_session(
                 expected_revision,
                 settings,
             }) => {
-                let quiescent = spokesperson_settings_are_quiescent(
-                    &turn_gate,
-                    active.as_ref(),
-                    &responses,
-                    &directive_speeches,
-                    &cancelled_directives,
-                    pending_user_response,
-                );
-                prepare_spokesperson_rate_update(
-                    PendingSpokespersonRateUpdate {
+                let quiescent = !core.has_unresolved_handoff()
+                    && spokesperson_settings_are_quiescent(
+                        &turn_gate,
+                        active.as_ref(),
+                        &responses,
+                        &directive_speeches,
+                        &cancelled_directives,
+                        pending_user_response,
+                    );
+                let current_voice = match &session_tts
+                    .as_ref()
+                    .expect("hello initialized TTS snapshot")
+                    .settings
+                {
+                    TtsSettings::OpenAi { voice, .. } => Some(voice.as_str()),
+                    _ => None,
+                };
+                let requested_voice = match &settings {
+                    TtsSettings::OpenAi { voice, .. } => Some(voice.clone()),
+                    _ => None,
+                };
+                let request = PendingSpokespersonRateUpdate {
+                    id,
+                    base_revision: expected_revision,
+                    settings,
+                };
+                if pending_voice_update.is_some() {
+                    reject_spokesperson_tts_settings(
                         id,
-                        base_revision: expected_revision,
-                        settings,
-                    },
-                    quiescent,
-                    session_tts
-                        .as_ref()
-                        .expect("hello initialized TTS snapshot"),
-                    &mut pending_rate_update,
-                    |request_id, rate| {
-                        runtime
+                        session_tts.as_ref().expect("initialized TTS snapshot"),
+                        "another Spokesperson voice update is in progress".into(),
+                        &mut writer,
+                    )?;
+                } else if current_voice == requested_voice.as_deref() {
+                    prepare_spokesperson_rate_update(
+                        request,
+                        quiescent,
+                        session_tts.as_ref().expect("initialized TTS snapshot"),
+                        &mut pending_rate_update,
+                        |request_id, rate| {
+                            runtime.as_ref().expect("initialized runtime").send(
+                                SpokespersonCommand::UpdateSpeed {
+                                    request_id,
+                                    speed: rate,
+                                },
+                            )
+                        },
+                        &mut writer,
+                    )?;
+                } else if pending_rate_update.is_some() {
+                    reject_spokesperson_tts_settings(
+                        id,
+                        session_tts.as_ref().expect("initialized TTS snapshot"),
+                        "another Spokesperson settings update is in progress".into(),
+                        &mut writer,
+                    )?;
+                } else {
+                    let snapshot = session_tts.as_ref().expect("initialized TTS snapshot");
+                    let id = request.id;
+                    match VoiceUpdateTransaction::start(
+                        VoiceUpdateRequest {
+                            id: request.id,
+                            base_revision: request.base_revision,
+                            settings: request.settings,
+                            semantic_revision: core.semantic_revision(),
+                        },
+                        snapshot.revision,
+                        quiescent,
+                        runtime_config
                             .as_ref()
-                            .expect("initialized runtime")
-                            .send(SpokespersonCommand::UpdateSpeed {
-                                request_id,
-                                speed: rate,
-                            })
-                    },
-                    &mut writer,
-                )?;
+                            .expect("initialized Spokesperson config"),
+                        core.semantic_transcript(),
+                    ) {
+                        Ok(update) => pending_voice_update = Some(update),
+                        Err(message) => {
+                            reject_spokesperson_tts_settings(id, snapshot, message, &mut writer)?
+                        }
+                    }
+                }
             }
             Input::Request(SessionRequest::SetPaused { .. }) => {}
         }
     }
     cancel_live_playback(&mut active);
+    if let Some(update) = pending_voice_update {
+        update.finish_candidate()?;
+    }
     if let Some(runtime) = runtime {
         runtime.finish()?;
     }
@@ -3415,6 +3674,7 @@ fn submit_expert_prepare(
             let speech_id = *next_speech_id;
             *next_speech_id += 1;
             directive_speeches.insert(request.id, (request.id, speech_id));
+            core.record_expert_turn(message.clone());
             runtime.send(SpokespersonCommand::ExpertSay {
                 directive_id: request.id,
                 text: message,
@@ -3758,6 +4018,7 @@ fn publish_live_response_if_complete(
                 .is_none_or(|text| text.is_empty())
     }) {
         responses.remove(response_id);
+        core.finish_spokesperson_turn(response_id, String::new(), false);
         return Ok(());
     }
     let ready = responses.get(response_id).is_some_and(|response| {
@@ -3776,6 +4037,7 @@ fn publish_live_response_if_complete(
         .remove(response_id)
         .expect("ready response exists");
     let transcript = delivered_live_transcript(&response);
+    core.finish_spokesperson_turn(response_id, transcript.clone(), response.interrupted);
     record_and_emit_live_event(
         core,
         next_live_token,
@@ -3874,7 +4136,9 @@ fn delivered_live_transcript(response: &LiveResponse) -> String {
         sample_rate: 24_000,
         segments: vec![DeliverySegment {
             text: text.to_string(),
-            played_frames: response.played_audio_frames.min(response.total_audio_frames),
+            played_frames: response
+                .played_audio_frames
+                .min(response.total_audio_frames),
             total_frames: response.total_audio_frames,
             synthesis_complete: true,
         }],
@@ -6614,15 +6878,8 @@ mod tests {
             ),
             ExpertPrepareRouting::Held
         ));
-        complete_spokesperson_rate_update(
-            7,
-            1.5,
-            Ok(()),
-            &mut pending,
-            &mut snapshot,
-            &mut output,
-        )
-        .unwrap();
+        complete_spokesperson_rate_update(7, 1.5, Ok(()), &mut pending, &mut snapshot, &mut output)
+            .unwrap();
         dispatch_pending_user_response(&mut response_needed, &mut gate, pending.is_some(), || {
             created_responses += 1;
             Ok(())
@@ -6815,7 +7072,10 @@ mod tests {
         assert_eq!(emitted[0]["type"], "speech_interrupted");
         assert_eq!(emitted[0]["spoken_through_utf8"], 0);
         assert_eq!(emitted[1]["type"], "user_final");
-        assert!(emitted[1]["text"].as_str().unwrap().contains("One two three"));
+        assert!(emitted[1]["text"]
+            .as_str()
+            .unwrap()
+            .contains("One two three"));
         assert!(!emitted[1]["text"].as_str().unwrap().contains("four"));
     }
 
@@ -6934,10 +7194,7 @@ mod tests {
         gate.response_started("response-new", 0).unwrap();
         assert!(gate.take_ready(false, 1).is_none());
         gate.response_finished("response-new");
-        assert_eq!(
-            gate.take_ready(false, 0).map(|request| request.id),
-            Some(7)
-        );
+        assert_eq!(gate.take_ready(false, 0).map(|request| request.id), Some(7));
     }
 
     #[test]
@@ -6954,7 +7211,10 @@ mod tests {
 
         flush_active_live_playback(&active, &mut responses).unwrap();
 
-        assert!(matches!(receiver.recv().unwrap(), LivePlaybackInput::Finish));
+        assert!(matches!(
+            receiver.recv().unwrap(),
+            LivePlaybackInput::Finish
+        ));
         assert!(responses["response-a"].finish_sent);
     }
 
@@ -8372,6 +8632,7 @@ mod tests {
             transcription_model: "test-transcription".into(),
             voice: "marin".into(),
             speed: 1.0,
+            semantic_transcript: Vec::new(),
         };
 
         apply_spokesperson_startup_settings(&session, &mut realtime).unwrap();
