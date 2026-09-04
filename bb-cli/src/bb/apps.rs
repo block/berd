@@ -536,17 +536,17 @@ fn run_create(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     }
     let initialize_required = plan
         .pointer("/initialize/required")
-        .and_then(Value::as_bool);
+        .and_then(Value::as_bool)
+        .context(
+            "Apps Platform plan response did not include boolean initialize.required; refusing to reserve the app",
+        )?;
     let initialize_recommended = plan
         .pointer("/initialize/recommended")
-        .and_then(Value::as_bool);
-    if initialize_required.is_none() && initialize_recommended.is_none() {
-        anyhow::bail!(
-            "Apps Platform plan response did not include initialize.required or initialize.recommended"
-        );
-    }
-    let plan_requests_initialize =
-        initialize_required.unwrap_or(false) || initialize_recommended.unwrap_or(false);
+        .and_then(Value::as_bool)
+        .context(
+            "Apps Platform plan response did not include boolean initialize.recommended; refusing to reserve the app",
+        )?;
+    let plan_requests_initialize = initialize_required || initialize_recommended;
     let mutation_request = mutation_request_from_plan(&plan);
     let (reservation, reservation_reconciled) =
         reconcile_create_reservation(&client, &credential, &app_id, &plan, &mutation_request)?;
@@ -2517,6 +2517,83 @@ mod tests {
             credential,
         );
         assert_eq!(requests[2].body, requests[1].body);
+    }
+
+    #[test]
+    fn bb_apps_create_requires_complete_boolean_initialize_decision_before_reserve() {
+        let credential = "apps-e2e-only.initialize-decision.session+credential";
+        let valid_plan = json!({
+            "app_id": "merchant-lookup",
+            "display_name": "Merchant Lookup",
+            "environment": "staging",
+            "persistence": "none",
+            "runtime_class": "default",
+            "initialize": {"required": false, "recommended": false}
+        });
+
+        for field in ["required", "recommended"] {
+            for (shape, replacement) in [
+                ("missing", None),
+                ("null", Some(Value::Null)),
+                ("non-boolean", Some(Value::String("false".to_string()))),
+            ] {
+                let mut plan = valid_plan.clone();
+                let initialize = plan["initialize"]
+                    .as_object_mut()
+                    .expect("initialize object");
+                match replacement {
+                    Some(value) => {
+                        initialize.insert(field.to_string(), value);
+                    }
+                    None => {
+                        initialize.remove(field);
+                    }
+                }
+                let auth_server = ProcessServer::start(vec![process_auth_response()]);
+                let control_plane = ProcessServer::start(vec![ProcessResponse::json(plan)]);
+                let mut command = process_command(
+                    &auth_server,
+                    &control_plane,
+                    &[
+                        "apps",
+                        "create",
+                        "--app-id",
+                        "merchant-lookup",
+                        "--name",
+                        "Merchant Lookup",
+                        "--base-url",
+                        APPROVED_TEST_BASE_URL,
+                        "--client-version",
+                        "0.2.0",
+                        "--json",
+                    ],
+                    credential,
+                );
+
+                let output = command
+                    .output()
+                    .unwrap_or_else(|error| panic!("run create with {field} {shape}: {error}"));
+                assert!(
+                    !output.status.success(),
+                    "accepted initialize.{field} as {shape}"
+                );
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                assert!(
+                    stderr.contains(&format!("boolean initialize.{field}"))
+                        && stderr.contains("refusing to reserve the app"),
+                    "stderr for initialize.{field} as {shape} was: {stderr}"
+                );
+                let auth_requests = auth_server.finish();
+                let requests = control_plane.finish();
+                assert_process_auth(&auth_requests[0], credential);
+                assert_eq!(
+                    requests.len(),
+                    1,
+                    "initialize.{field} as {shape} sent a mutation"
+                );
+                assert_process_control_plane(&requests[0], "POST", APPS_PLAN_PATH, credential);
+            }
+        }
     }
 
     #[test]
