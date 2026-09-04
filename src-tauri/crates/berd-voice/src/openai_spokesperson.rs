@@ -26,10 +26,7 @@ const CONTROL_ACK_TIMEOUT: Duration = Duration::from_secs(4);
 pub struct OpenAiSpokespersonConfig {
     pub endpoint: String,
     pub api_key: String,
-    pub model: String,
-    pub transcription_model: String,
-    pub voice: String,
-    pub speed: f32,
+    pub session: RealtimeSpokespersonSessionOptions,
     pub semantic_transcript: Vec<SemanticTurn>,
 }
 
@@ -43,17 +40,45 @@ impl OpenAiSpokespersonConfig {
             endpoint: std::env::var("OPENAI_REALTIME_ENDPOINT")
                 .unwrap_or_else(|_| DEFAULT_ENDPOINT.into()),
             api_key,
-            model: std::env::var("OPENAI_REALTIME_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.into()),
-            transcription_model: std::env::var("OPENAI_TRANSCRIPTION_MODEL")
-                .unwrap_or_else(|_| DEFAULT_TRANSCRIPTION_MODEL.into()),
-            voice: std::env::var("OPENAI_REALTIME_VOICE").unwrap_or_else(|_| "marin".into()),
-            speed: std::env::var("OPENAI_REALTIME_SPEED")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .filter(|value| (0.25..=1.5).contains(value))
-                .unwrap_or(1.0),
+            session: RealtimeSpokespersonSessionOptions {
+                model: Some(
+                    std::env::var("OPENAI_REALTIME_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.into()),
+                ),
+                transcription_model: Some(
+                    std::env::var("OPENAI_TRANSCRIPTION_MODEL")
+                        .unwrap_or_else(|_| DEFAULT_TRANSCRIPTION_MODEL.into()),
+                ),
+                voice: Some(
+                    std::env::var("OPENAI_REALTIME_VOICE").unwrap_or_else(|_| "marin".into()),
+                ),
+                speed: Some(
+                    std::env::var("OPENAI_REALTIME_SPEED")
+                        .ok()
+                        .and_then(|value| value.parse().ok())
+                        .filter(|value| (0.25..=1.5).contains(value))
+                        .unwrap_or(1.0),
+                ),
+                ..Default::default()
+            },
             semantic_transcript: Vec::new(),
         })
+    }
+
+    pub fn model(&self) -> &str {
+        self.session.model.as_deref().unwrap_or(DEFAULT_MODEL)
+    }
+
+    pub fn voice(&self) -> &str {
+        self.session.voice.as_deref().unwrap_or("marin")
+    }
+
+    pub fn speed(&self) -> f32 {
+        self.session.speed.unwrap_or(1.0)
+    }
+
+    pub fn set_voice_and_speed(&mut self, voice: String, speed: f32) {
+        self.session.voice = Some(voice);
+        self.session.speed = Some(speed);
     }
 }
 
@@ -268,9 +293,9 @@ fn validate_effective_session(
         .pointer("/session/audio/output/speed")
         .and_then(serde_json::Value::as_f64)
         .map(|value| value as f32);
-    if model != Some(config.model.as_str())
-        || voice != Some(config.voice.as_str())
-        || !speed.is_some_and(|speed| (speed - config.speed).abs() <= f32::EPSILON)
+    if model != Some(config.model())
+        || voice != Some(config.voice())
+        || !speed.is_some_and(|speed| (speed - config.speed()).abs() <= f32::EPSILON)
     {
         return Err("OpenAI Realtime did not apply the requested model, voice, and speed".into());
     }
@@ -361,9 +386,9 @@ async fn run(
         drop(existing);
     }
     let endpoint = if config.endpoint.contains('?') {
-        format!("{}&model={}", config.endpoint, config.model)
+        format!("{}&model={}", config.endpoint, config.model())
     } else {
-        format!("{}?model={}", config.endpoint, config.model)
+        format!("{}?model={}", config.endpoint, config.model())
     };
     let mut request = endpoint
         .into_client_request()
@@ -387,17 +412,7 @@ async fn run(
             Some(_) => return Err("Spokesperson command arrived before readiness".into()),
         }
     };
-    send_json(
-        &mut socket,
-        spokesperson_session_update(&RealtimeSpokespersonSessionOptions {
-            model: Some(config.model.clone()),
-            transcription_model: Some(config.transcription_model.clone()),
-            voice: Some(config.voice.clone()),
-            speed: Some(config.speed),
-            ..Default::default()
-        }),
-    )
-    .await?;
+    send_json(&mut socket, spokesperson_session_update(&config.session)).await?;
 
     let mut protocol = RealtimeProtocolReducer::default();
     let mut speed_update: Option<PendingSpeedUpdate> = None;
@@ -1123,6 +1138,30 @@ mod tests {
         SpokespersonResponseStatus, CONTROL_ACK_TIMEOUT,
     };
     use crate::expert_spokesperson::SemanticTurn;
+    use crate::openai_realtime_protocol::{
+        RealtimeEagerness, RealtimeNoiseReduction, RealtimeSpokespersonSessionOptions,
+        RealtimeTurnDetection,
+    };
+
+    fn test_config(
+        endpoint: String,
+        voice: &str,
+        speed: f32,
+        semantic_transcript: Vec<SemanticTurn>,
+    ) -> OpenAiSpokespersonConfig {
+        OpenAiSpokespersonConfig {
+            endpoint,
+            api_key: "test-key".into(),
+            session: RealtimeSpokespersonSessionOptions {
+                model: Some("test-model".into()),
+                transcription_model: Some("test-transcription".into()),
+                voice: Some(voice.into()),
+                speed: Some(speed),
+                ..Default::default()
+            },
+            semantic_transcript,
+        }
+    }
 
     #[allow(clippy::result_large_err)]
     fn require_test_authorization(
@@ -1242,14 +1281,11 @@ mod tests {
             let _ = socket.next().await;
         });
 
-        let (runtime, events) = OpenAiSpokespersonRuntime::spawn(OpenAiSpokespersonConfig {
+        let (runtime, events) = OpenAiSpokespersonRuntime::spawn(test_config(
             endpoint,
-            api_key: "test-key".into(),
-            model: "test-model".into(),
-            transcription_model: "test-transcription".into(),
-            voice: "new-voice".into(),
-            speed: 1.25,
-            semantic_transcript: vec![
+            "new-voice",
+            1.25,
+            vec![
                 SemanticTurn::Spokesperson {
                     text: "The heard prefix".into(),
                     interrupted: true,
@@ -1257,7 +1293,7 @@ mod tests {
                 SemanticTurn::User("interrupting user".into()),
                 SemanticTurn::Expert("verified result".into()),
             ],
-        })
+        ))
         .unwrap();
         let ready = tokio::task::spawn_blocking(move || {
             events.recv_timeout(Duration::from_secs(2)).unwrap()
@@ -1311,16 +1347,9 @@ mod tests {
             let _ = socket.next().await;
         });
 
-        let (runtime, events) = OpenAiSpokespersonRuntime::spawn(OpenAiSpokespersonConfig {
-            endpoint,
-            api_key: "test-key".into(),
-            model: "test-model".into(),
-            transcription_model: "test-transcription".into(),
-            voice: "old-voice".into(),
-            speed: 1.0,
-            semantic_transcript: Vec::new(),
-        })
-        .unwrap();
+        let (runtime, events) =
+            OpenAiSpokespersonRuntime::spawn(test_config(endpoint, "old-voice", 1.0, Vec::new()))
+                .unwrap();
         assert!(matches!(
             events.recv_timeout(Duration::from_secs(2)).unwrap(),
             SpokespersonEvent::Ready
@@ -1373,16 +1402,9 @@ mod tests {
             let _ = socket.next().await;
         });
 
-        let (runtime, events) = OpenAiSpokespersonRuntime::spawn(OpenAiSpokespersonConfig {
-            endpoint,
-            api_key: "test-key".into(),
-            model: "test-model".into(),
-            transcription_model: "test-transcription".into(),
-            voice: "old-voice".into(),
-            speed: 1.0,
-            semantic_transcript: Vec::new(),
-        })
-        .unwrap();
+        let (runtime, events) =
+            OpenAiSpokespersonRuntime::spawn(test_config(endpoint, "old-voice", 1.0, Vec::new()))
+                .unwrap();
         assert!(matches!(
             events.recv_timeout(Duration::from_secs(2)).unwrap(),
             SpokespersonEvent::Ready
@@ -1442,16 +1464,9 @@ mod tests {
             send_json(&mut socket, json!({"type":"input_audio_buffer.cleared"})).await;
             let _ = socket.next().await;
         });
-        let (runtime, events) = OpenAiSpokespersonRuntime::spawn(OpenAiSpokespersonConfig {
-            endpoint,
-            api_key: "test-key".into(),
-            model: "test-model".into(),
-            transcription_model: "test-transcription".into(),
-            voice: "old-voice".into(),
-            speed: 1.0,
-            semantic_transcript: Vec::new(),
-        })
-        .unwrap();
+        let (runtime, events) =
+            OpenAiSpokespersonRuntime::spawn(test_config(endpoint, "old-voice", 1.0, Vec::new()))
+                .unwrap();
         assert!(matches!(
             events.recv_timeout(Duration::from_secs(2)).unwrap(),
             SpokespersonEvent::Ready
@@ -1563,15 +1578,7 @@ mod tests {
         let (_commands, command_rx) = tokio::sync::mpsc::unbounded_channel();
         let (events, event_rx) = std::sync::mpsc::channel();
         run(
-            OpenAiSpokespersonConfig {
-                endpoint,
-                api_key: "test-key".into(),
-                model: "test-model".into(),
-                transcription_model: "test-transcription".into(),
-                voice: "test-voice".into(),
-                speed: 1.0,
-                semantic_transcript: Vec::new(),
-            },
+            test_config(endpoint, "test-voice", 1.0, Vec::new()),
             command_rx,
             &events,
         )
@@ -1640,16 +1647,9 @@ mod tests {
             );
         });
 
-        let (runtime, events) = OpenAiSpokespersonRuntime::spawn(OpenAiSpokespersonConfig {
-            endpoint,
-            api_key: "test-key".into(),
-            model: "test-model".into(),
-            transcription_model: "test-transcription".into(),
-            voice: "test-voice".into(),
-            speed: 1.0,
-            semantic_transcript: Vec::new(),
-        })
-        .unwrap();
+        let (runtime, events) =
+            OpenAiSpokespersonRuntime::spawn(test_config(endpoint, "test-voice", 1.0, Vec::new()))
+                .unwrap();
         let (ready, events) = tokio::task::spawn_blocking(move || {
             let ready = events.recv_timeout(Duration::from_secs(2)).unwrap();
             (ready, events)
@@ -1721,6 +1721,22 @@ mod tests {
             assert_eq!(
                 configured.pointer("/session/audio/output/voice"),
                 Some(&json!("test-voice"))
+            );
+            assert_eq!(
+                configured.pointer("/session/audio/input/turn_detection/type"),
+                Some(&json!("semantic_vad"))
+            );
+            assert_eq!(
+                configured.pointer("/session/audio/input/turn_detection/eagerness"),
+                Some(&json!("high"))
+            );
+            assert_eq!(
+                configured.pointer("/session/audio/input/noise_reduction/type"),
+                Some(&json!("far_field"))
+            );
+            assert_eq!(
+                configured.pointer("/session/audio/input/transcription/language"),
+                Some(&json!("en"))
             );
             acknowledge_initial_session(&mut socket, &configured, "test-model").await;
 
@@ -1903,22 +1919,12 @@ mod tests {
 
         let (commands, command_rx) = tokio::sync::mpsc::unbounded_channel();
         let (events, event_rx) = std::sync::mpsc::channel();
-        let client = tokio::spawn(async move {
-            run(
-                OpenAiSpokespersonConfig {
-                    endpoint,
-                    api_key: "test-key".into(),
-                    model: "test-model".into(),
-                    transcription_model: "test-transcription".into(),
-                    voice: "test-voice".into(),
-                    speed: 1.25,
-                    semantic_transcript: Vec::new(),
-                },
-                command_rx,
-                &events,
-            )
-            .await
-        });
+        let mut config = test_config(endpoint, "test-voice", 1.25, Vec::new());
+        config.session.turn_detection = Some(RealtimeTurnDetection::SemanticVad);
+        config.session.eagerness = Some(RealtimeEagerness::High);
+        config.session.noise_reduction = Some(RealtimeNoiseReduction::FarField);
+        config.session.transcription_language = Some("en".into());
+        let client = tokio::spawn(async move { run(config, command_rx, &events).await });
 
         let event_rx = tokio::task::spawn_blocking(move || {
             let ready = event_rx.recv_timeout(Duration::from_secs(2)).unwrap();

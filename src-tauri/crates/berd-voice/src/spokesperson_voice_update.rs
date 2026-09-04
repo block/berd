@@ -105,14 +105,14 @@ impl VoiceUpdateTransaction {
         }
         let (voice, speed) = match &request.settings {
             TtsSettings::OpenAi { model, voice, rate }
-                if model == &runtime_config.model
+                if model == runtime_config.model()
                     && !voice.trim().is_empty()
                     && rate.is_finite()
                     && (0.25..=1.5).contains(rate) =>
             {
                 (voice.clone(), *rate)
             }
-            TtsSettings::OpenAi { model, .. } if model != &runtime_config.model => {
+            TtsSettings::OpenAi { model, .. } if model != runtime_config.model() => {
                 return Err("Spokesperson model cannot change during a session".into());
             }
             TtsSettings::OpenAi { voice, .. } if voice.trim().is_empty() => {
@@ -124,8 +124,7 @@ impl VoiceUpdateTransaction {
             _ => return Err("Expert-Spokesperson requires OpenAI voice settings".into()),
         };
         let mut candidate_config = runtime_config.clone();
-        candidate_config.voice = voice;
-        candidate_config.speed = speed;
+        candidate_config.set_voice_and_speed(voice, speed);
         candidate_config.semantic_transcript = semantic_transcript;
         let (runtime, events) = OpenAiSpokespersonRuntime::spawn(candidate_config)?;
         Ok(Self {

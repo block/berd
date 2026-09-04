@@ -1905,8 +1905,7 @@ fn activate_spokesperson_voice_update(
             let config = runtime_config
                 .as_mut()
                 .expect("initialized Spokesperson config");
-            config.voice = voice.clone();
-            config.speed = *rate;
+            config.set_voice_and_speed(voice.clone(), *rate);
         }
         write_message(
             writer,
@@ -2414,7 +2413,7 @@ fn validate_queued_spokesperson_settings(
         ));
     }
     match &request.settings {
-        TtsSettings::OpenAi { model, .. } if model != &runtime_config.model => {
+        TtsSettings::OpenAi { model, .. } if model != runtime_config.model() => {
             Err("Spokesperson model cannot change during a session".into())
         }
         TtsSettings::OpenAi { voice, .. } if voice.trim().is_empty() => {
@@ -2462,7 +2461,7 @@ fn apply_spokesperson_startup_settings(
     if !(0.25..=1.5).contains(&rate) {
         return Err("Expert-Spokesperson rate must be between 0.25 and 1.5".into());
     }
-    spokesperson.speed = rate;
+    spokesperson.session.speed = Some(rate);
     Ok(())
 }
 
@@ -3459,9 +3458,9 @@ fn run_expert_spokesperson_session(
                 let tts = berd_voice::TtsConfigurationSnapshot {
                     revision: 1,
                     settings: TtsSettings::OpenAi {
-                        model: spokesperson_config.model.clone(),
-                        voice: spokesperson_config.voice.clone(),
-                        rate: spokesperson_config.speed,
+                        model: spokesperson_config.model().into(),
+                        voice: spokesperson_config.voice().into(),
+                        rate: spokesperson_config.speed(),
                     },
                 };
                 let input_policy = InputDuringTtsSlot::new(input_during_tts);
@@ -8736,17 +8735,20 @@ mod tests {
         let mut realtime = OpenAiSpokespersonConfig {
             endpoint: "ws://localhost".into(),
             api_key: "test-key".into(),
-            model: "test-model".into(),
-            transcription_model: "test-transcription".into(),
-            voice: "marin".into(),
-            speed: 1.0,
+            session: berd_voice::openai_realtime_protocol::RealtimeSpokespersonSessionOptions {
+                model: Some("test-model".into()),
+                transcription_model: Some("test-transcription".into()),
+                voice: Some("marin".into()),
+                speed: Some(1.0),
+                ..Default::default()
+            },
             semantic_transcript: Vec::new(),
         };
 
         apply_spokesperson_startup_settings(&session, &mut realtime).unwrap();
 
-        assert_eq!(realtime.speed, 1.5);
-        assert_eq!(realtime.voice, "marin");
+        assert_eq!(realtime.speed(), 1.5);
+        assert_eq!(realtime.voice(), "marin");
     }
 
     #[test]
