@@ -2664,6 +2664,7 @@ fn run_expert_spokesperson_session(
         if let Some(events) = runtime_events.as_ref() {
             if let Ok(event) = events.try_recv() {
                 match event {
+                    SpokespersonEvent::Provider(_) => {}
                     SpokespersonEvent::Ready => {}
                     SpokespersonEvent::UserSpeaking {
                         active: speaking,
