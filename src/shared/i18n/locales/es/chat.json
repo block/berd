@@ -623,7 +623,9 @@
         "agent-speaking": "El agente está hablando…",
         "error": "Error de conversación de voz: {{error}}"
       }
-    }
+    },
+    "starModel": "Destacar {{model}}",
+    "unstarModel": "Quitar destaque de {{model}}"
   },
   "tools": {
     "content": "Contenido",
