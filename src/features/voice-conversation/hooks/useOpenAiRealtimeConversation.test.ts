@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import {
-  createRealtimeTranscriptReplayEvents,
+  collectRealtimeTranscriptSeedTurns,
   requestOpenAiRealtimeConversationStart,
   resetOpenAiRealtimeConversationRuntimeForTests,
   stopOpenAiRealtimeConversation,
@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   createInvalidToolCallOutput: vi.fn(),
   createPeer: vi.fn(),
   createSession: vi.fn(),
+  createTranscriptSeed: vi.fn(),
   createResponse: true,
   completeExpertTurn: vi.fn(),
   dismissHandoffs: vi.fn(),
@@ -199,6 +200,7 @@ vi.mock("@/shared/api/openaiRealtime", () => ({
   claimVoiceDictationMicrophone: mocks.claimMicrophone,
   completeOpenAiRealtimeExpertTurn: mocks.completeExpertTurn,
   createOpenAiRealtimeVoiceSession: mocks.createSession,
+  createOpenAiRealtimeTranscriptSeed: mocks.createTranscriptSeed,
   dismissOpenAiRealtimeHandoffs: mocks.dismissHandoffs,
   enqueueOpenAiRealtimeSpokespersonMessage: mocks.enqueueSpokespersonMessage,
   getOpenAiRealtimeExpertPipeCursor: mocks.getExpertPipeCursor,
@@ -345,10 +347,10 @@ function acceptedHandoffId(callId: string): string {
   return handoffId;
 }
 
-describe("createRealtimeTranscriptReplayEvents", () => {
-  it("reconstructs a compact ordinary transcript without realtime state", () => {
+describe("collectRealtimeTranscriptSeedTurns", () => {
+  it("selects ordinary durable turns without encoding provider events", () => {
     expect(
-      createRealtimeTranscriptReplayEvents([
+      collectRealtimeTranscriptSeedTurns([
         {
           id: "u1",
           role: "user",
@@ -388,28 +390,17 @@ describe("createRealtimeTranscriptReplayEvents", () => {
       ]),
     ).toEqual([
       {
-        type: "conversation.item.create",
-        item: {
-          type: "message",
-          role: "user",
-          content: [{ type: "input_text", text: "What is in this folder?" }],
-        },
+        role: "user",
+        text: "What is in this folder?",
       },
       {
-        type: "conversation.item.create",
-        item: {
-          type: "message",
-          role: "assistant",
-          content: [{ type: "output_text", text: "There are 25 directories." }],
-        },
+        role: "spokesperson",
+        text: "There are 25 directories.",
+        interrupted: false,
       },
       {
-        type: "conversation.item.create",
-        item: {
-          type: "message",
-          role: "user",
-          content: [{ type: "input_text", text: "Are any symlinks?" }],
-        },
+        role: "user",
+        text: "Are any symlinks?",
       },
     ]);
   });
@@ -460,6 +451,7 @@ beforeEach(() => {
   });
   mocks.createPeer.mockReturnValue(peer);
   mocks.createSession.mockResolvedValue({ clientSecret: "test-secret" });
+  mocks.createTranscriptSeed.mockResolvedValue([]);
   mocks.listenControls.mockImplementation(async (listener) => {
     realtimeControlListener = listener;
     return vi.fn();

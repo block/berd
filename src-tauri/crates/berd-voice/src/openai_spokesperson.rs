@@ -9,8 +9,9 @@ use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
 
 use crate::expert_spokesperson::SemanticTurn;
 use crate::openai_realtime_protocol::{
-    spokesperson_session_update, RealtimeProtocolEvent, RealtimeProtocolReducer,
-    RealtimeSpokespersonSessionOptions, RealtimeTranscriptSpeaker,
+    realtime_transcript_seed_item, spokesperson_session_update, RealtimeProtocolEvent,
+    RealtimeProtocolReducer, RealtimeSpokespersonSessionOptions, RealtimeTranscriptSeedTurn,
+    RealtimeTranscriptSpeaker,
 };
 
 const DEFAULT_ENDPOINT: &str = "wss://api.openai.com/v1/realtime";
@@ -1050,36 +1051,14 @@ where
     *next_control_event_id = next_control_event_id
         .checked_add(1)
         .ok_or("Spokesperson seed item space is exhausted")?;
-    let (role, content_type, text) = match turn {
-        SemanticTurn::User(text) => ("user", "input_text", text),
-        SemanticTurn::Spokesperson { text, interrupted } => (
-            "assistant",
-            "output_text",
-            if interrupted {
-                format!("{text} [interrupted]")
-            } else {
-                text
-            },
-        ),
-        SemanticTurn::Expert(text) => (
-            "system",
-            "input_text",
-            format!("Private Expert context; do not respond now:\n{text}"),
-        ),
+    let turn = match turn {
+        SemanticTurn::User(text) => RealtimeTranscriptSeedTurn::User { text },
+        SemanticTurn::Spokesperson { text, interrupted } => {
+            RealtimeTranscriptSeedTurn::Spokesperson { text, interrupted }
+        }
+        SemanticTurn::Expert(text) => RealtimeTranscriptSeedTurn::Expert { text },
     };
-    send_json(
-        socket,
-        serde_json::json!({
-            "type": "conversation.item.create",
-            "item": {
-                "id": item_id,
-                "type": "message",
-                "role": role,
-                "content": [{ "type": content_type, "text": text }]
-            }
-        }),
-    )
-    .await?;
+    send_json(socket, realtime_transcript_seed_item(turn, Some(&item_id))).await?;
     *pending_item = Some(item_id);
     Ok(())
 }
