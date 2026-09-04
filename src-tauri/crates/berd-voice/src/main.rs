@@ -2073,7 +2073,7 @@ impl ExpertTurnGate {
 }
 
 fn expert_output_reserved(
-    directive_speeches: &HashMap<u64, (u64, u64)>,
+    directive_speeches: &HashMap<u64, DirectiveSpeech>,
     cancelled_directives: &HashSet<u64>,
     active: Option<&LivePlayback>,
     responses: &HashMap<String, LiveResponse>,
@@ -2084,6 +2084,12 @@ fn expert_output_reserved(
         || responses
             .values()
             .any(|response| response.prepare_id.is_some())
+}
+
+struct DirectiveSpeech {
+    prepare_id: u64,
+    speech_id: u64,
+    text: String,
 }
 
 fn route_expert_prepare(
@@ -2108,6 +2114,7 @@ fn route_expert_prepare(
 struct LiveResponse {
     prepare_id: Option<u64>,
     speech_id: Option<u64>,
+    expert_text: Option<String>,
     transcript: Option<String>,
     pending_audio: VecDeque<Vec<f32>>,
     pending_frames: usize,
@@ -2130,6 +2137,7 @@ impl LiveResponse {
         Self {
             prepare_id,
             speech_id,
+            expert_text: None,
             transcript: None,
             pending_audio: VecDeque::new(),
             pending_frames: 0,
@@ -2420,7 +2428,7 @@ fn spokesperson_settings_are_quiescent(
     gate: &ExpertTurnGate,
     active: Option<&LivePlayback>,
     responses: &HashMap<String, LiveResponse>,
-    directive_speeches: &HashMap<u64, (u64, u64)>,
+    directive_speeches: &HashMap<u64, DirectiveSpeech>,
     cancelled_directives: &HashSet<u64>,
     pending_user_response: bool,
 ) -> bool {
@@ -2517,7 +2525,7 @@ fn run_expert_spokesperson_session(
     let mut next_live_token = 1_u64;
     let mut emitted_live_token = 0_u64;
     let mut next_speech_id = 1_u64;
-    let mut directive_speeches = HashMap::<u64, (u64, u64)>::new();
+    let mut directive_speeches = HashMap::<u64, DirectiveSpeech>::new();
     let mut cancelled_directives = HashSet::<u64>::new();
     let mut responses = HashMap::<String, LiveResponse>::new();
     let mut waiting_responses = VecDeque::<String>::new();
@@ -3491,7 +3499,7 @@ fn run_expert_spokesperson_session(
             Input::Request(SessionRequest::OutputReady { id, speech_id }) => {
                 let valid = directive_speeches
                     .get(&id)
-                    .is_some_and(|(_, expected)| *expected == speech_id)
+                    .is_some_and(|directive| directive.speech_id == speech_id)
                     || responses.values().any(|response| {
                         response.prepare_id == Some(id) && response.speech_id == Some(speech_id)
                     });
@@ -3629,11 +3637,13 @@ fn run_expert_spokesperson_session(
                 )?;
             }
             Input::Request(SessionRequest::Cancel { id }) => {
-                let unbound_directive = directive_speeches.iter().find_map(
-                    |(directive_id, (prepare_id, speech_id))| {
-                        (*prepare_id == id).then_some((*directive_id, *speech_id))
-                    },
-                );
+                let unbound_directive =
+                    directive_speeches
+                        .iter()
+                        .find_map(|(directive_id, directive)| {
+                            (directive.prepare_id == id)
+                                .then_some((*directive_id, directive.speech_id))
+                        });
                 let outcome = if turn_gate.cancel_pending(id) {
                     CancelOutcome::Cancelled
                 } else if let Some((directive_id, _)) = unbound_directive {
@@ -3884,7 +3894,7 @@ fn submit_expert_prepare(
     request: PendingExpertPrepare,
     core: &mut ExpertSpokespersonCore,
     runtime: &OpenAiSpokespersonRuntime,
-    directive_speeches: &mut HashMap<u64, (u64, u64)>,
+    directive_speeches: &mut HashMap<u64, DirectiveSpeech>,
     next_speech_id: &mut u64,
     writer: &mut impl Write,
 ) -> Result<(), String> {
@@ -3914,7 +3924,14 @@ fn submit_expert_prepare(
         } => {
             let speech_id = *next_speech_id;
             *next_speech_id += 1;
-            directive_speeches.insert(request.id, (request.id, speech_id));
+            directive_speeches.insert(
+                request.id,
+                DirectiveSpeech {
+                    prepare_id: request.id,
+                    speech_id,
+                    text: message.clone(),
+                },
+            );
             core.record_expert_turn(message.clone());
             runtime.send(SpokespersonCommand::ExpertSay {
                 directive_id: request.id,
@@ -3933,17 +3950,17 @@ fn submit_expert_prepare(
 }
 
 fn interrupt_unbound_directives(
-    directive_speeches: &mut HashMap<u64, (u64, u64)>,
+    directive_speeches: &mut HashMap<u64, DirectiveSpeech>,
     cancelled_directives: &mut HashSet<u64>,
     writer: &mut impl Write,
 ) -> Result<(), String> {
-    for (directive_id, (prepare_id, speech_id)) in directive_speeches.drain() {
+    for (directive_id, directive) in directive_speeches.drain() {
         cancelled_directives.insert(directive_id);
         write_message(
             writer,
             &SessionMessage::SpeechInterrupted {
-                id: prepare_id,
-                speech_id,
+                id: directive.prepare_id,
+                speech_id: directive.speech_id,
                 spoken_through_utf8: 0,
             },
         )?;
@@ -3954,7 +3971,7 @@ fn interrupt_unbound_directives(
 fn bind_expert_response(
     response_id: String,
     directive_id: u64,
-    directive_speeches: &mut HashMap<u64, (u64, u64)>,
+    directive_speeches: &mut HashMap<u64, DirectiveSpeech>,
     cancelled_directives: &mut HashSet<u64>,
     responses: &mut HashMap<String, LiveResponse>,
 ) -> Result<(), String> {
@@ -3966,14 +3983,15 @@ fn bind_expert_response(
         response.playback_complete = true;
         return Ok(());
     }
-    let (prepare_id, speech_id) = directive_speeches
+    let directive = directive_speeches
         .remove(&directive_id)
         .ok_or_else(|| "Spokesperson bound an unknown Expert directive".to_string())?;
     if response.prepare_id.is_some() || response.speech_id.is_some() {
         return Err("Spokesperson response was bound more than once".into());
     }
-    response.prepare_id = Some(prepare_id);
-    response.speech_id = Some(speech_id);
+    response.prepare_id = Some(directive.prepare_id);
+    response.speech_id = Some(directive.speech_id);
+    response.expert_text = Some(directive.text);
     Ok(())
 }
 
@@ -4013,7 +4031,7 @@ fn emit_live_interrupted_terminal(
                 &SessionMessage::SpeechInterrupted {
                     id: prepare_id,
                     speech_id: playback.speech_id,
-                    spoken_through_utf8: 0,
+                    spoken_through_utf8: expert_spoken_through_utf8(response),
                 },
             )?;
         }
@@ -4385,6 +4403,43 @@ fn delivered_live_transcript(response: &LiveResponse) -> String {
         }],
     };
     text[..estimated_spoken_through_utf8(text, &delivery)].to_string()
+}
+
+fn expert_spoken_through_utf8(response: &LiveResponse) -> u64 {
+    let (Some(expert_text), Some(_)) = (
+        response.expert_text.as_deref(),
+        response.transcript.as_deref(),
+    ) else {
+        return 0;
+    };
+    let delivered = delivered_live_transcript(response);
+    let cutoff = expert_text
+        .char_indices()
+        .zip(delivered.chars())
+        .take_while(|((_, expert), spoken)| expert == spoken)
+        .map(|((offset, expert), _)| offset + expert.len_utf8())
+        .last()
+        .unwrap_or(0);
+    let completed_word_cutoff = if cutoff == expert_text.len()
+        || expert_text[cutoff..]
+            .chars()
+            .next()
+            .is_some_and(|character| !character.is_alphanumeric())
+    {
+        cutoff
+    } else {
+        expert_text[..cutoff]
+            .char_indices()
+            .scan(false, |in_word, (offset, character)| {
+                let word_ended = *in_word && !character.is_alphanumeric();
+                *in_word = character.is_alphanumeric();
+                Some(word_ended.then_some(offset))
+            })
+            .flatten()
+            .last()
+            .unwrap_or(0)
+    };
+    u64::try_from(completed_word_cutoff).expect("spoken Expert prefix fits in u64")
 }
 
 fn acknowledge_output_ready(
@@ -6718,7 +6773,14 @@ mod tests {
     #[test]
     fn accepted_expert_prepare_blocks_a_second_before_response_binding() {
         let mut gate = ExpertTurnGate::default();
-        let directives = HashMap::from([(7, (7, 3))]);
+        let directives = HashMap::from([(
+            7,
+            DirectiveSpeech {
+                prepare_id: 7,
+                speech_id: 3,
+                text: "first".into(),
+            },
+        )]);
         let responses = HashMap::new();
         let routing = route_expert_prepare(
             &mut gate,
@@ -6834,7 +6896,14 @@ mod tests {
 
     #[test]
     fn barge_in_terminalizes_an_admitted_directive_before_response_binding() {
-        let mut directives = HashMap::from([(7, (11, 3))]);
+        let mut directives = HashMap::from([(
+            7,
+            DirectiveSpeech {
+                prepare_id: 11,
+                speech_id: 3,
+                text: "hello".into(),
+            },
+        )]);
         let mut cancelled = HashSet::new();
         let mut output = Vec::new();
         interrupt_unbound_directives(&mut directives, &mut cancelled, &mut output).unwrap();
@@ -6860,6 +6929,27 @@ mod tests {
         assert!(responses["response-a"].interrupted);
         assert!(responses["response-a"].playback_complete);
         assert!(cancelled.is_empty());
+
+        let mut directives = HashMap::from([(
+            8,
+            DirectiveSpeech {
+                prepare_id: 12,
+                speech_id: 4,
+                text: "Exact Expert wording".into(),
+            },
+        )]);
+        bind_expert_response(
+            "response-b".into(),
+            8,
+            &mut directives,
+            &mut cancelled,
+            &mut responses,
+        )
+        .unwrap();
+        assert_eq!(
+            responses["response-b"].expert_text.as_deref(),
+            Some("Exact Expert wording")
+        );
     }
 
     #[test]
@@ -7302,6 +7392,7 @@ mod tests {
             Err(mpsc::TryRecvError::Empty)
         ));
         let mut response = LiveResponse::new(Some(11), Some(3));
+        response.expert_text = Some("One two three four five six.".into());
         response.transcript = Some("One two three four five six.".into());
         response.total_audio_frames = 24_000;
         response.server_finished = true;
@@ -7311,7 +7402,7 @@ mod tests {
         let terminal = messages(&output);
         assert_eq!(terminal.len(), 1);
         assert_eq!(terminal[0]["type"], "speech_interrupted");
-        assert_eq!(terminal[0]["spoken_through_utf8"], 0);
+        assert_eq!(terminal[0]["spoken_through_utf8"], "One two three".len());
         let mut responses = HashMap::from([("response-a".into(), response)]);
         let mut core = ExpertSpokespersonCore::default();
         let mut next_token = 1;
@@ -7327,13 +7418,26 @@ mod tests {
         .unwrap();
         let emitted = messages(&output);
         assert_eq!(emitted[0]["type"], "speech_interrupted");
-        assert_eq!(emitted[0]["spoken_through_utf8"], 0);
+        assert_eq!(emitted[0]["spoken_through_utf8"], "One two three".len());
         assert_eq!(emitted[1]["type"], "user_final");
         assert!(emitted[1]["text"]
             .as_str()
             .unwrap()
             .contains("One two three"));
         assert!(!emitted[1]["text"].as_str().unwrap().contains("four"));
+
+        let mut paraphrased = LiveResponse::new(Some(12), Some(4));
+        paraphrased.expert_text = Some("colour test".into());
+        paraphrased.transcript = Some("color test".into());
+        paraphrased.total_audio_frames = 12_000;
+        let mut paraphrased_output = Vec::new();
+        emit_live_interrupted_terminal(
+            &mut paraphrased,
+            active.as_ref().unwrap(),
+            &mut paraphrased_output,
+        )
+        .unwrap();
+        assert_eq!(messages(&paraphrased_output)[0]["spoken_through_utf8"], 0);
     }
 
     #[test]
