@@ -19,6 +19,8 @@ const mocks = vi.hoisted(() => ({
   createPeer: vi.fn(),
   createSession: vi.fn(),
   createResponse: true,
+  enqueueSpokespersonMessage: vi.fn(),
+  getExpertPipeCursor: vi.fn(),
   listenControls: vi.fn(),
   publishActivity: vi.fn(),
   publishMuted: vi.fn(),
@@ -137,6 +139,15 @@ const mocks = vi.hoisted(() => ({
     },
   ),
   pipeInitialCursors: [] as number[],
+  pipeNextId: 1,
+  pipePending: [] as Array<{
+    id: number;
+    sender: "master" | "emissary";
+    recipient: "master" | "emissary";
+    senderCursor: number;
+    message: string;
+  }>,
+  pipeConsumed: { master: 0, emissary: 0 },
   rebindControls: vi.fn(),
   registerEmissary: vi.fn(),
   recordToolOutput: vi.fn(),
@@ -164,6 +175,7 @@ const mocks = vi.hoisted(() => ({
   stopProtocol: vi.fn(),
   waitForBridgeReady: vi.fn(),
   sendRealtimeEvents: vi.fn(),
+  sendExpertPipeMessage: vi.fn(),
   steerPrompt: vi.fn(),
   requestToolOutput: vi.fn(),
   requestMasterMessage: vi.fn(),
@@ -177,6 +189,8 @@ vi.mock("@/shared/api/acpApi", () => ({
 vi.mock("@/shared/api/openaiRealtime", () => ({
   claimVoiceDictationMicrophone: mocks.claimMicrophone,
   createOpenAiRealtimeVoiceSession: mocks.createSession,
+  enqueueOpenAiRealtimeSpokespersonMessage: mocks.enqueueSpokespersonMessage,
+  getOpenAiRealtimeExpertPipeCursor: mocks.getExpertPipeCursor,
   listenToOpenAiRealtimeVoiceControls: mocks.listenControls,
   publishOpenAiRealtimeVoiceActivity: mocks.publishActivity,
   publishOpenAiRealtimeVoiceMicrophoneMuted: mocks.publishMuted,
@@ -204,6 +218,7 @@ vi.mock("@/shared/api/openaiRealtime", () => ({
     ),
   requestOpenAiRealtimeTypedUserMessage: (_sessionId: string, text: string) =>
     Promise.resolve(mocks.requestTypedUserMessage(text)),
+  sendOpenAiRealtimeExpertPipeMessage: mocks.sendExpertPipeMessage,
   releaseVoiceDictationMicrophone: mocks.releaseMicrophone,
   setOpenAiRealtimeVoiceControlsSuppressed: mocks.setControlsSuppressed,
   startOpenAiRealtimeVoiceControls: mocks.startControls,
@@ -667,6 +682,41 @@ beforeEach(() => {
   mocks.publishActivity.mockResolvedValue(undefined);
   mocks.publishMuted.mockResolvedValue(undefined);
   mocks.pipeInitialCursors.length = 0;
+  const sendPipeMessage = (
+    sender: "master" | "emissary",
+    cursor: number,
+    message: string,
+  ) => {
+    const active = mocks.pipePending[0];
+    if (active && active.sender !== sender) {
+      const latest = mocks.pipePending.at(-1);
+      if (!latest || cursor !== latest.id) {
+        return {
+          accepted: false as const,
+          reason: "pipe_busy" as const,
+          cursor: mocks.pipeConsumed[sender],
+        };
+      }
+      mocks.pipeConsumed[sender] = latest.id;
+      mocks.pipePending = [];
+    }
+    if (cursor !== mocks.pipeConsumed[sender]) {
+      return {
+        accepted: false as const,
+        reason: "stale_cursor" as const,
+        cursor: mocks.pipeConsumed[sender],
+      };
+    }
+    const outbound = {
+      id: mocks.pipeNextId++,
+      sender,
+      recipient: sender === "master" ? "emissary" : "master",
+      senderCursor: cursor,
+      message,
+    } as const;
+    mocks.pipePending.push(outbound);
+    return { accepted: true as const, outbound, cursor };
+  };
   mocks.rebindControls.mockResolvedValue({
     available: true,
     unavailableReason: null,
@@ -688,7 +738,33 @@ beforeEach(() => {
     microphoneMuted: false,
     revision: 7,
   }));
-  mocks.startProtocol.mockResolvedValue(undefined);
+  mocks.startProtocol.mockImplementation(
+    async (_sessionId: string, initialCursor: number) => {
+      mocks.pipeInitialCursors.push(initialCursor);
+      // Keep existing hook assertions independent of the randomized call
+      // namespace. The Rust pipe tests cover nonzero initial cursors directly.
+      mocks.pipeNextId = 1;
+      mocks.pipePending = [];
+      mocks.pipeConsumed = { master: 0, emissary: 0 };
+    },
+  );
+  mocks.enqueueSpokespersonMessage.mockImplementation(
+    async (_sessionId: string, message: string) => {
+      const latest = mocks.pipePending.at(-1);
+      const cursor =
+        latest?.recipient === "emissary"
+          ? latest.id
+          : mocks.pipeConsumed.emissary;
+      return sendPipeMessage("emissary", cursor, message);
+    },
+  );
+  mocks.sendExpertPipeMessage.mockImplementation(
+    async (_sessionId: string, cursor: number, message: string) =>
+      sendPipeMessage("master", cursor, message),
+  );
+  mocks.getExpertPipeCursor.mockImplementation(
+    async () => mocks.pipeConsumed.master,
+  );
   mocks.stopControls.mockResolvedValue(undefined);
   mocks.stopProtocol.mockResolvedValue(undefined);
   mocks.waitForBridgeReady.mockResolvedValue(undefined);

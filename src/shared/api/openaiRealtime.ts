@@ -73,10 +73,62 @@ export interface OpenAiRealtimeCoordinatorResult {
   events: Record<string, unknown>[];
 }
 
+export type OpenAiRealtimePipeMessage = {
+  id: number;
+  sender: "master" | "emissary";
+  recipient: "master" | "emissary";
+  senderCursor: number;
+  message: string;
+};
+
+export type OpenAiRealtimePipeExchange =
+  | {
+      accepted: true;
+      outbound: OpenAiRealtimePipeMessage;
+      cursor: number;
+    }
+  | {
+      accepted: false;
+      reason: "pipe_busy" | "stale_cursor";
+      cursor: number;
+    };
+
 export function startOpenAiRealtimeSpokespersonProtocol(
   sessionId: string,
+  initialCursor: number,
 ): Promise<void> {
-  return invoke("start_openai_realtime_spokesperson_protocol", { sessionId });
+  return invoke("start_openai_realtime_spokesperson_protocol", {
+    sessionId,
+    initialCursor,
+  });
+}
+
+export function enqueueOpenAiRealtimeSpokespersonMessage(
+  sessionId: string,
+  message: string,
+): Promise<OpenAiRealtimePipeExchange> {
+  return invoke("enqueue_openai_realtime_spokesperson_message", {
+    sessionId,
+    message,
+  });
+}
+
+export function sendOpenAiRealtimeExpertPipeMessage(
+  sessionId: string,
+  cursor: number,
+  message: string,
+): Promise<OpenAiRealtimePipeExchange> {
+  return invoke("send_openai_realtime_expert_pipe_message", {
+    sessionId,
+    cursor,
+    message,
+  });
+}
+
+export function getOpenAiRealtimeExpertPipeCursor(
+  sessionId: string,
+): Promise<number> {
+  return invoke("get_openai_realtime_expert_pipe_cursor", { sessionId });
 }
 
 export function reduceOpenAiRealtimeSpokespersonEvent(
