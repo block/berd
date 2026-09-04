@@ -2185,6 +2185,22 @@ fn reject_spokesperson_tts_settings(
     )
 }
 
+fn apply_spokesperson_startup_settings(
+    session: &SessionConfig,
+    spokesperson: &mut OpenAiSpokespersonConfig,
+) -> Result<(), String> {
+    let rate = match &session.tts {
+        TtsBackendConfig::OpenAi { rate }
+        | TtsBackendConfig::Siri { rate, .. }
+        | TtsBackendConfig::Pocket { rate, .. } => *rate,
+    };
+    if !(0.25..=1.5).contains(&rate) {
+        return Err("Expert-Spokesperson rate must be between 0.25 and 1.5".into());
+    }
+    spokesperson.speed = rate;
+    Ok(())
+}
+
 fn dispatch_pending_user_response(
     pending: &mut bool,
     gate: &mut ExpertTurnGate,
@@ -2199,7 +2215,7 @@ fn dispatch_pending_user_response(
 }
 
 fn run_expert_spokesperson_session(
-    _config: SessionConfig,
+    config: SessionConfig,
     pcm_output_fd: RawFd,
 ) -> Result<(), String> {
     let (control_tx, control_rx) = mpsc::channel();
@@ -2670,13 +2686,14 @@ fn run_expert_spokesperson_session(
                     )?;
                     break;
                 }
-                let config = OpenAiSpokespersonConfig::from_environment()?;
+                let mut spokesperson_config = OpenAiSpokespersonConfig::from_environment()?;
+                apply_spokesperson_startup_settings(&config, &mut spokesperson_config)?;
                 let tts = berd_voice::TtsConfigurationSnapshot {
                     revision: 1,
                     settings: TtsSettings::OpenAi {
-                        model: config.model.clone(),
-                        voice: config.voice.clone(),
-                        rate: config.speed,
+                        model: spokesperson_config.model.clone(),
+                        voice: spokesperson_config.voice.clone(),
+                        rate: spokesperson_config.speed,
                     },
                 };
                 let input_policy = InputDuringTtsSlot::new(input_during_tts);
@@ -2684,7 +2701,7 @@ fn run_expert_spokesperson_session(
                     tts: tts.clone(),
                     input_during_tts: input_policy.snapshot()?,
                 };
-                let (created, events) = OpenAiSpokespersonRuntime::spawn(config)?;
+                let (created, events) = OpenAiSpokespersonRuntime::spawn(spokesperson_config)?;
                 match events.recv_timeout(Duration::from_secs(30)) {
                     Ok(SpokespersonEvent::Ready) => {}
                     Ok(SpokespersonEvent::Failed(message)) => return Err(message),
@@ -7561,6 +7578,32 @@ mod tests {
         ]))
         .unwrap_err()
         .contains("0.75 and 2.0"));
+    }
+
+    #[test]
+    fn expert_spokesperson_uses_the_session_startup_rate() {
+        let session = SessionConfig {
+            tts: TtsBackendConfig::Siri {
+                voice: "Aaron".into(),
+                language: "en-US".into(),
+                rate: 1.5,
+            },
+            stt: SttBackendConfig::Macos,
+            mode: SessionMode::ExpertSpokesperson,
+        };
+        let mut realtime = OpenAiSpokespersonConfig {
+            endpoint: "ws://localhost".into(),
+            api_key: "test-key".into(),
+            model: "test-model".into(),
+            transcription_model: "test-transcription".into(),
+            voice: "marin".into(),
+            speed: 1.0,
+        };
+
+        apply_spokesperson_startup_settings(&session, &mut realtime).unwrap();
+
+        assert_eq!(realtime.speed, 1.5);
+        assert_eq!(realtime.voice, "marin");
     }
 
     #[test]
