@@ -481,7 +481,7 @@ export const RecommendedModelList = forwardRef<
           ref={scrollAreaRef}
           className="min-h-0 min-w-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:!block"
         >
-          <div className="space-y-0.5 p-1 pr-3">
+          <div className="p-1 pr-3">
             {sorted.map((model, index) => {
               const providerLabel = getGooseModelProviderLabel(model);
               const providerIcon =
@@ -561,7 +561,7 @@ export const RecommendedModelList = forwardRef<
                         // (enforced in globals.test.ts) — and favorited rows
                         // soften to foreground/80 via the selected flag.
                         className={cn(
-                          "shrink-0 opacity-0 transition-opacity focus-visible:opacity-100",
+                          "shrink-0 opacity-0 focus-visible:opacity-100",
                           (hoveredModelKey === modelKey ||
                             focusedModelKey === modelKey) &&
                             "opacity-100",
