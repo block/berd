@@ -2028,6 +2028,9 @@ struct LiveResponse {
     pending_frames: usize,
     total_audio_frames: u64,
     played_audio_frames: u64,
+    output_item: Option<(String, u64)>,
+    truncation_pending: bool,
+    truncation_sent: bool,
     audio_done: bool,
     finish_sent: bool,
     received_audio: bool,
@@ -2047,6 +2050,9 @@ impl LiveResponse {
             pending_frames: 0,
             total_audio_frames: 0,
             played_audio_frames: 0,
+            output_item: None,
+            truncation_pending: false,
+            truncation_sent: false,
             audio_done: false,
             finish_sent: false,
             received_audio: false,
@@ -2453,7 +2459,8 @@ fn run_expert_spokesperson_session(
                             &mut turn_gate,
                             !directive_speeches.is_empty()
                                 || !cancelled_directives.is_empty()
-                                || pending_rate_update.is_some(),
+                                || pending_rate_update.is_some()
+                                || live_truncation_pending(&responses),
                             || {
                                 runtime
                                     .as_ref()
@@ -2478,6 +2485,26 @@ fn run_expert_spokesperson_session(
                             &mut responses,
                             &mut waiting_responses,
                         );
+                        if !inflight_responses.is_empty() {
+                            runtime.as_ref().expect("initialized runtime").send(
+                                SpokespersonCommand::CancelResponses {
+                                    response_ids: inflight_responses,
+                                },
+                            )?;
+                        }
+                        for response_id in &preexisting_responses {
+                            let Some(response) = responses.get_mut(response_id) else {
+                                continue;
+                            };
+                            require_live_response_truncation(response)?;
+                            if active_response_id.as_deref() != Some(response_id.as_str()) {
+                                send_live_response_truncation(
+                                    response_id,
+                                    response,
+                                    runtime.as_ref().expect("initialized runtime"),
+                                )?;
+                            }
+                        }
                         interrupt_unbound_directives(
                             &mut directive_speeches,
                             &mut cancelled_directives,
@@ -2490,20 +2517,14 @@ fn run_expert_spokesperson_session(
                             LiveSideEvent::UserTranscript { text },
                             &mut writer,
                         )?;
-                        if !inflight_responses.is_empty() {
-                            runtime.as_ref().expect("initialized runtime").send(
-                                SpokespersonCommand::CancelResponses {
-                                    response_ids: inflight_responses,
-                                },
-                            )?;
-                        }
                         pending_user_response = true;
                         dispatch_pending_user_response(
                             &mut pending_user_response,
                             &mut turn_gate,
                             !directive_speeches.is_empty()
                                 || !cancelled_directives.is_empty()
-                                || pending_rate_update.is_some(),
+                                || pending_rate_update.is_some()
+                                || live_truncation_pending(&responses),
                             || {
                                 runtime
                                     .as_ref()
@@ -2582,7 +2603,8 @@ fn run_expert_spokesperson_session(
                             &mut turn_gate,
                             !directive_speeches.is_empty()
                                 || !cancelled_directives.is_empty()
-                                || pending_rate_update.is_some(),
+                                || pending_rate_update.is_some()
+                                || live_truncation_pending(&responses),
                             || {
                                 runtime
                                     .as_ref()
@@ -2605,6 +2627,8 @@ fn run_expert_spokesperson_session(
                     }
                     SpokespersonEvent::AudioDelta {
                         response_id,
+                        item_id,
+                        content_index,
                         samples,
                     } => {
                         let frame_count = u64::try_from(samples.len())
@@ -2654,12 +2678,21 @@ fn run_expert_spokesperson_session(
                             LiveAudioDelta::Queued | LiveAudioDelta::Ignored => {}
                         }
                         if let Some(response) = responses.get_mut(&response_id) {
-                            response.total_audio_frames = response
-                                .total_audio_frames
-                                .checked_add(frame_count)
-                                .ok_or("Spokesperson audio frame count overflowed")?;
-                            if !ignored {
-                                response.received_audio = true;
+                            let active_matches = active
+                                .as_ref()
+                                .is_some_and(|playback| playback.response_id == response_id);
+                            if record_live_audio_delta(
+                                response,
+                                (item_id, content_index),
+                                frame_count,
+                                ignored,
+                                active_matches,
+                            )? {
+                                send_live_response_truncation(
+                                    &response_id,
+                                    response,
+                                    runtime.as_ref().expect("initialized runtime"),
+                                )?;
                             }
                         }
                     }
@@ -2713,7 +2746,35 @@ fn run_expert_spokesperson_session(
                             &mut turn_gate,
                             !directive_speeches.is_empty()
                                 || !cancelled_directives.is_empty()
-                                || pending_rate_update.is_some(),
+                                || pending_rate_update.is_some()
+                                || live_truncation_pending(&responses),
+                            || {
+                                runtime
+                                    .as_ref()
+                                    .expect("initialized runtime")
+                                    .send(SpokespersonCommand::CreateUserResponse)
+                            },
+                        )?;
+                    }
+                    SpokespersonEvent::OutputTruncated { response_id } => {
+                        if let Some(response) = responses.get_mut(&response_id) {
+                            response.truncation_pending = false;
+                        }
+                        publish_live_response_if_complete(
+                            &response_id,
+                            &mut responses,
+                            &mut core,
+                            &mut next_live_token,
+                            &mut emitted_live_token,
+                            &mut writer,
+                        )?;
+                        dispatch_pending_user_response(
+                            &mut pending_user_response,
+                            &mut turn_gate,
+                            !directive_speeches.is_empty()
+                                || !cancelled_directives.is_empty()
+                                || pending_rate_update.is_some()
+                                || live_truncation_pending(&responses),
                             || {
                                 runtime
                                     .as_ref()
@@ -2807,6 +2868,11 @@ fn run_expert_spokesperson_session(
                     if message == AUDIO_CANCELLED {
                         if let Some(response) = responses.get_mut(&response_id) {
                             emit_live_interrupted_terminal(response, &playback, &mut writer)?;
+                            send_live_response_truncation(
+                                &response_id,
+                                response,
+                                runtime.as_ref().expect("initialized runtime"),
+                            )?;
                         }
                         publish_live_response_if_complete(
                             &response_id,
@@ -3685,6 +3751,7 @@ fn publish_live_response_if_complete(
     if responses.get(response_id).is_some_and(|response| {
         response.server_finished
             && response.playback_complete
+            && !response.truncation_pending
             && response
                 .transcript
                 .as_ref()
@@ -3696,6 +3763,7 @@ fn publish_live_response_if_complete(
     let ready = responses.get(response_id).is_some_and(|response| {
         response.server_finished
             && response.playback_complete
+            && !response.truncation_pending
             && response
                 .transcript
                 .as_ref()
@@ -3719,6 +3787,79 @@ fn publish_live_response_if_complete(
         writer,
     )?;
     Ok(())
+}
+
+fn live_truncation_pending(responses: &HashMap<String, LiveResponse>) -> bool {
+    responses
+        .values()
+        .any(|response| response.truncation_pending)
+}
+
+fn require_live_response_truncation(response: &mut LiveResponse) -> Result<(), String> {
+    if response.received_audio && response.output_item.is_none() {
+        return Err("Spokesperson audio had no provider item identity".into());
+    }
+    response.truncation_pending = response.received_audio;
+    Ok(())
+}
+
+fn record_live_audio_delta(
+    response: &mut LiveResponse,
+    output_item: (String, u64),
+    frame_count: u64,
+    ignored: bool,
+    active_matches: bool,
+) -> Result<bool, String> {
+    response.total_audio_frames = response
+        .total_audio_frames
+        .checked_add(frame_count)
+        .ok_or("Spokesperson audio frame count overflowed")?;
+    if response
+        .output_item
+        .as_ref()
+        .is_some_and(|existing| existing != &output_item)
+    {
+        return Err("Spokesperson response changed provider audio identity".into());
+    }
+    response.output_item = Some(output_item);
+    response.received_audio = true;
+    if ignored && response.interrupted {
+        require_live_response_truncation(response)?;
+        return Ok(!active_matches);
+    }
+    Ok(false)
+}
+
+fn send_live_response_truncation(
+    response_id: &str,
+    response: &mut LiveResponse,
+    runtime: &OpenAiSpokespersonRuntime,
+) -> Result<(), String> {
+    if !response.truncation_pending || response.truncation_sent {
+        return Ok(());
+    }
+    let (item_id, content_index) = response
+        .output_item
+        .as_ref()
+        .expect("required truncation has provider item identity");
+    let audio_end_ms = live_truncation_audio_end_ms(response)?;
+    runtime.send(SpokespersonCommand::TruncateOutput {
+        response_id: response_id.into(),
+        item_id: item_id.clone(),
+        content_index: *content_index,
+        audio_end_ms,
+    })?;
+    response.truncation_sent = true;
+    Ok(())
+}
+
+fn live_truncation_audio_end_ms(response: &LiveResponse) -> Result<u64, String> {
+    response
+        .played_audio_frames
+        .min(response.total_audio_frames)
+        .checked_mul(1_000)
+        .ok_or_else(|| "Spokesperson truncation duration overflowed".to_string())
+        .map(|frames_ms| frames_ms / 24_000)
 }
 
 fn delivered_live_transcript(response: &LiveResponse) -> String {
@@ -6264,6 +6405,68 @@ mod tests {
 
         assert!(!responses.contains_key("response-a"));
         assert_eq!(messages(&output).len(), 1);
+    }
+
+    #[test]
+    fn late_audio_after_interruption_requires_zero_ms_truncation_before_release() {
+        let mut response = LiveResponse::new(None, None);
+        response.interrupted = true;
+        response.playback_complete = true;
+        assert!(record_live_audio_delta(
+            &mut response,
+            ("assistant-late".into(), 0),
+            2_400,
+            true,
+            false,
+        )
+        .unwrap());
+        assert!(response.truncation_pending);
+        assert_eq!(live_truncation_audio_end_ms(&response).unwrap(), 0);
+        response.server_finished = true;
+        response.transcript = Some("unheard output".into());
+        let mut responses = HashMap::from([("response-late".into(), response)]);
+        let mut core = ExpertSpokespersonCore::default();
+        let mut next_token = 1;
+        let mut emitted_token = 0;
+        let mut output = Vec::new();
+
+        publish_live_response_if_complete(
+            "response-late",
+            &mut responses,
+            &mut core,
+            &mut next_token,
+            &mut emitted_token,
+            &mut output,
+        )
+        .unwrap();
+        assert!(responses.contains_key("response-late"));
+        assert!(output.is_empty());
+
+        responses
+            .get_mut("response-late")
+            .unwrap()
+            .truncation_pending = false;
+        publish_live_response_if_complete(
+            "response-late",
+            &mut responses,
+            &mut core,
+            &mut next_token,
+            &mut emitted_token,
+            &mut output,
+        )
+        .unwrap();
+        assert!(!responses.contains_key("response-late"));
+    }
+
+    #[test]
+    fn truncation_duration_is_bounded_for_zero_partial_and_full_delivery() {
+        let mut response = LiveResponse::new(None, None);
+        response.total_audio_frames = 24_000;
+        assert_eq!(live_truncation_audio_end_ms(&response).unwrap(), 0);
+        response.played_audio_frames = 12_000;
+        assert_eq!(live_truncation_audio_end_ms(&response).unwrap(), 500);
+        response.played_audio_frames = 48_000;
+        assert_eq!(live_truncation_audio_end_ms(&response).unwrap(), 1_000);
     }
 
     #[test]
