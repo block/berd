@@ -630,9 +630,11 @@ version = "0.6.2"
 dependencies = [
  "clap",
  "indexmap 2.13.1",
+ "libc",
  "serde",
  "serde_json",
  "ureq 3.4.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6668,14 +6670,19 @@ name = "tauri-plugin-berdctl"
 version = "0.6.2"
 dependencies = [
  "axum",
+ "getrandom 0.4.3",
+ "hex",
+ "libc",
  "log",
  "reqwest 0.13.4",
  "serde",
  "serde_json",
+ "subtle",
  "tauri",
  "tauri-plugin",
  "tokio",
  "uuid",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

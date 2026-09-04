@@ -1,16 +1,16 @@
 //! Loopback-only HTTP broker for the berdctl CLI.
 //!
 //! Serves `GET /v1/ping` (generation/protocol handshake) and `POST /v1/call`
-//! (command dispatch over the renderer bridge). There is no application auth
-//! in v1; the header rejection below (any `Origin`, any `Sec-Fetch-*`, `Host`
-//! mismatch) is the sole defense against browser-JS-to-localhost and DNS
-//! rebinding, so it applies to every route.
+//! (command dispatch over the renderer bridge). Every route requires the
+//! per-server bearer capability published in the private discovery file. The
+//! existing Origin, Sec-Fetch, and literal Host checks remain a separate
+//! defense against browser-JS-to-localhost and DNS rebinding.
 
 use crate::bridge::{Bridge, BridgeError, BridgeRequest, BridgeResult};
 use crate::discovery::PROTOCOL_VERSION;
-use axum::body::Bytes;
-use axum::extract::State;
-use axum::http::header::{HOST, ORIGIN};
+use axum::body::to_bytes;
+use axum::extract::{Request, State};
+use axum::http::header::{AUTHORIZATION, HOST, ORIGIN};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -21,6 +21,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::sync::{Arc, OnceLock, RwLock};
 use std::time::{Duration, Instant};
+use subtle::ConstantTimeEq;
 use tauri::{AppHandle, Runtime};
 use tokio::sync::{oneshot, Semaphore};
 
@@ -29,6 +30,18 @@ pub const IN_FLIGHT_LIMIT: usize = 4;
 const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 const MIN_REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
 const MAX_COMMAND_TIMEOUT: Duration = Duration::from_secs(900);
+const CAPABILITY_BYTES: usize = 32;
+/// Maximum accepted serialized `/v1/call` request body. The broker only
+/// forwards compact command envelopes, never arbitrary payload streams.
+// A 50,000-character prompt can exceed 200 KiB as UTF-8 and grow further
+// through JSON escaping. Leave ample envelope headroom while retaining a hard cap.
+const MAX_CALL_BODY_BYTES: usize = 512 * 1024;
+
+pub fn generate_capability() -> std::io::Result<String> {
+    let mut bytes = [0_u8; CAPABILITY_BYTES];
+    getrandom::fill(&mut bytes).map_err(std::io::Error::other)?;
+    Ok(hex::encode(bytes))
+}
 
 /// Resolve the bridge timeout for a call: a request `timeout_ms` wins
 /// (clamped to [`MIN_REQUEST_TIMEOUT`]..=[`MAX_COMMAND_TIMEOUT`]); otherwise
@@ -118,6 +131,7 @@ pub struct ServerContext<D> {
     // against their own instance, never the next server's.
     inflight: Arc<Semaphore>,
     generation: u64,
+    capability: String,
     // Set by `start_server` once the listener is bound, before any request.
     port: OnceLock<u16>,
 }
@@ -128,12 +142,14 @@ impl<D: CommandDispatcher> ServerContext<D> {
         timeouts: Arc<TimeoutStore>,
         inflight: Arc<Semaphore>,
         generation: u64,
+        capability: String,
     ) -> Self {
         Self {
             dispatcher,
             timeouts,
             inflight,
             generation,
+            capability,
             port: OnceLock::new(),
         }
     }
@@ -183,8 +199,9 @@ pub fn build_router<D: CommandDispatcher>(ctx: Arc<ServerContext<D>>) -> Router 
 }
 
 /// Reject requests that look like they came from a browser (any `Origin` or
-/// `Sec-Fetch-*` header) or through DNS rebinding (`Host` other than our
-/// loopback bind). Applied by every handler before anything else.
+/// `Sec-Fetch-*` header), through DNS rebinding (`Host` other than our
+/// loopback bind), or without this server instance's bearer capability.
+/// Applied by every handler before reading or dispatching a body.
 fn forbidden_header_response<D>(ctx: &ServerContext<D>, headers: &HeaderMap) -> Option<Response> {
     let violation = if headers.contains_key(ORIGIN) {
         Some("Origin header not allowed".to_string())
@@ -199,11 +216,28 @@ fn forbidden_header_response<D>(ctx: &ServerContext<D>, headers: &HeaderMap) -> 
             Some(host) if host == expected => None,
             _ => Some(format!("Host must be {expected}")),
         }
-    };
+    }
+    .or_else(|| {
+        let authorized = headers
+            .get(AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.strip_prefix("Bearer "))
+            .is_some_and(|provided| capability_matches(&ctx.capability, provided));
+        (!authorized).then(|| "valid bearer capability required".to_string())
+    });
     violation.map(|message| {
         log::warn!("[berdctl] rejected request: {message}");
         error_response(StatusCode::FORBIDDEN, "forbidden", &message)
     })
+}
+
+fn capability_matches(expected: &str, provided: &str) -> bool {
+    let expected = expected.as_bytes();
+    let provided = provided.as_bytes();
+    if expected.len() != provided.len() {
+        return false;
+    }
+    bool::from(expected.ct_eq(provided))
 }
 
 async fn handle_ping<D: CommandDispatcher>(
@@ -238,11 +272,25 @@ fn empty_object() -> Value {
 async fn handle_call<D: CommandDispatcher>(
     State(ctx): State<Arc<ServerContext<D>>>,
     headers: HeaderMap,
-    body: Bytes,
+    request: Request,
 ) -> Response {
+    // `Request` leaves its body untouched until after all header-only
+    // defenses pass. In particular, an unauthenticated peer cannot make us
+    // buffer or parse a body before receiving its 403 response.
     if let Some(rejection) = forbidden_header_response(&ctx, &headers) {
         return rejection;
     }
+
+    let body = match to_bytes(request.into_body(), MAX_CALL_BODY_BYTES).await {
+        Ok(body) => body,
+        Err(_) => {
+            return error_response(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "payload_too_large",
+                "request body exceeds the maximum allowed size",
+            );
+        }
+    };
 
     let call = match serde_json::from_slice::<CallBody>(&body) {
         Ok(call) => call,
@@ -356,9 +404,14 @@ fn log_call(command: &str, result_code: &str, started: Instant) {
 mod tests {
     use super::*;
     use crate::bridge::BridgeErrorBody;
+    use tokio::net::TcpStream;
     use tokio::sync::{mpsc, Notify};
 
     const TEST_GENERATION: u64 = 3;
+    const TEST_CAPABILITY: &str =
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    const STALE_CAPABILITY: &str =
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 
     #[derive(Clone)]
     enum StubBehavior {
@@ -451,6 +504,7 @@ mod tests {
             timeouts,
             Arc::new(Semaphore::new(limits.permits)),
             TEST_GENERATION,
+            TEST_CAPABILITY.to_string(),
         ));
         let handle = start_server(ctx).await.unwrap();
         TestServer {
@@ -459,13 +513,67 @@ mod tests {
         }
     }
 
-    async fn post_call(base: &str, body: &Value) -> reqwest::Response {
-        reqwest::Client::new()
+    async fn get_ping(base: &str, capability: Option<&str>) -> reqwest::Response {
+        let request = reqwest::Client::new().get(format!("{base}/v1/ping"));
+        let request = match capability {
+            Some(capability) => request.bearer_auth(capability),
+            None => request,
+        };
+        request.send().await.unwrap()
+    }
+
+    async fn post_call_with_capability(
+        base: &str,
+        body: &Value,
+        capability: Option<&str>,
+    ) -> reqwest::Response {
+        let request = reqwest::Client::new()
             .post(format!("{base}/v1/call"))
-            .json(body)
-            .send()
-            .await
-            .unwrap()
+            .json(body);
+        let request = match capability {
+            Some(capability) => request.bearer_auth(capability),
+            None => request,
+        };
+        request.send().await.unwrap()
+    }
+
+    async fn post_call(base: &str, body: &Value) -> reqwest::Response {
+        post_call_with_capability(base, body, Some(TEST_CAPABILITY)).await
+    }
+
+    async fn write_all(stream: &TcpStream, bytes: &[u8]) {
+        let mut written = 0;
+        while written < bytes.len() {
+            stream.writable().await.unwrap();
+            match stream.try_write(&bytes[written..]) {
+                Ok(count) => written += count,
+                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => continue,
+                Err(err) => panic!("write request: {err}"),
+            }
+        }
+    }
+
+    async fn read_headers(stream: &TcpStream) -> Vec<u8> {
+        tokio::time::timeout(Duration::from_secs(1), async {
+            let mut response = Vec::new();
+            let mut buffer = [0; 1024];
+            loop {
+                stream.readable().await.unwrap();
+                match stream.try_read(&mut buffer) {
+                    Ok(0) => return response,
+                    Ok(count) => {
+                        response.extend_from_slice(&buffer[..count]);
+                        if response.windows(4).any(|window| window == b"\r\n\r\n") {
+                            return response;
+                        }
+                    }
+                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => continue,
+                    Err(err) => panic!("read response: {err}"),
+                }
+            }
+        })
+        .await
+        .expect("server must reject headers without waiting for the body")
     }
 
     fn call_body(command: &str, args: Value) -> Value {
@@ -475,13 +583,104 @@ mod tests {
     #[tokio::test]
     async fn ping_echoes_generation_and_protocol_version() {
         let server = spawn_server(StubBehavior::Echo, Limits::default()).await;
-        let response = reqwest::get(format!("{}/v1/ping", server.base))
-            .await
-            .unwrap();
+        let response = get_ping(&server.base, Some(TEST_CAPABILITY)).await;
         assert_eq!(response.status(), 200);
         let body: Value = response.json().await.unwrap();
         assert_eq!(body["generation"], TEST_GENERATION);
         assert_eq!(body["protocolVersion"], PROTOCOL_VERSION);
+    }
+
+    #[tokio::test]
+    async fn missing_wrong_and_stale_capabilities_are_rejected_on_all_routes() {
+        let server = spawn_server(StubBehavior::Echo, Limits::default()).await;
+        let body = call_body("sessions", json!({ "action": "list" }));
+
+        for capability in [None, Some("wrong"), Some(STALE_CAPABILITY)] {
+            let ping = get_ping(&server.base, capability).await;
+            assert_eq!(ping.status(), 403, "ping capability {capability:?}");
+            let ping_body: Value = ping.json().await.unwrap();
+            assert_eq!(ping_body["error"]["code"], "forbidden");
+
+            let call = post_call_with_capability(&server.base, &body, capability).await;
+            assert_eq!(call.status(), 403, "call capability {capability:?}");
+            let call_body: Value = call.json().await.unwrap();
+            assert_eq!(call_body["error"]["code"], "forbidden");
+        }
+
+        assert_eq!(
+            get_ping(&server.base, Some(TEST_CAPABILITY)).await.status(),
+            200
+        );
+        assert_eq!(
+            post_call_with_capability(&server.base, &body, Some(TEST_CAPABILITY))
+                .await
+                .status(),
+            200
+        );
+    }
+
+    #[tokio::test]
+    async fn unauthorized_call_is_rejected_before_its_body_is_consumed() {
+        let server = spawn_server(StubBehavior::Echo, Limits::default()).await;
+        let stream = TcpStream::connect(server.base.strip_prefix("http://").unwrap())
+            .await
+            .unwrap();
+        // Declare a body but deliberately do not send it. A response proves
+        // header authentication ran before any body collection could wait for
+        // these bytes.
+        write_all(
+            &stream,
+            format!(
+                "POST /v1/call HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Length: {}\r\n\r\n",
+                server.base.rsplit(':').next().unwrap(),
+                MAX_CALL_BODY_BYTES + 1,
+            )
+            .as_bytes(),
+        )
+        .await;
+
+        let response = String::from_utf8(read_headers(&stream).await).unwrap();
+        assert!(response.starts_with("HTTP/1.1 403"), "{response}");
+    }
+
+    #[tokio::test]
+    async fn call_body_over_explicit_limit_is_413() {
+        let server = spawn_server(StubBehavior::Echo, Limits::default()).await;
+        let body = format!(
+            r#"{{"command":"x","args":{{"padding":"{}"}}}}"#,
+            "x".repeat(MAX_CALL_BODY_BYTES),
+        );
+        let response = reqwest::Client::new()
+            .post(format!("{}/v1/call", server.base))
+            .bearer_auth(TEST_CAPABILITY)
+            .header("Content-Type", "application/json")
+            .body(body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 413);
+        let body: Value = response.json().await.unwrap();
+        assert_eq!(body["ok"], false);
+        assert_eq!(body["error"]["code"], "payload_too_large");
+    }
+
+    #[test]
+    fn generated_capabilities_are_random_256_bit_hex() {
+        let first = generate_capability().unwrap();
+        let second = generate_capability().unwrap();
+        assert_eq!(first.len(), CAPABILITY_BYTES * 2);
+        assert!(first
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)));
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn capability_match_checks_content_and_length() {
+        assert!(capability_matches(TEST_CAPABILITY, TEST_CAPABILITY));
+        assert!(!capability_matches(TEST_CAPABILITY, STALE_CAPABILITY));
+        assert!(!capability_matches(TEST_CAPABILITY, "short"));
+        assert!(!capability_matches(TEST_CAPABILITY, &"0".repeat(128)));
     }
 
     #[tokio::test]
@@ -491,6 +690,7 @@ mod tests {
 
         let ping = client
             .get(format!("{}/v1/ping", server.base))
+            .bearer_auth(TEST_CAPABILITY)
             .header("Origin", "https://evil.example")
             .send()
             .await
@@ -502,6 +702,7 @@ mod tests {
 
         let call = client
             .post(format!("{}/v1/call", server.base))
+            .bearer_auth(TEST_CAPABILITY)
             .header("Origin", "http://localhost:3000")
             .json(&call_body("sessions", json!({ "action": "list" })))
             .send()
@@ -519,6 +720,7 @@ mod tests {
         for header in ["Sec-Fetch-Site", "Sec-Fetch-Mode", "Sec-Fetch-Dest"] {
             let response = client
                 .post(format!("{}/v1/call", server.base))
+                .bearer_auth(TEST_CAPABILITY)
                 .header(header, "cross-site")
                 .json(&call_body("sessions", json!({ "action": "list" })))
                 .send()
@@ -539,6 +741,7 @@ mod tests {
         for host in ["evil.example:1234", "localhost:80"] {
             let response = client
                 .get(format!("{}/v1/ping", server.base))
+                .bearer_auth(TEST_CAPABILITY)
                 .header("Host", host)
                 .send()
                 .await
@@ -626,6 +829,7 @@ mod tests {
         // Not JSON at all.
         let response = client
             .post(format!("{}/v1/call", server.base))
+            .bearer_auth(TEST_CAPABILITY)
             .header("Content-Type", "application/json")
             .body("{not json")
             .send()
