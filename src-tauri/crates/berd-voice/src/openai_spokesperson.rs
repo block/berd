@@ -52,6 +52,10 @@ pub enum SpokespersonCommand {
     ResetInput {
         completed: std::sync::mpsc::SyncSender<Result<(), String>>,
     },
+    CancelResponses {
+        response_ids: Vec<String>,
+    },
+    CreateUserResponse,
     ExpertSay {
         directive_id: u64,
         text: String,
@@ -65,8 +69,17 @@ pub enum SpokespersonCommand {
 #[derive(Debug)]
 pub enum SpokespersonEvent {
     Ready,
-    UserSpeaking(bool),
-    UserFinal(String),
+    UserSpeaking {
+        active: bool,
+        item_id: String,
+    },
+    UserFinal {
+        item_id: String,
+        text: String,
+    },
+    UserTurnDiscarded {
+        item_id: String,
+    },
     ResponseStarted {
         response_id: String,
     },
@@ -209,8 +222,8 @@ async fn run(
                             "threshold": 0.5,
                             "prefix_padding_ms": 300,
                             "silence_duration_ms": 500,
-                            "create_response": true,
-                            "interrupt_response": true
+                            "create_response": false,
+                            "interrupt_response": false
                         }
                     },
                     "output": {
@@ -256,6 +269,19 @@ async fn run(
                         let _ = completed.send(result.clone());
                         result?;
                     }
+                    Some(SpokespersonCommand::CancelResponses { response_ids }) => {
+                        for response_id in response_ids {
+                            send_json(&mut socket, serde_json::json!({
+                                "type": "response.cancel",
+                                "response_id": response_id,
+                            })).await?;
+                        }
+                    }
+                    Some(SpokespersonCommand::CreateUserResponse) => {
+                        send_json(&mut socket, serde_json::json!({
+                            "type": "response.create",
+                        })).await?;
+                    }
                     Some(SpokespersonCommand::ExpertContext { text }) => {
                         send_expert_item(&mut socket, &text, false).await?;
                     }
@@ -290,11 +316,36 @@ async fn run(
                 let kind = value.get("type").and_then(|value| value.as_str()).unwrap_or("");
                 match kind {
                     "session.updated" => send_event(events, SpokespersonEvent::Ready)?,
-                    "input_audio_buffer.speech_started" => send_event(events, SpokespersonEvent::UserSpeaking(true))?,
-                    "input_audio_buffer.speech_stopped" => send_event(events, SpokespersonEvent::UserSpeaking(false))?,
+                    "input_audio_buffer.speech_started" | "input_audio_buffer.speech_stopped" => {
+                        if let Some(item_id) = string(&value, "item_id") {
+                            send_event(events, SpokespersonEvent::UserSpeaking {
+                                active: kind.ends_with("speech_started"),
+                                item_id: item_id.into(),
+                            })?;
+                        }
+                    }
                     "conversation.item.input_audio_transcription.completed" => {
-                        if let Some(text) = string(&value, "transcript").filter(|text| !text.trim().is_empty()) {
-                            send_event(events, SpokespersonEvent::UserFinal(text.trim().into()))?;
+                        if let (Some(item_id), Some(text)) =
+                            (string(&value, "item_id"), string(&value, "transcript"))
+                        {
+                            let text = text.trim();
+                            if text.is_empty() {
+                                send_event(events, SpokespersonEvent::UserTurnDiscarded {
+                                    item_id: item_id.into(),
+                                })?;
+                            } else {
+                                send_event(events, SpokespersonEvent::UserFinal {
+                                    item_id: item_id.into(),
+                                    text: text.into(),
+                                })?;
+                            }
+                        }
+                    }
+                    "conversation.item.input_audio_transcription.failed" => {
+                        if let Some(item_id) = string(&value, "item_id") {
+                            send_event(events, SpokespersonEvent::UserTurnDiscarded {
+                                item_id: item_id.into(),
+                            })?;
                         }
                     }
                     "response.created" => {
@@ -542,7 +593,11 @@ mod tests {
             assert_eq!(configured["type"], "session.update");
             assert_eq!(
                 configured.pointer("/session/audio/input/turn_detection/create_response"),
-                Some(&json!(true))
+                Some(&json!(false))
+            );
+            assert_eq!(
+                configured.pointer("/session/audio/input/turn_detection/interrupt_response"),
+                Some(&json!(false))
             );
             assert_eq!(
                 configured.pointer("/session/audio/output/voice"),
@@ -563,6 +618,12 @@ mod tests {
             let item = receive_json(&mut socket).await;
             assert_eq!(item["type"], "input_audio_buffer.clear");
 
+            let cancel = receive_json(&mut socket).await;
+            assert_eq!(cancel["type"], "response.cancel");
+            assert_eq!(cancel["response_id"], "response-prior");
+            let response = receive_json(&mut socket).await;
+            assert_eq!(response["type"], "response.create");
+
             let item = receive_json(&mut socket).await;
             assert_eq!(item["type"], "conversation.item.create");
             assert!(item
@@ -580,19 +641,28 @@ mod tests {
 
             send_json(
                 &mut socket,
-                json!({"type":"input_audio_buffer.speech_started"}),
+                json!({"type":"input_audio_buffer.speech_started","item_id":"item-1"}),
             )
             .await;
             send_json(
                 &mut socket,
-                json!({"type":"input_audio_buffer.speech_stopped"}),
+                json!({"type":"input_audio_buffer.speech_stopped","item_id":"item-1"}),
             )
             .await;
             send_json(
                 &mut socket,
                 json!({
                     "type":"conversation.item.input_audio_transcription.completed",
+                    "item_id":"item-1",
                     "transcript":" hello expert "
+                }),
+            )
+            .await;
+            send_json(
+                &mut socket,
+                json!({
+                    "type":"conversation.item.input_audio_transcription.failed",
+                    "item_id":"item-2"
                 }),
             )
             .await;
@@ -700,6 +770,14 @@ mod tests {
             })
             .unwrap();
         commands
+            .send(SpokespersonCommand::CancelResponses {
+                response_ids: vec!["response-prior".into()],
+            })
+            .unwrap();
+        commands
+            .send(SpokespersonCommand::CreateUserResponse)
+            .unwrap();
+        commands
             .send(SpokespersonCommand::ExpertSay {
                 directive_id: 7,
                 text: "answer this".into(),
@@ -707,47 +785,51 @@ mod tests {
             .unwrap();
 
         let received = tokio::task::spawn_blocking(move || {
-            (0..12)
+            (0..13)
                 .map(|_| event_rx.recv_timeout(Duration::from_secs(2)).unwrap())
                 .collect::<Vec<_>>()
         })
         .await
         .unwrap();
         assert_eq!(reset_result.recv().unwrap(), Ok(()));
-        assert!(matches!(received[0], SpokespersonEvent::UserSpeaking(true)));
-        assert!(matches!(
-            received[1],
-            SpokespersonEvent::UserSpeaking(false)
-        ));
         assert!(
-            matches!(&received[2], SpokespersonEvent::UserFinal(text) if text == "hello expert")
+            matches!(&received[0], SpokespersonEvent::UserSpeaking { active: true, item_id } if item_id == "item-1")
         );
         assert!(
-            matches!(&received[3], SpokespersonEvent::ResponseStarted { response_id } if response_id == "response-auto")
+            matches!(&received[1], SpokespersonEvent::UserSpeaking { active: false, item_id } if item_id == "item-1")
         );
         assert!(
-            matches!(&received[4], SpokespersonEvent::ResponseFinished { response_id, status: SpokespersonResponseStatus::Failed(message) } if response_id == "response-auto" && message.contains("failed"))
+            matches!(&received[2], SpokespersonEvent::UserFinal { item_id, text } if item_id == "item-1" && text == "hello expert")
         );
         assert!(
-            matches!(&received[5], SpokespersonEvent::ResponseStarted { response_id } if response_id == "response-1")
+            matches!(&received[3], SpokespersonEvent::UserTurnDiscarded { item_id } if item_id == "item-2")
         );
         assert!(
-            matches!(&received[6], SpokespersonEvent::ResponseBound { response_id, directive_id: 7 } if response_id == "response-1")
+            matches!(&received[4], SpokespersonEvent::ResponseStarted { response_id } if response_id == "response-auto")
         );
         assert!(
-            matches!(&received[7], SpokespersonEvent::AudioDelta { response_id, samples } if response_id == "response-1" && samples.len() == 2)
+            matches!(&received[5], SpokespersonEvent::ResponseFinished { response_id, status: SpokespersonResponseStatus::Failed(message) } if response_id == "response-auto" && message.contains("failed"))
         );
         assert!(
-            matches!(&received[8], SpokespersonEvent::AudioDone { response_id } if response_id == "response-1")
+            matches!(&received[6], SpokespersonEvent::ResponseStarted { response_id } if response_id == "response-1")
         );
         assert!(
-            matches!(&received[9], SpokespersonEvent::TranscriptDone { response_id, text } if response_id == "response-1" && text == "spoken answer")
+            matches!(&received[7], SpokespersonEvent::ResponseBound { response_id, directive_id: 7 } if response_id == "response-1")
         );
         assert!(
-            matches!(&received[10], SpokespersonEvent::Handoff { call_id, message } if call_id == "call-1" && message == "inspect the computer")
+            matches!(&received[8], SpokespersonEvent::AudioDelta { response_id, samples } if response_id == "response-1" && samples.len() == 2)
         );
         assert!(
-            matches!(&received[11], SpokespersonEvent::ResponseFinished { response_id, status: SpokespersonResponseStatus::Completed } if response_id == "response-1")
+            matches!(&received[9], SpokespersonEvent::AudioDone { response_id } if response_id == "response-1")
+        );
+        assert!(
+            matches!(&received[10], SpokespersonEvent::TranscriptDone { response_id, text } if response_id == "response-1" && text == "spoken answer")
+        );
+        assert!(
+            matches!(&received[11], SpokespersonEvent::Handoff { call_id, message } if call_id == "call-1" && message == "inspect the computer")
+        );
+        assert!(
+            matches!(&received[12], SpokespersonEvent::ResponseFinished { response_id, status: SpokespersonResponseStatus::Completed } if response_id == "response-1")
         );
 
         commands.send(SpokespersonCommand::Shutdown).unwrap();
