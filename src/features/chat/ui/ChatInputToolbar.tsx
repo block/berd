@@ -114,6 +114,7 @@ export function ChatInputToolbar({
     currentModelProviderId,
     currentModel,
     availableModels = [],
+    favoriteModels,
     modelsLoading = false,
     modelStatusMessage = null,
     onModelChange,
@@ -357,6 +358,7 @@ export function ChatInputToolbar({
               currentModelProviderId={currentModelProviderId}
               currentModelName={currentModel ?? null}
               availableModels={availableModels}
+              favoriteModels={favoriteModels}
               modelsLoading={modelsLoading}
               modelStatusMessage={modelStatusMessage}
               onModelChange={onModelChange}

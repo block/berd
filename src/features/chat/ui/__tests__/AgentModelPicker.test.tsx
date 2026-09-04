@@ -2232,4 +2232,56 @@ describe("AgentModelPicker starred models", () => {
       ),
     ).toBe("1");
   });
+
+  it("keeps favorites from other agents visible and switches before selecting", async () => {
+    seedStar("claude-acp", "opus");
+    __resetStarredModelsCacheForTests();
+    const user = userEvent.setup();
+    const onAgentChange = vi.fn();
+    const onModelChange = vi.fn();
+    const favoriteModels = [
+      ...models.map((model) => ({ agentId: "goose", model })),
+      {
+        agentId: "claude-acp",
+        model: { id: "opus", name: "Claude Opus" },
+      },
+    ];
+    const { rerender } = render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={onAgentChange}
+        currentModelId="preferred"
+        currentModelName="Preferred"
+        availableModels={models}
+        favoriteModels={favoriteModels}
+        onModelChange={onModelChange}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    const picker = screen.getByRole("dialog");
+    expect(within(picker).getByText("Claude Opus")).toBeInTheDocument();
+    await user.click(within(picker).getByText("Claude Opus"));
+    expect(onAgentChange).toHaveBeenCalledWith("claude-acp");
+    expect(onModelChange).not.toHaveBeenCalled();
+
+    rerender(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="claude-acp"
+        onAgentChange={onAgentChange}
+        currentModelId={null}
+        availableModels={[{ id: "opus", name: "Claude Opus" }]}
+        favoriteModels={favoriteModels}
+        onModelChange={onModelChange}
+      />,
+    );
+    expect(onModelChange).toHaveBeenCalledWith(
+      "opus",
+      expect.objectContaining({ id: "opus" }),
+    );
+  });
 });

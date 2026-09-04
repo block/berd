@@ -50,6 +50,7 @@ interface AgentModelPickerProps {
   currentModelProviderId?: string | null;
   currentModelName?: string | null;
   availableModels: ModelOption[];
+  favoriteModels?: Array<{ agentId: string; model: ModelOption }>;
   modelsLoading?: boolean;
   modelStatusMessage?: string | null;
   onModelChange?: (modelId: string, model?: ModelOption) => void;
@@ -170,6 +171,7 @@ export function AgentModelPicker({
   currentModelProviderId = null,
   currentModelName = null,
   availableModels,
+  favoriteModels,
   modelsLoading = false,
   modelStatusMessage = null,
   onModelChange,
@@ -366,10 +368,28 @@ export function AgentModelPicker({
     }
   };
 
-  const handleModelSelect = (model: ModelOption) => {
-    recordModelSelection(selectedAgentId, model);
+  const pendingCrossAgentModelRef = useRef<{
+    agentId: string;
+    model: ModelOption;
+  } | null>(null);
+  const handleModelSelect = (model: ModelOption, agentId: string) => {
+    if (agentId !== selectedAgentId) {
+      pendingCrossAgentModelRef.current = { agentId, model };
+      onAgentChange(agentId);
+      return;
+    }
+    recordModelSelection(agentId, model);
     onModelChange?.(model.id, model);
   };
+  useEffect(() => {
+    const pending = pendingCrossAgentModelRef.current;
+    if (!pending || pending.agentId !== selectedAgentId) {
+      return;
+    }
+    pendingCrossAgentModelRef.current = null;
+    recordModelSelection(pending.agentId, pending.model);
+    onModelChange?.(pending.model.id, pending.model);
+  }, [onModelChange, selectedAgentId]);
 
   // Re-gate the provider column when the popover closes, so every reopen
   // starts from the compact layout.
@@ -703,7 +723,10 @@ export function AgentModelPicker({
                   key={selectedAgentId}
                   ref={modelListRef}
                   models={displayedModels}
-                  catalogModels={availableModels}
+                  favoriteModels={favoriteModels}
+                  catalogModels={
+                    favoriteModels?.map(({ model }) => model) ?? availableModels
+                  }
                   currentModelId={currentModelId}
                   currentModelProviderId={currentModelProviderId}
                   selectedAgentId={selectedAgentId}

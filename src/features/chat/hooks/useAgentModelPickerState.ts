@@ -114,6 +114,16 @@ export function useAgentModelPickerState({
     () => getModelsForAgent(selectedAgentId),
     [getModelsForAgent, selectedAgentId],
   );
+  const favoriteModels = useMemo(
+    () =>
+      pickerAgents.flatMap((agent) =>
+        getModelsForAgent(agent.id).map((model) => ({
+          agentId: agent.id,
+          model,
+        })),
+      ),
+    [getModelsForAgent, pickerAgents],
+  );
 
   const providerIdsForSelectedAgent = useMemo(
     () =>
@@ -211,6 +221,7 @@ export function useAgentModelPickerState({
     selectedAgentId,
     pickerAgents,
     availableModels,
+    favoriteModels,
     getModelsForAgent,
     isModelInventoryAuthoritative,
     modelsLoading,

@@ -134,8 +134,14 @@ function sortModels(
   });
 }
 
+export interface FavoriteModelOption {
+  agentId: string;
+  model: ModelOption;
+}
+
 interface ModelListProps {
   models: ModelOption[];
+  favoriteModels?: FavoriteModelOption[];
   /**
    * The authoritative catalog the rows were built from, without any
    * synthesized rows for the current selection. Starred state is only
@@ -147,7 +153,7 @@ interface ModelListProps {
   currentModelId: string | null;
   currentModelProviderId: string | null;
   selectedAgentId: string;
-  onModelSelect: (model: ModelOption) => void;
+  onModelSelect: (model: ModelOption, agentId: string) => void;
   /**
    * Reports whether the list has left the recommended view for the full model
    * list (search or "View more"), so the picker can hide affordances that
@@ -183,6 +189,7 @@ export const RecommendedModelList = forwardRef<
 >(function RecommendedModelList(
   {
     models,
+    favoriteModels,
     catalogModels,
     currentModelId,
     currentModelProviderId,
@@ -195,6 +202,18 @@ export const RecommendedModelList = forwardRef<
 ) {
   const { toggleStar, starredKeys } = useStarredModels();
   const prefersReducedMotion = useReducedMotion();
+  const modelAgentIds = useMemo(
+    () =>
+      new Map(
+        (favoriteModels ?? []).map(({ agentId, model }) => [model, agentId]),
+      ),
+    [favoriteModels],
+  );
+  const getModelScopeId = useCallback(
+    (model: ModelOption) =>
+      model.providerId ?? modelAgentIds.get(model) ?? selectedAgentId,
+    [modelAgentIds, selectedAgentId],
+  );
   // Rows include a synthesized entry for the current selection when the
   // catalog no longer serves it. Honoring starred state only for catalog
   // models keeps a favorited model a provider dropped from rendering as
@@ -205,22 +224,41 @@ export const RecommendedModelList = forwardRef<
     }
     return new Set(
       catalogModels.map((model) =>
-        modelStarKey(model.providerId ?? selectedAgentId, model.id),
+        modelStarKey(getModelScopeId(model), model.id),
       ),
     );
-  }, [catalogModels, selectedAgentId]);
+  }, [catalogModels, getModelScopeId]);
+  const favoriteModelKeys = useMemo(
+    () =>
+      favoriteModels
+        ? new Set(
+            favoriteModels.map(({ agentId, model }) =>
+              modelStarKey(model.providerId ?? agentId, model.id),
+            ),
+          )
+        : existingModelKeys,
+    [existingModelKeys, favoriteModels],
+  );
   const liveStarredKeys = useMemo(() => {
-    if (!existingModelKeys) {
+    if (!favoriteModelKeys) {
       return starredKeys;
     }
     const live = new Set<string>();
     for (const key of starredKeys) {
-      if (existingModelKeys.has(key)) {
+      if (favoriteModelKeys.has(key)) {
         live.add(key);
       }
     }
     return live;
-  }, [existingModelKeys, starredKeys]);
+  }, [favoriteModelKeys, starredKeys]);
+  const starredModels = useMemo(() => {
+    const candidates =
+      favoriteModels ??
+      models.map((model) => ({ agentId: selectedAgentId, model }));
+    return candidates.filter(({ agentId, model }) =>
+      liveStarredKeys.has(modelStarKey(model.providerId ?? agentId, model.id)),
+    );
+  }, [favoriteModels, liveStarredKeys, models, selectedAgentId]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const [hoveredModelKey, setHoveredModelKey] = useState<string | null>(null);
@@ -292,11 +330,7 @@ export const RecommendedModelList = forwardRef<
   }, [resetScroll]);
   const recencyMap = useModelRecency();
   const recommended = useMemo(() => {
-    const starred = models.filter((model) =>
-      liveStarredKeys.has(
-        modelStarKey(model.providerId ?? selectedAgentId, model.id),
-      ),
-    );
+    const starred = starredModels.map(({ model }) => model);
     const recent = models
       .map((m) => ({
         model: m,
@@ -311,10 +345,7 @@ export const RecommendedModelList = forwardRef<
             currentModelProviderId,
           ) &&
           !liveStarredKeys.has(
-            modelStarKey(
-              entry.model.providerId ?? selectedAgentId,
-              entry.model.id,
-            ),
+            modelStarKey(getModelScopeId(entry.model), entry.model.id),
           ),
       )
       .sort((left, right) => {
@@ -331,9 +362,7 @@ export const RecommendedModelList = forwardRef<
       .filter(
         (m) =>
           !recent.some((r) => r.id === m.id && r.providerId === m.providerId) &&
-          !liveStarredKeys.has(
-            modelStarKey(m.providerId ?? selectedAgentId, m.id),
-          ),
+          !liveStarredKeys.has(modelStarKey(getModelScopeId(m), m.id)),
       );
     const shortlist = [...recent, ...rec];
     if (
@@ -355,9 +384,7 @@ export const RecommendedModelList = forwardRef<
     }
     const unstarredFallback = models.filter(
       (model) =>
-        !liveStarredKeys.has(
-          modelStarKey(model.providerId ?? selectedAgentId, model.id),
-        ),
+        !liveStarredKeys.has(modelStarKey(getModelScopeId(model), model.id)),
     );
     return [
       ...starred,
@@ -370,6 +397,8 @@ export const RecommendedModelList = forwardRef<
     recencyMap,
     selectedAgentId,
     liveStarredKeys,
+    starredModels,
+    getModelScopeId,
   ]);
 
   useEffect(() => {
@@ -398,11 +427,17 @@ export const RecommendedModelList = forwardRef<
     if (!searchOpen && !showAll) {
       return recommended;
     }
+    const favoriteRows = starredModels.map(({ model }) => model);
+    const regularRows = models.filter(
+      (model) =>
+        !liveStarredKeys.has(modelStarKey(getModelScopeId(model), model.id)),
+    );
+    const browsableModels = [...favoriteRows, ...regularRows];
     const normalizedQuery = query.trim().toLowerCase();
     if (!normalizedQuery) {
-      return models;
+      return browsableModels;
     }
-    return models.filter(
+    return browsableModels.filter(
       (model) =>
         model.name.toLowerCase().includes(normalizedQuery) ||
         model.id.toLowerCase().includes(normalizedQuery) ||
@@ -410,13 +445,22 @@ export const RecommendedModelList = forwardRef<
         model.providerName?.toLowerCase().includes(normalizedQuery) ||
         model.providerId?.toLowerCase().includes(normalizedQuery),
     );
-  }, [models, query, recommended, searchOpen, showAll]);
+  }, [
+    liveStarredKeys,
+    models,
+    query,
+    recommended,
+    searchOpen,
+    showAll,
+    starredModels,
+    getModelScopeId,
+  ]);
 
   const grouped = useMemo(() => {
     const starred: ModelOption[] = [];
     const unstarred: ModelOption[] = [];
     for (const model of visibleModels) {
-      const scopeId = model.providerId ?? selectedAgentId;
+      const scopeId = getModelScopeId(model);
       (liveStarredKeys.has(modelStarKey(scopeId, model.id))
         ? starred
         : unstarred
@@ -439,6 +483,7 @@ export const RecommendedModelList = forwardRef<
     recencyMap,
     selectedAgentId,
     liveStarredKeys,
+    getModelScopeId,
   ]);
   const sorted = [...grouped.starred, ...grouped.unstarred];
   const layoutItems: Array<
@@ -454,15 +499,11 @@ export const RecommendedModelList = forwardRef<
     ? { duration: 0 }
     : { type: "spring" as const, duration: 0.24, bounce: 0 };
   const recommendedKeys = new Set(
-    recommended.map((model) =>
-      modelStarKey(model.providerId ?? selectedAgentId, model.id),
-    ),
+    recommended.map((model) => modelStarKey(getModelScopeId(model), model.id)),
   );
   const hasMore = models.some(
     (model) =>
-      !recommendedKeys.has(
-        modelStarKey(model.providerId ?? selectedAgentId, model.id),
-      ),
+      !recommendedKeys.has(modelStarKey(getModelScopeId(model), model.id)),
   );
   const showSearchButton =
     hasMore || recommended.length > SEARCHABLE_LIST_THRESHOLD;
@@ -582,7 +623,8 @@ export const RecommendedModelList = forwardRef<
                 currentModelId,
                 currentModelProviderId,
               );
-              const scopeId = model.providerId ?? selectedAgentId;
+              const modelAgentId = modelAgentIds.get(model) ?? selectedAgentId;
+              const scopeId = getModelScopeId(model);
               const modelKey = modelStarKey(scopeId, model.id);
               const starred = liveStarredKeys.has(modelKey);
               const existsInCatalog =
@@ -633,7 +675,7 @@ export const RecommendedModelList = forwardRef<
                   >
                     <PickerItem
                       onClick={() => {
-                        onModelSelect(model);
+                        onModelSelect(model, modelAgentId);
                         resetView();
                       }}
                       selected={isSelected}

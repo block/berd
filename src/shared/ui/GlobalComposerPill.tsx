@@ -1513,6 +1513,12 @@ export function GlobalComposerPill({
             }
             currentModelName={effectiveModelSelection?.modelName ?? null}
             availableModels={availableModels}
+            favoriteModels={pickerAgents.flatMap((agent) =>
+              getModelsForAgent(agent.id).map((model) => ({
+                agentId: agent.id,
+                model,
+              })),
+            )}
             modelsLoading={modelsLoading}
             modelStatusMessage={modelStatusMessage}
             onModelChange={handleModelChange}
