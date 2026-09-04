@@ -25,8 +25,8 @@ use berd_voice::input::{
     VoiceInputRuntime, INPUT_FRAME_SAMPLES,
 };
 use berd_voice::openai_realtime_protocol::{
-    resolve_interrupted_spokesperson_transcript, RealtimeInterruptedTranscriptInput,
-    RealtimeTranscriptAudioPart,
+    expert_transcript_message, resolve_interrupted_spokesperson_transcript,
+    RealtimeInterruptedTranscriptInput, RealtimeTranscriptAudioPart, RealtimeTranscriptSpeaker,
 };
 use berd_voice::openai_spokesperson::{
     OpenAiSpokespersonConfig, OpenAiSpokespersonRuntime, SpokespersonCommand, SpokespersonEvent,
@@ -4271,18 +4271,11 @@ fn live_event_origin(event: &LiveSideEvent) -> berd_voice::protocol::UtteranceOr
 
 fn render_live_event(event: &LiveSideEvent) -> String {
     match event {
-        LiveSideEvent::UserTranscript { text } => format!("[Voice transcript] User said: {text}"),
-        LiveSideEvent::SpokespersonTranscript {
-            text,
-            interrupted: false,
-        } => {
-            format!("[Voice transcript] Spokesperson said: {text}")
+        LiveSideEvent::UserTranscript { text } => {
+            expert_transcript_message(RealtimeTranscriptSpeaker::User, text, false)
         }
-        LiveSideEvent::SpokespersonTranscript {
-            text,
-            interrupted: true,
-        } => {
-            format!("[Voice transcript] Spokesperson said (interrupted; best effort): {text}")
+        LiveSideEvent::SpokespersonTranscript { text, interrupted } => {
+            expert_transcript_message(RealtimeTranscriptSpeaker::Spokesperson, text, *interrupted)
         }
         LiveSideEvent::Handoff { call_id, message } => {
             format!("[Handoff {call_id} from spokesperson] {message}")

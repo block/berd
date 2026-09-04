@@ -67,6 +67,7 @@ const mocks = vi.hoisted(() => ({
             id: 1,
             interrupted: false,
             itemId: user[0],
+            expertMessage: `[Voice transcript] User said: ${user[1]}`,
             speaker: "user",
             text: user[1],
             type: "transcript.finalized",
@@ -82,6 +83,9 @@ const mocks = vi.hoisted(() => ({
             id: 1,
             interrupted: spokesperson[2] ?? false,
             itemId: spokesperson[0],
+            expertMessage: `[Voice transcript] Spokesperson said${
+              spokesperson[2] ? " (interrupted; best effort)" : ""
+            }: ${spokesperson[1]}`,
             speaker: "spokesperson",
             text: spokesperson[1],
             type: "transcript.finalized",
@@ -477,12 +481,18 @@ beforeEach(() => {
   mocks.pipeInitialCursors.length = 0;
   mocks.openHandoffs.clear();
   mocks.registerHandoff.mockImplementation(
-    async (_sessionId: string, handoffId: string, message: string) => {
+    async (
+      _sessionId: string,
+      handoffId: string,
+      cursor: number,
+      message: string,
+    ) => {
       mocks.openHandoffs.set(handoffId, {
         message,
         reminderAttempts: 0,
         resolving: false,
       });
+      return `[Handoff ${handoffId} from spokesperson; cursor ${cursor}] ${message}`;
     },
   );
   mocks.unknownHandoffIds.mockImplementation(

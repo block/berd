@@ -882,19 +882,11 @@ class OpenAiRealtimeConversationRuntime {
                   },
                   false,
                 );
-                const transcriptLabel =
-                  bridgeEvent.speaker === "user"
-                    ? `User said: ${bridgeEvent.text}`
-                    : `Spokesperson said${
-                        bridgeEvent.interrupted
-                          ? " (interrupted; best-effort transcript)"
-                          : ""
-                      }: ${bridgeEvent.text}`;
-                const transcriptMessage = `[Voice transcript] ${transcriptLabel}`;
-                await queueExpertEvent(
-                  transcriptMessage,
-                  (cursor) =>
-                    `[Voice transcript; cursor ${cursor}] ${transcriptLabel}`,
+                await queueExpertEvent(bridgeEvent.expertMessage, (cursor) =>
+                  bridgeEvent.expertMessage.replace(
+                    "[Voice transcript]",
+                    `[Voice transcript; cursor ${cursor}]`,
+                  ),
                 );
                 if (bridgeEvent.speaker === "spokesperson") {
                   wakeExpert(ownerSessionId, bridgeEvent.text);
@@ -904,9 +896,14 @@ class OpenAiRealtimeConversationRuntime {
                   bridgeEvent.message,
                 );
                 const handoffId = `handoff-${this.bridgeCallScope.id}-${exchange.outbound.id}`;
-                pendingExpertEvents.push(
-                  `[Handoff ${handoffId} from spokesperson; cursor ${exchange.outbound.id}] ${bridgeEvent.message}`,
-                );
+                const expertHandoffMessage =
+                  await registerOpenAiRealtimeHandoff(
+                    sessionId,
+                    handoffId,
+                    exchange.outbound.id,
+                    exchange.outbound.message,
+                  );
+                pendingExpertEvents.push(expertHandoffMessage);
                 const toolOutput = await createOpenAiRealtimeHandoffToolOutput(
                   bridgeEvent.callId,
                   handoffId,
@@ -917,11 +914,6 @@ class OpenAiRealtimeConversationRuntime {
                   false,
                 );
                 sendRealtimeEvents(transport, toolFollowUp.events);
-                await registerOpenAiRealtimeHandoff(
-                  sessionId,
-                  handoffId,
-                  exchange.outbound.message,
-                );
                 useChatStore
                   .getState()
                   .addMessage(
