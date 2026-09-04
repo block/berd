@@ -22,6 +22,120 @@ const mocks = vi.hoisted(() => ({
   listenControls: vi.fn(),
   publishActivity: vi.fn(),
   publishMuted: vi.fn(),
+  reduceProtocol: vi.fn(
+    async (_sessionId: string, event: { type?: string }) => {
+      const userFinals: Record<string, [string, string]> = {
+        "test.transcript": ["user-item-1", "hello master"],
+        "test.transcript_repository": [
+          "user-item-repository",
+          "how many repos are in my development folder?",
+        ],
+        "test.transcript_followup": [
+          "user-item-2",
+          "are any of them symbolic links?",
+        ],
+        "test.transcript_corrected": ["user-item-1", "hello master"],
+      };
+      const spokespersonFinals: Record<string, [string, string, boolean?]> = {
+        "test.emissary": ["emissary-item-1", "hello user"],
+        "test.emissary_result": [
+          "emissary-item-2",
+          "You have 21 repositories.",
+        ],
+        "test.emissary_followup_ack": ["emissary-item-3", "I'll verify that."],
+        "test.emissary_symlink_result": [
+          "emissary-item-4",
+          "None of those repositories are symbolic links.",
+        ],
+        "test.emissary_interrupted": [
+          "emissary-item-interrupted",
+          "partially heard",
+          true,
+        ],
+      };
+      const user = event.type ? userFinals[event.type] : undefined;
+      if (user)
+        return [
+          {
+            evidence: "provider_final",
+            id: 1,
+            interrupted: false,
+            itemId: user[0],
+            speaker: "user",
+            text: user[1],
+            type: "transcript.finalized",
+          },
+        ];
+      const spokesperson = event.type
+        ? spokespersonFinals[event.type]
+        : undefined;
+      if (spokesperson)
+        return [
+          {
+            evidence: spokesperson[2] ? "provider_delta" : "provider_final",
+            id: 1,
+            interrupted: spokesperson[2] ?? false,
+            itemId: spokesperson[0],
+            speaker: "spokesperson",
+            text: spokesperson[1],
+            type: "transcript.finalized",
+          },
+        ];
+      if (event.type === "test.transcript_partial")
+        return [
+          {
+            itemId: "user-item-1",
+            speaker: "user",
+            text: "hello",
+            type: "transcript.updated",
+          },
+        ];
+      if (event.type === "test.emissary_partial_first")
+        return [
+          {
+            itemId: "emissary-item-multi",
+            speaker: "spokesperson",
+            text: "Let me think about that.",
+            type: "transcript.updated",
+          },
+        ];
+      if (event.type === "test.emissary_partial_second")
+        return [
+          {
+            itemId: "emissary-item-multi",
+            speaker: "spokesperson",
+            text: "Let me think about that. I received a compact transcript.",
+            type: "transcript.updated",
+          },
+        ];
+      if (event.type === "test.handoff")
+        return [
+          {
+            callId: "call-1",
+            message: "Please inspect the disk.",
+            type: "handoff",
+          },
+        ];
+      if (event.type === "test.handoff_followup")
+        return [
+          {
+            callId: "call-2",
+            message: "Please verify whether those repositories are symlinks.",
+            type: "handoff",
+          },
+        ];
+      if (event.type === "test.invalid_tool_call")
+        return [
+          {
+            callId: "call-broken",
+            error: "JSON Parse error: Unterminated string",
+            toolName: "handoff",
+            type: "tool_call.invalid",
+          },
+        ];
+      return [];
+    },
+  ),
   pipeInitialCursors: [] as number[],
   rebindControls: vi.fn(),
   registerEmissary: vi.fn(),
@@ -45,7 +159,9 @@ const mocks = vi.hoisted(() => ({
   releaseMicrophone: vi.fn(),
   setControlsSuppressed: vi.fn(),
   startControls: vi.fn(),
+  startProtocol: vi.fn(),
   stopControls: vi.fn(),
+  stopProtocol: vi.fn(),
   waitForBridgeReady: vi.fn(),
   sendRealtimeEvents: vi.fn(),
   steerPrompt: vi.fn(),
@@ -65,10 +181,35 @@ vi.mock("@/shared/api/openaiRealtime", () => ({
   publishOpenAiRealtimeVoiceActivity: mocks.publishActivity,
   publishOpenAiRealtimeVoiceMicrophoneMuted: mocks.publishMuted,
   rebindOpenAiRealtimeVoiceControls: mocks.rebindControls,
+  reduceOpenAiRealtimeSpokespersonEvent: async (
+    sessionId: string,
+    event: { type?: string },
+  ) => ({
+    protocolEvents: await mocks.reduceProtocol(sessionId, event),
+    clientEvents: [],
+    completedHandoffIds: [],
+    failedHandoffIds: [],
+  }),
+  requestOpenAiRealtimeExpertMessage: (_sessionId: string, message: unknown) =>
+    Promise.resolve(mocks.requestMasterMessage(message)),
+  requestOpenAiRealtimeToolOutput: (
+    _sessionId: string,
+    event: unknown,
+    requestResponse: boolean,
+  ) =>
+    Promise.resolve(
+      requestResponse
+        ? mocks.requestToolOutput(event)
+        : mocks.recordToolOutput(event),
+    ),
+  requestOpenAiRealtimeTypedUserMessage: (_sessionId: string, text: string) =>
+    Promise.resolve(mocks.requestTypedUserMessage(text)),
   releaseVoiceDictationMicrophone: mocks.releaseMicrophone,
   setOpenAiRealtimeVoiceControlsSuppressed: mocks.setControlsSuppressed,
   startOpenAiRealtimeVoiceControls: mocks.startControls,
+  startOpenAiRealtimeSpokespersonProtocol: mocks.startProtocol,
   stopOpenAiRealtimeVoiceControls: mocks.stopControls,
+  stopOpenAiRealtimeSpokespersonProtocol: mocks.stopProtocol,
 }));
 
 vi.mock("@/features/chat/lib/openaiRealtimeAudio", () => ({
@@ -547,7 +688,9 @@ beforeEach(() => {
     microphoneMuted: false,
     revision: 7,
   }));
+  mocks.startProtocol.mockResolvedValue(undefined);
   mocks.stopControls.mockResolvedValue(undefined);
+  mocks.stopProtocol.mockResolvedValue(undefined);
   mocks.waitForBridgeReady.mockResolvedValue(undefined);
   mocks.requestToolOutput.mockImplementation((event) => ({
     status: "queued",
@@ -1378,10 +1521,12 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       );
     });
 
-    expect(mocks.createInvalidToolCallOutput).toHaveBeenCalledWith(
-      "call-broken",
-      "handoff",
-      "JSON Parse error: Unterminated string",
+    await waitFor(() =>
+      expect(mocks.createInvalidToolCallOutput).toHaveBeenCalledWith(
+        "call-broken",
+        "handoff",
+        "JSON Parse error: Unterminated string",
+      ),
     );
     expect(mocks.requestToolOutput).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1464,13 +1609,17 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
         }),
       );
     });
+    await waitFor(() =>
+      expect(
+        useChatStore.getState().messagesBySession["session-a"]?.[0],
+      ).toMatchObject({
+        role: "user",
+        content: [{ type: "text", text: "hello" }],
+        metadata: { completionStatus: "inProgress" },
+      }),
+    );
     const provisional =
       useChatStore.getState().messagesBySession["session-a"]?.[0];
-    expect(provisional).toMatchObject({
-      role: "user",
-      content: [{ type: "text", text: "hello" }],
-      metadata: { completionStatus: "inProgress" },
-    });
     expect(onSend).not.toHaveBeenCalled();
 
     act(() => {
@@ -1480,15 +1629,16 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
         }),
       );
     });
-    await Promise.resolve();
+    await waitFor(() =>
+      expect(
+        useChatStore.getState().messagesBySession["session-a"]?.[0],
+      ).toMatchObject({
+        id: provisional?.id,
+        content: [{ type: "text", text: "hello master" }],
+        metadata: { completionStatus: "completed" },
+      }),
+    );
     expect(onSend).not.toHaveBeenCalled();
-    expect(
-      useChatStore.getState().messagesBySession["session-a"]?.[0],
-    ).toMatchObject({
-      id: provisional?.id,
-      content: [{ type: "text", text: "hello master" }],
-      metadata: { completionStatus: "completed" },
-    });
 
     await act(async () => owner.result.current.onToggle());
   });
@@ -1534,14 +1684,13 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     expect(onSend).not.toHaveBeenCalled();
 
     await act(async () => owner.result.current.onToggle());
+    act(() => useChatStore.getState().setSessionLoading("session-a", false));
     channel = new FakeDataChannel();
     peer = new FakePeer(channel);
     mocks.createPeer.mockReturnValue(peer);
     await act(async () => owner.result.current.onToggle());
     await waitFor(() => expect(owner.result.current.state).toBe("listening"));
 
-    act(() => useChatStore.getState().setSessionLoading("session-a", false));
-    await Promise.resolve();
     expect(onSend).not.toHaveBeenCalled();
 
     act(() => {
@@ -1551,6 +1700,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
         }),
       );
     });
+    await waitFor(() => expect(mocks.reduceProtocol).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
     await act(async () => owner.result.current.onToggle());
   });
@@ -1601,13 +1751,17 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       );
     });
 
-    expect(mocks.requestTypedUserMessage).toHaveBeenCalledWith(
-      "Please stop and check this.",
+    await waitFor(() =>
+      expect(mocks.requestTypedUserMessage).toHaveBeenCalledWith(
+        "Please stop and check this.",
+      ),
     );
-    expect(mocks.sendRealtimeEvents).toHaveBeenCalledWith(expect.anything(), [
-      { type: "response.cancel" },
-      { type: "conversation.item.create" },
-    ]);
+    await waitFor(() =>
+      expect(mocks.sendRealtimeEvents).toHaveBeenCalledWith(expect.anything(), [
+        { type: "response.cancel" },
+        { type: "conversation.item.create" },
+      ]),
+    );
     await waitFor(() => expect(mocks.steerPrompt).toHaveBeenCalledOnce());
     expect(mocks.steerPrompt).toHaveBeenCalledWith(
       "session-a",
@@ -1703,21 +1857,23 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       );
     });
 
-    const messages = useChatStore.getState().messagesBySession["session-a"];
-    expect(messages).toHaveLength(1);
-    expect(messages?.[0]).toMatchObject({
-      role: "assistant",
-      content: [
-        {
-          type: "text",
-          text: "Let me think about that. I received a compact transcript.",
-          speech: { status: "speaking" },
+    await waitFor(() => {
+      const messages = useChatStore.getState().messagesBySession["session-a"];
+      expect(messages).toHaveLength(1);
+      expect(messages?.[0]).toMatchObject({
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "Let me think about that. I received a compact transcript.",
+            speech: { status: "speaking" },
+          },
+        ],
+        metadata: {
+          completionStatus: "inProgress",
+          voiceConversationDebugEvent: "emissarySpeech",
         },
-      ],
-      metadata: {
-        completionStatus: "inProgress",
-        voiceConversationDebugEvent: "emissarySpeech",
-      },
+      });
     });
 
     await act(async () => owner.result.current.onToggle());
@@ -1899,13 +2055,15 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       );
     });
 
-    expect(
-      useChatStore.getState().messagesBySession["session-a"]?.[0],
-    ).toMatchObject({
-      role: "assistant",
-      content: [{ type: "text", text: "hello user" }],
-      metadata: { voiceConversationDebugEvent: "emissarySpeech" },
-    });
+    await waitFor(() =>
+      expect(
+        useChatStore.getState().messagesBySession["session-a"]?.[0],
+      ).toMatchObject({
+        role: "assistant",
+        content: [{ type: "text", text: "hello user" }],
+        metadata: { voiceConversationDebugEvent: "emissarySpeech" },
+      }),
+    );
     await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
     expect(onSend).toHaveBeenLastCalledWith(
       "[Voice transcript; cursor 1] Spokesperson said: hello user",
