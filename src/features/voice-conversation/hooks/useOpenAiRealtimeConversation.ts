@@ -12,6 +12,8 @@ import { appendSessionSystemPrompt } from "@/shared/api/acpApi";
 import {
   claimVoiceDictationMicrophone,
   createOpenAiRealtimeVoiceSession,
+  enqueueOpenAiRealtimeSpokespersonMessage,
+  getOpenAiRealtimeExpertPipeCursor,
   listenToOpenAiRealtimeVoiceControls,
   publishOpenAiRealtimeVoiceActivity,
   publishOpenAiRealtimeVoiceMicrophoneMuted,
@@ -20,6 +22,7 @@ import {
   requestOpenAiRealtimeExpertMessage,
   requestOpenAiRealtimeToolOutput,
   requestOpenAiRealtimeTypedUserMessage,
+  sendOpenAiRealtimeExpertPipeMessage,
   releaseVoiceDictationMicrophone,
   setOpenAiRealtimeVoiceControlsSuppressed,
   startOpenAiRealtimeVoiceControls,
@@ -47,7 +50,6 @@ import {
 import {
   createHandoffToolOutput,
   createInvalidToolCallOutput,
-  DirectMessagePipe,
   type MasterMessageMode,
   REALTIME_EXPERT_INSTRUCTIONS,
   sendRealtimeEvents,
@@ -746,8 +748,10 @@ class OpenAiRealtimeConversationRuntime {
       });
 
       const transport = { send: (data: string) => channel.send(data) };
-      const pipe = new DirectMessagePipe(this.bridgeCallScope.initialCursor);
-      await startOpenAiRealtimeSpokespersonProtocol(sessionId);
+      await startOpenAiRealtimeSpokespersonProtocol(
+        sessionId,
+        this.bridgeCallScope.initialCursor,
+      );
       this.realtimeProtocolSessionId = sessionId;
       const enqueueProtocolOperation = <T>(
         operation: () => Promise<T>,
@@ -762,12 +766,11 @@ class OpenAiRealtimeConversationRuntime {
         return result;
       };
       const pendingExpertEvents: string[] = [];
-      const queueMasterBoundEvent = (message: string) => {
-        const exchange = pipe.send({
-          sender: "emissary",
-          cursor: pipe.deliveryCursor("emissary"),
+      const queueMasterBoundEvent = async (message: string) => {
+        const exchange = await enqueueOpenAiRealtimeSpokespersonMessage(
+          sessionId,
           message,
-        });
+        );
         if (!exchange.accepted) {
           throw new Error(
             `The realtime event could not enter the Expert pipe (${exchange.reason}).`,
@@ -775,11 +778,11 @@ class OpenAiRealtimeConversationRuntime {
         }
         return exchange;
       };
-      const queueExpertEvent = (
+      const queueExpertEvent = async (
         message: string,
         format: (cursor: number) => string,
       ) => {
-        const exchange = queueMasterBoundEvent(message);
+        const exchange = await queueMasterBoundEvent(message);
         pendingExpertEvents.push(format(exchange.outbound.id));
         return exchange;
       };
@@ -937,7 +940,7 @@ class OpenAiRealtimeConversationRuntime {
                           : ""
                       }: ${bridgeEvent.text}`;
                 const transcriptMessage = `[Voice transcript] ${transcriptLabel}`;
-                queueExpertEvent(
+                await queueExpertEvent(
                   transcriptMessage,
                   (cursor) =>
                     `[Voice transcript; cursor ${cursor}] ${transcriptLabel}`,
@@ -946,7 +949,9 @@ class OpenAiRealtimeConversationRuntime {
                   wakeExpert(ownerSessionId, bridgeEvent.text);
                 }
               } else if (bridgeEvent.type === "handoff") {
-                const exchange = queueMasterBoundEvent(bridgeEvent.message);
+                const exchange = await queueMasterBoundEvent(
+                  bridgeEvent.message,
+                );
                 const handoffId = `handoff-${this.bridgeCallScope.id}-${exchange.outbound.id}`;
                 pendingExpertEvents.push(
                   `[Handoff ${handoffId} from spokesperson; cursor ${exchange.outbound.id}] ${bridgeEvent.message}`,
@@ -1042,7 +1047,7 @@ class OpenAiRealtimeConversationRuntime {
           return {
             accepted: false,
             reason: "context_cannot_resolve",
-            cursor: pipe.cursor("master"),
+            cursor: await getOpenAiRealtimeExpertPipeCursor(sessionId),
             handoffIds: resolvedHandoffIds,
           };
         }
@@ -1053,20 +1058,28 @@ class OpenAiRealtimeConversationRuntime {
           return {
             accepted: false,
             reason: "unknown_handoff",
-            cursor: pipe.cursor("master"),
+            cursor: await getOpenAiRealtimeExpertPipeCursor(sessionId),
             handoffIds: unknownHandoffIds,
           };
         }
-        const exchange = pipe.send({ sender: "master", cursor, message });
-        if (!exchange.accepted) return exchange;
-        const request = await enqueueProtocolOperation(() =>
-          requestOpenAiRealtimeExpertMessage(sessionId, {
+        const delivery = await enqueueProtocolOperation(async () => {
+          const exchange = await sendOpenAiRealtimeExpertPipeMessage(
+            sessionId,
+            cursor,
+            message,
+          );
+          if (!exchange.accepted) return { exchange };
+          const request = await requestOpenAiRealtimeExpertMessage(sessionId, {
             message: `[bridge cursor ${exchange.outbound.id}] ${message}`,
             mode,
             eventId: `berd-master-${exchange.outbound.id}`,
             resolvedHandoffIds,
-          }),
-        );
+          });
+          return { exchange, request };
+        });
+        if (!delivery.exchange.accepted) return delivery.exchange;
+        const { exchange, request } = delivery;
+        if (!request) throw new Error("Expert delivery was not prepared.");
         sendRealtimeEvents(transport, request.events);
         for (const handoffId of resolvedHandoffIds) {
           const handoff = this.openHandoffs.get(handoffId);
@@ -1095,7 +1108,7 @@ class OpenAiRealtimeConversationRuntime {
           return {
             accepted: false,
             reason: "unknown_handoff",
-            cursor: pipe.cursor("master"),
+            cursor: await getOpenAiRealtimeExpertPipeCursor(sessionId),
             handoffIds: unknownHandoffIds,
           };
         }
@@ -1103,19 +1116,23 @@ class OpenAiRealtimeConversationRuntime {
           throw new Error("handoff dismissal reason cannot be empty");
         }
         const dismissalContext = `Handoffs ${dismissedHandoffIds.join(", ")} were dismissed without a spoken response. Reason: ${reason.trim()}`;
-        const exchange = pipe.send({
-          sender: "master",
-          cursor,
-          message: dismissalContext,
-        });
-        if (!exchange.accepted) return exchange;
-        const request = await enqueueProtocolOperation(() =>
-          requestOpenAiRealtimeExpertMessage(sessionId, {
+        const delivery = await enqueueProtocolOperation(async () => {
+          const exchange = await sendOpenAiRealtimeExpertPipeMessage(
+            sessionId,
+            cursor,
+            dismissalContext,
+          );
+          if (!exchange.accepted) return { exchange };
+          const request = await requestOpenAiRealtimeExpertMessage(sessionId, {
             message: `[bridge cursor ${exchange.outbound.id}] [Handoff dismissal] ${dismissalContext} This is silent context; do not speak merely to acknowledge it.`,
             mode: "context",
             eventId: `berd-master-dismissal-${exchange.outbound.id}`,
-          }),
-        );
+          });
+          return { exchange, request };
+        });
+        if (!delivery.exchange.accepted) return delivery.exchange;
+        const { exchange, request } = delivery;
+        if (!request) throw new Error("Handoff dismissal was not prepared.");
         sendRealtimeEvents(transport, request.events);
         for (const handoffId of dismissedHandoffIds) {
           this.openHandoffs.delete(handoffId);
@@ -1166,11 +1183,6 @@ class OpenAiRealtimeConversationRuntime {
           .map(([handoffId, handoff]) => `- ${handoffId}: ${handoff.message}`)
           .join("\n");
         const reminder = `[Private handoff reminder]\nYou ended your turn without resolving the required handoffs below. Resolve them now with one or more send-to-spokesperson --mode say calls that name every answered handoff in --resolves, or dismiss obsolete handoffs explicitly. Berd will retry this reminder up to ${MAX_HANDOFF_REMINDER_ATTEMPTS} times. Do not redo completed work.\n${requests}`;
-        const masterBound = queueExpertEvent(
-          reminder,
-          (cursor) =>
-            `[Private handoff reminder; cursor ${cursor}]${reminder.slice("[Private handoff reminder]".length)}`,
-        );
         const reminderAttempt = Math.max(
           ...pending.map(([, handoff]) => handoff.reminderAttempts),
         );
@@ -1184,8 +1196,14 @@ class OpenAiRealtimeConversationRuntime {
               requests,
             ),
           );
-        void masterBound;
-        wakeExpert(ownerSessionId, "Handoff reminder", true, pendingIds);
+        void enqueueProtocolOperation(async () => {
+          await queueExpertEvent(
+            reminder,
+            (cursor) =>
+              `[Private handoff reminder; cursor ${cursor}]${reminder.slice("[Private handoff reminder]".length)}`,
+          );
+          wakeExpert(ownerSessionId, "Handoff reminder", true, pendingIds);
+        });
       };
       const bridgeSessionId = this.snapshot.boundSessionId ?? sessionId;
       if (

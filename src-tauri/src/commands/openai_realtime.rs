@@ -1,7 +1,7 @@
 use berd_voice::openai_realtime_protocol::{
     spokesperson_session_update, RealtimeCoordinatorResult, RealtimeExpertMessage,
-    RealtimeProtocolEvent, RealtimeProtocolReducer, RealtimeResponseCoordinator,
-    RealtimeSpokespersonSessionOptions,
+    RealtimeMessagePipe, RealtimePipeExchange, RealtimePipePeer, RealtimeProtocolEvent,
+    RealtimeProtocolReducer, RealtimeResponseCoordinator, RealtimeSpokespersonSessionOptions,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -20,10 +20,21 @@ pub struct OpenAiRealtimeProtocolState {
     sessions: Mutex<HashMap<String, OpenAiRealtimeProtocolSession>>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct OpenAiRealtimeProtocolSession {
     reducer: RealtimeProtocolReducer,
     responses: RealtimeResponseCoordinator,
+    pipe: RealtimeMessagePipe,
+}
+
+impl OpenAiRealtimeProtocolSession {
+    fn new(initial_cursor: u64) -> Self {
+        Self {
+            reducer: RealtimeProtocolReducer::default(),
+            responses: RealtimeResponseCoordinator::default(),
+            pipe: RealtimeMessagePipe::new(initial_cursor),
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -97,14 +108,56 @@ pub fn create_openai_realtime_spokesperson_session_update(
 pub fn start_openai_realtime_spokesperson_protocol(
     state: State<'_, OpenAiRealtimeProtocolState>,
     session_id: String,
+    initial_cursor: u64,
 ) -> Result<(), String> {
     let session_id = non_empty_session_id(session_id)?;
     state
         .sessions
         .lock()
         .map_err(|_| "OpenAI Realtime protocol state is unavailable".to_string())?
-        .insert(session_id, OpenAiRealtimeProtocolSession::default());
+        .insert(
+            session_id,
+            OpenAiRealtimeProtocolSession::new(initial_cursor),
+        );
     Ok(())
+}
+
+#[tauri::command]
+pub fn enqueue_openai_realtime_spokesperson_message(
+    state: State<'_, OpenAiRealtimeProtocolState>,
+    session_id: String,
+    message: String,
+) -> Result<RealtimePipeExchange, String> {
+    with_protocol_session(state, session_id, |session| {
+        let cursor = session.pipe.delivery_cursor(RealtimePipePeer::Spokesperson);
+        session
+            .pipe
+            .send(RealtimePipePeer::Spokesperson, cursor, &message)
+    })
+}
+
+#[tauri::command]
+pub fn send_openai_realtime_expert_pipe_message(
+    state: State<'_, OpenAiRealtimeProtocolState>,
+    session_id: String,
+    cursor: u64,
+    message: String,
+) -> Result<RealtimePipeExchange, String> {
+    with_protocol_session(state, session_id, |session| {
+        session
+            .pipe
+            .send(RealtimePipePeer::Expert, cursor, &message)
+    })
+}
+
+#[tauri::command]
+pub fn get_openai_realtime_expert_pipe_cursor(
+    state: State<'_, OpenAiRealtimeProtocolState>,
+    session_id: String,
+) -> Result<u64, String> {
+    with_protocol_session(state, session_id, |session| {
+        Ok(session.pipe.cursor(RealtimePipePeer::Expert))
+    })
 }
 
 #[tauri::command]

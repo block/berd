@@ -614,6 +614,148 @@ fn realtime_error_message(event: &Value) -> String {
         .to_string()
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+pub enum RealtimePipePeer {
+    #[serde(rename = "master")]
+    Expert,
+    #[serde(rename = "emissary")]
+    Spokesperson,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RealtimePipeMessage {
+    pub id: u64,
+    pub sender: RealtimePipePeer,
+    pub recipient: RealtimePipePeer,
+    pub sender_cursor: u64,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
+pub enum RealtimePipeExchange {
+    Accepted(RealtimePipeAccepted),
+    Rejected(RealtimePipeRejected),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RealtimePipeAccepted {
+    pub accepted: bool,
+    pub outbound: RealtimePipeMessage,
+    pub cursor: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RealtimePipeRejected {
+    pub accepted: bool,
+    pub reason: RealtimePipeRejection,
+    pub cursor: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RealtimePipeRejection {
+    PipeBusy,
+    StaleCursor,
+}
+
+#[derive(Debug)]
+pub struct RealtimeMessagePipe {
+    next_message_id: u64,
+    pending: Vec<RealtimePipeMessage>,
+    expert_cursor: u64,
+    spokesperson_cursor: u64,
+}
+
+impl RealtimeMessagePipe {
+    pub fn new(initial_cursor: u64) -> Self {
+        Self {
+            next_message_id: initial_cursor.saturating_add(1),
+            pending: Vec::new(),
+            expert_cursor: initial_cursor,
+            spokesperson_cursor: initial_cursor,
+        }
+    }
+
+    pub fn send(
+        &mut self,
+        sender: RealtimePipePeer,
+        cursor: u64,
+        message: &str,
+    ) -> Result<RealtimePipeExchange, String> {
+        let message = require_non_empty(message, "direct message")?;
+        if self
+            .pending
+            .first()
+            .is_some_and(|active| active.sender != sender)
+        {
+            let latest = self.pending.last().expect("pending batch is nonempty");
+            if cursor != latest.id {
+                return Ok(RealtimePipeExchange::Rejected(RealtimePipeRejected {
+                    accepted: false,
+                    reason: RealtimePipeRejection::PipeBusy,
+                    cursor: self.cursor(sender),
+                }));
+            }
+            *self.cursor_mut(sender) = latest.id;
+            self.pending.clear();
+        }
+        let confirmed_cursor = self.cursor(sender);
+        if cursor != confirmed_cursor {
+            return Ok(RealtimePipeExchange::Rejected(RealtimePipeRejected {
+                accepted: false,
+                reason: RealtimePipeRejection::StaleCursor,
+                cursor: confirmed_cursor,
+            }));
+        }
+        let outbound = RealtimePipeMessage {
+            id: self.next_message_id,
+            sender,
+            recipient: other_pipe_peer(sender),
+            sender_cursor: confirmed_cursor,
+            message,
+        };
+        self.next_message_id = self.next_message_id.saturating_add(1);
+        self.pending.push(outbound.clone());
+        Ok(RealtimePipeExchange::Accepted(RealtimePipeAccepted {
+            accepted: true,
+            outbound,
+            cursor: confirmed_cursor,
+        }))
+    }
+
+    pub fn cursor(&self, peer: RealtimePipePeer) -> u64 {
+        match peer {
+            RealtimePipePeer::Expert => self.expert_cursor,
+            RealtimePipePeer::Spokesperson => self.spokesperson_cursor,
+        }
+    }
+
+    pub fn delivery_cursor(&self, peer: RealtimePipePeer) -> u64 {
+        self.pending
+            .last()
+            .filter(|message| message.recipient == peer)
+            .map_or_else(|| self.cursor(peer), |message| message.id)
+    }
+
+    fn cursor_mut(&mut self, peer: RealtimePipePeer) -> &mut u64 {
+        match peer {
+            RealtimePipePeer::Expert => &mut self.expert_cursor,
+            RealtimePipePeer::Spokesperson => &mut self.spokesperson_cursor,
+        }
+    }
+}
+
+fn other_pipe_peer(peer: RealtimePipePeer) -> RealtimePipePeer {
+    match peer {
+        RealtimePipePeer::Expert => RealtimePipePeer::Spokesperson,
+        RealtimePipePeer::Spokesperson => RealtimePipePeer::Expert,
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RealtimeExpertMessageMode {
@@ -1378,6 +1520,53 @@ mod tests {
                 .unwrap()
                 .events,
             vec![json!({ "type": "response.create" })]
+        );
+    }
+
+    #[test]
+    fn message_pipe_preserves_half_duplex_causal_batches() {
+        let mut pipe = RealtimeMessagePipe::new(12_000_000);
+        let first = pipe
+            .send(RealtimePipePeer::Spokesperson, 12_000_000, "First detail.")
+            .unwrap();
+        let second = pipe
+            .send(RealtimePipePeer::Spokesperson, 12_000_000, "Second detail.")
+            .unwrap();
+        assert!(matches!(
+            first,
+            RealtimePipeExchange::Accepted(RealtimePipeAccepted {
+                outbound: RealtimePipeMessage { id: 12_000_001, .. },
+                ..
+            })
+        ));
+        assert!(matches!(
+            pipe.send(RealtimePipePeer::Expert, 12_000_001, "Too soon.")
+                .unwrap(),
+            RealtimePipeExchange::Rejected(RealtimePipeRejected {
+                reason: RealtimePipeRejection::PipeBusy,
+                cursor: 12_000_000,
+                ..
+            })
+        ));
+        let latest_id = match second {
+            RealtimePipeExchange::Accepted(accepted) => accepted.outbound.id,
+            RealtimePipeExchange::Rejected(_) => panic!("second message was rejected"),
+        };
+        assert!(matches!(
+            pipe.send(RealtimePipePeer::Expert, latest_id, "Reply.")
+                .unwrap(),
+            RealtimePipeExchange::Accepted(RealtimePipeAccepted {
+                cursor: 12_000_002,
+                outbound: RealtimePipeMessage {
+                    sender_cursor: 12_000_002,
+                    ..
+                },
+                ..
+            })
+        ));
+        assert_eq!(
+            pipe.delivery_cursor(RealtimePipePeer::Spokesperson),
+            12_000_003
         );
     }
 }

@@ -1,8 +1,8 @@
 import type {
-  DirectBridgeMessage,
-  DirectMessageExchange,
-  MasterMessageMode,
-} from "./realtimeEmissaryProtocol";
+  OpenAiRealtimePipeExchange as DirectMessageExchange,
+  OpenAiRealtimePipeMessage as DirectBridgeMessage,
+} from "@/shared/api/openaiRealtime";
+import type { MasterMessageMode } from "./realtimeEmissaryProtocol";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getOpenAiRealtimeVoiceControlsStatus } from "@/shared/api/openaiRealtime";
 

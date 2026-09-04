@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  DirectMessagePipe,
   REALTIME_EXPERT_INSTRUCTIONS,
   REALTIME_PROMPT_DOCUMENT,
   REALTIME_SPOKESPERSON_INSTRUCTIONS,
@@ -96,108 +95,5 @@ describe("Realtime tool results", () => {
         call_id: "call-3",
       },
     });
-  });
-});
-
-describe("DirectMessagePipe", () => {
-  it("starts each call in its assigned cursor namespace", () => {
-    const pipe = new DirectMessagePipe(12_000_000);
-
-    expect(pipe.cursor("master")).toBe(12_000_000);
-    expect(pipe.cursor("emissary")).toBe(12_000_000);
-    expect(
-      pipe.send({
-        sender: "emissary",
-        cursor: 12_000_000,
-        message: "Call-scoped message.",
-      }),
-    ).toMatchObject({
-      accepted: true,
-      outbound: { id: 12_000_001, senderCursor: 12_000_000 },
-    });
-  });
-
-  it("allows the active sender to queue multiple messages", () => {
-    const pipe = new DirectMessagePipe();
-    const first = pipe.send({
-      sender: "emissary",
-      cursor: 0,
-      message: "First detail.",
-    });
-    const second = pipe.send({
-      sender: "emissary",
-      cursor: 0,
-      message: "Second detail.",
-    });
-    expect(first).toMatchObject({
-      accepted: true,
-      outbound: { id: 1, sender: "emissary" },
-    });
-    expect(second).toMatchObject({
-      accepted: true,
-      outbound: { id: 2, sender: "emissary" },
-    });
-    expect(
-      pipe.send({ sender: "master", cursor: 0, message: "Reply." }),
-    ).toEqual({ accepted: false, reason: "pipe_busy", cursor: 0 });
-    expect(
-      pipe.send({ sender: "master", cursor: 2, message: "Reply." }),
-    ).toMatchObject({
-      accepted: true,
-      cursor: 2,
-      outbound: { id: 3, sender: "master", senderCursor: 2 },
-    });
-  });
-
-  it("requires the cursor for the complete pending batch", () => {
-    const pipe = new DirectMessagePipe();
-    pipe.send({ sender: "master", cursor: 0, message: "One." });
-    pipe.send({ sender: "master", cursor: 0, message: "Two." });
-
-    expect(
-      pipe.send({ sender: "emissary", cursor: 1, message: "Too soon." }),
-    ).toEqual({ accepted: false, reason: "pipe_busy", cursor: 0 });
-    expect(
-      pipe.send({ sender: "emissary", cursor: 2, message: "Now reply." }),
-    ).toMatchObject({
-      accepted: true,
-      cursor: 2,
-      outbound: { senderCursor: 2 },
-    });
-  });
-
-  it("rejects stale sends without consuming pending input", () => {
-    const pipe = new DirectMessagePipe();
-    const message = pipe.send({
-      sender: "master",
-      cursor: 0,
-      message: "Result.",
-    });
-    if (!message.accepted) throw new Error("expected accepted message");
-
-    expect(
-      pipe.send({ sender: "emissary", cursor: 0, message: "Stale reply." }),
-    ).toEqual({ accepted: false, reason: "pipe_busy", cursor: 0 });
-    expect(
-      pipe.send({
-        sender: "emissary",
-        cursor: message.outbound.id,
-        message: "Fresh reply.",
-      }),
-    ).toMatchObject({ accepted: true, cursor: 1 });
-  });
-
-  it("exposes the latest inbound cursor at trusted delivery boundaries", () => {
-    const pipe = new DirectMessagePipe();
-    pipe.send({ sender: "master", cursor: 0, message: "Context." });
-    const second = pipe.send({
-      sender: "master",
-      cursor: 0,
-      message: "More context.",
-    });
-    if (!second.accepted) throw new Error("expected an accepted batch");
-
-    expect(pipe.deliveryCursor("emissary")).toBe(second.outbound.id);
-    expect(pipe.deliveryCursor("master")).toBe(0);
   });
 });
