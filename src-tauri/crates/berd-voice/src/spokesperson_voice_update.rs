@@ -2,12 +2,12 @@ use std::collections::VecDeque;
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
-use berd_voice::expert_spokesperson::SemanticTurn;
-use berd_voice::input::VoiceInputFrame;
-use berd_voice::openai_spokesperson::{
+use crate::expert_spokesperson::SemanticTurn;
+use crate::input::VoiceInputFrame;
+use crate::openai_spokesperson::{
     OpenAiSpokespersonConfig, OpenAiSpokespersonRuntime, SpokespersonCommand, SpokespersonEvent,
 };
-use berd_voice::TtsSettings;
+use crate::TtsSettings;
 
 const READY_TIMEOUT: Duration = Duration::from_secs(30);
 
