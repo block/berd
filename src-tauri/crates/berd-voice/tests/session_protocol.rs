@@ -226,6 +226,14 @@ async fn acknowledge_realtime_session(
     socket: &mut tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
     update: &Value,
 ) {
+    assert_eq!(
+        update.pointer("/session/audio/input/turn_detection/create_response"),
+        Some(&json!(true))
+    );
+    assert_eq!(
+        update.pointer("/session/audio/input/turn_detection/interrupt_response"),
+        Some(&json!(true))
+    );
     send_realtime_json(
         socket,
         json!({
@@ -427,7 +435,6 @@ fn framed_hello_reports_input_initialization_failure_before_ready() {
 #[test]
 fn expert_spokesperson_renews_before_provider_expiry_without_changing_settings() {
     let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
-    let (suspended_tx, suspended_rx) = mpsc::sync_channel(1);
     let (audio_ready_tx, audio_ready_rx) = mpsc::sync_channel(1);
     let (release_speech_tx, release_speech_rx) = mpsc::sync_channel(1);
     let (renewed_tx, renewed_rx) = mpsc::sync_channel(1);
@@ -460,7 +467,6 @@ fn expert_spokesperson_renews_before_provider_expiry_without_changing_settings()
                     json!({"type":"conversation.item.input_audio_transcription.completed","item_id":"user-1","transcript":"remember this"}),
                 )
                 .await;
-                assert_eq!(receive_realtime_json(&mut old).await["type"], "response.create");
                 send_realtime_json(
                     &mut old,
                     json!({"type":"response.created","response":{"id":"response-1"}}),
@@ -481,15 +487,12 @@ fn expert_spokesperson_renews_before_provider_expiry_without_changing_settings()
                 .await;
                 tokio::task::spawn_blocking(move || release_speech_rx.recv().unwrap()).await.unwrap();
                 send_realtime_json(&mut old, json!({"type":"input_audio_buffer.speech_started","item_id":"user-2"})).await;
-                tokio::task::spawn_blocking(move || suspended_rx.recv().unwrap()).await.unwrap();
-                send_realtime_json(&mut old, json!({"type":"input_audio_buffer.speech_stopped","item_id":"user-2"})).await;
-                send_realtime_json(&mut old, json!({"type":"conversation.item.input_audio_transcription.completed","item_id":"user-2","transcript":"interrupt now"})).await;
-                assert_eq!(receive_realtime_json(&mut old).await["type"], "response.cancel");
                 let truncate = receive_realtime_json(&mut old).await;
                 assert_eq!(truncate["type"], "conversation.item.truncate");
                 send_realtime_json(&mut old, json!({"type":"conversation.item.truncated","item_id":"assistant-1","content_index":0})).await;
                 send_realtime_json(&mut old, json!({"type":"response.done","response":{"id":"response-1","status":"cancelled"}})).await;
-                assert_eq!(receive_realtime_json(&mut old).await["type"], "response.create");
+                send_realtime_json(&mut old, json!({"type":"input_audio_buffer.speech_stopped","item_id":"user-2"})).await;
+                send_realtime_json(&mut old, json!({"type":"conversation.item.input_audio_transcription.completed","item_id":"user-2","transcript":"interrupt now"})).await;
                 send_realtime_json(&mut old, json!({"type":"response.created","response":{"id":"response-2"}})).await;
                 send_realtime_json(&mut old, json!({"type":"response.output_audio_transcript.done","response_id":"response-2","item_id":"assistant-2","output_index":0,"content_index":0,"transcript":"after interruption"})).await;
                 send_realtime_json(&mut old, json!({"type":"response.done","response":{"id":"response-2","status":"completed"}})).await;
@@ -543,7 +546,7 @@ fn expert_spokesperson_renews_before_provider_expiry_without_changing_settings()
             });
     });
     let endpoint = endpoint_rx.recv().unwrap();
-    let mut session = ExpertSpokespersonTestSession::start_with_options(
+    let session = ExpertSpokespersonTestSession::start_with_options(
         endpoint,
         Some(1_000),
         Some(12_000),
@@ -551,30 +554,11 @@ fn expert_spokesperson_renews_before_provider_expiry_without_changing_settings()
     );
     audio_ready_rx.recv_timeout(Duration::from_secs(2)).unwrap();
     release_speech_tx.send(()).unwrap();
-    let mut messages = Vec::new();
-    loop {
-        let message = session.recv(Duration::from_secs(2));
-        let is_suspend = message["type"] == "audio_suspend";
-        let speech_id = message["speech_id"].as_u64();
-        messages.push(message);
-        if is_suspend {
-            assert!(speech_id.is_some());
-            session.send(json!({"type":"audio_suspended","speech_id":speech_id.unwrap(),"played_frames":12000}));
-            session.send(json!({"type":"query_state","id":99,"after":0}));
-            loop {
-                let barrier = session.recv(Duration::from_secs(2));
-                let done = barrier["type"] == "state" && barrier["id"] == 99;
-                messages.push(barrier);
-                if done {
-                    break;
-                }
-            }
-            suspended_tx.send(()).unwrap();
-            break;
-        }
-    }
     renewed_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-    messages.extend(session.shutdown_and_collect());
+    let messages = session.shutdown_and_collect();
+    assert!(messages
+        .iter()
+        .all(|message| message["type"] != "audio_suspend" && message["type"] != "audio_resume"));
     assert!(messages
         .iter()
         .all(|message| message["type"] != "tts_settings_result"));
@@ -1357,11 +1341,6 @@ fn user_activity_during_voice_cutover_rolls_back_and_flushes_gated_pcm_once() {
                         .await
                         .expect("held PCM should return to the authoritative runtime");
                 assert_eq!(append["type"], "input_audio_buffer.append");
-                let response =
-                    tokio::time::timeout(Duration::from_secs(2), receive_realtime_json(&mut old))
-                        .await
-                        .expect("settled user input should receive a response after rollback");
-                assert_eq!(response["type"], "response.create");
                 assert!(tokio::time::timeout(Duration::from_millis(100), old.next())
                     .await
                     .is_err());
@@ -2161,11 +2140,6 @@ fn user_final_promptly_aborts_a_stalled_voice_candidate_and_replies_on_old_runti
                     }),
                 )
                 .await;
-                let response =
-                    tokio::time::timeout(Duration::from_secs(2), receive_realtime_json(&mut old))
-                        .await
-                        .expect("old runtime should promptly receive replacement response request");
-                assert_eq!(response["type"], "response.create");
                 use tokio::io::AsyncReadExt;
                 let mut pending_handshake = Vec::new();
                 tokio::time::timeout(

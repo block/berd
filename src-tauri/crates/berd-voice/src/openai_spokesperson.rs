@@ -77,7 +77,6 @@ pub enum SpokespersonCommand {
     CancelResponses {
         response_ids: Vec<String>,
     },
-    CreateUserResponse,
     ExpertSay {
         directive_id: u64,
         text: String,
@@ -416,8 +415,8 @@ async fn run(
                             "threshold": 0.5,
                             "prefix_padding_ms": 300,
                             "silence_duration_ms": 500,
-                            "create_response": false,
-                            "interrupt_response": false
+                            "create_response": true,
+                            "interrupt_response": true
                         }
                     },
                     "output": {
@@ -568,11 +567,6 @@ async fn run(
                             })).await?;
                             cancellation_events.insert(event_id, response_id);
                         }
-                    }
-                    Some(SpokespersonCommand::CreateUserResponse) => {
-                        send_json(&mut socket, serde_json::json!({
-                            "type": "response.create",
-                        })).await?;
                     }
                     Some(SpokespersonCommand::ExpertContext { text }) => {
                         send_expert_item(&mut socket, &text, false).await?;
@@ -1733,11 +1727,6 @@ mod tests {
             assert_eq!(second["item_id"], "assistant-second");
             assert_eq!(second["content_index"], 1);
             assert_eq!(second["audio_end_ms"], 0);
-            assert!(
-                tokio::time::timeout(Duration::from_millis(20), socket.next())
-                    .await
-                    .is_err()
-            );
             send_json(
                 &mut socket,
                 json!({
@@ -1756,7 +1745,11 @@ mod tests {
                 }),
             )
             .await;
-            assert_eq!(receive_json(&mut socket).await["type"], "response.create");
+            assert!(
+                tokio::time::timeout(Duration::from_millis(20), socket.next())
+                    .await
+                    .is_err()
+            );
         });
 
         let (runtime, events) = OpenAiSpokespersonRuntime::spawn(OpenAiSpokespersonConfig {
@@ -1814,9 +1807,6 @@ mod tests {
             SpokespersonEvent::OutputTruncated { response_id, item_id, content_index: 1 }
                 if response_id == "response-old" && item_id == "assistant-second"
         ));
-        runtime
-            .send(SpokespersonCommand::CreateUserResponse)
-            .unwrap();
         server.await.unwrap();
         runtime.finish().unwrap();
     }
@@ -1834,11 +1824,11 @@ mod tests {
             assert_eq!(configured["type"], "session.update");
             assert_eq!(
                 configured.pointer("/session/audio/input/turn_detection/create_response"),
-                Some(&json!(false))
+                Some(&json!(true))
             );
             assert_eq!(
                 configured.pointer("/session/audio/input/turn_detection/interrupt_response"),
-                Some(&json!(false))
+                Some(&json!(true))
             );
             assert_eq!(
                 configured.pointer("/session/audio/output/voice"),
@@ -1886,9 +1876,6 @@ mod tests {
             let cancel = receive_json(&mut socket).await;
             assert_eq!(cancel["type"], "response.cancel");
             assert_eq!(cancel["response_id"], "response-prior");
-            let response = receive_json(&mut socket).await;
-            assert_eq!(response["type"], "response.create");
-
             let item = receive_json(&mut socket).await;
             assert_eq!(item["type"], "conversation.item.create");
             assert!(item
@@ -2077,9 +2064,6 @@ mod tests {
             .send(SpokespersonCommand::CancelResponses {
                 response_ids: vec!["response-prior".into()],
             })
-            .unwrap();
-        commands
-            .send(SpokespersonCommand::CreateUserResponse)
             .unwrap();
         commands
             .send(SpokespersonCommand::ExpertSay {
