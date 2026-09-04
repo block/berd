@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::LazyLock;
 use std::thread;
 use std::time::Duration;
 
@@ -9,27 +8,15 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
 
 use crate::expert_spokesperson::SemanticTurn;
+use crate::openai_realtime_protocol::{
+    spokesperson_session_update, RealtimeProtocolEvent, RealtimeProtocolReducer,
+    RealtimeSpokespersonSessionOptions, RealtimeTranscriptSpeaker,
+};
 
 const DEFAULT_ENDPOINT: &str = "wss://api.openai.com/v1/realtime";
 const DEFAULT_MODEL: &str = "gpt-realtime-2.1";
 const DEFAULT_TRANSCRIPTION_MODEL: &str = "gpt-realtime-whisper";
 const CONTROL_ACK_TIMEOUT: Duration = Duration::from_secs(4);
-
-const PROMPT_DOCUMENT: &str = include_str!("../prompts/expert-spokesperson.md");
-const ROLE_PLACEHOLDER: &str = "{{ROLE}}";
-static SPOKESPERSON_INSTRUCTIONS: LazyLock<String> =
-    LazyLock::new(|| create_realtime_role_instructions("Spokesperson"));
-
-fn create_realtime_role_instructions(role: &str) -> String {
-    let normalized = PROMPT_DOCUMENT.replace("\r\n", "\n");
-    let normalized = normalized.trim();
-    assert_eq!(
-        normalized.matches(ROLE_PLACEHOLDER).count(),
-        1,
-        "Realtime prompt must contain exactly one {ROLE_PLACEHOLDER} placeholder"
-    );
-    normalized.replace(ROLE_PLACEHOLDER, role)
-}
 
 /// Connection settings for the live Spokesperson. This deliberately does not
 /// implement `Debug` because it contains an API key.
@@ -400,50 +387,17 @@ async fn run(
     };
     send_json(
         &mut socket,
-        serde_json::json!({
-            "type": "session.update",
-            "session": {
-                "type": "realtime",
-                "output_modalities": ["audio"],
-                "instructions": SPOKESPERSON_INSTRUCTIONS.as_str(),
-                "audio": {
-                    "input": {
-                        "format": { "type": "audio/pcm", "rate": 24000 },
-                        "transcription": { "model": config.transcription_model },
-                        "turn_detection": {
-                            "type": "server_vad",
-                            "threshold": 0.5,
-                            "prefix_padding_ms": 300,
-                            "silence_duration_ms": 500,
-                            "create_response": true,
-                            "interrupt_response": true
-                        }
-                    },
-                    "output": {
-                        "format": { "type": "audio/pcm", "rate": 24000 },
-                        "voice": config.voice,
-                        "speed": config.speed
-                    }
-                },
-                "tools": [{
-                    "type": "function",
-                    "name": "handoff",
-                    "description": "Hand unresolved tool work or an authoritative question to the Expert.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": { "message": { "type": "string" } },
-                        "required": ["message"],
-                        "additionalProperties": false
-                    }
-                }],
-                "tool_choice": "auto"
-            }
+        spokesperson_session_update(&RealtimeSpokespersonSessionOptions {
+            model: Some(config.model.clone()),
+            transcription_model: Some(config.transcription_model.clone()),
+            voice: Some(config.voice.clone()),
+            speed: Some(config.speed),
+            ..Default::default()
         }),
     )
     .await?;
 
-    let mut call_names = HashMap::<String, String>::new();
-    let mut call_arguments = HashMap::<String, String>::new();
+    let mut protocol = RealtimeProtocolReducer::default();
     let mut speed_update: Option<PendingSpeedUpdate> = None;
     let mut cancellation_events = HashMap::<String, String>::new();
     let mut pending_truncations = HashMap::<(String, u64), PendingTruncation>::new();
@@ -734,6 +688,37 @@ async fn run(
                 };
                 let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else { continue };
                 let kind = value.get("type").and_then(|value| value.as_str()).unwrap_or("");
+                let protocol_events = if matches!(
+                    kind,
+                    "error" | "conversation.item.input_audio_transcription.failed"
+                ) {
+                    Vec::new()
+                } else {
+                    protocol.handle(&value)?
+                };
+                for protocol_event in protocol_events {
+                    match protocol_event {
+                        RealtimeProtocolEvent::TranscriptFinalized {
+                            item_id,
+                            speaker: RealtimeTranscriptSpeaker::User,
+                            text,
+                            ..
+                        } => send_event(events, SpokespersonEvent::UserFinal { item_id, text })?,
+                        RealtimeProtocolEvent::Handoff {
+                            response_id: Some(response_id),
+                            call_id,
+                            message,
+                        } => send_event(
+                            events,
+                            SpokespersonEvent::Handoff {
+                                response_id,
+                                call_id,
+                                message,
+                            },
+                        )?,
+                        _ => {}
+                    }
+                }
                 match kind {
                     "session.updated" => {
                         if let Some(update) = speed_update.take() {
@@ -788,11 +773,6 @@ async fn run(
                             if text.is_empty() {
                                 send_event(events, SpokespersonEvent::UserTurnDiscarded {
                                     item_id: item_id.into(),
-                                })?;
-                            } else {
-                                send_event(events, SpokespersonEvent::UserFinal {
-                                    item_id: item_id.into(),
-                                    text: text.into(),
                                 })?;
                             }
                             complete_input_cutover_if_ready(
@@ -963,29 +943,6 @@ async fn run(
                             value.get("output_index").and_then(serde_json::Value::as_u64),
                             value.get("content_index").and_then(serde_json::Value::as_u64), string(&value, "delta")) {
                             send_event(events, SpokespersonEvent::TranscriptDelta { response_id: response_id.into(), item_id: item_id.into(), output_index, content_index, text: text.into() })?;
-                        }
-                    }
-                    "response.output_item.added" => {
-                        if let Some(item) = value.get("item") {
-                            if let (Some(call_id), Some(name)) = (string(item, "call_id"), string(item, "name")) {
-                                call_names.insert(call_id.into(), name.into());
-                            }
-                        }
-                    }
-                    "response.function_call_arguments.delta" => {
-                        if let (Some(call_id), Some(delta)) = (string(&value, "call_id"), string(&value, "delta")) {
-                            call_arguments.entry(call_id.into()).or_default().push_str(delta);
-                        }
-                    }
-                    "response.function_call_arguments.done" => {
-                        let response_id = string(&value, "response_id").unwrap_or("");
-                        let call_id = string(&value, "call_id").unwrap_or("");
-                        let name = string(&value, "name").or_else(|| call_names.get(call_id).map(String::as_str));
-                        let args = string(&value, "arguments").or_else(|| call_arguments.get(call_id).map(String::as_str));
-                        if name == Some("handoff") && !response_id.is_empty() {
-                            if let Some(message) = args.and_then(parse_handoff) {
-                                send_event(events, SpokespersonEvent::Handoff { response_id: response_id.into(), call_id: call_id.into(), message })?;
-                            }
                         }
                     }
                     "error" => {
@@ -1160,16 +1117,6 @@ fn pcm16_samples(bytes: &[u8]) -> Result<Vec<f32>, String> {
         .collect())
 }
 
-fn parse_handoff(arguments: &str) -> Option<String> {
-    serde_json::from_str::<serde_json::Value>(arguments)
-        .ok()?
-        .get("message")?
-        .as_str()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-}
-
 fn string<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a str> {
     value.get(key).and_then(|value| value.as_str())
 }
@@ -1203,28 +1150,12 @@ mod tests {
     };
 
     use super::{
-        create_realtime_role_instructions, downsample_pcm16, expire_speed_update, parse_handoff,
-        pcm16_samples, run, speed_error_matches, truncation_timed_out, OpenAiSpokespersonConfig,
-        OpenAiSpokespersonRuntime, PendingSpeedUpdate, PendingTruncation, SpokespersonCommand,
-        SpokespersonEvent, SpokespersonResponseStatus, CONTROL_ACK_TIMEOUT, PROMPT_DOCUMENT,
-        ROLE_PLACEHOLDER,
+        downsample_pcm16, expire_speed_update, pcm16_samples, run, speed_error_matches,
+        truncation_timed_out, OpenAiSpokespersonConfig, OpenAiSpokespersonRuntime,
+        PendingSpeedUpdate, PendingTruncation, SpokespersonCommand, SpokespersonEvent,
+        SpokespersonResponseStatus, CONTROL_ACK_TIMEOUT,
     };
     use crate::expert_spokesperson::SemanticTurn;
-
-    #[test]
-    fn shared_prompt_renders_exactly_one_role_placeholder() {
-        let normalized = PROMPT_DOCUMENT.replace("\r\n", "\n");
-        let normalized = normalized.trim();
-        assert_eq!(normalized.matches(ROLE_PLACEHOLDER).count(), 1);
-        assert_eq!(
-            create_realtime_role_instructions("Spokesperson"),
-            normalized.replace(ROLE_PLACEHOLDER, "Spokesperson")
-        );
-        assert_eq!(
-            create_realtime_role_instructions("Expert"),
-            normalized.replace(ROLE_PLACEHOLDER, "Expert")
-        );
-    }
 
     #[allow(clippy::result_large_err)]
     fn require_test_authorization(
@@ -1591,16 +1522,6 @@ mod tests {
         ));
         runtime.finish().unwrap();
         server.await.unwrap();
-    }
-
-    #[test]
-    fn accepts_only_nonempty_handoff_messages() {
-        assert_eq!(
-            parse_handoff(r#"{"message":" check disk "}"#).as_deref(),
-            Some("check disk")
-        );
-        assert_eq!(parse_handoff(r#"{"message":" "}"#), None);
-        assert_eq!(parse_handoff("not json"), None);
     }
 
     #[test]

@@ -18,6 +18,120 @@ export interface OpenAiRealtimeSession {
   clientSecret: string;
 }
 
+export function createOpenAiRealtimeSpokespersonSessionUpdate(
+  options: unknown,
+): Promise<Record<string, unknown>> {
+  return invoke("create_openai_realtime_spokesperson_session_update", {
+    options,
+  });
+}
+
+export type OpenAiRealtimeProtocolEvent =
+  | {
+      type: "transcript.started";
+      itemId: string;
+      speaker: "user" | "spokesperson";
+    }
+  | {
+      type: "transcript.updated";
+      itemId: string;
+      speaker: "user" | "spokesperson";
+      text: string;
+    }
+  | {
+      type: "transcript.finalized";
+      id: number;
+      itemId: string;
+      speaker: "user" | "spokesperson";
+      text: string;
+      interrupted: boolean;
+      evidence: "provider_final" | "provider_delta";
+    }
+  | {
+      type: "handoff";
+      responseId?: string;
+      callId: string;
+      message: string;
+    }
+  | {
+      type: "tool_call.invalid";
+      callId: string;
+      toolName: string;
+      error: string;
+    }
+  | { type: "spokesperson.playback_interrupted"; responseId: string };
+
+export interface OpenAiRealtimeReduction {
+  protocolEvents: OpenAiRealtimeProtocolEvent[];
+  clientEvents: Record<string, unknown>[];
+  completedHandoffIds: string[];
+  failedHandoffIds: string[];
+}
+
+export interface OpenAiRealtimeCoordinatorResult {
+  status: "sent" | "interrupting" | "queued";
+  events: Record<string, unknown>[];
+}
+
+export function startOpenAiRealtimeSpokespersonProtocol(
+  sessionId: string,
+): Promise<void> {
+  return invoke("start_openai_realtime_spokesperson_protocol", { sessionId });
+}
+
+export function reduceOpenAiRealtimeSpokespersonEvent(
+  sessionId: string,
+  event: unknown,
+): Promise<OpenAiRealtimeReduction> {
+  return invoke("reduce_openai_realtime_spokesperson_event", {
+    sessionId,
+    event,
+  });
+}
+
+export function requestOpenAiRealtimeExpertMessage(
+  sessionId: string,
+  message: {
+    message: string;
+    mode: "context" | "say";
+    eventId?: string;
+    resolvedHandoffIds?: string[];
+  },
+): Promise<OpenAiRealtimeCoordinatorResult> {
+  return invoke("request_openai_realtime_expert_message", {
+    sessionId,
+    message,
+  });
+}
+
+export function requestOpenAiRealtimeToolOutput(
+  sessionId: string,
+  event: Record<string, unknown>,
+  requestResponse: boolean,
+): Promise<OpenAiRealtimeCoordinatorResult> {
+  return invoke("request_openai_realtime_tool_output", {
+    sessionId,
+    event,
+    requestResponse,
+  });
+}
+
+export function requestOpenAiRealtimeTypedUserMessage(
+  sessionId: string,
+  text: string,
+): Promise<OpenAiRealtimeCoordinatorResult> {
+  return invoke("request_openai_realtime_typed_user_message", {
+    sessionId,
+    text,
+  });
+}
+
+export function stopOpenAiRealtimeSpokespersonProtocol(
+  sessionId: string,
+): Promise<void> {
+  return invoke("stop_openai_realtime_spokesperson_protocol", { sessionId });
+}
+
 export type OpenAiRealtimeVoiceControl = {
   sessionId: string;
   revision: number;
