@@ -399,6 +399,14 @@ impl RemotePcmAudioOutput {
         state.phase == Phase::Failed && state.failure_quiescent
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_test_delivery_progress(&self, total_frames: u64, played_frames: u64) {
+        let mut state = self.state.lock().expect("remote output state");
+        state.total_frames = total_frames;
+        state.accepted_frames = total_frames;
+        state.played_frames = played_frames;
+    }
+
     pub fn handle_ack(&self, ack: AudioHostAck) -> Result<bool, String> {
         let mut state = self.state.lock().expect("remote output state");
         let mut started = false;
