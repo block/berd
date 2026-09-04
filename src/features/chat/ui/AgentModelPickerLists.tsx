@@ -170,6 +170,7 @@ interface ModelListProps {
   currentModelId: string | null;
   currentModelProviderId: string | null;
   selectedAgentId: string;
+  agentLabels?: ReadonlyMap<string, string>;
   onModelSelect: (model: ModelOption, agentId: string) => void;
   /**
    * Reports whether the list has left the recommended view for the full model
@@ -211,6 +212,7 @@ export const RecommendedModelList = forwardRef<
     currentModelId,
     currentModelProviderId,
     selectedAgentId,
+    agentLabels,
     onModelSelect,
     onBrowseChange,
     t,
@@ -677,11 +679,18 @@ export const RecommendedModelList = forwardRef<
                 modelAgentId !== "goose" || model.providerId
                   ? getProviderIcon(iconProviderId, "size-3.5")
                   : null;
-              const isSelected = modelMatchesSelection(
-                model,
-                currentModelId,
-                currentModelProviderId,
-              );
+              const isSelected =
+                modelAgentId === selectedAgentId &&
+                modelMatchesSelection(
+                  model,
+                  currentModelId,
+                  currentModelProviderId,
+                );
+              const foreignAgentLabel =
+                modelAgentId !== selectedAgentId
+                  ? (agentLabels?.get(modelAgentId) ??
+                    formatProviderLabel(modelAgentId))
+                  : null;
               const scopeId = getModelScopeId(model);
               const modelKey = modelStarKey(scopeId, model.id);
               const starred = liveStarredKeys.has(modelKey);
@@ -785,6 +794,11 @@ export const RecommendedModelList = forwardRef<
                         resetView();
                       }}
                       selected={isSelected}
+                      aria-label={
+                        foreignAgentLabel
+                          ? `${getModelDisplayName(model)}, ${foreignAgentLabel}`
+                          : undefined
+                      }
                       className="w-auto flex-1 justify-between"
                     >
                       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
@@ -796,8 +810,15 @@ export const RecommendedModelList = forwardRef<
                             {providerIcon}
                           </span>
                         ) : null}
-                        <div className="min-w-0 flex-1 truncate">
-                          {getModelDisplayName(model)}
+                        <div className="flex min-w-0 flex-1 items-baseline gap-1.5 overflow-hidden">
+                          <span className="min-w-0 truncate">
+                            {getModelDisplayName(model)}
+                          </span>
+                          {foreignAgentLabel ? (
+                            <span className="shrink-0 text-xs text-muted-foreground">
+                              {foreignAgentLabel}
+                            </span>
+                          ) : null}
                         </div>
                       </div>
                     </PickerItem>

@@ -2351,6 +2351,42 @@ describe("AgentModelPicker starred models", () => {
     ).toHaveLength(1);
   });
 
+  it("scopes same-ID selected state to the active agent", async () => {
+    seedStar("claude-acp", "shared");
+    __resetStarredModelsCacheForTests();
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="shared"
+        currentModelName="Shared"
+        availableModels={[{ id: "shared", name: "Shared" }]}
+        favoriteModels={[
+          { agentId: "goose", model: { id: "shared", name: "Shared" } },
+          { agentId: "claude-acp", model: { id: "shared", name: "Shared" } },
+        ]}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    const selectedRows = screen
+      .getByRole("dialog")
+      .querySelectorAll('[data-model-key][data-selected="true"]');
+    expect(selectedRows).toHaveLength(1);
+    expect(selectedRows[0]).toHaveAttribute(
+      "data-model-key",
+      modelStarKey("goose", "shared"),
+    );
+    expect(
+      screen.getByRole("button", { name: "Shared, Claude Code" }),
+    ).not.toHaveAttribute("data-selected");
+  });
+
   it("keeps favorites from other agents visible and switches before selecting", async () => {
     seedStar("claude-acp", "opus");
     __resetStarredModelsCacheForTests();
@@ -2388,7 +2424,14 @@ describe("AgentModelPicker starred models", () => {
     expect(
       within(claudeFavorite as HTMLElement).getByTitle("Claude"),
     ).toBeInTheDocument();
-    await user.click(within(picker).getByText("Claude Opus"));
+    expect(
+      within(claudeFavorite as HTMLElement).getByText("Claude Code"),
+    ).toBeInTheDocument();
+    const claudeModelButton = within(claudeFavorite as HTMLElement).getByRole(
+      "button",
+      { name: "Claude Opus, Claude Code" },
+    );
+    await user.click(claudeModelButton);
     expect(onAgentChange).toHaveBeenCalledWith("claude-acp");
     expect(onModelChange).not.toHaveBeenCalled();
 

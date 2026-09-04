@@ -707,6 +707,9 @@ export function AgentModelPicker({
                   currentModelId={currentModelId}
                   currentModelProviderId={currentModelProviderId}
                   selectedAgentId={selectedAgentId}
+                  agentLabels={
+                    new Map(agents.map((agent) => [agent.id, agent.label]))
+                  }
                   onModelSelect={handleModelSelect}
                   t={t}
                 />
