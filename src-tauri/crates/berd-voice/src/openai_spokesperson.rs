@@ -132,18 +132,28 @@ pub enum SpokespersonEvent {
     AudioDelta {
         response_id: String,
         item_id: String,
+        output_index: u64,
         content_index: u64,
         samples: Vec<f32>,
     },
     AudioDone {
         response_id: String,
+        item_id: String,
+        output_index: u64,
+        content_index: u64,
     },
     TranscriptDone {
         response_id: String,
+        item_id: String,
+        output_index: u64,
+        content_index: u64,
         text: String,
     },
     TranscriptDelta {
         response_id: String,
+        item_id: String,
+        output_index: u64,
+        content_index: u64,
         text: String,
     },
     SpeedUpdated {
@@ -157,6 +167,8 @@ pub enum SpokespersonEvent {
     },
     OutputTruncated {
         response_id: String,
+        item_id: String,
+        content_index: u64,
     },
     Handoff {
         call_id: String,
@@ -895,9 +907,10 @@ async fn run(
                         }
                     }
                     "response.output_audio.delta" => {
-                        if let (Some(response_id), Some(item_id), Some(content_index), Some(delta)) = (
+                        if let (Some(response_id), Some(item_id), Some(output_index), Some(content_index), Some(delta)) = (
                             string(&value, "response_id"),
                             string(&value, "item_id"),
+                            value.get("output_index").and_then(serde_json::Value::as_u64),
                             value.get("content_index").and_then(serde_json::Value::as_u64),
                             string(&value, "delta"),
                         ) {
@@ -906,6 +919,7 @@ async fn run(
                             send_event(events, SpokespersonEvent::AudioDelta {
                                 response_id: response_id.into(),
                                 item_id: item_id.into(),
+                                output_index,
                                 content_index,
                                 samples,
                             })?;
@@ -919,23 +933,35 @@ async fn run(
                             if let Some(truncation) = pending_truncations.remove(&(item_id.into(), content_index)) {
                                 send_event(events, SpokespersonEvent::OutputTruncated {
                                     response_id: truncation.response_id,
+                                    item_id: item_id.into(),
+                                    content_index,
                                 })?;
                             }
                         }
                     }
                     "response.output_audio.done" => {
-                        if let Some(response_id) = string(&value, "response_id") {
-                            send_event(events, SpokespersonEvent::AudioDone { response_id: response_id.into() })?;
+                        if let (Some(response_id), Some(item_id), Some(output_index), Some(content_index)) = (
+                            string(&value, "response_id"), string(&value, "item_id"),
+                            value.get("output_index").and_then(serde_json::Value::as_u64),
+                            value.get("content_index").and_then(serde_json::Value::as_u64),
+                        ) {
+                            send_event(events, SpokespersonEvent::AudioDone { response_id: response_id.into(), item_id: item_id.into(), output_index, content_index })?;
                         }
                     }
                     "response.output_audio_transcript.done" => {
-                        if let (Some(response_id), Some(text)) = (string(&value, "response_id"), string(&value, "transcript")) {
-                            send_event(events, SpokespersonEvent::TranscriptDone { response_id: response_id.into(), text: text.trim().into() })?;
+                        if let (Some(response_id), Some(item_id), Some(output_index), Some(content_index), Some(text)) = (
+                            string(&value, "response_id"), string(&value, "item_id"),
+                            value.get("output_index").and_then(serde_json::Value::as_u64),
+                            value.get("content_index").and_then(serde_json::Value::as_u64), string(&value, "transcript")) {
+                            send_event(events, SpokespersonEvent::TranscriptDone { response_id: response_id.into(), item_id: item_id.into(), output_index, content_index, text: text.trim().into() })?;
                         }
                     }
                     "response.output_audio_transcript.delta" => {
-                        if let (Some(response_id), Some(text)) = (string(&value, "response_id"), string(&value, "delta")) {
-                            send_event(events, SpokespersonEvent::TranscriptDelta { response_id: response_id.into(), text: text.into() })?;
+                        if let (Some(response_id), Some(item_id), Some(output_index), Some(content_index), Some(text)) = (
+                            string(&value, "response_id"), string(&value, "item_id"),
+                            value.get("output_index").and_then(serde_json::Value::as_u64),
+                            value.get("content_index").and_then(serde_json::Value::as_u64), string(&value, "delta")) {
+                            send_event(events, SpokespersonEvent::TranscriptDelta { response_id: response_id.into(), item_id: item_id.into(), output_index, content_index, text: text.into() })?;
                         }
                     }
                     "response.output_item.added" => {
@@ -1683,6 +1709,12 @@ mod tests {
             assert_eq!(truncate["item_id"], "assistant-old");
             assert_eq!(truncate["content_index"], 0);
             assert_eq!(truncate["audio_end_ms"], 500);
+            let second = receive_json(&mut socket).await;
+            assert_eq!(second["type"], "conversation.item.truncate");
+            assert_eq!(second["event_id"], "berd-truncate-2");
+            assert_eq!(second["item_id"], "assistant-second");
+            assert_eq!(second["content_index"], 1);
+            assert_eq!(second["audio_end_ms"], 0);
             assert!(
                 tokio::time::timeout(Duration::from_millis(20), socket.next())
                     .await
@@ -1694,6 +1726,15 @@ mod tests {
                     "type":"conversation.item.truncated",
                     "item_id":"assistant-old",
                     "content_index":0,
+                }),
+            )
+            .await;
+            send_json(
+                &mut socket,
+                json!({
+                    "type":"conversation.item.truncated",
+                    "item_id":"assistant-second",
+                    "content_index":1,
                 }),
             )
             .await;
@@ -1730,15 +1771,30 @@ mod tests {
                 audio_end_ms: 500,
             })
             .unwrap();
-        let truncated = tokio::task::spawn_blocking(move || {
-            events.recv_timeout(Duration::from_secs(2)).unwrap()
+        runtime
+            .send(SpokespersonCommand::TruncateOutput {
+                response_id: "response-old".into(),
+                item_id: "assistant-second".into(),
+                content_index: 1,
+                audio_end_ms: 0,
+            })
+            .unwrap();
+        let (truncated, second, _events) = tokio::task::spawn_blocking(move || {
+            let first = events.recv_timeout(Duration::from_secs(2)).unwrap();
+            let second = events.recv_timeout(Duration::from_secs(2)).unwrap();
+            (first, second, events)
         })
         .await
         .unwrap();
         assert!(matches!(
             truncated,
-            SpokespersonEvent::OutputTruncated { response_id }
+            SpokespersonEvent::OutputTruncated { response_id, .. }
                 if response_id == "response-old"
+        ));
+        assert!(matches!(
+            second,
+            SpokespersonEvent::OutputTruncated { response_id, item_id, content_index: 1 }
+                if response_id == "response-old" && item_id == "assistant-second"
         ));
         runtime
             .send(SpokespersonCommand::CreateUserResponse)
@@ -1887,6 +1943,7 @@ mod tests {
                     "type":"response.output_audio.delta",
                     "response_id":"response-1",
                     "item_id":"assistant-1",
+                    "output_index":0,
                     "content_index":0,
                     "delta": BASE64.encode([1_u8, 0, 255, 127])
                 }),
@@ -1894,7 +1951,7 @@ mod tests {
             .await;
             send_json(
                 &mut socket,
-                json!({"type":"response.output_audio.done","response_id":"response-1"}),
+                json!({"type":"response.output_audio.done","response_id":"response-1","item_id":"assistant-1","output_index":0,"content_index":0}),
             )
             .await;
             send_json(
@@ -1902,8 +1959,33 @@ mod tests {
                 json!({
                     "type":"response.output_audio_transcript.done",
                     "response_id":"response-1",
+                    "item_id":"assistant-1",
+                    "output_index":0,
+                    "content_index":0,
                     "transcript":" spoken answer "
                 }),
+            )
+            .await;
+            send_json(
+                &mut socket,
+                json!({
+                    "type":"response.output_audio.delta",
+                    "response_id":"response-1",
+                    "item_id":"assistant-2",
+                    "output_index":1,
+                    "content_index":0,
+                    "delta": BASE64.encode([2_u8, 0])
+                }),
+            )
+            .await;
+            send_json(
+                &mut socket,
+                json!({"type":"response.output_audio.done","response_id":"response-1","item_id":"assistant-2","output_index":1,"content_index":0}),
+            )
+            .await;
+            send_json(
+                &mut socket,
+                json!({"type":"response.output_audio_transcript.done","response_id":"response-1","item_id":"assistant-2","output_index":1,"content_index":0,"transcript":"second part"}),
             )
             .await;
             send_json(
@@ -1988,7 +2070,7 @@ mod tests {
             .unwrap();
 
         let received = tokio::task::spawn_blocking(move || {
-            (0..15)
+            (0..18)
                 .map(|_| event_rx.recv_timeout(Duration::from_secs(2)).unwrap())
                 .collect::<Vec<_>>()
         })
@@ -2033,19 +2115,28 @@ mod tests {
             matches!(&received[7], SpokespersonEvent::ResponseBound { response_id, directive_id: 7 } if response_id == "response-1")
         );
         assert!(
-            matches!(&received[8], SpokespersonEvent::AudioDelta { response_id, item_id, content_index: 0, samples } if response_id == "response-1" && item_id == "assistant-1" && samples.len() == 2)
+            matches!(&received[8], SpokespersonEvent::AudioDelta { response_id, item_id, output_index: 0, content_index: 0, samples } if response_id == "response-1" && item_id == "assistant-1" && samples.len() == 2)
         );
         assert!(
-            matches!(&received[9], SpokespersonEvent::AudioDone { response_id } if response_id == "response-1")
+            matches!(&received[9], SpokespersonEvent::AudioDone { response_id, .. } if response_id == "response-1")
         );
         assert!(
-            matches!(&received[10], SpokespersonEvent::TranscriptDone { response_id, text } if response_id == "response-1" && text == "spoken answer")
+            matches!(&received[10], SpokespersonEvent::TranscriptDone { response_id, text, .. } if response_id == "response-1" && text == "spoken answer")
         );
         assert!(
-            matches!(&received[11], SpokespersonEvent::Handoff { call_id, message } if call_id == "call-1" && message == "inspect the computer")
+            matches!(&received[11], SpokespersonEvent::AudioDelta { response_id, item_id, output_index: 1, content_index: 0, samples } if response_id == "response-1" && item_id == "assistant-2" && samples.len() == 1)
         );
         assert!(
-            matches!(&received[12], SpokespersonEvent::ResponseFinished { response_id, status: SpokespersonResponseStatus::Completed } if response_id == "response-1")
+            matches!(&received[12], SpokespersonEvent::AudioDone { response_id, item_id, output_index: 1, content_index: 0 } if response_id == "response-1" && item_id == "assistant-2")
+        );
+        assert!(
+            matches!(&received[13], SpokespersonEvent::TranscriptDone { response_id, item_id, output_index: 1, text, .. } if response_id == "response-1" && item_id == "assistant-2" && text == "second part")
+        );
+        assert!(
+            matches!(&received[14], SpokespersonEvent::Handoff { call_id, message } if call_id == "call-1" && message == "inspect the computer")
+        );
+        assert!(
+            matches!(&received[15], SpokespersonEvent::ResponseFinished { response_id, status: SpokespersonResponseStatus::Completed } if response_id == "response-1")
         );
 
         commands.send(SpokespersonCommand::Shutdown).unwrap();

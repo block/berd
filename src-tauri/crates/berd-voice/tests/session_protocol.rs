@@ -470,13 +470,13 @@ fn expert_spokesperson_renews_before_provider_expiry_without_changing_settings()
                 for _ in 0..2 {
                     send_realtime_json(
                         &mut old,
-                        json!({"type":"response.output_audio.delta","response_id":"response-1","item_id":"assistant-1","content_index":0,"delta":audio}),
+                        json!({"type":"response.output_audio.delta","response_id":"response-1","item_id":"assistant-1","output_index":0,"content_index":0,"delta":audio}),
                     )
                     .await;
                 }
                 send_realtime_json(
                     &mut old,
-                    json!({"type":"response.output_audio_transcript.done","response_id":"response-1","transcript":"heard words UNSAID SUFFIX"}),
+                    json!({"type":"response.output_audio_transcript.done","response_id":"response-1","item_id":"assistant-1","output_index":0,"content_index":0,"transcript":"heard words UNSAID SUFFIX"}),
                 )
                 .await;
                 tokio::task::spawn_blocking(move || release_speech_rx.recv().unwrap()).await.unwrap();
@@ -491,7 +491,7 @@ fn expert_spokesperson_renews_before_provider_expiry_without_changing_settings()
                 send_realtime_json(&mut old, json!({"type":"response.done","response":{"id":"response-1","status":"cancelled"}})).await;
                 assert_eq!(receive_realtime_json(&mut old).await["type"], "response.create");
                 send_realtime_json(&mut old, json!({"type":"response.created","response":{"id":"response-2"}})).await;
-                send_realtime_json(&mut old, json!({"type":"response.output_audio_transcript.done","response_id":"response-2","transcript":"after interruption"})).await;
+                send_realtime_json(&mut old, json!({"type":"response.output_audio_transcript.done","response_id":"response-2","item_id":"assistant-2","output_index":0,"content_index":0,"transcript":"after interruption"})).await;
                 send_realtime_json(&mut old, json!({"type":"response.done","response":{"id":"response-2","status":"completed"}})).await;
 
                 let (candidate_stream, _) =
@@ -756,6 +756,7 @@ fn active_spokesperson_disconnect_is_specific_terminal_and_does_not_replay() {
                         "type":"response.output_audio.delta",
                         "response_id":"response-active",
                         "item_id":"assistant-active",
+                        "output_index":0,
                         "content_index":0,
                         "delta":BASE64.encode(vec![0_u8; 24_000])
                     }),
@@ -810,6 +811,144 @@ fn active_spokesperson_disconnect_is_specific_terminal_and_does_not_replay() {
     assert!(stderr
         .iter()
         .any(|line| line.contains("without closing handshake")));
+    server.join().unwrap();
+}
+
+#[test]
+fn one_realtime_response_with_two_audio_parts_completes_without_identity_failure() {
+    let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
+    let (played_tx, played_rx) = mpsc::sync_channel(1);
+    let server = std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async move {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                endpoint_tx
+                    .send(format!("ws://{}/", listener.local_addr().unwrap()))
+                    .unwrap();
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut socket = accept_async(stream).await.unwrap();
+                let update = receive_realtime_json(&mut socket).await;
+                acknowledge_realtime_session(&mut socket, &update).await;
+                assert_eq!(
+                    receive_realtime_json(&mut socket).await["type"],
+                    "conversation.item.create"
+                );
+                assert_eq!(
+                    receive_realtime_json(&mut socket).await["type"],
+                    "response.create"
+                );
+                send_realtime_json(
+                    &mut socket,
+                    json!({
+                        "type":"response.created",
+                        "response":{
+                            "id":"response-multipart",
+                            "metadata":{"berd_expert_directive_id":"2"}
+                        }
+                    }),
+                )
+                .await;
+                for (output_index, item_id, transcript, sample) in [
+                    (0, "assistant-first", "first part", 0_u8),
+                    (1, "assistant-second", "second part", 1_u8),
+                ] {
+                    send_realtime_json(
+                        &mut socket,
+                        json!({
+                            "type":"response.output_audio.delta",
+                            "response_id":"response-multipart",
+                            "item_id":item_id,
+                            "output_index":output_index,
+                            "content_index":0,
+                            "delta":BASE64.encode(vec![sample; 16_384])
+                        }),
+                    )
+                    .await;
+                    send_realtime_json(
+                        &mut socket,
+                        json!({
+                            "type":"response.output_audio.done",
+                            "response_id":"response-multipart",
+                            "item_id":item_id,
+                            "output_index":output_index,
+                            "content_index":0
+                        }),
+                    )
+                    .await;
+                    send_realtime_json(
+                        &mut socket,
+                        json!({
+                            "type":"response.output_audio_transcript.done",
+                            "response_id":"response-multipart",
+                            "item_id":item_id,
+                            "output_index":output_index,
+                            "content_index":0,
+                            "transcript":transcript
+                        }),
+                    )
+                    .await;
+                }
+                tokio::task::spawn_blocking(move || played_rx.recv().unwrap())
+                    .await
+                    .unwrap();
+                send_realtime_json(
+                    &mut socket,
+                    json!({"type":"response.done","response":{"id":"response-multipart","status":"completed"}}),
+                )
+                .await;
+                let _ = socket.next().await;
+            });
+    });
+    let endpoint = endpoint_rx.recv().unwrap();
+    let mut session = ExpertSpokespersonTestSession::start_with_options(
+        endpoint,
+        None,
+        Some(16_384),
+        Some(played_tx),
+    );
+    session.send(json!({
+        "type":"prepare_speak",
+        "id":2,
+        "acknowledgement":null,
+        "text":"speak a multipart response"
+    }));
+    let admitted = session.recv(Duration::from_secs(2));
+    assert_eq!(admitted["type"], "admitted");
+    session.send(json!({
+        "type":"output_ready",
+        "id":2,
+        "speech_id":admitted["speech_id"]
+    }));
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    let mut saw_completed = false;
+    let mut saw_transcript = false;
+    let mut seen = Vec::new();
+    while !(saw_completed && saw_transcript) {
+        let remaining = deadline
+            .checked_duration_since(std::time::Instant::now())
+            .unwrap_or_else(|| panic!("multipart response did not complete cleanly: {seen:?}"));
+        let message = session
+            .output
+            .recv_timeout(remaining)
+            .unwrap_or_else(|error| {
+                panic!("multipart response did not complete cleanly ({error}): {seen:?}")
+            });
+        assert_ne!(message["type"], "fatal", "unexpected fatal: {message}");
+        saw_completed |= message["type"] == "speech_completed";
+        if message["type"] == "user_final" && message["origin"] == "spokesperson" {
+            assert_eq!(
+                message["text"],
+                "[Voice transcript] Spokesperson said: first part second part"
+            );
+            saw_transcript = true;
+        }
+        seen.push(message);
+    }
+    session.shutdown();
     server.join().unwrap();
 }
 
