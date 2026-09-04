@@ -25,6 +25,7 @@ pub mod parakeet_assets;
 mod pocket;
 pub mod pocket_assets;
 pub mod protocol;
+pub mod realtime_audio_delivery;
 pub mod session;
 pub mod siri;
 pub mod spokesperson_voice_update;
