@@ -238,7 +238,6 @@ pub fn run() {
             app.manage(commands::native_voice::NativeVoiceState::default());
             app.manage(commands::voice_buddy::RealtimeVoiceControlsState::default());
             app.manage(commands::voice_capture::VoiceCaptureState::default());
-            app.manage(commands::openai_realtime::OpenAiRealtimeProtocolState::default());
             app.manage(commands::openai_realtime::OpenAiRealtimeRuntimeState::default());
             app.manage(commands::telemetry::TelemetryAuthState::new(
                 app_data_dir.clone(),
@@ -615,7 +614,6 @@ pub fn run() {
             commands::openai_realtime::create_openai_realtime_handoff_tool_output,
             commands::openai_realtime::create_openai_realtime_invalid_tool_output,
             commands::openai_realtime::create_openai_realtime_transcript_seed,
-            commands::openai_realtime::start_openai_realtime_spokesperson_protocol,
             commands::openai_realtime::enqueue_openai_realtime_spokesperson_message,
             commands::openai_realtime::send_openai_realtime_expert_pipe_message,
             commands::openai_realtime::get_openai_realtime_expert_pipe_cursor,
@@ -628,7 +626,6 @@ pub fn run() {
             commands::openai_realtime::request_openai_realtime_expert_message,
             commands::openai_realtime::request_openai_realtime_tool_output,
             commands::openai_realtime::request_openai_realtime_typed_user_message,
-            commands::openai_realtime::stop_openai_realtime_spokesperson_protocol,
             commands::openai_realtime::claim_voice_dictation_microphone,
             commands::openai_realtime::release_voice_dictation_microphone,
             commands::agent_setup::start_agent_setup,

@@ -20,11 +20,6 @@ const OPENAI_REALTIME_CLIENT_SECRETS_URL: &str =
     "https://api.openai.com/v1/realtime/client_secrets";
 
 #[derive(Default)]
-pub struct OpenAiRealtimeProtocolState {
-    sessions: Mutex<HashMap<String, RealtimeExpertSpokespersonSession>>,
-}
-
-#[derive(Default)]
 pub struct OpenAiRealtimeRuntimeState {
     sessions: Mutex<HashMap<String, NativeRealtimeRuntime>>,
 }
@@ -32,6 +27,7 @@ pub struct OpenAiRealtimeRuntimeState {
 struct NativeRealtimeRuntime {
     owner_window: String,
     runtime: OpenAiSpokespersonRuntime,
+    protocol: RealtimeExpertSpokespersonSession,
 }
 
 const OPENAI_REALTIME_RUNTIME_EVENT: &str = "openai-realtime-runtime-event";
@@ -83,6 +79,7 @@ pub fn start_openai_realtime_spokesperson_runtime(
     state: State<'_, OpenAiRealtimeRuntimeState>,
     webview_window: WebviewWindow,
     session_id: String,
+    initial_cursor: u64,
     options: RealtimeSpokespersonSessionOptions,
 ) -> Result<(), String> {
     let session_id = non_empty_session_id(session_id)?;
@@ -112,6 +109,7 @@ pub fn start_openai_realtime_spokesperson_runtime(
         NativeRealtimeRuntime {
             owner_window: webview_window.label().into(),
             runtime,
+            protocol: RealtimeExpertSpokespersonSession::new(initial_cursor),
         },
     );
     drop(sessions);
@@ -316,26 +314,8 @@ pub fn create_openai_realtime_transcript_seed(
 }
 
 #[tauri::command]
-pub fn start_openai_realtime_spokesperson_protocol(
-    state: State<'_, OpenAiRealtimeProtocolState>,
-    session_id: String,
-    initial_cursor: u64,
-) -> Result<(), String> {
-    let session_id = non_empty_session_id(session_id)?;
-    state
-        .sessions
-        .lock()
-        .map_err(|_| "OpenAI Realtime protocol state is unavailable".to_string())?
-        .insert(
-            session_id,
-            RealtimeExpertSpokespersonSession::new(initial_cursor),
-        );
-    Ok(())
-}
-
-#[tauri::command]
 pub fn enqueue_openai_realtime_spokesperson_message(
-    state: State<'_, OpenAiRealtimeProtocolState>,
+    state: State<'_, OpenAiRealtimeRuntimeState>,
     session_id: String,
     message: String,
 ) -> Result<RealtimePipeExchange, String> {
@@ -346,7 +326,7 @@ pub fn enqueue_openai_realtime_spokesperson_message(
 
 #[tauri::command]
 pub fn send_openai_realtime_expert_pipe_message(
-    state: State<'_, OpenAiRealtimeProtocolState>,
+    state: State<'_, OpenAiRealtimeRuntimeState>,
     session_id: String,
     cursor: u64,
     message: String,
@@ -358,7 +338,7 @@ pub fn send_openai_realtime_expert_pipe_message(
 
 #[tauri::command]
 pub fn get_openai_realtime_expert_pipe_cursor(
-    state: State<'_, OpenAiRealtimeProtocolState>,
+    state: State<'_, OpenAiRealtimeRuntimeState>,
     session_id: String,
 ) -> Result<u64, String> {
     with_protocol_session(
@@ -370,7 +350,7 @@ pub fn get_openai_realtime_expert_pipe_cursor(
 
 #[tauri::command]
 pub fn register_openai_realtime_handoff(
-    state: State<'_, OpenAiRealtimeProtocolState>,
+    state: State<'_, OpenAiRealtimeRuntimeState>,
     session_id: String,
     handoff_id: String,
     cursor: u64,
@@ -383,7 +363,7 @@ pub fn register_openai_realtime_handoff(
 
 #[tauri::command]
 pub fn unknown_openai_realtime_handoff_ids(
-    state: State<'_, OpenAiRealtimeProtocolState>,
+    state: State<'_, OpenAiRealtimeRuntimeState>,
     session_id: String,
     handoff_ids: Vec<String>,
 ) -> Result<Vec<String>, String> {
@@ -394,7 +374,7 @@ pub fn unknown_openai_realtime_handoff_ids(
 
 #[tauri::command]
 pub fn mark_openai_realtime_handoffs_resolving(
-    state: State<'_, OpenAiRealtimeProtocolState>,
+    state: State<'_, OpenAiRealtimeRuntimeState>,
     session_id: String,
     handoff_ids: Vec<String>,
 ) -> Result<(), String> {
@@ -405,7 +385,7 @@ pub fn mark_openai_realtime_handoffs_resolving(
 
 #[tauri::command]
 pub fn dismiss_openai_realtime_handoffs(
-    state: State<'_, OpenAiRealtimeProtocolState>,
+    state: State<'_, OpenAiRealtimeRuntimeState>,
     session_id: String,
     handoff_ids: Vec<String>,
 ) -> Result<(), String> {
@@ -416,7 +396,7 @@ pub fn dismiss_openai_realtime_handoffs(
 
 #[tauri::command]
 pub fn complete_openai_realtime_expert_turn(
-    state: State<'_, OpenAiRealtimeProtocolState>,
+    state: State<'_, OpenAiRealtimeRuntimeState>,
     session_id: String,
     retrying_handoff_ids: Vec<String>,
     max_attempts: u8,
@@ -428,7 +408,7 @@ pub fn complete_openai_realtime_expert_turn(
 
 #[tauri::command]
 pub fn reduce_openai_realtime_spokesperson_event(
-    state: State<'_, OpenAiRealtimeProtocolState>,
+    state: State<'_, OpenAiRealtimeRuntimeState>,
     session_id: String,
     event: serde_json::Value,
 ) -> Result<RealtimeSessionReduction, String> {
@@ -437,15 +417,16 @@ pub fn reduce_openai_realtime_spokesperson_event(
         .sessions
         .lock()
         .map_err(|_| "OpenAI Realtime protocol state is unavailable".to_string())?;
-    let session = sessions
+    let protocol = &mut sessions
         .get_mut(&session_id)
-        .ok_or_else(|| "OpenAI Realtime protocol session is not active".to_string())?;
-    session.handle_provider_event(&event)
+        .ok_or_else(|| "OpenAI Realtime protocol session is not active".to_string())?
+        .protocol;
+    protocol.handle_provider_event(&event)
 }
 
 #[tauri::command]
 pub fn request_openai_realtime_expert_message(
-    state: State<'_, OpenAiRealtimeProtocolState>,
+    state: State<'_, OpenAiRealtimeRuntimeState>,
     session_id: String,
     message: RealtimeExpertMessage,
 ) -> Result<RealtimeCoordinatorResult, String> {
@@ -456,7 +437,7 @@ pub fn request_openai_realtime_expert_message(
 
 #[tauri::command]
 pub fn request_openai_realtime_tool_output(
-    state: State<'_, OpenAiRealtimeProtocolState>,
+    state: State<'_, OpenAiRealtimeRuntimeState>,
     session_id: String,
     event: serde_json::Value,
     request_response: bool,
@@ -468,27 +449,13 @@ pub fn request_openai_realtime_tool_output(
 
 #[tauri::command]
 pub fn request_openai_realtime_typed_user_message(
-    state: State<'_, OpenAiRealtimeProtocolState>,
+    state: State<'_, OpenAiRealtimeRuntimeState>,
     session_id: String,
     text: String,
 ) -> Result<RealtimeCoordinatorResult, String> {
     with_protocol_session(state, session_id, |session| {
         session.request_typed_user_message(&text)
     })
-}
-
-#[tauri::command]
-pub fn stop_openai_realtime_spokesperson_protocol(
-    state: State<'_, OpenAiRealtimeProtocolState>,
-    session_id: String,
-) -> Result<(), String> {
-    let session_id = non_empty_session_id(session_id)?;
-    state
-        .sessions
-        .lock()
-        .map_err(|_| "OpenAI Realtime protocol state is unavailable".to_string())?
-        .remove(&session_id);
-    Ok(())
 }
 
 fn non_empty_session_id(session_id: String) -> Result<String, String> {
@@ -501,7 +468,7 @@ fn non_empty_session_id(session_id: String) -> Result<String, String> {
 }
 
 fn with_protocol_session<T>(
-    state: State<'_, OpenAiRealtimeProtocolState>,
+    state: State<'_, OpenAiRealtimeRuntimeState>,
     session_id: String,
     operation: impl FnOnce(&mut RealtimeExpertSpokespersonSession) -> Result<T, String>,
 ) -> Result<T, String> {
@@ -511,9 +478,10 @@ fn with_protocol_session<T>(
         .lock()
         .map_err(|_| "OpenAI Realtime protocol state is unavailable".to_string())?;
     operation(
-        sessions
+        &mut sessions
             .get_mut(&session_id)
-            .ok_or_else(|| "OpenAI Realtime protocol session is not active".to_string())?,
+            .ok_or_else(|| "OpenAI Realtime protocol session is not active".to_string())?
+            .protocol,
     )
 }
 
