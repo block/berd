@@ -19,6 +19,7 @@ import { useStarredModels } from "../hooks/useStarredModels";
 import { modelStarKey } from "../lib/starredModels";
 import { SearchBar } from "@/shared/ui/SearchBar";
 import { Button } from "@/shared/ui/button";
+import { cn } from "@/shared/lib/cn";
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import { Separator } from "@/shared/ui/separator";
 import {
@@ -204,6 +205,8 @@ export const RecommendedModelList = forwardRef<
   }, [existingModelKeys, starredKeys]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
+  const [hoveredModelKey, setHoveredModelKey] = useState<string | null>(null);
+  const [focusedModelKey, setFocusedModelKey] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const searchButtonRef = useRef<HTMLButtonElement>(null);
@@ -221,6 +224,8 @@ export const RecommendedModelList = forwardRef<
     setQuery("");
     setSearchOpen(false);
     setShowAll(false);
+    setHoveredModelKey(null);
+    setFocusedModelKey(null);
     resetScroll();
   }, [resetScroll]);
   const recencyMap = useModelRecency();
@@ -417,7 +422,10 @@ export const RecommendedModelList = forwardRef<
   };
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+    <div
+      className="flex min-h-0 min-w-0 flex-1 flex-col"
+      onPointerLeave={() => setHoveredModelKey(null)}
+    >
       <div className="flex h-8 shrink-0 items-center px-1">
         {searchOpen ? (
           <div data-model-search-open className="relative mr-2 min-w-0 flex-1">
@@ -496,9 +504,23 @@ export const RecommendedModelList = forwardRef<
               return (
                 <div key={modelKey}>
                   <div
-                    className="group/model-row flex min-w-0 items-center gap-1"
+                    className="flex min-w-0 items-center gap-1"
                     data-model-key={modelKey}
                     data-starred={starred || undefined}
+                    onPointerEnter={() => setHoveredModelKey(modelKey)}
+                    onPointerLeave={() =>
+                      setHoveredModelKey((current) =>
+                        current === modelKey ? null : current,
+                      )
+                    }
+                    onFocusCapture={() => setFocusedModelKey(modelKey)}
+                    onBlurCapture={(event) => {
+                      if (!event.currentTarget.contains(event.relatedTarget)) {
+                        setFocusedModelKey((current) =>
+                          current === modelKey ? null : current,
+                        );
+                      }
+                    }}
                   >
                     <PickerItem
                       onClick={() => {
@@ -531,15 +553,19 @@ export const RecommendedModelList = forwardRef<
                         size="icon-xs"
                         selected={starred}
                         onClick={() => toggleStar(scopeId, model.id)}
-                        // Hover-reveal keeps rows calm; keyboard users still
-                        // reach the control through row focus
-                        // (group-focus-within/model-row) or direct focus. The idle
-                        // (unstarred) star rests on the ghost icon contract's
+                        // Explicit row-local pointer/focus state avoids
+                        // sticky WebKit :hover state while keeping the list calm.
+                        // The idle (unstarred) star rests on the ghost icon contract's
                         // muted-foreground — ≈5.7:1 light / ≈6.1:1 dark against
                         // the popover, above the 3:1 WCAG non-text bar
                         // (enforced in globals.test.ts) — and favorited rows
                         // soften to foreground/80 via the selected flag.
-                        className="shrink-0 opacity-0 transition-opacity group-hover/model-row:opacity-100 group-focus-within/model-row:opacity-100 focus-visible:opacity-100"
+                        className={cn(
+                          "shrink-0 opacity-0 transition-opacity focus-visible:opacity-100",
+                          (hoveredModelKey === modelKey ||
+                            focusedModelKey === modelKey) &&
+                            "opacity-100",
+                        )}
                         aria-label={t(
                           starred ? "toolbar.unstarModel" : "toolbar.starModel",
                           { model: getModelDisplayName(model) },

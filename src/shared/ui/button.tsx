@@ -127,7 +127,7 @@ const buttonVariants = cva(
       {
         variant: "ghost",
         selected: true,
-        className: "text-foreground/80",
+        className: "text-foreground/80 hover:text-foreground/80",
       },
     ],
     defaultVariants: {
@@ -310,8 +310,9 @@ export type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> &
      * On/pressed state for toggle controls that lean on Button as their
      * chrome (icon toggles like the model picker star). Ghost buttons rest
      * the label or icon at foreground/80 — softer than idle content yet
-     * well above the 3:1 non-text contrast bar — and keep the ghost hover
-     * at full foreground. Only meaningful on ghost; other variants ignore
+     * well above the 3:1 non-text contrast bar. Explicit true and false
+     * states keep their respective color on hover, so toggle groups do not
+     * show mixed shades. Only meaningful on ghost; other variants ignore
      * it (dev builds warn).
      */
     selected?: boolean;
@@ -573,6 +574,11 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
             selected: resolvedSelected,
             className,
           }),
+          resolvedEmphasis === "ghost" &&
+            selected !== undefined &&
+            (resolvedSelected
+              ? "text-foreground/80 hover:text-foreground/80"
+              : "text-muted-foreground hover:text-muted-foreground"),
           asChild && resolvedDisabled && "pointer-events-none",
         )}
         onClick={handleClick}

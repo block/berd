@@ -1912,13 +1912,16 @@ describe("AgentModelPicker starred models", () => {
     expect(idleStar).toHaveAttribute("data-slot", "button");
     expect(idleStar).toHaveAttribute("aria-pressed", "false");
     expect(idleStar).toHaveClass("text-muted-foreground");
+    expect(idleStar).toHaveClass("hover:text-muted-foreground");
     expect(idleStar).not.toHaveClass("text-foreground/80");
-    // A named group keeps outer picker hover/focus states from revealing
-    // every row's star at once.
-    expect(idleStar).toHaveClass("group-hover/model-row:opacity-100");
-    expect(idleStar).toHaveClass("group-focus-within/model-row:opacity-100");
-    expect(idleStar).not.toHaveClass("group-hover:opacity-100");
-    expect(idleStar).not.toHaveClass("group-focus-within:opacity-100");
+    expect(idleStar).toHaveClass("opacity-0");
+
+    const preferredRow = idleStar.closest("[data-model-key]");
+    expect(preferredRow).not.toBeNull();
+    await user.hover(preferredRow as HTMLElement);
+    expect(idleStar).toHaveClass("opacity-100");
+    await user.unhover(preferredRow as HTMLElement);
+    expect(idleStar).not.toHaveClass("opacity-100");
 
     const starredToggle = within(picker).getByRole("button", {
       name: "Unstar Other",
@@ -1926,6 +1929,7 @@ describe("AgentModelPicker starred models", () => {
     expect(starredToggle).toHaveAttribute("data-slot", "button");
     expect(starredToggle).toHaveAttribute("aria-pressed", "true");
     expect(starredToggle).toHaveClass("text-foreground/80");
+    expect(starredToggle).toHaveClass("hover:text-foreground/80");
     expect(starredToggle).not.toHaveClass("text-muted-foreground");
   });
 
