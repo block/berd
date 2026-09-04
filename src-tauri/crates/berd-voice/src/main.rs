@@ -39,7 +39,8 @@ use berd_voice::{
         LocalAssetLockError, LocalAssetRoots, LocalInstallError, LocalInstallErrorKind,
         LocalInstallPhase, LocalInstallProgress,
     },
-    ConfiguredTtsSlot, DeliveryProgress, PcmAudioOutput, TtsBackend, TtsConfiguration,
+    ConfiguredTtsSlot, DeliveryProgress, DeliverySegment, PcmAudioOutput, TtsBackend,
+    TtsConfiguration,
     TtsConfigurationLease, TtsConfigurationRejection, TtsConfigurationRejectionKind, TtsPcmSpec,
     TtsSettings, WavSynthesisErrorKind,
 };
@@ -2001,6 +2002,8 @@ struct LiveResponse {
     transcript: Option<String>,
     pending_audio: VecDeque<Vec<f32>>,
     pending_frames: usize,
+    total_audio_frames: u64,
+    played_audio_frames: u64,
     audio_done: bool,
     finish_sent: bool,
     received_audio: bool,
@@ -2018,6 +2021,8 @@ impl LiveResponse {
             transcript: None,
             pending_audio: VecDeque::new(),
             pending_frames: 0,
+            total_audio_frames: 0,
+            played_audio_frames: 0,
             audio_done: false,
             finish_sent: false,
             received_audio: false,
@@ -2428,19 +2433,23 @@ fn run_expert_spokesperson_session(
                         response_id,
                         samples,
                     } => {
+                        let frame_count = u64::try_from(samples.len())
+                            .map_err(|_| "Spokesperson audio frame count overflowed")?;
                         let active_response = active.as_ref().map(|playback| {
                             (
                                 playback.response_id.as_str(),
                                 playback.active.load(Ordering::SeqCst),
                             )
                         });
-                        match stage_live_audio_delta(
+                        let staged = stage_live_audio_delta(
                             &response_id,
                             samples,
                             &mut responses,
                             &mut waiting_responses,
                             active_response,
-                        )? {
+                        )?;
+                        let ignored = matches!(&staged, LiveAudioDelta::Ignored);
+                        match staged {
                             LiveAudioDelta::Stream(samples) => match active
                                 .as_ref()
                                 .expect("streaming response is active")
@@ -2471,7 +2480,13 @@ fn run_expert_spokesperson_session(
                             LiveAudioDelta::Queued | LiveAudioDelta::Ignored => {}
                         }
                         if let Some(response) = responses.get_mut(&response_id) {
-                            response.received_audio = true;
+                            response.total_audio_frames = response
+                                .total_audio_frames
+                                .checked_add(frame_count)
+                                .ok_or("Spokesperson audio frame count overflowed")?;
+                            if !ignored {
+                                response.received_audio = true;
+                            }
                         }
                     }
                     SpokespersonEvent::AudioDone { response_id } => {
@@ -2495,6 +2510,14 @@ fn run_expert_spokesperson_session(
                             &mut emitted_live_token,
                             &mut writer,
                         )?;
+                    }
+                    SpokespersonEvent::TranscriptDelta { response_id, text } => {
+                        responses
+                            .entry(response_id)
+                            .or_insert_with(|| LiveResponse::new(None, None))
+                            .transcript
+                            .get_or_insert_with(String::new)
+                            .push_str(&text);
                     }
                     SpokespersonEvent::Handoff { call_id, message } => {
                         record_and_emit_live_event(
@@ -3181,6 +3204,7 @@ fn emit_live_interrupted_terminal(
 ) -> Result<(), String> {
     response.playback_complete = true;
     response.interrupted = true;
+    response.played_audio_frames = playback.output.played_frames();
     if response.claim_speech_terminal() {
         if let Some(prepare_id) = playback.prepare_id {
             write_message(
@@ -3442,17 +3466,38 @@ fn publish_live_response_if_complete(
     let response = responses
         .remove(response_id)
         .expect("ready response exists");
+    let transcript = delivered_live_transcript(&response);
     record_and_emit_live_event(
         core,
         next_live_token,
         emitted_live_token,
         LiveSideEvent::SpokespersonTranscript {
-            text: response.transcript.expect("ready response has transcript"),
+            text: transcript,
             interrupted: response.interrupted,
         },
         writer,
     )?;
     Ok(())
+}
+
+fn delivered_live_transcript(response: &LiveResponse) -> String {
+    let text = response
+        .transcript
+        .as_deref()
+        .expect("publishable response has transcript");
+    if !response.interrupted {
+        return text.to_string();
+    }
+    let delivery = DeliveryProgress {
+        sample_rate: 24_000,
+        segments: vec![DeliverySegment {
+            text: text.to_string(),
+            played_frames: response.played_audio_frames.min(response.total_audio_frames),
+            total_frames: response.total_audio_frames,
+            synthesis_complete: true,
+        }],
+    };
+    text[..estimated_spoken_through_utf8(text, &delivery)].to_string()
 }
 
 fn acknowledge_output_ready(
@@ -5690,6 +5735,20 @@ mod tests {
     }
 
     #[test]
+    fn interrupted_spokesperson_history_keeps_only_estimated_delivered_prefix() {
+        let mut response = LiveResponse::new(None, Some(3));
+        response.transcript = Some("One two three four five six.".into());
+        response.interrupted = true;
+        response.total_audio_frames = 24_000;
+        response.played_audio_frames = 12_000;
+
+        let delivered = delivered_live_transcript(&response);
+
+        assert_eq!(delivered, "One two three");
+        assert!(!delivered.contains("four"));
+    }
+
+    #[test]
     fn expert_waits_for_the_complete_live_response_after_handoff() {
         let mut core = ExpertSpokespersonCore::default();
         core.add_live_event(
@@ -6130,7 +6189,14 @@ mod tests {
             .as_ref()
             .unwrap()
             .output
-            .handle_ack(AudioHostAck::Suspended { played_frames: 0 })
+            .set_test_delivery_progress(24_000, 12_000);
+        active
+            .as_ref()
+            .unwrap()
+            .output
+            .handle_ack(AudioHostAck::Suspended {
+                played_frames: 12_000,
+            })
             .unwrap();
         gate.finish_user_speaking();
         let (preexisting, _) = gate.resolve_user_final("item-1");
@@ -6143,13 +6209,35 @@ mod tests {
             Err(mpsc::TryRecvError::Empty)
         ));
         let mut response = LiveResponse::new(Some(11), Some(3));
+        response.transcript = Some("One two three four five six.".into());
+        response.total_audio_frames = 24_000;
+        response.server_finished = true;
         let mut output = Vec::new();
         emit_live_interrupted_terminal(&mut response, active.as_ref().unwrap(), &mut output)
             .unwrap();
-        emit_live_interrupted_terminal(&mut response, active.as_ref().unwrap(), &mut output)
-            .unwrap();
-        assert_eq!(messages(&output).len(), 1);
-        assert_eq!(messages(&output)[0]["type"], "speech_interrupted");
+        let terminal = messages(&output);
+        assert_eq!(terminal.len(), 1);
+        assert_eq!(terminal[0]["type"], "speech_interrupted");
+        assert_eq!(terminal[0]["spoken_through_utf8"], 0);
+        let mut responses = HashMap::from([("response-a".into(), response)]);
+        let mut core = ExpertSpokespersonCore::default();
+        let mut next_token = 1;
+        let mut emitted_token = 0;
+        publish_live_response_if_complete(
+            "response-a",
+            &mut responses,
+            &mut core,
+            &mut next_token,
+            &mut emitted_token,
+            &mut output,
+        )
+        .unwrap();
+        let emitted = messages(&output);
+        assert_eq!(emitted[0]["type"], "speech_interrupted");
+        assert_eq!(emitted[0]["spoken_through_utf8"], 0);
+        assert_eq!(emitted[1]["type"], "user_final");
+        assert!(emitted[1]["text"].as_str().unwrap().contains("One two three"));
+        assert!(!emitted[1]["text"].as_str().unwrap().contains("four"));
     }
 
     #[test]

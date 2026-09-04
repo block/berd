@@ -102,6 +102,10 @@ pub enum SpokespersonEvent {
         response_id: String,
         text: String,
     },
+    TranscriptDelta {
+        response_id: String,
+        text: String,
+    },
     Handoff {
         call_id: String,
         message: String,
@@ -407,6 +411,11 @@ async fn run(
                     "response.output_audio_transcript.done" => {
                         if let (Some(response_id), Some(text)) = (string(&value, "response_id"), string(&value, "transcript")) {
                             send_event(events, SpokespersonEvent::TranscriptDone { response_id: response_id.into(), text: text.trim().into() })?;
+                        }
+                    }
+                    "response.output_audio_transcript.delta" => {
+                        if let (Some(response_id), Some(text)) = (string(&value, "response_id"), string(&value, "delta")) {
+                            send_event(events, SpokespersonEvent::TranscriptDelta { response_id: response_id.into(), text: text.into() })?;
                         }
                     }
                     "response.output_item.added" => {
