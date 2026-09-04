@@ -1920,9 +1920,16 @@ describe("AgentModelPicker starred models", () => {
     const preferredRow = idleStar.closest("[data-model-key]");
     expect(preferredRow).not.toBeNull();
     await user.hover(preferredRow as HTMLElement);
-    expect(idleStar).toHaveClass("opacity-100");
+    expect(idleStar).toHaveClass(
+      "animate-in",
+      "fade-in",
+      "opacity-100",
+      "duration-75",
+    );
+    expect(idleStar).not.toHaveClass("transition-opacity");
     await user.unhover(preferredRow as HTMLElement);
     expect(idleStar).not.toHaveClass("opacity-100");
+    expect(idleStar).not.toHaveClass("animate-in", "fade-in");
 
     const starredToggle = within(picker).getByRole("button", {
       name: "Unstar Other",
