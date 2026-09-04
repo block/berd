@@ -52,6 +52,67 @@ describe("AgentModelPicker", () => {
     ).toHaveTextContent("GPT-4o");
   });
 
+  // Harness agents (pi-acp, codex-acp, etc.) get a wider picker in the
+  // new-chat composer because their ACP model names can be long; Goose keeps
+  // the compact layout.
+  it("widens the new-chat picker for a harness agent without reasoning effort", async () => {
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="claude-acp"
+        onAgentChange={vi.fn()}
+        currentModelId="claude-sonnet-4"
+        currentModelName="Claude Sonnet 4"
+        availableModels={[{ id: "claude-sonnet-4", name: "Claude Sonnet 4" }]}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+
+    expect(screen.getByRole("dialog")).toHaveClass("w-[35rem]");
+  });
+
+  // With a reasoning-effort column present the harness picker grows further,
+  // because the agent (11.75rem) and reasoning (11rem) columns alone consume
+  // most of the Goose expanded width and the model column needs room for
+  // long ACP names (e.g. "databricks / databricks-glm-5-3").
+  it("widens the expanded picker for a harness agent with reasoning effort", async () => {
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="claude-acp"
+        onAgentChange={vi.fn()}
+        currentModelId="claude-sonnet-4"
+        currentModelName="Claude Sonnet 4"
+        availableModels={[{ id: "claude-sonnet-4", name: "Claude Sonnet 4" }]}
+        onModelChange={vi.fn()}
+        reasoningEffort={{
+          config: {
+            configId: "thinking_effort",
+            currentValue: "medium",
+            options: [
+              { id: "low", name: "low" },
+              { id: "medium", name: "medium" },
+              { id: "high", name: "high" },
+            ],
+          },
+          onChange: vi.fn(),
+        }}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+
+    expect(screen.getByRole("dialog")).toHaveClass("w-[46rem]");
+  });
+
   it("routes not-ready Goose to Providers settings with a connect action", async () => {
     const user = userEvent.setup();
     const onAgentChange = vi.fn();
@@ -1416,6 +1477,35 @@ describe("AgentModelPicker", () => {
       await user.click(screen.getByRole("button", { name: /switch agent/i }));
 
       expect(content).toHaveClass("w-[37.25rem]");
+    });
+
+    // Without a reasoning-effort column the gated reveal widens to the
+    // harness width so long model names (e.g. pi-acp provider/id names) are
+    // not truncated. Goose is excluded, so use a harness agent here.
+    it("widens to the harness width when no reasoning-effort column is present", async () => {
+      const user = userEvent.setup();
+
+      render(
+        <AgentModelPicker
+          agents={AGENTS}
+          selectedAgentId="claude-acp"
+          onAgentChange={vi.fn()}
+          currentModelId="claude-sonnet-4"
+          currentModelName="Claude Sonnet 4"
+          availableModels={[{ id: "claude-sonnet-4", name: "Claude Sonnet 4" }]}
+          onModelChange={vi.fn()}
+          providerColumnMode="gated"
+        />,
+      );
+
+      await openPicker(user);
+
+      const content = document.querySelector('[data-slot="popover-content"]');
+      expect(content).toHaveClass("w-[26.25rem]");
+
+      await user.click(screen.getByRole("button", { name: /switch agent/i }));
+
+      expect(content).toHaveClass("w-[35rem]");
     });
 
     it("hides the switch-agent button when the only agent is ready", async () => {
