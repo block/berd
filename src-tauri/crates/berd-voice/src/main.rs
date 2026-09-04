@@ -24,6 +24,10 @@ use berd_voice::input::{
     VoiceInputControls, VoiceInputEngineConfig, VoiceInputEvent, VoiceInputFrame,
     VoiceInputRuntime, INPUT_FRAME_SAMPLES,
 };
+use berd_voice::openai_realtime_protocol::{
+    resolve_interrupted_spokesperson_transcript, RealtimeInterruptedTranscriptInput,
+    RealtimeTranscriptAudioPart,
+};
 use berd_voice::openai_spokesperson::{
     OpenAiSpokespersonConfig, OpenAiSpokespersonRuntime, SpokespersonCommand, SpokespersonEvent,
     SpokespersonResponseStatus,
@@ -39,9 +43,9 @@ use berd_voice::{
         LocalAssetLockError, LocalAssetRoots, LocalInstallError, LocalInstallErrorKind,
         LocalInstallPhase, LocalInstallProgress,
     },
-    ConfiguredTtsSlot, DeliveryProgress, DeliverySegment, PcmAudioOutput, TtsBackend,
-    TtsConfiguration, TtsConfigurationLease, TtsConfigurationRejection,
-    TtsConfigurationRejectionKind, TtsPcmSpec, TtsSettings, WavSynthesisErrorKind,
+    ConfiguredTtsSlot, DeliveryProgress, PcmAudioOutput, TtsBackend, TtsConfiguration,
+    TtsConfigurationLease, TtsConfigurationRejection, TtsConfigurationRejectionKind, TtsPcmSpec,
+    TtsSettings, WavSynthesisErrorKind,
 };
 use serde::Serialize;
 
@@ -4492,47 +4496,23 @@ fn delivered_live_transcript(response: &LiveResponse) -> String {
     if !response.interrupted {
         return text.to_string();
     }
-    if !response.audio_parts.is_empty() {
-        let mut remaining_played = response
-            .played_audio_frames
-            .min(response.total_audio_frames);
-        return response
-            .audio_parts
-            .iter()
-            .filter_map(|part| {
-                let played_frames = remaining_played.min(part.total_audio_frames);
-                remaining_played -= played_frames;
-                if part.transcript.is_empty() {
-                    return None;
-                }
-                let delivery = DeliveryProgress {
-                    sample_rate: 24_000,
-                    segments: vec![DeliverySegment {
-                        text: part.transcript.clone(),
-                        played_frames,
-                        total_frames: part.total_audio_frames,
-                        synthesis_complete: true,
-                    }],
-                };
-                let cutoff = estimated_spoken_through_utf8(&part.transcript, &delivery);
-                Some(&part.transcript[..cutoff])
-            })
-            .filter(|text| !text.is_empty())
-            .collect::<Vec<_>>()
-            .join(" ");
-    }
-    let delivery = DeliveryProgress {
-        sample_rate: 24_000,
-        segments: vec![DeliverySegment {
+    resolve_interrupted_spokesperson_transcript(
+        RealtimeInterruptedTranscriptInput::HostPlayedFrames {
             text: text.to_string(),
-            played_frames: response
-                .played_audio_frames
-                .min(response.total_audio_frames),
-            total_frames: response.total_audio_frames,
-            synthesis_complete: true,
-        }],
-    };
-    text[..estimated_spoken_through_utf8(text, &delivery)].to_string()
+            audio_parts: response
+                .audio_parts
+                .iter()
+                .map(|part| RealtimeTranscriptAudioPart {
+                    text: part.transcript.clone(),
+                    total_audio_frames: part.total_audio_frames,
+                })
+                .collect(),
+            played_audio_frames: response.played_audio_frames,
+            total_audio_frames: response.total_audio_frames,
+            sample_rate: 24_000,
+        },
+    )
+    .0
 }
 
 fn expert_spoken_through_utf8(response: &LiveResponse) -> u64 {

@@ -4,6 +4,8 @@ use std::sync::LazyLock;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::{estimated_spoken_through_utf8, DeliveryProgress, DeliverySegment};
+
 const PROMPT_DOCUMENT: &str = include_str!("../prompts/expert-spokesperson.md");
 const ROLE_PLACEHOLDER: &str = "{{ROLE}}";
 
@@ -198,6 +200,95 @@ pub enum RealtimeTranscriptSpeaker {
 pub enum RealtimeTranscriptEvidence {
     ProviderFinal,
     ProviderDelta,
+    HostPlayedFrames,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RealtimeTranscriptAudioPart {
+    pub text: String,
+    pub total_audio_frames: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RealtimeInterruptedTranscriptInput {
+    ProviderDelta {
+        text: String,
+    },
+    HostPlayedFrames {
+        text: String,
+        audio_parts: Vec<RealtimeTranscriptAudioPart>,
+        played_audio_frames: u64,
+        total_audio_frames: u64,
+        sample_rate: u32,
+    },
+}
+
+/// Resolve the safest publishable transcript after Spokesperson playback is
+/// interrupted. The policy is shared; each transport supplies the strongest
+/// evidence it can observe.
+pub fn resolve_interrupted_spokesperson_transcript(
+    input: RealtimeInterruptedTranscriptInput,
+) -> (String, RealtimeTranscriptEvidence) {
+    match input {
+        RealtimeInterruptedTranscriptInput::ProviderDelta { text } => {
+            (text, RealtimeTranscriptEvidence::ProviderDelta)
+        }
+        RealtimeInterruptedTranscriptInput::HostPlayedFrames {
+            text,
+            audio_parts,
+            played_audio_frames,
+            total_audio_frames,
+            sample_rate,
+        } => {
+            let text = if audio_parts.is_empty() {
+                estimated_transcript_prefix(
+                    &text,
+                    played_audio_frames.min(total_audio_frames),
+                    total_audio_frames,
+                    sample_rate,
+                )
+            } else {
+                let mut remaining_played = played_audio_frames.min(total_audio_frames);
+                audio_parts
+                    .into_iter()
+                    .filter_map(|part| {
+                        let played_frames = remaining_played.min(part.total_audio_frames);
+                        remaining_played -= played_frames;
+                        if part.text.is_empty() {
+                            return None;
+                        }
+                        Some(estimated_transcript_prefix(
+                            &part.text,
+                            played_frames,
+                            part.total_audio_frames,
+                            sample_rate,
+                        ))
+                    })
+                    .filter(|part| !part.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            };
+            (text, RealtimeTranscriptEvidence::HostPlayedFrames)
+        }
+    }
+}
+
+fn estimated_transcript_prefix(
+    text: &str,
+    played_frames: u64,
+    total_frames: u64,
+    sample_rate: u32,
+) -> String {
+    let delivery = DeliveryProgress {
+        sample_rate,
+        segments: vec![DeliverySegment {
+            text: text.to_string(),
+            played_frames,
+            total_frames,
+            synthesis_complete: true,
+        }],
+    };
+    text[..estimated_spoken_through_utf8(text, &delivery)].to_string()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -461,7 +552,16 @@ impl RealtimeProtocolReducer {
         let pending = self.pending_spokesperson_transcripts.remove(response_id);
         let mut events = Vec::new();
         if let Some(pending) = pending {
-            let text = combined_spokesperson_transcript(&pending, !interrupted);
+            let mut text = combined_spokesperson_transcript(&pending, !interrupted);
+            let evidence = if interrupted {
+                let resolved = resolve_interrupted_spokesperson_transcript(
+                    RealtimeInterruptedTranscriptInput::ProviderDelta { text },
+                );
+                text = resolved.0;
+                resolved.1
+            } else {
+                RealtimeTranscriptEvidence::ProviderFinal
+            };
             if !text.trim().is_empty()
                 && !self.finalized_item_ids.contains(&pending.display_item_id)
             {
@@ -473,11 +573,7 @@ impl RealtimeProtocolReducer {
                     RealtimeTranscriptSpeaker::Spokesperson,
                     text.trim(),
                     interrupted,
-                    if interrupted {
-                        RealtimeTranscriptEvidence::ProviderDelta
-                    } else {
-                        RealtimeTranscriptEvidence::ProviderFinal
-                    },
+                    evidence,
                 ));
             }
         }
@@ -1567,6 +1663,49 @@ mod tests {
         assert_eq!(
             pipe.delivery_cursor(RealtimePipePeer::Spokesperson),
             12_000_003
+        );
+    }
+
+    #[test]
+    fn interrupted_transcript_preserves_provider_delta_when_playback_is_remote() {
+        assert_eq!(
+            resolve_interrupted_spokesperson_transcript(
+                RealtimeInterruptedTranscriptInput::ProviderDelta {
+                    text: "Words generated before cancellation".into(),
+                },
+            ),
+            (
+                "Words generated before cancellation".into(),
+                RealtimeTranscriptEvidence::ProviderDelta,
+            )
+        );
+    }
+
+    #[test]
+    fn interrupted_transcript_uses_host_playback_across_ordered_audio_parts() {
+        assert_eq!(
+            resolve_interrupted_spokesperson_transcript(
+                RealtimeInterruptedTranscriptInput::HostPlayedFrames {
+                    text: "First complete part. Second partial part.".into(),
+                    audio_parts: vec![
+                        RealtimeTranscriptAudioPart {
+                            text: "First complete part.".into(),
+                            total_audio_frames: 12_000,
+                        },
+                        RealtimeTranscriptAudioPart {
+                            text: "Second partial part.".into(),
+                            total_audio_frames: 12_000,
+                        },
+                    ],
+                    played_audio_frames: 18_000,
+                    total_audio_frames: 24_000,
+                    sample_rate: 24_000,
+                },
+            ),
+            (
+                "First complete part. Second".into(),
+                RealtimeTranscriptEvidence::HostPlayedFrames,
+            )
         );
     }
 }
