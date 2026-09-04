@@ -126,6 +126,49 @@ describe("ArtifactsWidget open actions through the real provider", () => {
   });
 });
 
+describe("provider state across session replacement", () => {
+  it("does not let the previous session's debounce suppress the new session's first open", async () => {
+    // React reuses the provider instance when reconciliation swaps the
+    // session identity without unmounting. The per-path debounce map is
+    // session-scoped state: an entry recorded under the old session must not
+    // swallow the first open of the same path in the replacement session.
+    const user = userEvent.setup();
+    const path = "/p/data.csv";
+    const { rerender } = render(
+      <ArtifactPolicyProvider
+        messages={[messageWithArtifact(path)]}
+        sessionCwd="/p"
+        sessionId="session-old"
+      >
+        <ArtifactsWidget isOpen onToggleOpen={vi.fn()} />
+      </ArtifactPolicyProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: /data\.csv/i }));
+    await vi.waitFor(() => {
+      expect(mockOpenPath).toHaveBeenCalledTimes(1);
+    });
+
+    // Reconciliation: same provider instance, new effective session.
+    rerender(
+      <ArtifactPolicyProvider
+        messages={[messageWithArtifact(path)]}
+        sessionCwd="/p"
+        sessionId="session-new"
+      >
+        <ArtifactsWidget isOpen onToggleOpen={vi.fn()} />
+      </ArtifactPolicyProvider>,
+    );
+
+    // First open in the replacement session must reach the OS immediately —
+    // well inside the old entry's 1200ms window.
+    await user.click(screen.getByRole("button", { name: /data\.csv/i }));
+    await vi.waitFor(() => {
+      expect(mockOpenPath).toHaveBeenCalledTimes(2);
+    });
+  });
+});
+
 describe("one policy owner per session boundary", () => {
   it("shares the per-path open debounce across consumer surfaces", async () => {
     // The viewer and the right-rail widget render under ONE provider (as in

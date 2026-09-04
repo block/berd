@@ -327,6 +327,22 @@ export function ArtifactPolicyProvider({
   } | null>(null);
   const lastOpenAtByPathRef = useRef(new Map<string, number>());
 
+  // Session-scoped provider state must not survive a session identity change:
+  // React reuses this provider instance when reconciliation swaps the
+  // effective session without unmounting, and a debounce entry from the
+  // previous session would silently suppress the first open of the same path
+  // in the replacement session. Reset here (render-time, idempotent) instead
+  // of requiring every call site to remount via key={sessionId}.
+  // (Audited session-scoped refs: lastOpenAtByPathRef leaks across sessions;
+  // artifactCacheRef would self-correct via the message signature but is
+  // cleared for the same lifecycle reason.)
+  const providerSessionRef = useRef(sessionId);
+  if (providerSessionRef.current !== sessionId) {
+    providerSessionRef.current = sessionId;
+    lastOpenAtByPathRef.current.clear();
+    artifactCacheRef.current = null;
+  }
+
   // Recompute the content signature only when the message list or cwd changes,
   // then recollect artifacts only when that signature changes — keeping the
   // artifact array's identity stable across streaming text chunks that don't
