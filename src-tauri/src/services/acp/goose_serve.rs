@@ -5,12 +5,12 @@ use crate::commands::runtime_config::{
     local_byo_key_providers_enabled, RuntimeConfig, RuntimeConfigState,
 };
 use std::collections::HashMap;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
+use super::process_record_store::ProcessRecordStore;
 use crate::services::diagnostic_log::{
     self, DiagnosticCategory, DiagnosticFieldValue, DiagnosticLevel,
 };
@@ -22,11 +22,7 @@ use crate::services::log_redaction::redact_log_line;
 use crate::services::managed_acp_tools;
 use crate::services::path_env;
 #[cfg(unix)]
-use crate::services::process::ProcessId;
-#[cfg(unix)]
-use crate::services::process::{kill_process, terminate_process};
-use crate::services::process::{pid_t_from_u32, process_is_alive};
-#[cfg(windows)]
+use crate::services::process::{kill_process, pid_t_from_u32, terminate_process};
 use crate::services::process::{IdentityProbe, ProcessIdentity};
 
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
@@ -56,8 +52,10 @@ const GOOSE_FAST_MODEL_ENV: &str = "GOOSE_FAST_MODEL";
 pub struct GooseServeProcess {
     port: u16,
     secret_key: String,
-    process_record_dir: PathBuf,
-    _child: Child,
+    process_record_store: ProcessRecordStore,
+    process_record_path: PathBuf,
+    process_record: super::process_record_store::VerifiedRecord,
+    child: tokio::sync::Mutex<Child>,
 }
 
 /// Global singleton — initialised once at app startup.
@@ -87,60 +85,31 @@ impl GooseServeProcess {
             .await
     }
 
-    /// Kill the child process. Called from the app exit handler to ensure
-    /// the child doesn't outlive the Tauri process.
-    pub fn kill(&self) {
-        #[cfg(unix)]
-        if let Some(child_pid) = self._child.id() {
-            match pid_t_from_u32(child_pid) {
-                Some(pid) => {
-                    log::info!("Killing goose serve child (pid {child_pid})");
-                    terminate_process(pid);
-                }
-                None => {
-                    log::warn!(
-                        "Skipping goose serve child kill because pid {child_pid} is outside pid_t range"
-                    );
+    /// Terminate and reap the exact retained child, then remove its exact
+    /// recovery record. If exit cannot be confirmed, keep the record for the
+    /// next startup recovery pass.
+    pub async fn kill(&self) {
+        let mut child = self.child.lock().await;
+        match stop_child_and_reap(&mut child).await {
+            Ok(()) => {
+                if let Err(error) = self
+                    .process_record_store
+                    .remove_verified(&self.process_record_path, &self.process_record)
+                {
+                    log::warn!("Failed to remove confirmed-exit goose serve record: {error}");
                 }
             }
-        }
-
-        #[cfg(windows)]
-        let remove_process_record = if let Some(handle) = self._child.raw_handle() {
-            log::info!("Killing goose serve child through its retained process handle");
-            // SAFETY: Tokio owns this process handle for the lifetime of `_child`.
-            match unsafe {
-                crate::services::process::terminate_process_handle(handle, Duration::from_secs(5))
-            } {
-                Ok(()) => true,
-                Err(error) => {
-                    log::warn!(
-                        "Failed to stop goose serve child: {error}; keeping process record for recovery"
-                    );
-                    false
-                }
-            }
-        } else {
-            log::warn!(
-                "Cannot stop goose serve child through its retained handle; keeping process record for recovery"
-            );
-            false
-        };
-
-        #[cfg(unix)]
-        let remove_process_record = true;
-
-        // Keep recovery evidence until child exit has been confirmed on Windows.
-        if remove_process_record {
-            let _ = std::fs::remove_file(process_record_path(&self.process_record_dir));
+            Err(error) => log::warn!(
+                "Failed to stop and reap goose serve child: {error}; keeping process record for recovery"
+            ),
         }
     }
 
     /// Kill the singleton goose serve process if it exists. Called from the
     /// app exit handler.
-    pub fn kill_singleton() {
+    pub async fn kill_singleton() {
         if let Some(process) = GOOSE_SERVE.get() {
-            process.kill();
+            process.kill().await;
         }
     }
 
@@ -149,10 +118,20 @@ impl GooseServeProcess {
 
         // Kill any orphaned goose serve process left by a previous run
         // (e.g. tauri dev hot-reload).
-        let process_record_dir =
+        let process_record_dir = if let Some(dir) =
             crate::services::e2e_mode::E2eMode::process_record_dir_for(&app_handle)
-                .unwrap_or_else(|| std::env::temp_dir().join(PROCESS_RECORD_DIR_NAME));
-        kill_stale_serve_process(&process_record_dir).await;
+        {
+            dir
+        } else {
+            app_handle
+                .path()
+                .app_data_dir()
+                .map_err(|error| format!("Failed to resolve app data directory: {error}"))?
+                .join("processes")
+                .join(PROCESS_RECORD_DIR_NAME)
+        };
+        let process_record_store = ProcessRecordStore::open(process_record_dir)?;
+        kill_stale_serve_process(&process_record_store).await;
 
         let port = reserve_free_port()?;
         let secret_key = format!("berd-{}", uuid::Uuid::new_v4().simple());
@@ -282,6 +261,8 @@ impl GooseServeProcess {
             )
         })?;
         let pid = child.id();
+        let process_record_path =
+            process_record_store.new_record_path(std::process::id(), current_executable_hash());
         diagnostic_log::record_event(
             DiagnosticLevel::Info,
             DiagnosticCategory::GooseServe,
@@ -290,26 +271,28 @@ impl GooseServeProcess {
             diagnostic_log::fields([("pid", optional_u32_value(pid)), ("port", port.into())]),
         );
 
-        #[cfg(windows)]
-        if let Err(error) = write_process_record(&process_record_dir, &child) {
-            log::warn!(
-                "Failed to publish goose serve recovery record: {error}; stopping child and failing startup"
-            );
-            if let Some(handle) = child.raw_handle() {
-                // SAFETY: Tokio owns this process handle for the lifetime of `child`.
-                if let Err(stop_error) = unsafe {
-                    crate::services::process::terminate_process_handle(
-                        handle,
-                        Duration::from_secs(5),
-                    )
-                } {
-                    log::warn!("Failed to stop recordless goose serve child: {stop_error}");
-                }
+        #[cfg(unix)]
+        {
+            let publication = write_pid_file(&process_record_store, &process_record_path, &child);
+            if publication.is_err() {
+                log::warn!("Failed to publish goose serve recovery record; stopping child and failing startup");
             }
-            return Err(format!(
-                "Failed to publish goose serve recovery record: {error}"
-            ));
+            require_published_record(&mut child, publication).await?;
         }
+
+        #[cfg(windows)]
+        {
+            let publication =
+                write_process_record(&process_record_store, &process_record_path, &child);
+            if publication.is_err() {
+                log::warn!("Failed to publish goose serve recovery record; stopping child and failing startup");
+            }
+            require_published_record(&mut child, publication).await?;
+        }
+
+        let process_record =
+            retain_published_record(&process_record_store, &process_record_path, &mut child)
+                .await?;
 
         spawn_log_reader(child.stdout.take(), "stdout");
         spawn_log_reader(child.stderr.take(), "stderr");
@@ -340,22 +323,27 @@ impl GooseServeProcess {
                         ("port", port.into()),
                     ]),
                 );
+                teardown_published_child(
+                    &process_record_store,
+                    &process_record_path,
+                    Some(&process_record),
+                    &mut child,
+                    &error,
+                )
+                .await;
                 return Err(error);
             }
         }
 
         log::info!("Goose serve is ready on port {port}");
 
-        #[cfg(unix)]
-        if let Some(pid) = pid {
-            write_pid_file(&process_record_dir, pid);
-        }
-
         Ok(GooseServeProcess {
             port,
             secret_key,
-            process_record_dir,
-            _child: child,
+            process_record_store,
+            process_record_path,
+            process_record,
+            child: tokio::sync::Mutex::new(child),
         })
     }
 }
@@ -416,21 +404,173 @@ const PROCESS_RECORD_EXTENSION: &str = "json";
 struct ServeProcessRecord {
     owner_pid: u32,
     serve_pid: u32,
-    #[cfg(windows)]
     #[serde(default)]
     owner_identity: Option<ProcessIdentity>,
-    #[cfg(windows)]
     #[serde(default)]
     serve_identity: Option<ProcessIdentity>,
 }
 
-fn process_record_path(dir: &Path) -> PathBuf {
-    let exe = std::env::current_exe().unwrap_or_default();
-    let exe_hash = fnv1a(exe.to_string_lossy().as_bytes());
-    dir.join(format!(
-        "{}-{exe_hash:016x}.{PROCESS_RECORD_EXTENSION}",
-        std::process::id()
-    ))
+fn current_executable_hash() -> u64 {
+    let executable = std::env::current_exe().unwrap_or_default();
+    fnv1a(executable.to_string_lossy().as_bytes())
+}
+
+const CHILD_TEARDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+#[cfg(unix)]
+const CHILD_GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
+
+async fn bounded_child_teardown<F>(timeout: Duration, teardown: F) -> Result<(), String>
+where
+    F: std::future::Future<Output = Result<(), String>>,
+{
+    tokio::time::timeout(timeout, teardown)
+        .await
+        .map_err(|_| format!("child teardown exceeded {} seconds", timeout.as_secs()))?
+}
+
+async fn stop_child_and_reap(child: &mut Child) -> Result<(), String> {
+    bounded_child_teardown(CHILD_TEARDOWN_TIMEOUT, async {
+        #[cfg(unix)]
+        {
+            let pid = child.id().and_then(pid_t_from_u32).ok_or_else(|| {
+                "child has no valid process id for graceful termination".to_string()
+            })?;
+            if !terminate_process(pid) {
+                if child
+                    .try_wait()
+                    .map_err(|error| {
+                        format!("failed to inspect child after SIGTERM error: {error}")
+                    })?
+                    .is_some()
+                {
+                    return Ok(());
+                }
+            } else {
+                match tokio::time::timeout(CHILD_GRACEFUL_SHUTDOWN_TIMEOUT, child.wait()).await {
+                    Ok(Ok(_)) => return Ok(()),
+                    Ok(Err(error)) => {
+                        return Err(format!("failed to reap child after SIGTERM: {error}"));
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+
+        let kill_error = child.kill().await.err();
+        child.wait().await.map_err(|wait_error| match kill_error {
+            Some(kill_error) => {
+                format!("failed to kill child ({kill_error}) and reap it ({wait_error})")
+            }
+            None => format!("failed to reap child after forced termination: {wait_error}"),
+        })?;
+        Ok(())
+    })
+    .await
+}
+
+async fn teardown_published_child_with<F>(
+    store: &ProcessRecordStore,
+    path: &Path,
+    retained: Option<&super::process_record_store::VerifiedRecord>,
+    reason: &str,
+    teardown: F,
+) where
+    F: std::future::Future<Output = Result<(), String>>,
+{
+    finish_published_child_teardown(store, path, retained, reason, teardown.await);
+}
+
+async fn teardown_published_child(
+    store: &ProcessRecordStore,
+    path: &Path,
+    retained: Option<&super::process_record_store::VerifiedRecord>,
+    child: &mut Child,
+    reason: &str,
+) {
+    teardown_published_child_with(store, path, retained, reason, stop_child_and_reap(child)).await;
+}
+
+fn finish_published_child_teardown(
+    store: &ProcessRecordStore,
+    path: &Path,
+    retained: Option<&super::process_record_store::VerifiedRecord>,
+    reason: &str,
+    teardown: Result<(), String>,
+) {
+    match teardown {
+        Ok(()) => {
+            let Some(verified) = retained else {
+                log::warn!(
+                    "{reason}; child exited, but the published recovery record was never retained, so exact cleanup is impossible; keeping recovery evidence"
+                );
+                return;
+            };
+            if let Err(error) = store.remove_verified(path, verified) {
+                log::warn!("{reason}; child exited, but exact record cleanup failed: {error}");
+            }
+        }
+        Err(error) => log::warn!(
+            "{reason}; child teardown was not confirmed ({error}); keeping recovery record"
+        ),
+    }
+}
+
+async fn retain_published_record_with<F>(
+    store: &ProcessRecordStore,
+    path: &Path,
+    child: &mut Child,
+    retain: F,
+) -> Result<super::process_record_store::VerifiedRecord, String>
+where
+    F: FnOnce(
+        &ProcessRecordStore,
+        &Path,
+    ) -> Result<
+        super::process_record_store::VerifiedRecord,
+        super::process_record_store::VerifiedReadError,
+    >,
+{
+    match retain(store, path) {
+        Ok(record) => Ok(record),
+        Err(error) => {
+            let startup_error = format!(
+                "Failed to retain published goose serve recovery record {}: {}",
+                path.display(),
+                error.message
+            );
+            teardown_published_child(store, path, error.verified.as_ref(), child, &startup_error)
+                .await;
+            Err(startup_error)
+        }
+    }
+}
+
+async fn retain_published_record(
+    store: &ProcessRecordStore,
+    path: &Path,
+    child: &mut Child,
+) -> Result<super::process_record_store::VerifiedRecord, String> {
+    retain_published_record_with(store, path, child, |store, path| {
+        store.read_verified_for_cleanup(path)
+    })
+    .await
+}
+
+async fn require_published_record(
+    child: &mut Child,
+    publication: Result<(), String>,
+) -> Result<(), String> {
+    if let Err(error) = publication {
+        stop_child_and_reap(child).await.map_err(|teardown_error| {
+            format!(
+                "Failed to publish goose serve recovery record: {error}; child teardown also failed: {teardown_error}"
+            )
+        })?;
+        return Err(format!(
+            "Failed to publish goose serve recovery record: {error}"
+        ));
+    }
+    Ok(())
 }
 
 /// Legacy single-slot PID file used before per-owner process records. It is
@@ -455,46 +595,42 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 }
 
 #[cfg(unix)]
-fn write_pid_file(dir: &Path, serve_pid: u32) {
-    if let Err(error) = std::fs::create_dir_all(dir) {
-        log::warn!(
-            "Failed to create goose serve process record dir {}: {error}",
-            dir.display()
-        );
-        return;
-    }
-
-    let path = process_record_path(dir);
+fn write_pid_file(store: &ProcessRecordStore, path: &Path, child: &Child) -> Result<(), String> {
+    let serve_pid = child.id().ok_or_else(|| "child has no pid".to_string())?;
+    let owner_identity = crate::services::process::capture_process_identity(std::process::id());
+    let serve_identity = crate::services::process::capture_process_identity(serve_pid);
+    #[cfg(not(target_os = "macos"))]
+    let (owner_identity, serve_identity) = (
+        Some(owner_identity.map_err(|error| format!("failed to identify owner: {error}"))?),
+        Some(serve_identity.map_err(|error| format!("failed to identify child: {error}"))?),
+    );
+    #[cfg(target_os = "macos")]
+    let (owner_identity, serve_identity) = match (owner_identity, serve_identity) {
+        (Ok(owner), Ok(serve)) => (Some(owner), Some(serve)),
+        _ => {
+            // macOS currently cannot bind executable vnode identity to a PID
+            // without a pathname race. Publish a deletion-only record so normal
+            // startup works, but stale recovery can never authorize signaling.
+            (None, None)
+        }
+    };
     let record = ServeProcessRecord {
         owner_pid: std::process::id(),
         serve_pid,
+        owner_identity,
+        serve_identity,
     };
-    match std::fs::File::create(&path) {
-        Ok(mut file) => {
-            if let Err(error) = serde_json::to_writer(&mut file, &record) {
-                log::warn!(
-                    "Failed to write goose serve process record {}: {error}",
-                    path.display()
-                );
-            }
-            if let Err(error) = file.write_all(b"\n") {
-                log::warn!(
-                    "Failed to finish goose serve process record {}: {error}",
-                    path.display()
-                );
-            }
-        }
-        Err(error) => {
-            log::warn!(
-                "Failed to create goose serve process record {}: {error}",
-                path.display()
-            );
-        }
-    }
+    let serialized = serde_json::to_vec(&record)
+        .map_err(|error| format!("failed to serialize process record: {error}"))?;
+    store.publish(path, &serialized)
 }
 
 #[cfg(windows)]
-fn write_process_record(dir: &Path, child: &Child) -> Result<(), String> {
+fn write_process_record(
+    store: &ProcessRecordStore,
+    path: &Path,
+    child: &Child,
+) -> Result<(), String> {
     let handle = child
         .raw_handle()
         .ok_or_else(|| "child has no process handle".to_string())?;
@@ -503,13 +639,6 @@ fn write_process_record(dir: &Path, child: &Child) -> Result<(), String> {
     // SAFETY: Tokio owns this process handle for the lifetime of `child`.
     let serve_identity = unsafe { crate::services::process::process_identity_from_handle(handle) }
         .map_err(|error| format!("failed to identify child: {error}"))?;
-    std::fs::create_dir_all(dir).map_err(|error| {
-        format!(
-            "failed to create process record dir {}: {error}",
-            dir.display()
-        )
-    })?;
-    let path = process_record_path(dir);
     let record = ServeProcessRecord {
         owner_pid: owner_identity.pid,
         serve_pid: serve_identity.pid,
@@ -522,70 +651,28 @@ fn write_process_record(dir: &Path, child: &Child) -> Result<(), String> {
             path.display()
         )
     })?;
-    let temp_path = path.with_extension(format!("{PROCESS_RECORD_EXTENSION}.tmp"));
-    let _ = std::fs::remove_file(&temp_path);
-    let write_result = (|| {
-        let mut file = std::fs::File::create(&temp_path).map_err(|error| {
-            format!(
-                "failed to create temporary process record {}: {error}",
-                temp_path.display()
-            )
-        })?;
-        file.write_all(&serialized).map_err(|error| {
-            format!(
-                "failed to write temporary process record {}: {error}",
-                temp_path.display()
-            )
-        })?;
-        file.write_all(b"\n").map_err(|error| {
-            format!(
-                "failed to finish temporary process record {}: {error}",
-                temp_path.display()
-            )
-        })?;
-        file.sync_all().map_err(|error| {
-            format!(
-                "failed to sync temporary process record {}: {error}",
-                temp_path.display()
-            )
-        })?;
-        std::fs::rename(&temp_path, &path).map_err(|error| {
-            format!(
-                "failed to publish process record {}: {error}",
-                path.display()
-            )
-        })
-    })();
-    if write_result.is_err() {
-        let _ = std::fs::remove_file(&temp_path);
-    }
-    write_result
+    store.publish(path, &serialized)
 }
 
 /// Scan records left by previous runs and kill only true orphans: backend
 /// processes whose owning Tauri process is no longer alive. All errors are
 /// logged and swallowed so startup is never blocked.
-async fn kill_stale_serve_process(dir: &Path) {
+async fn kill_stale_serve_process(store: &ProcessRecordStore) {
     remove_legacy_pid_file();
 
-    let entries = match std::fs::read_dir(dir) {
+    let entries = match store.entries() {
         Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
         Err(error) => {
-            log::warn!(
-                "Failed to read goose serve process record dir {}: {error}",
-                dir.display()
-            );
+            log::warn!("Failed to enumerate goose serve process records: {error}");
             return;
         }
     };
 
-    for entry in entries.flatten() {
-        let path = entry.path();
+    for path in entries {
         if !is_process_record_path(&path) {
             continue;
         }
-        cleanup_process_record(&path).await;
+        cleanup_process_record(store, &path).await;
     }
 }
 
@@ -608,102 +695,194 @@ fn is_process_record_path(path: &Path) -> bool {
         .is_some_and(|extension| extension == PROCESS_RECORD_EXTENSION)
 }
 
-async fn cleanup_process_record(path: &Path) {
-    let record = match read_process_record(path) {
+async fn cleanup_process_record(store: &ProcessRecordStore, path: &Path) {
+    let (record, verified) = match read_process_record(store, path) {
         Ok(record) => record,
         Err(error) => {
             log::warn!(
-                "Failed to read goose serve process record {}: {error}; removing",
-                path.display()
+                "Failed to read goose serve process record {}: {}; removing only if it remains the exact validated object",
+                path.display(),
+                error.message
             );
-            let _ = std::fs::remove_file(path);
+            if let Some(verified) = error.verified {
+                if let Err(remove_error) = store.remove_verified(path, &verified) {
+                    log::warn!(
+                        "Failed exact cleanup of invalid process record {}: {remove_error}",
+                        path.display()
+                    );
+                }
+            }
             return;
         }
     };
 
-    #[cfg(windows)]
-    if let Some(owner_identity) = &record.owner_identity {
-        match crate::services::process::probe_process_identity(owner_identity) {
-            IdentityProbe::Matches => {
-                log::debug!(
-                    "Goose serve process record {} is still owned by live process {}; leaving it alone",
-                    path.display(),
-                    record.owner_pid
-                );
-                return;
-            }
-            IdentityProbe::Unverifiable => {
-                log::warn!(
-                    "Cannot verify owner of goose serve process record {}; keeping it",
-                    path.display()
-                );
-                return;
-            }
-            IdentityProbe::Gone | IdentityProbe::Mismatch => {
-                cleanup_orphaned_serve_process(path, &record).await;
-                return;
-            }
+    let Some(owner_identity) = &record.owner_identity else {
+        log::warn!(
+            "Process record {} lacks stable owner identity; keeping recovery evidence without signaling",
+            path.display()
+        );
+        return;
+    };
+    match crate::services::process::probe_process_identity(owner_identity) {
+        IdentityProbe::Matches => {
+            log::debug!(
+                "Process record {} is still owned by live exact process {}; leaving it alone",
+                path.display(),
+                record.owner_pid
+            );
+            return;
         }
+        IdentityProbe::Unverifiable => {
+            log::warn!(
+                "Cannot verify owner identity for {}; keeping recovery evidence",
+                path.display()
+            );
+            return;
+        }
+        IdentityProbe::Gone | IdentityProbe::Mismatch => {}
     }
 
-    let Some(owner_pid) = pid_t_from_u32(record.owner_pid) else {
-        log::warn!(
-            "Goose serve process record {} has invalid owner pid {}; removing",
-            path.display(),
-            record.owner_pid
-        );
-        let _ = std::fs::remove_file(path);
-        return;
-    };
-
-    if process_is_alive(owner_pid) {
-        log::debug!(
-            "Goose serve process record {} is still owned by live process {}; leaving it alone",
-            path.display(),
-            record.owner_pid
-        );
-        return;
-    }
-
-    #[cfg(unix)]
-    let Some(serve_pid) = pid_t_from_u32(record.serve_pid) else {
-        log::warn!(
-            "Goose serve process record {} has invalid serve pid {}; removing",
-            path.display(),
-            record.serve_pid
-        );
-        let _ = std::fs::remove_file(path);
-        return;
-    };
-
-    #[cfg(unix)]
-    cleanup_orphaned_serve_process(path, serve_pid).await;
-    #[cfg(windows)]
-    cleanup_orphaned_serve_process(path, &record).await;
+    cleanup_orphaned_serve_process(store, path, &verified, &record).await;
 }
 
-fn read_process_record(path: &Path) -> Result<ServeProcessRecord, String> {
-    let contents = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-    serde_json::from_str(&contents).map_err(|error| error.to_string())
+fn read_process_record(
+    store: &ProcessRecordStore,
+    path: &Path,
+) -> Result<
+    (
+        ServeProcessRecord,
+        super::process_record_store::VerifiedRecord,
+    ),
+    super::process_record_store::VerifiedReadError,
+> {
+    let verified = store.read_verified_for_cleanup(path)?;
+    match serde_json::from_slice(&verified.bytes) {
+        Ok(parsed) => Ok((parsed, verified)),
+        Err(error) => Err(super::process_record_store::VerifiedReadError {
+            message: error.to_string(),
+            verified: Some(verified),
+        }),
+    }
+}
+
+fn remove_verified_or_warn(
+    store: &ProcessRecordStore,
+    path: &Path,
+    verified: &super::process_record_store::VerifiedRecord,
+    reason: &str,
+) {
+    if let Err(error) = store.remove_verified(path, verified) {
+        log::warn!(
+            "Failed exact cleanup of process record {} after {reason}: {error}; keeping it",
+            path.display()
+        );
+    }
 }
 
 #[cfg(windows)]
-async fn cleanup_orphaned_serve_process(path: &Path, record: &ServeProcessRecord) {
+async fn cleanup_orphaned_serve_process(
+    store: &ProcessRecordStore,
+    path: &Path,
+    verified: &super::process_record_store::VerifiedRecord,
+    record: &ServeProcessRecord,
+) {
     let Some(identity) = &record.serve_identity else {
         log::warn!(
-            "Goose serve process record {} has no Windows process identity; removing without killing PID {}",
+            "Process record {} has no Windows process identity; removing without signaling PID {}",
             path.display(),
             record.serve_pid
         );
-        let _ = std::fs::remove_file(path);
+        remove_verified_or_warn(
+            store,
+            path,
+            verified,
+            "missing stable Windows serve identity",
+        );
         return;
     };
-    let identity = identity.clone();
+    match crate::services::process::kill_process_if_identity_matches(
+        identity,
+        Duration::from_secs(5),
+    ) {
+        Ok(outcome) if outcome.exit_confirmed() => {
+            remove_verified_or_warn(store, path, verified, "confirmed Windows process exit");
+        }
+        Ok(_) => log::warn!(
+            "Goose serve {} did not confirm exit; keeping {}",
+            identity.pid,
+            path.display()
+        ),
+        Err(error) => log::warn!(
+            "Failed to stop goose serve {}: {error}; keeping {}",
+            identity.pid,
+            path.display()
+        ),
+    }
+}
 
-    log::info!(
-        "Killing orphaned goose serve process (pid {})",
-        identity.pid
-    );
+#[cfg(unix)]
+async fn cleanup_orphaned_serve_process(
+    store: &ProcessRecordStore,
+    path: &Path,
+    verified: &super::process_record_store::VerifiedRecord,
+    record: &ServeProcessRecord,
+) {
+    cleanup_orphaned_serve_process_with_ops(
+        store,
+        path,
+        verified,
+        record,
+        crate::services::process::probe_process_identity,
+        terminate_process,
+        kill_process,
+        Duration::from_millis(200),
+        Duration::from_millis(50),
+    )
+    .await;
+}
+
+#[cfg(unix)]
+#[allow(clippy::too_many_arguments)]
+async fn cleanup_orphaned_serve_process_with_ops<FProbe, FTerm, FKill>(
+    store: &ProcessRecordStore,
+    path: &Path,
+    verified: &super::process_record_store::VerifiedRecord,
+    record: &ServeProcessRecord,
+    mut probe: FProbe,
+    mut terminate: FTerm,
+    mut kill: FKill,
+    term_delay: Duration,
+    kill_delay: Duration,
+) where
+    FProbe: FnMut(&ProcessIdentity) -> IdentityProbe,
+    FTerm: FnMut(crate::services::process::ProcessId) -> bool,
+    FKill: FnMut(crate::services::process::ProcessId) -> bool,
+{
+    let Some(identity) = &record.serve_identity else {
+        log::warn!(
+            "Process record {} lacks stable serve identity; removing without signaling PID {}",
+            path.display(),
+            record.serve_pid
+        );
+        remove_verified_or_warn(store, path, verified, "missing stable Unix serve identity");
+        return;
+    };
+    match probe(identity) {
+        IdentityProbe::Gone | IdentityProbe::Mismatch => {
+            remove_verified_or_warn(store, path, verified, "initial probe confirmed no match");
+            return;
+        }
+        IdentityProbe::Unverifiable => {
+            log::warn!(
+                "Cannot verify stale serve identity {}; keeping {}",
+                identity.pid,
+                path.display()
+            );
+            return;
+        }
+        IdentityProbe::Matches => {}
+    }
+
     diagnostic_log::record_event(
         DiagnosticLevel::Warn,
         DiagnosticCategory::GooseServe,
@@ -711,105 +890,84 @@ async fn cleanup_orphaned_serve_process(path: &Path, record: &ServeProcessRecord
         None,
         diagnostic_log::fields([("pid", (identity.pid as i64).into())]),
     );
-    match crate::services::process::kill_process_if_identity_matches(
-        &identity,
-        Duration::from_secs(5),
-    ) {
-        Ok(outcome) if outcome.exit_confirmed() => {
-            let _ = std::fs::remove_file(path);
-        }
-        Ok(_) => log::warn!(
-            "Goose serve process {} did not confirm exit; keeping process record {}",
-            identity.pid,
-            path.display()
-        ),
-        Err(error) => log::warn!(
-            "Failed to kill orphaned goose serve process {}: {error}; keeping process record {}",
-            identity.pid,
-            path.display()
-        ),
-    }
-}
-
-#[cfg(unix)]
-async fn cleanup_orphaned_serve_process(path: &Path, pid: ProcessId) {
-    if !process_is_alive(pid) {
-        log::info!(
-            "Previous goose serve (pid {pid}) is no longer running, removing process record {}",
-            path.display()
-        );
-        let _ = std::fs::remove_file(path);
-        return;
-    }
-
-    // Guard against PID recycling: verify the process is actually a goose binary.
-    if !is_goose_process(pid) {
+    let Some(pid) = pid_t_from_u32(identity.pid) else {
         log::warn!(
-            "PID {pid} is alive but is not a goose process (PID was likely recycled), removing process record {}",
+            "Invalid stale serve PID {}; keeping {}",
+            identity.pid,
             path.display()
         );
-        let _ = std::fs::remove_file(path);
+        return;
+    };
+    if !terminate(pid) {
+        match probe(identity) {
+            IdentityProbe::Gone | IdentityProbe::Mismatch => {
+                remove_verified_or_warn(
+                    store,
+                    path,
+                    verified,
+                    "failed SIGTERM followed by no identity match",
+                );
+            }
+            IdentityProbe::Matches | IdentityProbe::Unverifiable => log::warn!(
+                "SIGTERM failed for exact goose serve {}; exit remains unconfirmed; keeping {}",
+                identity.pid,
+                path.display()
+            ),
+        }
         return;
     }
-
-    log::info!("Killing orphaned goose serve process (pid {pid})");
+    tokio::time::sleep(term_delay).await;
+    match probe(identity) {
+        IdentityProbe::Gone | IdentityProbe::Mismatch => {
+            remove_verified_or_warn(store, path, verified, "post-SIGTERM probe confirmed exit");
+            return;
+        }
+        IdentityProbe::Unverifiable => {
+            log::warn!(
+                "Cannot reverify goose serve {} after SIGTERM; keeping {}",
+                identity.pid,
+                path.display()
+            );
+            return;
+        }
+        IdentityProbe::Matches => {}
+    }
     diagnostic_log::record_event(
         DiagnosticLevel::Warn,
         DiagnosticCategory::GooseServe,
-        "stale_process_kill",
+        "stale_process_kill_forced",
         None,
-        diagnostic_log::fields([("pid", (pid as i64).into())]),
+        diagnostic_log::fields([("pid", (identity.pid as i64).into())]),
     );
-    terminate_process(pid);
-
-    // Give it a moment to exit, then force-kill if still alive.
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    if process_is_alive(pid) {
-        log::warn!("Orphaned goose serve (pid {pid}) did not exit after SIGTERM, sending SIGKILL");
-        diagnostic_log::record_event(
-            DiagnosticLevel::Warn,
-            DiagnosticCategory::GooseServe,
-            "stale_process_kill_forced",
-            None,
-            diagnostic_log::fields([("pid", (pid as i64).into())]),
-        );
-        kill_process(pid);
+    if !kill(pid) {
+        match probe(identity) {
+            IdentityProbe::Gone | IdentityProbe::Mismatch => {
+                remove_verified_or_warn(
+                    store,
+                    path,
+                    verified,
+                    "failed SIGKILL followed by no identity match",
+                );
+            }
+            IdentityProbe::Matches | IdentityProbe::Unverifiable => log::warn!(
+                "SIGKILL failed for exact goose serve {}; exit remains unconfirmed; keeping {}",
+                identity.pid,
+                path.display()
+            ),
+        }
+        return;
     }
-
-    let _ = std::fs::remove_file(path);
-}
-
-#[cfg(unix)]
-/// Check whether the given PID belongs to a goose binary. Uses
-/// `proc_pidpath` on macOS and `/proc/{pid}/exe` on Linux.
-fn is_goose_process(pid: ProcessId) -> bool {
-    if let Some(name) = process_executable_name(pid) {
-        name.contains("goose")
-    } else {
-        // If we can't determine the process name, err on the side of caution
-        // and assume it is NOT a goose process to avoid killing an unrelated PID.
-        false
+    tokio::time::sleep(kill_delay).await;
+    match probe(identity) {
+        IdentityProbe::Gone | IdentityProbe::Mismatch => {
+            remove_verified_or_warn(store, path, verified, "post-SIGKILL probe confirmed exit");
+        }
+        IdentityProbe::Matches | IdentityProbe::Unverifiable => log::warn!(
+            "Goose serve {} exit remains unconfirmed; keeping {}",
+            identity.pid,
+            path.display()
+        ),
     }
-}
-
-#[cfg(target_os = "macos")]
-fn process_executable_name(pid: ProcessId) -> Option<String> {
-    let mut buf = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
-    // SAFETY: buf is large enough for the maximum path length.
-    let len =
-        unsafe { libc::proc_pidpath(pid, buf.as_mut_ptr() as *mut libc::c_void, buf.len() as u32) };
-    if len <= 0 {
-        return None;
-    }
-    let path = std::str::from_utf8(&buf[..len as usize]).ok()?;
-    path.rsplit('/').next().map(String::from)
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn process_executable_name(pid: ProcessId) -> Option<String> {
-    let exe_link = format!("/proc/{pid}/exe");
-    let path = std::fs::read_link(exe_link).ok()?;
-    path.file_name()?.to_str().map(String::from)
 }
 
 /// Paths resolved by `resolve_berdctl_spawn_paths`, consumed by
@@ -1219,15 +1377,26 @@ pub(crate) fn reserve_free_port() -> Result<u16, String> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(all(unix, not(target_os = "macos")))]
+    use super::cleanup_process_record;
+    #[cfg(unix)]
+    use super::ServeProcessRecord;
     use super::{
         acp_websocket_url, add_release_webview_origin_arg, apply_goose_search_paths_env,
         apply_runtime_goose_provider_env, apply_shell_env_with_extended_path,
-        apply_shell_env_with_extended_path_inner, DATABRICKS_HOST_ENV, TAURI_WEBVIEW_ORIGIN,
+        apply_shell_env_with_extended_path_inner, require_published_record, stop_child_and_reap,
+        DATABRICKS_HOST_ENV, TAURI_WEBVIEW_ORIGIN,
     };
     use crate::commands::runtime_config::default_runtime_config;
+    #[cfg(unix)]
+    use crate::services::acp::process_record_store::ProcessRecordStore;
+    #[cfg(unix)]
+    use crate::services::process::IdentityProbe;
     use std::collections::HashMap;
     use std::ffi::OsString;
     use std::path::{Path, PathBuf};
+    #[cfg(unix)]
+    use std::time::Duration;
     use tokio::process::Command;
 
     fn env_value(command: &Command, key: &str) -> Option<OsString> {
@@ -1238,6 +1407,493 @@ mod tests {
                 None
             }
         })
+    }
+
+    #[tokio::test]
+    async fn process_record_publication_failure_kills_and_reaps_the_child() {
+        #[cfg(unix)]
+        let mut command = {
+            let mut command = Command::new("sh");
+            command.args(["-c", "sleep 30"]);
+            command
+        };
+        #[cfg(windows)]
+        let mut command = {
+            let mut command = Command::new("cmd.exe");
+            command.args(["/d", "/c", "ping -n 31 127.0.0.1 >nul"]);
+            command
+        };
+        let mut child = command.spawn().expect("spawn long-lived child");
+        #[cfg(unix)]
+        let pid = child.id().expect("child pid");
+
+        let error = require_published_record(&mut child, Err("forced failure".to_string()))
+            .await
+            .expect_err("publication failure must abort startup");
+
+        assert!(error.contains("forced failure"));
+        assert!(child.id().is_none(), "wait must reap the child");
+        #[cfg(unix)]
+        assert_eq!(
+            unsafe { libc::kill(pid as i32, 0) },
+            -1,
+            "child must no longer exist"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn child_teardown_attempts_sigterm_before_forced_kill() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let marker = temp.path().join("term-received");
+        let script = format!(
+            "trap 'printf term > {} ; exit 0' TERM; while :; do sleep 1; done",
+            marker.display()
+        );
+        let mut child = Command::new("sh")
+            .args(["-c", &script])
+            .spawn()
+            .expect("spawn child");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        stop_child_and_reap(&mut child)
+            .await
+            .expect("graceful teardown");
+
+        assert!(child.id().is_none(), "wait must reap the child");
+        assert_eq!(
+            std::fs::read_to_string(marker).expect("SIGTERM handler marker"),
+            "term"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn readiness_failure_reaps_child_and_exact_deletes_retained_record() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let store = ProcessRecordStore::open(temp.path().join("records")).expect("open store");
+        let path = store.new_record_path(std::process::id(), 1);
+        store.publish(&path, b"record").expect("publish");
+        let verified = store.read_verified_for_cleanup(&path).expect("retain");
+        let mut child = Command::new("sh")
+            .args(["-c", "sleep 30"])
+            .spawn()
+            .expect("spawn child");
+        let pid = child.id().expect("child pid");
+
+        super::teardown_published_child(
+            &store,
+            &path,
+            Some(&verified),
+            &mut child,
+            "forced readiness failure",
+        )
+        .await;
+
+        assert!(child.id().is_none(), "wait must reap the child");
+        assert_eq!(
+            unsafe { libc::kill(pid as i32, 0) },
+            -1,
+            "child must no longer exist"
+        );
+        assert!(!path.exists(), "confirmed exit permits exact cleanup");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn post_publication_retention_failure_reaps_child_but_keeps_record() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let store = ProcessRecordStore::open(temp.path().join("records")).expect("open store");
+        let path = store.new_record_path(std::process::id(), 1);
+        store.publish(&path, b"record").expect("publish");
+        let mut child = Command::new("sh")
+            .args(["-c", "sleep 30"])
+            .spawn()
+            .expect("spawn child");
+        let pid = child.id().expect("child pid");
+
+        let error = super::retain_published_record_with(&store, &path, &mut child, |_, _| {
+            Err(super::super::process_record_store::VerifiedReadError {
+                message: "forced retention failure".to_string(),
+                verified: None,
+            })
+        })
+        .await
+        .expect_err("retention failure must abort startup");
+
+        assert!(error.contains("forced retention failure"));
+        assert!(child.id().is_none(), "wait must reap the child");
+        assert_eq!(
+            unsafe { libc::kill(pid as i32, 0) },
+            -1,
+            "child must no longer exist"
+        );
+        assert!(
+            path.exists(),
+            "without the originally retained object, exact cleanup must not reopen by path"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn published_child_teardown_timeout_keeps_exact_record() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let store = ProcessRecordStore::open(temp.path().join("records")).expect("open store");
+        let path = store.new_record_path(std::process::id(), 1);
+        store.publish(&path, b"record").expect("publish");
+        let verified = store.read_verified_for_cleanup(&path).expect("retain");
+
+        super::teardown_published_child_with(
+            &store,
+            &path,
+            Some(&verified),
+            "forced timeout",
+            super::bounded_child_teardown(Duration::ZERO, async {
+                std::future::pending::<Result<(), String>>().await
+            }),
+        )
+        .await;
+
+        assert!(path.exists(), "timed-out teardown must retain evidence");
+    }
+
+    #[cfg(unix)]
+    fn test_process_record(
+        identity: &crate::services::process::ProcessIdentity,
+    ) -> ServeProcessRecord {
+        ServeProcessRecord {
+            owner_pid: identity.pid,
+            serve_pid: identity.pid,
+            owner_identity: Some(identity.clone()),
+            serve_identity: Some(identity.clone()),
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn failed_sigterm_removes_record_when_follow_up_probe_confirms_gone() {
+        use std::collections::VecDeque;
+
+        let temp = tempfile::tempdir().expect("temp dir");
+        let store = ProcessRecordStore::open(temp.path().join("records")).expect("open store");
+        let path = store.new_record_path(std::process::id(), 1);
+        store.publish(&path, b"record").expect("publish");
+        let verified = store.read_verified_for_cleanup(&path).expect("retain");
+        let identity = crate::services::process::ProcessIdentity {
+            pid: std::process::id(),
+            created_at: 1,
+            exe: "test".to_string(),
+        };
+        let record = test_process_record(&identity);
+        let mut probes = VecDeque::from([IdentityProbe::Matches, IdentityProbe::Gone]);
+
+        super::cleanup_orphaned_serve_process_with_ops(
+            &store,
+            &path,
+            &verified,
+            &record,
+            |_| probes.pop_front().expect("scripted probe"),
+            |_| false,
+            |_| panic!("SIGKILL must not run after failed SIGTERM"),
+            Duration::ZERO,
+            Duration::ZERO,
+        )
+        .await;
+
+        assert!(!path.exists(), "confirmed exit permits exact cleanup");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn failed_sigkill_removes_record_when_follow_up_probe_confirms_mismatch() {
+        use std::collections::VecDeque;
+
+        let temp = tempfile::tempdir().expect("temp dir");
+        let store = ProcessRecordStore::open(temp.path().join("records")).expect("open store");
+        let path = store.new_record_path(std::process::id(), 1);
+        store.publish(&path, b"record").expect("publish");
+        let verified = store.read_verified_for_cleanup(&path).expect("retain");
+        let identity = crate::services::process::ProcessIdentity {
+            pid: std::process::id(),
+            created_at: 1,
+            exe: "test".to_string(),
+        };
+        let record = test_process_record(&identity);
+        let mut probes = VecDeque::from([
+            IdentityProbe::Matches,
+            IdentityProbe::Matches,
+            IdentityProbe::Mismatch,
+        ]);
+
+        super::cleanup_orphaned_serve_process_with_ops(
+            &store,
+            &path,
+            &verified,
+            &record,
+            |_| probes.pop_front().expect("scripted probe"),
+            |_| true,
+            |_| false,
+            Duration::ZERO,
+            Duration::ZERO,
+        )
+        .await;
+
+        assert!(!path.exists(), "confirmed mismatch permits exact cleanup");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn identity_change_between_term_and_kill_never_sends_kill() {
+        use std::cell::Cell;
+        use std::collections::VecDeque;
+        use std::rc::Rc;
+
+        let temp = tempfile::tempdir().expect("temp dir");
+        let store = ProcessRecordStore::open(temp.path().join("records")).expect("open store");
+        let path = store.new_record_path(std::process::id(), 1);
+        store.publish(&path, b"record").expect("publish");
+        let verified = store.read_verified_for_cleanup(&path).expect("retain");
+        let identity = crate::services::process::ProcessIdentity {
+            pid: std::process::id(),
+            created_at: 1,
+            exe: "test".to_string(),
+        };
+        let record = ServeProcessRecord {
+            owner_pid: identity.pid,
+            serve_pid: identity.pid,
+            owner_identity: Some(identity.clone()),
+            serve_identity: Some(identity),
+        };
+        let mut probes = VecDeque::from([IdentityProbe::Matches, IdentityProbe::Mismatch]);
+        let killed = Rc::new(Cell::new(false));
+        let killed_for_closure = Rc::clone(&killed);
+
+        super::cleanup_orphaned_serve_process_with_ops(
+            &store,
+            &path,
+            &verified,
+            &record,
+            |_| probes.pop_front().expect("scripted probe"),
+            |_| true,
+            move |_| {
+                killed_for_closure.set(true);
+                true
+            },
+            Duration::ZERO,
+            Duration::ZERO,
+        )
+        .await;
+
+        assert!(!killed.get(), "identity mismatch must suppress SIGKILL");
+        assert!(!path.exists(), "mismatched identity is confirmed gone");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn unconfirmed_exit_after_kill_retains_record() {
+        use std::collections::VecDeque;
+
+        let temp = tempfile::tempdir().expect("temp dir");
+        let store = ProcessRecordStore::open(temp.path().join("records")).expect("open store");
+        let path = store.new_record_path(std::process::id(), 1);
+        store.publish(&path, b"record").expect("publish");
+        let verified = store.read_verified_for_cleanup(&path).expect("retain");
+        let identity = crate::services::process::ProcessIdentity {
+            pid: std::process::id(),
+            created_at: 1,
+            exe: "test".to_string(),
+        };
+        let record = ServeProcessRecord {
+            owner_pid: identity.pid,
+            serve_pid: identity.pid,
+            owner_identity: Some(identity.clone()),
+            serve_identity: Some(identity),
+        };
+        let mut probes = VecDeque::from([
+            IdentityProbe::Matches,
+            IdentityProbe::Matches,
+            IdentityProbe::Unverifiable,
+        ]);
+
+        super::cleanup_orphaned_serve_process_with_ops(
+            &store,
+            &path,
+            &verified,
+            &record,
+            |_| probes.pop_front().expect("scripted probe"),
+            |_| true,
+            |_| true,
+            Duration::ZERO,
+            Duration::ZERO,
+        )
+        .await;
+
+        assert!(path.exists(), "unconfirmed exit must retain evidence");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn macos_publishes_deletion_only_record_when_identity_is_unavailable() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let store = ProcessRecordStore::open(temp.path().join("records")).expect("open store");
+        let path = store.new_record_path(std::process::id(), 1);
+        let mut child = Command::new("sh")
+            .args(["-c", "sleep 30"])
+            .spawn()
+            .expect("spawn child");
+
+        super::write_pid_file(&store, &path, &child).expect("publish deletion-only record");
+        let bytes = store
+            .read_verified_for_cleanup(&path)
+            .expect("read record")
+            .bytes;
+        let record: ServeProcessRecord = serde_json::from_slice(&bytes).expect("parse record");
+        assert!(record.owner_identity.is_none());
+        assert!(record.serve_identity.is_none());
+
+        child.kill().await.expect("kill child");
+        child.wait().await.expect("reap child");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn macos_identityless_stale_record_is_retained_without_signaling() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let store = ProcessRecordStore::open(temp.path().join("records")).expect("open store");
+        let path = store.new_record_path(std::process::id(), 1);
+        let record = ServeProcessRecord {
+            owner_pid: std::process::id(),
+            serve_pid: std::process::id(),
+            owner_identity: None,
+            serve_identity: None,
+        };
+        store
+            .publish(
+                &path,
+                &serde_json::to_vec(&record).expect("serialize record"),
+            )
+            .expect("publish identityless record");
+
+        super::cleanup_process_record(&store, &path).await;
+
+        assert!(
+            path.exists(),
+            "identityless recovery evidence must be retained"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn clean_shutdown_does_not_delete_successor_record() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path().join("records");
+        let store = ProcessRecordStore::open(root.clone()).expect("open store");
+        let path = store.new_record_path(std::process::id(), 1);
+        store.publish(&path, b"published").expect("publish record");
+        let verified = store
+            .read_verified_for_cleanup(&path)
+            .expect("retain record");
+        let displaced = root.join("displaced.json");
+        std::fs::rename(&path, &displaced).expect("displace published record");
+        std::fs::write(&path, b"successor\n").expect("write successor");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+            .expect("secure successor");
+        let child = Command::new("sh")
+            .args(["-c", "sleep 30"])
+            .spawn()
+            .expect("spawn child");
+        let process = super::GooseServeProcess {
+            port: 0,
+            secret_key: String::new(),
+            process_record_store: store,
+            process_record_path: path.clone(),
+            process_record: verified,
+            child: tokio::sync::Mutex::new(child),
+        };
+
+        process.kill().await;
+
+        assert_eq!(std::fs::read(&path).unwrap(), b"successor\n");
+        assert_eq!(std::fs::read(&displaced).unwrap(), b"published\n");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn malformed_record_cleanup_rejects_successor_substitution() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path().join("records");
+        let store = ProcessRecordStore::open(root.clone()).expect("open store");
+        let path = root.join("malformed.json");
+        std::fs::write(&path, b"not-json").expect("write malformed record");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+            .expect("secure malformed record");
+
+        let error = super::read_process_record(&store, &path).expect_err("reject malformed");
+        let verified = error.verified.expect("retain validated malformed object");
+        let displaced = root.join("malformed-displaced.json");
+        std::fs::rename(&path, &displaced).expect("displace malformed record");
+        std::fs::write(&path, b"successor\n").expect("write successor");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+            .expect("secure successor");
+
+        assert!(store.remove_verified(&path, &verified).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"successor\n");
+        assert_eq!(std::fs::read(&displaced).unwrap(), b"not-json");
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    #[tokio::test]
+    async fn stale_owner_pid_reuse_does_not_kill_an_unrelated_process() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let store = ProcessRecordStore::open(temp.path().join("records")).expect("open store");
+        let path = store.new_record_path(std::process::id(), 1);
+        let mut unrelated = Command::new("sh");
+        unrelated.args(["-c", "sleep 30"]);
+        let mut unrelated = unrelated.spawn().expect("spawn unrelated child");
+        let unrelated_pid = unrelated.id().expect("unrelated pid");
+        let mut stale_owner = Command::new("sh")
+            .arg("-c")
+            .arg("exit 0")
+            .spawn()
+            .expect("spawn stale owner");
+        let stale_owner_pid = stale_owner.id().expect("stale owner pid");
+        let stale_owner_identity =
+            crate::services::process::capture_process_identity(stale_owner_pid)
+                .expect("capture stale owner identity");
+        stale_owner.wait().await.expect("reap stale owner");
+        let mut unrelated_identity =
+            crate::services::process::capture_process_identity(unrelated_pid)
+                .expect("capture unrelated identity");
+        unrelated_identity.created_at = unrelated_identity.created_at.wrapping_add(1);
+        let record = ServeProcessRecord {
+            owner_pid: stale_owner_pid,
+            serve_pid: unrelated_pid,
+            owner_identity: Some(stale_owner_identity),
+            serve_identity: Some(unrelated_identity),
+        };
+        store
+            .publish(
+                &path,
+                &serde_json::to_vec(&record).expect("serialize record"),
+            )
+            .expect("publish stale record");
+
+        cleanup_process_record(&store, &path).await;
+
+        assert!(!path.exists(), "recycled-PID record should be removed");
+        assert!(
+            unrelated
+                .try_wait()
+                .expect("probe unrelated child")
+                .is_none(),
+            "a non-goose process at the recorded PID must not be killed"
+        );
+        unrelated.kill().await.expect("kill unrelated child");
+        unrelated.wait().await.expect("reap unrelated child");
     }
 
     #[test]

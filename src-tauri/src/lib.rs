@@ -755,7 +755,9 @@ pub fn run() {
                     .stop_for_app_exit();
                 app.state::<services::remote_backend::RemoteBackendRegistry>()
                     .kill_all_tunnels();
-                services::acp::goose_serve::GooseServeProcess::kill_singleton();
+                tauri::async_runtime::block_on(
+                    services::acp::goose_serve::GooseServeProcess::kill_singleton(),
+                );
             }
             #[cfg(target_os = "macos")]
             RunEvent::Reopen { .. } => {

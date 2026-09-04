@@ -55,12 +55,19 @@ pub(crate) fn process_is_alive(pid: ProcessId) -> bool {
 #[cfg(windows)]
 mod windows_identity;
 
-#[cfg(windows)]
+#[cfg(any(unix, windows))]
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ProcessIdentity {
     pub pid: u32,
     pub created_at: u64,
     pub exe: String,
+}
+
+#[cfg(unix)]
+impl ProcessIdentity {
+    fn matches(&self, other: &Self) -> bool {
+        self == other
+    }
 }
 
 #[cfg(windows)]
@@ -72,7 +79,7 @@ impl ProcessIdentity {
     }
 }
 
-#[cfg(windows)]
+#[cfg(any(unix, windows))]
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum IdentityProbe {
     Matches,
@@ -125,6 +132,59 @@ pub(crate) fn kill_process(pid: ProcessId) -> bool {
     unsafe { libc::kill(pid, libc::SIGKILL) == 0 }
 }
 
+#[cfg(target_os = "linux")]
+pub(crate) fn capture_process_identity(pid: u32) -> std::io::Result<ProcessIdentity> {
+    use std::os::unix::fs::MetadataExt;
+
+    let exe_link = std::path::PathBuf::from(format!("/proc/{pid}/exe"));
+    let metadata = std::fs::metadata(&exe_link)?;
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat"))?;
+    let close = stat
+        .rfind(')')
+        .ok_or_else(|| std::io::Error::other("malformed proc stat"))?;
+    let created_at = stat[close + 2..]
+        .split_whitespace()
+        .nth(19)
+        .ok_or_else(|| std::io::Error::other("missing proc start token"))?
+        .parse::<u64>()
+        .map_err(std::io::Error::other)?;
+    Ok(ProcessIdentity {
+        pid,
+        created_at,
+        exe: format!("{}:{}", metadata.dev(), metadata.ino()),
+    })
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn capture_process_identity(_pid: u32) -> std::io::Result<ProcessIdentity> {
+    // `proc_pidpath` plus pathname metadata is not process-bound and races
+    // executable replacement. Fail closed until a validated process-vnode API
+    // supplies the executable identity used for both capture and probing.
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "macOS process-bound executable identity is unavailable",
+    ))
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
+pub(crate) fn capture_process_identity(_pid: u32) -> std::io::Result<ProcessIdentity> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "process-bound executable identity is unavailable on this Unix target",
+    ))
+}
+
+#[cfg(unix)]
+pub(crate) fn probe_process_identity(identity: &ProcessIdentity) -> IdentityProbe {
+    match capture_process_identity(identity.pid) {
+        Ok(current) if current.matches(identity) => IdentityProbe::Matches,
+        Ok(_) => IdentityProbe::Mismatch,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => IdentityProbe::Gone,
+        Err(error) if error.raw_os_error() == Some(libc::ESRCH) => IdentityProbe::Gone,
+        Err(_) => IdentityProbe::Unverifiable,
+    }
+}
+
 #[cfg(windows)]
 pub(crate) fn capture_process_identity(pid: u32) -> std::io::Result<ProcessIdentity> {
     windows_identity::capture(pid)
@@ -151,16 +211,6 @@ pub(crate) unsafe fn process_identity_from_handle(
     handle: *mut std::ffi::c_void,
 ) -> std::io::Result<ProcessIdentity> {
     unsafe { windows_identity::identity_from_handle(handle as _) }
-}
-
-/// # Safety
-/// `handle` must remain a valid process handle with terminate and synchronize access.
-#[cfg(windows)]
-pub(crate) unsafe fn terminate_process_handle(
-    handle: *mut std::ffi::c_void,
-    wait: std::time::Duration,
-) -> std::io::Result<()> {
-    unsafe { windows_identity::terminate_handle(handle as _, wait) }
 }
 
 #[cfg(windows)]
