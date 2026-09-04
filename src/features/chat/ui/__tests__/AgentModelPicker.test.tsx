@@ -1915,7 +1915,7 @@ describe("AgentModelPicker starred models", () => {
     expect(idleStar).toHaveClass("hover:text-muted-foreground");
     expect(idleStar).not.toHaveClass("text-foreground/80");
     expect(idleStar).toHaveClass("opacity-0");
-    expect(idleStar).toHaveClass("transition-opacity", "duration-75");
+    expect(idleStar).not.toHaveClass("transition-opacity");
 
     const preferredRow = idleStar.closest("[data-model-key]");
     expect(preferredRow).not.toBeNull();

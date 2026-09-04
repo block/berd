@@ -561,7 +561,7 @@ export const RecommendedModelList = forwardRef<
                         // (enforced in globals.test.ts) — and favorited rows
                         // soften to foreground/80 via the selected flag.
                         className={cn(
-                          "shrink-0 opacity-0 transition-opacity duration-75 focus-visible:opacity-100",
+                          "shrink-0 opacity-0 focus-visible:opacity-100",
                           (hoveredModelKey === modelKey ||
                             focusedModelKey === modelKey) &&
                             "opacity-100",
