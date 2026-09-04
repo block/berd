@@ -158,6 +158,10 @@ export function ArtifactViewer({
   const [diskStatus, setDiskStatus] = useState<DiskStatus>("checking");
   const diskStatusRef = useRef<DiskStatus>(diskStatus);
   const [divergedKind, setDivergedKind] = useState<FileStatErrorKind>("other");
+  // Known-gone from disk (initial load or polling verdict). Gates every
+  // affordance that targets the file itself: the error body's "Open in
+  // editor" and both OS hand-offs in the ⋯ menu.
+  const fileIsMissing = diskStatus === "diverged" && divergedKind === "missing";
   const divergenceStrikesRef = useRef(0);
   const [imageDiskRevision, setImageDiskRevision] = useState(0);
   const imageDiskRevisionRef = useRef(0);
@@ -598,7 +602,14 @@ export function ArtifactViewer({
                 />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                {/* Both OS hand-offs target the file itself, so a deleted
+                    file makes them guaranteed dead clicks (the editor can't
+                    open it; revealItemInDir receives the missing path and
+                    its rejection is swallowed). Disable rather than hide so
+                    the menu shape stays stable; polling keeps watching the
+                    path and re-enables both if the file reappears. */}
                 <DropdownMenuItem
+                  disabled={fileIsMissing}
                   onSelect={() => {
                     void openResolvedPath(artifact.resolvedPath).catch(
                       () => {},
@@ -609,6 +620,7 @@ export function ArtifactViewer({
                   {t("artifactViewer.openExternally")}
                 </DropdownMenuItem>
                 <DropdownMenuItem
+                  disabled={fileIsMissing}
                   onSelect={() => {
                     void revealInFileManager(artifact.resolvedPath).catch(
                       () => {},
@@ -694,6 +706,10 @@ export function ArtifactViewer({
           <MarkdownBody
             markdownView={markdownView}
             textState={renderedTextState}
+            // A deleted file cannot be handed to an editor; the "file
+            // deleted" strip above is the whole answer (mirrors the strip
+            // hiding its Reload button for the same reason).
+            fileIsMissing={fileIsMissing}
             onOpenExternally={() => {
               void openResolvedPath(artifact.resolvedPath).catch(() => {});
             }}
@@ -776,10 +792,13 @@ function ImageBody({
 function MarkdownBody({
   markdownView,
   textState,
+  fileIsMissing = false,
   onOpenExternally,
 }: {
   markdownView: MarkdownView;
   textState: TextState;
+  /** The file is gone from disk, so opening it externally cannot succeed. */
+  fileIsMissing?: boolean;
   onOpenExternally: () => void;
 }) {
   const { t } = useTranslation("chat");
@@ -797,9 +816,16 @@ function MarkdownBody({
         <p className="text-center text-sm text-muted-foreground">
           {t("artifactViewer.loadError")}
         </p>
-        <Button variant="outline" size="sm" onClick={onOpenExternally}>
-          {t("artifactViewer.openExternally")}
-        </Button>
+        {/* "Open in editor" is an escape hatch for files Berd can't render
+            itself (encoding, size, permissions) — but a DELETED file can't be
+            opened by anything, so offering it would be a guaranteed dead
+            click. Polling keeps watching; if the file reappears the view
+            heals and the action returns. */}
+        {!fileIsMissing ? (
+          <Button variant="outline" size="sm" onClick={onOpenExternally}>
+            {t("artifactViewer.openExternally")}
+          </Button>
+        ) : null}
       </div>
     );
   }

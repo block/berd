@@ -668,6 +668,108 @@ describe("ArtifactViewer divergence grace period", () => {
     expect(contentBody().className).toMatch(/\bopacity-60\b/);
   });
 
+  it("does not offer 'Open in editor' in the error body for a deleted file", async () => {
+    // Initial load of an already-deleted file: the error body shows alongside
+    // the "File deleted from disk." strip. Offering "Open in editor" there
+    // would be a guaranteed dead click — nothing can open a file that is gone.
+    mockStatFile.mockRejectedValue({
+      kind: "missing",
+      message: "no such file",
+    });
+    render(<ArtifactViewer artifact={artifact()} onClose={vi.fn()} />);
+    await act(flushAsyncWork);
+
+    expect(screen.getByText(/couldn't load/i)).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "File deleted from disk.",
+    );
+    expect(
+      screen.queryByRole("button", { name: /open in editor/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps 'Open in editor' in the error body for unreadable (still present) files", async () => {
+    // The escape-hatch reading of the button: Berd can't render the file, but
+    // an external editor might. Only deletion removes it.
+    mockStatFile.mockRejectedValue({ kind: "other", message: "EACCES" });
+    render(<ArtifactViewer artifact={artifact()} onClose={vi.fn()} />);
+    await act(flushAsyncWork);
+
+    expect(screen.getByText(/couldn't load/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /open in editor/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("disables both OS hand-offs in the header menu once the file is deleted", async () => {
+    // Both menu actions target the file itself, so a deleted file makes each
+    // a guaranteed dead click: the editor cannot open a missing path, and
+    // revealItemInDir receives the missing path (not the parent directory)
+    // with its rejection swallowed.
+    mockOpenResolvedPath.mockClear();
+    mockRevealInFileManager.mockClear();
+    await renderLoadedViewer();
+
+    mockStatFile.mockRejectedValue({
+      kind: "missing",
+      message: "no such file",
+    });
+    await advancePollCycle();
+    await advancePollCycle();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "File deleted from disk.",
+    );
+
+    // userEvent needs real timers to advance its internal delays; the polled
+    // divergence state is already settled at this point.
+    vi.useRealTimers();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /file actions/i }));
+
+    const openItem = screen.getByRole("menuitem", {
+      name: /open in editor/i,
+    });
+    const revealItem = screen.getByRole("menuitem", { name: /reveal in/i });
+    expect(openItem).toHaveAttribute("aria-disabled", "true");
+    expect(revealItem).toHaveAttribute("aria-disabled", "true");
+
+    // Clicks on the disabled items must not reach either OS boundary —
+    // aria-disabled alone doesn't prove the handler is inert.
+    await user.click(openItem);
+    await user.click(revealItem);
+    expect(mockOpenResolvedPath).not.toHaveBeenCalled();
+    expect(mockRevealInFileManager).not.toHaveBeenCalled();
+  });
+
+  it("re-enables both OS hand-offs when the deleted file reappears", async () => {
+    // Polling keeps watching the path: recovery must restore the actions,
+    // otherwise disabling on deletion would be a one-way trap.
+    mockRevealInFileManager.mockClear();
+    await renderLoadedViewer();
+
+    mockStatFile.mockRejectedValue({
+      kind: "missing",
+      message: "no such file",
+    });
+    await advancePollCycle();
+    await advancePollCycle();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "File deleted from disk.",
+    );
+
+    mockStatFile.mockResolvedValue({ byteSize: "20", modifiedAtNs: "1" });
+    await advancePollCycle();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+
+    vi.useRealTimers();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /file actions/i }));
+    const revealItem = screen.getByRole("menuitem", { name: /reveal in/i });
+    expect(revealItem).not.toHaveAttribute("aria-disabled", "true");
+    await user.click(revealItem);
+    expect(mockRevealInFileManager).toHaveBeenCalledWith("/p/report.md");
+  });
+
   it("reports an unreadable file with a reload action", async () => {
     await renderLoadedViewer();
 
