@@ -550,10 +550,7 @@ fn run_create(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     let mutation_request = mutation_request_from_plan(&plan);
     let (reservation, reservation_reconciled) =
         reconcile_create_reservation(&client, &credential, &app_id, &plan, &mutation_request)?;
-    let should_initialize = plan_requests_initialize
-        || (reservation_reconciled
-            && plan.get("runtime_profile").and_then(Value::as_str) != Some("static"));
-    let initialize = if should_initialize {
+    let initialize = if plan_requests_initialize {
         let response = client
             .initialize(&credential, &app_id, &mutation_request)
             .with_context(|| {
@@ -653,20 +650,21 @@ fn is_matching_incomplete_reservation(
     app_id: &str,
     mutation_request: &Value,
 ) -> bool {
-    let Some(app) = response.get("app") else {
+    let Some(app) = response.get("app").and_then(Value::as_object) else {
         return false;
     };
-    if app.get("app_id").and_then(Value::as_str) != Some(app_id)
-        || app.get("role").and_then(Value::as_str) != Some("owner")
-        || app.get("route_status").and_then(Value::as_str) != Some("idle")
-        || app.get("route_revision").and_then(Value::as_u64) != Some(1)
-        || value_has_text(app.get("active_version_id"))
-        || value_has_text(app.get("version_id"))
-        || value_has_text(app.get("deleted_at"))
+    if response.get("ok").and_then(Value::as_bool) != Some(true)
         || response
             .get("versions")
             .and_then(Value::as_array)
-            .is_some_and(|versions| !versions.is_empty())
+            .is_none_or(|versions| !versions.is_empty())
+        || app.get("app_id").and_then(Value::as_str) != Some(app_id)
+        || app.get("role").and_then(Value::as_str) != Some("owner")
+        || app.get("route_status").and_then(Value::as_str) != Some("idle")
+        || app.get("route_revision").and_then(Value::as_u64) != Some(1)
+        || !value_is_absent_or_empty_text(app.get("active_version_id"))
+        || !value_is_absent_or_empty_text(app.get("version_id"))
+        || !value_is_absent_or_empty_text(app.get("deleted_at"))
     {
         return false;
     }
@@ -685,10 +683,12 @@ fn is_matching_incomplete_reservation(
     })
 }
 
-fn value_has_text(value: Option<&Value>) -> bool {
-    value
-        .and_then(Value::as_str)
-        .is_some_and(|value| !value.is_empty())
+fn value_is_absent_or_empty_text(value: Option<&Value>) -> bool {
+    match value {
+        None | Some(Value::Null) => true,
+        Some(Value::String(text)) => text.is_empty(),
+        Some(_) => false,
+    }
 }
 
 fn reservation_outcome_is_unknown(error: &anyhow::Error) -> bool {
@@ -2734,7 +2734,11 @@ mod tests {
             "runtime_class": "default",
             "runtime_profile": "process",
             "external_url": "https://merchant-lookup--bpsites.example/",
-            "initialize": {"required": false, "recommended": false}
+            "initialize": {
+                "required": true,
+                "recommended": true,
+                "reason": "the app ID is reserved, but its dynamic stack has not been initialized"
+            }
         });
         let reservation = json!({
             "app_id": "merchant-lookup",
@@ -2936,6 +2940,145 @@ mod tests {
             "/v1/agent/apps/merchant-lookup/initialize",
             credential,
         );
+    }
+
+    #[test]
+    fn bb_apps_create_reconciles_reserve_only_plan_without_initialize() {
+        let credential = "apps-e2e-only.reserve-only-reconcile.session+credential";
+        let plan = json!({
+            "app_id": "artifact-only-app",
+            "display_name": "Artifact Only App",
+            "environment": "staging",
+            "persistence": "none",
+            "runtime_class": "default",
+            "runtime_profile": "fetch-js",
+            "external_url": "https://artifact-only-app--bpsites.example/",
+            "initialize": {"required": false, "recommended": false}
+        });
+        let existing_reservation = json!({
+            "ok": true,
+            "app": {
+                "app_id": "artifact-only-app",
+                "name": "Artifact Only App",
+                "environment": "staging",
+                "persistence": "none",
+                "runtime_class": "default",
+                "role": "owner",
+                "status": "idle",
+                "route_status": "idle",
+                "route_revision": 1
+            },
+            "versions": []
+        });
+        let auth_server = ProcessServer::start(vec![process_auth_response()]);
+        let control_plane = ProcessServer::start(vec![
+            ProcessResponse::json(plan),
+            ProcessResponse::raw(201, "{"),
+            ProcessResponse::json(existing_reservation),
+        ]);
+        let mut command = process_command(
+            &auth_server,
+            &control_plane,
+            &[
+                "apps",
+                "create",
+                "--app-id",
+                "artifact-only-app",
+                "--name",
+                "Artifact Only App",
+                "--runtime-profile",
+                "fetch-js",
+                "--base-url",
+                APPROVED_TEST_BASE_URL,
+                "--client-version",
+                "0.2.0",
+                "--json",
+            ],
+            credential,
+        );
+
+        let output = command
+            .output()
+            .expect("run reserve-only create process command");
+        assert!(
+            output.status.success(),
+            "stderr was: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let value = serde_json::from_str::<Value>(&process_stdout(&output))
+            .expect("parse reconciled reserve-only output");
+        assert_eq!(value["reservation_reconciled"], true);
+        assert_eq!(value["initialized"], false);
+        assert_eq!(value["initialize"], Value::Null);
+        let auth_requests = auth_server.finish();
+        let requests = control_plane.finish();
+        assert_process_auth(&auth_requests[0], credential);
+        assert_eq!(requests.len(), 3);
+        assert_process_control_plane(
+            &requests[2],
+            "GET",
+            "/v1/agent/apps/artifact-only-app?environment=staging",
+            credential,
+        );
+    }
+
+    #[test]
+    fn matching_incomplete_reservation_requires_authoritative_empty_state() {
+        let mutation_request = json!({
+            "name": "Merchant Lookup",
+            "environment": "staging",
+            "persistence": "none",
+            "runtime_class": "default"
+        });
+        let response = json!({
+            "ok": true,
+            "app": {
+                "app_id": "merchant-lookup",
+                "name": "Merchant Lookup",
+                "environment": "staging",
+                "persistence": "none",
+                "runtime_class": "default",
+                "role": "owner",
+                "route_status": "idle",
+                "route_revision": 1
+            },
+            "versions": []
+        });
+        assert!(is_matching_incomplete_reservation(
+            &response,
+            "merchant-lookup",
+            &mutation_request
+        ));
+
+        for invalid_versions in [Value::Null, json!({}), json!([{"version_id": "ver-1"}])] {
+            let mut invalid = response.clone();
+            invalid["versions"] = invalid_versions;
+            assert!(!is_matching_incomplete_reservation(
+                &invalid,
+                "merchant-lookup",
+                &mutation_request
+            ));
+        }
+        let mut missing_versions = response.clone();
+        missing_versions
+            .as_object_mut()
+            .expect("response object")
+            .remove("versions");
+        assert!(!is_matching_incomplete_reservation(
+            &missing_versions,
+            "merchant-lookup",
+            &mutation_request
+        ));
+
+        for field in ["active_version_id", "version_id", "deleted_at"] {
+            let mut malformed = response.clone();
+            malformed["app"][field] = json!({});
+            assert!(!is_matching_incomplete_reservation(
+                &malformed,
+                "merchant-lookup",
+                &mutation_request
+            ));
+        }
     }
 
     #[test]
