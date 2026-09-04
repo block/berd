@@ -171,6 +171,7 @@ pub enum SpokespersonEvent {
         content_index: u64,
     },
     Handoff {
+        response_id: String,
         call_id: String,
         message: String,
     },
@@ -977,12 +978,13 @@ async fn run(
                         }
                     }
                     "response.function_call_arguments.done" => {
+                        let response_id = string(&value, "response_id").unwrap_or("");
                         let call_id = string(&value, "call_id").unwrap_or("");
                         let name = string(&value, "name").or_else(|| call_names.get(call_id).map(String::as_str));
                         let args = string(&value, "arguments").or_else(|| call_arguments.get(call_id).map(String::as_str));
-                        if name == Some("handoff") {
+                        if name == Some("handoff") && !response_id.is_empty() {
                             if let Some(message) = args.and_then(parse_handoff) {
-                                send_event(events, SpokespersonEvent::Handoff { call_id: call_id.into(), message })?;
+                                send_event(events, SpokespersonEvent::Handoff { response_id: response_id.into(), call_id: call_id.into(), message })?;
                             }
                         }
                     }
@@ -1992,6 +1994,7 @@ mod tests {
                 &mut socket,
                 json!({
                     "type":"response.function_call_arguments.done",
+                    "response_id":"response-1",
                     "call_id":"call-1",
                     "name":"handoff",
                     "arguments": r#"{"message":" inspect the computer "}"#
@@ -2133,7 +2136,7 @@ mod tests {
             matches!(&received[13], SpokespersonEvent::TranscriptDone { response_id, item_id, output_index: 1, text, .. } if response_id == "response-1" && item_id == "assistant-2" && text == "second part")
         );
         assert!(
-            matches!(&received[14], SpokespersonEvent::Handoff { call_id, message } if call_id == "call-1" && message == "inspect the computer")
+            matches!(&received[14], SpokespersonEvent::Handoff { response_id, call_id, message } if response_id == "response-1" && call_id == "call-1" && message == "inspect the computer")
         );
         assert!(
             matches!(&received[15], SpokespersonEvent::ResponseFinished { response_id, status: SpokespersonResponseStatus::Completed } if response_id == "response-1")
