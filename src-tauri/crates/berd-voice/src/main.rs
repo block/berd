@@ -37,6 +37,10 @@ use berd_voice::protocol::{
     SessionRequest, TtsSettingsOutcome, VoiceSessionSnapshot,
 };
 use berd_voice::session::{PrepareOutcome, PrepareRequest, SessionCore};
+use berd_voice::spokesperson_voice_update::{
+    VoiceBarrierAction, VoiceUpdateAction, VoiceUpdatePurpose, VoiceUpdateRequest,
+    VoiceUpdateTransaction,
+};
 use berd_voice::{
     estimated_spoken_through_utf8,
     local_assets::{
@@ -50,15 +54,10 @@ use berd_voice::{
 use serde::Serialize;
 
 mod session_audio;
-mod spokesperson_voice_update;
 
 use session_audio::{
     AudioHostAck, AudioOutputControlRequest, AudioPipeTransport, RemotePcmAudioOutput,
     AUDIO_CANCELLED,
-};
-use spokesperson_voice_update::{
-    VoiceBarrierAction, VoiceUpdateAction, VoiceUpdatePurpose, VoiceUpdateRequest,
-    VoiceUpdateTransaction,
 };
 
 const WIRE_MARKER: u32 = 2;
