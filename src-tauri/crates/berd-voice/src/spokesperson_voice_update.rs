@@ -21,7 +21,7 @@ pub enum VoiceUpdatePhase {
 pub enum VoiceUpdatePurpose {
     Settings,
     Renewal,
-    ExpiryRecovery { cause: String },
+    SessionRecovery { cause: String },
 }
 
 pub struct VoiceUpdateTransaction {
@@ -157,13 +157,16 @@ impl VoiceUpdateTransaction {
             Ok(SpokespersonEvent::Ready) if self.phase == VoiceUpdatePhase::Building => {
                 match self.events.try_recv() {
                     Err(TryRecvError::Empty) => {
-                        if matches!(self.purpose, VoiceUpdatePurpose::ExpiryRecovery { .. }) {
+                        if matches!(self.purpose, VoiceUpdatePurpose::SessionRecovery { .. }) {
                             VoiceUpdateAction::Activate
                         } else {
                             VoiceUpdateAction::BeginInputBarrier
                         }
                     }
                     Ok(SpokespersonEvent::Failed(message)) => VoiceUpdateAction::Reject(message),
+                    Ok(SpokespersonEvent::SessionLost(message)) => {
+                        VoiceUpdateAction::Reject(message)
+                    }
                     Ok(SpokespersonEvent::Closed) | Err(TryRecvError::Disconnected) => {
                         VoiceUpdateAction::Reject(
                             "replacement Spokesperson session closed before activation".into(),
@@ -175,6 +178,7 @@ impl VoiceUpdateTransaction {
                 }
             }
             Ok(SpokespersonEvent::Failed(message)) => VoiceUpdateAction::Reject(message),
+            Ok(SpokespersonEvent::SessionLost(message)) => VoiceUpdateAction::Reject(message),
             Ok(SpokespersonEvent::Closed) | Err(TryRecvError::Disconnected) => {
                 VoiceUpdateAction::Reject(
                     "replacement Spokesperson session closed before activation".into(),
@@ -231,19 +235,19 @@ impl VoiceUpdateTransaction {
 
     pub fn should_hold_input(&self) -> bool {
         self.phase == VoiceUpdatePhase::InputBarrier
-            || matches!(self.purpose, VoiceUpdatePurpose::ExpiryRecovery { .. })
+            || matches!(self.purpose, VoiceUpdatePurpose::SessionRecovery { .. })
     }
 
     pub fn purpose(&self) -> &VoiceUpdatePurpose {
         &self.purpose
     }
 
-    pub fn recover_from_expiry(&mut self, cause: String) -> Result<(), String> {
+    pub fn recover_after_session_loss(&mut self, cause: String) -> Result<(), String> {
         if self.phase != VoiceUpdatePhase::Building {
             return Err(cause);
         }
         if matches!(self.purpose, VoiceUpdatePurpose::Renewal) {
-            self.purpose = VoiceUpdatePurpose::ExpiryRecovery { cause };
+            self.purpose = VoiceUpdatePurpose::SessionRecovery { cause };
             Ok(())
         } else {
             Err(cause)
