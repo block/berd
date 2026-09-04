@@ -306,7 +306,6 @@ vi.mock("../lib/realtimeVoicePreference", () => ({
 }));
 
 vi.mock("../lib/realtimeEmissaryProtocol", () => ({
-  configureRealtimeEmissarySession: vi.fn(),
   sendRealtimeEvents: mocks.sendRealtimeEvents,
 }));
 
