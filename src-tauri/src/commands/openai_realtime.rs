@@ -1,8 +1,8 @@
 use berd_voice::openai_realtime_protocol::{
-    accepted_handoff_tool_output, expert_session_instructions, invalid_tool_call_output,
-    realtime_transcript_seed_events, RealtimeCoordinatorResult, RealtimeExpertMessage,
-    RealtimeExpertSpokespersonSession, RealtimeHandoffReminder, RealtimePipeExchange,
-    RealtimeSessionReduction, RealtimeSpokespersonSessionOptions, RealtimeTranscriptSeedTurn,
+    expert_session_instructions, realtime_transcript_seed_events, RealtimeCoordinatorResult,
+    RealtimeExpertDelivery, RealtimeExpertMessage, RealtimeExpertSpokespersonSession,
+    RealtimeExpertTurnCompletion, RealtimePipeExchange, RealtimeSessionReduction,
+    RealtimeSpokespersonSessionOptions, RealtimeTranscriptSeedTurn,
 };
 use berd_voice::openai_spokesperson::{
     OpenAiSpokespersonConfig, OpenAiSpokespersonControl, OpenAiSpokespersonRuntime,
@@ -80,9 +80,11 @@ pub fn start_openai_realtime_spokesperson_runtime(
     webview_window: WebviewWindow,
     session_id: String,
     initial_cursor: u64,
+    call_id: String,
     options: RealtimeSpokespersonSessionOptions,
 ) -> Result<(), String> {
     let session_id = non_empty_session_id(session_id)?;
+    let call_id = non_empty_session_id(call_id)?;
     let mut sessions = state
         .sessions
         .lock()
@@ -109,7 +111,7 @@ pub fn start_openai_realtime_spokesperson_runtime(
         NativeRealtimeRuntime {
             owner_window: webview_window.label().into(),
             runtime,
-            protocol: RealtimeExpertSpokespersonSession::new(initial_cursor),
+            protocol: RealtimeExpertSpokespersonSession::new(initial_cursor, call_id),
         },
     );
     drop(sessions);
@@ -288,40 +290,12 @@ pub fn create_openai_realtime_expert_instructions(
 }
 
 #[tauri::command]
-pub fn create_openai_realtime_handoff_tool_output(
-    call_id: String,
-    handoff_id: String,
-) -> Result<serde_json::Value, String> {
-    accepted_handoff_tool_output(&call_id, &handoff_id)
-}
-
-#[tauri::command]
-pub fn create_openai_realtime_invalid_tool_output(
-    call_id: String,
-    tool_name: String,
-    error: String,
-) -> Result<serde_json::Value, String> {
-    invalid_tool_call_output(&call_id, &tool_name, &error)
-}
-
-#[tauri::command]
 pub fn create_openai_realtime_transcript_seed(
     turns: Vec<RealtimeTranscriptSeedTurn>,
     max_items: usize,
     session_id: Option<String>,
 ) -> Vec<serde_json::Value> {
     realtime_transcript_seed_events(turns, max_items, session_id.as_deref())
-}
-
-#[tauri::command]
-pub fn enqueue_openai_realtime_spokesperson_message(
-    state: State<'_, OpenAiRealtimeRuntimeState>,
-    session_id: String,
-    message: String,
-) -> Result<RealtimePipeExchange, String> {
-    with_protocol_session(state, session_id, |session| {
-        session.enqueue_spokesperson_message(&message)
-    })
 }
 
 #[tauri::command]
@@ -346,19 +320,6 @@ pub fn get_openai_realtime_expert_pipe_cursor(
         session_id,
         |session| Ok(session.expert_pipe_cursor()),
     )
-}
-
-#[tauri::command]
-pub fn register_openai_realtime_handoff(
-    state: State<'_, OpenAiRealtimeRuntimeState>,
-    session_id: String,
-    handoff_id: String,
-    cursor: u64,
-    message: String,
-) -> Result<String, String> {
-    with_protocol_session(state, session_id, |session| {
-        session.register_handoff(&handoff_id, cursor, &message)
-    })
 }
 
 #[tauri::command]
@@ -400,9 +361,19 @@ pub fn complete_openai_realtime_expert_turn(
     session_id: String,
     retrying_handoff_ids: Vec<String>,
     max_attempts: u8,
-) -> Result<RealtimeHandoffReminder, String> {
+) -> Result<RealtimeExpertTurnCompletion, String> {
     with_protocol_session(state, session_id, |session| {
-        Ok(session.complete_expert_turn(&retrying_handoff_ids, max_attempts))
+        session.complete_expert_turn_with_delivery(&retrying_handoff_ids, max_attempts)
+    })
+}
+
+#[tauri::command]
+pub fn flush_openai_realtime_expert_events(
+    state: State<'_, OpenAiRealtimeRuntimeState>,
+    session_id: String,
+) -> Result<Option<RealtimeExpertDelivery>, String> {
+    with_protocol_session(state, session_id, |session| {
+        Ok(session.flush_expert_events("Final voice transcript"))
     })
 }
 
@@ -432,18 +403,6 @@ pub fn request_openai_realtime_expert_message(
 ) -> Result<RealtimeCoordinatorResult, String> {
     with_protocol_session(state, session_id, |session| {
         session.request_expert_message(message)
-    })
-}
-
-#[tauri::command]
-pub fn request_openai_realtime_tool_output(
-    state: State<'_, OpenAiRealtimeRuntimeState>,
-    session_id: String,
-    event: serde_json::Value,
-    request_response: bool,
-) -> Result<RealtimeCoordinatorResult, String> {
-    with_protocol_session(state, session_id, |session| {
-        Ok(session.request_tool_output(event, request_response))
     })
 }
 

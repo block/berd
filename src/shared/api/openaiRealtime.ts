@@ -20,11 +20,13 @@ export interface OpenAiRealtimeRuntimeEvent {
 export function startOpenAiRealtimeSpokespersonRuntime(
   sessionId: string,
   initialCursor: number,
+  callId: string,
   options: unknown,
 ): Promise<void> {
   return invoke("start_openai_realtime_spokesperson_runtime", {
     sessionId,
     initialCursor,
+    callId,
     options,
   });
 }
@@ -63,28 +65,6 @@ export function createOpenAiRealtimeExpertInstructions(
     sessionId,
     initialCursor,
     callId,
-  });
-}
-
-export function createOpenAiRealtimeHandoffToolOutput(
-  callId: string,
-  handoffId: string,
-): Promise<Record<string, unknown>> {
-  return invoke("create_openai_realtime_handoff_tool_output", {
-    callId,
-    handoffId,
-  });
-}
-
-export function createOpenAiRealtimeInvalidToolOutput(
-  callId: string,
-  toolName: string,
-  error: string,
-): Promise<Record<string, unknown>> {
-  return invoke("create_openai_realtime_invalid_tool_output", {
-    callId,
-    toolName,
-    error,
   });
 }
 
@@ -146,6 +126,14 @@ export interface OpenAiRealtimeReduction {
   clientEvents: Record<string, unknown>[];
   completedHandoffIds: string[];
   failedHandoffIds: string[];
+  expertDelivery?: OpenAiRealtimeExpertDelivery;
+  acceptedHandoffs: Array<{ handoffId: string; message: string }>;
+}
+
+export interface OpenAiRealtimeExpertDelivery {
+  message: string;
+  displayText: string;
+  handoffIds: string[];
 }
 
 export interface OpenAiRealtimeCoordinatorResult {
@@ -173,16 +161,6 @@ export type OpenAiRealtimePipeExchange =
       cursor: number;
     };
 
-export function enqueueOpenAiRealtimeSpokespersonMessage(
-  sessionId: string,
-  message: string,
-): Promise<OpenAiRealtimePipeExchange> {
-  return invoke("enqueue_openai_realtime_spokesperson_message", {
-    sessionId,
-    message,
-  });
-}
-
 export function sendOpenAiRealtimeExpertPipeMessage(
   sessionId: string,
   cursor: number,
@@ -199,20 +177,6 @@ export function getOpenAiRealtimeExpertPipeCursor(
   sessionId: string,
 ): Promise<number> {
   return invoke("get_openai_realtime_expert_pipe_cursor", { sessionId });
-}
-
-export function registerOpenAiRealtimeHandoff(
-  sessionId: string,
-  handoffId: string,
-  cursor: number,
-  message: string,
-): Promise<string> {
-  return invoke<string>("register_openai_realtime_handoff", {
-    sessionId,
-    handoffId,
-    cursor,
-    message,
-  });
 }
 
 export function unknownOpenAiRealtimeHandoffIds(
@@ -260,12 +224,21 @@ export function completeOpenAiRealtimeExpertTurn(
   sessionId: string,
   retryingHandoffIds: string[],
   maxAttempts: number,
-): Promise<OpenAiRealtimeHandoffReminder> {
+): Promise<{
+  reminder: OpenAiRealtimeHandoffReminder;
+  expertDelivery?: OpenAiRealtimeExpertDelivery;
+}> {
   return invoke("complete_openai_realtime_expert_turn", {
     sessionId,
     retryingHandoffIds,
     maxAttempts,
   });
+}
+
+export function flushOpenAiRealtimeExpertEvents(
+  sessionId: string,
+): Promise<OpenAiRealtimeExpertDelivery | null> {
+  return invoke("flush_openai_realtime_expert_events", { sessionId });
 }
 
 export function reduceOpenAiRealtimeSpokespersonEvent(
@@ -290,18 +263,6 @@ export function requestOpenAiRealtimeExpertMessage(
   return invoke("request_openai_realtime_expert_message", {
     sessionId,
     message,
-  });
-}
-
-export function requestOpenAiRealtimeToolOutput(
-  sessionId: string,
-  event: Record<string, unknown>,
-  requestResponse: boolean,
-): Promise<OpenAiRealtimeCoordinatorResult> {
-  return invoke("request_openai_realtime_tool_output", {
-    sessionId,
-    event,
-    requestResponse,
   });
 }
 
