@@ -21,7 +21,7 @@ use builderbot_auth::auth_login::auth_url;
 #[cfg(test)]
 use builderbot_auth::auth_login::build_auth_http_client;
 use builderbot_auth::auth_storage::StoredSessionCredential;
-use clap::{Arg, ArgMatches, Command};
+use clap::{Arg, ArgGroup, ArgMatches, Command};
 use reqwest::blocking::{multipart, Client, Request, RequestBuilder, Response};
 use reqwest::header::{HeaderValue, ACCEPT, AUTHORIZATION, USER_AGENT};
 use reqwest::redirect::Policy;
@@ -135,18 +135,28 @@ pub fn command() -> Command {
                 .about("Plan and initialize an app")
                 .long_about(
                     "Plan an app identity through Apps Platform, then initialize it only when the \
-                     returned plan marks initialization as required or recommended.",
+                     returned plan marks initialization as required or recommended. Supply a \
+                     descriptive DNS-safe app ID or a human-readable name from which the control \
+                     plane can derive one.",
+                )
+                .group(
+                    ArgGroup::new("app-identity")
+                        .args(["app-id", "name"])
+                        .multiple(true)
+                        .required(true),
                 )
                 .arg(
                     Arg::new("app-id")
                         .long("app-id")
                         .value_name("APP_ID")
-                        .help("Requested DNS-safe app identifier; the control plane generates one when omitted"),
+                        .value_parser(clap::builder::NonEmptyStringValueParser::new())
+                        .help("Descriptive DNS-safe app identifier to reserve exactly"),
                 )
                 .arg(
                     Arg::new("name")
                         .long("name")
                         .value_name("NAME")
+                        .value_parser(clap::builder::NonEmptyStringValueParser::new())
                         .help("Human-readable app name"),
                 )
                 .arg(
@@ -506,8 +516,9 @@ fn run_versions(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
 
 fn run_create(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     let (client, credential) = control_plane_context(config, matches)?;
+    let requested_app_id = matches.get_one::<String>("app-id").map(String::as_str);
     let request = PlanRequest {
-        app_id: matches.get_one::<String>("app-id").map(String::as_str),
+        app_id: requested_app_id,
         name: matches.get_one::<String>("name").map(String::as_str),
         environment: matches.get_one::<String>("environment").map(String::as_str),
         runtime_profile: matches
@@ -518,6 +529,9 @@ fn run_create(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     };
     let plan = client.plan(&credential, &request)?;
     let app_id = required_response_string(&plan, "app_id", "Apps Platform plan")?.to_string();
+    if let Some(requested_app_id) = requested_app_id {
+        require_exact_app_id("plan", requested_app_id, &app_id)?;
+    }
     let initialize_required = plan
         .pointer("/initialize/required")
         .and_then(Value::as_bool);
@@ -533,31 +547,38 @@ fn run_create(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
         initialize_required.unwrap_or(false) || initialize_recommended.unwrap_or(false);
     let initialize = if should_initialize {
         let request = initialize_request_from_plan(&plan);
-        Some(client.initialize(&credential, &app_id, &request)?)
+        let response = client.initialize(&credential, &app_id, &request)?;
+        let initialized_app_id =
+            required_response_string(&response, "app_id", "Apps Platform initialize")?;
+        require_exact_app_id("initialize", &app_id, initialized_app_id)?;
+        Some(response)
     } else {
         None
     };
-    let (effective_app_id, effective_external_url) = match initialize.as_ref() {
-        Some(response) => (
-            required_response_string(response, "app_id", "Apps Platform initialize")?.to_string(),
-            Value::String(
-                required_response_string(response, "external_url", "Apps Platform initialize")?
-                    .to_string(),
-            ),
+    let effective_external_url = match initialize.as_ref() {
+        Some(response) => Value::String(
+            required_response_string(response, "external_url", "Apps Platform initialize")?
+                .to_string(),
         ),
-        None => (
-            app_id,
-            plan.get("external_url").cloned().unwrap_or(Value::Null),
-        ),
+        None => plan.get("external_url").cloned().unwrap_or(Value::Null),
     };
     print_json(&json!({
         "ok": true,
-        "app_id": effective_app_id,
+        "app_id": app_id,
         "external_url": effective_external_url,
         "initialized": initialize.is_some(),
         "plan": plan,
         "initialize": initialize,
     }))
+}
+
+fn require_exact_app_id(stage: &str, expected: &str, actual: &str) -> Result<()> {
+    if actual != expected {
+        anyhow::bail!(
+            "Apps Platform {stage} returned app_id {actual:?}; expected exact app_id {expected:?}. No replacement app was accepted."
+        );
+    }
+    Ok(())
 }
 
 fn run_deploy(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
@@ -2226,8 +2247,8 @@ mod tests {
             "initialize": {"required": true, "recommended": false}
         });
         let initialized = json!({
-            "app_id": "merchant-lookup-2",
-            "external_url": "https://merchant-lookup-2--bpsites.example/"
+            "app_id": "merchant-lookup",
+            "external_url": "https://merchant-lookup--bpsites.example/"
         });
         let auth_server = ProcessServer::start(vec![process_auth_response()]);
         let control_plane = ProcessServer::start(vec![
@@ -2267,7 +2288,7 @@ mod tests {
         );
         let value = serde_json::from_str::<Value>(&process_stdout(&output))
             .expect("parse create process output");
-        assert_eq!(value["app_id"], "merchant-lookup-2");
+        assert_eq!(value["app_id"], "merchant-lookup");
         assert_eq!(value["initialized"], true);
         assert_eq!(value["plan"], plan);
         assert_eq!(value["initialize"], initialized);
@@ -2287,6 +2308,126 @@ mod tests {
                 "client_version": "0.2.0"
             })
         );
+        assert_process_control_plane(
+            &requests[1],
+            "POST",
+            "/v1/agent/apps/merchant-lookup/initialize",
+            credential,
+        );
+    }
+
+    #[test]
+    fn bb_apps_create_requires_descriptive_identity() {
+        let error = command()
+            .try_get_matches_from(["apps", "create", "--base-url", APPROVED_TEST_BASE_URL])
+            .expect_err("create without app identity must fail");
+
+        assert!(error
+            .to_string()
+            .contains("--app-id <APP_ID>|--name <NAME>"));
+    }
+
+    #[test]
+    fn bb_apps_create_rejects_empty_identity() {
+        for argument in ["--app-id", "--name"] {
+            command()
+                .try_get_matches_from([
+                    "apps",
+                    "create",
+                    argument,
+                    "",
+                    "--base-url",
+                    APPROVED_TEST_BASE_URL,
+                ])
+                .expect_err("empty app identity must fail");
+        }
+    }
+
+    #[test]
+    fn bb_apps_create_rejects_plan_substitute_before_initialize() {
+        let credential = "apps-e2e-only.plan-substitute.session+credential";
+        let plan = json!({
+            "app_id": "merchant-lookup-2",
+            "initialize": {"required": true, "recommended": true}
+        });
+        let auth_server = ProcessServer::start(vec![process_auth_response()]);
+        let control_plane = ProcessServer::start(vec![ProcessResponse::json(plan)]);
+        let mut command = process_command(
+            &auth_server,
+            &control_plane,
+            &[
+                "apps",
+                "create",
+                "--app-id",
+                "merchant-lookup",
+                "--base-url",
+                APPROVED_TEST_BASE_URL,
+                "--client-version",
+                "0.2.0",
+                "--json",
+            ],
+            credential,
+        );
+
+        let output = command.output().expect("run Apps create process command");
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains(
+            "expected exact app_id \\\"merchant-lookup\\\". No replacement app was accepted"
+        ));
+        let auth_requests = auth_server.finish();
+        let requests = control_plane.finish();
+        assert_process_auth(&auth_requests[0], credential);
+        assert_eq!(requests.len(), 1);
+        assert_process_control_plane(&requests[0], "POST", APPS_PLAN_PATH, credential);
+    }
+
+    #[test]
+    fn bb_apps_create_rejects_initialize_substitute() {
+        let credential = "apps-e2e-only.initialize-substitute.session+credential";
+        let plan = json!({
+            "app_id": "merchant-lookup",
+            "display_name": "Merchant Lookup",
+            "environment": "staging",
+            "persistence": "none",
+            "runtime_class": "default",
+            "initialize": {"required": true, "recommended": true}
+        });
+        let initialized = json!({
+            "app_id": "merchant-lookup-2",
+            "external_url": "https://merchant-lookup-2--bpsites.example/"
+        });
+        let auth_server = ProcessServer::start(vec![process_auth_response()]);
+        let control_plane = ProcessServer::start(vec![
+            ProcessResponse::json(plan),
+            ProcessResponse::json(initialized),
+        ]);
+        let mut command = process_command(
+            &auth_server,
+            &control_plane,
+            &[
+                "apps",
+                "create",
+                "--name",
+                "Merchant Lookup",
+                "--base-url",
+                APPROVED_TEST_BASE_URL,
+                "--client-version",
+                "0.2.0",
+                "--json",
+            ],
+            credential,
+        );
+
+        let output = command.output().expect("run Apps create process command");
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains(
+            "expected exact app_id \\\"merchant-lookup\\\". No replacement app was accepted"
+        ));
+        let auth_requests = auth_server.finish();
+        let requests = control_plane.finish();
+        assert_process_auth(&auth_requests[0], credential);
+        assert_eq!(requests.len(), 2);
+        assert_process_control_plane(&requests[0], "POST", APPS_PLAN_PATH, credential);
         assert_process_control_plane(
             &requests[1],
             "POST",
