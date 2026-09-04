@@ -649,9 +649,11 @@ export async function steerSession(
   content: ContentBlock[],
   expectedRunId: string | null,
   meta?: Record<string, unknown>,
+  callbacks: { onSteerDispatching?: () => void } = {},
 ): Promise<AcpSteerResponse> {
   const client = await getClientForSession(sessionId);
   const steer = async (runId: string): Promise<AcpSteerResponse> => {
+    callbacks.onSteerDispatching?.();
     const response = await client.extMethod("_goose/unstable/session/steer", {
       sessionId: getWireSessionId(sessionId),
       prompt: content,

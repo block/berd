@@ -43,9 +43,6 @@ export async function steerPromptInSession(
     reportErrorInTranscript?: boolean;
   } = {},
 ): Promise<boolean> {
-  // Steering is a send: restore an archived chat before injecting into the
-  // run, mirroring dispatchPrompt. Best-effort; see sendCore for details.
-  await restoreArchivedSessionBeforeSend(sessionId);
   const sessionRunsRemotely = Boolean(
     useChatSessionStore.getState().getSession(sessionId)?.remoteHost,
   );
@@ -130,6 +127,8 @@ export async function steerPromptInSession(
   });
 
   try {
+    await restoreArchivedSessionBeforeSend(sessionId);
+    useChatSessionStore.getState().assertSessionActive(sessionId);
     const steerResponse = await acpSteerMessage(
       sessionId,
       activeRunId,
@@ -142,6 +141,9 @@ export async function steerPromptInSession(
         images: images?.map(
           (img) => [img.base64, img.mimeType] as [string, string],
         ),
+        onSteerDispatching: () => {
+          useChatSessionStore.getState().assertSessionActive(sessionId);
+        },
       },
     );
     const steeredRunId = steerResponse.runId;

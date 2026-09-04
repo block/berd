@@ -315,29 +315,11 @@ export function resolveAssistantCancellation(
   finalizeAssistantCancellationRace(promptOwner);
 }
 
-/**
- * Sending a message to an archived chat restores it: the archive flag clears
- * locally and on the backend before any prompt preparation or dispatch, so
- * the conversation moves back to the active list instead of replying while
- * hidden. Best-effort: a failed restore logs a warning and the send proceeds;
- * the backend still surfaces its own error if the archived session cannot
- * accept the prompt.
- */
+/** Restore an archived chat and require durable success before sending. */
 export async function restoreArchivedSessionBeforeSend(
   sessionId: string,
 ): Promise<void> {
-  const sessionStore = useChatSessionStore.getState();
-  if (!sessionStore.getSession(sessionId)?.archivedAt) {
-    return;
-  }
-  try {
-    await sessionStore.unarchiveSession(sessionId);
-  } catch (error) {
-    console.warn(
-      `[send] failed to restore archived session ${sessionId}`,
-      error,
-    );
-  }
+  await useChatSessionStore.getState().ensureSessionActive(sessionId);
 }
 
 /**
@@ -467,9 +449,12 @@ export async function dispatchPrompt(
     // local transcript state so a retained queued record can retry without
     // duplicating the user turn.
     throwIfAborted(signal);
-    await restoreArchivedSessionBeforeSend(sessionId);
     await prepare?.();
     throwIfAborted(signal);
+
+    await restoreArchivedSessionBeforeSend(sessionId);
+    throwIfAborted(signal);
+    useChatSessionStore.getState().assertSessionActive(sessionId);
 
     const commitUserMessage = () => {
       throwIfAborted(signal);
@@ -564,7 +549,10 @@ export async function dispatchPrompt(
       images: images?.map(
         (img) => [img.base64, img.mimeType] as [string, string],
       ),
-      onPromptDispatching: commitUserMessage,
+      onPromptDispatching: () => {
+        useChatSessionStore.getState().assertSessionActive(sessionId);
+        commitUserMessage();
+      },
       onPromptDispatched: () => {
         onPromptDispatched?.();
       },

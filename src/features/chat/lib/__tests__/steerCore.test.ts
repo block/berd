@@ -40,6 +40,68 @@ function oversizedImageDraft() {
   };
 }
 
+function seedArchivedSession() {
+  useChatSessionStore.setState({
+    sessions: [
+      {
+        id: "session-1",
+        title: "Archived",
+        createdAt: "2026-04-01T00:00:00.000Z",
+        updatedAt: "2026-04-01T00:00:00.000Z",
+        archivedAt: "2026-04-02T00:00:00.000Z",
+        messageCount: 1,
+      },
+    ],
+    archiveMutationBySessionId: {},
+  });
+}
+
+describe("steerPromptInSession archived session restore", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useChatSessionStore.setState({
+      sessions: [],
+      archiveMutationBySessionId: {},
+    });
+    mockUnarchiveSession.mockResolvedValue(undefined);
+    mockAcpSteerMessage.mockResolvedValue({
+      runId: "run-1",
+      messageId: "msg-1",
+    });
+  });
+
+  it("does not restore an empty steer", async () => {
+    seedArchivedSession();
+    await expect(steerPromptInSession("session-1", "")).resolves.toBe(false);
+    expect(mockUnarchiveSession).not.toHaveBeenCalled();
+    expect(mockAcpSteerMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not restore an oversized steer", async () => {
+    seedArchivedSession();
+    await expect(
+      steerPromptInSession("session-1", "look", [oversizedImageDraft()]),
+    ).resolves.toBe(false);
+    expect(mockUnarchiveSession).not.toHaveBeenCalled();
+    expect(mockAcpSteerMessage).not.toHaveBeenCalled();
+  });
+
+  it("restores only after validation and waits for durable success", async () => {
+    seedArchivedSession();
+    let resolveRestore!: () => void;
+    const restore = new Promise<void>((resolve) => {
+      resolveRestore = resolve;
+    });
+    mockUnarchiveSession.mockReturnValueOnce(restore);
+    const pending = steerPromptInSession("session-1", "look");
+    await Promise.resolve();
+    expect(mockAcpSteerMessage).not.toHaveBeenCalled();
+    resolveRestore();
+    await pending;
+    expect(mockAcpSteerMessage).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("steerPromptInSession payload budget", () => {
   beforeEach(() => {
     vi.clearAllMocks();

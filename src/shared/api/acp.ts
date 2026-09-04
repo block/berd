@@ -303,7 +303,7 @@ export async function acpSteerMessage(
   options: Pick<
     AcpSendMessageOptions,
     "assistantPrompt" | "goose" | "images"
-  > = {},
+  > & { onSteerDispatching?: () => void } = {},
 ): Promise<AcpSteerResponse> {
   sessionRegistry.requireSessionInvocationSelection(sessionId);
   const { assistantPrompt, goose, images } = options;
@@ -328,6 +328,7 @@ export async function acpSteerMessage(
     content,
     expectedRunId,
     goose && Object.keys(goose).length > 0 ? { goose } : undefined,
+    { onSteerDispatching: options.onSteerDispatching },
   );
 }
 
