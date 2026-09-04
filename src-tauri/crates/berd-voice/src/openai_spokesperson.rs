@@ -119,6 +119,9 @@ pub enum SpokespersonCommand {
 
 #[derive(Debug)]
 pub enum SpokespersonEvent {
+    /// Raw provider event for an in-process host that owns the shared protocol
+    /// reducer. The ordinary external session uses normalized events only.
+    Provider(serde_json::Value),
     Ready,
     UserSpeaking {
         active: bool,
@@ -315,6 +318,19 @@ impl OpenAiSpokespersonRuntime {
     pub fn spawn(
         config: OpenAiSpokespersonConfig,
     ) -> Result<(Self, std::sync::mpsc::Receiver<SpokespersonEvent>), String> {
+        Self::spawn_inner(config, false)
+    }
+
+    pub fn spawn_observed(
+        config: OpenAiSpokespersonConfig,
+    ) -> Result<(Self, std::sync::mpsc::Receiver<SpokespersonEvent>), String> {
+        Self::spawn_inner(config, true)
+    }
+
+    fn spawn_inner(
+        config: OpenAiSpokespersonConfig,
+        forward_provider_events: bool,
+    ) -> Result<(Self, std::sync::mpsc::Receiver<SpokespersonEvent>), String> {
         let (commands, command_rx) = mpsc::unbounded_channel();
         let (events, event_rx) = std::sync::mpsc::channel();
         let worker = thread::Builder::new()
@@ -330,7 +346,12 @@ impl OpenAiSpokespersonRuntime {
                         return;
                     }
                 };
-                if let Err(error) = runtime.block_on(run(config, command_rx, &events)) {
+                if let Err(error) = runtime.block_on(run_inner(
+                    config,
+                    command_rx,
+                    &events,
+                    forward_provider_events,
+                )) {
                     let _ = events.send(SpokespersonEvent::Failed(error));
                 }
                 let _ = events.send(SpokespersonEvent::Closed);
@@ -377,10 +398,20 @@ impl OpenAiSpokespersonRuntime {
     }
 }
 
+#[cfg(test)]
 async fn run(
+    config: OpenAiSpokespersonConfig,
+    commands: mpsc::UnboundedReceiver<SpokespersonCommand>,
+    events: &std::sync::mpsc::Sender<SpokespersonEvent>,
+) -> Result<(), String> {
+    run_inner(config, commands, events, false).await
+}
+
+async fn run_inner(
     mut config: OpenAiSpokespersonConfig,
     mut commands: mpsc::UnboundedReceiver<SpokespersonCommand>,
     events: &std::sync::mpsc::Sender<SpokespersonEvent>,
+    forward_provider_events: bool,
 ) -> Result<(), String> {
     if let Err(existing) = rustls::crypto::aws_lc_rs::default_provider().install_default() {
         drop(existing);
@@ -716,6 +747,9 @@ async fn run(
                     }
                 };
                 let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else { continue };
+                if forward_provider_events {
+                    send_event(events, SpokespersonEvent::Provider(value.clone()))?;
+                }
                 let kind = value.get("type").and_then(|value| value.as_str()).unwrap_or("");
                 let protocol_events = if matches!(
                     kind,
@@ -1217,6 +1251,46 @@ mod tests {
         assert_eq!(samples.len(), 2);
         assert!(samples[0] > 0.99);
         assert!(samples[1] < -0.99);
+    }
+
+    #[tokio::test]
+    async fn observed_runtime_exposes_provider_events_before_normalized_events() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("ws://{}/", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_hdr_async(stream, require_test_authorization)
+                .await
+                .unwrap();
+            let update = receive_json(&mut socket).await;
+            acknowledge_initial_session(&mut socket, &update, "test-model").await;
+            let _ = socket.next().await;
+        });
+
+        let (runtime, events) = OpenAiSpokespersonRuntime::spawn_observed(test_config(
+            endpoint,
+            "test-voice",
+            1.0,
+            Vec::new(),
+        ))
+        .unwrap();
+        let (provider, ready) = tokio::task::spawn_blocking(move || {
+            (
+                events.recv_timeout(Duration::from_secs(2)).unwrap(),
+                events.recv_timeout(Duration::from_secs(2)).unwrap(),
+            )
+        })
+        .await
+        .unwrap();
+        assert!(matches!(
+            provider,
+            SpokespersonEvent::Provider(event)
+                if event["type"] == "session.updated"
+        ));
+        assert!(matches!(ready, SpokespersonEvent::Ready));
+
+        runtime.finish().unwrap();
+        server.await.unwrap();
     }
 
     #[tokio::test]
