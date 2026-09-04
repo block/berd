@@ -336,6 +336,7 @@ export function useResolvedAgentModelPicker({
   const {
     pickerAgents,
     availableModels,
+    favoriteModels,
     getModelsForAgent,
     isModelInventoryAuthoritative,
     modelsLoading,
@@ -816,6 +817,7 @@ export function useResolvedAgentModelPicker({
     selectedAgentId,
     pickerAgents,
     availableModels,
+    favoriteModels,
     getModelsForAgent,
     modelsLoading,
     modelStatusMessage,

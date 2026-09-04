@@ -1,7 +1,9 @@
 import type { ComponentProps } from "react";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { __resetStarredModelsCacheForTests } from "../../hooks/useStarredModels";
+import { modelStarKey, starredModelStorageKey } from "../../lib/starredModels";
 import { AgentModelPicker } from "../AgentModelPicker";
 import {
   getModelRecencyMap,
@@ -10,6 +12,18 @@ import {
   recordModelSelection,
 } from "../../lib/modelRecency";
 import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
+import { toast } from "sonner";
+
+vi.mock("sonner", () => ({
+  toast: {
+    error: vi.fn(),
+    success: vi.fn(),
+    info: vi.fn(),
+    warning: vi.fn(),
+    message: vi.fn(),
+    dismiss: vi.fn(),
+  },
+}));
 
 class ResizeObserverStub {
   observe() {}
@@ -76,6 +90,7 @@ describe("AgentModelPicker", () => {
         onAgentChange={onAgentChange}
         availableModels={[]}
         onModelChange={vi.fn()}
+        providerColumnMode="visible"
         onRequestComposerFocus={onRequestComposerFocus}
       />,
     );
@@ -120,6 +135,7 @@ describe("AgentModelPicker", () => {
         onAgentChange={onAgentChange}
         availableModels={[]}
         onModelChange={vi.fn()}
+        providerColumnMode="visible"
       />,
     );
 
@@ -232,12 +248,12 @@ describe("AgentModelPicker", () => {
     await user.click(trigger);
 
     const explicitModel = screen.getByRole("button", {
-      name: /Claude Opus 4\.8/,
+      name: /^Claude Opus 4\.8$/,
     });
     expect(explicitModel).toHaveClass("bg-accent");
     expect(
       explicitModel.querySelector(".tabler-icon-check"),
-    ).toBeInTheDocument();
+    ).not.toBeInTheDocument();
   });
 
   it("does not synthesize an external harness model into Goose", async () => {
@@ -269,7 +285,7 @@ describe("AgentModelPicker", () => {
       screen.queryByRole("button", { name: /synthetic-model/i }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /GPT-5\.5/i }),
+      screen.getByRole("button", { name: /^GPT-5\.5$/i }),
     ).toBeInTheDocument();
   });
 
@@ -509,6 +525,10 @@ describe("AgentModelPicker", () => {
     );
 
     expect(screen.getByText("Reasoning effort")).toBeInTheDocument();
+    const picker = screen.getByRole("dialog");
+    const initialWidthClass = Array.from(picker.classList).find((className) =>
+      className.startsWith("w-[min("),
+    );
 
     rerender(
       <AgentModelPicker
@@ -561,6 +581,11 @@ describe("AgentModelPicker", () => {
       },
       { timeout: 500 },
     );
+    expect(
+      Array.from(picker.classList).find((className) =>
+        className.startsWith("w-[min("),
+      ),
+    ).toBe(initialWidthClass);
   });
 
   it("passes the clicked model option through for duplicate model ids", async () => {
@@ -878,7 +903,7 @@ describe("AgentModelPicker", () => {
     const picker = screen.getByRole("dialog");
     expect(searchButton.parentElement).toHaveTextContent("Model");
     expect(searchButton).toHaveClass("mr-3", "h-6", "w-6");
-    expect(picker).toHaveClass("w-[26.25rem]");
+    expect(picker).toHaveClass("w-[min(28.25rem,calc(100vw-1.5rem))]");
     expect(within(picker).getByText("Claude Sonnet 4")).toBeInTheDocument();
     expect(within(picker).queryByText("GPT-4o mini")).not.toBeInTheDocument();
     expect(
@@ -940,7 +965,7 @@ describe("AgentModelPicker", () => {
     expect(
       within(picker).queryByText("gpt-4o-mini-2024-07-18"),
     ).not.toBeInTheDocument();
-    expect(picker).toHaveClass("w-[26.25rem]");
+    expect(picker).toHaveClass("w-[min(28.25rem,calc(100vw-1.5rem))]");
 
     if (modelViewport) {
       modelViewport.scrollTop = 120;
@@ -967,7 +992,7 @@ describe("AgentModelPicker", () => {
     ).not.toBeInTheDocument();
 
     await user.click(
-      within(picker).getByRole("button", { name: /GPT-4o mini/ }),
+      within(picker).getByRole("button", { name: /^GPT-4o mini$/ }),
     );
 
     // The selection is recorded as recently used, so it joins the compact
@@ -993,6 +1018,7 @@ describe("AgentModelPicker", () => {
           { id: "gpt-4o-mini", name: "GPT-4o mini" },
         ]}
         onModelChange={vi.fn()}
+        providerColumnMode="visible"
       />,
     );
 
@@ -1063,6 +1089,7 @@ describe("AgentModelPicker", () => {
           { id: "gpt-4o-mini", name: "GPT-4o mini" },
         ]}
         onModelChange={vi.fn()}
+        providerColumnMode="visible"
       />,
     );
 
@@ -1289,7 +1316,7 @@ describe("AgentModelPicker", () => {
       ).toHaveFocus();
     });
 
-    it("hides the switch-agent button while searching models", async () => {
+    it("keeps the switch-agent footer while searching models", async () => {
       const user = userEvent.setup();
       renderGated({ availableModels: BROWSABLE_MODELS });
 
@@ -1297,8 +1324,8 @@ describe("AgentModelPicker", () => {
       await user.click(screen.getByRole("button", { name: /search models/i }));
 
       expect(
-        screen.queryByRole("button", { name: /switch agent/i }),
-      ).toBeNull();
+        screen.getByRole("button", { name: /switch agent/i }),
+      ).toBeInTheDocument();
 
       await user.keyboard("{Escape}");
 
@@ -1307,7 +1334,7 @@ describe("AgentModelPicker", () => {
       ).toBeInTheDocument();
     });
 
-    it("hides the switch-agent button while browsing all models", async () => {
+    it("keeps the switch-agent footer while browsing all models", async () => {
       const user = userEvent.setup();
       renderGated({ availableModels: BROWSABLE_MODELS });
 
@@ -1315,8 +1342,8 @@ describe("AgentModelPicker", () => {
       await user.click(screen.getByRole("button", { name: /view more/i }));
 
       expect(
-        screen.queryByRole("button", { name: /switch agent/i }),
-      ).toBeNull();
+        screen.getByRole("button", { name: /switch agent/i }),
+      ).toBeInTheDocument();
 
       await user.keyboard("{Escape}");
       await waitFor(() => {
@@ -1411,22 +1438,22 @@ describe("AgentModelPicker", () => {
       await openPicker(user);
 
       const content = document.querySelector('[data-slot="popover-content"]');
-      expect(content).toHaveClass("w-[26.25rem]");
+      expect(content).toHaveClass("w-[min(28.25rem,calc(100vw-1.5rem))]");
 
       await user.click(screen.getByRole("button", { name: /switch agent/i }));
 
-      expect(content).toHaveClass("w-[37.25rem]");
+      expect(content).toHaveClass("w-[min(39.25rem,calc(100vw-1.5rem))]");
     });
 
-    it("hides the switch-agent button when the only agent is ready", async () => {
+    it("keeps the switch-agent footer during partial agent discovery", async () => {
       const user = userEvent.setup();
       renderGated({ agents: [{ id: "goose", label: "Goose" }] });
 
       await openPicker(user);
 
       expect(
-        screen.queryByRole("button", { name: /switch agent/i }),
-      ).toBeNull();
+        screen.getByRole("button", { name: /switch agent/i }),
+      ).toBeInTheDocument();
     });
 
     it("keeps the switch-agent button when the only agent needs setup", async () => {
@@ -1462,7 +1489,7 @@ describe("AgentModelPicker", () => {
       window.removeEventListener(OPEN_SETTINGS_EVENT, openSettings);
     });
 
-    it("keeps the agent column visible by default", async () => {
+    it("hides the agent column behind Switch agent by default", async () => {
       const user = userEvent.setup();
 
       render(
@@ -1481,11 +1508,16 @@ describe("AgentModelPicker", () => {
 
       expect(document.querySelector('[data-col="agent"]')).toHaveAttribute(
         "data-hidden",
+        "true",
+      );
+      expect(screen.queryByRole("button", { name: "Claude Code" })).toBeNull();
+
+      await user.click(screen.getByRole("button", { name: /switch agent/i }));
+
+      expect(document.querySelector('[data-col="agent"]')).toHaveAttribute(
+        "data-hidden",
         "false",
       );
-      expect(
-        screen.queryByRole("button", { name: /switch agent/i }),
-      ).toBeNull();
       expect(
         screen.getByRole("button", { name: "Claude Code" }),
       ).toBeInTheDocument();
@@ -1742,5 +1774,681 @@ describe("AgentModelPicker", () => {
         "Zeta Model",
       ]);
     });
+  });
+});
+
+describe("AgentModelPicker starred models", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    __resetStarredModelsCacheForTests();
+    vi.mocked(toast.error).mockClear();
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+    __resetStarredModelsCacheForTests();
+  });
+
+  const models = [
+    { id: "preferred", name: "Preferred", recommended: true },
+    { id: "also-preferred", name: "Also Preferred", recommended: true },
+    { id: "other", name: "Other" },
+    { id: "another", name: "Another" },
+  ];
+
+  const seedStar = (scopeId: string, modelId: string) => {
+    localStorage.setItem(
+      starredModelStorageKey(modelStarKey(scopeId, modelId)),
+      "1",
+    );
+  };
+
+  it("shows star actions on the preferred shortlist", async () => {
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="preferred"
+        currentModelName="Preferred"
+        availableModels={models}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    const picker = screen.getByRole("dialog");
+
+    expect(
+      within(picker).getByRole("button", { name: "Star Preferred" }),
+    ).toBeInTheDocument();
+    expect(
+      within(picker).getByRole("button", { name: "Star Also Preferred" }),
+    ).toBeInTheDocument();
+    expect(within(picker).queryByText("Other")).not.toBeInTheDocument();
+  });
+
+  it("always shows a non-recommended star above the preferred shortlist", async () => {
+    seedStar("goose", "other");
+    __resetStarredModelsCacheForTests();
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="preferred"
+        currentModelName="Preferred"
+        availableModels={models}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    const starredRow = document.querySelector(
+      `[data-model-key='${modelStarKey("goose", "other")}']`,
+    );
+    const divider = screen.getByTestId("starred-models-divider");
+    const preferredRow = document.querySelector(
+      `[data-model-key='${modelStarKey("goose", "preferred")}']`,
+    );
+
+    expect(starredRow).toBeInTheDocument();
+    expect(preferredRow).toBeInTheDocument();
+    expect(starredRow?.compareDocumentPosition(divider)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(divider.compareDocumentPosition(preferredRow as Element)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(screen.queryByText("Another")).not.toBeInTheDocument();
+  });
+
+  it("groups stars in View more without selecting the model", async () => {
+    const user = userEvent.setup();
+    const onModelChange = vi.fn();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="preferred"
+        currentModelName="Preferred"
+        availableModels={models}
+        onModelChange={onModelChange}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    const picker = screen.getByRole("dialog");
+    await user.click(within(picker).getByRole("button", { name: "View more" }));
+    await user.click(
+      within(picker).getByRole("button", { name: "Star Other" }),
+    );
+
+    expect(onModelChange).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(screen.getByTestId("starred-models-divider")).toBeInTheDocument(),
+    );
+  });
+
+  it("renders star actions through the shared Button contract with a ≥3:1 idle treatment", async () => {
+    seedStar("goose", "other");
+    __resetStarredModelsCacheForTests();
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="preferred"
+        currentModelName="Preferred"
+        availableModels={models}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    const picker = screen.getByRole("dialog");
+
+    // Unstarred rows idle on the ghost icon contract's muted-foreground; the
+    // pairing against the popover surface is enforced in globals.test.ts.
+    const idleStar = within(picker).getByRole("button", {
+      name: "Star Preferred",
+    });
+    expect(idleStar).toHaveAttribute("data-slot", "button");
+    expect(idleStar).toHaveAttribute("aria-pressed", "false");
+    expect(idleStar).toHaveClass("text-muted-foreground");
+    expect(idleStar).toHaveClass("hover:text-muted-foreground");
+    expect(idleStar).not.toHaveClass("text-foreground/80");
+    expect(idleStar).not.toHaveClass(
+      "opacity-0",
+      "opacity-100",
+      "transition-opacity",
+      "animate-in",
+      "fade-in",
+    );
+
+    const preferredRow = idleStar.closest("[data-model-key]");
+    expect(preferredRow).not.toBeNull();
+    const idleStarIcon = idleStar.firstElementChild;
+    expect(idleStarIcon).toBeInTheDocument();
+    await user.hover(preferredRow as HTMLElement);
+    expect(idleStar.firstElementChild).toBe(idleStarIcon);
+    expect(idleStar).not.toHaveClass("animate-in", "fade-in");
+    await user.unhover(preferredRow as HTMLElement);
+    expect(idleStar.firstElementChild).toBe(idleStarIcon);
+
+    const starredToggle = within(picker).getByRole("button", {
+      name: "Unstar Other",
+    });
+    expect(starredToggle).toHaveAttribute("data-slot", "button");
+    expect(starredToggle).toHaveAttribute("aria-pressed", "true");
+    expect(starredToggle).toHaveClass("text-foreground/80");
+    expect(starredToggle).toHaveClass("hover:text-foreground/80");
+    expect(starredToggle).not.toHaveClass(
+      "opacity-0",
+      "opacity-100",
+      "animate-in",
+      "fade-in",
+    );
+    expect(starredToggle).not.toHaveClass("text-muted-foreground");
+  });
+
+  it("does not restart the hover fade during a star click animation", async () => {
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="preferred"
+        currentModelName="Preferred"
+        availableModels={models}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    const star = screen.getByRole("button", { name: "Star Preferred" });
+    const row = star.closest("[data-model-key]");
+    expect(row).not.toBeNull();
+    const starIcon = star.firstElementChild;
+    await user.hover(row as HTMLElement);
+    expect(star.firstElementChild).toBe(starIcon);
+
+    await user.click(star);
+    expect(star).toHaveAttribute("data-star-animation-phase", "out");
+    expect(star.firstElementChild).toBe(starIcon);
+    expect(star).not.toHaveClass(
+      "opacity-0",
+      "opacity-100",
+      "animate-in",
+      "fade-in",
+    );
+  });
+
+  it("stores each star as its own entry so one toggle cannot drop another", async () => {
+    seedStar("goose", "other");
+    __resetStarredModelsCacheForTests();
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="preferred"
+        currentModelName="Preferred"
+        availableModels={models}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    const picker = screen.getByRole("dialog");
+    await user.click(within(picker).getByRole("button", { name: "View more" }));
+    await user.click(
+      within(picker).getByRole("button", { name: "Star Another" }),
+    );
+
+    await waitFor(() =>
+      expect(
+        localStorage.getItem(
+          starredModelStorageKey(modelStarKey("goose", "another")),
+        ),
+      ).toBe("1"),
+    );
+    // Starring one model must leave every other star entry untouched; an
+    // aggregate rewrite from a stale snapshot would drop "other" here.
+    expect(
+      localStorage.getItem(
+        starredModelStorageKey(modelStarKey("goose", "other")),
+      ),
+    ).toBe("1");
+    expect(
+      localStorage.getItem(
+        starredModelStorageKey(modelStarKey("goose", "another")),
+      ),
+    ).toBe("1");
+
+    await waitFor(() =>
+      expect(
+        picker.querySelector("[data-star-animation-phase]"),
+      ).not.toBeInTheDocument(),
+    );
+    await user.click(
+      within(picker).getByRole("button", { name: "Unstar Other" }),
+    );
+
+    await waitFor(() =>
+      expect(
+        localStorage.getItem(
+          starredModelStorageKey(modelStarKey("goose", "other")),
+        ),
+      ).toBeNull(),
+    );
+    expect(
+      localStorage.getItem(
+        starredModelStorageKey(modelStarKey("goose", "another")),
+      ),
+    ).toBe("1");
+  });
+
+  it("surfaces a persist failure when starring cannot be saved", async () => {
+    const setItemSpy = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
+        throw new DOMException("quota exceeded", "QuotaExceededError");
+      });
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="preferred"
+        currentModelName="Preferred"
+        availableModels={models}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    try {
+      await user.click(
+        screen.getByRole("button", { name: /choose agent and model/i }),
+      );
+      const picker = screen.getByRole("dialog");
+      await user.click(
+        within(picker).getByRole("button", { name: "View more" }),
+      );
+      await user.click(
+        within(picker).getByRole("button", { name: "Star Another" }),
+      );
+
+      await waitFor(() =>
+        expect(vi.mocked(toast.error)).toHaveBeenCalledTimes(1),
+      );
+      expect(vi.mocked(toast.error)).toHaveBeenCalledWith(
+        expect.stringMatching(/starred/i),
+      );
+      expect(
+        localStorage.getItem(
+          starredModelStorageKey(modelStarKey("goose", "another")),
+        ),
+      ).toBeNull();
+      // The optimistic toggle must not stick when the write failed.
+      expect(
+        within(picker).getByRole("button", { name: "Star Another" }),
+      ).toHaveAttribute("aria-pressed", "false");
+    } finally {
+      setItemSpy.mockRestore();
+    }
+  });
+
+  it("surfaces a persist failure when unstarring cannot be saved", async () => {
+    seedStar("goose", "other");
+    __resetStarredModelsCacheForTests();
+    const removeItemSpy = vi
+      .spyOn(Storage.prototype, "removeItem")
+      .mockImplementation(() => {
+        throw new DOMException("quota exceeded", "QuotaExceededError");
+      });
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="preferred"
+        currentModelName="Preferred"
+        availableModels={models}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    try {
+      await user.click(
+        screen.getByRole("button", { name: /choose agent and model/i }),
+      );
+      const picker = screen.getByRole("dialog");
+      await user.click(
+        within(picker).getByRole("button", { name: "Unstar Other" }),
+      );
+
+      await waitFor(() =>
+        expect(vi.mocked(toast.error)).toHaveBeenCalledTimes(1),
+      );
+      expect(vi.mocked(toast.error)).toHaveBeenCalledWith(
+        expect.stringMatching(/starred/i),
+      );
+      expect(
+        localStorage.getItem(
+          starredModelStorageKey(modelStarKey("goose", "other")),
+        ),
+      ).toBe("1");
+      expect(
+        within(picker).getByRole("button", { name: "Unstar Other" }),
+      ).toHaveAttribute("aria-pressed", "true");
+    } finally {
+      removeItemSpy.mockRestore();
+    }
+  });
+  it("renders a starred current model unstarred once its provider drops it", async () => {
+    seedStar("prov-a", "ghost");
+    __resetStarredModelsCacheForTests();
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="ghost"
+        currentModelName="Ghost"
+        currentModelProviderId="prov-a"
+        availableModels={[
+          {
+            id: "preferred",
+            name: "Preferred",
+            recommended: true,
+            providerId: "prov-a",
+          },
+          { id: "other", name: "Other", providerId: "prov-a" },
+        ]}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    screen.getByRole("dialog");
+
+    // The dropped selection stays visible so the user can see what is in use...
+    const ghostRow = document.querySelector(
+      '[data-model-key=\'["prov-a","ghost"]\']',
+    );
+    expect(ghostRow).toBeInTheDocument();
+    // ...but it is no longer a favorite: no star state, no toggle, no divider.
+    expect(ghostRow).not.toHaveAttribute("data-starred");
+    expect(
+      within(ghostRow as HTMLElement).queryByRole("button", {
+        name: /star ghost/i,
+      }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("starred-models-divider"),
+    ).not.toBeInTheDocument();
+    // The stored entry survives so the star returns if the model does.
+    expect(
+      localStorage.getItem(
+        starredModelStorageKey(modelStarKey("prov-a", "ghost")),
+      ),
+    ).toBe("1");
+  });
+
+  it("hides a starred model that is no longer in the available list", async () => {
+    seedStar("goose", "ghost");
+    __resetStarredModelsCacheForTests();
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="preferred"
+        currentModelName="Preferred"
+        availableModels={[
+          { id: "preferred", name: "Preferred", recommended: true },
+          { id: "other", name: "Other" },
+        ]}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+
+    expect(
+      document.querySelector('[data-model-key=\'["goose","ghost"]\']'),
+    ).not.toBeInTheDocument();
+    expect(
+      localStorage.getItem(
+        starredModelStorageKey(modelStarKey("goose", "ghost")),
+      ),
+    ).toBe("1");
+  });
+
+  it("sorts favorites alphabetically across agents and providers", async () => {
+    seedStar("claude-acp", "zebra");
+    seedStar("goose", "alpha");
+    seedStar("codex-acp", "middle");
+    __resetStarredModelsCacheForTests();
+    const user = userEvent.setup();
+    const favoriteModels = [
+      {
+        agentId: "claude-acp",
+        model: { id: "zebra", name: "zebra" },
+      },
+      {
+        agentId: "goose",
+        model: { id: "alpha", name: "Alpha", providerId: "goose" },
+      },
+      {
+        agentId: "codex-acp",
+        model: { id: "middle", name: "Middle" },
+      },
+    ];
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="preferred"
+        currentModelName="Preferred"
+        availableModels={models}
+        favoriteModels={favoriteModels}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    const picker = screen.getByRole("dialog");
+    const favoriteKeys = Array.from(
+      picker.querySelectorAll('[data-starred="true"]'),
+    ).map((row) => row.getAttribute("data-model-key"));
+    expect(favoriteKeys).toEqual([
+      modelStarKey("goose", "alpha"),
+      modelStarKey("codex-acp", "middle"),
+      modelStarKey("claude-acp", "zebra"),
+    ]);
+  });
+
+  it("keeps one stable row when unstarring Claude default", async () => {
+    seedStar("claude-acp", "default");
+    __resetStarredModelsCacheForTests();
+    const user = userEvent.setup();
+    const selectedModels = [
+      { id: "default", name: "Default" },
+      { id: "sonnet", name: "Sonnet" },
+    ];
+    const favoriteModels = [
+      {
+        agentId: "claude-acp",
+        // A distinct object mirrors the combined-catalog copy used by the app.
+        model: { id: "default", name: "Default" },
+      },
+    ];
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="claude-acp"
+        onAgentChange={vi.fn()}
+        currentModelId="default"
+        currentModelName="Default"
+        availableModels={selectedModels}
+        favoriteModels={favoriteModels}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    const picker = screen.getByRole("dialog");
+    await user.click(
+      within(picker).getByRole("button", { name: "Unstar Default" }),
+    );
+    await waitFor(() =>
+      expect(
+        localStorage.getItem(
+          starredModelStorageKey(modelStarKey("claude-acp", "default")),
+        ),
+      ).toBeNull(),
+    );
+
+    expect(
+      Array.from(picker.querySelectorAll("[data-model-key]")).filter(
+        (row) =>
+          row.getAttribute("data-model-key") ===
+          modelStarKey("claude-acp", "default"),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("scopes same-ID selected state to the active agent", async () => {
+    seedStar("claude-acp", "shared");
+    __resetStarredModelsCacheForTests();
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="shared"
+        currentModelName="Shared"
+        availableModels={[{ id: "shared", name: "Shared" }]}
+        favoriteModels={[
+          { agentId: "goose", model: { id: "shared", name: "Shared" } },
+          { agentId: "claude-acp", model: { id: "shared", name: "Shared" } },
+        ]}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    const selectedRows = screen
+      .getByRole("dialog")
+      .querySelectorAll('[data-model-key][data-selected="true"]');
+    expect(selectedRows).toHaveLength(1);
+    expect(selectedRows[0]).toHaveAttribute(
+      "data-model-key",
+      modelStarKey("goose", "shared"),
+    );
+    expect(
+      screen.getByRole("button", { name: "Shared, Claude Code" }),
+    ).not.toHaveAttribute("data-selected");
+  });
+
+  it("keeps favorites from other agents visible and switches before selecting", async () => {
+    seedStar("claude-acp", "opus");
+    __resetStarredModelsCacheForTests();
+    const user = userEvent.setup();
+    const onAgentChange = vi.fn();
+    const onModelChange = vi.fn();
+    const favoriteModels = [
+      ...models.map((model) => ({ agentId: "goose", model })),
+      {
+        agentId: "claude-acp",
+        model: { id: "opus", name: "Claude Opus" },
+      },
+    ];
+    const { rerender } = render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={onAgentChange}
+        currentModelId="preferred"
+        currentModelName="Preferred"
+        availableModels={models}
+        favoriteModels={favoriteModels}
+        onModelChange={onModelChange}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    const picker = screen.getByRole("dialog");
+    const claudeFavorite = within(picker)
+      .getByText("Claude Opus")
+      .closest("[data-model-key]");
+    expect(claudeFavorite).toBeInTheDocument();
+    expect(
+      within(claudeFavorite as HTMLElement).getByTitle("Claude"),
+    ).toBeInTheDocument();
+    expect(
+      within(claudeFavorite as HTMLElement).getByText("Claude Code"),
+    ).toBeInTheDocument();
+    const claudeModelButton = within(claudeFavorite as HTMLElement).getByRole(
+      "button",
+      { name: "Claude Opus, Claude Code" },
+    );
+    await user.click(claudeModelButton);
+    expect(onAgentChange).toHaveBeenCalledWith("claude-acp");
+    expect(onModelChange).not.toHaveBeenCalled();
+
+    rerender(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="claude-acp"
+        onAgentChange={onAgentChange}
+        currentModelId={null}
+        availableModels={[{ id: "opus", name: "Claude Opus" }]}
+        favoriteModels={favoriteModels}
+        onModelChange={onModelChange}
+      />,
+    );
+    expect(onModelChange).toHaveBeenCalledWith(
+      "opus",
+      expect.objectContaining({ id: "opus" }),
+    );
   });
 });

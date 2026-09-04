@@ -154,6 +154,7 @@ export interface ChatInputAgentModelPicker {
   currentModel?: string;
   currentExecutionTarget?: SessionExecutionTarget;
   availableModels?: ModelOption[];
+  favoriteModels?: Array<{ agentId: string; model: ModelOption }>;
   modelsLoading?: boolean;
   modelStatusMessage?: string | null;
   onModelChange?: (modelId: string, model?: ModelOption) => void;

@@ -384,6 +384,7 @@ export function ConversationComposerCapability({
         currentModel: controller.currentModelName ?? undefined,
         currentExecutionTarget: controller.currentExecutionTarget,
         availableModels: controller.availableModels,
+        favoriteModels: controller.favoriteModels,
         modelsLoading: controller.modelsLoading,
         modelStatusMessage: controller.modelStatusMessage,
         onModelChange: controller.handleModelChange,

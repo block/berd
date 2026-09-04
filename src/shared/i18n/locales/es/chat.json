@@ -367,6 +367,7 @@
     "voiceStopBeforeArchiveError": "No se pudo detener la conversación de voz, así que el chat no se archivó",
     "gitInspectionError": "No se pudieron inspeccionar los worktrees o las ramas. El chat no se archivó.",
     "gitCleanupError": "El chat se archivó, pero no se pudo completar la limpieza de Git",
+    "starredModelsPersistError": "No se pudieron actualizar tus modelos favoritos. El almacenamiento del dispositivo puede estar lleno o no disponible.",
     "moveError": "No se pudo mover el chat",
     "renameError": "No se pudo cambiar el nombre del chat"
   },
@@ -623,7 +624,9 @@
         "agent-speaking": "El agente está hablando…",
         "error": "Error de conversación de voz: {{error}}"
       }
-    }
+    },
+    "starModel": "Destacar {{model}}",
+    "unstarModel": "Quitar {{model}} de destacados"
   },
   "tools": {
     "content": "Contenido",

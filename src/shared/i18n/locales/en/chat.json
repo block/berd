@@ -368,6 +368,7 @@
     "voiceStopBeforeArchiveError": "Couldn't stop voice, so the chat wasn't archived",
     "gitInspectionError": "Couldn't inspect the worktrees or branches. The chat wasn't archived.",
     "gitCleanupError": "Chat archived, but Git cleanup couldn't finish",
+    "starredModelsPersistError": "Couldn't update your starred models. Device storage may be full or unavailable.",
     "moveError": "Failed to move chat",
     "renameError": "Failed to rename chat"
   },
@@ -638,7 +639,9 @@
         "agent-speaking": "Agent is speaking…",
         "error": "Voice conversation error: {{error}}"
       }
-    }
+    },
+    "starModel": "Star {{model}}",
+    "unstarModel": "Unstar {{model}}"
   },
   "tools": {
     "content": "Content",
