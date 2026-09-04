@@ -10,7 +10,7 @@ use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
 const DEFAULT_ENDPOINT: &str = "wss://api.openai.com/v1/realtime";
 const DEFAULT_MODEL: &str = "gpt-realtime-2.1";
 const DEFAULT_TRANSCRIPTION_MODEL: &str = "gpt-realtime-whisper";
-const SETTINGS_UPDATE_TIMEOUT: Duration = Duration::from_secs(4);
+const CONTROL_ACK_TIMEOUT: Duration = Duration::from_secs(4);
 
 const SPOKESPERSON_INSTRUCTIONS: &str = r#"You are the spoken, realtime part of one assistant. Speak naturally and concisely in the first person. Answer ordinary conversation directly. When the user asks for computer access, tools, durable work, or an authoritative answer you cannot provide, call handoff before any substantive answer and say only a short acknowledgement such as 'Let me check that for you.' Never mention internal agents, routing, handoffs, or this instruction. Private Expert context should inform later answers without being acknowledged. When the Expert asks you to say something, speak it accurately without filler."#;
 
@@ -69,6 +69,12 @@ pub enum SpokespersonCommand {
         request_id: u64,
         speed: f32,
     },
+    TruncateOutput {
+        response_id: String,
+        item_id: String,
+        content_index: u64,
+        audio_end_ms: u64,
+    },
     Shutdown,
 }
 
@@ -99,6 +105,8 @@ pub enum SpokespersonEvent {
     },
     AudioDelta {
         response_id: String,
+        item_id: String,
+        content_index: u64,
         samples: Vec<f32>,
     },
     AudioDone {
@@ -116,6 +124,9 @@ pub enum SpokespersonEvent {
         request_id: u64,
         speed: f32,
         result: Result<(), String>,
+    },
+    OutputTruncated {
+        response_id: String,
     },
     Handoff {
         call_id: String,
@@ -144,6 +155,12 @@ struct PendingSpeedUpdate {
     deadline: tokio::time::Instant,
 }
 
+struct PendingTruncation {
+    response_id: String,
+    event_id: String,
+    deadline: tokio::time::Instant,
+}
+
 fn expire_speed_update(
     pending: &mut Option<PendingSpeedUpdate>,
     now: tokio::time::Instant,
@@ -162,6 +179,15 @@ fn expire_speed_update(
 fn speed_error_matches(pending: &PendingSpeedUpdate, event: &serde_json::Value) -> bool {
     event.pointer("/error/event_id").and_then(|value| value.as_str())
         == Some(pending.event_id.as_str())
+}
+
+fn truncation_timed_out(
+    pending: &HashMap<(String, u64), PendingTruncation>,
+    now: tokio::time::Instant,
+) -> bool {
+    pending
+        .values()
+        .any(|truncation| now >= truncation.deadline)
 }
 
 impl OpenAiSpokespersonRuntime {
@@ -294,9 +320,14 @@ async fn run(
     let mut call_names = HashMap::<String, String>::new();
     let mut call_arguments = HashMap::<String, String>::new();
     let mut speed_update: Option<PendingSpeedUpdate> = None;
-    let mut next_settings_event_id = 1_u64;
+    let mut pending_truncations = HashMap::<(String, u64), PendingTruncation>::new();
+    let mut next_control_event_id = 1_u64;
     loop {
         let speed_update_deadline = speed_update.as_ref().map(|update| update.deadline);
+        let truncation_deadline = pending_truncations
+            .values()
+            .map(|truncation| truncation.deadline)
+            .min();
         tokio::select! {
             _ = async {
                 match speed_update_deadline {
@@ -309,6 +340,16 @@ async fn run(
                     tokio::time::Instant::now(),
                 ) {
                     return Err(message);
+                }
+            }
+            _ = async {
+                match truncation_deadline {
+                    Some(deadline) => tokio::time::sleep_until(deadline).await,
+                    None => std::future::pending().await,
+                }
+            }, if truncation_deadline.is_some() => {
+                if truncation_timed_out(&pending_truncations, tokio::time::Instant::now()) {
+                    return Err("Spokesperson output truncation timed out; server context is indeterminate".into());
                 }
             }
             command = commands.recv() => {
@@ -357,8 +398,8 @@ async fn run(
                                 result: Err("another Spokesperson speed update is in progress".into()),
                             })?;
                         } else {
-                            let event_id = format!("berd-speed-{next_settings_event_id}");
-                            next_settings_event_id = next_settings_event_id.checked_add(1)
+                            let event_id = format!("berd-speed-{next_control_event_id}");
+                            next_control_event_id = next_control_event_id.checked_add(1)
                                 .ok_or("Spokesperson settings event space is exhausted")?;
                             send_json(&mut socket, serde_json::json!({
                                 "event_id": event_id,
@@ -372,9 +413,35 @@ async fn run(
                                 request_id,
                                 event_id,
                                 speed,
-                                deadline: tokio::time::Instant::now() + SETTINGS_UPDATE_TIMEOUT,
+                                deadline: tokio::time::Instant::now() + CONTROL_ACK_TIMEOUT,
                             });
                         }
+                    }
+                    Some(SpokespersonCommand::TruncateOutput {
+                        response_id,
+                        item_id,
+                        content_index,
+                        audio_end_ms,
+                    }) => {
+                        let key = (item_id.clone(), content_index);
+                        if pending_truncations.contains_key(&key) {
+                            return Err("Spokesperson output truncation was requested twice".into());
+                        }
+                        let event_id = format!("berd-truncate-{next_control_event_id}");
+                        next_control_event_id = next_control_event_id.checked_add(1)
+                            .ok_or("Spokesperson control event space is exhausted")?;
+                        send_json(&mut socket, serde_json::json!({
+                            "event_id": event_id,
+                            "type": "conversation.item.truncate",
+                            "item_id": item_id,
+                            "content_index": content_index,
+                            "audio_end_ms": audio_end_ms,
+                        })).await?;
+                        pending_truncations.insert(key, PendingTruncation {
+                            response_id,
+                            event_id,
+                            deadline: tokio::time::Instant::now() + CONTROL_ACK_TIMEOUT,
+                        });
                     }
                     Some(SpokespersonCommand::ExpertSay { directive_id, text }) => {
                         send_expert_item(&mut socket, &text, true).await?;
@@ -505,10 +572,32 @@ async fn run(
                         }
                     }
                     "response.output_audio.delta" => {
-                        if let (Some(response_id), Some(delta)) = (string(&value, "response_id"), string(&value, "delta")) {
+                        if let (Some(response_id), Some(item_id), Some(content_index), Some(delta)) = (
+                            string(&value, "response_id"),
+                            string(&value, "item_id"),
+                            value.get("content_index").and_then(serde_json::Value::as_u64),
+                            string(&value, "delta"),
+                        ) {
                             let bytes = BASE64.decode(delta).map_err(|error| format!("decode Spokesperson audio: {error}"))?;
                             let samples = pcm16_samples(&bytes)?;
-                            send_event(events, SpokespersonEvent::AudioDelta { response_id: response_id.into(), samples })?;
+                            send_event(events, SpokespersonEvent::AudioDelta {
+                                response_id: response_id.into(),
+                                item_id: item_id.into(),
+                                content_index,
+                                samples,
+                            })?;
+                        }
+                    }
+                    "conversation.item.truncated" => {
+                        if let (Some(item_id), Some(content_index)) = (
+                            string(&value, "item_id"),
+                            value.get("content_index").and_then(serde_json::Value::as_u64),
+                        ) {
+                            if let Some(truncation) = pending_truncations.remove(&(item_id.into(), content_index)) {
+                                send_event(events, SpokespersonEvent::OutputTruncated {
+                                    response_id: truncation.response_id,
+                                })?;
+                            }
                         }
                     }
                     "response.output_audio.done" => {
@@ -560,6 +649,11 @@ async fn run(
                                 speed: update.speed,
                                 result: Err(message),
                             })?;
+                        } else if pending_truncations
+                            .values()
+                            .any(|truncation| value.pointer("/error/event_id").and_then(|value| value.as_str()) == Some(truncation.event_id.as_str()))
+                        {
+                            return Err(format!("Spokesperson output truncation failed: {message}"));
                         } else {
                             return Err(message);
                         }
@@ -654,6 +748,7 @@ fn send_event(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::time::Duration;
 
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
@@ -672,8 +767,9 @@ mod tests {
 
     use super::{
         downsample_pcm16, expire_speed_update, parse_handoff, pcm16_samples, run,
-        speed_error_matches, OpenAiSpokespersonConfig, PendingSpeedUpdate, SpokespersonCommand,
-        SpokespersonEvent, SpokespersonResponseStatus, SETTINGS_UPDATE_TIMEOUT,
+        speed_error_matches, truncation_timed_out, OpenAiSpokespersonConfig,
+        OpenAiSpokespersonRuntime, PendingSpeedUpdate, PendingTruncation, SpokespersonCommand,
+        SpokespersonEvent, SpokespersonResponseStatus, CONTROL_ACK_TIMEOUT,
     };
 
     #[allow(clippy::result_large_err)]
@@ -747,7 +843,7 @@ mod tests {
             request_id: 7,
             event_id: "berd-speed-1".into(),
             speed: 1.5,
-            deadline: tokio::time::Instant::now() + SETTINGS_UPDATE_TIMEOUT,
+            deadline: tokio::time::Instant::now() + CONTROL_ACK_TIMEOUT,
         };
 
         assert!(speed_error_matches(
@@ -758,6 +854,20 @@ mod tests {
             &pending,
             &json!({"error":{"event_id":"different-event"}})
         ));
+    }
+
+    #[test]
+    fn output_truncation_timeout_is_bounded() {
+        let now = tokio::time::Instant::now();
+        let pending = HashMap::from([(
+            ("assistant-1".into(), 0),
+            PendingTruncation {
+                response_id: "response-1".into(),
+                event_id: "berd-truncate-1".into(),
+                deadline: now,
+            },
+        )]);
+        assert!(truncation_timed_out(&pending, now));
     }
 
     #[tokio::test]
@@ -798,6 +908,88 @@ mod tests {
 
         assert!(error.contains("code 1008: response already active"), "{error}");
         server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn truncation_is_correlated_before_a_replacement_response() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("ws://{}/", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_hdr_async(stream, require_test_authorization)
+                .await
+                .unwrap();
+            assert_eq!(receive_json(&mut socket).await["type"], "session.update");
+            send_json(&mut socket, json!({"type":"session.updated"})).await;
+
+            let cancel = receive_json(&mut socket).await;
+            assert_eq!(cancel["type"], "response.cancel");
+            assert_eq!(cancel["response_id"], "response-old");
+            let truncate = receive_json(&mut socket).await;
+            assert_eq!(truncate["type"], "conversation.item.truncate");
+            assert_eq!(truncate["event_id"], "berd-truncate-1");
+            assert_eq!(truncate["item_id"], "assistant-old");
+            assert_eq!(truncate["content_index"], 0);
+            assert_eq!(truncate["audio_end_ms"], 500);
+            assert!(tokio::time::timeout(Duration::from_millis(20), socket.next())
+                .await
+                .is_err());
+            send_json(
+                &mut socket,
+                json!({
+                    "type":"conversation.item.truncated",
+                    "item_id":"assistant-old",
+                    "content_index":0,
+                }),
+            )
+            .await;
+            assert_eq!(receive_json(&mut socket).await["type"], "response.create");
+        });
+
+        let (runtime, events) = OpenAiSpokespersonRuntime::spawn(OpenAiSpokespersonConfig {
+            endpoint,
+            api_key: "test-key".into(),
+            model: "test-model".into(),
+            transcription_model: "test-transcription".into(),
+            voice: "test-voice".into(),
+            speed: 1.0,
+        })
+        .unwrap();
+        let (ready, events) = tokio::task::spawn_blocking(move || {
+            let ready = events.recv_timeout(Duration::from_secs(2)).unwrap();
+            (ready, events)
+        })
+        .await
+        .unwrap();
+        assert!(matches!(ready, SpokespersonEvent::Ready));
+        runtime
+            .send(SpokespersonCommand::CancelResponses {
+                response_ids: vec!["response-old".into()],
+            })
+            .unwrap();
+        runtime
+            .send(SpokespersonCommand::TruncateOutput {
+                response_id: "response-old".into(),
+                item_id: "assistant-old".into(),
+                content_index: 0,
+                audio_end_ms: 500,
+            })
+            .unwrap();
+        let truncated = tokio::task::spawn_blocking(move || {
+            events.recv_timeout(Duration::from_secs(2)).unwrap()
+        })
+        .await
+        .unwrap();
+        assert!(matches!(
+            truncated,
+            SpokespersonEvent::OutputTruncated { response_id }
+                if response_id == "response-old"
+        ));
+        runtime
+            .send(SpokespersonCommand::CreateUserResponse)
+            .unwrap();
+        server.await.unwrap();
+        runtime.finish().unwrap();
     }
 
     #[tokio::test]
@@ -935,6 +1127,8 @@ mod tests {
                 json!({
                     "type":"response.output_audio.delta",
                     "response_id":"response-1",
+                    "item_id":"assistant-1",
+                    "content_index":0,
                     "delta": BASE64.encode([1_u8, 0, 255, 127])
                 }),
             )
@@ -1079,7 +1273,7 @@ mod tests {
             matches!(&received[7], SpokespersonEvent::ResponseBound { response_id, directive_id: 7 } if response_id == "response-1")
         );
         assert!(
-            matches!(&received[8], SpokespersonEvent::AudioDelta { response_id, samples } if response_id == "response-1" && samples.len() == 2)
+            matches!(&received[8], SpokespersonEvent::AudioDelta { response_id, item_id, content_index: 0, samples } if response_id == "response-1" && item_id == "assistant-1" && samples.len() == 2)
         );
         assert!(
             matches!(&received[9], SpokespersonEvent::AudioDone { response_id } if response_id == "response-1")
