@@ -308,7 +308,17 @@ async fn run(
             message = socket.next() => {
                 let text = match message {
                     Some(Ok(Message::Text(text))) => text,
-                    Some(Ok(Message::Close(_))) | None => return Ok(()),
+                    Some(Ok(Message::Close(frame))) => {
+                        let detail = frame
+                            .map(|frame| {
+                                format!("code {}: {}", u16::from(frame.code), frame.reason)
+                            })
+                            .unwrap_or_else(|| "without a close frame".into());
+                        return Err(format!("OpenAI Realtime connection closed {detail}"));
+                    }
+                    None => {
+                        return Err("OpenAI Realtime connection ended without a close frame".into());
+                    }
                     Some(Ok(_)) => continue,
                     Some(Err(error)) => return Err(error.to_string()),
                 };
@@ -522,6 +532,7 @@ mod tests {
         accept_hdr_async,
         tungstenite::{
             handshake::server::{ErrorResponse, Request, Response},
+            protocol::{frame::coding::CloseCode, CloseFrame},
             Message,
         },
         WebSocketStream,
@@ -578,6 +589,46 @@ mod tests {
         );
         assert_eq!(parse_handoff(r#"{"message":" "}"#), None);
         assert_eq!(parse_handoff("not json"), None);
+    }
+
+    #[tokio::test]
+    async fn preserves_unexpected_realtime_close_details() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("ws://{}/", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_hdr_async(stream, require_test_authorization)
+                .await
+                .unwrap();
+            assert_eq!(receive_json(&mut socket).await["type"], "session.update");
+            socket
+                .close(Some(CloseFrame {
+                    code: CloseCode::Policy,
+                    reason: "response already active".into(),
+                }))
+                .await
+                .unwrap();
+        });
+
+        let (_commands, command_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (events, _event_rx) = std::sync::mpsc::channel();
+        let error = run(
+            OpenAiSpokespersonConfig {
+                endpoint,
+                api_key: "test-key".into(),
+                model: "test-model".into(),
+                transcription_model: "test-transcription".into(),
+                voice: "test-voice".into(),
+                speed: 1.0,
+            },
+            command_rx,
+            &events,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.contains("code 1008: response already active"), "{error}");
+        server.await.unwrap();
     }
 
     #[tokio::test]
