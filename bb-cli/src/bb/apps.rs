@@ -35,7 +35,7 @@ use super::display::{print_json, terminal_safe_text, Style};
 use super::runner;
 #[cfg(test)]
 use super::skills_api::failure_info;
-use super::skills_api::{exit_codes, failure};
+use super::skills_api::{exit_codes, failure, CliFailure};
 use super::skills_config::SkillsConfig;
 
 const APPS_BASE_URL_ENV_VAR: &str = "BB_APPS_CONTROL_PLANE_URL";
@@ -137,7 +137,9 @@ pub fn command() -> Command {
                     "Plan an app identity through Apps Platform, reserve that exact ID, then \
                      initialize it only when the returned plan marks initialization as required \
                      or recommended. Supply a descriptive DNS-safe app ID or a human-readable \
-                     name from which the control plane can derive one.",
+                     name from which the control plane can derive one. If creation is interrupted \
+                     after reservation, repeat the same command to reconcile the caller-owned \
+                     idle reservation and continue initialization.",
                 )
                 .group(
                     ArgGroup::new("app-identity")
@@ -543,15 +545,22 @@ fn run_create(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
             "Apps Platform plan response did not include initialize.required or initialize.recommended"
         );
     }
-    let should_initialize =
+    let plan_requests_initialize =
         initialize_required.unwrap_or(false) || initialize_recommended.unwrap_or(false);
     let mutation_request = mutation_request_from_plan(&plan);
-    let reservation = client.reserve(&credential, &app_id, &mutation_request)?;
-    let reserved_app_id =
-        required_response_string(&reservation, "app_id", "Apps Platform reserve")?;
-    require_exact_app_id("reserve", &app_id, reserved_app_id)?;
+    let (reservation, reservation_reconciled) =
+        reconcile_create_reservation(&client, &credential, &app_id, &plan, &mutation_request)?;
+    let should_initialize = plan_requests_initialize
+        || (reservation_reconciled
+            && plan.get("runtime_profile").and_then(Value::as_str) != Some("static"));
     let initialize = if should_initialize {
-        let response = client.initialize(&credential, &app_id, &mutation_request)?;
+        let response = client
+            .initialize(&credential, &app_id, &mutation_request)
+            .with_context(|| {
+                format!(
+                    "Apps Platform reserved app_id {app_id:?}, but initialization did not complete. Retry the same `bb apps create` command to reconcile the reservation and continue initialization."
+                )
+            })?;
         let initialized_app_id =
             required_response_string(&response, "app_id", "Apps Platform initialize")?;
         require_exact_app_id("initialize", &app_id, initialized_app_id)?;
@@ -574,11 +583,140 @@ fn run_create(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
         "app_id": app_id,
         "external_url": effective_external_url,
         "reserved": true,
+        "reservation_reconciled": reservation_reconciled,
         "initialized": initialize.is_some(),
         "plan": plan,
         "reservation": reservation,
         "initialize": initialize,
     }))
+}
+
+fn reconcile_create_reservation(
+    client: &ControlPlaneClient,
+    credential: &ComposeSessionCredential,
+    app_id: &str,
+    plan: &Value,
+    mutation_request: &Value,
+) -> Result<(Value, bool)> {
+    match client.reserve(credential, app_id, mutation_request) {
+        Ok(reservation) => {
+            let reserved_app_id =
+                required_response_string(&reservation, "app_id", "Apps Platform reserve")?;
+            require_exact_app_id("reserve", app_id, reserved_app_id)?;
+            Ok((reservation, false))
+        }
+        Err(reserve_error) => {
+            let environment = mutation_request.get("environment").and_then(Value::as_str);
+            match client.get_app(credential, app_id, environment) {
+                Ok(existing)
+                    if is_matching_incomplete_reservation(&existing, app_id, mutation_request) =>
+                {
+                    Ok((
+                        json!({
+                            "ok": true,
+                            "app_id": app_id,
+                            "external_url": plan.get("external_url").cloned().unwrap_or(Value::Null),
+                            "reconciled": true,
+                            "app": existing.get("app").cloned().unwrap_or(Value::Null),
+                        }),
+                        true,
+                    ))
+                }
+                Ok(_) if reservation_outcome_is_unknown(&reserve_error) => {
+                    let mismatch = anyhow::anyhow!(
+                        "the inspected app was not the same caller-owned, incomplete reservation"
+                    );
+                    Err(reservation_outcome_unknown(
+                        app_id,
+                        environment,
+                        &reserve_error,
+                        &mismatch,
+                    ))
+                }
+                Ok(_) => Err(reserve_error),
+                Err(inspect_error) if reservation_outcome_is_unknown(&reserve_error) => {
+                    Err(reservation_outcome_unknown(
+                        app_id,
+                        environment,
+                        &reserve_error,
+                        &inspect_error,
+                    ))
+                }
+                Err(_) => Err(reserve_error),
+            }
+        }
+    }
+}
+
+fn is_matching_incomplete_reservation(
+    response: &Value,
+    app_id: &str,
+    mutation_request: &Value,
+) -> bool {
+    let Some(app) = response.get("app") else {
+        return false;
+    };
+    if app.get("app_id").and_then(Value::as_str) != Some(app_id)
+        || app.get("role").and_then(Value::as_str) != Some("owner")
+        || app.get("route_status").and_then(Value::as_str) != Some("idle")
+        || app.get("route_revision").and_then(Value::as_u64) != Some(1)
+        || value_has_text(app.get("active_version_id"))
+        || value_has_text(app.get("version_id"))
+        || value_has_text(app.get("deleted_at"))
+        || response
+            .get("versions")
+            .and_then(Value::as_array)
+            .is_some_and(|versions| !versions.is_empty())
+    {
+        return false;
+    }
+    [
+        ("environment", "environment"),
+        ("persistence", "persistence"),
+        ("runtime_class", "runtime_class"),
+        ("name", "name"),
+    ]
+    .into_iter()
+    .all(|(request_field, app_field)| {
+        mutation_request
+            .get(request_field)
+            .and_then(Value::as_str)
+            .is_none_or(|expected| app.get(app_field).and_then(Value::as_str) == Some(expected))
+    })
+}
+
+fn value_has_text(value: Option<&Value>) -> bool {
+    value
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.is_empty())
+}
+
+fn reservation_outcome_is_unknown(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<CliFailure>())
+        .is_none_or(|failure| failure.code == "network_error")
+}
+
+fn reservation_outcome_unknown(
+    app_id: &str,
+    environment: Option<&str>,
+    reserve_error: &anyhow::Error,
+    inspect_error: &anyhow::Error,
+) -> anyhow::Error {
+    let environment_argument = environment
+        .map(|value| format!(" --environment {value}"))
+        .unwrap_or_default();
+    failure(
+        exit_codes::NETWORK,
+        "reservation_outcome_unknown",
+        format!(
+            "Apps Platform may have reserved app_id {app_id:?}, but the CLI did not receive a complete reservation result and could not verify the app.\n\
+             reserve_error: {reserve_error:#}\n\
+             inspection_error: {inspect_error:#}\n\
+             next_action: Run `bb apps get {app_id}{environment_argument}`. If it reports a caller-owned app with route_status `idle`, retry the same `bb apps create` command; the retry will reconcile that reservation and continue initialization."
+        ),
+    )
 }
 
 fn require_exact_app_id(stage: &str, expected: &str, actual: &str) -> Result<()> {
@@ -1577,12 +1715,29 @@ mod tests {
     #[derive(Clone)]
     struct ProcessResponse {
         status: u16,
-        body: Value,
+        body: String,
     }
 
     impl ProcessResponse {
         fn json(body: Value) -> Self {
-            Self { status: 200, body }
+            Self {
+                status: 200,
+                body: body.to_string(),
+            }
+        }
+
+        fn json_status(status: u16, body: Value) -> Self {
+            Self {
+                status,
+                body: body.to_string(),
+            }
+        }
+
+        fn raw(status: u16, body: impl Into<String>) -> Self {
+            Self {
+                status,
+                body: body.into(),
+            }
         }
     }
 
@@ -1650,7 +1805,7 @@ mod tests {
                         });
                     request
                         .respond(
-                            Response::from_string(response.body.to_string())
+                            Response::from_string(response.body)
                                 .with_status_code(response.status)
                                 .with_header(
                                     Header::from_bytes("Content-Type", "application/json")
@@ -2499,18 +2654,26 @@ mod tests {
             "runtime_class": "default",
             "initialize": {"required": true, "recommended": true}
         });
-        let collision = ProcessResponse {
-            status: 409,
-            body: json!({
+        let collision = ProcessResponse::json_status(
+            409,
+            json!({
                 "ok": false,
                 "error": {
                     "code": "app_id_collision",
                     "message": "app_id is already reserved"
                 }
             }),
-        };
+        );
+        let not_owned = ProcessResponse::json_status(
+            403,
+            json!({
+                "ok": false,
+                "error": {"code": "owner_required", "message": "caller does not own app"}
+            }),
+        );
         let auth_server = ProcessServer::start(vec![process_auth_response()]);
-        let control_plane = ProcessServer::start(vec![ProcessResponse::json(plan), collision]);
+        let control_plane =
+            ProcessServer::start(vec![ProcessResponse::json(plan), collision, not_owned]);
         let mut command = process_command(
             &auth_server,
             &control_plane,
@@ -2534,12 +2697,312 @@ mod tests {
         let auth_requests = auth_server.finish();
         let requests = control_plane.finish();
         assert_process_auth(&auth_requests[0], credential);
-        assert_eq!(requests.len(), 2);
+        assert_eq!(requests.len(), 3);
         assert_process_control_plane(&requests[0], "POST", APPS_PLAN_PATH, credential);
         assert_process_control_plane(
             &requests[1],
             "POST",
             "/v1/agent/apps/merchant-lookup/reserve",
+            credential,
+        );
+        assert_process_control_plane(
+            &requests[2],
+            "GET",
+            "/v1/agent/apps/merchant-lookup?environment=staging",
+            credential,
+        );
+    }
+
+    #[test]
+    fn bb_apps_create_retries_matching_reservation_after_initialize_failure() {
+        let credential = "apps-e2e-only.resume-after-initialize.session+credential";
+        let initial_plan = json!({
+            "app_id": "merchant-lookup",
+            "display_name": "Merchant Lookup",
+            "environment": "staging",
+            "persistence": "none",
+            "runtime_class": "default",
+            "runtime_profile": "process",
+            "external_url": "https://merchant-lookup--bpsites.example/",
+            "initialize": {"required": true, "recommended": true}
+        });
+        let retry_plan = json!({
+            "app_id": "merchant-lookup",
+            "display_name": "Merchant Lookup",
+            "environment": "staging",
+            "persistence": "none",
+            "runtime_class": "default",
+            "runtime_profile": "process",
+            "external_url": "https://merchant-lookup--bpsites.example/",
+            "initialize": {"required": false, "recommended": false}
+        });
+        let reservation = json!({
+            "app_id": "merchant-lookup",
+            "external_url": "https://merchant-lookup--bpsites.example/"
+        });
+        let initialize_failure = ProcessResponse::json_status(
+            502,
+            json!({
+                "ok": false,
+                "error": {"code": "kubernetes_apply_failed", "message": "runner rollout failed"}
+            }),
+        );
+        let collision = ProcessResponse::json_status(
+            409,
+            json!({
+                "ok": false,
+                "error": {"code": "app_id_collision", "message": "app_id is already reserved"}
+            }),
+        );
+        let existing_reservation = json!({
+            "ok": true,
+            "app": {
+                "app_id": "merchant-lookup",
+                "name": "Merchant Lookup",
+                "environment": "staging",
+                "persistence": "none",
+                "runtime_class": "default",
+                "role": "owner",
+                "status": "idle",
+                "route_status": "idle",
+                "route_revision": 1
+            },
+            "versions": []
+        });
+        let initialized = json!({
+            "app_id": "merchant-lookup",
+            "external_url": "https://merchant-lookup--bpsites.example/"
+        });
+        let auth_server =
+            ProcessServer::start(vec![process_auth_response(), process_auth_response()]);
+        let control_plane = ProcessServer::start(vec![
+            ProcessResponse::json(initial_plan),
+            ProcessResponse::json(reservation),
+            initialize_failure,
+            ProcessResponse::json(retry_plan),
+            collision,
+            ProcessResponse::json(existing_reservation),
+            ProcessResponse::json(initialized.clone()),
+        ]);
+        let args = [
+            "apps",
+            "create",
+            "--app-id",
+            "merchant-lookup",
+            "--name",
+            "Merchant Lookup",
+            "--runtime-profile",
+            "process",
+            "--base-url",
+            APPROVED_TEST_BASE_URL,
+            "--client-version",
+            "0.2.0",
+            "--json",
+        ];
+
+        let first = process_command(&auth_server, &control_plane, &args, credential)
+            .output()
+            .expect("run initial Apps create process command");
+        assert!(!first.status.success());
+        assert!(
+            String::from_utf8_lossy(&first.stderr)
+                .contains("Retry the same `bb apps create` command"),
+            "stderr was: {}",
+            String::from_utf8_lossy(&first.stderr)
+        );
+
+        let retry = process_command(&auth_server, &control_plane, &args, credential)
+            .output()
+            .expect("retry Apps create process command");
+        assert!(
+            retry.status.success(),
+            "stderr was: {}",
+            String::from_utf8_lossy(&retry.stderr)
+        );
+        let value = serde_json::from_str::<Value>(&process_stdout(&retry))
+            .expect("parse resumed create output");
+        assert_eq!(value["app_id"], "merchant-lookup");
+        assert_eq!(value["reservation_reconciled"], true);
+        assert_eq!(value["initialized"], true);
+        assert_eq!(value["initialize"], initialized);
+
+        let auth_requests = auth_server.finish();
+        let requests = control_plane.finish();
+        assert_eq!(auth_requests.len(), 2);
+        assert_eq!(requests.len(), 7);
+        assert_process_control_plane(
+            &requests[4],
+            "POST",
+            "/v1/agent/apps/merchant-lookup/reserve",
+            credential,
+        );
+        assert_process_control_plane(
+            &requests[5],
+            "GET",
+            "/v1/agent/apps/merchant-lookup?environment=staging",
+            credential,
+        );
+        assert_process_control_plane(
+            &requests[6],
+            "POST",
+            "/v1/agent/apps/merchant-lookup/initialize",
+            credential,
+        );
+    }
+
+    #[test]
+    fn bb_apps_create_reconciles_committed_reservation_after_unreadable_response() {
+        let credential = "apps-e2e-only.reserve-response-lost.session+credential";
+        let plan = json!({
+            "app_id": "merchant-lookup",
+            "display_name": "Merchant Lookup",
+            "environment": "staging",
+            "persistence": "none",
+            "runtime_class": "default",
+            "runtime_profile": "process",
+            "external_url": "https://merchant-lookup--bpsites.example/",
+            "initialize": {"required": true, "recommended": true}
+        });
+        let existing_reservation = json!({
+            "ok": true,
+            "app": {
+                "app_id": "merchant-lookup",
+                "name": "Merchant Lookup",
+                "environment": "staging",
+                "persistence": "none",
+                "runtime_class": "default",
+                "role": "owner",
+                "status": "idle",
+                "route_status": "idle",
+                "route_revision": 1
+            },
+            "versions": []
+        });
+        let initialized = json!({
+            "app_id": "merchant-lookup",
+            "external_url": "https://merchant-lookup--bpsites.example/"
+        });
+        let auth_server = ProcessServer::start(vec![process_auth_response()]);
+        let control_plane = ProcessServer::start(vec![
+            ProcessResponse::json(plan),
+            ProcessResponse::raw(201, "{"),
+            ProcessResponse::json(existing_reservation),
+            ProcessResponse::json(initialized),
+        ]);
+        let mut command = process_command(
+            &auth_server,
+            &control_plane,
+            &[
+                "apps",
+                "create",
+                "--app-id",
+                "merchant-lookup",
+                "--name",
+                "Merchant Lookup",
+                "--runtime-profile",
+                "process",
+                "--base-url",
+                APPROVED_TEST_BASE_URL,
+                "--client-version",
+                "0.2.0",
+                "--json",
+            ],
+            credential,
+        );
+
+        let output = command.output().expect("run Apps create process command");
+        assert!(
+            output.status.success(),
+            "stderr was: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let value = serde_json::from_str::<Value>(&process_stdout(&output))
+            .expect("parse reconciled create output");
+        assert_eq!(value["reservation_reconciled"], true);
+        assert_eq!(value["initialized"], true);
+        let auth_requests = auth_server.finish();
+        let requests = control_plane.finish();
+        assert_process_auth(&auth_requests[0], credential);
+        assert_eq!(requests.len(), 4);
+        assert_process_control_plane(
+            &requests[2],
+            "GET",
+            "/v1/agent/apps/merchant-lookup?environment=staging",
+            credential,
+        );
+        assert_process_control_plane(
+            &requests[3],
+            "POST",
+            "/v1/agent/apps/merchant-lookup/initialize",
+            credential,
+        );
+    }
+
+    #[test]
+    fn bb_apps_create_reports_unknown_reservation_outcome_when_inspection_fails() {
+        let credential = "apps-e2e-only.reserve-outcome-unknown.session+credential";
+        let plan = json!({
+            "app_id": "merchant-lookup",
+            "display_name": "Merchant Lookup",
+            "environment": "staging",
+            "persistence": "none",
+            "runtime_class": "default",
+            "runtime_profile": "process",
+            "initialize": {"required": true, "recommended": true}
+        });
+        let inspection_failure = ProcessResponse::json_status(
+            503,
+            json!({
+                "ok": false,
+                "error": {"code": "active_route_read_failed", "message": "store unavailable"}
+            }),
+        );
+        let auth_server = ProcessServer::start(vec![process_auth_response()]);
+        let control_plane = ProcessServer::start(vec![
+            ProcessResponse::json(plan),
+            ProcessResponse::raw(201, "{"),
+            inspection_failure,
+        ]);
+        let mut command = process_command(
+            &auth_server,
+            &control_plane,
+            &[
+                "apps",
+                "create",
+                "--app-id",
+                "merchant-lookup",
+                "--name",
+                "Merchant Lookup",
+                "--runtime-profile",
+                "process",
+                "--base-url",
+                APPROVED_TEST_BASE_URL,
+                "--client-version",
+                "0.2.0",
+                "--json",
+            ],
+            credential,
+        );
+
+        let output = command.output().expect("run Apps create process command");
+        assert!(!output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("reservation_outcome_unknown"),
+            "stderr was: {stderr}"
+        );
+        assert!(
+            stderr.contains("bb apps get merchant-lookup --environment staging"),
+            "stderr was: {stderr}"
+        );
+        let auth_requests = auth_server.finish();
+        let requests = control_plane.finish();
+        assert_process_auth(&auth_requests[0], credential);
+        assert_eq!(requests.len(), 3);
+        assert_process_control_plane(
+            &requests[2],
+            "GET",
+            "/v1/agent/apps/merchant-lookup?environment=staging",
             credential,
         );
     }
