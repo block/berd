@@ -31,16 +31,27 @@ pub struct OpenAiSpokespersonConfig {
 }
 
 impl OpenAiSpokespersonConfig {
+    pub fn new(
+        api_key: String,
+        session: RealtimeSpokespersonSessionOptions,
+        semantic_transcript: Vec<SemanticTurn>,
+    ) -> Self {
+        Self {
+            endpoint: DEFAULT_ENDPOINT.into(),
+            api_key,
+            session,
+            semantic_transcript,
+        }
+    }
+
     pub fn from_environment() -> Result<Self, String> {
         let api_key = std::env::var("OPENAI_API_KEY")
             .ok()
             .filter(|value| !value.trim().is_empty())
             .ok_or_else(|| "OPENAI_API_KEY is required for Expert-Spokesperson mode".to_string())?;
-        Ok(Self {
-            endpoint: std::env::var("OPENAI_REALTIME_ENDPOINT")
-                .unwrap_or_else(|_| DEFAULT_ENDPOINT.into()),
+        let mut config = Self::new(
             api_key,
-            session: RealtimeSpokespersonSessionOptions {
+            RealtimeSpokespersonSessionOptions {
                 model: Some(
                     std::env::var("OPENAI_REALTIME_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.into()),
                 ),
@@ -60,8 +71,11 @@ impl OpenAiSpokespersonConfig {
                 ),
                 ..Default::default()
             },
-            semantic_transcript: Vec::new(),
-        })
+            Vec::new(),
+        );
+        config.endpoint =
+            std::env::var("OPENAI_REALTIME_ENDPOINT").unwrap_or_else(|_| DEFAULT_ENDPOINT.into());
+        Ok(config)
     }
 
     pub fn model(&self) -> &str {
@@ -209,6 +223,19 @@ pub enum SpokespersonResponseStatus {
 pub struct OpenAiSpokespersonRuntime {
     commands: mpsc::UnboundedSender<SpokespersonCommand>,
     worker: Option<thread::JoinHandle<()>>,
+}
+
+#[derive(Clone)]
+pub struct OpenAiSpokespersonControl {
+    commands: mpsc::UnboundedSender<SpokespersonCommand>,
+}
+
+impl OpenAiSpokespersonControl {
+    pub fn send(&self, command: SpokespersonCommand) -> Result<(), String> {
+        self.commands
+            .send(command)
+            .map_err(|_| "Spokesperson runtime is unavailable".to_string())
+    }
 }
 
 struct PendingSpeedUpdate {
@@ -372,6 +399,12 @@ impl OpenAiSpokespersonRuntime {
         self.commands
             .send(command)
             .map_err(|_| "Spokesperson runtime is closed".into())
+    }
+
+    pub fn control(&self) -> OpenAiSpokespersonControl {
+        OpenAiSpokespersonControl {
+            commands: self.commands.clone(),
+        }
     }
 
     pub fn reset_input(&self) -> Result<(), String> {

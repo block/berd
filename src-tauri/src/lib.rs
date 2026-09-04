@@ -239,6 +239,7 @@ pub fn run() {
             app.manage(commands::voice_buddy::RealtimeVoiceControlsState::default());
             app.manage(commands::voice_capture::VoiceCaptureState::default());
             app.manage(commands::openai_realtime::OpenAiRealtimeProtocolState::default());
+            app.manage(commands::openai_realtime::OpenAiRealtimeRuntimeState::default());
             app.manage(commands::telemetry::TelemetryAuthState::new(
                 app_data_dir.clone(),
             ));
@@ -606,7 +607,10 @@ pub fn run() {
             commands::notifications::show_completion_notification,
             commands::openai_realtime::get_openai_realtime_status,
             commands::openai_realtime::create_openai_realtime_session,
-            commands::openai_realtime::create_openai_realtime_voice_session,
+            commands::openai_realtime::start_openai_realtime_spokesperson_runtime,
+            commands::openai_realtime::send_openai_realtime_spokesperson_runtime_event,
+            commands::openai_realtime::push_openai_realtime_spokesperson_audio,
+            commands::openai_realtime::stop_openai_realtime_spokesperson_runtime,
             commands::openai_realtime::create_openai_realtime_spokesperson_session_update,
             commands::openai_realtime::create_openai_realtime_expert_instructions,
             commands::openai_realtime::create_openai_realtime_handoff_tool_output,

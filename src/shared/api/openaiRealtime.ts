@@ -8,14 +8,48 @@ export interface OpenAiRealtimeStatus {
   configured: boolean;
 }
 
-export async function createOpenAiRealtimeVoiceSession(
-  model?: string,
-): Promise<OpenAiRealtimeSession> {
-  return invoke("create_openai_realtime_voice_session", { model });
-}
-
 export interface OpenAiRealtimeSession {
   clientSecret: string;
+}
+
+export interface OpenAiRealtimeRuntimeEvent {
+  sessionId: string;
+  event: Record<string, unknown>;
+}
+
+export function startOpenAiRealtimeSpokespersonRuntime(
+  sessionId: string,
+  options: unknown,
+): Promise<void> {
+  return invoke("start_openai_realtime_spokesperson_runtime", {
+    sessionId,
+    options,
+  });
+}
+
+export function sendOpenAiRealtimeSpokespersonRuntimeEvent(
+  sessionId: string,
+  event: Record<string, unknown>,
+): Promise<void> {
+  return invoke("send_openai_realtime_spokesperson_runtime_event", {
+    sessionId,
+    event,
+  });
+}
+
+export function stopOpenAiRealtimeSpokespersonRuntime(
+  sessionId: string,
+): Promise<void> {
+  return invoke("stop_openai_realtime_spokesperson_runtime", { sessionId });
+}
+
+export function listenToOpenAiRealtimeSpokespersonRuntime(
+  listener: (event: OpenAiRealtimeRuntimeEvent) => void,
+): Promise<UnlistenFn> {
+  return listen<OpenAiRealtimeRuntimeEvent>(
+    "openai-realtime-runtime-event",
+    ({ payload }) => listener(payload),
+  );
 }
 
 export function createOpenAiRealtimeSpokespersonSessionUpdate(

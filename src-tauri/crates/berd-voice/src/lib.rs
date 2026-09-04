@@ -26,6 +26,7 @@ mod pocket;
 pub mod pocket_assets;
 pub mod protocol;
 pub mod realtime_audio_delivery;
+pub mod realtime_host;
 pub mod session;
 pub mod siri;
 pub mod spokesperson_voice_update;
