@@ -1938,6 +1938,7 @@ describe("AgentModelPicker starred models", () => {
     expect(starredToggle).toHaveAttribute("aria-pressed", "true");
     expect(starredToggle).toHaveClass("text-foreground/80");
     expect(starredToggle).toHaveClass("hover:text-foreground/80");
+    expect(starredToggle).toHaveClass("opacity-100", "animate-in", "fade-in");
     expect(starredToggle).not.toHaveClass("text-muted-foreground");
   });
 

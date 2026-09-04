@@ -562,7 +562,8 @@ export const RecommendedModelList = forwardRef<
                         // soften to foreground/80 via the selected flag.
                         className={cn(
                           "shrink-0 opacity-0 focus-visible:opacity-100",
-                          (hoveredModelKey === modelKey ||
+                          (starred ||
+                            hoveredModelKey === modelKey ||
                             focusedModelKey === modelKey) &&
                             "animate-in fade-in opacity-100 duration-150",
                         )}
