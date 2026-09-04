@@ -257,7 +257,7 @@ describe("AgentModelPicker", () => {
     expect(explicitModel).toHaveClass("bg-accent");
     expect(
       explicitModel.querySelector(".tabler-icon-check"),
-    ).toBeInTheDocument();
+    ).not.toBeInTheDocument();
   });
 
   it("does not synthesize an external harness model into Goose", async () => {

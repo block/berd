@@ -8,7 +8,6 @@ import {
   useState,
 } from "react";
 import {
-  IconCheck,
   IconDots,
   IconSearch,
   IconStar,
@@ -738,8 +737,12 @@ export const RecommendedModelList = forwardRef<
                         rowElementsRef.current.delete(modelKey);
                       }
                     }}
-                    className="flex min-w-0 items-center gap-1"
+                    className={cn(
+                      "flex min-w-0 items-center gap-1 rounded-sm",
+                      isSelected && "bg-accent",
+                    )}
                     data-model-key={modelKey}
+                    data-selected={isSelected || undefined}
                     data-starred={starred || undefined}
                     onPointerMove={(event) => {
                       pointerPositionRef.current = {
@@ -797,16 +800,16 @@ export const RecommendedModelList = forwardRef<
                           {getModelDisplayName(model)}
                         </div>
                       </div>
-                      {isSelected ? (
-                        <IconCheck className="size-4 shrink-0 text-muted-foreground" />
-                      ) : null}
                     </PickerItem>
                     {existsInCatalog ? (
                       <Button
                         variant="ghost"
                         size="icon-xs"
                         selected={starred}
-                        onClick={handleStarClick}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleStarClick();
+                        }}
                         data-star-animation-phase={
                           activeStarAnimation?.phase ?? undefined
                         }
