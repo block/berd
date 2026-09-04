@@ -613,17 +613,24 @@ export const RecommendedModelList = forwardRef<
               }
 
               const { model } = item;
-              const providerLabel = getGooseModelProviderLabel(model);
+              const modelAgentId = modelAgentIds.get(model) ?? selectedAgentId;
+              const iconProviderId =
+                modelAgentId === "goose" && model.providerId
+                  ? model.providerId
+                  : modelAgentId;
+              const providerLabel =
+                modelAgentId === "goose"
+                  ? getGooseModelProviderLabel(model)
+                  : formatProviderLabel(modelAgentId);
               const providerIcon =
-                selectedAgentId === "goose" && model.providerId
-                  ? getProviderIcon(model.providerId, "size-3.5")
+                modelAgentId !== "goose" || model.providerId
+                  ? getProviderIcon(iconProviderId, "size-3.5")
                   : null;
               const isSelected = modelMatchesSelection(
                 model,
                 currentModelId,
                 currentModelProviderId,
               );
-              const modelAgentId = modelAgentIds.get(model) ?? selectedAgentId;
               const scopeId = getModelScopeId(model);
               const modelKey = modelStarKey(scopeId, model.id);
               const starred = liveStarredKeys.has(modelKey);

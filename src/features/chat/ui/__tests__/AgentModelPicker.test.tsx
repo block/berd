@@ -2263,7 +2263,13 @@ describe("AgentModelPicker starred models", () => {
       screen.getByRole("button", { name: /choose agent and model/i }),
     );
     const picker = screen.getByRole("dialog");
-    expect(within(picker).getByText("Claude Opus")).toBeInTheDocument();
+    const claudeFavorite = within(picker)
+      .getByText("Claude Opus")
+      .closest("[data-model-key]");
+    expect(claudeFavorite).toBeInTheDocument();
+    expect(
+      within(claudeFavorite as HTMLElement).getByTitle("Claude"),
+    ).toBeInTheDocument();
     await user.click(within(picker).getByText("Claude Opus"));
     expect(onAgentChange).toHaveBeenCalledWith("claude-acp");
     expect(onModelChange).not.toHaveBeenCalled();
