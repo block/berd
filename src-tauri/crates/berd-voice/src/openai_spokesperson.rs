@@ -163,6 +163,7 @@ pub enum SpokespersonEvent {
         message: String,
     },
     Expired(String),
+    SessionLost(String),
     Failed(String),
     Closed,
 }
@@ -690,13 +691,33 @@ async fn run(
                                 format!("code {}: {}", u16::from(frame.code), frame.reason)
                             })
                             .unwrap_or_else(|| "without a close frame".into());
-                        return Err(format!("OpenAI Realtime connection closed {detail}"));
+                        send_event(
+                            events,
+                            SpokespersonEvent::SessionLost(format!(
+                                "OpenAI Realtime connection closed {detail}"
+                            )),
+                        )?;
+                        return Ok(());
                     }
                     None => {
-                        return Err("OpenAI Realtime connection ended without a close frame".into());
+                        send_event(
+                            events,
+                            SpokespersonEvent::SessionLost(
+                                "OpenAI Realtime connection ended without a close frame".into(),
+                            ),
+                        )?;
+                        return Ok(());
                     }
                     Some(Ok(_)) => continue,
-                    Some(Err(error)) => return Err(error.to_string()),
+                    Some(Err(error)) => {
+                        send_event(
+                            events,
+                            SpokespersonEvent::SessionLost(format!(
+                                "OpenAI Realtime transport failed: {error}"
+                            )),
+                        )?;
+                        return Ok(());
+                    }
                 };
                 let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else { continue };
                 let kind = value.get("type").and_then(|value| value.as_str()).unwrap_or("");
@@ -1595,7 +1616,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn preserves_unexpected_realtime_close_details() {
+    async fn reports_unexpected_realtime_close_as_session_loss_with_details() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let endpoint = format!("ws://{}/", listener.local_addr().unwrap());
         let server = tokio::spawn(async move {
@@ -1614,8 +1635,8 @@ mod tests {
         });
 
         let (_commands, command_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (events, _event_rx) = std::sync::mpsc::channel();
-        let error = run(
+        let (events, event_rx) = std::sync::mpsc::channel();
+        run(
             OpenAiSpokespersonConfig {
                 endpoint,
                 api_key: "test-key".into(),
@@ -1629,11 +1650,13 @@ mod tests {
             &events,
         )
         .await
-        .unwrap_err();
-
+        .unwrap();
+        let SpokespersonEvent::SessionLost(message) = event_rx.recv().unwrap() else {
+            panic!("expected a detailed session-loss event")
+        };
         assert!(
-            error.contains("code 1008: response already active"),
-            "{error}"
+            message.contains("code 1008: response already active"),
+            "{message}"
         );
         server.await.unwrap();
     }

@@ -28,6 +28,7 @@ struct ExpertSpokespersonTestSession {
     child: ChildGuard,
     stdin: Option<Arc<Mutex<ChildStdin>>>,
     output: mpsc::Receiver<Value>,
+    stderr: mpsc::Receiver<String>,
     audio_host: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -69,6 +70,7 @@ impl ExpertSpokespersonTestSession {
         let process = child.0.as_mut().unwrap();
         let stdin = Arc::new(Mutex::new(process.stdin.take().unwrap()));
         let output = spawn_session_message_reader(process.stdout.take().unwrap());
+        let stderr = spawn_session_stderr_reader(process.stderr.take().unwrap());
         let audio_host = spawn_audio_host_with_played_limit(
             audio_host,
             Arc::clone(&stdin),
@@ -79,6 +81,7 @@ impl ExpertSpokespersonTestSession {
             child,
             stdin: Some(stdin),
             output,
+            stderr,
             audio_host: Some(audio_host),
         };
         session.send(json!({
@@ -132,13 +135,17 @@ impl ExpertSpokespersonTestSession {
         self.wait()
     }
 
-    fn wait(mut self) -> Vec<Value> {
+    fn wait(self) -> Vec<Value> {
+        self.wait_with_stderr().0
+    }
+
+    fn wait_with_stderr(mut self) -> (Vec<Value>, Vec<String>) {
         self.stdin.take();
         let status = self.child.0.as_mut().unwrap().wait().unwrap();
         self.child.0 = None;
         assert!(status.success());
         self.audio_host.take().unwrap().join().unwrap();
-        self.output.iter().collect()
+        (self.output.iter().collect(), self.stderr.iter().collect())
     }
 }
 
@@ -177,6 +184,18 @@ fn spawn_session_message_reader(stdout: ChildStdout) -> mpsc::Receiver<Value> {
                         break;
                     }
                 }
+            }
+        }
+    });
+    receiver
+}
+
+fn spawn_session_stderr_reader(stderr: std::process::ChildStderr) -> mpsc::Receiver<String> {
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            if sender.send(line).is_err() {
+                break;
             }
         }
     });
@@ -624,6 +643,173 @@ fn expert_spokesperson_recovers_from_provider_expiry_and_preserves_pcm_once() {
     release_candidate_tx.send(()).unwrap();
     std::thread::sleep(Duration::from_millis(100));
     session.shutdown();
+    server.join().unwrap();
+}
+
+#[test]
+fn expert_spokesperson_recovers_from_quiescent_provider_disconnect() {
+    let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
+    let (recovery_ready_tx, recovery_ready_rx) = mpsc::sync_channel(1);
+    let (pcm_seen_tx, pcm_seen_rx) = mpsc::sync_channel(1);
+    let server = std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async move {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                endpoint_tx
+                    .send(format!("ws://{}/", listener.local_addr().unwrap()))
+                    .unwrap();
+                let (old_stream, _) = listener.accept().await.unwrap();
+                let mut old = accept_async(old_stream).await.unwrap();
+                let initial = receive_realtime_json(&mut old).await;
+                acknowledge_realtime_session(&mut old, &initial).await;
+                drop(old);
+
+                let (candidate_stream, _) =
+                    tokio::time::timeout(Duration::from_secs(2), listener.accept())
+                        .await
+                        .expect("disconnect should start recovery")
+                        .unwrap();
+                let mut candidate = accept_async(candidate_stream).await.unwrap();
+                let replacement = receive_realtime_json(&mut candidate).await;
+                assert_eq!(
+                    replacement["session"]["audio"]["output"],
+                    initial["session"]["audio"]["output"]
+                );
+                acknowledge_realtime_session(&mut candidate, &replacement).await;
+                recovery_ready_tx.send(()).unwrap();
+                let pcm = receive_realtime_json(&mut candidate).await;
+                assert_eq!(pcm["type"], "input_audio_buffer.append");
+                pcm_seen_tx.send(()).unwrap();
+                if let Ok(Some(Ok(Message::Text(text)))) =
+                    tokio::time::timeout(Duration::from_millis(100), candidate.next()).await
+                {
+                    let message: Value = serde_json::from_str(&text).unwrap();
+                    assert_ne!(message["type"], "input_audio_buffer.append");
+                }
+                let _ = candidate.next().await;
+            });
+    });
+    let endpoint = endpoint_rx.recv().unwrap();
+    let mut session = ExpertSpokespersonTestSession::start(endpoint);
+    recovery_ready_rx
+        .recv_timeout(Duration::from_secs(2))
+        .unwrap();
+    session.send_pcm(0.25);
+    session.flush();
+    pcm_seen_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    session.send(json!({
+        "type":"set_tts_settings",
+        "id":2,
+        "expected_revision":2,
+        "settings":{"backend":"openai","model":"test-model","voice":"old-voice","rate":1.0}
+    }));
+    let authoritative = session.recv(Duration::from_secs(2));
+    assert_eq!(authoritative["type"], "tts_settings_result");
+    assert_eq!(authoritative["id"], 2);
+    assert_eq!(authoritative["outcome"], "rejected");
+    assert_eq!(authoritative["snapshot"]["revision"], 1);
+    assert_eq!(authoritative["snapshot"]["voice"], "old-voice");
+    assert!(session
+        .shutdown_and_collect()
+        .iter()
+        .all(|message| message["type"] != "tts_settings_result"));
+    server.join().unwrap();
+}
+
+#[test]
+fn active_spokesperson_disconnect_is_specific_terminal_and_does_not_replay() {
+    let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
+    let (release_disconnect_tx, release_disconnect_rx) = mpsc::sync_channel(1);
+    let server = std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async move {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                endpoint_tx
+                    .send(format!("ws://{}/", listener.local_addr().unwrap()))
+                    .unwrap();
+                let (old_stream, _) = listener.accept().await.unwrap();
+                let mut old = accept_async(old_stream).await.unwrap();
+                let initial = receive_realtime_json(&mut old).await;
+                acknowledge_realtime_session(&mut old, &initial).await;
+                assert_eq!(
+                    receive_realtime_json(&mut old).await["type"],
+                    "conversation.item.create"
+                );
+                assert_eq!(
+                    receive_realtime_json(&mut old).await["type"],
+                    "response.create"
+                );
+                send_realtime_json(
+                    &mut old,
+                    json!({"type":"response.created","response":{"id":"response-active"}}),
+                )
+                .await;
+                send_realtime_json(
+                    &mut old,
+                    json!({
+                        "type":"response.output_audio.delta",
+                        "response_id":"response-active",
+                        "item_id":"assistant-active",
+                        "content_index":0,
+                        "delta":BASE64.encode(vec![0_u8; 24_000])
+                    }),
+                )
+                .await;
+                tokio::task::spawn_blocking(move || release_disconnect_rx.recv().unwrap())
+                    .await
+                    .unwrap();
+                drop(old);
+                assert!(
+                    tokio::time::timeout(Duration::from_millis(300), listener.accept())
+                        .await
+                        .is_err(),
+                    "active output must not be replayed on a replacement session"
+                );
+            });
+    });
+    let endpoint = endpoint_rx.recv().unwrap();
+    let mut session = ExpertSpokespersonTestSession::start(endpoint);
+    session.send(json!({
+        "type":"prepare_speak",
+        "id":2,
+        "acknowledgement":null,
+        "text":"keep this response active"
+    }));
+    let admitted = session.recv(Duration::from_secs(2));
+    assert_eq!(admitted["type"], "admitted");
+    session.send(json!({
+        "type":"output_ready",
+        "id":2,
+        "speech_id":admitted["speech_id"]
+    }));
+    assert_eq!(
+        session.recv(Duration::from_secs(2))["type"],
+        "output_ready_result"
+    );
+    assert_eq!(
+        session.recv(Duration::from_secs(2))["type"],
+        "spokesperson_speech"
+    );
+    release_disconnect_tx.send(()).unwrap();
+    let fatal = session.recv(Duration::from_secs(2));
+    assert_eq!(fatal["type"], "fatal");
+    assert_eq!(
+        fatal["message"],
+        "Spokesperson connection was lost during an active turn"
+    );
+    let (remaining, stderr) = session.wait_with_stderr();
+    assert!(remaining
+        .iter()
+        .all(|message| message["type"] != "user_final"));
+    assert!(stderr
+        .iter()
+        .any(|line| line.contains("without closing handshake")));
     server.join().unwrap();
 }
 

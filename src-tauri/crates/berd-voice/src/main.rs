@@ -2442,6 +2442,14 @@ fn spokesperson_voice_update_is_safe(
         && quiescent
 }
 
+fn unavailable_spokesperson_title(connection_lost: bool, quiescent: bool) -> &'static str {
+    match (connection_lost, quiescent) {
+        (true, false) => "Spokesperson connection was lost during an active turn",
+        (true, true) => "Spokesperson connection was lost during a settings update",
+        (false, _) => "Spokesperson session expired before it could renew",
+    }
+}
+
 fn apply_spokesperson_startup_settings(
     session: &SessionConfig,
     spokesperson: &mut OpenAiSpokespersonConfig,
@@ -2596,7 +2604,7 @@ fn run_expert_spokesperson_session(
                 }
                 VoiceUpdateAction::Reject(message) => {
                     let expiry_cause = pending_voice_update.as_ref().and_then(|update| {
-                        if let VoiceUpdatePurpose::ExpiryRecovery { cause } = update.purpose() {
+                        if let VoiceUpdatePurpose::SessionRecovery { cause } = update.purpose() {
                             Some(cause.clone())
                         } else {
                             None
@@ -3046,7 +3054,12 @@ fn run_expert_spokesperson_session(
                             &mut writer,
                         )?;
                     }
-                    SpokespersonEvent::Expired(message) => {
+                    event @ (SpokespersonEvent::Expired(_) | SpokespersonEvent::SessionLost(_)) => {
+                        let (message, connection_lost) = match event {
+                            SpokespersonEvent::Expired(message) => (message, false),
+                            SpokespersonEvent::SessionLost(message) => (message, true),
+                            _ => unreachable!("matched a session terminal event"),
+                        };
                         let quiescent = spokesperson_settings_are_quiescent(
                             &turn_gate,
                             active.as_ref(),
@@ -3058,7 +3071,7 @@ fn run_expert_spokesperson_session(
                         if !quiescent || pending_rate_update.is_some() {
                             write_protocol_fatal(
                                 &mut writer,
-                                "Spokesperson session expired before it could renew",
+                                unavailable_spokesperson_title(connection_lost, quiescent),
                                 &message,
                             )?;
                             cancel_live_playback(&mut active);
@@ -3072,7 +3085,7 @@ fn run_expert_spokesperson_session(
                                 pending_voice_update
                                     .as_mut()
                                     .expect("renewal exists")
-                                    .recover_from_expiry(message.clone())?;
+                                    .recover_after_session_loss(message.clone())?;
                                 false
                             }
                             Some(VoiceUpdatePurpose::Settings) => {
@@ -3098,10 +3111,14 @@ fn run_expert_spokesperson_session(
                                 }
                                 true
                             }
-                            Some(VoiceUpdatePurpose::ExpiryRecovery { .. }) => {
+                            Some(VoiceUpdatePurpose::SessionRecovery { .. }) => {
                                 write_protocol_fatal(
                                     &mut writer,
-                                    "Spokesperson session expired during renewal",
+                                    if connection_lost {
+                                        "Spokesperson connection was lost during recovery"
+                                    } else {
+                                        "Spokesperson session expired during renewal"
+                                    },
                                     &message,
                                 )?;
                                 break;
@@ -3125,7 +3142,7 @@ fn run_expert_spokesperson_session(
                                     .as_ref()
                                     .expect("initialized Spokesperson config"),
                                 core.semantic_transcript(),
-                                VoiceUpdatePurpose::ExpiryRecovery {
+                                VoiceUpdatePurpose::SessionRecovery {
                                     cause: message.clone(),
                                 },
                             ) {
@@ -3148,7 +3165,7 @@ fn run_expert_spokesperson_session(
                     }
                     SpokespersonEvent::Closed => {
                         let recovering = pending_voice_update.as_ref().is_some_and(|update| {
-                            matches!(update.purpose(), VoiceUpdatePurpose::ExpiryRecovery { .. })
+                            matches!(update.purpose(), VoiceUpdatePurpose::SessionRecovery { .. })
                         });
                         if initialized && !recovering {
                             return Err("Spokesperson runtime closed unexpectedly".into());
@@ -3336,7 +3353,8 @@ fn run_expert_spokesperson_session(
                         .filter(|update| update.should_hold_input())
                     {
                         if let Err(frame) = update.hold_input(frame, INPUT_QUEUE_CAPACITY) {
-                            if let VoiceUpdatePurpose::ExpiryRecovery { cause } = update.purpose() {
+                            if let VoiceUpdatePurpose::SessionRecovery { cause } = update.purpose()
+                            {
                                 write_protocol_fatal(
                                     &mut writer,
                                     "Spokesperson session renewal failed",
@@ -3397,7 +3415,10 @@ fn run_expert_spokesperson_session(
                     OpenAiSpokespersonRuntime::spawn(spokesperson_config.clone())?;
                 match events.recv_timeout(Duration::from_secs(30)) {
                     Ok(SpokespersonEvent::Ready) => {}
-                    Ok(SpokespersonEvent::Failed(message)) => return Err(message),
+                    Ok(
+                        SpokespersonEvent::Failed(message)
+                        | SpokespersonEvent::SessionLost(message),
+                    ) => return Err(message),
                     Ok(_) => return Err("Spokesperson emitted an event before readiness".into()),
                     Err(_) => return Err("Spokesperson startup timed out".into()),
                 }
@@ -7184,6 +7205,22 @@ mod tests {
         assert_eq!(messages[2]["outcome"], "rejected");
         assert_eq!(messages[2]["snapshot"]["revision"], 2);
         assert_eq!(snapshot.revision, 2);
+    }
+
+    #[test]
+    fn connection_loss_titles_distinguish_active_turns_from_settings_updates() {
+        assert_eq!(
+            unavailable_spokesperson_title(true, false),
+            "Spokesperson connection was lost during an active turn"
+        );
+        assert_eq!(
+            unavailable_spokesperson_title(true, true),
+            "Spokesperson connection was lost during a settings update"
+        );
+        assert_eq!(
+            unavailable_spokesperson_title(false, true),
+            "Spokesperson session expired before it could renew"
+        );
     }
 
     #[test]
