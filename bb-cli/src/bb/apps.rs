@@ -132,12 +132,12 @@ pub fn command() -> Command {
         ))
         .subcommand(control_plane_args(
             Command::new("create")
-                .about("Plan and initialize an app")
+                .about("Plan and reserve an app")
                 .long_about(
-                    "Plan an app identity through Apps Platform, then initialize it only when the \
-                     returned plan marks initialization as required or recommended. Supply a \
-                     descriptive DNS-safe app ID or a human-readable name from which the control \
-                     plane can derive one.",
+                    "Plan an app identity through Apps Platform, reserve that exact ID, then \
+                     initialize it only when the returned plan marks initialization as required \
+                     or recommended. Supply a descriptive DNS-safe app ID or a human-readable \
+                     name from which the control plane can derive one.",
                 )
                 .group(
                     ArgGroup::new("app-identity")
@@ -545,9 +545,13 @@ fn run_create(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     }
     let should_initialize =
         initialize_required.unwrap_or(false) || initialize_recommended.unwrap_or(false);
+    let mutation_request = mutation_request_from_plan(&plan);
+    let reservation = client.reserve(&credential, &app_id, &mutation_request)?;
+    let reserved_app_id =
+        required_response_string(&reservation, "app_id", "Apps Platform reserve")?;
+    require_exact_app_id("reserve", &app_id, reserved_app_id)?;
     let initialize = if should_initialize {
-        let request = initialize_request_from_plan(&plan);
-        let response = client.initialize(&credential, &app_id, &request)?;
+        let response = client.initialize(&credential, &app_id, &mutation_request)?;
         let initialized_app_id =
             required_response_string(&response, "app_id", "Apps Platform initialize")?;
         require_exact_app_id("initialize", &app_id, initialized_app_id)?;
@@ -560,14 +564,19 @@ fn run_create(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
             required_response_string(response, "external_url", "Apps Platform initialize")?
                 .to_string(),
         ),
-        None => plan.get("external_url").cloned().unwrap_or(Value::Null),
+        None => reservation
+            .get("external_url")
+            .cloned()
+            .unwrap_or(Value::Null),
     };
     print_json(&json!({
         "ok": true,
         "app_id": app_id,
         "external_url": effective_external_url,
+        "reserved": true,
         "initialized": initialize.is_some(),
         "plan": plan,
+        "reservation": reservation,
         "initialize": initialize,
     }))
 }
@@ -778,7 +787,7 @@ struct DeployOptions {
     deployment_id: Option<String>,
 }
 
-fn initialize_request_from_plan(plan: &Value) -> Value {
+fn mutation_request_from_plan(plan: &Value) -> Value {
     let mut request = Map::new();
     for field in ["environment", "persistence", "runtime_class"] {
         if let Some(value) = plan.get(field).and_then(Value::as_str) {
@@ -1057,6 +1066,22 @@ impl ControlPlaneClient {
                 .json(request)
                 .build()
                 .context("build Apps Platform initialize request")
+        })
+    }
+
+    fn reserve(
+        &self,
+        credential: &ComposeSessionCredential,
+        app_id: &str,
+        request: &Value,
+    ) -> Result<Value> {
+        let url = self.app_action_url(app_id, "reserve")?;
+        let path = url.path().to_string();
+        self.authorized_json_request(credential, "POST", &path, |authorization| {
+            self.standard_request(self.client.post(url.clone()), authorization)
+                .json(request)
+                .build()
+                .context("build Apps Platform reserve request")
         })
     }
 
@@ -2236,7 +2261,7 @@ mod tests {
     }
 
     #[test]
-    fn bb_apps_create_process_runs_plan_and_initialize() {
+    fn bb_apps_create_process_runs_plan_reserve_and_initialize() {
         let credential = "apps-e2e-only.create.session+credential";
         let plan = json!({
             "app_id": "merchant-lookup",
@@ -2250,9 +2275,14 @@ mod tests {
             "app_id": "merchant-lookup",
             "external_url": "https://merchant-lookup--bpsites.example/"
         });
+        let reservation = json!({
+            "app_id": "merchant-lookup",
+            "external_url": "https://merchant-lookup--bpsites.example/"
+        });
         let auth_server = ProcessServer::start(vec![process_auth_response()]);
         let control_plane = ProcessServer::start(vec![
             ProcessResponse::json(plan.clone()),
+            ProcessResponse::json(reservation.clone()),
             ProcessResponse::json(initialized.clone()),
         ]);
         let mut command = process_command(
@@ -2289,13 +2319,15 @@ mod tests {
         let value = serde_json::from_str::<Value>(&process_stdout(&output))
             .expect("parse create process output");
         assert_eq!(value["app_id"], "merchant-lookup");
+        assert_eq!(value["reserved"], true);
         assert_eq!(value["initialized"], true);
         assert_eq!(value["plan"], plan);
+        assert_eq!(value["reservation"], reservation);
         assert_eq!(value["initialize"], initialized);
         let auth_requests = auth_server.finish();
         let requests = control_plane.finish();
         assert_process_auth(&auth_requests[0], credential);
-        assert_eq!(requests.len(), 2);
+        assert_eq!(requests.len(), 3);
         assert_process_control_plane(&requests[0], "POST", APPS_PLAN_PATH, credential);
         assert_eq!(
             requests[0].body,
@@ -2311,9 +2343,25 @@ mod tests {
         assert_process_control_plane(
             &requests[1],
             "POST",
+            "/v1/agent/apps/merchant-lookup/reserve",
+            credential,
+        );
+        assert_eq!(
+            requests[1].body,
+            json!({
+                "environment": "staging",
+                "persistence": "sqlite",
+                "runtime_class": "default",
+                "name": "Merchant Lookup"
+            })
+        );
+        assert_process_control_plane(
+            &requests[2],
+            "POST",
             "/v1/agent/apps/merchant-lookup/initialize",
             credential,
         );
+        assert_eq!(requests[2].body, requests[1].body);
     }
 
     #[test]
@@ -2382,6 +2430,121 @@ mod tests {
     }
 
     #[test]
+    fn bb_apps_create_rejects_reservation_substitute_before_initialize() {
+        let credential = "apps-e2e-only.reserve-substitute.session+credential";
+        let plan = json!({
+            "app_id": "merchant-lookup",
+            "display_name": "Merchant Lookup",
+            "environment": "staging",
+            "persistence": "none",
+            "runtime_class": "default",
+            "initialize": {"required": true, "recommended": true}
+        });
+        let reservation = json!({
+            "app_id": "merchant-lookup-2",
+            "external_url": "https://merchant-lookup-2--bpsites.example/"
+        });
+        let auth_server = ProcessServer::start(vec![process_auth_response()]);
+        let control_plane = ProcessServer::start(vec![
+            ProcessResponse::json(plan),
+            ProcessResponse::json(reservation),
+        ]);
+        let mut command = process_command(
+            &auth_server,
+            &control_plane,
+            &[
+                "apps",
+                "create",
+                "--app-id",
+                "merchant-lookup",
+                "--base-url",
+                APPROVED_TEST_BASE_URL,
+                "--client-version",
+                "0.2.0",
+                "--json",
+            ],
+            credential,
+        );
+
+        let output = command.output().expect("run Apps create process command");
+        assert!(!output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains(
+                "Apps Platform reserve returned app_id \\\"merchant-lookup-2\\\"; expected exact app_id \\\"merchant-lookup\\\". No replacement app was accepted"
+            ),
+            "stderr was: {stderr}"
+        );
+        let auth_requests = auth_server.finish();
+        let requests = control_plane.finish();
+        assert_process_auth(&auth_requests[0], credential);
+        assert_eq!(requests.len(), 2);
+        assert_process_control_plane(&requests[0], "POST", APPS_PLAN_PATH, credential);
+        assert_process_control_plane(
+            &requests[1],
+            "POST",
+            "/v1/agent/apps/merchant-lookup/reserve",
+            credential,
+        );
+    }
+
+    #[test]
+    fn bb_apps_create_stops_on_reservation_collision() {
+        let credential = "apps-e2e-only.reserve-collision.session+credential";
+        let plan = json!({
+            "app_id": "merchant-lookup",
+            "display_name": "Merchant Lookup",
+            "environment": "staging",
+            "persistence": "none",
+            "runtime_class": "default",
+            "initialize": {"required": true, "recommended": true}
+        });
+        let collision = ProcessResponse {
+            status: 409,
+            body: json!({
+                "ok": false,
+                "error": {
+                    "code": "app_id_collision",
+                    "message": "app_id is already reserved"
+                }
+            }),
+        };
+        let auth_server = ProcessServer::start(vec![process_auth_response()]);
+        let control_plane = ProcessServer::start(vec![ProcessResponse::json(plan), collision]);
+        let mut command = process_command(
+            &auth_server,
+            &control_plane,
+            &[
+                "apps",
+                "create",
+                "--app-id",
+                "merchant-lookup",
+                "--base-url",
+                APPROVED_TEST_BASE_URL,
+                "--client-version",
+                "0.2.0",
+                "--json",
+            ],
+            credential,
+        );
+
+        let output = command.output().expect("run Apps create process command");
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("app_id_collision"));
+        let auth_requests = auth_server.finish();
+        let requests = control_plane.finish();
+        assert_process_auth(&auth_requests[0], credential);
+        assert_eq!(requests.len(), 2);
+        assert_process_control_plane(&requests[0], "POST", APPS_PLAN_PATH, credential);
+        assert_process_control_plane(
+            &requests[1],
+            "POST",
+            "/v1/agent/apps/merchant-lookup/reserve",
+            credential,
+        );
+    }
+
+    #[test]
     fn bb_apps_create_rejects_initialize_substitute() {
         let credential = "apps-e2e-only.initialize-substitute.session+credential";
         let plan = json!({
@@ -2396,9 +2559,14 @@ mod tests {
             "app_id": "merchant-lookup-2",
             "external_url": "https://merchant-lookup-2--bpsites.example/"
         });
+        let reservation = json!({
+            "app_id": "merchant-lookup",
+            "external_url": "https://merchant-lookup--bpsites.example/"
+        });
         let auth_server = ProcessServer::start(vec![process_auth_response()]);
         let control_plane = ProcessServer::start(vec![
             ProcessResponse::json(plan),
+            ProcessResponse::json(reservation),
             ProcessResponse::json(initialized),
         ]);
         let mut command = process_command(
@@ -2426,10 +2594,16 @@ mod tests {
         let auth_requests = auth_server.finish();
         let requests = control_plane.finish();
         assert_process_auth(&auth_requests[0], credential);
-        assert_eq!(requests.len(), 2);
+        assert_eq!(requests.len(), 3);
         assert_process_control_plane(&requests[0], "POST", APPS_PLAN_PATH, credential);
         assert_process_control_plane(
             &requests[1],
+            "POST",
+            "/v1/agent/apps/merchant-lookup/reserve",
+            credential,
+        );
+        assert_process_control_plane(
+            &requests[2],
             "POST",
             "/v1/agent/apps/merchant-lookup/initialize",
             credential,
@@ -2437,15 +2611,26 @@ mod tests {
     }
 
     #[test]
-    fn bb_apps_create_process_skips_unrequested_initialize() {
-        let credential = "apps-e2e-only.existing.session+credential";
+    fn bb_apps_create_static_process_reserves_without_initialize() {
+        let credential = "apps-e2e-only.static.session+credential";
         let plan = json!({
-            "app_id": "existing-app",
-            "external_url": "https://existing-app--bpsites.example/",
+            "app_id": "static-app",
+            "display_name": "Static App",
+            "environment": "staging",
+            "persistence": "none",
+            "runtime_class": "default",
+            "runtime_profile": "static",
             "initialize": {"required": false, "recommended": false}
         });
+        let reservation = json!({
+            "app_id": "static-app",
+            "external_url": "https://static-app--bpsites.example/"
+        });
         let auth_server = ProcessServer::start(vec![process_auth_response()]);
-        let control_plane = ProcessServer::start(vec![ProcessResponse::json(plan.clone())]);
+        let control_plane = ProcessServer::start(vec![
+            ProcessResponse::json(plan.clone()),
+            ProcessResponse::json(reservation.clone()),
+        ]);
         let mut command = process_command(
             &auth_server,
             &control_plane,
@@ -2453,7 +2638,9 @@ mod tests {
                 "apps",
                 "create",
                 "--app-id",
-                "existing-app",
+                "static-app",
+                "--runtime-profile",
+                "static",
                 "--base-url",
                 APPROVED_TEST_BASE_URL,
                 "--client-version",
@@ -2467,14 +2654,82 @@ mod tests {
         assert!(output.status.success());
         let value = serde_json::from_str::<Value>(&process_stdout(&output))
             .expect("parse create process output");
-        assert_eq!(value["app_id"], "existing-app");
+        assert_eq!(value["app_id"], "static-app");
+        assert_eq!(value["reserved"], true);
+        assert_eq!(value["initialized"], false);
+        assert_eq!(value["reservation"], reservation);
+        assert_eq!(value["initialize"], Value::Null);
+        let auth_requests = auth_server.finish();
+        let requests = control_plane.finish();
+        assert_process_auth(&auth_requests[0], credential);
+        assert_eq!(requests.len(), 2);
+        assert_process_control_plane(&requests[0], "POST", APPS_PLAN_PATH, credential);
+        assert_process_control_plane(
+            &requests[1],
+            "POST",
+            "/v1/agent/apps/static-app/reserve",
+            credential,
+        );
+    }
+
+    #[test]
+    fn bb_apps_create_does_not_initialize_when_plan_does_not_request_it() {
+        let credential = "apps-e2e-only.no-initialize.session+credential";
+        let plan = json!({
+            "app_id": "artifact-only-app",
+            "display_name": "Artifact Only App",
+            "environment": "staging",
+            "persistence": "none",
+            "runtime_class": "default",
+            "runtime_profile": "fetch-js",
+            "initialize": {"required": false, "recommended": false}
+        });
+        let reservation = json!({
+            "app_id": "artifact-only-app",
+            "external_url": "https://artifact-only-app--bpsites.example/"
+        });
+        let auth_server = ProcessServer::start(vec![process_auth_response()]);
+        let control_plane = ProcessServer::start(vec![
+            ProcessResponse::json(plan),
+            ProcessResponse::json(reservation),
+        ]);
+        let mut command = process_command(
+            &auth_server,
+            &control_plane,
+            &[
+                "apps",
+                "create",
+                "--app-id",
+                "artifact-only-app",
+                "--runtime-profile",
+                "fetch-js",
+                "--base-url",
+                APPROVED_TEST_BASE_URL,
+                "--client-version",
+                "0.2.0",
+                "--json",
+            ],
+            credential,
+        );
+
+        let output = command.output().expect("run Apps create process command");
+        assert!(output.status.success());
+        let value = serde_json::from_str::<Value>(&process_stdout(&output))
+            .expect("parse create process output");
+        assert_eq!(value["reserved"], true);
         assert_eq!(value["initialized"], false);
         assert_eq!(value["initialize"], Value::Null);
         let auth_requests = auth_server.finish();
         let requests = control_plane.finish();
         assert_process_auth(&auth_requests[0], credential);
-        assert_eq!(requests.len(), 1);
+        assert_eq!(requests.len(), 2);
         assert_process_control_plane(&requests[0], "POST", APPS_PLAN_PATH, credential);
+        assert_process_control_plane(
+            &requests[1],
+            "POST",
+            "/v1/agent/apps/artifact-only-app/reserve",
+            credential,
+        );
     }
 
     #[test]
