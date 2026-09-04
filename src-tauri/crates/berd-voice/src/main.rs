@@ -2120,9 +2120,8 @@ struct LiveResponse {
     pending_frames: usize,
     total_audio_frames: u64,
     played_audio_frames: u64,
-    output_item: Option<(String, u64)>,
+    audio_parts: Vec<LiveAudioPart>,
     truncation_pending: bool,
-    truncation_sent: bool,
     audio_done: bool,
     finish_sent: bool,
     received_audio: bool,
@@ -2143,9 +2142,8 @@ impl LiveResponse {
             pending_frames: 0,
             total_audio_frames: 0,
             played_audio_frames: 0,
-            output_item: None,
+            audio_parts: Vec::new(),
             truncation_pending: false,
-            truncation_sent: false,
             audio_done: false,
             finish_sent: false,
             received_audio: false,
@@ -2183,6 +2181,66 @@ impl LiveResponse {
             true
         }
     }
+
+    fn audio_part_mut(
+        &mut self,
+        item_id: &str,
+        output_index: u64,
+        content_index: u64,
+    ) -> Result<&mut LiveAudioPart, String> {
+        if let Some(index) = self.audio_parts.iter().position(|part| {
+            part.output_index == output_index && part.content_index == content_index
+        }) {
+            if self.audio_parts[index].item_id != item_id {
+                return Err("Spokesperson audio part changed provider item identity".into());
+            }
+            return Ok(&mut self.audio_parts[index]);
+        }
+        if self.audio_parts.iter().any(|part| {
+            part.item_id == item_id
+                && part.content_index == content_index
+                && part.output_index != output_index
+        }) {
+            return Err("Spokesperson audio part changed provider output identity".into());
+        }
+        self.audio_parts.push(LiveAudioPart {
+            item_id: item_id.into(),
+            output_index,
+            content_index,
+            transcript: String::new(),
+            total_audio_frames: 0,
+            truncation_required: false,
+            truncation_sent: false,
+        });
+        self.audio_parts
+            .sort_by_key(|part| (part.output_index, part.content_index));
+        Ok(self
+            .audio_parts
+            .iter_mut()
+            .find(|part| part.output_index == output_index && part.content_index == content_index)
+            .expect("inserted audio part exists"))
+    }
+
+    fn refresh_transcript(&mut self) {
+        let text = self
+            .audio_parts
+            .iter()
+            .filter(|part| !part.transcript.is_empty())
+            .map(|part| part.transcript.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        self.transcript = Some(text);
+    }
+}
+
+struct LiveAudioPart {
+    item_id: String,
+    output_index: u64,
+    content_index: u64,
+    transcript: String,
+    total_audio_frames: u64,
+    truncation_required: bool,
+    truncation_sent: bool,
 }
 
 #[derive(Debug)]
@@ -2849,6 +2907,7 @@ fn run_expert_spokesperson_session(
                     SpokespersonEvent::AudioDelta {
                         response_id,
                         item_id,
+                        output_index,
                         content_index,
                         samples,
                     } => {
@@ -2902,13 +2961,26 @@ fn run_expert_spokesperson_session(
                             let active_matches = active
                                 .as_ref()
                                 .is_some_and(|playback| playback.response_id == response_id);
-                            if record_live_audio_delta(
+                            let requires_truncation = match record_live_audio_delta(
                                 response,
-                                (item_id, content_index),
+                                item_id,
+                                output_index,
+                                content_index,
                                 frame_count,
                                 ignored,
                                 active_matches,
-                            )? {
+                            ) {
+                                Ok(required) => required,
+                                Err(message) => {
+                                    write_protocol_fatal(
+                                        &mut writer,
+                                        "Spokesperson audio identity was invalid",
+                                        &message,
+                                    )?;
+                                    break;
+                                }
+                            };
+                            if requires_truncation {
                                 send_live_response_truncation(
                                     &response_id,
                                     response,
@@ -2917,19 +2989,49 @@ fn run_expert_spokesperson_session(
                             }
                         }
                     }
-                    SpokespersonEvent::AudioDone { response_id } => {
-                        if let Some(response) = responses.get_mut(&response_id) {
-                            if response.interrupted || response.audio_done {
-                                continue;
-                            }
-                            response.audio_done = true;
+                    SpokespersonEvent::AudioDone {
+                        response_id,
+                        item_id,
+                        output_index,
+                        content_index,
+                    } => {
+                        let response = responses
+                            .entry(response_id)
+                            .or_insert_with(|| LiveResponse::new(None, None));
+                        if live_audio_part_or_fatal(
+                            response,
+                            &item_id,
+                            output_index,
+                            content_index,
+                            &mut writer,
+                        )?
+                        .is_none()
+                        {
+                            break;
                         }
                     }
-                    SpokespersonEvent::TranscriptDone { response_id, text } => {
-                        responses
+                    SpokespersonEvent::TranscriptDone {
+                        response_id,
+                        item_id,
+                        output_index,
+                        content_index,
+                        text,
+                    } => {
+                        let response = responses
                             .entry(response_id.clone())
-                            .or_insert_with(|| LiveResponse::new(None, None))
-                            .transcript = Some(text);
+                            .or_insert_with(|| LiveResponse::new(None, None));
+                        let Some(part) = live_audio_part_or_fatal(
+                            response,
+                            &item_id,
+                            output_index,
+                            content_index,
+                            &mut writer,
+                        )?
+                        else {
+                            break;
+                        };
+                        part.transcript = text;
+                        response.refresh_transcript();
                         publish_live_response_if_complete(
                             &response_id,
                             &mut responses,
@@ -2939,13 +3041,28 @@ fn run_expert_spokesperson_session(
                             &mut writer,
                         )?;
                     }
-                    SpokespersonEvent::TranscriptDelta { response_id, text } => {
-                        responses
+                    SpokespersonEvent::TranscriptDelta {
+                        response_id,
+                        item_id,
+                        output_index,
+                        content_index,
+                        text,
+                    } => {
+                        let response = responses
                             .entry(response_id)
-                            .or_insert_with(|| LiveResponse::new(None, None))
-                            .transcript
-                            .get_or_insert_with(String::new)
-                            .push_str(&text);
+                            .or_insert_with(|| LiveResponse::new(None, None));
+                        let Some(part) = live_audio_part_or_fatal(
+                            response,
+                            &item_id,
+                            output_index,
+                            content_index,
+                            &mut writer,
+                        )?
+                        else {
+                            break;
+                        };
+                        part.transcript.push_str(&text);
+                        response.refresh_transcript();
                     }
                     SpokespersonEvent::SpeedUpdated {
                         request_id,
@@ -3025,9 +3142,21 @@ fn run_expert_spokesperson_session(
                             )?;
                         }
                     }
-                    SpokespersonEvent::OutputTruncated { response_id } => {
+                    SpokespersonEvent::OutputTruncated {
+                        response_id,
+                        item_id,
+                        content_index,
+                    } => {
                         if let Some(response) = responses.get_mut(&response_id) {
-                            response.truncation_pending = false;
+                            if let Some(part) = response.audio_parts.iter_mut().find(|part| {
+                                part.item_id == item_id && part.content_index == content_index
+                            }) {
+                                part.truncation_required = false;
+                            }
+                            response.truncation_pending = response
+                                .audio_parts
+                                .iter()
+                                .any(|part| part.truncation_required);
                         }
                         publish_live_response_if_complete(
                             &response_id,
@@ -4317,16 +4446,42 @@ fn live_truncation_pending(responses: &HashMap<String, LiveResponse>) -> bool {
 }
 
 fn require_live_response_truncation(response: &mut LiveResponse) -> Result<(), String> {
-    if response.received_audio && response.output_item.is_none() {
+    if response.received_audio && response.audio_parts.is_empty() {
         return Err("Spokesperson audio had no provider item identity".into());
     }
-    response.truncation_pending = response.received_audio;
+    for part in &mut response.audio_parts {
+        if part.total_audio_frames > 0 {
+            part.truncation_required = true;
+        }
+    }
+    response.truncation_pending = response
+        .audio_parts
+        .iter()
+        .any(|part| part.truncation_required);
     Ok(())
+}
+
+fn live_audio_part_or_fatal<'a>(
+    response: &'a mut LiveResponse,
+    item_id: &str,
+    output_index: u64,
+    content_index: u64,
+    writer: &mut impl Write,
+) -> Result<Option<&'a mut LiveAudioPart>, String> {
+    match response.audio_part_mut(item_id, output_index, content_index) {
+        Ok(part) => Ok(Some(part)),
+        Err(message) => {
+            write_protocol_fatal(writer, "Spokesperson audio identity was invalid", &message)?;
+            Ok(None)
+        }
+    }
 }
 
 fn record_live_audio_delta(
     response: &mut LiveResponse,
-    output_item: (String, u64),
+    item_id: String,
+    output_index: u64,
+    content_index: u64,
     frame_count: u64,
     ignored: bool,
     active_matches: bool,
@@ -4335,17 +4490,18 @@ fn record_live_audio_delta(
         .total_audio_frames
         .checked_add(frame_count)
         .ok_or("Spokesperson audio frame count overflowed")?;
-    if response
-        .output_item
-        .as_ref()
-        .is_some_and(|existing| existing != &output_item)
-    {
-        return Err("Spokesperson response changed provider audio identity".into());
+    let interrupted = response.interrupted;
+    let part = response.audio_part_mut(&item_id, output_index, content_index)?;
+    part.total_audio_frames = part
+        .total_audio_frames
+        .checked_add(frame_count)
+        .ok_or("Spokesperson audio part frame count overflowed")?;
+    if ignored && interrupted {
+        part.truncation_required = true;
     }
-    response.output_item = Some(output_item);
     response.received_audio = true;
-    if ignored && response.interrupted {
-        require_live_response_truncation(response)?;
+    if ignored && interrupted {
+        response.truncation_pending = true;
         return Ok(!active_matches);
     }
     Ok(false)
@@ -4356,24 +4512,34 @@ fn send_live_response_truncation(
     response: &mut LiveResponse,
     runtime: &OpenAiSpokespersonRuntime,
 ) -> Result<(), String> {
-    if !response.truncation_pending || response.truncation_sent {
+    if !response.truncation_pending {
         return Ok(());
     }
-    let (item_id, content_index) = response
-        .output_item
-        .as_ref()
-        .expect("required truncation has provider item identity");
-    let audio_end_ms = live_truncation_audio_end_ms(response)?;
-    runtime.send(SpokespersonCommand::TruncateOutput {
-        response_id: response_id.into(),
-        item_id: item_id.clone(),
-        content_index: *content_index,
-        audio_end_ms,
-    })?;
-    response.truncation_sent = true;
+    let mut played_frames = response
+        .played_audio_frames
+        .min(response.total_audio_frames);
+    for part in &mut response.audio_parts {
+        let part_played_frames = played_frames.min(part.total_audio_frames);
+        played_frames -= part_played_frames;
+        if !part.truncation_required || part.truncation_sent {
+            continue;
+        }
+        let audio_end_ms = part_played_frames
+            .checked_mul(1_000)
+            .ok_or_else(|| "Spokesperson truncation duration overflowed".to_string())?
+            / 24_000;
+        runtime.send(SpokespersonCommand::TruncateOutput {
+            response_id: response_id.into(),
+            item_id: part.item_id.clone(),
+            content_index: part.content_index,
+            audio_end_ms,
+        })?;
+        part.truncation_sent = true;
+    }
     Ok(())
 }
 
+#[cfg(test)]
 fn live_truncation_audio_end_ms(response: &LiveResponse) -> Result<u64, String> {
     response
         .played_audio_frames
@@ -4390,6 +4556,35 @@ fn delivered_live_transcript(response: &LiveResponse) -> String {
         .expect("publishable response has transcript");
     if !response.interrupted {
         return text.to_string();
+    }
+    if !response.audio_parts.is_empty() {
+        let mut remaining_played = response
+            .played_audio_frames
+            .min(response.total_audio_frames);
+        return response
+            .audio_parts
+            .iter()
+            .filter_map(|part| {
+                let played_frames = remaining_played.min(part.total_audio_frames);
+                remaining_played -= played_frames;
+                if part.transcript.is_empty() {
+                    return None;
+                }
+                let delivery = DeliveryProgress {
+                    sample_rate: 24_000,
+                    segments: vec![DeliverySegment {
+                        text: part.transcript.clone(),
+                        played_frames,
+                        total_frames: part.total_audio_frames,
+                        synthesis_complete: true,
+                    }],
+                };
+                let cutoff = estimated_spoken_through_utf8(&part.transcript, &delivery);
+                Some(&part.transcript[..cutoff])
+            })
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
     }
     let delivery = DeliveryProgress {
         sample_rate: 24_000,
@@ -7009,7 +7204,9 @@ mod tests {
         response.playback_complete = true;
         assert!(record_live_audio_delta(
             &mut response,
-            ("assistant-late".into(), 0),
+            "assistant-late".into(),
+            0,
+            0,
             2_400,
             true,
             false,
@@ -7051,6 +7248,89 @@ mod tests {
         )
         .unwrap();
         assert!(!responses.contains_key("response-late"));
+    }
+
+    #[test]
+    fn one_response_retains_ordered_provider_audio_parts_without_conflating_identity() {
+        let mut response = LiveResponse::new(None, None);
+        record_live_audio_delta(
+            &mut response,
+            "assistant-first".into(),
+            0,
+            0,
+            12_000,
+            false,
+            false,
+        )
+        .unwrap();
+        record_live_audio_delta(
+            &mut response,
+            "assistant-second".into(),
+            1,
+            0,
+            12_000,
+            false,
+            false,
+        )
+        .unwrap();
+        response
+            .audio_part_mut("assistant-first", 0, 0)
+            .unwrap()
+            .transcript = "First complete part.".into();
+        response
+            .audio_part_mut("assistant-second", 1, 0)
+            .unwrap()
+            .transcript = "Second partial part.".into();
+        response.refresh_transcript();
+        response.interrupted = true;
+        response.played_audio_frames = 18_000;
+        require_live_response_truncation(&mut response).unwrap();
+
+        assert_eq!(response.audio_parts.len(), 2);
+        assert!(response
+            .audio_parts
+            .iter()
+            .all(|part| part.truncation_required));
+        let delivered = delivered_live_transcript(&response);
+        assert!(delivered.starts_with("First complete part."));
+        assert!(delivered.contains("Second"));
+        assert!(!delivered.contains("partial"));
+    }
+
+    #[test]
+    fn transcript_identity_conflict_emits_a_flushed_protocol_fatal() {
+        let mut response = LiveResponse::new(None, None);
+        response.audio_part_mut("assistant-first", 0, 0).unwrap();
+        let mut output = Vec::new();
+
+        assert!(
+            live_audio_part_or_fatal(&mut response, "assistant-conflict", 0, 0, &mut output,)
+                .unwrap()
+                .is_none()
+        );
+        let emitted = messages(&output);
+        assert_eq!(emitted.len(), 1);
+        assert_eq!(emitted[0]["type"], "fatal");
+        assert_eq!(
+            emitted[0]["message"],
+            "Spokesperson audio identity was invalid"
+        );
+
+        let mut response = LiveResponse::new(None, None);
+        response.audio_part_mut("assistant-first", 0, 0).unwrap();
+        let mut output = Vec::new();
+        assert!(
+            live_audio_part_or_fatal(&mut response, "assistant-first", 1, 0, &mut output,)
+                .unwrap()
+                .is_none()
+        );
+        let emitted = messages(&output);
+        assert_eq!(emitted.len(), 1);
+        assert_eq!(emitted[0]["type"], "fatal");
+        assert_eq!(
+            emitted[0]["message"],
+            "Spokesperson audio identity was invalid"
+        );
     }
 
     #[test]
