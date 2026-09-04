@@ -315,6 +315,13 @@ export function resolveAssistantCancellation(
   finalizeAssistantCancellationRace(promptOwner);
 }
 
+/** Restore an archived chat and require durable success before sending. */
+export async function restoreArchivedSessionBeforeSend(
+  sessionId: string,
+): Promise<void> {
+  await useChatSessionStore.getState().ensureSessionActive(sessionId);
+}
+
 /**
  * Foreground send core: commits the user message, drives the
  * thinking-to-streaming-to-idle chat-state transitions, patches the session
@@ -445,6 +452,10 @@ export async function dispatchPrompt(
     await prepare?.();
     throwIfAborted(signal);
 
+    await restoreArchivedSessionBeforeSend(sessionId);
+    throwIfAborted(signal);
+    useChatSessionStore.getState().assertSessionActive(sessionId);
+
     const commitUserMessage = () => {
       throwIfAborted(signal);
       beforeUserMessageCommitted?.();
@@ -538,7 +549,10 @@ export async function dispatchPrompt(
       images: images?.map(
         (img) => [img.base64, img.mimeType] as [string, string],
       ),
-      onPromptDispatching: commitUserMessage,
+      onPromptDispatching: () => {
+        useChatSessionStore.getState().assertSessionActive(sessionId);
+        commitUserMessage();
+      },
       onPromptDispatched: () => {
         onPromptDispatched?.();
       },

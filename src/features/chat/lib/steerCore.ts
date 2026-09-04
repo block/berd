@@ -22,6 +22,7 @@ import {
 } from "./attachments";
 import { isSessionRunning } from "./sessionActivity";
 import { getSessionPromptOwner } from "./sessionPromptOwnership";
+import { restoreArchivedSessionBeforeSend } from "./sendCore";
 import { isVoiceConversationEmptyResponse } from "./voiceConversationNoop";
 import { i18n } from "@/shared/i18n";
 
@@ -126,6 +127,8 @@ export async function steerPromptInSession(
   });
 
   try {
+    await restoreArchivedSessionBeforeSend(sessionId);
+    useChatSessionStore.getState().assertSessionActive(sessionId);
     const steerResponse = await acpSteerMessage(
       sessionId,
       activeRunId,
