@@ -12,7 +12,7 @@ use berd_voice::openai_spokesperson::{
 use serde::Serialize;
 use serde_json::json;
 use std::{collections::HashMap, sync::Mutex};
-use tauri::{Emitter, State, WebviewWindow};
+use tauri::{Emitter, Manager, State, WebviewWindow};
 
 use super::openai_voice_credentials::{self, OpenAiVoiceCredential};
 use super::voice_capture::VoiceCaptureState;
@@ -117,10 +117,23 @@ pub fn start_openai_realtime_spokesperson_runtime(
     );
     drop(sessions);
 
-    std::thread::Builder::new()
+    let pump_session_id = session_id.clone();
+    if let Err(error) = std::thread::Builder::new()
         .name("berd-realtime-native-host".into())
-        .spawn(move || pump_native_realtime_events(webview_window, session_id, control, events))
-        .map_err(|error| format!("Could not start native Realtime host: {error}"))?;
+        .spawn(move || {
+            pump_native_realtime_events(webview_window, pump_session_id, control, events)
+        })
+    {
+        let entry = state
+            .sessions
+            .lock()
+            .map_err(|_| "OpenAI Realtime runtime state is unavailable".to_string())?
+            .remove(&session_id);
+        if let Some(entry) = entry {
+            let _ = entry.runtime.finish();
+        }
+        return Err(format!("Could not start native Realtime host: {error}"));
+    }
     Ok(())
 }
 
@@ -235,6 +248,21 @@ fn pump_native_realtime_events(
             &session_id,
             json!({ "type": "berd.realtime.failed", "message": error }),
         );
+    }
+    let entry = window
+        .state::<OpenAiRealtimeRuntimeState>()
+        .sessions
+        .lock()
+        .ok()
+        .and_then(|mut sessions| sessions.remove(&session_id));
+    if let Some(entry) = entry {
+        if let Err(error) = entry.runtime.finish() {
+            let _ = emit_runtime_provider_event(
+                &window,
+                &session_id,
+                json!({ "type": "berd.realtime.failed", "message": error }),
+            );
+        }
     }
 }
 
