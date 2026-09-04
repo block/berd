@@ -1,4 +1,5 @@
 use berd_voice::openai_realtime_protocol::{
+    accepted_handoff_tool_output, expert_session_instructions, invalid_tool_call_output,
     realtime_transcript_seed_events, spokesperson_session_update, RealtimeCoordinatorResult,
     RealtimeExpertMessage, RealtimeExpertSpokespersonSession, RealtimeHandoffReminder,
     RealtimePipeExchange, RealtimeSessionReduction, RealtimeSpokespersonSessionOptions,
@@ -77,6 +78,36 @@ pub fn create_openai_realtime_spokesperson_session_update(
     options: RealtimeSpokespersonSessionOptions,
 ) -> serde_json::Value {
     spokesperson_session_update(&options)
+}
+
+#[tauri::command]
+pub fn create_openai_realtime_expert_instructions(
+    session_id: String,
+    initial_cursor: u64,
+    call_id: String,
+) -> Result<String, String> {
+    Ok(expert_session_instructions(
+        &non_empty_session_id(session_id)?,
+        initial_cursor,
+        &non_empty_session_id(call_id)?,
+    ))
+}
+
+#[tauri::command]
+pub fn create_openai_realtime_handoff_tool_output(
+    call_id: String,
+    handoff_id: String,
+) -> Result<serde_json::Value, String> {
+    accepted_handoff_tool_output(&call_id, &handoff_id)
+}
+
+#[tauri::command]
+pub fn create_openai_realtime_invalid_tool_output(
+    call_id: String,
+    tool_name: String,
+    error: String,
+) -> Result<serde_json::Value, String> {
+    invalid_tool_call_output(&call_id, &tool_name, &error)
 }
 
 #[tauri::command]

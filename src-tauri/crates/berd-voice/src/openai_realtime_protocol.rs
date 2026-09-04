@@ -81,6 +81,51 @@ pub fn realtime_role_instructions(role: &str) -> String {
     normalized.replace(ROLE_PLACEHOLDER, role)
 }
 
+pub fn expert_session_instructions(session_id: &str, initial_cursor: u64, call_id: &str) -> String {
+    let session_id = serde_json::to_string(session_id).expect("session id is serializable");
+    format!(
+        "{}\n\nYour send_to_spokesperson tool is the Berd CLI command below. This Realtime call is {call_id}, and its initial bridge cursor is {initial_cursor}. Always use the newest cursor from any Expert-bound transcript, handoff, reminder, or prior tool result. A stale cursor means a newer event is already queued; wait for its normal delivery rather than bypassing it. Choose --mode context to silently update the Spokesperson's context for a future natural turn. Choose --mode say only when the Spokesperson should have an opportunity to speak your message to the user now. A say may resolve several open handoffs by repeating --resolves for each handoff id. Context cannot resolve a handoff. Finishing your turn does not notify or wake the Spokesperson, so send explicitly when needed. Resolve every required handoff before ending your turn; the host may privately remind you if one remains.\n\nberdctl session send-to-spokesperson --session-id {session_id} --cursor <cursor> --mode <context|say> [--resolves <handoff-id> ...] --message <message> --json\n\nIf a handoff is obsolete, superseded, or already handled, dismiss it explicitly:\n\nberdctl session dismiss-handoffs --session-id {session_id} --cursor <cursor> --handoff-id <handoff-id> [--handoff-id <handoff-id> ...] --reason <reason> --json",
+        realtime_role_instructions("Expert")
+    )
+}
+
+pub fn accepted_handoff_tool_output(call_id: &str, handoff_id: &str) -> Result<Value, String> {
+    let call_id = require_non_empty(call_id, "call id")?;
+    let handoff_id = require_non_empty(handoff_id, "handoff id")?;
+    Ok(json!({
+        "type": "conversation.item.create",
+        "item": {
+            "type": "function_call_output",
+            "call_id": call_id,
+            "output": json!({ "accepted": true, "handoff_id": handoff_id }).to_string(),
+        },
+    }))
+}
+
+pub fn invalid_tool_call_output(
+    call_id: &str,
+    tool_name: &str,
+    error: &str,
+) -> Result<Value, String> {
+    let call_id = require_non_empty(call_id, "call id")?;
+    let tool_name = require_non_empty(tool_name, "tool name")?;
+    let error = require_non_empty(error, "tool error")?;
+    Ok(json!({
+        "type": "conversation.item.create",
+        "item": {
+            "type": "function_call_output",
+            "call_id": call_id,
+            "output": json!({
+                "accepted": false,
+                "reason": "invalid_arguments",
+                "error": format!(
+                    "{tool_name} arguments were invalid: {error}. Retry this tool call with complete valid JSON. Do not speak this internal error to the user."
+                ),
+            }).to_string(),
+        },
+    }))
+}
+
 pub fn spokesperson_session_update(options: &RealtimeSpokespersonSessionOptions) -> Value {
     let create_response = options.create_response.unwrap_or(true);
     let interrupt_response = options.interrupt_response.unwrap_or(true);
@@ -1531,6 +1576,58 @@ mod tests {
             realtime_role_instructions("Expert"),
             normalized.replace(ROLE_PLACEHOLDER, "Expert")
         );
+        for required in [
+            "response text land in the durable transcript",
+            "produce visible progress and result text",
+            "Expert → Spokesperson delivery intents",
+            "`SAY` asks the Spokesperson to speak useful information now",
+            "finishing an Expert turn does not wake it",
+            "entire turn is an empty, zero-token success",
+            "interrupted Spokesperson transcripts as best-effort",
+            "The host delivers relevant conversation events to the Expert",
+            "there is no fixed timer or retry count",
+            "two parts of one brain",
+        ] {
+            assert!(
+                normalized.contains(required),
+                "missing prompt rule: {required}"
+            );
+        }
+        assert!(!normalized.contains("up to three times"));
+    }
+
+    #[test]
+    fn expert_session_instructions_describe_say_as_an_opportunity() {
+        let instructions = expert_session_instructions("session-a", 42, "call-a");
+        assert!(instructions.contains("opportunity to speak"));
+        assert!(instructions.contains("--session-id \"session-a\""));
+        assert!(instructions.contains("initial bridge cursor is 42"));
+        assert!(instructions.contains("Realtime call is call-a"));
+    }
+
+    #[test]
+    fn shared_tool_outputs_encode_handoff_acceptance_and_silent_retry() {
+        let accepted = accepted_handoff_tool_output("call-1", "handoff-1").unwrap();
+        assert_eq!(accepted.pointer("/item/call_id"), Some(&json!("call-1")));
+        assert_eq!(
+            accepted
+                .pointer("/item/output")
+                .and_then(Value::as_str)
+                .map(|output| serde_json::from_str::<Value>(output).unwrap()),
+            Some(json!({ "accepted": true, "handoff_id": "handoff-1" }))
+        );
+
+        let rejected = invalid_tool_call_output("call-2", "handoff", "bad JSON").unwrap();
+        let output = rejected
+            .pointer("/item/output")
+            .and_then(Value::as_str)
+            .and_then(|output| serde_json::from_str::<Value>(output).ok())
+            .unwrap();
+        assert_eq!(output["accepted"], false);
+        assert_eq!(output["reason"], "invalid_arguments");
+        assert!(output["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("Do not speak")));
     }
 
     #[test]
