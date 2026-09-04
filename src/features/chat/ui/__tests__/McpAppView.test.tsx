@@ -160,6 +160,326 @@ describe("McpAppView nested tool calls", () => {
     });
   });
 
+  it("requires one host confirmation before sending exact app-authored text", async () => {
+    let resolveSend: (accepted: boolean) => void = () => {};
+    const onSendMessage = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveSend = resolve;
+        }),
+    );
+    render(
+      <McpAppView
+        payload={createPayload()}
+        toolResponse={createToolResponse()}
+        onSendMessage={onSendMessage}
+      />,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-app-renderer")).toBeInTheDocument();
+    });
+
+    let resultPromise: Promise<unknown> | undefined;
+    await act(async () => {
+      resultPromise = getLatestAppRendererProps().onMessage?.(
+        {
+          role: "user",
+          content: [{ type: "text", text: "  exact app text  " }],
+        },
+        {} as RequestHandlerExtra,
+      );
+    });
+
+    expect(onSendMessage).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(
+        (_, element) => element?.textContent === "  exact app text  ",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/mcpappbench_local_.*inspect-messaging/),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => {
+      expect(onSendMessage).toHaveBeenCalledTimes(1);
+    });
+    expect(onSendMessage).toHaveBeenCalledWith("  exact app text  ");
+    expect(
+      screen.queryByRole("button", { name: "Send message" }),
+    ).not.toBeInTheDocument();
+
+    const replayed = getLatestAppRendererProps().onMessage?.(
+      { role: "user", content: [{ type: "text", text: "replayed" }] },
+      {} as RequestHandlerExtra,
+    );
+    await expect(replayed).resolves.toEqual({ isError: true });
+    expect(onSendMessage).toHaveBeenCalledTimes(1);
+
+    resolveSend(true);
+    await expect(resultPromise).resolves.toEqual({});
+  });
+
+  it("refreshes one recent-message protection signal across approvals", async () => {
+    const registry = createTranscriptRowStateRegistry();
+    const onSendMessage = vi.fn(() => true);
+    render(
+      <TranscriptRowStateProvider
+        registry={registry}
+        sessionId="virtual-session"
+        rowId="mcp-row"
+      >
+        <McpAppView
+          payload={createPayload()}
+          toolResponse={createToolResponse()}
+          onSendMessage={onSendMessage}
+        />
+      </TranscriptRowStateProvider>,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-app-renderer")).toBeInTheDocument();
+    });
+
+    for (const text of ["first", "second"]) {
+      let resultPromise: Promise<{ isError?: boolean } | undefined> | undefined;
+      await act(async () => {
+        resultPromise = getLatestAppRendererProps().onMessage?.(
+          { role: "user", content: [{ type: "text", text }] },
+          {} as RequestHandlerExtra,
+        );
+      });
+      const sendButton = await screen.findByRole("button", {
+        name: "Send message",
+      });
+      await act(async () => {
+        fireEvent.click(sendButton);
+        await resultPromise;
+      });
+      await expect(resultPromise).resolves.toEqual({});
+    }
+
+    expect(onSendMessage).toHaveBeenCalledTimes(2);
+    expect(registry.cleanupSession("virtual-session")).toMatchObject({
+      removedProtectionSignalCount: 1,
+    });
+  });
+
+  it("rejects a pending app message without sending it", async () => {
+    const onSendMessage = vi.fn(() => true);
+    render(
+      <McpAppView
+        payload={createPayload()}
+        toolResponse={createToolResponse()}
+        onSendMessage={onSendMessage}
+      />,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-app-renderer")).toBeInTheDocument();
+    });
+
+    let resultPromise: Promise<unknown> | undefined;
+    await act(async () => {
+      resultPromise = getLatestAppRendererProps().onMessage?.(
+        { role: "user", content: [{ type: "text", text: "do not send" }] },
+        {} as RequestHandlerExtra,
+      );
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+
+    expect(onSendMessage).not.toHaveBeenCalled();
+    await expect(resultPromise).resolves.toEqual({ isError: true });
+  });
+
+  it("rejects concurrent app messages instead of cross-approving them", async () => {
+    const onSendMessage = vi.fn(() => true);
+    render(
+      <McpAppView
+        payload={createPayload()}
+        toolResponse={createToolResponse()}
+        onSendMessage={onSendMessage}
+      />,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-app-renderer")).toBeInTheDocument();
+    });
+
+    const onMessage = getLatestAppRendererProps().onMessage;
+    let first: Promise<unknown> | undefined;
+    let second: Promise<unknown> | undefined;
+    await act(async () => {
+      first = onMessage?.(
+        { role: "user", content: [{ type: "text", text: "first" }] },
+        {} as RequestHandlerExtra,
+      );
+      second = onMessage?.(
+        { role: "user", content: [{ type: "text", text: "second" }] },
+        {} as RequestHandlerExtra,
+      );
+    });
+
+    await expect(second).resolves.toEqual({ isError: true });
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Send message" }),
+    );
+    await expect(first).resolves.toEqual({});
+    expect(onSendMessage).toHaveBeenCalledTimes(1);
+    expect(onSendMessage).toHaveBeenCalledWith("first");
+  });
+
+  it("rejects an app message while link confirmation is pending", async () => {
+    const onSendMessage = vi.fn(() => true);
+    render(
+      <McpAppView
+        payload={createPayload()}
+        toolResponse={createToolResponse()}
+        onSendMessage={onSendMessage}
+      />,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-app-renderer")).toBeInTheDocument();
+    });
+
+    let linkPromise: Promise<unknown> | undefined;
+    await act(async () => {
+      linkPromise = getLatestAppRendererProps().onOpenLink?.(
+        { url: "https://example.com" },
+        {} as RequestHandlerExtra,
+      );
+    });
+    await screen.findByText("https://example.com/");
+
+    const result = await getLatestAppRendererProps().onMessage?.(
+      { role: "user", content: [{ type: "text", text: "blocked" }] },
+      {} as RequestHandlerExtra,
+    );
+
+    expect(result).toEqual({ isError: true });
+    expect(onSendMessage).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("button", { name: "Send message" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await expect(linkPromise).resolves.toEqual({ isError: true });
+  });
+
+  it("rejects an open link while app message confirmation is pending", async () => {
+    const onSendMessage = vi.fn(() => true);
+    render(
+      <McpAppView
+        payload={createPayload()}
+        toolResponse={createToolResponse()}
+        onSendMessage={onSendMessage}
+      />,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-app-renderer")).toBeInTheDocument();
+    });
+
+    let messagePromise: Promise<unknown> | undefined;
+    await act(async () => {
+      messagePromise = getLatestAppRendererProps().onMessage?.(
+        { role: "user", content: [{ type: "text", text: "pending" }] },
+        {} as RequestHandlerExtra,
+      );
+    });
+    await screen.findByRole("button", { name: "Send message" });
+
+    const result = await getLatestAppRendererProps().onOpenLink?.(
+      { url: "https://example.com" },
+      {} as RequestHandlerExtra,
+    );
+
+    expect(result).toEqual({ isError: true });
+    expect(screen.queryByText("https://example.com/")).not.toBeInTheDocument();
+    expect(openUrl).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await expect(messagePromise).resolves.toEqual({ isError: true });
+  });
+
+  it("invalidates pending confirmation when its session or app identity changes", async () => {
+    const onSendMessage = vi.fn(() => true);
+    const { rerender } = render(
+      <McpAppView
+        payload={createPayload()}
+        toolResponse={createToolResponse()}
+        onSendMessage={onSendMessage}
+      />,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-app-renderer")).toBeInTheDocument();
+    });
+
+    let resultPromise: Promise<unknown> | undefined;
+    await act(async () => {
+      resultPromise = getLatestAppRendererProps().onMessage?.(
+        { role: "user", content: [{ type: "text", text: "stale" }] },
+        {} as RequestHandlerExtra,
+      );
+    });
+    rerender(
+      <McpAppView
+        payload={{ ...createPayload(), sessionId: "other-session" }}
+        toolResponse={createToolResponse()}
+        onSendMessage={onSendMessage}
+      />,
+    );
+
+    await expect(resultPromise).resolves.toEqual({ isError: true });
+    expect(onSendMessage).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("button", { name: "Send message" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("re-checks send admission at approval and rejects malformed messages", async () => {
+    const onSendMessage = vi.fn(() => false);
+    render(
+      <McpAppView
+        payload={createPayload()}
+        toolResponse={createToolResponse()}
+        onSendMessage={onSendMessage}
+      />,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-app-renderer")).toBeInTheDocument();
+    });
+
+    const onMessage = getLatestAppRendererProps().onMessage;
+    await expect(
+      onMessage?.(
+        {
+          role: "assistant" as "user",
+          content: [{ type: "text", text: "forged" }],
+        },
+        {} as RequestHandlerExtra,
+      ),
+    ).resolves.toEqual({ isError: true });
+    await expect(
+      onMessage?.(
+        { role: "user", content: [{ type: "text", text: "   " }] },
+        {} as RequestHandlerExtra,
+      ),
+    ).resolves.toEqual({ isError: true });
+
+    let blocked: Promise<unknown> | undefined;
+    await act(async () => {
+      blocked = onMessage?.(
+        { role: "user", content: [{ type: "text", text: "blocked now" }] },
+        {} as RequestHandlerExtra,
+      );
+    });
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Send message" }),
+    );
+
+    await expect(blocked).resolves.toEqual({ isError: true });
+    expect(onSendMessage).toHaveBeenCalledTimes(1);
+    expect(onSendMessage).toHaveBeenCalledWith("blocked now");
+  });
+
   it("keeps the original toolResult after nested app tool calls resolve", async () => {
     const nestedToolResult = {
       content: [{ type: "text", text: "2026-04-22T18:29:06.433Z" }],
