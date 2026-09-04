@@ -20,7 +20,9 @@ export interface NativeMicrophone {
   stop: () => void;
 }
 
-export async function startNativeMicrophone(): Promise<NativeMicrophone> {
+export async function startNativeMicrophone(
+  transportCommand = "push_native_voice_audio",
+): Promise<NativeMicrophone> {
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: {
       echoCancellation: true,
@@ -53,7 +55,7 @@ export async function startNativeMicrophone(): Promise<NativeMicrophone> {
     worklet.port.onmessage = (event: MessageEvent<Float32Array>) => {
       const samples = event.data;
       void invokeRawBinary(
-        "push_native_voice_audio",
+        transportCommand,
         new Uint8Array(samples.buffer, samples.byteOffset, samples.byteLength),
       ).catch((error) => {
         if (transportErrorReported) return;

@@ -678,9 +678,25 @@ impl RealtimeProtocolReducer {
         if let Some(pending) = pending {
             let mut text = combined_spokesperson_transcript(&pending, !interrupted);
             let evidence = if interrupted {
-                let resolved = resolve_interrupted_spokesperson_transcript(
-                    RealtimeInterruptedTranscriptInput::ProviderDelta { text },
-                );
+                let played_audio_frames = event.get("played_audio_frames").and_then(Value::as_u64);
+                let total_audio_frames = event.get("total_audio_frames").and_then(Value::as_u64);
+                let sample_rate = event
+                    .get("sample_rate")
+                    .and_then(Value::as_u64)
+                    .and_then(|value| u32::try_from(value).ok());
+                let input = match (played_audio_frames, total_audio_frames, sample_rate) {
+                    (Some(played_audio_frames), Some(total_audio_frames), Some(sample_rate)) => {
+                        RealtimeInterruptedTranscriptInput::HostPlayedFrames {
+                            text,
+                            audio_parts: Vec::new(),
+                            played_audio_frames,
+                            total_audio_frames,
+                            sample_rate,
+                        }
+                    }
+                    _ => RealtimeInterruptedTranscriptInput::ProviderDelta { text },
+                };
+                let resolved = resolve_interrupted_spokesperson_transcript(input);
                 text = resolved.0;
                 resolved.1
             } else {
@@ -1776,6 +1792,37 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn native_playback_frames_bound_the_interrupted_spokesperson_transcript() {
+        let mut reducer = RealtimeProtocolReducer::default();
+        reducer
+            .handle(&json!({
+                "type": "response.output_audio_transcript.delta",
+                "response_id": "response-1",
+                "item_id": "assistant-1",
+                "delta": "One two three four",
+            }))
+            .unwrap();
+
+        assert!(matches!(
+            reducer
+                .handle(&json!({
+                    "type": "output_audio_buffer.cleared",
+                    "response_id": "response-1",
+                    "played_audio_frames": 12_000,
+                    "total_audio_frames": 24_000,
+                    "sample_rate": 24_000,
+                }))
+                .unwrap()
+                .as_slice(),
+            [RealtimeProtocolEvent::TranscriptFinalized {
+                text,
+                evidence: RealtimeTranscriptEvidence::HostPlayedFrames,
+                ..
+            }, RealtimeProtocolEvent::PlaybackInterrupted { .. }] if text == "One two"
+        ));
     }
 
     #[test]

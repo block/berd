@@ -5,21 +5,43 @@ use berd_voice::openai_realtime_protocol::{
     RealtimePipeExchange, RealtimeSessionReduction, RealtimeSpokespersonSessionOptions,
     RealtimeTranscriptSeedTurn,
 };
+use berd_voice::openai_spokesperson::{
+    OpenAiSpokespersonConfig, OpenAiSpokespersonControl, OpenAiSpokespersonRuntime,
+    SpokespersonCommand, SpokespersonEvent,
+};
 use serde::Serialize;
 use serde_json::json;
 use std::{collections::HashMap, sync::Mutex};
-use tauri::{State, WebviewWindow};
+use tauri::{Emitter, State, WebviewWindow};
 
 use super::openai_voice_credentials::{self, OpenAiVoiceCredential};
 use super::voice_capture::VoiceCaptureState;
 
-const DEFAULT_REALTIME_MODEL: &str = "gpt-realtime-2.1";
 const OPENAI_REALTIME_CLIENT_SECRETS_URL: &str =
     "https://api.openai.com/v1/realtime/client_secrets";
 
 #[derive(Default)]
 pub struct OpenAiRealtimeProtocolState {
     sessions: Mutex<HashMap<String, RealtimeExpertSpokespersonSession>>,
+}
+
+#[derive(Default)]
+pub struct OpenAiRealtimeRuntimeState {
+    sessions: Mutex<HashMap<String, NativeRealtimeRuntime>>,
+}
+
+struct NativeRealtimeRuntime {
+    owner_window: String,
+    runtime: OpenAiSpokespersonRuntime,
+}
+
+const OPENAI_REALTIME_RUNTIME_EVENT: &str = "openai-realtime-runtime-event";
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OpenAiRealtimeRuntimeEvent {
+    session_id: String,
+    event: serde_json::Value,
 }
 
 #[derive(Serialize)]
@@ -46,22 +68,6 @@ pub async fn get_openai_realtime_status() -> Result<OpenAiRealtimeStatus, String
 }
 
 #[tauri::command]
-pub async fn create_openai_realtime_voice_session(
-    model: Option<String>,
-) -> Result<OpenAiRealtimeSession, String> {
-    let api_key = openai_voice_credentials::require(OpenAiVoiceCredential::Realtime)?;
-    let model = model
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| DEFAULT_REALTIME_MODEL.to_string());
-    let response = realtime_client_secret_request(&reqwest::Client::new(), &api_key, &model)
-        .send()
-        .await
-        .map_err(|error| format!("Failed to create OpenAI Realtime voice session: {error}"))?;
-    parse_session_response(response, "voice").await
-}
-
-#[tauri::command]
 pub async fn create_openai_realtime_session() -> Result<OpenAiRealtimeSession, String> {
     let api_key = openai_voice_credentials::require(OpenAiVoiceCredential::Realtime)?;
     let response = realtime_transcription_client_secret_request(&reqwest::Client::new(), &api_key)
@@ -71,6 +77,176 @@ pub async fn create_openai_realtime_session() -> Result<OpenAiRealtimeSession, S
             format!("Failed to create OpenAI Realtime transcription session: {error}")
         })?;
     parse_session_response(response, "transcription").await
+}
+
+#[tauri::command]
+pub fn start_openai_realtime_spokesperson_runtime(
+    state: State<'_, OpenAiRealtimeRuntimeState>,
+    webview_window: WebviewWindow,
+    session_id: String,
+    options: RealtimeSpokespersonSessionOptions,
+) -> Result<(), String> {
+    let session_id = non_empty_session_id(session_id)?;
+    let mut sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "OpenAI Realtime runtime state is unavailable".to_string())?;
+    if sessions.contains_key(&session_id) {
+        return Err("OpenAI Realtime runtime session is already active".into());
+    }
+    if sessions
+        .values()
+        .any(|entry| entry.owner_window == webview_window.label())
+    {
+        return Err("This window already owns an OpenAI Realtime runtime session".into());
+    }
+
+    let api_key = openai_voice_credentials::require(OpenAiVoiceCredential::Realtime)?;
+    let config = OpenAiSpokespersonConfig::new(api_key, options, Vec::new());
+    let (runtime, events) = OpenAiSpokespersonRuntime::spawn_observed(config)?;
+    let control = runtime.control();
+    log::info!(
+        "Starting Expert-Spokesperson session {session_id} with execution_path=berd_voice_in_process transport=websocket playback=native_pcm"
+    );
+    sessions.insert(
+        session_id.clone(),
+        NativeRealtimeRuntime {
+            owner_window: webview_window.label().into(),
+            runtime,
+        },
+    );
+    drop(sessions);
+
+    std::thread::Builder::new()
+        .name("berd-realtime-native-host".into())
+        .spawn(move || pump_native_realtime_events(webview_window, session_id, control, events))
+        .map_err(|error| format!("Could not start native Realtime host: {error}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn send_openai_realtime_spokesperson_runtime_event(
+    state: State<'_, OpenAiRealtimeRuntimeState>,
+    session_id: String,
+    event: serde_json::Value,
+) -> Result<(), String> {
+    with_runtime(state, session_id, |runtime| {
+        runtime.send(SpokespersonCommand::Provider(event))
+    })
+}
+
+#[tauri::command]
+pub fn push_openai_realtime_spokesperson_audio(
+    request: tauri::ipc::Request<'_>,
+    state: State<'_, OpenAiRealtimeRuntimeState>,
+    webview_window: WebviewWindow,
+) -> Result<(), String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("OpenAI Realtime audio requires a raw binary body".into());
+    };
+    let samples = bytes
+        .chunks_exact(std::mem::size_of::<f32>())
+        .map(|bytes| f32::from_le_bytes(bytes.try_into().expect("four-byte chunk")))
+        .collect::<Vec<_>>();
+    if samples.len() * std::mem::size_of::<f32>() != bytes.len()
+        || samples.iter().any(|sample| !sample.is_finite())
+    {
+        return Err("OpenAI Realtime audio must contain finite 32-bit PCM samples".into());
+    }
+    let sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "OpenAI Realtime runtime state is unavailable".to_string())?;
+    let entry = sessions
+        .values()
+        .find(|entry| entry.owner_window == webview_window.label())
+        .ok_or("This window does not own an OpenAI Realtime runtime session")?;
+    entry
+        .runtime
+        .send(SpokespersonCommand::InputPcm48Khz(samples))
+}
+
+#[tauri::command]
+pub fn stop_openai_realtime_spokesperson_runtime(
+    state: State<'_, OpenAiRealtimeRuntimeState>,
+    session_id: String,
+) -> Result<(), String> {
+    let session_id = non_empty_session_id(session_id)?;
+    let entry = state
+        .sessions
+        .lock()
+        .map_err(|_| "OpenAI Realtime runtime state is unavailable".to_string())?
+        .remove(&session_id);
+    if let Some(entry) = entry {
+        entry.runtime.finish()?;
+    }
+    Ok(())
+}
+
+fn with_runtime<T>(
+    state: State<'_, OpenAiRealtimeRuntimeState>,
+    session_id: String,
+    operation: impl FnOnce(&OpenAiSpokespersonRuntime) -> Result<T, String>,
+) -> Result<T, String> {
+    let session_id = non_empty_session_id(session_id)?;
+    let sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "OpenAI Realtime runtime state is unavailable".to_string())?;
+    operation(
+        &sessions
+            .get(&session_id)
+            .ok_or("OpenAI Realtime runtime session is not active")?
+            .runtime,
+    )
+}
+
+fn emit_runtime_provider_event(
+    window: &WebviewWindow,
+    session_id: &str,
+    event: serde_json::Value,
+) -> Result<(), String> {
+    window
+        .emit(
+            OPENAI_REALTIME_RUNTIME_EVENT,
+            OpenAiRealtimeRuntimeEvent {
+                session_id: session_id.into(),
+                event,
+            },
+        )
+        .map_err(|error| format!("Could not publish OpenAI Realtime event: {error}"))
+}
+
+fn pump_native_realtime_events(
+    window: WebviewWindow,
+    session_id: String,
+    control: OpenAiSpokespersonControl,
+    events: std::sync::mpsc::Receiver<SpokespersonEvent>,
+) {
+    let result = berd_voice::realtime_host::run_realtime_host(
+        events,
+        |command| control.send(command),
+        create_native_realtime_output,
+        |event| emit_runtime_provider_event(&window, &session_id, event),
+    );
+    if let Err(error) = result {
+        let _ = emit_runtime_provider_event(
+            &window,
+            &session_id,
+            json!({ "type": "berd.realtime.failed", "message": error }),
+        );
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn create_native_realtime_output() -> Result<Box<dyn berd_voice::PcmAudioOutput>, String> {
+    berd_voice::PocketAudioPlayer::new(24_000, 1.0, None)
+        .map(|output| Box::new(output) as Box<dyn berd_voice::PcmAudioOutput>)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn create_native_realtime_output() -> Result<Box<dyn berd_voice::PcmAudioOutput>, String> {
+    Err("Native OpenAI Realtime playback is not supported on this platform".into())
 }
 
 #[tauri::command]
@@ -321,22 +497,6 @@ fn with_protocol_session<T>(
     )
 }
 
-fn realtime_client_secret_request(
-    client: &reqwest::Client,
-    api_key: &str,
-    model: &str,
-) -> reqwest::RequestBuilder {
-    client
-        .post(OPENAI_REALTIME_CLIENT_SECRETS_URL)
-        .bearer_auth(api_key)
-        .json(&json!({
-            "session": {
-                "type": "realtime",
-                "model": model,
-            }
-        }))
-}
-
 fn realtime_transcription_client_secret_request(
     client: &reqwest::Client,
     api_key: &str,
@@ -438,10 +598,7 @@ fn client_secret_value(value: &serde_json::Value) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        parse_client_secret, realtime_client_secret_request,
-        realtime_transcription_client_secret_request,
-    };
+    use super::{parse_client_secret, realtime_transcription_client_secret_request};
     use serde_json::json;
 
     #[test]
@@ -467,45 +624,6 @@ mod tests {
     #[test]
     fn rejects_missing_client_secret() {
         assert!(parse_client_secret(&json!({ "ok": true })).is_err());
-    }
-
-    #[test]
-    fn client_secret_request_uses_only_the_standard_openai_endpoint() {
-        let request = realtime_client_secret_request(
-            &reqwest::Client::new(),
-            "sk-test-secret",
-            "gpt-realtime-test",
-        )
-        .build()
-        .expect("build request");
-
-        assert_eq!(
-            request.url().as_str(),
-            "https://api.openai.com/v1/realtime/client_secrets"
-        );
-        assert_eq!(
-            request
-                .headers()
-                .get(reqwest::header::AUTHORIZATION)
-                .and_then(|value| value.to_str().ok()),
-            Some("Bearer sk-test-secret")
-        );
-        let body: serde_json::Value = serde_json::from_slice(
-            request
-                .body()
-                .and_then(|body| body.as_bytes())
-                .expect("JSON body"),
-        )
-        .expect("parse request body");
-        assert_eq!(
-            body,
-            json!({
-                "session": {
-                    "type": "realtime",
-                    "model": "gpt-realtime-test",
-                }
-            })
-        );
     }
 
     #[test]
