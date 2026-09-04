@@ -52,14 +52,6 @@ export function listenToOpenAiRealtimeSpokespersonRuntime(
   );
 }
 
-export function createOpenAiRealtimeSpokespersonSessionUpdate(
-  options: unknown,
-): Promise<Record<string, unknown>> {
-  return invoke("create_openai_realtime_spokesperson_session_update", {
-    options,
-  });
-}
-
 export function createOpenAiRealtimeExpertInstructions(
   sessionId: string,
   initialCursor: number,

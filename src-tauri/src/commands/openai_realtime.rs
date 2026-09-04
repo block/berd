@@ -1,9 +1,8 @@
 use berd_voice::openai_realtime_protocol::{
     accepted_handoff_tool_output, expert_session_instructions, invalid_tool_call_output,
-    realtime_transcript_seed_events, spokesperson_session_update, RealtimeCoordinatorResult,
-    RealtimeExpertMessage, RealtimeExpertSpokespersonSession, RealtimeHandoffReminder,
-    RealtimePipeExchange, RealtimeSessionReduction, RealtimeSpokespersonSessionOptions,
-    RealtimeTranscriptSeedTurn,
+    realtime_transcript_seed_events, RealtimeCoordinatorResult, RealtimeExpertMessage,
+    RealtimeExpertSpokespersonSession, RealtimeHandoffReminder, RealtimePipeExchange,
+    RealtimeSessionReduction, RealtimeSpokespersonSessionOptions, RealtimeTranscriptSeedTurn,
 };
 use berd_voice::openai_spokesperson::{
     OpenAiSpokespersonConfig, OpenAiSpokespersonControl, OpenAiSpokespersonRuntime,
@@ -275,13 +274,6 @@ fn create_native_realtime_output() -> Result<Box<dyn berd_voice::PcmAudioOutput>
 #[cfg(not(target_os = "macos"))]
 fn create_native_realtime_output() -> Result<Box<dyn berd_voice::PcmAudioOutput>, String> {
     Err("Native OpenAI Realtime playback is not supported on this platform".into())
-}
-
-#[tauri::command]
-pub fn create_openai_realtime_spokesperson_session_update(
-    options: RealtimeSpokespersonSessionOptions,
-) -> serde_json::Value {
-    spokesperson_session_update(&options)
 }
 
 #[tauri::command]
