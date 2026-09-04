@@ -141,9 +141,6 @@ export async function steerPromptInSession(
         images: images?.map(
           (img) => [img.base64, img.mimeType] as [string, string],
         ),
-        onSteerDispatching: () => {
-          useChatSessionStore.getState().assertSessionActive(sessionId);
-        },
       },
     );
     const steeredRunId = steerResponse.runId;
