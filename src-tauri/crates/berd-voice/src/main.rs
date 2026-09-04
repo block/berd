@@ -53,7 +53,7 @@ use session_audio::{
     AUDIO_CANCELLED,
 };
 use spokesperson_voice_update::{
-    VoiceBarrierAction, VoiceUpdateAction, VoiceUpdatePhase, VoiceUpdateRequest,
+    VoiceBarrierAction, VoiceUpdateAction, VoiceUpdatePurpose, VoiceUpdateRequest,
     VoiceUpdateTransaction,
 };
 
@@ -63,6 +63,17 @@ const FRAME_MAGIC: [u8; 2] = *b"BV";
 const JSON_FRAME_KIND: u8 = 1;
 const PCM_FRAME_KIND: u8 = 2;
 const FRAME_HEADER_BYTES: usize = 8;
+const DEFAULT_SPOKESPERSON_RENEW_AFTER: Duration = Duration::from_secs(55 * 60);
+
+fn spokesperson_renew_after() -> Duration {
+    std::env::var("BERD_VOICE_REALTIME_RENEW_AFTER_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .map(Duration::from_millis)
+        .unwrap_or(DEFAULT_SPOKESPERSON_RENEW_AFTER)
+}
+
 const PCM_FRAME_BYTES: usize = INPUT_FRAME_SAMPLES * std::mem::size_of::<f32>();
 const MAX_FINAL_TEXT_BYTES: usize = 64 * 1024;
 const MAX_SPEAK_TEXT_BYTES: usize = 16 * 1024;
@@ -1848,8 +1859,64 @@ fn rollback_spokesperson_voice_update(
     let Some(update) = pending.take() else {
         return Ok(());
     };
+    let report_result = matches!(update.purpose(), VoiceUpdatePurpose::Settings);
     let id = update.abort(old_runtime)?;
-    reject_spokesperson_tts_settings(id, snapshot, message, writer)
+    if report_result {
+        reject_spokesperson_tts_settings(id, snapshot, message, writer)
+    } else {
+        Ok(())
+    }
+}
+
+fn activate_spokesperson_voice_update(
+    pending: &mut Option<VoiceUpdateTransaction>,
+    runtime: &mut Option<OpenAiSpokespersonRuntime>,
+    runtime_events: &mut Option<Receiver<SpokespersonEvent>>,
+    runtime_config: &mut Option<OpenAiSpokespersonConfig>,
+    snapshot: &mut berd_voice::TtsConfigurationSnapshot,
+    writer: &mut impl Write,
+) -> Result<(), String> {
+    let activated = pending
+        .take()
+        .expect("matched pending voice update")
+        .activate();
+    let old_runtime = runtime
+        .replace(activated.runtime)
+        .expect("initialized runtime");
+    *runtime_events = Some(activated.events);
+    old_runtime.finish()?;
+    for frame in activated.held_input {
+        runtime
+            .as_ref()
+            .expect("activated runtime")
+            .send(SpokespersonCommand::InputPcm48Khz(
+                frame.as_samples().to_vec(),
+            ))?;
+    }
+    if matches!(activated.purpose, VoiceUpdatePurpose::Settings) {
+        snapshot.revision = snapshot
+            .revision
+            .checked_add(1)
+            .ok_or("TTS configuration revision overflow")?;
+        snapshot.settings = activated.settings.clone();
+        if let TtsSettings::OpenAi { voice, rate, .. } = &activated.settings {
+            let config = runtime_config
+                .as_mut()
+                .expect("initialized Spokesperson config");
+            config.voice = voice.clone();
+            config.speed = *rate;
+        }
+        write_message(
+            writer,
+            &SessionMessage::TtsSettingsResult {
+                id: activated.id,
+                outcome: TtsSettingsOutcome::Applied,
+                snapshot: snapshot.clone(),
+                message: None,
+            },
+        )?;
+    }
+    Ok(())
 }
 
 enum ExpertPrepareRouting {
@@ -2454,10 +2521,46 @@ fn run_expert_spokesperson_session(
     let mut pending_user_response = false;
     let mut pending_rate_update = None;
     let mut pending_voice_update: Option<VoiceUpdateTransaction> = None;
+    let mut spokesperson_renew_at: Option<Instant> = None;
+    let mut next_maintenance_id = u64::MAX;
 
     loop {
         if fail_timed_out_user_response_start(&turn_gate, Instant::now(), &mut writer)? {
             return Ok(());
+        }
+        if pending_voice_update.is_none()
+            && spokesperson_renew_at.is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            let quiescent = initialized
+                && !core.has_unresolved_handoff()
+                && spokesperson_settings_are_quiescent(
+                    &turn_gate,
+                    active.as_ref(),
+                    &responses,
+                    &directive_speeches,
+                    &cancelled_directives,
+                    pending_user_response,
+                );
+            if quiescent && pending_rate_update.is_none() {
+                let snapshot = session_tts.as_ref().expect("initialized TTS snapshot");
+                let request = VoiceUpdateRequest {
+                    id: next_maintenance_id,
+                    base_revision: snapshot.revision,
+                    settings: snapshot.settings.clone(),
+                    semantic_revision: core.semantic_revision(),
+                };
+                next_maintenance_id = next_maintenance_id.wrapping_sub(1);
+                pending_voice_update = Some(VoiceUpdateTransaction::start_with_purpose(
+                    request,
+                    snapshot.revision,
+                    true,
+                    runtime_config
+                        .as_ref()
+                        .expect("initialized Spokesperson config"),
+                    core.semantic_transcript(),
+                    VoiceUpdatePurpose::Renewal,
+                )?);
+            }
         }
         if let Some(update) = pending_voice_update.as_ref() {
             let quiescent = spokesperson_settings_are_quiescent(
@@ -2480,13 +2583,47 @@ fn run_expert_spokesperson_session(
                     .as_mut()
                     .expect("voice update exists")
                     .begin_input_barrier(runtime.as_ref().expect("initialized runtime"))?,
-                VoiceUpdateAction::Reject(message) => rollback_spokesperson_voice_update(
-                    &mut pending_voice_update,
-                    runtime.as_ref().expect("initialized runtime"),
-                    session_tts.as_ref().expect("initialized TTS snapshot"),
-                    message,
-                    &mut writer,
-                )?,
+                VoiceUpdateAction::Activate => {
+                    activate_spokesperson_voice_update(
+                        &mut pending_voice_update,
+                        &mut runtime,
+                        &mut runtime_events,
+                        &mut runtime_config,
+                        session_tts.as_mut().expect("initialized TTS snapshot"),
+                        &mut writer,
+                    )?;
+                    spokesperson_renew_at = Some(Instant::now() + spokesperson_renew_after());
+                }
+                VoiceUpdateAction::Reject(message) => {
+                    let expiry_cause = pending_voice_update.as_ref().and_then(|update| {
+                        if let VoiceUpdatePurpose::ExpiryRecovery { cause } = update.purpose() {
+                            Some(cause.clone())
+                        } else {
+                            None
+                        }
+                    });
+                    if let Some(cause) = expiry_cause {
+                        write_protocol_fatal(
+                            &mut writer,
+                            "Spokesperson session renewal failed",
+                            &format!("{cause}; replacement failed: {message}"),
+                        )?;
+                        return Ok(());
+                    }
+                    let was_renewal = pending_voice_update.as_ref().is_some_and(|update| {
+                        matches!(update.purpose(), VoiceUpdatePurpose::Renewal)
+                    });
+                    rollback_spokesperson_voice_update(
+                        &mut pending_voice_update,
+                        runtime.as_ref().expect("initialized runtime"),
+                        session_tts.as_ref().expect("initialized TTS snapshot"),
+                        message,
+                        &mut writer,
+                    )?;
+                    if was_renewal {
+                        spokesperson_renew_at = Some(Instant::now() + Duration::from_secs(30));
+                    }
+                }
             }
         }
         if let Some(events) = runtime_events.as_ref() {
@@ -2852,42 +2989,16 @@ fn run_expert_spokesperson_session(
                             },
                         );
                         if action == VoiceBarrierAction::Activate {
-                            let update = pending_voice_update
-                                .take()
-                                .expect("matched pending voice update");
-                            let activated = update.activate();
-                            let old_runtime = runtime
-                                .replace(activated.runtime)
-                                .expect("initialized runtime");
-                            runtime_events = Some(activated.events);
-                            old_runtime.finish()?;
-                            for frame in activated.held_input {
-                                runtime.as_ref().expect("activated runtime").send(
-                                    SpokespersonCommand::InputPcm48Khz(frame.as_samples().to_vec()),
-                                )?;
-                            }
-                            let snapshot = session_tts.as_mut().expect("initialized TTS snapshot");
-                            snapshot.revision = snapshot
-                                .revision
-                                .checked_add(1)
-                                .ok_or("TTS configuration revision overflow")?;
-                            snapshot.settings = activated.settings.clone();
-                            if let TtsSettings::OpenAi { voice, rate, .. } = &activated.settings {
-                                let config = runtime_config
-                                    .as_mut()
-                                    .expect("initialized Spokesperson config");
-                                config.voice = voice.clone();
-                                config.speed = *rate;
-                            }
-                            write_message(
+                            activate_spokesperson_voice_update(
+                                &mut pending_voice_update,
+                                &mut runtime,
+                                &mut runtime_events,
+                                &mut runtime_config,
+                                session_tts.as_mut().expect("initialized TTS snapshot"),
                                 &mut writer,
-                                &SessionMessage::TtsSettingsResult {
-                                    id: activated.id,
-                                    outcome: TtsSettingsOutcome::Applied,
-                                    snapshot: snapshot.clone(),
-                                    message: None,
-                                },
                             )?;
+                            spokesperson_renew_at =
+                                Some(Instant::now() + spokesperson_renew_after());
                         } else if let VoiceBarrierAction::Reject(message) = action {
                             rollback_spokesperson_voice_update(
                                 &mut pending_voice_update,
@@ -2935,13 +3046,111 @@ fn run_expert_spokesperson_session(
                             &mut writer,
                         )?;
                     }
+                    SpokespersonEvent::Expired(message) => {
+                        let quiescent = spokesperson_settings_are_quiescent(
+                            &turn_gate,
+                            active.as_ref(),
+                            &responses,
+                            &directive_speeches,
+                            &cancelled_directives,
+                            pending_user_response,
+                        ) && !core.has_unresolved_handoff();
+                        if !quiescent || pending_rate_update.is_some() {
+                            write_protocol_fatal(
+                                &mut writer,
+                                "Spokesperson session expired before it could renew",
+                                &message,
+                            )?;
+                            cancel_live_playback(&mut active);
+                            break;
+                        }
+                        let start_recovery = match pending_voice_update
+                            .as_ref()
+                            .map(VoiceUpdateTransaction::purpose)
+                        {
+                            Some(VoiceUpdatePurpose::Renewal) => {
+                                pending_voice_update
+                                    .as_mut()
+                                    .expect("renewal exists")
+                                    .recover_from_expiry(message.clone())?;
+                                false
+                            }
+                            Some(VoiceUpdatePurpose::Settings) => {
+                                let settings_update =
+                                    pending_voice_update.take().expect("settings update exists");
+                                let request_id = settings_update.id;
+                                reject_spokesperson_tts_settings(
+                                    request_id,
+                                    session_tts.as_ref().expect("initialized TTS snapshot"),
+                                    "Spokesperson session expired before the voice change completed"
+                                        .into(),
+                                    &mut writer,
+                                )?;
+                                if let Err(error) = settings_update.finish_candidate() {
+                                    write_protocol_fatal(
+                                        &mut writer,
+                                        "Spokesperson session renewal failed",
+                                        &format!(
+                                            "{message}; voice-change candidate cleanup failed: {error}"
+                                        ),
+                                    )?;
+                                    break;
+                                }
+                                true
+                            }
+                            Some(VoiceUpdatePurpose::ExpiryRecovery { .. }) => {
+                                write_protocol_fatal(
+                                    &mut writer,
+                                    "Spokesperson session expired during renewal",
+                                    &message,
+                                )?;
+                                break;
+                            }
+                            None => true,
+                        };
+                        if start_recovery {
+                            let snapshot = session_tts.as_ref().expect("initialized TTS snapshot");
+                            let request = VoiceUpdateRequest {
+                                id: next_maintenance_id,
+                                base_revision: snapshot.revision,
+                                settings: snapshot.settings.clone(),
+                                semantic_revision: core.semantic_revision(),
+                            };
+                            next_maintenance_id = next_maintenance_id.wrapping_sub(1);
+                            pending_voice_update = match VoiceUpdateTransaction::start_with_purpose(
+                                request,
+                                snapshot.revision,
+                                true,
+                                runtime_config
+                                    .as_ref()
+                                    .expect("initialized Spokesperson config"),
+                                core.semantic_transcript(),
+                                VoiceUpdatePurpose::ExpiryRecovery {
+                                    cause: message.clone(),
+                                },
+                            ) {
+                                Ok(update) => Some(update),
+                                Err(error) => {
+                                    write_protocol_fatal(
+                                        &mut writer,
+                                        "Spokesperson session renewal failed",
+                                        &format!("{message}; replacement failed: {error}"),
+                                    )?;
+                                    break;
+                                }
+                            };
+                        }
+                    }
                     SpokespersonEvent::Failed(message) => {
                         write_protocol_fatal(&mut writer, "Spokesperson failed", &message)?;
                         cancel_live_playback(&mut active);
                         break;
                     }
                     SpokespersonEvent::Closed => {
-                        if initialized {
+                        let recovering = pending_voice_update.as_ref().is_some_and(|update| {
+                            matches!(update.purpose(), VoiceUpdatePurpose::ExpiryRecovery { .. })
+                        });
+                        if initialized && !recovering {
                             return Err("Spokesperson runtime closed unexpectedly".into());
                         }
                     }
@@ -3124,9 +3333,19 @@ fn run_expert_spokesperson_session(
                 ) {
                     if let Some(update) = pending_voice_update
                         .as_mut()
-                        .filter(|update| update.phase() == VoiceUpdatePhase::InputBarrier)
+                        .filter(|update| update.should_hold_input())
                     {
                         if let Err(frame) = update.hold_input(frame, INPUT_QUEUE_CAPACITY) {
+                            if let VoiceUpdatePurpose::ExpiryRecovery { cause } = update.purpose() {
+                                write_protocol_fatal(
+                                    &mut writer,
+                                    "Spokesperson session renewal failed",
+                                    &format!(
+                                        "{cause}; replacement could not keep up with microphone input"
+                                    ),
+                                )?;
+                                break;
+                            }
                             rollback_spokesperson_voice_update(
                                 &mut pending_voice_update,
                                 runtime.as_ref().expect("initialized runtime"),
@@ -3188,6 +3407,7 @@ fn run_expert_spokesperson_session(
                 session_tts = Some(tts);
                 input_during_tts_slot = Some(input_policy);
                 initialized = true;
+                spokesperson_renew_at = Some(Instant::now() + spokesperson_renew_after());
                 write_message(
                     &mut writer,
                     &SessionMessage::Ready {

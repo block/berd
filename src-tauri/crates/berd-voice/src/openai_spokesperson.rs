@@ -162,6 +162,7 @@ pub enum SpokespersonEvent {
         call_id: String,
         message: String,
     },
+    Expired(String),
     Failed(String),
     Closed,
 }
@@ -975,6 +976,12 @@ async fn run(
                             .any(|truncation| value.pointer("/error/event_id").and_then(|value| value.as_str()) == Some(truncation.event_id.as_str()))
                         {
                             return Err(format!("Spokesperson output truncation failed: {message}"));
+                        } else if value.pointer("/error/code").and_then(|value| value.as_str())
+                            == Some("session_expired")
+                            || message == "Your session hit the maximum duration of 60 minutes."
+                        {
+                            send_event(events, SpokespersonEvent::Expired(message))?;
+                            return Ok(());
                         } else {
                             return Err(message);
                         }
