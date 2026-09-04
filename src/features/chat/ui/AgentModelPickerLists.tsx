@@ -161,6 +161,22 @@ export interface RecommendedModelListHandle {
   closeSearch: () => boolean;
 }
 
+type StarAnimation = {
+  phase: "out" | "moving" | "in";
+  targetStarred: boolean;
+};
+
+const STAR_SPIN_TRANSITION = {
+  duration: 0.24,
+  ease: "easeInOut" as const,
+  times: [0, 0.18, 0.82, 1],
+  opacity: {
+    duration: 0.24,
+    ease: "easeIn" as const,
+    times: [0, 0.18, 0.82, 1],
+  },
+};
+
 export const RecommendedModelList = forwardRef<
   RecommendedModelListHandle,
   ModelListProps
@@ -209,7 +225,51 @@ export const RecommendedModelList = forwardRef<
   const [showAll, setShowAll] = useState(false);
   const [hoveredModelKey, setHoveredModelKey] = useState<string | null>(null);
   const [focusedModelKey, setFocusedModelKey] = useState<string | null>(null);
+  const [starAnimation, setStarAnimation] = useState<{
+    modelKey: string;
+    scopeId: string;
+    modelId: string;
+    state: StarAnimation;
+  } | null>(null);
   const [query, setQuery] = useState("");
+  useEffect(() => {
+    if (!starAnimation || prefersReducedMotion) {
+      return;
+    }
+    if (starAnimation.state.phase === "out") {
+      const timer = window.setTimeout(() => {
+        const changed = toggleStar(
+          starAnimation.scopeId,
+          starAnimation.modelId,
+        );
+        setHoveredModelKey(null);
+        setStarAnimation(
+          changed
+            ? {
+                ...starAnimation,
+                state: { ...starAnimation.state, phase: "moving" },
+              }
+            : null,
+        );
+      }, 240);
+      return () => window.clearTimeout(timer);
+    }
+    if (starAnimation.state.phase === "moving") {
+      const timer = window.setTimeout(() => {
+        setStarAnimation(
+          starAnimation.state.targetStarred
+            ? {
+                ...starAnimation,
+                state: { ...starAnimation.state, phase: "in" },
+              }
+            : null,
+        );
+      }, 240);
+      return () => window.clearTimeout(timer);
+    }
+    const timer = window.setTimeout(() => setStarAnimation(null), 240);
+    return () => window.clearTimeout(timer);
+  }, [prefersReducedMotion, starAnimation, toggleStar]);
   const inputRef = useRef<HTMLInputElement>(null);
   const searchButtonRef = useRef<HTMLButtonElement>(null);
   const restoreSearchButtonFocusRef = useRef(false);
@@ -393,7 +453,6 @@ export const RecommendedModelList = forwardRef<
   const layoutTransition = prefersReducedMotion
     ? { duration: 0 }
     : { type: "spring" as const, duration: 0.24, bounce: 0 };
-
   const recommendedKeys = new Set(
     recommended.map((model) =>
       modelStarKey(model.providerId ?? selectedAgentId, model.id),
@@ -528,6 +587,25 @@ export const RecommendedModelList = forwardRef<
               const starred = liveStarredKeys.has(modelKey);
               const existsInCatalog =
                 !existingModelKeys || existingModelKeys.has(modelKey);
+              const activeStarAnimation =
+                starAnimation?.modelKey === modelKey
+                  ? starAnimation.state
+                  : null;
+              const handleStarClick = () => {
+                if (starAnimation) {
+                  return;
+                }
+                if (prefersReducedMotion) {
+                  toggleStar(scopeId, model.id);
+                  return;
+                }
+                setStarAnimation({
+                  modelKey,
+                  scopeId,
+                  modelId: model.id,
+                  state: { phase: "out", targetStarred: !starred },
+                });
+              };
               return (
                 <motion.div
                   key={modelKey}
@@ -583,7 +661,10 @@ export const RecommendedModelList = forwardRef<
                         variant="ghost"
                         size="icon-xs"
                         selected={starred}
-                        onClick={() => toggleStar(scopeId, model.id)}
+                        onClick={handleStarClick}
+                        data-star-animation-phase={
+                          activeStarAnimation?.phase ?? undefined
+                        }
                         // Explicit row-local pointer/focus state avoids
                         // sticky WebKit :hover state while keeping the list calm.
                         // The idle (unstarred) star rests on the ghost icon contract's
@@ -594,9 +675,13 @@ export const RecommendedModelList = forwardRef<
                         className={cn(
                           "shrink-0 opacity-0 focus-visible:opacity-100",
                           (starred ||
+                            activeStarAnimation?.phase === "out" ||
+                            activeStarAnimation?.phase === "in" ||
                             hoveredModelKey === modelKey ||
                             focusedModelKey === modelKey) &&
                             "animate-in fade-in opacity-100 duration-150",
+                          activeStarAnimation?.phase === "moving" &&
+                            "pointer-events-none opacity-0",
                         )}
                         aria-label={t(
                           starred ? "toolbar.unstarModel" : "toolbar.starModel",
@@ -604,7 +689,34 @@ export const RecommendedModelList = forwardRef<
                         )}
                         aria-pressed={starred}
                       >
-                        {starred ? <IconStarFilled /> : <IconStar />}
+                        <motion.span
+                          className="flex"
+                          initial={false}
+                          animate={
+                            activeStarAnimation?.phase === "out"
+                              ? {
+                                  rotate: starred
+                                    ? [0, 0, -360, -360]
+                                    : [0, 0, 360, 360],
+                                  scale: [1, 0.78, 1.18, 0.9],
+                                  opacity: [1, 1, 0.7, 0],
+                                }
+                              : activeStarAnimation?.phase === "in"
+                                ? {
+                                    rotate: [-360, -180, 0, 0],
+                                    scale: [0.9, 1.18, 0.96, 1],
+                                    opacity: [0, 0, 0.7, 1],
+                                  }
+                                : {
+                                    rotate: 0,
+                                    scale: 1,
+                                    opacity: 1,
+                                  }
+                          }
+                          transition={STAR_SPIN_TRANSITION}
+                        >
+                          {starred ? <IconStarFilled /> : <IconStar />}
+                        </motion.span>
                       </Button>
                     ) : null}
                   </div>

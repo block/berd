@@ -58,9 +58,10 @@ export function useStarredModels() {
       starredKeys.has(modelStarKey(scopeId, modelId)),
     [starredKeys],
   );
-  const toggleStar = useCallback((scopeId: string, modelId: string) => {
-    toggleModelStar(scopeId, modelId);
-  }, []);
+  const toggleStar = useCallback(
+    (scopeId: string, modelId: string) => toggleModelStar(scopeId, modelId),
+    [],
+  );
 
   return { isStarred, toggleStar, starredKeys };
 }

@@ -85,9 +85,9 @@ function readStarredModels(): StarredModelSet {
  * other's stars. Note that two windows toggling the same model at the same
  * instant can still interleave; per-model state stays consistent either way.
  */
-function persistStarEntry(starKey: string, starred: boolean): void {
+function persistStarEntry(starKey: string, starred: boolean): boolean {
   if (typeof window === "undefined") {
-    return;
+    return false;
   }
 
   try {
@@ -101,18 +101,21 @@ function persistStarEntry(starKey: string, starred: boolean): void {
     // The write did not land (storage unavailable or over quota). Tell the
     // user instead of letting the toggle silently bounce back.
     toast.error(i18n.t("chat:notifications.starredModelsPersistError"));
+    window.dispatchEvent(new CustomEvent(STARRED_MODELS_CHANGED_EVENT));
+    return false;
   }
 
   window.dispatchEvent(new CustomEvent(STARRED_MODELS_CHANGED_EVENT));
+  return true;
 }
 
 export function getStarredModelKeys(): StarredModelSet {
   return readStarredModels();
 }
 
-export function toggleModelStar(scopeId: string, modelId: string): void {
+export function toggleModelStar(scopeId: string, modelId: string): boolean {
   if (typeof window === "undefined") {
-    return;
+    return false;
   }
 
   const starKey = modelStarKey(scopeId, modelId);
@@ -121,11 +124,12 @@ export function toggleModelStar(scopeId: string, modelId: string): void {
     migrateLegacyStarredModels();
     const starred =
       window.localStorage.getItem(starredModelStorageKey(starKey)) !== null;
-    persistStarEntry(starKey, !starred);
+    return persistStarEntry(starKey, !starred);
   } catch {
     // Storage is unavailable, so the toggle cannot be applied at all. The
     // write path reports its own failures; report this one too.
     toast.error(i18n.t("chat:notifications.starredModelsPersistError"));
+    return false;
   }
 }
 

@@ -1880,7 +1880,9 @@ describe("AgentModelPicker starred models", () => {
     );
 
     expect(onModelChange).not.toHaveBeenCalled();
-    expect(screen.getByTestId("starred-models-divider")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByTestId("starred-models-divider")).toBeInTheDocument(),
+    );
   });
 
   it("renders star actions through the shared Button contract with a ≥3:1 idle treatment", async () => {
@@ -2003,6 +2005,13 @@ describe("AgentModelPicker starred models", () => {
       within(picker).getByRole("button", { name: "Star Another" }),
     );
 
+    await waitFor(() =>
+      expect(
+        localStorage.getItem(
+          starredModelStorageKey(modelStarKey("goose", "another")),
+        ),
+      ).toBe("1"),
+    );
     // Starring one model must leave every other star entry untouched; an
     // aggregate rewrite from a stale snapshot would drop "other" here.
     expect(
@@ -2016,15 +2025,22 @@ describe("AgentModelPicker starred models", () => {
       ),
     ).toBe("1");
 
+    await waitFor(() =>
+      expect(
+        picker.querySelector("[data-star-animation-phase]"),
+      ).not.toBeInTheDocument(),
+    );
     await user.click(
       within(picker).getByRole("button", { name: "Unstar Other" }),
     );
 
-    expect(
-      localStorage.getItem(
-        starredModelStorageKey(modelStarKey("goose", "other")),
-      ),
-    ).toBeNull();
+    await waitFor(() =>
+      expect(
+        localStorage.getItem(
+          starredModelStorageKey(modelStarKey("goose", "other")),
+        ),
+      ).toBeNull(),
+    );
     expect(
       localStorage.getItem(
         starredModelStorageKey(modelStarKey("goose", "another")),
@@ -2063,7 +2079,9 @@ describe("AgentModelPicker starred models", () => {
         within(picker).getByRole("button", { name: "Star Another" }),
       );
 
-      expect(vi.mocked(toast.error)).toHaveBeenCalledTimes(1);
+      await waitFor(() =>
+        expect(vi.mocked(toast.error)).toHaveBeenCalledTimes(1),
+      );
       expect(vi.mocked(toast.error)).toHaveBeenCalledWith(
         expect.stringMatching(/starred/i),
       );
@@ -2111,7 +2129,9 @@ describe("AgentModelPicker starred models", () => {
         within(picker).getByRole("button", { name: "Unstar Other" }),
       );
 
-      expect(vi.mocked(toast.error)).toHaveBeenCalledTimes(1);
+      await waitFor(() =>
+        expect(vi.mocked(toast.error)).toHaveBeenCalledTimes(1),
+      );
       expect(vi.mocked(toast.error)).toHaveBeenCalledWith(
         expect.stringMatching(/starred/i),
       );
