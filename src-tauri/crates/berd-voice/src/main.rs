@@ -68,6 +68,7 @@ const SHUTDOWN_PLAYBACK_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_PENDING_SPOKESPERSON_FRAMES: usize = 24_000 * 15;
 const MAX_PENDING_SPOKESPERSON_RESPONSES: usize = 8;
 const TTS_CONFIGURATION_TIMEOUT: Duration = Duration::from_secs(120);
+const SPOKESPERSON_RESPONSE_START_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_OPENAI_BENCHMARK_REQUESTS: usize = 20;
 const MAX_OPENAI_BENCHMARK_TEXT_BYTES: usize = 64 * 1024;
 const MAX_OPENAI_STT_BENCHMARK_SECONDS: f64 = 120.0;
@@ -1840,7 +1841,7 @@ struct ExpertTurnGate {
     pending_user_items: HashSet<String>,
     inflight_responses: HashSet<String>,
     preexisting_responses: HashSet<String>,
-    user_response_requested: bool,
+    user_response_requested_at: Option<Instant>,
     pending_prepare: Option<PendingExpertPrepare>,
 }
 
@@ -1889,7 +1890,7 @@ impl ExpertTurnGate {
             return Err("Spokesperson started too many concurrent responses".into());
         }
         self.inflight_responses.insert(response_id.to_string());
-        self.user_response_requested = false;
+        self.user_response_requested_at = None;
         if self.recognition_pending {
             self.preexisting_responses.insert(response_id.to_string());
         }
@@ -1934,7 +1935,7 @@ impl ExpertTurnGate {
             || playback_active
             || retained_responses != 0
             || !self.inflight_responses.is_empty()
-            || self.user_response_requested
+            || self.user_response_requested_at.is_some()
     }
 
     fn cancel_pending(&mut self, id: u64) -> bool {
@@ -1959,12 +1960,24 @@ impl ExpertTurnGate {
     }
 
     fn reserve_user_response(&mut self, external_reservation: bool) -> bool {
-        if external_reservation || self.user_response_requested || self.has_inflight_response() {
+        self.reserve_user_response_at(external_reservation, Instant::now())
+    }
+
+    fn reserve_user_response_at(&mut self, external_reservation: bool, now: Instant) -> bool {
+        if external_reservation
+            || self.user_response_requested_at.is_some()
+            || self.has_inflight_response()
+        {
             false
         } else {
-            self.user_response_requested = true;
+            self.user_response_requested_at = Some(now);
             true
         }
+    }
+
+    fn user_response_start_timed_out(&self, now: Instant, timeout: Duration) -> bool {
+        self.user_response_requested_at
+            .is_some_and(|requested_at| now.saturating_duration_since(requested_at) >= timeout)
     }
 }
 
@@ -2219,6 +2232,22 @@ fn dispatch_pending_user_response(
     Ok(())
 }
 
+fn fail_timed_out_user_response_start(
+    gate: &ExpertTurnGate,
+    now: Instant,
+    writer: &mut impl Write,
+) -> Result<bool, String> {
+    if !gate.user_response_start_timed_out(now, SPOKESPERSON_RESPONSE_START_TIMEOUT) {
+        return Ok(false);
+    }
+    write_protocol_fatal(
+        writer,
+        "Spokesperson response did not start",
+        "OpenAI Realtime did not acknowledge the requested Spokesperson response",
+    )?;
+    Ok(true)
+}
+
 fn run_expert_spokesperson_session(
     config: SessionConfig,
     pcm_output_fd: RawFd,
@@ -2252,6 +2281,9 @@ fn run_expert_spokesperson_session(
     let mut pending_user_response = false;
 
     loop {
+        if fail_timed_out_user_response_start(&turn_gate, Instant::now(), &mut writer)? {
+            return Ok(());
+        }
         if let Some(events) = runtime_events.as_ref() {
             if let Ok(event) = events.try_recv() {
                 match event {
@@ -2352,7 +2384,7 @@ fn run_expert_spokesperson_session(
                     } => {
                         turn_gate.response_finished(&response_id);
                         if let Some(response) = responses.get_mut(&response_id) {
-                            response.server_finished = true;
+                            mark_live_response_server_finished(response);
                             if !response.received_audio {
                                 response.playback_complete = true;
                             }
@@ -3346,6 +3378,13 @@ fn flush_active_live_playback(
         }
     }
     Ok(())
+}
+
+fn mark_live_response_server_finished(response: &mut LiveResponse) {
+    response.server_finished = true;
+    // `response.done` is the authoritative end of the provider response. Some
+    // terminal paths do not emit a separate output_audio.done event.
+    response.audio_done = true;
 }
 
 fn handle_live_audio_ack(
@@ -6291,7 +6330,92 @@ mod tests {
         .unwrap();
         assert_eq!(created, 1);
         assert!(!pending);
-        assert!(gate.user_response_requested);
+        assert!(gate.user_response_requested_at.is_some());
+    }
+
+    #[test]
+    fn unstarted_user_response_has_a_bounded_reservation() {
+        let now = Instant::now();
+        let mut gate = ExpertTurnGate::default();
+        gate.response_started("response-old", 0).unwrap();
+        assert!(matches!(
+            gate.defer_if_busy(
+                PendingExpertPrepare {
+                    id: 7,
+                    acknowledgement: Some(1),
+                    text: "answer after the user".into(),
+                },
+                false,
+                1,
+            ),
+            ExpertPrepareRouting::Held
+        ));
+        gate.response_finished("response-old");
+        assert!(gate.reserve_user_response_at(false, now));
+        assert!(gate.take_ready(false, 0).is_none());
+        assert!(!gate.user_response_start_timed_out(
+            now + SPOKESPERSON_RESPONSE_START_TIMEOUT - Duration::from_millis(1),
+            SPOKESPERSON_RESPONSE_START_TIMEOUT,
+        ));
+        let mut output = Vec::new();
+        assert!(fail_timed_out_user_response_start(
+            &gate,
+            now + SPOKESPERSON_RESPONSE_START_TIMEOUT,
+            &mut output,
+        )
+        .unwrap());
+        assert_eq!(
+            messages(&output),
+            [json!({
+                "type": "fatal",
+                "message": "Spokesperson response did not start"
+            })]
+        );
+    }
+
+    #[test]
+    fn started_and_finished_user_response_releases_held_expert_prepare() {
+        let mut gate = ExpertTurnGate::default();
+        gate.response_started("response-old", 0).unwrap();
+        assert!(matches!(
+            gate.defer_if_busy(
+                PendingExpertPrepare {
+                    id: 7,
+                    acknowledgement: Some(1),
+                    text: "answer after the user".into(),
+                },
+                false,
+                1,
+            ),
+            ExpertPrepareRouting::Held
+        ));
+        gate.response_finished("response-old");
+        assert!(gate.reserve_user_response(false));
+        gate.response_started("response-new", 0).unwrap();
+        assert!(gate.take_ready(false, 1).is_none());
+        gate.response_finished("response-new");
+        assert_eq!(
+            gate.take_ready(false, 0).map(|request| request.id),
+            Some(7)
+        );
+    }
+
+    #[test]
+    fn response_done_finishes_playback_without_a_separate_audio_done() {
+        let (playback, _controls) = live_playback_fixture(None);
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let playback = LivePlayback { sender, ..playback };
+        let active = Some(playback);
+        let mut response = LiveResponse::new(None, Some(3));
+        response.received_audio = true;
+        assert!(!response.audio_done);
+        mark_live_response_server_finished(&mut response);
+        let mut responses = HashMap::from([("response-a".into(), response)]);
+
+        flush_active_live_playback(&active, &mut responses).unwrap();
+
+        assert!(matches!(receiver.recv().unwrap(), LivePlaybackInput::Finish));
+        assert!(responses["response-a"].finish_sent);
     }
 
     #[test]
