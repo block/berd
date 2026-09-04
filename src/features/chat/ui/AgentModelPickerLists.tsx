@@ -15,6 +15,7 @@ import {
   IconStarFilled,
   IconX,
 } from "@tabler/icons-react";
+import { motion, useReducedMotion } from "motion/react";
 import { useStarredModels } from "../hooks/useStarredModels";
 import { modelStarKey } from "../lib/starredModels";
 import { SearchBar } from "@/shared/ui/SearchBar";
@@ -177,6 +178,7 @@ export const RecommendedModelList = forwardRef<
   ref,
 ) {
   const { toggleStar, starredKeys } = useStarredModels();
+  const prefersReducedMotion = useReducedMotion();
   // Rows include a synthesized entry for the current selection when the
   // catalog no longer serves it. Honoring starred state only for catalog
   // models keeps a favorited model a provider dropped from rendering as
@@ -379,6 +381,18 @@ export const RecommendedModelList = forwardRef<
     liveStarredKeys,
   ]);
   const sorted = [...grouped.starred, ...grouped.unstarred];
+  const layoutItems: Array<
+    { type: "model"; model: ModelOption } | { type: "favorites-divider" }
+  > = [
+    ...grouped.starred.map((model) => ({ type: "model" as const, model })),
+    ...(grouped.starred.length > 0 && grouped.unstarred.length > 0
+      ? ([{ type: "favorites-divider" }] as const)
+      : []),
+    ...grouped.unstarred.map((model) => ({ type: "model" as const, model })),
+  ];
+  const layoutTransition = prefersReducedMotion
+    ? { duration: 0 }
+    : { type: "spring" as const, duration: 0.24, bounce: 0 };
 
   const recommendedKeys = new Set(
     recommended.map((model) =>
@@ -482,7 +496,23 @@ export const RecommendedModelList = forwardRef<
           className="min-h-0 min-w-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:!block"
         >
           <div className="p-1 pr-3">
-            {sorted.map((model, index) => {
+            {layoutItems.map((item) => {
+              if (item.type === "favorites-divider") {
+                return (
+                  <motion.div
+                    key="favorites-divider"
+                    layout={prefersReducedMotion ? false : "position"}
+                    transition={layoutTransition}
+                  >
+                    <Separator
+                      className="my-1"
+                      data-testid="starred-models-divider"
+                    />
+                  </motion.div>
+                );
+              }
+
+              const { model } = item;
               const providerLabel = getGooseModelProviderLabel(model);
               const providerIcon =
                 selectedAgentId === "goose" && model.providerId
@@ -498,11 +528,12 @@ export const RecommendedModelList = forwardRef<
               const starred = liveStarredKeys.has(modelKey);
               const existsInCatalog =
                 !existingModelKeys || existingModelKeys.has(modelKey);
-              const showStarredDivider =
-                index === grouped.starred.length - 1 &&
-                grouped.unstarred.length > 0;
               return (
-                <div key={modelKey}>
+                <motion.div
+                  key={modelKey}
+                  layout={prefersReducedMotion ? false : "position"}
+                  transition={layoutTransition}
+                >
                   <div
                     className="flex min-w-0 items-center gap-1"
                     data-model-key={modelKey}
@@ -577,13 +608,7 @@ export const RecommendedModelList = forwardRef<
                       </Button>
                     ) : null}
                   </div>
-                  {showStarredDivider ? (
-                    <Separator
-                      className="my-1"
-                      data-testid="starred-models-divider"
-                    />
-                  ) : null}
-                </div>
+                </motion.div>
               );
             })}
             {hasMore && !searchOpen && !showAll ? (
