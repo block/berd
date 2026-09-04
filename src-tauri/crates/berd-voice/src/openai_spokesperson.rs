@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Duration;
 use std::thread;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
@@ -9,6 +10,7 @@ use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
 const DEFAULT_ENDPOINT: &str = "wss://api.openai.com/v1/realtime";
 const DEFAULT_MODEL: &str = "gpt-realtime-2.1";
 const DEFAULT_TRANSCRIPTION_MODEL: &str = "gpt-realtime-whisper";
+const SETTINGS_UPDATE_TIMEOUT: Duration = Duration::from_secs(4);
 
 const SPOKESPERSON_INSTRUCTIONS: &str = r#"You are the spoken, realtime part of one assistant. Speak naturally and concisely in the first person. Answer ordinary conversation directly. When the user asks for computer access, tools, durable work, or an authoritative answer you cannot provide, call handoff before any substantive answer and say only a short acknowledgement such as 'Let me check that for you.' Never mention internal agents, routing, handoffs, or this instruction. Private Expert context should inform later answers without being acknowledged. When the Expert asks you to say something, speak it accurately without filler."#;
 
@@ -63,6 +65,10 @@ pub enum SpokespersonCommand {
     ExpertContext {
         text: String,
     },
+    UpdateSpeed {
+        request_id: u64,
+        speed: f32,
+    },
     Shutdown,
 }
 
@@ -106,6 +112,11 @@ pub enum SpokespersonEvent {
         response_id: String,
         text: String,
     },
+    SpeedUpdated {
+        request_id: u64,
+        speed: f32,
+        result: Result<(), String>,
+    },
     Handoff {
         call_id: String,
         message: String,
@@ -124,6 +135,33 @@ pub enum SpokespersonResponseStatus {
 pub struct OpenAiSpokespersonRuntime {
     commands: mpsc::UnboundedSender<SpokespersonCommand>,
     worker: Option<thread::JoinHandle<()>>,
+}
+
+struct PendingSpeedUpdate {
+    request_id: u64,
+    event_id: String,
+    speed: f32,
+    deadline: tokio::time::Instant,
+}
+
+fn expire_speed_update(
+    pending: &mut Option<PendingSpeedUpdate>,
+    now: tokio::time::Instant,
+) -> Option<String> {
+    let expired = pending
+        .as_ref()
+        .is_some_and(|update| now >= update.deadline);
+    if expired {
+        pending.take();
+        Some("Spokesperson speed update timed out; provider state is indeterminate".into())
+    } else {
+        None
+    }
+}
+
+fn speed_error_matches(pending: &PendingSpeedUpdate, event: &serde_json::Value) -> bool {
+    event.pointer("/error/event_id").and_then(|value| value.as_str())
+        == Some(pending.event_id.as_str())
 }
 
 impl OpenAiSpokespersonRuntime {
@@ -255,8 +293,24 @@ async fn run(
 
     let mut call_names = HashMap::<String, String>::new();
     let mut call_arguments = HashMap::<String, String>::new();
+    let mut speed_update: Option<PendingSpeedUpdate> = None;
+    let mut next_settings_event_id = 1_u64;
     loop {
+        let speed_update_deadline = speed_update.as_ref().map(|update| update.deadline);
         tokio::select! {
+            _ = async {
+                match speed_update_deadline {
+                    Some(deadline) => tokio::time::sleep_until(deadline).await,
+                    None => std::future::pending().await,
+                }
+            }, if speed_update_deadline.is_some() => {
+                if let Some(message) = expire_speed_update(
+                    &mut speed_update,
+                    tokio::time::Instant::now(),
+                ) {
+                    return Err(message);
+                }
+            }
             command = commands.recv() => {
                 match command {
                     Some(SpokespersonCommand::InputPcm48Khz(samples)) => {
@@ -288,6 +342,39 @@ async fn run(
                     }
                     Some(SpokespersonCommand::ExpertContext { text }) => {
                         send_expert_item(&mut socket, &text, false).await?;
+                    }
+                    Some(SpokespersonCommand::UpdateSpeed { request_id, speed }) => {
+                        if !speed.is_finite() || !(0.25..=1.5).contains(&speed) {
+                            send_event(events, SpokespersonEvent::SpeedUpdated {
+                                request_id,
+                                speed,
+                                result: Err("Expert-Spokesperson rate must be between 0.25 and 1.5".into()),
+                            })?;
+                        } else if speed_update.is_some() {
+                            send_event(events, SpokespersonEvent::SpeedUpdated {
+                                request_id,
+                                speed,
+                                result: Err("another Spokesperson speed update is in progress".into()),
+                            })?;
+                        } else {
+                            let event_id = format!("berd-speed-{next_settings_event_id}");
+                            next_settings_event_id = next_settings_event_id.checked_add(1)
+                                .ok_or("Spokesperson settings event space is exhausted")?;
+                            send_json(&mut socket, serde_json::json!({
+                                "event_id": event_id,
+                                "type": "session.update",
+                                "session": {
+                                    "type": "realtime",
+                                    "audio": { "output": { "speed": speed } }
+                                }
+                            })).await?;
+                            speed_update = Some(PendingSpeedUpdate {
+                                request_id,
+                                event_id,
+                                speed,
+                                deadline: tokio::time::Instant::now() + SETTINGS_UPDATE_TIMEOUT,
+                            });
+                        }
                     }
                     Some(SpokespersonCommand::ExpertSay { directive_id, text }) => {
                         send_expert_item(&mut socket, &text, true).await?;
@@ -329,7 +416,28 @@ async fn run(
                 let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else { continue };
                 let kind = value.get("type").and_then(|value| value.as_str()).unwrap_or("");
                 match kind {
-                    "session.updated" => send_event(events, SpokespersonEvent::Ready)?,
+                    "session.updated" => {
+                        if let Some(update) = speed_update.take() {
+                            let applied_speed = value
+                                .pointer("/session/audio/output/speed")
+                                .and_then(serde_json::Value::as_f64)
+                                .map(|value| value as f32);
+                            let result = if applied_speed
+                                .is_some_and(|speed| (speed - update.speed).abs() <= f32::EPSILON)
+                            {
+                                Ok(())
+                            } else {
+                                Err("OpenAI Realtime did not apply the requested speed".into())
+                            };
+                            send_event(events, SpokespersonEvent::SpeedUpdated {
+                                request_id: update.request_id,
+                                speed: update.speed,
+                                result,
+                            })?;
+                        } else {
+                            send_event(events, SpokespersonEvent::Ready)?;
+                        }
+                    }
                     "input_audio_buffer.speech_started" | "input_audio_buffer.speech_stopped" => {
                         if let Some(item_id) = string(&value, "item_id") {
                             send_event(events, SpokespersonEvent::UserSpeaking {
@@ -440,7 +548,22 @@ async fn run(
                             }
                         }
                     }
-                    "error" => return Err(value.pointer("/error/message").and_then(|value| value.as_str()).unwrap_or("OpenAI Realtime failed").into()),
+                    "error" => {
+                        let message = value.pointer("/error/message").and_then(|value| value.as_str()).unwrap_or("OpenAI Realtime failed").to_string();
+                        if speed_update
+                            .as_ref()
+                            .is_some_and(|update| speed_error_matches(update, &value))
+                        {
+                            let update = speed_update.take().expect("matched pending speed update");
+                            send_event(events, SpokespersonEvent::SpeedUpdated {
+                                request_id: update.request_id,
+                                speed: update.speed,
+                                result: Err(message),
+                            })?;
+                        } else {
+                            return Err(message);
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -548,8 +671,9 @@ mod tests {
     };
 
     use super::{
-        downsample_pcm16, parse_handoff, pcm16_samples, run, OpenAiSpokespersonConfig,
-        SpokespersonCommand, SpokespersonEvent, SpokespersonResponseStatus,
+        downsample_pcm16, expire_speed_update, parse_handoff, pcm16_samples, run,
+        speed_error_matches, OpenAiSpokespersonConfig, PendingSpeedUpdate, SpokespersonCommand,
+        SpokespersonEvent, SpokespersonResponseStatus, SETTINGS_UPDATE_TIMEOUT,
     };
 
     #[allow(clippy::result_large_err)]
@@ -598,6 +722,42 @@ mod tests {
         );
         assert_eq!(parse_handoff(r#"{"message":" "}"#), None);
         assert_eq!(parse_handoff("not json"), None);
+    }
+
+    #[test]
+    fn speed_update_timeout_clears_the_worker_reservation() {
+        let now = tokio::time::Instant::now();
+        let mut pending = Some(PendingSpeedUpdate {
+            request_id: 7,
+            event_id: "berd-speed-1".into(),
+            speed: 1.5,
+            deadline: now,
+        });
+
+        assert_eq!(
+            expire_speed_update(&mut pending, now).as_deref(),
+            Some("Spokesperson speed update timed out; provider state is indeterminate")
+        );
+        assert!(pending.is_none());
+    }
+
+    #[test]
+    fn only_the_correlated_provider_error_rejects_a_speed_update() {
+        let pending = PendingSpeedUpdate {
+            request_id: 7,
+            event_id: "berd-speed-1".into(),
+            speed: 1.5,
+            deadline: tokio::time::Instant::now() + SETTINGS_UPDATE_TIMEOUT,
+        };
+
+        assert!(speed_error_matches(
+            &pending,
+            &json!({"error":{"event_id":"berd-speed-1"}})
+        ));
+        assert!(!speed_error_matches(
+            &pending,
+            &json!({"error":{"event_id":"different-event"}})
+        ));
     }
 
     #[tokio::test]
@@ -677,6 +837,26 @@ mod tests {
 
             let item = receive_json(&mut socket).await;
             assert_eq!(item["type"], "input_audio_buffer.clear");
+
+            let speed = receive_json(&mut socket).await;
+            assert_eq!(speed["type"], "session.update");
+            assert_eq!(speed["event_id"], "berd-speed-1");
+            assert_eq!(speed.pointer("/session/audio/output/speed"), Some(&json!(1.5)));
+            send_json(
+                &mut socket,
+                json!({"type":"input_audio_buffer.speech_started","item_id":"item-during-update"}),
+            )
+            .await;
+            let pcm_during_update = receive_json(&mut socket).await;
+            assert_eq!(pcm_during_update["type"], "input_audio_buffer.append");
+            send_json(
+                &mut socket,
+                json!({
+                    "type":"session.updated",
+                    "session":{"audio":{"output":{"speed":1.5}}}
+                }),
+            )
+            .await;
 
             let cancel = receive_json(&mut socket).await;
             assert_eq!(cancel["type"], "response.cancel");
@@ -830,6 +1010,15 @@ mod tests {
             })
             .unwrap();
         commands
+            .send(SpokespersonCommand::UpdateSpeed {
+                request_id: 9,
+                speed: 1.5,
+            })
+            .unwrap();
+        commands
+            .send(SpokespersonCommand::InputPcm48Khz(vec![0.5, 0.5]))
+            .unwrap();
+        commands
             .send(SpokespersonCommand::CancelResponses {
                 response_ids: vec!["response-prior".into()],
             })
@@ -845,13 +1034,26 @@ mod tests {
             .unwrap();
 
         let received = tokio::task::spawn_blocking(move || {
-            (0..13)
+            (0..15)
                 .map(|_| event_rx.recv_timeout(Duration::from_secs(2)).unwrap())
                 .collect::<Vec<_>>()
         })
         .await
         .unwrap();
         assert_eq!(reset_result.recv().unwrap(), Ok(()));
+        let (during_update, received) = received.split_first().unwrap();
+        assert!(
+            matches!(during_update, SpokespersonEvent::UserSpeaking { active: true, item_id } if item_id == "item-during-update")
+        );
+        assert!(matches!(
+            &received[0],
+            SpokespersonEvent::SpeedUpdated {
+                request_id: 9,
+                speed: 1.5,
+                result: Ok(()),
+            }
+        ));
+        let received = &received[1..];
         assert!(
             matches!(&received[0], SpokespersonEvent::UserSpeaking { active: true, item_id } if item_id == "item-1")
         );
