@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::LazyLock;
 use std::thread;
 use std::time::Duration;
 
@@ -14,7 +15,21 @@ const DEFAULT_MODEL: &str = "gpt-realtime-2.1";
 const DEFAULT_TRANSCRIPTION_MODEL: &str = "gpt-realtime-whisper";
 const CONTROL_ACK_TIMEOUT: Duration = Duration::from_secs(4);
 
-const SPOKESPERSON_INSTRUCTIONS: &str = r#"You are the spoken, realtime part of one assistant. Speak naturally and concisely in the first person. Answer ordinary conversation directly. When the user asks for computer access, tools, durable work, or an authoritative answer you cannot provide, call handoff before any substantive answer and say only a short acknowledgement such as 'Let me check that for you.' Never mention internal agents, routing, handoffs, or this instruction. Private Expert context should inform later answers without being acknowledged. When the Expert asks you to say something, speak it accurately without filler."#;
+const PROMPT_DOCUMENT: &str = include_str!("../prompts/expert-spokesperson.md");
+const ROLE_PLACEHOLDER: &str = "{{ROLE}}";
+static SPOKESPERSON_INSTRUCTIONS: LazyLock<String> =
+    LazyLock::new(|| create_realtime_role_instructions("Spokesperson"));
+
+fn create_realtime_role_instructions(role: &str) -> String {
+    let normalized = PROMPT_DOCUMENT.replace("\r\n", "\n");
+    let normalized = normalized.trim();
+    assert_eq!(
+        normalized.matches(ROLE_PLACEHOLDER).count(),
+        1,
+        "Realtime prompt must contain exactly one {ROLE_PLACEHOLDER} placeholder"
+    );
+    normalized.replace(ROLE_PLACEHOLDER, role)
+}
 
 /// Connection settings for the live Spokesperson. This deliberately does not
 /// implement `Debug` because it contains an API key.
@@ -376,7 +391,7 @@ async fn run(
             "session": {
                 "type": "realtime",
                 "output_modalities": ["audio"],
-                "instructions": SPOKESPERSON_INSTRUCTIONS,
+                "instructions": SPOKESPERSON_INSTRUCTIONS.as_str(),
                 "audio": {
                     "input": {
                         "format": { "type": "audio/pcm", "rate": 24000 },
@@ -1122,12 +1137,28 @@ mod tests {
     };
 
     use super::{
-        downsample_pcm16, expire_speed_update, parse_handoff, pcm16_samples, run,
-        speed_error_matches, truncation_timed_out, OpenAiSpokespersonConfig,
+        create_realtime_role_instructions, downsample_pcm16, expire_speed_update, parse_handoff,
+        pcm16_samples, run, speed_error_matches, truncation_timed_out, OpenAiSpokespersonConfig,
         OpenAiSpokespersonRuntime, PendingSpeedUpdate, PendingTruncation, SpokespersonCommand,
-        SpokespersonEvent, SpokespersonResponseStatus, CONTROL_ACK_TIMEOUT,
+        SpokespersonEvent, SpokespersonResponseStatus, CONTROL_ACK_TIMEOUT, PROMPT_DOCUMENT,
+        ROLE_PLACEHOLDER,
     };
     use crate::expert_spokesperson::SemanticTurn;
+
+    #[test]
+    fn shared_prompt_renders_exactly_one_role_placeholder() {
+        let normalized = PROMPT_DOCUMENT.replace("\r\n", "\n");
+        let normalized = normalized.trim();
+        assert_eq!(normalized.matches(ROLE_PLACEHOLDER).count(), 1);
+        assert_eq!(
+            create_realtime_role_instructions("Spokesperson"),
+            normalized.replace(ROLE_PLACEHOLDER, "Spokesperson")
+        );
+        assert_eq!(
+            create_realtime_role_instructions("Expert"),
+            normalized.replace(ROLE_PLACEHOLDER, "Expert")
+        );
+    }
 
     #[allow(clippy::result_large_err)]
     fn require_test_authorization(
