@@ -83,7 +83,6 @@ const SHUTDOWN_PLAYBACK_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_PENDING_SPOKESPERSON_FRAMES: usize = 24_000 * 15;
 const MAX_PENDING_SPOKESPERSON_RESPONSES: usize = 8;
 const TTS_CONFIGURATION_TIMEOUT: Duration = Duration::from_secs(120);
-const SPOKESPERSON_RESPONSE_START_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_OPENAI_BENCHMARK_REQUESTS: usize = 20;
 const MAX_OPENAI_BENCHMARK_TEXT_BYTES: usize = 64 * 1024;
 const MAX_OPENAI_STT_BENCHMARK_SECONDS: f64 = 120.0;
@@ -1931,16 +1930,11 @@ struct ExpertTurnGate {
     recognition_pending: bool,
     pending_user_items: HashSet<String>,
     inflight_responses: HashSet<String>,
-    preexisting_responses: HashSet<String>,
-    user_response_requested_at: Option<Instant>,
     pending_prepare: Option<PendingExpertPrepare>,
 }
 
 impl ExpertTurnGate {
-    fn begin_user_speaking(&mut self, item_id: String, response_ids: impl Iterator<Item = String>) {
-        if self.pending_user_items.is_empty() {
-            self.preexisting_responses.extend(response_ids);
-        }
+    fn begin_user_speaking(&mut self, item_id: String) {
         self.pending_user_items.insert(item_id);
         self.recognition_pending = true;
         self.user_speaking = true;
@@ -1953,21 +1947,11 @@ impl ExpertTurnGate {
     fn discard_user_turn(&mut self, item_id: &str) {
         self.pending_user_items.remove(item_id);
         self.recognition_pending = !self.pending_user_items.is_empty();
-        if !self.recognition_pending {
-            self.preexisting_responses.clear();
-        }
     }
 
-    fn resolve_user_final(&mut self, item_id: &str) -> (HashSet<String>, Vec<String>) {
+    fn resolve_user_final(&mut self, item_id: &str) {
         self.pending_user_items.remove(item_id);
         self.recognition_pending = !self.pending_user_items.is_empty();
-        let preexisting = std::mem::take(&mut self.preexisting_responses);
-        let inflight = preexisting
-            .iter()
-            .filter(|id| self.inflight_responses.contains(*id))
-            .cloned()
-            .collect();
-        (preexisting, inflight)
     }
 
     fn response_started(
@@ -1981,10 +1965,6 @@ impl ExpertTurnGate {
             return Err("Spokesperson started too many concurrent responses".into());
         }
         self.inflight_responses.insert(response_id.to_string());
-        self.user_response_requested_at = None;
-        if self.recognition_pending {
-            self.preexisting_responses.insert(response_id.to_string());
-        }
         Ok(())
     }
 
@@ -2026,7 +2006,6 @@ impl ExpertTurnGate {
             || playback_active
             || retained_responses != 0
             || !self.inflight_responses.is_empty()
-            || self.user_response_requested_at.is_some()
     }
 
     fn cancel_pending(&mut self, id: u64) -> bool {
@@ -2044,31 +2023,6 @@ impl ExpertTurnGate {
 
     fn input_blocks_output(&self) -> bool {
         self.user_speaking || self.recognition_pending
-    }
-
-    fn has_inflight_response(&self) -> bool {
-        !self.inflight_responses.is_empty()
-    }
-
-    fn reserve_user_response(&mut self, external_reservation: bool) -> bool {
-        self.reserve_user_response_at(external_reservation, Instant::now())
-    }
-
-    fn reserve_user_response_at(&mut self, external_reservation: bool, now: Instant) -> bool {
-        if external_reservation
-            || self.user_response_requested_at.is_some()
-            || self.has_inflight_response()
-        {
-            false
-        } else {
-            self.user_response_requested_at = Some(now);
-            true
-        }
-    }
-
-    fn user_response_start_timed_out(&self, now: Instant, timeout: Duration) -> bool {
-        self.user_response_requested_at
-            .is_some_and(|requested_at| now.saturating_duration_since(requested_at) >= timeout)
     }
 }
 
@@ -2497,10 +2451,8 @@ fn spokesperson_settings_are_quiescent(
     responses: &HashMap<String, LiveResponse>,
     directive_speeches: &HashMap<u64, DirectiveSpeech>,
     cancelled_directives: &HashSet<u64>,
-    pending_user_response: bool,
 ) -> bool {
-    !pending_user_response
-        && gate.pending_prepare.is_none()
+    gate.pending_prepare.is_none()
         && !gate.is_busy(active.is_some(), responses.len())
         && !expert_output_reserved(directive_speeches, cancelled_directives, active, responses)
 }
@@ -2581,35 +2533,6 @@ fn apply_spokesperson_startup_settings(
     Ok(())
 }
 
-fn dispatch_pending_user_response(
-    pending: &mut bool,
-    gate: &mut ExpertTurnGate,
-    external_reservation: bool,
-    mut create_response: impl FnMut() -> Result<(), String>,
-) -> Result<(), String> {
-    if *pending && !gate.input_blocks_output() && gate.reserve_user_response(external_reservation) {
-        create_response()?;
-        *pending = false;
-    }
-    Ok(())
-}
-
-fn fail_timed_out_user_response_start(
-    gate: &ExpertTurnGate,
-    now: Instant,
-    writer: &mut impl Write,
-) -> Result<bool, String> {
-    if !gate.user_response_start_timed_out(now, SPOKESPERSON_RESPONSE_START_TIMEOUT) {
-        return Ok(false);
-    }
-    write_protocol_fatal(
-        writer,
-        "Spokesperson response did not start",
-        "OpenAI Realtime did not acknowledge the requested Spokesperson response",
-    )?;
-    Ok(true)
-}
-
 fn run_expert_spokesperson_session(
     config: SessionConfig,
     pcm_output_fd: RawFd,
@@ -2641,7 +2564,6 @@ fn run_expert_spokesperson_session(
     let mut session_tts: Option<berd_voice::TtsConfigurationSnapshot> = None;
     let mut input_during_tts_slot: Option<InputDuringTtsSlot> = None;
     let mut input_muted = false;
-    let mut pending_user_response = false;
     let mut queued_tts_settings: Option<PendingSpokespersonRateUpdate> = None;
     let mut pending_rate_update = None;
     let mut pending_voice_update: Option<VoiceUpdateTransaction> = None;
@@ -2649,9 +2571,6 @@ fn run_expert_spokesperson_session(
     let mut next_maintenance_id = u64::MAX;
 
     loop {
-        if fail_timed_out_user_response_start(&turn_gate, Instant::now(), &mut writer)? {
-            return Ok(());
-        }
         if pending_voice_update.is_none()
             && spokesperson_renew_at.is_some_and(|deadline| Instant::now() >= deadline)
         {
@@ -2663,7 +2582,6 @@ fn run_expert_spokesperson_session(
                     &responses,
                     &directive_speeches,
                     &cancelled_directives,
-                    pending_user_response,
                 );
             if quiescent && pending_rate_update.is_none() {
                 let snapshot = session_tts.as_ref().expect("initialized TTS snapshot");
@@ -2693,7 +2611,6 @@ fn run_expert_spokesperson_session(
                 &responses,
                 &directive_speeches,
                 &cancelled_directives,
-                pending_user_response,
             );
             let safe = spokesperson_voice_update_is_safe(
                 update,
@@ -2821,7 +2738,40 @@ fn run_expert_spokesperson_session(
                         item_id,
                     } => {
                         if speaking {
-                            turn_gate.begin_user_speaking(item_id, responses.keys().cloned());
+                            let preexisting_responses: HashSet<String> =
+                                responses.keys().cloned().collect();
+                            turn_gate.begin_user_speaking(item_id);
+                            let active_response_id =
+                                active.as_ref().map(|playback| playback.response_id.clone());
+                            if active_response_id.as_ref().is_some_and(|response_id| {
+                                preexisting_responses.contains(response_id)
+                            }) {
+                                cancel_live_playback(&mut active);
+                            }
+                            interrupt_live_responses(
+                                &preexisting_responses,
+                                active_response_id.as_deref(),
+                                &mut responses,
+                                &mut waiting_responses,
+                            );
+                            for response_id in &preexisting_responses {
+                                let Some(response) = responses.get_mut(response_id) else {
+                                    continue;
+                                };
+                                require_live_response_truncation(response)?;
+                                if active_response_id.as_deref() != Some(response_id.as_str()) {
+                                    send_live_response_truncation(
+                                        response_id,
+                                        response,
+                                        runtime.as_ref().expect("initialized runtime"),
+                                    )?;
+                                }
+                            }
+                            interrupt_unbound_directives(
+                                &mut directive_speeches,
+                                &mut cancelled_directives,
+                                &mut writer,
+                            )?;
                         } else {
                             turn_gate.finish_user_speaking();
                         }
@@ -2829,75 +2779,12 @@ fn run_expert_spokesperson_session(
                             &mut writer,
                             &SessionMessage::InputSpeaking { active: speaking },
                         )?;
-                        update_live_provisional_suspension(
-                            active.as_ref(),
-                            turn_gate.input_blocks_output(),
-                        )?;
                     }
                     SpokespersonEvent::UserTurnDiscarded { item_id } => {
                         turn_gate.discard_user_turn(&item_id);
-                        update_live_provisional_suspension(
-                            active.as_ref(),
-                            turn_gate.input_blocks_output(),
-                        )?;
-                        dispatch_pending_user_response(
-                            &mut pending_user_response,
-                            &mut turn_gate,
-                            !directive_speeches.is_empty()
-                                || !cancelled_directives.is_empty()
-                                || pending_rate_update.is_some()
-                                || pending_voice_update.is_some()
-                                || queued_tts_settings.is_some()
-                                || live_truncation_pending(&responses),
-                            || {
-                                runtime
-                                    .as_ref()
-                                    .expect("initialized runtime")
-                                    .send(SpokespersonCommand::CreateUserResponse)
-                            },
-                        )?;
                     }
                     SpokespersonEvent::UserFinal { item_id, text } => {
-                        let (preexisting_responses, inflight_responses) =
-                            turn_gate.resolve_user_final(&item_id);
-                        if active.as_ref().is_some_and(|playback| {
-                            preexisting_responses.contains(&playback.response_id)
-                        }) {
-                            cancel_live_playback(&mut active);
-                        }
-                        let active_response_id =
-                            active.as_ref().map(|playback| playback.response_id.clone());
-                        interrupt_live_responses(
-                            &preexisting_responses,
-                            active_response_id.as_deref(),
-                            &mut responses,
-                            &mut waiting_responses,
-                        );
-                        if !inflight_responses.is_empty() {
-                            runtime.as_ref().expect("initialized runtime").send(
-                                SpokespersonCommand::CancelResponses {
-                                    response_ids: inflight_responses,
-                                },
-                            )?;
-                        }
-                        for response_id in &preexisting_responses {
-                            let Some(response) = responses.get_mut(response_id) else {
-                                continue;
-                            };
-                            require_live_response_truncation(response)?;
-                            if active_response_id.as_deref() != Some(response_id.as_str()) {
-                                send_live_response_truncation(
-                                    response_id,
-                                    response,
-                                    runtime.as_ref().expect("initialized runtime"),
-                                )?;
-                            }
-                        }
-                        interrupt_unbound_directives(
-                            &mut directive_speeches,
-                            &mut cancelled_directives,
-                            &mut writer,
-                        )?;
+                        turn_gate.resolve_user_final(&item_id);
                         record_and_emit_live_event(
                             &mut core,
                             &mut next_live_token,
@@ -2906,23 +2793,6 @@ fn run_expert_spokesperson_session(
                             &mut writer,
                         )?;
                         core.record_user_turn(text);
-                        pending_user_response = true;
-                        dispatch_pending_user_response(
-                            &mut pending_user_response,
-                            &mut turn_gate,
-                            !directive_speeches.is_empty()
-                                || !cancelled_directives.is_empty()
-                                || pending_rate_update.is_some()
-                                || pending_voice_update.is_some()
-                                || queued_tts_settings.is_some()
-                                || live_truncation_pending(&responses),
-                            || {
-                                runtime
-                                    .as_ref()
-                                    .expect("initialized runtime")
-                                    .send(SpokespersonCommand::CreateUserResponse)
-                            },
-                        )?;
                     }
                     SpokespersonEvent::ResponseStarted { response_id } => {
                         turn_gate.response_started(&response_id, responses.len())?;
@@ -2989,22 +2859,6 @@ fn run_expert_spokesperson_session(
                             &mut next_live_token,
                             &mut emitted_live_token,
                             &mut writer,
-                        )?;
-                        dispatch_pending_user_response(
-                            &mut pending_user_response,
-                            &mut turn_gate,
-                            !directive_speeches.is_empty()
-                                || !cancelled_directives.is_empty()
-                                || pending_rate_update.is_some()
-                                || pending_voice_update.is_some()
-                                || queued_tts_settings.is_some()
-                                || live_truncation_pending(&responses),
-                            || {
-                                runtime
-                                    .as_ref()
-                                    .expect("initialized runtime")
-                                    .send(SpokespersonCommand::CreateUserResponse)
-                            },
                         )?;
                     }
                     SpokespersonEvent::ResponseBound {
@@ -3194,22 +3048,6 @@ fn run_expert_spokesperson_session(
                                 .expect("hello initialized TTS snapshot"),
                             &mut writer,
                         )?;
-                        dispatch_pending_user_response(
-                            &mut pending_user_response,
-                            &mut turn_gate,
-                            !directive_speeches.is_empty()
-                                || !cancelled_directives.is_empty()
-                                || pending_rate_update.is_some()
-                                || pending_voice_update.is_some()
-                                || queued_tts_settings.is_some()
-                                || live_truncation_pending(&responses),
-                            || {
-                                runtime
-                                    .as_ref()
-                                    .expect("initialized runtime")
-                                    .send(SpokespersonCommand::CreateUserResponse)
-                            },
-                        )?;
                     }
                     SpokespersonEvent::InputCutoverFinished { request_id, result } => {
                         let action = pending_voice_update.as_ref().map_or(
@@ -3221,7 +3059,6 @@ fn run_expert_spokesperson_session(
                                     &responses,
                                     &directive_speeches,
                                     &cancelled_directives,
-                                    pending_user_response,
                                 );
                                 let safe = spokesperson_voice_update_is_safe(
                                     update,
@@ -3281,22 +3118,6 @@ fn run_expert_spokesperson_session(
                             &mut next_live_token,
                             &mut emitted_live_token,
                             &mut writer,
-                        )?;
-                        dispatch_pending_user_response(
-                            &mut pending_user_response,
-                            &mut turn_gate,
-                            !directive_speeches.is_empty()
-                                || !cancelled_directives.is_empty()
-                                || pending_rate_update.is_some()
-                                || pending_voice_update.is_some()
-                                || queued_tts_settings.is_some()
-                                || live_truncation_pending(&responses),
-                            || {
-                                runtime
-                                    .as_ref()
-                                    .expect("initialized runtime")
-                                    .send(SpokespersonCommand::CreateUserResponse)
-                            },
                         )?;
                     }
                     SpokespersonEvent::Handoff {
@@ -3366,7 +3187,6 @@ fn run_expert_spokesperson_session(
                             &responses,
                             &directive_speeches,
                             &cancelled_directives,
-                            pending_user_response,
                         ) && !core.has_unresolved_handoff();
                         if !quiescent || pending_rate_update.is_some() {
                             write_protocol_fatal(
@@ -3590,22 +3410,6 @@ fn run_expert_spokesperson_session(
                 &mut writer,
             )?;
         }
-        dispatch_pending_user_response(
-            &mut pending_user_response,
-            &mut turn_gate,
-            !directive_speeches.is_empty()
-                || !cancelled_directives.is_empty()
-                || pending_rate_update.is_some()
-                || pending_voice_update.is_some()
-                || queued_tts_settings.is_some()
-                || live_truncation_pending(&responses),
-            || {
-                runtime
-                    .as_ref()
-                    .expect("initialized runtime")
-                    .send(SpokespersonCommand::CreateUserResponse)
-            },
-        )?;
         if !expert_output_reserved(
             &directive_speeches,
             &cancelled_directives,
@@ -4269,20 +4073,6 @@ fn cancel_live_playback(active: &mut Option<LivePlayback>) {
     if let Some(playback) = active.as_ref() {
         playback.active.store(false, Ordering::SeqCst);
         playback.output.notify_cancel_requested();
-    }
-}
-
-fn update_live_provisional_suspension(
-    active: Option<&LivePlayback>,
-    suspend: bool,
-) -> Result<(), String> {
-    let Some(playback) = active else {
-        return Ok(());
-    };
-    if suspend {
-        playback.output.request_suspend()
-    } else {
-        playback.output.request_resume()
     }
 }
 
@@ -7610,15 +7400,6 @@ mod tests {
         .unwrap();
         assert!(output.is_empty());
         let mut gate = ExpertTurnGate::default();
-        let mut response_needed = true;
-        let mut created_responses = 0;
-        dispatch_pending_user_response(&mut response_needed, &mut gate, pending.is_some(), || {
-            created_responses += 1;
-            Ok(())
-        })
-        .unwrap();
-        assert_eq!(created_responses, 0);
-        assert!(response_needed);
         assert!(matches!(
             route_expert_prepare(
                 &mut gate,
@@ -7636,16 +7417,6 @@ mod tests {
         ));
         complete_spokesperson_rate_update(7, 1.5, Ok(()), &mut pending, &mut snapshot, &mut output)
             .unwrap();
-        dispatch_pending_user_response(&mut response_needed, &mut gate, pending.is_some(), || {
-            created_responses += 1;
-            Ok(())
-        })
-        .unwrap();
-        assert_eq!(created_responses, 1);
-        assert!(!response_needed);
-        assert!(gate.take_ready(false, 0).is_none());
-        gate.response_started("response-after-rate", 0).unwrap();
-        gate.response_finished("response-after-rate");
         assert_eq!(
             gate.take_ready(false, 0).map(|request| request.id),
             Some(11)
@@ -7739,76 +7510,19 @@ mod tests {
     }
 
     #[test]
-    fn finalized_spokesperson_turn_includes_responses_started_during_recognition() {
-        let mut gate = ExpertTurnGate::default();
-        gate.response_started("response-a", 0).unwrap();
-        gate.begin_user_speaking("item-1".into(), ["response-a".into()].into_iter());
-        gate.finish_user_speaking();
-        assert!(gate.input_blocks_output());
-
-        gate.response_started("response-raced", 1).unwrap();
-        let (preexisting, inflight) = gate.resolve_user_final("item-1");
-        assert!(!gate.input_blocks_output());
-        assert_eq!(
-            preexisting,
-            HashSet::from(["response-a".into(), "response-raced".into()])
-        );
-        assert_eq!(inflight.len(), 2);
-    }
-
-    #[test]
-    fn discarded_spokesperson_turn_suspends_then_resumes_the_same_playback() {
-        let (playback, controls) = live_playback_fixture(None);
-        let mut gate = ExpertTurnGate::default();
-        gate.begin_user_speaking("item-1".into(), ["response-a".into()].into_iter());
-        update_live_provisional_suspension(Some(&playback), gate.input_blocks_output()).unwrap();
-        assert_eq!(
-            controls.recv().unwrap(),
-            AudioOutputControlRequest::Suspend { speech_id: 3 }
-        );
-        playback
-            .output
-            .handle_ack(AudioHostAck::Suspended { played_frames: 0 })
-            .unwrap();
-
-        gate.finish_user_speaking();
-        gate.discard_user_turn("item-1");
-        update_live_provisional_suspension(Some(&playback), gate.input_blocks_output()).unwrap();
-        assert_eq!(
-            controls.recv().unwrap(),
-            AudioOutputControlRequest::Resume { speech_id: 3 }
-        );
-        assert!(playback.active.load(Ordering::SeqCst));
-    }
-
-    #[test]
     fn finalized_spokesperson_turn_cancels_without_resume_and_terminalizes_once() {
         let (playback, controls) = live_playback_fixture(Some(11));
         let mut active = Some(playback);
         let mut gate = ExpertTurnGate::default();
         gate.response_started("response-a", 0).unwrap();
-        gate.begin_user_speaking("item-1".into(), ["response-a".into()].into_iter());
-        update_live_provisional_suspension(active.as_ref(), gate.input_blocks_output()).unwrap();
-        assert_eq!(
-            controls.recv().unwrap(),
-            AudioOutputControlRequest::Suspend { speech_id: 3 }
-        );
+        gate.begin_user_speaking("item-1".into());
         active
             .as_ref()
             .unwrap()
             .output
             .set_test_delivery_progress(24_000, 12_000);
-        active
-            .as_ref()
-            .unwrap()
-            .output
-            .handle_ack(AudioHostAck::Suspended {
-                played_frames: 12_000,
-            })
-            .unwrap();
         gate.finish_user_speaking();
-        let (preexisting, _) = gate.resolve_user_final("item-1");
-        assert!(preexisting.contains("response-a"));
+        gate.resolve_user_final("item-1");
 
         cancel_live_playback(&mut active);
         assert!(!active.as_ref().unwrap().active.load(Ordering::SeqCst));
@@ -7868,95 +7582,15 @@ mod tests {
     #[test]
     fn transcription_terminals_are_correlated_across_consecutive_vad_turns() {
         let mut gate = ExpertTurnGate::default();
-        gate.begin_user_speaking("item-1".into(), std::iter::empty());
+        gate.begin_user_speaking("item-1".into());
         gate.finish_user_speaking();
-        gate.begin_user_speaking("item-2".into(), std::iter::empty());
+        gate.begin_user_speaking("item-2".into());
         gate.finish_user_speaking();
 
         gate.discard_user_turn("item-1");
         assert!(gate.input_blocks_output());
         gate.discard_user_turn("item-2");
         assert!(!gate.input_blocks_output());
-    }
-
-    #[test]
-    fn discarded_turn_does_not_erase_a_later_real_barge_target() {
-        let mut gate = ExpertTurnGate::default();
-        gate.response_started("response-a", 0).unwrap();
-        gate.begin_user_speaking("item-1".into(), ["response-a".into()].into_iter());
-        gate.finish_user_speaking();
-        gate.begin_user_speaking("item-2".into(), std::iter::empty());
-        gate.finish_user_speaking();
-
-        gate.discard_user_turn("item-1");
-        let (preexisting, inflight) = gate.resolve_user_final("item-2");
-        assert!(preexisting.contains("response-a"));
-        assert_eq!(inflight, ["response-a"]);
-    }
-
-    #[test]
-    fn user_response_waits_for_cancelled_response_terminal() {
-        let mut pending = true;
-        let mut created = 0;
-        let mut gate = ExpertTurnGate::default();
-        gate.response_started("response-a", 0).unwrap();
-        dispatch_pending_user_response(&mut pending, &mut gate, false, || {
-            created += 1;
-            Ok(())
-        })
-        .unwrap();
-        assert_eq!(created, 0);
-        assert!(pending);
-
-        gate.response_finished("response-a");
-        dispatch_pending_user_response(&mut pending, &mut gate, false, || {
-            created += 1;
-            Ok(())
-        })
-        .unwrap();
-        assert_eq!(created, 1);
-        assert!(!pending);
-        assert!(gate.user_response_requested_at.is_some());
-    }
-
-    #[test]
-    fn unstarted_user_response_has_a_bounded_reservation() {
-        let now = Instant::now();
-        let mut gate = ExpertTurnGate::default();
-        gate.response_started("response-old", 0).unwrap();
-        assert!(matches!(
-            gate.defer_if_busy(
-                PendingExpertPrepare {
-                    id: 7,
-                    acknowledgement: Some(1),
-                    text: "answer after the user".into(),
-                },
-                false,
-                1,
-            ),
-            ExpertPrepareRouting::Held
-        ));
-        gate.response_finished("response-old");
-        assert!(gate.reserve_user_response_at(false, now));
-        assert!(gate.take_ready(false, 0).is_none());
-        assert!(!gate.user_response_start_timed_out(
-            now + SPOKESPERSON_RESPONSE_START_TIMEOUT - Duration::from_millis(1),
-            SPOKESPERSON_RESPONSE_START_TIMEOUT,
-        ));
-        let mut output = Vec::new();
-        assert!(fail_timed_out_user_response_start(
-            &gate,
-            now + SPOKESPERSON_RESPONSE_START_TIMEOUT,
-            &mut output,
-        )
-        .unwrap());
-        assert_eq!(
-            messages(&output),
-            [json!({
-                "type": "fatal",
-                "message": "Spokesperson response did not start"
-            })]
-        );
     }
 
     #[test]
@@ -7976,7 +7610,6 @@ mod tests {
             ExpertPrepareRouting::Held
         ));
         gate.response_finished("response-old");
-        assert!(gate.reserve_user_response(false));
         gate.response_started("response-new", 0).unwrap();
         assert!(gate.take_ready(false, 1).is_none());
         gate.response_finished("response-new");
@@ -8002,72 +7635,6 @@ mod tests {
             LivePlaybackInput::Finish
         ));
         assert!(responses["response-a"].finish_sent);
-    }
-
-    #[test]
-    fn requested_user_response_reserves_the_turn_before_response_started() {
-        let mut gate = ExpertTurnGate::default();
-        let mut pending = true;
-        let mut created = 0;
-        dispatch_pending_user_response(&mut pending, &mut gate, false, || {
-            created += 1;
-            Ok(())
-        })
-        .unwrap();
-        pending = true;
-        dispatch_pending_user_response(&mut pending, &mut gate, false, || {
-            created += 1;
-            Ok(())
-        })
-        .unwrap();
-        assert_eq!(created, 1);
-        assert!(pending);
-        assert!(matches!(
-            route_expert_prepare(
-                &mut gate,
-                PendingExpertPrepare {
-                    id: 9,
-                    acknowledgement: None,
-                    text: "wait".into(),
-                },
-                false,
-                false,
-                false,
-                0,
-            ),
-            ExpertPrepareRouting::Held
-        ));
-    }
-
-    #[test]
-    fn overlapping_user_turns_coalesce_response_until_all_transcriptions_settle() {
-        let mut gate = ExpertTurnGate::default();
-        gate.begin_user_speaking("item-1".into(), std::iter::empty());
-        gate.finish_user_speaking();
-        gate.begin_user_speaking("item-2".into(), std::iter::empty());
-        gate.finish_user_speaking();
-        let mut response_needed = false;
-        let mut created = 0;
-
-        gate.resolve_user_final("item-1");
-        assert!(!response_needed);
-        response_needed = true;
-        dispatch_pending_user_response(&mut response_needed, &mut gate, false, || {
-            created += 1;
-            Ok(())
-        })
-        .unwrap();
-        assert_eq!(created, 0);
-        assert!(response_needed);
-
-        gate.discard_user_turn("item-2");
-        dispatch_pending_user_response(&mut response_needed, &mut gate, false, || {
-            created += 1;
-            Ok(())
-        })
-        .unwrap();
-        assert_eq!(created, 1);
-        assert!(!response_needed);
     }
 
     #[test]
