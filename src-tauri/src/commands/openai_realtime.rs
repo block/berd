@@ -1,7 +1,8 @@
 use berd_voice::openai_realtime_protocol::{
-    spokesperson_session_update, RealtimeCoordinatorResult, RealtimeExpertMessage,
-    RealtimeExpertSpokespersonSession, RealtimeHandoffReminder, RealtimePipeExchange,
-    RealtimeSessionReduction, RealtimeSpokespersonSessionOptions,
+    realtime_transcript_seed_events, spokesperson_session_update, RealtimeCoordinatorResult,
+    RealtimeExpertMessage, RealtimeExpertSpokespersonSession, RealtimeHandoffReminder,
+    RealtimePipeExchange, RealtimeSessionReduction, RealtimeSpokespersonSessionOptions,
+    RealtimeTranscriptSeedTurn,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -76,6 +77,15 @@ pub fn create_openai_realtime_spokesperson_session_update(
     options: RealtimeSpokespersonSessionOptions,
 ) -> serde_json::Value {
     spokesperson_session_update(&options)
+}
+
+#[tauri::command]
+pub fn create_openai_realtime_transcript_seed(
+    turns: Vec<RealtimeTranscriptSeedTurn>,
+    max_items: usize,
+    session_id: Option<String>,
+) -> Vec<serde_json::Value> {
+    realtime_transcript_seed_events(turns, max_items, session_id.as_deref())
 }
 
 #[tauri::command]

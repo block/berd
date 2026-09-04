@@ -188,6 +188,84 @@ fn supports_reasoning(model: Option<&str>) -> bool {
     model.is_none_or(|model| model.starts_with("gpt-realtime-2.1"))
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(tag = "role", rename_all = "snake_case")]
+pub enum RealtimeTranscriptSeedTurn {
+    User { text: String },
+    Spokesperson { text: String, interrupted: bool },
+    Expert { text: String },
+}
+
+pub fn realtime_transcript_seed_item(
+    turn: RealtimeTranscriptSeedTurn,
+    item_id: Option<&str>,
+) -> Value {
+    let (role, content_type, text) = match turn {
+        RealtimeTranscriptSeedTurn::User { text } => ("user", "input_text", text),
+        RealtimeTranscriptSeedTurn::Spokesperson { text, interrupted } => (
+            "assistant",
+            "output_text",
+            if interrupted {
+                format!("{text} [interrupted]")
+            } else {
+                text
+            },
+        ),
+        RealtimeTranscriptSeedTurn::Expert { text } => (
+            "system",
+            "input_text",
+            format!("Private Expert context; do not respond now:\n{text}"),
+        ),
+    };
+    let mut item = json!({
+        "type": "message",
+        "role": role,
+        "content": [{ "type": content_type, "text": text }],
+    });
+    if let Some(item_id) = item_id {
+        item["id"] = item_id.into();
+    }
+    json!({ "type": "conversation.item.create", "item": item })
+}
+
+pub fn realtime_transcript_seed_events(
+    turns: Vec<RealtimeTranscriptSeedTurn>,
+    max_items: usize,
+    session_id: Option<&str>,
+) -> Vec<Value> {
+    let tail_start = turns.len().saturating_sub(max_items);
+    let tail = &turns[tail_start..];
+    let Some(first_user_index) = tail
+        .iter()
+        .position(|turn| matches!(turn, RealtimeTranscriptSeedTurn::User { .. }))
+    else {
+        return Vec::new();
+    };
+    let mut events = Vec::new();
+    if let Some(session_id) = session_id {
+        events.push(json!({
+            "type": "conversation.item.create",
+            "item": {
+                "type": "message",
+                "role": "system",
+                "content": [{
+                    "type": "input_text",
+                    "text": format!(
+                        "This voice conversation is being resumed from Berd session {session_id}. Durable session link: berd://session/{session_id}. The following items are a compact recent transcript, not new turns. Ask the Expert to inspect the durable session when older context is needed."
+                    ),
+                }],
+            },
+        }));
+    }
+    events.extend(
+        tail[first_user_index..]
+            .iter()
+            .cloned()
+            .map(|turn| realtime_transcript_seed_item(turn, None)),
+    );
+    events
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RealtimeTranscriptSpeaker {
@@ -1963,6 +2041,43 @@ mod tests {
             RealtimeHandoffReminder::Exhausted { ref handoff_ids, .. }
                 if handoff_ids == &["handoff-1"]
         ));
+    }
+
+    #[test]
+    fn transcript_seed_is_bounded_to_a_user_led_tail_and_marks_interruptions() {
+        let events = realtime_transcript_seed_events(
+            vec![
+                RealtimeTranscriptSeedTurn::Spokesperson {
+                    text: "orphan".into(),
+                    interrupted: false,
+                },
+                RealtimeTranscriptSeedTurn::User {
+                    text: "question".into(),
+                },
+                RealtimeTranscriptSeedTurn::Spokesperson {
+                    text: "partial answer".into(),
+                    interrupted: true,
+                },
+                RealtimeTranscriptSeedTurn::Expert {
+                    text: "private result".into(),
+                },
+            ],
+            3,
+            Some("session-1"),
+        );
+
+        assert_eq!(events.len(), 4);
+        assert_eq!(events[0].pointer("/item/role"), Some(&json!("system")));
+        assert_eq!(events[1].pointer("/item/role"), Some(&json!("user")));
+        assert_eq!(
+            events[2].pointer("/item/content/0/text"),
+            Some(&json!("partial answer [interrupted]"))
+        );
+        assert_eq!(events[3].pointer("/item/role"), Some(&json!("system")));
+        assert!(events[3]
+            .pointer("/item/content/0/text")
+            .and_then(Value::as_str)
+            .is_some_and(|text| text.contains("Private Expert context")));
     }
 
     #[test]

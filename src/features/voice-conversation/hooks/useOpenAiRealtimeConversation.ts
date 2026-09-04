@@ -13,6 +13,7 @@ import {
   claimVoiceDictationMicrophone,
   completeOpenAiRealtimeExpertTurn,
   createOpenAiRealtimeVoiceSession,
+  createOpenAiRealtimeTranscriptSeed,
   dismissOpenAiRealtimeHandoffs,
   enqueueOpenAiRealtimeSpokespersonMessage,
   getOpenAiRealtimeExpertPipeCursor,
@@ -34,6 +35,7 @@ import {
   stopOpenAiRealtimeVoiceControls,
   stopOpenAiRealtimeSpokespersonProtocol,
   unknownOpenAiRealtimeHandoffIds,
+  type OpenAiRealtimeTranscriptSeedTurn,
 } from "@/shared/api/openaiRealtime";
 import {
   createSystemNotificationMessage,
@@ -337,12 +339,11 @@ function visibleMessageText(message: Message): string {
     .trim();
 }
 
-export function createRealtimeTranscriptReplayEvents(
+export function collectRealtimeTranscriptSeedTurns(
   messages: readonly Message[],
-  sessionId?: string,
-): Record<string, unknown>[] {
-  const turns: Array<{ role: "user" | "assistant"; text: string }> = [];
-  let pendingAssistant: { role: "assistant"; text: string } | null = null;
+): OpenAiRealtimeTranscriptSeedTurn[] {
+  const turns: OpenAiRealtimeTranscriptSeedTurn[] = [];
+  let pendingAssistant: OpenAiRealtimeTranscriptSeedTurn | null = null;
   const flushAssistant = () => {
     if (!pendingAssistant) return;
     turns.push(pendingAssistant);
@@ -370,43 +371,14 @@ export function createRealtimeTranscriptReplayEvents(
     // Only the final visible assistant block before the next user turn is
     // useful context. Progress narration and earlier replacements stay in the
     // durable Expert transcript but do not bloat a resumed voice frontend.
-    pendingAssistant = { role: "assistant", text };
+    pendingAssistant = {
+      role: "spokesperson",
+      text,
+      interrupted: false,
+    };
   }
   flushAssistant();
-
-  const tail = turns.slice(-MAX_REALTIME_REPLAY_ITEMS);
-  const firstUserIndex = tail.findIndex((turn) => turn.role === "user");
-  if (firstUserIndex < 0) return [];
-  const replay = tail.slice(firstUserIndex).map((turn) => ({
-    type: "conversation.item.create",
-    item: {
-      type: "message",
-      role: turn.role,
-      content: [
-        {
-          type: turn.role === "assistant" ? "output_text" : "input_text",
-          text: turn.text,
-        },
-      ],
-    },
-  }));
-  if (!sessionId) return replay;
-  return [
-    {
-      type: "conversation.item.create",
-      item: {
-        type: "message",
-        role: "system",
-        content: [
-          {
-            type: "input_text",
-            text: `This voice conversation is being resumed from Berd session ${sessionId}. Durable session link: berd://session/${sessionId}. The following items are a compact recent transcript, not new turns. Ask the Expert to inspect the durable session when older context is needed.`,
-          },
-        ],
-      },
-    },
-    ...replay,
-  ];
+  return turns;
 }
 
 function waitForDataChannelOpen(channel: RTCDataChannel): Promise<void> {
@@ -1023,17 +995,20 @@ class OpenAiRealtimeConversationRuntime {
         forwardTypedUserMessage(text);
       }
       const replaySessionId = this.snapshot.boundSessionId ?? sessionId;
-      this.historyReplay = waitForSessionHydration(replaySessionId).then(() => {
-        if (isStale() || this.snapshot.boundSessionId !== replaySessionId)
-          return;
-        sendRealtimeEvents(
-          transport,
-          createRealtimeTranscriptReplayEvents(
-            useChatStore.getState().messagesBySession[replaySessionId] ?? [],
+      this.historyReplay = waitForSessionHydration(replaySessionId).then(
+        async () => {
+          if (isStale() || this.snapshot.boundSessionId !== replaySessionId)
+            return;
+          const events = await createOpenAiRealtimeTranscriptSeed(
+            collectRealtimeTranscriptSeedTurns(
+              useChatStore.getState().messagesBySession[replaySessionId] ?? [],
+            ),
+            MAX_REALTIME_REPLAY_ITEMS,
             replaySessionId,
-          ),
-        );
-      });
+          );
+          sendRealtimeEvents(transport, events);
+        },
+      );
       this.bridgeSender = async (message, cursor, mode, resolves) => {
         const resolvedHandoffIds = [...new Set(resolves)];
         if (mode === "context" && resolvedHandoffIds.length > 0) {

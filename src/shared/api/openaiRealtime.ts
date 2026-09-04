@@ -26,6 +26,23 @@ export function createOpenAiRealtimeSpokespersonSessionUpdate(
   });
 }
 
+export type OpenAiRealtimeTranscriptSeedTurn =
+  | { role: "user"; text: string }
+  | { role: "spokesperson"; text: string; interrupted: boolean }
+  | { role: "expert"; text: string };
+
+export function createOpenAiRealtimeTranscriptSeed(
+  turns: OpenAiRealtimeTranscriptSeedTurn[],
+  maxItems: number,
+  sessionId?: string,
+): Promise<Record<string, unknown>[]> {
+  return invoke("create_openai_realtime_transcript_seed", {
+    turns,
+    maxItems,
+    sessionId,
+  });
+}
+
 export type OpenAiRealtimeProtocolEvent =
   | {
       type: "transcript.started";

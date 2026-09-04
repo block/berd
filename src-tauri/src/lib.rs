@@ -608,6 +608,7 @@ pub fn run() {
             commands::openai_realtime::create_openai_realtime_session,
             commands::openai_realtime::create_openai_realtime_voice_session,
             commands::openai_realtime::create_openai_realtime_spokesperson_session_update,
+            commands::openai_realtime::create_openai_realtime_transcript_seed,
             commands::openai_realtime::start_openai_realtime_spokesperson_protocol,
             commands::openai_realtime::enqueue_openai_realtime_spokesperson_message,
             commands::openai_realtime::send_openai_realtime_expert_pipe_message,
