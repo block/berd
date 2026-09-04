@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::thread;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
@@ -59,6 +59,13 @@ pub enum SpokespersonEvent {
     Ready,
     UserSpeaking(bool),
     UserFinal(String),
+    ResponseStarted {
+        response_id: String,
+    },
+    ResponseFinished {
+        response_id: String,
+        status: SpokespersonResponseStatus,
+    },
     ResponseBound {
         response_id: String,
         directive_id: u64,
@@ -80,6 +87,13 @@ pub enum SpokespersonEvent {
     },
     Failed(String),
     Closed,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum SpokespersonResponseStatus {
+    Completed,
+    Cancelled,
+    Failed(String),
 }
 
 pub struct OpenAiSpokespersonRuntime {
@@ -206,7 +220,6 @@ async fn run(
     )
     .await?;
 
-    let mut pending_directives = VecDeque::new();
     let mut call_names = HashMap::<String, String>::new();
     let mut call_arguments = HashMap::<String, String>::new();
     loop {
@@ -225,11 +238,13 @@ async fn run(
                     }
                     Some(SpokespersonCommand::ExpertSay { directive_id, text }) => {
                         send_expert_item(&mut socket, &text, true).await?;
-                        pending_directives.push_back(directive_id);
                         send_json(&mut socket, serde_json::json!({
                             "type": "response.create",
                             "response": {
                                 "instructions": format!("Speak this Expert message naturally and accurately without adding filler: {text}"),
+                                "metadata": {
+                                    "berd_expert_directive_id": directive_id.to_string()
+                                },
                                 "tools": [],
                                 "tool_choice": "none"
                             }
@@ -260,11 +275,36 @@ async fn run(
                         }
                     }
                     "response.created" => {
-                        if let (Some(response_id), Some(directive_id)) =
-                            (value.pointer("/response/id").and_then(|value| value.as_str()), pending_directives.pop_front())
-                        {
+                        if let Some(response_id) = value.pointer("/response/id").and_then(|value| value.as_str()) {
+                            send_event(events, SpokespersonEvent::ResponseStarted {
+                                response_id: response_id.into()
+                            })?;
+                            if let Some(directive_id) = value
+                                .pointer("/response/metadata/berd_expert_directive_id")
+                                .and_then(|value| value.as_str())
+                                .and_then(|value| value.parse::<u64>().ok())
+                            {
                             send_event(events, SpokespersonEvent::ResponseBound {
                                 response_id: response_id.into(), directive_id
+                            })?;
+                            }
+                        }
+                    }
+                    "response.done" => {
+                        if let Some(response_id) = value.pointer("/response/id").and_then(|value| value.as_str()) {
+                            let status = match value
+                                .pointer("/response/status")
+                                .and_then(|value| value.as_str())
+                            {
+                                Some("completed") | None => SpokespersonResponseStatus::Completed,
+                                Some("cancelled") => SpokespersonResponseStatus::Cancelled,
+                                Some(status) => SpokespersonResponseStatus::Failed(format!(
+                                    "Spokesperson response ended with status {status}"
+                                )),
+                            };
+                            send_event(events, SpokespersonEvent::ResponseFinished {
+                                response_id: response_id.into(),
+                                status,
                             })?;
                         }
                     }
@@ -415,7 +455,7 @@ mod tests {
 
     use super::{
         downsample_pcm16, parse_handoff, pcm16_samples, run, OpenAiSpokespersonConfig,
-        SpokespersonCommand, SpokespersonEvent,
+        SpokespersonCommand, SpokespersonEvent, SpokespersonResponseStatus,
     };
 
     #[allow(clippy::result_large_err)]
@@ -505,7 +545,12 @@ mod tests {
                 .as_str()
                 .unwrap()
                 .contains("speak now"));
-            assert_eq!(receive_json(&mut socket).await["type"], "response.create");
+            let response_create = receive_json(&mut socket).await;
+            assert_eq!(response_create["type"], "response.create");
+            assert_eq!(
+                response_create.pointer("/response/metadata/berd_expert_directive_id"),
+                Some(&json!("7"))
+            );
 
             send_json(
                 &mut socket,
@@ -527,7 +572,26 @@ mod tests {
             .await;
             send_json(
                 &mut socket,
-                json!({"type":"response.created","response":{"id":"response-1"}}),
+                json!({"type":"response.created","response":{"id":"response-auto"}}),
+            )
+            .await;
+            send_json(
+                &mut socket,
+                json!({
+                    "type":"response.done",
+                    "response":{"id":"response-auto","status":"failed"}
+                }),
+            )
+            .await;
+            send_json(
+                &mut socket,
+                json!({
+                    "type":"response.created",
+                    "response":{
+                        "id":"response-1",
+                        "metadata":{"berd_expert_directive_id":"7"}
+                    }
+                }),
             )
             .await;
             send_json(
@@ -561,6 +625,11 @@ mod tests {
                     "name":"handoff",
                     "arguments": r#"{"message":" inspect the computer "}"#
                 }),
+            )
+            .await;
+            send_json(
+                &mut socket,
+                json!({"type":"response.done","response":{"id":"response-1"}}),
             )
             .await;
 
@@ -606,7 +675,7 @@ mod tests {
             .unwrap();
 
         let received = tokio::task::spawn_blocking(move || {
-            (0..8)
+            (0..12)
                 .map(|_| event_rx.recv_timeout(Duration::from_secs(2)).unwrap())
                 .collect::<Vec<_>>()
         })
@@ -621,19 +690,31 @@ mod tests {
             matches!(&received[2], SpokespersonEvent::UserFinal(text) if text == "hello expert")
         );
         assert!(
-            matches!(&received[3], SpokespersonEvent::ResponseBound { response_id, directive_id: 7 } if response_id == "response-1")
+            matches!(&received[3], SpokespersonEvent::ResponseStarted { response_id } if response_id == "response-auto")
         );
         assert!(
-            matches!(&received[4], SpokespersonEvent::AudioDelta { response_id, samples } if response_id == "response-1" && samples.len() == 2)
+            matches!(&received[4], SpokespersonEvent::ResponseFinished { response_id, status: SpokespersonResponseStatus::Failed(message) } if response_id == "response-auto" && message.contains("failed"))
         );
         assert!(
-            matches!(&received[5], SpokespersonEvent::AudioDone { response_id } if response_id == "response-1")
+            matches!(&received[5], SpokespersonEvent::ResponseStarted { response_id } if response_id == "response-1")
         );
         assert!(
-            matches!(&received[6], SpokespersonEvent::TranscriptDone { response_id, text } if response_id == "response-1" && text == "spoken answer")
+            matches!(&received[6], SpokespersonEvent::ResponseBound { response_id, directive_id: 7 } if response_id == "response-1")
         );
         assert!(
-            matches!(&received[7], SpokespersonEvent::Handoff { call_id, message } if call_id == "call-1" && message == "inspect the computer")
+            matches!(&received[7], SpokespersonEvent::AudioDelta { response_id, samples } if response_id == "response-1" && samples.len() == 2)
+        );
+        assert!(
+            matches!(&received[8], SpokespersonEvent::AudioDone { response_id } if response_id == "response-1")
+        );
+        assert!(
+            matches!(&received[9], SpokespersonEvent::TranscriptDone { response_id, text } if response_id == "response-1" && text == "spoken answer")
+        );
+        assert!(
+            matches!(&received[10], SpokespersonEvent::Handoff { call_id, message } if call_id == "call-1" && message == "inspect the computer")
+        );
+        assert!(
+            matches!(&received[11], SpokespersonEvent::ResponseFinished { response_id, status: SpokespersonResponseStatus::Completed } if response_id == "response-1")
         );
 
         commands.send(SpokespersonCommand::Shutdown).unwrap();
