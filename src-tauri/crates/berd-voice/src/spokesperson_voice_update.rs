@@ -126,7 +126,7 @@ impl VoiceUpdateTransaction {
         let mut candidate_config = runtime_config.clone();
         candidate_config.set_voice_and_speed(voice, speed);
         candidate_config.semantic_transcript = semantic_transcript;
-        let (runtime, events) = OpenAiSpokespersonRuntime::spawn(candidate_config)?;
+        let (runtime, events) = OpenAiSpokespersonRuntime::spawn_observed(candidate_config)?;
         Ok(Self {
             id: request.id,
             base_revision: request.base_revision,
@@ -152,9 +152,9 @@ impl VoiceUpdateTransaction {
                 "replacement Spokesperson session timed out before readiness".into(),
             );
         }
-        match self.events.try_recv() {
+        match self.try_recv_control_event() {
             Ok(SpokespersonEvent::Ready) if self.phase == VoiceUpdatePhase::Building => {
-                match self.events.try_recv() {
+                match self.try_recv_control_event() {
                     Err(TryRecvError::Empty) => {
                         if matches!(self.purpose, VoiceUpdatePurpose::SessionRecovery { .. }) {
                             VoiceUpdateAction::Activate
@@ -187,6 +187,15 @@ impl VoiceUpdateTransaction {
                 "replacement Spokesperson emitted live input before activation".into(),
             ),
             Err(TryRecvError::Empty) => VoiceUpdateAction::None,
+        }
+    }
+
+    fn try_recv_control_event(&self) -> Result<SpokespersonEvent, TryRecvError> {
+        loop {
+            match self.events.try_recv() {
+                Ok(SpokespersonEvent::Provider(_)) => continue,
+                event => return event,
+            }
         }
     }
 

@@ -511,13 +511,11 @@ impl RealtimeProtocolReducer {
                 Err(realtime_error_message(event))
             }
             "response.output_item.added" => {
-                if string_at(event, "/item/type") == Some("function_call") {
-                    if let (Some(call_id), Some(name)) = (
-                        string_at(event, "/item/call_id"),
-                        string_at(event, "/item/name"),
-                    ) {
-                        self.call_names.insert(call_id.into(), name.into());
-                    }
+                if let (Some(call_id), Some(name)) = (
+                    string_at(event, "/item/call_id"),
+                    string_at(event, "/item/name"),
+                ) {
+                    self.call_names.insert(call_id.into(), name.into());
                 }
                 Ok(Vec::new())
             }
@@ -1444,7 +1442,15 @@ impl RealtimeExpertSpokespersonSession {
         &mut self,
         event: LiveSideEvent,
     ) -> Result<crate::causal_inbox::CausalMessage<LiveSideEvent>, String> {
-        self.conversation.record_live_event(event)
+        let handoff = match &event {
+            LiveSideEvent::Handoff { call_id, message } => Some((call_id.clone(), message.clone())),
+            _ => None,
+        };
+        let recorded = self.conversation.record_live_event(event)?;
+        if let Some((handoff_id, message)) = handoff {
+            self.register_handoff(&handoff_id, recorded.token, &message)?;
+        }
+        Ok(recorded)
     }
 
     pub fn add_external_live_event(
@@ -1463,7 +1469,7 @@ impl RealtimeExpertSpokespersonSession {
     }
 
     pub fn has_unresolved_external_handoff(&self) -> bool {
-        self.conversation.has_unresolved_handoff()
+        !self.open_handoffs.is_empty()
     }
 
     pub fn reserve_external_spokesperson_turn(&mut self, response_id: String) {
@@ -1501,6 +1507,29 @@ impl RealtimeExpertSpokespersonSession {
         message: RealtimeExpertMessage,
     ) -> Result<RealtimeCoordinatorResult, String> {
         self.responses.request_expert_message(message)
+    }
+
+    pub fn handle_external_response_event(
+        &mut self,
+        event: &Value,
+    ) -> Result<RealtimeCoordinatorUpdate, String> {
+        let update = self.responses.handle(event)?;
+        for handoff_id in &update.completed_handoff_ids {
+            self.open_handoffs.remove(handoff_id);
+        }
+        for handoff_id in &update.failed_handoff_ids {
+            if let Some(handoff) = self.open_handoffs.get_mut(handoff_id) {
+                handoff.resolving = false;
+            }
+        }
+        Ok(update)
+    }
+
+    pub fn unresolved_external_handoff_ids(&self) -> Vec<String> {
+        self.open_handoffs
+            .iter()
+            .filter_map(|(id, handoff)| (!handoff.resolving).then_some(id.clone()))
+            .collect()
     }
 
     pub fn request_typed_user_message(
@@ -2573,5 +2602,53 @@ mod tests {
             session.unknown_handoff_ids(&["handoff-1".into()]),
             ["handoff-1"]
         );
+    }
+
+    #[test]
+    fn external_response_lifecycle_uses_host_playback_to_resolve_handoffs() {
+        let mut session = RealtimeExpertSpokespersonSession::new(0, "external-test");
+        session
+            .record_external_live_event(LiveSideEvent::Handoff {
+                call_id: "call-1".into(),
+                message: "Inspect the project".into(),
+            })
+            .unwrap();
+        let handoff_ids = session.unresolved_external_handoff_ids();
+        session.mark_handoffs_resolving(&handoff_ids).unwrap();
+        session
+            .request_expert_message(RealtimeExpertMessage {
+                message: "I found the answer".into(),
+                mode: RealtimeExpertMessageMode::Say,
+                event_id: None,
+                directive_id: Some(7),
+                resolved_handoff_ids: handoff_ids,
+            })
+            .unwrap();
+
+        session
+            .handle_external_response_event(
+                &json!({ "type": "response.created", "response": { "id": "response-1" } }),
+            )
+            .unwrap();
+        session
+            .handle_external_response_event(
+                &json!({ "type": "output_audio_buffer.started", "response_id": "response-1" }),
+            )
+            .unwrap();
+        let generated = session
+            .handle_external_response_event(&json!({
+                "type": "response.done",
+                "response": { "id": "response-1", "status": "completed" },
+            }))
+            .unwrap();
+        assert!(generated.completed_handoff_ids.is_empty());
+
+        let played = session
+            .handle_external_response_event(
+                &json!({ "type": "output_audio_buffer.stopped", "response_id": "response-1" }),
+            )
+            .unwrap();
+        assert_eq!(played.completed_handoff_ids, ["call-1"]);
+        assert!(session.unresolved_external_handoff_ids().is_empty());
     }
 }
