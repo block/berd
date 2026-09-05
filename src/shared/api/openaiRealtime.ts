@@ -161,51 +161,63 @@ export type OpenAiRealtimePipeExchange =
       cursor: number;
     };
 
-export function sendOpenAiRealtimeExpertPipeMessage(
+export type OpenAiRealtimeExpertMessageDelivery =
+  | {
+      accepted: true;
+      cursor: number;
+      deliveryStatus: "sent" | "interrupting" | "queued";
+      outbound: OpenAiRealtimePipeMessage;
+    }
+  | Exclude<OpenAiRealtimePipeExchange, { accepted: true }>
+  | {
+      accepted: false;
+      reason: "unknown_handoff" | "context_cannot_resolve";
+      cursor: number;
+      handoffIds: string[];
+    };
+
+export function deliverOpenAiRealtimeExpertMessage(
   sessionId: string,
   cursor: number,
   message: string,
-): Promise<OpenAiRealtimePipeExchange> {
-  return invoke("send_openai_realtime_expert_pipe_message", {
+  mode: "context" | "say",
+  resolvedHandoffIds: string[],
+): Promise<OpenAiRealtimeExpertMessageDelivery> {
+  return invoke("deliver_openai_realtime_expert_message", {
     sessionId,
     cursor,
     message,
+    mode,
+    resolvedHandoffIds,
   });
 }
 
-export function getOpenAiRealtimeExpertPipeCursor(
-  sessionId: string,
-): Promise<number> {
-  return invoke("get_openai_realtime_expert_pipe_cursor", { sessionId });
-}
+export type OpenAiRealtimeHandoffDismissal =
+  | {
+      accepted: true;
+      cursor: number;
+      dismissedHandoffIds: string[];
+      deliveryStatus: "sent" | "interrupting" | "queued";
+    }
+  | Exclude<OpenAiRealtimePipeExchange, { accepted: true }>
+  | {
+      accepted: false;
+      reason: "unknown_handoff" | "context_cannot_resolve";
+      cursor: number;
+      handoffIds: string[];
+    };
 
-export function unknownOpenAiRealtimeHandoffIds(
+export function dismissOpenAiRealtimeHandoffsWithContext(
   sessionId: string,
+  cursor: number,
   handoffIds: string[],
-): Promise<string[]> {
-  return invoke("unknown_openai_realtime_handoff_ids", {
+  reason: string,
+): Promise<OpenAiRealtimeHandoffDismissal> {
+  return invoke("dismiss_openai_realtime_handoffs_with_context", {
     sessionId,
+    cursor,
     handoffIds,
-  });
-}
-
-export function markOpenAiRealtimeHandoffsResolving(
-  sessionId: string,
-  handoffIds: string[],
-): Promise<void> {
-  return invoke("mark_openai_realtime_handoffs_resolving", {
-    sessionId,
-    handoffIds,
-  });
-}
-
-export function dismissOpenAiRealtimeHandoffs(
-  sessionId: string,
-  handoffIds: string[],
-): Promise<void> {
-  return invoke("dismiss_openai_realtime_handoffs", {
-    sessionId,
-    handoffIds,
+    reason,
   });
 }
 
@@ -248,22 +260,6 @@ export function reduceOpenAiRealtimeSpokespersonEvent(
   return invoke("reduce_openai_realtime_spokesperson_event", {
     sessionId,
     event,
-  });
-}
-
-export function requestOpenAiRealtimeExpertMessage(
-  sessionId: string,
-  message: {
-    message: string;
-    mode: "context" | "say";
-    eventId?: string;
-    directiveId?: number;
-    resolvedHandoffIds?: string[];
-  },
-): Promise<OpenAiRealtimeCoordinatorResult> {
-  return invoke("request_openai_realtime_expert_message", {
-    sessionId,
-    message,
   });
 }
 

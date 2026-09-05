@@ -1,8 +1,8 @@
 use berd_voice::openai_realtime_protocol::{
     expert_session_instructions, realtime_transcript_seed_events, RealtimeCoordinatorResult,
-    RealtimeExpertDelivery, RealtimeExpertMessage, RealtimeExpertSpokespersonSession,
-    RealtimeExpertTurnCompletion, RealtimePipeExchange, RealtimeSessionReduction,
-    RealtimeSpokespersonSessionOptions, RealtimeTranscriptSeedTurn,
+    RealtimeExpertDelivery, RealtimeExpertSpokespersonSession, RealtimeExpertTurnCompletion,
+    RealtimePipeExchange, RealtimeSessionReduction, RealtimeSpokespersonSessionOptions,
+    RealtimeTranscriptSeedTurn,
 };
 use berd_voice::openai_spokesperson::{
     OpenAiSpokespersonConfig, OpenAiSpokespersonControl, OpenAiSpokespersonRuntime,
@@ -299,60 +299,122 @@ pub fn create_openai_realtime_transcript_seed(
 }
 
 #[tauri::command]
-pub fn send_openai_realtime_expert_pipe_message(
+pub fn deliver_openai_realtime_expert_message(
     state: State<'_, OpenAiRealtimeRuntimeState>,
     session_id: String,
     cursor: u64,
     message: String,
-) -> Result<RealtimePipeExchange, String> {
-    with_protocol_session(state, session_id, |session| {
-        session.send_expert_pipe_message(cursor, &message)
-    })
+    mode: berd_voice::openai_realtime_protocol::RealtimeExpertMessageMode,
+    resolved_handoff_ids: Vec<String>,
+) -> Result<serde_json::Value, String> {
+    let session_id = non_empty_session_id(session_id)?;
+    let mut sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "OpenAI Realtime runtime state is unavailable".to_string())?;
+    let entry = sessions
+        .get_mut(&session_id)
+        .ok_or("OpenAI Realtime runtime session is not active")?;
+    let unknown = entry.protocol.unknown_handoff_ids(&resolved_handoff_ids);
+    let submission =
+        match entry
+            .protocol
+            .submit_expert_message(cursor, &message, mode, &resolved_handoff_ids)
+        {
+            Ok(submission) => submission,
+            Err(error) if error == "context cannot resolve handoffs" => {
+                return Ok(json!({
+                    "accepted": false,
+                    "reason": "context_cannot_resolve",
+                    "cursor": entry.protocol.expert_pipe_cursor(),
+                    "handoffIds": resolved_handoff_ids,
+                }));
+            }
+            Err(_error) if !unknown.is_empty() => {
+                return Ok(json!({
+                    "accepted": false,
+                    "reason": "unknown_handoff",
+                    "cursor": entry.protocol.expert_pipe_cursor(),
+                    "handoffIds": unknown,
+                }));
+            }
+            Err(error) => return Err(error),
+        };
+    let accepted = match submission.exchange {
+        RealtimePipeExchange::Accepted(accepted) => accepted,
+        rejected => {
+            return serde_json::to_value(rejected)
+                .map_err(|error| format!("Could not serialize Expert delivery rejection: {error}"))
+        }
+    };
+    let request = submission
+        .request
+        .ok_or("Accepted Expert delivery did not produce a provider request")?;
+    for event in request.events {
+        entry.runtime.send(SpokespersonCommand::Provider(event))?;
+    }
+    Ok(json!({
+        "accepted": true,
+        "cursor": accepted.cursor,
+        "outbound": accepted.outbound,
+        "deliveryStatus": request.status,
+    }))
 }
 
 #[tauri::command]
-pub fn get_openai_realtime_expert_pipe_cursor(
+pub fn dismiss_openai_realtime_handoffs_with_context(
     state: State<'_, OpenAiRealtimeRuntimeState>,
     session_id: String,
-) -> Result<u64, String> {
-    with_protocol_session(
-        state,
-        session_id,
-        |session| Ok(session.expert_pipe_cursor()),
-    )
-}
-
-#[tauri::command]
-pub fn unknown_openai_realtime_handoff_ids(
-    state: State<'_, OpenAiRealtimeRuntimeState>,
-    session_id: String,
+    cursor: u64,
     handoff_ids: Vec<String>,
-) -> Result<Vec<String>, String> {
-    with_protocol_session(state, session_id, |session| {
-        Ok(session.unknown_handoff_ids(&handoff_ids))
-    })
-}
-
-#[tauri::command]
-pub fn mark_openai_realtime_handoffs_resolving(
-    state: State<'_, OpenAiRealtimeRuntimeState>,
-    session_id: String,
-    handoff_ids: Vec<String>,
-) -> Result<(), String> {
-    with_protocol_session(state, session_id, |session| {
-        session.mark_handoffs_resolving(&handoff_ids)
-    })
-}
-
-#[tauri::command]
-pub fn dismiss_openai_realtime_handoffs(
-    state: State<'_, OpenAiRealtimeRuntimeState>,
-    session_id: String,
-    handoff_ids: Vec<String>,
-) -> Result<(), String> {
-    with_protocol_session(state, session_id, |session| {
-        session.dismiss_handoffs(&handoff_ids)
-    })
+    reason: String,
+) -> Result<serde_json::Value, String> {
+    let session_id = non_empty_session_id(session_id)?;
+    let mut sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "OpenAI Realtime runtime state is unavailable".to_string())?;
+    let entry = sessions
+        .get_mut(&session_id)
+        .ok_or("OpenAI Realtime runtime session is not active")?;
+    let unknown = entry.protocol.unknown_handoff_ids(&handoff_ids);
+    let dismissal =
+        match entry
+            .protocol
+            .dismiss_handoffs_with_context(cursor, &handoff_ids, &reason)
+        {
+            Ok(dismissal) => dismissal,
+            Err(_error) if !unknown.is_empty() => {
+                return Ok(json!({
+                    "accepted": false,
+                    "reason": "unknown_handoff",
+                    "cursor": entry.protocol.expert_pipe_cursor(),
+                    "handoffIds": unknown,
+                }));
+            }
+            Err(error) => return Err(error),
+        };
+    let accepted = match dismissal.exchange {
+        RealtimePipeExchange::Accepted(accepted) => accepted,
+        rejected => {
+            return serde_json::to_value(rejected).map_err(|error| {
+                format!("Could not serialize handoff dismissal rejection: {error}")
+            })
+        }
+    };
+    let request = dismissal
+        .request
+        .ok_or("Accepted handoff dismissal did not produce a provider request")?;
+    let delivery_status = request.status;
+    for event in request.events {
+        entry.runtime.send(SpokespersonCommand::Provider(event))?;
+    }
+    Ok(json!({
+        "accepted": true,
+        "cursor": accepted.cursor,
+        "dismissedHandoffIds": dismissal.dismissed_handoff_ids,
+        "deliveryStatus": delivery_status,
+    }))
 }
 
 #[tauri::command]
@@ -393,17 +455,6 @@ pub fn reduce_openai_realtime_spokesperson_event(
         .ok_or_else(|| "OpenAI Realtime protocol session is not active".to_string())?
         .protocol;
     protocol.handle_provider_event(&event)
-}
-
-#[tauri::command]
-pub fn request_openai_realtime_expert_message(
-    state: State<'_, OpenAiRealtimeRuntimeState>,
-    session_id: String,
-    message: RealtimeExpertMessage,
-) -> Result<RealtimeCoordinatorResult, String> {
-    with_protocol_session(state, session_id, |session| {
-        session.request_expert_message(message)
-    })
 }
 
 #[tauri::command]
