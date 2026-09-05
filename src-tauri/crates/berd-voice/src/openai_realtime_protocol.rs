@@ -1233,6 +1233,13 @@ pub struct RealtimeExpertTurnCompletion {
     pub expert_delivery: Option<RealtimeExpertDelivery>,
 }
 
+#[derive(Clone, Debug)]
+pub struct RealtimeHandoffDismissal {
+    pub exchange: RealtimePipeExchange,
+    pub provider_events: Vec<Value>,
+    pub dismissed_handoff_ids: Vec<String>,
+}
+
 impl RealtimeExpertSpokespersonSession {
     pub fn new(initial_cursor: u64, call_scope: impl Into<String>) -> Self {
         Self {
@@ -1620,6 +1627,50 @@ impl RealtimeExpertSpokespersonSession {
             self.open_handoffs.remove(handoff_id);
         }
         Ok(())
+    }
+
+    pub fn dismiss_handoffs_with_context(
+        &mut self,
+        cursor: u64,
+        handoff_ids: &[String],
+        reason: &str,
+    ) -> Result<RealtimeHandoffDismissal, String> {
+        if handoff_ids.is_empty() {
+            return Err("at least one handoff id is required".into());
+        }
+        let unknown = self.unknown_handoff_ids(handoff_ids);
+        if !unknown.is_empty() {
+            return Err(format!("unknown handoff: {}", unknown.join(", ")));
+        }
+        let reason = require_non_empty(reason, "handoff dismissal reason")?;
+        let context = format!(
+            "Handoffs {} were dismissed without a spoken response. Reason: {reason}",
+            handoff_ids.join(", ")
+        );
+        let exchange = self.send_expert_pipe_message(cursor, &context)?;
+        let RealtimePipeExchange::Accepted(accepted) = &exchange else {
+            return Ok(RealtimeHandoffDismissal {
+                exchange,
+                provider_events: Vec::new(),
+                dismissed_handoff_ids: Vec::new(),
+            });
+        };
+        let request = self.request_expert_message(RealtimeExpertMessage {
+            message: format!(
+                "[bridge cursor {}] [Handoff dismissal] {context} This is silent context; do not speak merely to acknowledge it.",
+                accepted.outbound.id
+            ),
+            mode: RealtimeExpertMessageMode::Context,
+            event_id: Some(format!("berd-expert-dismissal-{}", accepted.outbound.id)),
+            directive_id: None,
+            resolved_handoff_ids: Vec::new(),
+        })?;
+        self.dismiss_handoffs(handoff_ids)?;
+        Ok(RealtimeHandoffDismissal {
+            exchange,
+            provider_events: request.events,
+            dismissed_handoff_ids: handoff_ids.to_vec(),
+        })
     }
 
     pub fn complete_expert_turn(
@@ -2573,6 +2624,31 @@ mod tests {
             .message
             .starts_with("[Private handoff reminder; cursor 1]"));
         assert!(session.flush_expert_events("unused").is_none());
+    }
+
+    #[test]
+    fn shared_session_dismisses_handoffs_with_silent_provider_context() {
+        let mut session = RealtimeExpertSpokespersonSession::new(0, "test-call");
+        session
+            .register_handoff("handoff-1", 1, "Inspect the project state")
+            .unwrap();
+
+        let dismissal = session
+            .dismiss_handoffs_with_context(0, &["handoff-1".into()], "Superseded")
+            .unwrap();
+        assert!(matches!(
+            dismissal.exchange,
+            RealtimePipeExchange::Accepted(_)
+        ));
+        assert_eq!(dismissal.dismissed_handoff_ids, ["handoff-1"]);
+        assert_eq!(dismissal.provider_events.len(), 1);
+        assert_eq!(
+            dismissal.provider_events[0].pointer("/item/content/0/text"),
+            Some(&json!(
+                "Private context from the Expert for a future natural turn. Do not respond to this item now:\n[bridge cursor 1] [Handoff dismissal] Handoffs handoff-1 were dismissed without a spoken response. Reason: Superseded This is silent context; do not speak merely to acknowledge it."
+            ))
+        );
+        assert!(session.unresolved_external_handoff_ids().is_empty());
     }
 
     #[test]

@@ -23,17 +23,20 @@ use berd_voice::input::{
 };
 use berd_voice::openai_realtime_protocol::{
     expert_handoff_message, expert_transcript_message, RealtimeExpertMessage,
-    RealtimeExpertMessageMode, RealtimeExpertSpokespersonSession, RealtimeTranscriptSpeaker,
+    RealtimeExpertMessageMode, RealtimeExpertSpokespersonSession, RealtimeHandoffReminder,
+    RealtimeTranscriptSpeaker,
 };
 use berd_voice::openai_spokesperson::{
     OpenAiSpokespersonConfig, OpenAiSpokespersonRuntime, SpokespersonCommand, SpokespersonEvent,
     SpokespersonResponseStatus,
 };
 use berd_voice::protocol::{
-    CancelOutcome, InputDuringTtsOutcome, NotAdmittedReason, OutputReadyOutcome, SessionMessage,
-    SessionRequest, TtsSettingsOutcome, VoiceSessionSnapshot,
+    CancelOutcome, DismissHandoffsOutcome, ExpertTurnOutcome, InputDuringTtsOutcome,
+    NotAdmittedReason, OutputReadyOutcome, SessionMessage, SessionRequest, TtsSettingsOutcome,
+    VoiceSessionSnapshot,
 };
 use berd_voice::realtime_audio_delivery::RealtimeAudioDelivery;
+use berd_voice::realtime_pipe::RealtimePipeExchange;
 use berd_voice::session::{PrepareOutcome, PrepareRequest, SessionCore};
 use berd_voice::spokesperson_voice_update::{
     VoiceBarrierAction, VoiceUpdateAction, VoiceUpdatePurpose, VoiceUpdateRequest,
@@ -78,6 +81,9 @@ fn spokesperson_renew_after() -> Duration {
 const PCM_FRAME_BYTES: usize = INPUT_FRAME_SAMPLES * std::mem::size_of::<f32>();
 const MAX_FINAL_TEXT_BYTES: usize = 64 * 1024;
 const MAX_SPEAK_TEXT_BYTES: usize = 16 * 1024;
+const MAX_HANDOFF_IDS: usize = 64;
+const MAX_HANDOFF_ID_BYTES: usize = 512;
+const MAX_HANDOFF_REASON_BYTES: usize = 4 * 1024;
 const INPUT_QUEUE_CAPACITY: usize = 32;
 const INPUT_STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 const SHUTDOWN_PLAYBACK_TIMEOUT: Duration = Duration::from_secs(3);
@@ -1567,6 +1573,7 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                 id,
                 acknowledgement,
                 text,
+                resolved_handoff_ids: _,
             }) => {
                 let request = PrepareRequest {
                     id,
@@ -1814,6 +1821,33 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
             Input::Request(SessionRequest::QueryState { id, after }) => {
                 write_state(&mut writer, id, after, &core)?
             }
+            Input::Request(SessionRequest::DismissHandoffs { id, .. }) => {
+                write_message(
+                    &mut writer,
+                    &SessionMessage::DismissHandoffsResult {
+                        id,
+                        outcome: DismissHandoffsOutcome::Rejected,
+                        cursor: core.confirmed_token(),
+                        dismissed_handoff_ids: Vec::new(),
+                        message: Some("handoff dismissal requires Expert-Spokesperson mode".into()),
+                    },
+                )?;
+            }
+            Input::Request(SessionRequest::CompleteExpertTurn { id, .. }) => {
+                write_message(
+                    &mut writer,
+                    &SessionMessage::ExpertTurnResult {
+                        id,
+                        outcome: ExpertTurnOutcome::Rejected,
+                        handoff_ids: Vec::new(),
+                        attempt: None,
+                        through_token: None,
+                        message: Some(
+                            "Expert turn completion requires Expert-Spokesperson mode".into(),
+                        ),
+                    },
+                )?;
+            }
             Input::Request(SessionRequest::Cancel { id }) => {
                 handle_cancel(id, &mut held, &mut core, &mut active, &mut writer)?;
             }
@@ -1841,6 +1875,7 @@ struct PendingExpertPrepare {
     id: u64,
     acknowledgement: Option<u64>,
     text: String,
+    resolved_handoff_ids: Vec<String>,
 }
 
 struct PendingSpokespersonRateUpdate {
@@ -3552,11 +3587,13 @@ fn run_expert_spokesperson_session(
                 id,
                 acknowledgement,
                 text,
+                resolved_handoff_ids,
             }) => {
                 let request = PendingExpertPrepare {
                     id,
                     acknowledgement,
                     text,
+                    resolved_handoff_ids,
                 };
                 let routing = route_expert_prepare(
                     &mut turn_gate,
@@ -3624,6 +3661,108 @@ fn run_expert_spokesperson_session(
                             .map(pending_live_event)
                             .collect(),
                         unresolved_handoff_ids: core.unresolved_external_handoff_ids(),
+                    },
+                )?;
+            }
+            Input::Request(SessionRequest::DismissHandoffs {
+                id,
+                cursor,
+                handoff_ids,
+                reason,
+            }) => match core.dismiss_handoffs_with_context(cursor, &handoff_ids, &reason) {
+                Ok(dismissal) => {
+                    for event in dismissal.provider_events {
+                        runtime
+                            .as_ref()
+                            .expect("initialized runtime")
+                            .send(SpokespersonCommand::Provider(event))?;
+                    }
+                    match dismissal.exchange {
+                        RealtimePipeExchange::Accepted(accepted) => write_message(
+                            &mut writer,
+                            &SessionMessage::DismissHandoffsResult {
+                                id,
+                                outcome: DismissHandoffsOutcome::Applied,
+                                cursor: accepted.cursor,
+                                dismissed_handoff_ids: dismissal.dismissed_handoff_ids,
+                                message: None,
+                            },
+                        )?,
+                        RealtimePipeExchange::Rejected(rejected) => write_message(
+                            &mut writer,
+                            &SessionMessage::DismissHandoffsResult {
+                                id,
+                                outcome: DismissHandoffsOutcome::Rejected,
+                                cursor: rejected.cursor,
+                                dismissed_handoff_ids: Vec::new(),
+                                message: Some(format!(
+                                    "handoff dismissal was rejected: {:?}",
+                                    rejected.reason
+                                )),
+                            },
+                        )?,
+                    }
+                }
+                Err(message) => write_message(
+                    &mut writer,
+                    &SessionMessage::DismissHandoffsResult {
+                        id,
+                        outcome: DismissHandoffsOutcome::Rejected,
+                        cursor: core.expert_pipe_cursor(),
+                        dismissed_handoff_ids: Vec::new(),
+                        message: Some(message),
+                    },
+                )?,
+            },
+            Input::Request(SessionRequest::CompleteExpertTurn {
+                id,
+                retrying_handoff_ids,
+                max_attempts,
+            }) => {
+                let completion =
+                    core.complete_expert_turn_with_delivery(&retrying_handoff_ids, max_attempts)?;
+                emit_live_events(&core, &mut emitted_live_token, &mut writer)?;
+                let (outcome, handoff_ids, attempt, through_token, message) =
+                    match completion.reminder {
+                        RealtimeHandoffReminder::None => {
+                            (ExpertTurnOutcome::Complete, Vec::new(), None, None, None)
+                        }
+                        RealtimeHandoffReminder::Reminder {
+                            handoff_ids,
+                            attempt,
+                            ..
+                        } => {
+                            let delivery = completion.expert_delivery.ok_or_else(|| {
+                                "handoff reminder did not produce an Expert delivery".to_string()
+                            })?;
+                            (
+                                ExpertTurnOutcome::Reminder,
+                                handoff_ids,
+                                Some(attempt),
+                                Some(emitted_live_token),
+                                Some(delivery.message),
+                            )
+                        }
+                        RealtimeHandoffReminder::Exhausted {
+                            handoff_ids,
+                            message,
+                        } => (
+                            ExpertTurnOutcome::Exhausted,
+                            handoff_ids,
+                            None,
+                            None,
+                            Some(message),
+                        ),
+                    };
+                write_message(
+                    &mut writer,
+                    &SessionMessage::ExpertTurnResult {
+                        id,
+                        outcome,
+                        handoff_ids,
+                        attempt,
+                        through_token,
+                        message,
                     },
                 )?;
             }
@@ -3947,6 +4086,18 @@ fn submit_expert_prepare(
     next_speech_id: &mut u64,
     writer: &mut impl Write,
 ) -> Result<(), String> {
+    if !core
+        .unknown_handoff_ids(&request.resolved_handoff_ids)
+        .is_empty()
+    {
+        return write_message(
+            writer,
+            &SessionMessage::NotAdmitted {
+                id: request.id,
+                reason: NotAdmittedReason::InvalidHandoff,
+            },
+        );
+    }
     match core.prepare_external_expert_directive(request.acknowledgement, request.text) {
         ExpertDirectiveOutcome::Pending(events) => write_message(
             writer,
@@ -3978,7 +4129,7 @@ fn submit_expert_prepare(
                 },
             );
             core.record_external_expert_turn(message.clone());
-            let resolved_handoff_ids = core.unresolved_external_handoff_ids();
+            let resolved_handoff_ids = request.resolved_handoff_ids;
             core.mark_handoffs_resolving(&resolved_handoff_ids)?;
             let coordination = core.request_expert_message(RealtimeExpertMessage {
                 message,
@@ -6412,6 +6563,8 @@ fn validate_request(request: SessionRequest) -> Result<SessionRequest, String> {
         | SessionRequest::PrepareSpeak { id, .. }
         | SessionRequest::OutputReady { id, .. }
         | SessionRequest::QueryState { id, .. }
+        | SessionRequest::DismissHandoffs { id, .. }
+        | SessionRequest::CompleteExpertTurn { id, .. }
         | SessionRequest::Cancel { id } => Some(*id),
         SessionRequest::SetPaused { .. }
         | SessionRequest::AudioBeginAccepted { .. }
@@ -6431,6 +6584,36 @@ fn validate_request(request: SessionRequest) -> Result<SessionRequest, String> {
     match &request {
         SessionRequest::PrepareSpeak { text, .. } if text.len() > MAX_SPEAK_TEXT_BYTES => {
             return Err("speak text exceeds 16 KiB".into())
+        }
+        SessionRequest::PrepareSpeak {
+            resolved_handoff_ids,
+            ..
+        } => validate_handoff_ids(resolved_handoff_ids)?,
+        SessionRequest::DismissHandoffs {
+            handoff_ids,
+            reason,
+            ..
+        } => {
+            validate_handoff_ids(handoff_ids)?;
+            if handoff_ids.is_empty() {
+                return Err("at least one handoff id is required".into());
+            }
+            if reason.trim().is_empty() {
+                return Err("handoff dismissal reason must not be empty".into());
+            }
+            if reason.len() > MAX_HANDOFF_REASON_BYTES {
+                return Err("handoff dismissal reason exceeds 4 KiB".into());
+            }
+        }
+        SessionRequest::CompleteExpertTurn {
+            retrying_handoff_ids,
+            max_attempts,
+            ..
+        } => {
+            validate_handoff_ids(retrying_handoff_ids)?;
+            if *max_attempts == 0 || *max_attempts > 10 {
+                return Err("max attempts must be between 1 and 10".into());
+            }
         }
         SessionRequest::OutputReady { speech_id: 0, .. } => {
             return Err("speech id must be positive".into())
@@ -6467,6 +6650,29 @@ fn validate_request(request: SessionRequest) -> Result<SessionRequest, String> {
         _ => {}
     }
     Ok(request)
+}
+
+fn validate_handoff_ids(handoff_ids: &[String]) -> Result<(), String> {
+    if handoff_ids.len() > MAX_HANDOFF_IDS {
+        return Err("request contains more than 64 handoff ids".into());
+    }
+    if handoff_ids
+        .iter()
+        .any(|handoff_id| handoff_id.trim().is_empty())
+    {
+        return Err("handoff id must not be empty".into());
+    }
+    if handoff_ids
+        .iter()
+        .any(|handoff_id| handoff_id.len() > MAX_HANDOFF_ID_BYTES)
+    {
+        return Err("handoff id exceeds 512 bytes".into());
+    }
+    let unique = handoff_ids.iter().collect::<std::collections::HashSet<_>>();
+    if unique.len() != handoff_ids.len() {
+        return Err("handoff ids must be unique".into());
+    }
+    Ok(())
 }
 
 fn spawn_playback(
@@ -6724,6 +6930,7 @@ mod tests {
             id: 7,
             acknowledgement: Some(1),
             text: "answer".into(),
+            resolved_handoff_ids: Vec::new(),
         };
         assert!(matches!(
             gate.defer_if_busy(request, false, 1),
@@ -6760,6 +6967,7 @@ mod tests {
                     id: 7,
                     acknowledgement: Some(1),
                     text: "first".into(),
+                    resolved_handoff_ids: Vec::new(),
                 },
                 false,
                 1,
@@ -6772,6 +6980,7 @@ mod tests {
                     id: 8,
                     acknowledgement: Some(1),
                     text: "second".into(),
+                    resolved_handoff_ids: Vec::new(),
                 },
                 false,
                 1,
@@ -6801,6 +7010,7 @@ mod tests {
                 id: 8,
                 acknowledgement: Some(1),
                 text: "second".into(),
+                resolved_handoff_ids: Vec::new(),
             },
             expert_output_reserved(&directives, &HashSet::new(), None, &responses),
             false,
@@ -7214,6 +7424,7 @@ mod tests {
                     id: 11,
                     acknowledgement: None,
                     text: "wait for the configured rate".into(),
+                    resolved_handoff_ids: Vec::new(),
                 },
                 false,
                 true,
@@ -7420,6 +7631,7 @@ mod tests {
                     id: 7,
                     acknowledgement: Some(1),
                     text: "answer after the user".into(),
+                    resolved_handoff_ids: Vec::new(),
                 },
                 false,
                 1,
@@ -9472,6 +9684,31 @@ mod tests {
         assert_eq!(
             validate_request(request).unwrap_err(),
             "expected input-during-TTS revision must be positive"
+        );
+    }
+
+    #[test]
+    fn handoff_lifecycle_requests_reject_ambiguous_or_unbounded_ids() {
+        let duplicate = SessionRequest::DismissHandoffs {
+            id: 9,
+            cursor: 3,
+            handoff_ids: vec!["call-1".into(), "call-1".into()],
+            reason: "Superseded".into(),
+        };
+        assert_eq!(
+            validate_request(duplicate).unwrap_err(),
+            "handoff ids must be unique"
+        );
+
+        let empty = SessionRequest::PrepareSpeak {
+            id: 10,
+            acknowledgement: None,
+            text: "answer".into(),
+            resolved_handoff_ids: vec!["  ".into()],
+        };
+        assert_eq!(
+            validate_request(empty).unwrap_err(),
+            "handoff id must not be empty"
         );
     }
 
