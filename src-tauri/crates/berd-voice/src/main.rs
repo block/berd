@@ -22,8 +22,8 @@ use berd_voice::input::{
     VoiceInputRuntime, INPUT_FRAME_SAMPLES,
 };
 use berd_voice::openai_realtime_protocol::{
-    expert_handoff_message, expert_transcript_message, RealtimeExpertSpokespersonSession,
-    RealtimeTranscriptSpeaker,
+    expert_handoff_message, expert_transcript_message, RealtimeExpertMessage,
+    RealtimeExpertMessageMode, RealtimeExpertSpokespersonSession, RealtimeTranscriptSpeaker,
 };
 use berd_voice::openai_spokesperson::{
     OpenAiSpokespersonConfig, OpenAiSpokespersonRuntime, SpokespersonCommand, SpokespersonEvent,
@@ -2482,7 +2482,6 @@ fn run_expert_spokesperson_session(
     let mut initialized = false;
     let mut pending_control = None;
     let mut processed_pcm = 0_u64;
-    let mut next_live_token = 1_u64;
     let mut emitted_live_token = 0_u64;
     let mut next_speech_id = 1_u64;
     let mut directive_speeches = HashMap::<u64, DirectiveSpeech>::new();
@@ -2662,7 +2661,23 @@ fn run_expert_spokesperson_session(
         if let Some(events) = runtime_events.as_ref() {
             if let Ok(event) = events.try_recv() {
                 match event {
-                    SpokespersonEvent::Provider(_) => {}
+                    SpokespersonEvent::Provider(event) => {
+                        let kind = event.pointer("/type").and_then(serde_json::Value::as_str);
+                        if !matches!(
+                            kind,
+                            Some(
+                                "output_audio_buffer.started"
+                                    | "output_audio_buffer.stopped"
+                                    | "output_audio_buffer.cleared"
+                            )
+                        ) {
+                            apply_external_coordinator_event(
+                                &mut core,
+                                runtime.as_ref().expect("initialized runtime"),
+                                &event,
+                            )?;
+                        }
+                    }
                     SpokespersonEvent::Ready => {}
                     SpokespersonEvent::UserSpeaking {
                         active: speaking,
@@ -2718,7 +2733,6 @@ fn run_expert_spokesperson_session(
                         turn_gate.resolve_user_final(&item_id);
                         record_and_emit_live_event(
                             &mut core,
-                            &mut next_live_token,
                             &mut emitted_live_token,
                             LiveSideEvent::UserTranscript { text: text.clone() },
                             &mut writer,
@@ -2787,7 +2801,6 @@ fn run_expert_spokesperson_session(
                             &response_id,
                             &mut responses,
                             &mut core,
-                            &mut next_live_token,
                             &mut emitted_live_token,
                             &mut writer,
                         )?;
@@ -2938,7 +2951,6 @@ fn run_expert_spokesperson_session(
                             &response_id,
                             &mut responses,
                             &mut core,
-                            &mut next_live_token,
                             &mut emitted_live_token,
                             &mut writer,
                         )?;
@@ -3043,7 +3055,6 @@ fn run_expert_spokesperson_session(
                             &response_id,
                             &mut responses,
                             &mut core,
-                            &mut next_live_token,
                             &mut emitted_live_token,
                             &mut writer,
                         )?;
@@ -3055,7 +3066,6 @@ fn run_expert_spokesperson_session(
                     } => {
                         record_and_emit_live_event(
                             &mut core,
-                            &mut next_live_token,
                             &mut emitted_live_token,
                             LiveSideEvent::Handoff { call_id, message },
                             &mut writer,
@@ -3265,6 +3275,14 @@ fn run_expert_spokesperson_session(
                         .get_mut(&response_id)
                         .ok_or_else(|| "Spokesperson playback had no response state".to_string())?;
                     response.playback_complete = true;
+                    apply_external_coordinator_event(
+                        &mut core,
+                        runtime.as_ref().expect("initialized runtime"),
+                        &serde_json::json!({
+                            "type": "output_audio_buffer.stopped",
+                            "response_id": response_id,
+                        }),
+                    )?;
                     if response.claim_speech_terminal() {
                         if let Some(prepare_id) = response.prepare_id {
                             write_message(
@@ -3280,7 +3298,6 @@ fn run_expert_spokesperson_session(
                         &response_id,
                         &mut responses,
                         &mut core,
-                        &mut next_live_token,
                         &mut emitted_live_token,
                         &mut writer,
                     )?;
@@ -3292,6 +3309,14 @@ fn run_expert_spokesperson_session(
                         continue;
                     };
                     if message == AUDIO_CANCELLED {
+                        apply_external_coordinator_event(
+                            &mut core,
+                            runtime.as_ref().expect("initialized runtime"),
+                            &serde_json::json!({
+                                "type": "output_audio_buffer.cleared",
+                                "response_id": response_id,
+                            }),
+                        )?;
                         if let Some(response) = responses.get_mut(&response_id) {
                             emit_live_interrupted_terminal(response, &playback, &mut writer)?;
                             send_live_response_truncation(
@@ -3304,7 +3329,6 @@ fn run_expert_spokesperson_session(
                             &response_id,
                             &mut responses,
                             &mut core,
-                            &mut next_live_token,
                             &mut emitted_live_token,
                             &mut writer,
                         )?;
@@ -3326,7 +3350,7 @@ fn run_expert_spokesperson_session(
                 }
             }
         }
-        if !turn_gate.input_blocks_output() {
+        if initialized && !turn_gate.input_blocks_output() {
             start_next_live_playback(
                 &mut active,
                 &mut waiting_responses,
@@ -3335,6 +3359,8 @@ fn run_expert_spokesperson_session(
                 &audio_transport,
                 &audio_control_tx,
                 &playback_tx,
+                &mut core,
+                runtime.as_ref().expect("initialized runtime"),
                 &mut writer,
             )?;
         }
@@ -3468,15 +3494,24 @@ fn run_expert_spokesperson_session(
                     input_during_tts: input_policy.snapshot()?,
                 };
                 let (created, events) =
-                    OpenAiSpokespersonRuntime::spawn(spokesperson_config.clone())?;
-                match events.recv_timeout(Duration::from_secs(30)) {
-                    Ok(SpokespersonEvent::Ready) => {}
-                    Ok(
-                        SpokespersonEvent::Failed(message)
-                        | SpokespersonEvent::SessionLost(message),
-                    ) => return Err(message),
-                    Ok(_) => return Err("Spokesperson emitted an event before readiness".into()),
-                    Err(_) => return Err("Spokesperson startup timed out".into()),
+                    OpenAiSpokespersonRuntime::spawn_observed(spokesperson_config.clone())?;
+                let readiness_deadline = Instant::now() + Duration::from_secs(30);
+                loop {
+                    let remaining = readiness_deadline.saturating_duration_since(Instant::now());
+                    match events.recv_timeout(remaining) {
+                        Ok(SpokespersonEvent::Provider(event)) => {
+                            apply_external_coordinator_event(&mut core, &created, &event)?;
+                        }
+                        Ok(SpokespersonEvent::Ready) => break,
+                        Ok(
+                            SpokespersonEvent::Failed(message)
+                            | SpokespersonEvent::SessionLost(message),
+                        ) => return Err(message),
+                        Ok(_) => {
+                            return Err("Spokesperson emitted an event before readiness".into())
+                        }
+                        Err(_) => return Err("Spokesperson startup timed out".into()),
+                    }
                 }
                 runtime = Some(created);
                 runtime_events = Some(events);
@@ -3931,10 +3966,18 @@ fn submit_expert_prepare(
                 },
             );
             core.record_external_expert_turn(message.clone());
-            runtime.send(SpokespersonCommand::ExpertSay {
-                directive_id: request.id,
-                text: message,
+            let resolved_handoff_ids = core.unresolved_external_handoff_ids();
+            core.mark_handoffs_resolving(&resolved_handoff_ids)?;
+            let coordination = core.request_expert_message(RealtimeExpertMessage {
+                message,
+                mode: RealtimeExpertMessageMode::Say,
+                event_id: None,
+                directive_id: Some(request.id),
+                resolved_handoff_ids,
             })?;
+            for event in coordination.events {
+                runtime.send(SpokespersonCommand::Provider(event))?;
+            }
             write_message(
                 writer,
                 &SessionMessage::Admitted {
@@ -4068,6 +4111,8 @@ fn start_next_live_playback(
     audio_transport: &Arc<AudioPipeTransport>,
     audio_control_tx: &mpsc::Sender<AudioOutputControlRequest>,
     playback_tx: &mpsc::Sender<LivePlaybackResult>,
+    core: &mut RealtimeExpertSpokespersonSession,
+    runtime: &OpenAiSpokespersonRuntime,
     writer: &mut impl Write,
 ) -> Result<(), String> {
     if active.is_some() {
@@ -4090,16 +4135,36 @@ fn start_next_live_playback(
             write_message(writer, &SessionMessage::SpokespersonSpeech { speech_id })?;
         }
         let playback = spawn_live_playback(
-            response_id,
+            response_id.clone(),
             speech_id,
             response.prepare_id,
             Arc::clone(audio_transport),
             audio_control_tx.clone(),
             playback_tx.clone(),
         )?;
+        apply_external_coordinator_event(
+            core,
+            runtime,
+            &serde_json::json!({
+                "type": "output_audio_buffer.started",
+                "response_id": response_id,
+            }),
+        )?;
         *active = Some(playback);
         flush_active_live_playback(active, responses)?;
         break;
+    }
+    Ok(())
+}
+
+fn apply_external_coordinator_event(
+    core: &mut RealtimeExpertSpokespersonSession,
+    runtime: &OpenAiSpokespersonRuntime,
+    event: &serde_json::Value,
+) -> Result<(), String> {
+    let update = core.handle_external_response_event(event)?;
+    for event in update.events {
+        runtime.send(SpokespersonCommand::Provider(event))?;
     }
     Ok(())
 }
@@ -4227,14 +4292,11 @@ fn emit_live_events(
 
 fn record_and_emit_live_event(
     core: &mut RealtimeExpertSpokespersonSession,
-    next_live_token: &mut u64,
     emitted_live_token: &mut u64,
     event: LiveSideEvent,
     writer: &mut impl Write,
 ) -> Result<(), String> {
-    core.add_external_live_event(*next_live_token, event)
-        .map_err(|error| format!("invalid live event token: {error:?}"))?;
-    *next_live_token += 1;
+    core.record_external_live_event(event)?;
     emit_live_events(core, emitted_live_token, writer)
 }
 
@@ -4242,7 +4304,6 @@ fn publish_live_response_if_complete(
     response_id: &str,
     responses: &mut HashMap<String, LiveResponse>,
     core: &mut RealtimeExpertSpokespersonSession,
-    next_live_token: &mut u64,
     emitted_live_token: &mut u64,
     writer: &mut impl Write,
 ) -> Result<(), String> {
@@ -4278,7 +4339,6 @@ fn publish_live_response_if_complete(
     core.finish_external_spokesperson_turn(response_id, transcript.clone(), response.interrupted);
     record_and_emit_live_event(
         core,
-        next_live_token,
         emitted_live_token,
         LiveSideEvent::SpokespersonTranscript {
             text: transcript,
@@ -6565,12 +6625,10 @@ mod tests {
     #[test]
     fn expert_spokesperson_emits_user_input_before_confirmed_state_can_reference_it() {
         let mut core = RealtimeExpertSpokespersonSession::new(0, "external-test");
-        let mut next_token = 1;
         let mut emitted_token = 0;
         let mut output = Vec::new();
         record_and_emit_live_event(
             &mut core,
-            &mut next_token,
             &mut emitted_token,
             LiveSideEvent::UserTranscript {
                 text: "hello".into(),
@@ -6898,7 +6956,6 @@ mod tests {
             .unwrap();
         let mut responses = HashMap::from([("response-a".into(), response)]);
         let mut core = RealtimeExpertSpokespersonSession::new(0, "external-test");
-        let mut next_token = 1;
         let mut emitted_token = 0;
         let mut output = Vec::new();
 
@@ -6906,7 +6963,6 @@ mod tests {
             "response-a",
             &mut responses,
             &mut core,
-            &mut next_token,
             &mut emitted_token,
             &mut output,
         )
@@ -6930,7 +6986,6 @@ mod tests {
             "response-a",
             &mut responses,
             &mut core,
-            &mut next_token,
             &mut emitted_token,
             &mut output,
         )
@@ -6958,7 +7013,6 @@ mod tests {
             .unwrap();
         let mut responses = HashMap::from([("response-late".into(), response)]);
         let mut core = RealtimeExpertSpokespersonSession::new(0, "external-test");
-        let mut next_token = 1;
         let mut emitted_token = 0;
         let mut output = Vec::new();
 
@@ -6966,7 +7020,6 @@ mod tests {
             "response-late",
             &mut responses,
             &mut core,
-            &mut next_token,
             &mut emitted_token,
             &mut output,
         )
@@ -6983,7 +7036,6 @@ mod tests {
             "response-late",
             &mut responses,
             &mut core,
-            &mut next_token,
             &mut emitted_token,
             &mut output,
         )
@@ -7276,13 +7328,11 @@ mod tests {
         assert_eq!(terminal[0]["spoken_through_utf8"], "One two three".len());
         let mut responses = HashMap::from([("response-a".into(), response)]);
         let mut core = RealtimeExpertSpokespersonSession::new(0, "external-test");
-        let mut next_token = 1;
         let mut emitted_token = 0;
         publish_live_response_if_complete(
             "response-a",
             &mut responses,
             &mut core,
-            &mut next_token,
             &mut emitted_token,
             &mut output,
         )

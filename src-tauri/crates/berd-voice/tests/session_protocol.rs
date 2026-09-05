@@ -1751,7 +1751,7 @@ fn handoff_suppresses_acknowledgement_and_queued_voice_change_applies_before_exp
                 assert_eq!(expert_item["type"], "conversation.item.create");
                 assert_eq!(
                     expert_item["item"]["content"][0]["text"],
-                    "Expert message to speak now:\nThe answer is 21."
+                    "The Expert offers the following information for a response opportunity. Speak it naturally and accurately if a response is useful now; silence remains valid. Do not add filler or offer more help:\nThe answer is 21."
                 );
                 let create = receive_realtime_json(&mut candidate).await;
                 assert_eq!(create["type"], "response.create");
