@@ -615,6 +615,7 @@ async fn run_inner(
                                 message: text,
                                 mode: RealtimeExpertMessageMode::Context,
                                 event_id: None,
+                                directive_id: None,
                                 resolved_handoff_ids: Vec::new(),
                             }),
                         )
@@ -731,6 +732,7 @@ async fn run_inner(
                                 message: text.clone(),
                                 mode: RealtimeExpertMessageMode::Say,
                                 event_id: None,
+                                directive_id: Some(directive_id),
                                 resolved_handoff_ids: Vec::new(),
                             }),
                         )

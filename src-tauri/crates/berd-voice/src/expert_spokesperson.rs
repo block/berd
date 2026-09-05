@@ -1,4 +1,9 @@
-use crate::causal_inbox::{CausalInbox, CausalMessage, InvalidCausalToken};
+use crate::{
+    causal_inbox::{CausalMessage, InvalidCausalToken},
+    realtime_pipe::{
+        RealtimeMessagePipe, RealtimePipeExchange, RealtimePipePeer, RealtimePipeRejection,
+    },
+};
 use std::collections::HashMap;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -42,13 +47,20 @@ pub enum ExpertDirectiveOutcome {
 /// The live side contains the user in every mode and may also contain a
 /// Spokesperson. Both sources enter one ordered inbox. An Expert directive can
 /// cross back only after acknowledging the complete pending live-side batch.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ExpertSpokespersonCore {
-    live_events: CausalInbox<LiveSideEvent>,
+    pipe: RealtimeMessagePipe,
+    live_events: Vec<CausalMessage<LiveSideEvent>>,
     semantic_turns: Vec<Option<SemanticTurn>>,
     spokesperson_turns: HashMap<String, usize>,
     semantic_revision: u64,
     unresolved_handoff: bool,
+}
+
+impl Default for ExpertSpokespersonCore {
+    fn default() -> Self {
+        Self::new(0)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -59,17 +71,59 @@ pub enum SemanticTurn {
 }
 
 impl ExpertSpokespersonCore {
+    pub fn new(initial_cursor: u64) -> Self {
+        Self {
+            pipe: RealtimeMessagePipe::new(initial_cursor),
+            live_events: Vec::new(),
+            semantic_turns: Vec::new(),
+            spokesperson_turns: HashMap::new(),
+            semantic_revision: 0,
+            unresolved_handoff: false,
+        }
+    }
+
     pub fn add_live_event(
         &mut self,
         token: u64,
         event: LiveSideEvent,
     ) -> Result<(), InvalidCausalToken> {
+        let previous = self.pipe.next_message_id().saturating_sub(1);
+        if token != self.pipe.next_message_id() {
+            return Err(InvalidCausalToken { token, previous });
+        }
+        self.record_live_event(event)
+            .map(|_| ())
+            .map_err(|_| InvalidCausalToken { token, previous })
+    }
+
+    pub fn record_live_event(
+        &mut self,
+        event: LiveSideEvent,
+    ) -> Result<CausalMessage<LiveSideEvent>, String> {
         let is_handoff = matches!(event, LiveSideEvent::Handoff { .. });
-        self.live_events.push(token, event)?;
+        let cursor = self.pipe.delivery_cursor(RealtimePipePeer::Spokesperson);
+        let pipe_message = live_event_pipe_message(&event);
+        let exchange = self
+            .pipe
+            .send(RealtimePipePeer::Spokesperson, cursor, &pipe_message)?;
+        let token = match exchange {
+            RealtimePipeExchange::Accepted(accepted) => accepted.outbound.id,
+            RealtimePipeExchange::Rejected(rejected) => {
+                return Err(format!(
+                    "live event could not enter the Expert pipe ({:?})",
+                    rejected.reason
+                ))
+            }
+        };
+        let message = CausalMessage {
+            token,
+            payload: event,
+        };
+        self.live_events.push(message.clone());
         if is_handoff {
             self.unresolved_handoff = true;
         }
-        Ok(())
+        Ok(message)
     }
 
     pub fn prepare_directive(&mut self, directive: ExpertDirective) -> ExpertDirectiveOutcome {
@@ -78,27 +132,53 @@ impl ExpertSpokespersonCore {
             return ExpertDirectiveOutcome::Rejected(ExpertDirectiveRejection::EmptyMessage);
         }
 
-        let cutoff = self.live_events.acknowledge(directive.acknowledgement);
-        let pending = self.live_events.messages_after(cutoff);
-        if !pending.is_empty() {
-            return ExpertDirectiveOutcome::Pending(pending);
+        let cursor = directive
+            .acknowledgement
+            .unwrap_or_else(|| self.pipe.cursor(RealtimePipePeer::Expert));
+        match self.pipe.send(RealtimePipePeer::Expert, cursor, &message) {
+            Ok(RealtimePipeExchange::Accepted(accepted)) => {
+                self.unresolved_handoff = false;
+                ExpertDirectiveOutcome::Accepted {
+                    confirmed_token: accepted.outbound.sender_cursor,
+                    mode: directive.mode,
+                    message,
+                }
+            }
+            Ok(RealtimePipeExchange::Rejected(rejected)) => {
+                let acknowledged_live_token = directive.acknowledgement.filter(|token| {
+                    self.live_events
+                        .iter()
+                        .any(|message| message.token == *token)
+                });
+                let cutoff = acknowledged_live_token.unwrap_or(match rejected.reason {
+                    RealtimePipeRejection::PipeBusy | RealtimePipeRejection::StaleCursor => {
+                        rejected.cursor
+                    }
+                });
+                ExpertDirectiveOutcome::Pending(self.events_after(cutoff))
+            }
+            Err(_) => ExpertDirectiveOutcome::Rejected(ExpertDirectiveRejection::EmptyMessage),
         }
+    }
 
-        let confirmed_token = self.live_events.confirmed_token();
-        self.unresolved_handoff = false;
-        ExpertDirectiveOutcome::Accepted {
-            confirmed_token,
-            mode: directive.mode,
-            message,
-        }
+    pub fn send_expert_message(
+        &mut self,
+        cursor: u64,
+        message: &str,
+    ) -> Result<RealtimePipeExchange, String> {
+        self.pipe.send(RealtimePipePeer::Expert, cursor, message)
     }
 
     pub fn confirmed_token(&self) -> u64 {
-        self.live_events.confirmed_token()
+        self.pipe.cursor(RealtimePipePeer::Expert)
     }
 
     pub fn events_after(&self, token: u64) -> Vec<CausalMessage<LiveSideEvent>> {
-        self.live_events.messages_after(token)
+        self.live_events
+            .iter()
+            .filter(|message| message.token > token)
+            .cloned()
+            .collect()
     }
 
     pub fn has_unresolved_handoff(&self) -> bool {
@@ -145,6 +225,23 @@ impl ExpertSpokespersonCore {
     fn record_semantic_turn(&mut self, turn: SemanticTurn) {
         self.semantic_turns.push(Some(turn));
         self.semantic_revision = self.semantic_revision.saturating_add(1);
+    }
+}
+
+fn live_event_pipe_message(event: &LiveSideEvent) -> String {
+    match event {
+        LiveSideEvent::UserTranscript { text }
+        | LiveSideEvent::SpokespersonTranscript { text, .. }
+            if !text.trim().is_empty() =>
+        {
+            text.clone()
+        }
+        LiveSideEvent::UserTranscript { .. } => "[Empty user transcript]".into(),
+        LiveSideEvent::SpokespersonTranscript {
+            interrupted: true, ..
+        } => "[Spokesperson interrupted before any confirmed words]".into(),
+        LiveSideEvent::SpokespersonTranscript { .. } => "[Silent Spokesperson response]".into(),
+        LiveSideEvent::Handoff { message, .. } => message.clone(),
     }
 }
 

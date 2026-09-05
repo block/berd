@@ -257,6 +257,7 @@ export function requestOpenAiRealtimeExpertMessage(
     message: string;
     mode: "context" | "say";
     eventId?: string;
+    directiveId?: number;
     resolvedHandoffIds?: string[];
   },
 ): Promise<OpenAiRealtimeCoordinatorResult> {
