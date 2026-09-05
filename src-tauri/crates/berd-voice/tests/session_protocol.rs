@@ -1113,6 +1113,10 @@ fn unresolved_handoff_at_provider_expiry_fails_without_starting_a_replacement() 
     let handoff = session.recv(Duration::from_secs(2));
     assert_eq!(handoff["type"], "user_final");
     assert_eq!(handoff["origin"], "handoff");
+    let delivery = session.recv(Duration::from_secs(2));
+    assert_eq!(delivery["type"], "expert_delivery");
+    assert_eq!(delivery["through_token"], handoff["token"]);
+    assert_eq!(delivery["handoff_ids"], json!(["handoff-1"]));
     let fatal = session.recv(Duration::from_secs(2));
     assert_eq!(fatal["type"], "fatal");
     assert_eq!(
@@ -2025,6 +2029,10 @@ fn queued_rate_rejects_before_a_closed_runtime_terminal_is_reported() {
     let handoff = session.recv(Duration::from_secs(2));
     assert_eq!(handoff["type"], "user_final");
     assert_eq!(handoff["origin"], "handoff");
+    let delivery = session.recv(Duration::from_secs(2));
+    assert_eq!(delivery["type"], "expert_delivery");
+    assert_eq!(delivery["through_token"], handoff["token"]);
+    assert_eq!(delivery["handoff_ids"], json!(["handoff-closed-runtime"]));
     session.send(json!({
         "type":"set_tts_settings",
         "id":2,
