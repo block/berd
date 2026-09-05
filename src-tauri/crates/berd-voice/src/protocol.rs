@@ -187,6 +187,15 @@ pub enum SessionMessage {
         #[serde(skip_serializing_if = "Option::is_none")]
         origin: Option<UtteranceOrigin>,
     },
+    /// A crate-selected batch that is ready to wake the external Expert.
+    /// `user_final` remains the authoritative transcript projection; this
+    /// message alone controls when the host schedules an Expert turn.
+    ExpertDelivery {
+        through_token: u64,
+        message: String,
+        display_text: String,
+        handoff_ids: Vec<String>,
+    },
     /// Announces output initiated by the live Spokesperson rather than by an
     /// Expert `prepare_speak` request. The host accepts the following audio
     /// Begin record automatically; the ordinary audio acknowledgement contract
@@ -211,6 +220,8 @@ pub enum SessionMessage {
         id: u64,
         confirmed_token: u64,
         utterances_after: Vec<PendingUtterance>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        unresolved_handoff_ids: Vec<String>,
     },
     CancelResult {
         id: u64,
@@ -373,6 +384,16 @@ mod tests {
             })
             .unwrap(),
             r#"{"type":"user_final","token":7,"text":"[Voice transcript] Spokesperson said: hello","origin":"spokesperson"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&SessionMessage::ExpertDelivery {
+                through_token: 7,
+                message: "[Voice transcript; cursor 7] Spokesperson said: hello".into(),
+                display_text: "hello".into(),
+                handoff_ids: Vec::new(),
+            })
+            .unwrap(),
+            r#"{"type":"expert_delivery","through_token":7,"message":"[Voice transcript; cursor 7] Spokesperson said: hello","display_text":"hello","handoff_ids":[]}"#
         );
         assert_eq!(
             serde_json::to_string(&SessionMessage::InputSpeaking { active: true }).unwrap(),

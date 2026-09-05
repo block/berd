@@ -3411,6 +3411,17 @@ fn run_expert_spokesperson_session(
                         &mut writer,
                     )?;
                 }
+                if let Some(delivery) = core.flush_expert_events("Voice conversation ended") {
+                    write_message(
+                        &mut writer,
+                        &SessionMessage::ExpertDelivery {
+                            through_token: emitted_live_token,
+                            message: delivery.message,
+                            display_text: delivery.display_text,
+                            handoff_ids: delivery.handoff_ids,
+                        },
+                    )?;
+                }
                 break;
             }
             Input::Pcm(_) if !initialized => {
@@ -3612,6 +3623,7 @@ fn run_expert_spokesperson_session(
                             .into_iter()
                             .map(pending_live_event)
                             .collect(),
+                        unresolved_handoff_ids: core.unresolved_external_handoff_ids(),
                     },
                 )?;
             }
@@ -4296,8 +4308,20 @@ fn record_and_emit_live_event(
     event: LiveSideEvent,
     writer: &mut impl Write,
 ) -> Result<(), String> {
-    core.record_external_live_event(event)?;
-    emit_live_events(core, emitted_live_token, writer)
+    let (_, expert_delivery) = core.record_external_live_event_with_delivery(event)?;
+    emit_live_events(core, emitted_live_token, writer)?;
+    if let Some(delivery) = expert_delivery {
+        write_message(
+            writer,
+            &SessionMessage::ExpertDelivery {
+                through_token: *emitted_live_token,
+                message: delivery.message,
+                display_text: delivery.display_text,
+                handoff_ids: delivery.handoff_ids,
+            },
+        )?;
+    }
+    Ok(())
 }
 
 fn publish_live_response_if_complete(
@@ -6225,6 +6249,7 @@ fn write_state(
             id,
             confirmed_token: core.confirmed_token(),
             utterances_after: core.utterances_after(after),
+            unresolved_handoff_ids: Vec::new(),
         },
     )
 }
@@ -6649,6 +6674,7 @@ mod tests {
                 id: 9,
                 confirmed_token: core.expert_pipe_cursor(),
                 utterances_after: Vec::new(),
+                unresolved_handoff_ids: Vec::new(),
             },
         )
         .unwrap();
@@ -6992,7 +7018,10 @@ mod tests {
         .unwrap();
 
         assert!(!responses.contains_key("response-a"));
-        assert_eq!(messages(&output).len(), 1);
+        let emitted = messages(&output);
+        assert_eq!(emitted.len(), 2);
+        assert_eq!(emitted[0]["type"], "user_final");
+        assert_eq!(emitted[1]["type"], "expert_delivery");
     }
 
     #[test]

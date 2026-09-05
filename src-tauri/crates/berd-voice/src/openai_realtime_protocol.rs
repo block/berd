@@ -1438,19 +1438,49 @@ impl RealtimeExpertSpokespersonSession {
         })
     }
 
-    pub fn record_external_live_event(
+    pub fn record_external_live_event_with_delivery(
         &mut self,
         event: LiveSideEvent,
-    ) -> Result<crate::causal_inbox::CausalMessage<LiveSideEvent>, String> {
-        let handoff = match &event {
-            LiveSideEvent::Handoff { call_id, message } => Some((call_id.clone(), message.clone())),
-            _ => None,
-        };
+    ) -> Result<
+        (
+            crate::causal_inbox::CausalMessage<LiveSideEvent>,
+            Option<RealtimeExpertDelivery>,
+        ),
+        String,
+    > {
         let recorded = self.conversation.record_live_event(event)?;
-        if let Some((handoff_id, message)) = handoff {
-            self.register_handoff(&handoff_id, recorded.token, &message)?;
-        }
-        Ok(recorded)
+        let (expert_message, display_text, handoff_ids, flush) = match &recorded.payload {
+            LiveSideEvent::UserTranscript { text } => (
+                expert_transcript_message(RealtimeTranscriptSpeaker::User, text, false),
+                text.clone(),
+                Vec::new(),
+                false,
+            ),
+            LiveSideEvent::SpokespersonTranscript { text, interrupted } => (
+                expert_transcript_message(
+                    RealtimeTranscriptSpeaker::Spokesperson,
+                    text,
+                    *interrupted,
+                ),
+                text.clone(),
+                Vec::new(),
+                true,
+            ),
+            LiveSideEvent::Handoff { call_id, message } => (
+                self.register_handoff(call_id, recorded.token, message)?,
+                message.clone(),
+                vec![call_id.clone()],
+                true,
+            ),
+        };
+        self.pending_expert_events.push(expert_message.replace(
+            "[Voice transcript]",
+            &format!("[Voice transcript; cursor {}]", recorded.token),
+        ));
+        let delivery = flush
+            .then(|| self.take_expert_delivery(&display_text, handoff_ids))
+            .flatten();
+        Ok((recorded, delivery))
     }
 
     pub fn add_external_live_event(
@@ -2412,6 +2442,35 @@ mod tests {
     }
 
     #[test]
+    fn external_session_uses_the_same_expert_batch_boundary() {
+        let mut session = RealtimeExpertSpokespersonSession::new(0, "external");
+        let (user, delivery) = session
+            .record_external_live_event_with_delivery(LiveSideEvent::UserTranscript {
+                text: "What changed?".into(),
+            })
+            .unwrap();
+        assert_eq!(user.token, 1);
+        assert!(delivery.is_none());
+
+        let (spokesperson, delivery) = session
+            .record_external_live_event_with_delivery(LiveSideEvent::SpokespersonTranscript {
+                text: "I will check.".into(),
+                interrupted: false,
+            })
+            .unwrap();
+        assert_eq!(spokesperson.token, 2);
+        let delivery = delivery.unwrap();
+        assert_eq!(delivery.display_text, "I will check.");
+        assert!(delivery
+            .message
+            .contains("[Voice transcript; cursor 1] User said: What changed?"));
+        assert!(delivery
+            .message
+            .contains("[Voice transcript; cursor 2] Spokesperson said: I will check."));
+        assert!(session.flush_expert_events("unused").is_none());
+    }
+
+    #[test]
     fn shared_session_accepts_handoff_and_wakes_expert_atomically() {
         let mut session = RealtimeExpertSpokespersonSession::new(4, "call-a");
         let reduction = session
@@ -2607,12 +2666,13 @@ mod tests {
     #[test]
     fn external_response_lifecycle_uses_host_playback_to_resolve_handoffs() {
         let mut session = RealtimeExpertSpokespersonSession::new(0, "external-test");
-        session
-            .record_external_live_event(LiveSideEvent::Handoff {
+        let (_, delivery) = session
+            .record_external_live_event_with_delivery(LiveSideEvent::Handoff {
                 call_id: "call-1".into(),
                 message: "Inspect the project".into(),
             })
             .unwrap();
+        assert!(delivery.is_some());
         let handoff_ids = session.unresolved_external_handoff_ids();
         session.mark_handoffs_resolving(&handoff_ids).unwrap();
         session
