@@ -1,7 +1,7 @@
 {
   "repo": "https://github.com/aaif-goose/goose.git",
   "ref": "main",
-  "commit": "b9b671c6c3f6a019530698773af2354afece3756",
+  "commit": "5e90925962f05acf8e255032de44d16c4a7768a2",
   "package": "goose-cli",
   "bin": "goose"
 }
