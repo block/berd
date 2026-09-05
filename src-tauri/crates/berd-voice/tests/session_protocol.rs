@@ -1128,6 +1128,75 @@ fn unresolved_handoff_at_provider_expiry_fails_without_starting_a_replacement() 
 }
 
 #[test]
+fn expert_turn_completion_emits_a_correlated_private_handoff_reminder() {
+    let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
+    let server = std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async move {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                endpoint_tx
+                    .send(format!("ws://{}/", listener.local_addr().unwrap()))
+                    .unwrap();
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut socket = accept_async(stream).await.unwrap();
+                let initial = receive_realtime_json(&mut socket).await;
+                acknowledge_realtime_session(&mut socket, &initial).await;
+                send_realtime_json(
+                    &mut socket,
+                    json!({
+                        "type":"response.function_call_arguments.done",
+                        "response_id":"response-handoff",
+                        "call_id":"handoff-reminder",
+                        "name":"handoff",
+                        "arguments":"{\"message\":\"inspect the repository\"}"
+                    }),
+                )
+                .await;
+                while socket.next().await.is_some() {}
+            });
+    });
+    let endpoint = endpoint_rx.recv().unwrap();
+    let mut session = ExpertSpokespersonTestSession::start(endpoint);
+    let handoff = session.recv(Duration::from_secs(2));
+    assert_eq!(handoff["type"], "user_final");
+    assert_eq!(handoff["origin"], "handoff");
+    let delivery = session.recv(Duration::from_secs(2));
+    assert_eq!(delivery["type"], "expert_delivery");
+    assert_eq!(delivery["handoff_ids"], json!(["handoff-reminder"]));
+
+    session.send(json!({
+        "type":"complete_expert_turn",
+        "id":2,
+        "retrying_handoff_ids":["handoff-reminder"],
+        "max_attempts":3
+    }));
+    let reminder = session.recv(Duration::from_secs(2));
+    assert_eq!(reminder["type"], "user_final");
+    assert_eq!(reminder["origin"], "spokesperson");
+    assert!(reminder["text"]
+        .as_str()
+        .unwrap()
+        .contains("[Private handoff reminder]"));
+    let result = session.recv(Duration::from_secs(2));
+    assert_eq!(result["type"], "expert_turn_result");
+    assert_eq!(result["id"], 2);
+    assert_eq!(result["outcome"], "reminder");
+    assert_eq!(result["handoff_ids"], json!(["handoff-reminder"]));
+    assert_eq!(result["attempt"], 1);
+    assert_eq!(result["through_token"], reminder["token"]);
+    assert!(result["message"]
+        .as_str()
+        .unwrap()
+        .contains("[Private handoff reminder; cursor"));
+
+    session.shutdown_and_collect();
+    server.join().unwrap();
+}
+
+#[test]
 fn expiry_recovery_pcm_overflow_is_terminal_instead_of_losing_held_input() {
     let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
     let (candidate_seen_tx, candidate_seen_rx) = mpsc::sync_channel(1);
@@ -1872,9 +1941,21 @@ fn handoff_suppresses_acknowledgement_and_queued_voice_change_applies_before_exp
     assert_eq!(applied["snapshot"]["voice"], "new-voice");
     session.send(json!({
         "type":"prepare_speak",
+        "id":30,
+        "acknowledgement":1,
+        "text":"This must not enter Realtime.",
+        "resolved_handoff_ids":["unknown-handoff"]
+    }));
+    let rejected = session.recv(Duration::from_secs(2));
+    assert_eq!(rejected["type"], "not_admitted");
+    assert_eq!(rejected["id"], 30);
+    assert_eq!(rejected["reason"], "invalid_handoff");
+    session.send(json!({
+        "type":"prepare_speak",
         "id":3,
         "acknowledgement":1,
-        "text":"The answer is 21."
+        "text":"The answer is 21.",
+        "resolved_handoff_ids":["call-1"]
     }));
     let admitted = session.recv(Duration::from_secs(2));
     assert_eq!(admitted["type"], "admitted");

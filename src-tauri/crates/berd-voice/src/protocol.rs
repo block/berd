@@ -36,6 +36,8 @@ pub enum SessionRequest {
         id: u64,
         acknowledgement: Option<u64>,
         text: String,
+        #[serde(default)]
+        resolved_handoff_ids: Vec<String>,
     },
     OutputReady {
         id: u64,
@@ -83,6 +85,18 @@ pub enum SessionRequest {
         id: u64,
         after: u64,
     },
+    DismissHandoffs {
+        id: u64,
+        cursor: u64,
+        handoff_ids: Vec<String>,
+        reason: String,
+    },
+    CompleteExpertTurn {
+        id: u64,
+        #[serde(default)]
+        retrying_handoff_ids: Vec<String>,
+        max_attempts: u8,
+    },
     Cancel {
         id: u64,
     },
@@ -112,6 +126,7 @@ pub enum NotAdmittedReason {
     InProgress,
     Cancelled,
     EmptyText,
+    InvalidHandoff,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
@@ -145,6 +160,22 @@ pub enum TtsSettingsOutcome {
 #[serde(rename_all = "snake_case")]
 pub enum InputDuringTtsOutcome {
     Applied,
+    Rejected,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DismissHandoffsOutcome {
+    Applied,
+    Rejected,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ExpertTurnOutcome {
+    Complete,
+    Reminder,
+    Exhausted,
     Rejected,
 }
 
@@ -223,6 +254,25 @@ pub enum SessionMessage {
         #[serde(skip_serializing_if = "Vec::is_empty")]
         unresolved_handoff_ids: Vec<String>,
     },
+    DismissHandoffsResult {
+        id: u64,
+        outcome: DismissHandoffsOutcome,
+        cursor: u64,
+        dismissed_handoff_ids: Vec<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+    },
+    ExpertTurnResult {
+        id: u64,
+        outcome: ExpertTurnOutcome,
+        handoff_ids: Vec<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        attempt: Option<u8>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        through_token: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+    },
     CancelResult {
         id: u64,
         outcome: CancelOutcome,
@@ -277,7 +327,8 @@ mod tests {
             SessionRequest::PrepareSpeak {
                 id: 4,
                 acknowledgement: Some(0),
-                text: "hi".into()
+                text: "hi".into(),
+                resolved_handoff_ids: Vec::new(),
             }
         );
         assert_eq!(
@@ -394,6 +445,29 @@ mod tests {
             })
             .unwrap(),
             r#"{"type":"expert_delivery","through_token":7,"message":"[Voice transcript; cursor 7] Spokesperson said: hello","display_text":"hello","handoff_ids":[]}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&SessionMessage::DismissHandoffsResult {
+                id: 9,
+                outcome: DismissHandoffsOutcome::Applied,
+                cursor: 7,
+                dismissed_handoff_ids: vec!["call-1".into()],
+                message: None,
+            })
+            .unwrap(),
+            r#"{"type":"dismiss_handoffs_result","id":9,"outcome":"applied","cursor":7,"dismissed_handoff_ids":["call-1"]}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&SessionMessage::ExpertTurnResult {
+                id: 10,
+                outcome: ExpertTurnOutcome::Reminder,
+                handoff_ids: vec!["call-1".into()],
+                attempt: Some(1),
+                through_token: Some(8),
+                message: Some("Resolve call-1".into()),
+            })
+            .unwrap(),
+            r#"{"type":"expert_turn_result","id":10,"outcome":"reminder","handoff_ids":["call-1"],"attempt":1,"through_token":8,"message":"Resolve call-1"}"#
         );
         assert_eq!(
             serde_json::to_string(&SessionMessage::InputSpeaking { active: true }).unwrap(),
