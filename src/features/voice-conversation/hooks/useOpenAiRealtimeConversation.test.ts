@@ -192,6 +192,8 @@ const mocks = vi.hoisted(() => ({
   startNativeMicrophone: vi.fn(),
   waitForBridgeReady: vi.fn(),
   sendRealtimeEvents: vi.fn(),
+  deliverExpertMessage: vi.fn(),
+  dismissHandoffsWithContext: vi.fn(),
   sendExpertPipeMessage: vi.fn(),
   markHandoffsResolving: vi.fn(),
   steerPrompt: vi.fn(),
@@ -223,6 +225,8 @@ vi.mock("@/shared/api/openaiRealtime", () => ({
   ) =>
     Promise.resolve(mocks.createInvalidToolCallOutput(callId, toolName, error)),
   createOpenAiRealtimeTranscriptSeed: mocks.createTranscriptSeed,
+  deliverOpenAiRealtimeExpertMessage: mocks.deliverExpertMessage,
+  dismissOpenAiRealtimeHandoffsWithContext: mocks.dismissHandoffsWithContext,
   dismissOpenAiRealtimeHandoffs: mocks.dismissHandoffs,
   flushOpenAiRealtimeExpertEvents: mocks.flushExpertEvents,
   getOpenAiRealtimeExpertPipeCursor: mocks.getExpertPipeCursor,
@@ -754,6 +758,87 @@ beforeEach(() => {
     status: "sent",
     events: [{ type: "conversation.item.create", message }],
   }));
+  mocks.deliverExpertMessage.mockImplementation(
+    async (
+      sessionId: string,
+      cursor: number,
+      message: string,
+      mode: "context" | "say",
+      resolvedHandoffIds: string[],
+    ) => {
+      if (mode === "context" && resolvedHandoffIds.length > 0) {
+        return {
+          accepted: false,
+          reason: "context_cannot_resolve",
+          cursor: await mocks.getExpertPipeCursor(sessionId),
+          handoffIds: resolvedHandoffIds,
+        };
+      }
+      const unknown = await mocks.unknownHandoffIds(
+        sessionId,
+        resolvedHandoffIds,
+      );
+      if (unknown.length > 0) {
+        return {
+          accepted: false,
+          reason: "unknown_handoff",
+          cursor: await mocks.getExpertPipeCursor(sessionId),
+          handoffIds: unknown,
+        };
+      }
+      const exchange = await mocks.sendExpertPipeMessage(
+        sessionId,
+        cursor,
+        message,
+      );
+      if (!exchange.accepted) return exchange;
+      const request = mocks.requestMasterMessage({
+        message: `[bridge cursor ${exchange.outbound.id}] ${message}`,
+        mode,
+        eventId: `berd-master-${exchange.outbound.id}`,
+        resolvedHandoffIds,
+      });
+      await mocks.markHandoffsResolving(sessionId, resolvedHandoffIds);
+      return { ...exchange, deliveryStatus: request.status };
+    },
+  );
+  mocks.dismissHandoffsWithContext.mockImplementation(
+    async (
+      sessionId: string,
+      cursor: number,
+      handoffIds: string[],
+      reason: string,
+    ) => {
+      const unknown = await mocks.unknownHandoffIds(sessionId, handoffIds);
+      if (unknown.length > 0) {
+        return {
+          accepted: false,
+          reason: "unknown_handoff",
+          cursor: await mocks.getExpertPipeCursor(sessionId),
+          handoffIds: unknown,
+        };
+      }
+      const context = `Handoffs ${handoffIds.join(", ")} were dismissed without a spoken response. Reason: ${reason.trim()}`;
+      const exchange = await mocks.sendExpertPipeMessage(
+        sessionId,
+        cursor,
+        context,
+      );
+      if (!exchange.accepted) return exchange;
+      const request = mocks.requestMasterMessage({
+        message: `[bridge cursor ${exchange.outbound.id}] [Handoff dismissal] ${context} This is silent context; do not speak merely to acknowledge it.`,
+        mode: "context",
+        eventId: `berd-master-dismissal-${exchange.outbound.id}`,
+      });
+      await mocks.dismissHandoffs(sessionId, handoffIds);
+      return {
+        accepted: true,
+        cursor: exchange.cursor,
+        dismissedHandoffIds: handoffIds,
+        deliveryStatus: request.status,
+      };
+    },
+  );
   mocks.requestTypedUserMessage.mockReturnValue({
     status: "interrupting",
     events: [{ type: "response.cancel" }, { type: "conversation.item.create" }],
@@ -1519,9 +1604,9 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     await waitFor(() => expect(mocks.activeEmissary).not.toBeNull());
     const handoffId = acceptedHandoffId("call-1");
 
-    mocks.sendRealtimeEvents.mockImplementationOnce(() => {
-      throw new DOMException("channel closed", "InvalidStateError");
-    });
+    mocks.deliverExpertMessage.mockRejectedValueOnce(
+      new DOMException("channel closed", "InvalidStateError"),
+    );
     await expect(
       mocks.activeEmissary?.sendMasterMessage("First attempt", 1, "say", [
         handoffId,

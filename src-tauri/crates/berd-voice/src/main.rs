@@ -3671,7 +3671,8 @@ fn run_expert_spokesperson_session(
                 reason,
             }) => match core.dismiss_handoffs_with_context(cursor, &handoff_ids, &reason) {
                 Ok(dismissal) => {
-                    for event in dismissal.provider_events {
+                    let request = dismissal.request;
+                    for event in request.into_iter().flat_map(|request| request.events) {
                         runtime
                             .as_ref()
                             .expect("initialized runtime")

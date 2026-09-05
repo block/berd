@@ -14,19 +14,16 @@ import {
   completeOpenAiRealtimeExpertTurn,
   createOpenAiRealtimeExpertInstructions,
   createOpenAiRealtimeTranscriptSeed,
-  dismissOpenAiRealtimeHandoffs,
+  deliverOpenAiRealtimeExpertMessage,
+  dismissOpenAiRealtimeHandoffsWithContext,
   flushOpenAiRealtimeExpertEvents,
-  getOpenAiRealtimeExpertPipeCursor,
   listenToOpenAiRealtimeVoiceControls,
   listenToOpenAiRealtimeSpokespersonRuntime,
-  markOpenAiRealtimeHandoffsResolving,
   publishOpenAiRealtimeVoiceActivity,
   publishOpenAiRealtimeVoiceMicrophoneMuted,
   rebindOpenAiRealtimeVoiceControls,
   reduceOpenAiRealtimeSpokespersonEvent,
-  requestOpenAiRealtimeExpertMessage,
   requestOpenAiRealtimeTypedUserMessage,
-  sendOpenAiRealtimeExpertPipeMessage,
   sendOpenAiRealtimeSpokespersonRuntimeEvent,
   releaseVoiceDictationMicrophone,
   setOpenAiRealtimeVoiceControlsSuppressed,
@@ -34,7 +31,6 @@ import {
   startOpenAiRealtimeSpokespersonRuntime,
   stopOpenAiRealtimeVoiceControls,
   stopOpenAiRealtimeSpokespersonRuntime,
-  unknownOpenAiRealtimeHandoffIds,
   type OpenAiRealtimeTranscriptSeedTurn,
 } from "@/shared/api/openaiRealtime";
 import {
@@ -873,49 +869,16 @@ class OpenAiRealtimeConversationRuntime {
       );
       this.bridgeSender = async (message, cursor, mode, resolves) => {
         const resolvedHandoffIds = [...new Set(resolves)];
-        if (mode === "context" && resolvedHandoffIds.length > 0) {
-          return {
-            accepted: false,
-            reason: "context_cannot_resolve",
-            cursor: await getOpenAiRealtimeExpertPipeCursor(sessionId),
-            handoffIds: resolvedHandoffIds,
-          };
-        }
-        const unknownHandoffIds = await unknownOpenAiRealtimeHandoffIds(
-          sessionId,
-          resolvedHandoffIds,
-        );
-        if (unknownHandoffIds.length > 0) {
-          return {
-            accepted: false,
-            reason: "unknown_handoff",
-            cursor: await getOpenAiRealtimeExpertPipeCursor(sessionId),
-            handoffIds: unknownHandoffIds,
-          };
-        }
-        const delivery = await enqueueProtocolOperation(async () => {
-          const exchange = await sendOpenAiRealtimeExpertPipeMessage(
+        const delivery = await enqueueProtocolOperation(() =>
+          deliverOpenAiRealtimeExpertMessage(
             sessionId,
             cursor,
             message,
-          );
-          if (!exchange.accepted) return { exchange };
-          const request = await requestOpenAiRealtimeExpertMessage(sessionId, {
-            message: `[bridge cursor ${exchange.outbound.id}] ${message}`,
             mode,
-            eventId: `berd-master-${exchange.outbound.id}`,
             resolvedHandoffIds,
-          });
-          return { exchange, request };
-        });
-        if (!delivery.exchange.accepted) return delivery.exchange;
-        const { exchange, request } = delivery;
-        if (!request) throw new Error("Expert delivery was not prepared.");
-        sendRealtimeEvents(transport, request.events);
-        await markOpenAiRealtimeHandoffsResolving(
-          sessionId,
-          resolvedHandoffIds,
+          ),
         );
+        if (!delivery.accepted) return delivery;
         useChatStore
           .getState()
           .addMessage(
@@ -924,65 +887,34 @@ class OpenAiRealtimeConversationRuntime {
               mode === "say"
                 ? "masterToEmissarySay"
                 : "masterToEmissaryContext",
-              `Expert → Spokesperson · ${mode === "say" ? "Say" : "Context"} · ${request.status}`,
+              `Expert → Spokesperson · ${mode === "say" ? "Say" : "Context"} · ${delivery.deliveryStatus}`,
               message,
             ),
           );
-        return { ...exchange, deliveryStatus: request.status };
+        return delivery;
       };
       this.bridgeHandoffDismissal = async (cursor, handoffIds, reason) => {
         const dismissedHandoffIds = [...new Set(handoffIds)];
-        const unknownHandoffIds = await unknownOpenAiRealtimeHandoffIds(
-          sessionId,
-          dismissedHandoffIds,
-        );
-        if (unknownHandoffIds.length > 0) {
-          return {
-            accepted: false,
-            reason: "unknown_handoff",
-            cursor: await getOpenAiRealtimeExpertPipeCursor(sessionId),
-            handoffIds: unknownHandoffIds,
-          };
-        }
-        if (!reason.trim()) {
-          throw new Error("handoff dismissal reason cannot be empty");
-        }
-        const dismissalContext = `Handoffs ${dismissedHandoffIds.join(", ")} were dismissed without a spoken response. Reason: ${reason.trim()}`;
-        const delivery = await enqueueProtocolOperation(async () => {
-          const exchange = await sendOpenAiRealtimeExpertPipeMessage(
+        const dismissal = await enqueueProtocolOperation(() =>
+          dismissOpenAiRealtimeHandoffsWithContext(
             sessionId,
             cursor,
-            dismissalContext,
-          );
-          if (!exchange.accepted) return { exchange };
-          const request = await requestOpenAiRealtimeExpertMessage(sessionId, {
-            message: `[bridge cursor ${exchange.outbound.id}] [Handoff dismissal] ${dismissalContext} This is silent context; do not speak merely to acknowledge it.`,
-            mode: "context",
-            eventId: `berd-master-dismissal-${exchange.outbound.id}`,
-          });
-          return { exchange, request };
-        });
-        if (!delivery.exchange.accepted) return delivery.exchange;
-        const { exchange, request } = delivery;
-        if (!request) throw new Error("Handoff dismissal was not prepared.");
-        sendRealtimeEvents(transport, request.events);
-        await dismissOpenAiRealtimeHandoffs(sessionId, dismissedHandoffIds);
+            dismissedHandoffIds,
+            reason,
+          ),
+        );
+        if (!dismissal.accepted) return dismissal;
         useChatStore
           .getState()
           .addMessage(
             this.snapshot.boundSessionId ?? sessionId,
             createCoordinationDebugMessage(
               "masterDismissal",
-              `Expert → Spokesperson · Dismissed · ${request.status}`,
+              `Expert → Spokesperson · Dismissed · ${dismissal.deliveryStatus}`,
               `${dismissedHandoffIds.join(", ")}: ${reason.trim()}`,
             ),
           );
-        return {
-          accepted: true,
-          cursor: exchange.cursor,
-          dismissedHandoffIds,
-          deliveryStatus: request.status,
-        };
+        return dismissal;
       };
       this.bridgeMasterTurnCompletion = ({ reminderHandoffIds }) => {
         const ownerSessionId = this.snapshot.boundSessionId;

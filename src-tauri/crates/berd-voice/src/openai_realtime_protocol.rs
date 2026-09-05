@@ -1236,8 +1236,14 @@ pub struct RealtimeExpertTurnCompletion {
 #[derive(Clone, Debug)]
 pub struct RealtimeHandoffDismissal {
     pub exchange: RealtimePipeExchange,
-    pub provider_events: Vec<Value>,
+    pub request: Option<RealtimeCoordinatorResult>,
     pub dismissed_handoff_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct RealtimeExpertMessageSubmission {
+    pub exchange: RealtimePipeExchange,
+    pub request: Option<RealtimeCoordinatorResult>,
 }
 
 impl RealtimeExpertSpokespersonSession {
@@ -1651,7 +1657,7 @@ impl RealtimeExpertSpokespersonSession {
         let RealtimePipeExchange::Accepted(accepted) = &exchange else {
             return Ok(RealtimeHandoffDismissal {
                 exchange,
-                provider_events: Vec::new(),
+                request: None,
                 dismissed_handoff_ids: Vec::new(),
             });
         };
@@ -1668,8 +1674,43 @@ impl RealtimeExpertSpokespersonSession {
         self.dismiss_handoffs(handoff_ids)?;
         Ok(RealtimeHandoffDismissal {
             exchange,
-            provider_events: request.events,
+            request: Some(request),
             dismissed_handoff_ids: handoff_ids.to_vec(),
+        })
+    }
+
+    pub fn submit_expert_message(
+        &mut self,
+        cursor: u64,
+        message: &str,
+        mode: RealtimeExpertMessageMode,
+        resolved_handoff_ids: &[String],
+    ) -> Result<RealtimeExpertMessageSubmission, String> {
+        if matches!(mode, RealtimeExpertMessageMode::Context) && !resolved_handoff_ids.is_empty() {
+            return Err("context cannot resolve handoffs".into());
+        }
+        let unknown = self.unknown_handoff_ids(resolved_handoff_ids);
+        if !unknown.is_empty() {
+            return Err(format!("unknown handoff: {}", unknown.join(", ")));
+        }
+        let exchange = self.send_expert_pipe_message(cursor, message)?;
+        let RealtimePipeExchange::Accepted(accepted) = &exchange else {
+            return Ok(RealtimeExpertMessageSubmission {
+                exchange,
+                request: None,
+            });
+        };
+        let request = self.request_expert_message(RealtimeExpertMessage {
+            message: format!("[bridge cursor {}] {message}", accepted.outbound.id),
+            mode,
+            event_id: Some(format!("berd-master-{}", accepted.outbound.id)),
+            directive_id: None,
+            resolved_handoff_ids: resolved_handoff_ids.to_vec(),
+        })?;
+        self.mark_handoffs_resolving(resolved_handoff_ids)?;
+        Ok(RealtimeExpertMessageSubmission {
+            exchange,
+            request: Some(request),
         })
     }
 
@@ -2641,14 +2682,53 @@ mod tests {
             RealtimePipeExchange::Accepted(_)
         ));
         assert_eq!(dismissal.dismissed_handoff_ids, ["handoff-1"]);
-        assert_eq!(dismissal.provider_events.len(), 1);
+        let request = dismissal.request.unwrap();
+        assert_eq!(request.events.len(), 1);
         assert_eq!(
-            dismissal.provider_events[0].pointer("/item/content/0/text"),
+            request.events[0].pointer("/item/content/0/text"),
             Some(&json!(
                 "Private context from the Expert for a future natural turn. Do not respond to this item now:\n[bridge cursor 1] [Handoff dismissal] Handoffs handoff-1 were dismissed without a spoken response. Reason: Superseded This is silent context; do not speak merely to acknowledge it."
             ))
         );
         assert!(session.unresolved_external_handoff_ids().is_empty());
+    }
+
+    #[test]
+    fn shared_session_submits_expert_speech_and_marks_only_named_handoffs() {
+        let mut session = RealtimeExpertSpokespersonSession::new(0, "test-call");
+        session
+            .register_handoff("handoff-1", 1, "First request")
+            .unwrap();
+        session
+            .register_handoff("handoff-2", 2, "Second request")
+            .unwrap();
+
+        let submission = session
+            .submit_expert_message(
+                0,
+                "The first answer",
+                RealtimeExpertMessageMode::Say,
+                &["handoff-1".into()],
+            )
+            .unwrap();
+        assert!(matches!(
+            submission.exchange,
+            RealtimePipeExchange::Accepted(_)
+        ));
+        let request = submission.request.unwrap();
+        assert_eq!(request.status, RealtimeRequestStatus::Sent);
+        assert_eq!(request.events.len(), 2);
+        assert_eq!(
+            request.events[0].pointer("/item/content/0/text"),
+            Some(&json!(
+                "The Expert offers the following information for a response opportunity. Speak it naturally and accurately if a response is useful now; silence remains valid. Do not add filler or offer more help:\n[bridge cursor 1] The first answer"
+            ))
+        );
+        assert_eq!(session.unresolved_external_handoff_ids(), ["handoff-2"]);
+        assert_eq!(
+            session.unknown_handoff_ids(&["handoff-1".into()]),
+            Vec::<String>::new()
+        );
     }
 
     #[test]
