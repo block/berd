@@ -429,12 +429,12 @@ async fn run_inner(
     if let Err(existing) = rustls::crypto::aws_lc_rs::default_provider().install_default() {
         drop(existing);
     }
-    let endpoint = if config.endpoint.contains('?') {
-        format!("{}&model={}", config.endpoint, config.model())
-    } else {
-        format!("{}?model={}", config.endpoint, config.model())
-    };
+    let model = config.model().to_owned();
+    let mut endpoint = reqwest::Url::parse(&config.endpoint)
+        .map_err(|error| format!("parse OpenAI Realtime endpoint: {error}"))?;
+    endpoint.query_pairs_mut().append_pair("model", &model);
     let mut request = endpoint
+        .as_str()
         .into_client_request()
         .map_err(|error| format!("prepare OpenAI Realtime connection: {error}"))?;
     request.headers_mut().insert(
