@@ -31,7 +31,9 @@ import {
   startOpenAiRealtimeSpokespersonRuntime,
   stopOpenAiRealtimeVoiceControls,
   stopOpenAiRealtimeSpokespersonRuntime,
+  updateOpenAiRealtimeSpokespersonSettings,
   type OpenAiRealtimeTranscriptSeedTurn,
+  type OpenAiRealtimeExpertDeliveryEvent,
 } from "@/shared/api/openaiRealtime";
 import {
   createSystemNotificationMessage,
@@ -54,7 +56,10 @@ import {
   type MasterMessageMode,
   sendRealtimeEvents,
 } from "../lib/realtimeEmissaryProtocol";
-import { getRealtimeVoicePreference } from "../lib/realtimeVoicePreference";
+import {
+  getRealtimeVoicePreference,
+  subscribeToRealtimeVoicePreference,
+} from "../lib/realtimeVoicePreference";
 import {
   beginVoiceControlsVisibilityLease,
   observeVoiceConversationControlVisibility,
@@ -79,6 +84,35 @@ function isUnavailableDevMicrophoneClaim(error: unknown): boolean {
 
 function isMissingActiveRun(error: unknown): boolean {
   return errorText(error).toLowerCase().includes("no active run to steer");
+}
+
+export function renderRealtimeExpertDeliveryEvent(
+  event: OpenAiRealtimeExpertDeliveryEvent,
+): string {
+  const cursor = `cursor ${event.cursor}`;
+  switch (event.role) {
+    case "user":
+      return `[Voice transcript; ${cursor}] User said: ${event.text}`;
+    case "spokesperson":
+      return `[Voice transcript; ${cursor}] Spokesperson said: ${event.text}`;
+    case "spokesperson_interrupted":
+      return `[Voice transcript; ${cursor}] Spokesperson said (interrupted; best effort): ${event.text}`;
+    case "handoff":
+      return `[Handoff ${event.handoffId ?? "unknown"} from spokesperson; ${cursor}] ${event.text}`;
+    case "lifecycle":
+      return event.text.startsWith("[Private handoff reminder]")
+        ? event.text.replace(
+            "[Private handoff reminder]",
+            `[Private handoff reminder; ${cursor}]`,
+          )
+        : `[Voice lifecycle; ${cursor}] ${event.text}`;
+  }
+}
+
+export function renderRealtimeExpertDelivery(
+  events: OpenAiRealtimeExpertDeliveryEvent[],
+): string {
+  return events.map(renderRealtimeExpertDeliveryEvent).join("\n");
 }
 
 function waitForSessionHydration(
@@ -402,6 +436,9 @@ class OpenAiRealtimeConversationRuntime {
   private readonly listeners = new Set<() => void>();
   private nativeMicrophone: NativeMicrophone | null = null;
   private releaseRuntimeListener: (() => void) | null = null;
+  private releaseVoicePreferenceListener: (() => void) | null = null;
+  private realtimeSettingsRevision = 1;
+  private realtimeSettingsQueue = Promise.resolve();
   private realtimeRuntimeSessionId: string | null = null;
   private realtimeProtocolQueue = Promise.resolve();
   private realtimeRuntimeSendQueue = Promise.resolve();
@@ -521,6 +558,8 @@ class OpenAiRealtimeConversationRuntime {
     this.failureInProgress = false;
     this.realtimeProtocolQueue = Promise.resolve();
     this.realtimeRuntimeSendQueue = Promise.resolve();
+    this.realtimeSettingsRevision = 1;
+    this.realtimeSettingsQueue = Promise.resolve();
     this.boundOnSend = onSend;
     this.pendingTypedUserMessages = [];
     this.setSnapshot({
@@ -622,7 +661,7 @@ class OpenAiRealtimeConversationRuntime {
       const deliverExpertEvents = (
         ownerSessionId: string,
         delivery: {
-          message: string;
+          events: OpenAiRealtimeExpertDeliveryEvent[];
           displayText: string;
           handoffIds: string[];
         },
@@ -631,7 +670,7 @@ class OpenAiRealtimeConversationRuntime {
       ) => {
         this.deliverToMaster(
           ownerSessionId,
-          delivery.message,
+          renderRealtimeExpertDelivery(delivery.events),
           delivery.displayText,
           undefined,
           true,
@@ -844,6 +883,39 @@ class OpenAiRealtimeConversationRuntime {
         }),
       ]);
       if (isStale()) return;
+      let appliedVoice = preference.voice;
+      let appliedSpeed = preference.speed;
+      this.releaseVoicePreferenceListener = subscribeToRealtimeVoicePreference(
+        (next) => {
+          if (
+            isStale() ||
+            (next.voice === appliedVoice && next.speed === appliedSpeed)
+          )
+            return;
+          const requestedVoice = next.voice;
+          const requestedSpeed = next.speed;
+          const update = this.realtimeSettingsQueue.then(async () => {
+            if (isStale()) return;
+            const snapshot = await updateOpenAiRealtimeSpokespersonSettings(
+              sessionId,
+              this.realtimeSettingsRevision,
+              requestedVoice,
+              requestedSpeed,
+            );
+            if (isStale()) return;
+            this.realtimeSettingsRevision = snapshot.revision;
+            appliedVoice = snapshot.voice;
+            appliedSpeed = snapshot.rate;
+          });
+          this.realtimeSettingsQueue = update.catch((error) => {
+            if (!isStale()) {
+              toast.error("Could not update Realtime voice", {
+                description: errorText(error),
+              });
+            }
+          });
+        },
+      );
       this.nativeMicrophone = await startNativeMicrophone(
         "push_openai_realtime_spokesperson_audio",
       );
@@ -1212,6 +1284,7 @@ class OpenAiRealtimeConversationRuntime {
     this.releaseBridge?.();
     this.nativeMicrophone?.stop();
     this.releaseRuntimeListener?.();
+    this.releaseVoicePreferenceListener?.();
     const realtimeRuntimeSessionId = this.realtimeRuntimeSessionId;
     this.realtimeRuntimeSessionId = null;
     this.releaseControlsListener?.();
@@ -1225,6 +1298,8 @@ class OpenAiRealtimeConversationRuntime {
     this.flushPendingExpertEvents = null;
     this.nativeMicrophone = null;
     this.releaseRuntimeListener = null;
+    this.releaseVoicePreferenceListener = null;
+    this.realtimeSettingsQueue = Promise.resolve();
     if (controlsRevision > 0) {
       await stopOpenAiRealtimeVoiceControls(
         activeSessionId,

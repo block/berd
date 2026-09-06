@@ -156,7 +156,20 @@ const mocks = vi.hoisted(() => ({
     message: string;
   }>,
   pipeConsumed: { master: 0, emissary: 0 },
-  pendingExpertEvents: [] as string[],
+  pendingExpertEvents: [] as Array<{
+    cursor: number;
+    role:
+      | "user"
+      | "spokesperson"
+      | "spokesperson_interrupted"
+      | "handoff"
+      | "lifecycle";
+    text: string;
+    handoffId?: string;
+  }>,
+  preferenceListener: null as
+    | null
+    | ((preference: Record<string, unknown>) => void),
   realtimeCallScope: "test-call",
   openHandoffs: new Map<
     string,
@@ -188,6 +201,7 @@ const mocks = vi.hoisted(() => ({
   startRuntime: vi.fn(),
   stopControls: vi.fn(),
   stopRuntime: vi.fn(),
+  updateRuntimeSettings: vi.fn(),
   sendRuntimeEvent: vi.fn(),
   startNativeMicrophone: vi.fn(),
   waitForBridgeReady: vi.fn(),
@@ -250,7 +264,11 @@ vi.mock("@/shared/api/openaiRealtime", () => ({
       message: string;
     }> = [];
     let expertDelivery:
-      | { message: string; displayText: string; handoffIds: string[] }
+      | {
+          events: typeof mocks.pendingExpertEvents;
+          displayText: string;
+          handoffIds: string[];
+        }
       | undefined;
     for (const protocolEvent of protocolEvents) {
       if (protocolEvent.type === "transcript.finalized") {
@@ -260,15 +278,19 @@ vi.mock("@/shared/api/openaiRealtime", () => ({
         );
         if (!exchange.accepted)
           throw new Error("Expert pipe rejected transcript");
-        mocks.pendingExpertEvents.push(
-          protocolEvent.expertMessage.replace(
-            "[Voice transcript]",
-            `[Voice transcript; cursor ${exchange.outbound.id}]`,
-          ),
-        );
+        mocks.pendingExpertEvents.push({
+          cursor: exchange.outbound.id,
+          role:
+            protocolEvent.speaker === "user"
+              ? "user"
+              : protocolEvent.interrupted
+                ? "spokesperson_interrupted"
+                : "spokesperson",
+          text: protocolEvent.text,
+        });
         if (protocolEvent.speaker === "spokesperson") {
           expertDelivery = {
-            message: mocks.pendingExpertEvents.splice(0).join("\n"),
+            events: mocks.pendingExpertEvents.splice(0),
             displayText: protocolEvent.text,
             handoffIds: [],
           };
@@ -280,14 +302,18 @@ vi.mock("@/shared/api/openaiRealtime", () => ({
         );
         if (!exchange.accepted) throw new Error("Expert pipe rejected handoff");
         const handoffId = `handoff-${mocks.realtimeCallScope}-${exchange.outbound.id}`;
-        mocks.pendingExpertEvents.push(
-          await mocks.registerHandoff(
-            sessionId,
-            handoffId,
-            exchange.outbound.id,
-            exchange.outbound.message,
-          ),
+        await mocks.registerHandoff(
+          sessionId,
+          handoffId,
+          exchange.outbound.id,
+          exchange.outbound.message,
         );
+        mocks.pendingExpertEvents.push({
+          cursor: exchange.outbound.id,
+          role: "handoff",
+          text: protocolEvent.message,
+          handoffId,
+        });
         const toolOutput = mocks.createHandoffToolOutput(protocolEvent.callId, {
           accepted: true,
           handoff_id: handoffId,
@@ -295,7 +321,7 @@ vi.mock("@/shared/api/openaiRealtime", () => ({
         clientEvents.push(...mocks.recordToolOutput(toolOutput).events);
         acceptedHandoffs.push({ handoffId, message: protocolEvent.message });
         expertDelivery = {
-          message: mocks.pendingExpertEvents.splice(0).join("\n"),
+          events: mocks.pendingExpertEvents.splice(0),
           displayText: protocolEvent.message,
           handoffIds: [handoffId],
         };
@@ -329,6 +355,7 @@ vi.mock("@/shared/api/openaiRealtime", () => ({
   startOpenAiRealtimeSpokespersonRuntime: mocks.startRuntime,
   stopOpenAiRealtimeVoiceControls: mocks.stopControls,
   stopOpenAiRealtimeSpokespersonRuntime: mocks.stopRuntime,
+  updateOpenAiRealtimeSpokespersonSettings: mocks.updateRuntimeSettings,
   unknownOpenAiRealtimeHandoffIds: mocks.unknownHandoffIds,
 }));
 
@@ -368,6 +395,14 @@ vi.mock("../lib/realtimeVoicePreference", () => ({
     reasoningEffort: "default",
     maxOutputTokens: null,
   }),
+  subscribeToRealtimeVoicePreference: (
+    listener: (preference: Record<string, unknown>) => void,
+  ) => {
+    mocks.preferenceListener = listener;
+    return () => {
+      mocks.preferenceListener = null;
+    };
+  },
 }));
 
 vi.mock("../lib/realtimeEmissaryProtocol", () => ({
@@ -554,6 +589,13 @@ beforeEach(() => {
     },
   );
   mocks.stopRuntime.mockResolvedValue(undefined);
+  mocks.updateRuntimeSettings.mockResolvedValue({
+    revision: 2,
+    backend: "openai",
+    model: "gpt-realtime-2.1",
+    voice: "cedar",
+    rate: 1.5,
+  });
   mocks.sendRuntimeEvent.mockResolvedValue(undefined);
   mocks.startNativeMicrophone.mockImplementation(async () => {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -573,6 +615,7 @@ beforeEach(() => {
   mocks.publishMuted.mockResolvedValue(undefined);
   mocks.pipeInitialCursors.length = 0;
   mocks.pendingExpertEvents = [];
+  mocks.preferenceListener = null;
   mocks.openHandoffs.clear();
   mocks.registerHandoff.mockImplementation(
     async (
@@ -646,7 +689,6 @@ beforeEach(() => {
         message,
       );
       if (!exchange.accepted) throw new Error("Expert pipe rejected reminder");
-      const expertMessage = `[Private handoff reminder; cursor ${exchange.outbound.id}]${message.slice("[Private handoff reminder]".length)}`;
       return {
         reminder: {
           status: "reminder",
@@ -656,7 +698,13 @@ beforeEach(() => {
           message,
         },
         expertDelivery: {
-          message: expertMessage,
+          events: [
+            {
+              cursor: exchange.outbound.id,
+              role: "lifecycle",
+              text: message,
+            },
+          ],
           displayText: "Handoff reminder",
           handoffIds,
         },
@@ -732,7 +780,7 @@ beforeEach(() => {
   mocks.flushExpertEvents.mockImplementation(async () => {
     if (mocks.pendingExpertEvents.length === 0) return null;
     return {
-      message: mocks.pendingExpertEvents.splice(0).join("\n"),
+      events: mocks.pendingExpertEvents.splice(0),
       displayText: "Final voice transcript",
       handoffIds: [],
     };
@@ -854,6 +902,77 @@ afterEach(async () => {
 });
 
 describe("useOpenAiRealtimeConversation lifecycle", () => {
+  it("queues live voice settings through the managed Berd Voice runtime", async () => {
+    const owner = renderConversation("session-a");
+
+    await act(async () => owner.result.current.onToggle());
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+    act(() => {
+      mocks.preferenceListener?.({ voice: "cedar", speed: 1.5 });
+    });
+
+    await waitFor(() =>
+      expect(mocks.updateRuntimeSettings).toHaveBeenCalledWith(
+        "session-a",
+        1,
+        "cedar",
+        1.5,
+      ),
+    );
+  });
+
+  it("serializes rapid voice settings changes against each applied revision", async () => {
+    let resolveFirst!: (snapshot: {
+      revision: number;
+      backend: "openai";
+      model: string;
+      voice: string;
+      rate: number;
+    }) => void;
+    mocks.updateRuntimeSettings
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockResolvedValueOnce({
+        revision: 3,
+        backend: "openai",
+        model: "gpt-realtime-2.1",
+        voice: "marin",
+        rate: 1.25,
+      });
+    const owner = renderConversation("session-a");
+
+    await act(async () => owner.result.current.onToggle());
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+    act(() => {
+      mocks.preferenceListener?.({ voice: "cedar", speed: 1.5 });
+      mocks.preferenceListener?.({ voice: "marin", speed: 1.25 });
+    });
+
+    await waitFor(() =>
+      expect(mocks.updateRuntimeSettings).toHaveBeenCalledTimes(1),
+    );
+    resolveFirst({
+      revision: 2,
+      backend: "openai",
+      model: "gpt-realtime-2.1",
+      voice: "cedar",
+      rate: 1.5,
+    });
+    await waitFor(() =>
+      expect(mocks.updateRuntimeSettings).toHaveBeenNthCalledWith(
+        2,
+        "session-a",
+        2,
+        "marin",
+        1.25,
+      ),
+    );
+  });
+
   it("starts after a newly created session mounts from a deferred call request", async () => {
     act(() => requestOpenAiRealtimeConversationStart("session-a"));
     const owner = renderConversation("session-a");

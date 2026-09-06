@@ -44,6 +44,32 @@ pub struct VoiceUpdateRequest {
     pub semantic_revision: u64,
 }
 
+pub fn validate_voice_update_settings(
+    base_revision: u64,
+    settings: &TtsSettings,
+    current_revision: u64,
+    runtime_config: &OpenAiSpokespersonConfig,
+) -> Result<(), String> {
+    if base_revision != current_revision {
+        return Err(format!(
+            "stale TTS configuration revision: expected {base_revision}, current {current_revision}"
+        ));
+    }
+    match settings {
+        TtsSettings::OpenAi { model, .. } if model != runtime_config.model() => {
+            Err("Spokesperson model cannot change during a session".into())
+        }
+        TtsSettings::OpenAi { voice, .. } if voice.trim().is_empty() => {
+            Err("Spokesperson voice must not be empty".into())
+        }
+        TtsSettings::OpenAi { rate, .. } if !rate.is_finite() || !(0.25..=1.5).contains(rate) => {
+            Err("Expert-Spokesperson rate must be between 0.25 and 1.5".into())
+        }
+        TtsSettings::OpenAi { .. } => Ok(()),
+        _ => Err("Expert-Spokesperson requires OpenAI voice settings".into()),
+    }
+}
+
 pub struct ActivatedVoiceUpdate {
     pub id: u64,
     pub settings: TtsSettings,
@@ -94,34 +120,18 @@ impl VoiceUpdateTransaction {
         semantic_transcript: Vec<SemanticTurn>,
         purpose: VoiceUpdatePurpose,
     ) -> Result<Self, String> {
-        if current_revision != request.base_revision {
-            return Err(format!(
-                "stale TTS configuration revision: expected {}, current {current_revision}",
-                request.base_revision
-            ));
-        }
+        validate_voice_update_settings(
+            request.base_revision,
+            &request.settings,
+            current_revision,
+            runtime_config,
+        )?;
         if !quiescent {
             return Err("Spokesperson voice settings can only change between turns".into());
         }
         let (voice, speed) = match &request.settings {
-            TtsSettings::OpenAi { model, voice, rate }
-                if model == runtime_config.model()
-                    && !voice.trim().is_empty()
-                    && rate.is_finite()
-                    && (0.25..=1.5).contains(rate) =>
-            {
-                (voice.clone(), *rate)
-            }
-            TtsSettings::OpenAi { model, .. } if model != runtime_config.model() => {
-                return Err("Spokesperson model cannot change during a session".into());
-            }
-            TtsSettings::OpenAi { voice, .. } if voice.trim().is_empty() => {
-                return Err("Spokesperson voice must not be empty".into());
-            }
-            TtsSettings::OpenAi { .. } => {
-                return Err("Expert-Spokesperson rate must be between 0.25 and 1.5".into());
-            }
-            _ => return Err("Expert-Spokesperson requires OpenAI voice settings".into()),
+            TtsSettings::OpenAi { voice, rate, .. } => (voice.clone(), *rate),
+            _ => unreachable!("validated Expert-Spokesperson settings are OpenAI"),
         };
         let mut candidate_config = runtime_config.clone();
         candidate_config.set_voice_and_speed(voice, speed);
@@ -293,5 +303,68 @@ impl VoiceUpdateTransaction {
             runtime.finish()?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_voice_update_settings;
+    use crate::openai_realtime_protocol::RealtimeSpokespersonSessionOptions;
+    use crate::openai_spokesperson::OpenAiSpokespersonConfig;
+    use crate::TtsSettings;
+
+    fn config() -> OpenAiSpokespersonConfig {
+        OpenAiSpokespersonConfig::new(
+            "test-key".into(),
+            RealtimeSpokespersonSessionOptions {
+                model: Some("gpt-realtime-2.1".into()),
+                voice: Some("marin".into()),
+                speed: Some(1.0),
+                ..Default::default()
+            },
+            Vec::new(),
+        )
+    }
+
+    #[test]
+    fn shared_settings_validation_accepts_voice_and_rate_changes() {
+        assert_eq!(
+            validate_voice_update_settings(
+                4,
+                &TtsSettings::OpenAi {
+                    model: "gpt-realtime-2.1".into(),
+                    voice: "cedar".into(),
+                    rate: 1.5,
+                },
+                4,
+                &config(),
+            ),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn shared_settings_validation_rejects_stale_or_invalid_changes() {
+        let config = config();
+        let settings = TtsSettings::OpenAi {
+            model: "gpt-realtime-2.1".into(),
+            voice: "cedar".into(),
+            rate: 1.5,
+        };
+        assert!(validate_voice_update_settings(3, &settings, 4, &config)
+            .unwrap_err()
+            .contains("stale"));
+        assert!(validate_voice_update_settings(
+            4,
+            &TtsSettings::OpenAi {
+                model: "gpt-realtime-2.1".into(),
+                voice: "cedar".into(),
+                rate: 2.0,
+            },
+            4,
+            &config,
+        )
+        .unwrap_err()
+        .contains("between 0.25 and 1.5"));
     }
 }

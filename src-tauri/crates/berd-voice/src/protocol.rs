@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     input::{InputDuringTtsPolicy, InputDuringTtsSnapshot},
+    openai_realtime_protocol::RealtimeExpertDeliveryEvent,
     TtsConfigurationSnapshot, TtsSettings,
 };
 
@@ -223,7 +224,7 @@ pub enum SessionMessage {
     /// message alone controls when the host schedules an Expert turn.
     ExpertDelivery {
         through_token: u64,
-        message: String,
+        events: Vec<RealtimeExpertDeliveryEvent>,
         display_text: String,
         handoff_ids: Vec<String>,
     },
@@ -272,6 +273,8 @@ pub enum SessionMessage {
         through_token: Option<u64>,
         #[serde(skip_serializing_if = "Option::is_none")]
         message: Option<String>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        events: Vec<RealtimeExpertDeliveryEvent>,
     },
     CancelResult {
         id: u64,
@@ -439,12 +442,17 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&SessionMessage::ExpertDelivery {
                 through_token: 7,
-                message: "[Voice transcript; cursor 7] Spokesperson said: hello".into(),
+                events: vec![RealtimeExpertDeliveryEvent {
+                    cursor: 7,
+                    role: crate::openai_realtime_protocol::RealtimeExpertDeliveryRole::Spokesperson,
+                    text: "hello".into(),
+                    handoff_id: None,
+                }],
                 display_text: "hello".into(),
                 handoff_ids: Vec::new(),
             })
             .unwrap(),
-            r#"{"type":"expert_delivery","through_token":7,"message":"[Voice transcript; cursor 7] Spokesperson said: hello","display_text":"hello","handoff_ids":[]}"#
+            r#"{"type":"expert_delivery","through_token":7,"events":[{"cursor":7,"role":"spokesperson","text":"hello"}],"display_text":"hello","handoff_ids":[]}"#
         );
         assert_eq!(
             serde_json::to_string(&SessionMessage::DismissHandoffsResult {
@@ -465,9 +473,15 @@ mod tests {
                 attempt: Some(1),
                 through_token: Some(8),
                 message: Some("Resolve call-1".into()),
+                events: vec![RealtimeExpertDeliveryEvent {
+                    cursor: 8,
+                    role: crate::openai_realtime_protocol::RealtimeExpertDeliveryRole::Lifecycle,
+                    text: "Resolve call-1".into(),
+                    handoff_id: None,
+                }],
             })
             .unwrap(),
-            r#"{"type":"expert_turn_result","id":10,"outcome":"reminder","handoff_ids":["call-1"],"attempt":1,"through_token":8,"message":"Resolve call-1"}"#
+            r#"{"type":"expert_turn_result","id":10,"outcome":"reminder","handoff_ids":["call-1"],"attempt":1,"through_token":8,"message":"Resolve call-1","events":[{"cursor":8,"role":"lifecycle","text":"Resolve call-1"}]}"#
         );
         assert_eq!(
             serde_json::to_string(&SessionMessage::InputSpeaking { active: true }).unwrap(),

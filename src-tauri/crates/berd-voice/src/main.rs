@@ -39,8 +39,8 @@ use berd_voice::realtime_audio_delivery::RealtimeAudioDelivery;
 use berd_voice::realtime_pipe::RealtimePipeExchange;
 use berd_voice::session::{PrepareOutcome, PrepareRequest, SessionCore};
 use berd_voice::spokesperson_voice_update::{
-    VoiceBarrierAction, VoiceUpdateAction, VoiceUpdatePurpose, VoiceUpdateRequest,
-    VoiceUpdateTransaction,
+    validate_voice_update_settings, VoiceBarrierAction, VoiceUpdateAction, VoiceUpdatePurpose,
+    VoiceUpdateRequest, VoiceUpdateTransaction,
 };
 use berd_voice::{
     estimated_spoken_through_utf8,
@@ -1845,6 +1845,7 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                         message: Some(
                             "Expert turn completion requires Expert-Spokesperson mode".into(),
                         ),
+                        events: Vec::new(),
                     },
                 )?;
             }
@@ -2439,25 +2440,12 @@ fn validate_queued_spokesperson_settings(
     snapshot: &berd_voice::TtsConfigurationSnapshot,
     runtime_config: &OpenAiSpokespersonConfig,
 ) -> Result<(), String> {
-    if request.base_revision != snapshot.revision {
-        return Err(format!(
-            "stale TTS configuration revision: expected {}, current {}",
-            request.base_revision, snapshot.revision
-        ));
-    }
-    match &request.settings {
-        TtsSettings::OpenAi { model, .. } if model != runtime_config.model() => {
-            Err("Spokesperson model cannot change during a session".into())
-        }
-        TtsSettings::OpenAi { voice, .. } if voice.trim().is_empty() => {
-            Err("Spokesperson voice must not be empty".into())
-        }
-        TtsSettings::OpenAi { rate, .. } if !rate.is_finite() || !(0.25..=1.5).contains(rate) => {
-            Err("Expert-Spokesperson rate must be between 0.25 and 1.5".into())
-        }
-        TtsSettings::OpenAi { .. } => Ok(()),
-        _ => Err("Expert-Spokesperson requires OpenAI voice settings".into()),
-    }
+    validate_voice_update_settings(
+        request.base_revision,
+        &request.settings,
+        snapshot.revision,
+        runtime_config,
+    )
 }
 
 fn spokesperson_voice_update_is_safe(
@@ -3451,7 +3439,7 @@ fn run_expert_spokesperson_session(
                         &mut writer,
                         &SessionMessage::ExpertDelivery {
                             through_token: emitted_live_token,
-                            message: delivery.message,
+                            events: delivery.events,
                             display_text: delivery.display_text,
                             handoff_ids: delivery.handoff_ids,
                         },
@@ -3723,14 +3711,20 @@ fn run_expert_spokesperson_session(
                 let completion =
                     core.complete_expert_turn_with_delivery(&retrying_handoff_ids, max_attempts)?;
                 emit_live_events(&core, &mut emitted_live_token, &mut writer)?;
-                let (outcome, handoff_ids, attempt, through_token, message) =
+                let (outcome, handoff_ids, attempt, through_token, message, events) =
                     match completion.reminder {
-                        RealtimeHandoffReminder::None => {
-                            (ExpertTurnOutcome::Complete, Vec::new(), None, None, None)
-                        }
+                        RealtimeHandoffReminder::None => (
+                            ExpertTurnOutcome::Complete,
+                            Vec::new(),
+                            None,
+                            None,
+                            None,
+                            Vec::new(),
+                        ),
                         RealtimeHandoffReminder::Reminder {
                             handoff_ids,
                             attempt,
+                            message,
                             ..
                         } => {
                             let delivery = completion.expert_delivery.ok_or_else(|| {
@@ -3741,7 +3735,8 @@ fn run_expert_spokesperson_session(
                                 handoff_ids,
                                 Some(attempt),
                                 Some(emitted_live_token),
-                                Some(delivery.message),
+                                Some(message),
+                                delivery.events,
                             )
                         }
                         RealtimeHandoffReminder::Exhausted {
@@ -3753,6 +3748,7 @@ fn run_expert_spokesperson_session(
                             None,
                             None,
                             Some(message),
+                            Vec::new(),
                         ),
                     };
                 write_message(
@@ -3764,6 +3760,7 @@ fn run_expert_spokesperson_session(
                         attempt,
                         through_token,
                         message,
+                        events,
                     },
                 )?;
             }
@@ -4467,7 +4464,7 @@ fn record_and_emit_live_event(
             writer,
             &SessionMessage::ExpertDelivery {
                 through_token: *emitted_live_token,
-                message: delivery.message,
+                events: delivery.events,
                 display_text: delivery.display_text,
                 handoff_ids: delivery.handoff_ids,
             },

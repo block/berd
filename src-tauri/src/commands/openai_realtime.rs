@@ -4,14 +4,20 @@ use berd_voice::openai_realtime_protocol::{
     RealtimePipeExchange, RealtimeSessionReduction, RealtimeSpokespersonSessionOptions,
     RealtimeTranscriptSeedTurn,
 };
-use berd_voice::openai_spokesperson::{
-    OpenAiSpokespersonConfig, OpenAiSpokespersonControl, OpenAiSpokespersonRuntime,
-    SpokespersonCommand, SpokespersonEvent,
-};
+use berd_voice::openai_spokesperson::{OpenAiSpokespersonConfig, SpokespersonCommand};
+use berd_voice::realtime_host::ManagedRealtimeHost;
+use berd_voice::spokesperson_voice_update::VoiceUpdateRequest;
+use berd_voice::{TtsConfigurationSnapshot, TtsSettings};
 use serde::Serialize;
 use serde_json::json;
-use std::{collections::HashMap, sync::Mutex};
-use tauri::{Emitter, Manager, State, WebviewWindow};
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
+};
+use tauri::{Emitter, State, WebviewWindow};
 
 use super::openai_voice_credentials::{self, OpenAiVoiceCredential};
 use super::voice_capture::VoiceCaptureState;
@@ -26,8 +32,9 @@ pub struct OpenAiRealtimeRuntimeState {
 
 struct NativeRealtimeRuntime {
     owner_window: String,
-    runtime: OpenAiSpokespersonRuntime,
+    runtime: Arc<ManagedRealtimeHost>,
     protocol: RealtimeExpertSpokespersonSession,
+    semantic_revision: Arc<AtomicU64>,
 }
 
 const OPENAI_REALTIME_RUNTIME_EVENT: &str = "openai-realtime-runtime-event";
@@ -101,8 +108,15 @@ pub fn start_openai_realtime_spokesperson_runtime(
 
     let api_key = openai_voice_credentials::require(OpenAiVoiceCredential::Realtime)?;
     let config = OpenAiSpokespersonConfig::new(api_key, options, Vec::new());
-    let (runtime, events) = OpenAiSpokespersonRuntime::spawn_observed(config)?;
-    let control = runtime.control();
+    let semantic_revision = Arc::new(AtomicU64::new(0));
+    let event_window = webview_window.clone();
+    let event_session_id = session_id.clone();
+    let runtime = Arc::new(ManagedRealtimeHost::spawn(
+        config,
+        Arc::clone(&semantic_revision),
+        create_native_realtime_output,
+        move |event| emit_runtime_provider_event(&event_window, &event_session_id, event),
+    )?);
     log::info!(
         "Starting Expert-Spokesperson session {session_id} with execution_path=berd_voice_in_process transport=websocket playback=native_pcm"
     );
@@ -112,27 +126,9 @@ pub fn start_openai_realtime_spokesperson_runtime(
             owner_window: webview_window.label().into(),
             runtime,
             protocol: RealtimeExpertSpokespersonSession::new(initial_cursor, call_id),
+            semantic_revision,
         },
     );
-    drop(sessions);
-
-    let pump_session_id = session_id.clone();
-    if let Err(error) = std::thread::Builder::new()
-        .name("berd-realtime-native-host".into())
-        .spawn(move || {
-            pump_native_realtime_events(webview_window, pump_session_id, control, events)
-        })
-    {
-        let entry = state
-            .sessions
-            .lock()
-            .map_err(|_| "OpenAI Realtime runtime state is unavailable".to_string())?
-            .remove(&session_id);
-        if let Some(entry) = entry {
-            let _ = entry.runtime.finish();
-        }
-        return Err(format!("Could not start native Realtime host: {error}"));
-    }
     Ok(())
 }
 
@@ -198,19 +194,65 @@ pub fn stop_openai_realtime_spokesperson_runtime(
 fn with_runtime<T>(
     state: State<'_, OpenAiRealtimeRuntimeState>,
     session_id: String,
-    operation: impl FnOnce(&OpenAiSpokespersonRuntime) -> Result<T, String>,
+    operation: impl FnOnce(&ManagedRealtimeHost) -> Result<T, String>,
 ) -> Result<T, String> {
     let session_id = non_empty_session_id(session_id)?;
-    let sessions = state
+    let runtime = state
         .sessions
         .lock()
-        .map_err(|_| "OpenAI Realtime runtime state is unavailable".to_string())?;
-    operation(
-        &sessions
+        .map_err(|_| "OpenAI Realtime runtime state is unavailable".to_string())?
+        .get(&session_id)
+        .ok_or("OpenAI Realtime runtime session is not active")?
+        .runtime
+        .clone();
+    operation(&runtime)
+}
+
+#[tauri::command]
+pub async fn update_openai_realtime_spokesperson_settings(
+    state: State<'_, OpenAiRealtimeRuntimeState>,
+    session_id: String,
+    expected_revision: u64,
+    voice: String,
+    speed: f32,
+) -> Result<TtsConfigurationSnapshot, String> {
+    let session_id = non_empty_session_id(session_id)?;
+    let (runtime, semantic_transcript, semantic_revision) = {
+        let sessions = state
+            .sessions
+            .lock()
+            .map_err(|_| "OpenAI Realtime runtime state is unavailable".to_string())?;
+        let entry = sessions
             .get(&session_id)
-            .ok_or("OpenAI Realtime runtime session is not active")?
-            .runtime,
-    )
+            .ok_or("OpenAI Realtime runtime session is not active")?;
+        (
+            Arc::clone(&entry.runtime),
+            entry.protocol.semantic_transcript(),
+            entry.protocol.semantic_revision(),
+        )
+    };
+    let current = runtime.snapshot()?;
+    let model = match current.settings {
+        TtsSettings::OpenAi { model, .. } => model,
+        _ => return Err("Expert-Spokesperson requires OpenAI voice settings".into()),
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        runtime.update_settings(
+            VoiceUpdateRequest {
+                id: expected_revision,
+                base_revision: expected_revision,
+                settings: TtsSettings::OpenAi {
+                    model,
+                    voice,
+                    rate: speed,
+                },
+                semantic_revision,
+            },
+            semantic_transcript,
+        )
+    })
+    .await
+    .map_err(|error| format!("Spokesperson settings task failed: {error}"))?
 }
 
 fn emit_runtime_provider_event(
@@ -227,42 +269,6 @@ fn emit_runtime_provider_event(
             },
         )
         .map_err(|error| format!("Could not publish OpenAI Realtime event: {error}"))
-}
-
-fn pump_native_realtime_events(
-    window: WebviewWindow,
-    session_id: String,
-    control: OpenAiSpokespersonControl,
-    events: std::sync::mpsc::Receiver<SpokespersonEvent>,
-) {
-    let result = berd_voice::realtime_host::run_realtime_host(
-        events,
-        |command| control.send(command),
-        create_native_realtime_output,
-        |event| emit_runtime_provider_event(&window, &session_id, event),
-    );
-    if let Err(error) = result {
-        let _ = emit_runtime_provider_event(
-            &window,
-            &session_id,
-            json!({ "type": "berd.realtime.failed", "message": error }),
-        );
-    }
-    let entry = window
-        .state::<OpenAiRealtimeRuntimeState>()
-        .sessions
-        .lock()
-        .ok()
-        .and_then(|mut sessions| sessions.remove(&session_id));
-    if let Some(entry) = entry {
-        if let Err(error) = entry.runtime.finish() {
-            let _ = emit_runtime_provider_event(
-                &window,
-                &session_id,
-                json!({ "type": "berd.realtime.failed", "message": error }),
-            );
-        }
-    }
 }
 
 #[cfg(target_os = "macos")]
@@ -353,6 +359,9 @@ pub fn deliver_openai_realtime_expert_message(
     for event in request.events {
         entry.runtime.send(SpokespersonCommand::Provider(event))?;
     }
+    entry
+        .semantic_revision
+        .store(entry.protocol.semantic_revision(), Ordering::SeqCst);
     Ok(json!({
         "accepted": true,
         "cursor": accepted.cursor,
@@ -409,6 +418,9 @@ pub fn dismiss_openai_realtime_handoffs_with_context(
     for event in request.events {
         entry.runtime.send(SpokespersonCommand::Provider(event))?;
     }
+    entry
+        .semantic_revision
+        .store(entry.protocol.semantic_revision(), Ordering::SeqCst);
     Ok(json!({
         "accepted": true,
         "cursor": accepted.cursor,
@@ -450,11 +462,14 @@ pub fn reduce_openai_realtime_spokesperson_event(
         .sessions
         .lock()
         .map_err(|_| "OpenAI Realtime protocol state is unavailable".to_string())?;
-    let protocol = &mut sessions
+    let entry = sessions
         .get_mut(&session_id)
-        .ok_or_else(|| "OpenAI Realtime protocol session is not active".to_string())?
-        .protocol;
-    protocol.handle_provider_event(&event)
+        .ok_or_else(|| "OpenAI Realtime protocol session is not active".to_string())?;
+    let result = entry.protocol.handle_provider_event(&event)?;
+    entry
+        .semantic_revision
+        .store(entry.protocol.semantic_revision(), Ordering::SeqCst);
+    Ok(result)
 }
 
 #[tauri::command]
@@ -487,12 +502,14 @@ fn with_protocol_session<T>(
         .sessions
         .lock()
         .map_err(|_| "OpenAI Realtime protocol state is unavailable".to_string())?;
-    operation(
-        &mut sessions
-            .get_mut(&session_id)
-            .ok_or_else(|| "OpenAI Realtime protocol session is not active".to_string())?
-            .protocol,
-    )
+    let entry = sessions
+        .get_mut(&session_id)
+        .ok_or_else(|| "OpenAI Realtime protocol session is not active".to_string())?;
+    let result = operation(&mut entry.protocol)?;
+    entry
+        .semantic_revision
+        .store(entry.protocol.semantic_revision(), Ordering::SeqCst);
+    Ok(result)
 }
 
 fn realtime_transcription_client_secret_request(

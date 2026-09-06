@@ -47,6 +47,28 @@ export function stopOpenAiRealtimeSpokespersonRuntime(
   return invoke("stop_openai_realtime_spokesperson_runtime", { sessionId });
 }
 
+export interface OpenAiRealtimeTtsConfigurationSnapshot {
+  revision: number;
+  backend: "openai";
+  model: string;
+  voice: string;
+  rate: number;
+}
+
+export function updateOpenAiRealtimeSpokespersonSettings(
+  sessionId: string,
+  expectedRevision: number,
+  voice: string,
+  speed: number,
+): Promise<OpenAiRealtimeTtsConfigurationSnapshot> {
+  return invoke("update_openai_realtime_spokesperson_settings", {
+    sessionId,
+    expectedRevision,
+    voice,
+    speed,
+  });
+}
+
 export function listenToOpenAiRealtimeSpokespersonRuntime(
   listener: (event: OpenAiRealtimeRuntimeEvent) => void,
 ): Promise<UnlistenFn> {
@@ -131,9 +153,21 @@ export interface OpenAiRealtimeReduction {
 }
 
 export interface OpenAiRealtimeExpertDelivery {
-  message: string;
+  events: OpenAiRealtimeExpertDeliveryEvent[];
   displayText: string;
   handoffIds: string[];
+}
+
+export interface OpenAiRealtimeExpertDeliveryEvent {
+  cursor: number;
+  role:
+    | "user"
+    | "spokesperson"
+    | "spokesperson_interrupted"
+    | "handoff"
+    | "lifecycle";
+  text: string;
+  handoffId?: string;
 }
 
 export interface OpenAiRealtimeCoordinatorResult {
