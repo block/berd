@@ -230,9 +230,8 @@ pub fn handle_owner_window_destroyed(app: &AppHandle, window_label: &str) {
         Ok(mut sessions) => {
             let owned_session_ids = sessions
                 .iter()
-                .filter_map(|(session_id, entry)| {
-                    (entry.owner_window == window_label).then(|| session_id.clone())
-                })
+                .filter(|(_, entry)| entry.owner_window == window_label)
+                .map(|(session_id, _)| session_id.clone())
                 .collect::<Vec<_>>();
             owned_session_ids
                 .into_iter()
