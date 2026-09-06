@@ -2542,7 +2542,9 @@ fn push_audio_for_window(
     Ok(())
 }
 
-fn decode_voice_input_frame(bytes: &[u8]) -> Result<berd_voice::input::VoiceInputFrame, String> {
+pub(super) fn decode_voice_input_frame(
+    bytes: &[u8],
+) -> Result<berd_voice::input::VoiceInputFrame, String> {
     if bytes.len() != berd_voice::input::INPUT_FRAME_SAMPLES * size_of::<f32>() {
         return Err(format!(
             "native voice audio must contain exactly {} mono f32 samples",

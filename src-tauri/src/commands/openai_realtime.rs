@@ -163,15 +163,7 @@ pub fn push_openai_realtime_spokesperson_audio(
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
         return Err("OpenAI Realtime audio requires a raw binary body".into());
     };
-    let samples = bytes
-        .chunks_exact(std::mem::size_of::<f32>())
-        .map(|bytes| f32::from_le_bytes(bytes.try_into().expect("four-byte chunk")))
-        .collect::<Vec<_>>();
-    if samples.len() * std::mem::size_of::<f32>() != bytes.len()
-        || samples.iter().any(|sample| !sample.is_finite())
-    {
-        return Err("OpenAI Realtime audio must contain finite 32-bit PCM samples".into());
-    }
+    let samples = super::native_voice::decode_voice_input_frame(bytes)?;
     let sessions = state
         .sessions
         .lock()
@@ -180,9 +172,9 @@ pub fn push_openai_realtime_spokesperson_audio(
         .values()
         .find(|entry| entry.owner_window == webview_window.label())
         .ok_or("This window does not own an OpenAI Realtime runtime session")?;
-    entry
-        .runtime
-        .send(SpokespersonCommand::InputPcm48Khz(samples))
+    entry.runtime.send(SpokespersonCommand::InputPcm48Khz(
+        samples.as_samples().to_vec(),
+    ))
 }
 
 #[tauri::command]
