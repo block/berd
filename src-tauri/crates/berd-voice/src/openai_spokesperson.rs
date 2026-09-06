@@ -19,6 +19,10 @@ const DEFAULT_MODEL: &str = "gpt-realtime-2.1";
 const DEFAULT_TRANSCRIPTION_MODEL: &str = "gpt-realtime-whisper";
 const CONTROL_ACK_TIMEOUT: Duration = Duration::from_secs(4);
 const INPUT_QUEUE_FRAMES: usize = 100;
+const REALTIME_INPUT_SAMPLE_RATE: u64 = 24_000;
+const DEFAULT_GRACEFUL_SHUTDOWN_SILENCE_MS: u64 = 1_000;
+const GRACEFUL_SHUTDOWN_SILENCE_MARGIN_MS: u64 = 100;
+const MAX_GRACEFUL_SHUTDOWN_SILENCE_MS: u64 = 3_100;
 const GRACEFUL_SHUTDOWN_SETTLE: Duration = Duration::from_secs(1);
 const GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -446,6 +450,17 @@ async fn run_inner(
     let mut next_control_event_id = 1_u64;
     let mut shutdown_not_before = None;
     let mut shutdown_deadline = None;
+    let graceful_shutdown_silence_ms = match config.session.turn_detection.unwrap_or_default() {
+        crate::openai_realtime_protocol::RealtimeTurnDetection::ServerVad => config
+            .session
+            .silence_duration_ms
+            .unwrap_or(500)
+            .saturating_add(GRACEFUL_SHUTDOWN_SILENCE_MARGIN_MS),
+        crate::openai_realtime_protocol::RealtimeTurnDetection::SemanticVad => {
+            DEFAULT_GRACEFUL_SHUTDOWN_SILENCE_MS
+        }
+    }
+    .min(MAX_GRACEFUL_SHUTDOWN_SILENCE_MS);
     loop {
         if shutdown_deadline.is_some()
             && shutdown_not_before.is_none()
@@ -664,6 +679,10 @@ async fn run_inner(
                                 "audio": BASE64.encode(pcm),
                             })).await?;
                         }
+                        send_json(&mut socket, serde_json::json!({
+                            "type": "input_audio_buffer.append",
+                            "audio": BASE64.encode(silence_pcm16(graceful_shutdown_silence_ms)),
+                        })).await?;
                         shutdown_deadline = Some(
                             tokio::time::Instant::now() + GRACEFUL_SHUTDOWN_TIMEOUT,
                         );
@@ -1060,6 +1079,13 @@ fn downsample_pcm16(samples: &[f32]) -> Vec<u8> {
     output
 }
 
+fn silence_pcm16(duration_ms: u64) -> Vec<u8> {
+    let sample_count = REALTIME_INPUT_SAMPLE_RATE
+        .saturating_mul(duration_ms)
+        .saturating_div(1_000);
+    vec![0; sample_count.saturating_mul(2) as usize]
+}
+
 fn pcm16_samples(bytes: &[u8]) -> Result<Vec<f32>, String> {
     if !bytes.len().is_multiple_of(2) {
         return Err("Spokesperson audio contained a partial PCM16 frame".into());
@@ -1234,6 +1260,15 @@ mod tests {
                 json!({"type":"input_audio_buffer.speech_started","item_id":"item-final"}),
             )
             .await;
+            let silence = receive_json(&mut socket).await;
+            assert_eq!(silence["type"], "input_audio_buffer.append");
+            assert_eq!(
+                BASE64
+                    .decode(silence["audio"].as_str().unwrap())
+                    .unwrap()
+                    .len(),
+                28_800
+            );
             send_json(
                 &mut socket,
                 json!({"type":"input_audio_buffer.speech_stopped","item_id":"item-final"}),
@@ -1390,6 +1425,14 @@ mod tests {
                 json!({"type":"conversation.item.created","item":{"id":expert["item"]["id"]}}),
             )
             .await;
+            let shutdown_silence = receive_json(&mut socket).await;
+            assert_eq!(shutdown_silence["type"], "input_audio_buffer.append");
+            let shutdown_audio = BASE64
+                .decode(shutdown_silence["audio"].as_str().unwrap())
+                .unwrap();
+            assert_eq!(shutdown_audio.len(), 28_800);
+            assert!(shutdown_audio.iter().all(|sample| *sample == 0));
+
             let _ = socket.next().await;
         });
 
@@ -1975,6 +2018,14 @@ mod tests {
             )
             .await;
 
+            let shutdown_silence = receive_json(&mut socket).await;
+            assert_eq!(shutdown_silence["type"], "input_audio_buffer.append");
+            let shutdown_audio = BASE64
+                .decode(shutdown_silence["audio"].as_str().unwrap())
+                .unwrap();
+            assert_eq!(shutdown_audio.len(), 48_000);
+            assert!(shutdown_audio.iter().all(|sample| *sample == 0));
+
             let _ = socket.next().await;
         });
 
@@ -2031,10 +2082,11 @@ mod tests {
             ))
             .unwrap();
 
-        let received = tokio::task::spawn_blocking(move || {
-            (0..17)
+        let (received, event_rx) = tokio::task::spawn_blocking(move || {
+            let received = (0..17)
                 .map(|_| event_rx.recv_timeout(Duration::from_secs(2)).unwrap())
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            (received, event_rx)
         })
         .await
         .unwrap();
@@ -2093,7 +2145,9 @@ mod tests {
         );
 
         commands.send(SpokespersonCommand::Shutdown).unwrap();
-        assert!(client.await.unwrap().is_ok());
+        let client_result = client.await.unwrap();
         server.await.unwrap();
+        drop(event_rx);
+        assert!(client_result.is_ok(), "{client_result:?}");
     }
 }

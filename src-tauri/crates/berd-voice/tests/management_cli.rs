@@ -97,6 +97,18 @@ fn local_model_management_is_process_stable_without_network_or_root_creation() {
         })
     }));
 
+    let output = berd_voice(&["models", "openai", "voices"]);
+    assert!(output.status.success());
+    let value: Value = serde_json::from_slice(&output.stdout).expect("JSON result");
+    assert_eq!(value["operation"], "models.openai.voices");
+    assert_eq!(value["result"]["backend"], "openai");
+    assert_eq!(
+        value["result"]["voices"],
+        serde_json::json!([
+            "alloy", "ash", "ballad", "cedar", "coral", "echo", "marin", "sage", "shimmer", "verse"
+        ])
+    );
+
     for (engine, relative_file) in [
         ("pocket", "native-voice-v2/bundle.json"),
         ("parakeet", "native-voice-v2/stt/model.int8.onnx"),

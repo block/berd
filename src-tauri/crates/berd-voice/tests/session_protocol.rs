@@ -222,6 +222,17 @@ async fn send_realtime_json(
         .unwrap();
 }
 
+fn assert_not_duplicate_input_pcm(message: &Value) {
+    if message["type"] != "input_audio_buffer.append" {
+        return;
+    }
+    let audio = BASE64.decode(message["audio"].as_str().unwrap()).unwrap();
+    assert!(
+        audio.iter().all(|sample| *sample == 0),
+        "only graceful-shutdown silence may follow the expected input PCM"
+    );
+}
+
 async fn acknowledge_realtime_session(
     socket: &mut tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
     update: &Value,
@@ -612,7 +623,7 @@ fn expert_spokesperson_recovers_from_provider_expiry_and_preserves_pcm_once() {
                     tokio::time::timeout(Duration::from_millis(100), candidate.next()).await
                 {
                     let message: Value = serde_json::from_str(&text).unwrap();
-                    assert_ne!(message["type"], "input_audio_buffer.append");
+                    assert_not_duplicate_input_pcm(&message);
                 }
                 let _ = candidate.next().await;
             });
@@ -671,7 +682,7 @@ fn expert_spokesperson_recovers_from_quiescent_provider_disconnect() {
                     tokio::time::timeout(Duration::from_millis(100), candidate.next()).await
                 {
                     let message: Value = serde_json::from_str(&text).unwrap();
-                    assert_ne!(message["type"], "input_audio_buffer.append");
+                    assert_not_duplicate_input_pcm(&message);
                 }
                 let _ = candidate.next().await;
             });
@@ -791,7 +802,7 @@ fn active_spokesperson_disconnect_is_specific_terminal_and_does_not_replay() {
     let (remaining, stderr) = session.wait_with_stderr();
     assert!(remaining
         .iter()
-        .all(|message| message["type"] != "user_final"));
+        .all(|message| message["type"] != "live_event"));
     assert!(stderr
         .iter()
         .any(|line| line.contains("without closing handshake")));
@@ -923,7 +934,7 @@ fn one_realtime_response_with_two_audio_parts_completes_without_identity_failure
             });
         assert_ne!(message["type"], "fatal", "unexpected fatal: {message}");
         saw_completed |= message["type"] == "speech_completed";
-        if message["type"] == "user_final" && message["origin"] == "spokesperson" {
+        if message["type"] == "live_event" && message["origin"] == "spokesperson" {
             assert_eq!(
                 message["text"],
                 "[Voice transcript] Spokesperson said: first part second part"
@@ -1111,7 +1122,7 @@ fn unresolved_handoff_at_provider_expiry_fails_without_starting_a_replacement() 
     let endpoint = endpoint_rx.recv().unwrap();
     let session = ExpertSpokespersonTestSession::start(endpoint);
     let handoff = session.recv(Duration::from_secs(2));
-    assert_eq!(handoff["type"], "user_final");
+    assert_eq!(handoff["type"], "live_event");
     assert_eq!(handoff["origin"], "handoff");
     let delivery = session.recv(Duration::from_secs(2));
     assert_eq!(delivery["type"], "expert_delivery");
@@ -1161,7 +1172,7 @@ fn expert_turn_completion_emits_a_correlated_private_handoff_reminder() {
     let endpoint = endpoint_rx.recv().unwrap();
     let mut session = ExpertSpokespersonTestSession::start(endpoint);
     let handoff = session.recv(Duration::from_secs(2));
-    assert_eq!(handoff["type"], "user_final");
+    assert_eq!(handoff["type"], "live_event");
     assert_eq!(handoff["origin"], "handoff");
     let delivery = session.recv(Duration::from_secs(2));
     assert_eq!(delivery["type"], "expert_delivery");
@@ -1174,7 +1185,7 @@ fn expert_turn_completion_emits_a_correlated_private_handoff_reminder() {
         "max_attempts":3
     }));
     let reminder = session.recv(Duration::from_secs(2));
-    assert_eq!(reminder["type"], "user_final");
+    assert_eq!(reminder["type"], "live_event");
     assert_eq!(reminder["origin"], "spokesperson");
     assert!(reminder["text"]
         .as_str()
@@ -1308,7 +1319,7 @@ fn expert_spokesperson_voice_change_swaps_atomically_and_flushes_gated_pcm_once(
                     tokio::time::timeout(Duration::from_millis(100), candidate.next()).await
                 {
                     let message: Value = serde_json::from_str(&text).unwrap();
-                    assert_ne!(message["type"], "input_audio_buffer.append");
+                    assert_not_duplicate_input_pcm(&message);
                 }
             });
     });
@@ -1449,7 +1460,7 @@ fn user_activity_during_voice_cutover_rolls_back_and_flushes_gated_pcm_once() {
             .checked_duration_since(std::time::Instant::now())
             .expect("rollback did not publish user input and settings rejection promptly");
         let message = session.recv(remaining);
-        saw_user |= message["type"] == "user_final";
+        saw_user |= message["type"] == "live_event";
         if message["type"] == "tts_settings_result" {
             assert_eq!(message["outcome"], "rejected");
             assert_eq!(message["snapshot"]["revision"], 1);
@@ -1890,7 +1901,7 @@ fn handoff_suppresses_acknowledgement_and_queued_voice_change_applies_before_exp
             .checked_duration_since(std::time::Instant::now())
             .expect("handoff was not published promptly");
         let message = session.recv(remaining);
-        if message["type"] == "user_final" {
+        if message["type"] == "live_event" {
             assert_eq!(message["origin"], "handoff");
             break;
         }
@@ -2114,7 +2125,7 @@ fn queued_rate_rejects_before_a_closed_runtime_terminal_is_reported() {
     let endpoint = endpoint_rx.recv().unwrap();
     let mut session = ExpertSpokespersonTestSession::start(endpoint);
     let handoff = session.recv(Duration::from_secs(2));
-    assert_eq!(handoff["type"], "user_final");
+    assert_eq!(handoff["type"], "live_event");
     assert_eq!(handoff["origin"], "handoff");
     let delivery = session.recv(Duration::from_secs(2));
     assert_eq!(delivery["type"], "expert_delivery");
@@ -2196,7 +2207,7 @@ fn voice_cutover_timeout_is_terminal_and_never_reports_a_settings_result() {
 }
 
 #[test]
-fn user_final_promptly_aborts_a_stalled_voice_candidate_and_replies_on_old_runtime() {
+fn live_event_promptly_aborts_a_stalled_voice_candidate_and_replies_on_old_runtime() {
     let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
     let (candidate_seen_tx, candidate_seen_rx) = mpsc::sync_channel(1);
     let server = std::thread::spawn(move || {
@@ -2267,7 +2278,7 @@ fn user_final_promptly_aborts_a_stalled_voice_candidate_and_replies_on_old_runti
             .checked_duration_since(std::time::Instant::now())
             .expect("session did not report user input and voice rejection promptly");
         let message = session.recv(remaining);
-        saw_user |= message["type"] == "user_final";
+        saw_user |= message["type"] == "live_event";
         if message["type"] == "tts_settings_result" {
             assert_eq!(message["outcome"], "rejected");
             assert_eq!(message["snapshot"]["voice"], "old-voice");

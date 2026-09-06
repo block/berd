@@ -1082,9 +1082,9 @@ class OpenAiRealtimeConversationRuntime {
         }),
       ]);
     }
-    await releaseOpenAiRealtimeSpokespersonRuntime(sessionId).catch(
-      () => undefined,
-    );
+    await releaseOpenAiRealtimeSpokespersonRuntime(
+      realtimeRuntimeSessionId ?? sessionId,
+    ).catch(() => undefined);
     await this.cleanupResources(sessionId);
     this.boundOnSend = null;
     this.failureInProgress = false;

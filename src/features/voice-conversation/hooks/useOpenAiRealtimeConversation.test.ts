@@ -1416,6 +1416,8 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     );
 
     await act(async () => owner.result.current.onToggle());
+    expect(mocks.stopRuntime).toHaveBeenCalledWith("draft-session");
+    expect(mocks.releaseRuntime).toHaveBeenCalledWith("draft-session");
   });
 
   it("waits for owner promotion before stopping native controls", async () => {

@@ -245,20 +245,22 @@ The effective input-mute epoch advances only when the composed state changes.
 {"type":"input_reset_applied","id":u64}
 ```
 
-## Authoritative input
+## Authoritative live events
 
 The child emits:
 
 ```text
 {"type":"input_speaking","active":bool}
 {"type":"recognition_pending","active":bool}
-{"type":"user_final","token":u64,"text":string}
+{"type":"live_event","token":u64,"text":string,"origin"?:"user"|"spokesperson"|"handoff"}
 ```
 
-For every final, the child allocates a strictly increasing token, stores it in
-`SessionCore`, acknowledges the runtime storage receipt, emits `user_final`, and
-only then interrupts reserved or playing assistant output. Final text is at
-most 64 KiB.
+For every final live-side event, the child allocates a strictly increasing token,
+stores it in `SessionCore`, acknowledges the runtime storage receipt, and emits
+`live_event`. Conventional sessions omit `origin`, which means `user`.
+Expert-Spokesperson sessions use `origin` to distinguish user transcripts,
+Spokesperson transcripts, and handoffs. User finals interrupt reserved or playing
+assistant output only after storage and emission. Final text is at most 64 KiB.
 
 ## Confirmation and admission
 

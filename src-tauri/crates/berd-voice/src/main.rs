@@ -255,6 +255,7 @@ enum ManagementCommand {
     InstallPocketModel {
         roots: LocalAssetRoots,
     },
+    ListOpenAiVoices,
     ListPocketVoices,
     ParakeetModelStatus {
         roots: LocalAssetRoots,
@@ -273,6 +274,7 @@ impl ManagementCommand {
             Self::InstallMacosModel => "models.macos.install",
             Self::PocketModelStatus { .. } => "models.pocket.status",
             Self::InstallPocketModel { .. } => "models.pocket.install",
+            Self::ListOpenAiVoices => "models.openai.voices",
             Self::ListPocketVoices => "models.pocket.voices",
             Self::ParakeetModelStatus { .. } => "models.parakeet.status",
             Self::InstallParakeetModel { .. } => "models.parakeet.install",
@@ -345,6 +347,12 @@ struct PocketVoicesResult {
     model_id: &'static str,
     voice_license_id: &'static str,
     voices: Vec<PocketVoiceResult>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+struct OpenAiVoicesResult {
+    backend: &'static str,
+    voices: &'static [&'static str],
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -565,6 +573,7 @@ fn usage_error(error: &str) -> ! {
          [--availability-wait-seconds 1..1800]\n  \
          berd-voice models macos status\n  \
          berd-voice models macos install\n  \
+         berd-voice models openai voices\n  \
          berd-voice models pocket status|install --store-root ABSOLUTE_PATH\n  \
          berd-voice models pocket voices\n  \
          berd-voice models parakeet status|install --store-root ABSOLUTE_PATH"
@@ -652,6 +661,9 @@ fn parse_management_args(args: &[String]) -> Result<ManagementCommand, String> {
                 roots: parse_local_model_roots(args)?,
             })
         }
+        (Some("models"), Some("openai"), Some("voices")) if args.len() == 4 => {
+            Ok(ManagementCommand::ListOpenAiVoices)
+        }
         (Some("models"), Some("pocket"), Some("voices")) if args.len() == 4 => {
             Ok(ManagementCommand::ListPocketVoices)
         }
@@ -734,6 +746,13 @@ fn pocket_voices_report() -> PocketVoicesResult {
                 name: voice.name,
             })
             .collect(),
+    }
+}
+
+fn openai_voices_report() -> OpenAiVoicesResult {
+    OpenAiVoicesResult {
+        backend: "openai",
+        voices: berd_voice::openai_realtime_protocol::OPENAI_REALTIME_VOICE_IDS,
     }
 }
 
@@ -1194,6 +1213,11 @@ fn run_management_command(command: ManagementCommand) -> Result<(), ManagementFa
         ManagementCommand::InstallPocketModel { roots } => {
             let result = run_local_model_install(LocalModelKind::Pocket, roots, operation)?;
             write_management_result(operation, result).map_err(|error| {
+                management_failure("output_failed", "Could not write command result", error)
+            })
+        }
+        ManagementCommand::ListOpenAiVoices => {
+            write_management_result(operation, openai_voices_report()).map_err(|error| {
                 management_failure("output_failed", "Could not write command result", error)
             })
         }
@@ -2335,8 +2359,8 @@ fn spokesperson_voice_update_is_safe(
     snapshot: &berd_voice::TtsConfigurationSnapshot,
     quiescent: bool,
 ) -> bool {
-    let handoff_safe = !core.has_unresolved_external_handoff()
-        || matches!(update.purpose(), VoiceUpdatePurpose::Settings);
+    let handoff_safe =
+        !core.has_unresolved_handoff() || matches!(update.purpose(), VoiceUpdatePurpose::Settings);
     core.semantic_revision() == update.semantic_revision
         && snapshot.revision == update.base_revision
         && handoff_safe
@@ -2407,7 +2431,7 @@ fn run_expert_spokesperson_session(
             && spokesperson_renew_at.is_some_and(|deadline| Instant::now() >= deadline)
         {
             let quiescent = initialized
-                && !core.has_unresolved_external_handoff()
+                && !core.has_unresolved_handoff()
                 && spokesperson_settings_are_quiescent(
                     &turn_gate,
                     active.as_ref(),
@@ -2614,11 +2638,11 @@ fn run_expert_spokesperson_session(
                             LiveSideEvent::UserTranscript { text: text.clone() },
                             &mut writer,
                         )?;
-                        core.record_external_user_turn(text);
+                        core.record_user_turn(text);
                     }
                     SpokespersonEvent::ResponseStarted { response_id } => {
                         turn_gate.response_started(&response_id, responses.len())?;
-                        core.reserve_external_spokesperson_turn(response_id.clone());
+                        core.reserve_spokesperson_turn(response_id.clone());
                         responses
                             .entry(response_id)
                             .or_insert_with(|| LiveResponse::new(None, None));
@@ -3010,7 +3034,7 @@ fn run_expert_spokesperson_session(
                             &responses,
                             &directive_speeches,
                             &cancelled_directives,
-                        ) && !core.has_unresolved_external_handoff();
+                        ) && !core.has_unresolved_handoff();
                         if !quiescent {
                             write_protocol_fatal(
                                 &mut writer,
@@ -3481,11 +3505,11 @@ fn run_expert_spokesperson_session(
                         id,
                         confirmed_token: core.expert_pipe_cursor(),
                         utterances_after: core
-                            .external_events_after(after)
+                            .events_after(after)
                             .into_iter()
                             .map(pending_live_event)
                             .collect(),
-                        unresolved_handoff_ids: core.unresolved_external_handoff_ids(),
+                        unresolved_handoff_ids: core.unresolved_handoff_ids(),
                     },
                 )?;
             }
@@ -3930,7 +3954,7 @@ fn submit_expert_prepare(
             },
         );
     }
-    match core.prepare_external_expert_directive(request.acknowledgement, request.text) {
+    match core.prepare_expert_directive(request.acknowledgement, request.text) {
         ExpertDirectiveOutcome::Pending(events) => write_message(
             writer,
             &SessionMessage::Pending {
@@ -3960,7 +3984,7 @@ fn submit_expert_prepare(
                     text: message.clone(),
                 },
             );
-            core.record_external_expert_turn(message.clone());
+            core.record_expert_turn(message.clone());
             let resolved_handoff_ids = request.resolved_handoff_ids;
             core.mark_handoffs_resolving(&resolved_handoff_ids)?;
             let coordination = core.request_expert_message(RealtimeExpertMessage {
@@ -4157,7 +4181,7 @@ fn apply_external_coordinator_event(
     runtime: &OpenAiSpokespersonRuntime,
     event: &serde_json::Value,
 ) -> Result<(), String> {
-    let update = core.handle_external_response_event(event)?;
+    let update = core.handle_response_event(event)?;
     for event in update.events {
         runtime.send(SpokespersonCommand::Provider(event))?;
     }
@@ -4271,10 +4295,10 @@ fn emit_live_events(
     emitted_token: &mut u64,
     writer: &mut impl Write,
 ) -> Result<(), String> {
-    for event in core.external_events_after(*emitted_token) {
+    for event in core.events_after(*emitted_token) {
         write_message(
             writer,
-            &SessionMessage::UserFinal {
+            &SessionMessage::LiveEvent {
                 token: event.token,
                 text: render_live_event(event.token, &event.payload),
                 origin: Some(live_event_origin(&event.payload)),
@@ -4291,7 +4315,7 @@ fn record_and_emit_live_event(
     event: LiveSideEvent,
     writer: &mut impl Write,
 ) -> Result<(), String> {
-    let (_, expert_delivery) = core.record_external_live_event_with_delivery(event)?;
+    let (_, expert_delivery) = core.record_live_event_with_delivery(event)?;
     emit_live_events(core, emitted_live_token, writer)?;
     if let Some(delivery) = expert_delivery {
         write_message(
@@ -4321,7 +4345,7 @@ fn publish_live_response_if_complete(
             && !response.delivery.has_transcript()
     }) {
         responses.remove(response_id);
-        core.finish_external_spokesperson_turn(response_id, String::new(), false);
+        core.finish_spokesperson_turn(response_id, String::new(), false);
         return Ok(());
     }
     let ready = responses.get(response_id).is_some_and(|response| {
@@ -4340,10 +4364,10 @@ fn publish_live_response_if_complete(
         .delivery
         .delivered_transcript(response.interrupted, 24_000);
     if response.handoff_suppressed && transcript.is_empty() {
-        core.finish_external_spokesperson_turn(response_id, String::new(), false);
+        core.finish_spokesperson_turn(response_id, String::new(), false);
         return Ok(());
     }
-    core.finish_external_spokesperson_turn(response_id, transcript.clone(), response.interrupted);
+    core.finish_spokesperson_turn(response_id, transcript.clone(), response.interrupted);
     record_and_emit_live_event(
         core,
         emitted_live_token,
@@ -5909,7 +5933,7 @@ fn store_and_publish_voice_final(
     mark_stored();
     write_message(
         writer,
-        &SessionMessage::UserFinal {
+        &SessionMessage::LiveEvent {
             token,
             text,
             origin: None,
@@ -6700,7 +6724,7 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            core.prepare_external_expert_directive(Some(1), "hi".into()),
+            core.prepare_expert_directive(Some(1), "hi".into()),
             ExpertDirectiveOutcome::Accepted {
                 confirmed_token: 1,
                 ..
@@ -6718,7 +6742,7 @@ mod tests {
         .unwrap();
 
         let messages = messages(&output);
-        assert_eq!(messages[0]["type"], "user_final");
+        assert_eq!(messages[0]["type"], "live_event");
         assert_eq!(messages[0]["token"], 1);
         assert_eq!(messages[0]["origin"], "user");
         assert_eq!(messages[1]["type"], "state");
@@ -6748,7 +6772,7 @@ mod tests {
     #[test]
     fn expert_waits_for_the_complete_live_response_after_handoff() {
         let mut core = RealtimeExpertSpokespersonSession::new(0, "external-test");
-        core.add_external_live_event(
+        core.add_live_event(
             1,
             LiveSideEvent::Handoff {
                 call_id: "call-1".into(),
@@ -6770,7 +6794,7 @@ mod tests {
         ));
         assert!(gate.take_ready(false, 1).is_none());
 
-        core.add_external_live_event(
+        core.add_live_event(
             2,
             LiveSideEvent::SpokespersonTranscript {
                 text: "Let me check that.".into(),
@@ -6783,9 +6807,11 @@ mod tests {
             .take_ready(false, 0)
             .expect("settled response releases held Expert request");
         assert!(matches!(
-            core.prepare_external_expert_directive(request.acknowledgement, request.text),
-            ExpertDirectiveOutcome::Pending(events)
-                if events.len() == 1 && events[0].token == 2
+            core.prepare_expert_directive(request.acknowledgement, request.text),
+            ExpertDirectiveOutcome::Accepted {
+                confirmed_token: 2,
+                message,
+            } if message == "answer"
         ));
     }
 
@@ -7062,7 +7088,7 @@ mod tests {
         assert!(!responses.contains_key("response-a"));
         let emitted = messages(&output);
         assert_eq!(emitted.len(), 2);
-        assert_eq!(emitted[0]["type"], "user_final");
+        assert_eq!(emitted[0]["type"], "live_event");
         assert_eq!(emitted[1]["type"], "expert_delivery");
     }
 
@@ -7283,7 +7309,7 @@ mod tests {
         let emitted = messages(&output);
         assert_eq!(emitted[0]["type"], "speech_interrupted");
         assert_eq!(emitted[0]["spoken_through_utf8"], "One two three".len());
-        assert_eq!(emitted[1]["type"], "user_final");
+        assert_eq!(emitted[1]["type"], "live_event");
         assert!(emitted[1]["text"]
             .as_str()
             .unwrap()
@@ -8108,6 +8134,10 @@ mod tests {
             parse_management_args(&args(&["berd-voice", "models", "macos", "install"])).unwrap(),
             ManagementCommand::InstallMacosModel
         );
+        assert_eq!(
+            parse_management_args(&args(&["berd-voice", "models", "openai", "voices"])).unwrap(),
+            ManagementCommand::ListOpenAiVoices
+        );
         let store = std::env::temp_dir().join("berd-voice-management-parser");
         let roots = local_model_roots(&store).unwrap();
         assert_eq!(
@@ -8338,6 +8368,25 @@ mod tests {
         ] {
             assert!(!voices.contains(private_field));
         }
+
+        assert_eq!(
+            serde_json::to_value(ManagementResultEnvelope {
+                schema_version: MANAGEMENT_SCHEMA_VERSION,
+                operation: "models.openai.voices",
+                event: "result",
+                result: openai_voices_report(),
+            })
+            .unwrap(),
+            json!({
+                "schemaVersion": 1,
+                "operation": "models.openai.voices",
+                "event": "result",
+                "result": {
+                    "backend": "openai",
+                    "voices": berd_voice::openai_realtime_protocol::OPENAI_REALTIME_VOICE_IDS
+                }
+            })
+        );
 
         assert_eq!(
             serde_json::to_value(ManagementResultEnvelope {
@@ -9875,7 +9924,7 @@ mod tests {
                 .iter()
                 .map(|message| message["type"].as_str().unwrap())
                 .collect::<Vec<_>>(),
-            ["user_final", "speech_interrupted"]
+            ["live_event", "speech_interrupted"]
         );
         assert_eq!(core.utterances_after(0)[0].token, 1);
     }

@@ -16,6 +16,10 @@ use crate::{estimated_spoken_through_utf8, DeliveryProgress, DeliverySegment};
 const PROMPT_DOCUMENT: &str = include_str!("../prompts/expert-spokesperson.md");
 const ROLE_PLACEHOLDER: &str = "{{ROLE}}";
 
+pub const OPENAI_REALTIME_VOICE_IDS: &[&str] = &[
+    "alloy", "ash", "ballad", "cedar", "coral", "echo", "marin", "sage", "shimmer", "verse",
+];
+
 static SPOKESPERSON_INSTRUCTIONS: LazyLock<String> =
     LazyLock::new(|| realtime_role_instructions("Spokesperson"));
 
@@ -1485,18 +1489,35 @@ impl RealtimeExpertSpokespersonSession {
         self.conversation.confirmed_token()
     }
 
-    pub fn prepare_external_expert_directive(
+    pub fn prepare_expert_directive(
         &mut self,
         acknowledgement: Option<u64>,
         message: String,
     ) -> ExpertDirectiveOutcome {
-        self.conversation.prepare_directive(ExpertDirective {
+        let directive = ExpertDirective {
             acknowledgement,
             message,
+        };
+        let outcome = self.conversation.prepare_directive(directive.clone());
+        let ExpertDirectiveOutcome::Pending(events) = &outcome else {
+            return outcome;
+        };
+        let Some(last) = events.last() else {
+            return outcome;
+        };
+        if !events
+            .iter()
+            .all(|event| matches!(event.payload, LiveSideEvent::SpokespersonTranscript { .. }))
+        {
+            return outcome;
+        }
+        self.conversation.prepare_directive(ExpertDirective {
+            acknowledgement: Some(last.token),
+            message: directive.message,
         })
     }
 
-    pub fn record_external_live_event_with_delivery(
+    pub fn record_live_event_with_delivery(
         &mut self,
         event: LiveSideEvent,
     ) -> Result<
@@ -1547,7 +1568,7 @@ impl RealtimeExpertSpokespersonSession {
         Ok((recorded, delivery))
     }
 
-    pub fn add_external_live_event(
+    pub fn add_live_event(
         &mut self,
         token: u64,
         event: LiveSideEvent,
@@ -1555,36 +1576,31 @@ impl RealtimeExpertSpokespersonSession {
         self.conversation.add_live_event(token, event)
     }
 
-    pub fn external_events_after(
+    pub fn events_after(
         &self,
         token: u64,
     ) -> Vec<crate::causal_inbox::CausalMessage<LiveSideEvent>> {
         self.conversation.events_after(token)
     }
 
-    pub fn has_unresolved_external_handoff(&self) -> bool {
+    pub fn has_unresolved_handoff(&self) -> bool {
         !self.open_handoffs.is_empty()
     }
 
-    pub fn reserve_external_spokesperson_turn(&mut self, response_id: String) {
+    pub fn reserve_spokesperson_turn(&mut self, response_id: String) {
         self.conversation.reserve_spokesperson_turn(response_id);
     }
 
-    pub fn finish_external_spokesperson_turn(
-        &mut self,
-        response_id: &str,
-        text: String,
-        interrupted: bool,
-    ) {
+    pub fn finish_spokesperson_turn(&mut self, response_id: &str, text: String, interrupted: bool) {
         self.conversation
             .finish_spokesperson_turn(response_id, text, interrupted);
     }
 
-    pub fn record_external_user_turn(&mut self, text: String) {
+    pub fn record_user_turn(&mut self, text: String) {
         self.conversation.record_user_turn(text);
     }
 
-    pub fn record_external_expert_turn(&mut self, text: String) {
+    pub fn record_expert_turn(&mut self, text: String) {
         self.conversation.record_expert_turn(text);
     }
 
@@ -1603,7 +1619,7 @@ impl RealtimeExpertSpokespersonSession {
         self.responses.request_expert_message(message)
     }
 
-    pub fn handle_external_response_event(
+    pub fn handle_response_event(
         &mut self,
         event: &Value,
     ) -> Result<RealtimeCoordinatorUpdate, String> {
@@ -1619,7 +1635,7 @@ impl RealtimeExpertSpokespersonSession {
         Ok(update)
     }
 
-    pub fn unresolved_external_handoff_ids(&self) -> Vec<String> {
+    pub fn unresolved_handoff_ids(&self) -> Vec<String> {
         self.open_handoffs
             .iter()
             .filter_map(|(id, handoff)| (!handoff.resolving).then_some(id.clone()))
@@ -2596,7 +2612,7 @@ mod tests {
     fn external_session_uses_the_same_expert_batch_boundary() {
         let mut session = RealtimeExpertSpokespersonSession::new(0, "external");
         let (user, delivery) = session
-            .record_external_live_event_with_delivery(LiveSideEvent::UserTranscript {
+            .record_live_event_with_delivery(LiveSideEvent::UserTranscript {
                 text: "What changed?".into(),
             })
             .unwrap();
@@ -2604,7 +2620,7 @@ mod tests {
         assert!(delivery.is_none());
 
         let (spokesperson, delivery) = session
-            .record_external_live_event_with_delivery(LiveSideEvent::SpokespersonTranscript {
+            .record_live_event_with_delivery(LiveSideEvent::SpokespersonTranscript {
                 text: "I will check.".into(),
                 interrupted: false,
             })
@@ -2760,14 +2776,14 @@ mod tests {
     fn expert_delivery_preserves_text_and_marks_interruption_structurally() {
         let mut session = RealtimeExpertSpokespersonSession::new(0, "external");
         let (_, delivery) = session
-            .record_external_live_event_with_delivery(LiveSideEvent::UserTranscript {
+            .record_live_event_with_delivery(LiveSideEvent::UserTranscript {
                 text: "first\tsecond\nthird\r\nfourth".into(),
             })
             .unwrap();
         assert!(delivery.is_none());
 
         let (_, delivery) = session
-            .record_external_live_event_with_delivery(LiveSideEvent::SpokespersonTranscript {
+            .record_live_event_with_delivery(LiveSideEvent::SpokespersonTranscript {
                 text: String::new(),
                 interrupted: true,
             })
@@ -2814,7 +2830,7 @@ mod tests {
                 "Private context from the Expert for a future natural turn. Do not respond to this item now:\n[bridge cursor 1] [Handoff dismissal] Handoffs handoff-1 were dismissed without a spoken response. Reason: Superseded This is silent context; do not speak merely to acknowledge it."
             ))
         );
-        assert!(session.unresolved_external_handoff_ids().is_empty());
+        assert!(session.unresolved_handoff_ids().is_empty());
     }
 
     #[test]
@@ -2848,7 +2864,7 @@ mod tests {
                 "The Expert offers the following information for a response opportunity. Speak it naturally and accurately if a response is useful now; silence remains valid. Do not add filler or offer more help:\n[bridge cursor 1] The first answer"
             ))
         );
-        assert_eq!(session.unresolved_external_handoff_ids(), ["handoff-2"]);
+        assert_eq!(session.unresolved_handoff_ids(), ["handoff-2"]);
         assert_eq!(
             session.unknown_handoff_ids(&["handoff-1".into()]),
             Vec::<String>::new()
@@ -2995,13 +3011,13 @@ mod tests {
     fn external_response_lifecycle_uses_host_playback_to_resolve_handoffs() {
         let mut session = RealtimeExpertSpokespersonSession::new(0, "external-test");
         let (_, delivery) = session
-            .record_external_live_event_with_delivery(LiveSideEvent::Handoff {
+            .record_live_event_with_delivery(LiveSideEvent::Handoff {
                 call_id: "call-1".into(),
                 message: "Inspect the project".into(),
             })
             .unwrap();
         assert!(delivery.is_some());
-        let handoff_ids = session.unresolved_external_handoff_ids();
+        let handoff_ids = session.unresolved_handoff_ids();
         session.mark_handoffs_resolving(&handoff_ids).unwrap();
         session
             .request_expert_message(RealtimeExpertMessage {
@@ -3014,17 +3030,17 @@ mod tests {
             .unwrap();
 
         session
-            .handle_external_response_event(
+            .handle_response_event(
                 &json!({ "type": "response.created", "response": { "id": "response-1" } }),
             )
             .unwrap();
         session
-            .handle_external_response_event(
+            .handle_response_event(
                 &json!({ "type": "output_audio_buffer.started", "response_id": "response-1" }),
             )
             .unwrap();
         let generated = session
-            .handle_external_response_event(&json!({
+            .handle_response_event(&json!({
                 "type": "response.done",
                 "response": { "id": "response-1", "status": "completed" },
             }))
@@ -3032,11 +3048,11 @@ mod tests {
         assert!(generated.completed_handoff_ids.is_empty());
 
         let played = session
-            .handle_external_response_event(
+            .handle_response_event(
                 &json!({ "type": "output_audio_buffer.stopped", "response_id": "response-1" }),
             )
             .unwrap();
         assert_eq!(played.completed_handoff_ids, ["call-1"]);
-        assert!(session.unresolved_external_handoff_ids().is_empty());
+        assert!(session.unresolved_handoff_ids().is_empty());
     }
 }

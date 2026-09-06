@@ -17,11 +17,31 @@ export interface OpenAiRealtimeRuntimeEvent {
   event: Record<string, unknown>;
 }
 
+export interface OpenAiRealtimeSpokespersonSessionOptions {
+  model?: string;
+  transcriptionModel?: string;
+  transcriptionLanguage?: string;
+  transcriptionPrompt?: string;
+  voice?: string;
+  speed?: number;
+  turnDetection?: "server_vad" | "semantic_vad";
+  eagerness?: "low" | "medium" | "high" | "auto";
+  interruptResponse?: boolean;
+  createResponse?: boolean;
+  vadThreshold?: number;
+  prefixPaddingMs?: number;
+  silenceDurationMs?: number;
+  idleTimeoutMs?: number | null;
+  noiseReduction?: "off" | "near_field" | "far_field";
+  reasoningEffort?: "default" | "none" | "low" | "medium" | "high";
+  maxOutputTokens?: number | null;
+}
+
 export function startOpenAiRealtimeSpokespersonRuntime(
   sessionId: string,
   initialCursor: number,
   callId: string,
-  options: unknown,
+  options: OpenAiRealtimeSpokespersonSessionOptions,
 ): Promise<void> {
   return invoke("start_openai_realtime_spokesperson_runtime", {
     sessionId,

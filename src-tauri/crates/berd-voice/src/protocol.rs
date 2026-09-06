@@ -213,14 +213,14 @@ pub enum SessionMessage {
     RecognitionPending {
         active: bool,
     },
-    UserFinal {
+    LiveEvent {
         token: u64,
         text: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         origin: Option<UtteranceOrigin>,
     },
     /// A crate-selected batch that is ready to wake the external Expert.
-    /// `user_final` remains the authoritative transcript projection; this
+    /// `live_event` remains the authoritative transcript projection; this
     /// message alone controls when the host schedules an Expert turn.
     ExpertDelivery {
         through_token: u64,
@@ -422,22 +422,22 @@ mod tests {
             }
         );
         assert_eq!(
-            serde_json::to_string(&SessionMessage::UserFinal {
+            serde_json::to_string(&SessionMessage::LiveEvent {
                 token: 6,
                 text: "words".into(),
                 origin: None,
             })
             .unwrap(),
-            r#"{"type":"user_final","token":6,"text":"words"}"#
+            r#"{"type":"live_event","token":6,"text":"words"}"#
         );
         assert_eq!(
-            serde_json::to_string(&SessionMessage::UserFinal {
+            serde_json::to_string(&SessionMessage::LiveEvent {
                 token: 7,
                 text: "[Voice transcript] Spokesperson said: hello".into(),
                 origin: Some(UtteranceOrigin::Spokesperson),
             })
             .unwrap(),
-            r#"{"type":"user_final","token":7,"text":"[Voice transcript] Spokesperson said: hello","origin":"spokesperson"}"#
+            r#"{"type":"live_event","token":7,"text":"[Voice transcript] Spokesperson said: hello","origin":"spokesperson"}"#
         );
         assert_eq!(
             serde_json::to_string(&SessionMessage::ExpertDelivery {
