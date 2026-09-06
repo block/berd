@@ -1900,6 +1900,9 @@ mod tests {
             "The host delivers relevant conversation events to the Expert",
             "there is no fixed timer or retry count",
             "two parts of one brain",
+            "implementation, architecture, protocols, lifecycle, runtime behavior",
+            "never gives a preliminary or speculative answer before or alongside a handoff",
+            "When unsure whether a question is routine or authoritative, hand it off",
         ] {
             assert!(
                 normalized.contains(required),
