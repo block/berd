@@ -392,16 +392,20 @@ impl Drop for OpenAiSpokespersonRuntime {
     fn drop(&mut self) {
         let _ = self.commands.send(SpokespersonCommand::Shutdown);
         if let Some(worker) = self.worker.take() {
-            reap_spokesperson_worker(worker);
+            reap_spokesperson_worker(worker, self.audio.clone());
         }
     }
 }
 
-fn reap_spokesperson_worker(worker: thread::JoinHandle<()>) {
+fn reap_spokesperson_worker(
+    worker: thread::JoinHandle<()>,
+    audio_lifetime: mpsc::Sender<Vec<f32>>,
+) {
     let _ = thread::Builder::new()
         .name("berd-voice-spokesperson-reaper".into())
         .spawn(move || {
             let _ = worker.join();
+            drop(audio_lifetime);
         });
 }
 
