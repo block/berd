@@ -44,6 +44,49 @@ pub struct VoiceUpdateRequest {
     pub semantic_revision: u64,
 }
 
+/// Single-flight queue shared by every Expert-Spokesperson host. The queued
+/// request and the replacement transaction are deliberately separate: hosts
+/// may accept a request while a turn is active, but only one request may be
+/// queued or building at a time.
+pub struct VoiceUpdateQueue<T> {
+    queued: Option<T>,
+}
+
+impl<T> Default for VoiceUpdateQueue<T> {
+    fn default() -> Self {
+        Self { queued: None }
+    }
+}
+
+impl<T> VoiceUpdateQueue<T> {
+    pub fn is_pending(&self) -> bool {
+        self.queued.is_some()
+    }
+
+    pub fn is_busy(&self, transaction_active: bool) -> bool {
+        transaction_active || self.is_pending()
+    }
+
+    pub fn try_enqueue(&mut self, transaction_active: bool, request: T) -> Result<(), T> {
+        if self.is_busy(transaction_active) {
+            Err(request)
+        } else {
+            self.queued = Some(request);
+            Ok(())
+        }
+    }
+
+    pub fn take_ready(&mut self, transaction_active: bool, ready: bool) -> Option<T> {
+        (!transaction_active && ready)
+            .then(|| self.queued.take())
+            .flatten()
+    }
+
+    pub fn take(&mut self) -> Option<T> {
+        self.queued.take()
+    }
+}
+
 pub fn validate_voice_update_settings(
     base_revision: u64,
     settings: &TtsSettings,
@@ -308,7 +351,7 @@ impl VoiceUpdateTransaction {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_voice_update_settings;
+    use super::{validate_voice_update_settings, VoiceUpdateQueue};
     use crate::openai_realtime_protocol::RealtimeSpokespersonSessionOptions;
     use crate::openai_spokesperson::OpenAiSpokespersonConfig;
     use crate::TtsSettings;
@@ -366,5 +409,16 @@ mod tests {
         )
         .unwrap_err()
         .contains("between 0.25 and 1.5"));
+    }
+
+    #[test]
+    fn shared_queue_is_single_flight_and_waits_for_readiness() {
+        let mut queue = VoiceUpdateQueue::default();
+        assert_eq!(queue.try_enqueue(false, 1), Ok(()));
+        assert_eq!(queue.try_enqueue(false, 2), Err(2));
+        assert_eq!(queue.take_ready(false, false), None);
+        assert_eq!(queue.take_ready(true, true), None);
+        assert_eq!(queue.take_ready(false, true), Some(1));
+        assert_eq!(queue.try_enqueue(false, 3), Ok(()));
     }
 }

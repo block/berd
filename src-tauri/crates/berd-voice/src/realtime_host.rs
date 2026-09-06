@@ -17,9 +17,10 @@ use crate::{
     openai_spokesperson::{OpenAiSpokespersonConfig, OpenAiSpokespersonRuntime},
     openai_spokesperson::{SpokespersonCommand, SpokespersonEvent},
     realtime_audio_delivery::RealtimeAudioDelivery,
+    realtime_host_lifecycle::{voice_update_is_safe, RealtimeHostActivity, RealtimeHostWork},
     spokesperson_voice_update::{
-        validate_voice_update_settings, VoiceBarrierAction, VoiceUpdateAction, VoiceUpdateRequest,
-        VoiceUpdateTransaction,
+        validate_voice_update_settings, VoiceBarrierAction, VoiceUpdateAction, VoiceUpdateQueue,
+        VoiceUpdateRequest, VoiceUpdateTransaction,
     },
     PcmAudioOutput, TtsConfigurationSnapshot, TtsSettings,
 };
@@ -382,9 +383,8 @@ fn run_managed_realtime_host_inner(
 ) -> Result<(), String> {
     let (mut runtime, mut events) = OpenAiSpokespersonRuntime::spawn_observed(config.clone())?;
     let mut host = RealtimePlaybackHost::default();
-    let mut active_responses = HashSet::new();
-    let mut user_speaking = false;
-    let mut queued_update: Option<QueuedManagedUpdate> = None;
+    let mut activity = RealtimeHostActivity::default();
+    let mut queued_update = VoiceUpdateQueue::<QueuedManagedUpdate>::default();
     let mut pending_update: Option<PendingManagedUpdate> = None;
     let mut shutting_down = false;
 
@@ -423,7 +423,7 @@ fn run_managed_realtime_host_inner(
                         .lock()
                         .map_err(|_| "Spokesperson settings are unavailable")?
                         .clone();
-                    let validation = if queued_update.is_some() || pending_update.is_some() {
+                    let validation = if queued_update.is_busy(pending_update.is_some()) {
                         Err("another Spokesperson settings update is in progress".into())
                     } else {
                         validate_voice_update_settings(
@@ -436,11 +436,18 @@ fn run_managed_realtime_host_inner(
                     if let Err(message) = validation {
                         let _ = completed.send(Err(message));
                     } else {
-                        queued_update = Some(QueuedManagedUpdate {
+                        let queued = QueuedManagedUpdate {
                             request,
                             semantic_transcript,
                             completed,
-                        });
+                        };
+                        if let Err(queued) =
+                            queued_update.try_enqueue(pending_update.is_some(), queued)
+                        {
+                            let _ = queued.completed.send(Err(
+                                "another Spokesperson settings update is in progress".into(),
+                            ));
+                        }
                     }
                 }
                 Ok(ManagedRealtimeHostCommand::Shutdown) => {
@@ -458,29 +465,31 @@ fn run_managed_realtime_host_inner(
             break;
         }
 
-        let quiescent = host.is_idle() && active_responses.is_empty() && !user_speaking;
-        if pending_update.is_none() && quiescent {
-            if let Some(queued) = queued_update.take() {
-                let current = snapshot
-                    .lock()
-                    .map_err(|_| "Spokesperson settings are unavailable")?
-                    .clone();
-                match VoiceUpdateTransaction::start(
-                    queued.request,
-                    current.revision,
-                    true,
-                    &config,
-                    queued.semantic_transcript,
-                ) {
-                    Ok(transaction) => {
-                        pending_update = Some(PendingManagedUpdate {
-                            transaction,
-                            completed: queued.completed,
-                        });
-                    }
-                    Err(message) => {
-                        let _ = queued.completed.send(Err(message));
-                    }
+        let host_work = RealtimeHostWork {
+            playback_active: !host.is_idle(),
+            ..RealtimeHostWork::default()
+        };
+        let quiescent = activity.settings_are_quiescent(host_work);
+        if let Some(queued) = queued_update.take_ready(pending_update.is_some(), quiescent) {
+            let current = snapshot
+                .lock()
+                .map_err(|_| "Spokesperson settings are unavailable")?
+                .clone();
+            match VoiceUpdateTransaction::start(
+                queued.request,
+                current.revision,
+                true,
+                &config,
+                queued.semantic_transcript,
+            ) {
+                Ok(transaction) => {
+                    pending_update = Some(PendingManagedUpdate {
+                        transaction,
+                        completed: queued.completed,
+                    });
+                }
+                Err(message) => {
+                    let _ = queued.completed.send(Err(message));
                 }
             }
         }
@@ -490,9 +499,15 @@ fn run_managed_realtime_host_inner(
                 .lock()
                 .map_err(|_| "Spokesperson settings are unavailable")?
                 .clone();
-            let safe = quiescent
-                && semantic_revision.load(Ordering::SeqCst) == update.transaction.semantic_revision
-                && current.revision == update.transaction.base_revision;
+            let safe = voice_update_is_safe(
+                update.transaction.purpose(),
+                update.transaction.semantic_revision,
+                semantic_revision.load(Ordering::SeqCst),
+                update.transaction.base_revision,
+                current.revision,
+                false,
+                quiescent,
+            );
             match update.transaction.next_action(Instant::now(), safe) {
                 VoiceUpdateAction::None => {}
                 VoiceUpdateAction::BeginInputBarrier => pending_update
@@ -516,26 +531,43 @@ fn run_managed_realtime_host_inner(
         match events.recv_timeout(Duration::from_millis(10)) {
             Ok(event) => {
                 match &event {
-                    SpokespersonEvent::UserSpeaking { active, .. } => user_speaking = *active,
+                    SpokespersonEvent::UserSpeaking {
+                        active: true,
+                        item_id,
+                    } => activity.begin_user_speaking(item_id.clone()),
+                    SpokespersonEvent::UserSpeaking { active: false, .. } => {
+                        activity.finish_user_speaking();
+                    }
+                    SpokespersonEvent::UserTurnDiscarded { item_id }
+                    | SpokespersonEvent::UserFinal { item_id, .. } => {
+                        activity.finish_user_item(item_id);
+                    }
                     SpokespersonEvent::ResponseStarted { response_id } => {
-                        active_responses.insert(response_id.clone());
+                        activity.begin_response(response_id.clone());
                     }
                     SpokespersonEvent::ResponseFinished { response_id, .. } => {
-                        active_responses.remove(response_id);
+                        activity.finish_response(response_id);
                     }
                     SpokespersonEvent::InputCutoverFinished { request_id, result } => {
                         let current = snapshot
                             .lock()
                             .map_err(|_| "Spokesperson settings are unavailable")?
                             .clone();
-                        let safe = host.is_idle()
-                            && active_responses.is_empty()
-                            && !user_speaking
-                            && pending_update.as_ref().is_some_and(|update| {
-                                semantic_revision.load(Ordering::SeqCst)
-                                    == update.transaction.semantic_revision
-                                    && current.revision == update.transaction.base_revision
-                            });
+                        let quiescent = activity.settings_are_quiescent(RealtimeHostWork {
+                            playback_active: !host.is_idle(),
+                            ..RealtimeHostWork::default()
+                        });
+                        let safe = pending_update.as_ref().is_some_and(|update| {
+                            voice_update_is_safe(
+                                update.transaction.purpose(),
+                                update.transaction.semantic_revision,
+                                semantic_revision.load(Ordering::SeqCst),
+                                update.transaction.base_revision,
+                                current.revision,
+                                false,
+                                quiescent,
+                            )
+                        });
                         let action =
                             pending_update
                                 .as_ref()
@@ -573,7 +605,7 @@ fn run_managed_realtime_host_inner(
         host.finish_drained(emit)?;
     }
 
-    if let Some(queued) = queued_update {
+    if let Some(queued) = queued_update.take() {
         let _ = queued
             .completed
             .send(Err("Spokesperson session stopped".into()));

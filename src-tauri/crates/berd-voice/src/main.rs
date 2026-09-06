@@ -36,11 +36,14 @@ use berd_voice::protocol::{
     VoiceSessionSnapshot,
 };
 use berd_voice::realtime_audio_delivery::RealtimeAudioDelivery;
+use berd_voice::realtime_host_lifecycle::{
+    voice_update_is_safe, RealtimeHostActivity, RealtimeHostWork,
+};
 use berd_voice::realtime_pipe::RealtimePipeExchange;
 use berd_voice::session::{PrepareOutcome, PrepareRequest, SessionCore};
 use berd_voice::spokesperson_voice_update::{
     validate_voice_update_settings, VoiceBarrierAction, VoiceUpdateAction, VoiceUpdatePurpose,
-    VoiceUpdateRequest, VoiceUpdateTransaction,
+    VoiceUpdateQueue, VoiceUpdateRequest, VoiceUpdateTransaction,
 };
 use berd_voice::{
     estimated_spoken_through_utf8,
@@ -1986,32 +1989,25 @@ enum ExpertPrepareRouting {
 
 #[derive(Default)]
 struct ExpertTurnGate {
-    user_speaking: bool,
-    recognition_pending: bool,
-    pending_user_items: HashSet<String>,
-    inflight_responses: HashSet<String>,
+    activity: RealtimeHostActivity,
     pending_prepare: Option<PendingExpertPrepare>,
 }
 
 impl ExpertTurnGate {
     fn begin_user_speaking(&mut self, item_id: String) {
-        self.pending_user_items.insert(item_id);
-        self.recognition_pending = true;
-        self.user_speaking = true;
+        self.activity.begin_user_speaking(item_id);
     }
 
     fn finish_user_speaking(&mut self) {
-        self.user_speaking = false;
+        self.activity.finish_user_speaking();
     }
 
     fn discard_user_turn(&mut self, item_id: &str) {
-        self.pending_user_items.remove(item_id);
-        self.recognition_pending = !self.pending_user_items.is_empty();
+        self.activity.finish_user_item(item_id);
     }
 
     fn resolve_user_final(&mut self, item_id: &str) {
-        self.pending_user_items.remove(item_id);
-        self.recognition_pending = !self.pending_user_items.is_empty();
+        self.activity.finish_user_item(item_id);
     }
 
     fn response_started(
@@ -2019,17 +2015,17 @@ impl ExpertTurnGate {
         response_id: &str,
         retained_responses: usize,
     ) -> Result<(), String> {
-        if !self.inflight_responses.contains(response_id)
+        if !self.activity.has_inflight_response(response_id)
             && retained_responses >= MAX_PENDING_SPOKESPERSON_RESPONSES
         {
             return Err("Spokesperson started too many concurrent responses".into());
         }
-        self.inflight_responses.insert(response_id.to_string());
+        self.activity.begin_response(response_id.to_string());
         Ok(())
     }
 
     fn response_finished(&mut self, response_id: &str) {
-        self.inflight_responses.remove(response_id);
+        self.activity.finish_response(response_id);
     }
 
     fn defer_if_busy(
@@ -2061,11 +2057,11 @@ impl ExpertTurnGate {
     }
 
     fn is_busy(&self, playback_active: bool, retained_responses: usize) -> bool {
-        self.user_speaking
-            || self.recognition_pending
-            || playback_active
-            || retained_responses != 0
-            || !self.inflight_responses.is_empty()
+        self.activity.is_busy(RealtimeHostWork {
+            playback_active,
+            retained_responses,
+            ..RealtimeHostWork::default()
+        })
     }
 
     fn cancel_pending(&mut self, id: u64) -> bool {
@@ -2082,7 +2078,7 @@ impl ExpertTurnGate {
     }
 
     fn input_blocks_output(&self) -> bool {
-        self.user_speaking || self.recognition_pending
+        self.activity.input_blocks_output()
     }
 }
 
@@ -2323,9 +2319,18 @@ fn spokesperson_settings_are_quiescent(
     directive_speeches: &HashMap<u64, DirectiveSpeech>,
     cancelled_directives: &HashSet<u64>,
 ) -> bool {
-    gate.pending_prepare.is_none()
-        && !gate.is_busy(active.is_some(), responses.len())
-        && !expert_output_reserved(directive_speeches, cancelled_directives, active, responses)
+    gate.activity.settings_are_quiescent(RealtimeHostWork {
+        playback_active: active.is_some(),
+        retained_responses: responses.len(),
+        expert_output_reserved: expert_output_reserved(
+            directive_speeches,
+            cancelled_directives,
+            active,
+            responses,
+        ),
+        pending_expert_prepare: gate.pending_prepare.is_some(),
+        truncation_pending: live_truncation_pending(responses),
+    })
 }
 
 fn queued_spokesperson_settings_are_ready(
@@ -2335,9 +2340,18 @@ fn queued_spokesperson_settings_are_ready(
     directive_speeches: &HashMap<u64, DirectiveSpeech>,
     cancelled_directives: &HashSet<u64>,
 ) -> bool {
-    !gate.is_busy(active.is_some(), responses.len())
-        && !expert_output_reserved(directive_speeches, cancelled_directives, active, responses)
-        && !live_truncation_pending(responses)
+    gate.activity.queued_settings_are_ready(RealtimeHostWork {
+        playback_active: active.is_some(),
+        retained_responses: responses.len(),
+        expert_output_reserved: expert_output_reserved(
+            directive_speeches,
+            cancelled_directives,
+            active,
+            responses,
+        ),
+        pending_expert_prepare: gate.pending_prepare.is_some(),
+        truncation_pending: live_truncation_pending(responses),
+    })
 }
 
 fn validate_queued_spokesperson_settings(
@@ -2359,12 +2373,15 @@ fn spokesperson_voice_update_is_safe(
     snapshot: &berd_voice::TtsConfigurationSnapshot,
     quiescent: bool,
 ) -> bool {
-    let handoff_safe =
-        !core.has_unresolved_handoff() || matches!(update.purpose(), VoiceUpdatePurpose::Settings);
-    core.semantic_revision() == update.semantic_revision
-        && snapshot.revision == update.base_revision
-        && handoff_safe
-        && quiescent
+    voice_update_is_safe(
+        update.purpose(),
+        update.semantic_revision,
+        core.semantic_revision(),
+        update.base_revision,
+        snapshot.revision,
+        core.has_unresolved_handoff(),
+        quiescent,
+    )
 }
 
 fn unavailable_spokesperson_title(connection_lost: bool, quiescent: bool) -> &'static str {
@@ -2421,7 +2438,7 @@ fn run_expert_spokesperson_session(
     let mut session_tts: Option<berd_voice::TtsConfigurationSnapshot> = None;
     let mut input_during_tts_slot: Option<InputDuringTtsSlot> = None;
     let mut input_muted = false;
-    let mut queued_tts_settings: Option<PendingSpokespersonSettingsUpdate> = None;
+    let mut queued_tts_settings = VoiceUpdateQueue::<PendingSpokespersonSettingsUpdate>::default();
     let mut pending_voice_update: Option<VoiceUpdateTransaction> = None;
     let mut spokesperson_renew_at: Option<Instant> = None;
     let mut next_maintenance_id = u64::MAX;
@@ -2523,19 +2540,16 @@ fn run_expert_spokesperson_session(
                 }
             }
         }
-        if queued_tts_settings.is_some()
-            && pending_voice_update.is_none()
-            && queued_spokesperson_settings_are_ready(
-                &turn_gate,
-                active.as_ref(),
-                &responses,
-                &directive_speeches,
-                &cancelled_directives,
-            )
+        let queued_settings_ready = queued_spokesperson_settings_are_ready(
+            &turn_gate,
+            active.as_ref(),
+            &responses,
+            &directive_speeches,
+            &cancelled_directives,
+        );
+        if let Some(request) =
+            queued_tts_settings.take_ready(pending_voice_update.is_some(), queued_settings_ready)
         {
-            let request = queued_tts_settings
-                .take()
-                .expect("matched queued settings request");
             let snapshot = session_tts.as_ref().expect("initialized TTS snapshot");
             let id = request.id;
             pending_voice_update = match VoiceUpdateTransaction::start(
@@ -3260,7 +3274,9 @@ fn run_expert_spokesperson_session(
             &responses,
         ) {
             if let Some(request) = turn_gate.take_ready(
-                active.is_some() || pending_voice_update.is_some() || queued_tts_settings.is_some(),
+                active.is_some()
+                    || pending_voice_update.is_some()
+                    || queued_tts_settings.is_pending(),
                 responses.len(),
             ) {
                 submit_expert_prepare(
@@ -3455,7 +3471,7 @@ fn run_expert_spokesperson_session(
                         active.as_ref(),
                         &responses,
                     ),
-                    pending_voice_update.is_some() || queued_tts_settings.is_some(),
+                    pending_voice_update.is_some() || queued_tts_settings.is_pending(),
                     active.is_some(),
                     responses.len(),
                 );
@@ -3841,7 +3857,7 @@ fn run_expert_spokesperson_session(
                     base_revision: expected_revision,
                     settings,
                 };
-                if queued_tts_settings.is_some() || pending_voice_update.is_some() {
+                if queued_tts_settings.is_busy(pending_voice_update.is_some()) {
                     reject_spokesperson_tts_settings(
                         id,
                         session_tts.as_ref().expect("initialized TTS snapshot"),
@@ -3862,7 +3878,12 @@ fn run_expert_spokesperson_session(
                         &mut writer,
                     )?;
                 } else {
-                    queued_tts_settings = Some(request);
+                    if queued_tts_settings
+                        .try_enqueue(pending_voice_update.is_some(), request)
+                        .is_err()
+                    {
+                        return Err("validated idle settings queue rejected a request".into());
+                    }
                 }
             }
             Input::Request(SessionRequest::SetPaused { .. }) => {}
