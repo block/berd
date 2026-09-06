@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::LazyLock;
 
 use serde::{Deserialize, Serialize};
@@ -979,7 +979,7 @@ enum PendingResponse {
 #[derive(Debug, Default)]
 pub struct RealtimeResponseCoordinator {
     active_response: Option<ActiveResponse>,
-    pending_responses: Vec<PendingResponse>,
+    pending_responses: VecDeque<PendingResponse>,
     completed_handoff_ids: Vec<String>,
     failed_handoff_ids: Vec<String>,
 }
@@ -1005,7 +1005,8 @@ impl RealtimeResponseCoordinator {
                 events: vec![item, response],
             });
         }
-        self.pending_responses.push(PendingResponse::Say(message));
+        self.pending_responses
+            .push_back(PendingResponse::Say(message));
         Ok(RealtimeCoordinatorResult {
             status: RealtimeRequestStatus::Queued,
             events: vec![item],
@@ -1035,7 +1036,7 @@ impl RealtimeResponseCoordinator {
             .iter()
             .any(|pending| matches!(pending, PendingResponse::Default))
         {
-            self.pending_responses.push(PendingResponse::Default);
+            self.pending_responses.push_back(PendingResponse::Default);
         }
         RealtimeCoordinatorResult {
             status: RealtimeRequestStatus::Queued,
@@ -1072,7 +1073,7 @@ impl RealtimeResponseCoordinator {
             .iter()
             .any(|pending| matches!(pending, PendingResponse::Default))
         {
-            self.pending_responses.push(PendingResponse::Default);
+            self.pending_responses.push_back(PendingResponse::Default);
         }
         let mut events = Vec::new();
         let active = self.active_response.as_ref().expect("active response");
@@ -1177,7 +1178,7 @@ impl RealtimeResponseCoordinator {
                 target.extend(message.resolved_handoff_ids);
             }
         }
-        let Some(pending) = self.pending_responses.first() else {
+        let Some(pending) = self.pending_responses.front() else {
             return Ok(Vec::new());
         };
         let event = match pending {
@@ -1186,7 +1187,10 @@ impl RealtimeResponseCoordinator {
                 realtime_expert_say_response(&message.message, message.directive_id)?
             }
         };
-        let pending = self.pending_responses.remove(0);
+        let pending = self
+            .pending_responses
+            .pop_front()
+            .expect("pending response");
         self.active_response = Some(awaiting_created_response(match pending {
             PendingResponse::Default => None,
             PendingResponse::Say(message) => Some(message),
