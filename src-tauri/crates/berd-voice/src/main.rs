@@ -37,7 +37,8 @@ use berd_voice::protocol::{
 };
 use berd_voice::realtime_audio_delivery::RealtimeAudioDelivery;
 use berd_voice::realtime_host_lifecycle::{
-    voice_update_is_safe, RealtimeHostActivity, RealtimeHostWork,
+    session_loss_action, spokesperson_renew_after, voice_update_is_safe, RealtimeHostActivity,
+    RealtimeHostWork, RealtimeSessionLossAction,
 };
 use berd_voice::realtime_pipe::RealtimePipeExchange;
 use berd_voice::session::{PrepareOutcome, PrepareRequest, SessionCore};
@@ -70,17 +71,6 @@ const FRAME_MAGIC: [u8; 2] = *b"BV";
 const JSON_FRAME_KIND: u8 = 1;
 const PCM_FRAME_KIND: u8 = 2;
 const FRAME_HEADER_BYTES: usize = 8;
-const DEFAULT_SPOKESPERSON_RENEW_AFTER: Duration = Duration::from_secs(55 * 60);
-
-fn spokesperson_renew_after() -> Duration {
-    std::env::var("BERD_VOICE_REALTIME_RENEW_AFTER_MS")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .filter(|value| *value > 0)
-        .map(Duration::from_millis)
-        .unwrap_or(DEFAULT_SPOKESPERSON_RENEW_AFTER)
-}
-
 const PCM_FRAME_BYTES: usize = INPUT_FRAME_SAMPLES * std::mem::size_of::<f32>();
 const MAX_FINAL_TEXT_BYTES: usize = 64 * 1024;
 const MAX_SPEAK_TEXT_BYTES: usize = 16 * 1024;
@@ -3058,21 +3048,25 @@ fn run_expert_spokesperson_session(
                             cancel_live_playback(&mut active);
                             break;
                         }
-                        let start_recovery = match pending_voice_update
-                            .as_ref()
-                            .map(VoiceUpdateTransaction::purpose)
-                        {
-                            Some(VoiceUpdatePurpose::Renewal) => {
+                        let recovery_action = session_loss_action(
+                            pending_voice_update
+                                .as_ref()
+                                .map(VoiceUpdateTransaction::purpose),
+                            quiescent,
+                            core.has_unresolved_handoff(),
+                        );
+                        let start_recovery = match recovery_action {
+                            RealtimeSessionLossAction::ContinuePendingRecovery => {
                                 pending_voice_update
                                     .as_mut()
                                     .expect("renewal exists")
                                     .recover_after_session_loss(message.clone())?;
                                 false
                             }
-                            Some(VoiceUpdatePurpose::Settings) => {
+                            RealtimeSessionLossAction::ReplacePendingAndRecover => {
                                 unreachable!("settings updates were settled before recovery")
                             }
-                            Some(VoiceUpdatePurpose::SessionRecovery { .. }) => {
+                            RealtimeSessionLossAction::Fail => {
                                 write_protocol_fatal(
                                     &mut writer,
                                     if connection_lost {
@@ -3084,7 +3078,7 @@ fn run_expert_spokesperson_session(
                                 )?;
                                 break;
                             }
-                            None => true,
+                            RealtimeSessionLossAction::StartRecovery => true,
                         };
                         if start_recovery {
                             let snapshot = session_tts.as_ref().expect("initialized TTS snapshot");

@@ -17,10 +17,13 @@ use crate::{
     openai_spokesperson::{OpenAiSpokespersonConfig, OpenAiSpokespersonRuntime},
     openai_spokesperson::{SpokespersonCommand, SpokespersonEvent},
     realtime_audio_delivery::RealtimeAudioDelivery,
-    realtime_host_lifecycle::{voice_update_is_safe, RealtimeHostActivity, RealtimeHostWork},
+    realtime_host_lifecycle::{
+        session_loss_action, spokesperson_renew_after, voice_update_is_safe, RealtimeHostActivity,
+        RealtimeHostWork, RealtimeSessionLossAction,
+    },
     spokesperson_voice_update::{
-        validate_voice_update_settings, VoiceBarrierAction, VoiceUpdateAction, VoiceUpdateQueue,
-        VoiceUpdateRequest, VoiceUpdateTransaction,
+        validate_voice_update_settings, VoiceBarrierAction, VoiceUpdateAction, VoiceUpdatePurpose,
+        VoiceUpdateQueue, VoiceUpdateRequest, VoiceUpdateTransaction,
     },
     PcmAudioOutput, TtsConfigurationSnapshot, TtsSettings,
 };
@@ -213,6 +216,11 @@ impl RealtimePlaybackHost {
 
 enum ManagedRealtimeHostCommand {
     Send(SpokespersonCommand),
+    UpdateSemanticContext {
+        revision: u64,
+        transcript: Vec<SemanticTurn>,
+        unresolved_handoff: bool,
+    },
     UpdateSettings {
         request: VoiceUpdateRequest,
         semantic_transcript: Vec<SemanticTurn>,
@@ -229,7 +237,7 @@ struct QueuedManagedUpdate {
 
 struct PendingManagedUpdate {
     transaction: VoiceUpdateTransaction,
-    completed: SyncSender<Result<TtsConfigurationSnapshot, String>>,
+    completed: Option<SyncSender<Result<TtsConfigurationSnapshot, String>>>,
 }
 
 pub struct ManagedRealtimeHost {
@@ -242,6 +250,22 @@ impl ManagedRealtimeHost {
     pub fn spawn(
         config: OpenAiSpokespersonConfig,
         semantic_revision: Arc<AtomicU64>,
+        create_output: impl FnMut() -> Result<Box<dyn PcmAudioOutput>, String> + Send + 'static,
+        emit: impl FnMut(Value) -> Result<(), String> + Send + 'static,
+    ) -> Result<Self, String> {
+        Self::spawn_with_renew_after(
+            config,
+            semantic_revision,
+            spokesperson_renew_after(),
+            create_output,
+            emit,
+        )
+    }
+
+    fn spawn_with_renew_after(
+        config: OpenAiSpokespersonConfig,
+        semantic_revision: Arc<AtomicU64>,
+        renew_after: Duration,
         create_output: impl FnMut() -> Result<Box<dyn PcmAudioOutput>, String> + Send + 'static,
         emit: impl FnMut(Value) -> Result<(), String> + Send + 'static,
     ) -> Result<Self, String> {
@@ -261,6 +285,7 @@ impl ManagedRealtimeHost {
                 if let Err(message) = run_managed_realtime_host(
                     config,
                     semantic_revision,
+                    renew_after,
                     worker_snapshot,
                     receiver,
                     create_output,
@@ -288,6 +313,21 @@ impl ManagedRealtimeHost {
             .lock()
             .map(|snapshot| snapshot.clone())
             .map_err(|_| "Spokesperson settings are unavailable".into())
+    }
+
+    pub fn update_semantic_context(
+        &self,
+        revision: u64,
+        transcript: Vec<SemanticTurn>,
+        unresolved_handoff: bool,
+    ) -> Result<(), String> {
+        self.commands
+            .send(ManagedRealtimeHostCommand::UpdateSemanticContext {
+                revision,
+                transcript,
+                unresolved_handoff,
+            })
+            .map_err(|_| "Spokesperson runtime is unavailable".to_string())
     }
 
     pub fn update_settings(
@@ -354,6 +394,7 @@ fn reap_managed_worker(worker: thread::JoinHandle<()>) {
 fn run_managed_realtime_host(
     config: OpenAiSpokespersonConfig,
     semantic_revision: Arc<AtomicU64>,
+    renew_after: Duration,
     snapshot: Arc<Mutex<TtsConfigurationSnapshot>>,
     commands: Receiver<ManagedRealtimeHostCommand>,
     create_output: impl FnMut() -> Result<Box<dyn PcmAudioOutput>, String>,
@@ -362,6 +403,7 @@ fn run_managed_realtime_host(
     let result = run_managed_realtime_host_inner(
         config,
         semantic_revision,
+        renew_after,
         snapshot,
         commands,
         create_output,
@@ -376,6 +418,7 @@ fn run_managed_realtime_host(
 fn run_managed_realtime_host_inner(
     mut config: OpenAiSpokespersonConfig,
     semantic_revision: Arc<AtomicU64>,
+    renew_after: Duration,
     snapshot: Arc<Mutex<TtsConfigurationSnapshot>>,
     commands: Receiver<ManagedRealtimeHostCommand>,
     mut create_output: impl FnMut() -> Result<Box<dyn PcmAudioOutput>, String>,
@@ -386,6 +429,10 @@ fn run_managed_realtime_host_inner(
     let mut activity = RealtimeHostActivity::default();
     let mut queued_update = VoiceUpdateQueue::<QueuedManagedUpdate>::default();
     let mut pending_update: Option<PendingManagedUpdate> = None;
+    let mut semantic_transcript = Vec::new();
+    let mut unresolved_handoff = false;
+    let mut renew_at = Some(Instant::now() + renew_after);
+    let mut next_maintenance_id = u64::MAX;
     let mut shutting_down = false;
 
     while !shutting_down {
@@ -413,7 +460,18 @@ fn run_managed_realtime_host_inner(
                             .map_err(|_| "Realtime input overflowed during voice cutover")?;
                     }
                 }
-                Ok(ManagedRealtimeHostCommand::Send(command)) => runtime.send(command)?,
+                Ok(ManagedRealtimeHostCommand::Send(command)) => runtime
+                    .send(command)
+                    .map_err(|error| format!("Could not send input to Spokesperson: {error}"))?,
+                Ok(ManagedRealtimeHostCommand::UpdateSemanticContext {
+                    revision,
+                    transcript,
+                    unresolved_handoff: has_unresolved_handoff,
+                }) => {
+                    semantic_revision.store(revision, Ordering::SeqCst);
+                    semantic_transcript = transcript;
+                    unresolved_handoff = has_unresolved_handoff;
+                }
                 Ok(ManagedRealtimeHostCommand::UpdateSettings {
                     request,
                     semantic_transcript,
@@ -485,13 +543,42 @@ fn run_managed_realtime_host_inner(
                 Ok(transaction) => {
                     pending_update = Some(PendingManagedUpdate {
                         transaction,
-                        completed: queued.completed,
+                        completed: Some(queued.completed),
                     });
                 }
                 Err(message) => {
                     let _ = queued.completed.send(Err(message));
                 }
             }
+        }
+
+        if pending_update.is_none()
+            && renew_at.is_some_and(|deadline| Instant::now() >= deadline)
+            && quiescent
+            && !unresolved_handoff
+        {
+            let current = snapshot
+                .lock()
+                .map_err(|_| "Spokesperson settings are unavailable")?
+                .clone();
+            let request = VoiceUpdateRequest {
+                id: next_maintenance_id,
+                base_revision: current.revision,
+                settings: current.settings.clone(),
+                semantic_revision: semantic_revision.load(Ordering::SeqCst),
+            };
+            next_maintenance_id = next_maintenance_id.wrapping_sub(1);
+            pending_update = Some(PendingManagedUpdate {
+                transaction: VoiceUpdateTransaction::start_with_purpose(
+                    request,
+                    current.revision,
+                    true,
+                    &config,
+                    semantic_transcript.clone(),
+                    VoiceUpdatePurpose::Renewal,
+                )?,
+                completed: None,
+            });
         }
 
         if let Some(update) = pending_update.as_ref() {
@@ -505,7 +592,7 @@ fn run_managed_realtime_host_inner(
                 semantic_revision.load(Ordering::SeqCst),
                 update.transaction.base_revision,
                 current.revision,
-                false,
+                unresolved_handoff,
                 quiescent,
             );
             match update.transaction.next_action(Instant::now(), safe) {
@@ -515,15 +602,24 @@ fn run_managed_realtime_host_inner(
                     .expect("voice update exists")
                     .transaction
                     .begin_input_barrier(&runtime)?,
-                VoiceUpdateAction::Activate => activate_managed_update(
-                    &mut pending_update,
-                    &mut runtime,
-                    &mut events,
-                    &mut config,
-                    &snapshot,
-                )?,
+                VoiceUpdateAction::Activate => {
+                    activate_managed_update(
+                        &mut pending_update,
+                        &mut runtime,
+                        &mut events,
+                        &mut config,
+                        &snapshot,
+                    )?;
+                    renew_at = Some(Instant::now() + renew_after);
+                }
                 VoiceUpdateAction::Reject(message) => {
+                    let was_renewal = pending_update.as_ref().is_some_and(|update| {
+                        matches!(update.transaction.purpose(), VoiceUpdatePurpose::Renewal)
+                    });
                     reject_managed_update(&mut pending_update, &runtime, message)?;
+                    if was_renewal {
+                        renew_at = Some(Instant::now() + Duration::from_secs(30));
+                    }
                 }
             }
         }
@@ -564,7 +660,7 @@ fn run_managed_realtime_host_inner(
                                 semantic_revision.load(Ordering::SeqCst),
                                 update.transaction.base_revision,
                                 current.revision,
-                                false,
+                                unresolved_handoff,
                                 quiescent,
                             )
                         });
@@ -580,17 +676,97 @@ fn run_managed_realtime_host_inner(
                                 });
                         match action {
                             VoiceBarrierAction::Ignore => {}
-                            VoiceBarrierAction::Activate => activate_managed_update(
-                                &mut pending_update,
-                                &mut runtime,
-                                &mut events,
-                                &mut config,
-                                &snapshot,
-                            )?,
+                            VoiceBarrierAction::Activate => {
+                                activate_managed_update(
+                                    &mut pending_update,
+                                    &mut runtime,
+                                    &mut events,
+                                    &mut config,
+                                    &snapshot,
+                                )?;
+                                renew_at = Some(Instant::now() + renew_after);
+                            }
                             VoiceBarrierAction::Reject(message) => {
                                 reject_managed_update(&mut pending_update, &runtime, message)?;
                             }
                         }
+                    }
+                    SpokespersonEvent::Expired(message)
+                    | SpokespersonEvent::SessionLost(message) => {
+                        if let Some(queued) = queued_update.take() {
+                            let _ = queued.completed.send(Err(
+                                "Spokesperson session ended before the queued settings update could begin"
+                                    .into(),
+                            ));
+                        }
+                        let recovery_action = session_loss_action(
+                            pending_update
+                                .as_ref()
+                                .map(|update| update.transaction.purpose()),
+                            quiescent,
+                            unresolved_handoff,
+                        );
+                        let start_recovery = match recovery_action {
+                            RealtimeSessionLossAction::Fail => return Err(message.clone()),
+                            RealtimeSessionLossAction::ContinuePendingRecovery => {
+                                pending_update
+                                    .as_mut()
+                                    .expect("renewal exists")
+                                    .transaction
+                                    .recover_after_session_loss(message.clone())?;
+                                false
+                            }
+                            RealtimeSessionLossAction::ReplacePendingAndRecover => {
+                                let settings_update =
+                                    pending_update.take().expect("matched settings update");
+                                if let Some(completed) = settings_update.completed {
+                                    let _ = completed.send(Err(
+                                        "Spokesperson session ended before the settings update completed"
+                                            .into(),
+                                    ));
+                                }
+                                settings_update.transaction.finish_candidate()?;
+                                true
+                            }
+                            RealtimeSessionLossAction::StartRecovery => true,
+                        };
+                        if start_recovery {
+                            let current = snapshot
+                                .lock()
+                                .map_err(|_| "Spokesperson settings are unavailable")?
+                                .clone();
+                            let request = VoiceUpdateRequest {
+                                id: next_maintenance_id,
+                                base_revision: current.revision,
+                                settings: current.settings.clone(),
+                                semantic_revision: semantic_revision.load(Ordering::SeqCst),
+                            };
+                            next_maintenance_id = next_maintenance_id.wrapping_sub(1);
+                            pending_update = Some(PendingManagedUpdate {
+                                transaction: VoiceUpdateTransaction::start_with_purpose(
+                                    request,
+                                    current.revision,
+                                    true,
+                                    &config,
+                                    semantic_transcript.clone(),
+                                    VoiceUpdatePurpose::SessionRecovery {
+                                        cause: message.clone(),
+                                    },
+                                )?,
+                                completed: None,
+                            });
+                        }
+                        continue;
+                    }
+                    SpokespersonEvent::Closed
+                        if pending_update.as_ref().is_some_and(|update| {
+                            matches!(
+                                update.transaction.purpose(),
+                                VoiceUpdatePurpose::SessionRecovery { .. }
+                            )
+                        }) =>
+                    {
+                        continue;
                     }
                     _ => {}
                 }
@@ -600,6 +776,16 @@ fn run_managed_realtime_host_inner(
                 }
             }
             Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected)
+                if pending_update.as_ref().is_some_and(|update| {
+                    matches!(
+                        update.transaction.purpose(),
+                        VoiceUpdatePurpose::SessionRecovery { .. }
+                    )
+                }) =>
+            {
+                thread::sleep(Duration::from_millis(10));
+            }
             Err(RecvTimeoutError::Disconnected) => break,
         }
         host.finish_drained(emit)?;
@@ -611,9 +797,9 @@ fn run_managed_realtime_host_inner(
             .send(Err("Spokesperson session stopped".into()));
     }
     if let Some(update) = pending_update {
-        let _ = update
-            .completed
-            .send(Err("Spokesperson session stopped".into()));
+        if let Some(completed) = update.completed {
+            let _ = completed.send(Err("Spokesperson session stopped".into()));
+        }
         update.transaction.finish_candidate()?;
     }
     runtime.send(SpokespersonCommand::Shutdown)?;
@@ -643,29 +829,38 @@ fn activate_managed_update(
 ) -> Result<(), String> {
     let pending = pending.take().expect("matched pending voice update");
     let activated = pending.transaction.activate();
+    let report_settings = matches!(activated.purpose, VoiceUpdatePurpose::Settings);
     let old_runtime = std::mem::replace(runtime, activated.runtime);
     *events = activated.events;
     old_runtime.finish()?;
     for frame in activated.held_input {
-        runtime.send(SpokespersonCommand::InputPcm48Khz(
-            frame.as_samples().to_vec(),
-        ))?;
+        runtime
+            .send(SpokespersonCommand::InputPcm48Khz(
+                frame.as_samples().to_vec(),
+            ))
+            .map_err(|error| {
+                format!("Could not restore buffered input after Spokesperson cutover: {error}")
+            })?;
     }
-    if let TtsSettings::OpenAi { voice, rate, .. } = &activated.settings {
-        config.set_voice_and_speed(voice.clone(), *rate);
+    if report_settings {
+        if let TtsSettings::OpenAi { voice, rate, .. } = &activated.settings {
+            config.set_voice_and_speed(voice.clone(), *rate);
+        }
+        let applied = {
+            let mut snapshot = snapshot
+                .lock()
+                .map_err(|_| "Spokesperson settings are unavailable")?;
+            snapshot.revision = snapshot
+                .revision
+                .checked_add(1)
+                .ok_or("TTS configuration revision overflow")?;
+            snapshot.settings = activated.settings;
+            snapshot.clone()
+        };
+        if let Some(completed) = pending.completed {
+            let _ = completed.send(Ok(applied));
+        }
     }
-    let applied = {
-        let mut snapshot = snapshot
-            .lock()
-            .map_err(|_| "Spokesperson settings are unavailable")?;
-        snapshot.revision = snapshot
-            .revision
-            .checked_add(1)
-            .ok_or("TTS configuration revision overflow")?;
-        snapshot.settings = activated.settings;
-        snapshot.clone()
-    };
-    let _ = pending.completed.send(Ok(applied));
     Ok(())
 }
 
@@ -676,15 +871,31 @@ fn reject_managed_update(
 ) -> Result<(), String> {
     let pending = pending.take().expect("matched pending voice update");
     pending.transaction.abort(runtime)?;
-    let _ = pending.completed.send(Err(message));
+    if let Some(completed) = pending.completed {
+        let _ = completed.send(Err(message));
+    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{openai_spokesperson::SpokespersonEvent, PcmAudioOutput};
+    use std::{
+        sync::{atomic::AtomicU64, mpsc, Arc},
+        time::Duration,
+    };
 
-    use super::RealtimePlaybackHost;
+    use futures_util::{SinkExt, StreamExt};
+    use serde_json::{json, Value};
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
+
+    use crate::{
+        openai_realtime_protocol::RealtimeSpokespersonSessionOptions,
+        openai_spokesperson::{OpenAiSpokespersonConfig, SpokespersonEvent},
+        PcmAudioOutput,
+    };
+
+    use super::{ManagedRealtimeHost, RealtimePlaybackHost};
 
     struct FakeOutput {
         played_frames: u64,
@@ -708,6 +919,193 @@ mod tests {
         fn played_frames(&self) -> u64 {
             self.played_frames
         }
+    }
+
+    async fn receive_json(socket: &mut WebSocketStream<tokio::net::TcpStream>) -> Value {
+        let Message::Text(text) = socket.next().await.unwrap().unwrap() else {
+            panic!("expected JSON text")
+        };
+        serde_json::from_str(&text).unwrap()
+    }
+
+    async fn acknowledge_session(
+        socket: &mut WebSocketStream<tokio::net::TcpStream>,
+        update: &Value,
+    ) {
+        socket
+            .send(Message::Text(
+                json!({
+                    "type": "session.updated",
+                    "session": {
+                        "model": "test-model",
+                        "audio": { "output": update["session"]["audio"]["output"].clone() }
+                    }
+                })
+                .to_string()
+                .into(),
+            ))
+            .await
+            .unwrap();
+    }
+
+    async fn wait_for_close(socket: &mut WebSocketStream<tokio::net::TcpStream>) {
+        loop {
+            match socket.next().await {
+                Some(Ok(Message::Close(_))) | None => break,
+                Some(Ok(_)) => {}
+                Some(Err(error)) => panic!("Realtime test socket failed: {error}"),
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn managed_host_renews_an_idle_realtime_session() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("ws://{}/", listener.local_addr().unwrap());
+        let (renewed_tx, renewed_rx) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut first = accept_async(stream).await.unwrap();
+            let first_update = receive_json(&mut first).await;
+            assert_eq!(first_update["type"], "session.update");
+            acknowledge_session(&mut first, &first_update).await;
+
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut second = accept_async(stream).await.unwrap();
+            let second_update = receive_json(&mut second).await;
+            assert_eq!(second_update["type"], "session.update");
+            acknowledge_session(&mut second, &second_update).await;
+
+            assert_eq!(
+                receive_json(&mut first).await["type"],
+                "input_audio_buffer.clear"
+            );
+            first
+                .send(Message::Text(
+                    json!({"type": "input_audio_buffer.cleared"})
+                        .to_string()
+                        .into(),
+                ))
+                .await
+                .unwrap();
+            wait_for_close(&mut first).await;
+            renewed_tx.send(()).unwrap();
+            wait_for_close(&mut second).await;
+        });
+
+        let config = OpenAiSpokespersonConfig {
+            endpoint,
+            api_key: "test-key".into(),
+            session: RealtimeSpokespersonSessionOptions {
+                model: Some("test-model".into()),
+                voice: Some("test-voice".into()),
+                speed: Some(1.0),
+                ..Default::default()
+            },
+            semantic_transcript: Vec::new(),
+        };
+        let (emitted_tx, emitted_rx) = mpsc::channel();
+        let host = ManagedRealtimeHost::spawn_with_renew_after(
+            config,
+            Arc::new(AtomicU64::new(0)),
+            Duration::from_millis(100),
+            || Ok(Box::new(FakeOutput { played_frames: 0 })),
+            move |event| {
+                let _ = emitted_tx.send(event);
+                Ok(())
+            },
+        )
+        .unwrap();
+        tokio::task::spawn_blocking(move || loop {
+            let event = emitted_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+            if event["type"] == "berd.realtime.ready" {
+                break;
+            }
+        })
+        .await
+        .unwrap();
+
+        tokio::time::timeout(Duration::from_secs(3), renewed_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        host.finish().unwrap();
+        server.await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn managed_host_recovers_an_idle_lost_realtime_session() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("ws://{}/", listener.local_addr().unwrap());
+        let (candidate_ready_tx, candidate_ready_rx) = tokio::sync::oneshot::channel();
+        let (recovered_tx, recovered_rx) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut first = accept_async(stream).await.unwrap();
+            let first_update = receive_json(&mut first).await;
+            acknowledge_session(&mut first, &first_update).await;
+            first.send(Message::Close(None)).await.unwrap();
+            drop(first);
+
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut second = accept_async(stream).await.unwrap();
+            let second_update = receive_json(&mut second).await;
+            acknowledge_session(&mut second, &second_update).await;
+            candidate_ready_tx.send(()).unwrap();
+            assert_eq!(
+                receive_json(&mut second).await["type"],
+                "input_audio_buffer.append"
+            );
+            recovered_tx.send(()).unwrap();
+            wait_for_close(&mut second).await;
+        });
+
+        let config = OpenAiSpokespersonConfig {
+            endpoint,
+            api_key: "test-key".into(),
+            session: RealtimeSpokespersonSessionOptions {
+                model: Some("test-model".into()),
+                voice: Some("test-voice".into()),
+                speed: Some(1.0),
+                ..Default::default()
+            },
+            semantic_transcript: Vec::new(),
+        };
+        let (emitted_tx, emitted_rx) = mpsc::channel();
+        let host = ManagedRealtimeHost::spawn_with_renew_after(
+            config,
+            Arc::new(AtomicU64::new(0)),
+            Duration::from_secs(3_600),
+            || Ok(Box::new(FakeOutput { played_frames: 0 })),
+            move |event| {
+                let _ = emitted_tx.send(event);
+                Ok(())
+            },
+        )
+        .unwrap();
+        loop {
+            let event = emitted_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+            if event["type"] == "berd.realtime.ready" {
+                break;
+            }
+        }
+
+        tokio::time::timeout(Duration::from_secs(3), candidate_ready_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        host.send(
+            crate::openai_spokesperson::SpokespersonCommand::InputPcm48Khz(
+                vec![0.25; crate::input::INPUT_FRAME_SAMPLES],
+            ),
+        )
+        .unwrap();
+        tokio::time::timeout(Duration::from_secs(3), recovered_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        host.finish().unwrap();
+        server.await.unwrap();
     }
 
     #[test]

@@ -37,6 +37,22 @@ struct NativeRealtimeRuntime {
     semantic_revision: Arc<AtomicU64>,
 }
 
+impl NativeRealtimeRuntime {
+    fn publish_semantic_context(&self) -> Result<(), String> {
+        let revision = self.protocol.semantic_revision();
+        if self.semantic_revision.load(Ordering::SeqCst) == revision {
+            return Ok(());
+        }
+        self.runtime.update_semantic_context(
+            revision,
+            self.protocol.semantic_transcript(),
+            self.protocol.has_unresolved_handoff(),
+        )?;
+        self.semantic_revision.store(revision, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
 const OPENAI_REALTIME_RUNTIME_EVENT: &str = "openai-realtime-runtime-event";
 
 #[derive(Clone, Serialize)]
@@ -415,9 +431,7 @@ pub fn deliver_openai_realtime_expert_message(
     for event in request.events {
         entry.runtime.send(SpokespersonCommand::Provider(event))?;
     }
-    entry
-        .semantic_revision
-        .store(entry.protocol.semantic_revision(), Ordering::SeqCst);
+    entry.publish_semantic_context()?;
     Ok(json!({
         "accepted": true,
         "cursor": accepted.cursor,
@@ -474,9 +488,7 @@ pub fn dismiss_openai_realtime_handoffs_with_context(
     for event in request.events {
         entry.runtime.send(SpokespersonCommand::Provider(event))?;
     }
-    entry
-        .semantic_revision
-        .store(entry.protocol.semantic_revision(), Ordering::SeqCst);
+    entry.publish_semantic_context()?;
     Ok(json!({
         "accepted": true,
         "cursor": accepted.cursor,
@@ -522,9 +534,7 @@ pub fn reduce_openai_realtime_spokesperson_event(
         .get_mut(&session_id)
         .ok_or_else(|| "OpenAI Realtime protocol session is not active".to_string())?;
     let result = entry.protocol.handle_provider_event(&event)?;
-    entry
-        .semantic_revision
-        .store(entry.protocol.semantic_revision(), Ordering::SeqCst);
+    entry.publish_semantic_context()?;
     Ok(result)
 }
 
@@ -562,9 +572,7 @@ fn with_protocol_session<T>(
         .get_mut(&session_id)
         .ok_or_else(|| "OpenAI Realtime protocol session is not active".to_string())?;
     let result = operation(&mut entry.protocol)?;
-    entry
-        .semantic_revision
-        .store(entry.protocol.semantic_revision(), Ordering::SeqCst);
+    entry.publish_semantic_context()?;
     Ok(result)
 }
 

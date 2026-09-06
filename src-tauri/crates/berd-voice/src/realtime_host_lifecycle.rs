@@ -1,6 +1,17 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, time::Duration};
 
 use crate::spokesperson_voice_update::VoiceUpdatePurpose;
+
+const DEFAULT_SPOKESPERSON_RENEW_AFTER: Duration = Duration::from_secs(55 * 60);
+
+pub fn spokesperson_renew_after() -> Duration {
+    std::env::var("BERD_VOICE_REALTIME_RENEW_AFTER_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .map(Duration::from_millis)
+        .unwrap_or(DEFAULT_SPOKESPERSON_RENEW_AFTER)
+}
 
 /// Transport-independent activity that determines whether an OpenAI Realtime
 /// Spokesperson session may start or activate lifecycle work.
@@ -86,9 +97,36 @@ pub fn voice_update_is_safe(
         && quiescent
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RealtimeSessionLossAction {
+    Fail,
+    ContinuePendingRecovery,
+    ReplacePendingAndRecover,
+    StartRecovery,
+}
+
+pub fn session_loss_action(
+    pending: Option<&VoiceUpdatePurpose>,
+    quiescent: bool,
+    unresolved_handoff: bool,
+) -> RealtimeSessionLossAction {
+    if !quiescent || unresolved_handoff {
+        return RealtimeSessionLossAction::Fail;
+    }
+    match pending {
+        Some(VoiceUpdatePurpose::Renewal) => RealtimeSessionLossAction::ContinuePendingRecovery,
+        Some(VoiceUpdatePurpose::Settings) => RealtimeSessionLossAction::ReplacePendingAndRecover,
+        Some(VoiceUpdatePurpose::SessionRecovery { .. }) => RealtimeSessionLossAction::Fail,
+        None => RealtimeSessionLossAction::StartRecovery,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{voice_update_is_safe, RealtimeHostActivity, RealtimeHostWork};
+    use super::{
+        session_loss_action, voice_update_is_safe, RealtimeHostActivity, RealtimeHostWork,
+        RealtimeSessionLossAction,
+    };
     use crate::spokesperson_voice_update::VoiceUpdatePurpose;
 
     #[test]
@@ -131,5 +169,25 @@ mod tests {
             truncation_pending: true,
             ..RealtimeHostWork::default()
         }));
+    }
+
+    #[test]
+    fn session_loss_recovery_policy_is_shared_by_both_hosts() {
+        assert_eq!(
+            session_loss_action(None, true, false),
+            RealtimeSessionLossAction::StartRecovery
+        );
+        assert_eq!(
+            session_loss_action(Some(&VoiceUpdatePurpose::Renewal), true, false),
+            RealtimeSessionLossAction::ContinuePendingRecovery
+        );
+        assert_eq!(
+            session_loss_action(Some(&VoiceUpdatePurpose::Settings), true, false),
+            RealtimeSessionLossAction::ReplacePendingAndRecover
+        );
+        assert_eq!(
+            session_loss_action(None, true, true),
+            RealtimeSessionLossAction::Fail
+        );
     }
 }
