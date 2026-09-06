@@ -584,7 +584,7 @@ fn run_managed_realtime_host_inner(
             .send(Err("Spokesperson session stopped".into()));
         update.transaction.finish_candidate()?;
     }
-    let _ = runtime.send(SpokespersonCommand::Shutdown);
+    runtime.send(SpokespersonCommand::Shutdown)?;
     let drain_deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < drain_deadline {
         match events.recv_timeout(Duration::from_millis(10)) {

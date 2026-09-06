@@ -196,6 +196,7 @@ const mocks = vi.hoisted(() => ({
   },
   releaseBridge: vi.fn(),
   releaseMicrophone: vi.fn(),
+  releaseRuntime: vi.fn(),
   setControlsSuppressed: vi.fn(),
   startControls: vi.fn(),
   startRuntime: vi.fn(),
@@ -349,6 +350,7 @@ vi.mock("@/shared/api/openaiRealtime", () => ({
     Promise.resolve(mocks.requestTypedUserMessage(text)),
   sendOpenAiRealtimeExpertPipeMessage: mocks.sendExpertPipeMessage,
   sendOpenAiRealtimeSpokespersonRuntimeEvent: mocks.sendRuntimeEvent,
+  releaseOpenAiRealtimeSpokespersonRuntime: mocks.releaseRuntime,
   releaseVoiceDictationMicrophone: mocks.releaseMicrophone,
   setOpenAiRealtimeVoiceControlsSuppressed: mocks.setControlsSuppressed,
   startOpenAiRealtimeVoiceControls: mocks.startControls,
@@ -589,6 +591,7 @@ beforeEach(() => {
     },
   );
   mocks.stopRuntime.mockResolvedValue(undefined);
+  mocks.releaseRuntime.mockResolvedValue(undefined);
   mocks.updateRuntimeSettings.mockResolvedValue({
     revision: 2,
     backend: "openai",
@@ -1808,6 +1811,10 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       undefined,
       undefined,
       expect.objectContaining({ displayText: "Final voice transcript" }),
+    );
+    expect(mocks.releaseRuntime).toHaveBeenCalledWith("session-a");
+    expect(mocks.releaseRuntime.mock.invocationCallOrder[0]).toBeGreaterThan(
+      onSend.mock.invocationCallOrder[0],
     );
   });
 

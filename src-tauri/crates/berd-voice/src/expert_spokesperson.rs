@@ -13,16 +13,9 @@ pub enum LiveSideEvent {
     Handoff { call_id: String, message: String },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ExpertDirectiveMode {
-    Context,
-    Say,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExpertDirective {
     pub acknowledgement: Option<u64>,
-    pub mode: ExpertDirectiveMode,
     pub message: String,
 }
 
@@ -37,7 +30,6 @@ pub enum ExpertDirectiveOutcome {
     Rejected(ExpertDirectiveRejection),
     Accepted {
         confirmed_token: u64,
-        mode: ExpertDirectiveMode,
         message: String,
     },
 }
@@ -54,7 +46,6 @@ pub struct ExpertSpokespersonCore {
     semantic_turns: Vec<Option<SemanticTurn>>,
     spokesperson_turns: HashMap<String, usize>,
     semantic_revision: u64,
-    unresolved_handoff: bool,
 }
 
 impl Default for ExpertSpokespersonCore {
@@ -78,7 +69,6 @@ impl ExpertSpokespersonCore {
             semantic_turns: Vec::new(),
             spokesperson_turns: HashMap::new(),
             semantic_revision: 0,
-            unresolved_handoff: false,
         }
     }
 
@@ -100,7 +90,6 @@ impl ExpertSpokespersonCore {
         &mut self,
         event: LiveSideEvent,
     ) -> Result<CausalMessage<LiveSideEvent>, String> {
-        let is_handoff = matches!(event, LiveSideEvent::Handoff { .. });
         let cursor = self.pipe.delivery_cursor(RealtimePipePeer::Spokesperson);
         let pipe_message = live_event_pipe_message(&event);
         let exchange = self
@@ -120,9 +109,6 @@ impl ExpertSpokespersonCore {
             payload: event,
         };
         self.live_events.push(message.clone());
-        if is_handoff {
-            self.unresolved_handoff = true;
-        }
         Ok(message)
     }
 
@@ -136,14 +122,10 @@ impl ExpertSpokespersonCore {
             .acknowledgement
             .unwrap_or_else(|| self.pipe.cursor(RealtimePipePeer::Expert));
         match self.pipe.send(RealtimePipePeer::Expert, cursor, &message) {
-            Ok(RealtimePipeExchange::Accepted(accepted)) => {
-                self.unresolved_handoff = false;
-                ExpertDirectiveOutcome::Accepted {
-                    confirmed_token: accepted.outbound.sender_cursor,
-                    mode: directive.mode,
-                    message,
-                }
-            }
+            Ok(RealtimePipeExchange::Accepted(accepted)) => ExpertDirectiveOutcome::Accepted {
+                confirmed_token: accepted.outbound.sender_cursor,
+                message,
+            },
             Ok(RealtimePipeExchange::Rejected(rejected)) => {
                 let acknowledged_live_token = directive.acknowledgement.filter(|token| {
                     self.live_events
@@ -179,10 +161,6 @@ impl ExpertSpokespersonCore {
             .filter(|message| message.token > token)
             .cloned()
             .collect()
-    }
-
-    pub fn has_unresolved_handoff(&self) -> bool {
-        self.unresolved_handoff
     }
 
     pub fn reserve_spokesperson_turn(&mut self, response_id: String) {
@@ -260,7 +238,6 @@ mod tests {
     fn directive(acknowledgement: Option<u64>, message: &str) -> ExpertDirective {
         ExpertDirective {
             acknowledgement,
-            mode: ExpertDirectiveMode::Say,
             message: message.into(),
         }
     }
@@ -319,7 +296,6 @@ mod tests {
             core.prepare_directive(directive(Some(2), "  I checked.  ")),
             ExpertDirectiveOutcome::Accepted {
                 confirmed_token: 2,
-                mode: ExpertDirectiveMode::Say,
                 message: "I checked.".into(),
             }
         );
@@ -376,77 +352,5 @@ mod tests {
             core.semantic_transcript(),
             vec![SemanticTurn::User("Interrupting immediately".into())]
         );
-    }
-
-    #[test]
-    fn only_an_unresolved_handoff_blocks_voice_replacement() {
-        let mut core = ExpertSpokespersonCore::default();
-        core.add_live_event(
-            1,
-            LiveSideEvent::UserTranscript {
-                text: "Hello".into(),
-            },
-        )
-        .unwrap();
-        core.add_live_event(
-            2,
-            LiveSideEvent::SpokespersonTranscript {
-                text: "Hi".into(),
-                interrupted: false,
-            },
-        )
-        .unwrap();
-        assert!(!core.has_unresolved_handoff());
-
-        core.add_live_event(
-            3,
-            LiveSideEvent::Handoff {
-                call_id: "call-1".into(),
-                message: "Please inspect this".into(),
-            },
-        )
-        .unwrap();
-        assert!(core.has_unresolved_handoff());
-
-        core.add_live_event(
-            4,
-            LiveSideEvent::UserTranscript {
-                text: "One more detail".into(),
-            },
-        )
-        .unwrap();
-        assert!(matches!(
-            core.prepare_directive(directive(Some(3), "I checked")),
-            ExpertDirectiveOutcome::Pending(_)
-        ));
-        assert!(core.has_unresolved_handoff());
-
-        assert!(matches!(
-            core.prepare_directive(directive(Some(4), "I checked")),
-            ExpertDirectiveOutcome::Accepted { .. }
-        ));
-        assert!(!core.has_unresolved_handoff());
-    }
-
-    #[test]
-    fn rejected_handoff_token_does_not_poison_quiescence() {
-        let mut core = ExpertSpokespersonCore::default();
-        core.add_live_event(
-            1,
-            LiveSideEvent::UserTranscript {
-                text: "Hello".into(),
-            },
-        )
-        .unwrap();
-        assert!(core
-            .add_live_event(
-                1,
-                LiveSideEvent::Handoff {
-                    call_id: "duplicate".into(),
-                    message: "must not stick".into(),
-                },
-            )
-            .is_err());
-        assert!(!core.has_unresolved_handoff());
     }
 }

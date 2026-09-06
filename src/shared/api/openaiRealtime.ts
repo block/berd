@@ -47,6 +47,12 @@ export function stopOpenAiRealtimeSpokespersonRuntime(
   return invoke("stop_openai_realtime_spokesperson_runtime", { sessionId });
 }
 
+export function releaseOpenAiRealtimeSpokespersonRuntime(
+  sessionId: string,
+): Promise<void> {
+  return invoke("release_openai_realtime_spokesperson_runtime", { sessionId });
+}
+
 export interface OpenAiRealtimeTtsConfigurationSnapshot {
   revision: number;
   backend: "openai";

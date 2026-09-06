@@ -19,6 +19,8 @@ const DEFAULT_MODEL: &str = "gpt-realtime-2.1";
 const DEFAULT_TRANSCRIPTION_MODEL: &str = "gpt-realtime-whisper";
 const CONTROL_ACK_TIMEOUT: Duration = Duration::from_secs(4);
 const INPUT_QUEUE_FRAMES: usize = 100;
+const GRACEFUL_SHUTDOWN_SETTLE: Duration = Duration::from_secs(1);
+const GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Connection settings for the live Spokesperson. This deliberately does not
 /// implement `Debug` because it contains an API key.
@@ -442,7 +444,17 @@ async fn run_inner(
     let mut pending_seed_item: Option<String> = None;
     let mut initial_session_ready = false;
     let mut next_control_event_id = 1_u64;
+    let mut shutdown_not_before = None;
+    let mut shutdown_deadline = None;
     loop {
+        if shutdown_deadline.is_some()
+            && shutdown_not_before.is_none()
+            && started_input_items.is_empty()
+            && committed_input_items.is_empty()
+        {
+            let _ = socket.close(None).await;
+            return Ok(());
+        }
         let truncation_deadline = pending_truncations
             .values()
             .map(|truncation| truncation.deadline)
@@ -452,6 +464,23 @@ async fn run_inner(
             .map(|cutover| cutover.deadline);
         let reset_deadline = pending_input_reset.as_ref().map(|reset| reset.deadline);
         tokio::select! {
+            _ = async {
+                match shutdown_not_before {
+                    Some(deadline) => tokio::time::sleep_until(deadline).await,
+                    None => std::future::pending().await,
+                }
+            }, if shutdown_not_before.is_some() => {
+                shutdown_not_before = None;
+            }
+            _ = async {
+                match shutdown_deadline {
+                    Some(deadline) => tokio::time::sleep_until(deadline).await,
+                    None => std::future::pending().await,
+                }
+            }, if shutdown_deadline.is_some() => {
+                let _ = socket.close(None).await;
+                return Ok(());
+            }
             _ = async {
                 match reset_deadline {
                     Some(deadline) => tokio::time::sleep_until(deadline).await,
@@ -499,7 +528,7 @@ async fn run_inner(
                     return Err("Spokesperson output truncation timed out; server context is indeterminate".into());
                 }
             }
-            samples = audio.recv() => {
+            samples = audio.recv(), if shutdown_deadline.is_none() => {
                 let Some(samples) = samples else {
                     return Err("Spokesperson input queue is closed".into());
                 };
@@ -509,7 +538,7 @@ async fn run_inner(
                     "audio": BASE64.encode(pcm),
                 })).await?;
             }
-            command = commands.recv() => {
+            command = commands.recv(), if shutdown_deadline.is_none() => {
                 match command {
                     Some(SpokespersonCommand::Provider(event)) => {
                         send_json(&mut socket, event).await?;
@@ -626,8 +655,21 @@ async fn run_inner(
                         });
                     }
                     Some(SpokespersonCommand::Shutdown) | None => {
-                        let _ = socket.close(None).await;
-                        return Ok(());
+                        commands.close();
+                        audio.close();
+                        while let Ok(samples) = audio.try_recv() {
+                            let pcm = downsample_pcm16(&samples);
+                            send_json(&mut socket, serde_json::json!({
+                                "type": "input_audio_buffer.append",
+                                "audio": BASE64.encode(pcm),
+                            })).await?;
+                        }
+                        shutdown_deadline = Some(
+                            tokio::time::Instant::now() + GRACEFUL_SHUTDOWN_TIMEOUT,
+                        );
+                        shutdown_not_before = Some(
+                            tokio::time::Instant::now() + GRACEFUL_SHUTDOWN_SETTLE,
+                        );
                     }
                 }
             }
@@ -1172,6 +1214,70 @@ mod tests {
             command_rx.try_recv().unwrap(),
             SpokespersonCommand::Shutdown
         ));
+    }
+
+    #[tokio::test]
+    async fn runtime_drains_buffered_audio_before_graceful_shutdown() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("ws://{}/", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_hdr_async(stream, require_test_authorization)
+                .await
+                .unwrap();
+            let update = receive_json(&mut socket).await;
+            acknowledge_initial_session(&mut socket, &update, "test-model").await;
+            let append = receive_json(&mut socket).await;
+            assert_eq!(append["type"], "input_audio_buffer.append");
+            send_json(
+                &mut socket,
+                json!({"type":"input_audio_buffer.speech_started","item_id":"item-final"}),
+            )
+            .await;
+            send_json(
+                &mut socket,
+                json!({"type":"input_audio_buffer.speech_stopped","item_id":"item-final"}),
+            )
+            .await;
+            send_json(
+                &mut socket,
+                json!({
+                    "type":"conversation.item.input_audio_transcription.completed",
+                    "item_id":"item-final",
+                    "transcript":"final words"
+                }),
+            )
+            .await;
+            assert!(matches!(
+                socket.next().await,
+                Some(Ok(Message::Close(_))) | None
+            ));
+        });
+
+        let (runtime, events) = OpenAiSpokespersonRuntime::spawn_observed(test_config(
+            endpoint,
+            "test-voice",
+            1.0,
+            Vec::new(),
+        ))
+        .unwrap();
+        tokio::task::spawn_blocking(move || {
+            loop {
+                if matches!(
+                    events.recv_timeout(Duration::from_secs(2)).unwrap(),
+                    SpokespersonEvent::Ready
+                ) {
+                    break;
+                }
+            }
+            runtime
+                .send(SpokespersonCommand::InputPcm48Khz(vec![0.25; 1_920]))
+                .unwrap();
+            runtime.finish().unwrap();
+        })
+        .await
+        .unwrap();
+        server.await.unwrap();
     }
 
     #[tokio::test]

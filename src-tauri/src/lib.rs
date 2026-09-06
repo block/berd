@@ -610,6 +610,7 @@ pub fn run() {
             commands::openai_realtime::send_openai_realtime_spokesperson_runtime_event,
             commands::openai_realtime::push_openai_realtime_spokesperson_audio,
             commands::openai_realtime::stop_openai_realtime_spokesperson_runtime,
+            commands::openai_realtime::release_openai_realtime_spokesperson_runtime,
             commands::openai_realtime::update_openai_realtime_spokesperson_settings,
             commands::openai_realtime::create_openai_realtime_expert_instructions,
             commands::openai_realtime::create_openai_realtime_transcript_seed,

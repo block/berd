@@ -17,7 +17,7 @@ use std::{
         Arc, Mutex,
     },
 };
-use tauri::{Emitter, State, WebviewWindow};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 
 use super::openai_voice_credentials::{self, OpenAiVoiceCredential};
 use super::voice_capture::VoiceCaptureState;
@@ -186,7 +186,27 @@ pub fn push_openai_realtime_spokesperson_audio(
 }
 
 #[tauri::command]
-pub fn stop_openai_realtime_spokesperson_runtime(
+pub async fn stop_openai_realtime_spokesperson_runtime(
+    state: State<'_, OpenAiRealtimeRuntimeState>,
+    session_id: String,
+) -> Result<(), String> {
+    let session_id = non_empty_session_id(session_id)?;
+    let runtime = state
+        .sessions
+        .lock()
+        .map_err(|_| "OpenAI Realtime runtime state is unavailable".to_string())?
+        .get(&session_id)
+        .map(|entry| Arc::clone(&entry.runtime));
+    if let Some(runtime) = runtime {
+        tauri::async_runtime::spawn_blocking(move || runtime.finish())
+            .await
+            .map_err(|error| format!("OpenAI Realtime runtime stop task failed: {error}"))??;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn release_openai_realtime_spokesperson_runtime(
     state: State<'_, OpenAiRealtimeRuntimeState>,
     session_id: String,
 ) -> Result<(), String> {
@@ -197,9 +217,43 @@ pub fn stop_openai_realtime_spokesperson_runtime(
         .map_err(|_| "OpenAI Realtime runtime state is unavailable".to_string())?
         .remove(&session_id);
     if let Some(entry) = entry {
-        entry.runtime.finish()?;
+        tauri::async_runtime::spawn_blocking(move || entry.runtime.finish())
+            .await
+            .map_err(|error| format!("OpenAI Realtime runtime release task failed: {error}"))??;
     }
     Ok(())
+}
+
+pub fn handle_owner_window_destroyed(app: &AppHandle, window_label: &str) {
+    let state = app.state::<OpenAiRealtimeRuntimeState>();
+    let runtimes = match state.sessions.lock() {
+        Ok(mut sessions) => {
+            let owned_session_ids = sessions
+                .iter()
+                .filter_map(|(session_id, entry)| {
+                    (entry.owner_window == window_label).then(|| session_id.clone())
+                })
+                .collect::<Vec<_>>();
+            owned_session_ids
+                .into_iter()
+                .filter_map(|session_id| sessions.remove(&session_id))
+                .map(|entry| entry.runtime)
+                .collect::<Vec<_>>()
+        }
+        Err(_) => {
+            log::error!("OpenAI Realtime runtime state is unavailable during window cleanup");
+            return;
+        }
+    };
+    for runtime in runtimes {
+        tauri::async_runtime::spawn_blocking(move || {
+            if let Err(error) = runtime.finish() {
+                log::error!(
+                    "Failed to stop OpenAI Realtime runtime for destroyed owner window: {error}"
+                );
+            }
+        });
+    }
 }
 
 fn with_runtime<T>(

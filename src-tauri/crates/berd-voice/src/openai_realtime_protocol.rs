@@ -5,8 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::expert_spokesperson::{
-    ExpertDirective, ExpertDirectiveMode, ExpertDirectiveOutcome, ExpertSpokespersonCore,
-    LiveSideEvent, SemanticTurn,
+    ExpertDirective, ExpertDirectiveOutcome, ExpertSpokespersonCore, LiveSideEvent, SemanticTurn,
 };
 pub use crate::realtime_pipe::{
     RealtimeMessagePipe, RealtimePipeAccepted, RealtimePipeExchange, RealtimePipeMessage,
@@ -1493,7 +1492,6 @@ impl RealtimeExpertSpokespersonSession {
     ) -> ExpertDirectiveOutcome {
         self.conversation.prepare_directive(ExpertDirective {
             acknowledgement,
-            mode: ExpertDirectiveMode::Say,
             message,
         })
     }

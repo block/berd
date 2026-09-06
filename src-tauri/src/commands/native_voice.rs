@@ -2462,6 +2462,7 @@ impl NativeVoiceState {
 }
 
 pub fn handle_voice_owner_window_destroyed(app: &AppHandle, window_label: &str) {
+    super::openai_realtime::handle_owner_window_destroyed(app, window_label);
     app.state::<VoiceCaptureState>()
         .release_window(window_label);
     let destroyed_lifecycle = app

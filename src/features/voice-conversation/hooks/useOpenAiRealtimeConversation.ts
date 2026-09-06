@@ -31,6 +31,7 @@ import {
   startOpenAiRealtimeSpokespersonRuntime,
   stopOpenAiRealtimeVoiceControls,
   stopOpenAiRealtimeSpokespersonRuntime,
+  releaseOpenAiRealtimeSpokespersonRuntime,
   updateOpenAiRealtimeSpokespersonSettings,
   type OpenAiRealtimeTranscriptSeedTurn,
   type OpenAiRealtimeExpertDeliveryEvent,
@@ -1081,6 +1082,9 @@ class OpenAiRealtimeConversationRuntime {
         }),
       ]);
     }
+    await releaseOpenAiRealtimeSpokespersonRuntime(sessionId).catch(
+      () => undefined,
+    );
     await this.cleanupResources(sessionId);
     this.boundOnSend = null;
     this.failureInProgress = false;
@@ -1327,6 +1331,9 @@ class OpenAiRealtimeConversationRuntime {
         realtimeRuntimeSessionId,
       ).catch(() => undefined);
     }
+    await releaseOpenAiRealtimeSpokespersonRuntime(activeSessionId).catch(
+      () => undefined,
+    );
     await releaseVoiceDictationMicrophone(MICROPHONE_OWNER_ID).catch(
       () => undefined,
     );
