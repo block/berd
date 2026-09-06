@@ -1675,10 +1675,11 @@ impl RealtimeExpertSpokespersonSession {
     > {
         let cursor = self.conversation.next_live_token();
         let handoff_id = format!("handoff-{}-{cursor}", self.call_scope);
-        let recorded = self.conversation.record_live_event(LiveSideEvent::Handoff {
+        let event = LiveSideEvent::Handoff {
             call_id: handoff_id.clone(),
             message: message.to_string(),
-        })?;
+        };
+        let recorded = self.conversation.record_live_event(event)?;
         debug_assert_eq!(recorded.token, cursor);
         self.register_handoff(&handoff_id, cursor, message)?;
         let expert_event = handoff_delivery_event(cursor, &handoff_id, message);

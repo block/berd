@@ -652,10 +652,8 @@ fn run_managed_realtime_host_inner(
                     });
                     reject_managed_update(&mut pending_update, &runtime, message)?;
                     if was_renewal {
-                        lifecycle.retry_renewal_after(
-                            Instant::now(),
-                            Duration::from_secs(30),
-                        );
+                        let retry_delay = Duration::from_secs(30);
+                        lifecycle.retry_renewal_after(Instant::now(), retry_delay);
                     }
                 }
             }
