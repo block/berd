@@ -924,9 +924,14 @@ class OpenAiRealtimeConversationRuntime {
           });
         },
       );
-      this.nativeMicrophone = await startNativeMicrophone(
+      const nativeMicrophone = await startNativeMicrophone(
         "push_openai_realtime_spokesperson_audio",
       );
+      if (isStale()) {
+        nativeMicrophone.stop();
+        return;
+      }
+      this.nativeMicrophone = nativeMicrophone;
       this.nativeMicrophone.setMuted(this.snapshot.microphoneMuted);
       this.typedUserMessageSink = forwardTypedUserMessage;
       for (const text of this.pendingTypedUserMessages.splice(0)) {
@@ -1331,9 +1336,9 @@ class OpenAiRealtimeConversationRuntime {
         realtimeRuntimeSessionId,
       ).catch(() => undefined);
     }
-    await releaseOpenAiRealtimeSpokespersonRuntime(activeSessionId).catch(
-      () => undefined,
-    );
+    await releaseOpenAiRealtimeSpokespersonRuntime(
+      realtimeRuntimeSessionId ?? sessionId,
+    ).catch(() => undefined);
     await releaseVoiceDictationMicrophone(MICROPHONE_OWNER_ID).catch(
       () => undefined,
     );

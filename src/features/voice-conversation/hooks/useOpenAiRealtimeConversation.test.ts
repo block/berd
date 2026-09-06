@@ -1176,6 +1176,33 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     await act(async () => owner.result.current.onToggle());
   });
 
+  it("stops microphone capture when startup becomes stale during acquisition", async () => {
+    let resolveStream!: (stream: MediaStream) => void;
+    const delayedStream = {
+      getAudioTracks: () => [track],
+      getTracks: () => [track],
+    } as unknown as MediaStream;
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockReturnValueOnce(
+      new Promise<MediaStream>((resolve) => {
+        resolveStream = resolve;
+      }),
+    );
+    const owner = renderConversation("session-a");
+
+    let start = Promise.resolve();
+    act(() => {
+      start = Promise.resolve(owner.result.current.onToggle());
+    });
+    await waitFor(() => expect(mocks.startNativeMicrophone).toHaveBeenCalled());
+
+    await act(async () => stopOpenAiRealtimeConversation());
+    act(() => resolveStream(delayedStream));
+    await act(async () => start);
+
+    expect(track.stop).toHaveBeenCalledOnce();
+    expect(owner.result.current.state).toBe("off");
+  });
+
   it("publishes running controls only after the cross-renderer bridge is ready", async () => {
     let resolveBridge!: () => void;
     mocks.waitForBridgeReady.mockReturnValueOnce(

@@ -35,7 +35,7 @@ struct Playback {
     response_id: String,
     output: Box<dyn PcmAudioOutput>,
     delivery: RealtimeAudioDelivery,
-    server_audio_done: bool,
+    server_response_done: bool,
 }
 
 #[derive(Default)]
@@ -45,6 +45,23 @@ struct RealtimePlaybackHost {
 }
 
 impl RealtimePlaybackHost {
+    fn handle_outbound_command(
+        &mut self,
+        command: &SpokespersonCommand,
+        send_command: &mut impl FnMut(SpokespersonCommand) -> Result<(), String>,
+        emit: &mut impl FnMut(Value) -> Result<(), String>,
+    ) -> Result<(), String> {
+        if matches!(
+            command,
+            SpokespersonCommand::Provider(event)
+                if event.get("type").and_then(Value::as_str)
+                    == Some("output_audio_buffer.clear")
+        ) {
+            self.interrupt_active_playback(send_command, emit)?;
+        }
+        Ok(())
+    }
+
     fn handle(
         &mut self,
         event: SpokespersonEvent,
@@ -84,7 +101,7 @@ impl RealtimePlaybackHost {
                         response_id: response_id.clone(),
                         output: create_output()?,
                         delivery: RealtimeAudioDelivery::default(),
-                        server_audio_done: false,
+                        server_response_done: false,
                     });
                 }
                 let active = self.playback.as_mut().expect("playback was created");
@@ -97,11 +114,25 @@ impl RealtimePlaybackHost {
                 )?;
                 active.output.write(&samples)?;
             }
-            SpokespersonEvent::AudioDone { response_id, .. } => {
+            SpokespersonEvent::ResponseFinished { response_id, .. } => {
                 if let Some(active) = self.playback.as_mut() {
                     if active.response_id == response_id {
-                        active.server_audio_done = true;
+                        active.server_response_done = true;
                     }
+                }
+            }
+            SpokespersonEvent::Handoff { response_id, .. } => {
+                send_command(SpokespersonCommand::CancelResponses {
+                    response_ids: vec![response_id.clone()],
+                })?;
+                if self
+                    .playback
+                    .as_ref()
+                    .is_some_and(|active| active.response_id == response_id)
+                {
+                    self.interrupt_active_playback(send_command, emit)?;
+                } else {
+                    self.interrupted_responses.insert(response_id);
                 }
             }
             SpokespersonEvent::UserSpeaking { active: true, .. } => {
@@ -197,7 +228,7 @@ impl RealtimePlaybackHost {
         if self
             .playback
             .as_ref()
-            .is_some_and(|active| active.server_audio_done && active.output.is_drained())
+            .is_some_and(|active| active.server_response_done && active.output.is_drained())
         {
             let active = self.playback.take().expect("drained playback exists");
             active.output.check_health()?;
@@ -460,9 +491,13 @@ fn run_managed_realtime_host_inner(
                             .map_err(|_| "Realtime input overflowed during voice cutover")?;
                     }
                 }
-                Ok(ManagedRealtimeHostCommand::Send(command)) => runtime
-                    .send(command)
-                    .map_err(|error| format!("Could not send input to Spokesperson: {error}"))?,
+                Ok(ManagedRealtimeHostCommand::Send(command)) => {
+                    let mut send = |command| runtime.send(command);
+                    host.handle_outbound_command(&command, &mut send, emit)?;
+                    runtime.send(command).map_err(|error| {
+                        format!("Could not send input to Spokesperson: {error}")
+                    })?;
+                }
                 Ok(ManagedRealtimeHostCommand::UpdateSemanticContext {
                     revision,
                     transcript,
@@ -891,7 +926,10 @@ mod tests {
 
     use crate::{
         openai_realtime_protocol::RealtimeSpokespersonSessionOptions,
-        openai_spokesperson::{OpenAiSpokespersonConfig, SpokespersonEvent},
+        openai_spokesperson::{
+            OpenAiSpokespersonConfig, SpokespersonCommand, SpokespersonEvent,
+            SpokespersonResponseStatus,
+        },
         PcmAudioOutput,
     };
 
@@ -899,6 +937,7 @@ mod tests {
 
     struct FakeOutput {
         played_frames: u64,
+        drained: bool,
     }
 
     impl PcmAudioOutput for FakeOutput {
@@ -909,7 +948,7 @@ mod tests {
         fn cancel(&self) {}
 
         fn is_drained(&self) -> bool {
-            false
+            self.drained
         }
 
         fn check_health(&self) -> Result<(), String> {
@@ -1009,7 +1048,12 @@ mod tests {
             config,
             Arc::new(AtomicU64::new(0)),
             Duration::from_millis(100),
-            || Ok(Box::new(FakeOutput { played_frames: 0 })),
+            || {
+                Ok(Box::new(FakeOutput {
+                    played_frames: 0,
+                    drained: false,
+                }))
+            },
             move |event| {
                 let _ = emitted_tx.send(event);
                 Ok(())
@@ -1076,7 +1120,12 @@ mod tests {
             config,
             Arc::new(AtomicU64::new(0)),
             Duration::from_secs(3_600),
-            || Ok(Box::new(FakeOutput { played_frames: 0 })),
+            || {
+                Ok(Box::new(FakeOutput {
+                    played_frames: 0,
+                    drained: false,
+                }))
+            },
             move |event| {
                 let _ = emitted_tx.send(event);
                 Ok(())
@@ -1116,6 +1165,7 @@ mod tests {
             created += 1;
             Ok(Box::new(FakeOutput {
                 played_frames: if created == 1 { 40 } else { 0 },
+                drained: false,
             }) as Box<dyn PcmAudioOutput>)
         };
         let mut commands = Vec::new();
@@ -1184,5 +1234,197 @@ mod tests {
         assert_eq!(events[1]["total_audio_frames"], 100);
         assert_eq!(events[2]["type"], "output_audio_buffer.started");
         assert_eq!(events[2]["response_id"], "response-2");
+    }
+
+    #[test]
+    fn drained_playback_waits_for_the_whole_response_to_finish() {
+        let mut host = RealtimePlaybackHost::default();
+        let mut create_output = || {
+            Ok(Box::new(FakeOutput {
+                played_frames: 20,
+                drained: true,
+            }) as Box<dyn PcmAudioOutput>)
+        };
+        let mut commands = Vec::new();
+        let mut send_command = |command| {
+            commands.push(command);
+            Ok(())
+        };
+        let mut events = Vec::new();
+        let mut emit = |event| {
+            events.push(event);
+            Ok(())
+        };
+
+        host.handle(
+            SpokespersonEvent::AudioDelta {
+                response_id: "response-1".into(),
+                item_id: "assistant-1".into(),
+                output_index: 0,
+                content_index: 0,
+                samples: vec![0.0; 10],
+            },
+            &mut send_command,
+            &mut create_output,
+            &mut emit,
+        )
+        .unwrap();
+        host.handle(
+            SpokespersonEvent::AudioDone {
+                response_id: "response-1".into(),
+                item_id: "assistant-1".into(),
+                output_index: 0,
+                content_index: 0,
+            },
+            &mut send_command,
+            &mut create_output,
+            &mut emit,
+        )
+        .unwrap();
+        host.finish_drained(&mut emit).unwrap();
+        drop(emit);
+        assert_eq!(events.len(), 1);
+        let mut emit = |event| {
+            events.push(event);
+            Ok(())
+        };
+
+        host.handle(
+            SpokespersonEvent::AudioDelta {
+                response_id: "response-1".into(),
+                item_id: "assistant-2".into(),
+                output_index: 1,
+                content_index: 0,
+                samples: vec![0.0; 10],
+            },
+            &mut send_command,
+            &mut create_output,
+            &mut emit,
+        )
+        .unwrap();
+        host.handle(
+            SpokespersonEvent::ResponseFinished {
+                response_id: "response-1".into(),
+                status: SpokespersonResponseStatus::Completed,
+            },
+            &mut send_command,
+            &mut create_output,
+            &mut emit,
+        )
+        .unwrap();
+        host.finish_drained(&mut emit).unwrap();
+
+        assert_eq!(events[1]["type"], "output_audio_buffer.stopped");
+        assert_eq!(events[1]["response_id"], "response-1");
+        assert!(commands.is_empty());
+    }
+
+    #[test]
+    fn typed_clear_interrupts_native_playback() {
+        let mut host = RealtimePlaybackHost::default();
+        let mut create_output = || {
+            Ok(Box::new(FakeOutput {
+                played_frames: 40,
+                drained: false,
+            }) as Box<dyn PcmAudioOutput>)
+        };
+        let mut commands = Vec::new();
+        let mut send_command = |command| {
+            commands.push(command);
+            Ok(())
+        };
+        let mut events = Vec::new();
+        let mut emit = |event| {
+            events.push(event);
+            Ok(())
+        };
+        host.handle(
+            SpokespersonEvent::AudioDelta {
+                response_id: "response-1".into(),
+                item_id: "assistant-1".into(),
+                output_index: 0,
+                content_index: 0,
+                samples: vec![0.0; 100],
+            },
+            &mut send_command,
+            &mut create_output,
+            &mut emit,
+        )
+        .unwrap();
+
+        host.handle_outbound_command(
+            &SpokespersonCommand::Provider(json!({
+                "type": "output_audio_buffer.clear"
+            })),
+            &mut send_command,
+            &mut emit,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            commands.as_slice(),
+            [SpokespersonCommand::TruncateOutput { response_id, .. }]
+                if response_id == "response-1"
+        ));
+        assert_eq!(events[1]["type"], "output_audio_buffer.cleared");
+        assert!(host.is_idle());
+    }
+
+    #[test]
+    fn handoff_interrupts_and_cancels_native_playback() {
+        let mut host = RealtimePlaybackHost::default();
+        let mut create_output = || {
+            Ok(Box::new(FakeOutput {
+                played_frames: 40,
+                drained: false,
+            }) as Box<dyn PcmAudioOutput>)
+        };
+        let mut commands = Vec::new();
+        let mut send_command = |command| {
+            commands.push(command);
+            Ok(())
+        };
+        let mut events = Vec::new();
+        let mut emit = |event| {
+            events.push(event);
+            Ok(())
+        };
+        host.handle(
+            SpokespersonEvent::AudioDelta {
+                response_id: "response-1".into(),
+                item_id: "assistant-1".into(),
+                output_index: 0,
+                content_index: 0,
+                samples: vec![0.0; 100],
+            },
+            &mut send_command,
+            &mut create_output,
+            &mut emit,
+        )
+        .unwrap();
+        host.handle(
+            SpokespersonEvent::Handoff {
+                response_id: "response-1".into(),
+                call_id: "call-1".into(),
+                message: "inspect the repository".into(),
+            },
+            &mut send_command,
+            &mut create_output,
+            &mut emit,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            commands.first(),
+            Some(SpokespersonCommand::CancelResponses { response_ids })
+                if response_ids == &["response-1"]
+        ));
+        assert!(matches!(
+            commands.get(1),
+            Some(SpokespersonCommand::TruncateOutput { response_id, .. })
+                if response_id == "response-1"
+        ));
+        assert_eq!(events[1]["type"], "output_audio_buffer.cleared");
+        assert!(host.is_idle());
     }
 }
