@@ -224,6 +224,38 @@ interface SourceEntry {
   properties: Record<string, unknown>;
 }
 
+let shadowImportPromise: Promise<unknown> | null = null;
+let shadowImportRequested = false;
+let shadowImportLastStartedAt = 0;
+const SHADOW_IMPORT_READ_INTERVAL_MS = 30_000;
+
+function startProjectStorageShadowImport(force = false): void {
+  const now = Date.now();
+  if (
+    !force &&
+    (shadowImportPromise !== null ||
+      now - shadowImportLastStartedAt < SHADOW_IMPORT_READ_INTERVAL_MS)
+  ) {
+    return;
+  }
+  shadowImportRequested = true;
+  if (shadowImportPromise) return;
+  shadowImportPromise = (async () => {
+    while (shadowImportRequested) {
+      shadowImportRequested = false;
+      shadowImportLastStartedAt = Date.now();
+      try {
+        await invoke("shadow_import_legacy_projects");
+      } catch (error) {
+        console.warn("Project storage shadow import failed", error);
+      }
+    }
+  })().finally(() => {
+    shadowImportPromise = null;
+    if (shadowImportRequested) startProjectStorageShadowImport(true);
+  });
+}
+
 function toProjectInfo(source: SourceEntry): ProjectInfo {
   const p = source.properties ?? {};
   const rawWorkingDirs = (p.workingDirs as string[]) ?? [];
@@ -359,6 +391,7 @@ export async function listProjects(): Promise<ProjectInfo[]> {
   const raw = await client.goose.GooseUnstableSourcesList({
     type: "project",
   });
+  startProjectStorageShadowImport();
   const sources = (raw.sources ?? []) as unknown as SourceEntry[];
   return sources
     .map(toProjectInfo)
@@ -426,6 +459,7 @@ export async function createProject(
       chatGroups: null,
     }),
   });
+  startProjectStorageShadowImport(true);
   return toProjectInfo(raw.source as SourceEntry);
 }
 
@@ -498,6 +532,7 @@ export async function updateProject(
       chatGroups: merged.chatGroups,
     }),
   });
+  startProjectStorageShadowImport(true);
   return toProjectInfo(raw.source as SourceEntry);
 }
 
@@ -513,6 +548,7 @@ export async function deleteProject(
     type: "project",
     path,
   });
+  startProjectStorageShadowImport(true);
 }
 
 export async function getProject(id: string): Promise<ProjectInfo> {
@@ -528,6 +564,7 @@ async function listAllProjects(): Promise<ProjectInfo[]> {
   const raw = await client.goose.GooseUnstableSourcesList({
     type: "project",
   });
+  startProjectStorageShadowImport();
   const sources = (raw.sources ?? []) as unknown as SourceEntry[];
   return sources.map(toProjectInfo);
 }

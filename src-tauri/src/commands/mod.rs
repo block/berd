@@ -44,6 +44,7 @@ pub mod path_resolver;
 pub mod pocket_voice;
 pub mod pr_tracker;
 pub mod project_icons;
+pub mod projects;
 pub mod pull_requests;
 pub mod remote_backend;
 pub mod renderer;
