@@ -388,6 +388,23 @@ impl OpenAiSpokespersonRuntime {
     }
 }
 
+impl Drop for OpenAiSpokespersonRuntime {
+    fn drop(&mut self) {
+        let _ = self.commands.send(SpokespersonCommand::Shutdown);
+        if let Some(worker) = self.worker.take() {
+            reap_spokesperson_worker(worker);
+        }
+    }
+}
+
+fn reap_spokesperson_worker(worker: thread::JoinHandle<()>) {
+    let _ = thread::Builder::new()
+        .name("berd-voice-spokesperson-reaper".into())
+        .spawn(move || {
+            let _ = worker.join();
+        });
+}
+
 #[cfg(test)]
 async fn run(
     config: OpenAiSpokespersonConfig,
@@ -1363,6 +1380,49 @@ mod tests {
             .unwrap();
 
         runtime.finish().unwrap();
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn dropping_runtime_signals_and_reaps_its_worker() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("ws://{}/", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_hdr_async(stream, require_test_authorization)
+                .await
+                .unwrap();
+            let update = receive_json(&mut socket).await;
+            acknowledge_initial_session(&mut socket, &update, "test-model").await;
+            let silence = receive_json(&mut socket).await;
+            assert_eq!(silence["type"], "input_audio_buffer.append");
+            assert!(matches!(
+                socket.next().await,
+                Some(Ok(Message::Close(_))) | None
+            ));
+        });
+
+        let (runtime, events) = OpenAiSpokespersonRuntime::spawn_observed(test_config(
+            endpoint,
+            "test-voice",
+            1.0,
+            Vec::new(),
+        ))
+        .unwrap();
+        tokio::task::spawn_blocking(move || {
+            loop {
+                if matches!(
+                    events.recv_timeout(Duration::from_secs(2)).unwrap(),
+                    SpokespersonEvent::Ready
+                ) {
+                    break;
+                }
+            }
+            drop(runtime);
+        })
+        .await
+        .unwrap();
+
         server.await.unwrap();
     }
 
