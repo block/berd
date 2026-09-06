@@ -90,6 +90,7 @@ pub fn start_openai_realtime_spokesperson_runtime(
     call_id: String,
     options: RealtimeSpokespersonSessionOptions,
 ) -> Result<(), String> {
+    ensure_native_realtime_playback_supported()?;
     let session_id = non_empty_session_id(session_id)?;
     let call_id = non_empty_session_id(call_id)?;
     let mut sessions = state
@@ -130,6 +131,16 @@ pub fn start_openai_realtime_spokesperson_runtime(
         },
     );
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn ensure_native_realtime_playback_supported() -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn ensure_native_realtime_playback_supported() -> Result<(), String> {
+    Err("Native OpenAI Realtime playback is not supported on this platform".into())
 }
 
 #[tauri::command]

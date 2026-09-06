@@ -25,6 +25,7 @@ use crate::{
 };
 
 const REALTIME_SAMPLE_RATE: u32 = 24_000;
+const HOST_FINISH_TIMEOUT: Duration = Duration::from_secs(10);
 
 struct Playback {
     response_id: String,
@@ -70,9 +71,7 @@ impl RealtimePlaybackHost {
                     .as_ref()
                     .is_none_or(|active| active.response_id != response_id);
                 if needs_player {
-                    if let Some(active) = self.playback.take() {
-                        active.output.cancel();
-                    }
+                    self.interrupt_active_playback(send_command, emit)?;
                     emit(json!({
                         "type": "output_audio_buffer.started",
                         "response_id": response_id,
@@ -102,30 +101,7 @@ impl RealtimePlaybackHost {
                 }
             }
             SpokespersonEvent::UserSpeaking { active: true, .. } => {
-                if let Some(mut active) = self.playback.take() {
-                    self.interrupted_responses
-                        .insert(active.response_id.clone());
-                    active
-                        .delivery
-                        .set_played_frames(active.output.played_frames());
-                    active.output.cancel();
-                    active.delivery.require_all_truncations()?;
-                    for truncation in active.delivery.unsent_truncations(REALTIME_SAMPLE_RATE)? {
-                        send_command(SpokespersonCommand::TruncateOutput {
-                            response_id: active.response_id.clone(),
-                            item_id: truncation.key.item_id,
-                            content_index: truncation.key.content_index,
-                            audio_end_ms: truncation.audio_end_ms,
-                        })?;
-                    }
-                    emit(json!({
-                        "type": "output_audio_buffer.cleared",
-                        "response_id": active.response_id,
-                        "played_audio_frames": active.delivery.played_frames(),
-                        "total_audio_frames": active.delivery.total_frames(),
-                        "sample_rate": REALTIME_SAMPLE_RATE,
-                    }))?;
-                }
+                self.interrupt_active_playback(send_command, emit)?;
             }
             SpokespersonEvent::TranscriptDelta {
                 response_id,
@@ -178,6 +154,38 @@ impl RealtimePlaybackHost {
         Ok(false)
     }
 
+    fn interrupt_active_playback(
+        &mut self,
+        send_command: &mut impl FnMut(SpokespersonCommand) -> Result<(), String>,
+        emit: &mut impl FnMut(Value) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let Some(mut active) = self.playback.take() else {
+            return Ok(());
+        };
+        self.interrupted_responses
+            .insert(active.response_id.clone());
+        active
+            .delivery
+            .set_played_frames(active.output.played_frames());
+        active.output.cancel();
+        active.delivery.require_all_truncations()?;
+        for truncation in active.delivery.unsent_truncations(REALTIME_SAMPLE_RATE)? {
+            send_command(SpokespersonCommand::TruncateOutput {
+                response_id: active.response_id.clone(),
+                item_id: truncation.key.item_id,
+                content_index: truncation.key.content_index,
+                audio_end_ms: truncation.audio_end_ms,
+            })?;
+        }
+        emit(json!({
+            "type": "output_audio_buffer.cleared",
+            "response_id": active.response_id,
+            "played_audio_frames": active.delivery.played_frames(),
+            "total_audio_frames": active.delivery.total_frames(),
+            "sample_rate": REALTIME_SAMPLE_RATE,
+        }))
+    }
+
     fn finish_drained(
         &mut self,
         emit: &mut impl FnMut(Value) -> Result<(), String>,
@@ -200,31 +208,6 @@ impl RealtimePlaybackHost {
     fn is_idle(&self) -> bool {
         self.playback.is_none()
     }
-}
-
-pub fn run_realtime_host(
-    events: Receiver<SpokespersonEvent>,
-    mut send_command: impl FnMut(SpokespersonCommand) -> Result<(), String>,
-    mut create_output: impl FnMut() -> Result<Box<dyn PcmAudioOutput>, String>,
-    mut emit: impl FnMut(Value) -> Result<(), String>,
-) -> Result<(), String> {
-    let mut host = RealtimePlaybackHost::default();
-
-    loop {
-        match events.recv_timeout(Duration::from_millis(10)) {
-            Ok(event) => {
-                if host.handle(event, &mut send_command, &mut create_output, &mut emit)? {
-                    break;
-                }
-            }
-            Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => break,
-        }
-        host.finish_drained(&mut emit)?;
-    }
-
-    let _ = send_command(SpokespersonCommand::Shutdown);
-    Ok(())
 }
 
 enum ManagedRealtimeHostCommand {
@@ -320,8 +303,8 @@ impl ManagedRealtimeHost {
             })
             .map_err(|_| "Spokesperson runtime is unavailable".to_string())?;
         result
-            .recv_timeout(Duration::from_secs(35))
-            .map_err(|_| "Spokesperson settings update timed out".to_string())?
+            .recv()
+            .map_err(|_| "Spokesperson settings update was abandoned".to_string())?
     }
 
     pub fn finish(&self) -> Result<(), String> {
@@ -332,6 +315,14 @@ impl ManagedRealtimeHost {
             .map_err(|_| "Managed Realtime host join state is unavailable")?
             .take();
         if let Some(worker) = worker {
+            let deadline = Instant::now() + HOST_FINISH_TIMEOUT;
+            while !worker.is_finished() {
+                if Instant::now() >= deadline {
+                    reap_managed_worker(worker);
+                    return Err("Managed Realtime host shutdown timed out".into());
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
             worker
                 .join()
                 .map_err(|_| "Managed Realtime host panicked".to_string())?;
@@ -345,10 +336,18 @@ impl Drop for ManagedRealtimeHost {
         let _ = self.commands.send(ManagedRealtimeHostCommand::Shutdown);
         if let Ok(worker) = self.worker.get_mut() {
             if let Some(worker) = worker.take() {
-                let _ = worker.join();
+                reap_managed_worker(worker);
             }
         }
     }
+}
+
+fn reap_managed_worker(worker: thread::JoinHandle<()>) {
+    let _ = thread::Builder::new()
+        .name("berd-realtime-host-reaper".into())
+        .spawn(move || {
+            let _ = worker.join();
+        });
 }
 
 fn run_managed_realtime_host(
@@ -585,6 +584,21 @@ fn run_managed_realtime_host_inner(
             .send(Err("Spokesperson session stopped".into()));
         update.transaction.finish_candidate()?;
     }
+    let _ = runtime.send(SpokespersonCommand::Shutdown);
+    let drain_deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < drain_deadline {
+        match events.recv_timeout(Duration::from_millis(10)) {
+            Ok(event) => {
+                let mut send = |command| runtime.send(command);
+                if host.handle(event, &mut send, &mut create_output, emit)? {
+                    break;
+                }
+                host.finish_drained(emit)?;
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+    }
     runtime.finish()
 }
 
@@ -636,15 +650,9 @@ fn reject_managed_update(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{mpsc, Arc, Mutex};
+    use crate::{openai_spokesperson::SpokespersonEvent, PcmAudioOutput};
 
-    use serde_json::Value;
-
-    use super::run_realtime_host;
-    use crate::{
-        openai_spokesperson::{SpokespersonCommand, SpokespersonEvent},
-        PcmAudioOutput,
-    };
+    use super::RealtimePlaybackHost;
 
     struct FakeOutput {
         played_frames: u64,
@@ -671,75 +679,80 @@ mod tests {
     }
 
     #[test]
-    fn interruption_stops_local_playback_and_truncates_provider_context() {
-        let (tx, rx) = mpsc::channel();
-        tx.send(SpokespersonEvent::AudioDelta {
-            response_id: "response-1".into(),
-            item_id: "assistant-1".into(),
-            output_index: 0,
-            content_index: 0,
-            samples: vec![0.0; 24_000],
-        })
-        .unwrap();
-        tx.send(SpokespersonEvent::TranscriptDelta {
-            response_id: "response-1".into(),
-            item_id: "assistant-1".into(),
-            output_index: 0,
-            content_index: 0,
-            text: "One two three four".into(),
-        })
-        .unwrap();
-        tx.send(SpokespersonEvent::UserSpeaking {
-            active: true,
-            item_id: "user-1".into(),
-        })
-        .unwrap();
-        tx.send(SpokespersonEvent::Closed).unwrap();
+    fn replacing_playback_clears_and_truncates_the_previous_response() {
+        let mut host = RealtimePlaybackHost::default();
+        let mut created = 0;
+        let mut create_output = || {
+            created += 1;
+            Ok(Box::new(FakeOutput {
+                played_frames: if created == 1 { 40 } else { 0 },
+            }) as Box<dyn PcmAudioOutput>)
+        };
+        let mut commands = Vec::new();
+        let mut send_command = |command| {
+            commands.push(command);
+            Ok(())
+        };
+        let mut events = Vec::new();
+        let mut emit = |event| {
+            events.push(event);
+            Ok(())
+        };
 
-        let commands = Arc::new(Mutex::new(Vec::new()));
-        let emitted = Arc::new(Mutex::new(Vec::<Value>::new()));
-        run_realtime_host(
-            rx,
-            {
-                let commands = Arc::clone(&commands);
-                move |command| {
-                    commands.lock().unwrap().push(command);
-                    Ok(())
-                }
+        host.handle(
+            SpokespersonEvent::AudioDelta {
+                response_id: "response-1".into(),
+                item_id: "assistant-1".into(),
+                output_index: 0,
+                content_index: 0,
+                samples: vec![0.0; 100],
             },
-            || {
-                Ok(Box::new(FakeOutput {
-                    played_frames: 12_000,
-                }))
+            &mut send_command,
+            &mut create_output,
+            &mut emit,
+        )
+        .unwrap();
+        host.handle(
+            SpokespersonEvent::TranscriptDone {
+                response_id: "response-1".into(),
+                item_id: "assistant-1".into(),
+                output_index: 0,
+                content_index: 0,
+                text: "one two three four".into(),
             },
-            {
-                let emitted = Arc::clone(&emitted);
-                move |event| {
-                    emitted.lock().unwrap().push(event);
-                    Ok(())
-                }
+            &mut send_command,
+            &mut create_output,
+            &mut emit,
+        )
+        .unwrap();
+        host.handle(
+            SpokespersonEvent::AudioDelta {
+                response_id: "response-2".into(),
+                item_id: "assistant-2".into(),
+                output_index: 0,
+                content_index: 0,
+                samples: vec![0.0; 10],
             },
+            &mut send_command,
+            &mut create_output,
+            &mut emit,
         )
         .unwrap();
 
-        let commands = commands.lock().unwrap();
         assert!(matches!(
-            commands.first(),
-            Some(SpokespersonCommand::TruncateOutput {
+            &commands[..],
+            [crate::openai_spokesperson::SpokespersonCommand::TruncateOutput {
                 response_id,
                 item_id,
-                audio_end_ms: 500,
-                ..
-            }) if response_id == "response-1" && item_id == "assistant-1"
+                content_index: 0,
+                audio_end_ms: 1,
+            }] if response_id == "response-1" && item_id == "assistant-1"
         ));
-        assert!(matches!(
-            commands.last(),
-            Some(SpokespersonCommand::Shutdown)
-        ));
-        let emitted = emitted.lock().unwrap();
-        assert_eq!(emitted[0]["type"], "output_audio_buffer.started");
-        assert_eq!(emitted[1]["type"], "output_audio_buffer.cleared");
-        assert_eq!(emitted[1]["played_audio_frames"], 12_000);
-        assert_eq!(emitted[1]["total_audio_frames"], 24_000);
+        assert_eq!(events[1]["type"], "output_audio_buffer.cleared");
+        assert_eq!(events[1]["response_id"], "response-1");
+        assert_eq!(events[1]["played_audio_frames"], 40);
+        assert_eq!(events[1]["total_audio_frames"], 100);
+        assert_eq!(events[2]["type"], "output_audio_buffer.started");
+        assert_eq!(events[2]["response_id"], "response-2");
     }
 }

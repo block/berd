@@ -1879,7 +1879,7 @@ struct PendingExpertPrepare {
     resolved_handoff_ids: Vec<String>,
 }
 
-struct PendingSpokespersonRateUpdate {
+struct PendingSpokespersonSettingsUpdate {
     id: u64,
     base_revision: u64,
     settings: TtsSettings,
@@ -2292,125 +2292,6 @@ fn reject_spokesperson_tts_settings(
     )
 }
 
-fn prepare_spokesperson_rate_update(
-    request: PendingSpokespersonRateUpdate,
-    quiescent: bool,
-    snapshot: &berd_voice::TtsConfigurationSnapshot,
-    pending: &mut Option<PendingSpokespersonRateUpdate>,
-    send_update: impl FnOnce(u64, f32) -> Result<(), String>,
-    writer: &mut impl Write,
-) -> Result<(), String> {
-    let PendingSpokespersonRateUpdate {
-        id,
-        base_revision: expected_revision,
-        settings,
-    } = request;
-    let rate = if pending.is_some() {
-        Err("another Spokesperson settings update is in progress".into())
-    } else if snapshot.revision != expected_revision {
-        Err(format!(
-            "stale TTS configuration revision: expected {expected_revision}, current {}",
-            snapshot.revision
-        ))
-    } else if !quiescent {
-        Err("Spokesperson voice settings can only change between turns".into())
-    } else {
-        match (&snapshot.settings, &settings) {
-            (
-                TtsSettings::OpenAi {
-                    model: current_model,
-                    voice: current_voice,
-                    ..
-                },
-                TtsSettings::OpenAi { model, voice, rate },
-            ) if model == current_model && voice == current_voice => {
-                if !rate.is_finite() || !(0.25..=1.5).contains(rate) {
-                    Err("Expert-Spokesperson rate must be between 0.25 and 1.5".into())
-                } else {
-                    Ok(*rate)
-                }
-            }
-            (TtsSettings::OpenAi { .. }, TtsSettings::OpenAi { .. }) => {
-                Err("Spokesperson model cannot change during a session".into())
-            }
-            _ => Err("Expert-Spokesperson requires OpenAI voice settings".into()),
-        }
-    };
-    match rate {
-        Ok(rate) => match send_update(id, rate) {
-            Ok(()) => {
-                *pending = Some(PendingSpokespersonRateUpdate {
-                    id,
-                    base_revision: expected_revision,
-                    settings,
-                });
-                Ok(())
-            }
-            Err(message) => reject_spokesperson_tts_settings(
-                id,
-                snapshot,
-                format!("Spokesperson settings update could not begin: {message}"),
-                writer,
-            ),
-        },
-        Err(message) => reject_spokesperson_tts_settings(id, snapshot, message, writer),
-    }
-}
-
-fn complete_spokesperson_rate_update(
-    request_id: u64,
-    speed: f32,
-    result: Result<(), String>,
-    pending: &mut Option<PendingSpokespersonRateUpdate>,
-    snapshot: &mut berd_voice::TtsConfigurationSnapshot,
-    writer: &mut impl Write,
-) -> Result<(), String> {
-    if pending
-        .as_ref()
-        .is_none_or(|update| update.id != request_id)
-    {
-        return Ok(());
-    }
-    let update = pending.take().expect("matched pending rate update");
-    if result.is_ok() && snapshot.revision == update.base_revision {
-        let requested_rate = match &update.settings {
-            TtsSettings::OpenAi { rate, .. } => *rate,
-            _ => unreachable!("only OpenAI rate updates are admitted"),
-        };
-        if (requested_rate - speed).abs() > f32::EPSILON {
-            return reject_spokesperson_tts_settings(
-                request_id,
-                snapshot,
-                "Spokesperson returned a mismatched speed update".into(),
-                writer,
-            );
-        }
-        snapshot.revision = snapshot
-            .revision
-            .checked_add(1)
-            .ok_or("TTS configuration revision overflow")?;
-        snapshot.settings = update.settings;
-        write_message(
-            writer,
-            &SessionMessage::TtsSettingsResult {
-                id: request_id,
-                outcome: TtsSettingsOutcome::Applied,
-                snapshot: snapshot.clone(),
-                message: None,
-            },
-        )
-    } else {
-        reject_spokesperson_tts_settings(
-            request_id,
-            snapshot,
-            result.err().unwrap_or_else(|| {
-                "TTS configuration changed before the speed update completed".into()
-            }),
-            writer,
-        )
-    }
-}
-
 fn spokesperson_settings_are_quiescent(
     gate: &ExpertTurnGate,
     active: Option<&LivePlayback>,
@@ -2436,7 +2317,7 @@ fn queued_spokesperson_settings_are_ready(
 }
 
 fn validate_queued_spokesperson_settings(
-    request: &PendingSpokespersonRateUpdate,
+    request: &PendingSpokespersonSettingsUpdate,
     snapshot: &berd_voice::TtsConfigurationSnapshot,
     runtime_config: &OpenAiSpokespersonConfig,
 ) -> Result<(), String> {
@@ -2516,8 +2397,7 @@ fn run_expert_spokesperson_session(
     let mut session_tts: Option<berd_voice::TtsConfigurationSnapshot> = None;
     let mut input_during_tts_slot: Option<InputDuringTtsSlot> = None;
     let mut input_muted = false;
-    let mut queued_tts_settings: Option<PendingSpokespersonRateUpdate> = None;
-    let mut pending_rate_update = None;
+    let mut queued_tts_settings: Option<PendingSpokespersonSettingsUpdate> = None;
     let mut pending_voice_update: Option<VoiceUpdateTransaction> = None;
     let mut spokesperson_renew_at: Option<Instant> = None;
     let mut next_maintenance_id = u64::MAX;
@@ -2535,7 +2415,7 @@ fn run_expert_spokesperson_session(
                     &directive_speeches,
                     &cancelled_directives,
                 );
-            if quiescent && pending_rate_update.is_none() {
+            if quiescent {
                 let snapshot = session_tts.as_ref().expect("initialized TTS snapshot");
                 let request = VoiceUpdateRequest {
                     id: next_maintenance_id,
@@ -2620,7 +2500,6 @@ fn run_expert_spokesperson_session(
             }
         }
         if queued_tts_settings.is_some()
-            && pending_rate_update.is_none()
             && pending_voice_update.is_none()
             && queued_spokesperson_settings_are_ready(
                 &turn_gate,
@@ -2634,52 +2513,27 @@ fn run_expert_spokesperson_session(
                 .take()
                 .expect("matched queued settings request");
             let snapshot = session_tts.as_ref().expect("initialized TTS snapshot");
-            let same_voice = matches!(
-                (&snapshot.settings, &request.settings),
-                (
-                    TtsSettings::OpenAi { voice: current, .. },
-                    TtsSettings::OpenAi { voice: requested, .. }
-                ) if current == requested
-            );
-            if same_voice {
-                prepare_spokesperson_rate_update(
-                    request,
-                    true,
-                    snapshot,
-                    &mut pending_rate_update,
-                    |request_id, rate| {
-                        runtime.as_ref().expect("initialized runtime").send(
-                            SpokespersonCommand::UpdateSpeed {
-                                request_id,
-                                speed: rate,
-                            },
-                        )
-                    },
-                    &mut writer,
-                )?;
-            } else {
-                let id = request.id;
-                pending_voice_update = match VoiceUpdateTransaction::start(
-                    VoiceUpdateRequest {
-                        id,
-                        base_revision: request.base_revision,
-                        settings: request.settings,
-                        semantic_revision: core.semantic_revision(),
-                    },
-                    snapshot.revision,
-                    true,
-                    runtime_config
-                        .as_ref()
-                        .expect("initialized Spokesperson config"),
-                    core.semantic_transcript(),
-                ) {
-                    Ok(update) => Some(update),
-                    Err(message) => {
-                        reject_spokesperson_tts_settings(id, snapshot, message, &mut writer)?;
-                        None
-                    }
-                };
-            }
+            let id = request.id;
+            pending_voice_update = match VoiceUpdateTransaction::start(
+                VoiceUpdateRequest {
+                    id,
+                    base_revision: request.base_revision,
+                    settings: request.settings,
+                    semantic_revision: core.semantic_revision(),
+                },
+                snapshot.revision,
+                true,
+                runtime_config
+                    .as_ref()
+                    .expect("initialized Spokesperson config"),
+                core.semantic_transcript(),
+            ) {
+                Ok(update) => Some(update),
+                Err(message) => {
+                    reject_spokesperson_tts_settings(id, snapshot, message, &mut writer)?;
+                    None
+                }
+            };
         }
         if let Some(events) = runtime_events.as_ref() {
             if let Ok(event) = events.try_recv() {
@@ -3002,22 +2856,6 @@ fn run_expert_spokesperson_session(
                             break;
                         }
                     }
-                    SpokespersonEvent::SpeedUpdated {
-                        request_id,
-                        speed,
-                        result,
-                    } => {
-                        complete_spokesperson_rate_update(
-                            request_id,
-                            speed,
-                            result,
-                            &mut pending_rate_update,
-                            session_tts
-                                .as_mut()
-                                .expect("hello initialized TTS snapshot"),
-                            &mut writer,
-                        )?;
-                    }
                     SpokespersonEvent::InputCutoverFinished { request_id, result } => {
                         let action = pending_voice_update.as_ref().map_or(
                             VoiceBarrierAction::Ignore,
@@ -3142,6 +2980,30 @@ fn run_expert_spokesperson_session(
                                 &mut writer,
                             )?;
                         }
+                        if pending_voice_update.as_ref().is_some_and(|update| {
+                            matches!(update.purpose(), VoiceUpdatePurpose::Settings)
+                        }) {
+                            let settings_update = pending_voice_update
+                                .take()
+                                .expect("matched settings update");
+                            reject_spokesperson_tts_settings(
+                                settings_update.id,
+                                session_tts.as_ref().expect("initialized TTS snapshot"),
+                                "Spokesperson session ended before the settings update completed"
+                                    .into(),
+                                &mut writer,
+                            )?;
+                            if let Err(error) = settings_update.finish_candidate() {
+                                write_protocol_fatal(
+                                    &mut writer,
+                                    "Spokesperson session renewal failed",
+                                    &format!(
+                                        "{message}; voice-change candidate cleanup failed: {error}"
+                                    ),
+                                )?;
+                                break;
+                            }
+                        }
                         let quiescent = spokesperson_settings_are_quiescent(
                             &turn_gate,
                             active.as_ref(),
@@ -3149,7 +3011,7 @@ fn run_expert_spokesperson_session(
                             &directive_speeches,
                             &cancelled_directives,
                         ) && !core.has_unresolved_external_handoff();
-                        if !quiescent || pending_rate_update.is_some() {
+                        if !quiescent {
                             write_protocol_fatal(
                                 &mut writer,
                                 unavailable_spokesperson_title(connection_lost, quiescent),
@@ -3170,27 +3032,7 @@ fn run_expert_spokesperson_session(
                                 false
                             }
                             Some(VoiceUpdatePurpose::Settings) => {
-                                let settings_update =
-                                    pending_voice_update.take().expect("settings update exists");
-                                let request_id = settings_update.id;
-                                reject_spokesperson_tts_settings(
-                                    request_id,
-                                    session_tts.as_ref().expect("initialized TTS snapshot"),
-                                    "Spokesperson session expired before the voice change completed"
-                                        .into(),
-                                    &mut writer,
-                                )?;
-                                if let Err(error) = settings_update.finish_candidate() {
-                                    write_protocol_fatal(
-                                        &mut writer,
-                                        "Spokesperson session renewal failed",
-                                        &format!(
-                                            "{message}; voice-change candidate cleanup failed: {error}"
-                                        ),
-                                    )?;
-                                    break;
-                                }
-                                true
+                                unreachable!("settings updates were settled before recovery")
                             }
                             Some(VoiceUpdatePurpose::SessionRecovery { .. }) => {
                                 write_protocol_fatal(
@@ -3394,10 +3236,7 @@ fn run_expert_spokesperson_session(
             &responses,
         ) {
             if let Some(request) = turn_gate.take_ready(
-                active.is_some()
-                    || pending_rate_update.is_some()
-                    || pending_voice_update.is_some()
-                    || queued_tts_settings.is_some(),
+                active.is_some() || pending_voice_update.is_some() || queued_tts_settings.is_some(),
                 responses.len(),
             ) {
                 submit_expert_prepare(
@@ -3592,9 +3431,7 @@ fn run_expert_spokesperson_session(
                         active.as_ref(),
                         &responses,
                     ),
-                    pending_rate_update.is_some()
-                        || pending_voice_update.is_some()
-                        || queued_tts_settings.is_some(),
+                    pending_voice_update.is_some() || queued_tts_settings.is_some(),
                     active.is_some(),
                     responses.len(),
                 );
@@ -3975,15 +3812,12 @@ fn run_expert_spokesperson_session(
                 expected_revision,
                 settings,
             }) => {
-                let request = PendingSpokespersonRateUpdate {
+                let request = PendingSpokespersonSettingsUpdate {
                     id,
                     base_revision: expected_revision,
                     settings,
                 };
-                if queued_tts_settings.is_some()
-                    || pending_voice_update.is_some()
-                    || pending_rate_update.is_some()
-                {
+                if queued_tts_settings.is_some() || pending_voice_update.is_some() {
                     reject_spokesperson_tts_settings(
                         id,
                         session_tts.as_ref().expect("initialized TTS snapshot"),
@@ -7378,135 +7212,6 @@ mod tests {
         assert_eq!(messages[2]["snapshot"]["revision"], 2);
         assert_eq!(messages[3]["outcome"], "rejected");
         assert_eq!(messages[3]["snapshot"]["revision"], 2);
-    }
-
-    #[test]
-    fn spokesperson_rate_updates_are_atomic_revisioned_and_quiescent() {
-        let mut snapshot = berd_voice::TtsConfigurationSnapshot {
-            revision: 1,
-            settings: TtsSettings::OpenAi {
-                model: "gpt-realtime".into(),
-                voice: "marin".into(),
-                rate: 1.0,
-            },
-        };
-        let mut output = Vec::new();
-        let mut applied = Vec::new();
-        let mut pending = None;
-        prepare_spokesperson_rate_update(
-            PendingSpokespersonRateUpdate {
-                id: 7,
-                base_revision: 1,
-                settings: TtsSettings::OpenAi {
-                    model: "gpt-realtime".into(),
-                    voice: "marin".into(),
-                    rate: 1.5,
-                },
-            },
-            true,
-            &snapshot,
-            &mut pending,
-            |id, rate| {
-                applied.push((id, rate));
-                Ok(())
-            },
-            &mut output,
-        )
-        .unwrap();
-        assert!(output.is_empty());
-        let mut gate = ExpertTurnGate::default();
-        assert!(matches!(
-            route_expert_prepare(
-                &mut gate,
-                PendingExpertPrepare {
-                    id: 11,
-                    acknowledgement: None,
-                    text: "wait for the configured rate".into(),
-                    resolved_handoff_ids: Vec::new(),
-                },
-                false,
-                true,
-                false,
-                0,
-            ),
-            ExpertPrepareRouting::Held
-        ));
-        complete_spokesperson_rate_update(7, 1.5, Ok(()), &mut pending, &mut snapshot, &mut output)
-            .unwrap();
-        assert_eq!(
-            gate.take_ready(false, 0).map(|request| request.id),
-            Some(11)
-        );
-
-        prepare_spokesperson_rate_update(
-            PendingSpokespersonRateUpdate {
-                id: 8,
-                base_revision: 2,
-                settings: TtsSettings::OpenAi {
-                    model: "gpt-realtime".into(),
-                    voice: "marin".into(),
-                    rate: 1.25,
-                },
-            },
-            false,
-            &snapshot,
-            &mut pending,
-            |_, _| panic!("busy update must not reach provider"),
-            &mut output,
-        )
-        .unwrap();
-
-        prepare_spokesperson_rate_update(
-            PendingSpokespersonRateUpdate {
-                id: 9,
-                base_revision: 2,
-                settings: TtsSettings::OpenAi {
-                    model: "gpt-realtime".into(),
-                    voice: "marin".into(),
-                    rate: 1.25,
-                },
-            },
-            true,
-            &snapshot,
-            &mut pending,
-            |_, _| Ok(()),
-            &mut output,
-        )
-        .unwrap();
-        let output_before_mismatch = output.len();
-        complete_spokesperson_rate_update(
-            999,
-            1.25,
-            Ok(()),
-            &mut pending,
-            &mut snapshot,
-            &mut output,
-        )
-        .unwrap();
-        assert!(pending.is_some());
-        assert_eq!(output.len(), output_before_mismatch);
-        complete_spokesperson_rate_update(
-            9,
-            1.25,
-            Err("provider rejected speed".into()),
-            &mut pending,
-            &mut snapshot,
-            &mut output,
-        )
-        .unwrap();
-
-        let messages = messages(&output);
-        assert_eq!(applied, [(7, 1.5)]);
-        assert_eq!(messages.len(), 3);
-        assert_eq!(messages[0]["type"], "tts_settings_result");
-        assert_eq!(messages[0]["outcome"], "applied");
-        assert_eq!(messages[0]["snapshot"]["revision"], 2);
-        assert_eq!(messages[0]["snapshot"]["rate"], 1.5);
-        assert_eq!(messages[1]["outcome"], "rejected");
-        assert_eq!(messages[1]["snapshot"]["revision"], 2);
-        assert_eq!(messages[2]["outcome"], "rejected");
-        assert_eq!(messages[2]["snapshot"]["revision"], 2);
-        assert_eq!(snapshot.revision, 2);
     }
 
     #[test]

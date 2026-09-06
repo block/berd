@@ -1337,7 +1337,6 @@ impl RealtimeExpertSpokespersonSession {
                     speaker,
                     text,
                     interrupted,
-                    expert_message,
                     ..
                 } => {
                     let live_event = match speaker {
@@ -1351,8 +1350,16 @@ impl RealtimeExpertSpokespersonSession {
                             }
                         }
                     };
-                    let exchange = self.enqueue_live_message(live_event, expert_message)?;
-                    let cursor = accepted_exchange_cursor(exchange, "transcript")?;
+                    let cursor = self.enqueue_live_message(live_event)?;
+                    match speaker {
+                        RealtimeTranscriptSpeaker::User => {
+                            self.conversation.record_user_turn(text.clone());
+                        }
+                        RealtimeTranscriptSpeaker::Spokesperson => {
+                            self.conversation
+                                .record_spokesperson_turn(text.clone(), *interrupted);
+                        }
+                    }
                     self.pending_expert_events.push(transcript_delivery_event(
                         cursor,
                         *speaker,
@@ -1366,14 +1373,10 @@ impl RealtimeExpertSpokespersonSession {
                 RealtimeProtocolEvent::Handoff {
                     call_id, message, ..
                 } => {
-                    let exchange = self.enqueue_live_message(
-                        LiveSideEvent::Handoff {
-                            call_id: call_id.clone(),
-                            message: message.clone(),
-                        },
-                        message,
-                    )?;
-                    let cursor = accepted_exchange_cursor(exchange, "handoff")?;
+                    let cursor = self.enqueue_live_message(LiveSideEvent::Handoff {
+                        call_id: call_id.clone(),
+                        message: message.clone(),
+                    })?;
                     let handoff_id = format!("handoff-{}-{cursor}", self.call_scope);
                     self.register_handoff(&handoff_id, cursor, message)?;
                     self.pending_expert_events.push(handoff_delivery_event(
@@ -1431,14 +1434,10 @@ impl RealtimeExpertSpokespersonSession {
             ..
         } = &reminder
         {
-            let exchange = self.enqueue_live_message(
-                LiveSideEvent::SpokespersonTranscript {
-                    text: message.clone(),
-                    interrupted: false,
-                },
-                message,
-            )?;
-            let cursor = accepted_exchange_cursor(exchange, "handoff reminder")?;
+            let cursor = self.enqueue_live_message(LiveSideEvent::SpokespersonTranscript {
+                text: message.clone(),
+                interrupted: false,
+            })?;
             self.pending_expert_events
                 .push(RealtimeExpertDeliveryEvent {
                     cursor,
@@ -1471,23 +1470,8 @@ impl RealtimeExpertSpokespersonSession {
         })
     }
 
-    fn enqueue_live_message(
-        &mut self,
-        event: LiveSideEvent,
-        message: &str,
-    ) -> Result<RealtimePipeExchange, String> {
-        let event = self.conversation.record_live_event(event)?;
-        Ok(RealtimePipeExchange::Accepted(RealtimePipeAccepted {
-            accepted: true,
-            outbound: RealtimePipeMessage {
-                id: event.token,
-                sender: RealtimePipePeer::Spokesperson,
-                recipient: RealtimePipePeer::Expert,
-                sender_cursor: self.conversation.confirmed_token(),
-                message: message.into(),
-            },
-            cursor: self.conversation.confirmed_token(),
-        }))
+    fn enqueue_live_message(&mut self, event: LiveSideEvent) -> Result<u64, String> {
+        Ok(self.conversation.record_live_event(event)?.token)
     }
 
     pub fn send_expert_pipe_message(
@@ -1740,6 +1724,7 @@ impl RealtimeExpertSpokespersonSession {
             directive_id: None,
             resolved_handoff_ids: Vec::new(),
         })?;
+        self.conversation.record_expert_turn(context.clone());
         self.dismiss_handoffs(handoff_ids)?;
         Ok(RealtimeHandoffDismissal {
             exchange,
@@ -1776,6 +1761,7 @@ impl RealtimeExpertSpokespersonSession {
             directive_id: None,
             resolved_handoff_ids: resolved_handoff_ids.to_vec(),
         })?;
+        self.conversation.record_expert_turn(message.to_string());
         self.mark_handoffs_resolving(resolved_handoff_ids)?;
         Ok(RealtimeExpertMessageSubmission {
             exchange,
@@ -1840,16 +1826,6 @@ impl RealtimeExpertSpokespersonSession {
             attempt,
             requests,
         }
-    }
-}
-
-fn accepted_exchange_cursor(exchange: RealtimePipeExchange, kind: &str) -> Result<u64, String> {
-    match exchange {
-        RealtimePipeExchange::Accepted(accepted) => Ok(accepted.outbound.id),
-        RealtimePipeExchange::Rejected(rejected) => Err(format!(
-            "The realtime {kind} could not enter the Expert pipe ({:?}).",
-            rejected.reason
-        )),
     }
 }
 
@@ -2878,6 +2854,54 @@ mod tests {
         assert_eq!(
             session.unknown_handoff_ids(&["handoff-1".into()]),
             Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn native_session_records_every_semantic_turn_for_replacement() {
+        let mut session = RealtimeExpertSpokespersonSession::new(0, "test-call");
+        session
+            .handle_provider_event(&json!({
+                "type": "conversation.item.input_audio_transcription.completed",
+                "item_id": "user-1",
+                "transcript": "What changed?",
+            }))
+            .unwrap();
+        session
+            .handle_provider_event(&json!({
+                "type": "response.output_audio_transcript.done",
+                "response_id": "response-1",
+                "item_id": "assistant-1",
+                "output_index": 0,
+                "content_index": 0,
+                "transcript": "The voice changed.",
+            }))
+            .unwrap();
+        session
+            .handle_provider_event(&json!({
+                "type": "output_audio_buffer.stopped",
+                "response_id": "response-1",
+            }))
+            .unwrap();
+        session
+            .submit_expert_message(
+                2,
+                "Keep the session context.",
+                RealtimeExpertMessageMode::Context,
+                &[],
+            )
+            .unwrap();
+
+        assert_eq!(
+            session.semantic_transcript(),
+            vec![
+                SemanticTurn::User("What changed?".into()),
+                SemanticTurn::Spokesperson {
+                    text: "The voice changed.".into(),
+                    interrupted: false,
+                },
+                SemanticTurn::Expert("Keep the session context.".into()),
+            ]
         );
     }
 

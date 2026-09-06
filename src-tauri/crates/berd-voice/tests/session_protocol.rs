@@ -1190,7 +1190,13 @@ fn expert_turn_completion_emits_a_correlated_private_handoff_reminder() {
     assert!(result["message"]
         .as_str()
         .unwrap()
-        .contains("\tlifecycle\t[Private handoff reminder]"));
+        .contains("[Private handoff reminder]"));
+    assert_eq!(result["events"][0]["cursor"], reminder["token"]);
+    assert_eq!(result["events"][0]["role"], "lifecycle");
+    assert!(result["events"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("[Private handoff reminder]"));
 
     session.shutdown_and_collect();
     server.join().unwrap();

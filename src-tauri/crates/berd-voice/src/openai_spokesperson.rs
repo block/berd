@@ -9,16 +9,16 @@ use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
 
 use crate::expert_spokesperson::SemanticTurn;
 use crate::openai_realtime_protocol::{
-    realtime_expert_message_item, realtime_expert_say_response, realtime_transcript_seed_item,
-    spokesperson_session_update, RealtimeExpertMessage, RealtimeExpertMessageMode,
-    RealtimeProtocolEvent, RealtimeProtocolReducer, RealtimeSpokespersonSessionOptions,
-    RealtimeTranscriptSeedTurn, RealtimeTranscriptSpeaker,
+    realtime_transcript_seed_item, spokesperson_session_update, RealtimeProtocolEvent,
+    RealtimeProtocolReducer, RealtimeSpokespersonSessionOptions, RealtimeTranscriptSeedTurn,
+    RealtimeTranscriptSpeaker,
 };
 
 const DEFAULT_ENDPOINT: &str = "wss://api.openai.com/v1/realtime";
 const DEFAULT_MODEL: &str = "gpt-realtime-2.1";
 const DEFAULT_TRANSCRIPTION_MODEL: &str = "gpt-realtime-whisper";
 const CONTROL_ACK_TIMEOUT: Duration = Duration::from_secs(4);
+const INPUT_QUEUE_FRAMES: usize = 100;
 
 /// Connection settings for the live Spokesperson. This deliberately does not
 /// implement `Debug` because it contains an API key.
@@ -107,17 +107,6 @@ pub enum SpokespersonCommand {
     CancelResponses {
         response_ids: Vec<String>,
     },
-    ExpertSay {
-        directive_id: u64,
-        text: String,
-    },
-    ExpertContext {
-        text: String,
-    },
-    UpdateSpeed {
-        request_id: u64,
-        speed: f32,
-    },
     BeginInputCutover {
         request_id: u64,
     },
@@ -188,11 +177,6 @@ pub enum SpokespersonEvent {
         content_index: u64,
         text: String,
     },
-    SpeedUpdated {
-        request_id: u64,
-        speed: f32,
-        result: Result<(), String>,
-    },
     InputCutoverFinished {
         request_id: u64,
         result: Result<(), String>,
@@ -222,27 +206,8 @@ pub enum SpokespersonResponseStatus {
 
 pub struct OpenAiSpokespersonRuntime {
     commands: mpsc::UnboundedSender<SpokespersonCommand>,
+    audio: mpsc::Sender<Vec<f32>>,
     worker: Option<thread::JoinHandle<()>>,
-}
-
-#[derive(Clone)]
-pub struct OpenAiSpokespersonControl {
-    commands: mpsc::UnboundedSender<SpokespersonCommand>,
-}
-
-impl OpenAiSpokespersonControl {
-    pub fn send(&self, command: SpokespersonCommand) -> Result<(), String> {
-        self.commands
-            .send(command)
-            .map_err(|_| "Spokesperson runtime is unavailable".to_string())
-    }
-}
-
-struct PendingSpeedUpdate {
-    request_id: u64,
-    event_id: String,
-    speed: f32,
-    deadline: tokio::time::Instant,
 }
 
 struct PendingTruncation {
@@ -287,28 +252,6 @@ fn complete_input_cutover_if_ready(
         )?;
     }
     Ok(())
-}
-
-fn expire_speed_update(
-    pending: &mut Option<PendingSpeedUpdate>,
-    now: tokio::time::Instant,
-) -> Option<String> {
-    let expired = pending
-        .as_ref()
-        .is_some_and(|update| now >= update.deadline);
-    if expired {
-        pending.take();
-        Some("Spokesperson speed update timed out; provider state is indeterminate".into())
-    } else {
-        None
-    }
-}
-
-fn speed_error_matches(pending: &PendingSpeedUpdate, event: &serde_json::Value) -> bool {
-    event
-        .pointer("/error/event_id")
-        .and_then(|value| value.as_str())
-        == Some(pending.event_id.as_str())
 }
 
 fn validate_effective_session(
@@ -361,6 +304,7 @@ impl OpenAiSpokespersonRuntime {
         forward_provider_events: bool,
     ) -> Result<(Self, std::sync::mpsc::Receiver<SpokespersonEvent>), String> {
         let (commands, command_rx) = mpsc::unbounded_channel();
+        let (audio, audio_rx) = mpsc::channel(INPUT_QUEUE_FRAMES);
         let (events, event_rx) = std::sync::mpsc::channel();
         let worker = thread::Builder::new()
             .name("berd-voice-spokesperson".into())
@@ -378,6 +322,7 @@ impl OpenAiSpokespersonRuntime {
                 if let Err(error) = runtime.block_on(run_inner(
                     config,
                     command_rx,
+                    audio_rx,
                     &events,
                     forward_provider_events,
                 )) {
@@ -389,6 +334,7 @@ impl OpenAiSpokespersonRuntime {
         Ok((
             Self {
                 commands,
+                audio,
                 worker: Some(worker),
             },
             event_rx,
@@ -396,14 +342,17 @@ impl OpenAiSpokespersonRuntime {
     }
 
     pub fn send(&self, command: SpokespersonCommand) -> Result<(), String> {
-        self.commands
-            .send(command)
-            .map_err(|_| "Spokesperson runtime is closed".into())
-    }
-
-    pub fn control(&self) -> OpenAiSpokespersonControl {
-        OpenAiSpokespersonControl {
-            commands: self.commands.clone(),
+        match command {
+            SpokespersonCommand::InputPcm48Khz(samples) => {
+                self.audio.try_send(samples).map_err(|error| match error {
+                    mpsc::error::TrySendError::Full(_) => "Spokesperson input queue is full".into(),
+                    mpsc::error::TrySendError::Closed(_) => "Spokesperson runtime is closed".into(),
+                })
+            }
+            command => self
+                .commands
+                .send(command)
+                .map_err(|_| "Spokesperson runtime is closed".into()),
         }
     }
 
@@ -439,12 +388,14 @@ async fn run(
     commands: mpsc::UnboundedReceiver<SpokespersonCommand>,
     events: &std::sync::mpsc::Sender<SpokespersonEvent>,
 ) -> Result<(), String> {
-    run_inner(config, commands, events, false).await
+    let (_audio_tx, audio_rx) = mpsc::channel(INPUT_QUEUE_FRAMES);
+    run_inner(config, commands, audio_rx, events, false).await
 }
 
 async fn run_inner(
     mut config: OpenAiSpokespersonConfig,
     mut commands: mpsc::UnboundedReceiver<SpokespersonCommand>,
+    mut audio: mpsc::Receiver<Vec<f32>>,
     events: &std::sync::mpsc::Sender<SpokespersonEvent>,
     forward_provider_events: bool,
 ) -> Result<(), String> {
@@ -481,7 +432,6 @@ async fn run_inner(
     send_json(&mut socket, spokesperson_session_update(&config.session)).await?;
 
     let mut protocol = RealtimeProtocolReducer::default();
-    let mut speed_update: Option<PendingSpeedUpdate> = None;
     let mut cancellation_events = HashMap::<String, String>::new();
     let mut pending_truncations = HashMap::<(String, u64), PendingTruncation>::new();
     let mut pending_input_cutover: Option<PendingInputCutover> = None;
@@ -493,7 +443,6 @@ async fn run_inner(
     let mut initial_session_ready = false;
     let mut next_control_event_id = 1_u64;
     loop {
-        let speed_update_deadline = speed_update.as_ref().map(|update| update.deadline);
         let truncation_deadline = pending_truncations
             .values()
             .map(|truncation| truncation.deadline)
@@ -541,19 +490,6 @@ async fn run_inner(
                 }
             }
             _ = async {
-                match speed_update_deadline {
-                    Some(deadline) => tokio::time::sleep_until(deadline).await,
-                    None => std::future::pending().await,
-                }
-            }, if speed_update_deadline.is_some() => {
-                if let Some(message) = expire_speed_update(
-                    &mut speed_update,
-                    tokio::time::Instant::now(),
-                ) {
-                    return Err(message);
-                }
-            }
-            _ = async {
                 match truncation_deadline {
                     Some(deadline) => tokio::time::sleep_until(deadline).await,
                     None => std::future::pending().await,
@@ -562,6 +498,16 @@ async fn run_inner(
                 if truncation_timed_out(&pending_truncations, tokio::time::Instant::now()) {
                     return Err("Spokesperson output truncation timed out; server context is indeterminate".into());
                 }
+            }
+            samples = audio.recv() => {
+                let Some(samples) = samples else {
+                    return Err("Spokesperson input queue is closed".into());
+                };
+                let pcm = downsample_pcm16(&samples);
+                send_json(&mut socket, serde_json::json!({
+                    "type": "input_audio_buffer.append",
+                    "audio": BASE64.encode(pcm),
+                })).await?;
             }
             command = commands.recv() => {
                 match command {
@@ -606,52 +552,6 @@ async fn run_inner(
                                 "response_id": response_id,
                             })).await?;
                             cancellation_events.insert(event_id, response_id);
-                        }
-                    }
-                    Some(SpokespersonCommand::ExpertContext { text }) => {
-                        send_json(
-                            &mut socket,
-                            realtime_expert_message_item(&RealtimeExpertMessage {
-                                message: text,
-                                mode: RealtimeExpertMessageMode::Context,
-                                event_id: None,
-                                directive_id: None,
-                                resolved_handoff_ids: Vec::new(),
-                            }),
-                        )
-                        .await?;
-                    }
-                    Some(SpokespersonCommand::UpdateSpeed { request_id, speed }) => {
-                        if !speed.is_finite() || !(0.25..=1.5).contains(&speed) {
-                            send_event(events, SpokespersonEvent::SpeedUpdated {
-                                request_id,
-                                speed,
-                                result: Err("Expert-Spokesperson rate must be between 0.25 and 1.5".into()),
-                            })?;
-                        } else if speed_update.is_some() {
-                            send_event(events, SpokespersonEvent::SpeedUpdated {
-                                request_id,
-                                speed,
-                                result: Err("another Spokesperson speed update is in progress".into()),
-                            })?;
-                        } else {
-                            let event_id = format!("berd-speed-{next_control_event_id}");
-                            next_control_event_id = next_control_event_id.checked_add(1)
-                                .ok_or("Spokesperson settings event space is exhausted")?;
-                            send_json(&mut socket, serde_json::json!({
-                                "event_id": event_id,
-                                "type": "session.update",
-                                "session": {
-                                    "type": "realtime",
-                                    "audio": { "output": { "speed": speed } }
-                                }
-                            })).await?;
-                            speed_update = Some(PendingSpeedUpdate {
-                                request_id,
-                                event_id,
-                                speed,
-                                deadline: tokio::time::Instant::now() + CONTROL_ACK_TIMEOUT,
-                            });
                         }
                     }
                     Some(SpokespersonCommand::BeginInputCutover { request_id }) => {
@@ -724,24 +624,6 @@ async fn run_inner(
                             event_id,
                             deadline: tokio::time::Instant::now() + CONTROL_ACK_TIMEOUT,
                         });
-                    }
-                    Some(SpokespersonCommand::ExpertSay { directive_id, text }) => {
-                        send_json(
-                            &mut socket,
-                            realtime_expert_message_item(&RealtimeExpertMessage {
-                                message: text.clone(),
-                                mode: RealtimeExpertMessageMode::Say,
-                                event_id: None,
-                                directive_id: Some(directive_id),
-                                resolved_handoff_ids: Vec::new(),
-                            }),
-                        )
-                        .await?;
-                        send_json(
-                            &mut socket,
-                            realtime_expert_say_response(&text, Some(directive_id))?,
-                        )
-                        .await?;
                     }
                     Some(SpokespersonCommand::Shutdown) | None => {
                         let _ = socket.close(None).await;
@@ -824,24 +706,7 @@ async fn run_inner(
                 }
                 match kind {
                     "session.updated" => {
-                        if let Some(update) = speed_update.take() {
-                            let applied_speed = value
-                                .pointer("/session/audio/output/speed")
-                                .and_then(serde_json::Value::as_f64)
-                                .map(|value| value as f32);
-                            let result = if applied_speed
-                                .is_some_and(|speed| (speed - update.speed).abs() <= f32::EPSILON)
-                            {
-                                Ok(())
-                            } else {
-                                Err("OpenAI Realtime did not apply the requested speed".into())
-                            };
-                            send_event(events, SpokespersonEvent::SpeedUpdated {
-                                request_id: update.request_id,
-                                speed: update.speed,
-                                result,
-                            })?;
-                        } else if !initial_session_ready {
+                        if !initial_session_ready {
                             validate_effective_session(&value, &config)?;
                             initial_session_ready = true;
                             send_next_seed_item(
@@ -1074,16 +939,6 @@ async fn run_inner(
                                 request_id: cutover.request_id,
                                 result: Err(message),
                             })?;
-                        } else if speed_update
-                            .as_ref()
-                            .is_some_and(|update| speed_error_matches(update, &value))
-                        {
-                            let update = speed_update.take().expect("matched pending speed update");
-                            send_event(events, SpokespersonEvent::SpeedUpdated {
-                                request_id: update.request_id,
-                                speed: update.speed,
-                                result: Err(message),
-                            })?;
                         } else if pending_truncations
                             .values()
                             .any(|truncation| value.pointer("/error/event_id").and_then(|value| value.as_str()) == Some(truncation.event_id.as_str()))
@@ -1206,15 +1061,15 @@ mod tests {
     };
 
     use super::{
-        downsample_pcm16, expire_speed_update, pcm16_samples, run, speed_error_matches,
-        truncation_timed_out, OpenAiSpokespersonConfig, OpenAiSpokespersonRuntime,
-        PendingSpeedUpdate, PendingTruncation, SpokespersonCommand, SpokespersonEvent,
-        SpokespersonResponseStatus, CONTROL_ACK_TIMEOUT,
+        downsample_pcm16, pcm16_samples, run, truncation_timed_out, OpenAiSpokespersonConfig,
+        OpenAiSpokespersonRuntime, PendingTruncation, SpokespersonCommand, SpokespersonEvent,
+        SpokespersonResponseStatus,
     };
     use crate::expert_spokesperson::SemanticTurn;
     use crate::openai_realtime_protocol::{
-        RealtimeEagerness, RealtimeNoiseReduction, RealtimeSpokespersonSessionOptions,
-        RealtimeTurnDetection,
+        realtime_expert_message_item, realtime_expert_say_response, RealtimeEagerness,
+        RealtimeExpertMessage, RealtimeExpertMessageMode, RealtimeNoiseReduction,
+        RealtimeSpokespersonSessionOptions, RealtimeTurnDetection,
     };
 
     fn test_config(
@@ -1291,6 +1146,32 @@ mod tests {
         assert_eq!(samples.len(), 2);
         assert!(samples[0] > 0.99);
         assert!(samples[1] < -0.99);
+    }
+
+    #[test]
+    fn runtime_bounds_audio_without_blocking_control_commands() {
+        let (commands, mut command_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (audio, _audio_rx) = tokio::sync::mpsc::channel(1);
+        let runtime = OpenAiSpokespersonRuntime {
+            commands,
+            audio,
+            worker: None,
+        };
+
+        runtime
+            .send(SpokespersonCommand::InputPcm48Khz(vec![0.0]))
+            .unwrap();
+        assert_eq!(
+            runtime
+                .send(SpokespersonCommand::InputPcm48Khz(vec![0.0]))
+                .unwrap_err(),
+            "Spokesperson input queue is full"
+        );
+        runtime.send(SpokespersonCommand::Shutdown).unwrap();
+        assert!(matches!(
+            command_rx.try_recv().unwrap(),
+            SpokespersonCommand::Shutdown
+        ));
     }
 
     #[tokio::test]
@@ -1632,42 +1513,6 @@ mod tests {
     }
 
     #[test]
-    fn speed_update_timeout_clears_the_worker_reservation() {
-        let now = tokio::time::Instant::now();
-        let mut pending = Some(PendingSpeedUpdate {
-            request_id: 7,
-            event_id: "berd-speed-1".into(),
-            speed: 1.5,
-            deadline: now,
-        });
-
-        assert_eq!(
-            expire_speed_update(&mut pending, now).as_deref(),
-            Some("Spokesperson speed update timed out; provider state is indeterminate")
-        );
-        assert!(pending.is_none());
-    }
-
-    #[test]
-    fn only_the_correlated_provider_error_rejects_a_speed_update() {
-        let pending = PendingSpeedUpdate {
-            request_id: 7,
-            event_id: "berd-speed-1".into(),
-            speed: 1.5,
-            deadline: tokio::time::Instant::now() + CONTROL_ACK_TIMEOUT,
-        };
-
-        assert!(speed_error_matches(
-            &pending,
-            &json!({"error":{"event_id":"berd-speed-1"}})
-        ));
-        assert!(!speed_error_matches(
-            &pending,
-            &json!({"error":{"event_id":"different-event"}})
-        ));
-    }
-
-    #[test]
     fn output_truncation_timeout_is_bounded() {
         let now = tokio::time::Instant::now();
         let pending = HashMap::from([(
@@ -1879,13 +1724,6 @@ mod tests {
             assert_eq!(item["type"], "input_audio_buffer.clear");
             send_json(&mut socket, json!({"type":"input_audio_buffer.cleared"})).await;
 
-            let speed = receive_json(&mut socket).await;
-            assert_eq!(speed["type"], "session.update");
-            assert_eq!(speed["event_id"], "berd-speed-2");
-            assert_eq!(
-                speed.pointer("/session/audio/output/speed"),
-                Some(&json!(1.5))
-            );
             send_json(
                 &mut socket,
                 json!({"type":"input_audio_buffer.speech_started","item_id":"item-during-update"}),
@@ -1893,14 +1731,6 @@ mod tests {
             .await;
             let pcm_during_update = receive_json(&mut socket).await;
             assert_eq!(pcm_during_update["type"], "input_audio_buffer.append");
-            send_json(
-                &mut socket,
-                json!({
-                    "type":"session.updated",
-                    "session":{"audio":{"output":{"speed":1.5}}}
-                }),
-            )
-            .await;
 
             let cancel = receive_json(&mut socket).await;
             assert_eq!(cancel["type"], "response.cancel");
@@ -2071,12 +1901,6 @@ mod tests {
             })
             .unwrap();
         commands
-            .send(SpokespersonCommand::UpdateSpeed {
-                request_id: 9,
-                speed: 1.5,
-            })
-            .unwrap();
-        commands
             .send(SpokespersonCommand::InputPcm48Khz(vec![0.5, 0.5]))
             .unwrap();
         commands
@@ -2085,14 +1909,24 @@ mod tests {
             })
             .unwrap();
         commands
-            .send(SpokespersonCommand::ExpertSay {
-                directive_id: 7,
-                text: "answer this".into(),
-            })
+            .send(SpokespersonCommand::Provider(realtime_expert_message_item(
+                &RealtimeExpertMessage {
+                    message: "answer this".into(),
+                    mode: RealtimeExpertMessageMode::Say,
+                    event_id: None,
+                    directive_id: Some(7),
+                    resolved_handoff_ids: Vec::new(),
+                },
+            )))
+            .unwrap();
+        commands
+            .send(SpokespersonCommand::Provider(
+                realtime_expert_say_response("answer this", Some(7)).unwrap(),
+            ))
             .unwrap();
 
         let received = tokio::task::spawn_blocking(move || {
-            (0..18)
+            (0..17)
                 .map(|_| event_rx.recv_timeout(Duration::from_secs(2)).unwrap())
                 .collect::<Vec<_>>()
         })
@@ -2103,15 +1937,6 @@ mod tests {
         assert!(
             matches!(during_update, SpokespersonEvent::UserSpeaking { active: true, item_id } if item_id == "item-during-update")
         );
-        assert!(matches!(
-            &received[0],
-            SpokespersonEvent::SpeedUpdated {
-                request_id: 9,
-                speed: 1.5,
-                result: Ok(()),
-            }
-        ));
-        let received = &received[1..];
         assert!(
             matches!(&received[0], SpokespersonEvent::UserSpeaking { active: true, item_id } if item_id == "item-1")
         );

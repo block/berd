@@ -214,6 +214,14 @@ impl ExpertSpokespersonCore {
         self.record_semantic_turn(SemanticTurn::Expert(text));
     }
 
+    pub fn record_spokesperson_turn(&mut self, text: String, interrupted: bool) {
+        let text = text.trim().to_string();
+        if text.is_empty() {
+            return;
+        }
+        self.record_semantic_turn(SemanticTurn::Spokesperson { text, interrupted });
+    }
+
     pub fn semantic_revision(&self) -> u64 {
         self.semantic_revision
     }

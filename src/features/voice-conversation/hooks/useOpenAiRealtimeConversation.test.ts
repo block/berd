@@ -1811,6 +1811,41 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     );
   });
 
+  it("drains final runtime events after native shutdown before flushing", async () => {
+    let finishStop!: () => void;
+    mocks.stopRuntime.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishStop = resolve;
+        }),
+    );
+    const onSend = vi.fn().mockResolvedValue(true);
+    const owner = renderConversation("session-a", onSend);
+    await act(async () => owner.result.current.onToggle());
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+
+    let stop!: Promise<void>;
+    act(() => {
+      stop = stopOpenAiRealtimeConversation();
+    });
+    await waitFor(() =>
+      expect(mocks.stopRuntime).toHaveBeenCalledWith("session-a"),
+    );
+    realtimeRuntimeListener?.({
+      sessionId: "session-a",
+      event: { type: "test.transcript" },
+    });
+    finishStop();
+    await act(async () => stop);
+
+    expect(onSend).toHaveBeenCalledWith(
+      expect.stringContaining("User said: hello master"),
+      undefined,
+      undefined,
+      expect.objectContaining({ displayText: "Final voice transcript" }),
+    );
+  });
+
   it("does not request a Spokesperson response when automatic responses are disabled", async () => {
     mocks.createResponse = false;
     const owner = renderConversation("session-a");

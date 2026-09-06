@@ -863,13 +863,20 @@ class OpenAiRealtimeConversationRuntime {
         reasoningEffort: preference.reasoningEffort,
         maxOutputTokens: preference.maxOutputTokens,
       };
-      await startOpenAiRealtimeSpokespersonRuntime(
-        sessionId,
-        this.bridgeCallScope.initialCursor,
-        this.bridgeCallScope.id,
-        runtimeOptions,
-      );
       this.realtimeRuntimeSessionId = sessionId;
+      try {
+        await startOpenAiRealtimeSpokespersonRuntime(
+          sessionId,
+          this.bridgeCallScope.initialCursor,
+          this.bridgeCallScope.id,
+          runtimeOptions,
+        );
+      } catch (error) {
+        if (this.realtimeRuntimeSessionId === sessionId) {
+          this.realtimeRuntimeSessionId = null;
+        }
+        throw error;
+      }
       await Promise.race([
         runtimeReady,
         new Promise<never>((_, reject) => {
@@ -1053,6 +1060,15 @@ class OpenAiRealtimeConversationRuntime {
     )
       return;
     this.setSnapshot({ ...this.snapshot, state: "stopping" });
+    this.nativeMicrophone?.stop();
+    this.nativeMicrophone = null;
+    const realtimeRuntimeSessionId = this.realtimeRuntimeSessionId;
+    this.realtimeRuntimeSessionId = null;
+    if (realtimeRuntimeSessionId) {
+      await stopOpenAiRealtimeSpokespersonRuntime(
+        realtimeRuntimeSessionId,
+      ).catch(() => undefined);
+    }
     await this.realtimeProtocolQueue.catch(() => undefined);
     await this.realtimeRuntimeSendQueue.catch(() => undefined);
     const flushedPendingEvents =
