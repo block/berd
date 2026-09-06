@@ -847,6 +847,29 @@ pub fn expert_handoff_message(handoff_id: &str, cursor: u64, message: &str) -> S
     format!("[Handoff {handoff_id} from spokesperson; cursor {cursor}] {message}")
 }
 
+fn expert_delivery_row(cursor: u64, role: &str, text: &str) -> String {
+    let text = text.replace("\r\n", " ").replace(['\r', '\n', '\t'], " ");
+    format!("{cursor}\t{role}\t{text}")
+}
+
+fn transcript_delivery_row(
+    cursor: u64,
+    speaker: RealtimeTranscriptSpeaker,
+    text: &str,
+    interrupted: bool,
+) -> String {
+    let role = match (speaker, interrupted) {
+        (RealtimeTranscriptSpeaker::User, _) => "user",
+        (RealtimeTranscriptSpeaker::Spokesperson, false) => "spokesperson",
+        (RealtimeTranscriptSpeaker::Spokesperson, true) => "spokesperson-interrupted",
+    };
+    expert_delivery_row(cursor, role, text)
+}
+
+fn handoff_delivery_row(cursor: u64, handoff_id: &str, message: &str) -> String {
+    expert_delivery_row(cursor, "handoff", &format!("{handoff_id}: {message}"))
+}
+
 fn combined_spokesperson_transcript(
     pending: &PendingSpokespersonTranscript,
     prefer_final_text: bool,
@@ -1297,9 +1320,11 @@ impl RealtimeExpertSpokespersonSession {
                     };
                     let exchange = self.enqueue_live_message(live_event, expert_message)?;
                     let cursor = accepted_exchange_cursor(exchange, "transcript")?;
-                    self.pending_expert_events.push(expert_message.replace(
-                        "[Voice transcript]",
-                        &format!("[Voice transcript; cursor {cursor}]"),
+                    self.pending_expert_events.push(transcript_delivery_row(
+                        cursor,
+                        *speaker,
+                        text,
+                        *interrupted,
                     ));
                     if *speaker == RealtimeTranscriptSpeaker::Spokesperson {
                         expert_delivery = self.take_expert_delivery(text, Vec::new());
@@ -1317,8 +1342,12 @@ impl RealtimeExpertSpokespersonSession {
                     )?;
                     let cursor = accepted_exchange_cursor(exchange, "handoff")?;
                     let handoff_id = format!("handoff-{}-{cursor}", self.call_scope);
-                    let expert_handoff = self.register_handoff(&handoff_id, cursor, message)?;
-                    self.pending_expert_events.push(expert_handoff);
+                    self.register_handoff(&handoff_id, cursor, message)?;
+                    self.pending_expert_events.push(handoff_delivery_row(
+                        cursor,
+                        &handoff_id,
+                        message,
+                    ));
                     let tool_output = accepted_handoff_tool_output(call_id, &handoff_id)?;
                     client_events.extend(
                         self.responses
@@ -1377,12 +1406,8 @@ impl RealtimeExpertSpokespersonSession {
                 message,
             )?;
             let cursor = accepted_exchange_cursor(exchange, "handoff reminder")?;
-            self.pending_expert_events.push(format!(
-                "[Private handoff reminder; cursor {cursor}]{}",
-                message
-                    .strip_prefix("[Private handoff reminder]")
-                    .unwrap_or(message)
-            ));
+            self.pending_expert_events
+                .push(expert_delivery_row(cursor, "lifecycle", message));
             self.take_expert_delivery("Handoff reminder", handoff_ids.clone())
         } else {
             None
@@ -1462,15 +1487,21 @@ impl RealtimeExpertSpokespersonSession {
         String,
     > {
         let recorded = self.conversation.record_live_event(event)?;
-        let (expert_message, display_text, handoff_ids, flush) = match &recorded.payload {
+        let (expert_row, display_text, handoff_ids, flush) = match &recorded.payload {
             LiveSideEvent::UserTranscript { text } => (
-                expert_transcript_message(RealtimeTranscriptSpeaker::User, text, false),
+                transcript_delivery_row(
+                    recorded.token,
+                    RealtimeTranscriptSpeaker::User,
+                    text,
+                    false,
+                ),
                 text.clone(),
                 Vec::new(),
                 false,
             ),
             LiveSideEvent::SpokespersonTranscript { text, interrupted } => (
-                expert_transcript_message(
+                transcript_delivery_row(
+                    recorded.token,
                     RealtimeTranscriptSpeaker::Spokesperson,
                     text,
                     *interrupted,
@@ -1480,16 +1511,16 @@ impl RealtimeExpertSpokespersonSession {
                 true,
             ),
             LiveSideEvent::Handoff { call_id, message } => (
-                self.register_handoff(call_id, recorded.token, message)?,
+                {
+                    self.register_handoff(call_id, recorded.token, message)?;
+                    handoff_delivery_row(recorded.token, call_id, message)
+                },
                 message.clone(),
                 vec![call_id.clone()],
                 true,
             ),
         };
-        self.pending_expert_events.push(expert_message.replace(
-            "[Voice transcript]",
-            &format!("[Voice transcript; cursor {}]", recorded.token),
-        ));
+        self.pending_expert_events.push(expert_row);
         let delivery = flush
             .then(|| self.take_expert_delivery(&display_text, handoff_ids))
             .flatten();
@@ -1903,6 +1934,8 @@ mod tests {
             "implementation, architecture, protocols, lifecycle, runtime behavior",
             "never gives a preliminary or speculative answer before or alongside a handoff",
             "When unsure whether a question is routine or authoritative, hand it off",
+            "cursor\\trole\\ttext",
+            "`spokesperson-interrupted` role identifies them",
         ] {
             assert!(
                 normalized.contains(required),
@@ -2527,12 +2560,10 @@ mod tests {
             .unwrap();
         let delivery = finished.expert_delivery.unwrap();
         assert_eq!(delivery.display_text, "I will check.");
-        assert!(delivery
-            .message
-            .contains("[Voice transcript; cursor 11] User said: What changed?"));
-        assert!(delivery
-            .message
-            .contains("[Voice transcript; cursor 12] Spokesperson said: I will check."));
+        assert_eq!(
+            delivery.message,
+            "11\tuser\tWhat changed?\n12\tspokesperson\tI will check."
+        );
         assert!(session.flush_expert_events("unused").is_none());
     }
 
@@ -2556,12 +2587,10 @@ mod tests {
         assert_eq!(spokesperson.token, 2);
         let delivery = delivery.unwrap();
         assert_eq!(delivery.display_text, "I will check.");
-        assert!(delivery
-            .message
-            .contains("[Voice transcript; cursor 1] User said: What changed?"));
-        assert!(delivery
-            .message
-            .contains("[Voice transcript; cursor 2] Spokesperson said: I will check."));
+        assert_eq!(
+            delivery.message,
+            "1\tuser\tWhat changed?\n2\tspokesperson\tI will check."
+        );
         assert!(session.flush_expert_events("unused").is_none());
     }
 
@@ -2591,9 +2620,10 @@ mod tests {
         let delivery = reduction.expert_delivery.unwrap();
         assert_eq!(delivery.handoff_ids, ["handoff-call-a-5"]);
         assert_eq!(delivery.display_text, "Inspect the repository");
-        assert!(delivery.message.contains(
-            "[Handoff handoff-call-a-5 from spokesperson; cursor 5] Inspect the repository"
-        ));
+        assert_eq!(
+            delivery.message,
+            "5\thandoff\thandoff-call-a-5: Inspect the repository"
+        );
     }
 
     #[test]
@@ -2611,7 +2641,7 @@ mod tests {
             .flush_expert_events("Final voice transcript")
             .unwrap();
         assert_eq!(delivery.display_text, "Final voice transcript");
-        assert!(delivery.message.contains("User said: One last thought"));
+        assert_eq!(delivery.message, "1\tuser\tOne last thought");
         assert!(session
             .flush_expert_events("Final voice transcript")
             .is_none());
@@ -2666,8 +2696,30 @@ mod tests {
         assert_eq!(delivery.handoff_ids, ["handoff-1"]);
         assert!(delivery
             .message
-            .starts_with("[Private handoff reminder; cursor 1]"));
+            .starts_with("1\tlifecycle\t[Private handoff reminder]"));
         assert!(session.flush_expert_events("unused").is_none());
+    }
+
+    #[test]
+    fn expert_delivery_tsv_normalizes_embedded_separators_and_marks_interruption() {
+        let mut session = RealtimeExpertSpokespersonSession::new(0, "external");
+        let (_, delivery) = session
+            .record_external_live_event_with_delivery(LiveSideEvent::UserTranscript {
+                text: "first\tsecond\nthird\r\nfourth".into(),
+            })
+            .unwrap();
+        assert!(delivery.is_none());
+
+        let (_, delivery) = session
+            .record_external_live_event_with_delivery(LiveSideEvent::SpokespersonTranscript {
+                text: String::new(),
+                interrupted: true,
+            })
+            .unwrap();
+        assert_eq!(
+            delivery.unwrap().message,
+            "1\tuser\tfirst second third fourth\n2\tspokesperson-interrupted\t"
+        );
     }
 
     #[test]

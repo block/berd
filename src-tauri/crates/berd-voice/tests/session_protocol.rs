@@ -1190,7 +1190,7 @@ fn expert_turn_completion_emits_a_correlated_private_handoff_reminder() {
     assert!(result["message"]
         .as_str()
         .unwrap()
-        .contains("[Private handoff reminder; cursor"));
+        .contains("\tlifecycle\t[Private handoff reminder]"));
 
     session.shutdown_and_collect();
     server.join().unwrap();
