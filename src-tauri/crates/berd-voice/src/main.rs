@@ -61,7 +61,7 @@ use session_audio::{
     AUDIO_CANCELLED,
 };
 
-const WIRE_MARKER: u32 = 2;
+const WIRE_MARKER: u32 = 3;
 const MAX_LINE_BYTES: usize = 1024 * 1024;
 const FRAME_MAGIC: [u8; 2] = *b"BV";
 const JSON_FRAME_KIND: u8 = 1;

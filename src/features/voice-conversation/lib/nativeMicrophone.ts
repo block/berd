@@ -1,19 +1,4 @@
-function invokeRawBinary(
-  command: string,
-  payload: Uint8Array,
-): Promise<unknown> {
-  const internals = (
-    window as unknown as {
-      __TAURI_INTERNALS__?: {
-        invoke?: (command: string, payload: Uint8Array) => Promise<unknown>;
-      };
-    }
-  ).__TAURI_INTERNALS__;
-  if (!internals?.invoke) {
-    return Promise.reject(new Error("Tauri audio transport is unavailable."));
-  }
-  return internals.invoke(command, payload);
-}
+import { invoke } from "@tauri-apps/api/core";
 
 export interface NativeMicrophone {
   setMuted: (muted: boolean) => void;
@@ -54,7 +39,7 @@ export async function startNativeMicrophone(
     let transportErrorReported = false;
     worklet.port.onmessage = (event: MessageEvent<Float32Array>) => {
       const samples = event.data;
-      void invokeRawBinary(
+      void invoke(
         transportCommand,
         new Uint8Array(samples.buffer, samples.byteOffset, samples.byteLength),
       ).catch((error) => {
