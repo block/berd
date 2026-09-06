@@ -18,8 +18,8 @@ use crate::{
     openai_spokesperson::{SpokespersonCommand, SpokespersonEvent},
     realtime_audio_delivery::RealtimeAudioDelivery,
     realtime_host_lifecycle::{
-        session_loss_action, spokesperson_renew_after, voice_update_is_safe, RealtimeHostActivity,
-        RealtimeHostWork, RealtimeSessionLossAction,
+        spokesperson_renew_after, RealtimeHostLifecycle, RealtimeHostWork,
+        RealtimeSessionLossAction,
     },
     spokesperson_voice_update::{
         validate_voice_update_settings, VoiceBarrierAction, VoiceUpdateAction, VoiceUpdatePurpose,
@@ -457,13 +457,12 @@ fn run_managed_realtime_host_inner(
 ) -> Result<(), String> {
     let (mut runtime, mut events) = OpenAiSpokespersonRuntime::spawn_observed(config.clone())?;
     let mut host = RealtimePlaybackHost::default();
-    let mut activity = RealtimeHostActivity::default();
+    let mut lifecycle = RealtimeHostLifecycle::new(renew_after);
+    lifecycle.session_started(Instant::now());
     let mut queued_update = VoiceUpdateQueue::<QueuedManagedUpdate>::default();
     let mut pending_update: Option<PendingManagedUpdate> = None;
     let mut semantic_transcript = Vec::new();
     let mut unresolved_handoff = false;
-    let mut renew_at = Some(Instant::now() + renew_after);
-    let mut next_maintenance_id = u64::MAX;
     let mut shutting_down = false;
 
     while !shutting_down {
@@ -562,7 +561,7 @@ fn run_managed_realtime_host_inner(
             playback_active: !host.is_idle(),
             ..RealtimeHostWork::default()
         };
-        let quiescent = activity.settings_are_quiescent(host_work);
+        let quiescent = lifecycle.settings_are_quiescent(host_work);
         if let Some(queued) = queued_update.take_ready(pending_update.is_some(), quiescent) {
             let current = snapshot
                 .lock()
@@ -587,22 +586,22 @@ fn run_managed_realtime_host_inner(
             }
         }
 
-        if pending_update.is_none()
-            && renew_at.is_some_and(|deadline| Instant::now() >= deadline)
-            && quiescent
-            && !unresolved_handoff
-        {
+        if lifecycle.renewal_is_due(
+            Instant::now(),
+            host_work,
+            unresolved_handoff,
+            pending_update.is_some(),
+        ) {
             let current = snapshot
                 .lock()
                 .map_err(|_| "Spokesperson settings are unavailable")?
                 .clone();
             let request = VoiceUpdateRequest {
-                id: next_maintenance_id,
+                id: lifecycle.next_maintenance_id(),
                 base_revision: current.revision,
                 settings: current.settings.clone(),
                 semantic_revision: semantic_revision.load(Ordering::SeqCst),
             };
-            next_maintenance_id = next_maintenance_id.wrapping_sub(1);
             pending_update = Some(PendingManagedUpdate {
                 transaction: VoiceUpdateTransaction::start_with_purpose(
                     request,
@@ -621,14 +620,14 @@ fn run_managed_realtime_host_inner(
                 .lock()
                 .map_err(|_| "Spokesperson settings are unavailable")?
                 .clone();
-            let safe = voice_update_is_safe(
+            let safe = lifecycle.voice_update_is_safe(
                 update.transaction.purpose(),
                 update.transaction.semantic_revision,
                 semantic_revision.load(Ordering::SeqCst),
                 update.transaction.base_revision,
                 current.revision,
                 unresolved_handoff,
-                quiescent,
+                host_work,
             );
             match update.transaction.next_action(Instant::now(), safe) {
                 VoiceUpdateAction::None => {}
@@ -645,7 +644,7 @@ fn run_managed_realtime_host_inner(
                         &mut config,
                         &snapshot,
                     )?;
-                    renew_at = Some(Instant::now() + renew_after);
+                    lifecycle.session_started(Instant::now());
                 }
                 VoiceUpdateAction::Reject(message) => {
                     let was_renewal = pending_update.as_ref().is_some_and(|update| {
@@ -653,7 +652,10 @@ fn run_managed_realtime_host_inner(
                     });
                     reject_managed_update(&mut pending_update, &runtime, message)?;
                     if was_renewal {
-                        renew_at = Some(Instant::now() + Duration::from_secs(30));
+                        lifecycle.retry_renewal_after(
+                            Instant::now(),
+                            Duration::from_secs(30),
+                        );
                     }
                 }
             }
@@ -665,38 +667,38 @@ fn run_managed_realtime_host_inner(
                     SpokespersonEvent::UserSpeaking {
                         active: true,
                         item_id,
-                    } => activity.begin_user_speaking(item_id.clone()),
+                    } => lifecycle.begin_user_speaking(item_id.clone()),
                     SpokespersonEvent::UserSpeaking { active: false, .. } => {
-                        activity.finish_user_speaking();
+                        lifecycle.finish_user_speaking();
                     }
                     SpokespersonEvent::UserTurnDiscarded { item_id }
                     | SpokespersonEvent::UserFinal { item_id, .. } => {
-                        activity.finish_user_item(item_id);
+                        lifecycle.finish_user_item(item_id);
                     }
                     SpokespersonEvent::ResponseStarted { response_id } => {
-                        activity.begin_response(response_id.clone());
+                        lifecycle.begin_response(response_id.clone());
                     }
                     SpokespersonEvent::ResponseFinished { response_id, .. } => {
-                        activity.finish_response(response_id);
+                        lifecycle.finish_response(response_id);
                     }
                     SpokespersonEvent::InputCutoverFinished { request_id, result } => {
                         let current = snapshot
                             .lock()
                             .map_err(|_| "Spokesperson settings are unavailable")?
                             .clone();
-                        let quiescent = activity.settings_are_quiescent(RealtimeHostWork {
+                        let barrier_work = RealtimeHostWork {
                             playback_active: !host.is_idle(),
                             ..RealtimeHostWork::default()
-                        });
+                        };
                         let safe = pending_update.as_ref().is_some_and(|update| {
-                            voice_update_is_safe(
+                            lifecycle.voice_update_is_safe(
                                 update.transaction.purpose(),
                                 update.transaction.semantic_revision,
                                 semantic_revision.load(Ordering::SeqCst),
                                 update.transaction.base_revision,
                                 current.revision,
                                 unresolved_handoff,
-                                quiescent,
+                                barrier_work,
                             )
                         });
                         let action =
@@ -719,7 +721,7 @@ fn run_managed_realtime_host_inner(
                                     &mut config,
                                     &snapshot,
                                 )?;
-                                renew_at = Some(Instant::now() + renew_after);
+                                lifecycle.session_started(Instant::now());
                             }
                             VoiceBarrierAction::Reject(message) => {
                                 reject_managed_update(&mut pending_update, &runtime, message)?;
@@ -734,11 +736,11 @@ fn run_managed_realtime_host_inner(
                                     .into(),
                             ));
                         }
-                        let recovery_action = session_loss_action(
+                        let recovery_action = lifecycle.session_loss_action(
                             pending_update
                                 .as_ref()
                                 .map(|update| update.transaction.purpose()),
-                            quiescent,
+                            host_work,
                             unresolved_handoff,
                         );
                         let start_recovery = match recovery_action {
@@ -771,12 +773,11 @@ fn run_managed_realtime_host_inner(
                                 .map_err(|_| "Spokesperson settings are unavailable")?
                                 .clone();
                             let request = VoiceUpdateRequest {
-                                id: next_maintenance_id,
+                                id: lifecycle.next_maintenance_id(),
                                 base_revision: current.revision,
                                 settings: current.settings.clone(),
                                 semantic_revision: semantic_revision.load(Ordering::SeqCst),
                             };
-                            next_maintenance_id = next_maintenance_id.wrapping_sub(1);
                             pending_update = Some(PendingManagedUpdate {
                                 transaction: VoiceUpdateTransaction::start_with_purpose(
                                     request,

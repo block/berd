@@ -155,6 +155,10 @@ impl ExpertSpokespersonCore {
         self.pipe.cursor(RealtimePipePeer::Expert)
     }
 
+    pub fn next_live_token(&self) -> u64 {
+        self.pipe.next_message_id()
+    }
+
     pub fn events_after(&self, token: u64) -> Vec<CausalMessage<LiveSideEvent>> {
         self.live_events
             .iter()

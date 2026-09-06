@@ -35,6 +35,132 @@ pub struct RealtimeHostWork {
     pub truncation_pending: bool,
 }
 
+/// Shared lifecycle coordinator for every Expert-Spokesperson Realtime host.
+///
+/// Hosts still own transport I/O and playback, but session activity, renewal
+/// admission, maintenance request identity, update safety, and disconnect
+/// recovery decisions all pass through this state.
+#[derive(Debug)]
+pub struct RealtimeHostLifecycle {
+    activity: RealtimeHostActivity,
+    renew_after: Duration,
+    renew_at: Option<std::time::Instant>,
+    next_maintenance_id: u64,
+}
+
+impl RealtimeHostLifecycle {
+    pub fn new(renew_after: Duration) -> Self {
+        Self {
+            activity: RealtimeHostActivity::default(),
+            renew_after,
+            renew_at: None,
+            next_maintenance_id: u64::MAX,
+        }
+    }
+
+    pub fn begin_user_speaking(&mut self, item_id: String) {
+        self.activity.begin_user_speaking(item_id);
+    }
+
+    pub fn finish_user_speaking(&mut self) {
+        self.activity.finish_user_speaking();
+    }
+
+    pub fn finish_user_item(&mut self, item_id: &str) {
+        self.activity.finish_user_item(item_id);
+    }
+
+    pub fn begin_response(&mut self, response_id: String) {
+        self.activity.begin_response(response_id);
+    }
+
+    pub fn has_inflight_response(&self, response_id: &str) -> bool {
+        self.activity.has_inflight_response(response_id)
+    }
+
+    pub fn finish_response(&mut self, response_id: &str) {
+        self.activity.finish_response(response_id);
+    }
+
+    pub fn input_blocks_output(&self) -> bool {
+        self.activity.input_blocks_output()
+    }
+
+    pub fn is_busy(&self, work: RealtimeHostWork) -> bool {
+        self.activity.is_busy(work)
+    }
+
+    pub fn settings_are_quiescent(&self, work: RealtimeHostWork) -> bool {
+        self.activity.settings_are_quiescent(work)
+    }
+
+    pub fn queued_settings_are_ready(&self, work: RealtimeHostWork) -> bool {
+        self.activity.queued_settings_are_ready(work)
+    }
+
+    pub fn session_started(&mut self, now: std::time::Instant) {
+        self.renew_at = Some(now + self.renew_after);
+    }
+
+    pub fn retry_renewal_after(&mut self, now: std::time::Instant, delay: Duration) {
+        self.renew_at = Some(now + delay);
+    }
+
+    pub fn renewal_is_due(
+        &self,
+        now: std::time::Instant,
+        work: RealtimeHostWork,
+        unresolved_handoff: bool,
+        update_pending: bool,
+    ) -> bool {
+        !update_pending
+            && !unresolved_handoff
+            && self.renew_at.is_some_and(|deadline| now >= deadline)
+            && self.activity.settings_are_quiescent(work)
+    }
+
+    pub fn next_maintenance_id(&mut self) -> u64 {
+        let id = self.next_maintenance_id;
+        self.next_maintenance_id = self.next_maintenance_id.wrapping_sub(1);
+        id
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn voice_update_is_safe(
+        &self,
+        purpose: &VoiceUpdatePurpose,
+        update_semantic_revision: u64,
+        semantic_revision: u64,
+        update_settings_revision: u64,
+        settings_revision: u64,
+        unresolved_handoff: bool,
+        work: RealtimeHostWork,
+    ) -> bool {
+        voice_update_is_safe(
+            purpose,
+            update_semantic_revision,
+            semantic_revision,
+            update_settings_revision,
+            settings_revision,
+            unresolved_handoff,
+            self.activity.settings_are_quiescent(work),
+        )
+    }
+
+    pub fn session_loss_action(
+        &self,
+        pending: Option<&VoiceUpdatePurpose>,
+        work: RealtimeHostWork,
+        unresolved_handoff: bool,
+    ) -> RealtimeSessionLossAction {
+        session_loss_action(
+            pending,
+            self.activity.settings_are_quiescent(work),
+            unresolved_handoff,
+        )
+    }
+}
+
 impl RealtimeHostActivity {
     pub fn begin_user_speaking(&mut self, item_id: String) {
         self.pending_user_items.insert(item_id);
@@ -81,7 +207,7 @@ impl RealtimeHostActivity {
     }
 }
 
-pub fn voice_update_is_safe(
+fn voice_update_is_safe(
     purpose: &VoiceUpdatePurpose,
     update_semantic_revision: u64,
     semantic_revision: u64,
@@ -105,7 +231,7 @@ pub enum RealtimeSessionLossAction {
     StartRecovery,
 }
 
-pub fn session_loss_action(
+fn session_loss_action(
     pending: Option<&VoiceUpdatePurpose>,
     quiescent: bool,
     unresolved_handoff: bool,
@@ -124,8 +250,8 @@ pub fn session_loss_action(
 #[cfg(test)]
 mod tests {
     use super::{
-        session_loss_action, voice_update_is_safe, RealtimeHostActivity, RealtimeHostWork,
-        RealtimeSessionLossAction,
+        session_loss_action, voice_update_is_safe, RealtimeHostActivity, RealtimeHostLifecycle,
+        RealtimeHostWork, RealtimeSessionLossAction,
     };
     use crate::spokesperson_voice_update::VoiceUpdatePurpose;
 
@@ -188,6 +314,38 @@ mod tests {
         assert_eq!(
             session_loss_action(None, true, true),
             RealtimeSessionLossAction::Fail
+        );
+    }
+
+    #[test]
+    fn lifecycle_coordinates_renewal_identity_and_recovery() {
+        let now = std::time::Instant::now();
+        let mut lifecycle = RealtimeHostLifecycle::new(std::time::Duration::from_secs(30));
+        lifecycle.session_started(now);
+
+        assert!(!lifecycle.renewal_is_due(
+            now + std::time::Duration::from_secs(29),
+            RealtimeHostWork::default(),
+            false,
+            false,
+        ));
+        assert!(lifecycle.renewal_is_due(
+            now + std::time::Duration::from_secs(30),
+            RealtimeHostWork::default(),
+            false,
+            false,
+        ));
+        assert!(!lifecycle.renewal_is_due(
+            now + std::time::Duration::from_secs(30),
+            RealtimeHostWork::default(),
+            true,
+            false,
+        ));
+        assert_eq!(lifecycle.next_maintenance_id(), u64::MAX);
+        assert_eq!(lifecycle.next_maintenance_id(), u64::MAX - 1);
+        assert_eq!(
+            lifecycle.session_loss_action(None, RealtimeHostWork::default(), false),
+            RealtimeSessionLossAction::StartRecovery,
         );
     }
 }

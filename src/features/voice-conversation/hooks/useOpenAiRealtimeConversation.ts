@@ -1065,6 +1065,10 @@ class OpenAiRealtimeConversationRuntime {
       this.snapshot.state === "stopping"
     )
       return;
+    // Invalidate an in-flight start before the first awaited shutdown step so
+    // late microphone acquisition cannot install capture after stop begins.
+    // A running session stays valid long enough to drain its final events.
+    if (this.snapshot.state === "starting") this.activeRun += 1;
     this.setSnapshot({ ...this.snapshot, state: "stopping" });
     this.nativeMicrophone?.stop();
     this.nativeMicrophone = null;

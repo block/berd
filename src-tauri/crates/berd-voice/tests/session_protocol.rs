@@ -1127,7 +1127,7 @@ fn unresolved_handoff_at_provider_expiry_fails_without_starting_a_replacement() 
     let delivery = session.recv(Duration::from_secs(2));
     assert_eq!(delivery["type"], "expert_delivery");
     assert_eq!(delivery["through_token"], handoff["token"]);
-    assert_eq!(delivery["handoff_ids"], json!(["handoff-1"]));
+    assert_eq!(delivery["handoff_ids"], json!(["handoff-external-1"]));
     let fatal = session.recv(Duration::from_secs(2));
     assert_eq!(fatal["type"], "fatal");
     assert_eq!(
@@ -1176,12 +1176,12 @@ fn expert_turn_completion_emits_a_correlated_private_handoff_reminder() {
     assert_eq!(handoff["origin"], "handoff");
     let delivery = session.recv(Duration::from_secs(2));
     assert_eq!(delivery["type"], "expert_delivery");
-    assert_eq!(delivery["handoff_ids"], json!(["handoff-reminder"]));
+    assert_eq!(delivery["handoff_ids"], json!(["handoff-external-1"]));
 
     session.send(json!({
         "type":"complete_expert_turn",
         "id":2,
-        "retrying_handoff_ids":["handoff-reminder"],
+        "retrying_handoff_ids":["handoff-external-1"],
         "max_attempts":3
     }));
     let reminder = session.recv(Duration::from_secs(2));
@@ -1195,7 +1195,7 @@ fn expert_turn_completion_emits_a_correlated_private_handoff_reminder() {
     assert_eq!(result["type"], "expert_turn_result");
     assert_eq!(result["id"], 2);
     assert_eq!(result["outcome"], "reminder");
-    assert_eq!(result["handoff_ids"], json!(["handoff-reminder"]));
+    assert_eq!(result["handoff_ids"], json!(["handoff-external-1"]));
     assert_eq!(result["attempt"], 1);
     assert_eq!(result["through_token"], reminder["token"]);
     assert!(result["message"]
@@ -1972,7 +1972,7 @@ fn handoff_suppresses_acknowledgement_and_queued_voice_change_applies_before_exp
         "id":3,
         "acknowledgement":1,
         "text":"The answer is 21.",
-        "resolved_handoff_ids":["call-1"]
+        "resolved_handoff_ids":["handoff-external-1"]
     }));
     let admitted = session.recv(Duration::from_secs(2));
     assert_eq!(admitted["type"], "admitted");
@@ -2130,7 +2130,7 @@ fn queued_rate_rejects_before_a_closed_runtime_terminal_is_reported() {
     let delivery = session.recv(Duration::from_secs(2));
     assert_eq!(delivery["type"], "expert_delivery");
     assert_eq!(delivery["through_token"], handoff["token"]);
-    assert_eq!(delivery["handoff_ids"], json!(["handoff-closed-runtime"]));
+    assert_eq!(delivery["handoff_ids"], json!(["handoff-external-1"]));
     session.send(json!({
         "type":"set_tts_settings",
         "id":2,

@@ -1380,17 +1380,8 @@ impl RealtimeExpertSpokespersonSession {
                 RealtimeProtocolEvent::Handoff {
                     call_id, message, ..
                 } => {
-                    let cursor = self.enqueue_live_message(LiveSideEvent::Handoff {
-                        call_id: call_id.clone(),
-                        message: message.clone(),
-                    })?;
-                    let handoff_id = format!("handoff-{}-{cursor}", self.call_scope);
-                    self.register_handoff(&handoff_id, cursor, message)?;
-                    self.pending_expert_events.push(handoff_delivery_event(
-                        cursor,
-                        &handoff_id,
-                        message,
-                    ));
+                    let (_, handoff_id, expert_event) = self.record_handoff(message)?;
+                    self.pending_expert_events.push(expert_event);
                     let tool_output = accepted_handoff_tool_output(call_id, &handoff_id)?;
                     client_events.extend(
                         self.responses
@@ -1531,6 +1522,12 @@ impl RealtimeExpertSpokespersonSession {
         ),
         String,
     > {
+        if let LiveSideEvent::Handoff { message, .. } = &event {
+            let (recorded, handoff_id, expert_event) = self.record_handoff(message)?;
+            self.pending_expert_events.push(expert_event);
+            let delivery = self.take_expert_delivery(message, vec![handoff_id]);
+            return Ok((recorded, delivery));
+        }
         let recorded = self.conversation.record_live_event(event)?;
         let (expert_event, display_text, handoff_ids, flush) = match &recorded.payload {
             LiveSideEvent::UserTranscript { text } => (
@@ -1555,15 +1552,7 @@ impl RealtimeExpertSpokespersonSession {
                 Vec::new(),
                 true,
             ),
-            LiveSideEvent::Handoff { call_id, message } => (
-                {
-                    self.register_handoff(call_id, recorded.token, message)?;
-                    handoff_delivery_event(recorded.token, call_id, message)
-                },
-                message.clone(),
-                vec![call_id.clone()],
-                true,
-            ),
+            LiveSideEvent::Handoff { .. } => unreachable!("handoffs return above"),
         };
         self.pending_expert_events.push(expert_event);
         let delivery = flush
@@ -1671,6 +1660,29 @@ impl RealtimeExpertSpokespersonSession {
             },
         );
         Ok(expert_message)
+    }
+
+    fn record_handoff(
+        &mut self,
+        message: &str,
+    ) -> Result<
+        (
+            crate::causal_inbox::CausalMessage<LiveSideEvent>,
+            String,
+            RealtimeExpertDeliveryEvent,
+        ),
+        String,
+    > {
+        let cursor = self.conversation.next_live_token();
+        let handoff_id = format!("handoff-{}-{cursor}", self.call_scope);
+        let recorded = self.conversation.record_live_event(LiveSideEvent::Handoff {
+            call_id: handoff_id.clone(),
+            message: message.to_string(),
+        })?;
+        debug_assert_eq!(recorded.token, cursor);
+        self.register_handoff(&handoff_id, cursor, message)?;
+        let expert_event = handoff_delivery_event(cursor, &handoff_id, message);
+        Ok((recorded, handoff_id, expert_event))
     }
 
     pub fn unknown_handoff_ids(&self, handoff_ids: &[String]) -> Vec<String> {
@@ -3020,7 +3032,10 @@ mod tests {
                 message: "Inspect the project".into(),
             })
             .unwrap();
-        assert!(delivery.is_some());
+        assert_eq!(
+            delivery.as_ref().unwrap().handoff_ids,
+            ["handoff-external-test-1"]
+        );
         let handoff_ids = session.unresolved_handoff_ids();
         session.mark_handoffs_resolving(&handoff_ids).unwrap();
         session
@@ -3056,7 +3071,7 @@ mod tests {
                 &json!({ "type": "output_audio_buffer.stopped", "response_id": "response-1" }),
             )
             .unwrap();
-        assert_eq!(played.completed_handoff_ids, ["call-1"]);
+        assert_eq!(played.completed_handoff_ids, ["handoff-external-test-1"]);
         assert!(session.unresolved_handoff_ids().is_empty());
     }
 }
