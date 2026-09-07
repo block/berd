@@ -10,16 +10,18 @@ berdctl project create --name demo
 The implementation has three layers:
 
 1. CLI: `src-tauri/crates/berdctl/`
-   Parses flags with clap, prints help, reads the app discovery file, and sends
-   JSON calls. CLI validation is convenience only.
+   Parses flags with clap, prints help, reads the private app discovery file,
+   authenticates each loopback request with its per-broker capability, and
+   sends JSON calls. CLI validation is convenience only.
 2. Broker: `src-tauri/plugins/berdctl/`
-   Runs a localhost server inside the app, rejects browser-origin requests,
-   enforces in-flight and timeout limits, and forwards calls to the renderer
-   without command-specific logic.
+   Runs a localhost server inside the app, requires the current discovery-file
+   capability, rejects browser-origin requests, enforces in-flight and timeout
+   limits, and forwards calls to the renderer without command-specific logic.
 3. Renderer registry: `src/features/berdctl/commands/`
    Strict-parses args with zod, runs guards, executes through app state, and
-   returns JSON results. This is the trust boundary because any same-user
-   process can bypass the CLI and POST to the broker directly.
+   returns JSON results. This remains the command-policy trust boundary; the
+   broker capability limits access to processes that can read the owning
+   user's private discovery file.
 
 ## Layer rules
 
@@ -87,9 +89,13 @@ belongs in error messages, not generic help text.
 
 ## Safety model
 
-v1 has no auth tokens and no confirmation dialogs. That remains acceptable only
-while mutations are visible in the UI and either reversible or direct
-user-requested product actions, such as creating a session or sending a prompt.
+v1 requires a fresh 256-bit bearer capability for every broker start. The
+plugin writes it beside the port and generation in the discovery file, with
+owner-only directory/file permissions on Unix, and the CLI presents it on
+both `/v1/ping` and `/v1/call`. Missing, malformed, wrong, stale, symlinked,
+or non-private capability records fail closed. This authenticates possession
+of the app-issued session endpoint; it does not replace renderer command
+policy or add interactive confirmation dialogs.
 
 Required command properties:
 
@@ -108,8 +114,10 @@ piecemeal auth in a command PR.
 
 ## Versioning
 
-The broker writes a discovery file with `protocolVersion`, generation, and port.
-The CLI verifies it via `/v1/ping` before calls.
+The broker writes a private discovery file with `protocolVersion`, generation,
+port, and a per-start capability. The CLI authenticates and verifies it via
+`/v1/ping` before calls. Requiring that capability is a breaking wire reshape,
+so the authenticated surface starts at protocol version 5.
 
 Breaking wire reshapes must bump all three constants:
 
@@ -138,4 +146,4 @@ bump. Adding a command or optional field is not a wire reshape.
 | safety metadata complete | berdctl command tests |
 
 Review-only rules: single renderer dispatch point, detecting breaking wire
-reshapes, and product judgment for no-auth command eligibility.
+reshapes, and product judgment for command eligibility under capability authentication.
