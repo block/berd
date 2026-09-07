@@ -175,6 +175,7 @@ export function useAgentModelPickerState({
         availableModels.find((model) => model.id === modelId);
       onModelSelected?.({
         id: modelId,
+        agentId: selectedModelOverride?.agentId,
         name: selectedModel?.name ?? modelId,
         displayName: selectedModel?.displayName ?? modelId,
         provider: selectedModel?.provider,

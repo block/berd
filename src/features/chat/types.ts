@@ -14,6 +14,8 @@ import type { SessionExecutionTarget } from "./lib/sessionExecutionTarget";
 
 export interface ModelOption {
   id: string;
+  /** Agent that owns this row when it comes from the global starred section. */
+  agentId?: string;
   name: string;
   displayName?: string;
   provider?: string;
