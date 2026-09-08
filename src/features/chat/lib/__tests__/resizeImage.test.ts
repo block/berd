@@ -56,8 +56,8 @@ describe("resizeImage", () => {
   let toDataURL: ReturnType<typeof vi.fn>;
 
   function imageBlob(): Blob {
-    const source = bytes(PNG_HEADER);
-    const blob = new Blob([source], { type: "image/png" });
+    const source = Uint8Array.from(PNG_HEADER);
+    const blob = new Blob([source.buffer], { type: "image/png" });
     Object.defineProperty(blob, "arrayBuffer", {
       value: async () => source.buffer,
     });
@@ -65,8 +65,9 @@ describe("resizeImage", () => {
     Object.defineProperty(blob, "slice", {
       value: (...args: Parameters<Blob["slice"]>) => {
         const slice = originalSlice(...args);
+        const slicedSource = source.slice(args[0] ?? 0, args[1]);
         Object.defineProperty(slice, "arrayBuffer", {
-          value: async () => source.slice(args[0] ?? 0, args[1]).buffer,
+          value: async () => slicedSource.buffer,
         });
         return slice;
       },
