@@ -50,11 +50,11 @@ initial policy; a host-specific `auto` mode must be resolved before the request:
 {"type":"hello","id":1,"input_during_tts":"allow_barge_in"}
 ```
 
-The response uses `protocol:3` as a fixed wire-integrity marker, not a
+The response uses `protocol:4` as a fixed wire-integrity marker, not a
 negotiated mode:
 
 ```json
-{"type":"ready","id":1,"protocol":3,"session":{"tts":{"revision":1,"backend":"siri","voice":"Aaron","language":"en-US","rate":1.0},"input_during_tts":{"revision":1,"policy":"allow_barge_in"}}}
+{"type":"ready","id":1,"protocol":4,"session":{"tts":{"revision":1,"backend":"siri","voice":"Aaron","language":"en-US","rate":1.0},"input_during_tts":{"revision":1,"policy":"allow_barge_in"}}}
 ```
 
 The `session.tts` object is the authoritative, sanitized TTS configuration.
@@ -316,13 +316,15 @@ cancellation and shutdown terminals.
 {"type":"fatal","message":string}
 ```
 
-`query_state.after` is an exclusive token cutoff; `0` requests all. `cancel.id`
-targets the originating `prepare_speak.id`. `cancel_result` is emitted first. A
+`query_state.after` is an exclusive token cutoff; `0` requests all. Message `id`
+always correlates a result with its parent request; `cancel` uses the originating
+`prepare_speak.id` as that request ID. `cancel_result` is emitted first. A
 live held target then emits `not_admitted(cancelled)`; a live admitted target
 then emits `speech_interrupted`. `spoken_through_utf8` is Berd Voice's conservative UTF-8 byte boundary through the last fully played word; hosts may use it to distinguish the estimated spoken prefix from the unspoken suffix without recreating delivery policy. Repeated or unknown cancellation is stale.
 `cancel_speech.speech_id` targets active output directly, including autonomous
 Spokesperson output that has no originating `prepare_speak`. Its correlated
-`cancel_result` names that speech ID and is emitted before Berd Voice requests
+`cancel_result.id` echoes the `cancel_speech.id`, while `cancel_result.speech_id`
+names the targeted speech. The result is emitted before Berd Voice requests
 the host's quiescent `audio_cancelled` barrier.
 Every speech event carries the originating prepare ID. `speech_started` appears
 only after the first PCM Chunk is accepted by the host, and exactly one terminal

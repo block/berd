@@ -386,14 +386,22 @@ impl OpenAiSpokespersonRuntime {
             .join()
             .map_err(|_| "Spokesperson runtime panicked".to_string())
     }
-}
 
-impl Drop for OpenAiSpokespersonRuntime {
-    fn drop(&mut self) {
+    pub fn retire_in_background(mut self) {
+        self.begin_background_retirement();
+    }
+
+    fn begin_background_retirement(&mut self) {
         let _ = self.commands.send(SpokespersonCommand::Shutdown);
         if let Some(worker) = self.worker.take() {
             reap_spokesperson_worker(worker, self.audio.clone());
         }
+    }
+}
+
+impl Drop for OpenAiSpokespersonRuntime {
+    fn drop(&mut self) {
+        self.begin_background_retirement();
     }
 }
 
@@ -1136,7 +1144,7 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn retiring_runtime_does_not_wait_for_worker_shutdown() {
+    fn background_retirement_does_not_wait_for_worker_shutdown() {
         let (commands, mut requests) = tokio::sync::mpsc::unbounded_channel();
         let (audio, _audio_rx) = tokio::sync::mpsc::channel(1);
         let (release, wait) = std::sync::mpsc::channel();
@@ -1154,7 +1162,7 @@ mod tests {
             worker: Some(worker),
         };
         let caller = std::thread::spawn(move || {
-            drop(runtime);
+            runtime.retire_in_background();
             retired.send(()).unwrap();
         });
         let result = retirement.recv_timeout(Duration::from_secs(2));

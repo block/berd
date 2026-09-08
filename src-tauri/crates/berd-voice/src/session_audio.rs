@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use berd_voice::{PcmAudioOutput, TtsPcmSpec};
 
 pub const AUDIO_FRAME_MAGIC: [u8; 2] = *b"BA";
-pub const AUDIO_FRAME_MARKER: u8 = 3;
+pub const AUDIO_FRAME_MARKER: u8 = 4;
 pub const AUDIO_BEGIN_KIND: u8 = 1;
 pub const AUDIO_CHUNK_KIND: u8 = 2;
 pub const AUDIO_END_KIND: u8 = 3;
@@ -571,32 +571,8 @@ impl RemotePcmAudioOutput {
                 return Ok(false)
             }
             invalid => {
-                let received = match invalid {
-                    AudioHostAck::BeginAccepted => "BeginAccepted".into(),
-                    AudioHostAck::BeginFailed { played_frames, .. } => {
-                        format!("BeginFailed({played_frames})")
-                    }
-                    AudioHostAck::ChunkAccepted { sequence } => {
-                        format!("ChunkAccepted({sequence})")
-                    }
-                    AudioHostAck::Played { played_frames } => format!("Played({played_frames})"),
-                    AudioHostAck::Suspended { played_frames } => {
-                        format!("Suspended({played_frames})")
-                    }
-                    AudioHostAck::Resumed { played_frames } => format!("Resumed({played_frames})"),
-                    AudioHostAck::Drained {
-                        sequence,
-                        played_frames,
-                    } => format!("Drained({sequence}, {played_frames})"),
-                    AudioHostAck::Failed { played_frames, .. } => {
-                        format!("Failed({played_frames})")
-                    }
-                    AudioHostAck::Cancelled { played_frames } => {
-                        format!("Cancelled({played_frames})")
-                    }
-                };
                 return Err(format!(
-                    "audio host acknowledgement is stale, out of order, or impossible: received={received} phase={:?} suspension={:?} played={} accepted={} total={} pending={:?}",
+                    "audio host acknowledgement is stale, out of order, or impossible: received={invalid:?} phase={:?} suspension={:?} played={} accepted={} total={} pending={:?}",
                     state.phase, state.suspension,
                     state.played_frames, state.accepted_frames, state.total_frames,
                     state.pending_sequence,

@@ -65,7 +65,7 @@ use session_audio::{
     AUDIO_CANCELLED,
 };
 
-const WIRE_MARKER: u32 = 3;
+const WIRE_MARKER: u32 = 4;
 const MAX_LINE_BYTES: usize = 1024 * 1024;
 const FRAME_MAGIC: [u8; 2] = *b"BV";
 const JSON_FRAME_KIND: u8 = 1;
@@ -1940,8 +1940,7 @@ fn activate_spokesperson_voice_update(
         .replace(activated.runtime)
         .expect("initialized runtime");
     *runtime_events = Some(activated.events);
-    // Shutdown waits for provider events; keep draining microphone input meanwhile.
-    drop(old_runtime);
+    old_runtime.retire_in_background();
     for frame in activated.held_input {
         runtime
             .as_ref()
