@@ -80,6 +80,13 @@ type PopoverContentAlign = NonNullable<
 >;
 const REASONING_EFFORT_COLUMN_TRANSITION_MS = 240;
 const PICKER_WIDTH_COMPACT_PX = 420;
+// Harness agents (pi-acp, codex-acp, etc.) can report long ACP model names
+// (e.g. provider/id names), so they get wider pickers than Goose, whose
+// curated model names are short. With a reasoning-effort column present,
+// the agent (11.75rem) + reasoning (11rem) columns alone consume ~23rem,
+// so the picker needs extra width for the model column to breathe.
+const PICKER_WIDTH_HARNESS_PX = 560;
+const PICKER_WIDTH_HARNESS_EXPANDED_PX = 736;
 const PICKER_WIDTH_EXPANDED_PX = 596;
 
 function toSentenceCaseLabel(value: string | undefined): string {
@@ -395,10 +402,19 @@ export function AgentModelPicker({
     !modelBrowsing &&
     (agents.length > 1 || hasAgentNeedingSetup);
   const showReasoningEffortColumn = showReasoningEffort;
+  // Harness agents get wider pickers (and flexible model columns) whenever
+  // their agent column is visible, with or without a reasoning-effort
+  // column, so long ACP model names are not truncated. Goose is excluded
+  // because its curated model names are short.
+  const widenForHarnessAgent = showAgentColumn && selectedAgentId !== "goose";
   const isWidePicker = showReasoningEffortColumn && showAgentColumn;
   const pickerWidth = isWidePicker
-    ? PICKER_WIDTH_EXPANDED_PX
-    : PICKER_WIDTH_COMPACT_PX;
+    ? widenForHarnessAgent
+      ? PICKER_WIDTH_HARNESS_EXPANDED_PX
+      : PICKER_WIDTH_EXPANDED_PX
+    : widenForHarnessAgent
+      ? PICKER_WIDTH_HARNESS_PX
+      : PICKER_WIDTH_COMPACT_PX;
 
   // Land keyboard focus in the revealed column, since the reveal button that
   // held focus unmounts with it.
@@ -500,7 +516,13 @@ export function AgentModelPicker({
           // gated single-column layout has no dead vertical space below the
           // model list.
           "flex max-h-[min(24rem,50vh)] flex-col overflow-hidden p-1 transition-[width] duration-[240ms] ease-[cubic-bezier(0.2,0,0,1)]",
-          isWidePicker ? "w-[37.25rem]" : "w-[26.25rem]",
+          isWidePicker
+            ? widenForHarnessAgent
+              ? "w-[46rem]"
+              : "w-[37.25rem]"
+            : widenForHarnessAgent
+              ? "w-[35rem]"
+              : "w-[26.25rem]",
         )}
         onInteractOutside={(event) => {
           classifyOutsideInteraction(event.target);
@@ -672,7 +694,11 @@ export function AgentModelPicker({
               data-col="model"
               className={cn(
                 "flex min-h-0 min-w-0 overflow-hidden p-1",
-                showAgentColumn ? "ml-1 w-56 shrink-0" : "flex-1",
+                showAgentColumn
+                  ? widenForHarnessAgent
+                    ? "ml-1 flex-1"
+                    : "ml-1 w-56 shrink-0"
+                  : "flex-1",
               )}
             >
               {modelsLoading ? (

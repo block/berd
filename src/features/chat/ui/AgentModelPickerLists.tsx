@@ -399,7 +399,10 @@ export const RecommendedModelList = forwardRef<
                         {providerIcon}
                       </span>
                     ) : null}
-                    <div className="min-w-0 flex-1 truncate">
+                    <div
+                      className="min-w-0 flex-1 truncate"
+                      title={getModelDisplayName(model)}
+                    >
                       {getModelDisplayName(model)}
                     </div>
                   </div>
