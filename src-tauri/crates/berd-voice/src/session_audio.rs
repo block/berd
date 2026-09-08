@@ -570,10 +570,13 @@ impl RemotePcmAudioOutput {
             {
                 return Ok(false)
             }
-            _ => {
-                return Err(
-                    "audio host acknowledgement is stale, out of order, or impossible".into(),
-                )
+            invalid => {
+                return Err(format!(
+                    "audio host acknowledgement is stale, out of order, or impossible: received={invalid:?} phase={:?} suspension={:?} played={} accepted={} total={} pending={:?}",
+                    state.phase, state.suspension,
+                    state.played_frames, state.accepted_frames, state.total_frames,
+                    state.pending_sequence,
+                ));
             }
         }
         self.changed.notify_all();
@@ -1365,12 +1368,10 @@ mod tests {
                 message: "route failed".into(),
             })
             .unwrap();
-        assert_eq!(
-            output
-                .handle_ack(AudioHostAck::Suspended { played_frames: 0 })
-                .unwrap_err(),
-            "audio host acknowledgement is stale, out of order, or impossible"
-        );
+        assert!(output
+            .handle_ack(AudioHostAck::Suspended { played_frames: 0 })
+            .unwrap_err()
+            .starts_with("audio host acknowledgement is stale, out of order, or impossible"));
     }
 
     #[test]

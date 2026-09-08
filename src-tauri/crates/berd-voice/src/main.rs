@@ -65,7 +65,8 @@ use session_audio::{
     AUDIO_CANCELLED,
 };
 
-const WIRE_MARKER: u32 = 3;
+const SESSION_PROTOCOL_VERSION: u32 = 4;
+const INPUT_FRAME_MARKER: u8 = 3;
 const MAX_LINE_BYTES: usize = 1024 * 1024;
 const FRAME_MAGIC: [u8; 2] = *b"BV";
 const JSON_FRAME_KIND: u8 = 1;
@@ -1484,7 +1485,7 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                     &mut writer,
                     &SessionMessage::Ready {
                         id,
-                        protocol: WIRE_MARKER,
+                        protocol: SESSION_PROTOCOL_VERSION,
                         session,
                     },
                 )?;
@@ -1869,6 +1870,9 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
             Input::Request(SessionRequest::Cancel { id }) => {
                 handle_cancel(id, &mut held, &mut core, &mut active, &mut writer)?;
             }
+            Input::Request(SessionRequest::CancelSpeech { id, speech_id }) => {
+                handle_cancel_speech(id, speech_id, &mut core, &mut active, &mut writer)?;
+            }
         }
     }
 }
@@ -1937,7 +1941,7 @@ fn activate_spokesperson_voice_update(
         .replace(activated.runtime)
         .expect("initialized runtime");
     *runtime_events = Some(activated.events);
-    old_runtime.finish()?;
+    old_runtime.retire_in_background();
     for frame in activated.held_input {
         runtime
             .as_ref()
@@ -3444,7 +3448,7 @@ fn run_expert_spokesperson_session(
                     &mut writer,
                     &SessionMessage::Ready {
                         id,
-                        protocol: WIRE_MARKER,
+                        protocol: SESSION_PROTOCOL_VERSION,
                         session: snapshot,
                     },
                 )?;
@@ -3794,6 +3798,27 @@ fn run_expert_spokesperson_session(
                             spoken_through_utf8: 0,
                         },
                     )?;
+                }
+            }
+            Input::Request(SessionRequest::CancelSpeech { id, speech_id }) => {
+                let outcome = if active
+                    .as_ref()
+                    .is_some_and(|playback| playback.speech_id == speech_id)
+                {
+                    CancelOutcome::Cancelled
+                } else {
+                    CancelOutcome::Stale
+                };
+                write_message(
+                    &mut writer,
+                    &SessionMessage::CancelResult {
+                        id,
+                        outcome,
+                        speech_id: Some(speech_id),
+                    },
+                )?;
+                if outcome == CancelOutcome::Cancelled {
+                    cancel_live_playback(&mut active);
                 }
             }
             Input::Request(SessionRequest::SetInputMuted { id, active: muted }) => {
@@ -6224,6 +6249,35 @@ fn handle_cancel(
     Ok(())
 }
 
+fn handle_cancel_speech(
+    id: u64,
+    speech_id: u64,
+    core: &mut SessionCore,
+    active: &mut Option<ActivePlayback>,
+    writer: &mut impl Write,
+) -> Result<(), String> {
+    let outcome = if active
+        .as_ref()
+        .is_some_and(|current| current.speech_id == speech_id)
+    {
+        CancelOutcome::Cancelled
+    } else {
+        CancelOutcome::Stale
+    };
+    write_message(
+        writer,
+        &SessionMessage::CancelResult {
+            id,
+            outcome,
+            speech_id: Some(speech_id),
+        },
+    )?;
+    if outcome == CancelOutcome::Cancelled {
+        interrupt_active(core, active, writer)?;
+    }
+    Ok(())
+}
+
 fn abort_active(active: &Option<ActivePlayback>) {
     if let Some(flag) = active.as_ref().and_then(|current| current.active.as_ref()) {
         flag.store(false, Ordering::SeqCst);
@@ -6396,7 +6450,7 @@ fn decode_framed_input(reader: &mut impl Read, header: [u8; FRAME_HEADER_BYTES])
     if header[..2] != FRAME_MAGIC {
         return Input::Invalid("invalid session frame magic".into());
     }
-    if header[2] != WIRE_MARKER as u8 {
+    if header[2] != INPUT_FRAME_MARKER {
         return Input::Invalid(format!("invalid session frame marker: {}", header[2]));
     }
     let kind = header[3];
@@ -6449,7 +6503,8 @@ fn validate_request(request: SessionRequest) -> Result<SessionRequest, String> {
         | SessionRequest::QueryState { id, .. }
         | SessionRequest::DismissHandoffs { id, .. }
         | SessionRequest::CompleteExpertTurn { id, .. }
-        | SessionRequest::Cancel { id } => Some(*id),
+        | SessionRequest::Cancel { id }
+        | SessionRequest::CancelSpeech { id, .. } => Some(*id),
         SessionRequest::SetPaused { .. }
         | SessionRequest::AudioBeginAccepted { .. }
         | SessionRequest::AudioBeginFailed { .. }
@@ -6500,6 +6555,9 @@ fn validate_request(request: SessionRequest) -> Result<SessionRequest, String> {
             }
         }
         SessionRequest::OutputReady { speech_id: 0, .. } => {
+            return Err("speech id must be positive".into())
+        }
+        SessionRequest::CancelSpeech { speech_id: 0, .. } => {
             return Err("speech id must be positive".into())
         }
         SessionRequest::SetTtsSettings {
@@ -8062,7 +8120,7 @@ mod tests {
         };
         let ready = serde_json::to_string(&SessionMessage::Ready {
             id: 1,
-            protocol: WIRE_MARKER,
+            protocol: SESSION_PROTOCOL_VERSION,
             session: VoiceSessionSnapshot {
                 tts: snapshot.clone(),
                 input_during_tts: test_input_policy(),
@@ -9363,7 +9421,7 @@ mod tests {
     }
 
     fn framed(kind: u8, payload: &[u8]) -> Vec<u8> {
-        let mut frame = Vec::from([b'B', b'V', WIRE_MARKER as u8, kind]);
+        let mut frame = Vec::from([b'B', b'V', INPUT_FRAME_MARKER, kind]);
         frame.extend_from_slice(&(payload.len() as u32).to_le_bytes());
         frame.extend_from_slice(payload);
         frame
@@ -9420,7 +9478,7 @@ mod tests {
             (JSON_FRAME_KIND, MAX_LINE_BYTES + 1, "request exceeds 1 MiB"),
             (PCM_FRAME_KIND, PCM_FRAME_BYTES - 1, "PCM frame has"),
         ] {
-            let mut header = Vec::from([b'B', b'V', WIRE_MARKER as u8, kind]);
+            let mut header = Vec::from([b'B', b'V', INPUT_FRAME_MARKER, kind]);
             header.extend_from_slice(&(length as u32).to_le_bytes());
             let (control_sender, control_receiver) = mpsc::channel();
             let (pcm_sender, _pcm_receiver) = mpsc::sync_channel(1);
@@ -9787,6 +9845,44 @@ mod tests {
                 json!({"type":"cancel_result","id":7,"outcome":"cancelled","speech_id":1}),
                 json!({"type":"speech_interrupted","id":7,"speech_id":1,"spoken_through_utf8":0}),
                 json!({"type":"cancel_result","id":7,"outcome":"stale","speech_id":null}),
+            ]
+        );
+    }
+
+    #[test]
+    fn speech_targeted_cancel_orders_result_before_terminal() {
+        let mut core = SessionCore::default();
+        let PrepareOutcome::Admitted {
+            speech_id, text, ..
+        } = core.prepare(PrepareRequest {
+            id: 7,
+            acknowledgement: None,
+            text: "reply".into(),
+        })
+        else {
+            panic!("test speech must be admitted")
+        };
+        let mut active = Some(ActivePlayback {
+            prepare_id: 7,
+            speech_id,
+            text,
+            output: None,
+            active: None,
+            ready_deadline: Instant::now() + Duration::from_secs(2),
+            assistant_activity: None,
+            input_during_tts: test_input_policy(),
+            tts: test_tts_lease(),
+            suspension_requested: false,
+        });
+        let mut output = Vec::new();
+
+        handle_cancel_speech(9, speech_id, &mut core, &mut active, &mut output).unwrap();
+
+        assert_eq!(
+            messages(&output),
+            [
+                json!({"type":"cancel_result","id":9,"outcome":"cancelled","speech_id":1}),
+                json!({"type":"speech_interrupted","id":7,"speech_id":1,"spoken_through_utf8":0}),
             ]
         );
     }

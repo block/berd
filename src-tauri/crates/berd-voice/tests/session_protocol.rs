@@ -13,6 +13,8 @@ use serde_json::{json, Value};
 use tokio::net::TcpListener;
 use tokio_tungstenite::{accept_async, tungstenite::Message};
 
+const FRAME_MARKER: u8 = 3;
+
 struct ChildGuard(Option<Child>);
 
 impl Drop for ChildGuard {
@@ -32,13 +34,18 @@ struct ExpertSpokespersonTestSession {
     audio_host: Option<std::thread::JoinHandle<()>>,
 }
 
+struct AudioCancellationGate {
+    observed: mpsc::SyncSender<()>,
+    release: mpsc::Receiver<()>,
+}
+
 impl ExpertSpokespersonTestSession {
     fn start(endpoint: String) -> Self {
         Self::start_with_renew_after(endpoint, None)
     }
 
     fn start_with_renew_after(endpoint: String, renew_after_ms: Option<u64>) -> Self {
-        Self::start_with_options(endpoint, renew_after_ms, None, None)
+        Self::start_with_options(endpoint, renew_after_ms, None, None, None)
     }
 
     fn start_with_options(
@@ -46,6 +53,7 @@ impl ExpertSpokespersonTestSession {
         renew_after_ms: Option<u64>,
         played_frame_limit: Option<u64>,
         played_ready: Option<mpsc::SyncSender<()>>,
+        cancellation_gate: Option<AudioCancellationGate>,
     ) -> Self {
         let (mut command, _pcm, audio_host) = session_command();
         if let Some(renew_after_ms) = renew_after_ms {
@@ -76,6 +84,7 @@ impl ExpertSpokespersonTestSession {
             Arc::clone(&stdin),
             played_frame_limit,
             played_ready,
+            cancellation_gate,
         );
         let mut session = Self {
             child,
@@ -152,7 +161,7 @@ impl ExpertSpokespersonTestSession {
 fn write_session_json(writer: &mut impl Write, value: &Value) {
     let payload = serde_json::to_vec(value).unwrap();
     writer.write_all(b"BV").unwrap();
-    writer.write_all(&[3, 1]).unwrap();
+    writer.write_all(&[FRAME_MARKER, 1]).unwrap();
     writer
         .write_all(&(payload.len() as u32).to_le_bytes())
         .unwrap();
@@ -161,7 +170,7 @@ fn write_session_json(writer: &mut impl Write, value: &Value) {
 
 fn write_session_pcm(writer: &mut impl Write, value: f32) {
     writer.write_all(b"BV").unwrap();
-    writer.write_all(&[3, 2]).unwrap();
+    writer.write_all(&[FRAME_MARKER, 2]).unwrap();
     writer.write_all(&(960_u32 * 4).to_le_bytes()).unwrap();
     for _ in 0..960 {
         writer.write_all(&value.to_le_bytes()).unwrap();
@@ -283,7 +292,7 @@ fn spawn_audio_host(
     reader: UnixStream,
     stdin: Arc<Mutex<std::process::ChildStdin>>,
 ) -> std::thread::JoinHandle<()> {
-    spawn_audio_host_with_played_limit(reader, stdin, None, None)
+    spawn_audio_host_with_played_limit(reader, stdin, None, None, None)
 }
 
 fn spawn_audio_host_with_played_limit(
@@ -291,6 +300,7 @@ fn spawn_audio_host_with_played_limit(
     stdin: Arc<Mutex<std::process::ChildStdin>>,
     played_frame_limit: Option<u64>,
     mut played_ready: Option<mpsc::SyncSender<()>>,
+    mut cancellation_gate: Option<AudioCancellationGate>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let mut current = None::<(u64, u64, u64)>;
@@ -302,7 +312,7 @@ fn spawn_audio_host_with_played_limit(
                 Err(error) => panic!("audio pipe read failed: {error}"),
             }
             assert_eq!(&header[..2], b"BA");
-            assert_eq!(header[2], 3);
+            assert_eq!(header[2], FRAME_MARKER);
             let length = u32::from_le_bytes(header[4..8].try_into().unwrap()) as usize;
             let mut payload = vec![0_u8; length];
             reader.read_exact(&mut payload).unwrap();
@@ -359,6 +369,10 @@ fn spawn_audio_host_with_played_limit(
                         .map_or(0, |state| {
                             played_frame_limit.map_or(state.2, |limit| state.2.min(limit))
                         });
+                    if let Some(gate) = cancellation_gate.take() {
+                        let _ = gate.observed.send(());
+                        gate.release.recv().unwrap();
+                    }
                     json!({"type":"audio_cancelled","speech_id":speech_id,"played_frames":played_frames})
                 }
                 kind => panic!("unknown audio record kind {kind}"),
@@ -562,6 +576,7 @@ fn expert_spokesperson_renews_before_provider_expiry_without_changing_settings()
         Some(1_000),
         Some(12_000),
         Some(audio_ready_tx),
+        None,
     );
     audio_ready_rx.recv_timeout(Duration::from_secs(2)).unwrap();
     release_speech_tx.send(()).unwrap();
@@ -810,6 +825,176 @@ fn active_spokesperson_disconnect_is_specific_terminal_and_does_not_replay() {
 }
 
 #[test]
+fn autonomous_spokesperson_cancel_is_correlated_before_audio_cancellation_and_then_stale() {
+    let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
+    let (cancel_observed_tx, cancel_observed_rx) = mpsc::sync_channel(1);
+    let (release_cancel_tx, release_cancel_rx) = mpsc::sync_channel(1);
+    let (played_tx, played_rx) = mpsc::sync_channel(1);
+    let (finish_provider_tx, finish_provider_rx) = mpsc::sync_channel(1);
+    let (provider_terminal_tx, provider_terminal_rx) = mpsc::sync_channel(1);
+    let server = std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async move {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                endpoint_tx
+                    .send(format!("ws://{}/", listener.local_addr().unwrap()))
+                    .unwrap();
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut socket = accept_async(stream).await.unwrap();
+                let update = receive_realtime_json(&mut socket).await;
+                acknowledge_realtime_session(&mut socket, &update).await;
+                send_realtime_json(
+                    &mut socket,
+                    json!({"type":"input_audio_buffer.speech_started","item_id":"user-autonomous"}),
+                )
+                .await;
+                send_realtime_json(
+                    &mut socket,
+                    json!({"type":"input_audio_buffer.speech_stopped","item_id":"user-autonomous"}),
+                )
+                .await;
+                send_realtime_json(
+                    &mut socket,
+                    json!({
+                        "type":"conversation.item.input_audio_transcription.completed",
+                        "item_id":"user-autonomous",
+                        "transcript":"Say something on your own."
+                    }),
+                )
+                .await;
+                send_realtime_json(
+                    &mut socket,
+                    json!({"type":"response.created","response":{"id":"response-autonomous"}}),
+                )
+                .await;
+                send_realtime_json(
+                    &mut socket,
+                    json!({
+                        "type":"response.output_audio.delta",
+                        "response_id":"response-autonomous",
+                        "item_id":"assistant-autonomous",
+                        "output_index":0,
+                        "content_index":0,
+                        "delta":BASE64.encode(vec![0_u8; 24_000])
+                    }),
+                )
+                .await;
+                send_realtime_json(
+                    &mut socket,
+                    json!({
+                        "type":"response.output_audio_transcript.done",
+                        "response_id":"response-autonomous",
+                        "item_id":"assistant-autonomous",
+                        "output_index":0,
+                        "content_index":0,
+                        "transcript":"This autonomous response is interrupted."
+                    }),
+                )
+                .await;
+                tokio::task::spawn_blocking(move || finish_provider_rx.recv().unwrap())
+                    .await
+                    .unwrap();
+                send_realtime_json(
+                    &mut socket,
+                    json!({
+                        "type":"response.done",
+                        "response":{"id":"response-autonomous","status":"cancelled"}
+                    }),
+                )
+                .await;
+                provider_terminal_tx.send(()).unwrap();
+                let _ = socket.next().await;
+            });
+    });
+    let endpoint = endpoint_rx.recv().unwrap();
+    let mut session = ExpertSpokespersonTestSession::start_with_options(
+        endpoint,
+        None,
+        Some(1_000),
+        Some(played_tx),
+        Some(AudioCancellationGate {
+            observed: cancel_observed_tx,
+            release: release_cancel_rx,
+        }),
+    );
+    let started = loop {
+        let message = session.recv(Duration::from_secs(2));
+        if message["type"] == "spokesperson_speech" {
+            break message;
+        }
+        assert_ne!(message["type"], "fatal");
+    };
+    let speech_id = started["speech_id"].as_u64().unwrap();
+    played_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("autonomous playback should be live before cancellation");
+
+    session.send(json!({"type":"cancel_speech","id":2,"speech_id":speech_id}));
+    let cancelled = session.recv(Duration::from_secs(2));
+    assert_eq!(cancelled["type"], "cancel_result");
+    assert_eq!(cancelled["id"], 2);
+    assert_eq!(cancelled["speech_id"], speech_id);
+    assert_eq!(cancelled["outcome"], "cancelled");
+    finish_provider_tx.send(()).unwrap();
+    cancel_observed_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("audio cancellation should begin after the correlated result");
+    release_cancel_tx.send(()).unwrap();
+    provider_terminal_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("provider should end the cancelled response");
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    let mut after_cancel = Vec::new();
+    let interrupted = loop {
+        let remaining = deadline
+            .checked_duration_since(std::time::Instant::now())
+            .unwrap_or_else(|| panic!("interrupted transcript was not emitted: {after_cancel:?}"));
+        let message = session
+            .output
+            .recv_timeout(remaining)
+            .unwrap_or_else(|error| {
+                panic!("interrupted transcript was not emitted ({error}): {after_cancel:?}")
+            });
+        if message["type"] == "live_event" && message["origin"] == "spokesperson" {
+            break message;
+        }
+        assert_ne!(message["type"], "fatal", "unexpected fatal: {message}");
+        after_cancel.push(message);
+    };
+    assert_eq!(interrupted["type"], "live_event");
+    assert_eq!(interrupted["origin"], "spokesperson");
+    assert!(interrupted["text"]
+        .as_str()
+        .unwrap()
+        .contains("Spokesperson said (interrupted; best effort)"));
+
+    for (id, stale_speech_id) in [(3, speech_id), (4, speech_id + 1)] {
+        session.send(json!({
+            "type":"cancel_speech",
+            "id":id,
+            "speech_id":stale_speech_id
+        }));
+        let stale = loop {
+            let message = session.recv(Duration::from_secs(2));
+            if message["type"] == "cancel_result" {
+                break message;
+            }
+            assert_ne!(message["type"], "fatal", "unexpected fatal: {message}");
+        };
+        assert_eq!(stale["type"], "cancel_result");
+        assert_eq!(stale["id"], id);
+        assert_eq!(stale["speech_id"], stale_speech_id);
+        assert_eq!(stale["outcome"], "stale");
+    }
+    session.shutdown();
+    server.join().unwrap();
+}
+
+#[test]
 fn one_realtime_response_with_two_audio_parts_completes_without_identity_failure() {
     let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
     let (played_tx, played_rx) = mpsc::sync_channel(1);
@@ -903,6 +1088,7 @@ fn one_realtime_response_with_two_audio_parts_completes_without_identity_failure
         None,
         Some(16_384),
         Some(played_tx),
+        None,
     );
     session.send(json!({
         "type":"prepare_speak",
@@ -2324,7 +2510,7 @@ fn siri_session_reaches_ready_without_openai_credentials() {
     stdin.flush().unwrap();
     let ready = receive();
     assert_eq!(ready["type"], "ready");
-    assert_eq!(ready["protocol"], 3);
+    assert_eq!(ready["protocol"], 4);
     assert_eq!(ready["session"]["tts"]["backend"], "siri");
     assert_eq!(ready["session"]["tts"]["voice"], voice);
     assert_eq!(ready["session"]["tts"]["language"], language);
