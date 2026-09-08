@@ -1135,6 +1135,35 @@ mod tests {
     use std::collections::HashMap;
     use std::time::Duration;
 
+    #[test]
+    fn retiring_runtime_does_not_wait_for_worker_shutdown() {
+        let (commands, mut requests) = tokio::sync::mpsc::unbounded_channel();
+        let (audio, _audio_rx) = tokio::sync::mpsc::channel(1);
+        let (release, wait) = std::sync::mpsc::channel();
+        let (retired, retirement) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            assert!(matches!(
+                requests.blocking_recv(),
+                Some(super::SpokespersonCommand::Shutdown)
+            ));
+            wait.recv().unwrap();
+        });
+        let runtime = super::OpenAiSpokespersonRuntime {
+            commands,
+            audio,
+            worker: Some(worker),
+        };
+        let caller = std::thread::spawn(move || {
+            drop(runtime);
+            retired.send(()).unwrap();
+        });
+        let result = retirement.recv_timeout(Duration::from_secs(2));
+        // Always release the worker, including when the nonblocking assertion fails.
+        release.send(()).unwrap();
+        caller.join().unwrap();
+        result.expect("runtime retirement blocked on provider shutdown");
+    }
+
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
     use futures_util::{SinkExt, StreamExt};
     use serde_json::{json, Value};

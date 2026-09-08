@@ -570,10 +570,37 @@ impl RemotePcmAudioOutput {
             {
                 return Ok(false)
             }
-            _ => {
-                return Err(
-                    "audio host acknowledgement is stale, out of order, or impossible".into(),
-                )
+            invalid => {
+                let received = match invalid {
+                    AudioHostAck::BeginAccepted => "BeginAccepted".into(),
+                    AudioHostAck::BeginFailed { played_frames, .. } => {
+                        format!("BeginFailed({played_frames})")
+                    }
+                    AudioHostAck::ChunkAccepted { sequence } => {
+                        format!("ChunkAccepted({sequence})")
+                    }
+                    AudioHostAck::Played { played_frames } => format!("Played({played_frames})"),
+                    AudioHostAck::Suspended { played_frames } => {
+                        format!("Suspended({played_frames})")
+                    }
+                    AudioHostAck::Resumed { played_frames } => format!("Resumed({played_frames})"),
+                    AudioHostAck::Drained {
+                        sequence,
+                        played_frames,
+                    } => format!("Drained({sequence}, {played_frames})"),
+                    AudioHostAck::Failed { played_frames, .. } => {
+                        format!("Failed({played_frames})")
+                    }
+                    AudioHostAck::Cancelled { played_frames } => {
+                        format!("Cancelled({played_frames})")
+                    }
+                };
+                return Err(format!(
+                    "audio host acknowledgement is stale, out of order, or impossible: received={received} phase={:?} suspension={:?} played={} accepted={} total={} pending={:?}",
+                    state.phase, state.suspension,
+                    state.played_frames, state.accepted_frames, state.total_frames,
+                    state.pending_sequence,
+                ));
             }
         }
         self.changed.notify_all();
@@ -1365,12 +1392,10 @@ mod tests {
                 message: "route failed".into(),
             })
             .unwrap();
-        assert_eq!(
-            output
-                .handle_ack(AudioHostAck::Suspended { played_frames: 0 })
-                .unwrap_err(),
-            "audio host acknowledgement is stale, out of order, or impossible"
-        );
+        assert!(output
+            .handle_ack(AudioHostAck::Suspended { played_frames: 0 })
+            .unwrap_err()
+            .starts_with("audio host acknowledgement is stale, out of order, or impossible"));
     }
 
     #[test]

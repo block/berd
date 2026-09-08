@@ -1937,7 +1937,8 @@ fn activate_spokesperson_voice_update(
         .replace(activated.runtime)
         .expect("initialized runtime");
     *runtime_events = Some(activated.events);
-    old_runtime.finish()?;
+    // Shutdown waits for provider events; keep draining microphone input meanwhile.
+    drop(old_runtime);
     for frame in activated.held_input {
         runtime
             .as_ref()

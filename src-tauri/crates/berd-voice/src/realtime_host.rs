@@ -866,7 +866,8 @@ fn activate_managed_update(
     let report_settings = matches!(activated.purpose, VoiceUpdatePurpose::Settings);
     let old_runtime = std::mem::replace(runtime, activated.runtime);
     *events = activated.events;
-    old_runtime.finish()?;
+    // Shutdown waits for provider events; keep draining microphone input meanwhile.
+    drop(old_runtime);
     for frame in activated.held_input {
         runtime
             .send(SpokespersonCommand::InputPcm48Khz(
