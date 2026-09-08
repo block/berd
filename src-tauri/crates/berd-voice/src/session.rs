@@ -68,7 +68,11 @@ impl SessionCore {
             ));
         }
         self.highest_utterance_token = token;
-        self.utterances.push(PendingUtterance { token, text });
+        self.utterances.push(PendingUtterance {
+            token,
+            text,
+            origin: None,
+        });
         Ok(())
     }
 

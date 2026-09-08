@@ -2,8 +2,9 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
+import type { OpenAiRealtimeProtocolEvent } from "@/shared/api/openaiRealtime";
 import {
-  createRealtimeTranscriptReplayEvents,
+  collectRealtimeTranscriptSeedTurns,
   requestOpenAiRealtimeConversationStart,
   resetOpenAiRealtimeConversationRuntimeForTests,
   stopOpenAiRealtimeConversation,
@@ -13,17 +14,169 @@ import {
 const mocks = vi.hoisted(() => ({
   appendSessionSystemPrompt: vi.fn(),
   claimMicrophone: vi.fn(),
-  connectPeer: vi.fn(),
   createHandoffToolOutput: vi.fn(),
   createInvalidToolCallOutput: vi.fn(),
-  createPeer: vi.fn(),
-  createSession: vi.fn(),
+  createExpertInstructions: vi.fn(),
+  createTranscriptSeed: vi.fn(),
   createResponse: true,
+  completeExpertTurn: vi.fn(),
+  dismissHandoffs: vi.fn(),
+  enqueueSpokespersonMessage: vi.fn(),
+  flushExpertEvents: vi.fn(),
+  getExpertPipeCursor: vi.fn(),
   listenControls: vi.fn(),
+  listenRuntime: vi.fn(),
   publishActivity: vi.fn(),
   publishMuted: vi.fn(),
+  reduceProtocol: vi.fn(
+    async (_sessionId: string, event: { type?: string }) => {
+      const userFinals: Record<string, [string, string]> = {
+        "test.transcript": ["user-item-1", "hello master"],
+        "test.transcript_repository": [
+          "user-item-repository",
+          "how many repos are in my development folder?",
+        ],
+        "test.transcript_followup": [
+          "user-item-2",
+          "are any of them symbolic links?",
+        ],
+        "test.transcript_corrected": ["user-item-1", "hello master"],
+      };
+      const spokespersonFinals: Record<string, [string, string, boolean?]> = {
+        "test.emissary": ["emissary-item-1", "hello user"],
+        "test.emissary_result": [
+          "emissary-item-2",
+          "You have 21 repositories.",
+        ],
+        "test.emissary_followup_ack": ["emissary-item-3", "I'll verify that."],
+        "test.emissary_symlink_result": [
+          "emissary-item-4",
+          "None of those repositories are symbolic links.",
+        ],
+        "test.emissary_interrupted": [
+          "emissary-item-interrupted",
+          "partially heard",
+          true,
+        ],
+      };
+      const user = event.type ? userFinals[event.type] : undefined;
+      if (user)
+        return [
+          {
+            evidence: "provider_final",
+            id: 1,
+            interrupted: false,
+            itemId: user[0],
+            expertMessage: `[Voice transcript] User said: ${user[1]}`,
+            speaker: "user",
+            text: user[1],
+            type: "transcript.finalized",
+          },
+        ];
+      const spokesperson = event.type
+        ? spokespersonFinals[event.type]
+        : undefined;
+      if (spokesperson)
+        return [
+          {
+            evidence: spokesperson[2] ? "provider_delta" : "provider_final",
+            id: 1,
+            interrupted: spokesperson[2] ?? false,
+            itemId: spokesperson[0],
+            expertMessage: `[Voice transcript] Spokesperson said${
+              spokesperson[2] ? " (interrupted; best effort)" : ""
+            }: ${spokesperson[1]}`,
+            speaker: "spokesperson",
+            text: spokesperson[1],
+            type: "transcript.finalized",
+          },
+        ];
+      if (event.type === "test.transcript_partial")
+        return [
+          {
+            itemId: "user-item-1",
+            speaker: "user",
+            text: "hello",
+            type: "transcript.updated",
+          },
+        ];
+      if (event.type === "test.emissary_partial_first")
+        return [
+          {
+            itemId: "emissary-item-multi",
+            speaker: "spokesperson",
+            text: "Let me think about that.",
+            type: "transcript.updated",
+          },
+        ];
+      if (event.type === "test.emissary_partial_second")
+        return [
+          {
+            itemId: "emissary-item-multi",
+            speaker: "spokesperson",
+            text: "Let me think about that. I received a compact transcript.",
+            type: "transcript.updated",
+          },
+        ];
+      if (event.type === "test.handoff")
+        return [
+          {
+            callId: "call-1",
+            message: "Please inspect the disk.",
+            type: "handoff",
+          },
+        ];
+      if (event.type === "test.handoff_followup")
+        return [
+          {
+            callId: "call-2",
+            message: "Please verify whether those repositories are symlinks.",
+            type: "handoff",
+          },
+        ];
+      if (event.type === "test.invalid_tool_call")
+        return [
+          {
+            callId: "call-broken",
+            error: "JSON Parse error: Unterminated string",
+            toolName: "handoff",
+            type: "tool_call.invalid",
+          },
+        ];
+      return [];
+    },
+  ),
   pipeInitialCursors: [] as number[],
+  pipeNextId: 1,
+  pipePending: [] as Array<{
+    id: number;
+    sender: "master" | "emissary";
+    recipient: "master" | "emissary";
+    senderCursor: number;
+    message: string;
+  }>,
+  pipeConsumed: { master: 0, emissary: 0 },
+  pendingExpertEvents: [] as Array<{
+    cursor: number;
+    role:
+      | "user"
+      | "spokesperson"
+      | "spokesperson_interrupted"
+      | "handoff"
+      | "lifecycle";
+    text: string;
+    handoffId?: string;
+  }>,
+  preferenceListener: null as
+    | null
+    | ((preference: Record<string, unknown>) => void),
+  realtimeCallScope: "test-call",
+  openHandoffs: new Map<
+    string,
+    { message: string; reminderAttempts: number; resolving: boolean }
+  >(),
   rebindControls: vi.fn(),
+  registerHandoff: vi.fn(),
   registerEmissary: vi.fn(),
   recordToolOutput: vi.fn(),
   activeEmissary: null as null | {
@@ -43,15 +196,26 @@ const mocks = vi.hoisted(() => ({
   },
   releaseBridge: vi.fn(),
   releaseMicrophone: vi.fn(),
+  releaseRuntime: vi.fn(),
   setControlsSuppressed: vi.fn(),
   startControls: vi.fn(),
+  startRuntime: vi.fn(),
   stopControls: vi.fn(),
+  stopRuntime: vi.fn(),
+  updateRuntimeSettings: vi.fn(),
+  sendRuntimeEvent: vi.fn(),
+  startNativeMicrophone: vi.fn(),
   waitForBridgeReady: vi.fn(),
   sendRealtimeEvents: vi.fn(),
+  deliverExpertMessage: vi.fn(),
+  dismissHandoffsWithContext: vi.fn(),
+  sendExpertPipeMessage: vi.fn(),
+  markHandoffsResolving: vi.fn(),
   steerPrompt: vi.fn(),
   requestToolOutput: vi.fn(),
   requestMasterMessage: vi.fn(),
   requestTypedUserMessage: vi.fn(),
+  unknownHandoffIds: vi.fn(),
 }));
 
 vi.mock("@/shared/api/acpApi", () => ({
@@ -60,20 +224,145 @@ vi.mock("@/shared/api/acpApi", () => ({
 
 vi.mock("@/shared/api/openaiRealtime", () => ({
   claimVoiceDictationMicrophone: mocks.claimMicrophone,
-  createOpenAiRealtimeVoiceSession: mocks.createSession,
+  completeOpenAiRealtimeExpertTurn: mocks.completeExpertTurn,
+  createOpenAiRealtimeExpertInstructions: mocks.createExpertInstructions,
+  createOpenAiRealtimeHandoffToolOutput: (callId: string, handoffId: string) =>
+    Promise.resolve(
+      mocks.createHandoffToolOutput(callId, {
+        accepted: true,
+        handoff_id: handoffId,
+      }),
+    ),
+  createOpenAiRealtimeInvalidToolOutput: (
+    callId: string,
+    toolName: string,
+    error: string,
+  ) =>
+    Promise.resolve(mocks.createInvalidToolCallOutput(callId, toolName, error)),
+  createOpenAiRealtimeTranscriptSeed: mocks.createTranscriptSeed,
+  deliverOpenAiRealtimeExpertMessage: mocks.deliverExpertMessage,
+  dismissOpenAiRealtimeHandoffsWithContext: mocks.dismissHandoffsWithContext,
+  dismissOpenAiRealtimeHandoffs: mocks.dismissHandoffs,
+  flushOpenAiRealtimeExpertEvents: mocks.flushExpertEvents,
+  getOpenAiRealtimeExpertPipeCursor: mocks.getExpertPipeCursor,
   listenToOpenAiRealtimeVoiceControls: mocks.listenControls,
+  listenToOpenAiRealtimeSpokespersonRuntime: mocks.listenRuntime,
+  markOpenAiRealtimeHandoffsResolving: mocks.markHandoffsResolving,
   publishOpenAiRealtimeVoiceActivity: mocks.publishActivity,
   publishOpenAiRealtimeVoiceMicrophoneMuted: mocks.publishMuted,
   rebindOpenAiRealtimeVoiceControls: mocks.rebindControls,
+  reduceOpenAiRealtimeSpokespersonEvent: async (
+    sessionId: string,
+    event: { type?: string },
+  ) => {
+    const protocolEvents = (await mocks.reduceProtocol(
+      sessionId,
+      event,
+    )) as OpenAiRealtimeProtocolEvent[];
+    const clientEvents: unknown[] = [];
+    const acceptedHandoffs: Array<{
+      handoffId: string;
+      message: string;
+    }> = [];
+    let expertDelivery:
+      | {
+          events: typeof mocks.pendingExpertEvents;
+          displayText: string;
+          handoffIds: string[];
+        }
+      | undefined;
+    for (const protocolEvent of protocolEvents) {
+      if (protocolEvent.type === "transcript.finalized") {
+        const exchange = await mocks.enqueueSpokespersonMessage(
+          sessionId,
+          protocolEvent.expertMessage,
+        );
+        if (!exchange.accepted)
+          throw new Error("Expert pipe rejected transcript");
+        mocks.pendingExpertEvents.push({
+          cursor: exchange.outbound.id,
+          role:
+            protocolEvent.speaker === "user"
+              ? "user"
+              : protocolEvent.interrupted
+                ? "spokesperson_interrupted"
+                : "spokesperson",
+          text: protocolEvent.text,
+        });
+        if (protocolEvent.speaker === "spokesperson") {
+          expertDelivery = {
+            events: mocks.pendingExpertEvents.splice(0),
+            displayText: protocolEvent.text,
+            handoffIds: [],
+          };
+        }
+      } else if (protocolEvent.type === "handoff") {
+        const exchange = await mocks.enqueueSpokespersonMessage(
+          sessionId,
+          protocolEvent.message,
+        );
+        if (!exchange.accepted) throw new Error("Expert pipe rejected handoff");
+        const handoffId = `handoff-${mocks.realtimeCallScope}-${exchange.outbound.id}`;
+        await mocks.registerHandoff(
+          sessionId,
+          handoffId,
+          exchange.outbound.id,
+          exchange.outbound.message,
+        );
+        mocks.pendingExpertEvents.push({
+          cursor: exchange.outbound.id,
+          role: "handoff",
+          text: protocolEvent.message,
+          handoffId,
+        });
+        const toolOutput = mocks.createHandoffToolOutput(protocolEvent.callId, {
+          accepted: true,
+          handoff_id: handoffId,
+        });
+        clientEvents.push(...mocks.recordToolOutput(toolOutput).events);
+        acceptedHandoffs.push({ handoffId, message: protocolEvent.message });
+        expertDelivery = {
+          events: mocks.pendingExpertEvents.splice(0),
+          displayText: protocolEvent.message,
+          handoffIds: [handoffId],
+        };
+      } else if (protocolEvent.type === "tool_call.invalid") {
+        const toolOutput = mocks.createInvalidToolCallOutput(
+          protocolEvent.callId,
+          protocolEvent.toolName,
+          protocolEvent.error,
+        );
+        clientEvents.push(...mocks.requestToolOutput(toolOutput).events);
+      }
+    }
+    return {
+      protocolEvents,
+      clientEvents,
+      completedHandoffIds: [],
+      failedHandoffIds: [],
+      expertDelivery,
+      acceptedHandoffs,
+    };
+  },
+  requestOpenAiRealtimeExpertMessage: (_sessionId: string, message: unknown) =>
+    Promise.resolve(mocks.requestMasterMessage(message)),
+  requestOpenAiRealtimeTypedUserMessage: (_sessionId: string, text: string) =>
+    Promise.resolve(mocks.requestTypedUserMessage(text)),
+  sendOpenAiRealtimeExpertPipeMessage: mocks.sendExpertPipeMessage,
+  sendOpenAiRealtimeSpokespersonRuntimeEvent: mocks.sendRuntimeEvent,
+  releaseOpenAiRealtimeSpokespersonRuntime: mocks.releaseRuntime,
   releaseVoiceDictationMicrophone: mocks.releaseMicrophone,
   setOpenAiRealtimeVoiceControlsSuppressed: mocks.setControlsSuppressed,
   startOpenAiRealtimeVoiceControls: mocks.startControls,
+  startOpenAiRealtimeSpokespersonRuntime: mocks.startRuntime,
   stopOpenAiRealtimeVoiceControls: mocks.stopControls,
+  stopOpenAiRealtimeSpokespersonRuntime: mocks.stopRuntime,
+  updateOpenAiRealtimeSpokespersonSettings: mocks.updateRuntimeSettings,
+  unknownOpenAiRealtimeHandoffIds: mocks.unknownHandoffIds,
 }));
 
-vi.mock("@/features/chat/lib/openaiRealtimeAudio", () => ({
-  connectOpenAiRealtimePeerConnection: mocks.connectPeer,
-  createOpenAiRealtimePeerConnection: mocks.createPeer,
+vi.mock("../lib/nativeMicrophone", () => ({
+  startNativeMicrophone: mocks.startNativeMicrophone,
 }));
 
 vi.mock("@/features/chat/lib/steerCore", () => ({
@@ -108,242 +397,17 @@ vi.mock("../lib/realtimeVoicePreference", () => ({
     reasoningEffort: "default",
     maxOutputTokens: null,
   }),
+  subscribeToRealtimeVoicePreference: (
+    listener: (preference: Record<string, unknown>) => void,
+  ) => {
+    mocks.preferenceListener = listener;
+    return () => {
+      mocks.preferenceListener = null;
+    };
+  },
 }));
 
 vi.mock("../lib/realtimeEmissaryProtocol", () => ({
-  configureRealtimeEmissarySession: vi.fn(),
-  createInvalidToolCallOutput: mocks.createInvalidToolCallOutput,
-  createHandoffToolOutput: mocks.createHandoffToolOutput,
-  DirectMessagePipe: class {
-    private nextId = 1;
-    private pending: Array<{
-      id: number;
-      sender: "master" | "emissary";
-      recipient: "master" | "emissary";
-      senderCursor: number;
-      message: string;
-    }> = [];
-    private consumed = { master: 0, emissary: 0 };
-    constructor(initialCursor = 0) {
-      mocks.pipeInitialCursors.push(initialCursor);
-    }
-    cursor(peer: "master" | "emissary") {
-      return this.consumed[peer];
-    }
-    deliveryCursor(peer: "master" | "emissary") {
-      const latest = this.pending.at(-1);
-      return latest?.recipient === peer ? latest.id : this.consumed[peer];
-    }
-    send(options: {
-      sender: "master" | "emissary";
-      cursor: number;
-      message: string;
-    }) {
-      const active = this.pending[0];
-      if (active && active.sender !== options.sender) {
-        const latest = this.pending.at(-1);
-        if (!latest || options.cursor !== latest.id) {
-          return {
-            accepted: false,
-            reason: "pipe_busy",
-            cursor: this.consumed[options.sender],
-          };
-        }
-        this.consumed[options.sender] = latest.id;
-        this.pending = [];
-      }
-      if (options.cursor !== this.consumed[options.sender]) {
-        return {
-          accepted: false,
-          reason: "stale_cursor",
-          cursor: this.consumed[options.sender],
-        };
-      }
-      const id = this.nextId++;
-      const outbound = {
-        id,
-        sender: options.sender,
-        recipient: options.sender === "master" ? "emissary" : "master",
-        senderCursor: this.consumed[options.sender],
-        message: options.message,
-      } as const;
-      this.pending.push(outbound);
-      return {
-        accepted: true,
-        cursor: this.consumed[options.sender],
-        outbound,
-      };
-    }
-  },
-  REALTIME_EXPERT_INSTRUCTIONS: "Expert instructions",
-  RealtimeEmissaryProtocol: class {
-    handle(event: { type?: string }) {
-      if (event.type === "test.transcript")
-        return [
-          {
-            interrupted: false,
-            itemId: "user-item-1",
-            speaker: "user",
-            text: "hello master",
-            type: "transcript.finalized",
-          },
-        ];
-      if (event.type === "test.transcript_repository")
-        return [
-          {
-            interrupted: false,
-            itemId: "user-item-repository",
-            speaker: "user",
-            text: "how many repos are in my development folder?",
-            type: "transcript.finalized",
-          },
-        ];
-      if (event.type === "test.transcript_followup")
-        return [
-          {
-            interrupted: false,
-            itemId: "user-item-2",
-            speaker: "user",
-            text: "are any of them symbolic links?",
-            type: "transcript.finalized",
-          },
-        ];
-      if (event.type === "test.transcript_partial")
-        return [
-          {
-            itemId: "user-item-1",
-            speaker: "user",
-            text: "hello",
-            type: "transcript.updated",
-          },
-        ];
-      if (event.type === "test.transcript_corrected")
-        return [
-          {
-            itemId: "user-item-1",
-            speaker: "user",
-            text: "hello master",
-            type: "transcript.finalized",
-          },
-        ];
-      if (event.type === "test.emissary")
-        return [
-          {
-            interrupted: false,
-            itemId: "emissary-item-1",
-            speaker: "emissary",
-            text: "hello user",
-            type: "transcript.finalized",
-          },
-        ];
-      if (event.type === "test.emissary_partial_first")
-        return [
-          {
-            itemId: "emissary-item-multi",
-            speaker: "emissary",
-            text: "Let me think about that.",
-            type: "transcript.updated",
-          },
-        ];
-      if (event.type === "test.emissary_partial_second")
-        return [
-          {
-            itemId: "emissary-item-multi",
-            speaker: "emissary",
-            text: "Let me think about that. I received a compact transcript.",
-            type: "transcript.updated",
-          },
-        ];
-      if (event.type === "test.emissary_result")
-        return [
-          {
-            interrupted: false,
-            itemId: "emissary-item-2",
-            speaker: "emissary",
-            text: "You have 21 repositories.",
-            type: "transcript.finalized",
-          },
-        ];
-      if (event.type === "test.emissary_followup_ack")
-        return [
-          {
-            interrupted: false,
-            itemId: "emissary-item-3",
-            speaker: "emissary",
-            text: "I'll verify that.",
-            type: "transcript.finalized",
-          },
-        ];
-      if (event.type === "test.emissary_symlink_result")
-        return [
-          {
-            interrupted: false,
-            itemId: "emissary-item-4",
-            speaker: "emissary",
-            text: "None of those repositories are symbolic links.",
-            type: "transcript.finalized",
-          },
-        ];
-      if (event.type === "test.emissary_interrupted")
-        return [
-          {
-            interrupted: true,
-            speaker: "emissary",
-            text: "partially heard",
-            type: "transcript.finalized",
-          },
-        ];
-      if (event.type === "test.handoff")
-        return [
-          {
-            callId: "call-1",
-            message: "Please inspect the disk.",
-            type: "handoff",
-          },
-        ];
-      if (event.type === "test.handoff_followup")
-        return [
-          {
-            callId: "call-2",
-            message: "Please verify whether those repositories are symlinks.",
-            type: "handoff",
-          },
-        ];
-      if (event.type === "test.invalid_tool_call")
-        return [
-          {
-            callId: "call-broken",
-            error: "JSON Parse error: Unterminated string",
-            toolName: "handoff",
-            type: "tool_call.invalid",
-          },
-        ];
-      return [];
-    }
-  },
-  RealtimeResponseCoordinator: class {
-    handle() {
-      return [];
-    }
-    takeCompletedHandoffIds() {
-      return [];
-    }
-    takeFailedHandoffIds() {
-      return [];
-    }
-    requestMasterMessage(message: unknown) {
-      return mocks.requestMasterMessage(message);
-    }
-    recordToolOutput(event: unknown) {
-      return mocks.recordToolOutput(event);
-    }
-    requestToolOutput(event: unknown) {
-      return mocks.requestToolOutput(event);
-    }
-    requestTypedUserMessage(text: string) {
-      return mocks.requestTypedUserMessage(text);
-    }
-  },
   sendRealtimeEvents: mocks.sendRealtimeEvents,
 }));
 
@@ -353,30 +417,8 @@ class FakeDataChannel extends EventTarget {
   readonly send = vi.fn();
 }
 
-class FakePeer extends EventTarget {
-  readonly addTrack = vi.fn();
-  readonly close = vi.fn();
-  readonly createDataChannel = vi.fn();
-  connectionState: RTCPeerConnectionState = "connected";
-  iceConnectionState: RTCIceConnectionState = "connected";
-
-  constructor(channel: FakeDataChannel) {
-    super();
-    this.createDataChannel.mockReturnValue(channel);
-  }
-}
-
-class FakeAudio extends EventTarget {
-  autoplay = false;
-  readonly pause = vi.fn();
-  readonly play = vi.fn().mockResolvedValue(undefined);
-  srcObject: MediaStream | null = null;
-}
-
-const originalAudio = globalThis.Audio;
 const originalMediaDevices = navigator.mediaDevices;
 let channel: FakeDataChannel;
-let peer: FakePeer;
 let track: MediaStreamTrack & { stop: ReturnType<typeof vi.fn> };
 let realtimeControlListener:
   | ((control: {
@@ -386,6 +428,10 @@ let realtimeControlListener:
       muted?: boolean;
     }) => void)
   | undefined;
+let realtimeRuntimeListener:
+  | ((event: { sessionId: string; event: Record<string, unknown> }) => void)
+  | undefined;
+let realtimeRuntimeSessionId: string | undefined;
 
 function renderConversation(sessionId: string, onSend = vi.fn()) {
   return renderHook(() =>
@@ -404,10 +450,10 @@ function acceptedHandoffId(callId: string): string {
   return handoffId;
 }
 
-describe("createRealtimeTranscriptReplayEvents", () => {
-  it("reconstructs a compact ordinary transcript without realtime state", () => {
+describe("collectRealtimeTranscriptSeedTurns", () => {
+  it("selects ordinary durable turns without encoding provider events", () => {
     expect(
-      createRealtimeTranscriptReplayEvents([
+      collectRealtimeTranscriptSeedTurns([
         {
           id: "u1",
           role: "user",
@@ -447,28 +493,17 @@ describe("createRealtimeTranscriptReplayEvents", () => {
       ]),
     ).toEqual([
       {
-        type: "conversation.item.create",
-        item: {
-          type: "message",
-          role: "user",
-          content: [{ type: "input_text", text: "What is in this folder?" }],
-        },
+        role: "user",
+        text: "What is in this folder?",
       },
       {
-        type: "conversation.item.create",
-        item: {
-          type: "message",
-          role: "assistant",
-          content: [{ type: "output_text", text: "There are 25 directories." }],
-        },
+        role: "spokesperson",
+        text: "There are 25 directories.",
+        interrupted: false,
       },
       {
-        type: "conversation.item.create",
-        item: {
-          type: "message",
-          role: "user",
-          content: [{ type: "input_text", text: "Are any symlinks?" }],
-        },
+        role: "user",
+        text: "Are any symlinks?",
       },
     ]);
   });
@@ -487,7 +522,8 @@ beforeEach(() => {
   useChatSessionStore.setState({ sessions: [] });
   channel = new FakeDataChannel();
   realtimeControlListener = undefined;
-  peer = new FakePeer(channel);
+  realtimeRuntimeListener = undefined;
+  realtimeRuntimeSessionId = undefined;
   track = {
     enabled: true,
     stop: vi.fn(),
@@ -501,10 +537,8 @@ beforeEach(() => {
     configurable: true,
     value: { getUserMedia: vi.fn().mockResolvedValue(stream) },
   });
-  globalThis.Audio = FakeAudio as unknown as typeof Audio;
   mocks.appendSessionSystemPrompt.mockResolvedValue(undefined);
   mocks.claimMicrophone.mockResolvedValue(undefined);
-  mocks.connectPeer.mockResolvedValue(undefined);
   mocks.createHandoffToolOutput.mockReturnValue({
     type: "conversation.item.create",
     item: { type: "function_call_output" },
@@ -517,15 +551,204 @@ beforeEach(() => {
       output: '{"accepted":false,"reason":"invalid_arguments"}',
     },
   });
-  mocks.createPeer.mockReturnValue(peer);
-  mocks.createSession.mockResolvedValue({ clientSecret: "test-secret" });
+  mocks.createExpertInstructions.mockImplementation(
+    async (sessionId: string) =>
+      `Expert instructions\nberdctl session send-to-spokesperson --session-id ${JSON.stringify(sessionId)} --mode <context|say>`,
+  );
+  mocks.createTranscriptSeed.mockResolvedValue([]);
   mocks.listenControls.mockImplementation(async (listener) => {
     realtimeControlListener = listener;
     return vi.fn();
   });
+  mocks.listenRuntime.mockImplementation(async (listener) => {
+    realtimeRuntimeListener = listener;
+    const forwardMessage = (message: Event) => {
+      if (!realtimeRuntimeSessionId) return;
+      const data = (message as MessageEvent).data;
+      listener({
+        sessionId: realtimeRuntimeSessionId,
+        event: JSON.parse(String(data)),
+      });
+    };
+    channel.addEventListener("message", forwardMessage);
+    return () => channel.removeEventListener("message", forwardMessage);
+  });
+  mocks.startRuntime.mockImplementation(
+    async (sessionId: string, initialCursor: number, callId: string) => {
+      mocks.pipeInitialCursors.push(initialCursor);
+      // Keep existing hook assertions independent of the randomized call
+      // namespace. The Rust pipe tests cover nonzero initial cursors directly.
+      mocks.pipeNextId = 1;
+      mocks.pipePending = [];
+      mocks.pipeConsumed = { master: 0, emissary: 0 };
+      mocks.pendingExpertEvents = [];
+      mocks.realtimeCallScope = callId;
+      realtimeRuntimeSessionId = sessionId;
+      realtimeRuntimeListener?.({
+        sessionId,
+        event: { type: "berd.realtime.ready" },
+      });
+    },
+  );
+  mocks.stopRuntime.mockResolvedValue(undefined);
+  mocks.releaseRuntime.mockResolvedValue(undefined);
+  mocks.updateRuntimeSettings.mockResolvedValue({
+    revision: 2,
+    backend: "openai",
+    model: "gpt-realtime-2.1",
+    voice: "cedar",
+    rate: 1.5,
+  });
+  mocks.sendRuntimeEvent.mockResolvedValue(undefined);
+  mocks.startNativeMicrophone.mockImplementation(async () => {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    return {
+      setMuted: (muted: boolean) => {
+        stream.getAudioTracks().forEach((audioTrack) => {
+          audioTrack.enabled = !muted;
+        });
+      },
+      stop: () =>
+        stream.getTracks().forEach((item) => {
+          item.stop();
+        }),
+    };
+  });
   mocks.publishActivity.mockResolvedValue(undefined);
   mocks.publishMuted.mockResolvedValue(undefined);
   mocks.pipeInitialCursors.length = 0;
+  mocks.pendingExpertEvents = [];
+  mocks.preferenceListener = null;
+  mocks.openHandoffs.clear();
+  mocks.registerHandoff.mockImplementation(
+    async (
+      _sessionId: string,
+      handoffId: string,
+      cursor: number,
+      message: string,
+    ) => {
+      mocks.openHandoffs.set(handoffId, {
+        message,
+        reminderAttempts: 0,
+        resolving: false,
+      });
+      return `[Handoff ${handoffId} from spokesperson; cursor ${cursor}] ${message}`;
+    },
+  );
+  mocks.unknownHandoffIds.mockImplementation(
+    async (_sessionId: string, handoffIds: string[]) =>
+      handoffIds.filter((handoffId) => !mocks.openHandoffs.has(handoffId)),
+  );
+  mocks.markHandoffsResolving.mockImplementation(
+    async (_sessionId: string, handoffIds: string[]) => {
+      for (const handoffId of handoffIds) {
+        const handoff = mocks.openHandoffs.get(handoffId);
+        if (handoff) handoff.resolving = true;
+      }
+    },
+  );
+  mocks.dismissHandoffs.mockImplementation(
+    async (_sessionId: string, handoffIds: string[]) => {
+      for (const handoffId of handoffIds) mocks.openHandoffs.delete(handoffId);
+    },
+  );
+  mocks.completeExpertTurn.mockImplementation(
+    async (
+      _sessionId: string,
+      retryingHandoffIds: string[],
+      maxAttempts: number,
+    ) => {
+      const retrying = new Set(retryingHandoffIds);
+      const pending = [...mocks.openHandoffs.entries()].filter(
+        ([handoffId, handoff]) =>
+          !handoff.resolving &&
+          (handoff.reminderAttempts === 0 || retrying.has(handoffId)),
+      );
+      if (pending.length === 0) return { reminder: { status: "none" } };
+      const exhausted = pending.filter(
+        ([, handoff]) => handoff.reminderAttempts >= maxAttempts,
+      );
+      if (exhausted.length > 0) {
+        const handoffIds = exhausted.map(([handoffId]) => handoffId);
+        return {
+          reminder: {
+            status: "exhausted",
+            handoffIds,
+            message: `The Expert left required ${handoffIds.join(", ")} unresolved after ${maxAttempts} reminder attempts.`,
+          },
+        };
+      }
+      for (const [, handoff] of pending) handoff.reminderAttempts += 1;
+      const handoffIds = pending.map(([handoffId]) => handoffId);
+      const requests = pending
+        .map(([handoffId, handoff]) => `- ${handoffId}: ${handoff.message}`)
+        .join("\n");
+      const attempt = Math.max(
+        ...pending.map(([, handoff]) => handoff.reminderAttempts),
+      );
+      const message = `[Private handoff reminder]\nYou ended your turn without resolving the required handoffs below. Resolve them now with one or more send-to-spokesperson --mode say calls that name every answered handoff in --resolves, or dismiss obsolete handoffs explicitly. Berd will retry this reminder up to ${maxAttempts} times. Do not redo completed work.\n${requests}`;
+      const exchange = await mocks.enqueueSpokespersonMessage(
+        _sessionId,
+        message,
+      );
+      if (!exchange.accepted) throw new Error("Expert pipe rejected reminder");
+      return {
+        reminder: {
+          status: "reminder",
+          handoffIds,
+          attempt,
+          requests,
+          message,
+        },
+        expertDelivery: {
+          events: [
+            {
+              cursor: exchange.outbound.id,
+              role: "lifecycle",
+              text: message,
+            },
+          ],
+          displayText: "Handoff reminder",
+          handoffIds,
+        },
+      };
+    },
+  );
+  const sendPipeMessage = (
+    sender: "master" | "emissary",
+    cursor: number,
+    message: string,
+  ) => {
+    const active = mocks.pipePending[0];
+    if (active && active.sender !== sender) {
+      const latest = mocks.pipePending.at(-1);
+      if (!latest || cursor !== latest.id) {
+        return {
+          accepted: false as const,
+          reason: "pipe_busy" as const,
+          cursor: mocks.pipeConsumed[sender],
+        };
+      }
+      mocks.pipeConsumed[sender] = latest.id;
+      mocks.pipePending = [];
+    }
+    if (cursor !== mocks.pipeConsumed[sender]) {
+      return {
+        accepted: false as const,
+        reason: "stale_cursor" as const,
+        cursor: mocks.pipeConsumed[sender],
+      };
+    }
+    const outbound = {
+      id: mocks.pipeNextId++,
+      sender,
+      recipient: sender === "master" ? "emissary" : "master",
+      senderCursor: cursor,
+      message,
+    } as const;
+    mocks.pipePending.push(outbound);
+    return { accepted: true as const, outbound, cursor };
+  };
   mocks.rebindControls.mockResolvedValue({
     available: true,
     unavailableReason: null,
@@ -547,6 +770,31 @@ beforeEach(() => {
     microphoneMuted: false,
     revision: 7,
   }));
+  mocks.enqueueSpokespersonMessage.mockImplementation(
+    async (_sessionId: string, message: string) => {
+      const latest = mocks.pipePending.at(-1);
+      const cursor =
+        latest?.recipient === "emissary"
+          ? latest.id
+          : mocks.pipeConsumed.emissary;
+      return sendPipeMessage("emissary", cursor, message);
+    },
+  );
+  mocks.flushExpertEvents.mockImplementation(async () => {
+    if (mocks.pendingExpertEvents.length === 0) return null;
+    return {
+      events: mocks.pendingExpertEvents.splice(0),
+      displayText: "Final voice transcript",
+      handoffIds: [],
+    };
+  });
+  mocks.sendExpertPipeMessage.mockImplementation(
+    async (_sessionId: string, cursor: number, message: string) =>
+      sendPipeMessage("master", cursor, message),
+  );
+  mocks.getExpertPipeCursor.mockImplementation(
+    async () => mocks.pipeConsumed.master,
+  );
   mocks.stopControls.mockResolvedValue(undefined);
   mocks.waitForBridgeReady.mockResolvedValue(undefined);
   mocks.requestToolOutput.mockImplementation((event) => ({
@@ -561,6 +809,87 @@ beforeEach(() => {
     status: "sent",
     events: [{ type: "conversation.item.create", message }],
   }));
+  mocks.deliverExpertMessage.mockImplementation(
+    async (
+      sessionId: string,
+      cursor: number,
+      message: string,
+      mode: "context" | "say",
+      resolvedHandoffIds: string[],
+    ) => {
+      if (mode === "context" && resolvedHandoffIds.length > 0) {
+        return {
+          accepted: false,
+          reason: "context_cannot_resolve",
+          cursor: await mocks.getExpertPipeCursor(sessionId),
+          handoffIds: resolvedHandoffIds,
+        };
+      }
+      const unknown = await mocks.unknownHandoffIds(
+        sessionId,
+        resolvedHandoffIds,
+      );
+      if (unknown.length > 0) {
+        return {
+          accepted: false,
+          reason: "unknown_handoff",
+          cursor: await mocks.getExpertPipeCursor(sessionId),
+          handoffIds: unknown,
+        };
+      }
+      const exchange = await mocks.sendExpertPipeMessage(
+        sessionId,
+        cursor,
+        message,
+      );
+      if (!exchange.accepted) return exchange;
+      const request = mocks.requestMasterMessage({
+        message: `[bridge cursor ${exchange.outbound.id}] ${message}`,
+        mode,
+        eventId: `berd-master-${exchange.outbound.id}`,
+        resolvedHandoffIds,
+      });
+      await mocks.markHandoffsResolving(sessionId, resolvedHandoffIds);
+      return { ...exchange, deliveryStatus: request.status };
+    },
+  );
+  mocks.dismissHandoffsWithContext.mockImplementation(
+    async (
+      sessionId: string,
+      cursor: number,
+      handoffIds: string[],
+      reason: string,
+    ) => {
+      const unknown = await mocks.unknownHandoffIds(sessionId, handoffIds);
+      if (unknown.length > 0) {
+        return {
+          accepted: false,
+          reason: "unknown_handoff",
+          cursor: await mocks.getExpertPipeCursor(sessionId),
+          handoffIds: unknown,
+        };
+      }
+      const context = `Handoffs ${handoffIds.join(", ")} were dismissed without a spoken response. Reason: ${reason.trim()}`;
+      const exchange = await mocks.sendExpertPipeMessage(
+        sessionId,
+        cursor,
+        context,
+      );
+      if (!exchange.accepted) return exchange;
+      const request = mocks.requestMasterMessage({
+        message: `[bridge cursor ${exchange.outbound.id}] [Handoff dismissal] ${context} This is silent context; do not speak merely to acknowledge it.`,
+        mode: "context",
+        eventId: `berd-master-dismissal-${exchange.outbound.id}`,
+      });
+      await mocks.dismissHandoffs(sessionId, handoffIds);
+      return {
+        accepted: true,
+        cursor: exchange.cursor,
+        dismissedHandoffIds: handoffIds,
+        deliveryStatus: request.status,
+      };
+    },
+  );
   mocks.requestTypedUserMessage.mockReturnValue({
     status: "interrupting",
     events: [{ type: "response.cancel" }, { type: "conversation.item.create" }],
@@ -569,7 +898,6 @@ beforeEach(() => {
 
 afterEach(async () => {
   await resetOpenAiRealtimeConversationRuntimeForTests();
-  globalThis.Audio = originalAudio;
   Object.defineProperty(navigator, "mediaDevices", {
     configurable: true,
     value: originalMediaDevices,
@@ -577,12 +905,83 @@ afterEach(async () => {
 });
 
 describe("useOpenAiRealtimeConversation lifecycle", () => {
+  it("queues live voice settings through the managed Berd Voice runtime", async () => {
+    const owner = renderConversation("session-a");
+
+    await act(async () => owner.result.current.onToggle());
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+    act(() => {
+      mocks.preferenceListener?.({ voice: "cedar", speed: 1.5 });
+    });
+
+    await waitFor(() =>
+      expect(mocks.updateRuntimeSettings).toHaveBeenCalledWith(
+        "session-a",
+        1,
+        "cedar",
+        1.5,
+      ),
+    );
+  });
+
+  it("serializes rapid voice settings changes against each applied revision", async () => {
+    let resolveFirst!: (snapshot: {
+      revision: number;
+      backend: "openai";
+      model: string;
+      voice: string;
+      rate: number;
+    }) => void;
+    mocks.updateRuntimeSettings
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockResolvedValueOnce({
+        revision: 3,
+        backend: "openai",
+        model: "gpt-realtime-2.1",
+        voice: "marin",
+        rate: 1.25,
+      });
+    const owner = renderConversation("session-a");
+
+    await act(async () => owner.result.current.onToggle());
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+    act(() => {
+      mocks.preferenceListener?.({ voice: "cedar", speed: 1.5 });
+      mocks.preferenceListener?.({ voice: "marin", speed: 1.25 });
+    });
+
+    await waitFor(() =>
+      expect(mocks.updateRuntimeSettings).toHaveBeenCalledTimes(1),
+    );
+    resolveFirst({
+      revision: 2,
+      backend: "openai",
+      model: "gpt-realtime-2.1",
+      voice: "cedar",
+      rate: 1.5,
+    });
+    await waitFor(() =>
+      expect(mocks.updateRuntimeSettings).toHaveBeenNthCalledWith(
+        2,
+        "session-a",
+        2,
+        "marin",
+        1.25,
+      ),
+    );
+  });
+
   it("starts after a newly created session mounts from a deferred call request", async () => {
     act(() => requestOpenAiRealtimeConversationStart("session-a"));
     const owner = renderConversation("session-a");
 
     await waitFor(() => expect(owner.result.current.state).toBe("listening"));
-    expect(mocks.createSession).toHaveBeenCalledOnce();
+    expect(mocks.startRuntime).toHaveBeenCalledOnce();
 
     await act(async () => owner.result.current.onToggle());
   });
@@ -663,7 +1062,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     const owner = renderConversation("backend-session");
 
     await waitFor(() => expect(owner.result.current.state).toBe("listening"));
-    expect(mocks.createSession).toHaveBeenCalledOnce();
+    expect(mocks.startRuntime).toHaveBeenCalledOnce();
 
     await act(async () => owner.result.current.onToggle());
   });
@@ -777,6 +1176,64 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     await act(async () => owner.result.current.onToggle());
   });
 
+  it("stops microphone capture when startup becomes stale during acquisition", async () => {
+    let resolveStream!: (stream: MediaStream) => void;
+    const delayedStream = {
+      getAudioTracks: () => [track],
+      getTracks: () => [track],
+    } as unknown as MediaStream;
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockReturnValueOnce(
+      new Promise<MediaStream>((resolve) => {
+        resolveStream = resolve;
+      }),
+    );
+    const owner = renderConversation("session-a");
+
+    let start = Promise.resolve();
+    act(() => {
+      start = Promise.resolve(owner.result.current.onToggle());
+    });
+    await waitFor(() => expect(mocks.startNativeMicrophone).toHaveBeenCalled());
+
+    await act(async () => stopOpenAiRealtimeConversation());
+    act(() => resolveStream(delayedStream));
+    await act(async () => start);
+
+    expect(track.stop).toHaveBeenCalledOnce();
+    expect(owner.result.current.state).toBe("off");
+  });
+
+  it("invalidates startup immediately when the same owner stops", async () => {
+    let resolveStream!: (stream: MediaStream) => void;
+    const delayedStream = {
+      getAudioTracks: () => [track],
+      getTracks: () => [track],
+    } as unknown as MediaStream;
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockReturnValueOnce(
+      new Promise<MediaStream>((resolve) => {
+        resolveStream = resolve;
+      }),
+    );
+    const owner = renderConversation("session-a");
+
+    let start = Promise.resolve();
+    act(() => {
+      start = Promise.resolve(owner.result.current.onToggle());
+    });
+    await waitFor(() => expect(mocks.startNativeMicrophone).toHaveBeenCalled());
+
+    let stop = Promise.resolve();
+    act(() => {
+      stop = Promise.resolve(owner.result.current.onToggle());
+    });
+    expect(owner.result.current.state).toBe("stopping");
+    act(() => resolveStream(delayedStream));
+    await act(async () => Promise.all([start, stop]));
+
+    expect(track.stop).toHaveBeenCalledOnce();
+    expect(owner.result.current.state).toBe("off");
+  });
+
   it("publishes running controls only after the cross-renderer bridge is ready", async () => {
     let resolveBridge!: () => void;
     mocks.waitForBridgeReady.mockReturnValueOnce(
@@ -801,50 +1258,31 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     await act(async () => owner.result.current.onToggle());
   });
 
-  it("stops a captured microphone stream when parallel startup fails", async () => {
-    mocks.createSession.mockRejectedValueOnce(new Error("token failed"));
+  it("does not start microphone capture when the Rust runtime fails", async () => {
+    mocks.startRuntime.mockRejectedValueOnce(new Error("connection failed"));
     const owner = renderConversation("session-a");
 
     await act(async () => owner.result.current.onToggle());
 
     await waitFor(() => expect(owner.result.current.state).toBe("error"));
-    expect(track.stop).toHaveBeenCalledOnce();
+    expect(mocks.startNativeMicrophone).not.toHaveBeenCalled();
   });
 
-  it.each([
-    "close",
-    "error",
-  ] as const)("cleans up when the open Realtime data channel emits %s", async (eventType) => {
+  it("cleans up when the Rust Realtime runtime fails", async () => {
     const owner = renderConversation("session-a");
     await act(async () => owner.result.current.onToggle());
     await waitFor(() => expect(owner.result.current.state).toBe("listening"));
 
     await act(async () => {
-      channel.dispatchEvent(new Event(eventType));
+      realtimeRuntimeListener?.({
+        sessionId: "session-a",
+        event: { type: "berd.realtime.failed", message: "socket failed" },
+      });
     });
 
     await waitFor(() => expect(owner.result.current.state).toBe("error"));
-    expect(peer.close).toHaveBeenCalledOnce();
     expect(track.stop).toHaveBeenCalledOnce();
-    expect(mocks.stopControls).toHaveBeenCalledWith("session-a", 7);
-  });
-
-  it.each([
-    ["connectionstatechange", "connectionState"],
-    ["iceconnectionstatechange", "iceConnectionState"],
-  ] as const)("cleans up when Realtime emits terminal %s failure", async (eventType, stateProperty) => {
-    const owner = renderConversation("session-a");
-    await act(async () => owner.result.current.onToggle());
-    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
-
-    peer[stateProperty] = "failed";
-    await act(async () => {
-      peer.dispatchEvent(new Event(eventType));
-    });
-
-    await waitFor(() => expect(owner.result.current.state).toBe("error"));
-    expect(channel.close).toHaveBeenCalledOnce();
-    expect(track.stop).toHaveBeenCalledOnce();
+    expect(mocks.stopRuntime).toHaveBeenCalledWith("session-a");
     expect(mocks.stopControls).toHaveBeenCalledWith("session-a", 7);
   });
 
@@ -860,8 +1298,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
 
     first.unmount();
 
-    expect(channel.close).not.toHaveBeenCalled();
-    expect(peer.close).not.toHaveBeenCalled();
+    expect(mocks.stopRuntime).not.toHaveBeenCalled();
     expect(track.stop).not.toHaveBeenCalled();
     expect(mocks.releaseBridge).not.toHaveBeenCalled();
     expect(mocks.releaseMicrophone).not.toHaveBeenCalled();
@@ -869,7 +1306,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     const remounted = renderConversation("session-a", remountedOnSend);
     expect(remounted.result.current.state).toBe("listening");
     expect(remounted.result.current.ownsActiveConversation).toBe(true);
-    expect(mocks.createSession).toHaveBeenCalledTimes(1);
+    expect(mocks.startRuntime).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       channel.dispatchEvent(
@@ -883,8 +1320,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
 
     await act(async () => remounted.result.current.onToggle());
     await waitFor(() => expect(remounted.result.current.state).toBe("off"));
-    expect(channel.close).toHaveBeenCalledOnce();
-    expect(peer.close).toHaveBeenCalledOnce();
+    expect(mocks.stopRuntime).toHaveBeenCalledWith("session-a");
     expect(track.stop).toHaveBeenCalledOnce();
     expect(mocks.releaseBridge).toHaveBeenCalledOnce();
     expect(mocks.releaseMicrophone).toHaveBeenCalledOnce();
@@ -926,7 +1362,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     });
 
     await waitFor(() => expect(owner.result.current.state).toBe("off"));
-    expect(peer.close).toHaveBeenCalledOnce();
+    expect(mocks.stopRuntime).toHaveBeenCalledWith("session-a");
     expect(track.stop).toHaveBeenCalledOnce();
     expect(mocks.stopControls).toHaveBeenCalledWith("session-a", 7);
   });
@@ -942,7 +1378,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     expect(other.result.current.disabled).toBe(true);
 
     await act(async () => other.result.current.onToggle());
-    expect(mocks.createSession).toHaveBeenCalledTimes(1);
+    expect(mocks.startRuntime).toHaveBeenCalledTimes(1);
     expect(owner.result.current.state).toBe("listening");
 
     await act(async () => owner.result.current.onToggle());
@@ -1038,6 +1474,8 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     );
 
     await act(async () => owner.result.current.onToggle());
+    expect(mocks.stopRuntime).toHaveBeenCalledWith("draft-session");
+    expect(mocks.releaseRuntime).toHaveBeenCalledWith("draft-session");
   });
 
   it("waits for owner promotion before stopping native controls", async () => {
@@ -1348,9 +1786,9 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     await waitFor(() => expect(mocks.activeEmissary).not.toBeNull());
     const handoffId = acceptedHandoffId("call-1");
 
-    mocks.sendRealtimeEvents.mockImplementationOnce(() => {
-      throw new DOMException("channel closed", "InvalidStateError");
-    });
+    mocks.deliverExpertMessage.mockRejectedValueOnce(
+      new DOMException("channel closed", "InvalidStateError"),
+    );
     await expect(
       mocks.activeEmissary?.sendMasterMessage("First attempt", 1, "say", [
         handoffId,
@@ -1378,10 +1816,12 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       );
     });
 
-    expect(mocks.createInvalidToolCallOutput).toHaveBeenCalledWith(
-      "call-broken",
-      "handoff",
-      "JSON Parse error: Unterminated string",
+    await waitFor(() =>
+      expect(mocks.createInvalidToolCallOutput).toHaveBeenCalledWith(
+        "call-broken",
+        "handoff",
+        "JSON Parse error: Unterminated string",
+      ),
     );
     expect(mocks.requestToolOutput).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1432,6 +1872,45 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       undefined,
       expect.objectContaining({ displayText: "Final voice transcript" }),
     );
+    expect(mocks.releaseRuntime).toHaveBeenCalledWith("session-a");
+    expect(mocks.releaseRuntime.mock.invocationCallOrder[0]).toBeGreaterThan(
+      onSend.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("drains final runtime events after native shutdown before flushing", async () => {
+    let finishStop!: () => void;
+    mocks.stopRuntime.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishStop = resolve;
+        }),
+    );
+    const onSend = vi.fn().mockResolvedValue(true);
+    const owner = renderConversation("session-a", onSend);
+    await act(async () => owner.result.current.onToggle());
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+
+    let stop!: Promise<void>;
+    act(() => {
+      stop = stopOpenAiRealtimeConversation();
+    });
+    await waitFor(() =>
+      expect(mocks.stopRuntime).toHaveBeenCalledWith("session-a"),
+    );
+    realtimeRuntimeListener?.({
+      sessionId: "session-a",
+      event: { type: "test.transcript" },
+    });
+    finishStop();
+    await act(async () => stop);
+
+    expect(onSend).toHaveBeenCalledWith(
+      expect.stringContaining("User said: hello master"),
+      undefined,
+      undefined,
+      expect.objectContaining({ displayText: "Final voice transcript" }),
+    );
   });
 
   it("does not request a Spokesperson response when automatic responses are disabled", async () => {
@@ -1464,13 +1943,17 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
         }),
       );
     });
+    await waitFor(() =>
+      expect(
+        useChatStore.getState().messagesBySession["session-a"]?.[0],
+      ).toMatchObject({
+        role: "user",
+        content: [{ type: "text", text: "hello" }],
+        metadata: { completionStatus: "inProgress" },
+      }),
+    );
     const provisional =
       useChatStore.getState().messagesBySession["session-a"]?.[0];
-    expect(provisional).toMatchObject({
-      role: "user",
-      content: [{ type: "text", text: "hello" }],
-      metadata: { completionStatus: "inProgress" },
-    });
     expect(onSend).not.toHaveBeenCalled();
 
     act(() => {
@@ -1480,15 +1963,16 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
         }),
       );
     });
-    await Promise.resolve();
+    await waitFor(() =>
+      expect(
+        useChatStore.getState().messagesBySession["session-a"]?.[0],
+      ).toMatchObject({
+        id: provisional?.id,
+        content: [{ type: "text", text: "hello master" }],
+        metadata: { completionStatus: "completed" },
+      }),
+    );
     expect(onSend).not.toHaveBeenCalled();
-    expect(
-      useChatStore.getState().messagesBySession["session-a"]?.[0],
-    ).toMatchObject({
-      id: provisional?.id,
-      content: [{ type: "text", text: "hello master" }],
-      metadata: { completionStatus: "completed" },
-    });
 
     await act(async () => owner.result.current.onToggle());
   });
@@ -1534,14 +2018,11 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     expect(onSend).not.toHaveBeenCalled();
 
     await act(async () => owner.result.current.onToggle());
+    act(() => useChatStore.getState().setSessionLoading("session-a", false));
     channel = new FakeDataChannel();
-    peer = new FakePeer(channel);
-    mocks.createPeer.mockReturnValue(peer);
     await act(async () => owner.result.current.onToggle());
     await waitFor(() => expect(owner.result.current.state).toBe("listening"));
 
-    act(() => useChatStore.getState().setSessionLoading("session-a", false));
-    await Promise.resolve();
     expect(onSend).not.toHaveBeenCalled();
 
     act(() => {
@@ -1551,6 +2032,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
         }),
       );
     });
+    await waitFor(() => expect(mocks.reduceProtocol).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
     await act(async () => owner.result.current.onToggle());
   });
@@ -1601,13 +2083,17 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       );
     });
 
-    expect(mocks.requestTypedUserMessage).toHaveBeenCalledWith(
-      "Please stop and check this.",
+    await waitFor(() =>
+      expect(mocks.requestTypedUserMessage).toHaveBeenCalledWith(
+        "Please stop and check this.",
+      ),
     );
-    expect(mocks.sendRealtimeEvents).toHaveBeenCalledWith(expect.anything(), [
-      { type: "response.cancel" },
-      { type: "conversation.item.create" },
-    ]);
+    await waitFor(() =>
+      expect(mocks.sendRealtimeEvents).toHaveBeenCalledWith(expect.anything(), [
+        { type: "response.cancel" },
+        { type: "conversation.item.create" },
+      ]),
+    );
     await waitFor(() => expect(mocks.steerPrompt).toHaveBeenCalledOnce());
     expect(mocks.steerPrompt).toHaveBeenCalledWith(
       "session-a",
@@ -1703,21 +2189,23 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       );
     });
 
-    const messages = useChatStore.getState().messagesBySession["session-a"];
-    expect(messages).toHaveLength(1);
-    expect(messages?.[0]).toMatchObject({
-      role: "assistant",
-      content: [
-        {
-          type: "text",
-          text: "Let me think about that. I received a compact transcript.",
-          speech: { status: "speaking" },
+    await waitFor(() => {
+      const messages = useChatStore.getState().messagesBySession["session-a"];
+      expect(messages).toHaveLength(1);
+      expect(messages?.[0]).toMatchObject({
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "Let me think about that. I received a compact transcript.",
+            speech: { status: "speaking" },
+          },
+        ],
+        metadata: {
+          completionStatus: "inProgress",
+          voiceConversationDebugEvent: "emissarySpeech",
         },
-      ],
-      metadata: {
-        completionStatus: "inProgress",
-        voiceConversationDebugEvent: "emissarySpeech",
-      },
+      });
     });
 
     await act(async () => owner.result.current.onToggle());
@@ -1899,13 +2387,15 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
       );
     });
 
-    expect(
-      useChatStore.getState().messagesBySession["session-a"]?.[0],
-    ).toMatchObject({
-      role: "assistant",
-      content: [{ type: "text", text: "hello user" }],
-      metadata: { voiceConversationDebugEvent: "emissarySpeech" },
-    });
+    await waitFor(() =>
+      expect(
+        useChatStore.getState().messagesBySession["session-a"]?.[0],
+      ).toMatchObject({
+        role: "assistant",
+        content: [{ type: "text", text: "hello user" }],
+        metadata: { voiceConversationDebugEvent: "emissarySpeech" },
+      }),
+    );
     await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
     expect(onSend).toHaveBeenLastCalledWith(
       "[Voice transcript; cursor 1] Spokesperson said: hello user",

@@ -198,6 +198,12 @@ function subscribe(listener: () => void) {
   };
 }
 
+export function subscribeToRealtimeVoicePreference(
+  listener: (preference: RealtimeVoicePreference) => void,
+): () => void {
+  return subscribe(() => listener(getRealtimeVoicePreference()));
+}
+
 export function setRealtimeVoicePreference(
   preference: RealtimeVoicePreference,
 ): void {

@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use berd_voice::{PcmAudioOutput, TtsPcmSpec};
 
 pub const AUDIO_FRAME_MAGIC: [u8; 2] = *b"BA";
-pub const AUDIO_FRAME_MARKER: u8 = 2;
+pub const AUDIO_FRAME_MARKER: u8 = 3;
 pub const AUDIO_BEGIN_KIND: u8 = 1;
 pub const AUDIO_CHUNK_KIND: u8 = 2;
 pub const AUDIO_END_KIND: u8 = 3;
@@ -397,6 +397,14 @@ impl RemotePcmAudioOutput {
     pub fn failure_is_quiescent(&self) -> bool {
         let state = self.state.lock().expect("remote output state");
         state.phase == Phase::Failed && state.failure_quiescent
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_test_delivery_progress(&self, total_frames: u64, played_frames: u64) {
+        let mut state = self.state.lock().expect("remote output state");
+        state.total_frames = total_frames;
+        state.accepted_frames = total_frames;
+        state.played_frames = played_frames;
     }
 
     pub fn handle_ack(&self, ack: AudioHostAck) -> Result<bool, String> {

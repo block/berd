@@ -11,15 +11,30 @@ import { useChatStore } from "@/features/chat/stores/chatStore";
 import { appendSessionSystemPrompt } from "@/shared/api/acpApi";
 import {
   claimVoiceDictationMicrophone,
-  createOpenAiRealtimeVoiceSession,
+  completeOpenAiRealtimeExpertTurn,
+  createOpenAiRealtimeExpertInstructions,
+  createOpenAiRealtimeTranscriptSeed,
+  deliverOpenAiRealtimeExpertMessage,
+  dismissOpenAiRealtimeHandoffsWithContext,
+  flushOpenAiRealtimeExpertEvents,
   listenToOpenAiRealtimeVoiceControls,
+  listenToOpenAiRealtimeSpokespersonRuntime,
   publishOpenAiRealtimeVoiceActivity,
   publishOpenAiRealtimeVoiceMicrophoneMuted,
   rebindOpenAiRealtimeVoiceControls,
+  reduceOpenAiRealtimeSpokespersonEvent,
+  requestOpenAiRealtimeTypedUserMessage,
+  sendOpenAiRealtimeSpokespersonRuntimeEvent,
   releaseVoiceDictationMicrophone,
   setOpenAiRealtimeVoiceControlsSuppressed,
   startOpenAiRealtimeVoiceControls,
+  startOpenAiRealtimeSpokespersonRuntime,
   stopOpenAiRealtimeVoiceControls,
+  stopOpenAiRealtimeSpokespersonRuntime,
+  releaseOpenAiRealtimeSpokespersonRuntime,
+  updateOpenAiRealtimeSpokespersonSettings,
+  type OpenAiRealtimeTranscriptSeedTurn,
+  type OpenAiRealtimeExpertDeliveryEvent,
 } from "@/shared/api/openaiRealtime";
 import {
   createSystemNotificationMessage,
@@ -27,9 +42,9 @@ import {
   type VoiceConversationDebugEvent,
 } from "@/shared/types/messages";
 import {
-  connectOpenAiRealtimePeerConnection,
-  createOpenAiRealtimePeerConnection,
-} from "@/features/chat/lib/openaiRealtimeAudio";
+  startNativeMicrophone,
+  type NativeMicrophone,
+} from "../lib/nativeMicrophone";
 import {
   type ActiveRealtimeEmissary,
   type HandoffDismissal,
@@ -39,17 +54,13 @@ import {
   waitForRealtimeEmissaryBridgeReady,
 } from "../lib/realtimeEmissaryBridge";
 import {
-  createHandoffToolOutput,
-  createInvalidToolCallOutput,
-  DirectMessagePipe,
   type MasterMessageMode,
-  REALTIME_EXPERT_INSTRUCTIONS,
-  RealtimeEmissaryProtocol,
-  RealtimeResponseCoordinator,
   sendRealtimeEvents,
-  configureRealtimeEmissarySession,
 } from "../lib/realtimeEmissaryProtocol";
-import { getRealtimeVoicePreference } from "../lib/realtimeVoicePreference";
+import {
+  getRealtimeVoicePreference,
+  subscribeToRealtimeVoicePreference,
+} from "../lib/realtimeVoicePreference";
 import {
   beginVoiceControlsVisibilityLease,
   observeVoiceConversationControlVisibility,
@@ -74,6 +85,35 @@ function isUnavailableDevMicrophoneClaim(error: unknown): boolean {
 
 function isMissingActiveRun(error: unknown): boolean {
   return errorText(error).toLowerCase().includes("no active run to steer");
+}
+
+export function renderRealtimeExpertDeliveryEvent(
+  event: OpenAiRealtimeExpertDeliveryEvent,
+): string {
+  const cursor = `cursor ${event.cursor}`;
+  switch (event.role) {
+    case "user":
+      return `[Voice transcript; ${cursor}] User said: ${event.text}`;
+    case "spokesperson":
+      return `[Voice transcript; ${cursor}] Spokesperson said: ${event.text}`;
+    case "spokesperson_interrupted":
+      return `[Voice transcript; ${cursor}] Spokesperson said (interrupted; best effort): ${event.text}`;
+    case "handoff":
+      return `[Handoff ${event.handoffId ?? "unknown"} from spokesperson; ${cursor}] ${event.text}`;
+    case "lifecycle":
+      return event.text.startsWith("[Private handoff reminder]")
+        ? event.text.replace(
+            "[Private handoff reminder]",
+            `[Private handoff reminder; ${cursor}]`,
+          )
+        : `[Voice lifecycle; ${cursor}] ${event.text}`;
+  }
+}
+
+export function renderRealtimeExpertDelivery(
+  events: OpenAiRealtimeExpertDeliveryEvent[],
+): string {
+  return events.map(renderRealtimeExpertDeliveryEvent).join("\n");
 }
 
 function waitForSessionHydration(
@@ -230,7 +270,11 @@ function createBridgeCallScope(): { id: string; initialCursor: number } {
 }
 
 function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "AbortError";
+  return (
+    (error instanceof DOMException ||
+      (typeof error === "object" && error !== null && "name" in error)) &&
+    String(error.name) === "AbortError"
+  );
 }
 
 function createEmissaryTranscriptMessage(
@@ -322,12 +366,11 @@ function visibleMessageText(message: Message): string {
     .trim();
 }
 
-export function createRealtimeTranscriptReplayEvents(
+export function collectRealtimeTranscriptSeedTurns(
   messages: readonly Message[],
-  sessionId?: string,
-): Record<string, unknown>[] {
-  const turns: Array<{ role: "user" | "assistant"; text: string }> = [];
-  let pendingAssistant: { role: "assistant"; text: string } | null = null;
+): OpenAiRealtimeTranscriptSeedTurn[] {
+  const turns: OpenAiRealtimeTranscriptSeedTurn[] = [];
+  let pendingAssistant: OpenAiRealtimeTranscriptSeedTurn | null = null;
   const flushAssistant = () => {
     if (!pendingAssistant) return;
     turns.push(pendingAssistant);
@@ -355,79 +398,14 @@ export function createRealtimeTranscriptReplayEvents(
     // Only the final visible assistant block before the next user turn is
     // useful context. Progress narration and earlier replacements stay in the
     // durable Expert transcript but do not bloat a resumed voice frontend.
-    pendingAssistant = { role: "assistant", text };
+    pendingAssistant = {
+      role: "spokesperson",
+      text,
+      interrupted: false,
+    };
   }
   flushAssistant();
-
-  const tail = turns.slice(-MAX_REALTIME_REPLAY_ITEMS);
-  const firstUserIndex = tail.findIndex((turn) => turn.role === "user");
-  if (firstUserIndex < 0) return [];
-  const replay = tail.slice(firstUserIndex).map((turn) => ({
-    type: "conversation.item.create",
-    item: {
-      type: "message",
-      role: turn.role,
-      content: [
-        {
-          type: turn.role === "assistant" ? "output_text" : "input_text",
-          text: turn.text,
-        },
-      ],
-    },
-  }));
-  if (!sessionId) return replay;
-  return [
-    {
-      type: "conversation.item.create",
-      item: {
-        type: "message",
-        role: "system",
-        content: [
-          {
-            type: "input_text",
-            text: `This voice conversation is being resumed from Berd session ${sessionId}. Durable session link: berd://session/${sessionId}. The following items are a compact recent transcript, not new turns. Ask the Expert to inspect the durable session when older context is needed.`,
-          },
-        ],
-      },
-    },
-    ...replay,
-  ];
-}
-
-function waitForDataChannelOpen(channel: RTCDataChannel): Promise<void> {
-  if (channel.readyState === "open") return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    const cleanup = () => {
-      channel.removeEventListener("open", handleOpen);
-      channel.removeEventListener("error", handleError);
-    };
-    const handleOpen = () => {
-      cleanup();
-      resolve();
-    };
-    const handleError = () => {
-      cleanup();
-      reject(new Error("OpenAI Realtime data channel failed to open."));
-    };
-    channel.addEventListener("open", handleOpen);
-    channel.addEventListener("error", handleError);
-  });
-}
-
-function masterPrompt(
-  sessionId: string,
-  initialCursor: number,
-  callId: string,
-): string {
-  return `${REALTIME_EXPERT_INSTRUCTIONS}
-
-Your send_to_spokesperson tool is the Berd CLI command below. This Realtime call is ${callId}, and its initial bridge cursor is ${initialCursor}. Always use the newest cursor from any Expert-bound transcript, handoff, reminder, or prior tool result. A stale cursor means a newer event is already queued; wait for its normal delivery rather than bypassing it. Choose --mode context to silently update the Spokesperson's context for a future natural turn. Choose --mode say only when the Spokesperson should speak your message to the user now. A say may resolve several open handoffs by repeating --resolves for each handoff id. Context cannot resolve a handoff. Finishing your turn does not notify or wake the Spokesperson, so send explicitly when needed. Berd retries a private unresolved-handoff reminder up to three times before failing the voice session.
-
-berdctl session send-to-spokesperson --session-id ${JSON.stringify(sessionId)} --cursor <cursor> --mode <context|say> [--resolves <handoff-id> ...] --message <message> --json
-
-If a handoff is obsolete, superseded, or already handled, dismiss it explicitly:
-
-berdctl session dismiss-handoffs --session-id ${JSON.stringify(sessionId)} --cursor <cursor> --handoff-id <handoff-id> [--handoff-id <handoff-id> ...] --reason <reason> --json`;
+  return turns;
 }
 
 type RuntimeState = ChatInputVoiceConversation["state"];
@@ -457,10 +435,14 @@ const OFF_SNAPSHOT: Snapshot = {
 class OpenAiRealtimeConversationRuntime {
   private snapshot: Snapshot = OFF_SNAPSHOT;
   private readonly listeners = new Set<() => void>();
-  private peer: RTCPeerConnection | null = null;
-  private channel: RTCDataChannel | null = null;
-  private stream: MediaStream | null = null;
-  private audio: HTMLAudioElement | null = null;
+  private nativeMicrophone: NativeMicrophone | null = null;
+  private releaseRuntimeListener: (() => void) | null = null;
+  private releaseVoicePreferenceListener: (() => void) | null = null;
+  private realtimeSettingsRevision = 1;
+  private realtimeSettingsQueue = Promise.resolve();
+  private realtimeRuntimeSessionId: string | null = null;
+  private realtimeProtocolQueue = Promise.resolve();
+  private realtimeRuntimeSendQueue = Promise.resolve();
   private releaseControlsListener: (() => void) | null = null;
   private releaseBridge: (() => void) | null = null;
   private bridgeSender:
@@ -481,10 +463,6 @@ class OpenAiRealtimeConversationRuntime {
   private bridgeMasterTurnCompletion:
     | ((completion: RealtimeMasterTurnCompletion) => void)
     | null = null;
-  private readonly openHandoffs = new Map<
-    string,
-    { message: string; reminderAttempts: number; resolving: boolean }
-  >();
   private activeRun = 0;
   private deliveryQueue = Promise.resolve();
   private deliveryAbortController = new AbortController();
@@ -495,7 +473,7 @@ class OpenAiRealtimeConversationRuntime {
   private ownerMigration = Promise.resolve();
   private historyReplay = Promise.resolve();
   private bridgeCallScope = createBridgeCallScope();
-  private flushPendingExpertEvents: (() => boolean) | null = null;
+  private flushPendingExpertEvents: (() => Promise<boolean>) | null = null;
   private bridgeReady: Promise<ActiveRealtimeEmissary | null> =
     Promise.resolve(null);
   private resolveBridgeReady:
@@ -553,7 +531,7 @@ class OpenAiRealtimeConversationRuntime {
         await appendSessionSystemPrompt(
           sessionId,
           MASTER_PROMPT_KEY,
-          masterPrompt(
+          await createOpenAiRealtimeExpertInstructions(
             sessionId,
             this.bridgeCallScope.initialCursor,
             this.bridgeCallScope.id,
@@ -579,7 +557,10 @@ class OpenAiRealtimeConversationRuntime {
     });
     this.bridgeCallScope = createBridgeCallScope();
     this.failureInProgress = false;
-    this.openHandoffs.clear();
+    this.realtimeProtocolQueue = Promise.resolve();
+    this.realtimeRuntimeSendQueue = Promise.resolve();
+    this.realtimeSettingsRevision = 1;
+    this.realtimeSettingsQueue = Promise.resolve();
     this.boundOnSend = onSend;
     this.pendingTypedUserMessages = [];
     this.setSnapshot({
@@ -639,157 +620,77 @@ class OpenAiRealtimeConversationRuntime {
       const pendingDraft =
         useChatSessionStore.getState().getSession(sessionId)?.creationState ===
         "pending";
-      const streamPromise = navigator.mediaDevices
-        .getUserMedia({
-          audio: {
-            autoGainControl: true,
-            echoCancellation: true,
-            noiseSuppression: true,
-          },
-        })
-        .then((stream) => {
-          if (isStale()) {
-            stream.getTracks().forEach((track) => {
-              track.stop();
-            });
-          } else {
-            this.stream = stream;
-          }
-          return stream;
-        });
-      const [stream, session] = await Promise.all([
-        streamPromise,
-        createOpenAiRealtimeVoiceSession(preference.model),
-        pendingDraft
-          ? Promise.resolve()
-          : appendSessionSystemPrompt(
-              sessionId,
-              MASTER_PROMPT_KEY,
-              masterPrompt(
-                sessionId,
-                this.bridgeCallScope.initialCursor,
-                this.bridgeCallScope.id,
-              ),
-            ),
-      ]).then(([stream, session]) => [stream, session] as const);
-      if (isStale()) {
-        stream.getTracks().forEach((track) => {
-          track.stop();
-        });
-        return;
+      if (!pendingDraft) {
+        await createOpenAiRealtimeExpertInstructions(
+          sessionId,
+          this.bridgeCallScope.initialCursor,
+          this.bridgeCallScope.id,
+        ).then((instructions) =>
+          appendSessionSystemPrompt(sessionId, MASTER_PROMPT_KEY, instructions),
+        );
       }
+      if (isStale()) return;
 
-      const peer = createOpenAiRealtimePeerConnection();
-      const channel = peer.createDataChannel("oai-events");
-      const audio = new Audio();
-      const failActiveTransport = (message: string) => {
-        if (!isStale()) {
-          void this.fail(
-            this.snapshot.boundSessionId ?? sessionId,
-            new Error(message),
+      const transport = {
+        send: (data: string) => {
+          const event = JSON.parse(data) as Record<string, unknown>;
+          const sent = this.realtimeRuntimeSendQueue.then(() =>
+            sendOpenAiRealtimeSpokespersonRuntimeEvent(sessionId, event),
           );
-        }
-      };
-      channel.addEventListener("close", () =>
-        failActiveTransport(
-          "OpenAI Realtime data channel closed unexpectedly.",
-        ),
-      );
-      channel.addEventListener("error", () =>
-        failActiveTransport("OpenAI Realtime data channel failed."),
-      );
-      peer.addEventListener("connectionstatechange", () => {
-        if (peer.connectionState === "failed") {
-          failActiveTransport("OpenAI Realtime peer connection failed.");
-        }
-      });
-      peer.addEventListener("iceconnectionstatechange", () => {
-        if (peer.iceConnectionState === "failed") {
-          failActiveTransport("OpenAI Realtime ICE connection failed.");
-        }
-      });
-      audio.autoplay = true;
-      this.peer = peer;
-      this.channel = channel;
-      this.audio = audio;
-      audio.addEventListener("playing", () =>
-        this.publishActivity("assistant-speaking"),
-      );
-      audio.addEventListener("pause", () =>
-        this.publishActivity("assistant-idle"),
-      );
-      audio.addEventListener("ended", () =>
-        this.publishActivity("assistant-idle"),
-      );
-      stream.getAudioTracks().forEach((track) => {
-        track.enabled = !this.snapshot.microphoneMuted;
-        peer.addTrack(track, stream);
-      });
-      peer.addEventListener("track", (event) => {
-        audio.srcObject = event.streams[0] ?? new MediaStream([event.track]);
-        void audio
-          .play()
-          .catch((error) =>
+          this.realtimeRuntimeSendQueue = sent.catch(() => undefined);
+          void sent.catch((error) =>
             this.fail(this.snapshot.boundSessionId ?? sessionId, error),
           );
+        },
+      };
+      let markRuntimeReady: (() => void) | null = null;
+      const runtimeReady = new Promise<void>((resolve) => {
+        markRuntimeReady = resolve;
       });
-
-      const transport = { send: (data: string) => channel.send(data) };
-      const protocol = new RealtimeEmissaryProtocol();
-      const responses = new RealtimeResponseCoordinator();
-      const pipe = new DirectMessagePipe(this.bridgeCallScope.initialCursor);
-      const pendingExpertEvents: string[] = [];
-      const queueMasterBoundEvent = (message: string) => {
-        const exchange = pipe.send({
-          sender: "emissary",
-          cursor: pipe.deliveryCursor("emissary"),
-          message,
-        });
-        if (!exchange.accepted) {
-          throw new Error(
-            `The realtime event could not enter the Expert pipe (${exchange.reason}).`,
-          );
-        }
-        return exchange;
+      const enqueueProtocolOperation = <T>(
+        operation: () => Promise<T>,
+      ): Promise<T> => {
+        const result = this.realtimeProtocolQueue.then(operation);
+        this.realtimeProtocolQueue = result.then(
+          () => undefined,
+          async (error) => {
+            await this.fail(this.snapshot.boundSessionId ?? sessionId, error);
+          },
+        );
+        return result;
       };
-      const queueExpertEvent = (
-        message: string,
-        format: (cursor: number) => string,
-      ) => {
-        const exchange = queueMasterBoundEvent(message);
-        pendingExpertEvents.push(format(exchange.outbound.id));
-        return exchange;
-      };
-      const wakeExpert = (
+      const deliverExpertEvents = (
         ownerSessionId: string,
-        displayText: string,
+        delivery: {
+          events: OpenAiRealtimeExpertDeliveryEvent[];
+          displayText: string;
+          handoffIds: string[];
+        },
         queueUntilIdle = false,
-        reminderHandoffIds: string[] = [],
         continueAfterStop = false,
       ) => {
-        if (pendingExpertEvents.length === 0) return false;
-        const batch = pendingExpertEvents.splice(0);
         this.deliverToMaster(
           ownerSessionId,
-          batch.join("\n"),
-          displayText,
+          renderRealtimeExpertDelivery(delivery.events),
+          delivery.displayText,
           undefined,
           true,
           undefined,
           queueUntilIdle,
-          reminderHandoffIds,
+          delivery.handoffIds,
           continueAfterStop,
         );
-        return true;
       };
-      this.flushPendingExpertEvents = () => {
-        return wakeExpert(
+      this.flushPendingExpertEvents = async () => {
+        const delivery = await flushOpenAiRealtimeExpertEvents(sessionId);
+        if (!delivery) return false;
+        deliverExpertEvents(
           this.snapshot.boundSessionId ?? sessionId,
-          "Final voice transcript",
+          delivery,
           false,
-          [],
           true,
         );
+        return true;
       };
       const transcriptMessageIds = new Map<string, string>();
       const upsertTranscriptMessage = (
@@ -830,113 +731,121 @@ class OpenAiRealtimeConversationRuntime {
         return messageId;
       };
       const forwardTypedUserMessage = (text: string) => {
-        const request = responses.requestTypedUserMessage(text);
-        sendRealtimeEvents(transport, request.events);
+        void enqueueProtocolOperation(async () => {
+          const request = await requestOpenAiRealtimeTypedUserMessage(
+            sessionId,
+            text,
+          );
+          sendRealtimeEvents(transport, request.events);
+        });
       };
-      channel.addEventListener("message", (message) => {
-        try {
-          const ownerSessionId = this.snapshot.boundSessionId;
-          if (!ownerSessionId || isStale()) return;
-          const event: unknown = JSON.parse(String(message.data));
-          const eventType =
-            event && typeof event === "object" && "type" in event
-              ? String(event.type)
-              : "";
-          if (eventType === "input_audio_buffer.speech_started") {
-            this.publishActivity("user-speaking");
-          } else if (eventType === "input_audio_buffer.speech_stopped") {
-            this.publishActivity("user-idle");
-          }
-          sendRealtimeEvents(transport, responses.handle(event));
-          for (const handoffId of responses.takeCompletedHandoffIds()) {
-            this.openHandoffs.delete(handoffId);
-          }
-          for (const handoffId of responses.takeFailedHandoffIds()) {
-            const handoff = this.openHandoffs.get(handoffId);
-            if (handoff) handoff.resolving = false;
-          }
-          for (const bridgeEvent of protocol.handle(event)) {
-            if (bridgeEvent.type === "transcript.started") {
-              upsertTranscriptMessage(
-                ownerSessionId,
-                { ...bridgeEvent, text: "" },
-                true,
-              );
-            } else if (bridgeEvent.type === "transcript.updated") {
-              upsertTranscriptMessage(ownerSessionId, bridgeEvent, true);
-            } else if (bridgeEvent.type === "transcript.finalized") {
-              upsertTranscriptMessage(ownerSessionId, bridgeEvent, false);
-              const interrupted = bridgeEvent.interrupted === true;
-              const transcriptLabel =
-                bridgeEvent.speaker === "user"
-                  ? `User said: ${bridgeEvent.text}`
-                  : `Spokesperson said${
-                      interrupted
-                        ? " (interrupted; best-effort transcript)"
-                        : ""
-                    }: ${bridgeEvent.text}`;
-              const transcriptMessage = `[Voice transcript] ${transcriptLabel}`;
-              queueExpertEvent(
-                transcriptMessage,
-                (cursor) =>
-                  `[Voice transcript; cursor ${cursor}] ${transcriptLabel}`,
-              );
-              if (bridgeEvent.speaker === "emissary") {
-                wakeExpert(ownerSessionId, bridgeEvent.text);
-              }
-              // User speech is durable and enters the ordered bridge now, but
-              // only Spokesperson speech or a handoff wakes the Expert. The
-              // local user bubble already owns its visible transcript.
-            } else if (bridgeEvent.type === "handoff") {
-              const exchange = queueMasterBoundEvent(bridgeEvent.message);
-              const handoffId = `handoff-${this.bridgeCallScope.id}-${exchange.outbound.id}`;
-              pendingExpertEvents.push(
-                `[Handoff ${handoffId} from spokesperson; cursor ${exchange.outbound.id}] ${bridgeEvent.message}`,
-              );
-              const toolOutput = createHandoffToolOutput(bridgeEvent.callId, {
-                accepted: true,
-                handoff_id: handoffId,
-              });
-              const toolFollowUp = responses.recordToolOutput(toolOutput);
-              sendRealtimeEvents(transport, toolFollowUp.events);
-              this.openHandoffs.set(handoffId, {
-                message: exchange.outbound.message,
-                reminderAttempts: 0,
-                resolving: false,
-              });
-              useChatStore
-                .getState()
-                .addMessage(
-                  ownerSessionId,
-                  createHandoffDebugMessage(
-                    handoffId,
-                    exchange.outbound.message,
-                  ),
-                );
-              wakeExpert(ownerSessionId, exchange.outbound.message);
-            } else if (bridgeEvent.type === "tool_call.invalid") {
-              const toolFollowUp = responses.requestToolOutput(
-                createInvalidToolCallOutput(
-                  bridgeEvent.callId,
-                  bridgeEvent.toolName,
-                  bridgeEvent.error,
-                ),
-              );
-              sendRealtimeEvents(transport, toolFollowUp.events);
+      this.releaseRuntimeListener =
+        await listenToOpenAiRealtimeSpokespersonRuntime((runtimeEvent) => {
+          try {
+            if (runtimeEvent.sessionId !== sessionId) return;
+            if (!this.snapshot.boundSessionId || isStale()) return;
+            const event: unknown = runtimeEvent.event;
+            const eventType =
+              event && typeof event === "object" && "type" in event
+                ? String(event.type)
+                : "";
+            if (eventType === "berd.realtime.ready") {
+              markRuntimeReady?.();
+              return;
             }
+            if (eventType === "berd.realtime.failed") {
+              const message =
+                event && typeof event === "object" && "message" in event
+                  ? String(event.message)
+                  : "OpenAI Realtime runtime failed.";
+              void this.fail(
+                this.snapshot.boundSessionId ?? sessionId,
+                message,
+              );
+              return;
+            }
+            if (eventType === "input_audio_buffer.speech_started") {
+              this.publishActivity("user-speaking");
+            } else if (eventType === "input_audio_buffer.speech_stopped") {
+              this.publishActivity("user-idle");
+            } else if (eventType === "output_audio_buffer.started") {
+              this.publishActivity("assistant-speaking");
+            } else if (
+              eventType === "output_audio_buffer.stopped" ||
+              eventType === "output_audio_buffer.cleared"
+            ) {
+              this.publishActivity("assistant-idle");
+            }
+            void enqueueProtocolOperation(async () => {
+              const reduction = await reduceOpenAiRealtimeSpokespersonEvent(
+                sessionId,
+                event,
+              );
+              const ownerSessionId = this.snapshot.boundSessionId;
+              if (!ownerSessionId || isStale()) return;
+              sendRealtimeEvents(transport, reduction.clientEvents);
+              for (const bridgeEvent of reduction.protocolEvents) {
+                if (bridgeEvent.type === "transcript.started") {
+                  upsertTranscriptMessage(
+                    ownerSessionId,
+                    {
+                      itemId: bridgeEvent.itemId,
+                      speaker:
+                        bridgeEvent.speaker === "spokesperson"
+                          ? "emissary"
+                          : "user",
+                      text: "",
+                    },
+                    true,
+                  );
+                } else if (bridgeEvent.type === "transcript.updated") {
+                  upsertTranscriptMessage(
+                    ownerSessionId,
+                    {
+                      ...bridgeEvent,
+                      speaker:
+                        bridgeEvent.speaker === "spokesperson"
+                          ? "emissary"
+                          : "user",
+                    },
+                    true,
+                  );
+                } else if (bridgeEvent.type === "transcript.finalized") {
+                  upsertTranscriptMessage(
+                    ownerSessionId,
+                    {
+                      ...bridgeEvent,
+                      speaker:
+                        bridgeEvent.speaker === "spokesperson"
+                          ? "emissary"
+                          : "user",
+                      interrupted: bridgeEvent.interrupted || undefined,
+                    },
+                    false,
+                  );
+                }
+              }
+              for (const handoff of reduction.acceptedHandoffs) {
+                useChatStore
+                  .getState()
+                  .addMessage(
+                    ownerSessionId,
+                    createHandoffDebugMessage(
+                      handoff.handoffId,
+                      handoff.message,
+                    ),
+                  );
+              }
+              if (reduction.expertDelivery) {
+                deliverExpertEvents(ownerSessionId, reduction.expertDelivery);
+              }
+            });
+          } catch (error) {
+            void this.fail(this.snapshot.boundSessionId ?? sessionId, error);
           }
-        } catch (error) {
-          void this.fail(this.snapshot.boundSessionId ?? sessionId, error);
-        }
-      });
+        });
 
-      await connectOpenAiRealtimePeerConnection({
-        peerConnection: peer,
-        clientSecret: session.clientSecret,
-      });
-      await waitForDataChannelOpen(channel);
-      if (isStale()) return;
-      configureRealtimeEmissarySession(transport, {
+      const runtimeOptions = {
         model: preference.model,
         transcriptionModel: preference.transcriptionModel,
         transcriptionLanguage: preference.transcriptionLanguage,
@@ -954,57 +863,107 @@ class OpenAiRealtimeConversationRuntime {
         noiseReduction: preference.noiseReduction,
         reasoningEffort: preference.reasoningEffort,
         maxOutputTokens: preference.maxOutputTokens,
-      });
+      };
+      this.realtimeRuntimeSessionId = sessionId;
+      try {
+        await startOpenAiRealtimeSpokespersonRuntime(
+          sessionId,
+          this.bridgeCallScope.initialCursor,
+          this.bridgeCallScope.id,
+          runtimeOptions,
+        );
+      } catch (error) {
+        if (this.realtimeRuntimeSessionId === sessionId) {
+          this.realtimeRuntimeSessionId = null;
+        }
+        throw error;
+      }
+      await Promise.race([
+        runtimeReady,
+        new Promise<never>((_, reject) => {
+          window.setTimeout(
+            () =>
+              reject(
+                new Error("OpenAI Realtime runtime did not become ready."),
+              ),
+            35_000,
+          );
+        }),
+      ]);
+      if (isStale()) return;
+      let appliedVoice = preference.voice;
+      let appliedSpeed = preference.speed;
+      this.releaseVoicePreferenceListener = subscribeToRealtimeVoicePreference(
+        (next) => {
+          if (
+            isStale() ||
+            (next.voice === appliedVoice && next.speed === appliedSpeed)
+          )
+            return;
+          const requestedVoice = next.voice;
+          const requestedSpeed = next.speed;
+          const update = this.realtimeSettingsQueue.then(async () => {
+            if (isStale()) return;
+            const snapshot = await updateOpenAiRealtimeSpokespersonSettings(
+              sessionId,
+              this.realtimeSettingsRevision,
+              requestedVoice,
+              requestedSpeed,
+            );
+            if (isStale()) return;
+            this.realtimeSettingsRevision = snapshot.revision;
+            appliedVoice = snapshot.voice;
+            appliedSpeed = snapshot.rate;
+          });
+          this.realtimeSettingsQueue = update.catch((error) => {
+            if (!isStale()) {
+              toast.error("Could not update Realtime voice", {
+                description: errorText(error),
+              });
+            }
+          });
+        },
+      );
+      const nativeMicrophone = await startNativeMicrophone(
+        "push_openai_realtime_spokesperson_audio",
+      );
+      if (isStale()) {
+        nativeMicrophone.stop();
+        return;
+      }
+      this.nativeMicrophone = nativeMicrophone;
+      this.nativeMicrophone.setMuted(this.snapshot.microphoneMuted);
       this.typedUserMessageSink = forwardTypedUserMessage;
       for (const text of this.pendingTypedUserMessages.splice(0)) {
         forwardTypedUserMessage(text);
       }
       const replaySessionId = this.snapshot.boundSessionId ?? sessionId;
-      this.historyReplay = waitForSessionHydration(replaySessionId).then(() => {
-        if (isStale() || this.snapshot.boundSessionId !== replaySessionId)
-          return;
-        sendRealtimeEvents(
-          transport,
-          createRealtimeTranscriptReplayEvents(
-            useChatStore.getState().messagesBySession[replaySessionId] ?? [],
+      this.historyReplay = waitForSessionHydration(replaySessionId).then(
+        async () => {
+          if (isStale() || this.snapshot.boundSessionId !== replaySessionId)
+            return;
+          const events = await createOpenAiRealtimeTranscriptSeed(
+            collectRealtimeTranscriptSeedTurns(
+              useChatStore.getState().messagesBySession[replaySessionId] ?? [],
+            ),
+            MAX_REALTIME_REPLAY_ITEMS,
             replaySessionId,
-          ),
-        );
-      });
+          );
+          sendRealtimeEvents(transport, events);
+        },
+      );
       this.bridgeSender = async (message, cursor, mode, resolves) => {
         const resolvedHandoffIds = [...new Set(resolves)];
-        if (mode === "context" && resolvedHandoffIds.length > 0) {
-          return {
-            accepted: false,
-            reason: "context_cannot_resolve",
-            cursor: pipe.cursor("master"),
-            handoffIds: resolvedHandoffIds,
-          };
-        }
-        const unknownHandoffIds = resolvedHandoffIds.filter(
-          (handoffId) => !this.openHandoffs.has(handoffId),
+        const delivery = await enqueueProtocolOperation(() =>
+          deliverOpenAiRealtimeExpertMessage(
+            sessionId,
+            cursor,
+            message,
+            mode,
+            resolvedHandoffIds,
+          ),
         );
-        if (unknownHandoffIds.length > 0) {
-          return {
-            accepted: false,
-            reason: "unknown_handoff",
-            cursor: pipe.cursor("master"),
-            handoffIds: unknownHandoffIds,
-          };
-        }
-        const exchange = pipe.send({ sender: "master", cursor, message });
-        if (!exchange.accepted) return exchange;
-        const request = responses.requestMasterMessage({
-          message: `[bridge cursor ${exchange.outbound.id}] ${message}`,
-          mode,
-          eventId: `berd-master-${exchange.outbound.id}`,
-          resolvedHandoffIds,
-        });
-        sendRealtimeEvents(transport, request.events);
-        for (const handoffId of resolvedHandoffIds) {
-          const handoff = this.openHandoffs.get(handoffId);
-          if (handoff) handoff.resolving = true;
-        }
+        if (!delivery.accepted) return delivery;
         useChatStore
           .getState()
           .addMessage(
@@ -1013,110 +972,67 @@ class OpenAiRealtimeConversationRuntime {
               mode === "say"
                 ? "masterToEmissarySay"
                 : "masterToEmissaryContext",
-              `Expert → Spokesperson · ${mode === "say" ? "Say" : "Context"} · ${request.status}`,
+              `Expert → Spokesperson · ${mode === "say" ? "Say" : "Context"} · ${delivery.deliveryStatus}`,
               message,
             ),
           );
-        return { ...exchange, deliveryStatus: request.status };
+        return delivery;
       };
       this.bridgeHandoffDismissal = async (cursor, handoffIds, reason) => {
         const dismissedHandoffIds = [...new Set(handoffIds)];
-        const unknownHandoffIds = dismissedHandoffIds.filter(
-          (handoffId) => !this.openHandoffs.has(handoffId),
+        const dismissal = await enqueueProtocolOperation(() =>
+          dismissOpenAiRealtimeHandoffsWithContext(
+            sessionId,
+            cursor,
+            dismissedHandoffIds,
+            reason,
+          ),
         );
-        if (unknownHandoffIds.length > 0) {
-          return {
-            accepted: false,
-            reason: "unknown_handoff",
-            cursor: pipe.cursor("master"),
-            handoffIds: unknownHandoffIds,
-          };
-        }
-        if (!reason.trim()) {
-          throw new Error("handoff dismissal reason cannot be empty");
-        }
-        const dismissalContext = `Handoffs ${dismissedHandoffIds.join(", ")} were dismissed without a spoken response. Reason: ${reason.trim()}`;
-        const exchange = pipe.send({
-          sender: "master",
-          cursor,
-          message: dismissalContext,
-        });
-        if (!exchange.accepted) return exchange;
-        const request = responses.requestMasterMessage({
-          message: `[bridge cursor ${exchange.outbound.id}] [Handoff dismissal] ${dismissalContext} This is silent context; do not speak merely to acknowledge it.`,
-          mode: "context",
-          eventId: `berd-master-dismissal-${exchange.outbound.id}`,
-        });
-        sendRealtimeEvents(transport, request.events);
-        for (const handoffId of dismissedHandoffIds) {
-          this.openHandoffs.delete(handoffId);
-        }
+        if (!dismissal.accepted) return dismissal;
         useChatStore
           .getState()
           .addMessage(
             this.snapshot.boundSessionId ?? sessionId,
             createCoordinationDebugMessage(
               "masterDismissal",
-              `Expert → Spokesperson · Dismissed · ${request.status}`,
+              `Expert → Spokesperson · Dismissed · ${dismissal.deliveryStatus}`,
               `${dismissedHandoffIds.join(", ")}: ${reason.trim()}`,
             ),
           );
-        return {
-          accepted: true,
-          cursor: exchange.cursor,
-          dismissedHandoffIds,
-          deliveryStatus: request.status,
-        };
+        return dismissal;
       };
       this.bridgeMasterTurnCompletion = ({ reminderHandoffIds }) => {
         const ownerSessionId = this.snapshot.boundSessionId;
         if (!ownerSessionId) return;
-        const retrying = new Set(reminderHandoffIds);
-        const pending = [...this.openHandoffs.entries()].filter(
-          ([handoffId, handoff]) =>
-            !handoff.resolving &&
-            (handoff.reminderAttempts === 0 || retrying.has(handoffId)),
-        );
-        if (pending.length === 0) return;
-        const exhausted = pending.filter(
-          ([, handoff]) =>
-            handoff.reminderAttempts >= MAX_HANDOFF_REMINDER_ATTEMPTS,
-        );
-        if (exhausted.length > 0) {
-          void this.fail(
-            ownerSessionId,
-            new Error(
-              `The Expert left required ${exhausted.map(([handoffId]) => handoffId).join(", ")} unresolved after ${MAX_HANDOFF_REMINDER_ATTEMPTS} reminder attempts.`,
-            ),
+        void enqueueProtocolOperation(async () => {
+          const completion = await completeOpenAiRealtimeExpertTurn(
+            sessionId,
+            reminderHandoffIds,
+            MAX_HANDOFF_REMINDER_ATTEMPTS,
           );
-          return;
-        }
-        const pendingIds = pending.map(([handoffId]) => handoffId);
-        for (const [, handoff] of pending) handoff.reminderAttempts += 1;
-        const requests = pending
-          .map(([handoffId, handoff]) => `- ${handoffId}: ${handoff.message}`)
-          .join("\n");
-        const reminder = `[Private handoff reminder]\nYou ended your turn without resolving the required handoffs below. Resolve them now with one or more send-to-spokesperson --mode say calls that name every answered handoff in --resolves, or dismiss obsolete handoffs explicitly. Berd will retry this reminder up to ${MAX_HANDOFF_REMINDER_ATTEMPTS} times. Do not redo completed work.\n${requests}`;
-        const masterBound = queueExpertEvent(
-          reminder,
-          (cursor) =>
-            `[Private handoff reminder; cursor ${cursor}]${reminder.slice("[Private handoff reminder]".length)}`,
-        );
-        const reminderAttempt = Math.max(
-          ...pending.map(([, handoff]) => handoff.reminderAttempts),
-        );
-        useChatStore
-          .getState()
-          .addMessage(
-            ownerSessionId,
-            createCoordinationDebugMessage(
-              "handoffReminder",
-              `Berd → Expert · Handoff reminder ${reminderAttempt}/${MAX_HANDOFF_REMINDER_ATTEMPTS}`,
-              requests,
-            ),
-          );
-        void masterBound;
-        wakeExpert(ownerSessionId, "Handoff reminder", true, pendingIds);
+          const reminder = completion.reminder;
+          if (reminder.status === "none") return;
+          if (reminder.status === "exhausted") {
+            throw new Error(reminder.message);
+          }
+          useChatStore
+            .getState()
+            .addMessage(
+              ownerSessionId,
+              createCoordinationDebugMessage(
+                "handoffReminder",
+                `Berd → Expert · Handoff reminder ${reminder.attempt}/${MAX_HANDOFF_REMINDER_ATTEMPTS}`,
+                reminder.requests,
+              ),
+            );
+          if (completion.expertDelivery) {
+            deliverExpertEvents(
+              ownerSessionId,
+              completion.expertDelivery,
+              true,
+            );
+          }
+        });
       };
       const bridgeSessionId = this.snapshot.boundSessionId ?? sessionId;
       if (
@@ -1149,8 +1065,24 @@ class OpenAiRealtimeConversationRuntime {
       this.snapshot.state === "stopping"
     )
       return;
+    // Invalidate an in-flight start before the first awaited shutdown step so
+    // late microphone acquisition cannot install capture after stop begins.
+    // A running session stays valid long enough to drain its final events.
+    if (this.snapshot.state === "starting") this.activeRun += 1;
     this.setSnapshot({ ...this.snapshot, state: "stopping" });
-    const flushedPendingEvents = this.flushPendingExpertEvents?.() ?? false;
+    this.nativeMicrophone?.stop();
+    this.nativeMicrophone = null;
+    const realtimeRuntimeSessionId = this.realtimeRuntimeSessionId;
+    this.realtimeRuntimeSessionId = null;
+    if (realtimeRuntimeSessionId) {
+      await stopOpenAiRealtimeSpokespersonRuntime(
+        realtimeRuntimeSessionId,
+      ).catch(() => undefined);
+    }
+    await this.realtimeProtocolQueue.catch(() => undefined);
+    await this.realtimeRuntimeSendQueue.catch(() => undefined);
+    const flushedPendingEvents =
+      (await this.flushPendingExpertEvents?.()) ?? false;
     if (flushedPendingEvents) {
       await Promise.race([
         this.deliveryQueue.catch(() => undefined),
@@ -1159,6 +1091,9 @@ class OpenAiRealtimeConversationRuntime {
         }),
       ]);
     }
+    await releaseOpenAiRealtimeSpokespersonRuntime(
+      realtimeRuntimeSessionId ?? sessionId,
+    ).catch(() => undefined);
     await this.cleanupResources(sessionId);
     this.boundOnSend = null;
     this.failureInProgress = false;
@@ -1175,9 +1110,7 @@ class OpenAiRealtimeConversationRuntime {
     microphoneMuted: boolean,
   ): void {
     if (this.snapshot.boundSessionId !== sessionId) return;
-    this.stream?.getAudioTracks().forEach((track) => {
-      track.enabled = !microphoneMuted;
-    });
+    this.nativeMicrophone?.setMuted(microphoneMuted);
     this.setSnapshot({ ...this.snapshot, microphoneMuted });
     if (this.snapshot.controlsRevision > 0) {
       void publishOpenAiRealtimeVoiceMicrophoneMuted(
@@ -1207,12 +1140,12 @@ class OpenAiRealtimeConversationRuntime {
 
   async dispose(): Promise<void> {
     const sessionId = this.snapshot.boundSessionId;
+    await this.realtimeProtocolQueue.catch(() => undefined);
     if (sessionId) await this.cleanupResources(sessionId);
     this.boundOnSend = null;
     this.bridgeSender = null;
     this.bridgeHandoffDismissal = null;
     this.bridgeMasterTurnCompletion = null;
-    this.openHandoffs.clear();
     this.typedUserMessageSink = null;
     this.pendingTypedUserMessages = [];
     this.flushPendingExpertEvents = null;
@@ -1378,32 +1311,38 @@ class OpenAiRealtimeConversationRuntime {
     const activeSessionId = this.snapshot.boundSessionId ?? sessionId;
     const controlsRevision = this.snapshot.controlsRevision;
     this.releaseBridge?.();
-    this.channel?.close();
-    this.peer?.close();
-    this.stream?.getTracks().forEach((track) => {
-      track.stop();
-    });
-    this.audio?.pause();
+    this.nativeMicrophone?.stop();
+    this.releaseRuntimeListener?.();
+    this.releaseVoicePreferenceListener?.();
+    const realtimeRuntimeSessionId = this.realtimeRuntimeSessionId;
+    this.realtimeRuntimeSessionId = null;
     this.releaseControlsListener?.();
     this.releaseControlsListener = null;
     this.releaseBridge = null;
     this.bridgeSender = null;
     this.bridgeHandoffDismissal = null;
     this.bridgeMasterTurnCompletion = null;
-    this.openHandoffs.clear();
     this.typedUserMessageSink = null;
     this.pendingTypedUserMessages = [];
     this.flushPendingExpertEvents = null;
-    this.channel = null;
-    this.peer = null;
-    this.stream = null;
-    this.audio = null;
+    this.nativeMicrophone = null;
+    this.releaseRuntimeListener = null;
+    this.releaseVoicePreferenceListener = null;
+    this.realtimeSettingsQueue = Promise.resolve();
     if (controlsRevision > 0) {
       await stopOpenAiRealtimeVoiceControls(
         activeSessionId,
         controlsRevision,
       ).catch(() => undefined);
     }
+    if (realtimeRuntimeSessionId) {
+      await stopOpenAiRealtimeSpokespersonRuntime(
+        realtimeRuntimeSessionId,
+      ).catch(() => undefined);
+    }
+    await releaseOpenAiRealtimeSpokespersonRuntime(
+      realtimeRuntimeSessionId ?? sessionId,
+    ).catch(() => undefined);
     await releaseVoiceDictationMicrophone(MICROPHONE_OWNER_ID).catch(
       () => undefined,
     );

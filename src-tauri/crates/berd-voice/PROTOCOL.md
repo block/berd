@@ -50,11 +50,11 @@ initial policy; a host-specific `auto` mode must be resolved before the request:
 {"type":"hello","id":1,"input_during_tts":"allow_barge_in"}
 ```
 
-The response retains `protocol:2` as a fixed wire-integrity marker, not a
+The response uses `protocol:3` as a fixed wire-integrity marker, not a
 negotiated mode:
 
 ```json
-{"type":"ready","id":1,"protocol":2,"session":{"tts":{"revision":1,"backend":"siri","voice":"Aaron","language":"en-US","rate":1.0},"input_during_tts":{"revision":1,"policy":"allow_barge_in"}}}
+{"type":"ready","id":1,"protocol":3,"session":{"tts":{"revision":1,"backend":"siri","voice":"Aaron","language":"en-US","rate":1.0},"input_during_tts":{"revision":1,"policy":"allow_barge_in"}}}
 ```
 
 The `session.tts` object is the authoritative, sanitized TTS configuration.
@@ -71,10 +71,10 @@ policy and has its own revision.
 Every stdin message is an eight-byte header followed by exactly `length` bytes:
 
 ```text
-0x42 0x56 0x02 kind length:u32-little-endian
+0x42 0x56 0x03 kind length:u32-little-endian
 ```
 
-`0x02` is a fixed framing marker. Kind `1` is one UTF-8 JSON request, bounded to
+`0x03` is a fixed framing marker. Kind `1` is one UTF-8 JSON request, bounded to
 1 MiB. Kind `2` is exactly 3840 bytes: one 20 ms frame of 960 little-endian,
 finite Float32 mono samples at 48 kHz. Wrong magic, marker, kind, length, JSON,
 PCM shape, or non-finite PCM is fatal. Frames are processed in order and bounded
@@ -91,7 +91,7 @@ The child is the sole writer of self-framed records on `--pcm-output-fd`. Each
 record has an eight-byte header followed by exactly `length` bytes:
 
 ```text
-0x42 0x41 0x02 kind length:u32-little-endian
+0x42 0x41 0x03 kind length:u32-little-endian
 ```
 
 Kinds and little-endian payloads are:
@@ -245,20 +245,22 @@ The effective input-mute epoch advances only when the composed state changes.
 {"type":"input_reset_applied","id":u64}
 ```
 
-## Authoritative input
+## Authoritative live events
 
 The child emits:
 
 ```text
 {"type":"input_speaking","active":bool}
 {"type":"recognition_pending","active":bool}
-{"type":"user_final","token":u64,"text":string}
+{"type":"live_event","token":u64,"text":string,"origin"?:"user"|"spokesperson"|"handoff"}
 ```
 
-For every final, the child allocates a strictly increasing token, stores it in
-`SessionCore`, acknowledges the runtime storage receipt, emits `user_final`, and
-only then interrupts reserved or playing assistant output. Final text is at
-most 64 KiB.
+For every final live-side event, the child allocates a strictly increasing token,
+stores it in `SessionCore`, acknowledges the runtime storage receipt, and emits
+`live_event`. Conventional sessions omit `origin`, which means `user`.
+Expert-Spokesperson sessions use `origin` to distinguish user transcripts,
+Spokesperson transcripts, and handoffs. User finals interrupt reserved or playing
+assistant output only after storage and emission. Final text is at most 64 KiB.
 
 ## Confirmation and admission
 
