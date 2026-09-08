@@ -89,7 +89,7 @@ export const CURATED_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     binaryName: "pi-acp",
     group: "default",
     aliases: ["pi-acp", "pi"],
-    supportsInstall: false,
+    supportsInstall: true,
     supportsAuth: false,
     supportsAuthStatus: false,
   },
