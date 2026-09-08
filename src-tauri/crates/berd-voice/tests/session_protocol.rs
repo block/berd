@@ -13,6 +13,8 @@ use serde_json::{json, Value};
 use tokio::net::TcpListener;
 use tokio_tungstenite::{accept_async, tungstenite::Message};
 
+const FRAME_MARKER: u8 = 3;
+
 struct ChildGuard(Option<Child>);
 
 impl Drop for ChildGuard {
@@ -152,7 +154,7 @@ impl ExpertSpokespersonTestSession {
 fn write_session_json(writer: &mut impl Write, value: &Value) {
     let payload = serde_json::to_vec(value).unwrap();
     writer.write_all(b"BV").unwrap();
-    writer.write_all(&[4, 1]).unwrap();
+    writer.write_all(&[FRAME_MARKER, 1]).unwrap();
     writer
         .write_all(&(payload.len() as u32).to_le_bytes())
         .unwrap();
@@ -161,7 +163,7 @@ fn write_session_json(writer: &mut impl Write, value: &Value) {
 
 fn write_session_pcm(writer: &mut impl Write, value: f32) {
     writer.write_all(b"BV").unwrap();
-    writer.write_all(&[4, 2]).unwrap();
+    writer.write_all(&[FRAME_MARKER, 2]).unwrap();
     writer.write_all(&(960_u32 * 4).to_le_bytes()).unwrap();
     for _ in 0..960 {
         writer.write_all(&value.to_le_bytes()).unwrap();
@@ -302,7 +304,7 @@ fn spawn_audio_host_with_played_limit(
                 Err(error) => panic!("audio pipe read failed: {error}"),
             }
             assert_eq!(&header[..2], b"BA");
-            assert_eq!(header[2], 4);
+            assert_eq!(header[2], FRAME_MARKER);
             let length = u32::from_le_bytes(header[4..8].try_into().unwrap()) as usize;
             let mut payload = vec![0_u8; length];
             reader.read_exact(&mut payload).unwrap();

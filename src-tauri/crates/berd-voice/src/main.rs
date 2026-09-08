@@ -65,7 +65,8 @@ use session_audio::{
     AUDIO_CANCELLED,
 };
 
-const WIRE_MARKER: u32 = 4;
+const SESSION_PROTOCOL_VERSION: u32 = 4;
+const INPUT_FRAME_MARKER: u8 = 3;
 const MAX_LINE_BYTES: usize = 1024 * 1024;
 const FRAME_MAGIC: [u8; 2] = *b"BV";
 const JSON_FRAME_KIND: u8 = 1;
@@ -1484,7 +1485,7 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                     &mut writer,
                     &SessionMessage::Ready {
                         id,
-                        protocol: WIRE_MARKER,
+                        protocol: SESSION_PROTOCOL_VERSION,
                         session,
                     },
                 )?;
@@ -3447,7 +3448,7 @@ fn run_expert_spokesperson_session(
                     &mut writer,
                     &SessionMessage::Ready {
                         id,
-                        protocol: WIRE_MARKER,
+                        protocol: SESSION_PROTOCOL_VERSION,
                         session: snapshot,
                     },
                 )?;
@@ -6449,7 +6450,7 @@ fn decode_framed_input(reader: &mut impl Read, header: [u8; FRAME_HEADER_BYTES])
     if header[..2] != FRAME_MAGIC {
         return Input::Invalid("invalid session frame magic".into());
     }
-    if header[2] != WIRE_MARKER as u8 {
+    if header[2] != INPUT_FRAME_MARKER {
         return Input::Invalid(format!("invalid session frame marker: {}", header[2]));
     }
     let kind = header[3];
@@ -8119,7 +8120,7 @@ mod tests {
         };
         let ready = serde_json::to_string(&SessionMessage::Ready {
             id: 1,
-            protocol: WIRE_MARKER,
+            protocol: SESSION_PROTOCOL_VERSION,
             session: VoiceSessionSnapshot {
                 tts: snapshot.clone(),
                 input_during_tts: test_input_policy(),
@@ -9420,7 +9421,7 @@ mod tests {
     }
 
     fn framed(kind: u8, payload: &[u8]) -> Vec<u8> {
-        let mut frame = Vec::from([b'B', b'V', WIRE_MARKER as u8, kind]);
+        let mut frame = Vec::from([b'B', b'V', INPUT_FRAME_MARKER, kind]);
         frame.extend_from_slice(&(payload.len() as u32).to_le_bytes());
         frame.extend_from_slice(payload);
         frame
@@ -9477,7 +9478,7 @@ mod tests {
             (JSON_FRAME_KIND, MAX_LINE_BYTES + 1, "request exceeds 1 MiB"),
             (PCM_FRAME_KIND, PCM_FRAME_BYTES - 1, "PCM frame has"),
         ] {
-            let mut header = Vec::from([b'B', b'V', WIRE_MARKER as u8, kind]);
+            let mut header = Vec::from([b'B', b'V', INPUT_FRAME_MARKER, kind]);
             header.extend_from_slice(&(length as u32).to_le_bytes());
             let (control_sender, control_receiver) = mpsc::channel();
             let (pcm_sender, _pcm_receiver) = mpsc::sync_channel(1);

@@ -50,8 +50,8 @@ initial policy; a host-specific `auto` mode must be resolved before the request:
 {"type":"hello","id":1,"input_during_tts":"allow_barge_in"}
 ```
 
-The response uses `protocol:4` as a fixed wire-integrity marker, not a
-negotiated mode:
+The response uses `protocol:4` as the exact session message-set version. The
+parent must reject a version it does not support:
 
 ```json
 {"type":"ready","id":1,"protocol":4,"session":{"tts":{"revision":1,"backend":"siri","voice":"Aaron","language":"en-US","rate":1.0},"input_during_tts":{"revision":1,"policy":"allow_barge_in"}}}

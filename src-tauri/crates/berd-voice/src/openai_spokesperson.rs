@@ -392,8 +392,8 @@ impl OpenAiSpokespersonRuntime {
     }
 
     fn begin_background_retirement(&mut self) {
-        let _ = self.commands.send(SpokespersonCommand::Shutdown);
         if let Some(worker) = self.worker.take() {
+            let _ = self.commands.send(SpokespersonCommand::Shutdown);
             reap_spokesperson_worker(worker, self.audio.clone());
         }
     }
@@ -1149,12 +1149,14 @@ mod tests {
         let (audio, _audio_rx) = tokio::sync::mpsc::channel(1);
         let (release, wait) = std::sync::mpsc::channel();
         let (retired, retirement) = std::sync::mpsc::channel();
+        let (observed, observation) = std::sync::mpsc::channel();
         let worker = std::thread::spawn(move || {
             assert!(matches!(
                 requests.blocking_recv(),
                 Some(super::SpokespersonCommand::Shutdown)
             ));
             wait.recv().unwrap();
+            observed.send(requests.try_recv()).unwrap();
         });
         let runtime = super::OpenAiSpokespersonRuntime {
             commands,
@@ -1170,6 +1172,11 @@ mod tests {
         release.send(()).unwrap();
         caller.join().unwrap();
         result.expect("runtime retirement blocked on provider shutdown");
+        assert!(matches!(
+            observation.recv_timeout(Duration::from_secs(2)).unwrap(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty
+                | tokio::sync::mpsc::error::TryRecvError::Disconnected)
+        ));
     }
 
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine};

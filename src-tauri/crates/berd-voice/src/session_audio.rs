@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use berd_voice::{PcmAudioOutput, TtsPcmSpec};
 
 pub const AUDIO_FRAME_MAGIC: [u8; 2] = *b"BA";
-pub const AUDIO_FRAME_MARKER: u8 = 4;
+pub const AUDIO_FRAME_MARKER: u8 = 3;
 pub const AUDIO_BEGIN_KIND: u8 = 1;
 pub const AUDIO_CHUNK_KIND: u8 = 2;
 pub const AUDIO_END_KIND: u8 = 3;
