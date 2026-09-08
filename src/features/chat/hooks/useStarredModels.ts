@@ -4,7 +4,7 @@ import {
   modelStarKey,
   STARRED_MODELS_ENTRY_PREFIX,
   STARRED_MODELS_EVENT,
-  toggleModelStar,
+  setModelStarred,
 } from "../lib/starredModels";
 
 let cachedSnapshot: Set<string> | null = null;
@@ -61,10 +61,11 @@ export function useStarredModels() {
       starredKeys.has(modelStarKey(scopeId, modelId)),
     [starredKeys],
   );
-  const toggleStar = useCallback(
-    (scopeId: string, modelId: string) => toggleModelStar(scopeId, modelId),
+  const setStarred = useCallback(
+    (scopeId: string, modelId: string, starred: boolean) =>
+      setModelStarred(scopeId, modelId, starred),
     [],
   );
 
-  return { isStarred, toggleStar, starredKeys };
+  return { isStarred, setStarred, starredKeys };
 }

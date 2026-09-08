@@ -80,6 +80,14 @@ export function getStarredModelKeys(): StarredModelSet {
   return readStarredModels();
 }
 
+export function setModelStarred(
+  scopeId: string,
+  modelId: string,
+  starred: boolean,
+): boolean {
+  return persistStarEntry(modelStarKey(scopeId, modelId), starred);
+}
+
 export function toggleModelStar(scopeId: string, modelId: string): boolean {
   if (typeof window === "undefined") {
     return false;
@@ -90,7 +98,7 @@ export function toggleModelStar(scopeId: string, modelId: string): boolean {
   try {
     const starred =
       window.localStorage.getItem(starredModelStorageKey(starKey)) !== null;
-    return persistStarEntry(starKey, !starred);
+    return setModelStarred(scopeId, modelId, !starred);
   } catch {
     // Storage is unavailable, so the toggle cannot be applied at all. The
     // write path reports its own failures; report this one too.

@@ -1964,6 +1964,92 @@ describe("AgentModelPicker starred models", () => {
     expect(starredToggle).not.toHaveClass("text-muted-foreground");
   });
 
+  it("persists a star before the picker animation can unmount", async () => {
+    const user = userEvent.setup();
+    const { unmount } = render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="preferred"
+        currentModelName="Preferred"
+        availableModels={models}
+        onModelChange={vi.fn()}
+      />,
+    );
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    await user.click(screen.getByRole("button", { name: "Star Preferred" }));
+    unmount();
+    expect(
+      localStorage.getItem(
+        starredModelStorageKey(modelStarKey("goose", "preferred")),
+      ),
+    ).toBe("1");
+  });
+
+  it("does not rewrite an external same-entry change after the click", async () => {
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="preferred"
+        currentModelName="Preferred"
+        availableModels={models}
+        onModelChange={vi.fn()}
+      />,
+    );
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    await user.click(screen.getByRole("button", { name: "Star Preferred" }));
+    const storageKey = starredModelStorageKey(
+      modelStarKey("goose", "preferred"),
+    );
+    expect(localStorage.getItem(storageKey)).toBe("1");
+
+    // Simulate another window changing the same entry while only the local
+    // presentation animation is still running.
+    localStorage.removeItem(storageKey);
+    await new Promise((resolve) => window.setTimeout(resolve, 750));
+
+    expect(localStorage.getItem(storageKey)).toBeNull();
+  });
+
+  it("persists rapid star clicks on different rows", async () => {
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="preferred"
+        currentModelName="Preferred"
+        availableModels={models}
+        onModelChange={vi.fn()}
+      />,
+    );
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    await user.click(screen.getByRole("button", { name: "View more" }));
+    await user.click(screen.getByRole("button", { name: "Star Preferred" }));
+    await user.click(screen.getByRole("button", { name: "Star Another" }));
+    expect(
+      localStorage.getItem(
+        starredModelStorageKey(modelStarKey("goose", "preferred")),
+      ),
+    ).toBe("1");
+    expect(
+      localStorage.getItem(
+        starredModelStorageKey(modelStarKey("goose", "another")),
+      ),
+    ).toBe("1");
+  });
+
   it("does not restart the hover fade during a star click animation", async () => {
     const user = userEvent.setup();
     render(
