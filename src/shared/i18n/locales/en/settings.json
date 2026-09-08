@@ -938,7 +938,7 @@
     "modeChained": "Chained STT + TTS",
     "modeChainedDescription": "Choose speech-to-text and text-to-speech separately.",
     "modeOpenAiRealtime": "Expert & Spokesperson",
-    "modeOpenAiRealtimeDescription": "An OpenAI Realtime voice agent speaks in front of your coding agent.",
+    "modeOpenAiRealtimeDescription": "A realtime voice agent talks with you and hands complex work to your coding agent.",
     "advanced": "About interruption modes",
     "recommended": "Recommended",
     "resetToDefaults": "Reset to defaults",

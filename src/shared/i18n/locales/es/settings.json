@@ -937,7 +937,7 @@
     "modeChained": "STT + TTS encadenados",
     "modeChainedDescription": "Elige voz a texto y texto a voz por separado.",
     "modeOpenAiRealtime": "Experto y portavoz",
-    "modeOpenAiRealtimeDescription": "Un agente de voz OpenAI Realtime habla delante de tu agente de programación.",
+    "modeOpenAiRealtimeDescription": "Un agente de voz en tiempo real habla contigo y delega el trabajo complejo a tu agente de programación.",
     "advanced": "Acerca de los modos de interrupción",
     "recommended": "Recomendado",
     "resetToDefaults": "Restablecer valores predeterminados",
