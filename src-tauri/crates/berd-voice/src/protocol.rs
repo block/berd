@@ -101,6 +101,10 @@ pub enum SessionRequest {
     Cancel {
         id: u64,
     },
+    CancelSpeech {
+        id: u64,
+        speech_id: u64,
+    },
     Shutdown,
 }
 
@@ -365,6 +369,16 @@ mod tests {
                 id: 8,
                 expected_revision: 1,
                 policy: InputDuringTtsPolicy::SuppressInput,
+            }
+        );
+        assert_eq!(
+            serde_json::from_str::<SessionRequest>(
+                r#"{"type":"cancel_speech","id":9,"speech_id":12}"#
+            )
+            .unwrap(),
+            SessionRequest::CancelSpeech {
+                id: 9,
+                speech_id: 12,
             }
         );
         assert_eq!(

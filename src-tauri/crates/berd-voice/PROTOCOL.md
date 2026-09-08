@@ -190,6 +190,7 @@ it never admits a replacement while old host audio may still be active.
 audio acknowledgements listed above
 {"type":"query_state","id":u64,"after":u64}
 {"type":"cancel","id":u64}
+{"type":"cancel_speech","id":u64,"speech_id":u64}
 {"type":"shutdown"}
 ```
 
@@ -319,6 +320,10 @@ cancellation and shutdown terminals.
 targets the originating `prepare_speak.id`. `cancel_result` is emitted first. A
 live held target then emits `not_admitted(cancelled)`; a live admitted target
 then emits `speech_interrupted`. `spoken_through_utf8` is Berd Voice's conservative UTF-8 byte boundary through the last fully played word; hosts may use it to distinguish the estimated spoken prefix from the unspoken suffix without recreating delivery policy. Repeated or unknown cancellation is stale.
+`cancel_speech.speech_id` targets active output directly, including autonomous
+Spokesperson output that has no originating `prepare_speak`. Its correlated
+`cancel_result` names that speech ID and is emitted before Berd Voice requests
+the host's quiescent `audio_cancelled` barrier.
 Every speech event carries the originating prepare ID. `speech_started` appears
 only after the first PCM Chunk is accepted by the host, and exactly one terminal
 message follows every admission.

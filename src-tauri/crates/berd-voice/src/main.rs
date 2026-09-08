@@ -1869,6 +1869,9 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
             Input::Request(SessionRequest::Cancel { id }) => {
                 handle_cancel(id, &mut held, &mut core, &mut active, &mut writer)?;
             }
+            Input::Request(SessionRequest::CancelSpeech { id, speech_id }) => {
+                handle_cancel_speech(id, speech_id, &mut core, &mut active, &mut writer)?;
+            }
         }
     }
 }
@@ -3795,6 +3798,27 @@ fn run_expert_spokesperson_session(
                             spoken_through_utf8: 0,
                         },
                     )?;
+                }
+            }
+            Input::Request(SessionRequest::CancelSpeech { id, speech_id }) => {
+                let outcome = if active
+                    .as_ref()
+                    .is_some_and(|playback| playback.speech_id == speech_id)
+                {
+                    CancelOutcome::Cancelled
+                } else {
+                    CancelOutcome::Stale
+                };
+                write_message(
+                    &mut writer,
+                    &SessionMessage::CancelResult {
+                        id,
+                        outcome,
+                        speech_id: Some(speech_id),
+                    },
+                )?;
+                if outcome == CancelOutcome::Cancelled {
+                    cancel_live_playback(&mut active);
                 }
             }
             Input::Request(SessionRequest::SetInputMuted { id, active: muted }) => {
@@ -6225,6 +6249,35 @@ fn handle_cancel(
     Ok(())
 }
 
+fn handle_cancel_speech(
+    id: u64,
+    speech_id: u64,
+    core: &mut SessionCore,
+    active: &mut Option<ActivePlayback>,
+    writer: &mut impl Write,
+) -> Result<(), String> {
+    let outcome = if active
+        .as_ref()
+        .is_some_and(|current| current.speech_id == speech_id)
+    {
+        CancelOutcome::Cancelled
+    } else {
+        CancelOutcome::Stale
+    };
+    write_message(
+        writer,
+        &SessionMessage::CancelResult {
+            id,
+            outcome,
+            speech_id: Some(speech_id),
+        },
+    )?;
+    if outcome == CancelOutcome::Cancelled {
+        interrupt_active(core, active, writer)?;
+    }
+    Ok(())
+}
+
 fn abort_active(active: &Option<ActivePlayback>) {
     if let Some(flag) = active.as_ref().and_then(|current| current.active.as_ref()) {
         flag.store(false, Ordering::SeqCst);
@@ -6450,7 +6503,8 @@ fn validate_request(request: SessionRequest) -> Result<SessionRequest, String> {
         | SessionRequest::QueryState { id, .. }
         | SessionRequest::DismissHandoffs { id, .. }
         | SessionRequest::CompleteExpertTurn { id, .. }
-        | SessionRequest::Cancel { id } => Some(*id),
+        | SessionRequest::Cancel { id }
+        | SessionRequest::CancelSpeech { id, .. } => Some(*id),
         SessionRequest::SetPaused { .. }
         | SessionRequest::AudioBeginAccepted { .. }
         | SessionRequest::AudioBeginFailed { .. }
@@ -6501,6 +6555,9 @@ fn validate_request(request: SessionRequest) -> Result<SessionRequest, String> {
             }
         }
         SessionRequest::OutputReady { speech_id: 0, .. } => {
+            return Err("speech id must be positive".into())
+        }
+        SessionRequest::CancelSpeech { speech_id: 0, .. } => {
             return Err("speech id must be positive".into())
         }
         SessionRequest::SetTtsSettings {
@@ -9788,6 +9845,44 @@ mod tests {
                 json!({"type":"cancel_result","id":7,"outcome":"cancelled","speech_id":1}),
                 json!({"type":"speech_interrupted","id":7,"speech_id":1,"spoken_through_utf8":0}),
                 json!({"type":"cancel_result","id":7,"outcome":"stale","speech_id":null}),
+            ]
+        );
+    }
+
+    #[test]
+    fn speech_targeted_cancel_orders_result_before_terminal() {
+        let mut core = SessionCore::default();
+        let PrepareOutcome::Admitted {
+            speech_id, text, ..
+        } = core.prepare(PrepareRequest {
+            id: 7,
+            acknowledgement: None,
+            text: "reply".into(),
+        })
+        else {
+            panic!("test speech must be admitted")
+        };
+        let mut active = Some(ActivePlayback {
+            prepare_id: 7,
+            speech_id,
+            text,
+            output: None,
+            active: None,
+            ready_deadline: Instant::now() + Duration::from_secs(2),
+            assistant_activity: None,
+            input_during_tts: test_input_policy(),
+            tts: test_tts_lease(),
+            suspension_requested: false,
+        });
+        let mut output = Vec::new();
+
+        handle_cancel_speech(9, speech_id, &mut core, &mut active, &mut output).unwrap();
+
+        assert_eq!(
+            messages(&output),
+            [
+                json!({"type":"cancel_result","id":9,"outcome":"cancelled","speech_id":1}),
+                json!({"type":"speech_interrupted","id":7,"speech_id":1,"spoken_through_utf8":0}),
             ]
         );
     }
