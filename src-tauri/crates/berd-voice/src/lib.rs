@@ -32,6 +32,7 @@ pub mod realtime_pipe;
 pub mod session;
 pub mod siri;
 pub mod spokesperson_voice_update;
+pub mod status_sounds;
 mod synthesis;
 mod tts;
 

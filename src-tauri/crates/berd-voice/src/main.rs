@@ -46,6 +46,7 @@ use berd_voice::spokesperson_voice_update::{
     validate_voice_update_settings, VoiceBarrierAction, VoiceUpdateAction, VoiceUpdatePurpose,
     VoiceUpdateQueue, VoiceUpdateRequest, VoiceUpdateTransaction,
 };
+use berd_voice::status_sounds::StatusSoundRuntime;
 use berd_voice::{
     estimated_spoken_through_utf8,
     local_assets::{
@@ -65,7 +66,7 @@ use session_audio::{
     AUDIO_CANCELLED,
 };
 
-const SESSION_PROTOCOL_VERSION: u32 = 4;
+const SESSION_PROTOCOL_VERSION: u32 = 5;
 const INPUT_FRAME_MARKER: u8 = 3;
 const MAX_LINE_BYTES: usize = 1024 * 1024;
 const FRAME_MAGIC: [u8; 2] = *b"BV";
@@ -1259,6 +1260,7 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
     let mut processed_pcm = 0_u64;
     let mut held: Option<PrepareRequest> = None;
     let mut active: Option<ActivePlayback> = None;
+    let mut status_sound_runtime = StatusSoundRuntime::default();
 
     loop {
         if let Some(events) = input_events.as_mut() {
@@ -1327,6 +1329,11 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                     message: "output readiness timed out".into(),
                 },
             )?;
+        }
+        if let Err(message) = status_sound_runtime
+            .poll(core.user_speaking() || core.recognition_pending() || active.is_some())
+        {
+            eprintln!("status sound playback disabled: {message}");
         }
 
         let Some(input) = receive_session_input(
@@ -1424,6 +1431,8 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
             Input::Request(SessionRequest::Hello {
                 id,
                 input_during_tts,
+                status_sounds,
+                status_sound_output_device,
             }) => {
                 if initialized {
                     write_message(
@@ -1474,10 +1483,12 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                 input_runtime = Some(runtime);
                 input_events = Some(events);
                 initialized = true;
+                status_sound_runtime.set_output_device(status_sound_output_device);
                 let input_policy = InputDuringTtsSlot::new(input_during_tts);
                 let session = VoiceSessionSnapshot {
                     tts: slot.snapshot()?,
                     input_during_tts: input_policy.snapshot()?,
+                    status_sounds,
                 };
                 tts_slot = Some(slot);
                 input_during_tts_slot = Some(input_policy);
@@ -1499,6 +1510,21 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                     },
                 )?;
                 return Ok(());
+            }
+            Input::Request(SessionRequest::SetConversationStatus {
+                id,
+                status,
+                settings,
+            }) => {
+                status_sound_runtime.update(status, settings);
+                write_message(
+                    &mut writer,
+                    &SessionMessage::ConversationStatusApplied {
+                        id,
+                        status,
+                        settings,
+                    },
+                )?;
             }
             Input::Request(SessionRequest::SetInputMuted { id, active: muted }) => {
                 handle_input_muted(
@@ -2445,6 +2471,7 @@ fn run_expert_spokesperson_session(
     let mut input_muted = false;
     let mut queued_tts_settings = VoiceUpdateQueue::<PendingSpokespersonSettingsUpdate>::default();
     let mut pending_voice_update: Option<VoiceUpdateTransaction> = None;
+    let mut status_sound_runtime = StatusSoundRuntime::default();
 
     loop {
         if initialized {
@@ -3300,6 +3327,11 @@ fn run_expert_spokesperson_session(
                 )?;
             }
         }
+        if let Err(message) =
+            status_sound_runtime.poll(turn_gate.input_blocks_output() || active.is_some())
+        {
+            eprintln!("status sound playback disabled: {message}");
+        }
 
         let Some(input) = receive_session_input(
             &control_rx,
@@ -3393,6 +3425,8 @@ fn run_expert_spokesperson_session(
             Input::Request(SessionRequest::Hello {
                 id,
                 input_during_tts,
+                status_sounds,
+                status_sound_output_device,
             }) => {
                 if initialized {
                     write_protocol_fatal(
@@ -3416,6 +3450,7 @@ fn run_expert_spokesperson_session(
                 let snapshot = VoiceSessionSnapshot {
                     tts: tts.clone(),
                     input_during_tts: input_policy.snapshot()?,
+                    status_sounds,
                 };
                 let (created, events) =
                     OpenAiSpokespersonRuntime::spawn_observed(spokesperson_config.clone())?;
@@ -3443,6 +3478,7 @@ fn run_expert_spokesperson_session(
                 session_tts = Some(tts);
                 input_during_tts_slot = Some(input_policy);
                 initialized = true;
+                status_sound_runtime.set_output_device(status_sound_output_device);
                 turn_gate.lifecycle.session_started(Instant::now());
                 write_message(
                     &mut writer,
@@ -3820,6 +3856,21 @@ fn run_expert_spokesperson_session(
                 if outcome == CancelOutcome::Cancelled {
                     cancel_live_playback(&mut active);
                 }
+            }
+            Input::Request(SessionRequest::SetConversationStatus {
+                id,
+                status,
+                settings,
+            }) => {
+                status_sound_runtime.update(status, settings);
+                write_message(
+                    &mut writer,
+                    &SessionMessage::ConversationStatusApplied {
+                        id,
+                        status,
+                        settings,
+                    },
+                )?;
             }
             Input::Request(SessionRequest::SetInputMuted { id, active: muted }) => {
                 if pending_voice_update.is_some() {
@@ -6495,6 +6546,7 @@ fn validate_request(request: SessionRequest) -> Result<SessionRequest, String> {
     let id = match &request {
         SessionRequest::Hello { id, .. }
         | SessionRequest::SetInputMuted { id, .. }
+        | SessionRequest::SetConversationStatus { id, .. }
         | SessionRequest::SetTtsSettings { id, .. }
         | SessionRequest::SetInputDuringTts { id, .. }
         | SessionRequest::ResetInput { id }
@@ -6521,6 +6573,13 @@ fn validate_request(request: SessionRequest) -> Result<SessionRequest, String> {
         return Err("request id must be positive".into());
     }
     match &request {
+        SessionRequest::Hello { status_sounds, .. }
+        | SessionRequest::SetConversationStatus {
+            settings: status_sounds,
+            ..
+        } => {
+            status_sounds.validate()?;
+        }
         SessionRequest::PrepareSpeak { text, .. } if text.len() > MAX_SPEAK_TEXT_BYTES => {
             return Err("speak text exceeds 16 KiB".into())
         }
@@ -8124,6 +8183,7 @@ mod tests {
             session: VoiceSessionSnapshot {
                 tts: snapshot.clone(),
                 input_during_tts: test_input_policy(),
+                status_sounds: Default::default(),
             },
         })
         .unwrap();

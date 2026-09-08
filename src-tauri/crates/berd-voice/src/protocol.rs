@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     input::{InputDuringTtsPolicy, InputDuringTtsSnapshot},
     openai_realtime_protocol::RealtimeExpertDeliveryEvent,
+    status_sounds::{ConversationStatus, StatusSoundSettings},
     TtsConfigurationSnapshot, TtsSettings,
 };
 
@@ -12,6 +13,15 @@ pub enum SessionRequest {
     Hello {
         id: u64,
         input_during_tts: InputDuringTtsPolicy,
+        #[serde(default)]
+        status_sounds: StatusSoundSettings,
+        #[serde(default)]
+        status_sound_output_device: Option<String>,
+    },
+    SetConversationStatus {
+        id: u64,
+        status: ConversationStatus,
+        settings: StatusSoundSettings,
     },
     SetPaused {
         active: bool,
@@ -152,6 +162,7 @@ pub enum OutputReadyOutcome {
 pub struct VoiceSessionSnapshot {
     pub tts: TtsConfigurationSnapshot,
     pub input_during_tts: InputDuringTtsSnapshot,
+    pub status_sounds: StatusSoundSettings,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
@@ -191,6 +202,11 @@ pub enum SessionMessage {
         id: u64,
         protocol: u32,
         session: VoiceSessionSnapshot,
+    },
+    ConversationStatusApplied {
+        id: u64,
+        status: ConversationStatus,
+        settings: StatusSoundSettings,
     },
     TtsSettingsResult {
         id: u64,
@@ -341,7 +357,7 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&SessionMessage::Ready {
                 id: 4,
-                protocol: 4,
+                protocol: 5,
                 session: VoiceSessionSnapshot {
                     tts: TtsConfigurationSnapshot {
                         revision: 1,
@@ -355,10 +371,11 @@ mod tests {
                         revision: 1,
                         policy: InputDuringTtsPolicy::AllowBargeIn,
                     },
+                    status_sounds: StatusSoundSettings::default(),
                 },
             })
             .unwrap(),
-            r#"{"type":"ready","id":4,"protocol":4,"session":{"tts":{"revision":1,"backend":"openai","model":"gpt-4o-mini-tts","voice":"marin","rate":1.0},"input_during_tts":{"revision":1,"policy":"allow_barge_in"}}}"#
+            r#"{"type":"ready","id":4,"protocol":5,"session":{"tts":{"revision":1,"backend":"openai","model":"gpt-4o-mini-tts","voice":"marin","rate":1.0},"input_during_tts":{"revision":1,"policy":"allow_barge_in"},"status_sounds":{"mode":"continuous-while-working","volume":0.4}}}"#
         );
         assert_eq!(
             serde_json::from_str::<SessionRequest>(
