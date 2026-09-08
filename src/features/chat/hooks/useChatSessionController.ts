@@ -1406,9 +1406,10 @@ export function useChatSessionController({
   );
 
   const handleModelChangeWithContextReset = useCallback(
-    (modelId: string, model?: ModelOption) => {
+    (modelId: string, model?: ModelOption, agentId?: string) => {
       const nextModelProviderId = model?.providerId;
       if (
+        (!agentId || agentId === selectedAgentId) &&
         modelId === effectiveModelSelection?.id &&
         (!nextModelProviderId ||
           nextModelProviderId === effectiveModelSelection?.modelProviderId)
@@ -1419,12 +1420,13 @@ export function useChatSessionController({
         delete pendingDefaultReasoningEffortBySessionRef.current[sessionId];
       }
       useChatStore.getState().resetTokenState(stateSessionId);
-      handleModelChange(modelId, model);
+      handleModelChange(modelId, model, agentId);
     },
     [
       effectiveModelSelection?.id,
       effectiveModelSelection?.modelProviderId,
       handleModelChange,
+      selectedAgentId,
       sessionId,
       stateSessionId,
     ],

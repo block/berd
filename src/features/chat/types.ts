@@ -153,7 +153,11 @@ export interface ChatInputAgentModelPicker {
   favoriteModels?: Array<{ agentId: string; model: ModelOption }>;
   modelsLoading?: boolean;
   modelStatusMessage?: string | null;
-  onModelChange?: (modelId: string, model?: ModelOption) => void;
+  onModelChange?: (
+    modelId: string,
+    model?: ModelOption,
+    agentId?: string,
+  ) => void;
   onPickerOpen?: () => void;
   /**
    * "gated" hides the agent column behind a "Switch agent" button, for

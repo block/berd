@@ -506,21 +506,24 @@ export function useResolvedAgentModelPicker({
           console.error("Failed to update ACP session provider:", error);
         });
     },
-    onModelSelected: (model) => {
+    onModelSelected: (model, requestedAgentId) => {
+      const targetAgentId = requestedAgentId ?? selectedAgentId;
       const modelId = model.id;
       const modelName = model.displayName ?? model.name ?? model.id;
       const nextModelProviderId =
         model.providerId ??
-        session?.executionTarget?.modelProviderId ??
-        (selectedAgentId === "goose" ? undefined : selectedAgentId);
+        (targetAgentId === selectedAgentId
+          ? session?.executionTarget?.modelProviderId
+          : undefined) ??
+        (targetAgentId === "goose" ? undefined : targetAgentId);
       if (!nextModelProviderId) {
         console.warn("Dropped model selection without a model provider", {
-          harnessId: selectedAgentId,
+          harnessId: targetAgentId,
           modelId,
         });
         return;
       }
-      const nextTarget = targetFromAgentModelSelection(selectedAgentId, {
+      const nextTarget = targetFromAgentModelSelection(targetAgentId, {
         modelProviderId: nextModelProviderId,
         modelId,
         modelName,
@@ -542,7 +545,7 @@ export function useResolvedAgentModelPicker({
 
       if (!sessionId) {
         setPendingExecutionTarget(nextTarget);
-        setGlobalSelectedProvider(selectedAgentId);
+        setGlobalSelectedProvider(targetAgentId);
         setPendingModelSelection(nextModelSelection);
         return;
       }
@@ -563,7 +566,7 @@ export function useResolvedAgentModelPicker({
       const requestId = createModelSelectionRequestId();
 
       const previousStoredModelPreference =
-        getStoredModelPreference(selectedAgentId);
+        getStoredModelPreference(targetAgentId);
       const previousTarget = session.executionTarget;
       const providerChanged =
         nextTarget.modelProviderId !== previousTarget?.modelProviderId;
@@ -572,13 +575,13 @@ export function useResolvedAgentModelPicker({
       // the draft and let draft promotion configure the real backend session.
       if (session.creationState === "pending") {
         if (providerChanged && !sessionHasStarted) {
-          setGlobalSelectedProvider(selectedAgentId);
+          setGlobalSelectedProvider(targetAgentId);
         }
         beginModelSelectionIntent(sessionId, {
           requestId,
           target: nextTarget,
           previousTarget,
-          preferenceAgentId: selectedAgentId,
+          preferenceAgentId: targetAgentId,
         });
         return;
       }
@@ -589,7 +592,7 @@ export function useResolvedAgentModelPicker({
         previousTarget,
       });
       if (providerChanged && !sessionHasStarted) {
-        setGlobalSelectedProvider(selectedAgentId);
+        setGlobalSelectedProvider(targetAgentId);
       }
 
       void (async () => {
@@ -610,10 +613,7 @@ export function useResolvedAgentModelPicker({
             return;
           }
           if (!sessionHasStarted) {
-            setStoredModelPreference(
-              selectedAgentId,
-              nextStoredModelPreference,
-            );
+            setStoredModelPreference(targetAgentId, nextStoredModelPreference);
           }
         } catch (error) {
           const intentStillMatches = clearCurrentModelSelectionIntent(
@@ -636,7 +636,7 @@ export function useResolvedAgentModelPicker({
                 ? undefined
                 : () =>
                     setStoredModelPreference(
-                      selectedAgentId,
+                      targetAgentId,
                       nextStoredModelPreference,
                     ),
             )
@@ -650,11 +650,11 @@ export function useResolvedAgentModelPicker({
           if (!sessionHasStarted) {
             if (previousStoredModelPreference) {
               setStoredModelPreference(
-                selectedAgentId,
+                targetAgentId,
                 previousStoredModelPreference,
               );
             } else {
-              clearStoredModelPreference(selectedAgentId);
+              clearStoredModelPreference(targetAgentId);
             }
           }
           rollbackToPreviousModel({

@@ -14,7 +14,7 @@ interface UseAgentModelPickerStateOptions {
   providers: AcpProvider[];
   selectedProvider?: string;
   onProviderSelected: (providerId: string, models: ModelOption[]) => void;
-  onModelSelected?: (model: ModelOption) => void;
+  onModelSelected?: (model: ModelOption, agentId?: string) => void;
 }
 
 export function useAgentModelPickerState({
@@ -179,11 +179,15 @@ export function useAgentModelPickerState({
   );
 
   const handleModelChange = useCallback(
-    (modelId: string, selectedModelOverride?: ModelOption) => {
+    (
+      modelId: string,
+      selectedModelOverride?: ModelOption,
+      agentId?: string,
+    ) => {
       const selectedModel =
         selectedModelOverride ??
         availableModels.find((model) => model.id === modelId);
-      onModelSelected?.({
+      const selectedModelOption = {
         id: modelId,
         name: selectedModel?.name ?? modelId,
         displayName: selectedModel?.displayName ?? modelId,
@@ -192,7 +196,12 @@ export function useAgentModelPickerState({
         providerName: selectedModel?.providerName,
         contextLimit: selectedModel?.contextLimit,
         recommended: selectedModel?.recommended,
-      });
+      };
+      if (agentId) {
+        onModelSelected?.(selectedModelOption, agentId);
+      } else {
+        onModelSelected?.(selectedModelOption);
+      }
     },
     [availableModels, onModelSelected],
   );

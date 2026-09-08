@@ -148,6 +148,97 @@ describe("useResolvedAgentModelPicker", () => {
     );
   });
 
+  it("creates one pending target for a cross-agent model choice", () => {
+    const setPendingExecutionTarget = vi.fn();
+    const setPendingModelSelection = vi.fn();
+    const setGlobalSelectedProvider = vi.fn();
+    mockUseAgentModelPickerState.mockImplementation(({ onModelSelected }) => ({
+      pickerAgents: [{ id: "claude-acp", label: "Claude Code" }],
+      availableModels: [],
+      modelsLoading: false,
+      modelStatusMessage: null,
+      handleProviderChange: vi.fn(),
+      handleModelChange: () =>
+        onModelSelected?.({ id: "opus", name: "Claude Opus" }, "claude-acp"),
+    }));
+
+    const { result } = renderModelPicker({
+      sessionId: null,
+      session: undefined,
+      setPendingExecutionTarget,
+      setPendingModelSelection,
+      setGlobalSelectedProvider,
+    });
+    act(() =>
+      result.current.handleModelChange("opus", undefined, "claude-acp"),
+    );
+
+    expect(setPendingExecutionTarget).toHaveBeenCalledOnce();
+    expect(setPendingExecutionTarget).toHaveBeenCalledWith({
+      harnessId: "claude-acp",
+      modelProviderId: "claude-acp",
+      modelId: "opus",
+      modelName: "Claude Opus",
+    });
+    expect(setPendingModelSelection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "opus",
+        modelProviderId: "claude-acp",
+      }),
+    );
+    expect(setGlobalSelectedProvider).toHaveBeenCalledWith("claude-acp");
+  });
+
+  it("publishes one complete cross-agent target for a started session", async () => {
+    const session = makeSession(
+      {
+        harnessId: "goose",
+        modelProviderId: "openai",
+        modelId: "current",
+        modelName: "Current",
+      },
+      { messageCount: 1 },
+    );
+    let onModelSelected:
+      | ((model: { id: string; name: string }, agentId?: string) => void)
+      | undefined;
+    mockUseAgentModelPickerState.mockImplementation((args) => {
+      onModelSelected = args.onModelSelected;
+      return {
+        pickerAgents: [],
+        availableModels: [],
+        modelsLoading: false,
+        modelStatusMessage: null,
+        handleProviderChange: vi.fn(),
+        handleModelChange: vi.fn(),
+      };
+    });
+    const applySessionModelSelection = vi.fn().mockResolvedValue(true);
+    renderModelPicker({
+      session,
+      sessionHasStarted: true,
+      applySessionModelSelection,
+    });
+
+    act(() =>
+      onModelSelected?.({ id: "opus", name: "Claude Opus" }, "claude-acp"),
+    );
+
+    expect(getSessionTargetSelection("session-1")?.target).toEqual({
+      harnessId: "claude-acp",
+      modelProviderId: "claude-acp",
+      modelId: "opus",
+      modelName: "Claude Opus",
+    });
+    await waitFor(() =>
+      expect(applySessionModelSelection).toHaveBeenCalledWith(
+        "claude-acp",
+        expect.objectContaining({ id: "opus" }),
+        expect.any(String),
+      ),
+    );
+  });
+
   it("runs the real model picker apply behind dispatch and publishes B after preparation", async () => {
     const executionTarget = {
       harnessId: "goose" as const,

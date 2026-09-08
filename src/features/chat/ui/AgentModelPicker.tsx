@@ -53,7 +53,11 @@ interface AgentModelPickerProps {
   favoriteModels?: Array<{ agentId: string; model: ModelOption }>;
   modelsLoading?: boolean;
   modelStatusMessage?: string | null;
-  onModelChange?: (modelId: string, model?: ModelOption) => void;
+  onModelChange?: (
+    modelId: string,
+    model?: ModelOption,
+    agentId?: string,
+  ) => void;
   loading?: boolean;
   isCompact?: boolean;
   showSelectedModelInTrigger?: boolean;
@@ -365,28 +369,14 @@ export function AgentModelPicker({
     }
   };
 
-  const pendingCrossAgentModelRef = useRef<{
-    agentId: string;
-    model: ModelOption;
-  } | null>(null);
   const handleModelSelect = (model: ModelOption, agentId: string) => {
-    if (agentId !== selectedAgentId) {
-      pendingCrossAgentModelRef.current = { agentId, model };
-      onAgentChange(agentId);
-      return;
-    }
     recordModelSelection(agentId, model);
-    onModelChange?.(model.id, model);
-  };
-  useEffect(() => {
-    const pending = pendingCrossAgentModelRef.current;
-    if (!pending || pending.agentId !== selectedAgentId) {
-      return;
+    if (agentId === selectedAgentId) {
+      onModelChange?.(model.id, model);
+    } else {
+      onModelChange?.(model.id, model, agentId);
     }
-    pendingCrossAgentModelRef.current = null;
-    recordModelSelection(pending.agentId, pending.model);
-    onModelChange?.(pending.model.id, pending.model);
-  }, [onModelChange, selectedAgentId]);
+  };
 
   // Re-gate the provider column when the popover closes, so every reopen
   // starts from the compact layout.

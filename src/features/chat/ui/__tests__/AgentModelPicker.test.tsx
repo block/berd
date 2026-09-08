@@ -2473,7 +2473,7 @@ describe("AgentModelPicker starred models", () => {
     ).not.toHaveAttribute("data-selected");
   });
 
-  it("keeps favorites from other agents visible and switches before selecting", async () => {
+  it("emits one agent-and-model intent for a foreign favorite", async () => {
     seedStar("claude-acp", "opus");
     __resetStarredModelsCacheForTests();
     const user = userEvent.setup();
@@ -2486,7 +2486,7 @@ describe("AgentModelPicker starred models", () => {
         model: { id: "opus", name: "Claude Opus" },
       },
     ];
-    const { rerender } = render(
+    render(
       <AgentModelPicker
         agents={AGENTS}
         selectedAgentId="goose"
@@ -2518,23 +2518,12 @@ describe("AgentModelPicker starred models", () => {
       { name: "Claude Opus, Claude Code" },
     );
     await user.click(claudeModelButton);
-    expect(onAgentChange).toHaveBeenCalledWith("claude-acp");
-    expect(onModelChange).not.toHaveBeenCalled();
-
-    rerender(
-      <AgentModelPicker
-        agents={AGENTS}
-        selectedAgentId="claude-acp"
-        onAgentChange={onAgentChange}
-        currentModelId={null}
-        availableModels={[{ id: "opus", name: "Claude Opus" }]}
-        favoriteModels={favoriteModels}
-        onModelChange={onModelChange}
-      />,
-    );
+    expect(onAgentChange).not.toHaveBeenCalled();
+    expect(onModelChange).toHaveBeenCalledOnce();
     expect(onModelChange).toHaveBeenCalledWith(
       "opus",
       expect.objectContaining({ id: "opus" }),
+      "claude-acp",
     );
   });
 });
