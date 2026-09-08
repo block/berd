@@ -8,6 +8,7 @@ interface OpenAiApiKeyFieldProps {
   configured: boolean;
   onSave: (apiKey: string) => Promise<void>;
   onClear: () => Promise<void>;
+  description?: string;
 }
 
 export function OpenAiApiKeyField({
@@ -15,6 +16,7 @@ export function OpenAiApiKeyField({
   configured,
   onSave,
   onClear,
+  description,
 }: OpenAiApiKeyFieldProps) {
   const { t } = useTranslation("settings");
   const inputId = useId();
@@ -84,9 +86,10 @@ export function OpenAiApiKeyField({
         ) : null}
       </div>
       <p className="text-xs text-muted-foreground">
-        {configured
-          ? t("voice.openAiApiKeyConfigured")
-          : t("voice.openAiApiKeyNotConfigured")}
+        {description ??
+          (configured
+            ? t("voice.openAiApiKeyConfigured")
+            : t("voice.openAiApiKeyNotConfigured"))}
       </p>
       {error ? (
         <p className="text-xs text-destructive" role="alert">

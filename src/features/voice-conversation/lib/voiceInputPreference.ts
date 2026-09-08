@@ -98,6 +98,12 @@ export function setVoiceInputBackend(backend: VoiceInputBackend): void {
   window.dispatchEvent(new CustomEvent(CHANGED_EVENT, { detail: { backend } }));
 }
 
+export function getDefaultVoiceInputBackend(
+  macSpeechAvailable: boolean,
+): VoiceInputBackend {
+  return macSpeechAvailable ? "macos" : "parakeet";
+}
+
 export function useVoiceInputPreference(macSpeechAvailable: boolean | null) {
   const stored = useSyncExternalStore(
     subscribe,

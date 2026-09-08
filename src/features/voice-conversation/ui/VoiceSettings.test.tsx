@@ -284,10 +284,12 @@ describe("VoiceSettings", () => {
     expect(openAiStatusState.enabled).toBe(false);
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole("combobox", { name: "Speech output" }));
+    await user.click(
+      screen.getByRole("combobox", { name: "Text to speech (TTS)" }),
+    );
 
     expect(
-      screen.getByRole("option", { name: "OpenAI text-to-speech" }),
+      screen.getByRole("option", { name: "OpenAI TTS" }),
     ).toBeInTheDocument();
   });
 
@@ -297,10 +299,12 @@ describe("VoiceSettings", () => {
     renderWithProviders(<VoiceSettings />);
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole("combobox", { name: "Speech output" }));
+    await user.click(
+      screen.getByRole("combobox", { name: "Text to speech (TTS)" }),
+    );
 
     expect(
-      screen.queryByRole("option", { name: "OpenAI text-to-speech" }),
+      screen.queryByRole("option", { name: "OpenAI TTS" }),
     ).not.toBeInTheDocument();
   });
 
@@ -516,19 +520,29 @@ describe("VoiceSettings", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("shows interruption modes without VAD controls", () => {
+  it("keeps interruption selection concise with details on demand", async () => {
     setupState.current = setup(pocketStatus());
     renderWithProviders(<VoiceSettings />);
+    const user = userEvent.setup();
 
     expect(
-      screen.getByRole("radiogroup", { name: "Interruptions" }),
-    ).toBeInTheDocument();
+      screen.getByRole("combobox", { name: "Interruptions" }),
+    ).toHaveTextContent("Automatic");
     expect(
       screen.getByText(
         "Choose what happens when you speak while Berd is talking.",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: /^Automatic/ })).toBeChecked();
+    expect(
+      screen.queryByText(
+        "Allows interruptions on most audio devices. Berd pauses listening on built-in Mac speakers or when the device name contains “speaker” or “altavoces.”",
+      ),
+    ).not.toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: "About interruption modes" }),
+    );
+
     expect(
       screen.getByText(
         "Allows interruptions on most audio devices. Berd pauses listening on built-in Mac speakers or when the device name contains “speaker” or “altavoces.”",
@@ -618,21 +632,19 @@ describe("VoiceSettings", () => {
     renderWithProviders(<VoiceSettings />);
 
     expect(
-      screen.getByRole("heading", { name: "Speech output" }),
+      screen.getByRole("heading", { name: "Text to speech (TTS)" }),
     ).toBeInTheDocument();
     expect(screen.queryByText("Speech engine")).not.toBeInTheDocument();
     expect(
-      screen.getByRole("combobox", { name: "Speech output" }),
-    ).toHaveAccessibleDescription(
-      "Choose how Berd speaks assistant responses.",
-    );
+      screen.getByRole("combobox", { name: "Text to speech (TTS)" }),
+    ).toHaveAccessibleDescription("Choose a backend.");
     const outputPicker = screen.getByRole("combobox", {
-      name: "Speech output",
+      name: "Text to speech (TTS)",
     });
     expect(outputPicker).toHaveClass("w-full", "sm:w-auto");
     expect(
-      screen.getByRole("heading", { name: "Speech output" }).parentElement
-        ?.parentElement?.parentElement,
+      screen.getByRole("heading", { name: "Text to speech (TTS)" })
+        .parentElement?.parentElement?.parentElement,
     ).toHaveClass("flex-col", "sm:flex-row");
     expect(screen.getAllByText("Pocket TTS")).toHaveLength(1);
     expect(screen.getAllByText("Parakeet STT")).toHaveLength(1);

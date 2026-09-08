@@ -696,6 +696,49 @@ export function buildInitScript(options?: {
                 playbackSpeed: 1,
                 voices: [{ id: "mary", name: "Mary" }],
               });
+            case "get_mac_speech_status":
+              return Promise.resolve({
+                supported: true,
+                unavailableReason: null,
+                locale: "en-US",
+                localeSupported: true,
+                modelInstalled: true,
+                installing: false,
+                progress: null,
+                error: null,
+                revision: 1,
+              });
+            case "get_siri_voice_status":
+              return Promise.resolve({
+                supported: true,
+                availableLanguages: ["en-US"],
+                selectedVoice: { name: "Samantha", language: "en-US" },
+                selectedVoiceInstalled: true,
+                playbackSpeed: 1,
+                voices: [
+                  {
+                    name: "Samantha",
+                    language: "en-US",
+                    sizeBytes: 0,
+                    installed: true,
+                  },
+                ],
+              });
+            case "get_openai_voice_status":
+              return Promise.resolve({
+                sttConfigured: true,
+                ttsConfigured: true,
+                sttConfigurationSource: "default",
+                ttsConfigurationSource: "default",
+                sttUnavailableReason: null,
+                ttsUnavailableReason: null,
+                transcriptionModel: "gpt-realtime-whisper",
+                speechModel: "gpt-4o-mini-tts",
+                speechVoice: "marin",
+                playbackSpeed: 1,
+                ttsAvailable: true,
+                unavailableReason: null,
+              });
             case "speak_pocket_voice":
               POCKET_VOICE_SPOKEN_TEXTS.push(args?.text);
               return new Promise((resolve) =>

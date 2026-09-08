@@ -52,6 +52,10 @@ const DEFAULT_PREFERENCE: RealtimeVoicePreference = {
   reasoningEffort: "default",
   maxOutputTokens: null,
 };
+
+export function getDefaultRealtimeVoicePreference(): RealtimeVoicePreference {
+  return { ...DEFAULT_PREFERENCE };
+}
 const STORAGE_KEY = "goose:openai-realtime-voice-options";
 const CHANGED_EVENT = "goose:openai-realtime-voice-options-changed";
 const listeners = new Set<() => void>();

@@ -1,10 +1,16 @@
-import { CircleAlert } from "lucide-react";
+import { ChevronRight, CircleAlert } from "lucide-react";
 import { useId } from "react";
 import { useTranslation } from "react-i18next";
 import { getPlatform } from "@/shared/lib/platform";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
 import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import { Button } from "@/shared/ui/button";
+import { Badge } from "@/shared/ui/badge";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/shared/ui/collapsible";
 import { RadioGroup, RadioGroupCard } from "@/shared/ui/radio-group";
 import { SettingsRow } from "@/shared/ui/settings-row";
 import {
@@ -28,13 +34,20 @@ import { useMicrophonePermission } from "../hooks/useMicrophonePermission";
 import { useSiriVoiceSetup } from "../hooks/useSiriVoiceSetup";
 import type { VoiceInputBackend } from "../lib/voiceInputPreference";
 import {
+  getDefaultVoiceInputBackend,
   isMacSpeechAvailable,
   useVoiceInputPreference,
 } from "../lib/voiceInputPreference";
 import type { VoiceInterruptionMode } from "../lib/voiceInterruptionPreference";
-import { useVoiceInterruptionPreference } from "../lib/voiceInterruptionPreference";
+import {
+  getDefaultVoiceInterruptionPreference,
+  useVoiceInterruptionPreference,
+} from "../lib/voiceInterruptionPreference";
 import type { VoiceOutputBackend } from "../lib/voiceOutputPreference";
-import { useVoiceOutputPreference } from "../lib/voiceOutputPreference";
+import {
+  getDefaultVoiceOutputBackend,
+  useVoiceOutputPreference,
+} from "../lib/voiceOutputPreference";
 import type { VoiceConversationMode } from "../lib/voiceConversationModePreference";
 import { useVoiceConversationModePreference } from "../lib/voiceConversationModePreference";
 import { PocketVoiceSetupContent } from "./PocketVoiceSetupContent";
@@ -44,6 +57,10 @@ import { PlaybackSpeedRow } from "./PlaybackSpeedRow";
 import { useOpenAiVoiceSetup } from "../hooks/useOpenAiVoiceSetup";
 import { OpenAiApiKeyField } from "./OpenAiApiKeyField";
 import { RealtimeVoiceSettings } from "./RealtimeVoiceSettings";
+import {
+  getDefaultRealtimeVoicePreference,
+  setRealtimeVoicePreference,
+} from "../lib/realtimeVoicePreference";
 
 const INTERRUPTION_MODES: VoiceInterruptionMode[] = [
   "automatic",
@@ -165,46 +182,71 @@ export function VoiceSettings() {
                 input.backend,
               );
 
+  const resetCurrentMode = () => {
+    if (mode.mode === "openai-realtime") {
+      setRealtimeVoicePreference(getDefaultRealtimeVoicePreference());
+      return;
+    }
+    const macSpeechAvailable = Boolean(
+      macSpeechSetup.status?.supported && macSpeechSetup.status.localeSupported,
+    );
+    input.setBackend(getDefaultVoiceInputBackend(macSpeechAvailable));
+    output.setBackend(getDefaultVoiceOutputBackend());
+    interruption.setMode(getDefaultVoiceInterruptionPreference().mode);
+    if (getDefaultVoiceOutputBackend() === "siri") {
+      void siriSetup.setPlaybackSpeed(1);
+    }
+  };
+
   return (
     <SettingsPage
       title={t("nav.voice")}
       description={t("voice.settingsDescription")}
-      contentClassName="space-y-6"
-    >
-      <section className="space-y-2 overflow-hidden">
-        <SettingsRow
-          label={
-            <h2 className="text-sm font-medium">
-              {t("voice.conversationMode")}
-            </h2>
-          }
-          description={t("voice.conversationModeDescription")}
-          layout="responsive"
-          action={({ labelId, descriptionId }) => (
-            <Select
-              value={mode.mode}
-              onValueChange={(value) =>
-                mode.setMode(value as VoiceConversationMode)
-              }
-            >
-              <SelectTrigger
-                className="w-full sm:w-auto"
-                aria-labelledby={labelId}
-                aria-describedby={descriptionId}
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="chained">
-                  {t("voice.modeChained")}
-                </SelectItem>
-                <SelectItem value="openai-realtime">
-                  {t("voice.modeOpenAiRealtime")}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+      contentClassName="space-y-4"
+      actions={
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={resetCurrentMode}
+          title={t("voice.resetToDefaultsDescription")}
+        >
+          {t(
+            mode.mode === "openai-realtime"
+              ? "voice.resetExpertSettings"
+              : "voice.resetChainedSettings",
           )}
-        />
+        </Button>
+      }
+    >
+      <section className="space-y-3 overflow-hidden">
+        <div>
+          <h2 className="text-sm font-medium">{t("voice.conversationMode")}</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t("voice.conversationModeDescription")}
+          </p>
+        </div>
+        <RadioGroup
+          value={mode.mode}
+          onValueChange={(value) =>
+            mode.setMode(value as VoiceConversationMode)
+          }
+          className="grid gap-2 sm:grid-cols-2"
+          aria-label={t("voice.conversationMode")}
+        >
+          <RadioGroupCard
+            id="voice-mode-chained"
+            value="chained"
+            label={t("voice.modeChained")}
+            description={t("voice.modeChainedDescription")}
+          />
+          <RadioGroupCard
+            id="voice-mode-openai-realtime"
+            value="openai-realtime"
+            label={t("voice.modeOpenAiRealtime")}
+            description={t("voice.modeOpenAiRealtimeDescription")}
+          />
+        </RadioGroup>
       </section>
       {mode.mode === "chained" ? (
         <>
@@ -237,6 +279,7 @@ export function VoiceSettings() {
           ) : null}
           <section className="space-y-2 overflow-hidden">
             <SettingsRow
+              className="py-2"
               label={
                 <h2 className="text-sm font-medium">
                   {t("voice.speechInput")}
@@ -271,7 +314,12 @@ export function VoiceSettings() {
                     {macSpeechSetup.status?.supported &&
                     macSpeechSetup.status.localeSupported ? (
                       <SelectItem value="macos">
-                        {t("voice.backendMacSpeech")}
+                        <span className="flex items-center gap-2">
+                          {t("voice.backendMacSpeech")}
+                          <Badge variant="secondary">
+                            {t("voice.recommended")}
+                          </Badge>
+                        </span>
                       </SelectItem>
                     ) : null}
                   </SelectContent>
@@ -317,6 +365,7 @@ export function VoiceSettings() {
           </section>
           <section className="space-y-2">
             <SettingsRow
+              className="py-2"
               label={
                 <h2 className="text-sm font-medium">
                   {t("voice.speechOutput")}
@@ -351,7 +400,12 @@ export function VoiceSettings() {
                     ) : null}
                     {siriSupported ? (
                       <SelectItem value="siri">
-                        {t("voice.backendSiri")}
+                        <span className="flex items-center gap-2">
+                          {t("voice.backendSiri")}
+                          <Badge variant="secondary">
+                            {t("voice.recommended")}
+                          </Badge>
+                        </span>
                       </SelectItem>
                     ) : null}
                   </SelectContent>
@@ -417,40 +471,69 @@ export function VoiceSettings() {
               }
             />
           </section>
-          <section className="space-y-4 py-4 pr-4">
-            <h2 id={interruptionHeadingId} className="text-sm font-medium">
-              {t("voice.interruptionMode")}
-            </h2>
-            <p
-              id={interruptionDescriptionId}
-              className="text-xs text-muted-foreground"
-            >
-              {t("voice.interruptionDescription")}
-            </p>
-            <RadioGroup
-              value={interruption.mode}
-              onValueChange={(value) =>
-                interruption.setMode(value as VoiceInterruptionMode)
+          <section className="space-y-2 overflow-hidden">
+            <SettingsRow
+              className="py-2"
+              label={
+                <h2 id={interruptionHeadingId} className="text-sm font-medium">
+                  {t("voice.interruptionMode")}
+                </h2>
               }
-              aria-labelledby={interruptionHeadingId}
-              aria-describedby={interruptionDescriptionId}
-              className="gap-2"
-            >
-              {INTERRUPTION_MODES.map((mode) => {
-                const optionId = `${interruptionHeadingId}-${mode}`;
-                return (
-                  <RadioGroupCard
-                    key={mode}
-                    id={optionId}
-                    value={mode}
-                    label={t(`voice.interruptionModes.${mode}`)}
-                    description={t(
-                      `voice.interruptionModeDescriptions.${mode}`,
-                    )}
-                  />
-                );
-              })}
-            </RadioGroup>
+              description={t("voice.interruptionDescription")}
+              descriptionId={interruptionDescriptionId}
+              layout="responsive"
+              action={({ labelId, descriptionId }) => (
+                <Select
+                  value={interruption.mode}
+                  onValueChange={(value) =>
+                    interruption.setMode(value as VoiceInterruptionMode)
+                  }
+                >
+                  <SelectTrigger
+                    className="w-full sm:w-60"
+                    aria-labelledby={labelId}
+                    aria-describedby={descriptionId}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {INTERRUPTION_MODES.map((interruptionMode) => (
+                      <SelectItem
+                        key={interruptionMode}
+                        value={interruptionMode}
+                      >
+                        {t(`voice.interruptionModes.${interruptionMode}`)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            />
+            <Collapsible>
+              <CollapsibleTrigger asChild>
+                <Button type="button" variant="ghost" className="group px-0">
+                  <ChevronRight className="size-4 transition-transform group-data-[state=open]:rotate-90" />
+                  {t("voice.advanced")}
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="space-y-2 pt-2">
+                {INTERRUPTION_MODES.map((interruptionMode) => (
+                  <div
+                    key={interruptionMode}
+                    className="rounded-md border px-3 py-2"
+                  >
+                    <p className="text-sm font-medium">
+                      {t(`voice.interruptionModes.${interruptionMode}`)}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {t(
+                        `voice.interruptionModeDescriptions.${interruptionMode}`,
+                      )}
+                    </p>
+                  </div>
+                ))}
+              </CollapsibleContent>
+            </Collapsible>
           </section>
         </>
       ) : (

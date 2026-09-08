@@ -124,102 +124,11 @@ export function RealtimeVoiceSettings() {
           configured={openAiStatus?.sttConfigured ?? false}
           onSave={setOpenAiSttApiKey}
           onClear={clearOpenAiSttApiKey}
+          description={t("voice.realtimeApiKeyDescription")}
         />
-        <p className="text-xs text-muted-foreground">
-          {t("voice.realtimeApiKeyDescription")}
-        </p>
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="openai-realtime-presentation">
-          {t("voice.realtimePresentation")}
-        </Label>
-        <Select
-          value={preference.presentationMode}
-          onValueChange={(presentationMode) =>
-            update({
-              presentationMode: presentationMode as RealtimePresentationMode,
-            })
-          }
-        >
-          <SelectTrigger id="openai-realtime-presentation" className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="debug">
-              {t("voice.realtimePresentationDebug")}
-            </SelectItem>
-            <SelectItem value="subtle">
-              {t("voice.realtimePresentationSubtle")}
-            </SelectItem>
-          </SelectContent>
-        </Select>
-        <p className="text-xs text-muted-foreground">
-          {t("voice.realtimePresentationDescription")}
-        </p>
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-2">
-          <Label htmlFor="openai-realtime-model">
-            {t("voice.realtimeModel")}
-          </Label>
-          <Select
-            value={preference.model}
-            onValueChange={(model) => update({ model })}
-          >
-            <SelectTrigger id="openai-realtime-model" className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <OptionalCurrentSelectItem
-                value={preference.model}
-                knownValues={REALTIME_MODELS}
-              />
-              {REALTIME_MODELS.map((model) => (
-                <SelectItem key={model} value={model}>
-                  {model === "gpt-realtime-2.1"
-                    ? t("voice.defaultOption", { value: model })
-                    : model}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="openai-realtime-transcription-model">
-            {t("voice.realtimeTranscriptionModel")}
-          </Label>
-          <Select
-            value={preference.transcriptionModel}
-            onValueChange={(transcriptionModel) =>
-              update({ transcriptionModel })
-            }
-          >
-            <SelectTrigger
-              id="openai-realtime-transcription-model"
-              className="w-full"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <OptionalCurrentSelectItem
-                value={preference.transcriptionModel}
-                knownValues={TRANSCRIPTION_MODELS}
-              />
-              {TRANSCRIPTION_MODELS.map((model) => (
-                <SelectItem key={model} value={model}>
-                  {model === "gpt-realtime-whisper"
-                    ? t("voice.defaultOption", { value: model })
-                    : model}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-muted-foreground">
-            {t("voice.realtimeTranscriptionModelDescription")}
-          </p>
-        </div>
+      <div className="rounded-lg border bg-muted/20 p-4">
         <div className="space-y-2">
           <Label htmlFor="openai-realtime-voice">
             {t("voice.realtimeVoice")}
@@ -246,67 +155,6 @@ export function RealtimeVoiceSettings() {
             </SelectContent>
           </Select>
         </div>
-        <div className="space-y-2">
-          <Label htmlFor="openai-realtime-turn-detection">
-            {t("voice.realtimeTurnDetection")}
-          </Label>
-          <Select
-            value={preference.turnDetection}
-            onValueChange={(turnDetection) =>
-              update({ turnDetection: turnDetection as RealtimeTurnDetection })
-            }
-          >
-            <SelectTrigger
-              id="openai-realtime-turn-detection"
-              className="w-full"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="server_vad">
-                {t("voice.defaultOption", {
-                  value: t("voice.realtimeTurnDetectionServer"),
-                })}
-              </SelectItem>
-              <SelectItem value="semantic_vad">
-                {t("voice.realtimeTurnDetectionSemantic")}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        {preference.turnDetection === "semantic_vad" ? (
-          <div className="space-y-2">
-            <Label htmlFor="openai-realtime-eagerness">
-              {t("voice.realtimeEagerness")}
-            </Label>
-            <Select
-              value={preference.eagerness}
-              onValueChange={(eagerness) =>
-                update({ eagerness: eagerness as RealtimeEagerness })
-              }
-            >
-              <SelectTrigger id="openai-realtime-eagerness" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="low">
-                  {t("voice.realtimeEagernessLow")}
-                </SelectItem>
-                <SelectItem value="auto">
-                  {t("voice.defaultOption", {
-                    value: t("voice.realtimeEagernessAuto"),
-                  })}
-                </SelectItem>
-                <SelectItem value="medium">
-                  {t("voice.realtimeEagernessMedium")}
-                </SelectItem>
-                <SelectItem value="high">
-                  {t("voice.realtimeEagernessHigh")}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        ) : null}
       </div>
 
       <div className="space-y-2">
@@ -348,6 +196,165 @@ export function RealtimeVoiceSettings() {
           </Button>
         </CollapsibleTrigger>
         <CollapsibleContent className="space-y-5 pt-3">
+          <div className="space-y-2">
+            <Label htmlFor="openai-realtime-presentation">
+              {t("voice.realtimePresentation")}
+            </Label>
+            <Select
+              value={preference.presentationMode}
+              onValueChange={(presentationMode) =>
+                update({
+                  presentationMode:
+                    presentationMode as RealtimePresentationMode,
+                })
+              }
+            >
+              <SelectTrigger
+                id="openai-realtime-presentation"
+                className="w-full"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="debug">
+                  {t("voice.realtimePresentationDebug")}
+                </SelectItem>
+                <SelectItem value="subtle">
+                  {t("voice.realtimePresentationSubtle")}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              {t("voice.realtimePresentationDescription")}
+            </p>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="openai-realtime-model">
+                {t("voice.realtimeModel")}
+              </Label>
+              <Select
+                value={preference.model}
+                onValueChange={(model) => update({ model })}
+              >
+                <SelectTrigger id="openai-realtime-model" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <OptionalCurrentSelectItem
+                    value={preference.model}
+                    knownValues={REALTIME_MODELS}
+                  />
+                  {REALTIME_MODELS.map((model) => (
+                    <SelectItem key={model} value={model}>
+                      {model === "gpt-realtime-2.1"
+                        ? t("voice.defaultOption", { value: model })
+                        : model}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="openai-realtime-transcription-model">
+                {t("voice.realtimeTranscriptionModel")}
+              </Label>
+              <Select
+                value={preference.transcriptionModel}
+                onValueChange={(transcriptionModel) =>
+                  update({ transcriptionModel })
+                }
+              >
+                <SelectTrigger
+                  id="openai-realtime-transcription-model"
+                  className="w-full"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <OptionalCurrentSelectItem
+                    value={preference.transcriptionModel}
+                    knownValues={TRANSCRIPTION_MODELS}
+                  />
+                  {TRANSCRIPTION_MODELS.map((model) => (
+                    <SelectItem key={model} value={model}>
+                      {model === "gpt-realtime-whisper"
+                        ? t("voice.defaultOption", { value: model })
+                        : model}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="openai-realtime-turn-detection">
+                {t("voice.realtimeTurnDetection")}
+              </Label>
+              <Select
+                value={preference.turnDetection}
+                onValueChange={(turnDetection) =>
+                  update({
+                    turnDetection: turnDetection as RealtimeTurnDetection,
+                  })
+                }
+              >
+                <SelectTrigger
+                  id="openai-realtime-turn-detection"
+                  className="w-full"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="server_vad">
+                    {t("voice.defaultOption", {
+                      value: t("voice.realtimeTurnDetectionServer"),
+                    })}
+                  </SelectItem>
+                  <SelectItem value="semantic_vad">
+                    {t("voice.realtimeTurnDetectionSemantic")}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {preference.turnDetection === "semantic_vad" ? (
+              <div className="space-y-2">
+                <Label htmlFor="openai-realtime-eagerness">
+                  {t("voice.realtimeEagerness")}
+                </Label>
+                <Select
+                  value={preference.eagerness}
+                  onValueChange={(eagerness) =>
+                    update({ eagerness: eagerness as RealtimeEagerness })
+                  }
+                >
+                  <SelectTrigger
+                    id="openai-realtime-eagerness"
+                    className="w-full"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="low">
+                      {t("voice.realtimeEagernessLow")}
+                    </SelectItem>
+                    <SelectItem value="auto">
+                      {t("voice.defaultOption", {
+                        value: t("voice.realtimeEagernessAuto"),
+                      })}
+                    </SelectItem>
+                    <SelectItem value="medium">
+                      {t("voice.realtimeEagernessMedium")}
+                    </SelectItem>
+                    <SelectItem value="high">
+                      {t("voice.realtimeEagernessHigh")}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
+          </div>
+
           <SettingSwitch
             id="openai-realtime-create-response"
             label={t("voice.realtimeCreateResponse")}
