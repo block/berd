@@ -162,10 +162,11 @@ fn ensure_native_realtime_playback_supported() -> Result<(), String> {
 #[tauri::command]
 pub fn send_openai_realtime_spokesperson_runtime_event(
     state: State<'_, OpenAiRealtimeRuntimeState>,
+    webview_window: WebviewWindow,
     session_id: String,
     event: serde_json::Value,
 ) -> Result<(), String> {
-    with_runtime(state, session_id, |runtime| {
+    with_runtime(state, session_id, webview_window.label(), |runtime| {
         runtime.send(SpokespersonCommand::Provider(event))
     })
 }
@@ -196,6 +197,7 @@ pub fn push_openai_realtime_spokesperson_audio(
 #[tauri::command]
 pub async fn stop_openai_realtime_spokesperson_runtime(
     state: State<'_, OpenAiRealtimeRuntimeState>,
+    webview_window: WebviewWindow,
     session_id: String,
 ) -> Result<(), String> {
     let session_id = non_empty_session_id(session_id)?;
@@ -204,7 +206,11 @@ pub async fn stop_openai_realtime_spokesperson_runtime(
         .lock()
         .map_err(|_| "OpenAI Realtime runtime state is unavailable".to_string())?
         .get(&session_id)
-        .map(|entry| Arc::clone(&entry.runtime));
+        .map(|entry| {
+            ensure_runtime_owner(&entry.owner_window, webview_window.label())?;
+            Ok::<_, String>(Arc::clone(&entry.runtime))
+        })
+        .transpose()?;
     if let Some(runtime) = runtime {
         tauri::async_runtime::spawn_blocking(move || runtime.finish())
             .await
@@ -216,14 +222,20 @@ pub async fn stop_openai_realtime_spokesperson_runtime(
 #[tauri::command]
 pub async fn release_openai_realtime_spokesperson_runtime(
     state: State<'_, OpenAiRealtimeRuntimeState>,
+    webview_window: WebviewWindow,
     session_id: String,
 ) -> Result<(), String> {
     let session_id = non_empty_session_id(session_id)?;
-    let entry = state
-        .sessions
-        .lock()
-        .map_err(|_| "OpenAI Realtime runtime state is unavailable".to_string())?
-        .remove(&session_id);
+    let entry = {
+        let mut sessions = state
+            .sessions
+            .lock()
+            .map_err(|_| "OpenAI Realtime runtime state is unavailable".to_string())?;
+        if let Some(entry) = sessions.get(&session_id) {
+            ensure_runtime_owner(&entry.owner_window, webview_window.label())?;
+        }
+        sessions.remove(&session_id)
+    };
     if let Some(entry) = entry {
         tauri::async_runtime::spawn_blocking(move || entry.runtime.finish())
             .await
@@ -266,23 +278,27 @@ pub fn handle_owner_window_destroyed(app: &AppHandle, window_label: &str) {
 fn with_runtime<T>(
     state: State<'_, OpenAiRealtimeRuntimeState>,
     session_id: String,
+    owner_window: &str,
     operation: impl FnOnce(&ManagedRealtimeHost) -> Result<T, String>,
 ) -> Result<T, String> {
     let session_id = non_empty_session_id(session_id)?;
-    let runtime = state
+    let sessions = state
         .sessions
         .lock()
-        .map_err(|_| "OpenAI Realtime runtime state is unavailable".to_string())?
+        .map_err(|_| "OpenAI Realtime runtime state is unavailable".to_string())?;
+    let entry = sessions
         .get(&session_id)
-        .ok_or("OpenAI Realtime runtime session is not active")?
-        .runtime
-        .clone();
+        .ok_or("OpenAI Realtime runtime session is not active")?;
+    ensure_runtime_owner(&entry.owner_window, owner_window)?;
+    let runtime = entry.runtime.clone();
+    drop(sessions);
     operation(&runtime)
 }
 
 #[tauri::command]
 pub async fn update_openai_realtime_spokesperson_settings(
     state: State<'_, OpenAiRealtimeRuntimeState>,
+    webview_window: WebviewWindow,
     session_id: String,
     expected_revision: u64,
     voice: String,
@@ -297,6 +313,7 @@ pub async fn update_openai_realtime_spokesperson_settings(
         let entry = sessions
             .get(&session_id)
             .ok_or("OpenAI Realtime runtime session is not active")?;
+        ensure_runtime_owner(&entry.owner_window, webview_window.label())?;
         (
             Arc::clone(&entry.runtime),
             entry.protocol.semantic_transcript(),
@@ -379,6 +396,7 @@ pub fn create_openai_realtime_transcript_seed(
 #[tauri::command]
 pub fn deliver_openai_realtime_expert_message(
     state: State<'_, OpenAiRealtimeRuntimeState>,
+    webview_window: WebviewWindow,
     session_id: String,
     cursor: u64,
     message: String,
@@ -393,6 +411,7 @@ pub fn deliver_openai_realtime_expert_message(
     let entry = sessions
         .get_mut(&session_id)
         .ok_or("OpenAI Realtime runtime session is not active")?;
+    ensure_runtime_owner(&entry.owner_window, webview_window.label())?;
     let unknown = entry.protocol.unknown_handoff_ids(&resolved_handoff_ids);
     let submission =
         match entry
@@ -443,6 +462,7 @@ pub fn deliver_openai_realtime_expert_message(
 #[tauri::command]
 pub fn dismiss_openai_realtime_handoffs_with_context(
     state: State<'_, OpenAiRealtimeRuntimeState>,
+    webview_window: WebviewWindow,
     session_id: String,
     cursor: u64,
     handoff_ids: Vec<String>,
@@ -456,6 +476,7 @@ pub fn dismiss_openai_realtime_handoffs_with_context(
     let entry = sessions
         .get_mut(&session_id)
         .ok_or("OpenAI Realtime runtime session is not active")?;
+    ensure_runtime_owner(&entry.owner_window, webview_window.label())?;
     let unknown = entry.protocol.unknown_handoff_ids(&handoff_ids);
     let dismissal =
         match entry
@@ -500,11 +521,12 @@ pub fn dismiss_openai_realtime_handoffs_with_context(
 #[tauri::command]
 pub fn complete_openai_realtime_expert_turn(
     state: State<'_, OpenAiRealtimeRuntimeState>,
+    webview_window: WebviewWindow,
     session_id: String,
     retrying_handoff_ids: Vec<String>,
     max_attempts: u8,
 ) -> Result<RealtimeExpertTurnCompletion, String> {
-    with_protocol_session(state, session_id, |session| {
+    with_protocol_session(state, session_id, webview_window.label(), |session| {
         session.complete_expert_turn_with_delivery(&retrying_handoff_ids, max_attempts)
     })
 }
@@ -512,9 +534,10 @@ pub fn complete_openai_realtime_expert_turn(
 #[tauri::command]
 pub fn flush_openai_realtime_expert_events(
     state: State<'_, OpenAiRealtimeRuntimeState>,
+    webview_window: WebviewWindow,
     session_id: String,
 ) -> Result<Option<RealtimeExpertDelivery>, String> {
-    with_protocol_session(state, session_id, |session| {
+    with_protocol_session(state, session_id, webview_window.label(), |session| {
         Ok(session.flush_expert_events("Final voice transcript"))
     })
 }
@@ -522,6 +545,7 @@ pub fn flush_openai_realtime_expert_events(
 #[tauri::command]
 pub fn reduce_openai_realtime_spokesperson_event(
     state: State<'_, OpenAiRealtimeRuntimeState>,
+    webview_window: WebviewWindow,
     session_id: String,
     event: serde_json::Value,
 ) -> Result<RealtimeSessionReduction, String> {
@@ -533,6 +557,7 @@ pub fn reduce_openai_realtime_spokesperson_event(
     let entry = sessions
         .get_mut(&session_id)
         .ok_or_else(|| "OpenAI Realtime protocol session is not active".to_string())?;
+    ensure_runtime_owner(&entry.owner_window, webview_window.label())?;
     let result = entry.protocol.handle_provider_event(&event)?;
     entry.publish_semantic_context()?;
     Ok(result)
@@ -541,10 +566,11 @@ pub fn reduce_openai_realtime_spokesperson_event(
 #[tauri::command]
 pub fn request_openai_realtime_typed_user_message(
     state: State<'_, OpenAiRealtimeRuntimeState>,
+    webview_window: WebviewWindow,
     session_id: String,
     text: String,
 ) -> Result<RealtimeCoordinatorResult, String> {
-    with_protocol_session(state, session_id, |session| {
+    with_protocol_session(state, session_id, webview_window.label(), |session| {
         session.request_typed_user_message(&text)
     })
 }
@@ -561,6 +587,7 @@ fn non_empty_session_id(session_id: String) -> Result<String, String> {
 fn with_protocol_session<T>(
     state: State<'_, OpenAiRealtimeRuntimeState>,
     session_id: String,
+    owner_window: &str,
     operation: impl FnOnce(&mut RealtimeExpertSpokespersonSession) -> Result<T, String>,
 ) -> Result<T, String> {
     let session_id = non_empty_session_id(session_id)?;
@@ -571,9 +598,17 @@ fn with_protocol_session<T>(
     let entry = sessions
         .get_mut(&session_id)
         .ok_or_else(|| "OpenAI Realtime protocol session is not active".to_string())?;
+    ensure_runtime_owner(&entry.owner_window, owner_window)?;
     let result = operation(&mut entry.protocol)?;
     entry.publish_semantic_context()?;
     Ok(result)
+}
+
+fn ensure_runtime_owner(owner_window: &str, caller_window: &str) -> Result<(), String> {
+    if owner_window != caller_window {
+        return Err("This window does not own the OpenAI Realtime runtime session".into());
+    }
+    Ok(())
 }
 
 fn realtime_transcription_client_secret_request(
@@ -677,8 +712,21 @@ fn client_secret_value(value: &serde_json::Value) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_client_secret, realtime_transcription_client_secret_request};
+    use super::{
+        ensure_runtime_owner, parse_client_secret, realtime_transcription_client_secret_request,
+    };
     use serde_json::json;
+
+    #[test]
+    fn runtime_ownership_requires_the_exact_invoking_window() {
+        assert!(ensure_runtime_owner("owner", "owner").is_ok());
+        for caller in ["other", "", "owner-other", "Owner"] {
+            assert_eq!(
+                ensure_runtime_owner("owner", caller).unwrap_err(),
+                "This window does not own the OpenAI Realtime runtime session"
+            );
+        }
+    }
 
     #[test]
     fn parses_supported_client_secret_shapes() {
