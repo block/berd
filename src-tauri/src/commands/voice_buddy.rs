@@ -780,26 +780,28 @@ pub async fn stop_voice_conversation_from_buddy(
 }
 
 #[tauri::command]
-pub fn start_openai_realtime_voice_controls(
+pub async fn start_openai_realtime_voice_controls(
     app: AppHandle,
     window: WebviewWindow,
     state: tauri::State<'_, RealtimeVoiceControlsState>,
     native_state: tauri::State<'_, NativeVoiceState>,
+    capture: tauri::State<'_, VoiceCaptureState>,
     session_id: String,
 ) -> Result<RealtimeVoiceControlsStatus, String> {
     if window.label() == WINDOW_LABEL {
         return Err("Floating controls cannot own a Realtime voice conversation.".to_string());
     }
-    if native_state.active_session_target().is_some() {
-        return Err("A chained voice conversation is already active.".to_string());
-    }
     let owner_window_label = window.label().to_string();
-    let revision = state.begin(session_id.clone(), owner_window_label.clone())?;
-    if let Err(error) = install_realtime(&app, &owner_window_label, revision) {
-        let _ = state.finish(&session_id, revision);
-        return Err(error);
-    }
-    Ok(state.status())
+    native_state
+        .stop_active_then(&app, capture.inner(), || {
+            let revision = state.begin(session_id.clone(), owner_window_label.clone())?;
+            if let Err(error) = install_realtime(&app, &owner_window_label, revision) {
+                let _ = state.finish(&session_id, revision);
+                return Err(error);
+            }
+            Ok(state.status())
+        })
+        .await
 }
 
 #[tauri::command]
