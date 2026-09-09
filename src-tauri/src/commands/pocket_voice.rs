@@ -294,10 +294,22 @@ fn default_playback_speed() -> f32 {
     1.0
 }
 
+fn normalize_settings(mut settings: PocketSettings) -> PocketSettings {
+    if !pocket_assets::voices()
+        .iter()
+        .any(|voice| voice.id == settings.selected_voice)
+    {
+        settings.selected_voice = DEFAULT_VOICE.to_string();
+    }
+    settings.playback_speed = settings.playback_speed.clamp(0.75, 2.0);
+    settings
+}
+
 fn settings(base: &Path) -> PocketSettings {
     fs::read(base.join("settings.json"))
         .ok()
         .and_then(|data| serde_json::from_slice::<PocketSettings>(&data).ok())
+        .map(normalize_settings)
         .unwrap_or_default()
 }
 
@@ -317,13 +329,6 @@ fn update_settings(
         .lock()
         .map_err(|_| "Pocket settings lock was poisoned".to_string())?;
     let mut current = settings(base);
-    if !pocket_assets::voices()
-        .iter()
-        .any(|voice| voice.id == current.selected_voice)
-    {
-        current.selected_voice = DEFAULT_VOICE.to_string();
-    }
-    current.playback_speed = current.playback_speed.clamp(0.75, 2.0);
     update(&mut current);
     write_settings(base, &current)?;
     Ok(current)
@@ -389,13 +394,11 @@ fn local_asset_roots(base: &Path) -> Result<LocalAssetRoots, String> {
 }
 
 fn selected_voice(base: &Path) -> String {
-    Some(settings(base).selected_voice)
-        .filter(|id| pocket_assets::voices().iter().any(|voice| voice.id == id))
-        .unwrap_or_else(|| DEFAULT_VOICE.to_string())
+    settings(base).selected_voice
 }
 
 fn playback_speed(base: &Path) -> f32 {
-    settings(base).playback_speed.clamp(0.75, 2.0)
+    settings(base).playback_speed
 }
 
 pub(crate) fn selected_output_device() -> Option<String> {
