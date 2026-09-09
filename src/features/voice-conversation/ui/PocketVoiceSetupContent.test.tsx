@@ -59,6 +59,7 @@ describe("PocketVoiceSetupContent", () => {
     setPlaybackSpeed: vi.fn(),
     removeModel: vi.fn(),
     resetSettings: vi.fn(),
+    refreshSettings: vi.fn(),
     ...overrides,
   });
 

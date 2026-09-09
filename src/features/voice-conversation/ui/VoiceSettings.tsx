@@ -20,12 +20,12 @@ import { useEffect, useState } from "react";
 import {
   clearOpenAiSttApiKey,
   clearOpenAiTtsApiKey,
-  resetOpenAiVoiceSettings,
   setOpenAiSttApiKey,
   setOpenAiPlaybackSpeed,
   setOpenAiSpeechVoice,
   setOpenAiTtsApiKey,
 } from "../api/openAiVoice";
+import { resetAllVoiceBackendSettings } from "../api/voiceSettings";
 import { usePocketVoiceSetup } from "../hooks/usePocketVoiceSetup";
 import { useMacSpeechSetup } from "../hooks/useMacSpeechSetup";
 import { useMicrophonePermission } from "../hooks/useMicrophonePermission";
@@ -225,11 +225,8 @@ export function VoiceSettings() {
     setResetting(true);
     setResetError(null);
     try {
-      await Promise.all([
-        setup.resetSettings(),
-        resetOpenAiVoiceSettings(),
-        ...(siriSupported ? [siriSetup.resetSettings()] : []),
-      ]);
+      await resetAllVoiceBackendSettings();
+      await setup.refreshSettings();
       setRealtimeVoicePreference(getDefaultRealtimeVoicePreference());
       input.setBackend(getDefaultVoiceInputBackend(macSpeechAvailable));
       output.setBackend(getDefaultVoiceOutputBackend());

@@ -269,9 +269,9 @@ fn voice_settings_path() -> Result<std::path::PathBuf, String> {
         .join("openai-voice-settings.json"))
 }
 
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct OpenAiVoiceSettings {
+pub(crate) struct OpenAiVoiceSettings {
     #[serde(default = "default_playback_speed")]
     playback_speed: f32,
     #[serde(default = "default_speech_voice")]
@@ -293,6 +293,20 @@ impl Default for OpenAiVoiceSettings {
             speech_voice: default_speech_voice(),
         }
     }
+}
+
+pub(crate) fn replace_voice_settings(
+    state: &OpenAiVoiceState,
+    settings: &OpenAiVoiceSettings,
+) -> Result<(), String> {
+    let mut playback = state
+        .playback
+        .lock()
+        .map_err(|_| "OpenAI voice playback state lock was poisoned".to_string())?;
+    persist_voice_settings(settings.playback_speed, &settings.speech_voice)?;
+    playback.speed = settings.playback_speed;
+    playback.voice.clone_from(&settings.speech_voice);
+    Ok(())
 }
 
 fn stored_voice_settings() -> OpenAiVoiceSettings {

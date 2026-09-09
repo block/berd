@@ -68,7 +68,7 @@ const AIRPLAY_PLAYBACK_LATENCY_SAFETY_DURATION: Duration = Duration::from_secs(2
 const UNKNOWN_PLAYBACK_LATENCY_SAFETY_DURATION: Duration = Duration::from_secs(2);
 #[cfg(any(test, target_os = "macos"))]
 const POCKET_SOURCE_COMPLETION_TIMEOUT: Duration = Duration::from_secs(2);
-static POCKET_SETTINGS_LOCK: Mutex<()> = Mutex::new(());
+pub(crate) static POCKET_SETTINGS_LOCK: Mutex<()> = Mutex::new(());
 
 #[cfg(target_os = "macos")]
 fn playback_latency_safety_duration_for_transport(transport: Option<u32>) -> Duration {
@@ -246,7 +246,7 @@ pub enum VoiceModelKind {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct PocketSettings {
+pub(crate) struct PocketSettings {
     selected_voice: String,
     #[serde(default = "default_playback_speed")]
     playback_speed: f32,
@@ -305,7 +305,7 @@ fn normalize_settings(mut settings: PocketSettings) -> PocketSettings {
     settings
 }
 
-fn settings(base: &Path) -> PocketSettings {
+pub(crate) fn settings(base: &Path) -> PocketSettings {
     fs::read(base.join("settings.json"))
         .ok()
         .and_then(|data| serde_json::from_slice::<PocketSettings>(&data).ok())
@@ -313,7 +313,7 @@ fn settings(base: &Path) -> PocketSettings {
         .unwrap_or_default()
 }
 
-fn write_settings(base: &Path, settings: &PocketSettings) -> Result<(), String> {
+pub(crate) fn write_settings(base: &Path, settings: &PocketSettings) -> Result<(), String> {
     fs::create_dir_all(base).map_err(|error| format!("create Pocket settings: {error}"))?;
     let data = serde_json::to_vec_pretty(settings)
         .map_err(|error| format!("encode Pocket settings: {error}"))?;
@@ -377,7 +377,7 @@ fn parakeet_disk_bytes(base: &Path) -> Option<u64> {
         })
 }
 
-fn cache_base(app: &AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn cache_base(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_data_dir()
         .map(|path| path.join("pocket-tts"))

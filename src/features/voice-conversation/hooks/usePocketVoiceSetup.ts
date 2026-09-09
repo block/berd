@@ -27,6 +27,7 @@ export interface PocketVoiceSetup {
   setPlaybackSpeed: (speed: number) => Promise<void>;
   removeModel: (model: VoiceModelKind) => Promise<void>;
   resetSettings: () => Promise<void>;
+  refreshSettings: () => Promise<void>;
 }
 
 function progressSummary(status: PocketVoiceStatus): string {
@@ -245,6 +246,17 @@ export function usePocketVoiceSetup(enabled = true): PocketVoiceSetup {
     }
   }, []);
 
+  const refreshSettings = useCallback(async () => {
+    try {
+      const refreshed = await getPocketVoiceStatus();
+      setStatus((current) => mergePocketVoiceStatus(current, refreshed));
+    } catch (nextError) {
+      setError(
+        nextError instanceof Error ? nextError.message : String(nextError),
+      );
+    }
+  }, []);
+
   const previewVoice = useCallback(async (voiceId: string) => {
     setError(null);
     setPreviewingVoiceId(voiceId);
@@ -307,5 +319,6 @@ export function usePocketVoiceSetup(enabled = true): PocketVoiceSetup {
     setPlaybackSpeed,
     removeModel,
     resetSettings,
+    refreshSettings,
   };
 }

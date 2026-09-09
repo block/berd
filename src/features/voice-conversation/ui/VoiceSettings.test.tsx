@@ -99,7 +99,7 @@ const openAiApiMocks = vi.hoisted(() => ({
   setTtsApiKey: vi.fn(() => Promise.resolve()),
   clearTtsApiKey: vi.fn(() => Promise.resolve()),
   setSpeechVoice: vi.fn(() => Promise.resolve()),
-  resetOpenAi: vi.fn(() => Promise.resolve()),
+  resetAll: vi.fn(() => Promise.resolve()),
   resetPocket: vi.fn(() => Promise.resolve()),
   resetSiri: vi.fn(() => Promise.resolve()),
 }));
@@ -107,11 +107,13 @@ const openAiApiMocks = vi.hoisted(() => ({
 vi.mock("../api/openAiVoice", () => ({
   setOpenAiPlaybackSpeed: vi.fn(() => Promise.resolve()),
   setOpenAiSpeechVoice: openAiApiMocks.setSpeechVoice,
-  resetOpenAiVoiceSettings: openAiApiMocks.resetOpenAi,
   setOpenAiSttApiKey: openAiApiMocks.setSttApiKey,
   clearOpenAiSttApiKey: openAiApiMocks.clearSttApiKey,
   setOpenAiTtsApiKey: openAiApiMocks.setTtsApiKey,
   clearOpenAiTtsApiKey: openAiApiMocks.clearTtsApiKey,
+}));
+vi.mock("../api/voiceSettings", () => ({
+  resetAllVoiceBackendSettings: openAiApiMocks.resetAll,
 }));
 vi.mock("../api/pocketVoice", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../api/pocketVoice")>()),
@@ -192,6 +194,7 @@ function setup(status: PocketVoiceStatus): PocketVoiceSetup {
     setPlaybackSpeed: vi.fn(),
     removeModel: vi.fn(),
     resetSettings: openAiApiMocks.resetPocket,
+    refreshSettings: vi.fn(() => Promise.resolve()),
   };
 }
 
@@ -313,7 +316,7 @@ describe("VoiceSettings", () => {
     openAiApiMocks.setSttApiKey.mockClear();
     openAiApiMocks.clearSttApiKey.mockClear();
     openAiApiMocks.setSpeechVoice.mockClear();
-    openAiApiMocks.resetOpenAi.mockClear();
+    openAiApiMocks.resetAll.mockReset().mockResolvedValue(undefined);
     openAiApiMocks.resetPocket.mockClear();
     openAiApiMocks.resetSiri.mockClear();
     preferenceMocks.setInputBackend.mockClear();
@@ -373,9 +376,8 @@ describe("VoiceSettings", () => {
       within(dialog).getByRole("button", { name: "Reset to defaults" }),
     );
 
-    expect(openAiApiMocks.resetOpenAi).toHaveBeenCalledOnce();
-    expect(openAiApiMocks.resetPocket).toHaveBeenCalledOnce();
-    expect(openAiApiMocks.resetSiri).toHaveBeenCalledOnce();
+    expect(openAiApiMocks.resetAll).toHaveBeenCalledOnce();
+    expect(setupState.current?.refreshSettings).toHaveBeenCalledOnce();
     expect(preferenceMocks.setInputBackend).toHaveBeenCalledWith("macos");
     expect(preferenceMocks.setOutputBackend).toHaveBeenCalledWith("siri");
     expect(preferenceMocks.setInterruptionMode).toHaveBeenCalledWith(
@@ -397,6 +399,31 @@ describe("VoiceSettings", () => {
     expect(
       screen.getByRole("button", { name: "Reset to defaults" }),
     ).toBeDisabled();
+  });
+
+  it("keeps renderer preferences unchanged when the native reset rolls back", async () => {
+    openAiApiMocks.resetAll.mockRejectedValueOnce(
+      new Error("Could not reset voice settings"),
+    );
+    renderWithProviders(<VoiceSettings />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Reset to defaults" }));
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Reset to defaults",
+      }),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not reset voice settings",
+    );
+    expect(setupState.current?.refreshSettings).not.toHaveBeenCalled();
+    expect(preferenceMocks.setInputBackend).not.toHaveBeenCalled();
+    expect(preferenceMocks.setOutputBackend).not.toHaveBeenCalled();
+    expect(preferenceMocks.setInterruptionMode).not.toHaveBeenCalled();
+    expect(preferenceMocks.setMode).not.toHaveBeenCalled();
+    expect(preferenceMocks.setRealtimePreference).not.toHaveBeenCalled();
   });
 
   it("does not inspect OpenAI credentials for Apple speech input and output", () => {

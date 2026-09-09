@@ -690,6 +690,7 @@ pub fn run() {
             commands::openai_audio::set_openai_playback_speed,
             commands::openai_audio::set_openai_speech_voice,
             commands::openai_audio::reset_openai_voice_settings,
+            commands::voice_settings::reset_all_voice_backend_settings,
             commands::siri_voice::get_siri_voice_status,
             commands::siri_voice::select_siri_voice,
             commands::siri_voice::download_siri_voice,

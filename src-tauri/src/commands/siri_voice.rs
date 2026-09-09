@@ -139,7 +139,7 @@ const SIRI_OUTPUT_DRAIN_MARGIN: Duration = Duration::from_secs(60);
 const PLAYBACK_PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
 const MIN_PLAYBACK_SPEED: f32 = 0.5;
 const MAX_PLAYBACK_SPEED: f32 = 2.0;
-static SIRI_SETTINGS_LOCK: Mutex<()> = Mutex::new(());
+pub(crate) static SIRI_SETTINGS_LOCK: Mutex<()> = Mutex::new(());
 
 pub type SiriVoiceSelection = SiriVoiceIdentity;
 
@@ -156,7 +156,7 @@ pub struct SiriVoiceStatus {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct SiriVoiceSettings {
+pub(crate) struct SiriVoiceSettings {
     selected_voice: Option<SiriVoiceSelection>,
     #[serde(default = "default_playback_speed")]
     playback_speed: f32,
@@ -175,21 +175,21 @@ impl Default for SiriVoiceSettings {
     }
 }
 
-fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_data_dir()
         .map(|path| path.join("siri-tts").join("settings.json"))
         .map_err(|error| format!("resolve Siri TTS settings directory: {error}"))
 }
 
-fn read_settings(path: &Path) -> SiriVoiceSettings {
+pub(crate) fn read_settings(path: &Path) -> SiriVoiceSettings {
     fs::read(path)
         .ok()
         .and_then(|data| serde_json::from_slice(&data).ok())
         .unwrap_or_default()
 }
 
-fn write_settings(path: &Path, settings: &SiriVoiceSettings) -> Result<(), String> {
+pub(crate) fn write_settings(path: &Path, settings: &SiriVoiceSettings) -> Result<(), String> {
     let parent = path
         .parent()
         .ok_or_else(|| "Siri TTS settings path has no parent".to_string())?;
