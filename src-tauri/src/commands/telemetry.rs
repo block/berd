@@ -1199,7 +1199,7 @@ mod tests {
             // comma-joined, which it rejects like a missing one.
             assert_eq!(
                 request.header_values(TELEMETRY_SCHEMA_VERSION_HEADER),
-                vec!["berd-otlp-logs-v2"]
+                vec!["berd-otlp-logs-v3"]
             );
             assert_eq!(request.header("content-type"), Some("application/json"));
             // The gateway hands the raw request bytes to its JSON parser, so a

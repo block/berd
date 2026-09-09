@@ -968,6 +968,19 @@ describe("voice conversation store lifecycle ordering", () => {
     await expect(first).resolves.toEqual(status("stopped", 2));
   });
 
+  it("does not track a start response after an earlier terminal event", async () => {
+    const store = await loadStore();
+    const response = deferred<VoiceConversationStatus>();
+    mocks.start.mockReturnValue(response.promise);
+
+    const starting = store.getState().start("session-1");
+    emit({ type: "cleanShutdown", sessionId: "session-1", revision: 2 });
+    response.resolve(status("starting", 1, "session-1"));
+    await starting;
+
+    expect(mocks.trackStarted).not.toHaveBeenCalled();
+  });
+
   it("does not let a stale start response regress a startup event", async () => {
     const store = await loadStore();
     const response = deferred<VoiceConversationStatus>();

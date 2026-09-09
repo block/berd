@@ -672,11 +672,18 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
             inputBackend,
             foregroundGeneration,
           );
-          trackVoiceConversationStarted({
-            inputBackend,
-            outputBackend: getVoiceOutputBackend(),
-            voiceMode: "chained",
-          });
+          const currentStatus = get().status;
+          if (
+            shouldApplyResponseRevision(currentStatus, status.revision) ||
+            (currentStatus.lifecycle === "running" &&
+              currentStatus.sessionId === sessionId)
+          ) {
+            trackVoiceConversationStarted({
+              inputBackend,
+              outputBackend: getVoiceOutputBackend(),
+              voiceMode: "chained",
+            });
+          }
           set((state) =>
             shouldApplyResponseRevision(state.status, status.revision) ||
             (status.revision === state.status.revision &&

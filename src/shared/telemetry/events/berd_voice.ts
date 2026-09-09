@@ -19,26 +19,26 @@ export type BerdVoiceConversationEndReason =
   | "error";
 
 export interface BerdVoiceConversationContextParams {
-  inputBackend: BerdVoiceConversationBackend;
-  outputBackend: BerdVoiceConversationBackend;
-  voiceMode: BerdVoiceConversationMode;
+  input_backend: BerdVoiceConversationBackend;
+  output_backend: BerdVoiceConversationBackend;
+  voice_mode: BerdVoiceConversationMode;
 }
 
 export interface BerdVoiceConversationEndedParams
   extends BerdVoiceConversationContextParams {
-  durationMs: number;
-  userUtteranceCount: number;
-  assistantResponseCount: number;
-  endReason: BerdVoiceConversationEndReason;
+  duration_ms: number;
+  user_utterance_count: number;
+  assistant_response_count: number;
+  end_reason: BerdVoiceConversationEndReason;
 }
 
 function contextParameters(
   params: BerdVoiceConversationContextParams,
 ): Event["parameters"] {
   return {
-    input_backend: params.inputBackend,
-    output_backend: params.outputBackend,
-    voice_mode: params.voiceMode,
+    input_backend: params.input_backend,
+    output_backend: params.output_backend,
+    voice_mode: params.voice_mode,
   };
 }
 
@@ -60,10 +60,10 @@ export function berdVoiceConversationEnded(
     name: "berd_voice_conversation_ended",
     parameters: {
       ...contextParameters(params),
-      duration_ms: String(params.durationMs),
-      user_utterance_count: String(params.userUtteranceCount),
-      assistant_response_count: String(params.assistantResponseCount),
-      end_reason: params.endReason,
+      duration_ms: String(params.duration_ms),
+      user_utterance_count: String(params.user_utterance_count),
+      assistant_response_count: String(params.assistant_response_count),
+      end_reason: params.end_reason,
     },
   };
 }

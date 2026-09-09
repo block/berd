@@ -42,9 +42,9 @@ describe("vendored event surface", () => {
 
 describe("voice events", () => {
   const context = {
-    inputBackend: "macos" as const,
-    outputBackend: "siri" as const,
-    voiceMode: "chained" as const,
+    input_backend: "macos" as const,
+    output_backend: "siri" as const,
+    voice_mode: "chained" as const,
   };
 
   it("labels successful voice startup with its resolved backends", () => {
@@ -62,10 +62,10 @@ describe("voice events", () => {
     expect(
       berdVoiceConversationEnded({
         ...context,
-        durationMs: 12_345,
-        userUtteranceCount: 3,
-        assistantResponseCount: 2,
-        endReason: "user",
+        duration_ms: 12_345,
+        user_utterance_count: 3,
+        assistant_response_count: 2,
+        end_reason: "user",
       }),
     ).toEqual({
       name: "berd_voice_conversation_ended",

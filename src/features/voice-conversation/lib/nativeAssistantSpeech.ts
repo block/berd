@@ -1009,6 +1009,7 @@ export function startNativeAssistantSpeech(
   const transcriptReferenceByKey = new Map<string, VoiceTranscriptReference>();
   const invalidatedMessages = new Set<string>();
   const handledCompletionMessages = new Set<string>();
+  const countedAssistantResponseMessages = new Set<string>();
   const interruptedMessages = new Set<string>();
   const failedMessages = new Set<string>();
   const interruptionCauseByMessage = new Map<string, InterruptionCause>();
@@ -1693,7 +1694,10 @@ export function startNativeAssistantSpeech(
       // create an utterance for it.
       if (completionHandled) {
         handledCompletionMessages.add(message.id);
-        trackVoiceAssistantResponse();
+        if (!countedAssistantResponseMessages.has(message.id)) {
+          countedAssistantResponseMessages.add(message.id);
+          trackVoiceAssistantResponse();
+        }
       }
     }
   };
