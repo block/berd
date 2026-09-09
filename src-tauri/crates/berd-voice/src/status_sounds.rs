@@ -131,26 +131,25 @@ impl StatusSoundRuntime {
         }
     }
 
-    pub fn poll(&mut self, conversation_active: bool) -> Result<(), String> {
+    pub fn poll(&mut self, conversation_active: bool) -> Result<bool, String> {
         if conversation_active {
             self.player.stop();
         }
         if !self.playback_available {
-            return Ok(());
+            return Ok(false);
         }
         self.player.reap();
         let now = Instant::now();
-        if self.next_tick.is_none_or(|deadline| now < deadline) {
-            return Ok(());
-        }
-        self.next_tick = Some(now + STATUS_SOUND_INTERVAL);
-        if let Some(cue) = self.machine.tick(conversation_active) {
-            if let Err(message) = self.player.play(cue, self.output_device.as_deref()) {
-                self.playback_available = false;
-                return Err(message);
+        if self.next_tick.is_some_and(|deadline| now >= deadline) {
+            self.next_tick = Some(now + STATUS_SOUND_INTERVAL);
+            if let Some(cue) = self.machine.tick(conversation_active) {
+                if let Err(message) = self.player.play(cue, self.output_device.as_deref()) {
+                    self.playback_available = false;
+                    return Err(message);
+                }
             }
         }
-        Ok(())
+        Ok(self.player.is_active())
     }
 }
 
@@ -165,6 +164,10 @@ impl StatusSoundPlayer {
     }
 
     fn reap(&mut self) {}
+
+    fn is_active(&self) -> bool {
+        false
+    }
 
     fn stop(&mut self) {}
 }
@@ -213,6 +216,10 @@ impl StatusSoundPlayer {
 
     fn reap(&mut self) {
         self.active.retain(|player| !player.is_empty());
+    }
+
+    fn is_active(&self) -> bool {
+        !self.active.is_empty()
     }
 
     fn stop(&mut self) {

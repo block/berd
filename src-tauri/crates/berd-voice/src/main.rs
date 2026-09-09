@@ -17,8 +17,8 @@ use berd_voice::benchmark::{
 };
 use berd_voice::expert_spokesperson::{ExpertDirectiveOutcome, LiveSideEvent};
 use berd_voice::input::{
-    AssistantActivityGuard, InputDuringTtsSlot, InputDuringTtsSnapshot, VoiceInputConfig,
-    VoiceInputControls, VoiceInputEngineConfig, VoiceInputEvent, VoiceInputFrame,
+    AssistantActivityGuard, InputDuringTtsPolicy, InputDuringTtsSlot, InputDuringTtsSnapshot,
+    VoiceInputConfig, VoiceInputControls, VoiceInputEngineConfig, VoiceInputEvent, VoiceInputFrame,
     VoiceInputRuntime, INPUT_FRAME_SAMPLES,
 };
 use berd_voice::openai_realtime_protocol::{
@@ -1276,6 +1276,7 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
     let mut held: Option<PrepareRequest> = None;
     let mut active: Option<ActivePlayback> = None;
     let mut status_sound_runtime = StatusSoundRuntime::default();
+    let mut status_sound_activity: Option<AssistantActivityGuard> = None;
 
     loop {
         if let Some(events) = input_events.as_mut() {
@@ -1350,8 +1351,20 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
             core.recognition_pending(),
             active.is_some(),
         );
-        if let Err(message) = status_sound_runtime.poll(conversation_active) {
-            eprintln!("status sound playback disabled: {message}");
+        match status_sound_runtime.poll(conversation_active) {
+            Ok(true) if status_sound_activity.is_none() => {
+                status_sound_activity = input_controls.as_ref().map(|controls| {
+                    controls
+                        .begin_assistant_activity(0.65, InputDuringTtsPolicy::SuppressInput)
+                        .expect("balanced assistant threshold is valid")
+                });
+            }
+            Ok(false) => status_sound_activity = None,
+            Ok(true) => {}
+            Err(message) => {
+                status_sound_activity = None;
+                eprintln!("status sound playback disabled: {message}");
+            }
         }
 
         let Some(input) = receive_session_input(
@@ -2291,9 +2304,11 @@ fn stage_live_audio_delta(
 fn spokesperson_pcm_allowed(
     input_muted: bool,
     playback_active: bool,
+    status_sound_active: bool,
     input_policy: InputDuringTtsSnapshot,
 ) -> bool {
     !(input_muted
+        || status_sound_active
         || playback_active
             && input_policy.policy == berd_voice::input::InputDuringTtsPolicy::SuppressInput)
 }
@@ -3347,9 +3362,13 @@ fn run_expert_spokesperson_session(
             turn_gate.input_blocks_output(),
             active.is_some(),
         );
-        if let Err(message) = status_sound_runtime.poll(conversation_active) {
-            eprintln!("status sound playback disabled: {message}");
-        }
+        let status_sound_active = match status_sound_runtime.poll(conversation_active) {
+            Ok(active) => active,
+            Err(message) => {
+                eprintln!("status sound playback disabled: {message}");
+                false
+            }
+        };
 
         let Some(input) = receive_session_input(
             &control_rx,
@@ -3399,6 +3418,7 @@ fn run_expert_spokesperson_session(
                 if spokesperson_pcm_allowed(
                     input_muted,
                     active.is_some(),
+                    status_sound_active,
                     input_during_tts_slot
                         .as_ref()
                         .expect("hello initialized input policy")
@@ -7376,9 +7396,11 @@ mod tests {
         assert!(!spokesperson_pcm_allowed(
             false,
             true,
+            false,
             slot.snapshot().unwrap()
         ));
         assert!(spokesperson_pcm_allowed(
+            false,
             false,
             false,
             slot.snapshot().unwrap()
@@ -7386,7 +7408,16 @@ mod tests {
         assert!(!spokesperson_pcm_allowed(
             true,
             false,
+            false,
             slot.snapshot().unwrap()
+        ));
+        assert!(!spokesperson_pcm_allowed(
+            false,
+            false,
+            true,
+            InputDuringTtsSlot::new(InputDuringTtsPolicy::AllowBargeIn)
+                .snapshot()
+                .unwrap()
         ));
         let messages = messages(&output);
         assert_eq!(

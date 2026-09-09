@@ -1660,15 +1660,20 @@ float *berd_audio_file_load_mono_pcm(
             BerdSetError(errorOut, BerdError(41, @"Could not allocate decoded audio samples."));
             return NULL;
         }
-        AudioBufferList buffers = {0};
-        buffers.mNumberBuffers = 1;
-        buffers.mBuffers[0].mNumberChannels = channelCount;
-        buffers.mBuffers[0].mDataByteSize = capacity * channelCount * sizeof(float);
-        buffers.mBuffers[0].mData = samples;
-        UInt32 frameCount = capacity;
-        status = ExtAudioFileRead(file, &frameCount, &buffers);
+        uint32_t frameCount = 0;
+        while (frameCount < capacity) {
+            UInt32 requestedFrames = capacity - frameCount;
+            AudioBufferList buffers = {0};
+            buffers.mNumberBuffers = 1;
+            buffers.mBuffers[0].mNumberChannels = channelCount;
+            buffers.mBuffers[0].mDataByteSize = requestedFrames * channelCount * sizeof(float);
+            buffers.mBuffers[0].mData = samples + ((size_t)frameCount * channelCount);
+            status = ExtAudioFileRead(file, &requestedFrames, &buffers);
+            if (status != noErr || requestedFrames == 0) break;
+            frameCount += requestedFrames;
+        }
         ExtAudioFileDispose(file);
-        if (status != noErr || frameCount == 0) {
+        if (status != noErr || frameCount != capacity) {
             free(samples);
             BerdSetError(errorOut, BerdError(42, @"Could not decode the audio file."));
             return NULL;
