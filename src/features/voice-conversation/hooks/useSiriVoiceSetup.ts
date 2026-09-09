@@ -74,6 +74,7 @@ export interface SiriVoiceSetup {
   previewVoice: (voice: SiriVoice) => Promise<void>;
   selectVoice: (voice: SiriVoice) => Promise<void>;
   resetSettings: () => Promise<void>;
+  refreshSettings: () => Promise<void>;
 }
 
 export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
@@ -132,28 +133,36 @@ export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
     [],
   );
 
-  const refresh = useCallback(async (prefix: string) => {
-    const generation = ++statusRequestGenerationRef.current;
-    try {
-      const next = await getSiriVoiceStatus(prefix, { coalesce: true });
-      if (
-        statusRequestGenerationRef.current === generation &&
-        canonicalLocale(languageRef.current) === canonicalLocale(prefix)
-      ) {
-        setStatus(next);
-        setStatusError(null);
+  const refresh = useCallback(
+    async (prefix: string, propagateError = false) => {
+      const generation = ++statusRequestGenerationRef.current;
+      try {
+        const next = await getSiriVoiceStatus(prefix, { coalesce: true });
+        if (
+          statusRequestGenerationRef.current === generation &&
+          canonicalLocale(languageRef.current) === canonicalLocale(prefix)
+        ) {
+          setStatus(next);
+          setStatusError(null);
+        }
+        return next;
+      } catch (nextError) {
+        if (
+          statusRequestGenerationRef.current === generation &&
+          canonicalLocale(languageRef.current) === canonicalLocale(prefix)
+        ) {
+          setStatusError(String(nextError));
+        }
+        if (propagateError) throw nextError;
+        return null;
       }
-      return next;
-    } catch (nextError) {
-      if (
-        statusRequestGenerationRef.current === generation &&
-        canonicalLocale(languageRef.current) === canonicalLocale(prefix)
-      ) {
-        setStatusError(String(nextError));
-      }
-      return null;
-    }
-  }, []);
+    },
+    [],
+  );
+
+  const refreshSettings = useCallback(async () => {
+    await refresh(language, true);
+  }, [language, refresh]);
 
   useEffect(() => {
     if (!enabled || !window.__TAURI_INTERNALS__) {
@@ -346,6 +355,7 @@ export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
     previewVoice,
     selectVoice,
     resetSettings,
+    refreshSettings,
   };
 }
 

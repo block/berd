@@ -260,6 +260,7 @@ function siriSetup(): SiriVoiceSetup {
     previewVoice: vi.fn(),
     selectVoice: vi.fn(),
     resetSettings: openAiApiMocks.resetSiri,
+    refreshSettings: vi.fn(() => Promise.resolve()),
   };
 }
 
@@ -378,6 +379,7 @@ describe("VoiceSettings", () => {
 
     expect(openAiApiMocks.resetAll).toHaveBeenCalledOnce();
     expect(setupState.current?.refreshSettings).toHaveBeenCalledOnce();
+    expect(siriSetupState.current?.refreshSettings).toHaveBeenCalledOnce();
     expect(preferenceMocks.setInputBackend).toHaveBeenCalledWith("macos");
     expect(preferenceMocks.setOutputBackend).toHaveBeenCalledWith("siri");
     expect(preferenceMocks.setInterruptionMode).toHaveBeenCalledWith(
@@ -457,6 +459,40 @@ describe("VoiceSettings", () => {
 
     expect(refreshSettings).toHaveBeenCalledTimes(2);
     expect(openAiApiMocks.resetAll).toHaveBeenCalledTimes(2);
+    expect(preferenceMocks.setMode).toHaveBeenCalledWith("chained");
+  });
+
+  it("refreshes mounted Apple controls before completing reset", async () => {
+    outputState.backend = "siri";
+    const refreshSettings = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Could not refresh Apple settings"))
+      .mockResolvedValue(undefined);
+    if (!siriSetupState.current) throw new Error("expected Siri setup");
+    siriSetupState.current = { ...siriSetupState.current, refreshSettings };
+    renderWithProviders(<VoiceSettings />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Reset to defaults" }));
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Reset to defaults",
+      }),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not refresh Apple settings",
+    );
+    expect(preferenceMocks.setMode).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Reset to defaults" }));
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Reset to defaults",
+      }),
+    );
+
+    expect(refreshSettings).toHaveBeenCalledTimes(2);
     expect(preferenceMocks.setMode).toHaveBeenCalledWith("chained");
   });
 

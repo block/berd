@@ -149,6 +149,22 @@ describe("Siri voice locales", () => {
     expect(result.current.statusError).toBeNull();
   });
 
+  it("reports and propagates an explicit settings refresh failure", async () => {
+    apiMocks.getSiriVoiceStatus
+      .mockResolvedValueOnce(status("en-US", "Aaron"))
+      .mockRejectedValueOnce(new Error("Apple status unavailable"));
+    const { result } = renderHook(() => useSiriVoiceSetup(true));
+    await waitFor(() =>
+      expect(result.current.status?.selectedVoice?.name).toBe("Aaron"),
+    );
+
+    await expect(
+      act(async () => {
+        await result.current.refreshSettings();
+      }),
+    ).rejects.toThrow("Apple status unavailable");
+  });
+
   it("selects the exact Siri voice after its download completes", async () => {
     const initialStatus = status("en-US", "Aaron");
     apiMocks.getSiriVoiceStatus.mockResolvedValue(initialStatus);

@@ -227,6 +227,7 @@ export function VoiceSettings() {
     try {
       await resetAllVoiceBackendSettings();
       await setup.refreshSettings();
+      await siriSetup.refreshSettings();
       setRealtimeVoicePreference(getDefaultRealtimeVoicePreference());
       input.setBackend(getDefaultVoiceInputBackend(macSpeechAvailable));
       output.setBackend(getDefaultVoiceOutputBackend());
