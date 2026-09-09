@@ -25,6 +25,10 @@ test.beforeAll(async () => {
               import '/src/shared/styles/globals.css';
               await i18n.changeLanguage(new URLSearchParams(location.search).get('lang') || 'en');
               await i18n.loadNamespaces('chat');
+              if (new URLSearchParams(location.search).has('longTitle')) {
+                i18n.addResource('es', 'chat', 'remoteSessionUnavailable.title', 'Esta sesión remota ya no está disponible y no puedes continuar enviando mensajes en este chat');
+                document.documentElement.style.fontSize = '32px';
+              }
               createRoot(document.getElementById('root')).render(React.createElement(RemoteSessionUnavailableNotice));
             </script></body></html>`,
               ),
@@ -36,6 +40,30 @@ test.beforeAll(async () => {
   });
   await server.listen();
   url = `${server.resolvedUrls?.local[0]}unavailable-session`;
+});
+
+test("long translated title reflows with enlarged text", async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 800 });
+  await page.goto(`${url}?lang=es&longTitle=1`);
+  const title = page.locator('[data-slot="alert-title"]');
+  await expect(title).toHaveText(
+    "Esta sesión remota ya no está disponible y no puedes continuar enviando mensajes en este chat",
+  );
+  const dimensions = await title.evaluate((el) => ({
+    height: el.clientHeight,
+    contentHeight: el.scrollHeight,
+    width: el.clientWidth,
+    contentWidth: el.scrollWidth,
+    lineHeight: Number.parseFloat(getComputedStyle(el).lineHeight),
+  }));
+  expect(dimensions.height).toBeGreaterThan(dimensions.lineHeight);
+  expect(dimensions.contentHeight).toBeLessThanOrEqual(dimensions.height);
+  expect(dimensions.contentWidth).toBeLessThanOrEqual(dimensions.width);
+  expect(
+    await page
+      .getByRole("status")
+      .evaluate((el) => el.scrollWidth <= el.clientWidth),
+  ).toBe(true);
 });
 test.afterAll(async () => {
   await server?.close();
