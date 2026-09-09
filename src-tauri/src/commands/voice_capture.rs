@@ -83,6 +83,7 @@ pub struct VoiceTelemetryEndRequest {
 }
 
 struct ActiveVoiceTelemetry {
+    owner_window_label: String,
     owner_renderer_id: String,
     owner_renderer_epoch: u64,
     input_backend: VoiceTelemetryBackend,
@@ -190,6 +191,14 @@ impl CaptureState {
             } else {
                 self.microphone_owner = None;
             }
+        }
+        if let Some(active) = self
+            .active_voice_telemetry
+            .as_mut()
+            .filter(|active| active.owner_window_label == window_label)
+        {
+            active.owner_renderer_id = renderer_id.to_string();
+            active.owner_renderer_epoch = renderer_epoch;
         }
         self.pending_renderers.remove(window_label);
         Ok(())
@@ -398,6 +407,7 @@ impl VoiceCaptureState {
             return Ok(false);
         }
         state.active_voice_telemetry = Some(ActiveVoiceTelemetry {
+            owner_window_label: window_label.to_string(),
             owner_renderer_id: request.renderer_id,
             owner_renderer_epoch: request.renderer_epoch,
             input_backend: request.input_backend,
@@ -641,6 +651,56 @@ mod tests {
             .expect("claim end")
             .expect("completed telemetry");
         assert_eq!(completed.user_utterance_count, 0);
+    }
+
+    #[test]
+    fn voice_telemetry_follows_replacement_renderer_and_rejects_stale_updates() {
+        let capture = VoiceCaptureState::default();
+        let first_epoch = capture.register_renderer_for_test("main", "renderer-1");
+        capture
+            .start_voice_telemetry(
+                "main",
+                VoiceTelemetryStartRequest {
+                    renderer_id: "renderer-1".into(),
+                    renderer_epoch: first_epoch,
+                    input_backend: VoiceTelemetryBackend::Macos,
+                    output_backend: VoiceTelemetryBackend::Siri,
+                    voice_mode: VoiceTelemetryMode::Chained,
+                },
+            )
+            .expect("start telemetry");
+        let first = VoiceTelemetryOwnerRequest {
+            renderer_id: "renderer-1".into(),
+            renderer_epoch: first_epoch,
+        };
+        capture
+            .update_voice_telemetry(&first, |active| {
+                active.user_utterance_count += 1;
+                active.reportable = true;
+            })
+            .expect("first utterance");
+        let second_epoch = capture.register_renderer_for_test("main", "renderer-2");
+        capture
+            .activate_renderer("main", "renderer-2", second_epoch)
+            .expect("reload");
+        capture
+            .update_voice_telemetry(
+                &VoiceTelemetryOwnerRequest {
+                    renderer_id: "renderer-2".into(),
+                    renderer_epoch: second_epoch,
+                },
+                |active| active.user_utterance_count += 1,
+            )
+            .expect("resumed utterance");
+        capture
+            .update_voice_telemetry(&first, |active| active.user_utterance_count += 1)
+            .expect("ignore stale renderer");
+        let completed = capture
+            .end_voice_telemetry(VoiceTelemetryEndReason::User)
+            .expect("end")
+            .expect("aggregate");
+        assert_eq!(completed.user_utterance_count, 2);
+        assert!(completed.reportable);
     }
 
     #[test]
