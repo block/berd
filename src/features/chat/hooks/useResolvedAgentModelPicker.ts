@@ -521,7 +521,7 @@ export function useResolvedAgentModelPicker({
           harnessId: targetAgentId,
           modelId,
         });
-        return;
+        return false;
       }
       const nextTarget = targetFromAgentModelSelection(targetAgentId, {
         modelProviderId: nextModelProviderId,
@@ -529,7 +529,7 @@ export function useResolvedAgentModelPicker({
         modelName,
       });
       if (!isModelExecutionTarget(nextTarget)) {
-        return;
+        return false;
       }
       const nextModelSelection: PreferredModelSelection = {
         id: modelId,
@@ -543,11 +543,20 @@ export function useResolvedAgentModelPicker({
         providerId: nextModelProviderId,
       };
 
+      if (
+        !sessionId &&
+        targetAgentId === selectedAgentId &&
+        modelId === effectiveModelSelection?.id &&
+        nextModelProviderId === effectiveModelSelection?.modelProviderId
+      ) {
+        return false;
+      }
+
       if (!sessionId) {
         setPendingExecutionTarget(nextTarget);
         setGlobalSelectedProvider(targetAgentId);
         setPendingModelSelection(nextModelSelection);
-        return;
+        return true;
       }
 
       // No-op guard: if the selected model/provider already matches the
@@ -558,7 +567,7 @@ export function useResolvedAgentModelPicker({
         !session ||
         sameSessionExecutionTarget(session.executionTarget, nextTarget)
       ) {
-        return;
+        return false;
       }
 
       selectionVersionRef.current += 1;
@@ -583,7 +592,7 @@ export function useResolvedAgentModelPicker({
           previousTarget,
           preferenceAgentId: targetAgentId,
         });
-        return;
+        return true;
       }
 
       beginModelSelectionIntent(sessionId, {
@@ -672,6 +681,8 @@ export function useResolvedAgentModelPicker({
           });
         }
       })();
+      // Acceptance is synchronous; backend preparation keeps its existing rollback.
+      return true;
     },
   });
 

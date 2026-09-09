@@ -495,6 +495,7 @@ export function GlobalComposerPill({
       setProviderOverride(agentId);
       setModelOverride(selection);
       setSelectedProvider(agentId);
+      return true;
     },
   });
 

@@ -14,7 +14,7 @@ interface UseAgentModelPickerStateOptions {
   providers: AcpProvider[];
   selectedProvider?: string;
   onProviderSelected: (providerId: string, models: ModelOption[]) => void;
-  onModelSelected?: (model: ModelOption, agentId?: string) => void;
+  onModelSelected?: (model: ModelOption, agentId?: string) => boolean;
 }
 
 export function useAgentModelPickerState({
@@ -191,7 +191,7 @@ export function useAgentModelPickerState({
         agentId !== selectedAgentId &&
         !readyAgentIds.has(agentId)
       ) {
-        return;
+        return false;
       }
       const selectedModel =
         selectedModelOverride ??
@@ -207,9 +207,9 @@ export function useAgentModelPickerState({
         recommended: selectedModel?.recommended,
       };
       if (agentId) {
-        onModelSelected?.(selectedModelOption, agentId);
+        return onModelSelected?.(selectedModelOption, agentId) ?? false;
       } else {
-        onModelSelected?.(selectedModelOption);
+        return onModelSelected?.(selectedModelOption) ?? false;
       }
     },
     [availableModels, onModelSelected, readyAgentIds, selectedAgentId],
