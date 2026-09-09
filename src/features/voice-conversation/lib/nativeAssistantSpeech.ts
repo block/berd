@@ -1486,7 +1486,7 @@ export function startNativeAssistantSpeech(
       ).length;
       const priorToolCount = toolCountByMessage.get(message.id) ?? 0;
       const crossedToolBoundary = toolCount > priorToolCount;
-      const completed =
+      const completionPending =
         message.metadata?.completionStatus === "completed" &&
         !handledCompletionMessages.has(message.id);
       let textOrdinal = 0;
@@ -1645,7 +1645,9 @@ export function startNativeAssistantSpeech(
         interruptedMessages.has(message.id) ||
         invalidatedMessages.has(message.id);
       toolCountByMessage.set(message.id, toolCount);
-      let completionHandled = completed && messageCannotSpeak;
+      const completionHandled =
+        completionPending &&
+        (messageCannotSpeak || Boolean(utteranceOwnsMessage));
       if (
         crossedToolBoundary &&
         utterance &&
@@ -1660,12 +1662,11 @@ export function startNativeAssistantSpeech(
         );
       }
       if (
-        completed &&
+        completionPending &&
         utterance &&
         utteranceOwnsMessage &&
         !utterance.nativeStartQueued
       ) {
-        completionHandled = true;
         for (const target of utterance.targets) {
           heldSpeech?.targets.delete(targetKey(target));
         }
@@ -1675,12 +1676,11 @@ export function startNativeAssistantSpeech(
         }
         activeUtterance = null;
       } else if (
-        completed &&
+        completionPending &&
         utterance &&
         utteranceOwnsMessage &&
         !utterance.finishing
       ) {
-        completionHandled = true;
         utterance.finishing = true;
         queueStreamCommand(
           utterance,

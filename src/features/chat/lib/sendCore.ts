@@ -414,6 +414,11 @@ export async function dispatchPrompt(
     }
   };
 
+  const finishPromptAfterTranscriptSettles = async () => {
+    await settlePromptTranscriptDelivery(sessionId);
+    finishPromptSuccessfully();
+  };
+
   const completeRealtimeTurnIfActive = async (prompt: string) => {
     const shouldCoordinateAtCompletion =
       shouldCoordinateRealtime ||
@@ -425,7 +430,6 @@ export async function dispatchPrompt(
     ) {
       return;
     }
-    await settlePromptTranscriptDelivery(sessionId);
     if (
       assistantTextBeforeTurn &&
       !finalMasterTextSince(sessionId, assistantTextBeforeTurn)
@@ -550,8 +554,7 @@ export async function dispatchPrompt(
       );
     }
 
-    await settlePromptTranscriptDelivery(sessionId);
-    finishPromptSuccessfully();
+    await finishPromptAfterTranscriptSettles();
     try {
       await completeRealtimeTurnIfActive(acpPrompt);
     } catch (error) {
@@ -563,7 +566,7 @@ export async function dispatchPrompt(
       userMessageMetadata?.origin === "voice_conversation" &&
       isVoiceConversationEmptyResponse(formatAcpErrorMessage(err));
     if (isVoiceConversationNoop) {
-      finishPromptSuccessfully();
+      await finishPromptAfterTranscriptSettles();
       try {
         await completeRealtimeTurnIfActive(dispatchedPrompt);
       } catch (error) {
