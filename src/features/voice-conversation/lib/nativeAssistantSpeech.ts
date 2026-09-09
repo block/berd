@@ -46,6 +46,7 @@ import {
   type VoiceInterruptionSensitivity,
 } from "./voiceInterruptionPreference";
 import { getVoiceOutputBackend } from "./voiceOutputPreference";
+import { trackVoiceAssistantResponse } from "./voiceTelemetry";
 import { useVoiceConversationStore } from "../stores/voiceConversationStore";
 
 type SpeechFailureHandler = (text: string, error: unknown) => void;
@@ -1692,6 +1693,7 @@ export function startNativeAssistantSpeech(
       // create an utterance for it.
       if (completionHandled) {
         handledCompletionMessages.add(message.id);
+        trackVoiceAssistantResponse();
       }
     }
   };

@@ -18,7 +18,11 @@ const mocks = vi.hoisted(() => ({
   start: vi.fn(),
   stop: vi.fn(),
   stopForReplacement: vi.fn(),
+  clearRequestedEnd: vi.fn(),
+  requestEnd: vi.fn(),
+  trackEnded: vi.fn(),
   trackStarted: vi.fn(),
+  trackUserUtterance: vi.fn(),
 }));
 
 vi.mock("../api/voiceConversation", () => ({
@@ -37,7 +41,11 @@ vi.mock("../api/voiceConversation", () => ({
 }));
 
 vi.mock("../lib/voiceTelemetry", () => ({
+  clearRequestedVoiceConversationEnd: mocks.clearRequestedEnd,
+  requestVoiceConversationEnd: mocks.requestEnd,
+  trackVoiceConversationEnded: mocks.trackEnded,
   trackVoiceConversationStarted: mocks.trackStarted,
+  trackVoiceUserUtterance: mocks.trackUserUtterance,
 }));
 
 function status(
@@ -78,7 +86,11 @@ describe("voice conversation store lifecycle ordering", () => {
     mocks.start.mockReset();
     mocks.stop.mockReset();
     mocks.stopForReplacement.mockReset();
+    mocks.clearRequestedEnd.mockReset();
+    mocks.requestEnd.mockReset();
+    mocks.trackEnded.mockReset();
     mocks.trackStarted.mockReset();
+    mocks.trackUserUtterance.mockReset();
     mocks.listen.mockReset().mockImplementation(async (callback) => {
       emit = callback;
       return vi.fn();

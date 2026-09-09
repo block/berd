@@ -37,7 +37,7 @@ const TELEMETRY_BOOTSTRAP_PATH: &str = "/v1/bootstrap";
 // lost because the renderer's `BatchLogRecordProcessor` drops it.
 // `/v1/bootstrap` does not read it.
 const TELEMETRY_SCHEMA_VERSION_HEADER: &str = "x-berd-schema-version";
-const TELEMETRY_SCHEMA_VERSION: &str = "berd-otlp-logs-v2";
+const TELEMETRY_SCHEMA_VERSION: &str = "berd-otlp-logs-v3";
 
 // Telemetry-gateway host allowlist. The renderer's OTLP endpoint is
 // build-injected from VITE_OTLP_LOGS_ENDPOINT (see vite.config.ts) and must

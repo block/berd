@@ -18,7 +18,14 @@ import {
   type VoiceConversationStatus,
 } from "../api/voiceConversation";
 import type { VoiceInputBackend } from "../lib/voiceInputPreference";
-import { trackVoiceConversationStarted } from "../lib/voiceTelemetry";
+import { getVoiceOutputBackend } from "../lib/voiceOutputPreference";
+import {
+  clearRequestedVoiceConversationEnd,
+  requestVoiceConversationEnd,
+  trackVoiceConversationEnded,
+  trackVoiceConversationStarted,
+  trackVoiceUserUtterance,
+} from "../lib/voiceTelemetry";
 
 export type VoiceConversationUiState =
   | "off"
@@ -193,6 +200,7 @@ async function deliverTranscriptOnce(
         result.reason instanceof VoiceTranscriptDeferredError,
     );
     if (accepted) {
+      trackVoiceUserUtterance();
       rememberDeliveredTranscript(key);
       await acknowledgeVoiceConversationTranscript(transcript);
       priorFinalizedTranscriptKeys.delete(key);
@@ -369,6 +377,14 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
           if (!shouldApplyEventRevision(get().status, event.revision)) return;
 
           if (event.type === "user") observeFinalizedTranscript(event);
+
+          if (event.type === "cleanShutdown") {
+            trackVoiceConversationEnded("clean-shutdown");
+          } else if (event.type === "controlsDismissed") {
+            trackVoiceConversationEnded("controls-dismissed");
+          } else if (event.type === "error" && event.terminal) {
+            trackVoiceConversationEnded("error");
+          }
 
           if (event.type === "microphoneMute") {
             microphoneMuteIntent += 1;
@@ -656,7 +672,11 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
             inputBackend,
             foregroundGeneration,
           );
-          trackVoiceConversationStarted();
+          trackVoiceConversationStarted({
+            inputBackend,
+            outputBackend: getVoiceOutputBackend(),
+            voiceMode: "chained",
+          });
           set((state) =>
             shouldApplyResponseRevision(state.status, status.revision) ||
             (status.revision === state.status.revision &&
@@ -748,6 +768,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
       microphoneMuteIntent += 1;
       microphoneMuteStateVersion += 1;
       const activeStatus = get().status;
+      requestVoiceConversationEnd("user");
       set({
         uiState: "stopping",
         microphoneMuted: false,
@@ -757,6 +778,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
       const request = (async () => {
         try {
           const status = await stopVoiceConversation(activeStatus);
+          trackVoiceConversationEnded("user");
           set((state) =>
             shouldApplyResponseRevision(state.status, status.revision) ||
             (status.revision === state.status.revision &&
@@ -772,6 +794,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
           await reconcileVoiceConversationMicrophone(get().status);
           return status;
         } catch (error) {
+          clearRequestedVoiceConversationEnd();
           const message =
             error instanceof Error ? error.message : String(error);
           try {
@@ -797,6 +820,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
     },
 
     stopForReplacement: async (activeStatus, targetSessionId) => {
+      requestVoiceConversationEnd("replacement");
       microphoneMuteIntent += 1;
       microphoneMuteStateVersion += 1;
       set({
@@ -810,6 +834,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
           activeStatus,
           targetSessionId,
         );
+        trackVoiceConversationEnded("replacement");
         set((state) =>
           shouldApplyResponseRevision(state.status, status.revision) ||
           (status.revision === state.status.revision &&
@@ -826,6 +851,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
         await reconcileVoiceConversationMicrophone(get().status);
         return status;
       } catch (error) {
+        clearRequestedVoiceConversationEnd();
         const message = error instanceof Error ? error.message : String(error);
         try {
           const muteStateVersion = microphoneMuteStateVersion;
