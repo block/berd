@@ -90,6 +90,8 @@ export interface ChatSession {
   creationState?: "pending" | "failed";
   creationError?: string;
   pinnedLoadState?: "loading" | "failed";
+  /** Transient UI state; not a durable history or remote identity record. */
+  remoteSessionUnavailable?: boolean;
   clientSessionId?: string;
   intent?: "build-agent" | null;
   agentBuilderOpen?: boolean;

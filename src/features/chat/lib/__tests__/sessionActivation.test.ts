@@ -1148,6 +1148,33 @@ describe("loadSessionMessages", () => {
   });
 
   describe("remote sessions", () => {
+    it.each([
+      false,
+      true,
+    ])("handles missing remote sessions with an optional memory cache (%s)", async (cached) => {
+      seedSession(
+        {
+          id: "remote-gone",
+          remoteHost: "devbox",
+          workingDir: "/remote/project",
+        },
+        { replay: false },
+      );
+      const messages = cached ? [replayUserMessage()] : [];
+      useChatStore.getState().setMessages("remote-gone", messages);
+      acpLoadSession.mockRejectedValue(new Error("Session not found: old-id"));
+      await expect(
+        loadSessionMessages("remote-gone", { force: true }),
+      ).resolves.toBe(false);
+      expect(messagesFor("remote-gone")).toEqual(messages);
+      expect(
+        useChatSessionStore.getState().getSession("remote-gone")
+          ?.remoteSessionUnavailable,
+      ).toBe(true);
+      acpLoadSession.mockClear();
+      await expect(loadSessionMessages("remote-gone")).resolves.toBe(false);
+      expect(acpLoadSession).not.toHaveBeenCalled();
+    });
     it("passes the remote workingDir through verbatim and skips local checks", async () => {
       seedSession({
         id: "s-remote",
@@ -1174,7 +1201,7 @@ describe("loadSessionMessages", () => {
       expect(ensureRemoteHostConnected).not.toHaveBeenCalled();
     });
 
-    it("surfaces a failed host connection as the standard load failure", async () => {
+    it("leaves failed host connections to the reconnect banner", async () => {
       ensureRemoteHostConnected.mockRejectedValue(
         new Error("ssh tunnel failed"),
       );
@@ -1190,9 +1217,11 @@ describe("loadSessionMessages", () => {
       await expect(loadSessionMessages("s-remote-down")).resolves.toBe(false);
 
       expect(acpLoadSession).not.toHaveBeenCalled();
-      const error = notificationFromLastMessage("s-remote-down");
-      expect(error.notificationType).toBe("error");
-      expect(error.text).toBe("ssh tunnel failed");
+      expect(messagesFor("s-remote-down")).toEqual([]);
+      expect(
+        useChatSessionStore.getState().getSession("s-remote-down")
+          ?.remoteSessionUnavailable,
+      ).toBeUndefined();
       expect(
         useChatStore.getState().loadingSessionIds.has("s-remote-down"),
       ).toBe(false);

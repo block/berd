@@ -42,7 +42,14 @@ function Alert({
   );
 }
 
-function AlertTitle({ className, ...props }: React.ComponentProps<"div">) {
+function AlertTitle({
+  className,
+  wrap = false,
+  ...props
+}: React.ComponentProps<"div"> & {
+  /** Keep important or localized titles fully visible at constrained widths. */
+  wrap?: boolean;
+}) {
   return (
     <div
       {...getDesignSystemMetadata({
@@ -53,7 +60,8 @@ function AlertTitle({ className, ...props }: React.ComponentProps<"div">) {
       })}
       data-slot="alert-title"
       className={cn(
-        "font-display col-start-2 line-clamp-1 min-h-4 font-semibold tracking-[-0.01em]",
+        "font-display col-start-2 min-h-4 font-semibold tracking-[-0.01em]",
+        wrap ? "min-w-0 break-words" : "line-clamp-1",
         className,
       )}
       {...props}

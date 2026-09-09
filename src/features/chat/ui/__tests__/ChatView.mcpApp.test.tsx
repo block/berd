@@ -20,8 +20,11 @@ import { useSecurityConfirmationStore } from "@/features/security/stores/securit
 import { DEFAULT_RUNTIME_CONFIG } from "@/shared/runtime-config/schema";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import { ChatView } from "../ChatView";
+import { isQueuedMessageTargetAttemptable } from "../../lib/queuedMessageAttemptOwnership";
+import type { QueuedMessageRecord } from "../../stores/chatStore";
 
 const mocks = vi.hoisted(() => ({
+  sessions: [] as ChatSession[],
   messageTimelineSpy: vi.fn(),
   chatInputSpy: vi.fn(),
   chatRightRailSpy: vi.fn(),
@@ -324,6 +327,7 @@ vi.mock("../../hooks/useChatSessionController", () => ({
 vi.mock("../../stores/chatSessionStore", () => ({
   useChatSessionStore: (selector: (state: unknown) => unknown) =>
     selector({
+      sessions: mocks.sessions,
       activeWorkspaceBySession: mocks.activeWorkspaceBySession,
       isRightRailOpen: mocks.isRightRailOpen,
       setRightRailOpen: mocks.setRightRailOpen,
@@ -444,6 +448,7 @@ describe("ChatView MCP app messaging", () => {
   });
 
   beforeEach(() => {
+    mocks.sessions = [];
     mocks.messageTimelineSpy.mockClear();
     mocks.chatInputSpy.mockClear();
     mocks.chatRightRailSpy.mockClear();
@@ -591,7 +596,7 @@ describe("ChatView MCP app messaging", () => {
     expect(screen.getAllByTestId("artifact-policy-provider")).toHaveLength(1);
   });
 
-  it("keys the artifact policy provider by the controller's effective session, not the requested id", () => {
+  it("keys the artifact policy provider by the selected replacement session, not the requested id", () => {
     // During session replacement/reconciliation the requested sessionId can
     // briefly disagree with the session snapshot the controller serves. The
     // provider governs filesystem policy and viewer-store identity for its
@@ -616,7 +621,10 @@ describe("ChatView MCP app messaging", () => {
     render(
       <ChatView
         sessionId="session-requested"
-        activeSession={chatSessionWithWorkingDir("/tmp/project")}
+        activeSession={{
+          ...chatSessionWithWorkingDir("/tmp/project"),
+          id: "session-effective",
+        }}
       />,
     );
 
@@ -659,7 +667,10 @@ describe("ChatView MCP app messaging", () => {
     const { unmount } = render(
       <ChatView
         sessionId="session-requested"
-        activeSession={chatSessionWithWorkingDir("/tmp/project")}
+        activeSession={{
+          ...chatSessionWithWorkingDir("/tmp/project"),
+          id: "session-effective",
+        }}
       />,
     );
 
@@ -682,7 +693,10 @@ describe("ChatView MCP app messaging", () => {
     render(
       <ChatView
         sessionId="session-requested"
-        activeSession={chatSessionWithWorkingDir("/tmp/project")}
+        activeSession={{
+          ...chatSessionWithWorkingDir("/tmp/project"),
+          id: "session-effective",
+        }}
       />,
     );
     const chatColumnAfter = document.querySelector(
@@ -734,6 +748,87 @@ describe("ChatView MCP app messaging", () => {
     expect(timelineProps.messages).toBe(completeMessages);
     expect(timelineProps.messages).toHaveLength(12);
     expect(timelineProps.rendererPolicy).toBe("auto");
+  });
+
+  it("shows an unavailable state without restore actions or activity signaling", () => {
+    render(
+      <ChatView
+        sessionId="session-1"
+        activeSession={{
+          ...chatSessionWithWorkingDir("/remote/project"),
+          remoteHost: "remote-server",
+          remoteSessionUnavailable: true,
+        }}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "remoteSessionUnavailable.title",
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "remoteSessionUnavailable.description",
+    );
+    expect(mocks.useChatSessionController).toHaveBeenLastCalledWith(
+      expect.objectContaining({ readOnly: true }),
+    );
+    expect(
+      screen.queryByRole("button", { name: /restore|copy/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [true, false],
+    [false, false],
+    [true, true],
+    [false, true],
+  ])("uses the current whole session (unavailable=%s, replacement=%s)", (unavailable, replacement) => {
+    const current: ChatSession = {
+      ...chatSessionWithWorkingDir("/remote/current"),
+      id: replacement ? "replacement-session" : "session-1",
+      remoteHost: "remote-server",
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "openai",
+        modelId: "test-model",
+        modelName: "Test model",
+      },
+      ...(unavailable ? { remoteSessionUnavailable: true } : {}),
+    };
+    mocks.sessions = replacement
+      ? [
+          {
+            ...current,
+            id: "session-1",
+            remoteSessionUnavailable: !unavailable,
+          },
+          current,
+        ]
+      : [current];
+    mocks.useChatSessionController.mockReturnValue({
+      ...mocks.useChatSessionController(),
+      session: current,
+    });
+    render(
+      <ChatView
+        sessionId="session-1"
+        activeSession={{ ...current, remoteSessionUnavailable: !unavailable }}
+      />,
+    );
+    expect(Boolean(screen.queryByText("remoteSessionUnavailable.title"))).toBe(
+      unavailable,
+    );
+    expect(mocks.useChatSessionController).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sessionId: current.id, readOnly: unavailable }),
+    );
+    expect(
+      isQueuedMessageTargetAttemptable(
+        { kind: "transport-ready", editing: false } as QueuedMessageRecord,
+        current,
+      ),
+    ).toBe(!unavailable);
+    expect(screen.getByTestId("artifact-viewer-panel")).toHaveAttribute(
+      "data-session-id",
+      current.id,
+    );
   });
 
   it("does not pass fork-from-message in read-only mode", () => {
@@ -800,6 +895,61 @@ describe("ChatView MCP app messaging", () => {
       className?: string;
     };
     expect(chatInputProps.className).toBeUndefined();
+  });
+
+  it("shows and resolves security confirmation for the selected replacement", () => {
+    const replacement = {
+      ...chatSessionWithWorkingDir("/remote/project"),
+      id: "replacement",
+    };
+    const resolve = vi.fn();
+    mocks.sessions = [replacement];
+    useSecurityConfirmationStore.setState({
+      pendingBySessionId: {
+        replacement: [
+          {
+            request: {
+              sessionId: "replacement",
+              options: [
+                { optionId: "allow", kind: "allow_once", name: "Allow" },
+              ],
+            } as never,
+            title: "Replacement confirmation",
+            command: null,
+            alertText: "Replacement alert",
+            resolve,
+            inferredExplanation: { status: "idle" },
+          },
+        ],
+      },
+    });
+    render(<ChatView sessionId="old-session" activeSession={replacement} />);
+    expect(screen.getByText("Replacement alert")).toBeInTheDocument();
+    expect(
+      useSecurityConfirmationStore.getState().mountedSurfaceCountBySessionId
+        .replacement,
+    ).toBe(1);
+    expect(
+      useSecurityConfirmationStore.getState().mountedSurfaceCountBySessionId[
+        "old-session"
+      ],
+    ).toBeUndefined();
+    expect(
+      mocks.chatInputSpy.mock.calls
+        .at(-1)?.[0]
+        .composerActions.onSend("blocked"),
+    ).toBe(false);
+    fireEvent.click(
+      screen.getByRole("button", { name: "securityConfirmation.allow" }),
+    );
+    expect(resolve).toHaveBeenCalledOnce();
+    expect(
+      useSecurityConfirmationStore.getState().pendingBySessionId.replacement ??
+        [],
+    ).toHaveLength(0);
+    expect(
+      mocks.chatInputSpy.mock.calls.at(-1)?.[0].composerActions.onSend("ready"),
+    ).toBe(true);
   });
 
   it("blocks and hides composer, queue, MCP, and voice delivery while security confirmation is pending", () => {

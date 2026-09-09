@@ -19,6 +19,11 @@ function getErrorMessage(error: unknown): string {
   return "";
 }
 
+/** Match Goose's missing-session detail, not unrelated missing resources. */
+export function isAcpSessionNotFoundError(error: unknown): boolean {
+  return /^Session not found:\s*\S+/i.test(formatAcpErrorMessage(error, ""));
+}
+
 function stringifyData(data: unknown): string {
   try {
     return JSON.stringify(data);

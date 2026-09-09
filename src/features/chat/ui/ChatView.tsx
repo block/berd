@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next";
 import { ChatSearchBar } from "./ChatSearchBar";
 import { ChatTranscriptSurface } from "./ChatTranscriptSurface";
 import { RemoteHostConnectionBanner } from "./RemoteHostConnectionBanner";
+import { RemoteSessionUnavailableNotice } from "./RemoteSessionUnavailableNotice";
 import { LoadingBerd } from "./LoadingBerd";
 import { ChatRightRail } from "./ChatRightRail";
 import {
@@ -111,9 +112,9 @@ interface ChatViewProps {
 }
 
 export function ChatView({
-  sessionId,
+  sessionId: requestedSessionId,
   activeSession,
-  readOnlyStatus,
+  readOnlyStatus: assertedReadOnlyStatus,
   onCreatePersona,
   onCreateProject,
   onOpenProjectSettings,
@@ -128,7 +129,27 @@ export function ChatView({
   onAgentBuilderCompleted,
 }: ChatViewProps) {
   const { t } = useTranslation("chat");
-  useRegisterSecurityConfirmationSurface(sessionId);
+  const targetSessionId = activeSession?.id ?? requestedSessionId;
+  const storedSession = useChatSessionStore(
+    (state) =>
+      state.sessions?.find((session) => session.id === targetSessionId) ?? null,
+  );
+  // Resolve the entire snapshot, not individual flags from different revisions.
+  // The controller and queue also read the current store record for this id.
+  const selectedSession = storedSession ?? activeSession ?? null;
+  // All session-addressed children, including security, voice and terminal,
+  // must follow the selected replacement rather than the stale requested id.
+  const sessionId = selectedSession?.id ?? requestedSessionId;
+  const selectedSessionId = sessionId;
+  const remoteSessionUnavailable = Boolean(
+    selectedSession?.remoteSessionUnavailable,
+  );
+  const readOnlyStatus =
+    assertedReadOnlyStatus ??
+    (remoteSessionUnavailable
+      ? t("remoteSessionUnavailable.description")
+      : undefined);
+  useRegisterSecurityConfirmationSurface(selectedSessionId);
   const mountStart = useRef(performance.now());
   const terminalRootRef = useRef<HTMLDivElement | null>(null);
   const chatColumnRef = useRef<HTMLDivElement | null>(null);
@@ -147,8 +168,8 @@ export function ChatView({
   const composerBinding = useConversationComposerBinding({
     target: {
       kind: "existingSession",
-      sessionId,
-      sessionSnapshot: activeSession,
+      sessionId: selectedSessionId,
+      sessionSnapshot: selectedSession,
       readOnlyReason: readOnlyStatus,
     },
     onCreatePersonaRequested: onCreatePersona,
@@ -204,10 +225,9 @@ export function ChatView({
     sessionId,
   ]);
   const workspaceRepository = useWorkspaceRepository();
-  const effectiveSession = controller.session ?? activeSession ?? null;
-  // The effective session identity: during session replacement or
-  // reconciliation the requested sessionId can briefly disagree with the
-  // snapshot the controller serves. Every artifact-store read/write and
+  const effectiveSession = selectedSession;
+  // During replacement the supplied snapshot can already have the new id.
+  // The composer/controller target and every artifact-store read/write and
   // every layout decision derived from viewer state must use THIS id, so
   // the panel, the policy provider, and the width math all describe the
   // same store entry. (Audited: all useOpenArtifact call sites in ChatView.)
@@ -673,7 +693,8 @@ export function ChatView({
 
   // The composer is owned by the timeline so it stays mounted across loading,
   // empty, and populated states without losing focus or draft text.
-  const footerStatus = composerHandoffActive ? null : readOnlyStatus ? (
+  const hideFooterStatus = composerHandoffActive || remoteSessionUnavailable;
+  const footerStatus = hideFooterStatus ? null : readOnlyStatus ? (
     <div
       className={cn(
         "chat-response-status-enter flex h-8 items-center gap-2 px-3 text-sm",
@@ -724,9 +745,11 @@ export function ChatView({
           composerHandoffActive && "invisible pointer-events-none",
         )}
       >
-        {sessionIsRemote &&
-        effectiveSession?.remoteHost &&
-        !effectiveSession.creationState ? (
+        {remoteSessionUnavailable ? (
+          <RemoteSessionUnavailableNotice />
+        ) : sessionIsRemote &&
+          effectiveSession?.remoteHost &&
+          !effectiveSession.creationState ? (
           <RemoteHostConnectionBanner
             host={effectiveSession.remoteHost}
             sessionId={effectiveSession.id}
