@@ -10,7 +10,8 @@ use std::time::Duration;
 #[cfg(target_os = "macos")]
 use berd_voice::{
     ConfiguredTtsSlot, DeliveryProgress as VoiceDeliveryProgress, DrainPolicy, OutboundFailure,
-    OutboundOutcome, OutboundPlayback, PocketAudioPlayer, TtsBackend, TtsConfiguration,
+    OutboundOutcome, OutboundPlayback, PocketAudioPlayer, StreamingTextChunk, StreamingTtsText,
+    TtsBackend, TtsConfiguration,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
@@ -57,8 +58,20 @@ const TTS_SAMPLE_RATE: u32 = 24_000;
 const INITIAL_PLAYBACK_BUFFER_FRAMES: usize = TTS_SAMPLE_RATE as usize / 5;
 #[cfg(target_os = "macos")]
 const TTS_EVENT: &str = "openai-voice:stream-event";
-#[cfg(target_os = "macos")]
-const MAX_TTS_INPUT_CHARS: usize = 4096;
+#[cfg(any(test, target_os = "macos"))]
+// OpenAI returns variable trailing quiet PCM, so enforce a measured total
+// floor rather than stacking a fixed pause on top of provider padding.
+const OPENAI_INTER_PARAGRAPH_BASE_SILENCE_FLOOR: Duration = Duration::from_millis(500);
+#[cfg(any(test, target_os = "macos"))]
+const MIN_PLAYBACK_SPEED: f32 = 0.75;
+#[cfg(any(test, target_os = "macos"))]
+const MAX_PLAYBACK_SPEED: f32 = 2.0;
+
+#[cfg(any(test, target_os = "macos"))]
+fn openai_inter_paragraph_silence_floor(speed: f32) -> Duration {
+    OPENAI_INTER_PARAGRAPH_BASE_SILENCE_FLOOR
+        .div_f32(speed.clamp(MIN_PLAYBACK_SPEED, MAX_PLAYBACK_SPEED))
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct OpenAiVoiceState {
@@ -812,9 +825,10 @@ fn run_openai_voice_stream(
         TTS_SAMPLE_RATE,
         INITIAL_PLAYBACK_BUFFER_FRAMES,
     )?;
+    let inter_paragraph_silence_floor = openai_inter_paragraph_silence_floor(speed);
     let mut assistant_speech = None::<AssistantSpeechGuard>;
     let mut playback_drained_at = None::<Instant>;
-    let mut pending = String::new();
+    let mut streaming_text = StreamingTtsText::default();
     let mut last_progress = Instant::now();
 
     loop {
@@ -833,39 +847,44 @@ fn run_openai_voice_stream(
         }
         match receiver.recv_timeout(Duration::from_millis(20)) {
             Ok(OpenAiStreamCommand::Append(text)) => {
-                pending.push_str(&text);
-                if pending.len() >= 24 && pending.trim_end().ends_with(['.', '!', '?', '\n']) {
-                    match speak_pending(
-                        app,
-                        stream_id,
-                        backend.as_ref(),
-                        &mut playback,
-                        &mut pending,
-                        &native_voice,
-                        interruption_sensitivity,
-                        input_during_tts,
-                        &mut assistant_speech,
-                        &mut playback_drained_at,
-                    )
-                    .map_err(openai_playback_failure)?
-                    {
-                        OutboundOutcome::Interrupted => {
-                            return Ok(StreamOutcome {
-                                state: OpenAiStreamEventState::Interrupted,
-                                delivery: Some(playback.snapshot()),
-                            })
-                        }
-                        OutboundOutcome::Completed => {}
-                    }
-                }
-            }
-            Ok(OpenAiStreamCommand::Flush) => {
-                if speak_pending(
+                let ready = match streaming_text.append(backend.as_ref(), &text) {
+                    Ok(ready) => ready,
+                    Err(message) => return Err(openai_playback_failure(playback.abort(message))),
+                };
+                if speak_openai_stream_ready(
                     app,
                     stream_id,
                     backend.as_ref(),
                     &mut playback,
-                    &mut pending,
+                    inter_paragraph_silence_floor,
+                    ready,
+                    &native_voice,
+                    interruption_sensitivity,
+                    input_during_tts,
+                    &mut assistant_speech,
+                    &mut playback_drained_at,
+                )
+                .map_err(openai_playback_failure)?
+                    == OutboundOutcome::Interrupted
+                {
+                    return Ok(StreamOutcome {
+                        state: OpenAiStreamEventState::Interrupted,
+                        delivery: Some(playback.snapshot()),
+                    });
+                }
+            }
+            Ok(OpenAiStreamCommand::Flush) => {
+                let ready = match streaming_text.flush(backend.as_ref()) {
+                    Ok(ready) => ready,
+                    Err(message) => return Err(openai_playback_failure(playback.abort(message))),
+                };
+                if speak_openai_stream_ready(
+                    app,
+                    stream_id,
+                    backend.as_ref(),
+                    &mut playback,
+                    inter_paragraph_silence_floor,
+                    ready,
                     &native_voice,
                     interruption_sensitivity,
                     input_during_tts,
@@ -882,12 +901,17 @@ fn run_openai_voice_stream(
                 }
             }
             Ok(OpenAiStreamCommand::Finish) => {
-                if speak_pending(
+                let ready = match streaming_text.flush(backend.as_ref()) {
+                    Ok(ready) => ready,
+                    Err(message) => return Err(openai_playback_failure(playback.abort(message))),
+                };
+                if speak_openai_stream_ready(
                     app,
                     stream_id,
                     backend.as_ref(),
                     &mut playback,
-                    &mut pending,
+                    inter_paragraph_silence_floor,
+                    ready,
                     &native_voice,
                     interruption_sensitivity,
                     input_during_tts,
@@ -974,47 +998,38 @@ fn run_openai_voice_stream(
 
 #[cfg(target_os = "macos")]
 #[allow(clippy::too_many_arguments)]
-fn speak_pending(
+fn speak_openai_stream_ready(
     app: &AppHandle,
     stream_id: &str,
     backend: &dyn TtsBackend,
     playback: &mut OutboundPlayback<'_>,
-    pending: &mut String,
+    inter_paragraph_silence_floor: Duration,
+    ready: Vec<StreamingTextChunk>,
     native_voice: &NativeVoiceState,
     interruption_sensitivity: InterruptionSensitivity,
     input_during_tts: InputDuringTtsPolicy,
     assistant_speech: &mut Option<AssistantSpeechGuard>,
     playback_drained_at: &mut Option<Instant>,
 ) -> Result<OutboundOutcome, OutboundFailure> {
-    let text = std::mem::take(pending).trim().to_string();
-    if text.is_empty() {
-        return Ok(OutboundOutcome::Completed);
-    }
-    for chunk in chunk_text(&text, MAX_TTS_INPUT_CHARS) {
-        let outcome = playback.synthesize_segment(
+    for chunk in ready {
+        if chunk.starts_speech_block {
+            let outcome =
+                playback.queue_inter_segment_silence_floor(inter_paragraph_silence_floor)?;
+            if outcome == OutboundOutcome::Interrupted {
+                return Ok(outcome);
+            }
+        }
+        let outcome = speak_openai_ready_unit(
+            app,
+            stream_id,
             backend,
-            chunk,
-            &mut |_| {
-                *playback_drained_at = None;
-                if assistant_speech.is_none() {
-                    *assistant_speech = Some(
-                        native_voice
-                            .begin_assistant_speech(interruption_sensitivity, input_during_tts),
-                    );
-                }
-                Ok(())
-            },
-            &mut || {
-                emit_openai_stream_event(
-                    app,
-                    stream_id,
-                    OpenAiStreamEventState::Started,
-                    None,
-                    None,
-                );
-                Ok(())
-            },
-            &mut |_| Ok(()),
+            playback,
+            &chunk.text,
+            native_voice,
+            interruption_sensitivity,
+            input_during_tts,
+            assistant_speech,
+            playback_drained_at,
         )?;
         if outcome == OutboundOutcome::Interrupted {
             return Ok(outcome);
@@ -1024,32 +1039,49 @@ fn speak_pending(
 }
 
 #[cfg(target_os = "macos")]
+#[allow(clippy::too_many_arguments)]
+fn speak_openai_ready_unit(
+    app: &AppHandle,
+    stream_id: &str,
+    backend: &dyn TtsBackend,
+    playback: &mut OutboundPlayback<'_>,
+    text: &str,
+    native_voice: &NativeVoiceState,
+    interruption_sensitivity: InterruptionSensitivity,
+    input_during_tts: InputDuringTtsPolicy,
+    assistant_speech: &mut Option<AssistantSpeechGuard>,
+    playback_drained_at: &mut Option<Instant>,
+) -> Result<OutboundOutcome, OutboundFailure> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Ok(OutboundOutcome::Completed);
+    }
+    playback.synthesize_segment(
+        backend,
+        text,
+        &mut |_| {
+            *playback_drained_at = None;
+            if assistant_speech.is_none() {
+                *assistant_speech = Some(
+                    native_voice.begin_assistant_speech(interruption_sensitivity, input_during_tts),
+                );
+            }
+            Ok(())
+        },
+        &mut || {
+            emit_openai_stream_event(app, stream_id, OpenAiStreamEventState::Started, None, None);
+            Ok(())
+        },
+        &mut |_| Ok(()),
+    )
+}
+
+#[cfg(target_os = "macos")]
 fn openai_playback_failure(failure: OutboundFailure) -> StreamFailure {
     StreamFailure {
         error: failure.message,
         delivery: Some(failure.delivery),
     }
-}
-
-#[cfg(target_os = "macos")]
-fn chunk_text(text: &str, max_chars: usize) -> Vec<&str> {
-    let mut chunks = Vec::new();
-    let mut start = 0;
-    while start < text.len() {
-        let mut end = (start + max_chars).min(text.len());
-        while end > start && !text.is_char_boundary(end) {
-            end -= 1;
-        }
-        if end == start {
-            end = text.len();
-        }
-        chunks.push(text[start..end].trim());
-        start = end;
-    }
-    chunks
-        .into_iter()
-        .filter(|chunk| !chunk.is_empty())
-        .collect()
 }
 
 #[cfg(target_os = "macos")]
@@ -1093,6 +1125,22 @@ fn emit_openai_stream_event(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inter_paragraph_silence_floor_tracks_openai_synthesis_rate() {
+        assert!(
+            (openai_inter_paragraph_silence_floor(0.75).as_secs_f32() - (2.0 / 3.0)).abs()
+                < f32::EPSILON
+        );
+        assert_eq!(
+            openai_inter_paragraph_silence_floor(1.0),
+            Duration::from_millis(500)
+        );
+        assert_eq!(
+            openai_inter_paragraph_silence_floor(2.0),
+            Duration::from_millis(250)
+        );
+    }
 
     #[test]
     fn destroyed_window_only_stops_its_openai_stream() {
@@ -1236,12 +1284,5 @@ mod tests {
         state.configured.store(true, Ordering::Release);
 
         assert!(state.is_configured());
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn chunks_tts_text_on_char_boundaries() {
-        assert_eq!(chunk_text("hello", 10), vec!["hello"]);
-        assert_eq!(chunk_text("ééé", 3), vec!["é", "é", "é"]);
     }
 }

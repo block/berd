@@ -119,7 +119,68 @@ struct DeliveryLedger {
 struct LedgerSegment {
     text: String,
     total_frames: u64,
+    trailing_silence_frames: u64,
+    trailing_quiet: TrailingQuietMeter,
     synthesis_complete: bool,
+}
+
+// Five-millisecond windows at -40 dBFS identify trailing quiet padding while
+// tolerating low-level nonzero output from cloud synthesis.
+const QUIET_PCM_WINDOWS_PER_SECOND: usize = 200;
+const QUIET_PCM_RMS_THRESHOLD: f64 = 0.01;
+
+#[derive(Debug)]
+struct TrailingQuietMeter {
+    window_frames: usize,
+    measured_frames: u64,
+    window_sum_squares: f64,
+    buffered_frames: usize,
+}
+
+impl TrailingQuietMeter {
+    fn new(sample_rate: u32) -> Self {
+        Self {
+            window_frames: ((sample_rate as usize) / QUIET_PCM_WINDOWS_PER_SECOND).max(1),
+            measured_frames: 0,
+            window_sum_squares: 0.0,
+            buffered_frames: 0,
+        }
+    }
+
+    fn push(&mut self, samples: &[f32]) {
+        for sample in samples {
+            self.window_sum_squares += f64::from(*sample).powi(2);
+            self.buffered_frames += 1;
+            if self.buffered_frames == self.window_frames {
+                if self.buffered_window_is_quiet() {
+                    self.measured_frames = self
+                        .measured_frames
+                        .saturating_add(self.window_frames as u64);
+                } else {
+                    self.measured_frames = 0;
+                }
+                self.window_sum_squares = 0.0;
+                self.buffered_frames = 0;
+            }
+        }
+    }
+
+    fn measured_frames(&self) -> u64 {
+        if self.buffered_frames == 0 {
+            self.measured_frames
+        } else if self.buffered_window_is_quiet() {
+            self.measured_frames
+                .saturating_add(self.buffered_frames as u64)
+        } else {
+            0
+        }
+    }
+
+    fn buffered_window_is_quiet(&self) -> bool {
+        self.buffered_frames > 0
+            && (self.window_sum_squares / self.buffered_frames as f64).sqrt()
+                <= QUIET_PCM_RMS_THRESHOLD
+    }
 }
 
 impl DeliveryLedger {
@@ -134,13 +195,16 @@ impl DeliveryLedger {
         self.segments.push(LedgerSegment {
             text,
             total_frames: 0,
+            trailing_silence_frames: 0,
+            trailing_quiet: TrailingQuietMeter::new(self.sample_rate),
             synthesis_complete: false,
         });
     }
 
-    fn append_frames(&mut self, frames: usize) {
+    fn append_frames(&mut self, samples: &[f32]) {
         if let Some(segment) = self.segments.last_mut() {
-            segment.total_frames = segment.total_frames.saturating_add(frames as u64);
+            segment.total_frames = segment.total_frames.saturating_add(samples.len() as u64);
+            segment.trailing_quiet.push(samples);
         }
     }
 
@@ -148,6 +212,25 @@ impl DeliveryLedger {
         if let Some(segment) = self.segments.last_mut() {
             segment.synthesis_complete = true;
         }
+    }
+
+    fn append_trailing_silence(&mut self, frames: usize) {
+        if let Some(segment) = self.segments.last_mut() {
+            segment.trailing_silence_frames = segment
+                .trailing_silence_frames
+                .saturating_add(frames as u64);
+        }
+    }
+
+    fn missing_trailing_silence_frames(&self, target_frames: u64) -> u64 {
+        self.segments.last().map_or(target_frames, |segment| {
+            target_frames.saturating_sub(
+                segment
+                    .trailing_quiet
+                    .measured_frames()
+                    .saturating_add(segment.trailing_silence_frames),
+            )
+        })
     }
 
     fn snapshot(&self, played_frames: u64) -> DeliveryProgress {
@@ -159,7 +242,9 @@ impl DeliveryLedger {
                 let played_frames = played_frames
                     .saturating_sub(segment_start)
                     .min(segment.total_frames);
-                segment_start = segment_start.saturating_add(segment.total_frames);
+                segment_start = segment_start
+                    .saturating_add(segment.total_frames)
+                    .saturating_add(segment.trailing_silence_frames);
                 DeliverySegment {
                     text: segment.text.clone(),
                     played_frames,
@@ -259,7 +344,7 @@ impl<'a> OutboundPlayback<'a> {
                     return Ok(());
                 }
                 self.output.check_health()?;
-                self.ledger.append_frames(samples.len());
+                self.ledger.append_frames(samples);
                 if self.started {
                     before_write(false)?;
                     self.output.write(samples)?;
@@ -300,6 +385,56 @@ impl<'a> OutboundPlayback<'a> {
             }
         }
         Ok(OutboundOutcome::Completed)
+    }
+
+    /// Queues silence after the most recently synthesized segment.
+    ///
+    /// The ledger treats the gap as playback time between text segments, so it
+    /// does not inflate either segment's spoken-text progress.
+    pub fn queue_inter_segment_silence(
+        &mut self,
+        duration: Duration,
+    ) -> Result<OutboundOutcome, OutboundFailure> {
+        self.ensure_live()?;
+        if !self.started || duration.is_zero() {
+            return Ok(OutboundOutcome::Completed);
+        }
+        if !self.active.load(Ordering::SeqCst) {
+            return self.interrupt();
+        }
+        let frame_count =
+            (duration.as_secs_f64() * f64::from(self.ledger.sample_rate)).round() as usize;
+        if frame_count == 0 {
+            return Ok(OutboundOutcome::Completed);
+        }
+        self.output
+            .check_health()
+            .map_err(|message| self.fail(message))?;
+        self.output
+            .write(&vec![0.0; frame_count])
+            .map_err(|message| self.fail(message))?;
+        self.ledger.append_trailing_silence(frame_count);
+        Ok(OutboundOutcome::Completed)
+    }
+
+    /// Ensures the preceding segment ends with at least `duration` of quiet
+    /// audio, counting both backend-provided trailing PCM and queued silence.
+    pub fn queue_inter_segment_silence_floor(
+        &mut self,
+        duration: Duration,
+    ) -> Result<OutboundOutcome, OutboundFailure> {
+        let target_frames =
+            (duration.as_secs_f64() * f64::from(self.ledger.sample_rate)).round() as u64;
+        let missing_frames = self.ledger.missing_trailing_silence_frames(target_frames);
+        let missing_duration =
+            Duration::from_secs_f64(missing_frames as f64 / f64::from(self.ledger.sample_rate));
+        self.queue_inter_segment_silence(missing_duration)
+    }
+
+    /// Converts a host-side setup failure into the same terminal, quiescent
+    /// failure contract used for synthesis and playback errors.
+    pub fn abort(&mut self, message: String) -> OutboundFailure {
+        self.fail(message)
     }
 
     pub fn finish(
@@ -704,6 +839,124 @@ mod tests {
             .segments
             .iter()
             .all(|segment| segment.synthesis_complete));
+    }
+
+    #[test]
+    fn inter_segment_silence_does_not_inflate_text_delivery() {
+        let active = AtomicBool::new(true);
+        let output = FakeOutput::new(0);
+        let backend = FakeTts {
+            chunks: vec![vec![0.1, 0.2, 0.3]],
+            cancel_after_first: false,
+        };
+        let mut playback = OutboundPlayback::new(&output, &active, 10, 0).unwrap();
+        playback
+            .synthesize_segment(
+                &backend,
+                "one",
+                &mut |_| Ok(()),
+                &mut || Ok(()),
+                &mut |_| Ok(()),
+            )
+            .unwrap();
+        playback
+            .queue_inter_segment_silence(Duration::from_millis(200))
+            .unwrap();
+        playback
+            .synthesize_segment(
+                &backend,
+                "two",
+                &mut |_| Ok(()),
+                &mut || Ok(()),
+                &mut |_| Ok(()),
+            )
+            .unwrap();
+
+        assert_eq!(
+            output.writes.lock().unwrap().as_slice(),
+            &[vec![0.1, 0.2, 0.3], vec![0.0, 0.0], vec![0.1, 0.2, 0.3]]
+        );
+        output.played.store(4, Ordering::SeqCst);
+        let snapshot = playback.snapshot();
+        assert_eq!(snapshot.segments[0].played_frames, 3);
+        assert_eq!(snapshot.segments[1].played_frames, 0);
+
+        output.played.store(6, Ordering::SeqCst);
+        assert_eq!(playback.snapshot().segments[1].played_frames, 1);
+    }
+
+    #[test]
+    fn silence_floor_counts_provider_padding_and_queues_only_the_deficit() {
+        let active = AtomicBool::new(true);
+        let output = FakeOutput::new(0);
+        let backend = FakeTts {
+            chunks: vec![vec![0.2, 0.2, 0.0, 0.0]],
+            cancel_after_first: false,
+        };
+        let mut playback = OutboundPlayback::new(&output, &active, 10, 0).unwrap();
+        playback
+            .synthesize_segment(
+                &backend,
+                "one",
+                &mut |_| Ok(()),
+                &mut || Ok(()),
+                &mut |_| Ok(()),
+            )
+            .unwrap();
+        playback
+            .queue_inter_segment_silence_floor(Duration::from_millis(500))
+            .unwrap();
+
+        assert_eq!(
+            output.writes.lock().unwrap().as_slice(),
+            &[vec![0.2, 0.2, 0.0, 0.0], vec![0.0, 0.0, 0.0]]
+        );
+    }
+
+    #[test]
+    fn silence_floor_does_not_extend_sufficient_provider_padding() {
+        let active = AtomicBool::new(true);
+        let output = FakeOutput::new(0);
+        let backend = FakeTts {
+            chunks: vec![vec![0.2, 0.2, 0.0, 0.0, 0.0]],
+            cancel_after_first: false,
+        };
+        let mut playback = OutboundPlayback::new(&output, &active, 10, 0).unwrap();
+        playback
+            .synthesize_segment(
+                &backend,
+                "one",
+                &mut |_| Ok(()),
+                &mut || Ok(()),
+                &mut |_| Ok(()),
+            )
+            .unwrap();
+        playback
+            .queue_inter_segment_silence_floor(Duration::from_millis(300))
+            .unwrap();
+
+        assert_eq!(
+            output.writes.lock().unwrap().as_slice(),
+            &[vec![0.2, 0.2, 0.0, 0.0, 0.0]]
+        );
+    }
+
+    #[test]
+    fn silence_floor_counts_quiet_nonzero_provider_padding() {
+        let mut meter = TrailingQuietMeter::new(1_000);
+        meter.push(&[0.2; 5]);
+        meter.push(&[0.005; 10]);
+
+        assert_eq!(meter.measured_frames(), 10);
+    }
+
+    #[test]
+    fn trailing_non_quiet_partial_window_resets_measured_padding() {
+        let mut meter = TrailingQuietMeter::new(1_000);
+        meter.push(&[0.0; 10]);
+        meter.push(&[0.5]);
+
+        assert_eq!(meter.measured_frames(), 0);
     }
 
     #[test]

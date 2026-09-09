@@ -20,6 +20,8 @@ use std::sync::Mutex;
 
 use sherpa_onnx::Wave;
 
+use crate::tts::StreamingTextChunks;
+
 #[path = "pocket_april.rs"]
 mod pocket_april;
 use pocket_april::{prepare_april_prompt, AprilPocketTts};
@@ -28,31 +30,6 @@ use pocket_april::{prepare_april_prompt, AprilPocketTts};
 pub const SAMPLE_RATE: u32 = 24_000;
 
 const TTS_NUM_THREADS: usize = 1;
-
-/// Drain stable, sentence-aware chunks from text that may still be growing.
-///
-/// This backend-neutral form uses a word-count budget. It lets system speech
-/// engines share Berd's first-sentence latency behavior without loading a
-/// Pocket model solely to segment text.
-pub fn take_streaming_text_chunks(
-    text: &str,
-    first_chunk_pending: bool,
-    flush: bool,
-) -> Result<StreamingTextChunks, String> {
-    let (ready, pending, first_chunk_pending) =
-        pocket_april::take_streaming_chunks_at_natural_boundaries(
-            text,
-            50,
-            first_chunk_pending,
-            flush,
-            |candidate| Ok(candidate.split_whitespace().count()),
-        )?;
-    Ok(StreamingTextChunks {
-        ready,
-        pending,
-        first_chunk_pending,
-    })
-}
 
 thread_local! {
     static ACTIVE_SYNTHESIS_ENGINES: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
@@ -150,14 +127,6 @@ pub struct PocketTts {
     inner: Mutex<AprilPocketTts>,
 }
 
-/// Stable synthesis units drained from a growing assistant response.
-#[derive(Debug, PartialEq, Eq)]
-pub struct StreamingTextChunks {
-    pub ready: Vec<String>,
-    pub pending: String,
-    pub first_chunk_pending: bool,
-}
-
 /// Load Berd's pinned April INT8 model.
 pub fn load_text_to_speech(model_dir: &str) -> Result<PocketTts, String> {
     let dir = Path::new(model_dir);
@@ -167,16 +136,15 @@ pub fn load_text_to_speech(model_dir: &str) -> Result<PocketTts, String> {
 }
 
 impl PocketTts {
-    /// Drain model-safe units from text that may still be growing.
+    /// Drain complete paragraphs and model-safe overflow from growing text.
     ///
-    /// The first complete sentence is made ready immediately. Later text stays
-    /// pending until it overflows the model's exact token limit, at which point
-    /// every stable natural chunk except the growing tail is returned. `flush`
-    /// makes the tail ready at a response or tool boundary.
-    pub fn take_streaming_text_chunks(
+    /// Complete paragraphs become ready as a unit. An unfinished paragraph
+    /// stays pending unless it exceeds Pocket's exact model token limit, when
+    /// stable natural chunks are returned and the growing tail remains held.
+    /// `flush` makes the tail ready at a response or tool boundary.
+    pub(crate) fn take_streaming_text_chunks(
         &self,
         text: &str,
-        first_chunk_pending: bool,
         flush: bool,
     ) -> Result<StreamingTextChunks, String> {
         self.reject_reentry()?;
@@ -184,13 +152,7 @@ impl PocketTts {
             .inner
             .lock()
             .map_err(|_| "Pocket TTS engine lock poisoned".to_string())?;
-        let (ready, pending, first_chunk_pending) =
-            engine.take_streaming_text_chunks(text, first_chunk_pending, flush)?;
-        Ok(StreamingTextChunks {
-            ready,
-            pending,
-            first_chunk_pending,
-        })
+        engine.take_streaming_text_chunks(text, flush)
     }
 
     /// Stream synthesis as PCM deltas become decoder-safe. `emit_frames` is

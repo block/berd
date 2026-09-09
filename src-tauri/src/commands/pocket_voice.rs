@@ -20,8 +20,8 @@ use berd_voice::SAMPLE_RATE;
 #[cfg(target_os = "macos")]
 use berd_voice::{
     load_pocket_voice_style, load_text_to_speech, ConfiguredTtsSlot, DrainPolicy,
-    DrainTimeoutOutcome, OutboundFailure, OutboundOutcome, OutboundPlayback, TtsBackend,
-    TtsConfiguration,
+    DrainTimeoutOutcome, OutboundFailure, OutboundOutcome, OutboundPlayback, StreamingTextChunk,
+    StreamingTtsText, TtsBackend, TtsConfiguration,
 };
 use berd_voice::{parakeet_assets, pocket_assets};
 #[cfg(target_os = "macos")]
@@ -1933,8 +1933,7 @@ fn run_pocket_voice_stream(
     let backend = tts.backend();
     let player = PocketAudioPlayer::new(SAMPLE_RATE, playback_rate, output_device)?;
     let mut playback = OutboundPlayback::new(&player, &active, SAMPLE_RATE, 0)?;
-    let mut pending = String::new();
-    let mut first_chunk_pending = true;
+    let mut streaming_text = StreamingTtsText::default();
     let mut assistant_speech = None::<AssistantSpeechGuard>;
     let mut playback_drained_at = None;
     let output_latency_grace = playback_latency_safety_duration(output_device);
@@ -1957,21 +1956,19 @@ fn run_pocket_voice_stream(
         let command = receiver.recv_timeout(Duration::from_millis(20));
         match command {
             Ok(PocketStreamCommand::Append(text)) => {
-                pending.push_str(&text);
+                let ready = streaming_text.append(backend.as_ref(), &text)?;
                 if !synthesize_pocket_stream_ready(
                     app,
                     stream_id,
                     backend.as_ref(),
                     &mut playback,
-                    &mut pending,
-                    &mut first_chunk_pending,
+                    ready,
                     &native_voice,
                     interruption_sensitivity,
                     input_during_tts,
                     &mut assistant_speech,
                     &mut playback_drained_at,
                     &mut last_progress_emit,
-                    false,
                 )? {
                     return Ok(PocketStreamOutcome {
                         state: PocketStreamEventState::Interrupted,
@@ -1980,20 +1977,19 @@ fn run_pocket_voice_stream(
                 }
             }
             Ok(PocketStreamCommand::Flush) => {
+                let ready = streaming_text.flush(backend.as_ref())?;
                 if !synthesize_pocket_stream_ready(
                     app,
                     stream_id,
                     backend.as_ref(),
                     &mut playback,
-                    &mut pending,
-                    &mut first_chunk_pending,
+                    ready,
                     &native_voice,
                     interruption_sensitivity,
                     input_during_tts,
                     &mut assistant_speech,
                     &mut playback_drained_at,
                     &mut last_progress_emit,
-                    true,
                 )? {
                     return Ok(PocketStreamOutcome {
                         state: PocketStreamEventState::Interrupted,
@@ -2002,20 +1998,19 @@ fn run_pocket_voice_stream(
                 }
             }
             Ok(PocketStreamCommand::Finish) => {
+                let ready = streaming_text.flush(backend.as_ref())?;
                 if !synthesize_pocket_stream_ready(
                     app,
                     stream_id,
                     backend.as_ref(),
                     &mut playback,
-                    &mut pending,
-                    &mut first_chunk_pending,
+                    ready,
                     &native_voice,
                     interruption_sensitivity,
                     input_during_tts,
                     &mut assistant_speech,
                     &mut playback_drained_at,
                     &mut last_progress_emit,
-                    true,
                 )? {
                     return Ok(PocketStreamOutcome {
                         state: PocketStreamEventState::Interrupted,
@@ -2192,21 +2187,16 @@ fn synthesize_pocket_stream_ready(
     stream_id: &str,
     backend: &dyn TtsBackend,
     playback: &mut OutboundPlayback<'_>,
-    pending: &mut String,
-    first_chunk_pending: &mut bool,
+    ready: Vec<StreamingTextChunk>,
     native_voice: &NativeVoiceState,
     interruption_sensitivity: InterruptionSensitivity,
     input_during_tts: InputDuringTtsPolicy,
     assistant_speech: &mut Option<AssistantSpeechGuard>,
     playback_drained_at: &mut Option<Instant>,
     last_progress_emit: &mut Instant,
-    flush: bool,
 ) -> Result<bool, String> {
-    let split = berd_voice::take_streaming_text_chunks(pending, *first_chunk_pending, flush)?;
-    *pending = split.pending;
-    *first_chunk_pending = split.first_chunk_pending;
-    for text in split.ready {
-        let text = text.trim().to_string();
+    for chunk in ready {
+        let text = chunk.text.trim().to_string();
         let outcome = playback
             .synthesize_segment(
                 backend,

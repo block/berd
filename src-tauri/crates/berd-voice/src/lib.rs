@@ -49,10 +49,13 @@ pub use outbound::{
 };
 pub use parakeet::ParakeetRecognizer;
 pub use pocket::{
-    load_pocket_voice_style, load_text_to_speech, load_voice_style, take_streaming_text_chunks,
-    PocketTts, StreamingTextChunks, VoiceStyle, SAMPLE_RATE,
+    load_pocket_voice_style, load_text_to_speech, load_voice_style, PocketTts, VoiceStyle,
+    SAMPLE_RATE,
 };
 #[cfg(target_os = "macos")]
 pub use siri::SiriTts;
 pub use synthesis::{synthesize_pcm16_wav, WavSynthesis, WavSynthesisError, WavSynthesisErrorKind};
-pub use tts::{OpenAiTts, PocketTtsBackend, TtsBackend, TtsOutcome, TtsPcmSpec, TtsSynthesisEvent};
+pub use tts::{
+    OpenAiTts, PocketTtsBackend, StreamingTextChunk, StreamingTextChunks, StreamingTtsText,
+    TtsBackend, TtsOutcome, TtsPcmSpec, TtsSynthesisEvent,
+};
