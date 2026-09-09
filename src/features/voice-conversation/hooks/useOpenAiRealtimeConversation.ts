@@ -1065,6 +1065,7 @@ class OpenAiRealtimeConversationRuntime {
         inputBackend: "openai",
         outputBackend: "openai",
         voiceMode: "openai-realtime",
+        ttsRate: appliedSpeed,
       });
       this.setSnapshot({
         ...this.snapshot,

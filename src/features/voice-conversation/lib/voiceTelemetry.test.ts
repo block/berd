@@ -27,6 +27,7 @@ const context = {
   inputBackend: "macos" as const,
   outputBackend: "siri" as const,
   voiceMode: "chained" as const,
+  ttsRate: 1.25,
 };
 
 type NativeAggregate = {
@@ -65,6 +66,7 @@ function installNativeAccounting() {
         inputBackend: "macos",
         outputBackend: "siri",
         voiceMode: "chained",
+        ttsRate: 1.25,
         durationMs: 2500,
         userUtteranceCount: aggregate.userUtteranceCount,
         assistantResponseCount: aggregate.assistantResponseCount,
@@ -118,6 +120,7 @@ describe("voice conversation telemetry", () => {
         input_backend: "macos",
         output_backend: "siri",
         voice_mode: "chained",
+        tts_rate: "1.25",
         duration_ms: "2500",
         user_utterance_count: "2",
         assistant_response_count: "1",

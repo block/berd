@@ -1,3 +1,6 @@
+import { getPocketVoiceStatus } from "./pocketVoice";
+import { getSiriVoiceStatus } from "./siriVoice";
+import { getOpenAiVoiceStatus } from "./openAiVoice";
 import { invoke } from "@tauri-apps/api/core";
 import type { RendererInstance } from "@/shared/lib/rendererInstance";
 import type {
@@ -11,12 +14,14 @@ export interface VoiceConversationTelemetryContext {
   inputBackend: VoiceInputBackend;
   outputBackend: VoiceOutputBackend;
   voiceMode: BerdVoiceConversationMode;
+  ttsRate?: number | null;
 }
 
 export interface CompletedVoiceConversationTelemetry {
   inputBackend: VoiceInputBackend;
   outputBackend: VoiceOutputBackend;
   voiceMode: BerdVoiceConversationMode;
+  ttsRate?: number | null;
   durationMs: number;
   userUtteranceCount: number;
   assistantResponseCount: number;
@@ -84,4 +89,21 @@ export function endVoiceTelemetry(
   return invoke("end_voice_conversation_telemetry", {
     request: { fallbackReason },
   });
+}
+
+// Read the selected backend's configured playback multiplier without changing it.
+export async function getVoiceTtsRate(
+  backend: VoiceOutputBackend,
+): Promise<number | null> {
+  try {
+    const status =
+      backend === "pocket"
+        ? await getPocketVoiceStatus()
+        : backend === "siri"
+          ? await getSiriVoiceStatus("")
+          : await getOpenAiVoiceStatus();
+    return status.playbackSpeed;
+  } catch {
+    return null;
+  }
 }

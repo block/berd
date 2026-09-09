@@ -1,5 +1,6 @@
 import {
   startVoiceTelemetry,
+  getVoiceTtsRate,
   setVoiceTelemetryReportable,
   incrementVoiceUserUtterances,
   incrementVoiceAssistantResponses,
@@ -39,13 +40,19 @@ export function trackVoiceConversationStarted(
   context: VoiceConversationTelemetryContext,
 ): void {
   enqueue(async (renderer) => {
-    const started = await startVoiceTelemetry(renderer, context);
+    const ttsRate =
+      context.ttsRate ?? (await getVoiceTtsRate(context.outputBackend));
+    const started = await startVoiceTelemetry(renderer, {
+      ...context,
+      ttsRate,
+    });
     if (!started) return;
     const reportable = track(
       berdVoiceConversationStarted({
         input_backend: context.inputBackend,
         output_backend: context.outputBackend,
         voice_mode: context.voiceMode,
+        tts_rate: ttsRate,
       }),
     );
     await setVoiceTelemetryReportable(renderer, reportable);
@@ -91,6 +98,7 @@ export function trackVoiceConversationEnded(
         input_backend: conversation.inputBackend,
         output_backend: conversation.outputBackend,
         voice_mode: conversation.voiceMode,
+        tts_rate: conversation.ttsRate,
         duration_ms: conversation.durationMs,
         user_utterance_count: conversation.userUtteranceCount,
         assistant_response_count: conversation.assistantResponseCount,

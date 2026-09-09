@@ -67,6 +67,7 @@ pub struct VoiceTelemetryStartRequest {
     input_backend: VoiceTelemetryBackend,
     output_backend: VoiceTelemetryBackend,
     voice_mode: VoiceTelemetryMode,
+    tts_rate: Option<f64>,
 }
 
 #[derive(Deserialize)]
@@ -89,6 +90,7 @@ struct ActiveVoiceTelemetry {
     input_backend: VoiceTelemetryBackend,
     output_backend: VoiceTelemetryBackend,
     voice_mode: VoiceTelemetryMode,
+    tts_rate: Option<f64>,
     started_at: Instant,
     user_utterance_count: u64,
     assistant_response_count: u64,
@@ -102,6 +104,7 @@ pub struct CompletedVoiceTelemetry {
     input_backend: VoiceTelemetryBackend,
     output_backend: VoiceTelemetryBackend,
     voice_mode: VoiceTelemetryMode,
+    tts_rate: Option<f64>,
     duration_ms: u64,
     user_utterance_count: u64,
     assistant_response_count: u64,
@@ -413,6 +416,7 @@ impl VoiceCaptureState {
             input_backend: request.input_backend,
             output_backend: request.output_backend,
             voice_mode: request.voice_mode,
+            tts_rate: request.tts_rate,
             started_at: Instant::now(),
             user_utterance_count: 0,
             assistant_response_count: 0,
@@ -456,6 +460,7 @@ impl VoiceCaptureState {
                 input_backend: active.input_backend,
                 output_backend: active.output_backend,
                 voice_mode: active.voice_mode,
+                tts_rate: active.tts_rate,
                 duration_ms: u64::try_from(active.started_at.elapsed().as_millis())
                     .unwrap_or(u64::MAX),
                 user_utterance_count: active.user_utterance_count,
@@ -603,6 +608,7 @@ mod tests {
                     input_backend: VoiceTelemetryBackend::Macos,
                     output_backend: VoiceTelemetryBackend::Siri,
                     voice_mode: VoiceTelemetryMode::Chained,
+                    tts_rate: Some(1.25),
                 },
             )
             .expect("start telemetry");
@@ -632,6 +638,7 @@ mod tests {
                     input_backend: VoiceTelemetryBackend::Macos,
                     output_backend: VoiceTelemetryBackend::Siri,
                     voice_mode: VoiceTelemetryMode::Chained,
+                    tts_rate: Some(1.25),
                 },
             )
             .expect("start telemetry");
@@ -666,6 +673,7 @@ mod tests {
                     input_backend: VoiceTelemetryBackend::Macos,
                     output_backend: VoiceTelemetryBackend::Siri,
                     voice_mode: VoiceTelemetryMode::Chained,
+                    tts_rate: Some(1.25),
                 },
             )
             .expect("start telemetry");
@@ -701,6 +709,7 @@ mod tests {
             .expect("aggregate");
         assert_eq!(completed.user_utterance_count, 2);
         assert!(completed.reportable);
+        assert_eq!(completed.tts_rate, Some(1.25));
     }
 
     #[test]
