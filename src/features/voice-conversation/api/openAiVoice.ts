@@ -101,6 +101,10 @@ export function setOpenAiSpeechVoice(voice: string): Promise<void> {
   return invoke("set_openai_speech_voice", { voice });
 }
 
+export function resetOpenAiVoiceSettings(): Promise<void> {
+  return invoke("reset_openai_voice_settings");
+}
+
 export function listenToOpenAiVoiceStream(
   onEvent: (event: OpenAiVoiceStreamEvent) => void,
 ): Promise<UnlistenFn> {

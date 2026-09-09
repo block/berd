@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "@/shared/i18n";
@@ -56,6 +56,16 @@ const inputState = vi.hoisted(() => ({
 const outputState = vi.hoisted(() => ({
   backend: "pocket" as VoiceOutputBackend,
 }));
+const modeState = vi.hoisted(() => ({
+  mode: "chained" as "chained" | "openai-realtime",
+}));
+const preferenceMocks = vi.hoisted(() => ({
+  setInputBackend: vi.fn(),
+  setOutputBackend: vi.fn(),
+  setInterruptionMode: vi.fn(),
+  setMode: vi.fn(),
+  setRealtimePreference: vi.fn(),
+}));
 const interruptionState = vi.hoisted(() => ({
   mode: "automatic" as "automatic" | "allowInterruptions" | "preventFeedback",
 }));
@@ -89,15 +99,27 @@ const openAiApiMocks = vi.hoisted(() => ({
   setTtsApiKey: vi.fn(() => Promise.resolve()),
   clearTtsApiKey: vi.fn(() => Promise.resolve()),
   setSpeechVoice: vi.fn(() => Promise.resolve()),
+  resetOpenAi: vi.fn(() => Promise.resolve()),
+  resetPocket: vi.fn(() => Promise.resolve()),
+  resetSiri: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock("../api/openAiVoice", () => ({
   setOpenAiPlaybackSpeed: vi.fn(() => Promise.resolve()),
   setOpenAiSpeechVoice: openAiApiMocks.setSpeechVoice,
+  resetOpenAiVoiceSettings: openAiApiMocks.resetOpenAi,
   setOpenAiSttApiKey: openAiApiMocks.setSttApiKey,
   clearOpenAiSttApiKey: openAiApiMocks.clearSttApiKey,
   setOpenAiTtsApiKey: openAiApiMocks.setTtsApiKey,
   clearOpenAiTtsApiKey: openAiApiMocks.clearTtsApiKey,
+}));
+vi.mock("../api/pocketVoice", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../api/pocketVoice")>()),
+  resetPocketVoiceSettings: openAiApiMocks.resetPocket,
+}));
+vi.mock("../api/siriVoice", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../api/siriVoice")>()),
+  resetSiriVoiceSettings: openAiApiMocks.resetSiri,
 }));
 vi.mock("../hooks/useOpenAiVoiceSetup", () => ({
   useOpenAiVoiceSetup: (enabled: boolean) => {
@@ -124,23 +146,36 @@ vi.mock("../hooks/useMicrophonePermission", () => ({
   useMicrophonePermission: () => microphonePermissionState,
 }));
 vi.mock("../lib/voiceOutputPreference", () => ({
+  getDefaultVoiceOutputBackend: () =>
+    platformState.current === "mac" ? "siri" : "pocket",
   useVoiceOutputPreference: () => ({
     backend: outputState.backend,
-    setBackend: vi.fn(),
+    setBackend: preferenceMocks.setOutputBackend,
   }),
 }));
 vi.mock("../lib/voiceInputPreference", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/voiceInputPreference")>()),
   useVoiceInputPreference: () => ({
     backend: inputState.backend,
-    setBackend: vi.fn(),
+    setBackend: preferenceMocks.setInputBackend,
   }),
 }));
 vi.mock("../lib/voiceInterruptionPreference", () => ({
+  getDefaultVoiceInterruptionPreference: () => ({ mode: "automatic" }),
   useVoiceInterruptionPreference: () => ({
     ...interruptionState,
-    setMode: vi.fn(),
+    setMode: preferenceMocks.setInterruptionMode,
   }),
+}));
+vi.mock("../lib/voiceConversationModePreference", () => ({
+  useVoiceConversationModePreference: () => ({
+    mode: modeState.mode,
+    setMode: preferenceMocks.setMode,
+  }),
+}));
+vi.mock("../lib/realtimeVoicePreference", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/realtimeVoicePreference")>()),
+  setRealtimeVoicePreference: preferenceMocks.setRealtimePreference,
 }));
 
 function setup(status: PocketVoiceStatus): PocketVoiceSetup {
@@ -230,6 +265,7 @@ describe("VoiceSettings", () => {
     microphonePermissionState.openSettings.mockReset();
     inputState.backend = "parakeet";
     outputState.backend = "pocket";
+    modeState.mode = "chained";
     platformState.current = "mac";
     openAiStatusState.loaded = true;
     macSpeechSetupState.current = {
@@ -271,6 +307,55 @@ describe("VoiceSettings", () => {
     openAiApiMocks.setSttApiKey.mockClear();
     openAiApiMocks.clearSttApiKey.mockClear();
     openAiApiMocks.setSpeechVoice.mockClear();
+    openAiApiMocks.resetOpenAi.mockClear();
+    openAiApiMocks.resetPocket.mockClear();
+    openAiApiMocks.resetSiri.mockClear();
+    preferenceMocks.setInputBackend.mockClear();
+    preferenceMocks.setOutputBackend.mockClear();
+    preferenceMocks.setInterruptionMode.mockClear();
+    preferenceMocks.setMode.mockClear();
+    preferenceMocks.setRealtimePreference.mockClear();
+  });
+
+  it("confirms before resetting every voice setting to chained Apple defaults", async () => {
+    modeState.mode = "openai-realtime";
+    inputState.backend = "openai";
+    outputState.backend = "openai";
+    interruptionState.mode = "preventFeedback";
+    const macSpeechStatus = macSpeechSetupState.current.status;
+    if (!macSpeechStatus) throw new Error("expected macOS speech status");
+    macSpeechSetupState.current = {
+      ...macSpeechSetupState.current,
+      status: {
+        ...macSpeechStatus,
+        supported: true,
+        localeSupported: true,
+      },
+    };
+    renderWithProviders(<VoiceSettings />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Reset to defaults" }));
+    const dialog = screen.getByRole("dialog", {
+      name: "Reset all voice settings?",
+    });
+    expect(dialog).toBeInTheDocument();
+    expect(preferenceMocks.setMode).not.toHaveBeenCalled();
+
+    await user.click(
+      within(dialog).getByRole("button", { name: "Reset to defaults" }),
+    );
+
+    expect(openAiApiMocks.resetOpenAi).toHaveBeenCalledOnce();
+    expect(openAiApiMocks.resetPocket).toHaveBeenCalledOnce();
+    expect(openAiApiMocks.resetSiri).toHaveBeenCalledOnce();
+    expect(preferenceMocks.setInputBackend).toHaveBeenCalledWith("macos");
+    expect(preferenceMocks.setOutputBackend).toHaveBeenCalledWith("siri");
+    expect(preferenceMocks.setInterruptionMode).toHaveBeenCalledWith(
+      "automatic",
+    );
+    expect(preferenceMocks.setMode).toHaveBeenCalledWith("chained");
+    expect(preferenceMocks.setRealtimePreference).toHaveBeenCalledOnce();
   });
 
   it("does not inspect OpenAI credentials for Apple speech input and output", () => {

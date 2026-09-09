@@ -6,6 +6,7 @@ import { SettingsPage } from "@/shared/ui/SettingsPage";
 import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import { Button } from "@/shared/ui/button";
 import { Badge } from "@/shared/ui/badge";
+import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
 import {
   Collapsible,
   CollapsibleContent,
@@ -24,11 +25,14 @@ import { useEffect, useState } from "react";
 import {
   clearOpenAiSttApiKey,
   clearOpenAiTtsApiKey,
+  resetOpenAiVoiceSettings,
   setOpenAiSttApiKey,
   setOpenAiPlaybackSpeed,
   setOpenAiSpeechVoice,
   setOpenAiTtsApiKey,
 } from "../api/openAiVoice";
+import { resetPocketVoiceSettings } from "../api/pocketVoice";
+import { resetSiriVoiceSettings } from "../api/siriVoice";
 import { usePocketVoiceSetup } from "../hooks/usePocketVoiceSetup";
 import { useMacSpeechSetup } from "../hooks/useMacSpeechSetup";
 import { useMicrophonePermission } from "../hooks/useMicrophonePermission";
@@ -118,6 +122,9 @@ export function VoiceSettings() {
   const [openAiSpeedError, setOpenAiSpeedError] = useState<string | null>(null);
   const [openAiVoice, setOpenAiVoice] = useState("marin");
   const [openAiVoiceError, setOpenAiVoiceError] = useState<string | null>(null);
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
   const input = useVoiceInputPreference(
     isMacSpeechAvailable(macSpeechSetup.status, macSpeechSetup.loading),
   );
@@ -189,19 +196,28 @@ export function VoiceSettings() {
                 input.backend,
               );
 
-  const resetCurrentMode = () => {
-    if (mode.mode === "openai-realtime") {
-      setRealtimeVoicePreference(getDefaultRealtimeVoicePreference());
-      return;
-    }
+  const resetAllVoiceSettings = async () => {
     const macSpeechAvailable = Boolean(
       macSpeechSetup.status?.supported && macSpeechSetup.status.localeSupported,
     );
-    input.setBackend(getDefaultVoiceInputBackend(macSpeechAvailable));
-    output.setBackend(getDefaultVoiceOutputBackend());
-    interruption.setMode(getDefaultVoiceInterruptionPreference().mode);
-    if (getDefaultVoiceOutputBackend() === "siri") {
-      void siriSetup.setPlaybackSpeed(1);
+    setResetting(true);
+    setResetError(null);
+    try {
+      await Promise.all([
+        resetPocketVoiceSettings(),
+        resetOpenAiVoiceSettings(),
+        ...(siriSupported ? [resetSiriVoiceSettings()] : []),
+      ]);
+      setRealtimeVoicePreference(getDefaultRealtimeVoicePreference());
+      input.setBackend(getDefaultVoiceInputBackend(macSpeechAvailable));
+      output.setBackend(getDefaultVoiceOutputBackend());
+      interruption.setMode(getDefaultVoiceInterruptionPreference().mode);
+      mode.setMode("chained");
+      setOpenAiSpeed(1);
+      setOpenAiVoice("marin");
+      setResetDialogOpen(false);
+    } finally {
+      setResetting(false);
     }
   };
 
@@ -215,14 +231,13 @@ export function VoiceSettings() {
           type="button"
           variant="outline"
           size="sm"
-          onClick={resetCurrentMode}
+          onClick={() => {
+            setResetError(null);
+            setResetDialogOpen(true);
+          }}
           title={t("voice.resetToDefaultsDescription")}
         >
-          {t(
-            mode.mode === "openai-realtime"
-              ? "voice.resetExpertSettings"
-              : "voice.resetChainedSettings",
-          )}
+          {t("voice.resetToDefaults")}
         </Button>
       }
     >
@@ -576,6 +591,27 @@ export function VoiceSettings() {
       ) : (
         <RealtimeVoiceSettings />
       )}
+      {resetError ? (
+        <p className="text-sm text-destructive" role="alert">
+          {resetError}
+        </p>
+      ) : null}
+      <ConfirmDialog
+        open={resetDialogOpen}
+        onOpenChange={setResetDialogOpen}
+        title={t("voice.resetToDefaultsConfirmTitle")}
+        description={t("voice.resetToDefaultsConfirmDescription")}
+        cancelLabel={t("common:actions.cancel")}
+        confirmLabel={t("voice.resetToDefaults")}
+        loadingLabel={t("voice.resettingToDefaults")}
+        isLoading={resetting}
+        destructive={false}
+        onConfirm={resetAllVoiceSettings}
+        onConfirmError={(error) => {
+          setResetError(error instanceof Error ? error.message : String(error));
+          setResetDialogOpen(false);
+        }}
+      />
     </SettingsPage>
   );
 }

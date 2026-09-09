@@ -222,6 +222,14 @@ fn update_settings(
     Ok(settings)
 }
 
+fn reset_settings(path: &Path) -> Result<(), String> {
+    update_settings(path, |settings| {
+        *settings = SiriVoiceSettings::default();
+        true
+    })
+    .map(|_| ())
+}
+
 #[cfg(target_os = "macos")]
 unsafe extern "C" {
     fn berd_siri_tts_play_sample(
@@ -484,6 +492,11 @@ pub fn set_siri_playback_speed(app: AppHandle, speed: f32) -> Result<(), String>
         true
     })
     .map(|_| ())
+}
+
+#[tauri::command]
+pub fn reset_siri_voice_settings(app: AppHandle) -> Result<(), String> {
+    reset_settings(&settings_path(&app)?)
 }
 
 #[tauri::command]
@@ -1176,6 +1189,26 @@ mod tests {
             read_settings(&directory.path().join("missing.json")).selected_voice,
             None
         );
+    }
+
+    #[test]
+    fn reset_settings_restores_default_voice_and_speed() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let path = directory.path().join("settings.json");
+        write_settings(
+            &path,
+            &SiriVoiceSettings {
+                selected_voice: Some(SiriVoiceSelection::new("Aaron", "en-US").unwrap()),
+                playback_speed: 1.5,
+            },
+        )
+        .expect("write custom settings");
+
+        reset_settings(&path).expect("reset settings");
+
+        let settings = read_settings(&path);
+        assert_eq!(settings.selected_voice, None);
+        assert_eq!(settings.playback_speed, 1.0);
     }
 
     #[test]
