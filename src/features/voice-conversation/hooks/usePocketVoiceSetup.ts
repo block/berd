@@ -254,6 +254,7 @@ export function usePocketVoiceSetup(enabled = true): PocketVoiceSetup {
       setError(
         nextError instanceof Error ? nextError.message : String(nextError),
       );
+      throw nextError;
     }
   }, []);
 

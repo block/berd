@@ -426,6 +426,40 @@ describe("VoiceSettings", () => {
     expect(preferenceMocks.setRealtimePreference).not.toHaveBeenCalled();
   });
 
+  it("reports a Pocket refresh failure and succeeds on retry", async () => {
+    const refreshSettings = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Could not refresh Pocket settings"))
+      .mockResolvedValue(undefined);
+    if (!setupState.current) throw new Error("expected Pocket setup");
+    setupState.current = { ...setupState.current, refreshSettings };
+    renderWithProviders(<VoiceSettings />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Reset to defaults" }));
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Reset to defaults",
+      }),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not refresh Pocket settings",
+    );
+    expect(preferenceMocks.setMode).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Reset to defaults" }));
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Reset to defaults",
+      }),
+    );
+
+    expect(refreshSettings).toHaveBeenCalledTimes(2);
+    expect(openAiApiMocks.resetAll).toHaveBeenCalledTimes(2);
+    expect(preferenceMocks.setMode).toHaveBeenCalledWith("chained");
+  });
+
   it("does not inspect OpenAI credentials for Apple speech input and output", () => {
     inputState.backend = "macos";
     outputState.backend = "siri";
