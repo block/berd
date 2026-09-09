@@ -941,6 +941,47 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     );
   });
 
+  it("keeps working status until the admitted master run settles", async () => {
+    const onSend = vi.fn().mockImplementation(async () => {
+      useChatStore.getState().setChatState("session-a", "thinking");
+      useChatStore.getState().setActiveRunId("session-a", "run-1");
+      return true;
+    });
+    const owner = renderConversation("session-a", onSend);
+
+    await act(async () => owner.result.current.onToggle());
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+    mocks.updateStatusSounds.mockClear();
+
+    act(() => {
+      channel.dispatchEvent(
+        new MessageEvent("message", {
+          data: JSON.stringify({ type: "test.emissary" }),
+        }),
+      );
+    });
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+    expect(owner.result.current.state).toBe("agent-working");
+    expect(mocks.updateStatusSounds).toHaveBeenLastCalledWith(
+      "session-a",
+      "working",
+      { mode: "continuous-while-working", volume: 0.4 },
+    );
+
+    act(() => {
+      useChatStore.getState().setActiveRunId("session-a", null);
+      useChatStore.getState().setChatState("session-a", "idle");
+    });
+
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+    expect(mocks.updateStatusSounds).toHaveBeenLastCalledWith(
+      "session-a",
+      "waiting",
+      { mode: "continuous-while-working", volume: 0.4 },
+    );
+  });
+
   it("serializes rapid voice settings changes against each applied revision", async () => {
     let resolveFirst!: (snapshot: {
       revision: number;

@@ -472,6 +472,16 @@ export function resetVoiceUiWhenRunSettles(
 function ensureVoiceEventDeliveryInitialized() {
   if (deliveryInitialized) return;
   deliveryInitialized = true;
+  subscribeToStatusSoundPreference((preference) => {
+    const voice = useVoiceConversationStore.getState();
+    const activeSessionId = voice.status.sessionId;
+    if (voice.status.lifecycle !== "running" || !activeSessionId) return;
+    publishChainedVoiceStatus(
+      activeSessionId,
+      voice.uiState === "agent-working" ? "working" : "waiting",
+      preference,
+    );
+  });
   subscribeToVoiceConversationEvents(async (event) => {
     if (event.type === "cleanShutdown" || event.type === "controlsDismissed") {
       return;
@@ -1110,23 +1120,6 @@ export function useVoiceConversationController({
     startAssistantSpeech,
     stop,
   ]);
-
-  useEffect(() => {
-    if (
-      status.lifecycle !== "running" ||
-      status.sessionId !== sessionId ||
-      status.ownerWindowLabel !== getCurrentWindow().label
-    )
-      return;
-    return subscribeToStatusSoundPreference((preference) => {
-      const uiState = useVoiceConversationStore.getState().uiState;
-      publishChainedVoiceStatus(
-        sessionId,
-        uiState === "agent-working" ? "working" : "waiting",
-        preference,
-      );
-    });
-  }, [sessionId, status.lifecycle, status.ownerWindowLabel, status.sessionId]);
 
   useEffect(() => {
     if (

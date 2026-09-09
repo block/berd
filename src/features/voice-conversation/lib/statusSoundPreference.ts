@@ -43,13 +43,12 @@ export function getDefaultStatusSoundPreference(): StatusSoundPreference {
 
 export function getStatusSoundPreference(): StatusSoundPreference {
   if (typeof window === "undefined") return DEFAULT_PREFERENCE;
+  if (volatilePreference) return volatilePreference;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    return raw
-      ? normalize(JSON.parse(raw))
-      : (volatilePreference ?? DEFAULT_PREFERENCE);
+    return raw ? normalize(JSON.parse(raw)) : DEFAULT_PREFERENCE;
   } catch {
-    return volatilePreference ?? DEFAULT_PREFERENCE;
+    return DEFAULT_PREFERENCE;
   }
 }
 

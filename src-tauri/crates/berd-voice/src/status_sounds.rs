@@ -171,6 +171,7 @@ enum StatusSoundCommand {
 }
 
 /// Thread-safe status-sound service for hosts that do not own a polling loop.
+#[derive(Clone)]
 pub struct ManagedStatusSoundRuntime {
     commands: Sender<StatusSoundCommand>,
 }
@@ -235,12 +236,6 @@ impl ManagedStatusSoundRuntime {
     }
 
     pub fn finish(&self) {
-        let _ = self.commands.send(StatusSoundCommand::Shutdown);
-    }
-}
-
-impl Drop for ManagedStatusSoundRuntime {
-    fn drop(&mut self) {
         let _ = self.commands.send(StatusSoundCommand::Shutdown);
     }
 }
