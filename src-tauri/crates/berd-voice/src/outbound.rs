@@ -124,8 +124,8 @@ struct LedgerSegment {
     synthesis_complete: bool,
 }
 
-// Five-millisecond windows at -40 dBFS match the empirical paragraph-gap
-// measurements while tolerating quiet nonzero padding from cloud synthesis.
+// Five-millisecond windows at -40 dBFS identify trailing quiet padding while
+// tolerating low-level nonzero output from cloud synthesis.
 const QUIET_PCM_WINDOWS_PER_SECOND: usize = 200;
 const QUIET_PCM_RMS_THRESHOLD: f64 = 0.01;
 
