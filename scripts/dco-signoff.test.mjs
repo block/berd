@@ -3,10 +3,12 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-const validator = new URL("./validate-dco-signoff.mjs", import.meta.url)
-  .pathname;
+const validator = fileURLToPath(
+  new URL("./validate-dco-signoff.mjs", import.meta.url),
+);
 
 function run(
   message,
@@ -21,6 +23,11 @@ function run(
   return spawnSync("node", [validator, messagePath], {
     cwd: repo,
     encoding: "utf8",
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: author.name,
+      GIT_AUTHOR_EMAIL: author.email,
+    },
   });
 }
 
