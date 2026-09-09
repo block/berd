@@ -1,4 +1,4 @@
-import { ChevronRight, CircleAlert } from "lucide-react";
+import { CircleAlert } from "lucide-react";
 import { useId } from "react";
 import { useTranslation } from "react-i18next";
 import { getPlatform } from "@/shared/lib/platform";
@@ -7,11 +7,6 @@ import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import { Button } from "@/shared/ui/button";
 import { Badge } from "@/shared/ui/badge";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/shared/ui/collapsible";
 import { RadioGroup, RadioGroupCard } from "@/shared/ui/radio-group";
 import { SettingsRow } from "@/shared/ui/settings-row";
 import {
@@ -31,8 +26,6 @@ import {
   setOpenAiSpeechVoice,
   setOpenAiTtsApiKey,
 } from "../api/openAiVoice";
-import { resetPocketVoiceSettings } from "../api/pocketVoice";
-import { resetSiriVoiceSettings } from "../api/siriVoice";
 import { usePocketVoiceSetup } from "../hooks/usePocketVoiceSetup";
 import { useMacSpeechSetup } from "../hooks/useMacSpeechSetup";
 import { useMicrophonePermission } from "../hooks/useMicrophonePermission";
@@ -54,7 +47,10 @@ import {
   useVoiceOutputPreference,
 } from "../lib/voiceOutputPreference";
 import type { VoiceConversationMode } from "../lib/voiceConversationModePreference";
-import { useVoiceConversationModePreference } from "../lib/voiceConversationModePreference";
+import {
+  getDefaultVoiceConversationMode,
+  useVoiceConversationModePreference,
+} from "../lib/voiceConversationModePreference";
 import { PocketVoiceSetupContent } from "./PocketVoiceSetupContent";
 import { MacSpeechSettings } from "./MacSpeechSettings";
 import { SiriVoiceSettings } from "./SiriVoiceSettings";
@@ -67,6 +63,10 @@ import {
   getDefaultRealtimeVoicePreference,
   setRealtimeVoicePreference,
 } from "../lib/realtimeVoicePreference";
+import {
+  DEFAULT_OPENAI_VOICE,
+  openAiVoiceOptions,
+} from "../lib/openAiVoiceOptions";
 
 const INTERRUPTION_MODES: VoiceInterruptionMode[] = [
   "automatic",
@@ -142,7 +142,7 @@ export function VoiceSettings() {
   const macSpeechSetup = useMacSpeechSetup();
   const [openAiSpeed, setOpenAiSpeed] = useState(1);
   const [openAiSpeedError, setOpenAiSpeedError] = useState<string | null>(null);
-  const [openAiVoice, setOpenAiVoice] = useState("marin");
+  const [openAiVoice, setOpenAiVoice] = useState(DEFAULT_OPENAI_VOICE);
   const [openAiVoiceError, setOpenAiVoiceError] = useState<string | null>(null);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const [resetting, setResetting] = useState(false);
@@ -226,17 +226,15 @@ export function VoiceSettings() {
     setResetError(null);
     try {
       await Promise.all([
-        resetPocketVoiceSettings(),
+        setup.resetSettings(),
         resetOpenAiVoiceSettings(),
-        ...(siriSupported ? [resetSiriVoiceSettings()] : []),
+        ...(siriSupported ? [siriSetup.resetSettings()] : []),
       ]);
       setRealtimeVoicePreference(getDefaultRealtimeVoicePreference());
       input.setBackend(getDefaultVoiceInputBackend(macSpeechAvailable));
       output.setBackend(getDefaultVoiceOutputBackend());
       interruption.setMode(getDefaultVoiceInterruptionPreference().mode);
-      mode.setMode("chained");
-      setOpenAiSpeed(1);
-      setOpenAiVoice("marin");
+      mode.setMode(getDefaultVoiceConversationMode());
       setResetDialogOpen(false);
     } finally {
       setResetting(false);
@@ -258,6 +256,7 @@ export function VoiceSettings() {
             setResetDialogOpen(true);
           }}
           title={t("voice.resetToDefaultsDescription")}
+          disabled={macSpeechSetup.loading}
         >
           {t("voice.resetToDefaults")}
         </Button>
@@ -501,18 +500,11 @@ export function VoiceSettings() {
                     ) : null}
                     <div className="divide-y divide-border">
                       <SimpleVoicePickerDialog
-                        options={(
-                          openAiStatus?.speechVoices ?? [openAiVoice]
-                        ).map((voice) => ({
-                          value: voice,
-                          label:
-                            voice === "marin"
-                              ? t("voice.defaultOption", {
-                                  value: `${voice.charAt(0).toUpperCase()}${voice.slice(1)}`,
-                                })
-                              : `${voice.charAt(0).toUpperCase()}${voice.slice(1)}`,
-                        }))}
+                        options={openAiVoiceOptions(
+                          openAiStatus?.speechVoices ?? [openAiVoice],
+                        )}
                         selectedVoice={openAiVoice}
+                        defaultVoice={DEFAULT_OPENAI_VOICE}
                         error={openAiVoiceError}
                         onChange={async (voice) => {
                           setOpenAiVoiceError(null);
@@ -568,7 +560,9 @@ export function VoiceSettings() {
                   {t("voice.interruptionMode")}
                 </h2>
               }
-              description={t("voice.interruptionDescription")}
+              description={t(
+                `voice.interruptionModeDescriptions.${interruption.mode}`,
+              )}
               descriptionId={interruptionDescriptionId}
               layout="responsive"
               action={({ labelId, descriptionId }) => (
@@ -598,31 +592,6 @@ export function VoiceSettings() {
                 </Select>
               )}
             />
-            <Collapsible>
-              <CollapsibleTrigger asChild>
-                <Button type="button" variant="ghost" className="group px-0">
-                  <ChevronRight className="size-4 transition-transform group-data-[state=open]:rotate-90" />
-                  {t("voice.advanced")}
-                </Button>
-              </CollapsibleTrigger>
-              <CollapsibleContent className="space-y-2 pt-2">
-                {INTERRUPTION_MODES.map((interruptionMode) => (
-                  <div
-                    key={interruptionMode}
-                    className="rounded-md border px-3 py-2"
-                  >
-                    <p className="text-sm font-medium">
-                      {t(`voice.interruptionModes.${interruptionMode}`)}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {t(
-                        `voice.interruptionModeDescriptions.${interruptionMode}`,
-                      )}
-                    </p>
-                  </div>
-                ))}
-              </CollapsibleContent>
-            </Collapsible>
           </section>
         </>
       ) : (

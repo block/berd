@@ -72,21 +72,11 @@ describe("Siri voice API", () => {
     });
   });
 
-  it("resets the native settings and notifies mounted voice controls", async () => {
+  it("resets the native settings", async () => {
     mocks.invoke.mockResolvedValue(undefined);
-    const settingsChanged = vi.fn();
-    window.addEventListener(
-      "berd:siri-voice-settings-changed",
-      settingsChanged,
-    );
 
     await resetSiriVoiceSettings();
 
     expect(mocks.invoke).toHaveBeenCalledWith("reset_siri_voice_settings");
-    expect(settingsChanged).toHaveBeenCalledOnce();
-    window.removeEventListener(
-      "berd:siri-voice-settings-changed",
-      settingsChanged,
-    );
   });
 });

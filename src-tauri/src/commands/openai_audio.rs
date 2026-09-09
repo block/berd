@@ -663,16 +663,22 @@ pub fn set_openai_speech_voice(
 }
 
 #[tauri::command]
-pub fn reset_openai_voice_settings(state: State<'_, OpenAiVoiceState>) -> Result<(), String> {
+pub fn reset_openai_voice_settings(
+    app: AppHandle,
+    state: State<'_, OpenAiVoiceState>,
+) -> Result<(), String> {
     let defaults = OpenAiVoiceSettings::default();
-    let mut playback = state
-        .playback
-        .lock()
-        .map_err(|_| "OpenAI voice playback state lock was poisoned".to_string())?;
-    persist_voice_settings(defaults.playback_speed, &defaults.speech_voice)?;
-    playback.speed = defaults.playback_speed;
-    playback.voice = defaults.speech_voice;
-    Ok(())
+    {
+        let mut playback = state
+            .playback
+            .lock()
+            .map_err(|_| "OpenAI voice playback state lock was poisoned".to_string())?;
+        persist_voice_settings(defaults.playback_speed, &defaults.speech_voice)?;
+        playback.speed = defaults.playback_speed;
+        playback.voice = defaults.speech_voice;
+    }
+    app.emit(SETTINGS_CHANGED_EVENT, ())
+        .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))
 }
 
 fn stop_openai_voice_for_owner(

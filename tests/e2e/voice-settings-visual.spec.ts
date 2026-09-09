@@ -25,7 +25,7 @@ async function openVoiceSettings(page: Page) {
 
 test("captures consistent voice controls for each backend", async ({
   settings: page,
-}) => {
+}, testInfo) => {
   await page.addInitScript(() => {
     localStorage.setItem("goose:voice-conversation-mode", "chained");
     localStorage.setItem("goose:voice-input-backend", "macos");
@@ -38,43 +38,41 @@ test("captures consistent voice controls for each backend", async ({
   await expect(
     page.locator('[role="combobox"]').filter({ hasText: "Apple TTS" }),
   ).toBeVisible();
-  await page.getByRole("heading", { name: "Voice", exact: true }).hover();
-  await page.screenshot({
-    path: "/tmp/voice-settings-apple-after.png",
-    fullPage: true,
+  await testInfo.attach("voice-settings-apple", {
+    body: await page.screenshot({ fullPage: true }),
+    contentType: "image/png",
   });
 
   const outputBackend = page.getByRole("combobox", {
     name: "Text to speech (TTS)",
   });
   await outputBackend.click();
-  await page.getByRole("option", { name: "Pocket TTS" }).click();
+  await page.getByRole("option", { name: "Pocket TTS Local" }).click();
   await expect(
     page.getByRole("button", { name: /^Choose a voice:/ }),
   ).toBeVisible();
-  await page.screenshot({
-    path: "/tmp/voice-settings-pocket-after.png",
-    fullPage: true,
+  await testInfo.attach("voice-settings-pocket", {
+    body: await page.screenshot({ fullPage: true }),
+    contentType: "image/png",
   });
 
   await outputBackend.click();
-  await page.getByRole("option", { name: "OpenAI TTS" }).click();
+  await page.getByRole("option", { name: "OpenAI TTS Cloud" }).click();
   await expect(
     page.getByRole("button", { name: "Choose a voice: Marin (default)" }),
   ).toBeVisible();
-  await page.screenshot({
-    path: "/tmp/voice-settings-openai-tts-after.png",
-    fullPage: true,
+  await testInfo.attach("voice-settings-openai-tts", {
+    body: await page.screenshot({ fullPage: true }),
+    contentType: "image/png",
   });
 
   await page
-    .getByText("Talk through a voice assistant", { exact: true })
+    .getByRole("radio", { name: "Talk through a voice assistant Cloud" })
     .click();
   await expect(page.getByText("OpenAI API key", { exact: true })).toBeVisible();
   await expect(page.getByText("Realtime model")).toBeHidden();
-  await page.getByRole("heading", { name: "Voice", exact: true }).hover();
-  await page.screenshot({
-    path: "/tmp/voice-settings-es-after.png",
-    fullPage: true,
+  await testInfo.attach("voice-settings-voice-assistant", {
+    body: await page.screenshot({ fullPage: true }),
+    contentType: "image/png",
   });
 });

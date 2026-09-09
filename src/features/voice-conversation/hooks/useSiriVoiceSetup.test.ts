@@ -12,6 +12,7 @@ import {
 const apiMocks = vi.hoisted(() => ({
   downloadSiriVoice: vi.fn(),
   getSiriVoiceStatus: vi.fn(),
+  resetSiriVoiceSettings: vi.fn(),
   selectSiriVoice: vi.fn(),
 }));
 
@@ -19,6 +20,7 @@ vi.mock("../api/siriVoice", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../api/siriVoice")>()),
   downloadSiriVoice: apiMocks.downloadSiriVoice,
   getSiriVoiceStatus: apiMocks.getSiriVoiceStatus,
+  resetSiriVoiceSettings: apiMocks.resetSiriVoiceSettings,
   selectSiriVoice: apiMocks.selectSiriVoice,
 }));
 
@@ -49,6 +51,7 @@ beforeEach(() => {
   apiMocks.downloadSiriVoice.mockReset();
   apiMocks.getSiriVoiceStatus.mockReset();
   apiMocks.selectSiriVoice.mockReset();
+  apiMocks.resetSiriVoiceSettings.mockReset().mockResolvedValue(undefined);
   apiMocks.downloadSiriVoice.mockResolvedValue(undefined);
   apiMocks.selectSiriVoice.mockResolvedValue(undefined);
   window.__TAURI_INTERNALS__ = {} as typeof window.__TAURI_INTERNALS__;
@@ -442,5 +445,20 @@ describe("Siri voice locales", () => {
 
     expect(apiMocks.getSiriVoiceStatus.mock.calls.length).toBeGreaterThan(1);
     expect(result.current.error).toContain("Selection failed");
+  });
+
+  it("refreshes mounted controls after resetting settings", async () => {
+    const initial = status("en-US", "Aaron");
+    const reset = status("en-US", "Samantha");
+    apiMocks.getSiriVoiceStatus
+      .mockResolvedValueOnce(initial)
+      .mockResolvedValue(reset);
+    const { result } = renderHook(() => useSiriVoiceSetup(true));
+    await waitFor(() => expect(result.current.status).toEqual(initial));
+
+    await act(() => result.current.resetSettings());
+
+    expect(apiMocks.resetSiriVoiceSettings).toHaveBeenCalledOnce();
+    await waitFor(() => expect(result.current.status).toEqual(reset));
   });
 });

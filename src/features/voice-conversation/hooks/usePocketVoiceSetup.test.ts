@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   installModel: vi.fn(),
   listen: vi.fn(),
   removeModel: vi.fn(),
+  resetSettings: vi.fn(),
   stopPocket: vi.fn(),
 }));
 
@@ -16,6 +17,7 @@ vi.mock("../api/pocketVoice", async (importOriginal) => ({
   installVoiceModel: mocks.installModel,
   listenToPocketVoiceStatus: mocks.listen,
   removeVoiceModel: mocks.removeModel,
+  resetPocketVoiceSettings: mocks.resetSettings,
   stopPocketVoice: mocks.stopPocket,
 }));
 
@@ -64,6 +66,7 @@ describe("mergePocketVoiceStatus", () => {
     mocks.installModel.mockReset();
     mocks.listen.mockReset();
     mocks.removeModel.mockReset();
+    mocks.resetSettings.mockReset().mockResolvedValue(undefined);
     mocks.stopPocket.mockReset().mockResolvedValue(false);
   });
 
@@ -262,5 +265,24 @@ describe("mergePocketVoiceStatus", () => {
     expect(mocks.stopPocket).toHaveBeenCalledOnce();
     expect(mocks.removeModel).toHaveBeenCalledWith("pocket");
     expect(result.current.status).toEqual(removed);
+  });
+
+  it("refreshes mounted controls after resetting settings", async () => {
+    const initial = status(40);
+    const reset = {
+      ...initial,
+      statusRevision: initial.statusRevision + 1,
+      playbackSpeed: 1,
+    };
+    mocks.getStatus.mockResolvedValueOnce(initial).mockResolvedValueOnce(reset);
+    mocks.listen.mockResolvedValue(vi.fn());
+    window.__TAURI_INTERNALS__ = {} as typeof window.__TAURI_INTERNALS__;
+
+    const { result } = renderHook(() => usePocketVoiceSetup(true));
+    await waitFor(() => expect(result.current.status).toEqual(initial));
+    await act(() => result.current.resetSettings());
+
+    expect(mocks.resetSettings).toHaveBeenCalledOnce();
+    expect(result.current.status).toEqual(reset);
   });
 });

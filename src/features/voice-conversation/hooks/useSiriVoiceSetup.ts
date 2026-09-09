@@ -3,6 +3,7 @@ import {
   downloadSiriVoice,
   getSiriVoiceStatus,
   previewSiriVoice,
+  resetSiriVoiceSettings,
   selectSiriVoice,
   setSiriPlaybackSpeed,
   type SiriVoice,
@@ -72,6 +73,7 @@ export interface SiriVoiceSetup {
   downloadVoice: (voice: SiriVoice) => Promise<void>;
   previewVoice: (voice: SiriVoice) => Promise<void>;
   selectVoice: (voice: SiriVoice) => Promise<void>;
+  resetSettings: () => Promise<void>;
 }
 
 export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
@@ -317,6 +319,18 @@ export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
     [language, refresh],
   );
 
+  const resetSettings = useCallback(async () => {
+    setActionError(null);
+    try {
+      await resetSiriVoiceSettings();
+      window.dispatchEvent(new Event(SIRI_VOICE_SETTINGS_CHANGED));
+      if (enabled) await refresh(language);
+    } catch (nextError) {
+      setActionError(String(nextError));
+      throw nextError;
+    }
+  }, [enabled, language, refresh]);
+
   return {
     status,
     language,
@@ -331,6 +345,7 @@ export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
     downloadVoice,
     previewVoice,
     selectVoice,
+    resetSettings,
   };
 }
 

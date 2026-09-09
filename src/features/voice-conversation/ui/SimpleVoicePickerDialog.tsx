@@ -11,19 +11,25 @@ export interface SimpleVoiceOption {
 export function SimpleVoicePickerDialog({
   options,
   selectedVoice,
+  defaultVoice,
   error,
   onChange,
 }: {
   options: readonly SimpleVoiceOption[];
   selectedVoice: string;
+  defaultVoice?: string;
   error?: string | null;
   onChange: (voice: string) => void | Promise<void>;
 }) {
   const { t } = useTranslation("settings");
   const optionIdPrefix = useId();
-  const selectedLabel =
+  const rawSelectedLabel =
     options.find((option) => option.value === selectedVoice)?.label ??
     selectedVoice;
+  const selectedLabel =
+    selectedVoice === defaultVoice
+      ? t("voice.defaultOption", { value: rawSelectedLabel })
+      : rawSelectedLabel;
 
   return (
     <VoicePickerDialog selectedVoice={selectedLabel} dialogError={error}>
@@ -44,7 +50,11 @@ export function SimpleVoicePickerDialog({
               id={`${optionIdPrefix}-${option.value}`}
               value={option.value}
             />
-            <span>{option.label}</span>
+            <span>
+              {option.value === defaultVoice
+                ? t("voice.defaultOption", { value: option.label })
+                : option.label}
+            </span>
           </label>
         ))}
       </RadioGroup>

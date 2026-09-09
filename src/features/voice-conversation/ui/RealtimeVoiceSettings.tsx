@@ -31,6 +31,10 @@ import { useOpenAiVoiceSetup } from "../hooks/useOpenAiVoiceSetup";
 import { OpenAiApiKeyField } from "./OpenAiApiKeyField";
 import { PlaybackSpeedRow } from "./PlaybackSpeedRow";
 import { SimpleVoicePickerDialog } from "./SimpleVoicePickerDialog";
+import {
+  DEFAULT_OPENAI_VOICE,
+  openAiVoiceOptions,
+} from "../lib/openAiVoiceOptions";
 
 const REALTIME_MODELS = [
   "gpt-realtime-2.1",
@@ -57,10 +61,6 @@ const REALTIME_VOICES = [
   "shimmer",
   "verse",
 ] as const;
-
-function voiceLabel(voice: string): string {
-  return `${voice.charAt(0).toUpperCase()}${voice.slice(1)}`;
-}
 
 function boundedInteger(
   value: string,
@@ -117,16 +117,10 @@ export function RealtimeVoiceSettings() {
   const update = (patch: Partial<typeof preference>) => {
     setPreference({ ...preference, ...patch });
   };
-  const voiceOptions = Array.from(
-    new Set([preference.voice, ...REALTIME_VOICES]),
-    (voice) => ({
-      value: voice,
-      label:
-        voice === "marin"
-          ? t("voice.defaultOption", { value: voiceLabel(voice) })
-          : voiceLabel(voice),
-    }),
-  );
+  const voiceOptions = openAiVoiceOptions([
+    preference.voice,
+    ...REALTIME_VOICES,
+  ]);
 
   return (
     <section className="space-y-5 py-2 pr-4">
@@ -144,6 +138,7 @@ export function RealtimeVoiceSettings() {
         <SimpleVoicePickerDialog
           options={voiceOptions}
           selectedVoice={preference.voice}
+          defaultVoice={DEFAULT_OPENAI_VOICE}
           onChange={(voice) => update({ voice })}
         />
         <PlaybackSpeedRow

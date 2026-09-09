@@ -939,7 +939,6 @@
     "modeChainedDescription": "Your speech becomes a message to your coding agent, and its response is read aloud. Best for direct, project-aware work.",
     "modeOpenAiRealtime": "Talk through a voice assistant",
     "modeOpenAiRealtimeDescription": "Have a lower-latency, more natural conversation with a voice assistant that consults your coding agent when it needs your project or tools. Requires an OpenAI API key.",
-    "advanced": "About interruption modes",
     "cloud": "Cloud",
     "local": "Local",
     "recommended": "Recommended",
@@ -1026,7 +1025,6 @@
     "macSpeechModel": "On-device dictation",
     "macSpeechNotInstalled": "Not installed for {{locale}}",
     "macSpeechSystemLocale": "the system language",
-    "interruptionDescription": "Choose what happens when you speak while Berd is talking.",
     "interruptionMode": "Interruptions",
     "interruptionModeDescriptions": {
       "allowInterruptions": "Berd keeps listening on every audio device. You can interrupt, but speaker audio may be mistaken for your voice.",

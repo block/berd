@@ -168,6 +168,7 @@ vi.mock("../lib/voiceInterruptionPreference", () => ({
   }),
 }));
 vi.mock("../lib/voiceConversationModePreference", () => ({
+  getDefaultVoiceConversationMode: () => "chained",
   useVoiceConversationModePreference: () => ({
     mode: modeState.mode,
     setMode: preferenceMocks.setMode,
@@ -190,6 +191,7 @@ function setup(status: PocketVoiceStatus): PocketVoiceSetup {
     selectVoice: vi.fn(),
     setPlaybackSpeed: vi.fn(),
     removeModel: vi.fn(),
+    resetSettings: openAiApiMocks.resetPocket,
   };
 }
 
@@ -254,6 +256,7 @@ function siriSetup(): SiriVoiceSetup {
     downloadVoice: vi.fn(),
     previewVoice: vi.fn(),
     selectVoice: vi.fn(),
+    resetSettings: openAiApiMocks.resetSiri,
   };
 }
 
@@ -380,6 +383,20 @@ describe("VoiceSettings", () => {
     );
     expect(preferenceMocks.setMode).toHaveBeenCalledWith("chained");
     expect(preferenceMocks.setRealtimePreference).toHaveBeenCalledOnce();
+  });
+
+  it("waits for Apple capability detection before offering reset", () => {
+    macSpeechSetupState.current = {
+      ...macSpeechSetupState.current,
+      status: null,
+      loading: true,
+    };
+
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      screen.getByRole("button", { name: "Reset to defaults" }),
+    ).toBeDisabled();
   });
 
   it("does not inspect OpenAI credentials for Apple speech input and output", () => {
@@ -651,7 +668,7 @@ describe("VoiceSettings", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("keeps interruption selection concise with details on demand", async () => {
+  it("shows the selected interruption mode description inline", async () => {
     setupState.current = setup(pocketStatus());
     renderWithProviders(<VoiceSettings />);
     const user = userEvent.setup();
@@ -661,34 +678,15 @@ describe("VoiceSettings", () => {
     ).toHaveTextContent("Automatic");
     expect(
       screen.getByText(
-        "Choose what happens when you speak while Berd is talking.",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByText(
         "Allows interruptions on most audio devices. Berd pauses listening on built-in Mac speakers or when the device name contains “speaker” or “altavoces.”",
       ),
-    ).not.toBeInTheDocument();
+    ).toBeInTheDocument();
 
-    await user.click(
-      screen.getByRole("button", { name: "About interruption modes" }),
+    await user.click(screen.getByRole("combobox", { name: "Interruptions" }));
+    await user.click(screen.getByRole("option", { name: "Prevent feedback" }));
+    expect(preferenceMocks.setInterruptionMode).toHaveBeenCalledWith(
+      "preventFeedback",
     );
-
-    expect(
-      screen.getByText(
-        "Allows interruptions on most audio devices. Berd pauses listening on built-in Mac speakers or when the device name contains “speaker” or “altavoces.”",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "Berd keeps listening on every audio device. You can interrupt, but speaker audio may be mistaken for your voice.",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "Berd pauses listening on every audio device. This prevents feedback, but you can’t interrupt.",
-      ),
-    ).toBeInTheDocument();
     expect(
       screen.queryByText("Interruption sensitivity"),
     ).not.toBeInTheDocument();
