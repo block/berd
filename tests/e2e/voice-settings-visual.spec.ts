@@ -67,8 +67,10 @@ test("captures consistent voice controls for each backend", async ({
     fullPage: true,
   });
 
-  await page.getByText("Expert & Spokesperson", { exact: true }).click();
-  await expect(page.getByText("OpenAI API key")).toBeVisible();
+  await page
+    .getByText("Talk through a voice assistant", { exact: true })
+    .click();
+  await expect(page.getByText("OpenAI API key", { exact: true })).toBeVisible();
   await expect(page.getByText("Realtime model")).toBeHidden();
   await page.getByRole("heading", { name: "Voice", exact: true }).hover();
   await page.screenshot({
