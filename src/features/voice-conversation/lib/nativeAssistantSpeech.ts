@@ -1008,6 +1008,8 @@ export function startNativeAssistantSpeech(
   const transcriptReferenceByKey = new Map<string, VoiceTranscriptReference>();
   const invalidatedMessages = new Set<string>();
   const completedMessages = new Set<string>();
+  const completionReadyMessages = new Set<string>();
+  const completionTimers = new Map<string, number>();
   const interruptedMessages = new Set<string>();
   const failedMessages = new Set<string>();
   const interruptionCauseByMessage = new Map<string, InterruptionCause>();
@@ -1646,7 +1648,9 @@ export function startNativeAssistantSpeech(
         invalidatedMessages.has(message.id);
       if (utteranceOwnsMessage || messageCannotSpeak) {
         toolCountByMessage.set(message.id, toolCount);
-        if (completed) completedMessages.add(message.id);
+        if (completed && messageCannotSpeak) {
+          completedMessages.add(message.id);
+        }
       }
       if (
         crossedToolBoundary &&
@@ -1667,6 +1671,7 @@ export function startNativeAssistantSpeech(
         utteranceOwnsMessage &&
         !utterance.nativeStartQueued
       ) {
+        completedMessages.add(message.id);
         for (const target of utterance.targets) {
           heldSpeech?.targets.delete(targetKey(target));
         }
@@ -1683,6 +1688,24 @@ export function startNativeAssistantSpeech(
         utteranceOwnsMessage &&
         !utterance.finishing
       ) {
+        // ACP can resolve session/prompt just before dispatching a final
+        // session/update already read from the same transport. Confirm the
+        // completion on the next macrotask so a trailing text delta is
+        // appended before native TTS receives finish.
+        if (!completionReadyMessages.has(message.id)) {
+          if (!completionTimers.has(message.id)) {
+            const timer = window.setTimeout(() => {
+              completionTimers.delete(message.id);
+              if (activeGeneration !== generation) return;
+              completionReadyMessages.add(message.id);
+              inspect();
+            }, 0);
+            completionTimers.set(message.id, timer);
+          }
+          break;
+        }
+        completionReadyMessages.delete(message.id);
+        completedMessages.add(message.id);
         utterance.finishing = true;
         queueStreamCommand(
           utterance,
@@ -1704,7 +1727,15 @@ export function startNativeAssistantSpeech(
     }
   };
 
-  stopSubscription = useChatStore.subscribe(inspect);
+  const unsubscribeChat = useChatStore.subscribe(inspect);
+  stopSubscription = () => {
+    unsubscribeChat();
+    for (const timer of completionTimers.values()) {
+      window.clearTimeout(timer);
+    }
+    completionTimers.clear();
+    completionReadyMessages.clear();
+  };
   let reachedRunning =
     initialVoice.status.lifecycle === "running" &&
     initialVoice.status.sessionId === sessionId;

@@ -737,6 +737,32 @@ describe("native assistant speech stream", () => {
     ).toMatchObject({ speech: { status: "spoken" } });
   });
 
+  it("includes a final queued text delta before finishing streamed speech", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [assistant([{ type: "text", text: "N" }])]);
+    window.setTimeout(() => {
+      useChatStore
+        .getState()
+        .appendStreamingText("session-1", "assistant-1", "ora arrived.");
+    }, 0);
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "N" }], "completed"),
+      ]);
+
+    await vi.waitFor(() => expect(mocks.finish).toHaveBeenCalledTimes(1));
+
+    expect(mocks.append.mock.calls.map(([, text]) => text).join("")).toBe(
+      "Nora arrived.",
+    );
+    expect(mocks.finish.mock.invocationCallOrder[0]).toBeGreaterThan(
+      mocks.append.mock.invocationCallOrder.at(-1) ?? 0,
+    );
+  });
+
   it("serializes terminal idle behind the speaking activity report", async () => {
     let finishSpeakingReport: (() => void) | undefined;
     mocks.setAssistantSpeaking.mockImplementation(
