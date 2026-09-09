@@ -2,15 +2,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Event } from "@/shared/telemetry/events";
 
 const mocks = vi.hoisted(() => ({
+  invoke: vi.fn(),
+  renderer: { rendererId: "renderer-test", rendererEpoch: 7 },
   track: vi.fn((_event: Event): boolean => true),
+}));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
+vi.mock("@/shared/lib/rendererInstance", () => ({
+  getRendererInstance: () => Promise.resolve({ ...mocks.renderer }),
 }));
 vi.mock("@/shared/telemetry/client", () => ({ track: mocks.track }));
 
 import {
   clearRequestedVoiceConversationEnd,
+  flushVoiceTelemetryForTest,
   requestVoiceConversationEnd,
   resetVoiceTelemetryForTest,
-  resetVoiceTelemetryMemoryForTest,
   trackVoiceAssistantResponse,
   trackVoiceConversationEnded,
   trackVoiceConversationStarted,
@@ -23,34 +29,89 @@ const context = {
   voiceMode: "chained" as const,
 };
 
+type NativeAggregate = {
+  owner: typeof mocks.renderer;
+  reportable: boolean;
+  userUtteranceCount: number;
+  assistantResponseCount: number;
+  requestedEndReason: string | null;
+} | null;
+
+function installNativeAccounting() {
+  let aggregate: NativeAggregate = null;
+  mocks.invoke.mockImplementation(async (command, args) => {
+    const request = args?.request;
+    if (command === "start_voice_conversation_telemetry") {
+      if (aggregate) return false;
+      aggregate = {
+        owner: {
+          rendererId: request.rendererId,
+          rendererEpoch: request.rendererEpoch,
+        },
+        reportable: false,
+        userUtteranceCount: 0,
+        assistantResponseCount: 0,
+        requestedEndReason: null,
+      };
+      return true;
+    }
+    if (command === "set_voice_conversation_telemetry_reportable") {
+      if (aggregate) aggregate.reportable = args.reportable;
+      return;
+    }
+    if (command === "end_voice_conversation_telemetry") {
+      if (!aggregate) return null;
+      const completed = {
+        inputBackend: "macos",
+        outputBackend: "siri",
+        voiceMode: "chained",
+        durationMs: 2500,
+        userUtteranceCount: aggregate.userUtteranceCount,
+        assistantResponseCount: aggregate.assistantResponseCount,
+        endReason: aggregate.requestedEndReason ?? request.fallbackReason,
+        reportable: aggregate.reportable,
+      };
+      aggregate = null;
+      return completed;
+    }
+    if (
+      !aggregate ||
+      aggregate.owner.rendererId !== request.rendererId ||
+      aggregate.owner.rendererEpoch !== request.rendererEpoch
+    )
+      return;
+    if (command === "increment_voice_conversation_user_utterances")
+      aggregate.userUtteranceCount += 1;
+    if (command === "increment_voice_conversation_assistant_responses")
+      aggregate.assistantResponseCount += 1;
+    if (command === "request_voice_conversation_telemetry_end")
+      aggregate.requestedEndReason = args.reason;
+    if (command === "clear_voice_conversation_telemetry_end")
+      aggregate.requestedEndReason = null;
+  });
+}
+
 describe("voice conversation telemetry", () => {
   beforeEach(() => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-09-09T00:00:00Z"));
     mocks.track.mockReset().mockReturnValue(true);
+    mocks.invoke.mockReset();
+    mocks.renderer.rendererId = "renderer-test";
+    mocks.renderer.rendererEpoch = 7;
     resetVoiceTelemetryForTest();
+    installNativeAccounting();
   });
 
-  it("emits one self-contained lifecycle with aggregate counts", () => {
-    trackVoiceConversationStarted(context);
+  it("emits one self-contained lifecycle with aggregate counts", async () => {
     trackVoiceConversationStarted(context);
     trackVoiceUserUtterance();
     trackVoiceUserUtterance();
     trackVoiceAssistantResponse();
-    vi.advanceTimersByTime(2_500);
     requestVoiceConversationEnd("controls-dismissed");
     trackVoiceConversationEnded("clean-shutdown");
     trackVoiceConversationEnded("error");
+    await flushVoiceTelemetryForTest();
 
     expect(mocks.track).toHaveBeenCalledTimes(2);
-    expect(mocks.track.mock.calls[0][0]).toMatchObject({
-      name: "berd_voice_conversation_started",
-      parameters: {
-        input_backend: "macos",
-        output_backend: "siri",
-        voice_mode: "chained",
-      },
-    });
     expect(mocks.track.mock.calls[1][0]).toEqual({
       name: "berd_voice_conversation_ended",
       parameters: {
@@ -65,62 +126,48 @@ describe("voice conversation telemetry", () => {
     });
   });
 
-  it("clears a failed stop intent before a later terminal event", () => {
+  it("clears a failed stop intent before a later terminal event", async () => {
     trackVoiceConversationStarted(context);
     requestVoiceConversationEnd("user");
     clearRequestedVoiceConversationEnd();
     trackVoiceConversationEnded("error");
-
+    await flushVoiceTelemetryForTest();
     expect(mocks.track.mock.calls[1][0].parameters.end_reason).toBe("error");
   });
-  it("finishes a lifecycle after its owner renderer is destroyed", () => {
+
+  it("keeps accounting when browser storage is unavailable", async () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("unavailable");
+    });
     trackVoiceConversationStarted(context);
     trackVoiceUserUtterance();
-    resetVoiceTelemetryMemoryForTest();
-    trackVoiceConversationEnded("clean-shutdown");
-
-    expect(mocks.track.mock.calls[1][0].parameters).toMatchObject({
-      user_utterance_count: "1",
-      end_reason: "clean-shutdown",
-    });
-  });
-
-  it("lets a new renderer replace stale lifecycle storage", () => {
-    trackVoiceConversationStarted(context);
-    resetVoiceTelemetryMemoryForTest();
-    trackVoiceConversationStarted({
-      inputBackend: "parakeet",
-      outputBackend: "pocket",
-      voiceMode: "chained",
-    });
     trackVoiceConversationEnded("user");
-
-    expect(mocks.track).toHaveBeenCalledTimes(3);
-    expect(mocks.track.mock.calls[2][0].parameters).toMatchObject({
-      input_backend: "parakeet",
-      output_backend: "pocket",
-    });
+    await flushVoiceTelemetryForTest();
+    expect(mocks.track.mock.calls[1][0].parameters.user_utterance_count).toBe(
+      "1",
+    );
   });
 
-  it("does not let another renderer add to the owner's aggregate", () => {
+  it("ignores updates from a non-owning renderer", async () => {
     trackVoiceConversationStarted(context);
-    resetVoiceTelemetryMemoryForTest();
+    mocks.renderer.rendererId = "replacement-renderer";
+    mocks.renderer.rendererEpoch = 8;
     trackVoiceUserUtterance();
     trackVoiceAssistantResponse();
     trackVoiceConversationEnded("clean-shutdown");
-
+    await flushVoiceTelemetryForTest();
     expect(mocks.track.mock.calls[1][0].parameters).toMatchObject({
       user_utterance_count: "0",
       assistant_response_count: "0",
     });
   });
 
-  it("does not emit an end aggregate when the start is rejected", () => {
+  it("does not emit an end aggregate when the start is rejected", async () => {
     mocks.track.mockReturnValueOnce(false);
     trackVoiceConversationStarted(context);
     trackVoiceUserUtterance();
     trackVoiceConversationEnded("user");
-
+    await flushVoiceTelemetryForTest();
     expect(mocks.track).toHaveBeenCalledOnce();
   });
 });

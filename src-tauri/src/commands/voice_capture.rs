@@ -1,8 +1,8 @@
 //! Shared renderer and microphone ownership for voice features.
 
-use std::{collections::HashMap, sync::Mutex};
+use std::{collections::HashMap, sync::Mutex, time::Instant};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tauri::{State, WebviewWindow};
 
 const MAX_ID_LEN: usize = 256;
@@ -32,6 +32,82 @@ pub struct ForegroundSessionRequest {
     session_id: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum VoiceTelemetryBackend {
+    Parakeet,
+    Macos,
+    Pocket,
+    Siri,
+    Openai,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum VoiceTelemetryMode {
+    Chained,
+    OpenaiRealtime,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum VoiceTelemetryEndReason {
+    User,
+    Replacement,
+    ControlsDismissed,
+    CleanShutdown,
+    Error,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VoiceTelemetryStartRequest {
+    renderer_id: String,
+    renderer_epoch: u64,
+    input_backend: VoiceTelemetryBackend,
+    output_backend: VoiceTelemetryBackend,
+    voice_mode: VoiceTelemetryMode,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VoiceTelemetryOwnerRequest {
+    renderer_id: String,
+    renderer_epoch: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VoiceTelemetryEndRequest {
+    fallback_reason: VoiceTelemetryEndReason,
+}
+
+struct ActiveVoiceTelemetry {
+    owner_renderer_id: String,
+    owner_renderer_epoch: u64,
+    input_backend: VoiceTelemetryBackend,
+    output_backend: VoiceTelemetryBackend,
+    voice_mode: VoiceTelemetryMode,
+    started_at: Instant,
+    user_utterance_count: u64,
+    assistant_response_count: u64,
+    requested_end_reason: Option<VoiceTelemetryEndReason>,
+    reportable: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompletedVoiceTelemetry {
+    input_backend: VoiceTelemetryBackend,
+    output_backend: VoiceTelemetryBackend,
+    voice_mode: VoiceTelemetryMode,
+    duration_ms: u64,
+    user_utterance_count: u64,
+    assistant_response_count: u64,
+    end_reason: VoiceTelemetryEndReason,
+    reportable: bool,
+}
+
 #[derive(Default)]
 struct CaptureState {
     renderer_epoch: u64,
@@ -39,6 +115,7 @@ struct CaptureState {
     current_renderers: HashMap<String, (String, u64)>,
     foreground_sessions: HashMap<String, ForegroundSessionClaim>,
     microphone_owner: Option<MicrophoneOwner>,
+    active_voice_telemetry: Option<ActiveVoiceTelemetry>,
 }
 
 #[derive(Default)]
@@ -306,6 +383,74 @@ impl VoiceCaptureState {
         matches
     }
 
+    fn start_voice_telemetry(
+        &self,
+        window_label: &str,
+        request: VoiceTelemetryStartRequest,
+    ) -> Result<bool, String> {
+        validate_id("renderer", &request.renderer_id)?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "Voice capture state lock was poisoned".to_string())?;
+        state.activate_renderer(window_label, &request.renderer_id, request.renderer_epoch)?;
+        if state.active_voice_telemetry.is_some() {
+            return Ok(false);
+        }
+        state.active_voice_telemetry = Some(ActiveVoiceTelemetry {
+            owner_renderer_id: request.renderer_id,
+            owner_renderer_epoch: request.renderer_epoch,
+            input_backend: request.input_backend,
+            output_backend: request.output_backend,
+            voice_mode: request.voice_mode,
+            started_at: Instant::now(),
+            user_utterance_count: 0,
+            assistant_response_count: 0,
+            requested_end_reason: None,
+            reportable: false,
+        });
+        Ok(true)
+    }
+
+    fn update_voice_telemetry(
+        &self,
+        request: &VoiceTelemetryOwnerRequest,
+        update: impl FnOnce(&mut ActiveVoiceTelemetry),
+    ) -> Result<(), String> {
+        validate_id("renderer", &request.renderer_id)?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "Voice capture state lock was poisoned".to_string())?;
+        if let Some(active) = state.active_voice_telemetry.as_mut().filter(|active| {
+            active.owner_renderer_id == request.renderer_id
+                && active.owner_renderer_epoch == request.renderer_epoch
+        }) {
+            update(active);
+        }
+        Ok(())
+    }
+
+    fn end_voice_telemetry(
+        &self,
+        fallback_reason: VoiceTelemetryEndReason,
+    ) -> Result<Option<CompletedVoiceTelemetry>, String> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "Voice capture state lock was poisoned".to_string())?;
+        Ok(state.active_voice_telemetry.take().map(|active| CompletedVoiceTelemetry {
+            input_backend: active.input_backend,
+            output_backend: active.output_backend,
+            voice_mode: active.voice_mode,
+            duration_ms: u64::try_from(active.started_at.elapsed().as_millis()).unwrap_or(u64::MAX),
+            user_utterance_count: active.user_utterance_count,
+            assistant_response_count: active.assistant_response_count,
+            end_reason: active.requested_end_reason.unwrap_or(fallback_reason),
+            reportable: active.reportable,
+        }))
+    }
+
     pub fn release_window(&self, window_label: &str) {
         let Ok(mut state) = self.state.lock() else {
             return;
@@ -321,6 +466,65 @@ impl VoiceCaptureState {
         state.pending_renderers.remove(window_label);
         state.foreground_sessions.remove(window_label);
     }
+}
+
+#[tauri::command]
+pub fn start_voice_conversation_telemetry(
+    state: State<'_, VoiceCaptureState>,
+    webview_window: WebviewWindow,
+    request: VoiceTelemetryStartRequest,
+) -> Result<bool, String> {
+    state.start_voice_telemetry(webview_window.label(), request)
+}
+
+#[tauri::command]
+pub fn set_voice_conversation_telemetry_reportable(
+    state: State<'_, VoiceCaptureState>,
+    request: VoiceTelemetryOwnerRequest,
+    reportable: bool,
+) -> Result<(), String> {
+    state.update_voice_telemetry(&request, |active| active.reportable = reportable)
+}
+
+#[tauri::command]
+pub fn increment_voice_conversation_user_utterances(
+    state: State<'_, VoiceCaptureState>,
+    request: VoiceTelemetryOwnerRequest,
+) -> Result<(), String> {
+    state.update_voice_telemetry(&request, |active| active.user_utterance_count += 1)
+}
+
+#[tauri::command]
+pub fn increment_voice_conversation_assistant_responses(
+    state: State<'_, VoiceCaptureState>,
+    request: VoiceTelemetryOwnerRequest,
+) -> Result<(), String> {
+    state.update_voice_telemetry(&request, |active| active.assistant_response_count += 1)
+}
+
+#[tauri::command]
+pub fn request_voice_conversation_telemetry_end(
+    state: State<'_, VoiceCaptureState>,
+    request: VoiceTelemetryOwnerRequest,
+    reason: VoiceTelemetryEndReason,
+) -> Result<(), String> {
+    state.update_voice_telemetry(&request, |active| active.requested_end_reason = Some(reason))
+}
+
+#[tauri::command]
+pub fn clear_voice_conversation_telemetry_end(
+    state: State<'_, VoiceCaptureState>,
+    request: VoiceTelemetryOwnerRequest,
+) -> Result<(), String> {
+    state.update_voice_telemetry(&request, |active| active.requested_end_reason = None)
+}
+
+#[tauri::command]
+pub fn end_voice_conversation_telemetry(
+    state: State<'_, VoiceCaptureState>,
+    request: VoiceTelemetryEndRequest,
+) -> Result<Option<CompletedVoiceTelemetry>, String> {
+    state.end_voice_telemetry(request.fallback_reason)
 }
 
 #[tauri::command]
@@ -369,6 +573,69 @@ fn validate_id(label: &str, value: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn voice_telemetry_end_claim_is_atomic() {
+        let capture = VoiceCaptureState::default();
+        let epoch = capture.register_renderer_for_test("main", "renderer-1");
+        capture
+            .start_voice_telemetry(
+                "main",
+                VoiceTelemetryStartRequest {
+                    renderer_id: "renderer-1".into(),
+                    renderer_epoch: epoch,
+                    input_backend: VoiceTelemetryBackend::Macos,
+                    output_backend: VoiceTelemetryBackend::Siri,
+                    voice_mode: VoiceTelemetryMode::Chained,
+                },
+            )
+            .expect("start telemetry");
+
+        let first = capture
+            .end_voice_telemetry(VoiceTelemetryEndReason::User)
+            .expect("first claim");
+        let second = capture
+            .end_voice_telemetry(VoiceTelemetryEndReason::Error)
+            .expect("second claim");
+
+        assert!(first.is_some());
+        assert!(second.is_none());
+        assert_eq!(first.expect("completed telemetry").duration_ms, 0);
+    }
+
+    #[test]
+    fn voice_telemetry_updates_require_the_owner_renderer() {
+        let capture = VoiceCaptureState::default();
+        let owner_epoch = capture.register_renderer_for_test("main", "renderer-1");
+        capture
+            .start_voice_telemetry(
+                "main",
+                VoiceTelemetryStartRequest {
+                    renderer_id: "renderer-1".into(),
+                    renderer_epoch: owner_epoch,
+                    input_backend: VoiceTelemetryBackend::Macos,
+                    output_backend: VoiceTelemetryBackend::Siri,
+                    voice_mode: VoiceTelemetryMode::Chained,
+                },
+            )
+            .expect("start telemetry");
+        let other_epoch = capture.register_renderer_for_test("other", "renderer-2");
+        capture
+            .update_voice_telemetry(
+                &VoiceTelemetryOwnerRequest {
+                    renderer_id: "renderer-2".into(),
+                    renderer_epoch: other_epoch,
+                },
+                |active| active.user_utterance_count += 1,
+            )
+            .expect("ignore non-owner update");
+
+        let completed = capture
+            .end_voice_telemetry(VoiceTelemetryEndReason::User)
+            .expect("claim end")
+            .expect("completed telemetry");
+        assert_eq!(completed.user_utterance_count, 0);
+    }
 
     #[test]
     fn renderer_ownership_is_exclusive_and_releasable() {
