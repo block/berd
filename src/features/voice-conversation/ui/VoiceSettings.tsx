@@ -74,6 +74,28 @@ const INTERRUPTION_MODES: VoiceInterruptionMode[] = [
   "preventFeedback",
 ];
 
+function BackendOption({
+  label,
+  location,
+  recommended = false,
+}: {
+  label: string;
+  location: string;
+  recommended?: boolean;
+}) {
+  const { t } = useTranslation("settings");
+
+  return (
+    <span className="flex items-center gap-2">
+      {label}
+      {recommended ? (
+        <Badge variant="secondary">{t("voice.recommended")}</Badge>
+      ) : null}
+      <Badge variant="outline">{location}</Badge>
+    </span>
+  );
+}
+
 function readinessDescriptionKey(
   inputReady: boolean,
   outputReady: boolean,
@@ -265,7 +287,12 @@ export function VoiceSettings() {
           <RadioGroupCard
             id="voice-mode-openai-realtime"
             value="openai-realtime"
-            label={t("voice.modeOpenAiRealtime")}
+            label={
+              <span className="flex items-center gap-2">
+                {t("voice.modeOpenAiRealtime")}
+                <Badge variant="outline">{t("voice.cloud")}</Badge>
+              </span>
+            }
             description={t("voice.modeOpenAiRealtimeDescription")}
           />
         </RadioGroup>
@@ -328,20 +355,25 @@ export function VoiceSettings() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="parakeet">
-                      {t("voice.backendParakeet")}
+                      <BackendOption
+                        label={t("voice.backendParakeet")}
+                        location={t("voice.local")}
+                      />
                     </SelectItem>
                     <SelectItem value="openai">
-                      {t("voice.backendOpenAiStt")}
+                      <BackendOption
+                        label={t("voice.backendOpenAiStt")}
+                        location={t("voice.cloud")}
+                      />
                     </SelectItem>
                     {macSpeechSetup.status?.supported &&
                     macSpeechSetup.status.localeSupported ? (
                       <SelectItem value="macos">
-                        <span className="flex items-center gap-2">
-                          {t("voice.backendMacSpeech")}
-                          <Badge variant="secondary">
-                            {t("voice.recommended")}
-                          </Badge>
-                        </span>
+                        <BackendOption
+                          label={t("voice.backendMacSpeech")}
+                          location={t("voice.local")}
+                          recommended
+                        />
                       </SelectItem>
                     ) : null}
                   </SelectContent>
@@ -413,21 +445,26 @@ export function VoiceSettings() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="pocket">
-                      {t("voice.backendPocket")}
+                      <BackendOption
+                        label={t("voice.backendPocket")}
+                        location={t("voice.local")}
+                      />
                     </SelectItem>
                     {getPlatform() === "mac" ? (
                       <SelectItem value="openai">
-                        {t("voice.backendOpenAiTts")}
+                        <BackendOption
+                          label={t("voice.backendOpenAiTts")}
+                          location={t("voice.cloud")}
+                        />
                       </SelectItem>
                     ) : null}
                     {siriSupported ? (
                       <SelectItem value="siri">
-                        <span className="flex items-center gap-2">
-                          {t("voice.backendSiri")}
-                          <Badge variant="secondary">
-                            {t("voice.recommended")}
-                          </Badge>
-                        </span>
+                        <BackendOption
+                          label={t("voice.backendSiri")}
+                          location={t("voice.local")}
+                          recommended
+                        />
                       </SelectItem>
                     ) : null}
                   </SelectContent>

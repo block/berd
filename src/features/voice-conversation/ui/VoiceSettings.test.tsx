@@ -328,7 +328,7 @@ describe("VoiceSettings", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Speak directly with your coding agent. Its answers are read aloud using the STT and TTS services you choose.",
+        "Your speech becomes a message to your coding agent, and its response is read aloud. Best for direct, project-aware work.",
       ),
     ).toBeInTheDocument();
     expect(
@@ -403,7 +403,7 @@ describe("VoiceSettings", () => {
     );
 
     expect(
-      screen.getByRole("option", { name: "OpenAI TTS" }),
+      screen.getByRole("option", { name: "OpenAI TTS Cloud" }),
     ).toBeInTheDocument();
   });
 
@@ -418,7 +418,7 @@ describe("VoiceSettings", () => {
     );
 
     expect(
-      screen.queryByRole("option", { name: "OpenAI TTS" }),
+      screen.queryByRole("option", { name: /OpenAI TTS/ }),
     ).not.toBeInTheDocument();
   });
 
