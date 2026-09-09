@@ -420,11 +420,7 @@ done
 # the user setting in Gate A and hides the toggle, the feature does the same
 # for the native Gate B in export_otel_logs.
 [[ "$VITE_TELEMETRY_ENFORCED_VALUE" == "1" ]] && CARGO_FEATURES="$CARGO_FEATURES,block-telemetry-enforced"
-if [[ "$VITE_VOICE_DICTATION_VALUE" == "1" ]]; then
-  CARGO_FEATURES="$CARGO_FEATURES,block-voice-dictation"
-else
-  CARGO_FEATURES="$CARGO_FEATURES,no-voice-dictation"
-fi
+[[ "$VITE_VOICE_DICTATION_VALUE" == "1" ]] && CARGO_FEATURES="$CARGO_FEATURES,block-voice-dictation"
 
 # bb CLI PATH install has no runtime-config representation; the custom pipeline
 # exposes a dedicated select that disables it via the Cargo feature.

@@ -3,7 +3,7 @@
   "nouns": {
     "session": {
       "group": "sessions",
-      "about": "Manage chat sessions: create, send, open, list, get, rename, move, move to group, clear project, fork, archive",
+      "about": "Manage chat sessions: create, send, open, list, get, rename, move, move to group, clear project, send to Spokesperson, dismiss handoffs, fork, archive",
       "verbs": {
         "create": {
           "action": "create",
@@ -49,6 +49,16 @@
           "action": "clear_project",
           "about": "Move a chat session out of any project",
           "afterHelp": "Example:\n  berdctl session clear-project --session-id <session-id>\n\nResult:\n  {\"ok\": true} — the app's session list regroups immediately."
+        },
+        "send-to-spokesperson": {
+          "action": "send_to_spokesperson",
+          "about": "Send private guidance to a session's live voice Spokesperson",
+          "afterHelp": "Example:\n  berdctl session send-to-spokesperson --session-id <session-id> --cursor <latest-cursor> \\\n    --mode say --resolves <handoff-id> \\\n    --message \"The build failed because the signing certificate expired.\" --json\n\nResult:\n  {\"session_id\":\"...\",\"cursor\":<latest-cursor>,\"delivery_status\":\"sent\"|\"interrupting\"|\"queued\",\"mode\":\"context\"|\"say\",\"resolved_handoff_ids\":[\"<handoff-id>\"]}\n\nUse --mode context to update the Spokesperson's future context without starting a\nresponse. Use --mode say when the Spokesperson should speak the message now.\nRepeat --resolves to close every handoff answered by one say. Context messages\ncannot resolve handoffs. A say may omit --resolves when volunteering information.\n\nA send while the pipe contains a newer Expert-bound transcript, handoff, or\nreminder fails with reason \"pipe_busy\" without consuming that pending event.\nWait for Berd to deliver it normally, then retry with its cursor."
+        },
+        "dismiss-handoffs": {
+          "action": "dismiss_handoffs",
+          "about": "Dismiss open voice handoffs without speaking",
+          "afterHelp": "Example:\n  berdctl session dismiss-handoffs --session-id <session-id> --cursor <latest-cursor>     --handoff-id <handoff-id>     --reason \"The user's follow-up superseded both requests.\" --json\n\nResult:\n  {\"session_id\":\"...\",\"cursor\":<latest-cursor>,\"dismissed_handoff_ids\":[\"<handoff-id>\"],\"context_delivery_status\":\"sent\"|\"interrupting\"|\"queued\"}\n\nEvery id must still be open. A dismissal consumes pending Spokesperson handoffs only\nwhen --cursor proves the Expert received the complete pending batch, then\natomically sends the dismissal reason back as silent context. Use send-to-spokesperson\n--mode say instead when the user still needs an answer."
         },
         "fork": {
           "action": "fork",

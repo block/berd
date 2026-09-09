@@ -78,6 +78,7 @@ describe("provider catalog selectors", () => {
       "copilot-acp",
       "amp-acp",
       "cursor-agent",
+      "pi-acp",
     ]);
     expect(getModelProviders().map((provider) => provider.id)).toEqual([
       "databricks_v2",

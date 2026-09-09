@@ -12,14 +12,33 @@ import {
 import type { ChatSendOptions } from "../../types";
 import { useChatStore } from "../../stores/chatStore";
 import { useChatSessionStore } from "../../stores/chatSessionStore";
+import { loadCachedMessageQueues } from "../../stores/queuePersistence";
 import { useMessageQueue } from "../useMessageQueue";
 
-const mockAcpPrepareSession = vi.fn().mockResolvedValue(undefined);
+const mocks = vi.hoisted(() => ({
+  acpPrepareSession: vi.fn().mockResolvedValue(undefined),
+  stopRealtimeForSession: vi.fn().mockResolvedValue(undefined),
+  toastError: vi.fn(),
+}));
 
 vi.mock("@/shared/api/acp", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/shared/api/acp")>()),
-  acpPrepareSession: (...args: unknown[]) => mockAcpPrepareSession(...args),
+  acpPrepareSession: (...args: unknown[]) => mocks.acpPrepareSession(...args),
 }));
+
+vi.mock("sonner", () => ({
+  toast: {
+    error: (...args: unknown[]) => mocks.toastError(...args),
+  },
+}));
+
+vi.mock(
+  "@/features/voice-conversation/hooks/useOpenAiRealtimeConversation",
+  () => ({
+    stopOpenAiRealtimeConversationForSession: (...args: unknown[]) =>
+      mocks.stopRealtimeForSession(...args),
+  }),
+);
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -33,6 +52,10 @@ function deferred<T = void>() {
 
 describe("useMessageQueue", () => {
   beforeEach(() => {
+    mocks.acpPrepareSession.mockClear();
+    mocks.stopRealtimeForSession.mockClear();
+    mocks.toastError.mockClear();
+    window.localStorage.clear();
     resetSessionTargetCoordinatorsForTests();
     useChatSessionStore.setState({
       sessions: [
@@ -1498,6 +1521,92 @@ describe("useMessageQueue", () => {
     });
     expect(sendMessage).toHaveBeenCalledTimes(2);
     expect(useChatStore.getState().queuedMessageBySession.s1).toBeUndefined();
+    vi.useRealTimers();
+  });
+
+  it("keeps transport-only voice coordination hidden while queued", () => {
+    const sendMessage = vi.fn().mockReturnValue(true);
+    const { result } = renderHook(() =>
+      useMessageQueue("s1", "streaming", sendMessage),
+    );
+
+    act(() => {
+      expect(
+        result.current.enqueue(
+          "[Handoff handoff-3 from spokesperson; cursor 3] Check the result",
+          undefined,
+          undefined,
+          {
+            userMessageMetadata: {
+              origin: "voice_conversation",
+              userVisible: false,
+            },
+          },
+        ),
+      ).toBe(true);
+    });
+
+    expect(
+      useChatStore.getState().queuedMessageBySession.s1?.[0]?.payload,
+    ).toMatchObject({
+      showInComposer: false,
+      sendOptions: {
+        userMessageMetadata: {
+          origin: "voice_conversation",
+          userVisible: false,
+        },
+      },
+    });
+  });
+
+  it("removes exhausted hidden coordination and drains the next user message", async () => {
+    vi.useFakeTimers();
+    const privateCoordination =
+      "[Handoff handoff-3 from spokesperson; cursor 3] Private context";
+    const sendMessage = vi.fn((text: string) => text === "normal user message");
+    useChatStore.getState().enqueueTransportReadyMessage("s1", {
+      persona: { kind: "inherit" },
+      text: privateCoordination,
+      showInComposer: false,
+      sendOptions: {
+        userMessageMetadata: {
+          origin: "voice_conversation",
+          userVisible: false,
+        },
+      },
+    });
+    useChatStore.getState().enqueueTransportReadyMessage("s1", {
+      persona: { kind: "inherit" },
+      text: "normal user message",
+    });
+
+    renderHook(() => useMessageQueue("s1", "idle", sendMessage));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+
+    expect(sendMessage).toHaveBeenCalledTimes(6);
+    expect(sendMessage.mock.calls.at(-1)?.[0]).toBe("normal user message");
+    expect(useChatStore.getState().queuedMessageBySession.s1).toBeUndefined();
+    expect(loadCachedMessageQueues()).toEqual({});
+    expect(mocks.stopRealtimeForSession).toHaveBeenCalledOnce();
+    expect(mocks.stopRealtimeForSession).toHaveBeenCalledWith("s1");
+    expect(mocks.toastError).toHaveBeenCalledOnce();
+
+    const visibleMessages = useChatStore.getState().messagesBySession.s1;
+    expect(visibleMessages).toHaveLength(1);
+    expect(visibleMessages?.[0]).toMatchObject({
+      role: "system",
+      content: [
+        {
+          type: "systemNotification",
+          notificationType: "error",
+        },
+      ],
+      metadata: { userVisible: true, agentVisible: false },
+    });
+    expect(JSON.stringify(visibleMessages)).not.toContain(privateCoordination);
     vi.useRealTimers();
   });
 

@@ -1,0 +1,30 @@
+{
+  "id": "english-short-v1",
+  "language": "en-US",
+  "warmup": {
+    "id": "warmup",
+    "text": "Fresh violet clouds drift slowly above the harbor."
+  },
+  "prompts": [
+    {
+      "id": "copper-fox",
+      "text": "A bright copper fox races past the quiet pond."
+    },
+    {
+      "id": "silver-bird",
+      "text": "The small silver bird glides over the calm lake."
+    },
+    {
+      "id": "autumn-wind",
+      "text": "A gentle autumn wind moves through the tall grass."
+    },
+    {
+      "id": "blue-heron",
+      "text": "The patient blue heron waits beside the clear stream."
+    },
+    {
+      "id": "rain-window",
+      "text": "A curious young cat watches rain cross the window."
+    }
+  ]
+}

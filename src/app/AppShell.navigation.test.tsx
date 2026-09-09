@@ -53,7 +53,9 @@ import { BUILDERBOT_SURFACE_EXPERIMENT_ID } from "@/features/experiments/experim
 import {
   EXPERIMENT_PREFERENCES_STORAGE_KEY,
   EXPERIMENT_PREFERENCES_STORAGE_VERSION,
+  setExperimentEnabled,
 } from "@/features/experiments/experimentPreferences";
+import { VOICE_CONVERSATION_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { ThemeProvider } from "@/shared/theme/ThemeProvider";
 import { useDefaultProviderReadinessStore } from "@/features/providers/stores/defaultProviderReadinessStore";
 import { useProviderModelCacheStore } from "@/features/providers/stores/providerModelCacheStore";
@@ -138,6 +140,17 @@ const mockVoiceSetupReadiness = vi.hoisted(() => ({
   ready: false,
 }));
 const mockVoiceSettingsEnabled = vi.hoisted(() => ({ enabled: false }));
+const mockStopOpenAiRealtimeConversation = vi.hoisted(() => vi.fn());
+
+vi.mock(
+  "@/features/voice-conversation/hooks/useOpenAiRealtimeConversation",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("@/features/voice-conversation/hooks/useOpenAiRealtimeConversation")
+    >()),
+    stopOpenAiRealtimeConversation: mockStopOpenAiRealtimeConversation,
+  }),
+);
 
 vi.mock("@/features/settings/ui/settingsSections", async (importOriginal) => {
   const actual =
@@ -927,6 +940,22 @@ describe("AppShell global navigation", () => {
     ).toBe(false);
   });
 
+  it("stops both voice pipelines when Voice is disabled", async () => {
+    mockBuildFeatures.voiceConversation = true;
+    const stopVoiceConversation = vi.fn().mockResolvedValue(undefined);
+    useVoiceConversationStore.setState({ stop: stopVoiceConversation });
+    renderAppShell();
+
+    act(() => {
+      setExperimentEnabled(VOICE_CONVERSATION_EXPERIMENT_ID, false);
+    });
+
+    await waitFor(() => {
+      expect(stopVoiceConversation).toHaveBeenCalledOnce();
+      expect(mockStopOpenAiRealtimeConversation).toHaveBeenCalledOnce();
+    });
+  });
+
   afterEach(cleanup);
 
   beforeEach(() => {
@@ -950,6 +979,8 @@ describe("AppShell global navigation", () => {
     mockSessionWindowSupport.supported = false;
     mockVoiceSetupReadiness.ready = false;
     mockVoiceSettingsEnabled.enabled = false;
+    mockStopOpenAiRealtimeConversation.mockReset();
+    mockStopOpenAiRealtimeConversation.mockResolvedValue(undefined);
     mockFocusSessionWindow.mockReset();
     useSessionWindowStore.getState().setSnapshot([]);
     useVoiceConversationStore.setState({

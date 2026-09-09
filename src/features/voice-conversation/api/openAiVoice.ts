@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { shareInFlight } from "@/shared/lib/shareInFlight";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { VoiceDeliveryProgress } from "./pocketVoice";
 import type {
@@ -16,6 +17,7 @@ export interface OpenAiVoiceStatus {
   transcriptionModel: string;
   speechModel: string;
   speechVoice: string;
+  speechVoices: string[];
   playbackSpeed: number;
   ttsAvailable: boolean;
   unavailableReason: "missingApiKey" | "unsupportedPlatform" | null;
@@ -28,9 +30,9 @@ export interface OpenAiVoiceStreamEvent {
   delivery?: VoiceDeliveryProgress | null;
 }
 
-export function getOpenAiVoiceStatus(): Promise<OpenAiVoiceStatus> {
-  return invoke<OpenAiVoiceStatus>("get_openai_voice_status");
-}
+export const getOpenAiVoiceStatus = shareInFlight(
+  (): Promise<OpenAiVoiceStatus> => invoke("get_openai_voice_status"),
+);
 
 export function setOpenAiTtsApiKey(apiKey: string): Promise<void> {
   return invoke("set_openai_tts_api_key", { apiKey });
@@ -55,11 +57,17 @@ export function listenToOpenAiVoiceSettings(
 }
 
 export function startOpenAiVoiceStream(
+  sessionId: string,
+  expectedRevision: number,
+  speechId: number,
   streamId: string,
   interruptionMode: VoiceInterruptionMode,
   interruptionSensitivity: VoiceInterruptionSensitivity,
-): Promise<void> {
-  return invoke("start_openai_voice_stream", {
+): Promise<boolean> {
+  return invoke<boolean>("start_openai_voice_stream", {
+    sessionId,
+    expectedRevision,
+    speechId,
     streamId,
     interruptionMode,
     interruptionSensitivity,
@@ -87,6 +95,14 @@ export function stopOpenAiVoice(): Promise<boolean> {
 
 export function setOpenAiPlaybackSpeed(speed: number): Promise<void> {
   return invoke("set_openai_playback_speed", { speed });
+}
+
+export function setOpenAiSpeechVoice(voice: string): Promise<void> {
+  return invoke("set_openai_speech_voice", { voice });
+}
+
+export function resetOpenAiVoiceSettings(): Promise<void> {
+  return invoke("reset_openai_voice_settings");
 }
 
 export function listenToOpenAiVoiceStream(

@@ -64,8 +64,12 @@ sync-schema:
 # Install dependencies and build workspace packages.
 [unix]
 _setup-dev-deps:
-    pnpm install
-    cd sdk && pnpm build
+    ./scripts/ensure-dev-deps.sh --force
+
+# Repair only stale development dependencies and workspace package outputs.
+[unix]
+_ensure-dev-deps:
+    ./scripts/ensure-dev-deps.sh
 
 [unix]
 _install-lefthook:
@@ -352,7 +356,7 @@ _bundle-unix:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)"
+    TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh bundle)"
     if [[ -z "${GOOSE_BIN:-}" ]]; then
       GOOSE_DEV_MODE=required GOOSE_BUILD_PROFILE=release ./scripts/ensure-local-goose.sh
     fi
@@ -431,7 +435,7 @@ _bundle-debug-unix:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)"
+    TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh bundle)"
     if [[ -z "${GOOSE_BIN:-}" ]]; then
       GOOSE_DEV_MODE=required GOOSE_BUILD_PROFILE=debug ./scripts/ensure-local-goose.sh
     fi
@@ -488,10 +492,11 @@ dev:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    if [[ -n "${GOOSE_BIN:-}" ]]; then
-        just _setup-no-goose
-    else
-        GOOSE_BUILD_PROFILE=debug just setup
+    just _ensure-dev-deps
+
+    if [[ -z "${GOOSE_BIN:-}" ]]; then
+        LOCAL_GOOSE_BIN="$(GOOSE_DEV_MODE=required GOOSE_BUILD_PROFILE=debug ./scripts/ensure-local-goose.sh --print-bin)"
+        export GOOSE_BIN="$LOCAL_GOOSE_BIN"
     fi
 
     VITE_PORT="$(python3 -c "import hashlib,os; h=int(hashlib.sha256(os.getcwd().encode()).hexdigest(),16); print(10000 + h % 55000)")"
@@ -528,20 +533,7 @@ dev:
         ./scripts/prepare-bb-cli-resource.sh
     fi
 
-    if [[ -n "${GOOSE_BIN:-}" ]]; then
-        echo "Using explicitly set GOOSE_BIN: ${GOOSE_BIN}"
-    else
-        LOCAL_GOOSE_BIN="$(GOOSE_BUILD_PROFILE=debug ./scripts/ensure-local-goose.sh --check-bin)" || {
-            rc=$?
-            if [[ $rc -eq 2 ]]; then
-                echo "❌ Local goose binary is not ready. Run 'just setup' first." >&2
-                exit 1
-            fi
-            exit $rc
-        }
-        export GOOSE_BIN="$LOCAL_GOOSE_BIN"
-        echo "Using local goose binary: ${GOOSE_BIN}"
-    fi
+    echo "Using Goose binary: ${GOOSE_BIN}"
 
     DISTRO_DIR="$(pwd)/distro"
     if [[ -z "${GOOSE_DISTRO_DIR:-}" && -d "$DISTRO_DIR" ]]; then

@@ -8,17 +8,18 @@
 extern "C" {
 #endif
 
-/// Returns a malloc-owned JSON array of Siri voices for the requested language
-/// prefix. Each item contains name, language, sizeBytes, and installed. Returns
-/// NULL and sets error_out on failure.
-char *berd_siri_tts_catalog_json(const char *language_prefix, char **error_out);
+/// Returns a malloc-owned JSON array of Siri voices for the requested exact
+/// normalized language, or every language when empty. Each item contains name,
+/// language, sizeBytes, and installed. Returns NULL and sets error_out on failure.
+char *berd_siri_tts_catalog_json(const char *language, char **error_out);
 
 /// Returns the locale tags represented in the complete Siri voice catalog.
 /// This does not perform per-voice daemon validation.
 char *berd_siri_tts_languages_json(char **error_out);
 
 /// Downloads and validates one exact Siri voice. This call blocks until the
-/// voice is usable or the timeout elapses.
+/// voice is usable or the availability-polling timeout elapses. Validation and
+/// subscription are separately bounded and occur before that polling deadline.
 bool berd_siri_tts_download_voice(
     const char *language,
     const char *voice_name,
@@ -28,6 +29,33 @@ bool berd_siri_tts_download_voice(
 
 typedef bool (*BerdSiriTTSShouldStop)(void *context);
 typedef void (*BerdSiriTTSPlaybackStarted)(void *context);
+typedef bool (*BerdSiriTTSPcmFrames)(
+    const float *samples,
+    uint32_t frame_count,
+    void *context
+);
+
+/// Validates that an exact Siri voice is downloaded and usable through
+/// sirittsd. This does not synthesize or play audio.
+bool berd_siri_tts_validate_voice(
+    const char *language,
+    const char *voice_name,
+    char **error_out
+);
+
+/// Synthesizes one utterance and emits normalized 48 kHz mono Float32 PCM.
+/// This call blocks until synthesis and converter flushing complete. It never
+/// opens an audio device. Returning false from `pcm_frames` cancels synthesis.
+bool berd_siri_tts_synthesize_pcm(
+    const char *text,
+    const char *language,
+    const char *voice_name,
+    float rate,
+    BerdSiriTTSShouldStop should_stop,
+    BerdSiriTTSPcmFrames pcm_frames,
+    void *context,
+    char **error_out
+);
 
 /// Plays the small per-voice sample bundled with macOS. This works before the
 /// full Siri voice has been downloaded.
@@ -87,7 +115,6 @@ bool berd_pocket_audio_player_enqueue(
     uint32_t frame_count,
     char **error_out
 );
-bool berd_pocket_audio_player_set_rate(void *player, float rate, char **error_out);
 uint64_t berd_pocket_audio_player_completed_source_frames(void *player);
 uint64_t berd_pocket_audio_player_pending_buffers(void *player);
 bool berd_pocket_audio_player_failed(void *player);

@@ -87,7 +87,7 @@ static NSDictionary *BerdSelectInstalledEnglishVoice(NSError **error) {
 
 static BOOL BerdDecodePackets(
     NSArray<BerdCapturedSiriPacket *> *packets,
-    BerdSiriSpeechPlayer *decoder,
+    BerdSiriAudioDecoder *decoder,
     NSMutableData *samples,
     NSError **error
 ) {
@@ -126,7 +126,7 @@ static BOOL BerdTestPCMNormalization(NSError **error) {
     };
     const int16_t sourceSamples[] = { 0, INT16_MAX, INT16_MIN, 16384, -16384 };
     NSData *data = [NSData dataWithBytes:sourceSamples length:sizeof(sourceSamples)];
-    BerdSiriSpeechPlayer *decoder = [BerdSiriSpeechPlayer new];
+    BerdSiriAudioDecoder *decoder = [BerdSiriAudioDecoder new];
     AVAudioPCMBuffer *buffer = [decoder decodeData:data
                                             format:format
                                        packetCount:5
@@ -239,7 +239,7 @@ int main(void) {
             return 2;
         }
 
-        BerdSiriSpeechPlayer *reusedDecoder = [BerdSiriSpeechPlayer new];
+        BerdSiriAudioDecoder *reusedDecoder = [BerdSiriAudioDecoder new];
         if (!BerdDecodePackets(firstPackets, reusedDecoder, nil, &error)) {
             fprintf(stderr, "decode first sentence: %s\n", error.localizedDescription.UTF8String);
             return 2;
@@ -265,7 +265,7 @@ int main(void) {
                                 length:buffer.frameLength * sizeof(float)];
         }
 
-        BerdSiriSpeechPlayer *freshDecoder = [BerdSiriSpeechPlayer new];
+        BerdSiriAudioDecoder *freshDecoder = [BerdSiriAudioDecoder new];
         NSMutableData *freshSamples = [NSMutableData data];
         if (!BerdDecodePackets(secondPackets, freshDecoder, freshSamples, &error)) {
             fprintf(stderr, "decode second sentence with fresh decoder: %s\n",

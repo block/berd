@@ -11,6 +11,43 @@
 
 @source "../../../node_modules/streamdown/dist";
 
+/* Realtime coordination is product-internal. Debug presentation makes its
+   direction legible without replacing the Expert's ordinary transcript. */
+[data-realtime-voice-presentation="debug"]
+  [data-realtime-voice-debug-event="emissaryToMaster"]
+  [data-role="message-bubble-surface"] {
+  border-color: color-mix(in srgb, var(--color-indigo-200) 58%, transparent);
+  background: color-mix(in srgb, var(--color-indigo-200) 12%, transparent);
+}
+
+[data-realtime-voice-presentation="debug"]
+  [data-realtime-voice-debug-event="masterToEmissarySay"]
+  [data-role="message-bubble-surface"] {
+  border-color: color-mix(in srgb, var(--color-green-300) 62%, transparent);
+  background: color-mix(in srgb, var(--color-green-300) 12%, transparent);
+}
+
+[data-realtime-voice-presentation="debug"]
+  [data-realtime-voice-debug-event="masterToEmissaryContext"]
+  [data-role="message-bubble-surface"] {
+  border-color: color-mix(in srgb, var(--color-blue-200) 62%, transparent);
+  background: color-mix(in srgb, var(--color-blue-200) 12%, transparent);
+}
+
+[data-realtime-voice-presentation="debug"]
+  [data-realtime-voice-debug-event="masterDismissal"]
+  [data-role="message-bubble-surface"] {
+  border-color: color-mix(in srgb, var(--color-yellow-200) 62%, transparent);
+  background: color-mix(in srgb, var(--color-yellow-200) 12%, transparent);
+}
+
+[data-realtime-voice-presentation="debug"]
+  [data-realtime-voice-debug-event="handoffReminder"]
+  [data-role="message-bubble-surface"] {
+  border-color: color-mix(in srgb, var(--color-orange-200) 62%, transparent);
+  background: color-mix(in srgb, var(--color-orange-200) 12%, transparent);
+}
+
 .goose-terminal .xterm {
   align-items: flex-start;
   box-sizing: border-box;

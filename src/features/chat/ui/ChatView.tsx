@@ -20,6 +20,7 @@ import {
   CONVERSATION_MIN_WIDTH_WITH_VIEWER,
 } from "./ArtifactViewerPanel";
 import { useOpenArtifact } from "../stores/artifactViewerStore";
+import { ArtifactPolicyProvider } from "../hooks/ArtifactPolicyContext";
 import { ArtifactAutoOpenMount } from "./ArtifactAutoOpenMount";
 import {
   CP_TOTAL_W,
@@ -65,6 +66,7 @@ import {
 import type { TranscriptSearchBackend } from "@/features/chat/lib/transcriptSearchBackend";
 import type { GlobalComposerHandoffRect } from "@/shared/ui/GlobalComposerPill";
 import { useVoiceConversationController } from "@/features/voice-conversation/hooks/useVoiceConversationController";
+import { useOpenAiRealtimeConversation } from "@/features/voice-conversation/hooks/useOpenAiRealtimeConversation";
 import { usePocketVoiceSetup } from "@/features/voice-conversation/hooks/usePocketVoiceSetup";
 import { useMacSpeechSetup } from "@/features/voice-conversation/hooks/useMacSpeechSetup";
 import { useOpenAiVoiceSetup } from "@/features/voice-conversation/hooks/useOpenAiVoiceSetup";
@@ -73,8 +75,11 @@ import {
   isMacSpeechAvailable,
   useVoiceInputPreference,
 } from "@/features/voice-conversation/lib/voiceInputPreference";
+import { useRealtimeVoicePreference } from "@/features/voice-conversation/lib/realtimeVoicePreference";
+import { presentRealtimeVoiceMessages } from "@/features/voice-conversation/lib/realtimeVoicePresentation";
 import { useVoiceOutputPreference } from "@/features/voice-conversation/lib/voiceOutputPreference";
 import { isVoiceSetupReady } from "@/features/voice-conversation/lib/voiceSetupReadiness";
+import { useVoiceConversationModePreference } from "@/features/voice-conversation/lib/voiceConversationModePreference";
 import { useProfileCapabilities } from "@/shared/profile/capabilities";
 import { requestOpenSettings } from "@/features/settings/lib/settingsEvents";
 import {
@@ -124,7 +129,6 @@ export function ChatView({
 }: ChatViewProps) {
   const { t } = useTranslation("chat");
   useRegisterSecurityConfirmationSurface(sessionId);
-  const isArtifactViewerOpen = useOpenArtifact(sessionId) !== null;
   const mountStart = useRef(performance.now());
   const terminalRootRef = useRef<HTMLDivElement | null>(null);
   const chatColumnRef = useRef<HTMLDivElement | null>(null);
@@ -201,6 +205,14 @@ export function ChatView({
   ]);
   const workspaceRepository = useWorkspaceRepository();
   const effectiveSession = controller.session ?? activeSession ?? null;
+  // The effective session identity: during session replacement or
+  // reconciliation the requested sessionId can briefly disagree with the
+  // snapshot the controller serves. Every artifact-store read/write and
+  // every layout decision derived from viewer state must use THIS id, so
+  // the panel, the policy provider, and the width math all describe the
+  // same store entry. (Audited: all useOpenArtifact call sites in ChatView.)
+  const timelineSessionId = effectiveSession?.id ?? sessionId;
+  const isArtifactViewerOpen = useOpenArtifact(timelineSessionId) !== null;
   const isReadOnly = Boolean(readOnlyStatus);
   // A remote session's cwd and artifact paths live on its SSH host: the
   // in-chat terminal (a local PTY), local folder pickers, and local file
@@ -242,6 +254,7 @@ export function ChatView({
     isMacSpeechAvailable(macSpeechSetup.status, macSpeechSetup.loading),
   );
   const voiceOutput = useVoiceOutputPreference();
+  const voiceMode = useVoiceConversationModePreference();
   const openAiVoiceSetup = useOpenAiVoiceSetup(
     capabilities.voiceConversation &&
       (voiceInput.backend === "openai" || voiceOutput.backend === "openai"),
@@ -269,13 +282,13 @@ export function ChatView({
       controller.isLoadingHistory ||
       !controller.workspaceContextReady ||
       controller.queue.queuedMessage !== null);
-  const voiceConversation = useVoiceConversationController({
+  const chainedVoiceConversation = useVoiceConversationController({
     sessionId,
     // Voice delivery only needs to wait for admission. Holding its per-session
     // queue through the full run would prevent later utterances from steering
     // the active run.
     onSend,
-    enabled: capabilities.voiceConversation,
+    enabled: capabilities.voiceConversation && voiceMode.mode === "chained",
     isGooseSession: controller.selectedProvider === "goose",
     pocketReady: voiceReady,
     inputBackend: voiceInput.backend,
@@ -293,6 +306,25 @@ export function ChatView({
     routeUnavailable: voiceAdmissionPermanentlyBlocked,
     disabled: admissionBlocked || voiceDeliveryTemporarilyBlocked,
   });
+  const realtimeVoiceConversation = useOpenAiRealtimeConversation({
+    sessionId,
+    onSend,
+    enabled:
+      capabilities.voiceConversation &&
+      voiceMode.mode === "openai-realtime" &&
+      controller.selectedProvider === "goose",
+    readOnly: Boolean(readOnlyStatus),
+    disabled: admissionBlocked || voiceDeliveryTemporarilyBlocked,
+  });
+  const voiceConversation =
+    voiceMode.mode === "openai-realtime"
+      ? realtimeVoiceConversation
+      : chainedVoiceConversation;
+  const { preference: realtimeVoicePreference } = useRealtimeVoicePreference();
+  const presentedMessages = presentRealtimeVoiceMessages(
+    controller.messages,
+    realtimeVoicePreference.presentationMode,
+  );
   const isAgentBuilderOpen = agentBuilderOpenForLayout;
   const patchSession = useChatSessionStore((s) => s.patchSession);
   const agentBuilderContextState = effectiveSession?.agentBuilderContextState;
@@ -703,6 +735,12 @@ export function ChatView({
         <SecurityConfirmationPanel sessionId={sessionId} />
         <ConversationComposerCapability
           binding={composerBinding}
+          onUserTextCommitted={
+            realtimeVoiceConversation.active &&
+            realtimeVoiceConversation.ownsActiveConversation
+              ? realtimeVoiceConversation.onTypedUserMessageCommitted
+              : undefined
+          }
           renderingPolicy={{
             presentation: {
               surface: "bare",
@@ -728,11 +766,10 @@ export function ChatView({
     </div>
   );
 
-  const timelineSessionId = effectiveSession?.id ?? sessionId;
   const messageTimeline = (
     <ChatTranscriptSurface
       sessionId={timelineSessionId}
-      messages={controller.messages}
+      messages={presentedMessages}
       sessionCreatedAt={effectiveSession?.createdAt}
       sessionSurveySamplingRateBasisPoints={
         isReadOnly || !capabilities.feedbackSurveys
@@ -793,11 +830,28 @@ export function ChatView({
   });
 
   return (
-    <>
+    // The single artifact policy owner for this session boundary. It must
+    // wrap the whole chat row because the transcript AND its siblings
+    // consume the context: ArtifactViewerPanel ("Open in editor"), the
+    // right rail's ArtifactsWidget (row opens), and ArtifactAutoOpenMount
+    // (the artifact list). ChatTranscriptSurface intentionally does NOT own
+    // artifact policy — a nested provider would derive a second artifact
+    // inventory and split the per-path open debounce (enforced by the
+    // provider-boundary tests). Consumers outside the provider get the
+    // inert default context and silently no-op.
+    // The identity, messages, and cwd must describe one session snapshot:
+    // timelineSessionId (the controller's effective session) rather than the
+    // raw requested sessionId, which can briefly disagree with
+    // controller.messages during session replacement or reconciliation.
+    <ArtifactPolicyProvider
+      messages={controller.messages}
+      sessionCwd={controller.sessionArtifactCwd}
+      sessionId={timelineSessionId}
+    >
       <ArtifactAutoOpenMount
         // Remote artifacts cannot be read locally, so never auto-open the
         // viewer for them; a null session absorbs appearances silently.
-        sessionId={sessionIsRemote ? null : sessionId}
+        sessionId={sessionIsRemote ? null : timelineSessionId}
         isHistoryLoading={controller.isLoadingHistory}
         sessionCwd={controller.sessionArtifactCwd}
       />
@@ -869,6 +923,9 @@ export function ChatView({
         >
           <div
             ref={conversationDropTargetRef}
+            data-realtime-voice-presentation={
+              realtimeVoicePreference.presentationMode
+            }
             className={cn(
               "relative flex min-h-0 flex-1 flex-col overflow-visible rounded-md bg-card",
               terminal.visible && !terminal.isFloating && "min-h-[280px]",
@@ -943,7 +1000,9 @@ export function ChatView({
         </div>
 
         {sessionId && !isAgentBuilderSession ? (
-          <ArtifactViewerPanel sessionId={sessionId} />
+          // Keyed by the same effective identity the providers use, so the
+          // panel reads the viewer-store entry that openInApp writes.
+          <ArtifactViewerPanel sessionId={timelineSessionId} />
         ) : null}
 
         <ChatRightRail
@@ -979,6 +1038,6 @@ export function ChatView({
           }
         />
       </div>
-    </>
+    </ArtifactPolicyProvider>
   );
 }

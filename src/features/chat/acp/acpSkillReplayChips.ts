@@ -49,7 +49,10 @@ export function handleReplayUserMessageChunk(
   messageId: string,
   content: TextContent | ImageContent,
   created?: number,
-  metadata?: Pick<MessageMetadata, "delivery" | "origin">,
+  metadata?: Pick<
+    MessageMetadata,
+    "delivery" | "origin" | "userVisible" | "agentVisible"
+  >,
 ): void {
   const buffer = ensureReplayBuffer(sessionId);
   const existing = getBufferedMessage(sessionId, messageId);

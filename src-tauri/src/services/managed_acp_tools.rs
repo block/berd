@@ -290,7 +290,7 @@ pub const MANAGED_TOOLS: &[ManagedTool] = &[
         id: "codex-acp",
         binary: "codex-acp",
         package: "@agentclientprotocol/codex-acp",
-        version: "1.2.0",
+        version: "1.10.0",
     },
 ];
 

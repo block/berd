@@ -1586,6 +1586,28 @@ describe("transcript projection cache", () => {
     expect(second.heightRevision).not.toBe(first.heightRevision);
   });
 
+  it("includes realtime coordination kind in render and height revisions", () => {
+    const original = message(
+      "assistant-1",
+      "assistant",
+      "same",
+      utc(2026, 6, 4, 10),
+    );
+    const coordination = {
+      ...original,
+      metadata: {
+        ...original.metadata,
+        voiceConversationDebugEvent: "masterToEmissarySay" as const,
+      },
+    };
+
+    const first = buildMessageRevisions(original);
+    const second = buildMessageRevisions(coordination);
+
+    expect(second.renderRevision).not.toBe(first.renderRevision);
+    expect(second.heightRevision).not.toBe(first.heightRevision);
+  });
+
   it.each([
     ["agent identity", { subagentAgentName: "Rivet" }],
     ["task description", { subagentTaskLabel: "Count markdown files" }],

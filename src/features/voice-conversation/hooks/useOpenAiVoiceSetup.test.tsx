@@ -4,15 +4,17 @@ import type { OpenAiVoiceStatus } from "../api/openAiVoice";
 import { useOpenAiVoiceSetup } from "./useOpenAiVoiceSetup";
 
 const mocks = vi.hoisted(() => ({
-  getStatus: vi.fn<() => Promise<OpenAiVoiceStatus>>(),
-  settingsChanged: null as (() => void) | null,
+  getStatus:
+    vi.fn<(options?: { coalesce?: boolean }) => Promise<OpenAiVoiceStatus>>(),
+  settingsChanged: null as ((event?: unknown) => void) | null,
   finishListening: null as (() => void) | null,
   listenerError: null as Error | null,
 }));
 
 vi.mock("../api/openAiVoice", () => ({
-  getOpenAiVoiceStatus: () => mocks.getStatus(),
-  listenToOpenAiVoiceSettings: (listener: () => void) => {
+  getOpenAiVoiceStatus: (options?: { coalesce?: boolean }) =>
+    mocks.getStatus(options),
+  listenToOpenAiVoiceSettings: (listener: (event?: unknown) => void) => {
     mocks.settingsChanged = listener;
     if (mocks.listenerError) return Promise.reject(mocks.listenerError);
     return new Promise<() => void>((resolve) => {
@@ -42,6 +44,7 @@ function status(configured: boolean): OpenAiVoiceStatus {
     transcriptionModel: "gpt-live-transcribe",
     speechModel: "gpt-4o-mini-tts",
     speechVoice: "marin",
+    speechVoices: ["alloy", "marin"],
     playbackSpeed: 1,
     ttsAvailable: true,
     unavailableReason: configured ? null : "missingApiKey",
@@ -66,8 +69,16 @@ describe("useOpenAiVoiceSetup", () => {
     await waitFor(() => expect(mocks.settingsChanged).not.toBeNull());
     act(() => mocks.finishListening?.());
     await waitFor(() => expect(mocks.getStatus).toHaveBeenCalledTimes(1));
+    expect(mocks.getStatus).toHaveBeenLastCalledWith({ coalesce: true });
 
-    act(() => mocks.settingsChanged?.());
+    act(() =>
+      mocks.settingsChanged?.({
+        event: "openai-voice:settings-changed",
+        id: 1,
+        payload: null,
+      }),
+    );
+    expect(mocks.getStatus).toHaveBeenLastCalledWith(undefined);
     refreshed.resolve(status(true));
     await waitFor(() =>
       expect(result.current.status?.sttConfigured).toBe(true),
@@ -123,7 +134,7 @@ describe("useOpenAiVoiceSetup", () => {
     expect(result.current.error).toBe("Keychain unavailable");
   });
 
-  it("does not expose cached readiness while disabled", async () => {
+  it("does not reuse cached readiness after being disabled", async () => {
     mocks.listenerError = new Error("listener unavailable");
     mocks.getStatus.mockResolvedValue(status(true));
     const { result, rerender } = renderHook(
@@ -137,5 +148,16 @@ describe("useOpenAiVoiceSetup", () => {
     rerender({ enabled: false });
 
     expect(result.current).toEqual({ status: null, error: null });
+
+    const reloaded = deferred<OpenAiVoiceStatus>();
+    mocks.getStatus.mockReturnValueOnce(reloaded.promise);
+    rerender({ enabled: true });
+
+    expect(result.current).toEqual({ status: null, error: null });
+
+    reloaded.resolve(status(false));
+    await waitFor(() =>
+      expect(result.current.status?.ttsConfigured).toBe(false),
+    );
   });
 });

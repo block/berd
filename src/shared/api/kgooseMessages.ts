@@ -19,7 +19,23 @@ export type KgooseSessionStatus =
 
 export interface KgooseMessageContent {
   type?: string | number;
+  id?: string;
   text?: { text?: string } | string;
+  toolCall?: {
+    status?: string | number;
+    value?: {
+      name?: string;
+      arguments?: unknown;
+    };
+  };
+  toolResult?: {
+    status?: string | number;
+    value?: {
+      content?: unknown[];
+      structuredContent?: unknown;
+      isError?: boolean;
+    };
+  };
   toolRequest?: {
     id?: string;
     status?: string | number;
@@ -154,7 +170,11 @@ function mapRole(value: string | number | undefined): MessageRole {
 
 function mapTimestamp(value: string | number | undefined): number {
   const numeric = Number(value);
-  if (Number.isFinite(numeric) && numeric > 0) return numeric;
+  if (Number.isFinite(numeric) && numeric > 0) {
+    // Goose's JSON session export uses Unix seconds while the messages API
+    // uses milliseconds. Normalize both into the renderer's millisecond clock.
+    return numeric < 10_000_000_000 ? numeric * 1000 : numeric;
+  }
 
   if (typeof value === "string") {
     const parsed = Date.parse(value);
@@ -213,8 +233,21 @@ export function mapKgooseMessageContent(
     return { type: "text", text };
   }
 
-  if (content.toolRequest || type.includes("TOOL_REQUEST")) {
-    const request = content.toolRequest ?? {};
+  if (
+    content.toolRequest ||
+    content.toolCall ||
+    type.includes("TOOL_REQUEST") ||
+    type.includes("TOOLREQUEST")
+  ) {
+    const request: NonNullable<KgooseMessageContent["toolRequest"]> =
+      content.toolRequest ??
+      (content.toolCall
+        ? {
+            id: content.id,
+            status: content.toolCall.status,
+            value: content.toolCall.value,
+          }
+        : {});
     const tool = isRecord(request.value) ? request.value : {};
     const toolName =
       typeof tool.name === "string"
@@ -238,8 +271,23 @@ export function mapKgooseMessageContent(
     };
   }
 
-  if (content.toolResponse || type.includes("TOOL_RESPONSE")) {
-    const response = content.toolResponse ?? {};
+  if (
+    content.toolResponse ||
+    content.toolResult ||
+    type.includes("TOOL_RESPONSE") ||
+    type.includes("TOOLRESPONSE")
+  ) {
+    const exportedResult = content.toolResult?.value;
+    const response =
+      content.toolResponse ??
+      (content.toolResult
+        ? {
+            id: content.id,
+            status: content.toolResult.status,
+            results: exportedResult?.content,
+            error: exportedResult?.isError ? "Tool call failed" : undefined,
+          }
+        : {});
     const isError = isErrorStatus(response.status) || Boolean(response.error);
     const result = response.error ?? getToolResponseText(response.results);
 
@@ -398,6 +446,22 @@ export function asKgooseMessagesResponse(
     sessionName:
       typeof record.sessionName === "string" ? record.sessionName : undefined,
   };
+}
+
+/** Parse the JSON emitted by `goose session export` into timeline messages. */
+export function messagesFromKgooseSessionExport(value: unknown): Message[] {
+  let parsed = value;
+  if (typeof value === "string") {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      return [];
+    }
+  }
+
+  const normalized = normalizeKgooseJson(parsed);
+  const record = asRecord(normalized);
+  return asKgooseMessagesResponse({ messages: record.conversation }).messages;
 }
 
 export function asKgooseStreamResponse(

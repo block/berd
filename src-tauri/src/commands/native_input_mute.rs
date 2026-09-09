@@ -1,16 +1,9 @@
-use std::sync::{
-    atomic::{AtomicBool, AtomicU64, Ordering},
-    Arc,
-};
-
-pub fn start<F>(input_muted: &Arc<AtomicBool>, mute_epoch: &Arc<AtomicU64>, on_change: F) -> bool
+pub fn start<F>(on_change: F) -> bool
 where
     F: Fn(bool) + Send + Sync + 'static,
 {
-    clear(input_muted);
-
     #[cfg(target_os = "macos")]
-    return match macos::install(Arc::clone(input_muted), Arc::clone(mute_epoch), on_change) {
+    return match macos::install(on_change) {
         Ok(()) => true,
         Err(error) => {
             log::info!("AirPods input mute listener is unavailable: {error}");
@@ -20,61 +13,33 @@ where
 
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (mute_epoch, on_change);
+        let _ = on_change;
         false
     }
 }
 
-pub fn stop(input_muted: &Arc<AtomicBool>) {
-    clear(input_muted);
-
+pub fn stop() {
     #[cfg(target_os = "macos")]
     if let Err(error) = macos::uninstall() {
         log::info!("Could not stop the AirPods input mute listener: {error}");
     }
 }
 
-pub fn set_muted(
-    input_muted: &AtomicBool,
-    mute_epoch: &AtomicU64,
-    muted: bool,
-) -> Result<(), String> {
+pub fn set_muted(muted: bool) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        macos::set_muted(muted)?;
-        apply_change(input_muted, mute_epoch, muted, &|_| {});
-        Ok(())
+        macos::set_muted(muted)
     }
 
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (input_muted, mute_epoch, muted);
+        let _ = muted;
         Err("native microphone mute is only available on macOS".to_string())
-    }
-}
-
-fn clear(input_muted: &AtomicBool) {
-    input_muted.store(false, Ordering::Release);
-}
-
-#[cfg(any(target_os = "macos", test))]
-fn apply_change(
-    input_muted: &AtomicBool,
-    mute_epoch: &AtomicU64,
-    muted: bool,
-    on_change: &dyn Fn(bool),
-) {
-    if input_muted.swap(muted, Ordering::AcqRel) != muted {
-        if muted {
-            mute_epoch.fetch_add(1, Ordering::AcqRel);
-        }
-        on_change(muted);
     }
 }
 
 #[cfg(target_os = "macos")]
 mod macos {
-    use super::*;
     use block2::RcBlock;
     use objc2::runtime::Bool;
     use objc2_avf_audio::AVAudioApplication;
@@ -84,11 +49,7 @@ mod macos {
         fn berd_airpods_capture_stop();
     }
 
-    pub fn install<F>(
-        input_muted: Arc<AtomicBool>,
-        mute_epoch: Arc<AtomicU64>,
-        on_change: F,
-    ) -> Result<(), String>
+    pub fn install<F>(on_change: F) -> Result<(), String>
     where
         F: Fn(bool) + Send + Sync + 'static,
     {
@@ -97,10 +58,8 @@ mod macos {
         let application = unsafe { AVAudioApplication::sharedInstance() };
         let handler = RcBlock::new(move |muted: Bool| {
             let muted = muted.as_bool();
-            apply_change(&input_muted, &mute_epoch, muted, &|muted| {
-                log::info!("AirPods input mute changed muted={muted}");
-                on_change(muted);
-            });
+            log::info!("AirPods input mute changed muted={muted}");
+            on_change(muted);
             Bool::YES
         });
         // SAFETY: The block has the generated AVFAudio signature. The API
@@ -142,29 +101,5 @@ mod macos {
         let application = unsafe { AVAudioApplication::sharedInstance() };
         unsafe { application.setInputMuted_error(muted) }
             .map_err(|error| error.localizedDescription().to_string())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn lifecycle_boundary_clears_mute() {
-        let input_muted = Arc::new(AtomicBool::new(true));
-        clear(&input_muted);
-        assert!(!input_muted.load(Ordering::Acquire));
-    }
-
-    #[test]
-    fn mute_edge_advances_epoch_even_after_immediate_unmute() {
-        let input_muted = AtomicBool::new(false);
-        let mute_epoch = AtomicU64::new(0);
-
-        apply_change(&input_muted, &mute_epoch, true, &|_| {});
-        apply_change(&input_muted, &mute_epoch, false, &|_| {});
-
-        assert!(!input_muted.load(Ordering::Acquire));
-        assert_eq!(mute_epoch.load(Ordering::Acquire), 1);
     }
 }

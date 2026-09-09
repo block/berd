@@ -294,6 +294,18 @@ export const designSystemComponentManifest = [
     sourceTokenClasses: [],
   },
   {
+    name: "Avatar Static Media",
+    source: "src/shared/ui/avatar-static-media.tsx",
+    description:
+      "Renders video-only avatar media through one connected decoder, captures its\nalready-composited first visible frame, and reuses that image for every\ncompact occurrence. WebKit does not reliably decode Tauri asset URLs in\ndetached video elements, so one mounted occurrence owns decoding while all\nothers show their fixed-size fallback. Ownership transfers after remounts,\nfailures, and timeouts without creating concurrent decoders.",
+    exports: ["AvatarStaticMedia"],
+    slots: [],
+    cva: [],
+    tokenClasses: [],
+    stateClasses: [],
+    sourceTokenClasses: [],
+  },
+  {
     name: "Avatar Visual",
     source: "src/shared/ui/avatar-visual.tsx",
     description:

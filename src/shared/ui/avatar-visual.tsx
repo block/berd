@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactEventHandler, ReactNode } from "react";
 import { useAvatarImage, useAvatarMedia } from "@/shared/hooks/useAvatarSrc";
 import type { Avatar } from "@/shared/types/agents";
 import { AvatarMedia } from "@/shared/ui/avatar-media";
@@ -9,6 +9,7 @@ interface AvatarVisualProps {
   className?: string;
   fallback?: ReactNode;
   loadingStrategy?: "eager" | "lazy-once" | "visible-video";
+  onError?: ReactEventHandler<HTMLImageElement | HTMLVideoElement>;
 }
 
 /**
@@ -25,6 +26,7 @@ export function AvatarVisual({
   className,
   fallback = null,
   loadingStrategy = "visible-video",
+  onError,
 }: AvatarVisualProps) {
   const image = useAvatarImage(avatar);
   const media = useAvatarMedia(avatar);
@@ -37,6 +39,7 @@ export function AvatarVisual({
         alt={alt}
         className={className}
         data-avatar-visual="image"
+        onError={onError}
       />
     );
   }
@@ -49,6 +52,7 @@ export function AvatarVisual({
         poster={media.posterSrc}
         loadingStrategy={loadingStrategy}
         className={className}
+        onError={onError}
       />
     );
   }

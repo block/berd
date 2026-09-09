@@ -96,6 +96,10 @@ export function setPocketPlaybackSpeed(speed: number): Promise<void> {
   return invoke("set_pocket_playback_speed", { speed });
 }
 
+export function resetPocketVoiceSettings(): Promise<void> {
+  return invoke("reset_pocket_voice_settings");
+}
+
 export function previewPocketVoice(voiceId: string): Promise<void> {
   return invoke("preview_pocket_voice", { voiceId });
 }
@@ -105,11 +109,17 @@ export function speakPocketVoice(text: string): Promise<void> {
 }
 
 export function startPocketVoiceStream(
+  sessionId: string,
+  expectedRevision: number,
+  speechId: number,
   streamId: string,
   interruptionMode: VoiceInterruptionMode,
   interruptionSensitivity: VoiceInterruptionSensitivity,
-): Promise<void> {
-  return invoke("start_pocket_voice_stream", {
+): Promise<boolean> {
+  return invoke<boolean>("start_pocket_voice_stream", {
+    sessionId,
+    expectedRevision,
+    speechId,
     streamId,
     interruptionMode,
     interruptionSensitivity,

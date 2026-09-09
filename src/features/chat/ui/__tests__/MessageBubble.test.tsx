@@ -723,6 +723,36 @@ describe("MessageBubble", () => {
     expect(screen.getAllByText("One visible assistant response.")).toHaveLength(
       1,
     );
+    expect(
+      container.querySelector('[data-role="message-bubble-surface"]'),
+    ).toHaveClass("rounded-lg", "border");
+  });
+
+  it("renders realtime coordination as a distinct assistant bubble", () => {
+    const { container } = render(
+      <div data-realtime-voice-presentation="debug">
+        <MessageBubble
+          message={assistantMessage(
+            [{ type: "text", text: "Please inspect the disk." }],
+            {
+              metadata: {
+                personaName: "Emissary → Master · Handoff handoff-1",
+                voiceConversationDebugEvent: "emissaryToMaster",
+              },
+            },
+          )}
+        />
+      </div>,
+    );
+
+    const message = container.querySelector(
+      '[data-realtime-voice-debug-event="emissaryToMaster"]',
+    );
+    expect(message).toHaveAttribute("data-role", "assistant-message");
+    expect(message).toHaveTextContent("Emissary → Master · Handoff handoff-1");
+    expect(
+      message?.querySelector('[data-role="message-bubble-surface"]'),
+    ).toHaveClass("rounded-lg", "border");
   });
 
   it("strikes only the estimated unspoken suffix after barge-in", () => {

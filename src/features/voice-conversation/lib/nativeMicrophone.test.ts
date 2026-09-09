@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   workletDisconnect: vi.fn(),
 }));
 
+vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
+
 class FakeAudioWorkletNode {
   readonly port: {
     onmessage: ((event: MessageEvent<Float32Array>) => void) | null;
@@ -57,10 +59,6 @@ describe("native microphone", () => {
         constructor(readonly tracks: MediaStreamTrack[]) {}
       },
     );
-    Object.defineProperty(window, "__TAURI_INTERNALS__", {
-      configurable: true,
-      value: { invoke: mocks.invoke },
-    });
     Object.defineProperty(navigator, "mediaDevices", {
       configurable: true,
       value: {
@@ -80,7 +78,6 @@ describe("native microphone", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
-    Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
   });
 
   it("ships raw float PCM through Tauri and tears down once", async () => {

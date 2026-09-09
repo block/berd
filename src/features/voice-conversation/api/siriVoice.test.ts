@@ -6,7 +6,11 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 
-import { getSiriVoiceStatus, startSiriVoiceStream } from "./siriVoice";
+import {
+  getSiriVoiceStatus,
+  resetSiriVoiceSettings,
+  startSiriVoiceStream,
+} from "./siriVoice";
 
 describe("Siri voice API", () => {
   beforeEach(() => {
@@ -48,6 +52,9 @@ describe("Siri voice API", () => {
     const voice = { name: "Samantha", language: "en-US" };
 
     await startSiriVoiceStream(
+      "session-1",
+      4,
+      7,
       "stream-1",
       voice,
       "allowInterruptions",
@@ -55,10 +62,21 @@ describe("Siri voice API", () => {
     );
 
     expect(mocks.invoke).toHaveBeenCalledWith("start_siri_voice_stream", {
+      sessionId: "session-1",
+      expectedRevision: 4,
+      speechId: 7,
       streamId: "stream-1",
       voice,
       interruptionMode: "allowInterruptions",
       interruptionSensitivity: "balanced",
     });
+  });
+
+  it("resets the native settings", async () => {
+    mocks.invoke.mockResolvedValue(undefined);
+
+    await resetSiriVoiceSettings();
+
+    expect(mocks.invoke).toHaveBeenCalledWith("reset_siri_voice_settings");
   });
 });

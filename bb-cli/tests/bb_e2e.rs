@@ -3656,6 +3656,7 @@ fn bb_apps_help_distinguishes_external_and_internal_paths() {
         "get",
         "versions",
         "rollback",
+        "delete",
         "ready",
         "debug",
     ] {
@@ -3770,6 +3771,183 @@ fn bb_apps_rollback_help_exposes_optional_target_and_environment() {
             "rollback help omitted {expected:?}: {stdout}"
         );
     }
+}
+
+#[test]
+fn bb_apps_delete_help_exposes_exact_confirmation_and_retention_behavior() {
+    let output = bb_command()
+        .args(["apps", "delete", "--help"])
+        .output()
+        .expect("run bb apps delete help");
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(output.status.success(), "stderr was: {stderr}");
+    for expected in [
+        "<APP_ID>",
+        "--confirm-app-id <APP_ID>",
+        "--environment <ENVIRONMENT>",
+        "--confirm-environment <ENVIRONMENT>",
+        "owner-only",
+        "retained",
+        "--base-url <URL>",
+    ] {
+        assert!(
+            stdout.contains(expected),
+            "delete help omitted {expected:?}: {stdout}"
+        );
+    }
+}
+
+#[test]
+fn bb_apps_delete_requires_confirmation_before_auth_or_network() {
+    let output = bb_command()
+        .args([
+            "apps",
+            "delete",
+            "merchant-lookup",
+            "--base-url",
+            "https://compose-ctrl.test.blockstaging.build",
+        ])
+        .output()
+        .expect("run bb apps delete without confirmation");
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(!output.status.success());
+    assert!(stdout.is_empty(), "stdout was: {stdout}");
+    assert!(stderr.contains("--confirm-app-id <APP_ID>"));
+    assert!(stderr.contains("--environment <ENVIRONMENT>"));
+    assert!(stderr.contains("--confirm-environment <ENVIRONMENT>"));
+    assert!(stderr.contains("required"));
+}
+
+#[test]
+fn bb_apps_delete_requires_an_explicit_environment() {
+    let output = bb_command()
+        .args([
+            "apps",
+            "delete",
+            "merchant-lookup",
+            "--confirm-app-id",
+            "merchant-lookup",
+            "--confirm-environment",
+            "production",
+            "--base-url",
+            "https://compose-ctrl.test.blockstaging.build",
+        ])
+        .output()
+        .expect("run bb apps delete without environment");
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(!output.status.success());
+    assert!(stdout.is_empty(), "stdout was: {stdout}");
+    assert!(stderr.contains("--environment <ENVIRONMENT>"));
+    assert!(stderr.contains("required"));
+}
+
+#[test]
+fn bb_apps_access_help_exposes_get_and_full_policy_replacement() {
+    let access_output = bb_command()
+        .args(["apps", "access", "--help"])
+        .output()
+        .expect("run bb apps access help");
+    let (access_stdout, access_stderr) = output_text(&access_output);
+    assert!(
+        access_output.status.success(),
+        "stderr was: {access_stderr}"
+    );
+    for expected in ["get", "set", "visibility and explicit viewer list"] {
+        assert!(
+            access_stdout.contains(expected),
+            "access help omitted {expected:?}: {access_stdout}"
+        );
+    }
+
+    let get_output = bb_command()
+        .args(["apps", "access", "get", "--help"])
+        .output()
+        .expect("run bb apps access get help");
+    let (get_stdout, get_stderr) = output_text(&get_output);
+    assert!(get_output.status.success(), "stderr was: {get_stderr}");
+    for expected in [
+        "<APP_ID>",
+        "--environment <ENVIRONMENT>",
+        "--base-url <URL>",
+    ] {
+        assert!(
+            get_stdout.contains(expected),
+            "access get help omitted {expected:?}: {get_stdout}"
+        );
+    }
+
+    let set_output = bb_command()
+        .args(["apps", "access", "set", "--help"])
+        .output()
+        .expect("run bb apps access set help");
+    let (set_stdout, set_stderr) = output_text(&set_output);
+    assert!(set_output.status.success(), "stderr was: {set_stderr}");
+    for expected in [
+        "<APP_ID>",
+        "--visibility <VISIBILITY>",
+        "organization",
+        "restricted",
+        "--viewer <IDENTITY>",
+        "--clear-viewers",
+        "--environment <ENVIRONMENT>",
+        "complete access policy",
+        "exact caller value",
+        "bb apps list --json",
+        "owner",
+        "--base-url <URL>",
+    ] {
+        assert!(
+            set_stdout.contains(expected),
+            "access set help omitted {expected:?}: {set_stdout}"
+        );
+    }
+}
+
+#[test]
+fn bb_apps_access_set_requires_explicit_restricted_viewer_clearing_before_auth_or_network() {
+    let output = bb_command()
+        .args([
+            "apps",
+            "access",
+            "set",
+            "merchant-lookup",
+            "--visibility",
+            "restricted",
+            "--base-url",
+            "https://compose-ctrl.test.blockstaging.build",
+        ])
+        .output()
+        .expect("run bb apps access set without a viewer or clearing confirmation");
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(!output.status.success());
+    assert!(stdout.is_empty(), "stdout was: {stdout}");
+    assert!(stderr.contains("requires at least one --viewer"));
+    assert!(stderr.contains("--clear-viewers"));
+}
+
+#[test]
+fn bb_apps_access_set_requires_visibility_before_auth_or_network() {
+    let output = bb_command()
+        .args([
+            "apps",
+            "access",
+            "set",
+            "merchant-lookup",
+            "--base-url",
+            "https://compose-ctrl.test.blockstaging.build",
+        ])
+        .output()
+        .expect("run bb apps access set without visibility");
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(!output.status.success());
+    assert!(stdout.is_empty(), "stdout was: {stdout}");
+    assert!(stderr.contains("--visibility <VISIBILITY>"));
+    assert!(stderr.contains("required"));
 }
 
 #[test]

@@ -83,7 +83,10 @@ export default defineConfig({
     },
     {
       name: "voice-conversation",
-      testMatch: ["**/voice-conversation.spec.ts"],
+      testMatch: [
+        "**/voice-conversation.spec.ts",
+        "**/voice-settings-visual.spec.ts",
+      ],
       use: {
         ...devices["Desktop Chrome"],
         userAgent:

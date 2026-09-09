@@ -15,7 +15,7 @@ clang \
   -framework AVFoundation \
   -framework AudioToolbox \
   -framework CoreAudio \
-  "$repo_root/src-tauri/native/tests/siri_tts_stream_regression.m" \
+  "$repo_root/src-tauri/crates/berd-voice/native/tests/siri_tts_stream_regression.m" \
   -o "$test_binary"
 
 "$test_binary"

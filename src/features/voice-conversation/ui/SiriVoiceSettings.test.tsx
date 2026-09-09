@@ -43,6 +43,8 @@ function setup(overrides: Partial<SiriVoiceSetup> = {}): SiriVoiceSetup {
     downloadVoice: vi.fn().mockResolvedValue(undefined),
     previewVoice: vi.fn().mockResolvedValue(undefined),
     selectVoice: vi.fn().mockResolvedValue(undefined),
+    resetSettings: vi.fn().mockResolvedValue(undefined),
+    refreshSettings: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }

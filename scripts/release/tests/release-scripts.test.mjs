@@ -38,6 +38,55 @@ afterEach(async () => {
   );
 });
 
+describe("Tauri Cargo target isolation", () => {
+  it("defaults to the current checkout's ignored Cargo target", () => {
+    const result = run("bash", ["scripts/resolve-tauri-cargo-target-dir.sh"], {
+      BERD_TAURI_CARGO_TARGET_DIR: "",
+      XDG_CACHE_HOME: join(tmpdir(), "unrelated-xdg-cache"),
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe(join(repo, "src-tauri/target"));
+  });
+
+  it("preserves the explicit target directory override", async () => {
+    const override = join(await tempDir(), "cargo-target");
+    const result = run("bash", ["scripts/resolve-tauri-cargo-target-dir.sh"], {
+      BERD_TAURI_CARGO_TARGET_DIR: override,
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe(override);
+  });
+
+  it("preserves the shared Unix bundle target contract", async () => {
+    const home = join(await tempDir(), "home");
+    const justfile = await readFile(join(repo, "justfile"), "utf8");
+    const result = run(
+      "bash",
+      ["scripts/resolve-tauri-cargo-target-dir.sh", "bundle"],
+      {
+        BERD_TAURI_CARGO_TARGET_DIR: "",
+        HOME: home,
+        XDG_CACHE_HOME: "",
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe(
+      process.platform === "darwin"
+        ? join(home, "Library/Caches/berd-tauri/cargo-target")
+        : join(home, ".cache/berd-tauri/cargo-target"),
+    );
+    expect(justfile).toMatch(
+      /^_bundle-unix:\n(?:(?: {4}.*)?\n)* {4}TAURI_CARGO_TARGET_DIR=.*resolve-tauri-cargo-target-dir\.sh bundle/m,
+    );
+    expect(justfile).toMatch(
+      /^_bundle-debug-unix:\n(?:(?: {4}.*)?\n)* {4}TAURI_CARGO_TARGET_DIR=.*resolve-tauri-cargo-target-dir\.sh bundle/m,
+    );
+  });
+});
+
 describe("managed Goose build profile", () => {
   it("defaults development to debug and makes release selection profile-aware", async () => {
     const script = await readFile(
@@ -118,13 +167,26 @@ describe("managed Goose build profile", () => {
       /_bundle-debug-unix:[\s\S]*if \[\[ -z "\$\{GOOSE_BIN:-\}" \]\]; then[\s\S]*GOOSE_BUILD_PROFILE=debug \.\/scripts\/ensure-local-goose\.sh/,
     );
     expect(justfile).toMatch(
-      /dev:[\s\S]*GOOSE_BUILD_PROFILE=debug just setup[\s\S]*GOOSE_BUILD_PROFILE=debug \.\/scripts\/ensure-local-goose\.sh --check-bin/,
+      /dev:[\s\S]*just _ensure-dev-deps[\s\S]*GOOSE_DEV_MODE=required GOOSE_BUILD_PROFILE=debug \.\/scripts\/ensure-local-goose\.sh --print-bin/,
     );
     expect(devE2e).toContain("GOOSE_BUILD_PROFILE=debug just setup");
     expect(schema).toContain("GOOSE_BUILD_PROFILE=debug");
     expect(windowsSetup).toContain('$GooseBuildProfile = "debug"');
     expect(windowsDev).toContain('$env:GOOSE_BUILD_PROFILE = "debug"');
     expect(windowsStage).toContain('$env:GOOSE_BUILD_PROFILE = "debug"');
+  });
+});
+
+describe("shared Cargo package cache", () => {
+  it("keeps Cargo dependency and binary paths stable across worktrees", async () => {
+    const hermitConfig = await readFile(join(repo, "bin/hermit.hcl"), "utf8");
+
+    expect(hermitConfig).toMatch(
+      /"CARGO_HOME": "\$\{HOME\}\/\.cache\/berd\/cargo-home"/,
+    );
+    expect(hermitConfig).toMatch(
+      /"PATH": "\$\{HOME\}\/\.cache\/berd\/cargo-home\/bin:\$\{PATH\}"/,
+    );
   });
 });
 
@@ -527,7 +589,6 @@ describe("build-macos Block-service feature seam", () => {
     expect(script).not.toContain(
       'VITE_AUTH_GATE_VALUE="$VITE_BUILDERBOT_VALUE"',
     );
-    expect(script).toContain("no-voice-dictation");
     expect(script).toContain('if [[ "$VITE_AGENT_TOOLS_VALUE" == "1" ]]; then');
     expect(script).toContain(
       'jq \'.bundle.resources["../resources/bb"] = "bb"\'',
@@ -2155,10 +2216,16 @@ async function canonicalGates() {
 }
 
 describe("Block feature gate propagation", () => {
+  it("supports an empty base feature set", () => {
+    const result = run("bash", ["scripts/block-feature-gates.sh"]);
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe("");
+  });
+
   it("maps every updater-off default to the fail-closed Cargo posture", () => {
     const result = run("bash", ["scripts/block-feature-gates.sh", "berdctl"]);
     expect(result.status).toBe(0);
-    expect(result.stdout.trim()).toBe("berdctl,no-voice-dictation");
+    expect(result.stdout.trim()).toBe("berdctl");
   });
 
   it("maps every renderer gate to its matching Cargo feature", () => {

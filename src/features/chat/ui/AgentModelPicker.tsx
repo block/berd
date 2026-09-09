@@ -398,8 +398,9 @@ export function AgentModelPicker({
   const showSwitchProviderFooter =
     providerColumnMode === "gated" && !providerRevealed;
   const showReasoningEffortColumn = showReasoningEffort;
-  // Model changes can add or remove reasoning controls. Keep the popover width
-  // fixed for the current panel mode so those changes do not resize it.
+  // Keep width stable when reasoning controls change. Harness agents need
+  // extra room for long ACP model names, including beside reasoning controls.
+  const widenForHarnessAgent = showAgentColumn && selectedAgentId !== "goose";
   const isWidePicker = showAgentColumn;
 
   // Land keyboard focus in the revealed column, since the reveal button that
@@ -495,7 +496,9 @@ export function AgentModelPicker({
           // model list.
           "flex max-h-[min(24rem,50vh)] flex-col overflow-hidden p-1 transition-[width] duration-[240ms] ease-[cubic-bezier(0.2,0,0,1)]",
           isWidePicker
-            ? "w-[min(39.25rem,calc(100vw-1.5rem))]"
+            ? widenForHarnessAgent
+              ? "w-[min(48rem,calc(100vw-1.5rem))]"
+              : "w-[min(39.25rem,calc(100vw-1.5rem))]"
             : "w-[min(28.25rem,calc(100vw-1.5rem))]",
         )}
         onInteractOutside={(event) => {
@@ -668,7 +671,11 @@ export function AgentModelPicker({
               data-col="model"
               className={cn(
                 "flex min-h-0 min-w-0 overflow-hidden p-1",
-                showAgentColumn ? "ml-1 w-64 shrink-0" : "flex-1",
+                showAgentColumn
+                  ? widenForHarnessAgent
+                    ? "ml-1 flex-1"
+                    : "ml-1 w-64 shrink-0"
+                  : "flex-1",
               )}
             >
               {modelsLoading ? (

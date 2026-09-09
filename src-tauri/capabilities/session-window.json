@@ -28,7 +28,34 @@
       "identifier": "opener:allow-open-path",
       "allow": [
         {
-          "path": "$DOWNLOAD"
+          "path": "$HOME/**"
+        },
+        {
+          "path": "$HOME/.goose/**"
+        },
+        {
+          "path": "$TEMP/**"
+        },
+        {
+          "path": "/Volumes/**"
+        },
+        {
+          "path": "/mnt/**"
+        },
+        {
+          "path": "/workspace/**"
+        },
+        {
+          "path": "/workspaces/**"
+        },
+        {
+          "path": "/opt/**"
+        },
+        {
+          "path": "/srv/**"
+        },
+        {
+          "path": "*:/**"
         }
       ]
     },

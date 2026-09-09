@@ -20,6 +20,7 @@
 //! Every state transition is emitted as [`REMOTE_BACKEND_STATUS_EVENT`] so the
 //! renderer can mirror per-host status without polling.
 
+pub(crate) mod bounded_output;
 pub(crate) mod daemon;
 pub(crate) mod error;
 pub(crate) mod host;
@@ -536,8 +537,7 @@ async fn establish(
         })
     };
     let Some(generation) = generation else {
-        let _ = tunnel.child.start_kill();
-        let _ = tunnel.child.wait().await;
+        tunnel.terminate_and_reap().await;
         return Ok(None);
     };
     emit_status(app, slot, generation, &state);
@@ -569,14 +569,15 @@ async fn establish(
 fn spawn_supervisor(
     app: AppHandle,
     slot: Arc<HostSlot>,
-    mut tunnel: tunnel::TunnelProcess,
+    tunnel: tunnel::TunnelProcess,
     generation: u64,
     prior_attempts: u32,
 ) {
     tauri::async_runtime::spawn(async move {
         let established_at = tokio::time::Instant::now();
+        let mut tunnel = tunnel.into_parts();
         let tunnel_pid = tunnel.child.id();
-        let status = tunnel.child.wait().await;
+        let exit_detail = tunnel.wait_for_exit().await;
 
         let is_current = {
             let mut shared = slot.shared.lock().expect("slot poisoned");
@@ -588,10 +589,6 @@ fn spawn_supervisor(
             return;
         }
 
-        let exit_detail = match status {
-            Ok(status) => status.to_string(),
-            Err(error) => error.to_string(),
-        };
         log::warn!(
             "[remote-backend] tunnel to {} closed unexpectedly ({exit_detail}); reconnecting",
             slot.key

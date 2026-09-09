@@ -7,6 +7,10 @@ use std::{
 };
 use tokio::{io::AsyncWriteExt, process::Command, time::timeout};
 
+pub(crate) fn resolve_control_executable(name: &str) -> Option<PathBuf> {
+    Some(PathBuf::from(name))
+}
+
 pub(super) async fn capture_dir_env_uncached(
     dir: &Path,
     timeout_duration: Duration,

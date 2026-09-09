@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "corpus": "LibriSpeech ASR corpus",
+  "resource_id": "SLR12",
+  "subset": "test-clean",
+  "language": "en",
+  "license": "CC BY 4.0",
+  "license_url": "https://creativecommons.org/licenses/by/4.0/",
+  "source_url": "https://www.openslr.org/12/",
+  "archive_url": "https://www.openslr.org/resources/12/test-clean.tar.gz",
+  "archive_md5": "32fa31d27d2e1cad72775fee3f4849a9",
+  "utterances": [
+    {
+      "id": "1089-134686-0002",
+      "file": "1089-134686-0002.flac",
+      "sha256": "66277a3fa3df407261dc2a3ce685a7ceef19999ab0c10531bee5257cb64cb59d",
+      "bytes": 116299,
+      "sample_rate_hz": 16000,
+      "channels": 1,
+      "bits_per_sample": 16,
+      "samples": 106000,
+      "transcript": "AFTER EARLY NIGHTFALL THE YELLOW LAMPS WOULD LIGHT UP HERE AND THERE THE SQUALID QUARTER OF THE BROTHELS"
+    },
+    {
+      "id": "1221-135766-0002",
+      "file": "1221-135766-0002.flac",
+      "sha256": "1f02bae046f9567010f0163e8f204612fd1035a751383586a7aef6cb0fcc6e60",
+      "bytes": 104776,
+      "sample_rate_hz": 16000,
+      "channels": 1,
+      "bits_per_sample": 16,
+      "samples": 77200,
+      "transcript": "YET THESE THOUGHTS AFFECTED HESTER PRYNNE LESS WITH HOPE THAN APPREHENSION"
+    },
+    {
+      "id": "1284-1180-0003",
+      "file": "1284-1180-0003.flac",
+      "sha256": "e9850c58c0b066ec8eeceda7ded87ba42cb6823f69b935bfe5d3619c46fe166a",
+      "bytes": 96521,
+      "sample_rate_hz": 16000,
+      "channels": 1,
+      "bits_per_sample": 16,
+      "samples": 77360,
+      "transcript": "FOR A LONG TIME HE HAD WISHED TO EXPLORE THE BEAUTIFUL LAND OF OZ IN WHICH THEY LIVED"
+    }
+  ]
+}

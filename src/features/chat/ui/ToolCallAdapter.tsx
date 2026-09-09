@@ -24,6 +24,7 @@ import {
 import type { ToolCallLocation, ToolCallStatus } from "@/shared/types/messages";
 import { useArtifactActionsContext } from "@/features/chat/hooks/ArtifactPolicyContext";
 import { getSubagentToolCallInfo } from "@/features/chat/lib/subagentToolCalls";
+import { AgentIdentityAvatar } from "./AgentIdentityAvatar";
 
 interface ToolCallAdapterProps {
   className?: string;
@@ -313,13 +314,43 @@ function AgentWorkToolSection({
   );
 }
 
+interface SubagentTitlePresentation {
+  text: string;
+  agentName?: string;
+  beforeAgent?: string;
+  afterAgent?: string;
+}
+
+const AGENT_NAME_MARKER = "\u{e000}";
+
+function translatedAgentTitle(
+  t: (key: string, options?: Record<string, unknown>) => string,
+  key: string,
+  agentName: string,
+  options: Record<string, unknown> = {},
+): SubagentTitlePresentation {
+  const markedTitle = t(key, { ...options, name: AGENT_NAME_MARKER });
+  const markerIndex = markedTitle.indexOf(AGENT_NAME_MARKER);
+  if (markerIndex < 0) {
+    return { text: t(key, { ...options, name: agentName }) };
+  }
+  const beforeAgent = markedTitle.slice(0, markerIndex);
+  const afterAgent = markedTitle.slice(markerIndex + AGENT_NAME_MARKER.length);
+  return {
+    text: `${beforeAgent}${agentName}${afterAgent}`,
+    agentName,
+    beforeAgent,
+    afterAgent,
+  };
+}
+
 function subagentTitle(
   t: (key: string, options?: Record<string, unknown>) => string,
   info: NonNullable<ReturnType<typeof getSubagentToolCallInfo>>,
   resolvedAgentName?: string,
   resolvedTaskLabel?: string,
   resolvedTaskIsConfigured?: boolean,
-): string {
+): SubagentTitlePresentation {
   // Explicit key map keeps the i18n usage statically checkable.
   const keys = {
     delegating: [
@@ -384,23 +415,33 @@ function subagentTitle(
   const agentNames = info.agentNames;
   const taskLabel = info.label ?? resolvedTaskLabel;
   if (agentNames) {
-    return t("tools.subagent.waitingAgents", { names: agentNames.join(", ") });
+    return {
+      text: t("tools.subagent.waitingAgents", { names: agentNames.join(", ") }),
+    };
   }
   if (agentName && (info.sourceDefinesTask || resolvedTaskIsConfigured)) {
-    return t(configuredTaskKeys[info.activity], { name: agentName });
+    return translatedAgentTitle(
+      t,
+      configuredTaskKeys[info.activity],
+      agentName,
+    );
   }
   if (agentName && taskLabel) {
-    return t(agentLabeled, { name: agentName, label: taskLabel });
+    return translatedAgentTitle(t, agentLabeled, agentName, {
+      label: taskLabel,
+    });
   }
-  if (agentName) return t(agent, { name: agentName });
+  if (agentName) return translatedAgentTitle(t, agent, agentName);
   if (taskLabel) {
-    return info.taskId
-      ? t(taskLabeledKeys[info.activity], { label: taskLabel })
-      : t(labeled, { label: taskLabel });
+    return {
+      text: info.taskId
+        ? t(taskLabeledKeys[info.activity], { label: taskLabel })
+        : t(labeled, { label: taskLabel }),
+    };
   }
   // A task id is correlation identity, not a task description. When no
   // delegate context can be recovered, show only the known activity fact.
-  return t(plain);
+  return { text: t(plain) };
 }
 
 function sentenceCaseToolTitle(name: string): string {
@@ -463,7 +504,7 @@ export function ToolCallAdapter({
     () => getSubagentToolCallInfo({ toolName, arguments: args }),
     [toolName, args],
   );
-  const displayName = subagentInfo
+  const subagentTitlePresentation = subagentInfo
     ? subagentTitle(
         t,
         subagentInfo,
@@ -471,7 +512,9 @@ export function ToolCallAdapter({
         subagentTaskLabel,
         subagentTaskIsConfigured,
       )
-    : sentenceCaseToolTitle(name);
+    : undefined;
+  const displayName =
+    subagentTitlePresentation?.text ?? sentenceCaseToolTitle(name);
 
   const pathRow = summaryRows.find((row) => row.kind === "path");
   const headerFileLabel = pathRow?.value;
@@ -508,6 +551,22 @@ export function ToolCallAdapter({
   const showResultBody =
     hasOutput && !textIsStringifiedCopy && !canHoistResultIntoHeader;
 
+  const subagentHeaderTitle: ReactNode =
+    subagentTitlePresentation?.agentName ? (
+      <span className="inline-flex min-w-0 max-w-full items-center">
+        <span>{subagentTitlePresentation.beforeAgent}</span>
+        <AgentIdentityAvatar
+          agentName={subagentTitlePresentation.agentName}
+          className="ml-1.5 mr-0.5"
+        />
+        <span className="min-w-0 truncate">
+          {subagentTitlePresentation.agentName}
+          {subagentTitlePresentation.afterAgent}
+        </span>
+      </span>
+    ) : (
+      displayName
+    );
   const headerTitle: ReactNode = headerTitleParts ? (
     <>
       <span data-tool-title-prefix>{headerTitleParts.prefix}</span>
@@ -538,7 +597,7 @@ export function ToolCallAdapter({
     </>
   ) : canHoistResultIntoHeader ? (
     <>
-      <span>{displayName}</span>
+      {subagentHeaderTitle}
       <span aria-hidden="true" className="text-muted-foreground">
         {" · "}
       </span>
@@ -547,7 +606,7 @@ export function ToolCallAdapter({
       </span>
     </>
   ) : (
-    displayName
+    subagentHeaderTitle
   );
 
   const showCombinedSurface = summaryRows.length > 0 || hasStructuredArgs;

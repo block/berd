@@ -2,18 +2,18 @@
 
 const KEYCHAIN_SERVICE: &str = "berd-openai-voice";
 const KEYCHAIN_ACCOUNT: &str = "api-key";
-const LEGACY_TTS_KEYCHAIN_ACCOUNT: &str = "tts-api-key";
 
 #[derive(Clone, Copy)]
 pub(crate) enum OpenAiVoiceCredential {
     SpeechToText,
     TextToSpeech,
+    Realtime,
 }
 
 impl OpenAiVoiceCredential {
     const fn account(self) -> &'static str {
         match self {
-            Self::SpeechToText | Self::TextToSpeech => KEYCHAIN_ACCOUNT,
+            Self::SpeechToText | Self::TextToSpeech | Self::Realtime => KEYCHAIN_ACCOUNT,
         }
     }
 
@@ -24,6 +24,9 @@ impl OpenAiVoiceCredential {
             }
             Self::TextToSpeech => {
                 "OpenAI text-to-speech is not configured. Add the shared OpenAI voice API key in Voice settings, then try again."
+            }
+            Self::Realtime => {
+                "OpenAI Realtime voice is not configured. Add the shared OpenAI voice API key in Voice settings, then try again."
             }
         }
     }
@@ -55,45 +58,19 @@ fn clear_account(account: &str) -> Result<(), String> {
     }
 }
 
-fn canonical_mutation_with_legacy_cleanup<T>(
-    canonical_mutation: impl FnOnce() -> Result<T, String>,
-    legacy_cleanup: impl FnOnce() -> Result<(), String>,
-) -> Result<T, String> {
-    let value = canonical_mutation()?;
-    if let Err(error) = legacy_cleanup() {
-        log::warn!("Could not remove Berd's legacy OpenAI voice credential: {error}");
-    }
-    Ok(value)
-}
-
 pub(crate) fn read(credential: OpenAiVoiceCredential) -> Result<Option<String>, String> {
-    if let Some(api_key) = read_account(credential.account())? {
-        return Ok(Some(api_key));
-    }
-    let Some(api_key) = read_account(LEGACY_TTS_KEYCHAIN_ACCOUNT)? else {
-        return Ok(None);
-    };
-    store(credential, &api_key)?;
-    Ok(Some(api_key))
+    read_account(credential.account())
 }
 
 pub(crate) fn store(credential: OpenAiVoiceCredential, api_key: &str) -> Result<(), String> {
     let entry = entry(credential.account())?;
-    canonical_mutation_with_legacy_cleanup(
-        || {
-            entry
-                .set_password(api_key)
-                .map_err(|error| format!("Could not save Berd's OpenAI voice credential: {error}"))
-        },
-        || clear_account(LEGACY_TTS_KEYCHAIN_ACCOUNT),
-    )
+    entry
+        .set_password(api_key)
+        .map_err(|error| format!("Could not save Berd's OpenAI voice credential: {error}"))
 }
 
 pub(crate) fn clear(credential: OpenAiVoiceCredential) -> Result<(), String> {
-    canonical_mutation_with_legacy_cleanup(
-        || clear_account(credential.account()),
-        || clear_account(LEGACY_TTS_KEYCHAIN_ACCOUNT),
-    )
+    clear_account(credential.account())
 }
 
 pub(crate) fn require(credential: OpenAiVoiceCredential) -> Result<String, String> {
@@ -103,35 +80,10 @@ pub(crate) fn require(credential: OpenAiVoiceCredential) -> Result<String, Strin
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::RefCell;
-
     #[test]
     fn speech_services_use_the_shared_voice_keychain_account() {
         assert_eq!(OpenAiVoiceCredential::SpeechToText.account(), "api-key");
         assert_eq!(OpenAiVoiceCredential::TextToSpeech.account(), "api-key");
-    }
-
-    #[test]
-    fn legacy_cleanup_failure_does_not_change_canonical_mutation_result() {
-        let credential = RefCell::new(None);
-        let save = canonical_mutation_with_legacy_cleanup(
-            || {
-                credential.replace(Some("shared-key"));
-                Ok(())
-            },
-            || Err("legacy cleanup failed".to_string()),
-        );
-        assert_eq!(save, Ok(()));
-        assert_eq!(*credential.borrow(), Some("shared-key"));
-
-        let clear = canonical_mutation_with_legacy_cleanup(
-            || {
-                credential.replace(None);
-                Ok(())
-            },
-            || Err("legacy cleanup failed".to_string()),
-        );
-        assert_eq!(clear, Ok(()));
-        assert_eq!(*credential.borrow(), None);
+        assert_eq!(OpenAiVoiceCredential::Realtime.account(), "api-key");
     }
 }

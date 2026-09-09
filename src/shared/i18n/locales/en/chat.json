@@ -402,6 +402,10 @@
     "mcpApp": "MCP App",
     "mcpAppLoading": "Loading MCP App…",
     "mcpAppRenderError": "Unable to render MCP App inline.",
+    "mcpAppMessageConfirmTitle": "Send this app message?",
+    "mcpAppMessageConfirmDescription": "{{extension}} / {{tool}} wants to send this message as you. Review the exact text before sending.",
+    "mcpAppMessageCancel": "Cancel",
+    "mcpAppMessageSend": "Send message",
     "redactedThinking": "(thinking redacted)",
     "responseFeedbackGood": "Good response",
     "responseFeedbackBad": "Bad response",
@@ -440,6 +444,8 @@
     "sendAnyway": "Send anyway",
     "backgroundSendFailed": "The queued message could not be sent. Retry it or edit the message.",
     "backgroundSendFailedTitle": "Queued message failed",
+    "voiceCoordinationFailed": "An internal voice update could not be delivered, so the voice conversation was stopped. Start voice again to continue.",
+    "voiceCoordinationFailedTitle": "Voice conversation stopped",
     "configureWorktree": "Configure your new worktree?",
     "configureWorkspaces": "Configure new project workspaces?",
     "configureWorkspacePlan": "Configure {{worktreeLabel}}?",
@@ -712,6 +718,8 @@
     "summary": {
       "previousSteps_one": "{{count}} previous step",
       "previousSteps_other": "{{count}} previous steps",
+      "activeAgents_one": "{{names}} is working",
+      "activeAgents_other": "{{names}} are working",
       "steps_one": "{{count}} step",
       "steps_other": "{{count}} steps"
     }

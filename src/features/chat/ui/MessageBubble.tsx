@@ -804,6 +804,7 @@ export const MessageBubble = memo(function MessageBubble({
   }, [isCopyConfirmed, updateRowState]);
 
   const isUser = role === "user";
+  const voiceDebugEvent = message.metadata?.voiceConversationDebugEvent;
   const messageAttachments =
     message.metadata?.attachments ?? EMPTY_MESSAGE_ATTACHMENTS;
   const attachmentPreviewItems = useMemo(
@@ -834,6 +835,9 @@ export const MessageBubble = memo(function MessageBubble({
     .filter((c): c is TextContent => c.type === "text")
     .map((c) => c.text)
     .join("\n");
+  const hasVoiceSpeech = content.some(
+    (block) => block.type === "text" && block.speech !== undefined,
+  );
   const renderedContent = visibleContent;
   const actionTextContent = fragmentRole
     ? rawContent
@@ -958,6 +962,7 @@ export const MessageBubble = memo(function MessageBubble({
         isUser ? "ml-auto flex-row-reverse gap-3" : "flex-row gap-3",
       )}
       data-role={isUser ? "user-message" : "assistant-message"}
+      data-realtime-voice-debug-event={voiceDebugEvent}
       data-message-fragment-role={fragmentRole}
       {...rowRootAttributes}
     >
@@ -995,11 +1000,16 @@ export const MessageBubble = memo(function MessageBubble({
           shouldReserveMessageActionSpace && "pb-9",
           isUser
             ? "max-w-[var(--chat-user-message-max-width)] items-end"
-            : "w-full items-start",
+            : voiceDebugEvent && voiceDebugEvent !== "emissarySpeech"
+              ? "w-full max-w-3xl items-start"
+              : "w-full items-start",
         )}
       >
         {showAssistantIdentity ? (
-          <div className="mb-0.5 flex items-center gap-1 text-xs">
+          <div
+            data-role="assistant-message-identity"
+            className="mb-0.5 flex items-center gap-1 text-xs"
+          >
             {hasPersonaAvatar ? (
               <AvatarVisual
                 avatar={persona?.avatar}
@@ -1025,11 +1035,17 @@ export const MessageBubble = memo(function MessageBubble({
         {/* biome-ignore lint/a11y/useKeyWithClickEvents: delegated link handler */}
         {/* biome-ignore lint/a11y/noStaticElementInteractions: delegated link handler */}
         <div
+          data-role="message-bubble-surface"
           className={cn(
             "min-w-0 text-sm leading-relaxed",
             isUser
               ? "rounded-sm bg-message-user-bg px-4 py-2 leading-normal"
               : "w-full",
+            hasVoiceSpeech &&
+              "rounded-lg border border-border/80 px-4 py-3 shadow-sm",
+            voiceDebugEvent &&
+              voiceDebugEvent !== "emissarySpeech" &&
+              "rounded-lg border px-4 py-3 shadow-sm",
           )}
           onClick={handleContentClick}
         >

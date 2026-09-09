@@ -551,14 +551,25 @@ async fn run_git_output_with_env_source_async(
     }
 }
 
+fn build_git_command(git: &Path, path: &Path, args: &[&str]) -> TokioCommand {
+    let mut command = TokioCommand::new(git);
+    command.args(args).current_dir(path).kill_on_drop(true);
+    command
+}
+
 async fn run_git_once_async(
     path: &Path,
     args: &[&str],
     command_timeout: Duration,
     env_source: EnvSource,
 ) -> Result<Output, GitRunError> {
-    let mut command = TokioCommand::new("git");
-    command.args(args).current_dir(path).kill_on_drop(true);
+    let git = dir_env::resolve_control_executable("git").ok_or_else(|| {
+        GitRunError::Spawn(io::Error::new(
+            io::ErrorKind::NotFound,
+            "trusted Git executable was not found",
+        ))
+    })?;
+    let mut command = build_git_command(&git, path, args);
 
     apply_git_environment(
         &mut command,
@@ -1388,6 +1399,31 @@ exit \"$?\"
         assert!(
             !output.status.success(),
             "commit must fail when the hook tool lookup fails"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn git_command_program_is_not_resolved_from_captured_path() {
+        let trusted_git = PathBuf::from(r"C:\Program Files\Git\cmd\git.exe");
+        let project_bin = PathBuf::from(r"C:\repo\.hermit\bin");
+        let mut command = build_git_command(&trusted_git, Path::new(r"C:\repo"), &["status"]);
+        let env = HashMap::from([(
+            "Path".to_string(),
+            std::env::join_paths([project_bin.clone(), PathBuf::from(r"C:\Windows\System32")])
+                .expect("captured PATH")
+                .to_string_lossy()
+                .into_owned(),
+        )]);
+
+        apply_captured_git_env(&mut command, &env);
+
+        assert_eq!(command.as_std().get_program(), trusted_git.as_os_str());
+        assert_eq!(
+            std::env::split_paths(&env_value(&command, "PATH").expect("command PATH"))
+                .next()
+                .as_deref(),
+            Some(project_bin.as_path())
         );
     }
 

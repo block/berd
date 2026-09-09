@@ -21,10 +21,6 @@ done
 [[ "${VITE_MANAGED_CONNECTIONS:-0}" == "1" ]] && features+=(block-managed-connections)
 [[ "${VITE_SKILL_DISCOVERY:-0}" == "1" ]] && features+=(block-skill-discovery)
 [[ "${VITE_TELEMETRY_ENFORCED:-0}" == "1" ]] && features+=(block-telemetry-enforced)
-if [[ "${VITE_VOICE_DICTATION:-0}" == "1" ]]; then
-  features+=(block-voice-dictation)
-else
-  features+=(no-voice-dictation)
-fi
+[[ "${VITE_VOICE_DICTATION:-0}" == "1" ]] && features+=(block-voice-dictation)
 
-(IFS=,; echo "${features[*]}")
+(IFS=,; echo "${features[*]:-}")

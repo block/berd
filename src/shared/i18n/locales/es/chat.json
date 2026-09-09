@@ -401,6 +401,10 @@
     "mcpApp": "MCP App",
     "mcpAppLoading": "Cargando MCP App…",
     "mcpAppRenderError": "No se pudo renderizar MCP App en línea.",
+    "mcpAppMessageConfirmTitle": "¿Enviar este mensaje de la aplicación?",
+    "mcpAppMessageConfirmDescription": "{{extension}} / {{tool}} quiere enviar este mensaje como tú. Revisa el texto exacto antes de enviarlo.",
+    "mcpAppMessageCancel": "Cancelar",
+    "mcpAppMessageSend": "Enviar mensaje",
     "redactedThinking": "(pensamiento redactado)",
     "responseFeedbackGood": "Buena respuesta",
     "responseFeedbackBad": "Mala respuesta",
@@ -439,6 +443,8 @@
     "sendAnyway": "Enviar de todos modos",
     "backgroundSendFailed": "No se pudo enviar el mensaje en cola. Reinténtalo o edita el mensaje.",
     "backgroundSendFailedTitle": "No se pudo enviar el mensaje en cola",
+    "voiceCoordinationFailed": "No se pudo entregar una actualización interna de voz, por lo que se detuvo la conversación de voz. Inicia la voz de nuevo para continuar.",
+    "voiceCoordinationFailedTitle": "Conversación de voz detenida",
     "configureWorktree": "¿Configurar un worktree nuevo?",
     "configureWorkspaces": "¿Configurar espacios de trabajo nuevos para el proyecto?",
     "configureWorkspacePlan": "¿Configurar {{worktreeLabel}}?",
@@ -696,6 +702,8 @@
     "summary": {
       "previousSteps_one": "{{count}} paso anterior",
       "previousSteps_other": "{{count}} pasos anteriores",
+      "activeAgents_one": "{{names}} está trabajando",
+      "activeAgents_other": "{{names}} están trabajando",
       "steps_one": "{{count}} paso",
       "steps_other": "{{count}} pasos"
     }

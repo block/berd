@@ -36,6 +36,14 @@ export interface VoiceSpeechState {
   interruptionCause?: "userSpeaking" | "voiceStopped";
 }
 
+export type VoiceConversationDebugEvent =
+  | "emissarySpeech"
+  | "emissaryToMaster"
+  | "masterToEmissarySay"
+  | "masterToEmissaryContext"
+  | "masterDismissal"
+  | "handoffReminder";
+
 /** ACP TextContent with discriminator and local voice playback state. */
 export type TextContent = AcpTextContent & {
   type: "text";
@@ -260,6 +268,7 @@ export interface MessageMetadata {
   voiceUtteranceId?: string;
   voiceConversationLifecycleId?: string;
   voiceConversationRevision?: number;
+  voiceConversationDebugEvent?: VoiceConversationDebugEvent;
   attachments?: MessageAttachment[];
   chips?: MessageChip[];
   personaId?: string;

@@ -1,0 +1,5 @@
+[
+  { "outcome": "pending" },
+  { "outcome": "notAdmitted" },
+  { "outcome": "admitted", "speechId": 7 }
+]

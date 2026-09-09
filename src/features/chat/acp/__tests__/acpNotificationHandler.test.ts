@@ -2390,6 +2390,41 @@ describe("acpNotificationHandler", () => {
     });
   });
 
+  it("streams an owned local prompt live while session history is loading", async () => {
+    const sessionId = "loading-with-live-prompt";
+    markSessionReplayLoading(sessionId);
+    claimSessionPrompt(sessionId);
+    setActiveMessageId(sessionId, "master-live", {});
+
+    await handleSessionNotification({
+      sessionId,
+      update: {
+        sessionUpdate: "agent_thought_chunk",
+        content: { type: "text", text: "Inspecting the workspace" },
+      },
+    } as never);
+    await handleSessionNotification({
+      sessionId,
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "I found the answer." },
+      },
+    } as never);
+    flushBufferedStreamingUpdatesForSession(sessionId);
+
+    expect(getReplayBuffer(sessionId)).toBeUndefined();
+    expect(useChatStore.getState().messagesBySession[sessionId]).toMatchObject([
+      {
+        id: "master-live",
+        role: "assistant",
+        content: [
+          { type: "thinking", text: "Inspecting the workspace" },
+          { type: "text", text: "I found the answer." },
+        ],
+      },
+    ]);
+  });
+
   it("replay preserves timestamps from goose metadata on user and assistant chunks", async () => {
     const replaySessionId = "replay-timestamp-session";
     const userCreated = 1_700_000_000;

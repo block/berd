@@ -1,5 +1,54 @@
 # Changelog
 
+## [v0.6.3](https://github.com/block/berd/releases/tag/v0.6.3) - 2026-09-05
+
+This release brings major improvements to voice conversations, search, agents, Home, and CLI workflows, plus many reliability fixes across everyday chat use.
+
+- **GPT-6 Astra support:** Berd now uses a newer Goose backend with proper GPT-6 Astra support, including its larger context and output limits.
+- **Voice engines:** Voice Conversation now supports Apple Speech Recognition, Siri voices, OpenAI speech-to-text, and OpenAI text-to-speech, with clearer setup in Voice settings.
+- **Faster spoken responses:** Berd can start speaking assistant replies while they stream instead of waiting for the full response to finish.
+- **Better voice turn-taking:** Interruptions, false positives, mute boundaries, and active user speech are handled more reliably so Berd does not talk over you or resume stale audio.
+- **Background voice calls:** Voice conversations can continue when you switch sessions or apps, with floating controls for mute, hang up, and returning to the active chat.
+- **Voice setup fixes:** Starting a voice call now works more reliably after installing models, granting microphone access, changing settings, or starting from a new chat.
+- **Voice quality improvements:** Siri audio is normalized to avoid garbled playback, Pocket playback quality is improved, and Pocket speed changes can apply during active speech.
+- **AirPods mute support:** On supported macOS devices, AirPods and Beats mute controls now toggle Berd’s voice microphone state.
+- **Chat search:** `Cmd+K` and Session History search now cover the full session set, not just chats already loaded in the app.
+- **Model picker recency:** Recently used models now appear near the top of the model picker and in the compact recommended view.
+- **Databricks model names:** Unity Catalog models show cleaner, readable names in the chat composer while preserving the full model ID behind the scenes.
+- **Chat tables:** Markdown tables now scroll vertically when needed and wrap long cell contents like URLs and file paths.
+- **Queued sends:** Messages sent while a chat is still starting are no longer silently stranded, and retry behavior is more reliable.
+- **Voice-submitted messages:** Chats now scroll to voice-submitted messages immediately, before the assistant responds.
+- **Artifact viewer:** Open documents and images now stay in sync with files on disk, including external edits, shell writes, deletions, and recovery after temporary read failures.
+- **Sidebar recovery:** “View all chats” now appears whenever more sessions exist, giving users a path to Session History even when the sidebar has not loaded those chats.
+- **Agent avatars:** Custom avatars and generated gloopies now appear consistently across chat surfaces, delegation activity, active-agent summaries, pickers, mentions, and messages.
+- **Avatar library:** Custom gloopies are now reusable across agents and appear first in the Gloopies collection.
+- **Agent creation:** Newly saved agents open directly to their profile, descriptions validate more naturally, and the profile avatar affordance now opens the avatar collection gallery.
+- **Agent import:** Agents can now be imported from ZIP files, and native drag-and-drop imports are more reliable.
+- **Agent cards:** Shared agent cards have a cleaner layout and avoid obsolete metadata.
+- **Home canvas:** Brand-new installs now start with a refined Home layout, and users can add text labels to organize their canvas.
+- **Home reliability:** Berdy’s Home avatar stays visible when clicked, and onboarding now enters Berd directly after the welcome page.
+- **Settings:** About has been merged into System settings, with updates and app details in one place.
+- **Composer focus:** Closing model and project pickers now returns focus to the composer so you can keep typing.
+- **Mention suggestions:** `Escape` and outside clicks now dismiss mention suggestions reliably without reopening for the same token.
+- **Skills:** The Skill Builder now warns before discarding unsaved edits.
+- **Skills toolbar:** Skills search, import actions, and wide-screen alignment have been cleaned up.
+- **Public builds:** Consumer builds no longer expose Block-internal Skill Discovery or send users to internal sign-in flows.
+- **Feedback:** Eligible builds can show response ratings and sampled session feedback prompts, with surveys staying visible after transcript remounts.
+- **Windows app launch:** Clicking Berd while it is already running on Windows now focuses the existing window instead of opening a duplicate instance.
+- **Berd Help:** The bundled help guidance now checks whether `berdctl feedback` is available before recommending it.
+- **berdctl folders:** `berdctl` can now attach and detach project folders after a project already exists, and folder commands better handle `~` versus expanded home paths.
+- **berdctl errors:** CLI session and project commands now show more useful backend error details instead of only generic messages.
+- **bb apps:** The bundled Apps CLI gained commands to list, inspect, debug, check readiness, roll back, delete, and manage access for deployed apps.
+- **Buzz Handoff skill:** Berd now publishes a Buzz Handoff skill for bringing Buzz context into a private agent conversation and sharing an approved reply.
+- **Monitoring tools:** Berd now bundles native monitoring and orchestration skills so agents can run longer-lived monitored workflows and safely retry delivered updates.
+- **Experimental — Remote SSH sessions:** You can opt into running sessions on an SSH host while keeping the Berd UI local, with reconnect support and in-composer SSH environment setup.
+- **Experimental — OpenAI Realtime voice:** A new Realtime voice mode combines a fast spoken interface with the full Berd coding agent behind it.
+- **Experimental — Pull request tracking:** Berd can show related pull requests in the Changes rail and an in-app Pull Requests popover from the top bar.
+- **Experimental — Chat on canvas:** Pinned chats can expand into live, interactive Home canvas cards.
+- **Experimental — Prompt pins:** You can pin reusable prompts to Home and run them with one click.
+
+**Full Changelog**: https://github.com/block/berd/compare/v0.6.2...2b87b50b
+
 ## [v0.6.2](https://github.com/block/berd/releases/tag/v0.6.2) - 2026-08-18
 
 Berd 0.6.1 expands the starter agent collection, improves agent sharing, and makes connections and agent activity easier to navigate.

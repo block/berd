@@ -1,11 +1,13 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ArtifactLinkCandidate } from "@/features/chat/hooks/ArtifactPolicyContext";
 import type { ToolCallLocation } from "@/shared/types/messages";
 import enChat from "@/shared/i18n/locales/en/chat.json";
 import esChat from "@/shared/i18n/locales/es/chat.json";
 import { ToolCallAdapter } from "../ToolCallAdapter";
+import { useAgentStore } from "@/features/agents/stores/agentStore";
 
 const mockResolveMarkdownHref =
   vi.fn<(href: string) => ArtifactLinkCandidate | null>();
@@ -40,6 +42,7 @@ vi.mock("@/features/chat/hooks/ArtifactPolicyContext", () => ({
 
 beforeEach(() => {
   mockResolveMarkdownHref.mockReturnValue(null);
+  useAgentStore.setState({ personas: [] });
 });
 
 afterEach(() => {
@@ -160,6 +163,235 @@ describe("ToolCallAdapter — subagent laws", () => {
         name: /Delegating to Rivet · Count markdown files/i,
       }),
     ).toBeInTheDocument();
+  });
+
+  it("renders a matching agent avatar inline before the delegated name", () => {
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "rivet",
+          displayName: "Rivet",
+          avatar: "https://example.test/rivet.png",
+          systemPrompt: "Review code",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+
+    const { container } = renderAdapter({
+      name: "delegate",
+      toolName: "delegate",
+      arguments: {
+        source: "Rivet",
+        instructions: "Count markdown files",
+      },
+    });
+
+    const avatar = container.querySelector(
+      '[data-agent-identity-avatar="Rivet"] img',
+    );
+    expect(avatar).toHaveAttribute("src", "https://example.test/rivet.png");
+    expect(avatar).toHaveAttribute("alt", "");
+    expect(avatar?.parentElement?.previousElementSibling).toHaveTextContent(
+      "Delegating to",
+    );
+    expect(avatar?.parentElement?.nextElementSibling).toHaveTextContent(
+      "Rivet · Count markdown files",
+    );
+  });
+
+  it("places an overlapping agent name at the translated identity slot", () => {
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "to",
+          displayName: "to",
+          avatar: "https://example.test/to.png",
+          systemPrompt: "Review code",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+
+    const { container } = renderAdapter({
+      name: "delegate",
+      toolName: "delegate",
+      arguments: { source: "to", instructions: "Review the code" },
+    });
+
+    const avatar = container.querySelector('[data-agent-identity-avatar="to"]');
+    expect(avatar?.previousElementSibling).toHaveTextContent("Delegating to");
+    expect(avatar?.nextElementSibling).toHaveTextContent(
+      "to · Review the code",
+    );
+  });
+
+  it("retains the delegated avatar when a result is hoisted", () => {
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "rivet",
+          displayName: "Rivet",
+          avatar: "https://example.test/rivet.png",
+          systemPrompt: "Review code",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+
+    const { container } = renderAdapter({
+      name: "delegate",
+      toolName: "delegate",
+      arguments: { source: "Rivet", instructions: "Review the code" },
+      result: "Done",
+      structuredContent: { outcome: "complete" },
+    });
+
+    expect(
+      container.querySelector('[data-agent-identity-avatar="Rivet"] img'),
+    ).toHaveAttribute("src", "https://example.test/rivet.png");
+    expect(
+      container.querySelector("[data-tool-title-hoisted]"),
+    ).toHaveTextContent("Done");
+  });
+
+  it("does not choose an arbitrary avatar for ambiguous display names", () => {
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "/agents/first.md",
+          displayName: "Rivet",
+          avatar: "https://example.test/first.png",
+          systemPrompt: "First",
+          isBuiltin: false,
+          writable: true,
+        },
+        {
+          id: "/agents/second.md",
+          displayName: " rivet ",
+          avatar: "https://example.test/second.png",
+          systemPrompt: "Second",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+
+    const { container } = renderAdapter({
+      name: "delegate",
+      toolName: "delegate",
+      arguments: { source: "Rivet" },
+    });
+
+    expect(
+      container.querySelector('[data-agent-avatar-fallback=""]'),
+    ).toHaveTextContent("R");
+    expect(
+      container.querySelector("[data-agent-identity-avatar] img"),
+    ).toBeNull();
+  });
+
+  it("prefers a canonical source id over ambiguous display names", () => {
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "/agents/first.md",
+          displayName: "Rivet",
+          avatar: "https://example.test/first.png",
+          systemPrompt: "First",
+          isBuiltin: false,
+          writable: true,
+        },
+        {
+          id: "/agents/second.md",
+          displayName: "Rivet",
+          avatar: "https://example.test/second.png",
+          systemPrompt: "Second",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+
+    const { container } = renderAdapter({
+      name: "delegate",
+      toolName: "delegate",
+      arguments: { source: "second" },
+    });
+
+    expect(
+      container.querySelector('[data-agent-identity-avatar="second"] img'),
+    ).toHaveAttribute("src", "https://example.test/second.png");
+  });
+
+  it("falls back after an avatar image fails and retries a changed source", () => {
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "rivet",
+          displayName: "Rivet",
+          avatar: "https://example.test/broken.png",
+          systemPrompt: "Review code",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+
+    const { container, rerender } = renderAdapter({
+      name: "delegate",
+      toolName: "delegate",
+      arguments: { source: "Rivet" },
+    });
+    const failedImage = container.querySelector(
+      "[data-agent-identity-avatar] img",
+    );
+    expect(failedImage).not.toBeNull();
+    act(() => fireEvent.error(failedImage as HTMLImageElement));
+    expect(
+      container.querySelector('[data-agent-avatar-fallback=""]'),
+    ).toHaveTextContent("R");
+
+    act(() =>
+      useAgentStore.setState({
+        personas: [
+          {
+            id: "rivet",
+            displayName: "Rivet",
+            avatar: "https://example.test/recovered.png",
+            systemPrompt: "Review code",
+            isBuiltin: false,
+            writable: true,
+          },
+        ],
+      }),
+    );
+    rerender(
+      <ToolCallAdapter
+        name="delegate"
+        toolName="delegate"
+        arguments={{ source: "Rivet" }}
+        status="completed"
+      />,
+    );
+    expect(
+      container.querySelector("[data-agent-identity-avatar] img"),
+    ).toHaveAttribute("src", "https://example.test/recovered.png");
+  });
+
+  it("falls back to an initial for an unmatched delegated agent", () => {
+    const { container } = renderAdapter({
+      name: "delegate",
+      toolName: "delegate",
+      arguments: { source: "Rivet" },
+    });
+
+    expect(
+      container.querySelector('[data-agent-avatar-fallback=""]'),
+    ).toHaveTextContent("R");
   });
 
   it("describes a valid source-only delegation", () => {

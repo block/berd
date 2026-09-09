@@ -151,6 +151,42 @@ function createBinding(
 describe("ConversationComposerCapability surface parity", () => {
   beforeEach(() => chatInputSpy.mockClear());
 
+  it("notifies an active voice frontend after typed sends commit", async () => {
+    const controller = createController();
+    const notify = vi.fn();
+    controller.handleSend.mockImplementation(
+      (_text, _personaId, _attachments, options) => {
+        options?.onUserMessageCommitted?.();
+        return true;
+      },
+    );
+    controller.steerDraftMessage.mockImplementation(
+      async (_text, _personaId, _attachments, options) => {
+        options?.onUserMessageCommitted?.();
+        return true;
+      },
+    );
+    render(
+      <ConversationComposerCapability
+        binding={createBinding(controller, {
+          kind: "existingSession",
+          sessionId: "session-1",
+        })}
+        renderingPolicy={{
+          presentation: { surface: "bare", providerColumnMode: "gated" },
+        }}
+        onUserTextCommitted={notify}
+      />,
+    );
+
+    const actions = latestProps().composerActions;
+    expect(actions.onSend("typed message")).toBe(true);
+    expect(notify).toHaveBeenCalledWith("typed message");
+
+    await actions.onSteerMessage?.("typed steer");
+    expect(notify).toHaveBeenCalledWith("typed steer");
+  });
+
   it("preserves Home deferred-queue policy while sharing draft and selection behavior", () => {
     const controller = createController();
     render(
