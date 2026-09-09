@@ -184,6 +184,15 @@ export function useAgentModelPickerState({
       selectedModelOverride?: ModelOption,
       agentId?: string,
     ) => {
+      // Cross-agent favorites use the same readiness owner as provider picks.
+      // Do not emit a combined intent until the owning agent is ready.
+      if (
+        agentId &&
+        agentId !== selectedAgentId &&
+        !readyAgentIds.has(agentId)
+      ) {
+        return;
+      }
       const selectedModel =
         selectedModelOverride ??
         availableModels.find((model) => model.id === modelId);
@@ -203,7 +212,7 @@ export function useAgentModelPickerState({
         onModelSelected?.(selectedModelOption);
       }
     },
-    [availableModels, onModelSelected],
+    [availableModels, onModelSelected, readyAgentIds, selectedAgentId],
   );
 
   const refreshingRef = useRef(false);

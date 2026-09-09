@@ -15,6 +15,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { requestOpenSettings } from "@/features/settings/lib/settingsEvents";
 import { useComposerPickerCloseFocus } from "@/features/chat/hooks/useComposerPickerCloseFocus";
+import { useStarredModels } from "../hooks/useStarredModels";
 import { recordModelSelection } from "@/features/chat/lib/modelRecency";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
@@ -231,6 +232,10 @@ export function AgentModelPicker({
     currentModelProviderId,
     availableModels,
   });
+  const { isStarred } = useStarredModels();
+  const hasLiveFavorites = favoriteModels?.some(({ agentId, model }) =>
+    isStarred(model.providerId ?? agentId, model.id),
+  );
   const displayedModels = useMemo(() => {
     const currentModelBelongsToSelectedAgent =
       selectedAgentId === "goose"
@@ -687,7 +692,7 @@ export function AgentModelPicker({
                     </div>
                   )}
                 </div>
-              ) : displayedModels.length > 0 ? (
+              ) : displayedModels.length > 0 || hasLiveFavorites ? (
                 <RecommendedModelList
                   key={selectedAgentId}
                   ref={modelListRef}

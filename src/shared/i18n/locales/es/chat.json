@@ -623,6 +623,8 @@
         "error": "Error de conversación de voz: {{error}}"
       }
     },
+    "starAgentModel": "Destacar {{model}}, {{agent}}",
+    "unstarAgentModel": "Quitar {{model}}, {{agent}} de destacados",
     "starModel": "Destacar {{model}}",
     "unstarModel": "Quitar {{model}} de destacados"
   },

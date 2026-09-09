@@ -638,6 +638,8 @@
         "error": "Voice conversation error: {{error}}"
       }
     },
+    "starAgentModel": "Star {{model}}, {{agent}}",
+    "unstarAgentModel": "Unstar {{model}}, {{agent}}",
     "starModel": "Star {{model}}",
     "unstarModel": "Unstar {{model}}"
   },

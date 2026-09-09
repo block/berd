@@ -2471,9 +2471,26 @@ describe("AgentModelPicker starred models", () => {
     expect(
       screen.getByRole("button", { name: "Shared, Claude Code" }),
     ).not.toHaveAttribute("data-selected");
+    expect(
+      screen.getByRole("button", { name: "Star Shared" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "Unstar Shared, Claude Code",
+      }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Star Shared" }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Unstar Shared" }),
+      ).toBeInTheDocument(),
+    );
   });
 
-  it("emits one agent-and-model intent for a foreign favorite", async () => {
+  it.each([
+    false,
+    true,
+  ])("emits one agent-and-model intent for a foreign favorite with empty catalog=%s", async (emptyCatalog) => {
     seedStar("claude-acp", "opus");
     __resetStarredModelsCacheForTests();
     const user = userEvent.setup();
@@ -2493,7 +2510,7 @@ describe("AgentModelPicker starred models", () => {
         onAgentChange={onAgentChange}
         currentModelId="preferred"
         currentModelName="Preferred"
-        availableModels={models}
+        availableModels={emptyCatalog ? [] : models}
         favoriteModels={favoriteModels}
         onModelChange={onModelChange}
       />,

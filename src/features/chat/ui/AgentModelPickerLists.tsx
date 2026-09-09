@@ -861,10 +861,24 @@ export const RecommendedModelList = forwardRef<
                           activeStarAnimation?.phase === "moving" &&
                             "pointer-events-none",
                         )}
-                        aria-label={t(
-                          starred ? "toolbar.unstarModel" : "toolbar.starModel",
-                          { model: getModelDisplayName(model) },
-                        )}
+                        aria-label={
+                          foreignAgentLabel
+                            ? t(
+                                starred
+                                  ? "toolbar.unstarAgentModel"
+                                  : "toolbar.starAgentModel",
+                                {
+                                  model: getModelDisplayName(model),
+                                  agent: foreignAgentLabel,
+                                },
+                              )
+                            : t(
+                                starred
+                                  ? "toolbar.unstarModel"
+                                  : "toolbar.starModel",
+                                { model: getModelDisplayName(model) },
+                              )
+                        }
                       >
                         <motion.span
                           className="flex"
