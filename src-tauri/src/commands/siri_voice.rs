@@ -46,7 +46,7 @@ use berd_voice::DeliverySegment as VoiceDeliverySegment;
 #[cfg(target_os = "macos")]
 use berd_voice::{
     ConfiguredTtsSlot, DrainPolicy, OutboundFailure, OutboundOutcome, OutboundPlayback,
-    PcmAudioOutput, PocketAudioPlayer, TtsBackend, TtsConfiguration,
+    PcmAudioOutput, PocketAudioPlayer, StreamingTtsText, TtsBackend, TtsConfiguration,
 };
 
 #[derive(Clone, Debug, Default)]
@@ -137,6 +137,8 @@ const SIRI_STREAM_EVENT: &str = "siri-voice:stream-event";
 const SIRI_OUTPUT_DRAIN_MARGIN: Duration = Duration::from_secs(60);
 #[cfg(target_os = "macos")]
 const PLAYBACK_PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
+#[cfg(target_os = "macos")]
+const SIRI_INTER_CHUNK_SILENCE: Duration = Duration::from_millis(250);
 const MIN_PLAYBACK_SPEED: f32 = 0.5;
 const MAX_PLAYBACK_SPEED: f32 = 2.0;
 pub(crate) static SIRI_SETTINGS_LOCK: Mutex<()> = Mutex::new(());
@@ -522,8 +524,7 @@ fn synthesize_siri_stream_ready(
     playback: &mut OutboundPlayback<'_>,
     player: &PocketAudioPlayer,
     output_latency_grace: Duration,
-    pending: &mut String,
-    first_chunk_pending: &mut bool,
+    ready: Vec<String>,
     native_voice: &NativeVoiceState,
     interruption_sensitivity: InterruptionSensitivity,
     input_during_tts: InputDuringTtsPolicy,
@@ -531,12 +532,15 @@ fn synthesize_siri_stream_ready(
     playback_drained_at: &mut Option<Instant>,
     last_progress_emit: &mut Instant,
     last_progress: &mut Option<VoiceDeliveryProgress>,
-    flush: bool,
 ) -> Result<bool, String> {
-    let split = berd_voice::take_streaming_text_chunks(pending, *first_chunk_pending, flush)?;
-    *pending = split.pending;
-    *first_chunk_pending = split.first_chunk_pending;
-    for text in split.ready {
+    for text in ready {
+        if playback
+            .queue_inter_segment_silence(SIRI_INTER_CHUNK_SILENCE)
+            .map_err(|failure| failure.message)?
+            == OutboundOutcome::Interrupted
+        {
+            return Ok(false);
+        }
         // The coordinator invokes these callbacks serially, but Rust cannot
         // infer that two callback values never overlap. Interior borrows keep
         // the single host-owned guard state shared without duplicating it.
@@ -665,8 +669,7 @@ fn run_siri_stream(
     let player =
         PocketAudioPlayer::new(pcm_spec.sample_rate, pcm_spec.playback_rate, output_device)?;
     let mut playback = OutboundPlayback::new(&player, &active, pcm_spec.sample_rate, 0)?;
-    let mut pending = String::new();
-    let mut first_chunk_pending = true;
+    let mut streaming_text = StreamingTtsText::default();
     let mut assistant_speech = None::<AssistantSpeechGuard>;
     let mut playback_drained_at = None;
     let mut last_progress_emit = Instant::now();
@@ -689,7 +692,7 @@ fn run_siri_stream(
         let command = receiver.recv_timeout(Duration::from_millis(10));
         match command {
             Ok(SiriStreamCommand::Append(text)) => {
-                pending.push_str(&text);
+                let ready = streaming_text.append(backend.as_ref(), &text)?;
                 if !synthesize_siri_stream_ready(
                     &app,
                     &stream_id,
@@ -697,8 +700,7 @@ fn run_siri_stream(
                     &mut playback,
                     &player,
                     output_latency_grace,
-                    &mut pending,
-                    &mut first_chunk_pending,
+                    ready,
                     &native_voice,
                     interruption_sensitivity,
                     input_during_tts,
@@ -706,7 +708,6 @@ fn run_siri_stream(
                     &mut playback_drained_at,
                     &mut last_progress_emit,
                     &mut last_progress,
-                    false,
                 )? {
                     return Ok(SiriStreamOutcome {
                         state: SiriStreamEventState::Interrupted,
@@ -715,6 +716,7 @@ fn run_siri_stream(
                 }
             }
             Ok(SiriStreamCommand::Flush) => {
+                let ready = streaming_text.flush(backend.as_ref())?;
                 if !synthesize_siri_stream_ready(
                     &app,
                     &stream_id,
@@ -722,8 +724,7 @@ fn run_siri_stream(
                     &mut playback,
                     &player,
                     output_latency_grace,
-                    &mut pending,
-                    &mut first_chunk_pending,
+                    ready,
                     &native_voice,
                     interruption_sensitivity,
                     input_during_tts,
@@ -731,7 +732,6 @@ fn run_siri_stream(
                     &mut playback_drained_at,
                     &mut last_progress_emit,
                     &mut last_progress,
-                    true,
                 )? {
                     return Ok(SiriStreamOutcome {
                         state: SiriStreamEventState::Interrupted,
@@ -740,6 +740,7 @@ fn run_siri_stream(
                 }
             }
             Ok(SiriStreamCommand::Finish) => {
+                let ready = streaming_text.flush(backend.as_ref())?;
                 if !synthesize_siri_stream_ready(
                     &app,
                     &stream_id,
@@ -747,8 +748,7 @@ fn run_siri_stream(
                     &mut playback,
                     &player,
                     output_latency_grace,
-                    &mut pending,
-                    &mut first_chunk_pending,
+                    ready,
                     &native_voice,
                     interruption_sensitivity,
                     input_during_tts,
@@ -756,7 +756,6 @@ fn run_siri_stream(
                     &mut playback_drained_at,
                     &mut last_progress_emit,
                     &mut last_progress,
-                    true,
                 )? {
                     return Ok(SiriStreamOutcome {
                         state: SiriStreamEventState::Interrupted,

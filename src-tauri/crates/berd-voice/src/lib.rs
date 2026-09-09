@@ -55,4 +55,7 @@ pub use pocket::{
 #[cfg(target_os = "macos")]
 pub use siri::SiriTts;
 pub use synthesis::{synthesize_pcm16_wav, WavSynthesis, WavSynthesisError, WavSynthesisErrorKind};
-pub use tts::{OpenAiTts, PocketTtsBackend, TtsBackend, TtsOutcome, TtsPcmSpec, TtsSynthesisEvent};
+pub use tts::{
+    OpenAiTts, PocketTtsBackend, StreamingTtsText, TtsBackend, TtsOutcome, TtsPcmSpec,
+    TtsSynthesisEvent,
+};

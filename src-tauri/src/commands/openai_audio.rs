@@ -10,7 +10,8 @@ use std::time::Duration;
 #[cfg(target_os = "macos")]
 use berd_voice::{
     ConfiguredTtsSlot, DeliveryProgress as VoiceDeliveryProgress, DrainPolicy, OutboundFailure,
-    OutboundOutcome, OutboundPlayback, PocketAudioPlayer, TtsBackend, TtsConfiguration,
+    OutboundOutcome, OutboundPlayback, PocketAudioPlayer, StreamingTtsText, TtsBackend,
+    TtsConfiguration,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
@@ -814,7 +815,7 @@ fn run_openai_voice_stream(
     )?;
     let mut assistant_speech = None::<AssistantSpeechGuard>;
     let mut playback_drained_at = None::<Instant>;
-    let mut pending = String::new();
+    let mut streaming_text = StreamingTtsText::default();
     let mut last_progress = Instant::now();
 
     loop {
@@ -833,39 +834,42 @@ fn run_openai_voice_stream(
         }
         match receiver.recv_timeout(Duration::from_millis(20)) {
             Ok(OpenAiStreamCommand::Append(text)) => {
-                pending.push_str(&text);
-                if pending.len() >= 24 && pending.trim_end().ends_with(['.', '!', '?', '\n']) {
-                    match speak_pending(
-                        app,
-                        stream_id,
-                        backend.as_ref(),
-                        &mut playback,
-                        &mut pending,
-                        &native_voice,
-                        interruption_sensitivity,
-                        input_during_tts,
-                        &mut assistant_speech,
-                        &mut playback_drained_at,
-                    )
-                    .map_err(openai_playback_failure)?
-                    {
-                        OutboundOutcome::Interrupted => {
-                            return Ok(StreamOutcome {
-                                state: OpenAiStreamEventState::Interrupted,
-                                delivery: Some(playback.snapshot()),
-                            })
-                        }
-                        OutboundOutcome::Completed => {}
-                    }
-                }
-            }
-            Ok(OpenAiStreamCommand::Flush) => {
-                if speak_pending(
+                let ready = match streaming_text.append(backend.as_ref(), &text) {
+                    Ok(ready) => ready,
+                    Err(message) => return Err(openai_playback_failure(playback.abort(message))),
+                };
+                if speak_openai_stream_ready(
                     app,
                     stream_id,
                     backend.as_ref(),
                     &mut playback,
-                    &mut pending,
+                    ready,
+                    &native_voice,
+                    interruption_sensitivity,
+                    input_during_tts,
+                    &mut assistant_speech,
+                    &mut playback_drained_at,
+                )
+                .map_err(openai_playback_failure)?
+                    == OutboundOutcome::Interrupted
+                {
+                    return Ok(StreamOutcome {
+                        state: OpenAiStreamEventState::Interrupted,
+                        delivery: Some(playback.snapshot()),
+                    });
+                }
+            }
+            Ok(OpenAiStreamCommand::Flush) => {
+                let ready = match streaming_text.flush(backend.as_ref()) {
+                    Ok(ready) => ready,
+                    Err(message) => return Err(openai_playback_failure(playback.abort(message))),
+                };
+                if speak_openai_stream_ready(
+                    app,
+                    stream_id,
+                    backend.as_ref(),
+                    &mut playback,
+                    ready,
                     &native_voice,
                     interruption_sensitivity,
                     input_during_tts,
@@ -882,12 +886,16 @@ fn run_openai_voice_stream(
                 }
             }
             Ok(OpenAiStreamCommand::Finish) => {
-                if speak_pending(
+                let ready = match streaming_text.flush(backend.as_ref()) {
+                    Ok(ready) => ready,
+                    Err(message) => return Err(openai_playback_failure(playback.abort(message))),
+                };
+                if speak_openai_stream_ready(
                     app,
                     stream_id,
                     backend.as_ref(),
                     &mut playback,
-                    &mut pending,
+                    ready,
                     &native_voice,
                     interruption_sensitivity,
                     input_during_tts,
@@ -970,6 +978,41 @@ fn run_openai_voice_stream(
             }
         }
     }
+}
+
+#[cfg(target_os = "macos")]
+#[allow(clippy::too_many_arguments)]
+fn speak_openai_stream_ready(
+    app: &AppHandle,
+    stream_id: &str,
+    backend: &dyn TtsBackend,
+    playback: &mut OutboundPlayback<'_>,
+    ready: Vec<String>,
+    native_voice: &NativeVoiceState,
+    interruption_sensitivity: InterruptionSensitivity,
+    input_during_tts: InputDuringTtsPolicy,
+    assistant_speech: &mut Option<AssistantSpeechGuard>,
+    playback_drained_at: &mut Option<Instant>,
+) -> Result<OutboundOutcome, OutboundFailure> {
+    for text in ready {
+        let mut ready = text;
+        let outcome = speak_pending(
+            app,
+            stream_id,
+            backend,
+            playback,
+            &mut ready,
+            native_voice,
+            interruption_sensitivity,
+            input_during_tts,
+            assistant_speech,
+            playback_drained_at,
+        )?;
+        if outcome == OutboundOutcome::Interrupted {
+            return Ok(outcome);
+        }
+    }
+    Ok(OutboundOutcome::Completed)
 }
 
 #[cfg(target_os = "macos")]

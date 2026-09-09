@@ -3,7 +3,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use crate::openai::{stream_openai_pcm, OpenAiPcmOutcome, OpenAiSpeechConfig};
-use crate::{load_pocket_voice_style, load_text_to_speech, PocketTts, VoiceStyle, SAMPLE_RATE};
+use crate::{
+    load_pocket_voice_style, load_text_to_speech, take_streaming_text_chunks, PocketTts,
+    StreamingTextChunks, VoiceStyle, SAMPLE_RATE,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TtsPcmSpec {
@@ -24,12 +27,44 @@ pub enum TtsSynthesisEvent<'a> {
     Poll,
 }
 
+#[derive(Default)]
+pub struct StreamingTtsText {
+    pending: String,
+}
+
+impl StreamingTtsText {
+    pub fn append(&mut self, backend: &dyn TtsBackend, delta: &str) -> Result<Vec<String>, String> {
+        self.pending.push_str(delta);
+        self.take_ready(backend, false)
+    }
+
+    pub fn flush(&mut self, backend: &dyn TtsBackend) -> Result<Vec<String>, String> {
+        self.take_ready(backend, true)
+    }
+
+    fn take_ready(&mut self, backend: &dyn TtsBackend, flush: bool) -> Result<Vec<String>, String> {
+        let split = backend.take_streaming_text_chunks(&self.pending, flush)?;
+        self.pending = split.pending;
+        Ok(split.ready)
+    }
+}
+
 /// A backend-neutral source of normalized mono, unit-scale Float32 PCM.
 ///
 /// Turn admission, output-device ownership, buffering, playback, and delivery
 /// events remain the session host's responsibility.
 pub trait TtsBackend: Send + Sync {
     fn pcm_spec(&self) -> TtsPcmSpec;
+
+    /// Drains stable synthesis units while retaining the growing text tail.
+    /// Backends may override this only to honor an actual provider limit.
+    fn take_streaming_text_chunks(
+        &self,
+        text: &str,
+        flush: bool,
+    ) -> Result<StreamingTextChunks, String> {
+        take_streaming_text_chunks(text, flush)
+    }
 
     fn synthesize(
         &self,
@@ -91,6 +126,14 @@ impl TtsBackend for PocketTtsBackend {
             sample_rate: SAMPLE_RATE,
             playback_rate: self.playback_rate,
         }
+    }
+
+    fn take_streaming_text_chunks(
+        &self,
+        text: &str,
+        flush: bool,
+    ) -> Result<StreamingTextChunks, String> {
+        self.engine.take_streaming_text_chunks(text, flush)
     }
 
     fn synthesize(
@@ -175,7 +218,7 @@ impl TtsBackend for OpenAiTts {
 
 #[cfg(test)]
 mod tests {
-    use super::{PocketTtsBackend, TtsBackend, TtsOutcome, TtsPcmSpec};
+    use super::{PocketTtsBackend, StreamingTtsText, TtsBackend, TtsOutcome, TtsPcmSpec};
     use std::path::Path;
     use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -213,6 +256,21 @@ mod tests {
         assert_eq!(backend.pcm_spec().sample_rate, 16_000);
         assert_eq!(outcome, TtsOutcome::Completed);
         assert_eq!(received, [0.0, 0.5]);
+    }
+
+    #[test]
+    fn streaming_text_accepts_deltas_and_releases_only_stable_units() {
+        let backend = FakeTts;
+        let mut text = StreamingTtsText::default();
+
+        assert!(text.append(&backend, "N").unwrap().is_empty());
+        assert_eq!(
+            text.append(&backend, "ora waited.\n\nThe light remained")
+                .unwrap(),
+            ["Nora waited.\n\n"]
+        );
+        assert_eq!(text.flush(&backend).unwrap(), ["The light remained"]);
+        assert!(text.flush(&backend).unwrap().is_empty());
     }
 
     #[test]

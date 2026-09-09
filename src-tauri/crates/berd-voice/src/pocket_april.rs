@@ -380,24 +380,19 @@ impl AprilPocketTts {
         if self.prepared_token_count(&prepared.text)? <= self.bundle.max_token_per_chunk {
             return Ok(vec![prepared.text.clone()]);
         }
-        split_at_natural_boundaries(
-            &prepared.text,
-            self.bundle.max_token_per_chunk,
-            false,
-            |text| self.prepared_token_count(text),
-        )
+        split_at_natural_boundaries(&prepared.text, self.bundle.max_token_per_chunk, |text| {
+            self.prepared_token_count(text)
+        })
     }
 
     pub(crate) fn take_streaming_text_chunks(
         &mut self,
         text: &str,
-        first_chunk_pending: bool,
         flush: bool,
-    ) -> Result<(Vec<String>, String, bool), String> {
-        take_streaming_chunks_at_natural_boundaries(
+    ) -> Result<(Vec<String>, String), String> {
+        take_streaming_chunks_at_paragraph_boundaries(
             text,
             self.bundle.max_token_per_chunk,
-            first_chunk_pending,
             flush,
             |candidate| {
                 let Some(prepared) = prepare_april_prompt(candidate) else {
@@ -789,7 +784,6 @@ impl AprilPocketTts {
 fn split_at_natural_boundaries<F>(
     text: &str,
     max_tokens: usize,
-    isolate_first_sentence: bool,
     mut token_count: F,
 ) -> Result<Vec<String>, String>
 where
@@ -817,7 +811,6 @@ where
             break;
         }
 
-        let mut first_sentence_end = None;
         let mut sentence_end = None;
         let mut clause_end = None;
         let mut word_end = None;
@@ -843,7 +836,6 @@ where
             word_end = Some(end);
             match natural_boundary(&text[start..end], end == text.len()) {
                 TextBoundary::Sentence => {
-                    first_sentence_end.get_or_insert(end);
                     sentence_end = Some(end);
                 }
                 TextBoundary::Clause => clause_end = Some(end),
@@ -851,11 +843,7 @@ where
             }
         }
 
-        let preferred_end = if isolate_first_sentence && chunks.is_empty() {
-            first_sentence_end.or(clause_end).or(word_end)
-        } else {
-            sentence_end.or(clause_end).or(word_end)
-        };
+        let preferred_end = sentence_end.or(clause_end).or(word_end);
         let end = if let Some(end) = preferred_end {
             end
         } else {
@@ -898,13 +886,12 @@ where
     Ok(chunks)
 }
 
-pub(crate) fn take_streaming_chunks_at_natural_boundaries<F>(
+pub(crate) fn take_streaming_chunks_at_paragraph_boundaries<F>(
     text: &str,
     max_tokens: usize,
-    mut first_chunk_pending: bool,
     flush: bool,
     mut token_count: F,
-) -> Result<(Vec<String>, String, bool), String>
+) -> Result<(Vec<String>, String), String>
 where
     F: FnMut(&str) -> Result<usize, String>,
 {
@@ -912,81 +899,101 @@ where
     let mut ready = Vec::new();
 
     if pending.is_empty() {
-        return Ok((ready, pending, first_chunk_pending));
+        return Ok((ready, pending));
     }
 
-    if first_chunk_pending {
-        let first_sentence_end = pending.char_indices().find_map(|(offset, ch)| {
-            let end = offset + ch.len_utf8();
-            let at_boundary = end == pending.len()
-                || pending[end..]
-                    .chars()
-                    .next()
-                    .is_some_and(char::is_whitespace);
-            (at_boundary && natural_boundary(&pending[..end], false) == TextBoundary::Sentence)
-                .then_some(end)
-        });
-
-        if let Some(mut end) = first_sentence_end {
-            while pending[end..]
-                .chars()
-                .next()
-                .is_some_and(char::is_whitespace)
-            {
-                end += pending[end..]
-                    .chars()
-                    .next()
-                    .expect("checked above")
-                    .len_utf8();
-            }
-            let sentence = pending[..end].to_string();
-            if token_count(&sentence)? <= max_tokens {
-                ready.push(sentence);
-            } else {
-                ready.extend(split_at_natural_boundaries(
-                    &sentence,
-                    max_tokens,
-                    false,
-                    &mut token_count,
-                )?);
-            }
-            pending = pending[end..].to_string();
-            first_chunk_pending = false;
-        }
+    while let Some(end) = first_stable_paragraph_end(&pending) {
+        let paragraph = pending[..end].to_string();
+        ready.extend(split_at_natural_boundaries(
+            &paragraph,
+            max_tokens,
+            &mut token_count,
+        )?);
+        pending = pending[end..].trim_start().to_string();
     }
 
     if pending.is_empty() {
-        return Ok((ready, pending, first_chunk_pending));
+        return Ok((ready, pending));
     }
 
     if flush {
         ready.extend(split_at_natural_boundaries(
             &pending,
             max_tokens,
-            first_chunk_pending,
             &mut token_count,
         )?);
         pending.clear();
-        first_chunk_pending = false;
-        return Ok((ready, pending, first_chunk_pending));
+        return Ok((ready, pending));
     }
 
     if token_count(&pending)? > max_tokens {
-        let chunks = split_at_natural_boundaries(
-            &pending,
-            max_tokens,
-            first_chunk_pending,
-            &mut token_count,
-        )?;
+        let chunks = split_at_natural_boundaries(&pending, max_tokens, &mut token_count)?;
         if chunks.len() > 1 {
             let stable_count = chunks.len() - 1;
             ready.extend(chunks[..stable_count].iter().cloned());
             pending = chunks[stable_count].clone();
-            first_chunk_pending = false;
         }
     }
 
-    Ok((ready, pending, first_chunk_pending))
+    Ok((ready, pending))
+}
+
+fn first_stable_paragraph_end(text: &str) -> Option<usize> {
+    let mut saw_line_break = false;
+    for (offset, ch) in text.char_indices() {
+        if ch == '\n' {
+            if saw_line_break {
+                let separator_end = offset + ch.len_utf8();
+                let mut end = separator_end;
+                while text[end..].chars().next().is_some_and(char::is_whitespace) {
+                    end += text[end..]
+                        .chars()
+                        .next()
+                        .expect("checked above")
+                        .len_utf8();
+                }
+                if end == text.len() {
+                    return None;
+                }
+                if starts_markdown_list_item(text)
+                    && (starts_markdown_list_item(&text[end..])
+                        || next_block_is_indented(text, separator_end, end))
+                {
+                    saw_line_break = false;
+                    continue;
+                }
+                return Some(end);
+            }
+            saw_line_break = true;
+        } else if !ch.is_whitespace() {
+            saw_line_break = false;
+        }
+    }
+    None
+}
+
+fn next_block_is_indented(text: &str, separator_end: usize, content_start: usize) -> bool {
+    let line_start = text[separator_end..content_start]
+        .rfind('\n')
+        .map_or(separator_end, |offset| separator_end + offset + 1);
+    let indentation = &text[line_start..content_start];
+    indentation.contains('\t') || indentation.chars().filter(|ch| *ch == ' ').count() >= 2
+}
+
+fn starts_markdown_list_item(text: &str) -> bool {
+    let line = text.trim_start();
+    if line.starts_with("- ") || line.starts_with("* ") || line.starts_with("+ ") {
+        return true;
+    }
+    let marker_end = line
+        .char_indices()
+        .take_while(|(_, ch)| ch.is_ascii_digit())
+        .last()
+        .map(|(offset, ch)| offset + ch.len_utf8());
+    marker_end.is_some_and(|end| {
+        matches!(line[end..].chars().next(), Some('.' | ')'))
+            && line[end + 1..].starts_with(char::is_whitespace)
+    })
 }
 
 fn natural_boundary(candidate: &str, is_end_of_text: bool) -> TextBoundary {
@@ -1260,59 +1267,39 @@ mod tests {
     }
 
     #[test]
-    fn playback_split_keeps_first_sentence_separate_then_packs_the_remainder() {
-        let text = "One two. Three four. Five six.";
-        let chunks = split_at_natural_boundaries(text, 4, true, whitespace_token_count).unwrap();
-        assert_eq!(chunks, ["One two. ", "Three four. Five six."]);
-        assert_eq!(chunks.concat(), text);
-    }
-
-    #[test]
     fn model_split_packs_multiple_sentences_within_limit() {
         let text = "One two. Three four. Five six.";
-        let chunks = split_at_natural_boundaries(text, 4, false, whitespace_token_count).unwrap();
+        let chunks = split_at_natural_boundaries(text, 4, whitespace_token_count).unwrap();
         assert_eq!(chunks, ["One two. Three four. ", "Five six."]);
         assert_eq!(chunks.concat(), text);
     }
 
     #[test]
-    fn playback_then_model_split_does_not_isolate_later_sentences_again() {
+    fn model_split_does_not_isolate_the_first_sentence() {
         let text = "Alpha one. Beta two. Gamma three.";
-        let playback = split_at_natural_boundaries(text, 50, true, whitespace_token_count).unwrap();
-        assert_eq!(playback, ["Alpha one. ", "Beta two. Gamma three."]);
-
-        let model: Vec<_> = playback
-            .iter()
-            .flat_map(|chunk| {
-                split_at_natural_boundaries(chunk.trim(), 50, false, whitespace_token_count)
-                    .unwrap()
-            })
-            .collect();
-        assert_eq!(model, ["Alpha one.", "Beta two. Gamma three."]);
+        let chunks = split_at_natural_boundaries(text, 50, whitespace_token_count).unwrap();
+        assert_eq!(chunks, [text]);
     }
 
     #[test]
-    fn streaming_text_releases_the_first_sentence_immediately() {
-        let (ready, pending, first_pending) = take_streaming_chunks_at_natural_boundaries(
-            "One two. Three four",
+    fn streaming_text_releases_complete_paragraphs() {
+        let (ready, pending) = take_streaming_chunks_at_paragraph_boundaries(
+            "One two.\n\nThree four",
             50,
-            true,
             false,
             whitespace_token_count,
         )
         .unwrap();
 
-        assert_eq!(ready, ["One two. "]);
+        assert_eq!(ready, ["One two.\n\n"]);
         assert_eq!(pending, "Three four");
-        assert!(!first_pending);
     }
 
     #[test]
-    fn streaming_text_keeps_later_sentences_pending_under_the_token_limit() {
-        let (ready, pending, first_pending) = take_streaming_chunks_at_natural_boundaries(
+    fn streaming_text_keeps_sentences_in_an_incomplete_paragraph_together() {
+        let (ready, pending) = take_streaming_chunks_at_paragraph_boundaries(
             "Three four. Five six.",
             5,
-            false,
             false,
             whitespace_token_count,
         )
@@ -1320,15 +1307,32 @@ mod tests {
 
         assert!(ready.is_empty());
         assert_eq!(pending, "Three four. Five six.");
-        assert!(!first_pending);
     }
 
     #[test]
-    fn streaming_text_drains_stable_natural_chunks_after_overflow() {
-        let (ready, pending, first_pending) = take_streaming_chunks_at_natural_boundaries(
+    fn streaming_text_never_emits_an_initial_model_delta_by_itself() {
+        let (ready, pending) =
+            take_streaming_chunks_at_paragraph_boundaries("N", 50, false, whitespace_token_count)
+                .unwrap();
+        assert!(ready.is_empty());
+        assert_eq!(pending, "N");
+
+        let (ready, pending) = take_streaming_chunks_at_paragraph_boundaries(
+            &format!("{pending}ora kept the lighthouse lit.\n\nA paper boat arrived."),
+            50,
+            false,
+            whitespace_token_count,
+        )
+        .unwrap();
+        assert_eq!(ready, ["Nora kept the lighthouse lit.\n\n"]);
+        assert_eq!(pending, "A paper boat arrived.");
+    }
+
+    #[test]
+    fn streaming_text_drains_model_safe_chunks_after_overflow() {
+        let (ready, pending) = take_streaming_chunks_at_paragraph_boundaries(
             "Three four. Five six. Seven eight.",
             4,
-            false,
             false,
             whitespace_token_count,
         )
@@ -1336,15 +1340,13 @@ mod tests {
 
         assert_eq!(ready, ["Three four. Five six. "]);
         assert_eq!(pending, "Seven eight.");
-        assert!(!first_pending);
     }
 
     #[test]
     fn streaming_text_flushes_the_growing_tail() {
-        let (ready, pending, first_pending) = take_streaming_chunks_at_natural_boundaries(
+        let (ready, pending) = take_streaming_chunks_at_paragraph_boundaries(
             "Three four. Five six.",
             5,
-            false,
             true,
             whitespace_token_count,
         )
@@ -1352,29 +1354,133 @@ mod tests {
 
         assert_eq!(ready, ["Three four. Five six."]);
         assert!(pending.is_empty());
-        assert!(!first_pending);
     }
 
     #[test]
-    fn streaming_text_waits_for_a_real_first_sentence_boundary() {
-        let (ready, pending, first_pending) = take_streaming_chunks_at_natural_boundaries(
-            "Dr. J. Smith is still speaking",
+    fn streaming_text_recognizes_a_whitespace_only_paragraph_break() {
+        let (ready, pending) = take_streaming_chunks_at_paragraph_boundaries(
+            "Dr. J. Smith finished.\n  \nNext paragraph",
             50,
-            true,
+            false,
+            whitespace_token_count,
+        )
+        .unwrap();
+
+        assert_eq!(ready, ["Dr. J. Smith finished.\n  \n"]);
+        assert_eq!(pending, "Next paragraph");
+    }
+
+    #[test]
+    fn streaming_text_keeps_blank_line_separated_bullets_in_one_unit() {
+        let (ready, pending) = take_streaming_chunks_at_paragraph_boundaries(
+            "- First finding.\n\n- Second finding.\n\nAfter the list",
+            50,
+            false,
+            whitespace_token_count,
+        )
+        .unwrap();
+
+        assert_eq!(ready, ["- First finding.\n\n- Second finding.\n\n"]);
+        assert_eq!(pending, "After the list");
+    }
+
+    #[test]
+    fn streaming_text_keeps_blank_line_separated_numbered_steps_in_one_unit() {
+        let (ready, pending) = take_streaming_chunks_at_paragraph_boundaries(
+            "1. Inspect the change.\n\n2) Run the tests.\n\nSummary",
+            50,
+            false,
+            whitespace_token_count,
+        )
+        .unwrap();
+
+        assert_eq!(ready, ["1. Inspect the change.\n\n2) Run the tests.\n\n"]);
+        assert_eq!(pending, "Summary");
+    }
+
+    #[test]
+    fn streaming_text_keeps_indented_list_explanations_with_the_list() {
+        let (ready, pending) = take_streaming_chunks_at_paragraph_boundaries(
+            "- First finding.\n\n  Supporting detail.\n\n- Second finding.\n\nSummary",
+            50,
+            false,
+            whitespace_token_count,
+        )
+        .unwrap();
+
+        assert_eq!(
+            ready,
+            ["- First finding.\n\n  Supporting detail.\n\n- Second finding.\n\n"]
+        );
+        assert_eq!(pending, "Summary");
+    }
+
+    #[test]
+    fn streaming_text_waits_to_classify_a_trailing_list_break() {
+        let (ready, pending) = take_streaming_chunks_at_paragraph_boundaries(
+            "- First finding.\n\n",
+            50,
             false,
             whitespace_token_count,
         )
         .unwrap();
 
         assert!(ready.is_empty());
-        assert_eq!(pending, "Dr. J. Smith is still speaking");
-        assert!(first_pending);
+        assert_eq!(pending, "- First finding.\n\n");
+    }
+
+    #[test]
+    fn streaming_text_releases_prose_before_a_markdown_list() {
+        let (ready, pending) = take_streaming_chunks_at_paragraph_boundaries(
+            "Here is the result.\n\n- First finding.\n\n- Second finding.",
+            50,
+            false,
+            whitespace_token_count,
+        )
+        .unwrap();
+
+        assert_eq!(ready, ["Here is the result.\n\n"]);
+        assert_eq!(pending, "- First finding.\n\n- Second finding.");
+    }
+
+    #[test]
+    fn streaming_text_matches_multi_paragraph_story_shape_from_berd_history() {
+        let (ready, pending) = take_streaming_chunks_at_paragraph_boundaries(
+            "A lighthouse kept shining after the harbor closed.\n\nA paper boat arrived during a storm.\n\nIts note asked the keeper to leave the light on.",
+            50,
+            false,
+            whitespace_token_count,
+        )
+        .unwrap();
+
+        assert_eq!(
+            ready,
+            [
+                "A lighthouse kept shining after the harbor closed.\n\n",
+                "A paper boat arrived during a storm.\n\n",
+            ]
+        );
+        assert_eq!(pending, "Its note asked the keeper to leave the light on.");
+    }
+
+    #[test]
+    fn streaming_text_flushes_a_complete_list_as_one_unit() {
+        let (ready, pending) = take_streaming_chunks_at_paragraph_boundaries(
+            "- First finding.\n\n- Second finding.",
+            50,
+            true,
+            whitespace_token_count,
+        )
+        .unwrap();
+
+        assert_eq!(ready, ["- First finding.\n\n- Second finding."]);
+        assert!(pending.is_empty());
     }
 
     #[test]
     fn natural_split_prefers_preceding_sentence_boundary() {
         let text = "One two. Three four five six.";
-        let chunks = split_at_natural_boundaries(text, 5, true, whitespace_token_count).unwrap();
+        let chunks = split_at_natural_boundaries(text, 5, whitespace_token_count).unwrap();
         assert_eq!(chunks, ["One two. ", "Three four five six."]);
         assert_eq!(chunks.concat(), text);
     }
@@ -1383,13 +1489,13 @@ mod tests {
     fn oversized_sentence_uses_clause_then_word_fallback() {
         let clause_text = "One two three, four five six seven.";
         let clause_chunks =
-            split_at_natural_boundaries(clause_text, 5, true, whitespace_token_count).unwrap();
+            split_at_natural_boundaries(clause_text, 5, whitespace_token_count).unwrap();
         assert_eq!(clause_chunks, ["One two three, ", "four five six seven."]);
         assert_eq!(clause_chunks.concat(), clause_text);
 
         let word_text = "One two three four five six.";
         let word_chunks =
-            split_at_natural_boundaries(word_text, 4, true, whitespace_token_count).unwrap();
+            split_at_natural_boundaries(word_text, 4, whitespace_token_count).unwrap();
         assert_eq!(word_chunks, ["One two three four ", "five six."]);
         assert_eq!(word_chunks.concat(), word_text);
     }
@@ -1397,7 +1503,7 @@ mod tests {
     #[test]
     fn natural_split_preserves_unicode_punctuation_and_abbreviations() {
         let text = "“Café naïve?” Maybe—yes, definitely; 東京 speaks.";
-        let chunks = split_at_natural_boundaries(text, 3, true, whitespace_token_count).unwrap();
+        let chunks = split_at_natural_boundaries(text, 3, whitespace_token_count).unwrap();
         assert_eq!(
             chunks,
             ["“Café naïve?” ", "Maybe—yes, definitely; ", "東京 speaks."]
@@ -1405,14 +1511,13 @@ mod tests {
         assert_eq!(chunks.concat(), text);
 
         let abbreviation = "Dr. Smith waits. Then leaves.";
-        let chunks =
-            split_at_natural_boundaries(abbreviation, 3, true, whitespace_token_count).unwrap();
+        let chunks = split_at_natural_boundaries(abbreviation, 3, whitespace_token_count).unwrap();
         assert_eq!(chunks, ["Dr. Smith waits. ", "Then leaves."]);
         assert_eq!(chunks.concat(), abbreviation);
 
         let unspaced_clause = "alpha beta—gamma delta";
         let chunks =
-            split_at_natural_boundaries(unspaced_clause, 2, true, whitespace_token_count).unwrap();
+            split_at_natural_boundaries(unspaced_clause, 2, whitespace_token_count).unwrap();
         assert_eq!(chunks, ["alpha beta—", "gamma delta"]);
         assert_eq!(chunks.concat(), unspaced_clause);
     }
@@ -1420,7 +1525,7 @@ mod tests {
     #[test]
     fn natural_split_does_not_treat_numeric_punctuation_as_unspaced_clauses() {
         let text = "Meet at 12:30 with 1,000 guests onward.";
-        let chunks = split_at_natural_boundaries(text, 3, true, whitespace_token_count).unwrap();
+        let chunks = split_at_natural_boundaries(text, 3, whitespace_token_count).unwrap();
         assert_eq!(chunks, ["Meet at 12:30 ", "with 1,000 guests ", "onward."]);
         assert_eq!(chunks.concat(), text);
     }
@@ -1429,7 +1534,7 @@ mod tests {
     fn oversized_word_uses_utf8_scalar_boundary_without_loss() {
         let text = "éééé";
         let chunks =
-            split_at_natural_boundaries(text, 3, true, |chunk| Ok(chunk.chars().count())).unwrap();
+            split_at_natural_boundaries(text, 3, |chunk| Ok(chunk.chars().count())).unwrap();
         assert_eq!(chunks, ["ééé", "é"]);
         assert_eq!(chunks.concat(), text);
     }
@@ -1445,7 +1550,7 @@ mod tests {
         let tokenized_bytes = |repeats: usize| -> usize {
             let text = sentence.repeat(repeats).trim_end().to_string();
             let total = std::cell::Cell::new(0_usize);
-            let chunks = split_at_natural_boundaries(&text, 50, true, |chunk| {
+            let chunks = split_at_natural_boundaries(&text, 50, |chunk| {
                 total.set(total.get() + chunk.len());
                 whitespace_token_count(chunk)
             })
