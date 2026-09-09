@@ -1397,7 +1397,7 @@ mod tests {
     }
 
     #[test]
-    fn streaming_text_matches_multi_paragraph_story_shape_from_berd_history() {
+    fn streaming_text_preserves_multiple_paragraph_boundaries() {
         let (ready, pending) = take_streaming_chunks_at_paragraph_boundaries(
             "A lighthouse kept shining after the harbor closed.\n\nA paper boat arrived during a storm.\n\nIts note asked the keeper to leave the light on.",
             50,
