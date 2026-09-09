@@ -6,7 +6,7 @@ use std::fs;
 #[cfg(target_os = "macos")]
 use std::os::raw::c_char;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_os = "macos")]
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -29,6 +29,7 @@ use super::pocket_voice::{
     effective_output_device_name, output_device_uses_speakers, playback_latency_safety_duration,
     resolve_input_during_tts_policy, selected_output_device,
 };
+use super::system::write_sibling_then_replace;
 #[cfg(target_os = "macos")]
 use berd_voice::input::InputDuringTtsPolicy;
 #[cfg(target_os = "macos")]
@@ -139,7 +140,6 @@ const PLAYBACK_PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
 const MIN_PLAYBACK_SPEED: f32 = 0.5;
 const MAX_PLAYBACK_SPEED: f32 = 2.0;
 static SIRI_SETTINGS_LOCK: Mutex<()> = Mutex::new(());
-static SIRI_SETTINGS_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub type SiriVoiceSelection = SiriVoiceIdentity;
 
@@ -196,16 +196,10 @@ fn write_settings(path: &Path, settings: &SiriVoiceSettings) -> Result<(), Strin
     fs::create_dir_all(parent).map_err(|error| format!("create Siri TTS settings: {error}"))?;
     let data = serde_json::to_vec_pretty(settings)
         .map_err(|error| format!("encode Siri TTS settings: {error}"))?;
-    let temporary = path.with_extension(format!(
-        "json.{}.{}.tmp",
-        std::process::id(),
-        SIRI_SETTINGS_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed),
-    ));
-    fs::write(&temporary, data).map_err(|error| format!("write Siri TTS settings: {error}"))?;
-    fs::rename(&temporary, path).map_err(|error| {
-        let _ = fs::remove_file(&temporary);
-        format!("publish Siri TTS settings: {error}")
+    write_sibling_then_replace(path, |temporary| {
+        std::io::Write::write_all(temporary, &data)
     })
+    .map_err(|error| format!("publish Siri TTS settings: {error}"))
 }
 
 fn update_settings(

@@ -131,6 +131,14 @@ export function migrateLegacyParakeetPreference(
   }
 }
 
+export function useLegacyParakeetPreferenceMigration(
+  macSpeechAvailable: boolean | null,
+) {
+  useEffect(() => {
+    migrateLegacyParakeetPreference(macSpeechAvailable);
+  }, [macSpeechAvailable]);
+}
+
 export function useVoiceInputPreference(macSpeechAvailable: boolean | null) {
   const stored = useSyncExternalStore(
     subscribe,
@@ -138,9 +146,6 @@ export function useVoiceInputPreference(macSpeechAvailable: boolean | null) {
     () => null,
   );
   const backend = resolveVoiceInputBackend(stored, macSpeechAvailable);
-  useEffect(() => {
-    migrateLegacyParakeetPreference(macSpeechAvailable);
-  }, [macSpeechAvailable]);
   const setBackend = useCallback((value: VoiceInputBackend) => {
     setVoiceInputBackend(value);
   }, []);

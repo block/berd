@@ -40,6 +40,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use super::native_voice::AssistantSpeechGuard;
 #[cfg(any(test, target_os = "macos"))]
 use super::native_voice::{output_latency_grace_elapsed, output_latency_grace_remaining};
+use super::system::write_sibling_then_replace;
 use super::{
     native_voice::{InterruptionSensitivity, NativeVoiceState},
     voice_capture::VoiceCaptureState,
@@ -303,10 +304,10 @@ fn write_settings(base: &Path, settings: &PocketSettings) -> Result<(), String> 
     fs::create_dir_all(base).map_err(|error| format!("create Pocket settings: {error}"))?;
     let data = serde_json::to_vec_pretty(settings)
         .map_err(|error| format!("encode Pocket settings: {error}"))?;
-    let temporary = base.join("settings.json.tmp");
-    fs::write(&temporary, data).map_err(|error| format!("write Pocket settings: {error}"))?;
-    fs::rename(&temporary, base.join("settings.json"))
-        .map_err(|error| format!("publish Pocket settings: {error}"))
+    write_sibling_then_replace(&base.join("settings.json"), |temporary| {
+        std::io::Write::write_all(temporary, &data)
+    })
+    .map_err(|error| format!("publish Pocket settings: {error}"))
 }
 
 fn pocket_download_bytes() -> u64 {

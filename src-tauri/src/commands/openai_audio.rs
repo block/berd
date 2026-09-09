@@ -24,6 +24,7 @@ use super::pocket_voice::{
     effective_output_device_name, playback_latency_safety_duration,
     resolve_input_during_tts_policy, selected_output_device,
 };
+use super::system::write_sibling_then_replace;
 use super::{
     native_voice::{InterruptionSensitivity, NativeVoiceState},
     openai_voice_credentials::{self, OpenAiVoiceCredential},
@@ -326,15 +327,15 @@ fn persist_voice_settings(speed: f32, voice: &str) -> Result<(), String> {
         std::fs::create_dir_all(parent)
             .map_err(|error| format!("create OpenAI voice settings directory: {error}"))?;
     }
-    std::fs::write(
-        &path,
-        serde_json::to_vec_pretty(&OpenAiVoiceSettings {
-            playback_speed: speed,
-            speech_voice: voice.to_string(),
-        })
-        .expect("OpenAI voice settings are serializable"),
-    )
-    .map_err(|error| format!("write OpenAI voice settings: {error}"))
+    let data = serde_json::to_vec_pretty(&OpenAiVoiceSettings {
+        playback_speed: speed,
+        speech_voice: voice.to_string(),
+    })
+    .map_err(|error| format!("encode OpenAI voice settings: {error}"))?;
+    write_sibling_then_replace(&path, |temporary| {
+        std::io::Write::write_all(temporary, &data)
+    })
+    .map_err(|error| format!("publish OpenAI voice settings: {error}"))
 }
 
 #[tauri::command]

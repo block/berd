@@ -420,7 +420,7 @@ fn write_agent_image_atomically(path: &Path, contents: &[u8]) -> io::Result<()> 
     })
 }
 
-fn write_sibling_then_replace(
+pub(crate) fn write_sibling_then_replace(
     path: &Path,
     write_temporary: impl FnOnce(&mut File) -> io::Result<()>,
 ) -> io::Result<()> {
