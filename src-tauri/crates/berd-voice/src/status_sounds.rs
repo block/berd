@@ -131,9 +131,13 @@ impl StatusSoundRuntime {
         }
     }
 
+    pub fn stop(&mut self) {
+        self.player.stop();
+    }
+
     pub fn poll(&mut self, conversation_active: bool) -> Result<bool, String> {
         if conversation_active {
-            self.player.stop();
+            self.stop();
         }
         if !self.playback_available {
             return Ok(false);
@@ -143,9 +147,11 @@ impl StatusSoundRuntime {
         if self.next_tick.is_some_and(|deadline| now >= deadline) {
             self.next_tick = Some(now + STATUS_SOUND_INTERVAL);
             if let Some(cue) = self.machine.tick(conversation_active) {
-                if let Err(message) = self.player.play(cue, self.output_device.as_deref()) {
-                    self.playback_available = false;
-                    return Err(message);
+                if cue.volume > 0.0 {
+                    if let Err(message) = self.player.play(cue, self.output_device.as_deref()) {
+                        self.playback_available = false;
+                        return Err(message);
+                    }
                 }
             }
         }
