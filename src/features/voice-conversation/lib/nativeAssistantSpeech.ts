@@ -1052,11 +1052,6 @@ export function startNativeAssistantSpeech(
   let pendingUserRecognitionSegment = false;
   let recognitionSegmentTimer: number | null = null;
   let heldReleaseTimer: number | null = null;
-  let pendingCompletionConfirmation: {
-    messageId: string;
-    timer: number;
-    ready: boolean;
-  } | null = null;
 
   const cacheCausalTranscriptKeys = (
     messages: ReturnType<
@@ -1649,11 +1644,9 @@ export function startNativeAssistantSpeech(
         failedMessages.has(message.id) ||
         interruptedMessages.has(message.id) ||
         invalidatedMessages.has(message.id);
-      const completionReady =
-        pendingCompletionConfirmation?.messageId === message.id &&
-        pendingCompletionConfirmation.ready;
-      if (utteranceOwnsMessage || messageCannotSpeak) {
-        toolCountByMessage.set(message.id, toolCount);
+      toolCountByMessage.set(message.id, toolCount);
+      if (completed && messageCannotSpeak) {
+        completedMessages.add(message.id);
       }
       if (
         crossedToolBoundary &&
@@ -1674,6 +1667,7 @@ export function startNativeAssistantSpeech(
         utteranceOwnsMessage &&
         !utterance.nativeStartQueued
       ) {
+        completedMessages.add(message.id);
         for (const target of utterance.targets) {
           heldSpeech?.targets.delete(targetKey(target));
         }
@@ -1682,48 +1676,21 @@ export function startNativeAssistantSpeech(
           heldReleaseReady = false;
         }
         activeUtterance = null;
-      } else if (
+        continue;
+      }
+      if (
         completed &&
         utterance &&
         utteranceOwnsMessage &&
         !utterance.finishing
       ) {
-        // ACP can resolve session/prompt just before dispatching a final
-        // session/update already read from the same transport. Confirm the
-        // completion on the next macrotask so a trailing text delta is
-        // appended before native TTS receives finish.
-        if (!completionReady) {
-          if (pendingCompletionConfirmation?.messageId !== message.id) {
-            const pending = { messageId: message.id, timer: 0, ready: false };
-            pending.timer = window.setTimeout(() => {
-              if (
-                activeGeneration !== generation ||
-                pendingCompletionConfirmation !== pending
-              ) {
-                return;
-              }
-              pending.ready = true;
-              inspect();
-            }, 0);
-            pendingCompletionConfirmation = pending;
-          }
-          break;
-        }
-        pendingCompletionConfirmation = null;
+        completedMessages.add(message.id);
         utterance.finishing = true;
         queueStreamCommand(
           utterance,
           () => streamBackend.finish(utterance.id),
           onFailure,
         );
-      }
-      if (
-        completed &&
-        (messageCannotSpeak ||
-          (utteranceOwnsMessage &&
-            (!utterance?.nativeStartQueued || completionReady)))
-      ) {
-        completedMessages.add(message.id);
       }
     }
   };
@@ -1739,14 +1706,7 @@ export function startNativeAssistantSpeech(
     }
   };
 
-  const unsubscribeChat = useChatStore.subscribe(inspect);
-  stopSubscription = () => {
-    unsubscribeChat();
-    if (pendingCompletionConfirmation) {
-      window.clearTimeout(pendingCompletionConfirmation.timer);
-      pendingCompletionConfirmation = null;
-    }
-  };
+  stopSubscription = useChatStore.subscribe(inspect);
   let reachedRunning =
     initialVoice.status.lifecycle === "running" &&
     initialVoice.status.sessionId === sessionId;

@@ -737,30 +737,28 @@ describe("native assistant speech stream", () => {
     ).toMatchObject({ speech: { status: "spoken" } });
   });
 
-  it("includes a final queued text delta before finishing streamed speech", async () => {
+  it("does not flush the first text chunk when a tool preceded it", async () => {
     startNativeAssistantSpeech("session-1", vi.fn());
+    const toolRequest = {
+      type: "toolRequest" as const,
+      id: "tool-1",
+      name: "todo_write",
+      arguments: {},
+      status: "completed" as const,
+    };
     useChatStore
       .getState()
-      .setMessages("session-1", [assistant([{ type: "text", text: "N" }])]);
-    window.setTimeout(() => {
-      useChatStore
-        .getState()
-        .appendStreamingText("session-1", "assistant-1", "ora arrived.");
-    }, 0);
+      .setMessages("session-1", [assistant([toolRequest])]);
     useChatStore
       .getState()
       .setMessages("session-1", [
-        assistant([{ type: "text", text: "N" }], "completed"),
+        assistant([toolRequest, { type: "text", text: "Mara" }]),
       ]);
 
-    await vi.waitFor(() => expect(mocks.finish).toHaveBeenCalledTimes(1));
-
-    expect(mocks.append.mock.calls.map(([, text]) => text).join("")).toBe(
-      "Nora arrived.",
+    await vi.waitFor(() =>
+      expect(mocks.append).toHaveBeenCalledWith(expect.any(String), "Mara"),
     );
-    expect(mocks.finish.mock.invocationCallOrder[0]).toBeGreaterThan(
-      mocks.append.mock.invocationCallOrder.at(-1) ?? 0,
-    );
+    expect(mocks.flush).not.toHaveBeenCalled();
   });
 
   it("serializes terminal idle behind the speaking activity report", async () => {
