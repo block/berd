@@ -176,6 +176,7 @@ describe("voice conversation store lifecycle ordering", () => {
     ).toBe(["session-1", "lifecycle-1", "1", "utterance-1"].join("\0"));
     expect(mocks.acknowledge).not.toHaveBeenCalled();
     expect(mocks.reject).not.toHaveBeenCalled();
+    expect(mocks.trackUserUtterance).toHaveBeenCalledOnce();
 
     delivery.resolve();
     await vi.waitFor(() => expect(mocks.acknowledge).toHaveBeenCalledOnce());
@@ -203,6 +204,7 @@ describe("voice conversation store lifecycle ordering", () => {
       module.useVoiceConversationStore.getState().latestFinalizedTranscriptKey,
     ).toBe(["session-1", "lifecycle-1", "1", "utterance-2"].join("\0"));
     await vi.waitFor(() => expect(mocks.reject).toHaveBeenCalledOnce());
+    expect(mocks.trackUserUtterance).toHaveBeenCalledOnce();
     expect(mocks.acknowledge).not.toHaveBeenCalled();
     expect(
       module.useVoiceConversationStore.getState().latestFinalizedTranscriptKey,
@@ -306,6 +308,7 @@ describe("voice conversation store lifecycle ordering", () => {
     expect(
       module.useVoiceConversationStore.getState().latestFinalizedTranscriptKey,
     ).toBe("prior-transcript");
+    expect(mocks.trackUserUtterance).toHaveBeenCalledTimes(2);
     unsubscribe();
   });
 

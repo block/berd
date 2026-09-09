@@ -103,9 +103,18 @@ const deliveredTranscripts = new Set<string>();
 const deliveredTranscriptOrder: string[] = [];
 const MAX_DELIVERED_TRANSCRIPT_KEYS = 256;
 const priorFinalizedTranscriptKeys = new Map<string, string | null>();
+const observedTranscriptKeys = new Set<string>();
+const observedTranscriptOrder: string[] = [];
 
 function observeFinalizedTranscript(transcript: PendingVoiceTranscript): void {
   const deliveryKey = transcriptKey(transcript);
+  if (observedTranscriptKeys.has(deliveryKey)) return;
+  observedTranscriptKeys.add(deliveryKey);
+  observedTranscriptOrder.push(deliveryKey);
+  if (observedTranscriptOrder.length > MAX_DELIVERED_TRANSCRIPT_KEYS) {
+    const expired = observedTranscriptOrder.shift();
+    if (expired) observedTranscriptKeys.delete(expired);
+  }
   const key = finalizedTranscriptKey(transcript);
   if (!priorFinalizedTranscriptKeys.has(deliveryKey)) {
     priorFinalizedTranscriptKeys.set(
@@ -114,6 +123,7 @@ function observeFinalizedTranscript(transcript: PendingVoiceTranscript): void {
     );
   }
   useVoiceConversationStore.setState({ latestFinalizedTranscriptKey: key });
+  trackVoiceUserUtterance();
 }
 
 export function subscribeToVoiceConversationEvents(
@@ -172,6 +182,12 @@ function rememberDeliveredTranscript(key: string) {
   }
 }
 
+function forgetObservedTranscript(key: string): void {
+  if (!observedTranscriptKeys.delete(key)) return;
+  const index = observedTranscriptOrder.indexOf(key);
+  if (index !== -1) observedTranscriptOrder.splice(index, 1);
+}
+
 async function deliverTranscriptOnce(
   transcript: PendingVoiceTranscript,
 ): Promise<TranscriptDeliveryOutcome> {
@@ -200,13 +216,13 @@ async function deliverTranscriptOnce(
         result.reason instanceof VoiceTranscriptDeferredError,
     );
     if (accepted) {
-      trackVoiceUserUtterance();
       rememberDeliveredTranscript(key);
       await acknowledgeVoiceConversationTranscript(transcript);
       priorFinalizedTranscriptKeys.delete(key);
     } else if (!deferred) {
       const rejection = await rejectVoiceConversationTranscript(transcript);
       if (rejection.terminal) {
+        forgetObservedTranscript(key);
         const priorKey = priorFinalizedTranscriptKeys.get(key) ?? null;
         priorFinalizedTranscriptKeys.delete(key);
         for (const [
@@ -407,6 +423,8 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
             (event.type === "error" && event.terminal)
           ) {
             priorFinalizedTranscriptKeys.clear();
+            observedTranscriptKeys.clear();
+            observedTranscriptOrder.length = 0;
           }
 
           set((state) => {

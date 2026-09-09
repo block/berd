@@ -1,12 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const track = vi.hoisted(() => vi.fn());
-vi.mock("@/shared/telemetry/client", () => ({ track }));
+const mocks = vi.hoisted(() => ({
+  track: vi.fn(),
+  consentGranted: true,
+  consentSettled: true,
+}));
+vi.mock("@/shared/telemetry/client", () => ({ track: mocks.track }));
+vi.mock("@/shared/telemetry/consent", () => ({
+  telemetryConsentGranted: () => mocks.consentGranted,
+  telemetryConsentSettled: () => mocks.consentSettled,
+}));
 
 import {
   clearRequestedVoiceConversationEnd,
   requestVoiceConversationEnd,
   resetVoiceTelemetryForTest,
+  resetVoiceTelemetryMemoryForTest,
   trackVoiceAssistantResponse,
   trackVoiceConversationEnded,
   trackVoiceConversationStarted,
@@ -23,7 +32,9 @@ describe("voice conversation telemetry", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-09T00:00:00Z"));
-    track.mockReset();
+    mocks.track.mockReset();
+    mocks.consentGranted = true;
+    mocks.consentSettled = true;
     resetVoiceTelemetryForTest();
   });
 
@@ -38,8 +49,8 @@ describe("voice conversation telemetry", () => {
     trackVoiceConversationEnded("clean-shutdown");
     trackVoiceConversationEnded("error");
 
-    expect(track).toHaveBeenCalledTimes(2);
-    expect(track.mock.calls[0][0]).toMatchObject({
+    expect(mocks.track).toHaveBeenCalledTimes(2);
+    expect(mocks.track.mock.calls[0][0]).toMatchObject({
       name: "berd_voice_conversation_started",
       parameters: {
         input_backend: "macos",
@@ -47,7 +58,7 @@ describe("voice conversation telemetry", () => {
         voice_mode: "chained",
       },
     });
-    expect(track.mock.calls[1][0]).toEqual({
+    expect(mocks.track.mock.calls[1][0]).toEqual({
       name: "berd_voice_conversation_ended",
       parameters: {
         input_backend: "macos",
@@ -67,6 +78,57 @@ describe("voice conversation telemetry", () => {
     clearRequestedVoiceConversationEnd();
     trackVoiceConversationEnded("error");
 
-    expect(track.mock.calls[1][0].parameters.end_reason).toBe("error");
+    expect(mocks.track.mock.calls[1][0].parameters.end_reason).toBe("error");
+  });
+  it("finishes a lifecycle after its owner renderer is destroyed", () => {
+    trackVoiceConversationStarted(context);
+    trackVoiceUserUtterance();
+    resetVoiceTelemetryMemoryForTest();
+    trackVoiceConversationEnded("clean-shutdown");
+
+    expect(mocks.track.mock.calls[1][0].parameters).toMatchObject({
+      user_utterance_count: "1",
+      end_reason: "clean-shutdown",
+    });
+  });
+
+  it("lets a new renderer replace stale lifecycle storage", () => {
+    trackVoiceConversationStarted(context);
+    resetVoiceTelemetryMemoryForTest();
+    trackVoiceConversationStarted({
+      inputBackend: "parakeet",
+      outputBackend: "pocket",
+      voiceMode: "chained",
+    });
+    trackVoiceConversationEnded("user");
+
+    expect(mocks.track).toHaveBeenCalledTimes(3);
+    expect(mocks.track.mock.calls[2][0].parameters).toMatchObject({
+      input_backend: "parakeet",
+      output_backend: "pocket",
+    });
+  });
+
+  it("does not let another renderer add to the owner's aggregate", () => {
+    trackVoiceConversationStarted(context);
+    resetVoiceTelemetryMemoryForTest();
+    trackVoiceUserUtterance();
+    trackVoiceAssistantResponse();
+    trackVoiceConversationEnded("clean-shutdown");
+
+    expect(mocks.track.mock.calls[1][0].parameters).toMatchObject({
+      user_utterance_count: "0",
+      assistant_response_count: "0",
+    });
+  });
+
+  it("does not emit an end aggregate for a consent-denied start", () => {
+    mocks.consentGranted = false;
+    trackVoiceConversationStarted(context);
+    mocks.consentGranted = true;
+    trackVoiceUserUtterance();
+    trackVoiceConversationEnded("user");
+
+    expect(mocks.track).toHaveBeenCalledOnce();
   });
 });
