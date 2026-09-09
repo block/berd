@@ -687,6 +687,7 @@ pub fn run() {
             commands::openai_audio::finish_openai_voice_stream,
             commands::openai_audio::stop_openai_voice,
             commands::openai_audio::set_openai_playback_speed,
+            commands::openai_audio::set_openai_speech_voice,
             commands::siri_voice::get_siri_voice_status,
             commands::siri_voice::select_siri_voice,
             commands::siri_voice::download_siri_voice,

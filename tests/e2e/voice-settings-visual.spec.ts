@@ -23,7 +23,7 @@ async function openVoiceSettings(page: Page) {
   ).toBeVisible();
 }
 
-test("captures chained and expert-spokesperson voice settings", async ({
+test("captures consistent voice controls for each backend", async ({
   settings: page,
 }) => {
   await page.addInitScript(() => {
@@ -40,7 +40,30 @@ test("captures chained and expert-spokesperson voice settings", async ({
   ).toBeVisible();
   await page.getByRole("heading", { name: "Voice", exact: true }).hover();
   await page.screenshot({
-    path: "/tmp/voice-settings-chained-after.png",
+    path: "/tmp/voice-settings-apple-after.png",
+    fullPage: true,
+  });
+
+  const outputBackend = page.getByRole("combobox", {
+    name: "Text to speech (TTS)",
+  });
+  await outputBackend.click();
+  await page.getByRole("option", { name: "Pocket TTS" }).click();
+  await expect(
+    page.getByRole("button", { name: /^Choose a voice:/ }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: "/tmp/voice-settings-pocket-after.png",
+    fullPage: true,
+  });
+
+  await outputBackend.click();
+  await page.getByRole("option", { name: "OpenAI TTS" }).click();
+  await expect(
+    page.getByRole("button", { name: "Choose a voice: Marin (default)" }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: "/tmp/voice-settings-openai-tts-after.png",
     fullPage: true,
   });
 

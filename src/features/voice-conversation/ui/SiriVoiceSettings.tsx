@@ -94,13 +94,6 @@ export function SiriVoiceSettings({ setup }: { setup: SiriVoiceSetup }) {
   return (
     <div className="px-4 pb-4">
       <div className="divide-y divide-border">
-        {setup.status ? (
-          <PlaybackSpeedRow
-            speed={setup.status.playbackSpeed}
-            speeds={PLAYBACK_SPEEDS}
-            onChange={setup.setPlaybackSpeed}
-          />
-        ) : null}
         <VoicePickerDialog
           selectedVoice={selectedVoice}
           dialogError={setup.error}
@@ -249,6 +242,13 @@ export function SiriVoiceSettings({ setup }: { setup: SiriVoiceSetup }) {
             </div>
           )}
         </VoicePickerDialog>
+        {setup.status ? (
+          <PlaybackSpeedRow
+            speed={setup.status.playbackSpeed}
+            speeds={PLAYBACK_SPEEDS}
+            onChange={setup.setPlaybackSpeed}
+          />
+        ) : null}
       </div>
       {setup.error ? (
         <p className="mt-3 text-sm text-destructive" role="alert">

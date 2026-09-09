@@ -12,8 +12,7 @@ use berd_voice::{
     ConfiguredTtsSlot, DeliveryProgress as VoiceDeliveryProgress, DrainPolicy, OutboundFailure,
     OutboundOutcome, OutboundPlayback, PocketAudioPlayer, TtsBackend, TtsConfiguration,
 };
-use serde::Serialize;
-use serde_json::json;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
 #[cfg(target_os = "macos")]
@@ -40,6 +39,10 @@ const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 const DEFAULT_TRANSCRIPTION_MODEL: &str = "gpt-live-transcribe";
 const DEFAULT_TTS_MODEL: &str = "gpt-4o-mini-tts";
 const DEFAULT_TTS_VOICE: &str = "marin";
+const TTS_VOICES: &[&str] = &[
+    "alloy", "ash", "ballad", "cedar", "coral", "echo", "fable", "marin", "nova", "onyx", "sage",
+    "shimmer", "verse",
+];
 const BASE_URL_ENV: &str = "BERD_OPENAI_VOICE_BASE_URL";
 const STT_MODEL_ENV: &str = "BERD_OPENAI_STT_MODEL";
 const TTS_MODEL_ENV: &str = "BERD_OPENAI_TTS_MODEL";
@@ -74,14 +77,17 @@ struct PlaybackRuntime {
     active: Option<Arc<AtomicBool>>,
     stream: Option<ActiveOpenAiStream>,
     speed: f32,
+    voice: String,
 }
 
 impl Default for PlaybackRuntime {
     fn default() -> Self {
+        let settings = stored_voice_settings();
         Self {
             active: None,
             stream: None,
-            speed: stored_playback_speed(),
+            speed: settings.playback_speed,
+            voice: settings.speech_voice,
         }
     }
 }
@@ -114,6 +120,7 @@ pub struct OpenAiVoiceStatus {
     transcription_model: String,
     speech_model: String,
     speech_voice: String,
+    speech_voices: &'static [&'static str],
     playback_speed: f32,
     tts_available: bool,
     unavailable_reason: Option<String>,
@@ -216,8 +223,8 @@ fn speech_model() -> String {
     env_trimmed(TTS_MODEL_ENV).unwrap_or_else(|| DEFAULT_TTS_MODEL.to_string())
 }
 
-fn speech_voice() -> String {
-    env_trimmed(TTS_VOICE_ENV).unwrap_or_else(|| DEFAULT_TTS_VOICE.to_string())
+fn effective_speech_voice(stored_voice: &str) -> String {
+    env_trimmed(TTS_VOICE_ENV).unwrap_or_else(|| stored_voice.to_string())
 }
 
 fn tts_configuration_source() -> OpenAiVoiceConfigurationSource {
@@ -254,33 +261,78 @@ fn endpoint_for_base_url(base_url: &str, path: &str) -> Result<String, String> {
     Ok(url.to_string())
 }
 
-fn speed_settings_path() -> Result<std::path::PathBuf, String> {
+fn voice_settings_path() -> Result<std::path::PathBuf, String> {
     Ok(crate::services::goose_config::config_path()?
         .parent()
         .ok_or_else(|| "Could not resolve Goose's configuration directory".to_string())?
         .join("openai-voice-settings.json"))
 }
 
-fn stored_playback_speed() -> f32 {
-    speed_settings_path()
-        .ok()
-        .and_then(|path| std::fs::read(path).ok())
-        .and_then(|data| serde_json::from_slice::<serde_json::Value>(&data).ok())
-        .and_then(|value| value.get("playbackSpeed")?.as_f64())
-        .map(|speed| speed as f32)
-        .filter(|speed| speed.is_finite() && (0.75..=2.0).contains(speed))
-        .unwrap_or(1.0)
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OpenAiVoiceSettings {
+    #[serde(default = "default_playback_speed")]
+    playback_speed: f32,
+    #[serde(default = "default_speech_voice")]
+    speech_voice: String,
 }
 
-fn persist_playback_speed(speed: f32) -> Result<(), String> {
-    let path = speed_settings_path()?;
+fn default_playback_speed() -> f32 {
+    1.0
+}
+
+fn default_speech_voice() -> String {
+    DEFAULT_TTS_VOICE.to_string()
+}
+
+impl Default for OpenAiVoiceSettings {
+    fn default() -> Self {
+        Self {
+            playback_speed: default_playback_speed(),
+            speech_voice: default_speech_voice(),
+        }
+    }
+}
+
+fn stored_voice_settings() -> OpenAiVoiceSettings {
+    normalize_voice_settings(
+        voice_settings_path()
+            .ok()
+            .and_then(|path| std::fs::read(path).ok())
+            .and_then(|data| serde_json::from_slice::<OpenAiVoiceSettings>(&data).ok())
+            .unwrap_or_default(),
+    )
+}
+
+fn normalize_voice_settings(settings: OpenAiVoiceSettings) -> OpenAiVoiceSettings {
+    OpenAiVoiceSettings {
+        playback_speed: settings
+            .playback_speed
+            .is_finite()
+            .then_some(settings.playback_speed)
+            .filter(|speed| (0.75..=2.0).contains(speed))
+            .unwrap_or_else(default_playback_speed),
+        speech_voice: if TTS_VOICES.contains(&settings.speech_voice.as_str()) {
+            settings.speech_voice
+        } else {
+            default_speech_voice()
+        },
+    }
+}
+
+fn persist_voice_settings(speed: f32, voice: &str) -> Result<(), String> {
+    let path = voice_settings_path()?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|error| format!("create OpenAI voice settings directory: {error}"))?;
     }
     std::fs::write(
         &path,
-        serde_json::to_vec_pretty(&json!({ "playbackSpeed": speed })).unwrap(),
+        serde_json::to_vec_pretty(&OpenAiVoiceSettings {
+            playback_speed: speed,
+            speech_voice: voice.to_string(),
+        })
+        .expect("OpenAI voice settings are serializable"),
     )
     .map_err(|error| format!("write OpenAI voice settings: {error}"))
 }
@@ -289,11 +341,13 @@ fn persist_playback_speed(speed: f32) -> Result<(), String> {
 pub async fn get_openai_voice_status(
     state: State<'_, OpenAiVoiceState>,
 ) -> Result<OpenAiVoiceStatus, String> {
-    let playback_speed = state
-        .playback
-        .lock()
-        .map_err(|_| "OpenAI voice playback state lock was poisoned".to_string())?
-        .speed;
+    let (playback_speed, speech_voice) = {
+        let playback = state
+            .playback
+            .lock()
+            .map_err(|_| "OpenAI voice playback state lock was poisoned".to_string())?;
+        (playback.speed, effective_speech_voice(&playback.voice))
+    };
     let tts_available = cfg!(target_os = "macos");
     let credential_revision = state.credential_revision.load(Ordering::Acquire);
     let credential_result = tauri::async_runtime::spawn_blocking(move || {
@@ -318,7 +372,8 @@ pub async fn get_openai_voice_status(
         tts_unavailable_reason: tts_error,
         transcription_model: transcription_model(),
         speech_model: speech_model(),
-        speech_voice: speech_voice(),
+        speech_voice,
+        speech_voices: TTS_VOICES,
         playback_speed,
         tts_available,
         unavailable_reason: if !tts_available {
@@ -489,11 +544,13 @@ pub fn start_openai_voice_stream(
                 sender,
             });
         }
-        let speed = state
-            .playback
-            .lock()
-            .map_err(|_| "OpenAI voice playback state lock was poisoned".to_string())?
-            .speed;
+        let (speed, voice) = {
+            let playback = state
+                .playback
+                .lock()
+                .map_err(|_| "OpenAI voice playback state lock was poisoned".to_string())?;
+            (playback.speed, effective_speech_voice(&playback.voice))
+        };
         let playback = state.playback.clone();
         let native_voice = native_voice.inner().clone();
         tauri::async_runtime::spawn_blocking(move || {
@@ -510,6 +567,7 @@ pub fn start_openai_voice_stream(
                 output_device,
                 output_latency_grace,
                 speed,
+                voice,
             );
             if let Ok(mut playback) = playback.lock() {
                 let still_owns_playback = playback
@@ -575,12 +633,32 @@ pub fn set_openai_playback_speed(
     if !speed.is_finite() || !(0.75..=2.0).contains(&speed) {
         return Err("OpenAI playback speed must be between 0.75 and 2.0".to_string());
     }
-    persist_playback_speed(speed)?;
-    state
+    let mut playback = state
         .playback
         .lock()
-        .map_err(|_| "OpenAI voice playback state lock was poisoned".to_string())?
-        .speed = speed;
+        .map_err(|_| "OpenAI voice playback state lock was poisoned".to_string())?;
+    persist_voice_settings(speed, &playback.voice)?;
+    playback.speed = speed;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_openai_speech_voice(
+    state: State<'_, OpenAiVoiceState>,
+    voice: String,
+) -> Result<(), String> {
+    if env_trimmed(TTS_VOICE_ENV).is_some() {
+        return Err("OpenAI speech voice is controlled by BERD_OPENAI_TTS_VOICE".to_string());
+    }
+    if !TTS_VOICES.contains(&voice.as_str()) {
+        return Err(format!("Unsupported OpenAI speech voice: {voice}"));
+    }
+    let mut playback = state
+        .playback
+        .lock()
+        .map_err(|_| "OpenAI voice playback state lock was poisoned".to_string())?;
+    persist_voice_settings(playback.speed, &voice)?;
+    playback.voice = voice;
     Ok(())
 }
 
@@ -684,12 +762,13 @@ fn run_openai_voice_stream(
     output_device: Option<String>,
     output_latency_grace: Duration,
     speed: f32,
+    voice: String,
 ) -> Result<StreamOutcome, StreamFailure> {
     let tts = ConfiguredTtsSlot::new(TtsConfiguration::openai(
         endpoint("audio/speech")?,
         key,
         speech_model(),
-        speech_voice(),
+        voice,
         speed,
     ))?;
     let tts = tts.lease()?;
@@ -1047,6 +1126,31 @@ mod tests {
         assert_eq!(STT_MODEL_ENV, "BERD_OPENAI_STT_MODEL");
         assert_eq!(TTS_MODEL_ENV, "BERD_OPENAI_TTS_MODEL");
         assert_eq!(TTS_VOICE_ENV, "BERD_OPENAI_TTS_VOICE");
+    }
+
+    #[test]
+    fn openai_voice_settings_preserve_legacy_speed_only_files() {
+        let settings: OpenAiVoiceSettings =
+            serde_json::from_str(r#"{"playbackSpeed":1.25}"#).expect("legacy settings");
+
+        assert_eq!(
+            normalize_voice_settings(settings),
+            OpenAiVoiceSettings {
+                playback_speed: 1.25,
+                speech_voice: DEFAULT_TTS_VOICE.to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn openai_voice_settings_reject_unknown_voices_and_invalid_speeds() {
+        assert_eq!(
+            normalize_voice_settings(OpenAiVoiceSettings {
+                playback_speed: 3.0,
+                speech_voice: "unknown".to_string(),
+            }),
+            OpenAiVoiceSettings::default()
+        );
     }
 
     #[test]

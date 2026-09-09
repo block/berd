@@ -26,6 +26,7 @@ import {
   clearOpenAiTtsApiKey,
   setOpenAiSttApiKey,
   setOpenAiPlaybackSpeed,
+  setOpenAiSpeechVoice,
   setOpenAiTtsApiKey,
 } from "../api/openAiVoice";
 import { usePocketVoiceSetup } from "../hooks/usePocketVoiceSetup";
@@ -54,6 +55,7 @@ import { PocketVoiceSetupContent } from "./PocketVoiceSetupContent";
 import { MacSpeechSettings } from "./MacSpeechSettings";
 import { SiriVoiceSettings } from "./SiriVoiceSettings";
 import { PlaybackSpeedRow } from "./PlaybackSpeedRow";
+import { SimpleVoicePickerDialog } from "./SimpleVoicePickerDialog";
 import { useOpenAiVoiceSetup } from "../hooks/useOpenAiVoiceSetup";
 import { OpenAiApiKeyField } from "./OpenAiApiKeyField";
 import { RealtimeVoiceSettings } from "./RealtimeVoiceSettings";
@@ -114,6 +116,8 @@ export function VoiceSettings() {
   const macSpeechSetup = useMacSpeechSetup();
   const [openAiSpeed, setOpenAiSpeed] = useState(1);
   const [openAiSpeedError, setOpenAiSpeedError] = useState<string | null>(null);
+  const [openAiVoice, setOpenAiVoice] = useState("marin");
+  const [openAiVoiceError, setOpenAiVoiceError] = useState<string | null>(null);
   const input = useVoiceInputPreference(
     isMacSpeechAvailable(macSpeechSetup.status, macSpeechSetup.loading),
   );
@@ -122,7 +126,10 @@ export function VoiceSettings() {
     input.backend === "openai" || output.backend === "openai",
   );
   useEffect(() => {
-    if (openAiStatus) setOpenAiSpeed(openAiStatus.playbackSpeed);
+    if (openAiStatus) {
+      setOpenAiSpeed(openAiStatus.playbackSpeed);
+      setOpenAiVoice(openAiStatus.speechVoice);
+    }
   }, [openAiStatus]);
   const interruption = useVoiceInterruptionPreference();
   const mode = useVoiceConversationModePreference();
@@ -440,23 +447,53 @@ export function VoiceSettings() {
                         {t("voice.openAiEnvironmentOverride")}
                       </p>
                     ) : null}
-                    <PlaybackSpeedRow
-                      speed={openAiSpeed}
-                      speeds={[0.75, 1, 1.25, 1.5, 2]}
-                      onChange={async (speed) => {
-                        setOpenAiSpeedError(null);
-                        try {
-                          await setOpenAiPlaybackSpeed(speed);
-                          setOpenAiSpeed(speed);
-                        } catch (cause) {
-                          setOpenAiSpeedError(
-                            cause instanceof Error
-                              ? cause.message
-                              : String(cause),
-                          );
-                        }
-                      }}
-                    />
+                    <div className="divide-y divide-border">
+                      <SimpleVoicePickerDialog
+                        options={(
+                          openAiStatus?.speechVoices ?? [openAiVoice]
+                        ).map((voice) => ({
+                          value: voice,
+                          label:
+                            voice === "marin"
+                              ? t("voice.defaultOption", {
+                                  value: `${voice.charAt(0).toUpperCase()}${voice.slice(1)}`,
+                                })
+                              : `${voice.charAt(0).toUpperCase()}${voice.slice(1)}`,
+                        }))}
+                        selectedVoice={openAiVoice}
+                        error={openAiVoiceError}
+                        onChange={async (voice) => {
+                          setOpenAiVoiceError(null);
+                          try {
+                            await setOpenAiSpeechVoice(voice);
+                            setOpenAiVoice(voice);
+                          } catch (cause) {
+                            setOpenAiVoiceError(
+                              cause instanceof Error
+                                ? cause.message
+                                : String(cause),
+                            );
+                          }
+                        }}
+                      />
+                      <PlaybackSpeedRow
+                        speed={openAiSpeed}
+                        speeds={[0.75, 1, 1.25, 1.5, 2]}
+                        onChange={async (speed) => {
+                          setOpenAiSpeedError(null);
+                          try {
+                            await setOpenAiPlaybackSpeed(speed);
+                            setOpenAiSpeed(speed);
+                          } catch (cause) {
+                            setOpenAiSpeedError(
+                              cause instanceof Error
+                                ? cause.message
+                                : String(cause),
+                            );
+                          }
+                        }}
+                      />
+                    </div>
                     {openAiSpeedError ? (
                       <p className="text-xs text-destructive" role="alert">
                         {openAiSpeedError}

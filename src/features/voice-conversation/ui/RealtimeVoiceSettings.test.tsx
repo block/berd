@@ -30,9 +30,14 @@ describe("RealtimeVoiceSettings", () => {
     const user = userEvent.setup();
     renderWithProviders(<RealtimeVoiceSettings />);
 
-    expect(screen.getByRole("combobox", { name: "Voice" })).toHaveTextContent(
-      "Marin (default)",
-    );
+    expect(
+      screen.getByRole("button", {
+        name: "Choose a voice: Marin (default)",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("combobox", { name: "Playback speed" }),
+    ).toHaveTextContent("1×");
     expect(
       screen.queryByRole("combobox", { name: "Realtime model" }),
     ).not.toBeInTheDocument();

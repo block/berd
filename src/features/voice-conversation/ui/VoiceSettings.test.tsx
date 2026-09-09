@@ -77,6 +77,7 @@ const openAiStatusState = vi.hoisted(() => ({
     transcriptionModel: "gpt-live-transcribe",
     speechModel: "gpt-4o-mini-tts",
     speechVoice: "marin",
+    speechVoices: ["alloy", "marin"],
     playbackSpeed: 1,
     ttsAvailable: true,
     unavailableReason: null as string | null,
@@ -87,10 +88,12 @@ const openAiApiMocks = vi.hoisted(() => ({
   clearSttApiKey: vi.fn(() => Promise.resolve()),
   setTtsApiKey: vi.fn(() => Promise.resolve()),
   clearTtsApiKey: vi.fn(() => Promise.resolve()),
+  setSpeechVoice: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock("../api/openAiVoice", () => ({
   setOpenAiPlaybackSpeed: vi.fn(() => Promise.resolve()),
+  setOpenAiSpeechVoice: openAiApiMocks.setSpeechVoice,
   setOpenAiSttApiKey: openAiApiMocks.setSttApiKey,
   clearOpenAiSttApiKey: openAiApiMocks.clearSttApiKey,
   setOpenAiTtsApiKey: openAiApiMocks.setTtsApiKey,
@@ -258,6 +261,7 @@ describe("VoiceSettings", () => {
       transcriptionModel: "gpt-live-transcribe",
       speechModel: "gpt-4o-mini-tts",
       speechVoice: "marin",
+      speechVoices: ["alloy", "marin"],
       playbackSpeed: 1,
       ttsAvailable: true,
       unavailableReason: null,
@@ -266,6 +270,7 @@ describe("VoiceSettings", () => {
     openAiApiMocks.clearTtsApiKey.mockClear();
     openAiApiMocks.setSttApiKey.mockClear();
     openAiApiMocks.clearSttApiKey.mockClear();
+    openAiApiMocks.setSpeechVoice.mockClear();
   });
 
   it("does not inspect OpenAI credentials for Apple speech input and output", () => {
@@ -332,6 +337,23 @@ describe("VoiceSettings", () => {
     renderWithProviders(<VoiceSettings />);
 
     expect(openAiStatusState.enabled).toBe(true);
+  });
+
+  it("uses the shared voice and speed controls for OpenAI TTS", async () => {
+    outputState.backend = "openai";
+    renderWithProviders(<VoiceSettings />);
+
+    const voice = screen.getByRole("button", {
+      name: "Choose a voice: Marin (default)",
+    });
+    const speed = screen.getByRole("combobox", { name: "Playback speed" });
+    expect(
+      voice.compareDocumentPosition(speed) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    await userEvent.click(voice);
+    await userEvent.click(screen.getByRole("radio", { name: "Alloy" }));
+    expect(openAiApiMocks.setSpeechVoice).toHaveBeenCalledWith("alloy");
   });
 
   it("renders independently selected OpenAI input and output settings", async () => {

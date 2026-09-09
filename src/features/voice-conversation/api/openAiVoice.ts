@@ -17,6 +17,7 @@ export interface OpenAiVoiceStatus {
   transcriptionModel: string;
   speechModel: string;
   speechVoice: string;
+  speechVoices: string[];
   playbackSpeed: number;
   ttsAvailable: boolean;
   unavailableReason: "missingApiKey" | "unsupportedPlatform" | null;
@@ -94,6 +95,10 @@ export function stopOpenAiVoice(): Promise<boolean> {
 
 export function setOpenAiPlaybackSpeed(speed: number): Promise<void> {
   return invoke("set_openai_playback_speed", { speed });
+}
+
+export function setOpenAiSpeechVoice(voice: string): Promise<void> {
+  return invoke("set_openai_speech_voice", { voice });
 }
 
 export function listenToOpenAiVoiceStream(

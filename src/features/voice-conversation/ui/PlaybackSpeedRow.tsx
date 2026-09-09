@@ -18,6 +18,9 @@ export function PlaybackSpeedRow({
   onChange: (speed: number) => void | Promise<void>;
 }) {
   const { t } = useTranslation("settings");
+  const options = Array.from(new Set([...speeds, speed])).sort(
+    (left, right) => left - right,
+  );
 
   return (
     <SettingsRow
@@ -32,7 +35,7 @@ export function PlaybackSpeedRow({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {speeds.map((option) => (
+            {options.map((option) => (
               <SelectItem key={option} value={String(option)}>
                 {option}×
               </SelectItem>

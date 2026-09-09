@@ -29,6 +29,8 @@ import {
 import { clearOpenAiSttApiKey, setOpenAiSttApiKey } from "../api/openAiVoice";
 import { useOpenAiVoiceSetup } from "../hooks/useOpenAiVoiceSetup";
 import { OpenAiApiKeyField } from "./OpenAiApiKeyField";
+import { PlaybackSpeedRow } from "./PlaybackSpeedRow";
+import { SimpleVoicePickerDialog } from "./SimpleVoicePickerDialog";
 
 const REALTIME_MODELS = [
   "gpt-realtime-2.1",
@@ -115,6 +117,16 @@ export function RealtimeVoiceSettings() {
   const update = (patch: Partial<typeof preference>) => {
     setPreference({ ...preference, ...patch });
   };
+  const voiceOptions = Array.from(
+    new Set([preference.voice, ...REALTIME_VOICES]),
+    (voice) => ({
+      value: voice,
+      label:
+        voice === "marin"
+          ? t("voice.defaultOption", { value: voiceLabel(voice) })
+          : voiceLabel(voice),
+    }),
+  );
 
   return (
     <section className="space-y-5 py-2 pr-4">
@@ -128,56 +140,17 @@ export function RealtimeVoiceSettings() {
         />
       </div>
 
-      <div className="rounded-lg border bg-muted/20 p-4">
-        <div className="space-y-2">
-          <Label htmlFor="openai-realtime-voice">
-            {t("voice.realtimeVoice")}
-          </Label>
-          <Select
-            value={preference.voice}
-            onValueChange={(voice) => update({ voice })}
-          >
-            <SelectTrigger id="openai-realtime-voice" className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <OptionalCurrentSelectItem
-                value={preference.voice}
-                knownValues={REALTIME_VOICES}
-              />
-              {REALTIME_VOICES.map((voice) => (
-                <SelectItem key={voice} value={voice}>
-                  {voice === "marin"
-                    ? t("voice.defaultOption", { value: voiceLabel(voice) })
-                    : voiceLabel(voice)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <div className="flex items-center justify-between gap-4">
-          <Label htmlFor="openai-realtime-speed">
-            {t("voice.realtimeSpeed")}
-          </Label>
-          <span className="text-sm tabular-nums text-muted-foreground">
-            {preference.speed.toFixed(2)}×
-          </span>
-        </div>
-        <Slider
-          id="openai-realtime-speed"
-          min={0.25}
-          max={1.5}
-          step={0.05}
-          value={[preference.speed]}
-          onValueChange={([speed]) => update({ speed })}
-          aria-label={t("voice.realtimeSpeed")}
+      <div className="divide-y divide-border">
+        <SimpleVoicePickerDialog
+          options={voiceOptions}
+          selectedVoice={preference.voice}
+          onChange={(voice) => update({ voice })}
         />
-        <p className="text-xs text-muted-foreground">
-          {t("voice.realtimeSpeedDescription")}
-        </p>
+        <PlaybackSpeedRow
+          speed={preference.speed}
+          speeds={[0.25, 0.5, 0.75, 1, 1.25, 1.5]}
+          onChange={(speed) => update({ speed })}
+        />
       </div>
 
       <SettingSwitch
