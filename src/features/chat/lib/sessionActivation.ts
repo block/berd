@@ -20,7 +20,10 @@ import {
 import { resolveSessionArtifactCwd } from "@/shared/artifacts/sessionArtifactLocation";
 import { perfLog } from "@/shared/lib/perfLog";
 import { isDefaultChatTitle } from "@/features/chat/lib/sessionTitle";
-import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
+import {
+  formatAcpErrorMessage,
+  isAcpSessionNotFoundError,
+} from "@/shared/api/acpErrors";
 import { i18n } from "@/shared/i18n";
 import {
   createSystemNotificationMessage,
@@ -252,6 +255,13 @@ export async function loadSessionMessagesAndPrepare(
         prepareWorkingDir: workingDir,
       });
     } catch (error) {
+      if (session?.remoteHost && isAcpSessionNotFoundError(error)) {
+        useChatSessionStore
+          .getState()
+          .patchSession(sessionId, { remoteSessionUnavailable: true });
+        useChatStore.getState().setError(sessionId, null);
+        return false;
+      }
       console.warn("Failed to prepare loaded session selection:", error);
     }
   }
@@ -292,6 +302,12 @@ async function performSessionMessagesLoad(
   sessionId: string,
   options: LoadSessionMessagesOptions,
 ): Promise<boolean> {
+  if (
+    useChatSessionStore.getState().getSession(sessionId)
+      ?.remoteSessionUnavailable
+  ) {
+    return false;
+  }
   const sid = sessionId.slice(0, 8);
   const existingMsgs = useChatStore.getState().messagesBySession[sessionId];
   if (!options.force && hasConversationMessages(existingMsgs)) {
@@ -331,6 +347,7 @@ async function performSessionMessagesLoad(
   const t0 = performance.now();
   perfLog(`[perf:load] ${sid} start`);
   useChatStore.getState().setSessionLoading(sessionId, true);
+  let connectingRemoteHost = false;
   try {
     const [
       { acpGetSessionInfo, acpLoadSession },
@@ -391,9 +408,10 @@ async function performSessionMessagesLoad(
     const { workingDir, missingCwdWarning } =
       await resolveWorkingDirForSessionLoad(session, project);
     if (session && isRemoteSession(session) && session.remoteHost) {
-      // A failed connect throws into the shared catch below, which surfaces
-      // the standard session-load-failed notification for this session.
+      // The connection banner owns failed connections and reconnect actions.
+      connectingRemoteHost = true;
       await ensureRemoteHostConnected(session.remoteHost);
+      connectingRemoteHost = false;
     }
     const loadedSelection = await acpLoadSession(sessionId, workingDir);
     const loadedTarget = loadedSelection
@@ -500,6 +518,13 @@ async function performSessionMessagesLoad(
       sessionId,
       loaderNoticeMessageId(sessionId, "error"),
     );
+    if (connectingRemoteHost) return false;
+    if (sessionAtRequest?.remoteHost && isAcpSessionNotFoundError(err)) {
+      sessionStore.patchSession(sessionId, { remoteSessionUnavailable: true });
+      // Preserve cached messages; the unavailable banner replaces the raw error.
+      chatStore.setError(sessionId, null);
+      return false;
+    }
     chatStore.addMessage(sessionId, {
       ...createSystemNotificationMessage(errorMessage, "error"),
       id: loaderNoticeMessageId(sessionId, "error"),

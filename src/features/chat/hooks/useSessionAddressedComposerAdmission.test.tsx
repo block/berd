@@ -34,6 +34,20 @@ function derive(
 }
 
 describe("session-addressed composer admission", () => {
+  it("blocks a missing remote session even when its transcript remains cached", () => {
+    const { result } = renderHook(() =>
+      useSessionAddressedComposerAdmission({
+        sessionId: session.id,
+        sessionSnapshot: {
+          ...session,
+          remoteHost: "remote-server",
+          remoteSessionUnavailable: true,
+        },
+      }),
+    );
+    expect(result.current.blocked).toBe(true);
+    expect(result.current.readOnlyReason).toBeTruthy();
+  });
   beforeEach(() => {
     useSecurityConfirmationStore.setState({
       pendingBySessionId: {},

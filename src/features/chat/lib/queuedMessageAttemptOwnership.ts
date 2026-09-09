@@ -19,7 +19,8 @@ export function isQueuedMessageTargetAttemptable(
     // against it reaches the backend with an id it never created. Hold the
     // head instead; promotion clears `creationState` and swaps in the backend
     // id, which notifies the session store and wakes every drain.
-    session?.creationState == null
+    session?.creationState == null &&
+    !session?.remoteSessionUnavailable
   );
 }
 

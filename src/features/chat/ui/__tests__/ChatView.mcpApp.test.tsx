@@ -736,6 +736,31 @@ describe("ChatView MCP app messaging", () => {
     expect(timelineProps.rendererPolicy).toBe("auto");
   });
 
+  it("shows an unavailable state without restore actions or activity signaling", () => {
+    render(
+      <ChatView
+        sessionId="session-1"
+        activeSession={{
+          ...chatSessionWithWorkingDir("/remote/project"),
+          remoteHost: "remote-server",
+          remoteSessionUnavailable: true,
+        }}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "remoteSessionUnavailable.title",
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "remoteSessionUnavailable.description",
+    );
+    expect(mocks.useChatSessionController).toHaveBeenLastCalledWith(
+      expect.objectContaining({ readOnly: true }),
+    );
+    expect(
+      screen.queryByRole("button", { name: /restore|copy/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it("does not pass fork-from-message in read-only mode", () => {
     render(
       <ChatView

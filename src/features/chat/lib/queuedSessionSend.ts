@@ -122,7 +122,10 @@ export async function acquireExistingSessionForBackgroundSend(
   const sessionBeforeHydration = useChatSessionStore
     .getState()
     .getSession(sessionId);
-  if (!sessionBeforeHydration) {
+  if (
+    !sessionBeforeHydration ||
+    sessionBeforeHydration.remoteSessionUnavailable
+  ) {
     return { status: "session-missing" } as const;
   }
   // Backend creation is still in flight (or has failed), so this id is a

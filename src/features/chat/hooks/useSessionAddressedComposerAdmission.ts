@@ -90,6 +90,9 @@ export function useSessionAddressedComposerAdmission({
   );
   const readOnlyReason =
     assertedReadOnlyReason ??
+    ((sessionSnapshot ?? storedSession)?.remoteSessionUnavailable
+      ? t("remoteSessionUnavailable.description")
+      : undefined) ??
     (openInSessionWindow ? t("sessionWindow.readOnlyStatus") : undefined);
 
   return deriveSessionAddressedComposerAdmission({
