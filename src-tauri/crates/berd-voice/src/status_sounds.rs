@@ -108,7 +108,7 @@ impl Default for StatusSoundRuntime {
         Self {
             machine: StatusSoundStateMachine::default(),
             next_tick: None,
-            player: StatusSoundPlayer::default(),
+            player: StatusSoundPlayer::new(),
             output_device: None,
             playback_available: true,
         }
@@ -160,11 +160,14 @@ impl StatusSoundRuntime {
 }
 
 #[cfg(not(target_os = "macos"))]
-#[derive(Default)]
 struct StatusSoundPlayer;
 
 #[cfg(not(target_os = "macos"))]
 impl StatusSoundPlayer {
+    fn new() -> Self {
+        Self
+    }
+
     fn play(&mut self, _cue: StatusSoundCue, _output_device: Option<&str>) -> Result<(), String> {
         Err("status sound playback is only available on macOS".into())
     }
@@ -195,18 +198,15 @@ struct StatusSoundPlayer {
 }
 
 #[cfg(target_os = "macos")]
-impl Default for StatusSoundPlayer {
-    fn default() -> Self {
+impl StatusSoundPlayer {
+    fn new() -> Self {
         Self {
             working: load_system_sound("Pop"),
             waiting: load_system_sound("Purr"),
             active: Vec::new(),
         }
     }
-}
 
-#[cfg(target_os = "macos")]
-impl StatusSoundPlayer {
     fn play(&mut self, cue: StatusSoundCue, output_device: Option<&str>) -> Result<(), String> {
         let asset = match cue.status {
             ConversationStatus::Working => &self.working,
@@ -401,7 +401,7 @@ mod tests {
     #[test]
     #[ignore = "opens the default CoreAudio output and plays the macOS Pop and Purr cues"]
     fn macos_player_decodes_and_queues_both_status_cues() {
-        let mut player = StatusSoundPlayer::default();
+        let mut player = StatusSoundPlayer::new();
         for status in [ConversationStatus::Working, ConversationStatus::Waiting] {
             player
                 .play(
