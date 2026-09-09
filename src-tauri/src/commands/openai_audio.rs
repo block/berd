@@ -1064,13 +1064,7 @@ fn speak_openai_ready_unit(
             Ok(())
         },
         &mut || {
-            emit_openai_stream_event(
-                app,
-                stream_id,
-                OpenAiStreamEventState::Started,
-                None,
-                None,
-            );
+            emit_openai_stream_event(app, stream_id, OpenAiStreamEventState::Started, None, None);
             Ok(())
         },
         &mut |_| Ok(()),
@@ -1286,5 +1280,4 @@ mod tests {
 
         assert!(state.is_configured());
     }
-
 }
