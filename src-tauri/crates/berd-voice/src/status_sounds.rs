@@ -173,10 +173,19 @@ impl StatusSoundPlayer {
 }
 
 #[cfg(target_os = "macos")]
+const STATUS_SOUND_OUTPUT_TAIL: Duration = Duration::from_millis(100);
+
+#[cfg(target_os = "macos")]
+struct ActiveStatusSound {
+    player: crate::macos_audio_output::PocketAudioPlayer,
+    output_tail_deadline: Option<Instant>,
+}
+
+#[cfg(target_os = "macos")]
 struct StatusSoundPlayer {
     working: Result<StatusSoundAsset, String>,
     waiting: Result<StatusSoundAsset, String>,
-    active: Vec<crate::macos_audio_output::PocketAudioPlayer>,
+    active: Vec<ActiveStatusSound>,
 }
 
 #[cfg(target_os = "macos")]
@@ -210,12 +219,25 @@ impl StatusSoundPlayer {
             .map(|sample| sample * cue.volume)
             .collect::<Vec<_>>();
         player.enqueue(&samples)?;
-        self.active.push(player);
+        self.active.push(ActiveStatusSound {
+            player,
+            output_tail_deadline: None,
+        });
         Ok(())
     }
 
     fn reap(&mut self) {
-        self.active.retain(|player| !player.is_empty());
+        let now = Instant::now();
+        self.active.retain_mut(|sound| {
+            if !sound.player.is_empty() {
+                sound.output_tail_deadline = None;
+                return true;
+            }
+            let deadline = sound
+                .output_tail_deadline
+                .get_or_insert(now + STATUS_SOUND_OUTPUT_TAIL);
+            now < *deadline
+        });
     }
 
     fn is_active(&self) -> bool {
@@ -223,8 +245,8 @@ impl StatusSoundPlayer {
     }
 
     fn stop(&mut self) {
-        for player in self.active.drain(..) {
-            player.stop();
+        for sound in self.active.drain(..) {
+            sound.player.stop();
         }
     }
 }
