@@ -215,7 +215,7 @@ async function recoverMissingMasterTranscript(
   }
 }
 
-async function settleMasterTranscriptDelivery(
+async function settlePromptTranscriptDelivery(
   sessionId: string,
 ): Promise<void> {
   if (useChatStore.getState().loadingSessionIds.has(sessionId)) {
@@ -229,7 +229,7 @@ async function settleMasterTranscriptDelivery(
   }
   // ACP may resolve session/prompt immediately before dispatching the final
   // session/update already read from the same transport. Yield one macrotask
-  // so transcript recovery sees that last visible text block.
+  // so completion observers and transcript recovery see that last text block.
   // Keep ownership through new-session hydration as well: a late live chunk
   // routed after ownership is released looks like replay and can be discarded
   // by the hydration snapshot that is finishing at the same boundary.
@@ -425,7 +425,7 @@ export async function dispatchPrompt(
     ) {
       return;
     }
-    await settleMasterTranscriptDelivery(sessionId);
+    await settlePromptTranscriptDelivery(sessionId);
     if (
       assistantTextBeforeTurn &&
       !finalMasterTextSince(sessionId, assistantTextBeforeTurn)
@@ -550,6 +550,7 @@ export async function dispatchPrompt(
       );
     }
 
+    await settlePromptTranscriptDelivery(sessionId);
     finishPromptSuccessfully();
     try {
       await completeRealtimeTurnIfActive(acpPrompt);

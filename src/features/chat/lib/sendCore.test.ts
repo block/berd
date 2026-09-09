@@ -65,6 +65,42 @@ describe("dispatchPrompt pre-commit rejection", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("applies the final ACP update before marking the response complete", async () => {
+    mocks.acpSendMessage.mockImplementationOnce(
+      (
+        sessionId: string,
+        _prompt: string,
+        options: { onPromptDispatching(): void },
+      ) => {
+        options.onPromptDispatching();
+        const store = useChatStore.getState();
+        store.addMessage(sessionId, {
+          id: "assistant-1",
+          role: "assistant",
+          created: Date.now(),
+          content: [{ type: "text", text: "N" }],
+          metadata: { completionStatus: "inProgress" },
+        });
+        store.setStreamingMessageId(sessionId, "assistant-1");
+        window.setTimeout(() => {
+          useChatStore
+            .getState()
+            .appendStreamingText(sessionId, "assistant-1", "ora arrived.");
+        }, 0);
+        return Promise.resolve();
+      },
+    );
+
+    await dispatchPrompt("session-1", "Tell me a story", {});
+
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.at(-1),
+    ).toMatchObject({
+      content: [{ type: "text", text: "Nora arrived." }],
+      metadata: { completionStatus: "completed" },
+    });
+  });
+
   it("preserves the complete newer-owner runtime on ownership loss", async () => {
     let newerOwnerRuntime: SessionChatRuntime | undefined;
     mocks.acpSendMessage.mockImplementationOnce(

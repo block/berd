@@ -1007,7 +1007,7 @@ export function startNativeAssistantSpeech(
   const causalTranscriptKeyByMessage = new Map<string, string | null>();
   const transcriptReferenceByKey = new Map<string, VoiceTranscriptReference>();
   const invalidatedMessages = new Set<string>();
-  const completedMessages = new Set<string>();
+  const handledCompletionMessages = new Set<string>();
   const interruptedMessages = new Set<string>();
   const failedMessages = new Set<string>();
   const interruptionCauseByMessage = new Map<string, InterruptionCause>();
@@ -1033,7 +1033,7 @@ export function startNativeAssistantSpeech(
         .length,
     );
     if (message.metadata?.completionStatus === "completed") {
-      completedMessages.add(message.id);
+      handledCompletionMessages.add(message.id);
     }
     let textOrdinal = 0;
     for (const content of message.content) {
@@ -1219,7 +1219,7 @@ export function startNativeAssistantSpeech(
         targetKey(target),
         content.text.slice(0, safeLocalCutoff),
       );
-      completedMessages.delete(target.messageId);
+      handledCompletionMessages.delete(target.messageId);
     }
     resumableInterruption = null;
     interruptionReleaseReady = false;
@@ -1488,7 +1488,7 @@ export function startNativeAssistantSpeech(
       const crossedToolBoundary = toolCount > priorToolCount;
       const completed =
         message.metadata?.completionStatus === "completed" &&
-        !completedMessages.has(message.id);
+        !handledCompletionMessages.has(message.id);
       let textOrdinal = 0;
       for (const content of message.content) {
         if (content.type !== "text") continue;
@@ -1645,9 +1645,7 @@ export function startNativeAssistantSpeech(
         interruptedMessages.has(message.id) ||
         invalidatedMessages.has(message.id);
       toolCountByMessage.set(message.id, toolCount);
-      if (completed && messageCannotSpeak) {
-        completedMessages.add(message.id);
-      }
+      let completionHandled = completed && messageCannotSpeak;
       if (
         crossedToolBoundary &&
         utterance &&
@@ -1667,7 +1665,7 @@ export function startNativeAssistantSpeech(
         utteranceOwnsMessage &&
         !utterance.nativeStartQueued
       ) {
-        completedMessages.add(message.id);
+        completionHandled = true;
         for (const target of utterance.targets) {
           heldSpeech?.targets.delete(targetKey(target));
         }
@@ -1676,21 +1674,24 @@ export function startNativeAssistantSpeech(
           heldReleaseReady = false;
         }
         activeUtterance = null;
-        continue;
-      }
-      if (
+      } else if (
         completed &&
         utterance &&
         utteranceOwnsMessage &&
         !utterance.finishing
       ) {
-        completedMessages.add(message.id);
+        completionHandled = true;
         utterance.finishing = true;
         queueStreamCommand(
           utterance,
           () => streamBackend.finish(utterance.id),
           onFailure,
         );
+      }
+      // A completed tool-only message remains unhandled until later text can
+      // create an utterance for it.
+      if (completionHandled) {
+        handledCompletionMessages.add(message.id);
       }
     }
   };
