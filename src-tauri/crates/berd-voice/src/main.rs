@@ -46,7 +46,7 @@ use berd_voice::spokesperson_voice_update::{
     validate_voice_update_settings, VoiceBarrierAction, VoiceUpdateAction, VoiceUpdatePurpose,
     VoiceUpdateQueue, VoiceUpdateRequest, VoiceUpdateTransaction,
 };
-use berd_voice::status_sounds::StatusSoundRuntime;
+use berd_voice::StatusSoundRuntime;
 use berd_voice::{
     estimated_spoken_through_utf8,
     local_assets::{
@@ -1236,6 +1236,14 @@ fn run_management_command(command: ManagementCommand) -> Result<(), ManagementFa
     }
 }
 
+fn conversation_activity_suppresses_status_cues(
+    input_active: bool,
+    recognition_pending: bool,
+    output_active: bool,
+) -> bool {
+    input_active || recognition_pending || output_active
+}
+
 fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String> {
     let (control_tx, control_rx) = mpsc::channel();
     let (pcm_tx, pcm_rx) = mpsc::sync_channel(INPUT_QUEUE_CAPACITY);
@@ -1330,9 +1338,12 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                 },
             )?;
         }
-        if let Err(message) = status_sound_runtime
-            .poll(core.user_speaking() || core.recognition_pending() || active.is_some())
-        {
+        let conversation_active = conversation_activity_suppresses_status_cues(
+            core.user_speaking(),
+            core.recognition_pending(),
+            active.is_some(),
+        );
+        if let Err(message) = status_sound_runtime.poll(conversation_active) {
             eprintln!("status sound playback disabled: {message}");
         }
 
@@ -1431,7 +1442,6 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
             Input::Request(SessionRequest::Hello {
                 id,
                 input_during_tts,
-                status_sounds,
                 status_sound_output_device,
             }) => {
                 if initialized {
@@ -1488,7 +1498,6 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                 let session = VoiceSessionSnapshot {
                     tts: slot.snapshot()?,
                     input_during_tts: input_policy.snapshot()?,
-                    status_sounds,
                 };
                 tts_slot = Some(slot);
                 input_during_tts_slot = Some(input_policy);
@@ -3327,9 +3336,12 @@ fn run_expert_spokesperson_session(
                 )?;
             }
         }
-        if let Err(message) =
-            status_sound_runtime.poll(turn_gate.input_blocks_output() || active.is_some())
-        {
+        let conversation_active = conversation_activity_suppresses_status_cues(
+            turn_gate.input_blocks_output(),
+            false,
+            active.is_some(),
+        );
+        if let Err(message) = status_sound_runtime.poll(conversation_active) {
             eprintln!("status sound playback disabled: {message}");
         }
 
@@ -3425,7 +3437,6 @@ fn run_expert_spokesperson_session(
             Input::Request(SessionRequest::Hello {
                 id,
                 input_during_tts,
-                status_sounds,
                 status_sound_output_device,
             }) => {
                 if initialized {
@@ -3450,7 +3461,6 @@ fn run_expert_spokesperson_session(
                 let snapshot = VoiceSessionSnapshot {
                     tts: tts.clone(),
                     input_during_tts: input_policy.snapshot()?,
-                    status_sounds,
                 };
                 let (created, events) =
                     OpenAiSpokespersonRuntime::spawn_observed(spokesperson_config.clone())?;
@@ -6573,8 +6583,7 @@ fn validate_request(request: SessionRequest) -> Result<SessionRequest, String> {
         return Err("request id must be positive".into());
     }
     match &request {
-        SessionRequest::Hello { status_sounds, .. }
-        | SessionRequest::SetConversationStatus {
+        SessionRequest::SetConversationStatus {
             settings: status_sounds,
             ..
         } => {
@@ -8183,7 +8192,6 @@ mod tests {
             session: VoiceSessionSnapshot {
                 tts: snapshot.clone(),
                 input_during_tts: test_input_policy(),
-                status_sounds: Default::default(),
             },
         })
         .unwrap();

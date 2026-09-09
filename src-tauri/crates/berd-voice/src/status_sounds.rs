@@ -54,7 +54,7 @@ pub struct StatusSoundCue {
 }
 
 /// Pure policy for deciding which cue, if any, a fixed-cadence runtime tick plays.
-/// The host owns the timer and supplies whether conversation audio is currently audible.
+/// The host owns the timer and supplies whether conversation activity should suppress cues.
 #[derive(Debug, Default)]
 pub struct StatusSoundStateMachine {
     current: Option<(ConversationStatus, StatusSoundSettings)>,
@@ -62,13 +62,16 @@ pub struct StatusSoundStateMachine {
 }
 
 impl StatusSoundStateMachine {
-    pub fn update(&mut self, status: ConversationStatus, settings: StatusSoundSettings) {
-        self.current = Some((status, settings));
+    pub fn update(&mut self, status: ConversationStatus, settings: StatusSoundSettings) -> bool {
+        let next = (status, settings);
+        let changed = self.current != Some(next);
+        self.current = Some(next);
+        changed
     }
 
-    pub fn tick(&mut self, conversation_audio_audible: bool) -> Option<StatusSoundCue> {
+    pub fn tick(&mut self, conversation_active: bool) -> Option<StatusSoundCue> {
         let (status, settings) = self.current?;
-        if conversation_audio_audible || settings.mode == StatusSoundMode::Off {
+        if conversation_active || settings.mode == StatusSoundMode::Off {
             return None;
         }
         let should_play = match settings.mode {
@@ -103,7 +106,6 @@ pub struct StatusSoundRuntime {
     player: StatusSoundPlayer,
     output_device: Option<String>,
     playback_available: bool,
-    conversation_audio_audible: bool,
 }
 
 impl Default for StatusSoundRuntime {
@@ -114,7 +116,6 @@ impl Default for StatusSoundRuntime {
             player: StatusSoundPlayer::default(),
             output_device: None,
             playback_available: cfg!(target_os = "macos"),
-            conversation_audio_audible: false,
         }
     }
 }
@@ -128,19 +129,17 @@ impl StatusSoundRuntime {
     }
 
     pub fn update(&mut self, status: ConversationStatus, settings: StatusSoundSettings) {
-        let changed = self.machine.current != Some((status, settings));
-        self.machine.update(status, settings);
+        let changed = self.machine.update(status, settings);
         if changed {
             self.player.stop();
             self.next_tick = Some(Instant::now());
         }
     }
 
-    pub fn poll(&mut self, conversation_audio_audible: bool) -> Result<(), String> {
-        if conversation_audio_audible && !self.conversation_audio_audible {
+    pub fn poll(&mut self, conversation_active: bool) -> Result<(), String> {
+        if conversation_active {
             self.player.stop();
         }
-        self.conversation_audio_audible = conversation_audio_audible;
         if !self.playback_available {
             return Ok(());
         }
@@ -150,7 +149,7 @@ impl StatusSoundRuntime {
             return Ok(());
         }
         self.next_tick = Some(now + STATUS_SOUND_INTERVAL);
-        if let Some(cue) = self.machine.tick(conversation_audio_audible) {
+        if let Some(cue) = self.machine.tick(conversation_active) {
             if let Err(message) = self.player.play(cue, self.output_device.as_deref()) {
                 self.playback_available = false;
                 return Err(message);
@@ -163,7 +162,6 @@ impl StatusSoundRuntime {
         self.machine.clear();
         self.next_tick = None;
         self.player.stop();
-        self.conversation_audio_audible = false;
     }
 }
 
@@ -243,47 +241,11 @@ struct StatusSoundAsset {
 
 #[cfg(target_os = "macos")]
 fn load_system_sound(name: &str) -> Result<StatusSoundAsset, String> {
-    use std::process::Command;
-
     let source = format!("/System/Library/Sounds/{name}.aiff");
-    let directory =
-        tempfile::tempdir().map_err(|error| format!("could not prepare status sound: {error}"))?;
-    let output = directory.path().join("status.wav");
-    let destination = output.to_str().ok_or("status sound path is not UTF-8")?;
-    let result = Command::new("/usr/bin/afconvert")
-        .args([
-            source.as_str(),
-            destination,
-            "-d",
-            "LEI16@22050",
-            "-c",
-            "1",
-            "-f",
-            "WAVE",
-        ])
-        .output()
-        .map_err(|error| format!("could not convert {name} status sound: {error}"))?;
-    if !result.status.success() {
-        return Err(format!("could not convert {name} status sound"));
-    }
-    let mut reader = hound::WavReader::open(&output)
-        .map_err(|error| format!("could not open {name} status sound: {error}"))?;
-    let spec = reader.spec();
-    if spec.channels != 1 || spec.bits_per_sample != 16 {
-        return Err(format!(
-            "converted {name} status sound has an unsupported format"
-        ));
-    }
-    let samples = reader
-        .samples::<i16>()
-        .map(|sample| sample.map(|sample| f32::from(sample) / f32::from(i16::MAX)))
-        .collect::<Result<Vec<_>, _>>()
+    let (sample_rate, samples) = crate::macos_audio_output::load_mono_audio_file(&source)
         .map_err(|error| format!("could not decode {name} status sound: {error}"))?;
-    if samples.is_empty() {
-        return Err(format!("converted {name} status sound is empty"));
-    }
     Ok(StatusSoundAsset {
-        sample_rate: spec.sample_rate,
+        sample_rate,
         samples,
     })
 }
@@ -389,7 +351,6 @@ mod tests {
     #[test]
     fn duplicate_updates_preserve_the_existing_cadence() {
         let mut runtime = StatusSoundRuntime::default();
-        runtime.playback_available = false;
         let settings = settings(StatusSoundMode::Continuous);
         runtime.update(ConversationStatus::Working, settings);
         let deadline = runtime.next_tick;
@@ -400,7 +361,6 @@ mod tests {
     #[test]
     fn changed_updates_restart_the_cadence() {
         let mut runtime = StatusSoundRuntime::default();
-        runtime.playback_available = false;
         runtime.update(
             ConversationStatus::Working,
             settings(StatusSoundMode::Continuous),

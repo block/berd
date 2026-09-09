@@ -2519,10 +2519,6 @@ fn siri_session_reaches_ready_without_openai_credentials() {
         ready["session"]["input_during_tts"],
         json!({"revision":1,"policy":"allow_barge_in"})
     );
-    assert_eq!(
-        ready["session"]["status_sounds"],
-        json!({"mode":"continuous-while-working","volume":0.4})
-    );
     write_session_json(
         &mut stdin,
         &json!({

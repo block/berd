@@ -101,6 +101,16 @@ bool berd_siri_tts_speak(
     char **error_out
 );
 
+/// Decodes an audio file through AVFoundation into malloc-owned mono Float32 PCM.
+/// The caller releases successful samples with `berd_audio_free_samples`.
+float *berd_audio_file_load_mono_pcm(
+    const char *path,
+    uint32_t *sample_rate_out,
+    uint32_t *frame_count_out,
+    char **error_out
+);
+void berd_audio_free_samples(float *samples);
+
 /// Opaque Pocket PCM player backed by AVAudioUnitTimePitch. Samples are
 /// mono, noninterleaved float PCM. Device ID 0 uses the system default.
 void *berd_pocket_audio_player_create(

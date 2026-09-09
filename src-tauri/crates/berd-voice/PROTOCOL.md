@@ -47,12 +47,10 @@ has no device-owning or stdout-multiplexed fallback.
 
 The first request must be `hello`. `input_during_tts` is the host's resolved
 initial policy; a host-specific `auto` mode must be resolved before the request.
-`status_sounds` is the host's persisted effective preference. `status_sound_output_device`
-is the host's selected playback-device name; omitting it uses the system default.
-Omitting `status_sounds` uses `continuous-while-working` at volume `0.4`:
+`status_sound_output_device` is the host's selected playback-device name; omitting it uses the system default:
 
 ```json
-{"type":"hello","id":1,"input_during_tts":"allow_barge_in","status_sounds":{"mode":"continuous-while-working","volume":0.4},"status_sound_output_device":"MacBook Pro Speakers"}
+{"type":"hello","id":1,"input_during_tts":"allow_barge_in","status_sound_output_device":"MacBook Pro Speakers"}
 ```
 
 The response uses `protocol:5` as the exact session message-set version. The
@@ -60,7 +58,7 @@ parent must reject a version it does not support; the JSON version is independen
 of the fixed binary framing marker described below:
 
 ```json
-{"type":"ready","id":1,"protocol":5,"session":{"tts":{"revision":1,"backend":"siri","voice":"Aaron","language":"en-US","rate":1.0},"input_during_tts":{"revision":1,"policy":"allow_barge_in"},"status_sounds":{"mode":"continuous-while-working","volume":0.4}}}
+{"type":"ready","id":1,"protocol":5,"session":{"tts":{"revision":1,"backend":"siri","voice":"Aaron","language":"en-US","rate":1.0},"input_during_tts":{"revision":1,"policy":"allow_barge_in"}}}
 ```
 
 The `session.tts` object is the authoritative, sanitized TTS configuration.
@@ -70,9 +68,9 @@ and `rate`. Credentials, endpoints, and bundle paths never appear on stdout.
 Detailed backend errors are diagnostics on stderr only; protocol rejection and
 fatal messages are sanitized at the stdout boundary.
 `session.input_during_tts` is the authoritative effective assistant-input
-policy and has its own revision. `session.status_sounds` is the host-provided
-effective mode and volume. The runtime owns cue cadence and playback; it does not
-persist preferences.
+policy and has its own revision. Status-sound settings are per-update parameters,
+not session snapshot configuration. The runtime owns cue cadence and playback; it
+does not persist preferences.
 
 ## Stdin framing
 
@@ -187,7 +185,7 @@ it never admits a replacement while old host audio may still be active.
 ## Parent requests
 
 ```text
-{"type":"hello","id":u64,"input_during_tts":"allow_barge_in"|"suppress_input","status_sounds":StatusSoundSettings}
+{"type":"hello","id":u64,"input_during_tts":"allow_barge_in"|"suppress_input","status_sound_output_device":string?}
 {"type":"set_paused","active":bool}
 {"type":"set_input_muted","id":u64,"active":bool}
 {"type":"set_conversation_status","id":u64,"status":"working"|"waiting","settings":StatusSoundSettings}
@@ -213,9 +211,7 @@ through `1`. No cue is emitted until the first `set_conversation_status` request
 The runtime then ticks immediately and every five seconds. `continuous` emits the
 current cue every tick; `continuous-while-working` repeats working and emits
 waiting once; `once` emits only when the requested status differs from the last
-emitted cue; `off` emits nothing. Audible user or assistant conversation audio
-suppresses a tick without consuming its pending cue. On macOS, working uses the
-system Pop sound and waiting uses Purr through the native PCM player. The applied
+emitted cue; `off` emits nothing. Active user input, pending recognition, or assistant output suppresses a tick without consuming its pending cue. On macOS, working uses the system Pop sound and waiting uses Purr through the native PCM player. The applied
 request is acknowledged with:
 
 ```text

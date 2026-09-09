@@ -1604,6 +1604,54 @@ bool berd_siri_tts_speak(
     }
 }
 
+float *berd_audio_file_load_mono_pcm(
+    const char *pathValue,
+    uint32_t *sampleRateOut,
+    uint32_t *frameCountOut,
+    char **errorOut
+) {
+    @autoreleasepool {
+        if (errorOut) *errorOut = NULL;
+        if (!pathValue || !sampleRateOut || !frameCountOut) {
+            BerdSetError(errorOut, BerdError(38, @"An audio path and output pointers are required."));
+            return NULL;
+        }
+        NSURL *url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:pathValue]];
+        NSError *error = nil;
+        AVAudioFile *file = [[AVAudioFile alloc] initForReading:url error:&error];
+        if (!file) {
+            BerdSetError(errorOut, error ?: BerdError(39, @"Could not open the audio file."));
+            return NULL;
+        }
+        AVAudioFormat *format = file.processingFormat;
+        AVAudioFrameCount capacity = (AVAudioFrameCount)file.length;
+        AVAudioPCMBuffer *buffer = [[AVAudioPCMBuffer alloc]
+            initWithPCMFormat:format frameCapacity:capacity];
+        if (!buffer || ![file readIntoBuffer:buffer error:&error]) {
+            BerdSetError(errorOut, error ?: BerdError(40, @"Could not decode the audio file."));
+            return NULL;
+        }
+        uint32_t frameCount = buffer.frameLength;
+        if (frameCount == 0 || !buffer.floatChannelData) {
+            BerdSetError(errorOut, BerdError(41, @"The decoded audio file is empty."));
+            return NULL;
+        }
+        float *samples = malloc((size_t)frameCount * sizeof(float));
+        if (!samples) {
+            BerdSetError(errorOut, BerdError(42, @"Could not allocate decoded audio samples."));
+            return NULL;
+        }
+        memcpy(samples, buffer.floatChannelData[0], (size_t)frameCount * sizeof(float));
+        *sampleRateOut = (uint32_t)format.sampleRate;
+        *frameCountOut = frameCount;
+        return samples;
+    }
+}
+
+void berd_audio_free_samples(float *samples) {
+    free(samples);
+}
+
 void *berd_pocket_audio_player_create(
     uint32_t sampleRate,
     float rate,
