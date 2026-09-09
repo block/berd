@@ -483,23 +483,18 @@ export function GlobalComposerPill({
       setModelOverride(nextModel);
       setSelectedProvider(providerId);
     },
-    onModelSelected: (model) => {
-      const selection = modelOptionToSelection(
-        model,
-        selectedProviderForPicker,
-      );
+    onModelSelected: (model, owningAgentId) => {
+      const agentId = owningAgentId ?? selectedAgentId;
+      const providerId = owningAgentId ?? selectedProviderForPicker;
+      const selection = modelOptionToSelection(model, providerId);
       personaOverrideUserOverrideForRef.current = selectedPersonaId;
       personaOverrideActiveRef.current = false;
       onExecutionTargetChange?.(
-        executionTargetForSelection(
-          selectedAgentId,
-          selection,
-          selectedProviderForPicker,
-        ),
+        executionTargetForSelection(agentId, selection, providerId),
       );
-      setProviderOverride(selectedAgentId);
+      setProviderOverride(agentId);
       setModelOverride(selection);
-      setSelectedProvider(selectedAgentId);
+      setSelectedProvider(agentId);
     },
   });
 
