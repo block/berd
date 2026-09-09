@@ -56,6 +56,7 @@ const LEGACY_CONTEXT_PANEL_OPEN_STORAGE_KEY = "goose:context-panel-open";
 let sessionLoadEpoch = 0;
 let archiveMutationOperationId = 0;
 const inFlightArchiveMutationIdsBySessionId = new Map<string, Set<number>>();
+const inFlightUnarchiveBySessionId = new Map<string, Promise<void>>();
 
 /** Thrown by archiveSession when the id matches no session in the store. */
 export class SessionNotFoundError extends Error {
@@ -248,6 +249,12 @@ interface ChatSessionStoreActions {
    * rethrown.
    */
   unarchiveSession: (id: string) => Promise<void>;
+  /**
+   * Wait until a session is durably active. Concurrent callers share one
+   * restore operation, and an archive that wins the race rejects the gate.
+   */
+  ensureSessionActive: (id: string) => Promise<void>;
+  assertSessionActive: (id: string) => void;
 
   setActiveSession: (sessionId: string | null) => void;
   setRightRailOpen: (open: boolean) => void;
@@ -1097,45 +1104,85 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     }
   },
 
-  unarchiveSession: async (id) => {
-    const session = get().sessions.find((candidate) => candidate.id === id);
-    if (!session) {
-      return;
+  unarchiveSession: (id) => {
+    const existing = inFlightUnarchiveBySessionId.get(id);
+    if (existing) {
+      return existing;
     }
-    const operationId = ++archiveMutationOperationId;
-    const mutation: ArchiveSessionMutation = {
-      operationId,
-      desiredState: "unarchived",
-      previousArchivedAt: getArchiveMutationRollbackArchivedAt(
-        session,
-        get().archiveMutationBySessionId[id],
-      ),
-      status: "pending",
-    };
-    trackArchiveMutation(id, operationId);
-    set((state) => ({
-      sessions: state.sessions.map((candidate) =>
-        candidate.id === id
-          ? { ...candidate, archivedAt: undefined }
-          : candidate,
-      ),
-      archiveMutationBySessionId: {
-        ...state.archiveMutationBySessionId,
-        [id]: mutation,
-      },
-    }));
-    try {
-      await acpUnarchiveSession(session.id);
-      set((state) => recordArchiveMutationSuccess(state, id, mutation));
-      settleArchiveMutationAndCancelIfArchived(get(), id, operationId);
-      const unarchived = get().getSession(id);
-      if (unarchived?.remoteHost) {
-        persistRemoteSessionRecordForSession(unarchived);
+
+    const restore = (async () => {
+      const session = get().sessions.find((candidate) => candidate.id === id);
+      if (!session) {
+        return;
       }
-    } catch (error) {
-      set((state) => rollbackFailedArchiveMutation(state, id, operationId));
-      settleArchiveMutationAndCancelIfArchived(get(), id, operationId);
-      throw error;
+      const operationId = ++archiveMutationOperationId;
+      const mutation: ArchiveSessionMutation = {
+        operationId,
+        desiredState: "unarchived",
+        previousArchivedAt: getArchiveMutationRollbackArchivedAt(
+          session,
+          get().archiveMutationBySessionId[id],
+        ),
+        status: "pending",
+      };
+      trackArchiveMutation(id, operationId);
+      set((state) => ({
+        sessions: state.sessions.map((candidate) =>
+          candidate.id === id
+            ? { ...candidate, archivedAt: undefined }
+            : candidate,
+        ),
+        archiveMutationBySessionId: {
+          ...state.archiveMutationBySessionId,
+          [id]: mutation,
+        },
+      }));
+      try {
+        await acpUnarchiveSession(session.id);
+        set((state) => recordArchiveMutationSuccess(state, id, mutation));
+        settleArchiveMutationAndCancelIfArchived(get(), id, operationId);
+        const unarchived = get().getSession(id);
+        if (unarchived?.remoteHost) {
+          persistRemoteSessionRecordForSession(unarchived);
+        }
+      } catch (error) {
+        set((state) => rollbackFailedArchiveMutation(state, id, operationId));
+        settleArchiveMutationAndCancelIfArchived(get(), id, operationId);
+        throw error;
+      }
+    })();
+    inFlightUnarchiveBySessionId.set(id, restore);
+    void restore.then(
+      () => {
+        if (inFlightUnarchiveBySessionId.get(id) === restore) {
+          inFlightUnarchiveBySessionId.delete(id);
+        }
+      },
+      () => {
+        if (inFlightUnarchiveBySessionId.get(id) === restore) {
+          inFlightUnarchiveBySessionId.delete(id);
+        }
+      },
+    );
+    return restore;
+  },
+
+  ensureSessionActive: async (id) => {
+    const existing = inFlightUnarchiveBySessionId.get(id);
+    if (existing) {
+      await existing;
+    } else if (get().getSession(id)?.archivedAt) {
+      await get().unarchiveSession(id);
+    }
+
+    if (get().getSession(id)?.archivedAt) {
+      throw new Error(`Session ${id} was archived before the send started.`);
+    }
+  },
+
+  assertSessionActive: (id) => {
+    if (get().getSession(id)?.archivedAt) {
+      throw new Error(`Session ${id} was archived before the send started.`);
     }
   },
 

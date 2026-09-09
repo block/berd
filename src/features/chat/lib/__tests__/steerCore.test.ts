@@ -1,11 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useChatStore } from "../../stores/chatStore";
+import { useChatSessionStore } from "../../stores/chatSessionStore";
+import type { ChatSession } from "../../stores/chatSessionStore";
 import { MAX_PROMPT_ATTACHMENT_BYTES } from "../attachmentPayloadBudget";
 
 const mockAcpSteerMessage = vi.fn();
+const mockUnarchiveSession = vi.fn();
 
 vi.mock("@/shared/api/acp", () => ({
   acpSteerMessage: (...args: unknown[]) => mockAcpSteerMessage(...args),
+}));
+
+vi.mock("@/shared/api/acpApi", () => ({
+  archiveSession: vi.fn().mockResolvedValue(undefined),
+  unarchiveSession: (...args: unknown[]) => mockUnarchiveSession(...args),
+  renameSession: vi.fn().mockResolvedValue(undefined),
+  updateSessionProject: vi.fn().mockResolvedValue(undefined),
+  updateWorkingDir: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/shared/i18n", () => ({
@@ -28,6 +39,68 @@ function oversizedImageDraft() {
     previewUrl: "blob:huge",
   };
 }
+
+function seedArchivedSession() {
+  useChatSessionStore.setState({
+    sessions: [
+      {
+        id: "session-1",
+        title: "Archived",
+        createdAt: "2026-04-01T00:00:00.000Z",
+        updatedAt: "2026-04-01T00:00:00.000Z",
+        archivedAt: "2026-04-02T00:00:00.000Z",
+        messageCount: 1,
+      },
+    ],
+    archiveMutationBySessionId: {},
+  });
+}
+
+describe("steerPromptInSession archived session restore", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useChatSessionStore.setState({
+      sessions: [],
+      archiveMutationBySessionId: {},
+    });
+    mockUnarchiveSession.mockResolvedValue(undefined);
+    mockAcpSteerMessage.mockResolvedValue({
+      runId: "run-1",
+      messageId: "msg-1",
+    });
+  });
+
+  it("does not restore an empty steer", async () => {
+    seedArchivedSession();
+    await expect(steerPromptInSession("session-1", "")).resolves.toBe(false);
+    expect(mockUnarchiveSession).not.toHaveBeenCalled();
+    expect(mockAcpSteerMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not restore an oversized steer", async () => {
+    seedArchivedSession();
+    await expect(
+      steerPromptInSession("session-1", "look", [oversizedImageDraft()]),
+    ).resolves.toBe(false);
+    expect(mockUnarchiveSession).not.toHaveBeenCalled();
+    expect(mockAcpSteerMessage).not.toHaveBeenCalled();
+  });
+
+  it("restores only after validation and waits for durable success", async () => {
+    seedArchivedSession();
+    let resolveRestore!: () => void;
+    const restore = new Promise<void>((resolve) => {
+      resolveRestore = resolve;
+    });
+    mockUnarchiveSession.mockReturnValueOnce(restore);
+    const pending = steerPromptInSession("session-1", "look");
+    await Promise.resolve();
+    expect(mockAcpSteerMessage).not.toHaveBeenCalled();
+    resolveRestore();
+    await pending;
+    expect(mockAcpSteerMessage).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("steerPromptInSession payload budget", () => {
   beforeEach(() => {
@@ -271,5 +344,79 @@ describe("steerPromptInSession voice no-op", () => {
     expect(messages[0].content[0]).toMatchObject({
       text: "User said: Nice weather today.",
     });
+  });
+});
+
+// Steering is a send: an archived chat must be restored before the steer is
+// injected, mirroring the dispatchPrompt restore.
+describe("steerPromptInSession archived session restore", () => {
+  const ARCHIVED_AT = "2026-04-02T00:00:00.000Z";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAcpSteerMessage.mockResolvedValue({
+      runId: "run-1",
+      messageId: "msg-1",
+    });
+    mockUnarchiveSession.mockResolvedValue(undefined);
+    useChatStore.setState({
+      messagesBySession: {},
+      sessionStateById: {},
+      activeSessionId: null,
+      isConnected: true,
+    });
+    useChatSessionStore.setState({
+      sessions: [],
+      activeSessionId: null,
+      activeWorkspaceBySession: {},
+      archiveMutationBySessionId: {},
+    });
+  });
+
+  it("restores an archived session before steering", async () => {
+    useChatSessionStore.setState((state) => ({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Test Session",
+          createdAt: "2026-04-01T00:00:00.000Z",
+          updatedAt: "2026-04-01T00:00:00.000Z",
+          messageCount: 1,
+          archivedAt: ARCHIVED_AT,
+        },
+        ...state.sessions,
+      ],
+    }));
+
+    const accepted = await steerPromptInSession("session-1", "one more thing");
+
+    expect(accepted).toBe(true);
+    expect(mockUnarchiveSession).toHaveBeenCalledWith("session-1");
+    expect(
+      useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+    ).toBeUndefined();
+    expect(mockUnarchiveSession.mock.invocationCallOrder[0]).toBeLessThan(
+      mockAcpSteerMessage.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("does not restore an active session", async () => {
+    useChatSessionStore.setState((state) => ({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Test Session",
+          createdAt: "2026-04-01T00:00:00.000Z",
+          updatedAt: "2026-04-01T00:00:00.000Z",
+          messageCount: 1,
+        } satisfies ChatSession,
+        ...state.sessions,
+      ],
+    }));
+
+    const accepted = await steerPromptInSession("session-1", "one more thing");
+
+    expect(accepted).toBe(true);
+    expect(mockUnarchiveSession).not.toHaveBeenCalled();
   });
 });
