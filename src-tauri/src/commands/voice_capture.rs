@@ -481,6 +481,15 @@ impl VoiceCaptureState {
         {
             state.microphone_owner = None;
         }
+        // The owner can no longer supply or export this lifecycle. Do not let
+        // an abandoned aggregate suppress telemetry for subsequent calls.
+        if state
+            .active_voice_telemetry
+            .as_ref()
+            .is_some_and(|active| active.owner_window_label == window_label)
+        {
+            state.active_voice_telemetry = None;
+        }
         state.current_renderers.remove(window_label);
         state.pending_renderers.remove(window_label);
         state.foreground_sessions.remove(window_label);
@@ -710,6 +719,32 @@ mod tests {
         assert_eq!(completed.user_utterance_count, 2);
         assert!(completed.reportable);
         assert_eq!(completed.tts_rate, Some(1.25));
+    }
+
+    #[test]
+    fn destroying_the_telemetry_owner_allows_the_next_conversation() {
+        let capture = VoiceCaptureState::default();
+        let first_epoch = capture.register_renderer_for_test("main", "renderer-1");
+        let request = |renderer: &str, epoch| VoiceTelemetryStartRequest {
+            renderer_id: renderer.into(),
+            renderer_epoch: epoch,
+            input_backend: VoiceTelemetryBackend::Macos,
+            output_backend: VoiceTelemetryBackend::Siri,
+            voice_mode: VoiceTelemetryMode::Chained,
+            tts_rate: Some(1.25),
+        };
+        assert!(capture
+            .start_voice_telemetry("main", request("renderer-1", first_epoch))
+            .expect("start first conversation"));
+        capture.release_window("unrelated");
+        assert!(!capture
+            .start_voice_telemetry("main", request("renderer-1", first_epoch))
+            .expect("unrelated destruction preserves the active aggregate"));
+        capture.release_window("main");
+        let second_epoch = capture.register_renderer_for_test("main", "renderer-2");
+        assert!(capture
+            .start_voice_telemetry("main", request("renderer-2", second_epoch))
+            .expect("start next conversation"));
     }
 
     #[test]
