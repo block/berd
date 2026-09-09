@@ -120,8 +120,16 @@ struct LedgerSegment {
     text: String,
     total_frames: u64,
     trailing_silence_frames: u64,
+    measured_trailing_quiet_frames: u64,
+    quiet_window_sum_squares: f64,
+    quiet_window_frames: usize,
     synthesis_complete: bool,
 }
+
+// Five-millisecond windows at -40 dBFS match the empirical paragraph-gap
+// measurements while tolerating quiet nonzero padding from cloud synthesis.
+const QUIET_PCM_WINDOWS_PER_SECOND: usize = 200;
+const QUIET_PCM_RMS_THRESHOLD: f64 = 0.01;
 
 impl DeliveryLedger {
     fn new(sample_rate: u32) -> Self {
@@ -136,13 +144,33 @@ impl DeliveryLedger {
             text,
             total_frames: 0,
             trailing_silence_frames: 0,
+            measured_trailing_quiet_frames: 0,
+            quiet_window_sum_squares: 0.0,
+            quiet_window_frames: 0,
             synthesis_complete: false,
         });
     }
 
-    fn append_frames(&mut self, frames: usize) {
+    fn append_frames(&mut self, samples: &[f32]) {
         if let Some(segment) = self.segments.last_mut() {
-            segment.total_frames = segment.total_frames.saturating_add(frames as u64);
+            segment.total_frames = segment.total_frames.saturating_add(samples.len() as u64);
+            let window_frames = ((self.sample_rate as usize) / QUIET_PCM_WINDOWS_PER_SECOND).max(1);
+            for sample in samples {
+                segment.quiet_window_sum_squares += f64::from(*sample).powi(2);
+                segment.quiet_window_frames += 1;
+                if segment.quiet_window_frames == window_frames {
+                    let rms = (segment.quiet_window_sum_squares / window_frames as f64).sqrt();
+                    if rms.is_finite() && rms <= QUIET_PCM_RMS_THRESHOLD {
+                        segment.measured_trailing_quiet_frames = segment
+                            .measured_trailing_quiet_frames
+                            .saturating_add(window_frames as u64);
+                    } else {
+                        segment.measured_trailing_quiet_frames = 0;
+                    }
+                    segment.quiet_window_sum_squares = 0.0;
+                    segment.quiet_window_frames = 0;
+                }
+            }
         }
     }
 
@@ -158,6 +186,26 @@ impl DeliveryLedger {
                 .trailing_silence_frames
                 .saturating_add(frames as u64);
         }
+    }
+
+    fn missing_trailing_silence_frames(&self, target_frames: u64) -> u64 {
+        self.segments.last().map_or(target_frames, |segment| {
+            let partial_window_is_quiet = segment.quiet_window_frames > 0
+                && (segment.quiet_window_sum_squares / segment.quiet_window_frames as f64).sqrt()
+                    <= QUIET_PCM_RMS_THRESHOLD;
+            let measured_trailing_quiet_frames = if partial_window_is_quiet {
+                segment
+                    .measured_trailing_quiet_frames
+                    .saturating_add(segment.quiet_window_frames as u64)
+            } else if segment.quiet_window_frames > 0 {
+                0
+            } else {
+                segment.measured_trailing_quiet_frames
+            };
+            target_frames.saturating_sub(
+                measured_trailing_quiet_frames.saturating_add(segment.trailing_silence_frames),
+            )
+        })
     }
 
     fn snapshot(&self, played_frames: u64) -> DeliveryProgress {
@@ -271,7 +319,7 @@ impl<'a> OutboundPlayback<'a> {
                     return Ok(());
                 }
                 self.output.check_health()?;
-                self.ledger.append_frames(samples.len());
+                self.ledger.append_frames(samples);
                 if self.started {
                     before_write(false)?;
                     self.output.write(samples)?;
@@ -342,6 +390,20 @@ impl<'a> OutboundPlayback<'a> {
             .map_err(|message| self.fail(message))?;
         self.ledger.append_trailing_silence(frame_count);
         Ok(OutboundOutcome::Completed)
+    }
+
+    /// Ensures the preceding segment ends with at least `duration` of quiet
+    /// audio, counting both backend-provided trailing PCM and queued silence.
+    pub fn queue_inter_segment_silence_floor(
+        &mut self,
+        duration: Duration,
+    ) -> Result<OutboundOutcome, OutboundFailure> {
+        let target_frames =
+            (duration.as_secs_f64() * f64::from(self.ledger.sample_rate)).round() as u64;
+        let missing_frames = self.ledger.missing_trailing_silence_frames(target_frames);
+        let missing_duration =
+            Duration::from_secs_f64(missing_frames as f64 / f64::from(self.ledger.sample_rate));
+        self.queue_inter_segment_silence(missing_duration)
     }
 
     /// Converts a host-side setup failure into the same terminal, quiescent
@@ -796,6 +858,82 @@ mod tests {
 
         output.played.store(6, Ordering::SeqCst);
         assert_eq!(playback.snapshot().segments[1].played_frames, 1);
+    }
+
+    #[test]
+    fn silence_floor_counts_provider_padding_and_queues_only_the_deficit() {
+        let active = AtomicBool::new(true);
+        let output = FakeOutput::new(0);
+        let backend = FakeTts {
+            chunks: vec![vec![0.2, 0.2, 0.0, 0.0]],
+            cancel_after_first: false,
+        };
+        let mut playback = OutboundPlayback::new(&output, &active, 10, 0).unwrap();
+        playback
+            .synthesize_segment(
+                &backend,
+                "one",
+                &mut |_| Ok(()),
+                &mut || Ok(()),
+                &mut |_| Ok(()),
+            )
+            .unwrap();
+        playback
+            .queue_inter_segment_silence_floor(Duration::from_millis(500))
+            .unwrap();
+
+        assert_eq!(
+            output.writes.lock().unwrap().as_slice(),
+            &[vec![0.2, 0.2, 0.0, 0.0], vec![0.0, 0.0, 0.0]]
+        );
+    }
+
+    #[test]
+    fn silence_floor_does_not_extend_sufficient_provider_padding() {
+        let active = AtomicBool::new(true);
+        let output = FakeOutput::new(0);
+        let backend = FakeTts {
+            chunks: vec![vec![0.2, 0.2, 0.0, 0.0, 0.0]],
+            cancel_after_first: false,
+        };
+        let mut playback = OutboundPlayback::new(&output, &active, 10, 0).unwrap();
+        playback
+            .synthesize_segment(
+                &backend,
+                "one",
+                &mut |_| Ok(()),
+                &mut || Ok(()),
+                &mut |_| Ok(()),
+            )
+            .unwrap();
+        playback
+            .queue_inter_segment_silence_floor(Duration::from_millis(300))
+            .unwrap();
+
+        assert_eq!(
+            output.writes.lock().unwrap().as_slice(),
+            &[vec![0.2, 0.2, 0.0, 0.0, 0.0]]
+        );
+    }
+
+    #[test]
+    fn silence_floor_counts_quiet_nonzero_provider_padding() {
+        let mut ledger = DeliveryLedger::new(1_000);
+        ledger.begin_segment("one".into());
+        ledger.append_frames(&[0.2; 5]);
+        ledger.append_frames(&[0.005; 10]);
+
+        assert_eq!(ledger.missing_trailing_silence_frames(10), 0);
+    }
+
+    #[test]
+    fn trailing_non_quiet_partial_window_resets_measured_padding() {
+        let mut ledger = DeliveryLedger::new(1_000);
+        ledger.begin_segment("one".into());
+        ledger.append_frames(&[0.0; 10]);
+        ledger.append_frames(&[0.5]);
+
+        assert_eq!(ledger.missing_trailing_silence_frames(10), 10);
     }
 
     #[test]

@@ -60,6 +60,16 @@ const INITIAL_PLAYBACK_BUFFER_FRAMES: usize = TTS_SAMPLE_RATE as usize / 5;
 const TTS_EVENT: &str = "openai-voice:stream-event";
 #[cfg(target_os = "macos")]
 const MAX_TTS_INPUT_CHARS: usize = 4096;
+#[cfg(any(test, target_os = "macos"))]
+const OPENAI_INTER_PARAGRAPH_BASE_SILENCE_FLOOR: Duration = Duration::from_millis(500);
+const MIN_PLAYBACK_SPEED: f32 = 0.75;
+const MAX_PLAYBACK_SPEED: f32 = 2.0;
+
+#[cfg(any(test, target_os = "macos"))]
+fn openai_inter_paragraph_silence_floor(speed: f32) -> Duration {
+    OPENAI_INTER_PARAGRAPH_BASE_SILENCE_FLOOR
+        .div_f32(speed.clamp(MIN_PLAYBACK_SPEED, MAX_PLAYBACK_SPEED))
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct OpenAiVoiceState {
@@ -813,6 +823,7 @@ fn run_openai_voice_stream(
         TTS_SAMPLE_RATE,
         INITIAL_PLAYBACK_BUFFER_FRAMES,
     )?;
+    let inter_paragraph_silence_floor = openai_inter_paragraph_silence_floor(speed);
     let mut assistant_speech = None::<AssistantSpeechGuard>;
     let mut playback_drained_at = None::<Instant>;
     let mut streaming_text = StreamingTtsText::default();
@@ -843,6 +854,7 @@ fn run_openai_voice_stream(
                     stream_id,
                     backend.as_ref(),
                     &mut playback,
+                    inter_paragraph_silence_floor,
                     ready,
                     &native_voice,
                     interruption_sensitivity,
@@ -869,6 +881,7 @@ fn run_openai_voice_stream(
                     stream_id,
                     backend.as_ref(),
                     &mut playback,
+                    inter_paragraph_silence_floor,
                     ready,
                     &native_voice,
                     interruption_sensitivity,
@@ -895,6 +908,7 @@ fn run_openai_voice_stream(
                     stream_id,
                     backend.as_ref(),
                     &mut playback,
+                    inter_paragraph_silence_floor,
                     ready,
                     &native_voice,
                     interruption_sensitivity,
@@ -987,6 +1001,7 @@ fn speak_openai_stream_ready(
     stream_id: &str,
     backend: &dyn TtsBackend,
     playback: &mut OutboundPlayback<'_>,
+    inter_paragraph_silence_floor: Duration,
     ready: Vec<String>,
     native_voice: &NativeVoiceState,
     interruption_sensitivity: InterruptionSensitivity,
@@ -995,6 +1010,10 @@ fn speak_openai_stream_ready(
     playback_drained_at: &mut Option<Instant>,
 ) -> Result<OutboundOutcome, OutboundFailure> {
     for text in ready {
+        let outcome = playback.queue_inter_segment_silence_floor(inter_paragraph_silence_floor)?;
+        if outcome == OutboundOutcome::Interrupted {
+            return Ok(outcome);
+        }
         let mut ready = text;
         let outcome = speak_pending(
             app,
@@ -1136,6 +1155,22 @@ fn emit_openai_stream_event(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inter_paragraph_silence_floor_tracks_openai_synthesis_rate() {
+        assert!(
+            (openai_inter_paragraph_silence_floor(0.75).as_secs_f32() - (2.0 / 3.0)).abs()
+                < f32::EPSILON
+        );
+        assert_eq!(
+            openai_inter_paragraph_silence_floor(1.0),
+            Duration::from_millis(500)
+        );
+        assert_eq!(
+            openai_inter_paragraph_silence_floor(2.0),
+            Duration::from_millis(250)
+        );
+    }
 
     #[test]
     fn destroyed_window_only_stops_its_openai_stream() {

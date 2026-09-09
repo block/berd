@@ -137,11 +137,16 @@ const SIRI_STREAM_EVENT: &str = "siri-voice:stream-event";
 const SIRI_OUTPUT_DRAIN_MARGIN: Duration = Duration::from_secs(60);
 #[cfg(target_os = "macos")]
 const PLAYBACK_PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
-#[cfg(target_os = "macos")]
-const SIRI_INTER_CHUNK_SILENCE: Duration = Duration::from_millis(250);
+#[cfg(any(test, target_os = "macos"))]
+const SIRI_INTER_PARAGRAPH_BASE_SILENCE: Duration = Duration::from_millis(250);
 const MIN_PLAYBACK_SPEED: f32 = 0.5;
 const MAX_PLAYBACK_SPEED: f32 = 2.0;
 pub(crate) static SIRI_SETTINGS_LOCK: Mutex<()> = Mutex::new(());
+
+#[cfg(any(test, target_os = "macos"))]
+fn siri_inter_paragraph_silence(speed: f32) -> Duration {
+    SIRI_INTER_PARAGRAPH_BASE_SILENCE.div_f32(speed.clamp(MIN_PLAYBACK_SPEED, MAX_PLAYBACK_SPEED))
+}
 
 pub type SiriVoiceSelection = SiriVoiceIdentity;
 
@@ -524,6 +529,7 @@ fn synthesize_siri_stream_ready(
     playback: &mut OutboundPlayback<'_>,
     player: &PocketAudioPlayer,
     output_latency_grace: Duration,
+    inter_paragraph_silence: Duration,
     ready: Vec<String>,
     native_voice: &NativeVoiceState,
     interruption_sensitivity: InterruptionSensitivity,
@@ -535,7 +541,7 @@ fn synthesize_siri_stream_ready(
 ) -> Result<bool, String> {
     for text in ready {
         if playback
-            .queue_inter_segment_silence(SIRI_INTER_CHUNK_SILENCE)
+            .queue_inter_segment_silence(inter_paragraph_silence)
             .map_err(|failure| failure.message)?
             == OutboundOutcome::Interrupted
         {
@@ -669,6 +675,7 @@ fn run_siri_stream(
     let player =
         PocketAudioPlayer::new(pcm_spec.sample_rate, pcm_spec.playback_rate, output_device)?;
     let mut playback = OutboundPlayback::new(&player, &active, pcm_spec.sample_rate, 0)?;
+    let inter_paragraph_silence = siri_inter_paragraph_silence(speed);
     let mut streaming_text = StreamingTtsText::default();
     let mut assistant_speech = None::<AssistantSpeechGuard>;
     let mut playback_drained_at = None;
@@ -700,6 +707,7 @@ fn run_siri_stream(
                     &mut playback,
                     &player,
                     output_latency_grace,
+                    inter_paragraph_silence,
                     ready,
                     &native_voice,
                     interruption_sensitivity,
@@ -724,6 +732,7 @@ fn run_siri_stream(
                     &mut playback,
                     &player,
                     output_latency_grace,
+                    inter_paragraph_silence,
                     ready,
                     &native_voice,
                     interruption_sensitivity,
@@ -748,6 +757,7 @@ fn run_siri_stream(
                     &mut playback,
                     &player,
                     output_latency_grace,
+                    inter_paragraph_silence,
                     ready,
                     &native_voice,
                     interruption_sensitivity,
@@ -1153,6 +1163,22 @@ impl SiriVoiceState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inter_paragraph_silence_tracks_siri_synthesis_rate() {
+        assert_eq!(
+            siri_inter_paragraph_silence(0.5),
+            Duration::from_millis(500)
+        );
+        assert_eq!(
+            siri_inter_paragraph_silence(1.0),
+            Duration::from_millis(250)
+        );
+        assert_eq!(
+            siri_inter_paragraph_silence(2.0),
+            Duration::from_millis(125)
+        );
+    }
 
     #[test]
     fn voice_lookup_normalizes_language_but_preserves_exact_name() {
