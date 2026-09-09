@@ -23,9 +23,15 @@ import {
   confirmVoiceConversationForegroundSession,
   isVoiceMicrophoneCaptureError,
   setVoiceConversationControlsSuppressed,
+  updateVoiceConversationStatusSounds,
   type PendingVoiceTranscript,
 } from "../api/voiceConversation";
 import { getMicrophonePermissionStatus } from "../api/microphonePermission";
+import {
+  getStatusSoundPreference,
+  subscribeToStatusSoundPreference,
+  type StatusSoundPreference,
+} from "../lib/statusSoundPreference";
 import type { VoiceInputBackend } from "../lib/voiceInputPreference";
 import type { SiriVoiceSelection } from "../api/siriVoice";
 
@@ -409,6 +415,25 @@ export function waitForVoiceDeliveryOpportunity(
   });
 }
 
+export function publishChainedVoiceStatus(
+  sessionId: string,
+  conversationStatus: "working" | "waiting",
+  settings: StatusSoundPreference = getStatusSoundPreference(),
+): void {
+  const status = useVoiceConversationStore.getState().status;
+  if (status.lifecycle !== "running" || status.sessionId !== sessionId) return;
+  void updateVoiceConversationStatusSounds(
+    status,
+    conversationStatus,
+    settings,
+  ).catch((error) =>
+    console.warn(
+      `Could not publish chained voice ${conversationStatus} status`,
+      error,
+    ),
+  );
+}
+
 export function resetVoiceUiWhenRunSettles(
   sessionId: string,
   deliveryRevision: number,
@@ -436,6 +461,7 @@ export function resetVoiceUiWhenRunSettles(
     unsubscribeVoice();
     if (voice.status.revision >= deliveryRevision) {
       voice.setUiState("listening");
+      publishChainedVoiceStatus(sessionId, "waiting");
     }
   };
   const unsubscribeChat = useChatStore.subscribe(check);
@@ -531,6 +557,7 @@ function ensureVoiceEventDeliveryInitialized() {
           displayText: event.text,
         };
         store.setUiState("agent-working");
+        publishChainedVoiceStatus(event.sessionId, "working");
         const delivered =
           opportunity === "steer"
             ? await steerPromptInSession(
@@ -987,6 +1014,7 @@ export function useVoiceConversationController({
         return "not-completed";
       }
       startAssistantSpeech(assistantSpeechHistory);
+      publishChainedVoiceStatus(sessionId, "waiting");
       return "completed";
     } catch (startError) {
       const backendStatus = useVoiceConversationStore.getState().status;
@@ -1082,6 +1110,23 @@ export function useVoiceConversationController({
     startAssistantSpeech,
     stop,
   ]);
+
+  useEffect(() => {
+    if (
+      status.lifecycle !== "running" ||
+      status.sessionId !== sessionId ||
+      status.ownerWindowLabel !== getCurrentWindow().label
+    )
+      return;
+    return subscribeToStatusSoundPreference((preference) => {
+      const uiState = useVoiceConversationStore.getState().uiState;
+      publishChainedVoiceStatus(
+        sessionId,
+        uiState === "agent-working" ? "working" : "waiting",
+        preference,
+      );
+    });
+  }, [sessionId, status.lifecycle, status.ownerWindowLabel, status.sessionId]);
 
   useEffect(() => {
     if (

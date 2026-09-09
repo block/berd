@@ -64,7 +64,16 @@ const preferenceMocks = vi.hoisted(() => ({
   setOutputBackend: vi.fn(),
   setInterruptionMode: vi.fn(),
   setMode: vi.fn(),
+  setStatusSounds: vi.fn(),
   setRealtimePreference: vi.fn(),
+}));
+const statusSoundState = vi.hoisted(() => ({
+  mode: "continuous-while-working" as
+    | "continuous"
+    | "continuous-while-working"
+    | "once"
+    | "off",
+  volume: 0.4,
 }));
 const interruptionState = vi.hoisted(() => ({
   mode: "automatic" as "automatic" | "allowInterruptions" | "preventFeedback",
@@ -174,6 +183,16 @@ vi.mock("../lib/voiceConversationModePreference", () => ({
   useVoiceConversationModePreference: () => ({
     mode: modeState.mode,
     setMode: preferenceMocks.setMode,
+  }),
+}));
+vi.mock("../lib/statusSoundPreference", () => ({
+  getDefaultStatusSoundPreference: () => ({
+    mode: "continuous-while-working",
+    volume: 0.4,
+  }),
+  useStatusSoundPreference: () => ({
+    ...statusSoundState,
+    update: preferenceMocks.setStatusSounds,
   }),
 }));
 vi.mock("../lib/realtimeVoicePreference", async (importOriginal) => ({

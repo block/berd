@@ -1,4 +1,8 @@
-use std::time::{Duration, Instant};
+use std::{
+    sync::mpsc::{self, RecvTimeoutError, Sender},
+    thread,
+    time::{Duration, Instant},
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -156,6 +160,88 @@ impl StatusSoundRuntime {
             }
         }
         Ok(self.player.is_active())
+    }
+}
+
+enum StatusSoundCommand {
+    Update(ConversationStatus, StatusSoundSettings),
+    ConversationActive(bool),
+    OutputDevice(Option<String>),
+    Shutdown,
+}
+
+/// Thread-safe status-sound service for hosts that do not own a polling loop.
+pub struct ManagedStatusSoundRuntime {
+    commands: Sender<StatusSoundCommand>,
+}
+
+impl ManagedStatusSoundRuntime {
+    pub fn spawn(output_device: Option<String>) -> Result<Self, String> {
+        let (commands, receiver) = mpsc::channel();
+        let worker = thread::Builder::new()
+            .name("berd-status-sounds".into())
+            .spawn(move || {
+                let mut runtime = StatusSoundRuntime::default();
+                let mut conversation_active = false;
+                runtime.set_output_device(output_device);
+                loop {
+                    match receiver.recv_timeout(Duration::from_millis(10)) {
+                        Ok(StatusSoundCommand::Update(status, settings)) => {
+                            runtime.update(status, settings);
+                        }
+                        Ok(StatusSoundCommand::ConversationActive(active)) => {
+                            conversation_active = active;
+                        }
+                        Ok(StatusSoundCommand::OutputDevice(device)) => {
+                            runtime.set_output_device(device);
+                        }
+                        Ok(StatusSoundCommand::Shutdown) | Err(RecvTimeoutError::Disconnected) => {
+                            runtime.stop();
+                            break;
+                        }
+                        Err(RecvTimeoutError::Timeout) => {}
+                    }
+                    if let Err(message) = runtime.poll(conversation_active) {
+                        eprintln!("status sound playback disabled: {message}");
+                    }
+                }
+            })
+            .map_err(|error| format!("Could not start status sound runtime: {error}"))?;
+        drop(worker);
+        Ok(Self { commands })
+    }
+
+    pub fn update(
+        &self,
+        status: ConversationStatus,
+        settings: StatusSoundSettings,
+    ) -> Result<(), String> {
+        settings.validate().map_err(str::to_string)?;
+        self.send(StatusSoundCommand::Update(status, settings))
+    }
+
+    pub fn set_conversation_active(&self, active: bool) -> Result<(), String> {
+        self.send(StatusSoundCommand::ConversationActive(active))
+    }
+
+    pub fn set_output_device(&self, output_device: Option<String>) -> Result<(), String> {
+        self.send(StatusSoundCommand::OutputDevice(output_device))
+    }
+
+    fn send(&self, command: StatusSoundCommand) -> Result<(), String> {
+        self.commands
+            .send(command)
+            .map_err(|_| "Status sound runtime is unavailable".to_string())
+    }
+
+    pub fn finish(&self) {
+        let _ = self.commands.send(StatusSoundCommand::Shutdown);
+    }
+}
+
+impl Drop for ManagedStatusSoundRuntime {
+    fn drop(&mut self) {
+        let _ = self.commands.send(StatusSoundCommand::Shutdown);
     }
 }
 

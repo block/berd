@@ -56,7 +56,8 @@ pub use pocket::{
 #[cfg(target_os = "macos")]
 pub use siri::SiriTts;
 pub use status_sounds::{
-    ConversationStatus, StatusSoundMode, StatusSoundRuntime, StatusSoundSettings,
+    ConversationStatus, ManagedStatusSoundRuntime, StatusSoundMode,
+    StatusSoundRuntime, StatusSoundSettings,
 };
 pub use synthesis::{synthesize_pcm16_wav, WavSynthesis, WavSynthesisError, WavSynthesisErrorKind};
 pub use tts::{

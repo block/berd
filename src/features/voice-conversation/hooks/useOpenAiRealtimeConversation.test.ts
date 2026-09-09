@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import type { OpenAiRealtimeProtocolEvent } from "@/shared/api/openaiRealtime";
+import { setStatusSoundPreference } from "../lib/statusSoundPreference";
 import {
   collectRealtimeTranscriptSeedTurns,
   requestOpenAiRealtimeConversationStart,
@@ -200,6 +201,7 @@ const mocks = vi.hoisted(() => ({
   setControlsSuppressed: vi.fn(),
   startControls: vi.fn(),
   startRuntime: vi.fn(),
+  updateStatusSounds: vi.fn<() => Promise<void>>(),
   stopControls: vi.fn(),
   stopRuntime: vi.fn(),
   updateRuntimeSettings: vi.fn(),
@@ -358,6 +360,7 @@ vi.mock("@/shared/api/openaiRealtime", () => ({
   stopOpenAiRealtimeVoiceControls: mocks.stopControls,
   stopOpenAiRealtimeSpokespersonRuntime: mocks.stopRuntime,
   updateOpenAiRealtimeSpokespersonSettings: mocks.updateRuntimeSettings,
+  updateOpenAiRealtimeStatusSounds: mocks.updateStatusSounds,
   unknownOpenAiRealtimeHandoffIds: mocks.unknownHandoffIds,
 }));
 
@@ -510,6 +513,7 @@ describe("collectRealtimeTranscriptSeedTurns", () => {
 });
 
 beforeEach(() => {
+  window.localStorage.clear();
   vi.clearAllMocks();
   mocks.activeEmissary = null;
   mocks.createResponse = true;
@@ -538,6 +542,8 @@ beforeEach(() => {
     value: { getUserMedia: vi.fn().mockResolvedValue(stream) },
   });
   mocks.appendSessionSystemPrompt.mockResolvedValue(undefined);
+  mocks.updateStatusSounds.mockReset();
+  mocks.updateStatusSounds.mockResolvedValue(undefined);
   mocks.claimMicrophone.mockResolvedValue(undefined);
   mocks.createHandoffToolOutput.mockReturnValue({
     type: "conversation.item.create",
@@ -910,6 +916,17 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
 
     await act(async () => owner.result.current.onToggle());
     await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+    expect(mocks.updateStatusSounds).toHaveBeenCalledWith(
+      "session-a",
+      "waiting",
+      { mode: "continuous-while-working", volume: 0.4 },
+    );
+    act(() => setStatusSoundPreference({ mode: "once", volume: 0.7 }));
+    expect(mocks.updateStatusSounds).toHaveBeenLastCalledWith(
+      "session-a",
+      "waiting",
+      { mode: "once", volume: 0.7 },
+    );
     act(() => {
       mocks.preferenceListener?.({ voice: "cedar", speed: 1.5 });
     });

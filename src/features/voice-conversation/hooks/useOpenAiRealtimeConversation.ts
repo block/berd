@@ -33,6 +33,7 @@ import {
   stopOpenAiRealtimeSpokespersonRuntime,
   releaseOpenAiRealtimeSpokespersonRuntime,
   updateOpenAiRealtimeSpokespersonSettings,
+  updateOpenAiRealtimeStatusSounds,
   type OpenAiRealtimeTranscriptSeedTurn,
   type OpenAiRealtimeExpertDeliveryEvent,
 } from "@/shared/api/openaiRealtime";
@@ -58,16 +59,21 @@ import {
   sendRealtimeEvents,
 } from "../lib/realtimeEmissaryProtocol";
 import {
+  getStatusSoundPreference,
+  subscribeToStatusSoundPreference,
+  type StatusSoundPreference,
+} from "../lib/statusSoundPreference";
+import {
+  getRealtimeVoicePreference,
+  subscribeToRealtimeVoicePreference,
+} from "../lib/realtimeVoicePreference";
+import {
   requestVoiceConversationEnd,
   trackVoiceAssistantResponse,
   trackVoiceConversationEnded,
   trackVoiceConversationStarted,
   trackVoiceUserUtterance,
 } from "../lib/voiceTelemetry";
-import {
-  getRealtimeVoicePreference,
-  subscribeToRealtimeVoicePreference,
-} from "../lib/realtimeVoicePreference";
 import {
   beginVoiceControlsVisibilityLease,
   observeVoiceConversationControlVisibility,
@@ -439,12 +445,24 @@ const OFF_SNAPSHOT: Snapshot = {
   ownerWindowLabel: null,
 };
 
+function publishRealtimeStatus(
+  sessionId: string,
+  status: "working" | "waiting",
+  settings: StatusSoundPreference = getStatusSoundPreference(),
+): void {
+  void updateOpenAiRealtimeStatusSounds(sessionId, status, settings).catch(
+    (error) =>
+      console.warn(`Could not publish Realtime voice ${status} status`, error),
+  );
+}
+
 class OpenAiRealtimeConversationRuntime {
   private snapshot: Snapshot = OFF_SNAPSHOT;
   private readonly listeners = new Set<() => void>();
   private nativeMicrophone: NativeMicrophone | null = null;
   private releaseRuntimeListener: (() => void) | null = null;
   private releaseVoicePreferenceListener: (() => void) | null = null;
+  private releaseStatusSoundPreferenceListener: (() => void) | null = null;
   private realtimeSettingsRevision = 1;
   private realtimeSettingsQueue = Promise.resolve();
   private realtimeRuntimeSessionId: string | null = null;
@@ -884,6 +902,17 @@ class OpenAiRealtimeConversationRuntime {
           this.bridgeCallScope.id,
           runtimeOptions,
         );
+        publishRealtimeStatus(sessionId, "waiting");
+        this.releaseStatusSoundPreferenceListener =
+          subscribeToStatusSoundPreference((settings) => {
+            if (isStale() || this.realtimeRuntimeSessionId !== sessionId)
+              return;
+            publishRealtimeStatus(
+              sessionId,
+              this.snapshot.state === "agent-working" ? "working" : "waiting",
+              settings,
+            );
+          });
       } catch (error) {
         if (this.realtimeRuntimeSessionId === sessionId) {
           this.realtimeRuntimeSessionId = null;
@@ -1243,6 +1272,7 @@ class OpenAiRealtimeConversationRuntime {
         };
         if (!continueAfterStop) {
           this.setSnapshot({ ...this.snapshot, state: "agent-working" });
+          publishRealtimeStatus(sessionId, "working");
         }
         for (;;) {
           const opportunity = await waitForMasterDeliveryOpportunity(
@@ -1281,8 +1311,10 @@ class OpenAiRealtimeConversationRuntime {
           }
         }
         onDelivered?.();
-        if (this.snapshot.boundSessionId === sessionId)
+        if (this.snapshot.boundSessionId === sessionId) {
           this.setSnapshot({ ...this.snapshot, state: "listening" });
+          publishRealtimeStatus(sessionId, "waiting");
+        }
       })
       .catch((error) => {
         if (isAbortError(error)) return;
@@ -1336,6 +1368,7 @@ class OpenAiRealtimeConversationRuntime {
     this.nativeMicrophone?.stop();
     this.releaseRuntimeListener?.();
     this.releaseVoicePreferenceListener?.();
+    this.releaseStatusSoundPreferenceListener?.();
     const realtimeRuntimeSessionId = this.realtimeRuntimeSessionId;
     this.realtimeRuntimeSessionId = null;
     this.releaseControlsListener?.();
@@ -1350,6 +1383,7 @@ class OpenAiRealtimeConversationRuntime {
     this.nativeMicrophone = null;
     this.releaseRuntimeListener = null;
     this.releaseVoicePreferenceListener = null;
+    this.releaseStatusSoundPreferenceListener = null;
     this.realtimeSettingsQueue = Promise.resolve();
     if (controlsRevision > 0) {
       await stopOpenAiRealtimeVoiceControls(

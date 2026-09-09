@@ -9,6 +9,7 @@ import { Badge } from "@/shared/ui/badge";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
 import { RadioGroup, RadioGroupCard } from "@/shared/ui/radio-group";
 import { SettingsRow } from "@/shared/ui/settings-row";
+import { Slider } from "@/shared/ui/slider";
 import {
   Select,
   SelectContent,
@@ -30,6 +31,11 @@ import { usePocketVoiceSetup } from "../hooks/usePocketVoiceSetup";
 import { useMacSpeechSetup } from "../hooks/useMacSpeechSetup";
 import { useMicrophonePermission } from "../hooks/useMicrophonePermission";
 import { useSiriVoiceSetup } from "../hooks/useSiriVoiceSetup";
+import type { StatusSoundMode } from "../lib/statusSoundPreference";
+import {
+  getDefaultStatusSoundPreference,
+  useStatusSoundPreference,
+} from "../lib/statusSoundPreference";
 import type { VoiceInputBackend } from "../lib/voiceInputPreference";
 import {
   getDefaultVoiceInputBackend,
@@ -67,6 +73,13 @@ import {
   DEFAULT_OPENAI_VOICE,
   openAiVoiceOptions,
 } from "../lib/openAiVoiceOptions";
+
+const STATUS_SOUND_MODES: StatusSoundMode[] = [
+  "continuous",
+  "continuous-while-working",
+  "once",
+  "off",
+];
 
 const INTERRUPTION_MODES: VoiceInterruptionMode[] = [
   "automatic",
@@ -162,6 +175,7 @@ export function VoiceSettings() {
   }, [openAiStatus]);
   const interruption = useVoiceInterruptionPreference();
   const mode = useVoiceConversationModePreference();
+  const statusSounds = useStatusSoundPreference();
   const siriSetup = useSiriVoiceSetup(output.backend === "siri");
   const siriSupported = getPlatform() === "mac";
   const microphonePermission = useMicrophonePermission(siriSupported);
@@ -233,6 +247,7 @@ export function VoiceSettings() {
       output.setBackend(getDefaultVoiceOutputBackend());
       interruption.setMode(getDefaultVoiceInterruptionPreference().mode);
       mode.setMode(getDefaultVoiceConversationMode());
+      statusSounds.update(getDefaultStatusSoundPreference());
       setResetDialogOpen(false);
     } finally {
       setResetting(false);
@@ -595,6 +610,61 @@ export function VoiceSettings() {
       ) : (
         <RealtimeVoiceSettings />
       )}
+      <section className="space-y-2 overflow-hidden">
+        <SettingsRow
+          className="py-2"
+          label={
+            <h2 className="text-sm font-medium">{t("voice.statusSounds")}</h2>
+          }
+          description={t(
+            `voice.statusSoundModeDescriptions.${statusSounds.mode}`,
+          )}
+          layout="responsive"
+          action={({ labelId, descriptionId }) => (
+            <Select
+              value={statusSounds.mode}
+              onValueChange={(value) =>
+                statusSounds.update({ mode: value as StatusSoundMode })
+              }
+            >
+              <SelectTrigger
+                className="w-full sm:w-60"
+                aria-labelledby={labelId}
+                aria-describedby={descriptionId}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {STATUS_SOUND_MODES.map((statusSoundMode) => (
+                  <SelectItem key={statusSoundMode} value={statusSoundMode}>
+                    {t(`voice.statusSoundModes.${statusSoundMode}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          details={
+            statusSounds.mode === "off" ? null : (
+              <div className="space-y-2 py-2">
+                <div className="flex justify-between gap-4 text-sm">
+                  <span>{t("voice.statusSoundVolume")}</span>
+                  <span className="tabular-nums text-muted-foreground">
+                    {Math.round(statusSounds.volume * 100)}%
+                  </span>
+                </div>
+                <Slider
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={[statusSounds.volume]}
+                  onValueChange={([volume]) => statusSounds.update({ volume })}
+                  aria-label={t("voice.statusSoundVolume")}
+                />
+              </div>
+            )
+          }
+        />
+      </section>
       {resetError ? (
         <p className="text-sm text-destructive" role="alert">
           {resetError}

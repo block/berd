@@ -3,6 +3,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useVoiceConversationStore } from "../stores/voiceConversationStore";
 import { VoiceMicrophoneCaptureError } from "../api/voiceConversation";
+import { setStatusSoundPreference } from "../lib/statusSoundPreference";
 
 const nativeAssistantSpeechMocks = vi.hoisted(() => ({
   capture: vi.fn(() => []),
@@ -13,6 +14,7 @@ const nativeAssistantSpeechMocks = vi.hoisted(() => ({
 const tauriWindowMocks = vi.hoisted(() => ({ label: "main" }));
 const voiceApiMocks = vi.hoisted(() => ({
   confirmForegroundSession: vi.fn<() => Promise<number>>(),
+  updateStatusSounds: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
 }));
 const microphonePermissionMocks = vi.hoisted(() => ({
   getStatus: vi.fn<() => Promise<"authorized" | "denied">>(),
@@ -38,6 +40,7 @@ vi.mock("../api/voiceConversation", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../api/voiceConversation")>()),
   confirmVoiceConversationForegroundSession:
     voiceApiMocks.confirmForegroundSession,
+  updateVoiceConversationStatusSounds: voiceApiMocks.updateStatusSounds,
 }));
 
 vi.mock("../api/microphonePermission", () => ({
@@ -220,9 +223,15 @@ describe("voice transcript delivery coordination", () => {
     useChatStore.getState().setActiveRunId("session-1", null);
 
     expect(useVoiceConversationStore.getState().uiState).toBe("listening");
+    expect(voiceApiMocks.updateStatusSounds).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "session-1", revision: 3 }),
+      "waiting",
+      { mode: "continuous-while-working", volume: 0.4 },
+    );
   });
 
   beforeEach(() => {
+    window.localStorage.clear();
     tauriWindowMocks.label = "main";
     nativeAssistantSpeechMocks.capture.mockClear();
     nativeAssistantSpeechMocks.start.mockClear();
@@ -231,9 +240,49 @@ describe("voice transcript delivery coordination", () => {
     nativeAssistantSpeechMocks.takeNotices.mockReturnValue(null);
     voiceApiMocks.confirmForegroundSession.mockReset();
     voiceApiMocks.confirmForegroundSession.mockResolvedValue(1);
+    voiceApiMocks.updateStatusSounds.mockReset();
+    voiceApiMocks.updateStatusSounds.mockResolvedValue(undefined);
     microphonePermissionMocks.getStatus.mockReset();
     microphonePermissionMocks.getStatus.mockResolvedValue("authorized");
     useChatStore.setState({ messagesBySession: {}, sessionStateById: {} });
+  });
+
+  it("applies settings changes to an active chained runtime", async () => {
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-1",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 3,
+      },
+      uiState: "agent-working",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+    });
+    const { unmount } = renderHook(() =>
+      useVoiceConversationController({
+        sessionId: "session-1",
+        onSend: vi.fn(),
+        enabled: true,
+        isGooseSession: true,
+        pocketReady: true,
+        onPocketSetupRequired: vi.fn(),
+      }),
+    );
+
+    act(() => setStatusSoundPreference({ mode: "once", volume: 0.7 }));
+
+    await waitFor(() =>
+      expect(voiceApiMocks.updateStatusSounds).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: "session-1", revision: 3 }),
+        "working",
+        { mode: "once", volume: 0.7 },
+      ),
+    );
+    unmount();
   });
 
   it("delivers a queued transcript after its chat becomes temporarily ineligible", async () => {
@@ -285,6 +334,11 @@ describe("voice transcript delivery coordination", () => {
       undefined,
       undefined,
       expect.objectContaining({ displayText: "keep this route" }),
+    );
+    expect(voiceApiMocks.updateStatusSounds).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "session-1", revision: 1 }),
+      "working",
+      { mode: "continuous-while-working", volume: 0.4 },
     );
   });
 

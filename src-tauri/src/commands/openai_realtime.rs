@@ -33,6 +33,7 @@ pub struct OpenAiRealtimeRuntimeState {
 struct NativeRealtimeRuntime {
     owner_window: String,
     runtime: Arc<ManagedRealtimeHost>,
+    status_sounds: Option<berd_voice::ManagedStatusSoundRuntime>,
     protocol: RealtimeExpertSpokespersonSession,
     semantic_revision: Arc<AtomicU64>,
 }
@@ -137,11 +138,16 @@ pub fn start_openai_realtime_spokesperson_runtime(
     log::info!(
         "Starting Expert-Spokesperson session {session_id} with execution_path=berd_voice_in_process transport=websocket playback=native_pcm"
     );
+    let status_sounds =
+        berd_voice::ManagedStatusSoundRuntime::spawn(super::pocket_voice::selected_output_device())
+            .map_err(|error| log::warn!("Status sounds unavailable: {error}"))
+            .ok();
     sessions.insert(
         session_id.clone(),
         NativeRealtimeRuntime {
             owner_window: webview_window.label().into(),
             runtime,
+            status_sounds,
             protocol: RealtimeExpertSpokespersonSession::new(initial_cursor, call_id),
             semantic_revision,
         },
@@ -157,6 +163,29 @@ fn ensure_native_realtime_playback_supported() -> Result<(), String> {
 #[cfg(not(target_os = "macos"))]
 fn ensure_native_realtime_playback_supported() -> Result<(), String> {
     Err("Native OpenAI Realtime playback is not supported on this platform".into())
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RealtimeStatusSoundUpdate {
+    status: berd_voice::ConversationStatus,
+    settings: berd_voice::StatusSoundSettings,
+}
+
+#[tauri::command]
+pub fn update_openai_realtime_status_sounds(
+    state: State<'_, OpenAiRealtimeRuntimeState>,
+    webview_window: WebviewWindow,
+    session_id: String,
+    update: RealtimeStatusSoundUpdate,
+) -> Result<(), String> {
+    with_runtime_entry(state, session_id, webview_window.label(), |entry| {
+        entry
+            .status_sounds
+            .as_ref()
+            .ok_or_else(|| "Status sound runtime is unavailable".to_string())?
+            .update(update.status, update.settings)
+    })
 }
 
 #[tauri::command]
@@ -273,6 +302,24 @@ pub fn handle_owner_window_destroyed(app: &AppHandle, window_label: &str) {
             }
         });
     }
+}
+
+fn with_runtime_entry<T>(
+    state: State<'_, OpenAiRealtimeRuntimeState>,
+    session_id: String,
+    owner_window: &str,
+    operation: impl FnOnce(&NativeRealtimeRuntime) -> Result<T, String>,
+) -> Result<T, String> {
+    let session_id = non_empty_session_id(session_id)?;
+    let sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "OpenAI Realtime runtime state is unavailable".to_string())?;
+    let entry = sessions
+        .get(&session_id)
+        .ok_or("OpenAI Realtime runtime session is not active")?;
+    ensure_runtime_owner(&entry.owner_window, owner_window)?;
+    operation(entry)
 }
 
 fn with_runtime<T>(
