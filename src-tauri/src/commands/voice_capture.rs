@@ -439,16 +439,20 @@ impl VoiceCaptureState {
             .state
             .lock()
             .map_err(|_| "Voice capture state lock was poisoned".to_string())?;
-        Ok(state.active_voice_telemetry.take().map(|active| CompletedVoiceTelemetry {
-            input_backend: active.input_backend,
-            output_backend: active.output_backend,
-            voice_mode: active.voice_mode,
-            duration_ms: u64::try_from(active.started_at.elapsed().as_millis()).unwrap_or(u64::MAX),
-            user_utterance_count: active.user_utterance_count,
-            assistant_response_count: active.assistant_response_count,
-            end_reason: active.requested_end_reason.unwrap_or(fallback_reason),
-            reportable: active.reportable,
-        }))
+        Ok(state
+            .active_voice_telemetry
+            .take()
+            .map(|active| CompletedVoiceTelemetry {
+                input_backend: active.input_backend,
+                output_backend: active.output_backend,
+                voice_mode: active.voice_mode,
+                duration_ms: u64::try_from(active.started_at.elapsed().as_millis())
+                    .unwrap_or(u64::MAX),
+                user_utterance_count: active.user_utterance_count,
+                assistant_response_count: active.assistant_response_count,
+                end_reason: active.requested_end_reason.unwrap_or(fallback_reason),
+                reportable: active.reportable,
+            }))
     }
 
     pub fn release_window(&self, window_label: &str) {
@@ -508,7 +512,9 @@ pub fn request_voice_conversation_telemetry_end(
     request: VoiceTelemetryOwnerRequest,
     reason: VoiceTelemetryEndReason,
 ) -> Result<(), String> {
-    state.update_voice_telemetry(&request, |active| active.requested_end_reason = Some(reason))
+    state.update_voice_telemetry(&request, |active| {
+        active.requested_end_reason = Some(reason)
+    })
 }
 
 #[tauri::command]
