@@ -1,9 +1,5 @@
 import { track } from "@/shared/telemetry/client";
 import {
-  telemetryConsentGranted,
-  telemetryConsentSettled,
-} from "@/shared/telemetry/consent";
-import {
   berdVoiceConversationEnded,
   berdVoiceConversationStarted,
   type BerdVoiceConversationEndReason,
@@ -115,17 +111,17 @@ export function trackVoiceConversationStarted(
     userUtteranceCount: 0,
     assistantResponseCount: 0,
     requestedEndReason: null,
-    reportable: !telemetryConsentSettled() || telemetryConsentGranted(),
+    reportable: false,
     ownerToken: createOwnerToken(),
   };
-  persistActiveConversation();
-  track(
+  activeConversation.reportable = track(
     berdVoiceConversationStarted({
       input_backend: context.inputBackend,
       output_backend: context.outputBackend,
       voice_mode: context.voiceMode,
     }),
   );
+  persistActiveConversation();
 }
 
 export function trackVoiceUserUtterance(): void {

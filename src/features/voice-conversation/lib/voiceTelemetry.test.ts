@@ -1,15 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Event } from "@/shared/telemetry/events";
 
 const mocks = vi.hoisted(() => ({
-  track: vi.fn(),
-  consentGranted: true,
-  consentSettled: true,
+  track: vi.fn((_event: Event): boolean => true),
 }));
 vi.mock("@/shared/telemetry/client", () => ({ track: mocks.track }));
-vi.mock("@/shared/telemetry/consent", () => ({
-  telemetryConsentGranted: () => mocks.consentGranted,
-  telemetryConsentSettled: () => mocks.consentSettled,
-}));
 
 import {
   clearRequestedVoiceConversationEnd,
@@ -32,9 +27,7 @@ describe("voice conversation telemetry", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-09T00:00:00Z"));
-    mocks.track.mockReset();
-    mocks.consentGranted = true;
-    mocks.consentSettled = true;
+    mocks.track.mockReset().mockReturnValue(true);
     resetVoiceTelemetryForTest();
   });
 
@@ -122,10 +115,9 @@ describe("voice conversation telemetry", () => {
     });
   });
 
-  it("does not emit an end aggregate for a consent-denied start", () => {
-    mocks.consentGranted = false;
+  it("does not emit an end aggregate when the start is rejected", () => {
+    mocks.track.mockReturnValueOnce(false);
     trackVoiceConversationStarted(context);
-    mocks.consentGranted = true;
     trackVoiceUserUtterance();
     trackVoiceConversationEnded("user");
 

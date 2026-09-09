@@ -631,9 +631,9 @@ function startPipeline(): void {
  * Emits immediately once the logger exists; until then — while consent is
  * still loading and while the logger's construction is in flight — events
  * land in the startup buffer, which the consent gate then flushes or
- * discards.
+ * discards. Returns whether this event was admitted for emission or buffering.
  */
-function trackEvent(createEvent: () => Event): void {
+function trackEvent(createEvent: () => Event): boolean {
   // The dev-only viewer taps the chokepoint itself, ahead of every gate, so
   // the `just dev` terminal reports what fired rather than what survived. It
   // is dead code outside the Vite dev server and never reaches the exporter.
@@ -648,7 +648,7 @@ function trackEvent(createEvent: () => Event): void {
     // otherwise start counting drops for a build that never emits.
     if (!telemetryBuildEnabled()) {
       logDebugEvent(createEvent);
-      return;
+      return false;
     }
     if (telemetryConsentDenied()) {
       // A settled denial is deliberate silence, not a loss. The timed-out but
@@ -662,18 +662,18 @@ function trackEvent(createEvent: () => Event): void {
         noteDroppedEvents(1, "the telemetry setting did not load in time");
       }
       logDebugEvent(createEvent);
-      return;
+      return false;
     }
 
     if (loggerUnavailable) {
       // Terminal: buffering for a logger that will never exist would only
       // defer the same loss, so take it now and keep it counted.
       noteDroppedEvents(1, "the telemetry logger could not be constructed");
-      return;
+      return false;
     }
     if (logger !== null) {
       emit(createEvent);
-      return;
+      return true;
     }
     if (buffer.length >= MAX_BUFFERED_EVENTS) {
       // Buffer full before the logger exists: the event can neither be kept
@@ -682,16 +682,18 @@ function trackEvent(createEvent: () => Event): void {
       // MAX_BUFFERED_EVENTS events inside it, but it is a real loss, so
       // count it instead of dropping it silently.
       noteDroppedEvents(1, "buffer full before the logger was ready");
-      return;
+      return false;
     }
     buffer.push({ createEvent, timestamp: new Date().toISOString() });
+    return true;
   } catch (error) {
     perfLog(`[telemetry] failed to track event: ${String(error)}`);
+    return false;
   }
 }
 
-export function track(event: Event): void {
-  trackEvent(() => event);
+export function track(event: Event): boolean {
+  return trackEvent(() => event);
 }
 
 /**
