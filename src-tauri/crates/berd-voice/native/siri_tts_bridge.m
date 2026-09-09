@@ -1617,32 +1617,62 @@ float *berd_audio_file_load_mono_pcm(
             return NULL;
         }
         NSURL *url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:pathValue]];
-        NSError *error = nil;
-        AVAudioFile *file = [[AVAudioFile alloc] initForReading:url error:&error];
-        if (!file) {
-            BerdSetError(errorOut, error ?: BerdError(39, @"Could not open the audio file."));
+        ExtAudioFileRef file = NULL;
+        OSStatus status = ExtAudioFileOpenURL((__bridge CFURLRef)url, &file);
+        if (status != noErr || !file) {
+            BerdSetError(errorOut, BerdError(39, @"Could not open the audio file."));
             return NULL;
         }
-        AVAudioFormat *format = file.processingFormat;
-        AVAudioFrameCount capacity = (AVAudioFrameCount)file.length;
-        AVAudioPCMBuffer *buffer = [[AVAudioPCMBuffer alloc]
-            initWithPCMFormat:format frameCapacity:capacity];
-        if (!buffer || ![file readIntoBuffer:buffer error:&error]) {
-            BerdSetError(errorOut, error ?: BerdError(40, @"Could not decode the audio file."));
+        AudioStreamBasicDescription sourceFormat = {0};
+        UInt32 propertySize = sizeof(sourceFormat);
+        status = ExtAudioFileGetProperty(
+            file, kExtAudioFileProperty_FileDataFormat, &propertySize, &sourceFormat);
+        SInt64 sourceFrames = 0;
+        propertySize = sizeof(sourceFrames);
+        if (status == noErr) {
+            status = ExtAudioFileGetProperty(
+                file, kExtAudioFileProperty_FileLengthFrames, &propertySize, &sourceFrames);
+        }
+        AudioStreamBasicDescription clientFormat = {0};
+        clientFormat.mSampleRate = sourceFormat.mSampleRate;
+        clientFormat.mFormatID = kAudioFormatLinearPCM;
+        clientFormat.mFormatFlags = kAudioFormatFlagsNativeFloatPacked;
+        clientFormat.mBytesPerPacket = sizeof(float);
+        clientFormat.mFramesPerPacket = 1;
+        clientFormat.mBytesPerFrame = sizeof(float);
+        clientFormat.mChannelsPerFrame = 1;
+        clientFormat.mBitsPerChannel = 8 * sizeof(float);
+        if (status == noErr) {
+            status = ExtAudioFileSetProperty(
+                file, kExtAudioFileProperty_ClientDataFormat,
+                sizeof(clientFormat), &clientFormat);
+        }
+        if (status != noErr || sourceFrames <= 0 || sourceFrames > UINT32_MAX) {
+            ExtAudioFileDispose(file);
+            BerdSetError(errorOut, BerdError(40, @"Could not prepare the audio file for decoding."));
             return NULL;
         }
-        uint32_t frameCount = buffer.frameLength;
-        if (frameCount == 0 || !buffer.floatChannelData) {
-            BerdSetError(errorOut, BerdError(41, @"The decoded audio file is empty."));
-            return NULL;
-        }
-        float *samples = malloc((size_t)frameCount * sizeof(float));
+        uint32_t capacity = (uint32_t)sourceFrames;
+        float *samples = malloc((size_t)capacity * sizeof(float));
         if (!samples) {
-            BerdSetError(errorOut, BerdError(42, @"Could not allocate decoded audio samples."));
+            ExtAudioFileDispose(file);
+            BerdSetError(errorOut, BerdError(41, @"Could not allocate decoded audio samples."));
             return NULL;
         }
-        memcpy(samples, buffer.floatChannelData[0], (size_t)frameCount * sizeof(float));
-        *sampleRateOut = (uint32_t)format.sampleRate;
+        AudioBufferList buffers = {0};
+        buffers.mNumberBuffers = 1;
+        buffers.mBuffers[0].mNumberChannels = 1;
+        buffers.mBuffers[0].mDataByteSize = capacity * sizeof(float);
+        buffers.mBuffers[0].mData = samples;
+        UInt32 frameCount = capacity;
+        status = ExtAudioFileRead(file, &frameCount, &buffers);
+        ExtAudioFileDispose(file);
+        if (status != noErr || frameCount == 0) {
+            free(samples);
+            BerdSetError(errorOut, BerdError(42, @"Could not decode the audio file."));
+            return NULL;
+        }
+        *sampleRateOut = (uint32_t)clientFormat.mSampleRate;
         *frameCountOut = frameCount;
         return samples;
     }
