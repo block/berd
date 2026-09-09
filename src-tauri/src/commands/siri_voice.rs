@@ -29,7 +29,7 @@ use super::pocket_voice::{
     effective_output_device_name, output_device_uses_speakers, playback_latency_safety_duration,
     resolve_input_during_tts_policy, selected_output_device,
 };
-use super::system::write_sibling_then_replace;
+use crate::services::atomic_file::write_bytes_atomically;
 #[cfg(target_os = "macos")]
 use berd_voice::input::InputDuringTtsPolicy;
 #[cfg(target_os = "macos")]
@@ -196,10 +196,8 @@ fn write_settings(path: &Path, settings: &SiriVoiceSettings) -> Result<(), Strin
     fs::create_dir_all(parent).map_err(|error| format!("create Siri TTS settings: {error}"))?;
     let data = serde_json::to_vec_pretty(settings)
         .map_err(|error| format!("encode Siri TTS settings: {error}"))?;
-    write_sibling_then_replace(path, |temporary| {
-        std::io::Write::write_all(temporary, &data)
-    })
-    .map_err(|error| format!("publish Siri TTS settings: {error}"))
+    write_bytes_atomically(path, &data)
+        .map_err(|error| format!("publish Siri TTS settings: {error}"))
 }
 
 fn update_settings(

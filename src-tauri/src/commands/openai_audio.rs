@@ -24,13 +24,13 @@ use super::pocket_voice::{
     effective_output_device_name, playback_latency_safety_duration,
     resolve_input_during_tts_policy, selected_output_device,
 };
-use super::system::write_sibling_then_replace;
 use super::{
     native_voice::{InterruptionSensitivity, NativeVoiceState},
     openai_voice_credentials::{self, OpenAiVoiceCredential},
     pocket_voice::VoiceInterruptionMode,
     voice_capture::VoiceCaptureState,
 };
+use crate::services::atomic_file::write_bytes_atomically;
 #[cfg(target_os = "macos")]
 use berd_voice::input::InputDuringTtsPolicy;
 #[cfg(any(test, target_os = "macos"))]
@@ -332,10 +332,8 @@ fn persist_voice_settings(speed: f32, voice: &str) -> Result<(), String> {
         speech_voice: voice.to_string(),
     })
     .map_err(|error| format!("encode OpenAI voice settings: {error}"))?;
-    write_sibling_then_replace(&path, |temporary| {
-        std::io::Write::write_all(temporary, &data)
-    })
-    .map_err(|error| format!("publish OpenAI voice settings: {error}"))
+    write_bytes_atomically(&path, &data)
+        .map_err(|error| format!("publish OpenAI voice settings: {error}"))
 }
 
 #[tauri::command]

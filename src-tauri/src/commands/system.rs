@@ -8,12 +8,14 @@ use tauri_plugin_opener::OpenerExt;
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::fs::{self, File, OpenOptions};
+use std::fs;
 use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use crate::services::atomic_file::write_sibling_then_replace;
 
 const DEFAULT_FILE_MENTION_LIMIT: usize = 12;
 const MAX_FILE_MENTION_LIMIT: usize = 32;
@@ -418,91 +420,6 @@ fn write_agent_image_atomically(path: &Path, contents: &[u8]) -> io::Result<()> 
         temporary.write_all(contents)?;
         temporary.sync_all()
     })
-}
-
-pub(crate) fn write_sibling_then_replace(
-    path: &Path,
-    write_temporary: impl FnOnce(&mut File) -> io::Result<()>,
-) -> io::Result<()> {
-    let parent = path.parent().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "agent image export path has no parent directory",
-        )
-    })?;
-    let filename = path.file_name().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "agent image export path has no file name",
-        )
-    })?;
-    let temporary_path = parent.join(format!(
-        ".{}.{}.tmp",
-        filename.to_string_lossy(),
-        uuid::Uuid::new_v4()
-    ));
-
-    let result = (|| {
-        let mut temporary = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temporary_path)?;
-        write_temporary(&mut temporary)?;
-        drop(temporary);
-        replace_file_atomically(&temporary_path, path)
-    })();
-
-    if result.is_err() {
-        let _ = fs::remove_file(&temporary_path);
-    }
-    result
-}
-
-#[cfg(not(target_os = "windows"))]
-fn replace_file_atomically(from: &Path, to: &Path) -> io::Result<()> {
-    fs::rename(from, to)
-}
-
-#[cfg(target_os = "windows")]
-fn replace_file_atomically(from: &Path, to: &Path) -> io::Result<()> {
-    use std::os::windows::ffi::OsStrExt;
-
-    const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
-    const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
-
-    #[link(name = "kernel32")]
-    extern "system" {
-        fn MoveFileExW(
-            existing_file_name: *const u16,
-            new_file_name: *const u16,
-            flags: u32,
-        ) -> i32;
-    }
-
-    let from = from
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect::<Vec<_>>();
-    let to = to
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect::<Vec<_>>();
-    // Same-directory MoveFileExW provides the Windows replacement counterpart
-    // to rename(2); REPLACE_EXISTING avoids deleting the destination first.
-    let replaced = unsafe {
-        MoveFileExW(
-            from.as_ptr(),
-            to.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-    };
-    if replaced == 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(())
-    }
 }
 
 #[tauri::command]
