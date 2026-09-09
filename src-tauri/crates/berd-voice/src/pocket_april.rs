@@ -895,38 +895,18 @@ pub(crate) fn take_streaming_chunks_at_paragraph_boundaries<F>(
 where
     F: FnMut(&str) -> Result<usize, String>,
 {
-    let mut pending = text.trim_start().to_string();
+    let split = crate::tts::take_streaming_text_chunks(text, flush);
     let mut ready = Vec::new();
-
-    if pending.is_empty() {
-        return Ok((ready, pending));
-    }
-
-    while let Some(end) = first_stable_paragraph_end(&pending) {
-        let paragraph = pending[..end].to_string();
+    for paragraph in split.ready {
         ready.extend(split_at_natural_boundaries(
             &paragraph,
             max_tokens,
             &mut token_count,
         )?);
-        pending = pending[end..].trim_start().to_string();
     }
+    let mut pending = split.pending;
 
-    if pending.is_empty() {
-        return Ok((ready, pending));
-    }
-
-    if flush {
-        ready.extend(split_at_natural_boundaries(
-            &pending,
-            max_tokens,
-            &mut token_count,
-        )?);
-        pending.clear();
-        return Ok((ready, pending));
-    }
-
-    if token_count(&pending)? > max_tokens {
+    if !pending.is_empty() && token_count(&pending)? > max_tokens {
         let chunks = split_at_natural_boundaries(&pending, max_tokens, &mut token_count)?;
         if chunks.len() > 1 {
             let stable_count = chunks.len() - 1;
@@ -936,64 +916,6 @@ where
     }
 
     Ok((ready, pending))
-}
-
-fn first_stable_paragraph_end(text: &str) -> Option<usize> {
-    let mut saw_line_break = false;
-    for (offset, ch) in text.char_indices() {
-        if ch == '\n' {
-            if saw_line_break {
-                let separator_end = offset + ch.len_utf8();
-                let mut end = separator_end;
-                while text[end..].chars().next().is_some_and(char::is_whitespace) {
-                    end += text[end..]
-                        .chars()
-                        .next()
-                        .expect("checked above")
-                        .len_utf8();
-                }
-                if end == text.len() {
-                    return None;
-                }
-                if starts_markdown_list_item(text)
-                    && (starts_markdown_list_item(&text[end..])
-                        || next_block_is_indented(text, separator_end, end))
-                {
-                    saw_line_break = false;
-                    continue;
-                }
-                return Some(end);
-            }
-            saw_line_break = true;
-        } else if !ch.is_whitespace() {
-            saw_line_break = false;
-        }
-    }
-    None
-}
-
-fn next_block_is_indented(text: &str, separator_end: usize, content_start: usize) -> bool {
-    let line_start = text[separator_end..content_start]
-        .rfind('\n')
-        .map_or(separator_end, |offset| separator_end + offset + 1);
-    let indentation = &text[line_start..content_start];
-    indentation.contains('\t') || indentation.chars().filter(|ch| *ch == ' ').count() >= 2
-}
-
-fn starts_markdown_list_item(text: &str) -> bool {
-    let line = text.trim_start();
-    if line.starts_with("- ") || line.starts_with("* ") || line.starts_with("+ ") {
-        return true;
-    }
-    let marker_end = line
-        .char_indices()
-        .take_while(|(_, ch)| ch.is_ascii_digit())
-        .last()
-        .map(|(offset, ch)| offset + ch.len_utf8());
-    marker_end.is_some_and(|end| {
-        matches!(line[end..].chars().next(), Some('.' | ')'))
-            && line[end + 1..].starts_with(char::is_whitespace)
-    })
 }
 
 fn natural_boundary(candidate: &str, is_end_of_text: bool) -> TextBoundary {

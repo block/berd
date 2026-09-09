@@ -120,9 +120,7 @@ struct LedgerSegment {
     text: String,
     total_frames: u64,
     trailing_silence_frames: u64,
-    measured_trailing_quiet_frames: u64,
-    quiet_window_sum_squares: f64,
-    quiet_window_frames: usize,
+    trailing_quiet: TrailingQuietMeter,
     synthesis_complete: bool,
 }
 
@@ -130,6 +128,60 @@ struct LedgerSegment {
 // measurements while tolerating quiet nonzero padding from cloud synthesis.
 const QUIET_PCM_WINDOWS_PER_SECOND: usize = 200;
 const QUIET_PCM_RMS_THRESHOLD: f64 = 0.01;
+
+#[derive(Debug)]
+struct TrailingQuietMeter {
+    window_frames: usize,
+    measured_frames: u64,
+    window_sum_squares: f64,
+    buffered_frames: usize,
+}
+
+impl TrailingQuietMeter {
+    fn new(sample_rate: u32) -> Self {
+        Self {
+            window_frames: ((sample_rate as usize) / QUIET_PCM_WINDOWS_PER_SECOND).max(1),
+            measured_frames: 0,
+            window_sum_squares: 0.0,
+            buffered_frames: 0,
+        }
+    }
+
+    fn push(&mut self, samples: &[f32]) {
+        for sample in samples {
+            self.window_sum_squares += f64::from(*sample).powi(2);
+            self.buffered_frames += 1;
+            if self.buffered_frames == self.window_frames {
+                if self.buffered_window_is_quiet() {
+                    self.measured_frames = self
+                        .measured_frames
+                        .saturating_add(self.window_frames as u64);
+                } else {
+                    self.measured_frames = 0;
+                }
+                self.window_sum_squares = 0.0;
+                self.buffered_frames = 0;
+            }
+        }
+    }
+
+    fn measured_frames(&self) -> u64 {
+        if self.buffered_frames == 0 {
+            self.measured_frames
+        } else if self.buffered_window_is_quiet() {
+            self.measured_frames
+                .saturating_add(self.buffered_frames as u64)
+        } else {
+            0
+        }
+    }
+
+    fn buffered_window_is_quiet(&self) -> bool {
+        self.buffered_frames > 0
+            && (self.window_sum_squares / self.buffered_frames as f64).sqrt()
+                <= QUIET_PCM_RMS_THRESHOLD
+    }
+}
 
 impl DeliveryLedger {
     fn new(sample_rate: u32) -> Self {
@@ -144,9 +196,7 @@ impl DeliveryLedger {
             text,
             total_frames: 0,
             trailing_silence_frames: 0,
-            measured_trailing_quiet_frames: 0,
-            quiet_window_sum_squares: 0.0,
-            quiet_window_frames: 0,
+            trailing_quiet: TrailingQuietMeter::new(self.sample_rate),
             synthesis_complete: false,
         });
     }
@@ -154,23 +204,7 @@ impl DeliveryLedger {
     fn append_frames(&mut self, samples: &[f32]) {
         if let Some(segment) = self.segments.last_mut() {
             segment.total_frames = segment.total_frames.saturating_add(samples.len() as u64);
-            let window_frames = ((self.sample_rate as usize) / QUIET_PCM_WINDOWS_PER_SECOND).max(1);
-            for sample in samples {
-                segment.quiet_window_sum_squares += f64::from(*sample).powi(2);
-                segment.quiet_window_frames += 1;
-                if segment.quiet_window_frames == window_frames {
-                    let rms = (segment.quiet_window_sum_squares / window_frames as f64).sqrt();
-                    if rms.is_finite() && rms <= QUIET_PCM_RMS_THRESHOLD {
-                        segment.measured_trailing_quiet_frames = segment
-                            .measured_trailing_quiet_frames
-                            .saturating_add(window_frames as u64);
-                    } else {
-                        segment.measured_trailing_quiet_frames = 0;
-                    }
-                    segment.quiet_window_sum_squares = 0.0;
-                    segment.quiet_window_frames = 0;
-                }
-            }
+            segment.trailing_quiet.push(samples);
         }
     }
 
@@ -190,20 +224,11 @@ impl DeliveryLedger {
 
     fn missing_trailing_silence_frames(&self, target_frames: u64) -> u64 {
         self.segments.last().map_or(target_frames, |segment| {
-            let partial_window_is_quiet = segment.quiet_window_frames > 0
-                && (segment.quiet_window_sum_squares / segment.quiet_window_frames as f64).sqrt()
-                    <= QUIET_PCM_RMS_THRESHOLD;
-            let measured_trailing_quiet_frames = if partial_window_is_quiet {
-                segment
-                    .measured_trailing_quiet_frames
-                    .saturating_add(segment.quiet_window_frames as u64)
-            } else if segment.quiet_window_frames > 0 {
-                0
-            } else {
-                segment.measured_trailing_quiet_frames
-            };
             target_frames.saturating_sub(
-                measured_trailing_quiet_frames.saturating_add(segment.trailing_silence_frames),
+                segment
+                    .trailing_quiet
+                    .measured_frames()
+                    .saturating_add(segment.trailing_silence_frames),
             )
         })
     }
@@ -918,22 +943,20 @@ mod tests {
 
     #[test]
     fn silence_floor_counts_quiet_nonzero_provider_padding() {
-        let mut ledger = DeliveryLedger::new(1_000);
-        ledger.begin_segment("one".into());
-        ledger.append_frames(&[0.2; 5]);
-        ledger.append_frames(&[0.005; 10]);
+        let mut meter = TrailingQuietMeter::new(1_000);
+        meter.push(&[0.2; 5]);
+        meter.push(&[0.005; 10]);
 
-        assert_eq!(ledger.missing_trailing_silence_frames(10), 0);
+        assert_eq!(meter.measured_frames(), 10);
     }
 
     #[test]
     fn trailing_non_quiet_partial_window_resets_measured_padding() {
-        let mut ledger = DeliveryLedger::new(1_000);
-        ledger.begin_segment("one".into());
-        ledger.append_frames(&[0.0; 10]);
-        ledger.append_frames(&[0.5]);
+        let mut meter = TrailingQuietMeter::new(1_000);
+        meter.push(&[0.0; 10]);
+        meter.push(&[0.5]);
 
-        assert_eq!(ledger.missing_trailing_silence_frames(10), 10);
+        assert_eq!(meter.measured_frames(), 0);
     }
 
     #[test]

@@ -20,6 +20,8 @@ use std::sync::Mutex;
 
 use sherpa_onnx::Wave;
 
+use crate::tts::StreamingTextChunks;
+
 #[path = "pocket_april.rs"]
 mod pocket_april;
 use pocket_april::{prepare_april_prompt, AprilPocketTts};
@@ -28,20 +30,6 @@ use pocket_april::{prepare_april_prompt, AprilPocketTts};
 pub const SAMPLE_RATE: u32 = 24_000;
 
 const TTS_NUM_THREADS: usize = 1;
-
-/// Drain complete paragraphs from text that may still be growing.
-///
-/// The common policy keeps an incomplete paragraph intact until the stream is
-/// flushed. Backends with provider limits can apply a stricter splitter.
-pub fn take_streaming_text_chunks(text: &str, flush: bool) -> Result<StreamingTextChunks, String> {
-    let (ready, pending) = pocket_april::take_streaming_chunks_at_paragraph_boundaries(
-        text,
-        usize::MAX,
-        flush,
-        |_| Ok(0),
-    )?;
-    Ok(StreamingTextChunks { ready, pending })
-}
 
 thread_local! {
     static ACTIVE_SYNTHESIS_ENGINES: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
@@ -139,13 +127,6 @@ pub struct PocketTts {
     inner: Mutex<AprilPocketTts>,
 }
 
-/// Stable synthesis units drained from a growing assistant response.
-#[derive(Debug, PartialEq, Eq)]
-pub struct StreamingTextChunks {
-    pub ready: Vec<String>,
-    pub pending: String,
-}
-
 /// Load Berd's pinned April INT8 model.
 pub fn load_text_to_speech(model_dir: &str) -> Result<PocketTts, String> {
     let dir = Path::new(model_dir);
@@ -161,7 +142,7 @@ impl PocketTts {
     /// stays pending unless it exceeds Pocket's exact model token limit, when
     /// stable natural chunks are returned and the growing tail remains held.
     /// `flush` makes the tail ready at a response or tool boundary.
-    pub fn take_streaming_text_chunks(
+    pub(crate) fn take_streaming_text_chunks(
         &self,
         text: &str,
         flush: bool,

@@ -4,9 +4,10 @@ use std::time::Duration;
 
 use crate::openai::{stream_openai_pcm, OpenAiPcmOutcome, OpenAiSpeechConfig};
 use crate::{
-    load_pocket_voice_style, load_text_to_speech, take_streaming_text_chunks, PocketTts,
-    StreamingTextChunks, VoiceStyle, SAMPLE_RATE,
+    load_pocket_voice_style, load_text_to_speech, PocketTts, VoiceStyle, SAMPLE_RATE,
 };
+
+const OPENAI_MAX_TTS_INPUT_CHARS: usize = 4096;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TtsPcmSpec {
@@ -25,6 +26,139 @@ pub enum TtsSynthesisEvent<'a> {
     /// A lifecycle polling opportunity while synthesis is blocked waiting for
     /// more PCM or a terminal provider result.
     Poll,
+}
+
+/// Stable synthesis units drained from a growing assistant response.
+#[derive(Debug, PartialEq, Eq)]
+pub struct StreamingTextChunks {
+    pub ready: Vec<String>,
+    pub pending: String,
+}
+
+/// Drain complete speech blocks while retaining text that may still grow.
+///
+/// A speech block is one prose paragraph or one whole Markdown list, including
+/// adjacent list items and their indented explanations. A possible list marker
+/// at the streaming tail remains pending until it can be classified.
+pub(crate) fn take_streaming_text_chunks(text: &str, flush: bool) -> StreamingTextChunks {
+    let mut pending = text.trim_start().to_string();
+    let mut ready = Vec::new();
+
+    while let Some(end) = first_stable_speech_block_end(&pending) {
+        ready.push(pending[..end].to_string());
+        pending = pending[end..].trim_start().to_string();
+    }
+
+    if flush && !pending.is_empty() {
+        ready.push(std::mem::take(&mut pending));
+    }
+
+    StreamingTextChunks { ready, pending }
+}
+
+fn first_stable_speech_block_end(text: &str) -> Option<usize> {
+    let mut saw_line_break = false;
+    for (offset, ch) in text.char_indices() {
+        if ch == '\n' {
+            if saw_line_break {
+                let separator_end = offset + ch.len_utf8();
+                let mut end = separator_end;
+                while text[end..].chars().next().is_some_and(char::is_whitespace) {
+                    end += text[end..]
+                        .chars()
+                        .next()
+                        .expect("checked above")
+                        .len_utf8();
+                }
+                if end == text.len() {
+                    return None;
+                }
+                if starts_markdown_list_item(text)
+                    && (starts_markdown_list_item(&text[end..])
+                        || could_be_incomplete_markdown_list_marker(&text[end..])
+                        || next_block_is_indented(text, separator_end, end))
+                {
+                    saw_line_break = false;
+                    continue;
+                }
+                return Some(end);
+            }
+            saw_line_break = true;
+        } else if !ch.is_whitespace() {
+            saw_line_break = false;
+        }
+    }
+    None
+}
+
+fn next_block_is_indented(text: &str, separator_end: usize, content_start: usize) -> bool {
+    let line_start = text[separator_end..content_start]
+        .rfind('\n')
+        .map_or(separator_end, |offset| separator_end + offset + 1);
+    let indentation = &text[line_start..content_start];
+    indentation.contains('\t') || indentation.chars().filter(|ch| *ch == ' ').count() >= 2
+}
+
+fn starts_markdown_list_item(text: &str) -> bool {
+    let line = text.trim_start();
+    if line.starts_with("- ") || line.starts_with("* ") || line.starts_with("+ ") {
+        return true;
+    }
+    let marker_end = line
+        .char_indices()
+        .take_while(|(_, ch)| ch.is_ascii_digit())
+        .last()
+        .map(|(offset, ch)| offset + ch.len_utf8());
+    marker_end.is_some_and(|end| {
+        matches!(line[end..].chars().next(), Some('.' | ')'))
+            && line[end + 1..].starts_with(char::is_whitespace)
+    })
+}
+
+fn could_be_incomplete_markdown_list_marker(text: &str) -> bool {
+    let line = text.trim_start();
+    if matches!(line, "-" | "*" | "+") {
+        return true;
+    }
+    let digits = line.bytes().take_while(|byte| byte.is_ascii_digit()).count();
+    digits > 0
+        && (digits == line.len()
+            || (digits + 1 == line.len()
+                && matches!(line.as_bytes().get(digits), Some(b'.' | b')'))))
+}
+
+fn split_at_char_limit(text: &str, max_chars: usize) -> Vec<String> {
+    debug_assert!(max_chars > 0);
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    while start < text.len() {
+        let end = text[start..]
+            .char_indices()
+            .nth(max_chars)
+            .map_or(text.len(), |(offset, _)| start + offset);
+        let chunk = text[start..end].trim();
+        if !chunk.is_empty() {
+            chunks.push(chunk.to_string());
+        }
+        start = end;
+    }
+    chunks
+}
+
+fn apply_char_limit(mut split: StreamingTextChunks, max_chars: usize) -> StreamingTextChunks {
+    split.ready = split
+        .ready
+        .into_iter()
+        .flat_map(|text| split_at_char_limit(&text, max_chars))
+        .collect();
+    if split.pending.chars().count() > max_chars {
+        let mut chunks = split_at_char_limit(&split.pending, max_chars);
+        if let Some(pending) = chunks.pop() {
+            split.ready.extend(chunks);
+            split.pending = pending;
+        }
+    }
+    split
 }
 
 #[derive(Default)]
@@ -63,7 +197,7 @@ pub trait TtsBackend: Send + Sync {
         text: &str,
         flush: bool,
     ) -> Result<StreamingTextChunks, String> {
-        take_streaming_text_chunks(text, flush)
+        Ok(take_streaming_text_chunks(text, flush))
     }
 
     fn synthesize(
@@ -193,6 +327,17 @@ impl TtsBackend for OpenAiTts {
         }
     }
 
+    fn take_streaming_text_chunks(
+        &self,
+        text: &str,
+        flush: bool,
+    ) -> Result<StreamingTextChunks, String> {
+        Ok(apply_char_limit(
+            take_streaming_text_chunks(text, flush),
+            OPENAI_MAX_TTS_INPUT_CHARS,
+        ))
+    }
+
     fn synthesize(
         &self,
         text: &str,
@@ -218,7 +363,10 @@ impl TtsBackend for OpenAiTts {
 
 #[cfg(test)]
 mod tests {
-    use super::{PocketTtsBackend, StreamingTtsText, TtsBackend, TtsOutcome, TtsPcmSpec};
+    use super::{
+        apply_char_limit, take_streaming_text_chunks, PocketTtsBackend, StreamingTextChunks,
+        StreamingTtsText, TtsBackend, TtsOutcome, TtsPcmSpec,
+    };
     use std::path::Path;
     use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -271,6 +419,37 @@ mod tests {
         );
         assert_eq!(text.flush(&backend).unwrap(), ["The light remained"]);
         assert!(text.flush(&backend).unwrap().is_empty());
+    }
+
+    #[test]
+    fn streaming_text_waits_for_a_partial_list_marker() {
+        let split = take_streaming_text_chunks("- First.\n\n-", false);
+
+        assert!(split.ready.is_empty());
+        assert_eq!(split.pending, "- First.\n\n-");
+
+        let split = take_streaming_text_chunks("1. First.\n\n2.", false);
+
+        assert!(split.ready.is_empty());
+        assert_eq!(split.pending, "1. First.\n\n2.");
+
+        let split = take_streaming_text_chunks("- First.\n\n- Second.\n\nAfter", false);
+        assert_eq!(split.ready, ["- First.\n\n- Second.\n\n"]);
+        assert_eq!(split.pending, "After");
+    }
+
+    #[test]
+    fn provider_character_limit_releases_only_stable_overflow() {
+        let split = apply_char_limit(
+            StreamingTextChunks {
+                ready: vec!["12345678".into()],
+                pending: "abcdéfg".into(),
+            },
+            4,
+        );
+
+        assert_eq!(split.ready, ["1234", "5678", "abcd"]);
+        assert_eq!(split.pending, "éfg");
     }
 
     #[test]

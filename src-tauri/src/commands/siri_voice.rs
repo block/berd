@@ -138,6 +138,8 @@ const SIRI_OUTPUT_DRAIN_MARGIN: Duration = Duration::from_secs(60);
 #[cfg(target_os = "macos")]
 const PLAYBACK_PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
 #[cfg(any(test, target_os = "macos"))]
+// Separate Siri synthesis requests lose part of the natural paragraph pause,
+// so add the measured deficit rather than treating existing PCM as the target.
 const SIRI_INTER_PARAGRAPH_BASE_SILENCE: Duration = Duration::from_millis(250);
 const MIN_PLAYBACK_SPEED: f32 = 0.5;
 const MAX_PLAYBACK_SPEED: f32 = 2.0;
