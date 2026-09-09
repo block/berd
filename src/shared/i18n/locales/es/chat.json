@@ -1,7 +1,7 @@
 {
   "remoteSessionUnavailable": {
     "title": "Esta sesión ya no está disponible",
-    "description": "Este chat ya no está disponible en el servidor remoto. Aquí se muestran los mensajes que siguen en la caché de esta aplicación. Inicia un chat nuevo para continuar."
+    "description": "Este chat ya no está disponible en el servidor remoto. Los mensajes que siguen disponibles se muestran arriba, pero pueden desaparecer al reiniciar Berd. Guarda la información importante antes de cerrar la aplicación. Inicia un chat nuevo para continuar."
   },
   "attachments": {
     "alt": "Adjunto {{index}}",

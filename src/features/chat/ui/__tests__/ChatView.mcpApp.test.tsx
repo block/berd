@@ -20,8 +20,11 @@ import { useSecurityConfirmationStore } from "@/features/security/stores/securit
 import { DEFAULT_RUNTIME_CONFIG } from "@/shared/runtime-config/schema";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import { ChatView } from "../ChatView";
+import { isQueuedMessageTargetAttemptable } from "../../lib/queuedMessageAttemptOwnership";
+import type { QueuedMessageRecord } from "../../stores/chatStore";
 
 const mocks = vi.hoisted(() => ({
+  sessions: [] as ChatSession[],
   messageTimelineSpy: vi.fn(),
   chatInputSpy: vi.fn(),
   chatRightRailSpy: vi.fn(),
@@ -324,6 +327,7 @@ vi.mock("../../hooks/useChatSessionController", () => ({
 vi.mock("../../stores/chatSessionStore", () => ({
   useChatSessionStore: (selector: (state: unknown) => unknown) =>
     selector({
+      sessions: mocks.sessions,
       activeWorkspaceBySession: mocks.activeWorkspaceBySession,
       isRightRailOpen: mocks.isRightRailOpen,
       setRightRailOpen: mocks.setRightRailOpen,
@@ -444,6 +448,7 @@ describe("ChatView MCP app messaging", () => {
   });
 
   beforeEach(() => {
+    mocks.sessions = [];
     mocks.messageTimelineSpy.mockClear();
     mocks.chatInputSpy.mockClear();
     mocks.chatRightRailSpy.mockClear();
@@ -591,7 +596,7 @@ describe("ChatView MCP app messaging", () => {
     expect(screen.getAllByTestId("artifact-policy-provider")).toHaveLength(1);
   });
 
-  it("keys the artifact policy provider by the controller's effective session, not the requested id", () => {
+  it("keys the artifact policy provider by the selected replacement session, not the requested id", () => {
     // During session replacement/reconciliation the requested sessionId can
     // briefly disagree with the session snapshot the controller serves. The
     // provider governs filesystem policy and viewer-store identity for its
@@ -616,7 +621,10 @@ describe("ChatView MCP app messaging", () => {
     render(
       <ChatView
         sessionId="session-requested"
-        activeSession={chatSessionWithWorkingDir("/tmp/project")}
+        activeSession={{
+          ...chatSessionWithWorkingDir("/tmp/project"),
+          id: "session-effective",
+        }}
       />,
     );
 
@@ -659,7 +667,10 @@ describe("ChatView MCP app messaging", () => {
     const { unmount } = render(
       <ChatView
         sessionId="session-requested"
-        activeSession={chatSessionWithWorkingDir("/tmp/project")}
+        activeSession={{
+          ...chatSessionWithWorkingDir("/tmp/project"),
+          id: "session-effective",
+        }}
       />,
     );
 
@@ -682,7 +693,10 @@ describe("ChatView MCP app messaging", () => {
     render(
       <ChatView
         sessionId="session-requested"
-        activeSession={chatSessionWithWorkingDir("/tmp/project")}
+        activeSession={{
+          ...chatSessionWithWorkingDir("/tmp/project"),
+          id: "session-effective",
+        }}
       />,
     );
     const chatColumnAfter = document.querySelector(
@@ -759,6 +773,62 @@ describe("ChatView MCP app messaging", () => {
     expect(
       screen.queryByRole("button", { name: /restore|copy/i }),
     ).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [true, false],
+    [false, false],
+    [true, true],
+    [false, true],
+  ])("uses the current whole session (unavailable=%s, replacement=%s)", (unavailable, replacement) => {
+    const current: ChatSession = {
+      ...chatSessionWithWorkingDir("/remote/current"),
+      id: replacement ? "replacement-session" : "session-1",
+      remoteHost: "remote-server",
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "openai",
+        modelId: "test-model",
+        modelName: "Test model",
+      },
+      ...(unavailable ? { remoteSessionUnavailable: true } : {}),
+    };
+    mocks.sessions = replacement
+      ? [
+          {
+            ...current,
+            id: "session-1",
+            remoteSessionUnavailable: !unavailable,
+          },
+          current,
+        ]
+      : [current];
+    mocks.useChatSessionController.mockReturnValue({
+      ...mocks.useChatSessionController(),
+      session: current,
+    });
+    render(
+      <ChatView
+        sessionId="session-1"
+        activeSession={{ ...current, remoteSessionUnavailable: !unavailable }}
+      />,
+    );
+    expect(Boolean(screen.queryByText("remoteSessionUnavailable.title"))).toBe(
+      unavailable,
+    );
+    expect(mocks.useChatSessionController).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sessionId: current.id, readOnly: unavailable }),
+    );
+    expect(
+      isQueuedMessageTargetAttemptable(
+        { kind: "transport-ready", editing: false } as QueuedMessageRecord,
+        current,
+      ),
+    ).toBe(!unavailable);
+    expect(screen.getByTestId("artifact-viewer-panel")).toHaveAttribute(
+      "data-session-id",
+      current.id,
+    );
   });
 
   it("does not pass fork-from-message in read-only mode", () => {

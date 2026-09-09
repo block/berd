@@ -53,6 +53,14 @@ test("unavailable notice stays readable without recovery actions", async ({
         : "Esta sesión ya no está disponible",
     );
     await expect(notice.getByRole("button")).toHaveCount(0);
+    await expect(notice).toContainText(
+      lang === "en" ? "shown above" : "se muestran arriba",
+    );
+    await expect(notice).toContainText(
+      lang === "en"
+        ? "may disappear when you restart Berd"
+        : "pueden desaparecer al reiniciar Berd",
+    );
     for (const width of [360, 800]) {
       await page.setViewportSize({ width, height: 400 });
       expect(

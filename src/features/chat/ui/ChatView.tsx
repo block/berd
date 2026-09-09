@@ -129,19 +129,24 @@ export function ChatView({
   onAgentBuilderCompleted,
 }: ChatViewProps) {
   const { t } = useTranslation("chat");
-  const remoteSessionUnavailable = useChatSessionStore(
+  const targetSessionId = activeSession?.id ?? sessionId;
+  const storedSession = useChatSessionStore(
     (state) =>
-      state.sessions?.find((session) => session.id === sessionId)
-        ?.remoteSessionUnavailable ??
-      activeSession?.remoteSessionUnavailable ??
-      false,
+      state.sessions?.find((session) => session.id === targetSessionId) ?? null,
+  );
+  // Resolve the entire snapshot, not individual flags from different revisions.
+  // The controller and queue also read the current store record for this id.
+  const selectedSession = storedSession ?? activeSession ?? null;
+  const selectedSessionId = selectedSession?.id ?? sessionId;
+  const remoteSessionUnavailable = Boolean(
+    selectedSession?.remoteSessionUnavailable,
   );
   const readOnlyStatus =
     assertedReadOnlyStatus ??
     (remoteSessionUnavailable
       ? t("remoteSessionUnavailable.description")
       : undefined);
-  useRegisterSecurityConfirmationSurface(sessionId);
+  useRegisterSecurityConfirmationSurface(selectedSessionId);
   const mountStart = useRef(performance.now());
   const terminalRootRef = useRef<HTMLDivElement | null>(null);
   const chatColumnRef = useRef<HTMLDivElement | null>(null);
@@ -160,8 +165,8 @@ export function ChatView({
   const composerBinding = useConversationComposerBinding({
     target: {
       kind: "existingSession",
-      sessionId,
-      sessionSnapshot: activeSession,
+      sessionId: selectedSessionId,
+      sessionSnapshot: selectedSession,
       readOnlyReason: readOnlyStatus,
     },
     onCreatePersonaRequested: onCreatePersona,
@@ -217,10 +222,9 @@ export function ChatView({
     sessionId,
   ]);
   const workspaceRepository = useWorkspaceRepository();
-  const effectiveSession = controller.session ?? activeSession ?? null;
-  // The effective session identity: during session replacement or
-  // reconciliation the requested sessionId can briefly disagree with the
-  // snapshot the controller serves. Every artifact-store read/write and
+  const effectiveSession = selectedSession;
+  // During replacement the supplied snapshot can already have the new id.
+  // The composer/controller target and every artifact-store read/write and
   // every layout decision derived from viewer state must use THIS id, so
   // the panel, the policy provider, and the width math all describe the
   // same store entry. (Audited: all useOpenArtifact call sites in ChatView.)
