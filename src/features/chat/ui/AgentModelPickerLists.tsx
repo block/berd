@@ -827,13 +827,16 @@ export const RecommendedModelList = forwardRef<
                         ) : null}
                         <div className="flex min-w-0 flex-1 items-baseline gap-1.5 overflow-hidden">
                           <span
-                            className="min-w-0 truncate"
+                            className="min-w-0 flex-1 truncate"
                             title={getModelDisplayName(model)}
                           >
                             {getModelDisplayName(model)}
                           </span>
                           {foreignAgentLabel ? (
-                            <span className="shrink-0 text-xs text-muted-foreground">
+                            <span
+                              className="min-w-0 max-w-[40%] shrink-0 truncate text-xs text-muted-foreground"
+                              title={foreignAgentLabel}
+                            >
                               {foreignAgentLabel}
                             </span>
                           ) : null}

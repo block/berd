@@ -2434,6 +2434,66 @@ describe("AgentModelPicker starred models", () => {
     ).toBe("1");
   });
 
+  it("bounds long foreign-agent metadata in the compact picker and preserves both names", async () => {
+    const agentLabel =
+      "Custom localized engineering assistant with a very long name";
+    const model = {
+      id: "long-foreign-model",
+      name: "databricks-gpt-5-4-nano-preview-super-long-model-name",
+    };
+    seedStar("custom-agent", model.id);
+    __resetStarredModelsCacheForTests();
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        providerColumnMode="gated"
+        agents={[...AGENTS, { id: "custom-agent", label: agentLabel }]}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="preferred"
+        currentModelName="Preferred"
+        availableModels={models}
+        favoriteModels={[{ agentId: "custom-agent", model }]}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    const picker = screen.getByRole("dialog");
+    const modelButton = within(picker).getByRole("button", {
+      name: `${model.name}, ${agentLabel}`,
+    });
+    const primaryLabel = within(modelButton).getByText(model.name);
+    const secondaryLabel = within(modelButton).getByText(agentLabel);
+
+    // jsdom cannot measure layout. Pin the responsive width and flex/truncation
+    // contract: metadata gets at most 40%; the model gets the remaining space.
+    expect(picker).toHaveClass("w-[min(28.25rem,calc(100vw-1.5rem))]");
+    expect(modelButton).toHaveClass("min-w-0", "flex-1", "overflow-hidden");
+    expect(primaryLabel.parentElement).toHaveClass(
+      "min-w-0",
+      "flex-1",
+      "overflow-hidden",
+    );
+    expect(primaryLabel).toHaveClass("min-w-0", "flex-1", "truncate");
+    expect(secondaryLabel).toHaveClass(
+      "min-w-0",
+      "max-w-[40%]",
+      "shrink-0",
+      "truncate",
+      "text-xs",
+    );
+    expect(primaryLabel).toHaveAttribute("title", model.name);
+    expect(secondaryLabel).toHaveAttribute("title", agentLabel);
+    expect(
+      within(picker).getByRole("button", {
+        name: `Unstar ${model.name}, ${agentLabel}`,
+      }),
+    ).toBeInTheDocument();
+  });
+
   it("sorts favorites alphabetically across agents and providers", async () => {
     seedStar("claude-acp", "zebra");
     seedStar("goose", "alpha");
