@@ -1,4 +1,4 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useChatStore } from "../../stores/chatStore";
@@ -464,10 +464,12 @@ describe("useChat", () => {
       firstPromptDeferred.resolve();
       await firstSendPromise;
     });
-    expect(
-      useChatStore.getState().messagesBySession["session-1"]?.[1]?.metadata
-        ?.completionStatus,
-    ).toBe("completed");
+    await waitFor(() =>
+      expect(
+        useChatStore.getState().messagesBySession["session-1"]?.[1]?.metadata
+          ?.completionStatus,
+      ).toBe("completed"),
+    );
     expect(
       useChatStore.getState().messagesBySession["session-1"]?.[3]?.metadata
         ?.completionStatus,
@@ -515,10 +517,12 @@ describe("useChat", () => {
       cancelDeferred.resolve(false);
       await cancelDeferred.promise;
     });
-    expect(
-      useChatStore.getState().messagesBySession["session-1"]?.[1]?.metadata
-        ?.completionStatus,
-    ).toBe("completed");
+    await waitFor(() =>
+      expect(
+        useChatStore.getState().messagesBySession["session-1"]?.[1]?.metadata
+          ?.completionStatus,
+      ).toBe("completed"),
+    );
   });
 
   it("completes the settled assistant when cancellation rejects", async () => {
@@ -562,10 +566,12 @@ describe("useChat", () => {
       }
       await Promise.resolve();
     });
-    expect(
-      useChatStore.getState().messagesBySession["session-1"]?.[1]?.metadata
-        ?.completionStatus,
-    ).toBe("completed");
+    await waitFor(() =>
+      expect(
+        useChatStore.getState().messagesBySession["session-1"]?.[1]?.metadata
+          ?.completionStatus,
+      ).toBe("completed"),
+    );
   });
 
   it("marks the streaming assistant completed when the prompt settles", async () => {
@@ -593,10 +599,12 @@ describe("useChat", () => {
       await sendPromise;
     });
 
-    expect(
-      useChatStore.getState().messagesBySession["session-1"]?.[1]?.metadata
-        ?.completionStatus,
-    ).toBe("completed");
+    await waitFor(() =>
+      expect(
+        useChatStore.getState().messagesBySession["session-1"]?.[1]?.metadata
+          ?.completionStatus,
+      ).toBe("completed"),
+    );
   });
 
   it("preserves a newer assistant when the final flush changes prompt ownership", async () => {
@@ -639,13 +647,19 @@ describe("useChat", () => {
       await sendPromise;
     });
 
+    await waitFor(() =>
+      expect(
+        useChatStore
+          .getState()
+          .messagesBySession["session-1"].find(
+            (message) => message.id === "assistant-1",
+          ),
+      ).toMatchObject({
+        content: [{ type: "text", text: "final text" }],
+        metadata: { completionStatus: "completed" },
+      }),
+    );
     const messages = useChatStore.getState().messagesBySession["session-1"];
-    expect(
-      messages.find((message) => message.id === "assistant-1"),
-    ).toMatchObject({
-      content: [{ type: "text", text: "final text" }],
-      metadata: { completionStatus: "completed" },
-    });
     expect(
       messages.find((message) => message.id === "assistant-2")?.metadata
         ?.completionStatus,
@@ -682,9 +696,11 @@ describe("useChat", () => {
       await sendPromise;
     });
 
-    const runtime = useChatStore.getState().getSessionRuntime("session-1");
-    expect(runtime.activeRunId).toBeNull();
-    expect(runtime.isRunCancellationPending).toBe(false);
+    await waitFor(() => {
+      const runtime = useChatStore.getState().getSessionRuntime("session-1");
+      expect(runtime.activeRunId).toBeNull();
+      expect(runtime.isRunCancellationPending).toBe(false);
+    });
   });
 
   it("does not mark a newer follow-up idle when the stopped prompt settles", async () => {
@@ -938,9 +954,11 @@ describe("useChat", () => {
       await secondSendPromise;
     });
 
-    runtime = useChatStore.getState().getSessionRuntime("session-1");
-    expect(runtime.activeRunId).toBeNull();
-    expect(runtime.isRunCancellationPending).toBe(false);
+    await waitFor(() => {
+      runtime = useChatStore.getState().getSessionRuntime("session-1");
+      expect(runtime.activeRunId).toBeNull();
+      expect(runtime.isRunCancellationPending).toBe(false);
+    });
   });
 
   it("keeps cancellation pending after stopping a streaming run without active run metadata", async () => {

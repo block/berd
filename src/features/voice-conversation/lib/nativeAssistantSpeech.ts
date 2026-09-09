@@ -1007,7 +1007,7 @@ export function startNativeAssistantSpeech(
   const causalTranscriptKeyByMessage = new Map<string, string | null>();
   const transcriptReferenceByKey = new Map<string, VoiceTranscriptReference>();
   const invalidatedMessages = new Set<string>();
-  const completedMessages = new Set<string>();
+  const handledCompletionMessages = new Set<string>();
   const interruptedMessages = new Set<string>();
   const failedMessages = new Set<string>();
   const interruptionCauseByMessage = new Map<string, InterruptionCause>();
@@ -1033,7 +1033,7 @@ export function startNativeAssistantSpeech(
         .length,
     );
     if (message.metadata?.completionStatus === "completed") {
-      completedMessages.add(message.id);
+      handledCompletionMessages.add(message.id);
     }
     let textOrdinal = 0;
     for (const content of message.content) {
@@ -1219,7 +1219,7 @@ export function startNativeAssistantSpeech(
         targetKey(target),
         content.text.slice(0, safeLocalCutoff),
       );
-      completedMessages.delete(target.messageId);
+      handledCompletionMessages.delete(target.messageId);
     }
     resumableInterruption = null;
     interruptionReleaseReady = false;
@@ -1486,9 +1486,9 @@ export function startNativeAssistantSpeech(
       ).length;
       const priorToolCount = toolCountByMessage.get(message.id) ?? 0;
       const crossedToolBoundary = toolCount > priorToolCount;
-      const completed =
+      const completionPending =
         message.metadata?.completionStatus === "completed" &&
-        !completedMessages.has(message.id);
+        !handledCompletionMessages.has(message.id);
       let textOrdinal = 0;
       for (const content of message.content) {
         if (content.type !== "text") continue;
@@ -1644,10 +1644,10 @@ export function startNativeAssistantSpeech(
         failedMessages.has(message.id) ||
         interruptedMessages.has(message.id) ||
         invalidatedMessages.has(message.id);
-      if (utteranceOwnsMessage || messageCannotSpeak) {
-        toolCountByMessage.set(message.id, toolCount);
-        if (completed) completedMessages.add(message.id);
-      }
+      toolCountByMessage.set(message.id, toolCount);
+      const completionHandled =
+        completionPending &&
+        (messageCannotSpeak || Boolean(utteranceOwnsMessage));
       if (
         crossedToolBoundary &&
         utterance &&
@@ -1662,7 +1662,7 @@ export function startNativeAssistantSpeech(
         );
       }
       if (
-        completed &&
+        completionPending &&
         utterance &&
         utteranceOwnsMessage &&
         !utterance.nativeStartQueued
@@ -1675,10 +1675,8 @@ export function startNativeAssistantSpeech(
           heldReleaseReady = false;
         }
         activeUtterance = null;
-        continue;
-      }
-      if (
-        completed &&
+      } else if (
+        completionPending &&
         utterance &&
         utteranceOwnsMessage &&
         !utterance.finishing
@@ -1689,6 +1687,11 @@ export function startNativeAssistantSpeech(
           () => streamBackend.finish(utterance.id),
           onFailure,
         );
+      }
+      // A completed tool-only message remains unhandled until later text can
+      // create an utterance for it.
+      if (completionHandled) {
+        handledCompletionMessages.add(message.id);
       }
     }
   };

@@ -737,6 +737,30 @@ describe("native assistant speech stream", () => {
     ).toMatchObject({ speech: { status: "spoken" } });
   });
 
+  it("does not flush the first text chunk when a tool preceded it", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    const toolRequest = {
+      type: "toolRequest" as const,
+      id: "tool-1",
+      name: "todo_write",
+      arguments: {},
+      status: "completed" as const,
+    };
+    useChatStore
+      .getState()
+      .setMessages("session-1", [assistant([toolRequest])]);
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([toolRequest, { type: "text", text: "Mara" }]),
+      ]);
+
+    await vi.waitFor(() =>
+      expect(mocks.append).toHaveBeenCalledWith(expect.any(String), "Mara"),
+    );
+    expect(mocks.flush).not.toHaveBeenCalled();
+  });
+
   it("serializes terminal idle behind the speaking activity report", async () => {
     let finishSpeakingReport: (() => void) | undefined;
     mocks.setAssistantSpeaking.mockImplementation(
