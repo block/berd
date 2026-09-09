@@ -91,11 +91,6 @@ impl StatusSoundStateMachine {
             volume: settings.volume,
         })
     }
-
-    pub fn clear(&mut self) {
-        self.current = None;
-        self.last_played = None;
-    }
 }
 
 /// Owns status cadence and cue playback for one running voice session.
@@ -115,7 +110,7 @@ impl Default for StatusSoundRuntime {
             next_tick: None,
             player: StatusSoundPlayer::default(),
             output_device: None,
-            playback_available: cfg!(target_os = "macos"),
+            playback_available: true,
         }
     }
 }
@@ -156,12 +151,6 @@ impl StatusSoundRuntime {
             }
         }
         Ok(())
-    }
-
-    pub fn clear(&mut self) {
-        self.machine.clear();
-        self.next_tick = None;
-        self.player.stop();
     }
 }
 

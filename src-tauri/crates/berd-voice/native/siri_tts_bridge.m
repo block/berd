@@ -1637,10 +1637,11 @@ float *berd_audio_file_load_mono_pcm(
         clientFormat.mSampleRate = sourceFormat.mSampleRate;
         clientFormat.mFormatID = kAudioFormatLinearPCM;
         clientFormat.mFormatFlags = kAudioFormatFlagsNativeFloatPacked;
-        clientFormat.mBytesPerPacket = sizeof(float);
+        uint32_t channelCount = sourceFormat.mChannelsPerFrame;
+        clientFormat.mBytesPerPacket = sizeof(float) * channelCount;
         clientFormat.mFramesPerPacket = 1;
-        clientFormat.mBytesPerFrame = sizeof(float);
-        clientFormat.mChannelsPerFrame = 1;
+        clientFormat.mBytesPerFrame = sizeof(float) * channelCount;
+        clientFormat.mChannelsPerFrame = channelCount;
         clientFormat.mBitsPerChannel = 8 * sizeof(float);
         if (status == noErr) {
             status = ExtAudioFileSetProperty(
@@ -1653,7 +1654,7 @@ float *berd_audio_file_load_mono_pcm(
             return NULL;
         }
         uint32_t capacity = (uint32_t)sourceFrames;
-        float *samples = malloc((size_t)capacity * sizeof(float));
+        float *samples = malloc((size_t)capacity * channelCount * sizeof(float));
         if (!samples) {
             ExtAudioFileDispose(file);
             BerdSetError(errorOut, BerdError(41, @"Could not allocate decoded audio samples."));
@@ -1661,8 +1662,8 @@ float *berd_audio_file_load_mono_pcm(
         }
         AudioBufferList buffers = {0};
         buffers.mNumberBuffers = 1;
-        buffers.mBuffers[0].mNumberChannels = 1;
-        buffers.mBuffers[0].mDataByteSize = capacity * sizeof(float);
+        buffers.mBuffers[0].mNumberChannels = channelCount;
+        buffers.mBuffers[0].mDataByteSize = capacity * channelCount * sizeof(float);
         buffers.mBuffers[0].mData = samples;
         UInt32 frameCount = capacity;
         status = ExtAudioFileRead(file, &frameCount, &buffers);
@@ -1671,6 +1672,15 @@ float *berd_audio_file_load_mono_pcm(
             free(samples);
             BerdSetError(errorOut, BerdError(42, @"Could not decode the audio file."));
             return NULL;
+        }
+        if (channelCount > 1) {
+            for (uint32_t frame = 0; frame < frameCount; frame++) {
+                float mixed = 0;
+                for (uint32_t channel = 0; channel < channelCount; channel++) {
+                    mixed += samples[frame * channelCount + channel];
+                }
+                samples[frame] = mixed / channelCount;
+            }
         }
         *sampleRateOut = (uint32_t)clientFormat.mSampleRate;
         *frameCountOut = frameCount;

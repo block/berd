@@ -1,4 +1,4 @@
-//! Safe ownership wrapper for the shared macOS AVAudioUnitTimePitch PCM player.
+//! Safe wrappers for the shared macOS audio FFI boundary.
 
 use std::ffi::{c_char, c_void, CStr};
 

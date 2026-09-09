@@ -1236,12 +1236,19 @@ fn run_management_command(command: ManagementCommand) -> Result<(), ManagementFa
     }
 }
 
-fn conversation_activity_suppresses_status_cues(
-    input_active: bool,
+fn standard_session_status_cues_suppressed(
+    user_speaking: bool,
     recognition_pending: bool,
-    output_active: bool,
+    assistant_output_active: bool,
 ) -> bool {
-    input_active || recognition_pending || output_active
+    user_speaking || recognition_pending || assistant_output_active
+}
+
+fn expert_session_status_cues_suppressed(
+    input_blocks_output: bool,
+    assistant_output_active: bool,
+) -> bool {
+    input_blocks_output || assistant_output_active
 }
 
 fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String> {
@@ -1338,7 +1345,7 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                 },
             )?;
         }
-        let conversation_active = conversation_activity_suppresses_status_cues(
+        let conversation_active = standard_session_status_cues_suppressed(
             core.user_speaking(),
             core.recognition_pending(),
             active.is_some(),
@@ -3336,9 +3343,8 @@ fn run_expert_spokesperson_session(
                 )?;
             }
         }
-        let conversation_active = conversation_activity_suppresses_status_cues(
+        let conversation_active = expert_session_status_cues_suppressed(
             turn_gate.input_blocks_output(),
-            false,
             active.is_some(),
         );
         if let Err(message) = status_sound_runtime.poll(conversation_active) {
