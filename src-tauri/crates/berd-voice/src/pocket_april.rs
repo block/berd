@@ -390,17 +390,12 @@ impl AprilPocketTts {
         text: &str,
         flush: bool,
     ) -> Result<crate::tts::StreamingTextChunks, String> {
-        split_streaming_text_for_pocket(
-            text,
-            self.bundle.max_token_per_chunk,
-            flush,
-            |candidate| {
-                let Some(prepared) = prepare_april_prompt(candidate) else {
-                    return Ok(0);
-                };
-                self.prepared_token_count(&prepared.text)
-            },
-        )
+        split_streaming_text_for_pocket(text, self.bundle.max_token_per_chunk, flush, |candidate| {
+            let Some(prepared) = prepare_april_prompt(candidate) else {
+                return Ok(0);
+            };
+            self.prepared_token_count(&prepared.text)
+        })
     }
 
     /// Return a fresh Flow LM state conditioned on the reference voice,
@@ -898,11 +893,7 @@ where
     let split = crate::tts::take_streaming_text_chunks(text, flush);
     let mut ready = Vec::new();
     for block in split.ready {
-        let pieces = split_at_natural_boundaries(
-            &block.text,
-            max_tokens,
-            &mut token_count,
-        )?;
+        let pieces = split_at_natural_boundaries(&block.text, max_tokens, &mut token_count)?;
         let last = pieces.len().saturating_sub(1);
         ready.extend(pieces.into_iter().enumerate().map(|(index, text)| {
             crate::tts::StreamingTextChunk {
@@ -918,13 +909,16 @@ where
         let chunks = split_at_natural_boundaries(&pending, max_tokens, &mut token_count)?;
         if chunks.len() > 1 {
             let stable_count = chunks.len() - 1;
-            ready.extend(chunks[..stable_count].iter().enumerate().map(
-                |(index, text)| crate::tts::StreamingTextChunk {
-                    text: text.clone(),
-                    starts_speech_block: index == 0,
-                    ends_speech_block: false,
-                },
-            ));
+            ready.extend(
+                chunks[..stable_count]
+                    .iter()
+                    .enumerate()
+                    .map(|(index, text)| crate::tts::StreamingTextChunk {
+                        text: text.clone(),
+                        starts_speech_block: index == 0,
+                        ends_speech_block: false,
+                    }),
+            );
             pending = chunks[stable_count].clone();
         }
     }

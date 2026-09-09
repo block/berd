@@ -62,7 +62,9 @@ const TTS_EVENT: &str = "openai-voice:stream-event";
 // OpenAI returns variable trailing quiet PCM, so enforce a measured total
 // floor rather than stacking a fixed pause on top of provider padding.
 const OPENAI_INTER_PARAGRAPH_BASE_SILENCE_FLOOR: Duration = Duration::from_millis(500);
+#[cfg(any(test, target_os = "macos"))]
 const MIN_PLAYBACK_SPEED: f32 = 0.75;
+#[cfg(any(test, target_os = "macos"))]
 const MAX_PLAYBACK_SPEED: f32 = 2.0;
 
 #[cfg(any(test, target_os = "macos"))]

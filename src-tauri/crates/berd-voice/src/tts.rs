@@ -3,9 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use crate::openai::{stream_openai_pcm, OpenAiPcmOutcome, OpenAiSpeechConfig};
-use crate::{
-    load_pocket_voice_style, load_text_to_speech, PocketTts, VoiceStyle, SAMPLE_RATE,
-};
+use crate::{load_pocket_voice_style, load_text_to_speech, PocketTts, VoiceStyle, SAMPLE_RATE};
 
 const OPENAI_MAX_TTS_INPUT_CHARS: usize = 4096;
 
@@ -138,7 +136,10 @@ fn could_be_incomplete_markdown_list_marker(text: &str) -> bool {
     if matches!(line, "-" | "*" | "+") {
         return true;
     }
-    let digits = line.bytes().take_while(|byte| byte.is_ascii_digit()).count();
+    let digits = line
+        .bytes()
+        .take_while(|byte| byte.is_ascii_digit())
+        .count();
     digits > 0
         && (digits == line.len()
             || (digits + 1 == line.len()
@@ -183,16 +184,18 @@ fn apply_char_limit(mut split: StreamingTextChunks, max_chars: usize) -> Streami
     if split.pending.chars().count() > max_chars {
         let mut chunks = split_at_char_limit(&split.pending, max_chars);
         if let Some(pending) = chunks.pop() {
-            split.ready.extend(
-                chunks
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, text)| StreamingTextChunk {
-                        text,
-                        starts_speech_block: index == 0,
-                        ends_speech_block: false,
-                    }),
-            );
+            split
+                .ready
+                .extend(
+                    chunks
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, text)| StreamingTextChunk {
+                            text,
+                            starts_speech_block: index == 0,
+                            ends_speech_block: false,
+                        }),
+                );
             split.pending = pending;
         }
     }
@@ -215,10 +218,7 @@ impl StreamingTtsText {
         self.take_ready(backend, false)
     }
 
-    pub fn flush(
-        &mut self,
-        backend: &dyn TtsBackend,
-    ) -> Result<Vec<StreamingTextChunk>, String> {
+    pub fn flush(&mut self, backend: &dyn TtsBackend) -> Result<Vec<StreamingTextChunk>, String> {
         self.take_ready(backend, true)
     }
 
@@ -461,10 +461,7 @@ mod tests {
             text: &str,
             flush: bool,
         ) -> Result<StreamingTextChunks, String> {
-            Ok(apply_char_limit(
-                take_streaming_text_chunks(text, flush),
-                4,
-            ))
+            Ok(apply_char_limit(take_streaming_text_chunks(text, flush), 4))
         }
 
         fn synthesize(
