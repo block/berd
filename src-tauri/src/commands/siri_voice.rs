@@ -543,14 +543,13 @@ fn synthesize_siri_stream_ready(
     last_progress: &mut Option<VoiceDeliveryProgress>,
 ) -> Result<bool, String> {
     for chunk in ready {
-        if chunk.starts_speech_block {
-            if playback
+        if chunk.starts_speech_block
+            && playback
                 .queue_inter_segment_silence(inter_paragraph_silence)
                 .map_err(|failure| failure.message)?
                 == OutboundOutcome::Interrupted
-            {
-                return Ok(false);
-            }
+        {
+            return Ok(false);
         }
         // The coordinator invokes these callbacks serially, but Rust cannot
         // infer that two callback values never overlap. Interior borrows keep
