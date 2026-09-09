@@ -1,4 +1,14 @@
-import { invoke } from "@tauri-apps/api/core";
+import {
+  startVoiceTelemetry,
+  setVoiceTelemetryReportable,
+  incrementVoiceUserUtterances,
+  incrementVoiceAssistantResponses,
+  requestVoiceTelemetryEnd,
+  clearVoiceTelemetryEnd,
+  endVoiceTelemetry,
+  type VoiceConversationTelemetryContext,
+} from "../api/voiceTelemetry";
+export type { VoiceConversationTelemetryContext } from "../api/voiceTelemetry";
 import {
   getRendererInstance,
   type RendererInstance,
@@ -8,27 +18,7 @@ import {
   berdVoiceConversationEnded,
   berdVoiceConversationStarted,
   type BerdVoiceConversationEndReason,
-  type BerdVoiceConversationMode,
 } from "@/shared/telemetry/events";
-import type { VoiceInputBackend } from "./voiceInputPreference";
-import type { VoiceOutputBackend } from "./voiceOutputPreference";
-
-export interface VoiceConversationTelemetryContext {
-  inputBackend: VoiceInputBackend;
-  outputBackend: VoiceOutputBackend;
-  voiceMode: BerdVoiceConversationMode;
-}
-
-interface CompletedVoiceConversationTelemetry {
-  inputBackend: VoiceInputBackend;
-  outputBackend: VoiceOutputBackend;
-  voiceMode: BerdVoiceConversationMode;
-  durationMs: number;
-  userUtteranceCount: number;
-  assistantResponseCount: number;
-  endReason: BerdVoiceConversationEndReason;
-  reportable: boolean;
-}
 
 let pendingOperation: Promise<void> = Promise.resolve();
 
@@ -44,29 +34,12 @@ function enqueue(
     });
 }
 
-function ownerRequest(renderer: RendererInstance) {
-  return {
-    rendererId: renderer.rendererId,
-    rendererEpoch: renderer.rendererEpoch,
-  };
-}
-
 /** Starts aggregate telemetry only after voice startup succeeds. */
 export function trackVoiceConversationStarted(
   context: VoiceConversationTelemetryContext,
 ): void {
   enqueue(async (renderer) => {
-    const started = await invoke<boolean>(
-      "start_voice_conversation_telemetry",
-      {
-        request: {
-          ...ownerRequest(renderer),
-          inputBackend: context.inputBackend,
-          outputBackend: context.outputBackend,
-          voiceMode: context.voiceMode,
-        },
-      },
-    );
+    const started = await startVoiceTelemetry(renderer, context);
     if (!started) return;
     const reportable = track(
       berdVoiceConversationStarted({
@@ -75,26 +48,19 @@ export function trackVoiceConversationStarted(
         voice_mode: context.voiceMode,
       }),
     );
-    await invoke("set_voice_conversation_telemetry_reportable", {
-      request: ownerRequest(renderer),
-      reportable,
-    });
+    await setVoiceTelemetryReportable(renderer, reportable);
   });
 }
 
 export function trackVoiceUserUtterance(): void {
   enqueue(async (renderer) => {
-    await invoke("increment_voice_conversation_user_utterances", {
-      request: ownerRequest(renderer),
-    });
+    await incrementVoiceUserUtterances(renderer);
   });
 }
 
 export function trackVoiceAssistantResponse(): void {
   enqueue(async (renderer) => {
-    await invoke("increment_voice_conversation_assistant_responses", {
-      request: ownerRequest(renderer),
-    });
+    await incrementVoiceAssistantResponses(renderer);
   });
 }
 
@@ -103,18 +69,13 @@ export function requestVoiceConversationEnd(
   reason: BerdVoiceConversationEndReason,
 ): void {
   enqueue(async (renderer) => {
-    await invoke("request_voice_conversation_telemetry_end", {
-      request: ownerRequest(renderer),
-      reason,
-    });
+    await requestVoiceTelemetryEnd(renderer, reason);
   });
 }
 
 export function clearRequestedVoiceConversationEnd(): void {
   enqueue(async (renderer) => {
-    await invoke("clear_voice_conversation_telemetry_end", {
-      request: ownerRequest(renderer),
-    });
+    await clearVoiceTelemetryEnd(renderer);
   });
 }
 
@@ -123,11 +84,7 @@ export function trackVoiceConversationEnded(
   fallbackReason: BerdVoiceConversationEndReason,
 ): void {
   enqueue(async () => {
-    const conversation =
-      await invoke<CompletedVoiceConversationTelemetry | null>(
-        "end_voice_conversation_telemetry",
-        { request: { fallbackReason } },
-      );
+    const conversation = await endVoiceTelemetry(fallbackReason);
     if (!conversation?.reportable) return;
     track(
       berdVoiceConversationEnded({
