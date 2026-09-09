@@ -389,8 +389,8 @@ impl AprilPocketTts {
         &mut self,
         text: &str,
         flush: bool,
-    ) -> Result<(Vec<String>, String), String> {
-        take_streaming_chunks_at_paragraph_boundaries(
+    ) -> Result<crate::tts::StreamingTextChunks, String> {
+        split_streaming_text_for_pocket(
             text,
             self.bundle.max_token_per_chunk,
             flush,
@@ -886,23 +886,31 @@ where
     Ok(chunks)
 }
 
-pub(crate) fn take_streaming_chunks_at_paragraph_boundaries<F>(
+fn split_streaming_text_for_pocket<F>(
     text: &str,
     max_tokens: usize,
     flush: bool,
     mut token_count: F,
-) -> Result<(Vec<String>, String), String>
+) -> Result<crate::tts::StreamingTextChunks, String>
 where
     F: FnMut(&str) -> Result<usize, String>,
 {
     let split = crate::tts::take_streaming_text_chunks(text, flush);
     let mut ready = Vec::new();
-    for paragraph in split.ready {
-        ready.extend(split_at_natural_boundaries(
-            &paragraph,
+    for block in split.ready {
+        let pieces = split_at_natural_boundaries(
+            &block.text,
             max_tokens,
             &mut token_count,
-        )?);
+        )?;
+        let last = pieces.len().saturating_sub(1);
+        ready.extend(pieces.into_iter().enumerate().map(|(index, text)| {
+            crate::tts::StreamingTextChunk {
+                text,
+                starts_speech_block: block.starts_speech_block && index == 0,
+                ends_speech_block: block.ends_speech_block && index == last,
+            }
+        }));
     }
     let mut pending = split.pending;
 
@@ -910,12 +918,35 @@ where
         let chunks = split_at_natural_boundaries(&pending, max_tokens, &mut token_count)?;
         if chunks.len() > 1 {
             let stable_count = chunks.len() - 1;
-            ready.extend(chunks[..stable_count].iter().cloned());
+            ready.extend(chunks[..stable_count].iter().enumerate().map(
+                |(index, text)| crate::tts::StreamingTextChunk {
+                    text: text.clone(),
+                    starts_speech_block: index == 0,
+                    ends_speech_block: false,
+                },
+            ));
             pending = chunks[stable_count].clone();
         }
     }
 
-    Ok((ready, pending))
+    Ok(crate::tts::StreamingTextChunks { ready, pending })
+}
+
+#[cfg(test)]
+pub(crate) fn take_streaming_chunks_at_paragraph_boundaries<F>(
+    text: &str,
+    max_tokens: usize,
+    flush: bool,
+    token_count: F,
+) -> Result<(Vec<String>, String), String>
+where
+    F: FnMut(&str) -> Result<usize, String>,
+{
+    let split = split_streaming_text_for_pocket(text, max_tokens, flush, token_count)?;
+    Ok((
+        split.ready.into_iter().map(|chunk| chunk.text).collect(),
+        split.pending,
+    ))
 }
 
 fn natural_boundary(candidate: &str, is_end_of_text: bool) -> TextBoundary {

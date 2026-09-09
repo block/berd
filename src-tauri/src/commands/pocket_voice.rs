@@ -20,8 +20,8 @@ use berd_voice::SAMPLE_RATE;
 #[cfg(target_os = "macos")]
 use berd_voice::{
     load_pocket_voice_style, load_text_to_speech, ConfiguredTtsSlot, DrainPolicy,
-    DrainTimeoutOutcome, OutboundFailure, OutboundOutcome, OutboundPlayback, StreamingTtsText,
-    TtsBackend, TtsConfiguration,
+    DrainTimeoutOutcome, OutboundFailure, OutboundOutcome, OutboundPlayback, StreamingTextChunk,
+    StreamingTtsText, TtsBackend, TtsConfiguration,
 };
 use berd_voice::{parakeet_assets, pocket_assets};
 #[cfg(target_os = "macos")]
@@ -2187,7 +2187,7 @@ fn synthesize_pocket_stream_ready(
     stream_id: &str,
     backend: &dyn TtsBackend,
     playback: &mut OutboundPlayback<'_>,
-    ready: Vec<String>,
+    ready: Vec<StreamingTextChunk>,
     native_voice: &NativeVoiceState,
     interruption_sensitivity: InterruptionSensitivity,
     input_during_tts: InputDuringTtsPolicy,
@@ -2195,8 +2195,8 @@ fn synthesize_pocket_stream_ready(
     playback_drained_at: &mut Option<Instant>,
     last_progress_emit: &mut Instant,
 ) -> Result<bool, String> {
-    for text in ready {
-        let text = text.trim().to_string();
+    for chunk in ready {
+        let text = chunk.text.trim().to_string();
         let outcome = playback
             .synthesize_segment(
                 backend,

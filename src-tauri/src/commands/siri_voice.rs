@@ -46,7 +46,8 @@ use berd_voice::DeliverySegment as VoiceDeliverySegment;
 #[cfg(target_os = "macos")]
 use berd_voice::{
     ConfiguredTtsSlot, DrainPolicy, OutboundFailure, OutboundOutcome, OutboundPlayback,
-    PcmAudioOutput, PocketAudioPlayer, StreamingTtsText, TtsBackend, TtsConfiguration,
+    PcmAudioOutput, PocketAudioPlayer, StreamingTextChunk, StreamingTtsText, TtsBackend,
+    TtsConfiguration,
 };
 
 #[derive(Clone, Debug, Default)]
@@ -532,7 +533,7 @@ fn synthesize_siri_stream_ready(
     player: &PocketAudioPlayer,
     output_latency_grace: Duration,
     inter_paragraph_silence: Duration,
-    ready: Vec<String>,
+    ready: Vec<StreamingTextChunk>,
     native_voice: &NativeVoiceState,
     interruption_sensitivity: InterruptionSensitivity,
     input_during_tts: InputDuringTtsPolicy,
@@ -541,13 +542,15 @@ fn synthesize_siri_stream_ready(
     last_progress_emit: &mut Instant,
     last_progress: &mut Option<VoiceDeliveryProgress>,
 ) -> Result<bool, String> {
-    for text in ready {
-        if playback
-            .queue_inter_segment_silence(inter_paragraph_silence)
-            .map_err(|failure| failure.message)?
-            == OutboundOutcome::Interrupted
-        {
-            return Ok(false);
+    for chunk in ready {
+        if chunk.starts_speech_block {
+            if playback
+                .queue_inter_segment_silence(inter_paragraph_silence)
+                .map_err(|failure| failure.message)?
+                == OutboundOutcome::Interrupted
+            {
+                return Ok(false);
+            }
         }
         // The coordinator invokes these callbacks serially, but Rust cannot
         // infer that two callback values never overlap. Interior borrows keep
@@ -557,7 +560,7 @@ fn synthesize_siri_stream_ready(
         let outcome = playback
             .synthesize_segment(
                 backend,
-                text.trim(),
+                chunk.text.trim(),
                 &mut |_| {
                     let mut assistant_speech = assistant_speech_cell.borrow_mut();
                     if assistant_speech.is_none() {

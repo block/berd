@@ -31,8 +31,18 @@ pub enum TtsSynthesisEvent<'a> {
 /// Stable synthesis units drained from a growing assistant response.
 #[derive(Debug, PartialEq, Eq)]
 pub struct StreamingTextChunks {
-    pub ready: Vec<String>,
+    pub ready: Vec<StreamingTextChunk>,
     pub pending: String,
+}
+
+/// One provider-safe piece of a speech block.
+#[derive(Debug, PartialEq, Eq)]
+pub struct StreamingTextChunk {
+    pub text: String,
+    /// True only for the first provider piece in a prose paragraph or Markdown list.
+    pub starts_speech_block: bool,
+    /// True only for the final provider piece in a prose paragraph or Markdown list.
+    pub ends_speech_block: bool,
 }
 
 /// Drain complete speech blocks while retaining text that may still grow.
@@ -45,12 +55,20 @@ pub(crate) fn take_streaming_text_chunks(text: &str, flush: bool) -> StreamingTe
     let mut ready = Vec::new();
 
     while let Some(end) = first_stable_speech_block_end(&pending) {
-        ready.push(pending[..end].to_string());
+        ready.push(StreamingTextChunk {
+            text: pending[..end].to_string(),
+            starts_speech_block: true,
+            ends_speech_block: true,
+        });
         pending = pending[end..].trim_start().to_string();
     }
 
     if flush && !pending.is_empty() {
-        ready.push(std::mem::take(&mut pending));
+        ready.push(StreamingTextChunk {
+            text: std::mem::take(&mut pending),
+            starts_speech_block: true,
+            ends_speech_block: true,
+        });
     }
 
     StreamingTextChunks { ready, pending }
@@ -149,12 +167,32 @@ fn apply_char_limit(mut split: StreamingTextChunks, max_chars: usize) -> Streami
     split.ready = split
         .ready
         .into_iter()
-        .flat_map(|text| split_at_char_limit(&text, max_chars))
+        .flat_map(|chunk| {
+            let pieces = split_at_char_limit(&chunk.text, max_chars);
+            let last = pieces.len().saturating_sub(1);
+            pieces
+                .into_iter()
+                .enumerate()
+                .map(move |(index, text)| StreamingTextChunk {
+                    text,
+                    starts_speech_block: chunk.starts_speech_block && index == 0,
+                    ends_speech_block: chunk.ends_speech_block && index == last,
+                })
+        })
         .collect();
     if split.pending.chars().count() > max_chars {
         let mut chunks = split_at_char_limit(&split.pending, max_chars);
         if let Some(pending) = chunks.pop() {
-            split.ready.extend(chunks);
+            split.ready.extend(
+                chunks
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, text)| StreamingTextChunk {
+                        text,
+                        starts_speech_block: index == 0,
+                        ends_speech_block: false,
+                    }),
+            );
             split.pending = pending;
         }
     }
@@ -164,20 +202,40 @@ fn apply_char_limit(mut split: StreamingTextChunks, max_chars: usize) -> Streami
 #[derive(Default)]
 pub struct StreamingTtsText {
     pending: String,
+    pending_block_started: bool,
 }
 
 impl StreamingTtsText {
-    pub fn append(&mut self, backend: &dyn TtsBackend, delta: &str) -> Result<Vec<String>, String> {
+    pub fn append(
+        &mut self,
+        backend: &dyn TtsBackend,
+        delta: &str,
+    ) -> Result<Vec<StreamingTextChunk>, String> {
         self.pending.push_str(delta);
         self.take_ready(backend, false)
     }
 
-    pub fn flush(&mut self, backend: &dyn TtsBackend) -> Result<Vec<String>, String> {
+    pub fn flush(
+        &mut self,
+        backend: &dyn TtsBackend,
+    ) -> Result<Vec<StreamingTextChunk>, String> {
         self.take_ready(backend, true)
     }
 
-    fn take_ready(&mut self, backend: &dyn TtsBackend, flush: bool) -> Result<Vec<String>, String> {
-        let split = backend.take_streaming_text_chunks(&self.pending, flush)?;
+    fn take_ready(
+        &mut self,
+        backend: &dyn TtsBackend,
+        flush: bool,
+    ) -> Result<Vec<StreamingTextChunk>, String> {
+        let mut split = backend.take_streaming_text_chunks(&self.pending, flush)?;
+        if self.pending_block_started {
+            if let Some(first) = split.ready.first_mut() {
+                first.starts_speech_block = false;
+            }
+        }
+        if let Some(last) = split.ready.last() {
+            self.pending_block_started = !last.ends_speech_block;
+        }
         self.pending = split.pending;
         Ok(split.ready)
     }
@@ -364,13 +422,15 @@ impl TtsBackend for OpenAiTts {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_char_limit, take_streaming_text_chunks, PocketTtsBackend, StreamingTextChunks,
-        StreamingTtsText, TtsBackend, TtsOutcome, TtsPcmSpec,
+        apply_char_limit, take_streaming_text_chunks, PocketTtsBackend, StreamingTextChunk,
+        StreamingTextChunks, StreamingTtsText, TtsBackend, TtsOutcome, TtsPcmSpec,
     };
     use std::path::Path;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     struct FakeTts;
+
+    struct FourCharacterTts;
 
     impl TtsBackend for FakeTts {
         fn pcm_spec(&self) -> TtsPcmSpec {
@@ -388,6 +448,32 @@ mod tests {
         ) -> Result<TtsOutcome, String> {
             on_frames(&[0.0, 0.5])?;
             Ok(TtsOutcome::Completed)
+        }
+    }
+
+    impl TtsBackend for FourCharacterTts {
+        fn pcm_spec(&self) -> TtsPcmSpec {
+            FakeTts.pcm_spec()
+        }
+
+        fn take_streaming_text_chunks(
+            &self,
+            text: &str,
+            flush: bool,
+        ) -> Result<StreamingTextChunks, String> {
+            Ok(apply_char_limit(
+                take_streaming_text_chunks(text, flush),
+                4,
+            ))
+        }
+
+        fn synthesize(
+            &self,
+            text: &str,
+            active: &AtomicBool,
+            on_frames: &mut dyn FnMut(&[f32]) -> Result<(), String>,
+        ) -> Result<TtsOutcome, String> {
+            FakeTts.synthesize(text, active, on_frames)
         }
     }
 
@@ -415,9 +501,20 @@ mod tests {
         assert_eq!(
             text.append(&backend, "ora waited.\n\nThe light remained")
                 .unwrap(),
-            ["Nora waited.\n\n"]
+            [StreamingTextChunk {
+                text: "Nora waited.\n\n".into(),
+                starts_speech_block: true,
+                ends_speech_block: true,
+            }]
         );
-        assert_eq!(text.flush(&backend).unwrap(), ["The light remained"]);
+        assert_eq!(
+            text.flush(&backend).unwrap(),
+            [StreamingTextChunk {
+                text: "The light remained".into(),
+                starts_speech_block: true,
+                ends_speech_block: true,
+            }]
+        );
         assert!(text.flush(&backend).unwrap().is_empty());
     }
 
@@ -434,7 +531,14 @@ mod tests {
         assert_eq!(split.pending, "1. First.\n\n2.");
 
         let split = take_streaming_text_chunks("- First.\n\n- Second.\n\nAfter", false);
-        assert_eq!(split.ready, ["- First.\n\n- Second.\n\n"]);
+        assert_eq!(
+            split.ready,
+            [StreamingTextChunk {
+                text: "- First.\n\n- Second.\n\n".into(),
+                starts_speech_block: true,
+                ends_speech_block: true,
+            }]
+        );
         assert_eq!(split.pending, "After");
     }
 
@@ -442,14 +546,67 @@ mod tests {
     fn provider_character_limit_releases_only_stable_overflow() {
         let split = apply_char_limit(
             StreamingTextChunks {
-                ready: vec!["12345678".into()],
+                ready: vec![StreamingTextChunk {
+                    text: "12345678".into(),
+                    starts_speech_block: true,
+                    ends_speech_block: true,
+                }],
                 pending: "abcdéfg".into(),
             },
             4,
         );
 
-        assert_eq!(split.ready, ["1234", "5678", "abcd"]);
+        assert_eq!(
+            split.ready,
+            [
+                StreamingTextChunk {
+                    text: "1234".into(),
+                    starts_speech_block: true,
+                    ends_speech_block: false,
+                },
+                StreamingTextChunk {
+                    text: "5678".into(),
+                    starts_speech_block: false,
+                    ends_speech_block: true,
+                },
+                StreamingTextChunk {
+                    text: "abcd".into(),
+                    starts_speech_block: true,
+                    ends_speech_block: false,
+                },
+            ]
+        );
         assert_eq!(split.pending, "éfg");
+    }
+
+    #[test]
+    fn provider_splits_do_not_create_false_speech_block_boundaries() {
+        let backend = FourCharacterTts;
+        let mut text = StreamingTtsText::default();
+
+        assert_eq!(
+            text.append(&backend, "abcdefghij").unwrap(),
+            [
+                StreamingTextChunk {
+                    text: "abcd".into(),
+                    starts_speech_block: true,
+                    ends_speech_block: false,
+                },
+                StreamingTextChunk {
+                    text: "efgh".into(),
+                    starts_speech_block: false,
+                    ends_speech_block: false,
+                },
+            ]
+        );
+        assert_eq!(
+            text.flush(&backend).unwrap(),
+            [StreamingTextChunk {
+                text: "ij".into(),
+                starts_speech_block: false,
+                ends_speech_block: true,
+            }]
+        );
     }
 
     #[test]

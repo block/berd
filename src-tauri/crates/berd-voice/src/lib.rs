@@ -56,6 +56,6 @@ pub use pocket::{
 pub use siri::SiriTts;
 pub use synthesis::{synthesize_pcm16_wav, WavSynthesis, WavSynthesisError, WavSynthesisErrorKind};
 pub use tts::{
-    OpenAiTts, PocketTtsBackend, StreamingTextChunks, StreamingTtsText, TtsBackend, TtsOutcome,
-    TtsPcmSpec, TtsSynthesisEvent,
+    OpenAiTts, PocketTtsBackend, StreamingTextChunk, StreamingTextChunks, StreamingTtsText,
+    TtsBackend, TtsOutcome, TtsPcmSpec, TtsSynthesisEvent,
 };

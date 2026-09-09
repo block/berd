@@ -10,8 +10,8 @@ use std::time::Duration;
 #[cfg(target_os = "macos")]
 use berd_voice::{
     ConfiguredTtsSlot, DeliveryProgress as VoiceDeliveryProgress, DrainPolicy, OutboundFailure,
-    OutboundOutcome, OutboundPlayback, PocketAudioPlayer, StreamingTtsText, TtsBackend,
-    TtsConfiguration,
+    OutboundOutcome, OutboundPlayback, PocketAudioPlayer, StreamingTextChunk, StreamingTtsText,
+    TtsBackend, TtsConfiguration,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
@@ -1002,24 +1002,27 @@ fn speak_openai_stream_ready(
     backend: &dyn TtsBackend,
     playback: &mut OutboundPlayback<'_>,
     inter_paragraph_silence_floor: Duration,
-    ready: Vec<String>,
+    ready: Vec<StreamingTextChunk>,
     native_voice: &NativeVoiceState,
     interruption_sensitivity: InterruptionSensitivity,
     input_during_tts: InputDuringTtsPolicy,
     assistant_speech: &mut Option<AssistantSpeechGuard>,
     playback_drained_at: &mut Option<Instant>,
 ) -> Result<OutboundOutcome, OutboundFailure> {
-    for text in ready {
-        let outcome = playback.queue_inter_segment_silence_floor(inter_paragraph_silence_floor)?;
-        if outcome == OutboundOutcome::Interrupted {
-            return Ok(outcome);
+    for chunk in ready {
+        if chunk.starts_speech_block {
+            let outcome =
+                playback.queue_inter_segment_silence_floor(inter_paragraph_silence_floor)?;
+            if outcome == OutboundOutcome::Interrupted {
+                return Ok(outcome);
+            }
         }
         let outcome = speak_openai_ready_unit(
             app,
             stream_id,
             backend,
             playback,
-            &text,
+            &chunk.text,
             native_voice,
             interruption_sensitivity,
             input_during_tts,

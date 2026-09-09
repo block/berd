@@ -152,8 +152,7 @@ impl PocketTts {
             .inner
             .lock()
             .map_err(|_| "Pocket TTS engine lock poisoned".to_string())?;
-        let (ready, pending) = engine.take_streaming_text_chunks(text, flush)?;
-        Ok(StreamingTextChunks { ready, pending })
+        engine.take_streaming_text_chunks(text, flush)
     }
 
     /// Stream synthesis as PCM deltas become decoder-safe. `emit_frames` is
