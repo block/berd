@@ -112,7 +112,7 @@ interface ChatViewProps {
 }
 
 export function ChatView({
-  sessionId,
+  sessionId: requestedSessionId,
   activeSession,
   readOnlyStatus: assertedReadOnlyStatus,
   onCreatePersona,
@@ -129,7 +129,7 @@ export function ChatView({
   onAgentBuilderCompleted,
 }: ChatViewProps) {
   const { t } = useTranslation("chat");
-  const targetSessionId = activeSession?.id ?? sessionId;
+  const targetSessionId = activeSession?.id ?? requestedSessionId;
   const storedSession = useChatSessionStore(
     (state) =>
       state.sessions?.find((session) => session.id === targetSessionId) ?? null,
@@ -137,7 +137,10 @@ export function ChatView({
   // Resolve the entire snapshot, not individual flags from different revisions.
   // The controller and queue also read the current store record for this id.
   const selectedSession = storedSession ?? activeSession ?? null;
-  const selectedSessionId = selectedSession?.id ?? sessionId;
+  // All session-addressed children, including security, voice and terminal,
+  // must follow the selected replacement rather than the stale requested id.
+  const sessionId = selectedSession?.id ?? requestedSessionId;
+  const selectedSessionId = sessionId;
   const remoteSessionUnavailable = Boolean(
     selectedSession?.remoteSessionUnavailable,
   );

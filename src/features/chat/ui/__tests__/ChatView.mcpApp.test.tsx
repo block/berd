@@ -897,6 +897,61 @@ describe("ChatView MCP app messaging", () => {
     expect(chatInputProps.className).toBeUndefined();
   });
 
+  it("shows and resolves security confirmation for the selected replacement", () => {
+    const replacement = {
+      ...chatSessionWithWorkingDir("/remote/project"),
+      id: "replacement",
+    };
+    const resolve = vi.fn();
+    mocks.sessions = [replacement];
+    useSecurityConfirmationStore.setState({
+      pendingBySessionId: {
+        replacement: [
+          {
+            request: {
+              sessionId: "replacement",
+              options: [
+                { optionId: "allow", kind: "allow_once", name: "Allow" },
+              ],
+            } as never,
+            title: "Replacement confirmation",
+            command: null,
+            alertText: "Replacement alert",
+            resolve,
+            inferredExplanation: { status: "idle" },
+          },
+        ],
+      },
+    });
+    render(<ChatView sessionId="old-session" activeSession={replacement} />);
+    expect(screen.getByText("Replacement alert")).toBeInTheDocument();
+    expect(
+      useSecurityConfirmationStore.getState().mountedSurfaceCountBySessionId
+        .replacement,
+    ).toBe(1);
+    expect(
+      useSecurityConfirmationStore.getState().mountedSurfaceCountBySessionId[
+        "old-session"
+      ],
+    ).toBeUndefined();
+    expect(
+      mocks.chatInputSpy.mock.calls
+        .at(-1)?.[0]
+        .composerActions.onSend("blocked"),
+    ).toBe(false);
+    fireEvent.click(
+      screen.getByRole("button", { name: "securityConfirmation.allow" }),
+    );
+    expect(resolve).toHaveBeenCalledOnce();
+    expect(
+      useSecurityConfirmationStore.getState().pendingBySessionId.replacement ??
+        [],
+    ).toHaveLength(0);
+    expect(
+      mocks.chatInputSpy.mock.calls.at(-1)?.[0].composerActions.onSend("ready"),
+    ).toBe(true);
+  });
+
   it("blocks and hides composer, queue, MCP, and voice delivery while security confirmation is pending", () => {
     const sendDeferredAnyway = vi.fn();
     mocks.useChatSessionController.mockReturnValue({
