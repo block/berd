@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getStoredVoiceInputBackend,
   isMacSpeechAvailable,
+  migrateLegacyParakeetPreference,
   resolveVoiceInputBackend,
   setVoiceInputBackend,
   useVoiceInputPreference,
@@ -30,8 +31,37 @@ describe("voice input preference", () => {
     expect(resolveVoiceInputBackend(null, false)).toBe("parakeet");
   });
 
-  it("preserves an explicit Parakeet choice on supported macOS", () => {
+  it("resolves an explicit Parakeet choice until the one-time migration runs", () => {
     expect(resolveVoiceInputBackend("parakeet", true)).toBe("parakeet");
+  });
+
+  it("migrates an existing Parakeet preference to native macOS speech once", () => {
+    window.localStorage.setItem("goose:voice-input-backend", "parakeet");
+
+    expect(migrateLegacyParakeetPreference(true)).toBe(true);
+    expect(getStoredVoiceInputBackend()).toBe("macos");
+
+    setVoiceInputBackend("parakeet");
+    expect(migrateLegacyParakeetPreference(true)).toBe(false);
+    expect(getStoredVoiceInputBackend()).toBe("parakeet");
+  });
+
+  it("waits to complete the Parakeet migration until macOS speech is available", () => {
+    window.localStorage.setItem("goose:voice-input-backend", "parakeet");
+
+    expect(migrateLegacyParakeetPreference(false)).toBe(false);
+    expect(getStoredVoiceInputBackend()).toBe("parakeet");
+    expect(migrateLegacyParakeetPreference(true)).toBe(true);
+    expect(getStoredVoiceInputBackend()).toBe("macos");
+  });
+
+  it("records the migration for other preferences so a later Parakeet choice sticks", () => {
+    window.localStorage.setItem("goose:voice-input-backend", "macos");
+
+    expect(migrateLegacyParakeetPreference(true)).toBe(false);
+    setVoiceInputBackend("parakeet");
+    expect(migrateLegacyParakeetPreference(true)).toBe(false);
+    expect(getStoredVoiceInputBackend()).toBe("parakeet");
   });
 
   it("uses Parakeet without erasing a persisted unavailable choice", () => {

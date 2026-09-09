@@ -267,6 +267,9 @@ describe("VoiceSettings", () => {
     outputState.backend = "pocket";
     modeState.mode = "chained";
     platformState.current = "mac";
+    setupState.current = setup(
+      pocketStatus({ pocketInstalled: true, parakeetInstalled: true }),
+    );
     openAiStatusState.loaded = true;
     macSpeechSetupState.current = {
       status: {
@@ -315,6 +318,27 @@ describe("VoiceSettings", () => {
     preferenceMocks.setInterruptionMode.mockClear();
     preferenceMocks.setMode.mockClear();
     preferenceMocks.setRealtimePreference.mockClear();
+  });
+
+  it("describes voice modes by who the user talks with", () => {
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      screen.getByRole("radio", { name: /Talk to your coding agent/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Speak directly with your coding agent. Its answers are read aloud using the STT and TTS services you choose.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("radio", { name: /Talk through a voice assistant/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Have a lower-latency, more natural conversation with a voice assistant that consults your coding agent when it needs your project or tools. Requires an OpenAI API key.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("confirms before resetting every voice setting to chained Apple defaults", async () => {
