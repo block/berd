@@ -773,4 +773,36 @@ describe("dispatchPrompt archived session restore", () => {
     expect(mocks.unarchiveSession).not.toHaveBeenCalled();
     expect(mocks.acpSendMessage).not.toHaveBeenCalled();
   });
+
+  it("does not restore a cancelled send", async () => {
+    seedSession({ archivedAt: ARCHIVED_AT });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      dispatchPrompt("session-1", "hello", { signal: controller.signal }),
+    ).rejects.toThrow();
+    expect(mocks.unarchiveSession).not.toHaveBeenCalled();
+    expect(mocks.acpSendMessage).not.toHaveBeenCalled();
+    expect(
+      useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+    ).toBe(ARCHIVED_AT);
+  });
+
+  it("does not dispatch a send cancelled while the restore is in flight", async () => {
+    seedSession({ archivedAt: ARCHIVED_AT });
+    const controller = new AbortController();
+    const restore = deferred<void>();
+    mocks.unarchiveSession.mockReturnValue(restore.promise);
+
+    const send = dispatchPrompt("session-1", "hello", {
+      signal: controller.signal,
+    });
+    await Promise.resolve();
+    controller.abort();
+    restore.resolve(undefined);
+
+    await expect(send).rejects.toThrow();
+    expect(mocks.acpSendMessage).not.toHaveBeenCalled();
+  });
 });
