@@ -18,6 +18,7 @@ import {
   listenToPocketVoiceStatus,
   previewPocketVoice,
   removeVoiceModel,
+  resetPocketVoiceSettings,
   selectPocketVoice,
   setPocketPlaybackSpeed,
   speakPocketVoice,
@@ -43,6 +44,7 @@ describe("Pocket voice API", () => {
     await expect(speakPocketVoice("Hello")).resolves.toBe(status);
     await expect(stopPocketVoice()).resolves.toBe(status);
     await expect(removeVoiceModel("pocket")).resolves.toBe(status);
+    await expect(resetPocketVoiceSettings()).resolves.toBe(status);
 
     expect(mocks.invoke).toHaveBeenNthCalledWith(1, "get_pocket_voice_status");
     expect(mocks.invoke).toHaveBeenNthCalledWith(2, "install_voice_model", {
@@ -66,6 +68,10 @@ describe("Pocket voice API", () => {
     expect(mocks.invoke).toHaveBeenNthCalledWith(8, "remove_voice_model", {
       model: "pocket",
     });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(
+      9,
+      "reset_pocket_voice_settings",
+    );
   });
 
   it("unwraps download progress events", async () => {

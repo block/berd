@@ -6,7 +6,7 @@ use std::fs;
 #[cfg(target_os = "macos")]
 use std::os::raw::c_char;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_os = "macos")]
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -29,6 +29,7 @@ use super::pocket_voice::{
     effective_output_device_name, output_device_uses_speakers, playback_latency_safety_duration,
     resolve_input_during_tts_policy, selected_output_device,
 };
+use crate::services::atomic_file::write_bytes_atomically;
 #[cfg(target_os = "macos")]
 use berd_voice::input::InputDuringTtsPolicy;
 #[cfg(target_os = "macos")]
@@ -138,8 +139,7 @@ const SIRI_OUTPUT_DRAIN_MARGIN: Duration = Duration::from_secs(60);
 const PLAYBACK_PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
 const MIN_PLAYBACK_SPEED: f32 = 0.5;
 const MAX_PLAYBACK_SPEED: f32 = 2.0;
-static SIRI_SETTINGS_LOCK: Mutex<()> = Mutex::new(());
-static SIRI_SETTINGS_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+pub(crate) static SIRI_SETTINGS_LOCK: Mutex<()> = Mutex::new(());
 
 pub type SiriVoiceSelection = SiriVoiceIdentity;
 
@@ -156,7 +156,7 @@ pub struct SiriVoiceStatus {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct SiriVoiceSettings {
+pub(crate) struct SiriVoiceSettings {
     selected_voice: Option<SiriVoiceSelection>,
     #[serde(default = "default_playback_speed")]
     playback_speed: f32,
@@ -175,37 +175,29 @@ impl Default for SiriVoiceSettings {
     }
 }
 
-fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_data_dir()
         .map(|path| path.join("siri-tts").join("settings.json"))
         .map_err(|error| format!("resolve Siri TTS settings directory: {error}"))
 }
 
-fn read_settings(path: &Path) -> SiriVoiceSettings {
+pub(crate) fn read_settings(path: &Path) -> SiriVoiceSettings {
     fs::read(path)
         .ok()
         .and_then(|data| serde_json::from_slice(&data).ok())
         .unwrap_or_default()
 }
 
-fn write_settings(path: &Path, settings: &SiriVoiceSettings) -> Result<(), String> {
+pub(crate) fn write_settings(path: &Path, settings: &SiriVoiceSettings) -> Result<(), String> {
     let parent = path
         .parent()
         .ok_or_else(|| "Siri TTS settings path has no parent".to_string())?;
     fs::create_dir_all(parent).map_err(|error| format!("create Siri TTS settings: {error}"))?;
     let data = serde_json::to_vec_pretty(settings)
         .map_err(|error| format!("encode Siri TTS settings: {error}"))?;
-    let temporary = path.with_extension(format!(
-        "json.{}.{}.tmp",
-        std::process::id(),
-        SIRI_SETTINGS_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed),
-    ));
-    fs::write(&temporary, data).map_err(|error| format!("write Siri TTS settings: {error}"))?;
-    fs::rename(&temporary, path).map_err(|error| {
-        let _ = fs::remove_file(&temporary);
-        format!("publish Siri TTS settings: {error}")
-    })
+    write_bytes_atomically(path, &data)
+        .map_err(|error| format!("publish Siri TTS settings: {error}"))
 }
 
 fn update_settings(
@@ -220,6 +212,14 @@ fn update_settings(
         write_settings(path, &settings)?;
     }
     Ok(settings)
+}
+
+fn reset_settings(path: &Path) -> Result<(), String> {
+    update_settings(path, |settings| {
+        *settings = SiriVoiceSettings::default();
+        true
+    })
+    .map(|_| ())
 }
 
 #[cfg(target_os = "macos")]
@@ -484,6 +484,11 @@ pub fn set_siri_playback_speed(app: AppHandle, speed: f32) -> Result<(), String>
         true
     })
     .map(|_| ())
+}
+
+#[tauri::command]
+pub fn reset_siri_voice_settings(app: AppHandle) -> Result<(), String> {
+    reset_settings(&settings_path(&app)?)
 }
 
 #[tauri::command]
@@ -1176,6 +1181,26 @@ mod tests {
             read_settings(&directory.path().join("missing.json")).selected_voice,
             None
         );
+    }
+
+    #[test]
+    fn reset_settings_restores_default_voice_and_speed() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let path = directory.path().join("settings.json");
+        write_settings(
+            &path,
+            &SiriVoiceSettings {
+                selected_voice: Some(SiriVoiceSelection::new("Aaron", "en-US").unwrap()),
+                playback_speed: 1.5,
+            },
+        )
+        .expect("write custom settings");
+
+        reset_settings(&path).expect("reset settings");
+
+        let settings = read_settings(&path);
+        assert_eq!(settings.selected_voice, None);
+        assert_eq!(settings.playback_speed, 1.0);
     }
 
     #[test]

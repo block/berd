@@ -3,6 +3,7 @@ import {
   downloadSiriVoice,
   getSiriVoiceStatus,
   previewSiriVoice,
+  resetSiriVoiceSettings,
   selectSiriVoice,
   setSiriPlaybackSpeed,
   type SiriVoice,
@@ -72,6 +73,8 @@ export interface SiriVoiceSetup {
   downloadVoice: (voice: SiriVoice) => Promise<void>;
   previewVoice: (voice: SiriVoice) => Promise<void>;
   selectVoice: (voice: SiriVoice) => Promise<void>;
+  resetSettings: () => Promise<void>;
+  refreshSettings: () => Promise<void>;
 }
 
 export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
@@ -130,28 +133,36 @@ export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
     [],
   );
 
-  const refresh = useCallback(async (prefix: string) => {
-    const generation = ++statusRequestGenerationRef.current;
-    try {
-      const next = await getSiriVoiceStatus(prefix, { coalesce: true });
-      if (
-        statusRequestGenerationRef.current === generation &&
-        canonicalLocale(languageRef.current) === canonicalLocale(prefix)
-      ) {
-        setStatus(next);
-        setStatusError(null);
+  const refresh = useCallback(
+    async (prefix: string, propagateError = false) => {
+      const generation = ++statusRequestGenerationRef.current;
+      try {
+        const next = await getSiriVoiceStatus(prefix, { coalesce: true });
+        if (
+          statusRequestGenerationRef.current === generation &&
+          canonicalLocale(languageRef.current) === canonicalLocale(prefix)
+        ) {
+          setStatus(next);
+          setStatusError(null);
+        }
+        return next;
+      } catch (nextError) {
+        if (
+          statusRequestGenerationRef.current === generation &&
+          canonicalLocale(languageRef.current) === canonicalLocale(prefix)
+        ) {
+          setStatusError(String(nextError));
+        }
+        if (propagateError) throw nextError;
+        return null;
       }
-      return next;
-    } catch (nextError) {
-      if (
-        statusRequestGenerationRef.current === generation &&
-        canonicalLocale(languageRef.current) === canonicalLocale(prefix)
-      ) {
-        setStatusError(String(nextError));
-      }
-      return null;
-    }
-  }, []);
+    },
+    [],
+  );
+
+  const refreshSettings = useCallback(async () => {
+    await refresh(language, true);
+  }, [language, refresh]);
 
   useEffect(() => {
     if (!enabled || !window.__TAURI_INTERNALS__) {
@@ -317,6 +328,18 @@ export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
     [language, refresh],
   );
 
+  const resetSettings = useCallback(async () => {
+    setActionError(null);
+    try {
+      await resetSiriVoiceSettings();
+      window.dispatchEvent(new Event(SIRI_VOICE_SETTINGS_CHANGED));
+      if (enabled) await refresh(language);
+    } catch (nextError) {
+      setActionError(String(nextError));
+      throw nextError;
+    }
+  }, [enabled, language, refresh]);
+
   return {
     status,
     language,
@@ -331,6 +354,8 @@ export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
     downloadVoice,
     previewVoice,
     selectVoice,
+    resetSettings,
+    refreshSettings,
   };
 }
 

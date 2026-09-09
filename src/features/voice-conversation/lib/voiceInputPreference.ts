@@ -1,9 +1,11 @@
-import { useCallback, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
 import type { MacSpeechStatus } from "../api/macSpeech";
 
 export type VoiceInputBackend = "parakeet" | "macos" | "openai";
 
 const STORAGE_KEY = "goose:voice-input-backend";
+const PARAKEET_RECOMMENDATION_MIGRATION_KEY =
+  "goose:voice-input-backend-recommendation-v1";
 const CHANGED_EVENT = "goose:voice-input-backend-changed";
 let inMemoryBackend: VoiceInputBackend | null = null;
 
@@ -96,6 +98,45 @@ export function setVoiceInputBackend(backend: VoiceInputBackend): void {
     // Keep the current in-memory renderer usable when storage is unavailable.
   }
   window.dispatchEvent(new CustomEvent(CHANGED_EVENT, { detail: { backend } }));
+}
+
+export function getDefaultVoiceInputBackend(
+  macSpeechAvailable: boolean,
+): VoiceInputBackend {
+  return macSpeechAvailable ? "macos" : "parakeet";
+}
+
+export function migrateLegacyParakeetPreference(
+  macSpeechAvailable: boolean | null,
+): boolean {
+  if (typeof window === "undefined" || macSpeechAvailable !== true)
+    return false;
+  try {
+    if (
+      window.localStorage.getItem(PARAKEET_RECOMMENDATION_MIGRATION_KEY) ===
+      "complete"
+    ) {
+      return false;
+    }
+    const stored = normalizeStored(window.localStorage.getItem(STORAGE_KEY));
+    window.localStorage.setItem(
+      PARAKEET_RECOMMENDATION_MIGRATION_KEY,
+      "complete",
+    );
+    if (stored !== "parakeet") return false;
+    setVoiceInputBackend("macos");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function useLegacyParakeetPreferenceMigration(
+  macSpeechAvailable: boolean | null,
+) {
+  useEffect(() => {
+    migrateLegacyParakeetPreference(macSpeechAvailable);
+  }, [macSpeechAvailable]);
 }
 
 export function useVoiceInputPreference(macSpeechAvailable: boolean | null) {

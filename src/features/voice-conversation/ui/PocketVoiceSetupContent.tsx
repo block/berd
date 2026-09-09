@@ -208,11 +208,6 @@ export function PocketVoiceSetupContent({
 
           {showPocketVoiceControls && status && pocketInstalled ? (
             <div className="divide-y divide-border">
-              <PlaybackSpeedRow
-                speed={status.playbackSpeed}
-                speeds={[0.75, 1, 1.25, 1.5, 2]}
-                onChange={setup.setPlaybackSpeed}
-              />
               <VoicePickerDialog
                 selectedVoice={selectedVoice}
                 dialogError={error}
@@ -261,6 +256,11 @@ export function PocketVoiceSetupContent({
                   ))}
                 </RadioGroup>
               </VoicePickerDialog>
+              <PlaybackSpeedRow
+                speed={status.playbackSpeed}
+                speeds={[0.75, 1, 1.25, 1.5, 2]}
+                onChange={setup.setPlaybackSpeed}
+              />
             </div>
           ) : null}
         </div>

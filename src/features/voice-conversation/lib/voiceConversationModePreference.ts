@@ -7,16 +7,22 @@ const CHANGED_EVENT = "goose:voice-conversation-mode-changed";
 let inMemoryMode: VoiceConversationMode | null = null;
 
 function normalize(value: unknown): VoiceConversationMode {
-  return value === "openai-realtime" ? value : "chained";
+  return value === "openai-realtime"
+    ? value
+    : getDefaultVoiceConversationMode();
+}
+
+export function getDefaultVoiceConversationMode(): VoiceConversationMode {
+  return "chained";
 }
 
 export function getVoiceConversationMode(): VoiceConversationMode {
-  if (typeof window === "undefined") return "chained";
+  if (typeof window === "undefined") return getDefaultVoiceConversationMode();
   if (inMemoryMode) return inMemoryMode;
   try {
     return normalize(window.localStorage.getItem(STORAGE_KEY));
   } catch {
-    return "chained";
+    return getDefaultVoiceConversationMode();
   }
 }
 
@@ -69,7 +75,7 @@ export function useVoiceConversationModePreference() {
   const mode = useSyncExternalStore(
     subscribe,
     getVoiceConversationMode,
-    () => "chained" as const,
+    getDefaultVoiceConversationMode,
   );
   const setMode = useCallback((value: VoiceConversationMode) => {
     setVoiceConversationMode(value);

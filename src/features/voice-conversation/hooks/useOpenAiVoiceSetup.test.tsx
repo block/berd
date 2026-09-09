@@ -44,6 +44,7 @@ function status(configured: boolean): OpenAiVoiceStatus {
     transcriptionModel: "gpt-live-transcribe",
     speechModel: "gpt-4o-mini-tts",
     speechVoice: "marin",
+    speechVoices: ["alloy", "marin"],
     playbackSpeed: 1,
     ttsAvailable: true,
     unavailableReason: configured ? null : "missingApiKey",

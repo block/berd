@@ -61,6 +61,10 @@ export function setSiriPlaybackSpeed(speed: number): Promise<void> {
   return invoke("set_siri_playback_speed", { speed });
 }
 
+export function resetSiriVoiceSettings(): Promise<void> {
+  return invoke("reset_siri_voice_settings");
+}
+
 export interface SiriVoiceStreamEvent {
   streamId: string;
   state: "started" | "progress" | "completed" | "interrupted" | "failed";

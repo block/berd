@@ -246,6 +246,7 @@ import { useOpenAiVoiceSetup } from "@/features/voice-conversation/hooks/useOpen
 import { useSiriVoiceSetup } from "@/features/voice-conversation/hooks/useSiriVoiceSetup";
 import {
   isMacSpeechAvailable,
+  useLegacyParakeetPreferenceMigration,
   useVoiceInputPreference,
 } from "@/features/voice-conversation/lib/voiceInputPreference";
 import { useVoiceOutputPreference } from "@/features/voice-conversation/lib/voiceOutputPreference";
@@ -749,12 +750,12 @@ export function AppShell({
   const globalMacSpeechSetup = useMacSpeechSetup(
     capabilities.voiceConversation,
   );
-  const globalVoiceInput = useVoiceInputPreference(
-    isMacSpeechAvailable(
-      globalMacSpeechSetup.status,
-      globalMacSpeechSetup.loading,
-    ),
+  const globalMacSpeechAvailable = isMacSpeechAvailable(
+    globalMacSpeechSetup.status,
+    globalMacSpeechSetup.loading,
   );
+  useLegacyParakeetPreferenceMigration(globalMacSpeechAvailable);
+  const globalVoiceInput = useVoiceInputPreference(globalMacSpeechAvailable);
   const globalVoiceOutput = useVoiceOutputPreference();
   const globalOpenAiVoiceSetup = useOpenAiVoiceSetup(
     capabilities.voiceConversation &&

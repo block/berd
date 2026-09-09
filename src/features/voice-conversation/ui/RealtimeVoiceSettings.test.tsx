@@ -26,27 +26,39 @@ describe("RealtimeVoiceSettings", () => {
     await i18n.changeLanguage("en");
   });
 
-  it("shows recommended model, transcription, voice, and turn controls", () => {
+  it("keeps the voice primary and provider tuning under Advanced", async () => {
+    const user = userEvent.setup();
     renderWithProviders(<RealtimeVoiceSettings />);
+
+    expect(
+      screen.getByRole("button", {
+        name: "Choose a voice: Marin (default)",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("combobox", { name: "Playback speed" }),
+    ).toHaveTextContent("1×");
+    expect(
+      screen.queryByRole("combobox", { name: "Realtime model" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("switch", { name: "Interrupt when I speak" }),
+    ).toBeChecked();
+
+    await user.click(screen.getByRole("button", { name: "Advanced" }));
 
     expect(
       screen.getByRole("combobox", { name: "Realtime model" }),
     ).toHaveTextContent("gpt-realtime-2.1 (default)");
     expect(
-      screen.getByRole("combobox", { name: "Transcription model" }),
+      screen.getByRole("combobox", { name: "STT model" }),
     ).toHaveTextContent("gpt-realtime-whisper (default)");
-    expect(screen.getByRole("combobox", { name: "Voice" })).toHaveTextContent(
-      "Marin (default)",
-    );
     expect(
       screen.getByRole("combobox", { name: "Turn detection" }),
     ).toHaveTextContent("Server VAD (default)");
     expect(
       screen.getByRole("combobox", { name: "Conversation presentation" }),
     ).toHaveTextContent("Debug — show agent routing");
-    expect(
-      screen.getByRole("switch", { name: "Interrupt when I speak" }),
-    ).toBeChecked();
   });
 
   it("stores the Realtime key through the shared OpenAI voice credential path", async () => {

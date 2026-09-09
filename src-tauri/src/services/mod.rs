@@ -1,6 +1,7 @@
 pub mod acp;
 pub(crate) mod acp_tools_reconciler;
 pub(crate) mod app_data_migration;
+pub(crate) mod atomic_file;
 pub(crate) mod berdctl_discovery;
 #[cfg(feature = "block-builderbot")]
 pub(crate) mod builderbot;

@@ -44,6 +44,7 @@ use super::{
     native_voice::{InterruptionSensitivity, NativeVoiceState},
     voice_capture::VoiceCaptureState,
 };
+use crate::services::atomic_file::write_bytes_atomically;
 #[cfg(target_os = "macos")]
 use berd_voice::PocketAudioPlayer;
 
@@ -67,6 +68,7 @@ const AIRPLAY_PLAYBACK_LATENCY_SAFETY_DURATION: Duration = Duration::from_secs(2
 const UNKNOWN_PLAYBACK_LATENCY_SAFETY_DURATION: Duration = Duration::from_secs(2);
 #[cfg(any(test, target_os = "macos"))]
 const POCKET_SOURCE_COMPLETION_TIMEOUT: Duration = Duration::from_secs(2);
+pub(crate) static POCKET_SETTINGS_LOCK: Mutex<()> = Mutex::new(());
 
 #[cfg(target_os = "macos")]
 fn playback_latency_safety_duration_for_transport(transport: Option<u32>) -> Duration {
@@ -244,10 +246,19 @@ pub enum VoiceModelKind {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct PocketSettings {
+pub(crate) struct PocketSettings {
     selected_voice: String,
     #[serde(default = "default_playback_speed")]
     playback_speed: f32,
+}
+
+impl Default for PocketSettings {
+    fn default() -> Self {
+        Self {
+            selected_voice: DEFAULT_VOICE.to_string(),
+            playback_speed: default_playback_speed(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -283,14 +294,44 @@ fn default_playback_speed() -> f32 {
     1.0
 }
 
-fn settings(base: &Path) -> PocketSettings {
+fn normalize_settings(mut settings: PocketSettings) -> PocketSettings {
+    if !pocket_assets::voices()
+        .iter()
+        .any(|voice| voice.id == settings.selected_voice)
+    {
+        settings.selected_voice = DEFAULT_VOICE.to_string();
+    }
+    settings.playback_speed = settings.playback_speed.clamp(0.75, 2.0);
+    settings
+}
+
+pub(crate) fn settings(base: &Path) -> PocketSettings {
     fs::read(base.join("settings.json"))
         .ok()
         .and_then(|data| serde_json::from_slice::<PocketSettings>(&data).ok())
-        .unwrap_or_else(|| PocketSettings {
-            selected_voice: DEFAULT_VOICE.to_string(),
-            playback_speed: default_playback_speed(),
-        })
+        .map(normalize_settings)
+        .unwrap_or_default()
+}
+
+pub(crate) fn write_settings(base: &Path, settings: &PocketSettings) -> Result<(), String> {
+    fs::create_dir_all(base).map_err(|error| format!("create Pocket settings: {error}"))?;
+    let data = serde_json::to_vec_pretty(settings)
+        .map_err(|error| format!("encode Pocket settings: {error}"))?;
+    write_bytes_atomically(&base.join("settings.json"), &data)
+        .map_err(|error| format!("publish Pocket settings: {error}"))
+}
+
+fn update_settings(
+    base: &Path,
+    update: impl FnOnce(&mut PocketSettings),
+) -> Result<PocketSettings, String> {
+    let _guard = POCKET_SETTINGS_LOCK
+        .lock()
+        .map_err(|_| "Pocket settings lock was poisoned".to_string())?;
+    let mut current = settings(base);
+    update(&mut current);
+    write_settings(base, &current)?;
+    Ok(current)
 }
 
 fn pocket_download_bytes() -> u64 {
@@ -336,7 +377,7 @@ fn parakeet_disk_bytes(base: &Path) -> Option<u64> {
         })
 }
 
-fn cache_base(app: &AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn cache_base(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_data_dir()
         .map(|path| path.join("pocket-tts"))
@@ -353,13 +394,11 @@ fn local_asset_roots(base: &Path) -> Result<LocalAssetRoots, String> {
 }
 
 fn selected_voice(base: &Path) -> String {
-    Some(settings(base).selected_voice)
-        .filter(|id| pocket_assets::voices().iter().any(|voice| voice.id == id))
-        .unwrap_or_else(|| DEFAULT_VOICE.to_string())
+    settings(base).selected_voice
 }
 
 fn playback_speed(base: &Path) -> f32 {
-    settings(base).playback_speed.clamp(0.75, 2.0)
+    settings(base).playback_speed
 }
 
 pub(crate) fn selected_output_device() -> Option<String> {
@@ -716,16 +755,7 @@ pub fn select_pocket_voice(app: AppHandle, voice_id: String) -> Result<(), Strin
         return Err(format!("Unknown Pocket voice: {voice_id}"));
     }
     let base = cache_base(&app)?;
-    fs::create_dir_all(&base).map_err(|error| format!("create Pocket settings: {error}"))?;
-    let data = serde_json::to_vec_pretty(&PocketSettings {
-        selected_voice: voice_id,
-        playback_speed: playback_speed(&base),
-    })
-    .map_err(|error| format!("encode Pocket settings: {error}"))?;
-    let temporary = base.join("settings.json.tmp");
-    fs::write(&temporary, data).map_err(|error| format!("write Pocket settings: {error}"))?;
-    fs::rename(&temporary, base.join("settings.json"))
-        .map_err(|error| format!("publish Pocket settings: {error}"))
+    update_settings(&base, |settings| settings.selected_voice = voice_id).map(|_| ())
 }
 
 #[tauri::command]
@@ -734,16 +764,13 @@ pub fn set_pocket_playback_speed(app: AppHandle, speed: f32) -> Result<(), Strin
         return Err("Pocket playback speed must be between 0.75 and 2.0".to_string());
     }
     let base = cache_base(&app)?;
-    fs::create_dir_all(&base).map_err(|error| format!("create Pocket settings: {error}"))?;
-    let data = serde_json::to_vec_pretty(&PocketSettings {
-        selected_voice: selected_voice(&base),
-        playback_speed: speed,
-    })
-    .map_err(|error| format!("encode Pocket settings: {error}"))?;
-    let temporary = base.join("settings.json.tmp");
-    fs::write(&temporary, data).map_err(|error| format!("write Pocket settings: {error}"))?;
-    fs::rename(&temporary, base.join("settings.json"))
-        .map_err(|error| format!("publish Pocket settings: {error}"))
+    update_settings(&base, |settings| settings.playback_speed = speed).map(|_| ())
+}
+
+#[tauri::command]
+pub fn reset_pocket_voice_settings(app: AppHandle) -> Result<(), String> {
+    let base = cache_base(&app)?;
+    update_settings(&base, |settings| *settings = PocketSettings::default()).map(|_| ())
 }
 
 #[tauri::command]
@@ -3143,5 +3170,66 @@ mod tests {
         )
         .expect("write incompatible selection");
         assert_eq!(selected_voice(directory.path()), DEFAULT_VOICE);
+    }
+
+    #[test]
+    fn default_settings_restore_mary_at_normal_speed() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        write_settings(
+            directory.path(),
+            &PocketSettings {
+                selected_voice: "jane".to_string(),
+                playback_speed: 1.5,
+            },
+        )
+        .expect("write custom settings");
+        write_settings(directory.path(), &PocketSettings::default()).expect("reset settings");
+
+        let reset = settings(directory.path());
+        assert_eq!(reset.selected_voice, DEFAULT_VOICE);
+        assert_eq!(reset.playback_speed, 1.0);
+    }
+
+    #[test]
+    fn concurrent_settings_updates_preserve_voice_and_speed() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let base = Arc::new(directory.path().to_path_buf());
+        let (voice_entered_tx, voice_entered_rx) = std::sync::mpsc::channel();
+        let (release_voice_tx, release_voice_rx) = std::sync::mpsc::channel();
+
+        let voice_base = base.clone();
+        let voice_writer = std::thread::spawn(move || {
+            update_settings(&voice_base, |settings| {
+                voice_entered_tx.send(()).expect("signal settings read");
+                release_voice_rx.recv().expect("release voice write");
+                settings.selected_voice = "jane".to_string();
+            })
+            .expect("write selected voice");
+        });
+
+        voice_entered_rx.recv().expect("voice acquired lock");
+        assert!(matches!(
+            POCKET_SETTINGS_LOCK.try_lock(),
+            Err(std::sync::TryLockError::WouldBlock)
+        ));
+        let speed_base = base.clone();
+        let (speed_started_tx, speed_started_rx) = std::sync::mpsc::channel();
+        let speed_writer = std::thread::spawn(move || {
+            speed_started_tx.send(()).expect("signal speed update");
+            update_settings(&speed_base, |settings| settings.playback_speed = 1.5)
+                .expect("write playback speed");
+        });
+        speed_started_rx.recv().expect("speed update started");
+        release_voice_tx.send(()).expect("release voice write");
+        voice_writer.join().expect("voice writer");
+        speed_writer.join().expect("speed writer");
+
+        let persisted = settings(&base);
+        assert_eq!(persisted.selected_voice, "jane");
+        assert_eq!(persisted.playback_speed, 1.5);
+        serde_json::from_slice::<PocketSettings>(
+            &fs::read(base.join("settings.json")).expect("settings JSON"),
+        )
+        .expect("valid settings JSON");
     }
 }

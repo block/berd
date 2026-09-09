@@ -1,4 +1,5 @@
 import { useCallback, useSyncExternalStore } from "react";
+import { DEFAULT_OPENAI_VOICE } from "./openAiVoiceOptions";
 
 export type RealtimeTurnDetection = "server_vad" | "semantic_vad";
 export type RealtimeEagerness = "low" | "medium" | "high" | "auto";
@@ -36,7 +37,7 @@ const DEFAULT_PREFERENCE: RealtimeVoicePreference = {
   presentationMode: import.meta.env.DEV ? "debug" : "subtle",
   model: "gpt-realtime-2.1",
   transcriptionModel: "gpt-realtime-whisper",
-  voice: "marin",
+  voice: DEFAULT_OPENAI_VOICE,
   speed: 1,
   turnDetection: "server_vad",
   eagerness: "auto",
@@ -52,6 +53,10 @@ const DEFAULT_PREFERENCE: RealtimeVoicePreference = {
   reasoningEffort: "default",
   maxOutputTokens: null,
 };
+
+export function getDefaultRealtimeVoicePreference(): RealtimeVoicePreference {
+  return { ...DEFAULT_PREFERENCE };
+}
 const STORAGE_KEY = "goose:openai-realtime-voice-options";
 const CHANGED_EVENT = "goose:openai-realtime-voice-options-changed";
 const listeners = new Set<() => void>();

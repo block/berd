@@ -5,6 +5,8 @@ import { getPlatform } from "@/shared/lib/platform";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
 import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import { Button } from "@/shared/ui/button";
+import { Badge } from "@/shared/ui/badge";
+import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
 import { RadioGroup, RadioGroupCard } from "@/shared/ui/radio-group";
 import { SettingsRow } from "@/shared/ui/settings-row";
 import {
@@ -20,36 +22,79 @@ import {
   clearOpenAiTtsApiKey,
   setOpenAiSttApiKey,
   setOpenAiPlaybackSpeed,
+  setOpenAiSpeechVoice,
   setOpenAiTtsApiKey,
 } from "../api/openAiVoice";
+import { resetAllVoiceBackendSettings } from "../api/voiceSettings";
 import { usePocketVoiceSetup } from "../hooks/usePocketVoiceSetup";
 import { useMacSpeechSetup } from "../hooks/useMacSpeechSetup";
 import { useMicrophonePermission } from "../hooks/useMicrophonePermission";
 import { useSiriVoiceSetup } from "../hooks/useSiriVoiceSetup";
 import type { VoiceInputBackend } from "../lib/voiceInputPreference";
 import {
+  getDefaultVoiceInputBackend,
   isMacSpeechAvailable,
   useVoiceInputPreference,
 } from "../lib/voiceInputPreference";
 import type { VoiceInterruptionMode } from "../lib/voiceInterruptionPreference";
-import { useVoiceInterruptionPreference } from "../lib/voiceInterruptionPreference";
+import {
+  getDefaultVoiceInterruptionPreference,
+  useVoiceInterruptionPreference,
+} from "../lib/voiceInterruptionPreference";
 import type { VoiceOutputBackend } from "../lib/voiceOutputPreference";
-import { useVoiceOutputPreference } from "../lib/voiceOutputPreference";
+import {
+  getDefaultVoiceOutputBackend,
+  useVoiceOutputPreference,
+} from "../lib/voiceOutputPreference";
 import type { VoiceConversationMode } from "../lib/voiceConversationModePreference";
-import { useVoiceConversationModePreference } from "../lib/voiceConversationModePreference";
+import {
+  getDefaultVoiceConversationMode,
+  useVoiceConversationModePreference,
+} from "../lib/voiceConversationModePreference";
 import { PocketVoiceSetupContent } from "./PocketVoiceSetupContent";
 import { MacSpeechSettings } from "./MacSpeechSettings";
 import { SiriVoiceSettings } from "./SiriVoiceSettings";
 import { PlaybackSpeedRow } from "./PlaybackSpeedRow";
+import { SimpleVoicePickerDialog } from "./SimpleVoicePickerDialog";
 import { useOpenAiVoiceSetup } from "../hooks/useOpenAiVoiceSetup";
 import { OpenAiApiKeyField } from "./OpenAiApiKeyField";
 import { RealtimeVoiceSettings } from "./RealtimeVoiceSettings";
+import {
+  getDefaultRealtimeVoicePreference,
+  setRealtimeVoicePreference,
+} from "../lib/realtimeVoicePreference";
+import {
+  DEFAULT_OPENAI_VOICE,
+  openAiVoiceOptions,
+} from "../lib/openAiVoiceOptions";
 
 const INTERRUPTION_MODES: VoiceInterruptionMode[] = [
   "automatic",
   "allowInterruptions",
   "preventFeedback",
 ];
+
+function BackendOption({
+  label,
+  location,
+  recommended = false,
+}: {
+  label: string;
+  location: string;
+  recommended?: boolean;
+}) {
+  const { t } = useTranslation("settings");
+
+  return (
+    <span className="flex items-center gap-2">
+      {label}
+      {recommended ? (
+        <Badge variant="secondary">{t("voice.recommended")}</Badge>
+      ) : null}
+      <Badge variant="outline">{location}</Badge>
+    </span>
+  );
+}
 
 function readinessDescriptionKey(
   inputReady: boolean,
@@ -97,6 +142,11 @@ export function VoiceSettings() {
   const macSpeechSetup = useMacSpeechSetup();
   const [openAiSpeed, setOpenAiSpeed] = useState(1);
   const [openAiSpeedError, setOpenAiSpeedError] = useState<string | null>(null);
+  const [openAiVoice, setOpenAiVoice] = useState(DEFAULT_OPENAI_VOICE);
+  const [openAiVoiceError, setOpenAiVoiceError] = useState<string | null>(null);
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
   const input = useVoiceInputPreference(
     isMacSpeechAvailable(macSpeechSetup.status, macSpeechSetup.loading),
   );
@@ -105,7 +155,10 @@ export function VoiceSettings() {
     input.backend === "openai" || output.backend === "openai",
   );
   useEffect(() => {
-    if (openAiStatus) setOpenAiSpeed(openAiStatus.playbackSpeed);
+    if (openAiStatus) {
+      setOpenAiSpeed(openAiStatus.playbackSpeed);
+      setOpenAiVoice(openAiStatus.speechVoice);
+    }
   }, [openAiStatus]);
   const interruption = useVoiceInterruptionPreference();
   const mode = useVoiceConversationModePreference();
@@ -165,46 +218,81 @@ export function VoiceSettings() {
                 input.backend,
               );
 
+  const resetAllVoiceSettings = async () => {
+    const macSpeechAvailable = Boolean(
+      macSpeechSetup.status?.supported && macSpeechSetup.status.localeSupported,
+    );
+    setResetting(true);
+    setResetError(null);
+    try {
+      await resetAllVoiceBackendSettings();
+      await setup.refreshSettings();
+      await siriSetup.refreshSettings();
+      setRealtimeVoicePreference(getDefaultRealtimeVoicePreference());
+      input.setBackend(getDefaultVoiceInputBackend(macSpeechAvailable));
+      output.setBackend(getDefaultVoiceOutputBackend());
+      interruption.setMode(getDefaultVoiceInterruptionPreference().mode);
+      mode.setMode(getDefaultVoiceConversationMode());
+      setResetDialogOpen(false);
+    } finally {
+      setResetting(false);
+    }
+  };
+
   return (
     <SettingsPage
       title={t("nav.voice")}
       description={t("voice.settingsDescription")}
-      contentClassName="space-y-6"
+      contentClassName="space-y-4"
+      actions={
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            setResetError(null);
+            setResetDialogOpen(true);
+          }}
+          title={t("voice.resetToDefaultsDescription")}
+          disabled={macSpeechSetup.loading}
+        >
+          {t("voice.resetToDefaults")}
+        </Button>
+      }
     >
-      <section className="space-y-2 overflow-hidden">
-        <SettingsRow
-          label={
-            <h2 className="text-sm font-medium">
-              {t("voice.conversationMode")}
-            </h2>
+      <section className="space-y-3 overflow-hidden">
+        <div>
+          <h2 className="text-sm font-medium">{t("voice.conversationMode")}</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t("voice.conversationModeDescription")}
+          </p>
+        </div>
+        <RadioGroup
+          value={mode.mode}
+          onValueChange={(value) =>
+            mode.setMode(value as VoiceConversationMode)
           }
-          description={t("voice.conversationModeDescription")}
-          layout="responsive"
-          action={({ labelId, descriptionId }) => (
-            <Select
-              value={mode.mode}
-              onValueChange={(value) =>
-                mode.setMode(value as VoiceConversationMode)
-              }
-            >
-              <SelectTrigger
-                className="w-full sm:w-auto"
-                aria-labelledby={labelId}
-                aria-describedby={descriptionId}
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="chained">
-                  {t("voice.modeChained")}
-                </SelectItem>
-                <SelectItem value="openai-realtime">
-                  {t("voice.modeOpenAiRealtime")}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          )}
-        />
+          className="grid gap-2 sm:grid-cols-2"
+          aria-label={t("voice.conversationMode")}
+        >
+          <RadioGroupCard
+            id="voice-mode-chained"
+            value="chained"
+            label={t("voice.modeChained")}
+            description={t("voice.modeChainedDescription")}
+          />
+          <RadioGroupCard
+            id="voice-mode-openai-realtime"
+            value="openai-realtime"
+            label={
+              <span className="flex items-center gap-2">
+                {t("voice.modeOpenAiRealtime")}
+                <Badge variant="outline">{t("voice.cloud")}</Badge>
+              </span>
+            }
+            description={t("voice.modeOpenAiRealtimeDescription")}
+          />
+        </RadioGroup>
       </section>
       {mode.mode === "chained" ? (
         <>
@@ -237,6 +325,7 @@ export function VoiceSettings() {
           ) : null}
           <section className="space-y-2 overflow-hidden">
             <SettingsRow
+              className="py-2"
               label={
                 <h2 className="text-sm font-medium">
                   {t("voice.speechInput")}
@@ -263,15 +352,25 @@ export function VoiceSettings() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="parakeet">
-                      {t("voice.backendParakeet")}
+                      <BackendOption
+                        label={t("voice.backendParakeet")}
+                        location={t("voice.local")}
+                      />
                     </SelectItem>
                     <SelectItem value="openai">
-                      {t("voice.backendOpenAiStt")}
+                      <BackendOption
+                        label={t("voice.backendOpenAiStt")}
+                        location={t("voice.cloud")}
+                      />
                     </SelectItem>
                     {macSpeechSetup.status?.supported &&
                     macSpeechSetup.status.localeSupported ? (
                       <SelectItem value="macos">
-                        {t("voice.backendMacSpeech")}
+                        <BackendOption
+                          label={t("voice.backendMacSpeech")}
+                          location={t("voice.local")}
+                          recommended
+                        />
                       </SelectItem>
                     ) : null}
                   </SelectContent>
@@ -317,6 +416,7 @@ export function VoiceSettings() {
           </section>
           <section className="space-y-2">
             <SettingsRow
+              className="py-2"
               label={
                 <h2 className="text-sm font-medium">
                   {t("voice.speechOutput")}
@@ -342,16 +442,26 @@ export function VoiceSettings() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="pocket">
-                      {t("voice.backendPocket")}
+                      <BackendOption
+                        label={t("voice.backendPocket")}
+                        location={t("voice.local")}
+                      />
                     </SelectItem>
                     {getPlatform() === "mac" ? (
                       <SelectItem value="openai">
-                        {t("voice.backendOpenAiTts")}
+                        <BackendOption
+                          label={t("voice.backendOpenAiTts")}
+                          location={t("voice.cloud")}
+                        />
                       </SelectItem>
                     ) : null}
                     {siriSupported ? (
                       <SelectItem value="siri">
-                        {t("voice.backendSiri")}
+                        <BackendOption
+                          label={t("voice.backendSiri")}
+                          location={t("voice.local")}
+                          recommended
+                        />
                       </SelectItem>
                     ) : null}
                   </SelectContent>
@@ -386,23 +496,46 @@ export function VoiceSettings() {
                         {t("voice.openAiEnvironmentOverride")}
                       </p>
                     ) : null}
-                    <PlaybackSpeedRow
-                      speed={openAiSpeed}
-                      speeds={[0.75, 1, 1.25, 1.5, 2]}
-                      onChange={async (speed) => {
-                        setOpenAiSpeedError(null);
-                        try {
-                          await setOpenAiPlaybackSpeed(speed);
-                          setOpenAiSpeed(speed);
-                        } catch (cause) {
-                          setOpenAiSpeedError(
-                            cause instanceof Error
-                              ? cause.message
-                              : String(cause),
-                          );
-                        }
-                      }}
-                    />
+                    <div className="divide-y divide-border">
+                      <SimpleVoicePickerDialog
+                        options={openAiVoiceOptions(
+                          openAiStatus?.speechVoices ?? [openAiVoice],
+                        )}
+                        selectedVoice={openAiVoice}
+                        defaultVoice={DEFAULT_OPENAI_VOICE}
+                        error={openAiVoiceError}
+                        onChange={async (voice) => {
+                          setOpenAiVoiceError(null);
+                          try {
+                            await setOpenAiSpeechVoice(voice);
+                            setOpenAiVoice(voice);
+                          } catch (cause) {
+                            setOpenAiVoiceError(
+                              cause instanceof Error
+                                ? cause.message
+                                : String(cause),
+                            );
+                          }
+                        }}
+                      />
+                      <PlaybackSpeedRow
+                        speed={openAiSpeed}
+                        speeds={[0.75, 1, 1.25, 1.5, 2]}
+                        onChange={async (speed) => {
+                          setOpenAiSpeedError(null);
+                          try {
+                            await setOpenAiPlaybackSpeed(speed);
+                            setOpenAiSpeed(speed);
+                          } catch (cause) {
+                            setOpenAiSpeedError(
+                              cause instanceof Error
+                                ? cause.message
+                                : String(cause),
+                            );
+                          }
+                        }}
+                      />
+                    </div>
                     {openAiSpeedError ? (
                       <p className="text-xs text-destructive" role="alert">
                         {openAiSpeedError}
@@ -417,45 +550,72 @@ export function VoiceSettings() {
               }
             />
           </section>
-          <section className="space-y-4 py-4 pr-4">
-            <h2 id={interruptionHeadingId} className="text-sm font-medium">
-              {t("voice.interruptionMode")}
-            </h2>
-            <p
-              id={interruptionDescriptionId}
-              className="text-xs text-muted-foreground"
-            >
-              {t("voice.interruptionDescription")}
-            </p>
-            <RadioGroup
-              value={interruption.mode}
-              onValueChange={(value) =>
-                interruption.setMode(value as VoiceInterruptionMode)
+          <section className="space-y-2 overflow-hidden">
+            <SettingsRow
+              className="py-2"
+              label={
+                <h2 id={interruptionHeadingId} className="text-sm font-medium">
+                  {t("voice.interruptionMode")}
+                </h2>
               }
-              aria-labelledby={interruptionHeadingId}
-              aria-describedby={interruptionDescriptionId}
-              className="gap-2"
-            >
-              {INTERRUPTION_MODES.map((mode) => {
-                const optionId = `${interruptionHeadingId}-${mode}`;
-                return (
-                  <RadioGroupCard
-                    key={mode}
-                    id={optionId}
-                    value={mode}
-                    label={t(`voice.interruptionModes.${mode}`)}
-                    description={t(
-                      `voice.interruptionModeDescriptions.${mode}`,
-                    )}
-                  />
-                );
-              })}
-            </RadioGroup>
+              description={t(
+                `voice.interruptionModeDescriptions.${interruption.mode}`,
+              )}
+              descriptionId={interruptionDescriptionId}
+              layout="responsive"
+              action={({ labelId, descriptionId }) => (
+                <Select
+                  value={interruption.mode}
+                  onValueChange={(value) =>
+                    interruption.setMode(value as VoiceInterruptionMode)
+                  }
+                >
+                  <SelectTrigger
+                    className="w-full sm:w-60"
+                    aria-labelledby={labelId}
+                    aria-describedby={descriptionId}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {INTERRUPTION_MODES.map((interruptionMode) => (
+                      <SelectItem
+                        key={interruptionMode}
+                        value={interruptionMode}
+                      >
+                        {t(`voice.interruptionModes.${interruptionMode}`)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            />
           </section>
         </>
       ) : (
         <RealtimeVoiceSettings />
       )}
+      {resetError ? (
+        <p className="text-sm text-destructive" role="alert">
+          {resetError}
+        </p>
+      ) : null}
+      <ConfirmDialog
+        open={resetDialogOpen}
+        onOpenChange={setResetDialogOpen}
+        title={t("voice.resetToDefaultsConfirmTitle")}
+        description={t("voice.resetToDefaultsConfirmDescription")}
+        cancelLabel={t("common:actions.cancel")}
+        confirmLabel={t("voice.resetToDefaults")}
+        loadingLabel={t("voice.resettingToDefaults")}
+        isLoading={resetting}
+        destructive={false}
+        onConfirm={resetAllVoiceSettings}
+        onConfirmError={(error) => {
+          setResetError(error instanceof Error ? error.message : String(error));
+          setResetDialogOpen(false);
+        }}
+      />
     </SettingsPage>
   );
 }
