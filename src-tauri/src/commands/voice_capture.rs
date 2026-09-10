@@ -80,6 +80,8 @@ pub struct VoiceTelemetryOwnerRequest {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VoiceTelemetryEndRequest {
+    #[serde(flatten)]
+    owner: VoiceTelemetryOwnerRequest,
     fallback_reason: VoiceTelemetryEndReason,
 }
 
@@ -447,12 +449,20 @@ impl VoiceCaptureState {
 
     fn end_voice_telemetry(
         &self,
+        request: &VoiceTelemetryOwnerRequest,
         fallback_reason: VoiceTelemetryEndReason,
     ) -> Result<Option<CompletedVoiceTelemetry>, String> {
+        validate_id("renderer", &request.renderer_id)?;
         let mut state = self
             .state
             .lock()
             .map_err(|_| "Voice capture state lock was poisoned".to_string())?;
+        if !state.active_voice_telemetry.as_ref().is_some_and(|active| {
+            active.owner_renderer_id == request.renderer_id
+                && active.owner_renderer_epoch == request.renderer_epoch
+        }) {
+            return Ok(None);
+        }
         Ok(state
             .active_voice_telemetry
             .take()
@@ -554,7 +564,7 @@ pub fn end_voice_conversation_telemetry(
     state: State<'_, VoiceCaptureState>,
     request: VoiceTelemetryEndRequest,
 ) -> Result<Option<CompletedVoiceTelemetry>, String> {
-    state.end_voice_telemetry(request.fallback_reason)
+    state.end_voice_telemetry(&request.owner, request.fallback_reason)
 }
 
 #[tauri::command]
@@ -622,11 +632,30 @@ mod tests {
             )
             .expect("start telemetry");
 
+        let owner = VoiceTelemetryOwnerRequest {
+            renderer_id: "renderer-1".into(),
+            renderer_epoch: epoch,
+        };
+        for request in [
+            VoiceTelemetryOwnerRequest {
+                renderer_id: "other-renderer".into(),
+                renderer_epoch: epoch,
+            },
+            VoiceTelemetryOwnerRequest {
+                renderer_id: "renderer-1".into(),
+                renderer_epoch: epoch + 1,
+            },
+        ] {
+            assert!(capture
+                .end_voice_telemetry(&request, VoiceTelemetryEndReason::Error)
+                .expect("reject non-owner")
+                .is_none());
+        }
         let first = capture
-            .end_voice_telemetry(VoiceTelemetryEndReason::User)
+            .end_voice_telemetry(&owner, VoiceTelemetryEndReason::User)
             .expect("first claim");
         let second = capture
-            .end_voice_telemetry(VoiceTelemetryEndReason::Error)
+            .end_voice_telemetry(&owner, VoiceTelemetryEndReason::Error)
             .expect("second claim");
 
         assert!(first.is_some());
@@ -663,7 +692,13 @@ mod tests {
             .expect("ignore non-owner update");
 
         let completed = capture
-            .end_voice_telemetry(VoiceTelemetryEndReason::User)
+            .end_voice_telemetry(
+                &VoiceTelemetryOwnerRequest {
+                    renderer_id: "renderer-1".into(),
+                    renderer_epoch: owner_epoch,
+                },
+                VoiceTelemetryEndReason::User,
+            )
             .expect("claim end")
             .expect("completed telemetry");
         assert_eq!(completed.user_utterance_count, 0);
@@ -712,8 +747,18 @@ mod tests {
         capture
             .update_voice_telemetry(&first, |active| active.user_utterance_count += 1)
             .expect("ignore stale renderer");
+        assert!(capture
+            .end_voice_telemetry(&first, VoiceTelemetryEndReason::Error)
+            .expect("ignore stale end")
+            .is_none());
         let completed = capture
-            .end_voice_telemetry(VoiceTelemetryEndReason::User)
+            .end_voice_telemetry(
+                &VoiceTelemetryOwnerRequest {
+                    renderer_id: "renderer-2".into(),
+                    renderer_epoch: second_epoch,
+                },
+                VoiceTelemetryEndReason::User,
+            )
             .expect("end")
             .expect("aggregate");
         assert_eq!(completed.user_utterance_count, 2);

@@ -90,8 +90,8 @@ export function clearRequestedVoiceConversationEnd(): void {
 export function trackVoiceConversationEnded(
   fallbackReason: BerdVoiceConversationEndReason,
 ): void {
-  enqueue(async () => {
-    const conversation = await endVoiceTelemetry(fallbackReason);
+  enqueue(async (renderer) => {
+    const conversation = await endVoiceTelemetry(renderer, fallbackReason);
     if (!conversation?.reportable) return;
     track(
       berdVoiceConversationEnded({

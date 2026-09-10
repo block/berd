@@ -61,7 +61,12 @@ function installNativeAccounting() {
       return;
     }
     if (command === "end_voice_conversation_telemetry") {
-      if (!aggregate) return null;
+      if (
+        !aggregate ||
+        aggregate.owner.rendererId !== request.rendererId ||
+        aggregate.owner.rendererEpoch !== request.rendererEpoch
+      )
+        return null;
       const completed = {
         inputBackend: "macos",
         outputBackend: "siri",
@@ -151,13 +156,18 @@ describe("voice conversation telemetry", () => {
     );
   });
 
-  it("ignores updates from a non-owning renderer", async () => {
+  it("ignores updates and ends from a non-owning renderer", async () => {
     trackVoiceConversationStarted(context);
     mocks.renderer.rendererId = "replacement-renderer";
     mocks.renderer.rendererEpoch = 8;
     trackVoiceUserUtterance();
     trackVoiceAssistantResponse();
     trackVoiceConversationEnded("clean-shutdown");
+    await flushVoiceTelemetryForTest();
+    expect(mocks.track).toHaveBeenCalledOnce();
+    mocks.renderer.rendererId = "renderer-test";
+    mocks.renderer.rendererEpoch = 7;
+    trackVoiceConversationEnded("user");
     await flushVoiceTelemetryForTest();
     expect(mocks.track.mock.calls[1][0].parameters).toMatchObject({
       user_utterance_count: "0",

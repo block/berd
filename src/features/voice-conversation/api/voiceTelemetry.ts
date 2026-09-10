@@ -84,10 +84,11 @@ export function clearVoiceTelemetryEnd(
   });
 }
 export function endVoiceTelemetry(
+  renderer: RendererInstance,
   fallbackReason: BerdVoiceConversationEndReason,
 ): Promise<CompletedVoiceConversationTelemetry | null> {
   return invoke("end_voice_conversation_telemetry", {
-    request: { fallbackReason },
+    request: { ...ownerRequest(renderer), fallbackReason },
   });
 }
 
