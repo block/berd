@@ -1,5 +1,21 @@
 # Changelog
 
+## [v0.6.4](https://github.com/block/berd/releases/tag/v0.6.4) - 2026-09-10
+
+This release improves chat recovery, artifact actions, voice conversations, and agent setup across Berd.
+
+- **Artifact actions restored:** `Open in editor` and artifact-row actions work again, including in popped-out session windows. Actions are disabled when a file has been deleted and automatically return if it reappears.
+- **Unavailable remote chats:** When a remote session no longer exists, Berd now shows a clear read-only notice instead of a raw error while preserving any messages still available in memory.
+- **Archived chat recovery:** Sending a new message to an archived chat now restores it to the active chat list before continuing the conversation.
+- **Smoother voice replies:** Streamed responses are spoken in complete paragraphs, preventing isolated opening words and awkward pauses. Lists, playback speed, interruptions, and long Pocket TTS responses also sound more natural.
+- **Simpler voice settings:** Voice modes now have clearer descriptions and Local/Cloud labels, with Apple speech as the recommended direct-mode default. A new reset option restores defaults without removing credentials or selected models.
+- **More reliable live voice:** Expert and Spokesperson modes now switch more cleanly, avoid blocking during runtime changes, and handle speech cancellation, reconnection, and voice or speed changes more consistently.
+- **Pi agent support:** Pi is now available during onboarding with one-click installation and model selection. The wider model picker also makes long model names easier to read.
+- **GPT-6 Astra for Codex:** GPT-6 Astra can now be selected when starting a Codex ACP session.
+- **Safer MCP App messages:** Berd now asks for explicit confirmation before an MCP App can submit a message as you.
+
+**Full Changelog**: https://github.com/block/berd/compare/v0.6.3...3d3817f64
+
 ## [v0.6.3](https://github.com/block/berd/releases/tag/v0.6.3) - 2026-09-05
 
 This release brings major improvements to voice conversations, search, agents, Home, and CLI workflows, plus many reliability fixes across everyday chat use.
