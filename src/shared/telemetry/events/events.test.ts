@@ -14,7 +14,10 @@ import {
   berdProjectDeleteCompleted,
   berdProjectEditCompleted,
 } from "./berd_project";
-import { berdVoiceConversationStarted } from "./berd_voice";
+import {
+  berdVoiceConversationEnded,
+  berdVoiceConversationStarted,
+} from "./berd_voice";
 
 // The vendored set is a curated subset of the schema repo (see ./index.ts): the
 // port excluded every *Initiated* variant, so a factory for one has no call
@@ -38,10 +41,43 @@ describe("vendored event surface", () => {
 });
 
 describe("voice events", () => {
-  it("keeps successful voice startup as a privacy-safe bare counter", () => {
-    expect(berdVoiceConversationStarted()).toEqual({
+  const context = {
+    input_backend: "macos" as const,
+    output_backend: "siri" as const,
+    voice_mode: "chained" as const,
+  };
+
+  it("labels successful voice startup with its resolved backends", () => {
+    expect(berdVoiceConversationStarted(context)).toEqual({
       name: "berd_voice_conversation_started",
-      parameters: {},
+      parameters: {
+        input_backend: "macos",
+        output_backend: "siri",
+        voice_mode: "chained",
+      },
+    });
+  });
+
+  it("keeps the end record self-contained without an identifier", () => {
+    expect(
+      berdVoiceConversationEnded({
+        ...context,
+        duration_ms: 12_345,
+        user_utterance_count: 3,
+        assistant_response_count: 2,
+        end_reason: "user",
+      }),
+    ).toEqual({
+      name: "berd_voice_conversation_ended",
+      parameters: {
+        input_backend: "macos",
+        output_backend: "siri",
+        voice_mode: "chained",
+        duration_ms: "12345",
+        user_utterance_count: "3",
+        assistant_response_count: "2",
+        end_reason: "user",
+      },
     });
   });
 });

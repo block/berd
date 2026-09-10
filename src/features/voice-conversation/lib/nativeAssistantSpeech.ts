@@ -46,6 +46,7 @@ import {
   type VoiceInterruptionSensitivity,
 } from "./voiceInterruptionPreference";
 import { getVoiceOutputBackend } from "./voiceOutputPreference";
+import { trackVoiceAssistantResponse } from "./voiceTelemetry";
 import { useVoiceConversationStore } from "../stores/voiceConversationStore";
 
 type SpeechFailureHandler = (text: string, error: unknown) => void;
@@ -1008,6 +1009,7 @@ export function startNativeAssistantSpeech(
   const transcriptReferenceByKey = new Map<string, VoiceTranscriptReference>();
   const invalidatedMessages = new Set<string>();
   const handledCompletionMessages = new Set<string>();
+  const countedAssistantResponseMessages = new Set<string>();
   const interruptedMessages = new Set<string>();
   const failedMessages = new Set<string>();
   const interruptionCauseByMessage = new Map<string, InterruptionCause>();
@@ -1692,6 +1694,10 @@ export function startNativeAssistantSpeech(
       // create an utterance for it.
       if (completionHandled) {
         handledCompletionMessages.add(message.id);
+        if (!countedAssistantResponseMessages.has(message.id)) {
+          countedAssistantResponseMessages.add(message.id);
+          trackVoiceAssistantResponse();
+        }
       }
     }
   };

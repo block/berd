@@ -69,6 +69,7 @@ const mocks = vi.hoisted(() => ({
   openAiFinish: vi.fn<(streamId: string) => Promise<void>>(),
   openAiStop: vi.fn<() => Promise<boolean>>(),
   openAiStreamHandler: null as ((event: PocketVoiceStreamEvent) => void) | null,
+  trackAssistantResponse: vi.fn(),
 }));
 vi.mock("../api/voiceConversation", () => ({
   setVoiceConversationAssistantSpeaking: mocks.setAssistantSpeaking,
@@ -150,6 +151,10 @@ vi.mock("../api/siriVoice", () => ({
     mocks.siriStreamHandler = handler;
     return vi.fn();
   },
+}));
+
+vi.mock("./voiceTelemetry", () => ({
+  trackVoiceAssistantResponse: mocks.trackAssistantResponse,
 }));
 
 vi.mock("./voiceOutputPreference", () => ({
@@ -2794,6 +2799,7 @@ describe("native assistant speech stream", () => {
       ]);
       await vi.runAllTimersAsync();
       const firstStreamId = mocks.start.mock.calls[0]?.[0] as string;
+      const responseCount = mocks.trackAssistantResponse.mock.calls.length;
       mocks.streamHandler?.({
         streamId: firstStreamId,
         state: "started",
@@ -2835,6 +2841,7 @@ describe("native assistant speech stream", () => {
         state: "started",
         error: null,
       });
+      expect(mocks.trackAssistantResponse).toHaveBeenCalledTimes(responseCount);
       useVoiceConversationStore.setState({ userSpeaking: true });
       mocks.streamHandler?.({
         streamId: secondStreamId,

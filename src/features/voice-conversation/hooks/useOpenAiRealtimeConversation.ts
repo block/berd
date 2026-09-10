@@ -58,6 +58,13 @@ import {
   sendRealtimeEvents,
 } from "../lib/realtimeEmissaryProtocol";
 import {
+  requestVoiceConversationEnd,
+  trackVoiceAssistantResponse,
+  trackVoiceConversationEnded,
+  trackVoiceConversationStarted,
+  trackVoiceUserUtterance,
+} from "../lib/voiceTelemetry";
+import {
   getRealtimeVoicePreference,
   subscribeToRealtimeVoicePreference,
 } from "../lib/realtimeVoicePreference";
@@ -811,6 +818,11 @@ class OpenAiRealtimeConversationRuntime {
                     true,
                   );
                 } else if (bridgeEvent.type === "transcript.finalized") {
+                  if (bridgeEvent.speaker === "spokesperson") {
+                    trackVoiceAssistantResponse();
+                  } else {
+                    trackVoiceUserUtterance();
+                  }
                   upsertTranscriptMessage(
                     ownerSessionId,
                     {
@@ -1049,6 +1061,12 @@ class OpenAiRealtimeConversationRuntime {
         completeMasterTurn: this.bridgeMasterTurnCompletion,
       });
       this.resolveBridgeReady = null;
+      trackVoiceConversationStarted({
+        inputBackend: "openai",
+        outputBackend: "openai",
+        voiceMode: "openai-realtime",
+        ttsRate: appliedSpeed,
+      });
       this.setSnapshot({
         ...this.snapshot,
         state: "listening",
@@ -1069,6 +1087,7 @@ class OpenAiRealtimeConversationRuntime {
     // late microphone acquisition cannot install capture after stop begins.
     // A running session stays valid long enough to drain its final events.
     if (this.snapshot.state === "starting") this.activeRun += 1;
+    requestVoiceConversationEnd("user");
     this.setSnapshot({ ...this.snapshot, state: "stopping" });
     this.nativeMicrophone?.stop();
     this.nativeMicrophone = null;
@@ -1097,6 +1116,7 @@ class OpenAiRealtimeConversationRuntime {
     await this.cleanupResources(sessionId);
     this.boundOnSend = null;
     this.failureInProgress = false;
+    trackVoiceConversationEnded("user");
     this.setSnapshot(OFF_SNAPSHOT);
   }
 
@@ -1152,6 +1172,7 @@ class OpenAiRealtimeConversationRuntime {
     this.failureInProgress = false;
     this.resetDeliveryQueue();
     this.historyReplay = Promise.resolve();
+    trackVoiceConversationEnded("clean-shutdown");
     this.setSnapshot(OFF_SNAPSHOT);
   }
 
@@ -1287,6 +1308,7 @@ class OpenAiRealtimeConversationRuntime {
     const message = errorText(error);
     await this.cleanupResources(sessionId);
     this.boundOnSend = null;
+    trackVoiceConversationEnded("error");
     this.setSnapshot({
       state: "error",
       boundSessionId: sessionId,

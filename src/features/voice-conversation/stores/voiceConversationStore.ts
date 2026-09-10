@@ -18,7 +18,14 @@ import {
   type VoiceConversationStatus,
 } from "../api/voiceConversation";
 import type { VoiceInputBackend } from "../lib/voiceInputPreference";
-import { trackVoiceConversationStarted } from "../lib/voiceTelemetry";
+import { getVoiceOutputBackend } from "../lib/voiceOutputPreference";
+import {
+  clearRequestedVoiceConversationEnd,
+  requestVoiceConversationEnd,
+  trackVoiceConversationEnded,
+  trackVoiceConversationStarted,
+  trackVoiceUserUtterance,
+} from "../lib/voiceTelemetry";
 
 export type VoiceConversationUiState =
   | "off"
@@ -96,9 +103,18 @@ const deliveredTranscripts = new Set<string>();
 const deliveredTranscriptOrder: string[] = [];
 const MAX_DELIVERED_TRANSCRIPT_KEYS = 256;
 const priorFinalizedTranscriptKeys = new Map<string, string | null>();
+const observedTranscriptKeys = new Set<string>();
+const observedTranscriptOrder: string[] = [];
 
 function observeFinalizedTranscript(transcript: PendingVoiceTranscript): void {
   const deliveryKey = transcriptKey(transcript);
+  if (observedTranscriptKeys.has(deliveryKey)) return;
+  observedTranscriptKeys.add(deliveryKey);
+  observedTranscriptOrder.push(deliveryKey);
+  if (observedTranscriptOrder.length > MAX_DELIVERED_TRANSCRIPT_KEYS) {
+    const expired = observedTranscriptOrder.shift();
+    if (expired) observedTranscriptKeys.delete(expired);
+  }
   const key = finalizedTranscriptKey(transcript);
   if (!priorFinalizedTranscriptKeys.has(deliveryKey)) {
     priorFinalizedTranscriptKeys.set(
@@ -107,6 +123,7 @@ function observeFinalizedTranscript(transcript: PendingVoiceTranscript): void {
     );
   }
   useVoiceConversationStore.setState({ latestFinalizedTranscriptKey: key });
+  trackVoiceUserUtterance();
 }
 
 export function subscribeToVoiceConversationEvents(
@@ -165,6 +182,12 @@ function rememberDeliveredTranscript(key: string) {
   }
 }
 
+function forgetObservedTranscript(key: string): void {
+  if (!observedTranscriptKeys.delete(key)) return;
+  const index = observedTranscriptOrder.indexOf(key);
+  if (index !== -1) observedTranscriptOrder.splice(index, 1);
+}
+
 async function deliverTranscriptOnce(
   transcript: PendingVoiceTranscript,
 ): Promise<TranscriptDeliveryOutcome> {
@@ -199,6 +222,7 @@ async function deliverTranscriptOnce(
     } else if (!deferred) {
       const rejection = await rejectVoiceConversationTranscript(transcript);
       if (rejection.terminal) {
+        forgetObservedTranscript(key);
         const priorKey = priorFinalizedTranscriptKeys.get(key) ?? null;
         priorFinalizedTranscriptKeys.delete(key);
         for (const [
@@ -370,6 +394,14 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
 
           if (event.type === "user") observeFinalizedTranscript(event);
 
+          if (event.type === "cleanShutdown") {
+            trackVoiceConversationEnded("clean-shutdown");
+          } else if (event.type === "controlsDismissed") {
+            trackVoiceConversationEnded("controls-dismissed");
+          } else if (event.type === "error" && event.terminal) {
+            trackVoiceConversationEnded("error");
+          }
+
           if (event.type === "microphoneMute") {
             microphoneMuteIntent += 1;
             microphoneMuteStateVersion += 1;
@@ -391,6 +423,8 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
             (event.type === "error" && event.terminal)
           ) {
             priorFinalizedTranscriptKeys.clear();
+            observedTranscriptKeys.clear();
+            observedTranscriptOrder.length = 0;
           }
 
           set((state) => {
@@ -656,7 +690,18 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
             inputBackend,
             foregroundGeneration,
           );
-          trackVoiceConversationStarted();
+          const currentStatus = get().status;
+          if (
+            shouldApplyResponseRevision(currentStatus, status.revision) ||
+            (currentStatus.lifecycle === "running" &&
+              currentStatus.sessionId === sessionId)
+          ) {
+            trackVoiceConversationStarted({
+              inputBackend,
+              outputBackend: getVoiceOutputBackend(),
+              voiceMode: "chained",
+            });
+          }
           set((state) =>
             shouldApplyResponseRevision(state.status, status.revision) ||
             (status.revision === state.status.revision &&
@@ -748,6 +793,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
       microphoneMuteIntent += 1;
       microphoneMuteStateVersion += 1;
       const activeStatus = get().status;
+      requestVoiceConversationEnd("user");
       set({
         uiState: "stopping",
         microphoneMuted: false,
@@ -757,6 +803,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
       const request = (async () => {
         try {
           const status = await stopVoiceConversation(activeStatus);
+          trackVoiceConversationEnded("user");
           set((state) =>
             shouldApplyResponseRevision(state.status, status.revision) ||
             (status.revision === state.status.revision &&
@@ -772,6 +819,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
           await reconcileVoiceConversationMicrophone(get().status);
           return status;
         } catch (error) {
+          clearRequestedVoiceConversationEnd();
           const message =
             error instanceof Error ? error.message : String(error);
           try {
@@ -797,6 +845,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
     },
 
     stopForReplacement: async (activeStatus, targetSessionId) => {
+      requestVoiceConversationEnd("replacement");
       microphoneMuteIntent += 1;
       microphoneMuteStateVersion += 1;
       set({
@@ -810,6 +859,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
           activeStatus,
           targetSessionId,
         );
+        trackVoiceConversationEnded("replacement");
         set((state) =>
           shouldApplyResponseRevision(state.status, status.revision) ||
           (status.revision === state.status.revision &&
@@ -826,6 +876,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
         await reconcileVoiceConversationMicrophone(get().status);
         return status;
       } catch (error) {
+        clearRequestedVoiceConversationEnd();
         const message = error instanceof Error ? error.message : String(error);
         try {
           const muteStateVersion = microphoneMuteStateVersion;

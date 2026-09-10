@@ -18,7 +18,11 @@ const mocks = vi.hoisted(() => ({
   start: vi.fn(),
   stop: vi.fn(),
   stopForReplacement: vi.fn(),
+  clearRequestedEnd: vi.fn(),
+  requestEnd: vi.fn(),
+  trackEnded: vi.fn(),
   trackStarted: vi.fn(),
+  trackUserUtterance: vi.fn(),
 }));
 
 vi.mock("../api/voiceConversation", () => ({
@@ -37,7 +41,11 @@ vi.mock("../api/voiceConversation", () => ({
 }));
 
 vi.mock("../lib/voiceTelemetry", () => ({
+  clearRequestedVoiceConversationEnd: mocks.clearRequestedEnd,
+  requestVoiceConversationEnd: mocks.requestEnd,
+  trackVoiceConversationEnded: mocks.trackEnded,
   trackVoiceConversationStarted: mocks.trackStarted,
+  trackVoiceUserUtterance: mocks.trackUserUtterance,
 }));
 
 function status(
@@ -78,7 +86,11 @@ describe("voice conversation store lifecycle ordering", () => {
     mocks.start.mockReset();
     mocks.stop.mockReset();
     mocks.stopForReplacement.mockReset();
+    mocks.clearRequestedEnd.mockReset();
+    mocks.requestEnd.mockReset();
+    mocks.trackEnded.mockReset();
     mocks.trackStarted.mockReset();
+    mocks.trackUserUtterance.mockReset();
     mocks.listen.mockReset().mockImplementation(async (callback) => {
       emit = callback;
       return vi.fn();
@@ -164,6 +176,7 @@ describe("voice conversation store lifecycle ordering", () => {
     ).toBe(["session-1", "lifecycle-1", "1", "utterance-1"].join("\0"));
     expect(mocks.acknowledge).not.toHaveBeenCalled();
     expect(mocks.reject).not.toHaveBeenCalled();
+    expect(mocks.trackUserUtterance).toHaveBeenCalledOnce();
 
     delivery.resolve();
     await vi.waitFor(() => expect(mocks.acknowledge).toHaveBeenCalledOnce());
@@ -191,6 +204,7 @@ describe("voice conversation store lifecycle ordering", () => {
       module.useVoiceConversationStore.getState().latestFinalizedTranscriptKey,
     ).toBe(["session-1", "lifecycle-1", "1", "utterance-2"].join("\0"));
     await vi.waitFor(() => expect(mocks.reject).toHaveBeenCalledOnce());
+    expect(mocks.trackUserUtterance).toHaveBeenCalledOnce();
     expect(mocks.acknowledge).not.toHaveBeenCalled();
     expect(
       module.useVoiceConversationStore.getState().latestFinalizedTranscriptKey,
@@ -294,6 +308,7 @@ describe("voice conversation store lifecycle ordering", () => {
     expect(
       module.useVoiceConversationStore.getState().latestFinalizedTranscriptKey,
     ).toBe("prior-transcript");
+    expect(mocks.trackUserUtterance).toHaveBeenCalledTimes(2);
     unsubscribe();
   });
 
@@ -954,6 +969,19 @@ describe("voice conversation store lifecycle ordering", () => {
 
     response.resolve(status("stopped", 2));
     await expect(first).resolves.toEqual(status("stopped", 2));
+  });
+
+  it("does not track a start response after an earlier terminal event", async () => {
+    const store = await loadStore();
+    const response = deferred<VoiceConversationStatus>();
+    mocks.start.mockReturnValue(response.promise);
+
+    const starting = store.getState().start("session-1");
+    emit({ type: "cleanShutdown", sessionId: "session-1", revision: 2 });
+    response.resolve(status("starting", 1, "session-1"));
+    await starting;
+
+    expect(mocks.trackStarted).not.toHaveBeenCalled();
   });
 
   it("does not let a stale start response regress a startup event", async () => {
