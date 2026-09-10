@@ -606,6 +606,52 @@ describe("useCompletionNotifications", () => {
     expect(mocks.audioPlay).not.toHaveBeenCalled();
   });
 
+  it("passes the saved toast duration through to the completion toast", async () => {
+    let focusChanged: ((event: { payload: boolean }) => void) | null = null;
+    window.localStorage.setItem(
+      "goose:notifications",
+      JSON.stringify({ toastDurationSeconds: 30 }),
+    );
+
+    mocks.getCurrentWindow.mockReturnValue({
+      onFocusChanged: vi.fn((handler) => {
+        focusChanged = handler;
+        return Promise.resolve(vi.fn());
+      }),
+      unminimize: vi.fn().mockResolvedValue(undefined),
+      show: vi.fn().mockResolvedValue(undefined),
+      setFocus: vi.fn().mockResolvedValue(undefined),
+    });
+
+    renderHook(() => useCompletionNotifications(vi.fn()));
+
+    await waitFor(() => expect(focusChanged).toBeTruthy());
+
+    useChatSessionStore.getState().addSession({
+      id: "session-duration",
+      title: "Custom duration",
+      createdAt: "2026-06-05T00:00:00.000Z",
+      updatedAt: "2026-06-05T00:00:00.000Z",
+      messageCount: 1,
+    });
+    useChatStore
+      .getState()
+      .setMessages("session-duration", [makeMsg("completed")]);
+
+    act(() => {
+      focusChanged?.({ payload: true });
+      useChatStore.getState().setChatState("session-duration", "streaming");
+      useChatStore.getState().setChatState("session-duration", "idle");
+    });
+
+    await waitFor(() =>
+      expect(mocks.toast).toHaveBeenCalledWith(
+        "Custom duration finished",
+        expect.objectContaining({ duration: 30_000 }),
+      ),
+    );
+  });
+
   it("passes null sound to desktop notifications when desktop sound is silent", async () => {
     let focusChanged: ((event: { payload: boolean }) => void) | null = null;
     window.localStorage.setItem(

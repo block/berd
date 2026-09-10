@@ -3,8 +3,24 @@ import {
   normalizeNotificationSoundId,
   type NotificationSoundId,
 } from "@/shared/notifications/notificationSounds";
+import {
+  DEFAULT_TOAST_DURATION_SECONDS,
+  clampToastDurationSeconds,
+} from "@/shared/notifications/toastDuration";
 
 const STORAGE_KEY = "goose:notifications";
+
+// Re-exported so existing settings-feature imports keep working; the
+// canonical contract (bounds, sentinel, clamp) lives in the shared
+// notifications domain since CompletionNotificationToast (shared) also
+// depends on it and shouldn't depend on a feature module.
+export {
+  DEFAULT_TOAST_DURATION_SECONDS,
+  MIN_TOAST_DURATION_SECONDS,
+  MAX_TOAST_DURATION_SECONDS,
+  NEVER_DISMISS_TOAST_DURATION_SECONDS,
+  clampToastDurationSeconds,
+} from "@/shared/notifications/toastDuration";
 
 export interface NotificationPrefs {
   enabled: boolean;
@@ -12,6 +28,7 @@ export interface NotificationPrefs {
   desktop: boolean;
   inAppSound: NotificationSoundId;
   desktopSound: NotificationSoundId;
+  toastDurationSeconds: number;
 }
 
 const DEFAULTS: NotificationPrefs = {
@@ -20,6 +37,7 @@ const DEFAULTS: NotificationPrefs = {
   desktop: true,
   inAppSound: DEFAULT_NOTIFICATION_SOUND,
   desktopSound: DEFAULT_NOTIFICATION_SOUND,
+  toastDurationSeconds: DEFAULT_TOAST_DURATION_SECONDS,
 };
 
 export function getNotificationPrefs(): NotificationPrefs {
@@ -32,6 +50,9 @@ export function getNotificationPrefs(): NotificationPrefs {
       ...parsed,
       inAppSound: normalizeNotificationSoundId(parsed.inAppSound),
       desktopSound: normalizeNotificationSoundId(parsed.desktopSound),
+      toastDurationSeconds: clampToastDurationSeconds(
+        parsed.toastDurationSeconds,
+      ),
     };
   } catch {
     return { ...DEFAULTS };

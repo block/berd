@@ -3230,8 +3230,10 @@ export const designSystemComponentManifest = [
       "ring-ring/50",
     ],
     stateClasses: [
+      "aria-describedby",
       "aria-label",
       "aria-labelledby",
+      "aria-valuetext",
       "data-[disabled]:opacity-50",
       "data-[orientation=horizontal]:h-1.5",
       "data-[orientation=horizontal]:h-full",

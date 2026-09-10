@@ -88,6 +88,53 @@ describe("CompletionNotificationToast", () => {
     expect(onView).toHaveBeenCalledOnce();
   });
 
+  it("defaults to an 8 second duration when none is provided", () => {
+    mocks.toast.mockReturnValue("completion-toast-id");
+
+    showCompletionNotificationToast({
+      title: "Review fixes finished",
+      outcome: "completed",
+      onView: vi.fn(),
+    });
+
+    expect(mocks.toast).toHaveBeenCalledWith(
+      "Review fixes finished",
+      expect.objectContaining({ duration: 8000 }),
+    );
+  });
+
+  it("converts a custom finite duration to milliseconds", () => {
+    mocks.toast.mockReturnValue("completion-toast-id");
+
+    showCompletionNotificationToast({
+      title: "Review fixes finished",
+      outcome: "completed",
+      onView: vi.fn(),
+      durationSeconds: 30,
+    });
+
+    expect(mocks.toast).toHaveBeenCalledWith(
+      "Review fixes finished",
+      expect.objectContaining({ duration: 30000 }),
+    );
+  });
+
+  it("maps a never-dismiss duration to an infinite toast duration", () => {
+    mocks.toast.mockReturnValue("completion-toast-id");
+
+    showCompletionNotificationToast({
+      title: "Review fixes finished",
+      outcome: "completed",
+      onView: vi.fn(),
+      durationSeconds: 0,
+    });
+
+    expect(mocks.toast).toHaveBeenCalledWith(
+      "Review fixes finished",
+      expect.objectContaining({ duration: Number.POSITIVE_INFINITY }),
+    );
+  });
+
   it("uses the shared Toaster-backed error toast for error responses", () => {
     const onView = vi.fn();
     mocks.toastError.mockReturnValue("error-toast-id");
