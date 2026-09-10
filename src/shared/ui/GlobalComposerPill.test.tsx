@@ -645,6 +645,7 @@ describe("GlobalComposerPill", () => {
     await user.click(
       screen.getByRole("button", { name: /choose agent and model/i }),
     );
+    await user.click(screen.getByRole("button", { name: "Switch agent" }));
     await user.click(screen.getByRole("button", { name: "Claude Code" }));
 
     expect(
@@ -1516,6 +1517,7 @@ describe("GlobalComposerPill", () => {
     await user.click(
       screen.getByRole("button", { name: /choose agent and model/i }),
     );
+    await user.click(screen.getByRole("button", { name: "Switch agent" }));
     await user.click(screen.getByRole("button", { name: "Claude Code" }));
 
     expect(onExecutionTargetChange).toHaveBeenCalledWith({
@@ -2128,6 +2130,7 @@ describe("GlobalComposerPill", () => {
     await user.click(
       screen.getByRole("button", { name: /choose agent and model/i }),
     );
+    await user.click(screen.getByRole("button", { name: "Switch agent" }));
     await user.click(screen.getByRole("button", { name: "Claude Code" }));
     await user.click(screen.getByRole("button", { name: /send message/i }));
 
