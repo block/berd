@@ -2434,7 +2434,10 @@ describe("AgentModelPicker starred models", () => {
     ).toBe("1");
   });
 
-  it("bounds long foreign-agent metadata in the compact picker and preserves both names", async () => {
+  it.each([
+    "gated",
+    "visible",
+  ] as const)("stacks long foreign-agent labels at full text width in the %s picker", async (providerColumnMode) => {
     const agentLabel =
       "Custom localized engineering assistant with a very long name";
     const model = {
@@ -2446,7 +2449,7 @@ describe("AgentModelPicker starred models", () => {
     const user = userEvent.setup();
     render(
       <AgentModelPicker
-        providerColumnMode="gated"
+        providerColumnMode={providerColumnMode}
         agents={[...AGENTS, { id: "custom-agent", label: agentLabel }]}
         selectedAgentId="goose"
         onAgentChange={vi.fn()}
@@ -2468,23 +2471,24 @@ describe("AgentModelPicker starred models", () => {
     const primaryLabel = within(modelButton).getByText(model.name);
     const secondaryLabel = within(modelButton).getByText(agentLabel);
 
-    // jsdom cannot measure layout. Pin the responsive width and flex/truncation
-    // contract: metadata gets at most 40%; the model gets the remaining space.
-    expect(picker).toHaveClass("w-[min(28.25rem,calc(100vw-1.5rem))]");
+    // jsdom cannot measure layout. Both block labels use the whole text area;
+    // Chrome verification covers allocated widths and the separate star target.
     expect(modelButton).toHaveClass("min-w-0", "flex-1", "overflow-hidden");
     expect(primaryLabel.parentElement).toHaveClass(
       "min-w-0",
       "flex-1",
-      "overflow-hidden",
+      "text-left",
     );
-    expect(primaryLabel).toHaveClass("min-w-0", "flex-1", "truncate");
+    expect(primaryLabel.parentElement).not.toHaveClass("flex");
+    expect(secondaryLabel.parentElement).toBe(primaryLabel.parentElement);
+    expect(primaryLabel).toHaveClass("block", "truncate", "text-foreground");
     expect(secondaryLabel).toHaveClass(
-      "min-w-0",
-      "max-w-[40%]",
-      "shrink-0",
+      "block",
       "truncate",
       "text-xs",
+      "text-muted-foreground",
     );
+    expect(secondaryLabel).not.toHaveClass("max-w-[40%]");
     expect(primaryLabel).toHaveAttribute("title", model.name);
     expect(secondaryLabel).toHaveAttribute("title", agentLabel);
     expect(
