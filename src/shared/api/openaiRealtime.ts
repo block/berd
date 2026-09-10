@@ -56,6 +56,7 @@ export function updateOpenAiRealtimeStatusSounds(
   status: "working" | "waiting",
   settings: {
     mode: "working" | "working-and-waiting";
+    volume?: number;
   },
 ): Promise<void> {
   return invoke("update_openai_realtime_status_sounds", {

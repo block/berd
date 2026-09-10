@@ -6,7 +6,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-const STATUS_SOUND_GAIN: f32 = 0.4;
+pub const DEFAULT_STATUS_SOUND_VOLUME: f32 = 0.8;
 pub const STATUS_SOUND_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -24,15 +24,40 @@ pub enum ConversationStatus {
     Waiting,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct StatusSoundSettings {
     pub mode: StatusSoundMode,
+    #[serde(default = "default_status_sound_volume")]
+    pub volume: f32,
+}
+
+impl Default for StatusSoundSettings {
+    fn default() -> Self {
+        Self {
+            mode: StatusSoundMode::default(),
+            volume: DEFAULT_STATUS_SOUND_VOLUME,
+        }
+    }
+}
+
+impl StatusSoundSettings {
+    pub fn validate(self) -> Result<Self, &'static str> {
+        if !self.volume.is_finite() || !(0.0..=1.0).contains(&self.volume) {
+            return Err("status sound volume must be finite and between 0 and 1");
+        }
+        Ok(self)
+    }
+}
+
+const fn default_status_sound_volume() -> f32 {
+    DEFAULT_STATUS_SOUND_VOLUME
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StatusSoundCue {
     pub status: ConversationStatus,
+    pub volume: f32,
 }
 
 /// Pure policy for deciding which cue, if any, a fixed-cadence runtime tick plays.
@@ -58,7 +83,10 @@ impl StatusSoundStateMachine {
         {
             return None;
         }
-        Some(StatusSoundCue { status })
+        Some(StatusSoundCue {
+            status,
+            volume: settings.volume,
+        })
     }
 }
 
@@ -69,6 +97,7 @@ pub struct StatusSoundRuntime {
     next_tick: Option<Instant>,
     player: StatusSoundPlayer,
     output_device: Option<String>,
+    conversation_active: bool,
 }
 
 impl Default for StatusSoundRuntime {
@@ -78,6 +107,7 @@ impl Default for StatusSoundRuntime {
             next_tick: None,
             player: StatusSoundPlayer::new(),
             output_device: None,
+            conversation_active: false,
         }
     }
 }
@@ -105,6 +135,11 @@ impl StatusSoundRuntime {
     pub fn poll(&mut self, conversation_active: bool) -> Result<bool, String> {
         if conversation_active {
             self.stop();
+        } else if self.conversation_active {
+            self.next_tick = Some(Instant::now());
+        }
+        self.conversation_active = conversation_active;
+        if conversation_active {
             self.player.reap();
             return Ok(false);
         }
@@ -174,6 +209,7 @@ impl ManagedStatusSoundRuntime {
         status: ConversationStatus,
         settings: StatusSoundSettings,
     ) -> Result<(), String> {
+        settings.validate().map_err(str::to_string)?;
         self.send(StatusSoundCommand::Update(status, settings))
     }
 
@@ -259,7 +295,7 @@ impl StatusSoundPlayer {
         let samples = asset
             .samples
             .iter()
-            .map(|sample| sample * STATUS_SOUND_GAIN)
+            .map(|sample| sample * cue.volume)
             .collect::<Vec<_>>();
         player.enqueue(&samples)?;
         self.active.push(ActiveStatusSound {
@@ -316,7 +352,10 @@ mod tests {
     use super::*;
 
     fn settings(mode: StatusSoundMode) -> StatusSoundSettings {
-        StatusSoundSettings { mode }
+        StatusSoundSettings {
+            mode,
+            ..StatusSoundSettings::default()
+        }
     }
 
     #[test]
@@ -368,6 +407,41 @@ mod tests {
     }
 
     #[test]
+    fn resuming_after_conversation_audio_plays_without_waiting_for_old_cadence() {
+        let mut runtime = StatusSoundRuntime::default();
+        runtime.update(
+            ConversationStatus::Working,
+            settings(StatusSoundMode::Working),
+        );
+        assert!(!runtime.poll(true).unwrap());
+        runtime.next_tick = Some(Instant::now() + Duration::from_secs(60));
+        let _ = runtime.poll(false);
+        assert!(runtime.next_tick.unwrap() < Instant::now() + STATUS_SOUND_INTERVAL);
+    }
+
+    #[test]
+    fn session_volume_defaults_to_point_eight_and_accepts_an_override() {
+        assert_eq!(StatusSoundSettings::default().volume, 0.8);
+        let explicit = StatusSoundSettings {
+            mode: StatusSoundMode::Working,
+            volume: 0.25,
+        };
+        assert_eq!(explicit.validate().unwrap().volume, 0.25);
+    }
+
+    #[test]
+    fn rejects_invalid_session_volume() {
+        for volume in [f32::NAN, f32::INFINITY, -0.1, 1.1] {
+            assert!(StatusSoundSettings {
+                mode: StatusSoundMode::Working,
+                volume,
+            }
+            .validate()
+            .is_err());
+        }
+    }
+
+    #[test]
     fn duplicate_updates_preserve_the_existing_cadence() {
         let mut runtime = StatusSoundRuntime::default();
         let settings = settings(StatusSoundMode::WorkingAndWaiting);
@@ -400,7 +474,10 @@ mod tests {
         for status in [ConversationStatus::Working, ConversationStatus::Waiting] {
             player
                 .play(
-                    StatusSoundCue { status },
+                    StatusSoundCue {
+                        status,
+                        volume: DEFAULT_STATUS_SOUND_VOLUME,
+                    },
                     None,
                 )
                 .unwrap();

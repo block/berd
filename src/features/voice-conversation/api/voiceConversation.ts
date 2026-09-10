@@ -591,6 +591,7 @@ export function rejectVoiceConversationTranscript(
 
 export interface VoiceStatusSoundSettings {
   mode: "working" | "working-and-waiting";
+  volume?: number;
 }
 
 export async function updateVoiceConversationStatusSounds(

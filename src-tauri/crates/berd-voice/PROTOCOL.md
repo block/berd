@@ -205,7 +205,7 @@ Unknown fields are rejected. IDs are positive. Speak text is at most 16 KiB.
 The parent cannot author speaking state or finalized input; those are derived
 only from PCM by the child runtime.
 
-`StatusSoundSettings` has a `mode` of `working` or `working-and-waiting`. No cue
+`StatusSoundSettings` has a `mode` of `working` or `working-and-waiting` and an optional per-session `volume` from 0 to 1 that defaults to `0.8`. No cue
 is emitted until the first `set_conversation_status` request. The runtime then
 ticks immediately and every five seconds. `working` repeats only the working cue
 and stays silent while waiting; `working-and-waiting` repeats the current working
