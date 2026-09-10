@@ -9,7 +9,6 @@ import { Badge } from "@/shared/ui/badge";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
 import { RadioGroup, RadioGroupCard } from "@/shared/ui/radio-group";
 import { SettingsRow } from "@/shared/ui/settings-row";
-import { Slider } from "@/shared/ui/slider";
 import {
   Select,
   SelectContent,
@@ -75,10 +74,8 @@ import {
 } from "../lib/openAiVoiceOptions";
 
 const STATUS_SOUND_MODES: StatusSoundMode[] = [
-  "continuous",
-  "continuous-while-working",
-  "once",
-  "off",
+  "working",
+  "working-and-waiting",
 ];
 
 const INTERRUPTION_MODES: VoiceInterruptionMode[] = [
@@ -643,26 +640,6 @@ export function VoiceSettings() {
               </SelectContent>
             </Select>
           )}
-          details={
-            statusSounds.mode === "off" ? null : (
-              <div className="space-y-2 py-2">
-                <div className="flex justify-between gap-4 text-sm">
-                  <span>{t("voice.statusSoundVolume")}</span>
-                  <span className="tabular-nums text-muted-foreground">
-                    {Math.round(statusSounds.volume * 100)}%
-                  </span>
-                </div>
-                <Slider
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={[statusSounds.volume]}
-                  onValueChange={([volume]) => statusSounds.update({ volume })}
-                  aria-label={t("voice.statusSoundVolume")}
-                />
-              </div>
-            )
-          }
         />
       </section>
       {resetError ? (

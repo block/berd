@@ -1,40 +1,36 @@
 import { useCallback, useSyncExternalStore } from "react";
 
-export type StatusSoundMode =
-  | "continuous"
-  | "continuous-while-working"
-  | "once"
-  | "off";
+export type StatusSoundMode = "working" | "working-and-waiting";
 
 export interface StatusSoundPreference {
   mode: StatusSoundMode;
-  volume: number;
 }
 
 const STORAGE_KEY = "goose:voice-status-sound-preference";
 const CHANGED_EVENT = "goose:voice-status-sound-preference-changed";
 const DEFAULT_PREFERENCE: StatusSoundPreference = {
-  mode: "continuous-while-working",
-  volume: 0.4,
+  mode: "working",
 };
 const DEFAULT_SNAPSHOT = JSON.stringify(DEFAULT_PREFERENCE);
 let volatilePreference: StatusSoundPreference | undefined;
 
 function normalize(value: unknown): StatusSoundPreference {
   if (!value || typeof value !== "object") return DEFAULT_PREFERENCE;
-  const candidate = value as Partial<StatusSoundPreference>;
-  const mode =
-    candidate.mode === "continuous" ||
-    candidate.mode === "continuous-while-working" ||
-    candidate.mode === "once" ||
-    candidate.mode === "off"
-      ? candidate.mode
-      : DEFAULT_PREFERENCE.mode;
-  const volume =
-    typeof candidate.volume === "number" && Number.isFinite(candidate.volume)
-      ? Math.min(1, Math.max(0, candidate.volume))
-      : DEFAULT_PREFERENCE.volume;
-  return { mode, volume };
+  const candidate = value as { mode?: unknown };
+  const mode = (() => {
+    switch (candidate.mode) {
+      case "working-and-waiting":
+      case "continuous":
+        return "working-and-waiting";
+      case "working":
+      case "continuous-while-working":
+      case "once":
+      case "off":
+      default:
+        return DEFAULT_PREFERENCE.mode;
+    }
+  })();
+  return { mode };
 }
 
 export function getDefaultStatusSoundPreference(): StatusSoundPreference {

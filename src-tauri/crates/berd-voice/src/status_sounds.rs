@@ -6,17 +6,15 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-pub const DEFAULT_STATUS_SOUND_VOLUME: f32 = 0.4;
+const STATUS_SOUND_GAIN: f32 = 0.4;
 pub const STATUS_SOUND_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum StatusSoundMode {
-    Continuous,
+    WorkingAndWaiting,
     #[default]
-    ContinuousWhileWorking,
-    Once,
-    Off,
+    Working,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -30,31 +28,19 @@ pub enum ConversationStatus {
 #[serde(deny_unknown_fields)]
 pub struct StatusSoundSettings {
     pub mode: StatusSoundMode,
-    pub volume: f32,
 }
 
 impl Default for StatusSoundSettings {
     fn default() -> Self {
         Self {
             mode: StatusSoundMode::default(),
-            volume: DEFAULT_STATUS_SOUND_VOLUME,
         }
-    }
-}
-
-impl StatusSoundSettings {
-    pub fn validate(self) -> Result<Self, &'static str> {
-        if !self.volume.is_finite() || !(0.0..=1.0).contains(&self.volume) {
-            return Err("status sound volume must be finite and between 0 and 1");
-        }
-        Ok(self)
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StatusSoundCue {
     pub status: ConversationStatus,
-    pub volume: f32,
 }
 
 /// Pure policy for deciding which cue, if any, a fixed-cadence runtime tick plays.
@@ -62,7 +48,6 @@ pub struct StatusSoundCue {
 #[derive(Debug, Default)]
 pub struct StatusSoundStateMachine {
     current: Option<(ConversationStatus, StatusSoundSettings)>,
-    last_played: Option<ConversationStatus>,
 }
 
 impl StatusSoundStateMachine {
@@ -75,25 +60,13 @@ impl StatusSoundStateMachine {
 
     pub fn tick(&mut self, conversation_active: bool) -> Option<StatusSoundCue> {
         let (status, settings) = self.current?;
-        if conversation_active || settings.mode == StatusSoundMode::Off {
+        if conversation_active
+            || (settings.mode == StatusSoundMode::Working
+                && status == ConversationStatus::Waiting)
+        {
             return None;
         }
-        let should_play = match settings.mode {
-            StatusSoundMode::Continuous => true,
-            StatusSoundMode::ContinuousWhileWorking => {
-                status == ConversationStatus::Working || self.last_played != Some(status)
-            }
-            StatusSoundMode::Once => self.last_played != Some(status),
-            StatusSoundMode::Off => false,
-        };
-        if !should_play {
-            return None;
-        }
-        self.last_played = Some(status);
-        Some(StatusSoundCue {
-            status,
-            volume: settings.volume,
-        })
+        Some(StatusSoundCue { status })
     }
 }
 
@@ -104,7 +77,6 @@ pub struct StatusSoundRuntime {
     next_tick: Option<Instant>,
     player: StatusSoundPlayer,
     output_device: Option<String>,
-    playback_available: bool,
 }
 
 impl Default for StatusSoundRuntime {
@@ -114,7 +86,6 @@ impl Default for StatusSoundRuntime {
             next_tick: None,
             player: StatusSoundPlayer::new(),
             output_device: None,
-            playback_available: true,
         }
     }
 }
@@ -142,8 +113,7 @@ impl StatusSoundRuntime {
     pub fn poll(&mut self, conversation_active: bool) -> Result<bool, String> {
         if conversation_active {
             self.stop();
-        }
-        if !self.playback_available {
+            self.player.reap();
             return Ok(false);
         }
         self.player.reap();
@@ -151,12 +121,7 @@ impl StatusSoundRuntime {
         if self.next_tick.is_some_and(|deadline| now >= deadline) {
             self.next_tick = Some(now + STATUS_SOUND_INTERVAL);
             if let Some(cue) = self.machine.tick(conversation_active) {
-                if cue.volume > 0.0 {
-                    if let Err(message) = self.player.play(cue, self.output_device.as_deref()) {
-                        self.playback_available = false;
-                        return Err(message);
-                    }
-                }
+                self.player.play(cue, self.output_device.as_deref())?;
             }
         }
         Ok(self.player.is_active())
@@ -217,7 +182,6 @@ impl ManagedStatusSoundRuntime {
         status: ConversationStatus,
         settings: StatusSoundSettings,
     ) -> Result<(), String> {
-        settings.validate().map_err(str::to_string)?;
         self.send(StatusSoundCommand::Update(status, settings))
     }
 
@@ -303,7 +267,7 @@ impl StatusSoundPlayer {
         let samples = asset
             .samples
             .iter()
-            .map(|sample| sample * cue.volume)
+            .map(|sample| sample * STATUS_SOUND_GAIN)
             .collect::<Vec<_>>();
         player.enqueue(&samples)?;
         self.active.push(ActiveStatusSound {
@@ -360,72 +324,48 @@ mod tests {
     use super::*;
 
     fn settings(mode: StatusSoundMode) -> StatusSoundSettings {
-        StatusSoundSettings { mode, volume: 0.4 }
+        StatusSoundSettings { mode }
     }
 
     #[test]
-    fn defaults_to_continuous_while_working() {
+    fn defaults_to_working_only() {
         assert_eq!(
             StatusSoundSettings::default(),
-            settings(StatusSoundMode::ContinuousWhileWorking)
+            settings(StatusSoundMode::Working)
         );
     }
 
     #[test]
-    fn continuous_plays_every_tick() {
+    fn working_and_waiting_repeats_both_statuses() {
+        let mut machine = StatusSoundStateMachine::default();
+        let settings = settings(StatusSoundMode::WorkingAndWaiting);
+        machine.update(ConversationStatus::Working, settings);
+        assert_eq!(machine.tick(false).unwrap().status, ConversationStatus::Working);
+        assert_eq!(machine.tick(false).unwrap().status, ConversationStatus::Working);
+        machine.update(ConversationStatus::Waiting, settings);
+        assert_eq!(machine.tick(false).unwrap().status, ConversationStatus::Waiting);
+        assert_eq!(machine.tick(false).unwrap().status, ConversationStatus::Waiting);
+    }
+
+    #[test]
+    fn working_only_repeats_working_and_stays_silent_while_waiting() {
+        let mut machine = StatusSoundStateMachine::default();
+        let settings = settings(StatusSoundMode::Working);
+        machine.update(ConversationStatus::Working, settings);
+        assert_eq!(machine.tick(false).unwrap().status, ConversationStatus::Working);
+        assert_eq!(machine.tick(false).unwrap().status, ConversationStatus::Working);
+        machine.update(ConversationStatus::Waiting, settings);
+        assert_eq!(machine.tick(false), None);
+        assert_eq!(machine.tick(false), None);
+    }
+
+    #[test]
+    fn conversation_audio_suppresses_without_changing_the_status() {
         let mut machine = StatusSoundStateMachine::default();
         machine.update(
-            ConversationStatus::Waiting,
-            settings(StatusSoundMode::Continuous),
+            ConversationStatus::Working,
+            settings(StatusSoundMode::Working),
         );
-        assert!(machine.tick(false).is_some());
-        assert!(machine.tick(false).is_some());
-    }
-
-    #[test]
-    fn continuous_while_working_repeats_working_and_plays_waiting_once() {
-        let mut machine = StatusSoundStateMachine::default();
-        let settings = settings(StatusSoundMode::ContinuousWhileWorking);
-        machine.update(ConversationStatus::Working, settings);
-        assert_eq!(
-            machine.tick(false).unwrap().status,
-            ConversationStatus::Working
-        );
-        assert_eq!(
-            machine.tick(false).unwrap().status,
-            ConversationStatus::Working
-        );
-        machine.update(ConversationStatus::Waiting, settings);
-        assert_eq!(
-            machine.tick(false).unwrap().status,
-            ConversationStatus::Waiting
-        );
-        assert_eq!(machine.tick(false), None);
-    }
-
-    #[test]
-    fn once_plays_only_when_status_differs_from_last_cue() {
-        let mut machine = StatusSoundStateMachine::default();
-        let settings = settings(StatusSoundMode::Once);
-        machine.update(ConversationStatus::Working, settings);
-        assert!(machine.tick(false).is_some());
-        assert_eq!(machine.tick(false), None);
-        machine.update(ConversationStatus::Waiting, settings);
-        assert!(machine.tick(false).is_some());
-        assert_eq!(machine.tick(false), None);
-    }
-
-    #[test]
-    fn off_never_plays() {
-        let mut machine = StatusSoundStateMachine::default();
-        machine.update(ConversationStatus::Working, settings(StatusSoundMode::Off));
-        assert_eq!(machine.tick(false), None);
-    }
-
-    #[test]
-    fn audible_conversation_audio_suppresses_without_consuming_cue() {
-        let mut machine = StatusSoundStateMachine::default();
-        machine.update(ConversationStatus::Waiting, settings(StatusSoundMode::Once));
         assert_eq!(machine.tick(true), None);
         assert!(machine.tick(false).is_some());
     }
@@ -436,27 +376,9 @@ mod tests {
     }
 
     #[test]
-    fn validates_volume() {
-        for volume in [f32::NAN, f32::INFINITY, -0.1, 1.1] {
-            assert!(StatusSoundSettings {
-                mode: StatusSoundMode::Once,
-                volume
-            }
-            .validate()
-            .is_err());
-        }
-        assert!(StatusSoundSettings {
-            mode: StatusSoundMode::Once,
-            volume: 1.0
-        }
-        .validate()
-        .is_ok());
-    }
-
-    #[test]
     fn duplicate_updates_preserve_the_existing_cadence() {
         let mut runtime = StatusSoundRuntime::default();
-        let settings = settings(StatusSoundMode::Continuous);
+        let settings = settings(StatusSoundMode::WorkingAndWaiting);
         runtime.update(ConversationStatus::Working, settings);
         let deadline = runtime.next_tick;
         runtime.update(ConversationStatus::Working, settings);
@@ -468,12 +390,12 @@ mod tests {
         let mut runtime = StatusSoundRuntime::default();
         runtime.update(
             ConversationStatus::Working,
-            settings(StatusSoundMode::Continuous),
+            settings(StatusSoundMode::WorkingAndWaiting),
         );
         runtime.next_tick = Some(Instant::now() + Duration::from_secs(60));
         runtime.update(
             ConversationStatus::Waiting,
-            settings(StatusSoundMode::Continuous),
+            settings(StatusSoundMode::WorkingAndWaiting),
         );
         assert!(runtime.next_tick.unwrap() < Instant::now() + Duration::from_secs(1));
     }
@@ -486,10 +408,7 @@ mod tests {
         for status in [ConversationStatus::Working, ConversationStatus::Waiting] {
             player
                 .play(
-                    StatusSoundCue {
-                        status,
-                        volume: DEFAULT_STATUS_SOUND_VOLUME,
-                    },
+                    StatusSoundCue { status },
                     None,
                 )
                 .unwrap();

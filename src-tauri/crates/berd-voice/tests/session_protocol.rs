@@ -2525,7 +2525,7 @@ fn siri_session_reaches_ready_without_openai_credentials() {
             "type":"set_conversation_status",
             "id":19,
             "status":"working",
-            "settings":{"mode":"once","volume":0.25}
+            "settings":{"mode":"working"}
         }),
     );
     stdin.flush().unwrap();
@@ -2535,7 +2535,7 @@ fn siri_session_reaches_ready_without_openai_credentials() {
             "type":"conversation_status_applied",
             "id":19,
             "status":"working",
-            "settings":{"mode":"once","volume":0.25}
+            "settings":{"mode":"working"}
         })
     );
     write_session_json(

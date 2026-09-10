@@ -413,22 +413,55 @@ pub async fn update_openai_realtime_spokesperson_settings(
 
 #[derive(Default)]
 struct RealtimeStatusSoundActivity {
-    user_speaking: bool,
+    speaking_item_ids: std::collections::HashSet<String>,
+    transcription_item_ids: std::collections::HashSet<String>,
     playback_active: bool,
 }
 
 impl RealtimeStatusSoundActivity {
     fn update(&mut self, event: &serde_json::Value) -> Option<bool> {
+        let item_id = || {
+            event
+                .get("item_id")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        };
         match event.get("type").and_then(serde_json::Value::as_str) {
-            Some("input_audio_buffer.speech_started") => self.user_speaking = true,
-            Some("input_audio_buffer.speech_stopped") => self.user_speaking = false,
+            Some("input_audio_buffer.speech_started") => {
+                if let Some(item_id) = item_id() {
+                    self.speaking_item_ids.insert(item_id.clone());
+                    self.transcription_item_ids.insert(item_id);
+                }
+            }
+            Some("input_audio_buffer.speech_stopped") => {
+                if let Some(item_id) = item_id() {
+                    self.speaking_item_ids.remove(&item_id);
+                }
+            }
+            Some(
+                "conversation.item.input_audio_transcription.completed"
+                | "conversation.item.input_audio_transcription.failed",
+            ) => {
+                if let Some(item_id) = item_id() {
+                    self.speaking_item_ids.remove(&item_id);
+                    self.transcription_item_ids.remove(&item_id);
+                }
+            }
+            Some("input_audio_buffer.cleared") => {
+                self.speaking_item_ids.clear();
+                self.transcription_item_ids.clear();
+            }
             Some("output_audio_buffer.started") => self.playback_active = true,
             Some("output_audio_buffer.stopped" | "output_audio_buffer.cleared") => {
                 self.playback_active = false;
             }
             _ => return None,
         }
-        Some(self.user_speaking || self.playback_active)
+        Some(
+            !self.speaking_item_ids.is_empty()
+                || !self.transcription_item_ids.is_empty()
+                || self.playback_active,
+        )
     }
 }
 
@@ -838,7 +871,9 @@ mod tests {
         let mut activity = RealtimeStatusSoundActivity::default();
 
         assert_eq!(
-            activity.update(&json!({ "type": "input_audio_buffer.speech_started" })),
+            activity.update(
+                &json!({ "type": "input_audio_buffer.speech_started", "item_id": "user-1" })
+            ),
             Some(true)
         );
         assert_eq!(
@@ -846,14 +881,36 @@ mod tests {
             Some(true)
         );
         assert_eq!(
-            activity.update(&json!({ "type": "input_audio_buffer.speech_stopped" })),
+            activity.update(
+                &json!({ "type": "input_audio_buffer.speech_stopped", "item_id": "user-1" })
+            ),
             Some(true)
         );
         assert_eq!(
             activity.update(&json!({ "type": "output_audio_buffer.stopped" })),
+            Some(true)
+        );
+        assert_eq!(
+            activity.update(&json!({ "type": "conversation.item.input_audio_transcription.completed", "item_id": "user-1" })),
             Some(false)
         );
         assert_eq!(activity.update(&json!({ "type": "response.done" })), None);
+    }
+
+    #[test]
+    fn realtime_status_sound_activity_releases_abandoned_input_when_cleared() {
+        let mut activity = RealtimeStatusSoundActivity::default();
+
+        assert_eq!(
+            activity.update(
+                &json!({ "type": "input_audio_buffer.speech_started", "item_id": "user-1" })
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            activity.update(&json!({ "type": "input_audio_buffer.cleared" })),
+            Some(false)
+        );
     }
 
     #[test]

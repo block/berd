@@ -6601,12 +6601,6 @@ fn validate_request(request: SessionRequest) -> Result<SessionRequest, String> {
         return Err("request id must be positive".into());
     }
     match &request {
-        SessionRequest::SetConversationStatus {
-            settings: status_sounds,
-            ..
-        } => {
-            status_sounds.validate()?;
-        }
         SessionRequest::PrepareSpeak { text, .. } if text.len() > MAX_SPEAK_TEXT_BYTES => {
             return Err("speak text exceeds 16 KiB".into())
         }

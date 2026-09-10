@@ -1100,18 +1100,13 @@
     "voice": "Voice",
     "voiceLabel": "Pocket TTS voice",
     "statusSounds": "Status sounds",
-    "statusSoundVolume": "Status sound volume",
     "statusSoundModes": {
-      "continuous": "Always repeat",
-      "continuous-while-working": "Repeat while working",
-      "once": "Play once",
-      "off": "Off"
+      "working": "While working",
+      "working-and-waiting": "While working and waiting"
     },
     "statusSoundModeDescriptions": {
-      "continuous": "Plays the current working or waiting cue every five seconds.",
-      "continuous-while-working": "Repeats the working cue every five seconds, then plays the waiting cue once.",
-      "once": "Plays one cue whenever the agent changes between working and waiting.",
-      "off": "Disables agent status sounds."
+      "working": "Repeats the working sound while the agent is working.",
+      "working-and-waiting": "Repeats the working sound while the agent is working and the waiting sound while it waits."
     }
   }
 }

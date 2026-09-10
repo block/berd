@@ -461,19 +461,22 @@ function resetRealtimeStatusWhenRunSettles(
   sessionId: string,
 ): void {
   let sawRun = false;
+  let publishedStatus: "working" | "waiting" = "working";
   const check = () => {
     if (runtime.getSnapshot().boundSessionId !== sessionId) {
       unsubscribe();
       return;
     }
     const master = useChatStore.getState().getSessionRuntime(sessionId);
-    if (master.activeRunId !== null || isSessionRunning(master.chatState)) {
-      sawRun = true;
-      return;
-    }
+    const working =
+      master.activeRunId !== null || isSessionRunning(master.chatState);
+    if (working) sawRun = true;
     if (!sawRun) return;
-    unsubscribe();
-    runtime.markWaiting(sessionId);
+    const nextStatus = working ? "working" : "waiting";
+    if (nextStatus === publishedStatus) return;
+    publishedStatus = nextStatus;
+    if (working) runtime.markWorking(sessionId);
+    else runtime.markWaiting(sessionId);
   };
   const unsubscribe = useChatStore.subscribe(check);
   queueMicrotask(check);
@@ -1228,10 +1231,22 @@ class OpenAiRealtimeConversationRuntime {
     this.setSnapshot(OFF_SNAPSHOT);
   }
 
+  markWorking(sessionId: string): void {
+    if (this.snapshot.boundSessionId !== sessionId) return;
+    this.setSnapshot({ ...this.snapshot, state: "agent-working" });
+    const runtimeSessionId = this.realtimeRuntimeSessionId;
+    if (runtimeSessionId) {
+      publishRealtimeStatus(runtimeSessionId, "working");
+    }
+  }
+
   markWaiting(sessionId: string): void {
     if (this.snapshot.boundSessionId !== sessionId) return;
     this.setSnapshot({ ...this.snapshot, state: "listening" });
-    publishRealtimeStatus(sessionId, "waiting");
+    const runtimeSessionId = this.realtimeRuntimeSessionId;
+    if (runtimeSessionId) {
+      publishRealtimeStatus(runtimeSessionId, "waiting");
+    }
   }
 
   private deliverToMaster(
@@ -1301,7 +1316,10 @@ class OpenAiRealtimeConversationRuntime {
         };
         if (!continueAfterStop) {
           this.setSnapshot({ ...this.snapshot, state: "agent-working" });
-          publishRealtimeStatus(sessionId, "working");
+          const runtimeSessionId = this.realtimeRuntimeSessionId;
+          if (runtimeSessionId) {
+            publishRealtimeStatus(runtimeSessionId, "working");
+          }
         }
         for (;;) {
           const opportunity = await waitForMasterDeliveryOpportunity(

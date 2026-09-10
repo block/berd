@@ -21,7 +21,7 @@ device; the existing Berd Siri player and the CLI use the same decoder.
 in [PROTOCOL.md](PROTOCOL.md). The host supplies persisted status-sound settings
 and semantic `working` / `waiting` updates through that protocol; the runtime
 owns the five-second cadence, speech suppression, and macOS Pop/Purr playback.
-The default mode is `continuous-while-working` at volume `0.4`.
+The default mode is `working`; status sounds use a fixed gain of `0.4`.
 
 Siri TTS and macOS speech recognition are the defaults:
 

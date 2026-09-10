@@ -7,6 +7,7 @@ import type {
   ChatInputVoiceConversation,
 } from "@/features/chat/types";
 import { useChatStore } from "@/features/chat/stores/chatStore";
+import { isSessionRunning } from "@/features/chat/lib/sessionActivity";
 import { createSystemNotificationMessage } from "@/shared/types/messages";
 import { steerPromptInSession } from "@/features/chat/lib/steerCore";
 import {
@@ -434,38 +435,51 @@ export function publishChainedVoiceStatus(
   );
 }
 
+const chainedRunStatusObservers = new Map<string, () => void>();
+
 export function resetVoiceUiWhenRunSettles(
   sessionId: string,
   deliveryRevision: number,
 ): void {
+  chainedRunStatusObservers.get(sessionId)?.();
   let sawRun = false;
+  let publishedStatus: "working" | "waiting" = "working";
+  const cleanup = () => {
+    unsubscribeChat();
+    unsubscribeVoice();
+    if (chainedRunStatusObservers.get(sessionId) === cleanup) {
+      chainedRunStatusObservers.delete(sessionId);
+    }
+  };
   const check = () => {
     const voice = useVoiceConversationStore.getState();
     if (
       voice.status.lifecycle !== "running" ||
       voice.status.sessionId !== sessionId
     ) {
-      unsubscribeChat();
-      unsubscribeVoice();
+      cleanup();
       return;
     }
 
     const runtime = useChatStore.getState().getSessionRuntime(sessionId);
-    if (runtime.activeRunId !== null || runtime.chatState !== "idle") {
-      sawRun = true;
-      return;
-    }
+    const working =
+      runtime.activeRunId !== null || isSessionRunning(runtime.chatState);
+    if (working) sawRun = true;
     if (!sawRun) return;
 
-    unsubscribeChat();
-    unsubscribeVoice();
+    const nextStatus = working ? "working" : "waiting";
+    if (nextStatus === publishedStatus) return;
     if (voice.status.revision >= deliveryRevision) {
-      voice.setUiState("listening");
-      publishChainedVoiceStatus(sessionId, "waiting");
+      publishedStatus = nextStatus;
+      voice.setUiState(
+        nextStatus === "working" ? "agent-working" : "listening",
+      );
+      publishChainedVoiceStatus(sessionId, nextStatus);
     }
   };
   const unsubscribeChat = useChatStore.subscribe(check);
   const unsubscribeVoice = useVoiceConversationStore.subscribe(check);
+  chainedRunStatusObservers.set(sessionId, cleanup);
   queueMicrotask(check);
 }
 
@@ -478,7 +492,7 @@ function ensureVoiceEventDeliveryInitialized() {
     if (voice.status.lifecycle !== "running" || !activeSessionId) return;
     publishChainedVoiceStatus(
       activeSessionId,
-      voice.uiState === "agent-working" ? "working" : "waiting",
+      voice.activityFallbackState === "agent-working" ? "working" : "waiting",
       preference,
     );
   });

@@ -226,7 +226,26 @@ describe("voice transcript delivery coordination", () => {
     expect(voiceApiMocks.updateStatusSounds).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: "session-1", revision: 3 }),
       "waiting",
-      { mode: "continuous-while-working", volume: 0.4 },
+      { mode: "working" },
+    );
+
+    voiceApiMocks.updateStatusSounds.mockClear();
+    useChatStore.getState().setActiveRunId("session-1", "run-2");
+    expect(useVoiceConversationStore.getState().uiState).toBe("agent-working");
+    expect(voiceApiMocks.updateStatusSounds).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "session-1", revision: 3 }),
+      "working",
+      { mode: "working" },
+    );
+
+    voiceApiMocks.updateStatusSounds.mockClear();
+    useChatStore.getState().setActiveRunId("session-1", null);
+    useChatStore.getState().setError("session-1", "run failed");
+    expect(useVoiceConversationStore.getState().uiState).toBe("listening");
+    expect(voiceApiMocks.updateStatusSounds).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "session-1", revision: 3 }),
+      "waiting",
+      { mode: "working" },
     );
   });
 
@@ -258,7 +277,8 @@ describe("voice transcript delivery coordination", () => {
         microphoneMuted: false,
         revision: 3,
       },
-      uiState: "agent-working",
+      uiState: "agent-speaking",
+      activityFallbackState: "agent-working",
       hydrated: true,
       init: vi.fn().mockResolvedValue(undefined),
     });
@@ -273,13 +293,13 @@ describe("voice transcript delivery coordination", () => {
       }),
     );
 
-    act(() => setStatusSoundPreference({ mode: "once", volume: 0.7 }));
+    act(() => setStatusSoundPreference({ mode: "working-and-waiting" }));
 
     await waitFor(() =>
       expect(voiceApiMocks.updateStatusSounds).toHaveBeenCalledWith(
         expect.objectContaining({ sessionId: "session-1", revision: 3 }),
         "working",
-        { mode: "once", volume: 0.7 },
+        { mode: "working-and-waiting" },
       ),
     );
     unmount();
@@ -338,7 +358,7 @@ describe("voice transcript delivery coordination", () => {
     expect(voiceApiMocks.updateStatusSounds).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: "session-1", revision: 1 }),
       "working",
-      { mode: "continuous-while-working", volume: 0.4 },
+      { mode: "working" },
     );
   });
 

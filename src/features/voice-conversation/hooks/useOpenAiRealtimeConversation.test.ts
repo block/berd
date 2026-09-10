@@ -919,13 +919,13 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     expect(mocks.updateStatusSounds).toHaveBeenCalledWith(
       "session-a",
       "waiting",
-      { mode: "continuous-while-working", volume: 0.4 },
+      { mode: "working" },
     );
-    act(() => setStatusSoundPreference({ mode: "once", volume: 0.7 }));
+    act(() => setStatusSoundPreference({ mode: "working-and-waiting" }));
     expect(mocks.updateStatusSounds).toHaveBeenLastCalledWith(
       "session-a",
       "waiting",
-      { mode: "once", volume: 0.7 },
+      { mode: "working-and-waiting" },
     );
     act(() => {
       mocks.preferenceListener?.({ voice: "cedar", speed: 1.5 });
@@ -966,7 +966,7 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     expect(mocks.updateStatusSounds).toHaveBeenLastCalledWith(
       "session-a",
       "working",
-      { mode: "continuous-while-working", volume: 0.4 },
+      { mode: "working" },
     );
 
     act(() => {
@@ -978,7 +978,20 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     expect(mocks.updateStatusSounds).toHaveBeenLastCalledWith(
       "session-a",
       "waiting",
-      { mode: "continuous-while-working", volume: 0.4 },
+      { mode: "working" },
+    );
+
+    act(() => {
+      useChatStore.getState().setChatState("session-a", "thinking");
+      useChatStore.getState().setActiveRunId("session-a", "run-2");
+    });
+    await waitFor(() =>
+      expect(owner.result.current.state).toBe("agent-working"),
+    );
+    expect(mocks.updateStatusSounds).toHaveBeenLastCalledWith(
+      "session-a",
+      "working",
+      { mode: "working" },
     );
   });
 

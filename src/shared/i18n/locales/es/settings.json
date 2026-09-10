@@ -1099,18 +1099,13 @@
     "voice": "Voz",
     "voiceLabel": "Voz de Pocket TTS",
     "statusSounds": "Sonidos de estado",
-    "statusSoundVolume": "Volumen de los sonidos de estado",
     "statusSoundModes": {
-      "continuous": "Repetir siempre",
-      "continuous-while-working": "Repetir mientras trabaja",
-      "once": "Reproducir una vez",
-      "off": "Desactivados"
+      "working": "Mientras trabaja",
+      "working-and-waiting": "Mientras trabaja y espera"
     },
     "statusSoundModeDescriptions": {
-      "continuous": "Reproduce la señal actual de trabajo o espera cada cinco segundos.",
-      "continuous-while-working": "Repite la señal de trabajo cada cinco segundos y luego reproduce una vez la señal de espera.",
-      "once": "Reproduce una señal cuando el agente cambia entre trabajo y espera.",
-      "off": "Desactiva los sonidos de estado del agente."
+      "working": "Repite el sonido de trabajo mientras el agente está trabajando.",
+      "working-and-waiting": "Repite el sonido de trabajo mientras el agente trabaja y el sonido de espera mientras espera."
     }
   }
 }

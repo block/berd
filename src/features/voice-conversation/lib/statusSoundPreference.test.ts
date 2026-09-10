@@ -10,39 +10,35 @@ describe("status sound preference", () => {
   beforeEach(() => window.localStorage.clear());
   afterEach(() => vi.restoreAllMocks());
 
-  it("defaults to working pulses and one waiting cue", () => {
-    expect(getDefaultStatusSoundPreference()).toEqual({
-      mode: "continuous-while-working",
-      volume: 0.4,
-    });
+  it("defaults to repeating only while working", () => {
+    expect(getDefaultStatusSoundPreference()).toEqual({ mode: "working" });
     expect(getStatusSoundPreference()).toEqual(
       getDefaultStatusSoundPreference(),
     );
   });
 
-  it("persists mode and volume", () => {
-    setStatusSoundPreference({ mode: "once", volume: 0.65 });
-    expect(getStatusSoundPreference()).toEqual({ mode: "once", volume: 0.65 });
+  it("persists the working-and-waiting mode", () => {
+    setStatusSoundPreference({ mode: "working-and-waiting" });
+    expect(getStatusSoundPreference()).toEqual({
+      mode: "working-and-waiting",
+    });
   });
 
   it("normalizes malformed persisted values", () => {
     window.localStorage.setItem(
       "goose:voice-status-sound-preference",
-      JSON.stringify({ mode: "unexpected", volume: 4 }),
+      JSON.stringify({ mode: "unexpected" }),
     );
-    expect(getStatusSoundPreference()).toEqual({
-      mode: "continuous-while-working",
-      volume: 1,
-    });
+    expect(getStatusSoundPreference()).toEqual({ mode: "working" });
   });
 
   it("notifies runtime subscribers with the applied preference", () => {
     const listener = vi.fn();
     const unsubscribe = subscribeToStatusSoundPreference(listener);
 
-    setStatusSoundPreference({ mode: "continuous", volume: 0.7 });
+    setStatusSoundPreference({ mode: "working-and-waiting" });
 
-    expect(listener).toHaveBeenCalledWith({ mode: "continuous", volume: 0.7 });
+    expect(listener).toHaveBeenCalledWith({ mode: "working-and-waiting" });
     unsubscribe();
   });
 
@@ -50,7 +46,9 @@ describe("status sound preference", () => {
     vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
       throw new Error("storage unavailable");
     });
-    setStatusSoundPreference({ mode: "off", volume: 0.2 });
-    expect(getStatusSoundPreference()).toEqual({ mode: "off", volume: 0.2 });
+    setStatusSoundPreference({ mode: "working-and-waiting" });
+    expect(getStatusSoundPreference()).toEqual({
+      mode: "working-and-waiting",
+    });
   });
 });
