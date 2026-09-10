@@ -24,18 +24,10 @@ pub enum ConversationStatus {
     Waiting,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct StatusSoundSettings {
     pub mode: StatusSoundMode,
-}
-
-impl Default for StatusSoundSettings {
-    fn default() -> Self {
-        Self {
-            mode: StatusSoundMode::default(),
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
