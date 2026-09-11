@@ -15,6 +15,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { requestOpenSettings } from "@/features/settings/lib/settingsEvents";
 import { useComposerPickerCloseFocus } from "@/features/chat/hooks/useComposerPickerCloseFocus";
+import { useStarredModels } from "../hooks/useStarredModels";
 import { recordModelSelection } from "@/features/chat/lib/modelRecency";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
@@ -50,9 +51,15 @@ interface AgentModelPickerProps {
   currentModelProviderId?: string | null;
   currentModelName?: string | null;
   availableModels: ModelOption[];
+  favoriteModels?: Array<{ agentId: string; model: ModelOption }>;
   modelsLoading?: boolean;
   modelStatusMessage?: string | null;
-  onModelChange?: (modelId: string, model?: ModelOption) => void;
+  onModelChange?: (
+    modelId: string,
+    model?: ModelOption,
+    agentId?: string,
+    // biome-ignore lint/suspicious/noConfusingVoidType: Legacy selection callbacks return void; only false rejects.
+  ) => boolean | void;
   loading?: boolean;
   isCompact?: boolean;
   showSelectedModelInTrigger?: boolean;
@@ -79,15 +86,6 @@ type PopoverContentAlign = NonNullable<
   ComponentProps<typeof PopoverContent>["align"]
 >;
 const REASONING_EFFORT_COLUMN_TRANSITION_MS = 240;
-const PICKER_WIDTH_COMPACT_PX = 420;
-// Harness agents (pi-acp, codex-acp, etc.) can report long ACP model names
-// (e.g. provider/id names), so they get wider pickers than Goose, whose
-// curated model names are short. With a reasoning-effort column present,
-// the agent (11.75rem) + reasoning (11rem) columns alone consume ~23rem,
-// so the picker needs extra width for the model column to breathe.
-const PICKER_WIDTH_HARNESS_PX = 560;
-const PICKER_WIDTH_HARNESS_EXPANDED_PX = 736;
-const PICKER_WIDTH_EXPANDED_PX = 596;
 
 function toSentenceCaseLabel(value: string | undefined): string {
   const trimmed = value?.trim();
@@ -177,6 +175,7 @@ export function AgentModelPicker({
   currentModelProviderId = null,
   currentModelName = null,
   availableModels,
+  favoriteModels,
   modelsLoading = false,
   modelStatusMessage = null,
   onModelChange,
@@ -192,7 +191,7 @@ export function AgentModelPicker({
   reasoningEffort,
   contentAlign = "start",
   contentCollisionPadding = 16,
-  providerColumnMode = "visible",
+  providerColumnMode = "gated",
 }: AgentModelPickerProps) {
   const { t } = useTranslation("chat");
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
@@ -216,7 +215,6 @@ export function AgentModelPicker({
   });
   const modelListRef = useRef<RecommendedModelListHandle>(null);
   const [providerRevealed, setProviderRevealed] = useState(false);
-  const [modelBrowsing, setModelBrowsing] = useState(false);
   const [resolvedContentAlign, setResolvedContentAlign] =
     useState<PopoverContentAlign>("start");
   const [latchedReasoningEffortConfig, setLatchedReasoningEffortConfig] =
@@ -235,6 +233,10 @@ export function AgentModelPicker({
     currentModelProviderId,
     availableModels,
   });
+  const { isStarred } = useStarredModels();
+  const hasLiveFavorites = favoriteModels?.some(({ agentId, model }) =>
+    isStarred(model.providerId ?? agentId, model.id),
+  );
   const displayedModels = useMemo(() => {
     const currentModelBelongsToSelectedAgent =
       selectedAgentId === "goose"
@@ -373,9 +375,16 @@ export function AgentModelPicker({
     }
   };
 
-  const handleModelSelect = (model: ModelOption) => {
-    recordModelSelection(selectedAgentId, model);
-    onModelChange?.(model.id, model);
+  const handleModelSelect = (model: ModelOption, agentId: string) => {
+    if (!onModelChange) return false;
+    const accepted =
+      agentId === selectedAgentId
+        ? onModelChange(model.id, model)
+        : onModelChange(model.id, model, agentId);
+    // Existing callbacks without an acceptance result still accept selections.
+    if (accepted === false) return false;
+    recordModelSelection(agentId, model);
+    return true;
   };
 
   // Re-gate the provider column when the popover closes, so every reopen
@@ -383,38 +392,20 @@ export function AgentModelPicker({
   useEffect(() => {
     if (!open) {
       setProviderRevealed(false);
-      setModelBrowsing(false);
     }
   }, [open]);
 
   const showAgentColumn = providerColumnMode === "visible" || providerRevealed;
-  // A sole ready agent leaves nothing to reveal, but a sole not-ready agent
-  // still needs the footer: the hidden column's Connect/Install row is the
-  // only setup path from this picker.
-  const hasAgentNeedingSetup = agents.some(
-    (agent) => agent.readiness && agent.readiness !== "ready",
-  );
-  // Browsing the full model list (search or "View more") is a model-picking
-  // task; the reveal button would swap the whole popover out from under it.
+  // Keep the reveal action anchored below the scrolling model area whenever
+  // the panel is gated. Agent discovery may temporarily report one agent; it
+  // must not remove the user's route to the full agent panel.
   const showSwitchProviderFooter =
-    providerColumnMode === "gated" &&
-    !providerRevealed &&
-    !modelBrowsing &&
-    (agents.length > 1 || hasAgentNeedingSetup);
+    providerColumnMode === "gated" && !providerRevealed;
   const showReasoningEffortColumn = showReasoningEffort;
-  // Harness agents get wider pickers (and flexible model columns) whenever
-  // their agent column is visible, with or without a reasoning-effort
-  // column, so long ACP model names are not truncated. Goose is excluded
-  // because its curated model names are short.
+  // Keep width stable when reasoning controls change. Harness agents need
+  // extra room for long ACP model names, including beside reasoning controls.
   const widenForHarnessAgent = showAgentColumn && selectedAgentId !== "goose";
-  const isWidePicker = showReasoningEffortColumn && showAgentColumn;
-  const pickerWidth = isWidePicker
-    ? widenForHarnessAgent
-      ? PICKER_WIDTH_HARNESS_EXPANDED_PX
-      : PICKER_WIDTH_EXPANDED_PX
-    : widenForHarnessAgent
-      ? PICKER_WIDTH_HARNESS_PX
-      : PICKER_WIDTH_COMPACT_PX;
+  const isWidePicker = showAgentColumn;
 
   // Land keyboard focus in the revealed column, since the reveal button that
   // held focus unmounts with it.
@@ -431,20 +422,12 @@ export function AgentModelPicker({
   }, [providerRevealed]);
 
   const resolveContentAlign = useCallback((): PopoverContentAlign => {
-    if (contentAlign !== "smart") {
-      return contentAlign;
-    }
-
-    const triggerRect = triggerRef.current?.getBoundingClientRect();
-    if (!triggerRect) {
-      return "start";
-    }
-
-    const leftAlignedRightEdge = triggerRect.left + pickerWidth;
-    return leftAlignedRightEdge <= window.innerWidth - contentCollisionPadding
-      ? "start"
-      : "center";
-  }, [contentAlign, contentCollisionPadding, pickerWidth]);
+    // Center alignment follows the trigger's center, so a model label changing
+    // the trigger width makes the open popover jump left or right. Anchor smart
+    // placement to the trigger's stable leading edge instead; Radix still
+    // shifts the content when needed to keep it inside the viewport.
+    return contentAlign === "smart" ? "start" : contentAlign;
+  }, [contentAlign]);
 
   useEffect(() => {
     if (open) {
@@ -518,11 +501,9 @@ export function AgentModelPicker({
           "flex max-h-[min(24rem,50vh)] flex-col overflow-hidden p-1 transition-[width] duration-[240ms] ease-[cubic-bezier(0.2,0,0,1)]",
           isWidePicker
             ? widenForHarnessAgent
-              ? "w-[46rem]"
-              : "w-[37.25rem]"
-            : widenForHarnessAgent
-              ? "w-[35rem]"
-              : "w-[26.25rem]",
+              ? "w-[min(48rem,calc(100vw-1.5rem))]"
+              : "w-[min(39.25rem,calc(100vw-1.5rem))]"
+            : "w-[min(28.25rem,calc(100vw-1.5rem))]",
         )}
         onInteractOutside={(event) => {
           classifyOutsideInteraction(event.target);
@@ -572,7 +553,14 @@ export function AgentModelPicker({
                 "button[data-picker-nav-item]:not(:disabled)",
               ),
             );
-            const idx = items.indexOf(document.activeElement as HTMLElement);
+            const activeElement = document.activeElement as HTMLElement;
+            const origin =
+              activeElement
+                ?.closest("[data-model-key]")
+                ?.querySelector<HTMLElement>(
+                  "button[data-picker-nav-item]:not(:disabled)",
+                ) ?? activeElement;
+            const idx = items.indexOf(origin);
             const next =
               idx < 0
                 ? e.key === "ArrowDown"
@@ -697,7 +685,7 @@ export function AgentModelPicker({
                 showAgentColumn
                   ? widenForHarnessAgent
                     ? "ml-1 flex-1"
-                    : "ml-1 w-56 shrink-0"
+                    : "ml-1 w-64 shrink-0"
                   : "flex-1",
               )}
             >
@@ -722,16 +710,20 @@ export function AgentModelPicker({
                     </div>
                   )}
                 </div>
-              ) : displayedModels.length > 0 ? (
+              ) : displayedModels.length > 0 || hasLiveFavorites ? (
                 <RecommendedModelList
                   key={selectedAgentId}
                   ref={modelListRef}
                   models={displayedModels}
+                  favoriteModels={favoriteModels}
+                  catalogModels={availableModels}
                   currentModelId={currentModelId}
                   currentModelProviderId={currentModelProviderId}
                   selectedAgentId={selectedAgentId}
+                  agentLabels={
+                    new Map(agents.map((agent) => [agent.id, agent.label]))
+                  }
                   onModelSelect={handleModelSelect}
-                  onBrowseChange={setModelBrowsing}
                   t={t}
                 />
               ) : (

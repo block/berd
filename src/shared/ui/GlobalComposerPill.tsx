@@ -483,23 +483,19 @@ export function GlobalComposerPill({
       setModelOverride(nextModel);
       setSelectedProvider(providerId);
     },
-    onModelSelected: (model) => {
-      const selection = modelOptionToSelection(
-        model,
-        selectedProviderForPicker,
-      );
+    onModelSelected: (model, owningAgentId) => {
+      const agentId = owningAgentId ?? selectedAgentId;
+      const providerId = owningAgentId ?? selectedProviderForPicker;
+      const selection = modelOptionToSelection(model, providerId);
       personaOverrideUserOverrideForRef.current = selectedPersonaId;
       personaOverrideActiveRef.current = false;
       onExecutionTargetChange?.(
-        executionTargetForSelection(
-          selectedAgentId,
-          selection,
-          selectedProviderForPicker,
-        ),
+        executionTargetForSelection(agentId, selection, providerId),
       );
-      setProviderOverride(selectedAgentId);
+      setProviderOverride(agentId);
       setModelOverride(selection);
-      setSelectedProvider(selectedAgentId);
+      setSelectedProvider(agentId);
+      return true;
     },
   });
 
@@ -1513,6 +1509,12 @@ export function GlobalComposerPill({
             }
             currentModelName={effectiveModelSelection?.modelName ?? null}
             availableModels={availableModels}
+            favoriteModels={pickerAgents.flatMap((agent) =>
+              getModelsForAgent(agent.id).map((model) => ({
+                agentId: agent.id,
+                model,
+              })),
+            )}
             modelsLoading={modelsLoading}
             modelStatusMessage={modelStatusMessage}
             onModelChange={handleModelChange}

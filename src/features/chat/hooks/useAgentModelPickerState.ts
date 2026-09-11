@@ -14,7 +14,7 @@ interface UseAgentModelPickerStateOptions {
   providers: AcpProvider[];
   selectedProvider?: string;
   onProviderSelected: (providerId: string, models: ModelOption[]) => void;
-  onModelSelected?: (model: ModelOption) => void;
+  onModelSelected?: (model: ModelOption, agentId?: string) => boolean;
 }
 
 export function useAgentModelPickerState({
@@ -114,6 +114,16 @@ export function useAgentModelPickerState({
     () => getModelsForAgent(selectedAgentId),
     [getModelsForAgent, selectedAgentId],
   );
+  const favoriteModels = useMemo(
+    () =>
+      pickerAgents.flatMap((agent) =>
+        getModelsForAgent(agent.id).map((model) => ({
+          agentId: agent.id,
+          model,
+        })),
+      ),
+    [getModelsForAgent, pickerAgents],
+  );
 
   const providerIdsForSelectedAgent = useMemo(
     () =>
@@ -169,11 +179,24 @@ export function useAgentModelPickerState({
   );
 
   const handleModelChange = useCallback(
-    (modelId: string, selectedModelOverride?: ModelOption) => {
+    (
+      modelId: string,
+      selectedModelOverride?: ModelOption,
+      agentId?: string,
+    ) => {
+      // Cross-agent favorites use the same readiness owner as provider picks.
+      // Do not emit a combined intent until the owning agent is ready.
+      if (
+        agentId &&
+        agentId !== selectedAgentId &&
+        !readyAgentIds.has(agentId)
+      ) {
+        return false;
+      }
       const selectedModel =
         selectedModelOverride ??
         availableModels.find((model) => model.id === modelId);
-      onModelSelected?.({
+      const selectedModelOption = {
         id: modelId,
         name: selectedModel?.name ?? modelId,
         displayName: selectedModel?.displayName ?? modelId,
@@ -182,9 +205,14 @@ export function useAgentModelPickerState({
         providerName: selectedModel?.providerName,
         contextLimit: selectedModel?.contextLimit,
         recommended: selectedModel?.recommended,
-      });
+      };
+      if (agentId) {
+        return onModelSelected?.(selectedModelOption, agentId) ?? false;
+      } else {
+        return onModelSelected?.(selectedModelOption) ?? false;
+      }
     },
-    [availableModels, onModelSelected],
+    [availableModels, onModelSelected, readyAgentIds, selectedAgentId],
   );
 
   const refreshingRef = useRef(false);
@@ -211,6 +239,7 @@ export function useAgentModelPickerState({
     selectedAgentId,
     pickerAgents,
     availableModels,
+    favoriteModels,
     getModelsForAgent,
     isModelInventoryAuthoritative,
     modelsLoading,

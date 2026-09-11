@@ -1162,6 +1162,7 @@ export function useChatSessionController({
     selectedAgentId,
     pickerAgents,
     availableModels,
+    favoriteModels,
     getModelsForAgent,
     modelsLoading,
     modelStatusMessage,
@@ -1405,28 +1406,17 @@ export function useChatSessionController({
   );
 
   const handleModelChangeWithContextReset = useCallback(
-    (modelId: string, model?: ModelOption) => {
-      const nextModelProviderId = model?.providerId;
-      if (
-        modelId === effectiveModelSelection?.id &&
-        (!nextModelProviderId ||
-          nextModelProviderId === effectiveModelSelection?.modelProviderId)
-      ) {
-        return;
+    (modelId: string, model?: ModelOption, agentId?: string) => {
+      if (!handleModelChange(modelId, model, agentId)) {
+        return false;
       }
       if (sessionId) {
         delete pendingDefaultReasoningEffortBySessionRef.current[sessionId];
       }
       useChatStore.getState().resetTokenState(stateSessionId);
-      handleModelChange(modelId, model);
+      return true;
     },
-    [
-      effectiveModelSelection?.id,
-      effectiveModelSelection?.modelProviderId,
-      handleModelChange,
-      sessionId,
-      stateSessionId,
-    ],
+    [handleModelChange, sessionId, stateSessionId],
   );
 
   useEffect(() => {
@@ -3556,6 +3546,7 @@ export function useChatSessionController({
     currentModelName: effectiveModelSelection?.name ?? null,
     currentExecutionTarget: session?.executionTarget,
     availableModels,
+    favoriteModels,
     modelsLoading,
     modelStatusMessage,
     handleModelChange: handleModelChangeWithContextReset,

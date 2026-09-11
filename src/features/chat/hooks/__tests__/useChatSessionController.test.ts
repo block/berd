@@ -46,6 +46,22 @@ const mockTrackChatSessionStarted = vi.fn();
 const mockUseChatHook = vi.fn();
 const mockUseMessageQueue = vi.fn();
 const mockPickerOpen = vi.fn();
+const mockRealPicker = vi.fn();
+const mockAgentStatus = vi.fn();
+vi.mock("@/features/providers/hooks/useAgentProviderStatus", () => ({
+  useAgentProviderStatus: () => mockAgentStatus(),
+}));
+vi.mock("@/features/providers/hooks/useProviderModels", () => ({
+  useProviderModels: () => ({
+    configuredModelProviderIds: [],
+    modelCacheRefreshProviderIds: [],
+    getModelsForAgent: () => [],
+    refreshAllModelProviders: vi.fn(),
+    isRefreshingProvider: () => false,
+    getError: () => null,
+    isModelInventoryAuthoritative: () => false,
+  }),
+}));
 const mockPreSeedDraftAgent = vi.fn();
 const mockClearBuilderSessionState = vi.fn();
 const mockMarkAgentBuilderSessionPreparationFailed = vi.fn();
@@ -249,43 +265,43 @@ vi.mock("../../lib/remoteSession", () => ({
 }));
 
 vi.mock("../useAgentModelPickerState", () => ({
-  useAgentModelPickerState: ({
-    onProviderSelected,
-    onModelSelected,
-  }: {
-    onProviderSelected?: (providerId: string) => void;
-    onModelSelected?: (model: {
-      id: string;
-      name: string;
-      displayName?: string;
-      providerId?: string;
-    }) => void;
-  }) => ({
-    selectedAgentId: mockPickerState.selectedAgentId,
-    pickerAgents: mockPickerState.pickerAgents,
-    availableModels: mockPickerState.availableModels,
-    getModelsForAgent: (agentId: string) =>
-      mockPickerState.modelsByAgent.get(agentId) ??
-      mockPickerState.availableModels,
-    isModelInventoryAuthoritative: () => false,
-    modelsLoading: mockPickerState.modelsLoading,
-    modelStatusMessage: mockPickerState.modelStatusMessage,
-    handleProviderChange: (providerId: string) =>
-      onProviderSelected?.(providerId),
-    handleModelChange: (modelId: string) => {
-      const model = modelFixtures[modelId];
-      if (model) {
-        onModelSelected?.({
-          id: modelId,
-          name: model.name,
-          displayName: model.displayName,
-          providerId: model.providerId,
-        });
-      }
-    },
-    handlePickerOpen: () => mockPickerOpen(),
-  }),
+  useAgentModelPickerState: (
+    options: Parameters<
+      typeof import("../useAgentModelPickerState").useAgentModelPickerState
+    >[0],
+  ) => mockRealPicker(options) ?? mockPicker(options),
 }));
+
+const mockPicker = ({
+  onProviderSelected,
+  onModelSelected,
+}: Parameters<
+  typeof import("../useAgentModelPickerState").useAgentModelPickerState
+>[0]) => ({
+  selectedAgentId: mockPickerState.selectedAgentId,
+  pickerAgents: mockPickerState.pickerAgents,
+  availableModels: mockPickerState.availableModels,
+  getModelsForAgent: (agentId: string) =>
+    mockPickerState.modelsByAgent.get(agentId) ??
+    mockPickerState.availableModels,
+  isModelInventoryAuthoritative: () => false,
+  modelsLoading: mockPickerState.modelsLoading,
+  modelStatusMessage: mockPickerState.modelStatusMessage,
+  handleProviderChange: (providerId: string) =>
+    onProviderSelected(providerId, []),
+  handleModelChange: (modelId: string) => {
+    const model = modelFixtures[modelId];
+    if (model) {
+      return onModelSelected?.({
+        id: modelId,
+        name: model.name,
+        displayName: model.displayName,
+        providerId: model.providerId,
+      });
+    }
+  },
+  handlePickerOpen: () => mockPickerOpen(),
+});
 
 // Wrappers are mocked so the tests can pin the fire points; CHAT_SOURCE_SURFACE
 // and the rest of the module stay real.
@@ -553,6 +569,7 @@ describe("useChatSessionController", () => {
       path: "/Users/x/.agents/agents/draft-from-chat.md",
       slug: "draft-from-chat",
     });
+    mockRealPicker.mockReset();
     mockPickerState.selectedAgentId = "goose";
     mockPickerState.pickerAgents = [{ id: "goose", label: "Goose" }];
     mockPickerState.availableModels = [];
@@ -2525,6 +2542,90 @@ describe("useChatSessionController", () => {
       "Create-persona requested without an AppShell handler",
     );
     warn.mockRestore();
+  });
+
+  it.each([
+    "not_ready",
+    "not_installed",
+    "ready",
+  ])("resets context and pending reasoning only for an accepted %s foreign favorite", async (readiness) => {
+    const { useAgentModelPickerState } = await vi.importActual<
+      typeof import("../useAgentModelPickerState")
+    >("../useAgentModelPickerState");
+    mockRealPicker.mockImplementation(useAgentModelPickerState);
+    mockAgentStatus.mockReturnValue({
+      readyAgentIds: new Set(
+        readiness === "ready" ? ["goose", "claude-acp"] : ["goose"],
+      ),
+      agentReadiness: new Map([
+        ["goose", "ready"],
+        ["claude-acp", readiness],
+      ]),
+      refresh: vi.fn(),
+    });
+    patchReasoningEffort("session-1");
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+    await act(async () => result.current.handleReasoningEffortChange("high"));
+    const targetBefore = useChatSessionStore
+      .getState()
+      .getSession("session-1")?.executionTarget;
+    const reasoningBefore = useChatSessionStore
+      .getState()
+      .getSession("session-1")?.reasoningEffort;
+    const tokenState = {
+      ...useChatStore.getState().getSessionRuntime("session-1").tokenState,
+      accumulatedTotal: 12000,
+      contextLimit: 400000,
+    };
+    act(() =>
+      useChatStore.getState().replaceTokenState("session-1", tokenState, true),
+    );
+    act(() =>
+      result.current.handleModelChange(
+        "opus",
+        { id: "opus", name: "Claude Opus" },
+        "claude-acp",
+      ),
+    );
+    const runtime = useChatStore.getState().getSessionRuntime("session-1");
+    if (readiness === "ready") {
+      expect(runtime.hasUsageSnapshot).toBe(false);
+      expect(runtime.tokenState.accumulatedTotal).toBe(0);
+      expect(getModelSelectionIntent("session-1")?.target).toMatchObject({
+        harnessId: "claude-acp",
+        modelId: "opus",
+      });
+    } else {
+      expect(runtime.hasUsageSnapshot).toBe(true);
+      expect(runtime.tokenState).toEqual(tokenState);
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.executionTarget,
+      ).toEqual(targetBefore);
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.reasoningEffort,
+      ).toEqual(reasoningBefore);
+      expect(getModelSelectionIntent("session-1")).toBeUndefined();
+    }
+    mockUseChatSendMessage.mockImplementationOnce(
+      async (options?: {
+        onMessageAccepted?: (
+          sessionId: string,
+          text: string,
+        ) => boolean | undefined;
+      }) => options?.onMessageAccepted?.("session-1", "hello"),
+    );
+    await act(async () => {
+      await result.current.handleSend("hello");
+    });
+    if (readiness === "ready") {
+      expect(mockGoosePreferencesSave).not.toHaveBeenCalled();
+    } else {
+      expect(mockGoosePreferencesSave).toHaveBeenCalledWith({
+        values: [{ key: "gooseThinkingEffort", value: "high" }],
+      });
+    }
   });
 
   it("saves a changed reasoning effort as the default after a message is accepted", async () => {

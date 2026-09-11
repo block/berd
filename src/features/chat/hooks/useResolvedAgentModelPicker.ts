@@ -336,6 +336,7 @@ export function useResolvedAgentModelPicker({
   const {
     pickerAgents,
     availableModels,
+    favoriteModels,
     getModelsForAgent,
     isModelInventoryAuthoritative,
     modelsLoading,
@@ -505,27 +506,30 @@ export function useResolvedAgentModelPicker({
           console.error("Failed to update ACP session provider:", error);
         });
     },
-    onModelSelected: (model) => {
+    onModelSelected: (model, requestedAgentId) => {
+      const targetAgentId = requestedAgentId ?? selectedAgentId;
       const modelId = model.id;
       const modelName = model.displayName ?? model.name ?? model.id;
       const nextModelProviderId =
         model.providerId ??
-        session?.executionTarget?.modelProviderId ??
-        (selectedAgentId === "goose" ? undefined : selectedAgentId);
+        (targetAgentId === selectedAgentId
+          ? session?.executionTarget?.modelProviderId
+          : undefined) ??
+        (targetAgentId === "goose" ? undefined : targetAgentId);
       if (!nextModelProviderId) {
         console.warn("Dropped model selection without a model provider", {
-          harnessId: selectedAgentId,
+          harnessId: targetAgentId,
           modelId,
         });
-        return;
+        return false;
       }
-      const nextTarget = targetFromAgentModelSelection(selectedAgentId, {
+      const nextTarget = targetFromAgentModelSelection(targetAgentId, {
         modelProviderId: nextModelProviderId,
         modelId,
         modelName,
       });
       if (!isModelExecutionTarget(nextTarget)) {
-        return;
+        return false;
       }
       const nextModelSelection: PreferredModelSelection = {
         id: modelId,
@@ -539,11 +543,20 @@ export function useResolvedAgentModelPicker({
         providerId: nextModelProviderId,
       };
 
+      if (
+        !sessionId &&
+        targetAgentId === selectedAgentId &&
+        modelId === effectiveModelSelection?.id &&
+        nextModelProviderId === effectiveModelSelection?.modelProviderId
+      ) {
+        return false;
+      }
+
       if (!sessionId) {
         setPendingExecutionTarget(nextTarget);
-        setGlobalSelectedProvider(selectedAgentId);
+        setGlobalSelectedProvider(targetAgentId);
         setPendingModelSelection(nextModelSelection);
-        return;
+        return true;
       }
 
       // No-op guard: if the selected model/provider already matches the
@@ -554,7 +567,7 @@ export function useResolvedAgentModelPicker({
         !session ||
         sameSessionExecutionTarget(session.executionTarget, nextTarget)
       ) {
-        return;
+        return false;
       }
 
       selectionVersionRef.current += 1;
@@ -562,7 +575,7 @@ export function useResolvedAgentModelPicker({
       const requestId = createModelSelectionRequestId();
 
       const previousStoredModelPreference =
-        getStoredModelPreference(selectedAgentId);
+        getStoredModelPreference(targetAgentId);
       const previousTarget = session.executionTarget;
       const providerChanged =
         nextTarget.modelProviderId !== previousTarget?.modelProviderId;
@@ -571,15 +584,15 @@ export function useResolvedAgentModelPicker({
       // the draft and let draft promotion configure the real backend session.
       if (session.creationState === "pending") {
         if (providerChanged && !sessionHasStarted) {
-          setGlobalSelectedProvider(selectedAgentId);
+          setGlobalSelectedProvider(targetAgentId);
         }
         beginModelSelectionIntent(sessionId, {
           requestId,
           target: nextTarget,
           previousTarget,
-          preferenceAgentId: selectedAgentId,
+          preferenceAgentId: targetAgentId,
         });
-        return;
+        return true;
       }
 
       beginModelSelectionIntent(sessionId, {
@@ -588,7 +601,7 @@ export function useResolvedAgentModelPicker({
         previousTarget,
       });
       if (providerChanged && !sessionHasStarted) {
-        setGlobalSelectedProvider(selectedAgentId);
+        setGlobalSelectedProvider(targetAgentId);
       }
 
       void (async () => {
@@ -609,10 +622,7 @@ export function useResolvedAgentModelPicker({
             return;
           }
           if (!sessionHasStarted) {
-            setStoredModelPreference(
-              selectedAgentId,
-              nextStoredModelPreference,
-            );
+            setStoredModelPreference(targetAgentId, nextStoredModelPreference);
           }
         } catch (error) {
           const intentStillMatches = clearCurrentModelSelectionIntent(
@@ -635,7 +645,7 @@ export function useResolvedAgentModelPicker({
                 ? undefined
                 : () =>
                     setStoredModelPreference(
-                      selectedAgentId,
+                      targetAgentId,
                       nextStoredModelPreference,
                     ),
             )
@@ -649,11 +659,11 @@ export function useResolvedAgentModelPicker({
           if (!sessionHasStarted) {
             if (previousStoredModelPreference) {
               setStoredModelPreference(
-                selectedAgentId,
+                targetAgentId,
                 previousStoredModelPreference,
               );
             } else {
-              clearStoredModelPreference(selectedAgentId);
+              clearStoredModelPreference(targetAgentId);
             }
           }
           rollbackToPreviousModel({
@@ -671,6 +681,8 @@ export function useResolvedAgentModelPicker({
           });
         }
       })();
+      // Acceptance is synchronous; backend preparation keeps its existing rollback.
+      return true;
     },
   });
 
@@ -816,6 +828,7 @@ export function useResolvedAgentModelPicker({
     selectedAgentId,
     pickerAgents,
     availableModels,
+    favoriteModels,
     getModelsForAgent,
     modelsLoading,
     modelStatusMessage,
