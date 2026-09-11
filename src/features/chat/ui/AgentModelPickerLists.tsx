@@ -171,7 +171,7 @@ interface ModelListProps {
   currentModelProviderId: string | null;
   selectedAgentId: string;
   agentLabels?: ReadonlyMap<string, string>;
-  onModelSelect: (model: ModelOption, agentId: string) => void;
+  onModelSelect: (model: ModelOption, agentId: string) => boolean;
   /**
    * Reports whether the list has left the recommended view for the full model
    * list (search or "View more"), so the picker can hide affordances that
@@ -232,6 +232,15 @@ export const RecommendedModelList = forwardRef<
     (model: ModelOption) =>
       model.providerId ?? modelAgentIds.get(model) ?? selectedAgentId,
     [modelAgentIds, selectedAgentId],
+  );
+  const getForeignAgentLabel = useCallback(
+    (model: ModelOption) => {
+      const agentId = modelAgentIds.get(model) ?? selectedAgentId;
+      return agentId !== selectedAgentId
+        ? (agentLabels?.get(agentId) ?? formatProviderLabel(agentId))
+        : null;
+    },
+    [agentLabels, modelAgentIds, selectedAgentId],
   );
   // Rows include a synthesized entry for the current selection when the
   // catalog no longer serves it. Honoring starred state only for catalog
@@ -350,6 +359,7 @@ export const RecommendedModelList = forwardRef<
     }, 240);
     animationTimersRef.current.add(timer);
   }, []);
+  const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const searchButtonRef = useRef<HTMLButtonElement>(null);
   const restoreSearchButtonFocusRef = useRef(false);
@@ -485,12 +495,14 @@ export const RecommendedModelList = forwardRef<
         model.id.toLowerCase().includes(normalizedQuery) ||
         model.displayName?.toLowerCase().includes(normalizedQuery) ||
         model.providerName?.toLowerCase().includes(normalizedQuery) ||
-        model.providerId?.toLowerCase().includes(normalizedQuery),
+        model.providerId?.toLowerCase().includes(normalizedQuery) ||
+        getForeignAgentLabel(model)?.toLowerCase().includes(normalizedQuery),
     );
   }, [
     liveStarredKeys,
     models,
     query,
+    getForeignAgentLabel,
     recommended,
     searchOpen,
     showAll,
@@ -587,6 +599,7 @@ export const RecommendedModelList = forwardRef<
 
   return (
     <div
+      ref={listRef}
       className="flex min-h-0 min-w-0 flex-1 flex-col"
       onPointerLeave={() => setHoveredModelKey(null)}
     >
@@ -683,11 +696,7 @@ export const RecommendedModelList = forwardRef<
                   currentModelId,
                   currentModelProviderId,
                 );
-              const foreignAgentLabel =
-                modelAgentId !== selectedAgentId
-                  ? (agentLabels?.get(modelAgentId) ??
-                    formatProviderLabel(modelAgentId))
-                  : null;
+              const foreignAgentLabel = getForeignAgentLabel(model);
               const scopeId = getModelScopeId(model);
               const modelKey = modelStarKey(scopeId, model.id);
               const committedStarred = liveStarredKeys.has(modelKey);
@@ -707,9 +716,35 @@ export const RecommendedModelList = forwardRef<
                 if (rowAnimation) return;
                 const targetStarred = !starred;
                 if (!setStarred(scopeId, model.id, targetStarred)) return;
+                const hasSelectedAgentDestination = models.some(
+                  (candidate) =>
+                    modelStarKey(getModelScopeId(candidate), candidate.id) ===
+                    modelKey,
+                );
+                if (
+                  !targetStarred &&
+                  !hasSelectedAgentDestination &&
+                  rowElementsRef.current
+                    .get(modelKey)
+                    ?.contains(document.activeElement)
+                ) {
+                  const index = sorted.indexOf(model);
+                  const neighbor = sorted[index + 1] ?? sorted[index - 1];
+                  const nextRow = neighbor
+                    ? rowElementsRef.current.get(
+                        modelStarKey(getModelScopeId(neighbor), neighbor.id),
+                      )
+                    : null;
+                  const target =
+                    nextRow?.querySelector<HTMLButtonElement>(
+                      "[data-picker-nav-item]",
+                    ) ??
+                    inputRef.current ??
+                    searchButtonRef.current ??
+                    listRef.current?.closest<HTMLElement>('[role="dialog"]');
+                  target?.focus();
+                }
                 if (prefersReducedMotion) return;
-                const hasSelectedAgentDestination =
-                  existingModelKeys?.has(modelKey) ?? true;
                 updateRowAnimation(modelKey, {
                   hasSelectedAgentDestination,
                   state: { phase: "out", targetStarred },
@@ -805,8 +840,7 @@ export const RecommendedModelList = forwardRef<
                   >
                     <PickerItem
                       onClick={() => {
-                        onModelSelect(model, modelAgentId);
-                        resetView();
+                        if (onModelSelect(model, modelAgentId)) resetView();
                       }}
                       selected={isSelected}
                       aria-label={

@@ -58,7 +58,8 @@ interface AgentModelPickerProps {
     modelId: string,
     model?: ModelOption,
     agentId?: string,
-  ) => void;
+    // biome-ignore lint/suspicious/noConfusingVoidType: Legacy selection callbacks return void; only false rejects.
+  ) => boolean | void;
   loading?: boolean;
   isCompact?: boolean;
   showSelectedModelInTrigger?: boolean;
@@ -375,12 +376,15 @@ export function AgentModelPicker({
   };
 
   const handleModelSelect = (model: ModelOption, agentId: string) => {
+    if (!onModelChange) return false;
+    const accepted =
+      agentId === selectedAgentId
+        ? onModelChange(model.id, model)
+        : onModelChange(model.id, model, agentId);
+    // Existing callbacks without an acceptance result still accept selections.
+    if (accepted === false) return false;
     recordModelSelection(agentId, model);
-    if (agentId === selectedAgentId) {
-      onModelChange?.(model.id, model);
-    } else {
-      onModelChange?.(model.id, model, agentId);
-    }
+    return true;
   };
 
   // Re-gate the provider column when the popover closes, so every reopen

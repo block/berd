@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __resetStarredModelsCacheForTests } from "../../hooks/useStarredModels";
 import { modelStarKey, starredModelStorageKey } from "../../lib/starredModels";
+import { useAgentModelPickerState } from "../../hooks/useAgentModelPickerState";
 import { AgentModelPicker } from "../AgentModelPicker";
 import {
   getModelRecencyMap,
@@ -23,6 +24,33 @@ vi.mock("sonner", () => ({
     message: vi.fn(),
     dismiss: vi.fn(),
   },
+}));
+
+const readiness = vi.hoisted(() => ({ ready: false }));
+vi.mock("@/features/providers/hooks/useProviderModels", () => ({
+  useProviderModels: () => ({
+    configuredModelProviderIds: [],
+    modelCacheRefreshProviderIds: [],
+    getModelsForAgent: () => [],
+    isModelInventoryAuthoritative: () => false,
+    refreshAllModelProviders: vi.fn(),
+    isRefreshingProvider: () => false,
+    getError: () => null,
+  }),
+}));
+vi.mock("@/features/providers/hooks/useAgentProviderStatus", () => ({
+  useAgentProviderStatus: () => ({
+    readyAgentIds: new Set(
+      readiness.ready ? ["goose", "claude-acp"] : ["goose"],
+    ),
+    agentReadiness: new Map(),
+    refresh: vi.fn(),
+  }),
+}));
+const motionPreference = vi.hoisted(() => ({ reduced: false }));
+vi.mock("motion/react", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("motion/react")>()),
+  useReducedMotion: () => motionPreference.reduced,
 }));
 
 class ResizeObserverStub {
@@ -2702,5 +2730,178 @@ describe("AgentModelPicker starred models", () => {
       expect.objectContaining({ id: "opus" }),
       "claude-acp",
     );
+  });
+  it("searches the resolved visible foreign agent label", async () => {
+    seedStar("vendor", "opus");
+    __resetStarredModelsCacheForTests();
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        agents={[...AGENTS, { id: "research", label: "Research" }]}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        availableModels={models}
+        favoriteModels={[
+          {
+            agentId: "research",
+            model: {
+              id: "opus",
+              name: "Opus",
+              providerId: "vendor",
+              providerName: "Unrelated",
+            },
+          },
+        ]}
+        onModelChange={vi.fn()}
+      />,
+    );
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Opus, Research" }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /search models/i }));
+    await user.type(
+      screen.getByRole("searchbox", { name: /search models/i }),
+      "Research",
+    );
+    expect(
+      screen.getByRole("button", { name: "Opus, Research" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Preferred" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps recency, order and search unchanged until the readiness owner accepts", async () => {
+    seedStar("claude-acp", "opus");
+    __resetStarredModelsCacheForTests();
+    readiness.ready = false;
+    const selected = vi.fn(() => true);
+    const favorite = { id: "opus", name: "Claude Opus" };
+    function Harness() {
+      const state = useAgentModelPickerState({
+        providers: [],
+        selectedProvider: "goose",
+        onProviderSelected: vi.fn(),
+        onModelSelected: selected,
+      });
+      return (
+        <AgentModelPicker
+          agents={AGENTS}
+          selectedAgentId="goose"
+          onAgentChange={vi.fn()}
+          availableModels={models}
+          favoriteModels={[{ agentId: "claude-acp", model: favorite }]}
+          onModelChange={state.handleModelChange}
+        />
+      );
+    }
+    const user = userEvent.setup();
+    const view = render(<Harness />);
+    recordModelSelection("goose", models[0]);
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    await user.click(screen.getByRole("button", { name: /search models/i }));
+    const search = screen.getByRole("searchbox", { name: /search models/i });
+    await user.type(search, "o");
+    const order = () =>
+      Array.from(document.querySelectorAll("[data-model-key]")).map((row) =>
+        row.getAttribute("data-model-key"),
+      );
+    const beforeOrder = order();
+    const beforeRecency = { ...getModelRecencyMap() };
+    await user.click(
+      screen.getByRole("button", { name: "Claude Opus, Claude Code" }),
+    );
+    expect(selected).not.toHaveBeenCalled();
+    expect(getModelRecencyMap()).toEqual(beforeRecency);
+    expect(order()).toEqual(beforeOrder);
+    expect(search).toHaveValue("o");
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    readiness.ready = true;
+    view.rerender(<Harness />);
+    await user.click(
+      screen.getByRole("button", { name: "Claude Opus, Claude Code" }),
+    );
+    expect(selected).toHaveBeenCalledOnce();
+    expect(
+      getModelRecencyRank(getModelRecencyMap(), "claude-acp", favorite),
+    ).not.toBeNull();
+    expect(
+      screen.queryByRole("searchbox", { name: /search models/i }),
+    ).not.toBeInTheDocument();
+    readiness.ready = false;
+  });
+
+  it.each([
+    false,
+    true,
+  ])("restores focus after foreign-only unstar with reduced motion=%s", async (reduced) => {
+    motionPreference.reduced = reduced;
+    seedStar("claude-acp", "opus");
+    __resetStarredModelsCacheForTests();
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        availableModels={models}
+        favoriteModels={[
+          { agentId: "claude-acp", model: { id: "opus", name: "Claude Opus" } },
+        ]}
+        onModelChange={vi.fn()}
+      />,
+    );
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    const star = screen.getByRole("button", {
+      name: "Unstar Claude Opus, Claude Code",
+    });
+    star.focus();
+    expect(star).toHaveFocus();
+    await user.keyboard("{Enter}");
+    const destination = screen.getByRole("button", { name: "Also Preferred" });
+    expect(destination).toHaveFocus();
+    await waitFor(() => expect(star).not.toBeInTheDocument());
+    expect(destination).toHaveFocus();
+    motionPreference.reduced = false;
+  });
+
+  it.each([
+    false,
+    true,
+  ])("keeps focus in the list after its last foreign row is removed, reduced motion=%s", async (reduced) => {
+    motionPreference.reduced = reduced;
+    seedStar("claude-acp", "opus");
+    __resetStarredModelsCacheForTests();
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        availableModels={[]}
+        favoriteModels={[
+          { agentId: "claude-acp", model: { id: "opus", name: "Claude Opus" } },
+        ]}
+        onModelChange={vi.fn()}
+      />,
+    );
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    const star = screen.getByRole("button", {
+      name: "Unstar Claude Opus, Claude Code",
+    });
+    star.focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(star).not.toBeInTheDocument());
+    expect(screen.getByRole("dialog")).toHaveFocus();
+    motionPreference.reduced = false;
   });
 });

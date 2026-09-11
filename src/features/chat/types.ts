@@ -161,7 +161,8 @@ export interface ChatInputAgentModelPicker {
     modelId: string,
     model?: ModelOption,
     agentId?: string,
-  ) => void;
+    // biome-ignore lint/suspicious/noConfusingVoidType: Legacy selection callbacks return void; only false rejects.
+  ) => boolean | void;
   onPickerOpen?: () => void;
   /**
    * "gated" hides the agent column behind a "Switch agent" button, for
