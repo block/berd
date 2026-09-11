@@ -34,10 +34,17 @@ export class BerdctlDeliveryAlreadyAcceptedError extends Error {
 }
 
 export function berdctlCrossSessionSendOptions(
-  options: { senderLabel?: string; deliveryId?: string } = {},
+  options: {
+    senderLabel?: string;
+    deliveryId?: string;
+    eventType?: "notification";
+  } = {},
 ): ChatSendOptions {
   const senderMetadata = options.senderLabel
     ? { berdSenderLabel: options.senderLabel }
+    : {};
+  const eventMetadata = options.eventType
+    ? { berdEventType: options.eventType }
     : {};
   const deliveryMetadata = options.deliveryId
     ? { berdDeliveryId: options.deliveryId }
@@ -46,11 +53,13 @@ export function berdctlCrossSessionSendOptions(
     userMessageMetadata: {
       origin: BERDCTL_CROSS_SESSION_ORIGIN,
       ...senderMetadata,
+      ...eventMetadata,
       ...deliveryMetadata,
     },
     acpGooseMetadata: {
       origin: BERDCTL_CROSS_SESSION_ORIGIN,
       ...senderMetadata,
+      ...eventMetadata,
       ...deliveryMetadata,
     },
   };

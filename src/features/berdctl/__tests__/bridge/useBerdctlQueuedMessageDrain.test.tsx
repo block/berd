@@ -599,6 +599,45 @@ describe("useBerdctlQueuedMessageDrain", () => {
     });
   });
 
+  it("preserves notification metadata without a sender label or delivery id", async () => {
+    const sendOptions = {
+      userMessageMetadata: {
+        origin: "berdctl_cross_session" as const,
+        berdEventType: "notification" as const,
+      },
+      acpGooseMetadata: {
+        origin: "berdctl_cross_session" as const,
+        berdEventType: "notification" as const,
+      },
+    };
+    const chatStore = useChatStore.getState();
+    chatStore.setChatState("session-1", "streaming");
+    chatStore.enqueueTransportReadyMessage("session-1", {
+      persona: { kind: "inherit" },
+      text: "queued delivery",
+      sendOptions,
+    });
+    render(<DrainHarness />);
+
+    act(() => {
+      useChatStore.getState().setChatState("session-1", "idle");
+    });
+
+    await waitFor(() => {
+      expect(
+        mocks.sendPromptToExistingSessionInBackground,
+      ).toHaveBeenCalledWith(
+        "session-1",
+        "queued delivery",
+        expect.any(Function),
+        {
+          returnOnDispatch: true,
+          sendOptions,
+        },
+      );
+    });
+  });
+
   it("dismisses a stale queued delivery already accepted in the transcript", async () => {
     const accepted = createUserMessage("queued delivery");
     accepted.metadata = {

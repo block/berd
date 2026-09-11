@@ -58,7 +58,7 @@ import { Button } from "@/shared/ui/button";
 import { LinkifiedText } from "@/shared/ui/LinkifiedText";
 import { useProfileCapability } from "@/shared/profile/capabilities";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
-import { BerdUpdateDisclosure } from "./BerdUpdateDisclosure";
+import { SessionNotificationDisclosure } from "./SessionNotificationDisclosure";
 import { MessageBubbleActions } from "./MessageBubbleActions";
 import { MessageMetadataChip } from "./MessageMetadataChip";
 import { isResponseFeedbackEligible } from "../response-feedback/responseFeedbackState";
@@ -935,7 +935,10 @@ export const MessageBubble = memo(function MessageBubble({
   const isSteeredMessage = isUser && message.metadata?.delivery === "steer";
   const isBerdctlCrossSessionMessage =
     isUser && message.metadata?.origin === "berdctl_cross_session";
-  const isUserAuthored = isUser && !isBerdctlCrossSessionMessage;
+  const isBerdctlNotification =
+    isBerdctlCrossSessionMessage &&
+    message.metadata?.berdEventType === "notification";
+  const isUserAuthored = isUser && !isBerdctlNotification;
   const berdSenderLabel = isBerdctlCrossSessionMessage
     ? message.metadata?.berdSenderLabel
     : undefined;
@@ -964,7 +967,7 @@ export const MessageBubble = memo(function MessageBubble({
         isUserAuthored ? "ml-auto flex-row-reverse gap-3" : "flex-row gap-3",
       )}
       data-role={
-        isBerdctlCrossSessionMessage
+        isBerdctlNotification
           ? "activity-message"
           : isUser
             ? "user-message"
@@ -1001,7 +1004,7 @@ export const MessageBubble = memo(function MessageBubble({
       ) : null}
       <div
         data-role={
-          isBerdctlCrossSessionMessage
+          isBerdctlNotification
             ? "activity-message-content"
             : isUser
               ? "user-message-content"
@@ -1009,9 +1012,7 @@ export const MessageBubble = memo(function MessageBubble({
         }
         className={cn(
           "group relative min-w-0 flex flex-col gap-1",
-          shouldReserveMessageActionSpace &&
-            !isBerdctlCrossSessionMessage &&
-            "pb-9",
+          shouldReserveMessageActionSpace && !isBerdctlNotification && "pb-9",
           isUserAuthored
             ? "max-w-[var(--chat-user-message-max-width)] items-end"
             : voiceDebugEvent && voiceDebugEvent !== "emissarySpeech"
@@ -1046,8 +1047,8 @@ export const MessageBubble = memo(function MessageBubble({
           </div>
         ) : null}
 
-        <BerdUpdateDisclosure
-          enabled={isBerdctlCrossSessionMessage}
+        <SessionNotificationDisclosure
+          enabled={isBerdctlNotification}
           sender={berdSenderLabel}
         >
           {/* biome-ignore lint/a11y/useKeyWithClickEvents: delegated link handler */}
@@ -1056,7 +1057,7 @@ export const MessageBubble = memo(function MessageBubble({
             data-role="message-bubble-surface"
             className={cn(
               "min-w-0 text-sm leading-relaxed",
-              isBerdctlCrossSessionMessage
+              isBerdctlNotification
                 ? "w-full rounded-md bg-muted/50 px-3 py-2"
                 : isUser
                   ? "rounded-sm bg-message-user-bg px-4 py-2 leading-normal"
@@ -1069,6 +1070,18 @@ export const MessageBubble = memo(function MessageBubble({
             )}
             onClick={handleContentClick}
           >
+            {isBerdctlCrossSessionMessage && !isBerdctlNotification ? (
+              <div
+                data-role="berdctl-cross-session-message-label"
+                className="mb-1 text-xs font-normal leading-4 text-muted-foreground"
+              >
+                {berdSenderLabel
+                  ? t("message.berdctlCrossSessionNamedLabel", {
+                      sender: berdSenderLabel,
+                    })
+                  : t("message.berdctlCrossSessionLabel")}
+              </div>
+            ) : null}
             {isSteeredMessage ? (
               <div className="mb-1 flex flex-col items-start gap-0.5 text-xs font-normal leading-4 text-muted-foreground">
                 <span data-role="steer-message-label" className="leading-4">
@@ -1212,7 +1225,7 @@ export const MessageBubble = memo(function MessageBubble({
               />
             </div>
           ) : null}
-        </BerdUpdateDisclosure>
+        </SessionNotificationDisclosure>
       </div>
     </div>
   );

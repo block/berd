@@ -3469,12 +3469,14 @@ describe("ChatInput", () => {
           acpGooseMetadata: {
             origin: "berdctl_cross_session",
             berdSenderLabel: "berd-monitor",
+            berdEventType: "notification",
             berdDeliveryId: "event-1",
             threadId: "thread-1",
           },
           userMessageMetadata: {
             origin: "berdctl_cross_session",
             berdSenderLabel: "berd-monitor",
+            berdEventType: "notification",
             berdDeliveryId: "event-1",
           },
         },

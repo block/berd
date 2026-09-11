@@ -1079,7 +1079,7 @@ fn deliver_with_candidates(
                 .arg("--timeout-ms")
                 .arg("10000")
                 .arg("session")
-                .arg("send")
+                .arg("notify")
                 .arg("--session-id")
                 .arg(session_id)
                 .arg("--prompt")
@@ -1731,6 +1731,8 @@ mod tests {
         let delivered = fs::read_to_string(capture).unwrap();
         assert_eq!(delivered.matches("before\u{fffd}after").count(), 1);
         assert!(delivered.contains("later output"));
+        assert_eq!(delivered.matches("session\nnotify\n").count(), 2);
+        assert!(!delivered.contains("session\nsend\n"));
         fs::remove_dir_all(paths.root).unwrap();
     }
 
