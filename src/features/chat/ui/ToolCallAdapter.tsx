@@ -1,4 +1,3 @@
-import { ToolDetailSection } from "./ToolDetailSection";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronRight, FolderOpen } from "lucide-react";
@@ -9,6 +8,7 @@ import { CodeBlock } from "@/shared/ui/ai-elements/code-block";
 import {
   Tool,
   ToolContent,
+  ToolDetailSection,
   ToolDetailsViewport,
   ToolHeader,
   ToolInput,

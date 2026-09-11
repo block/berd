@@ -5,11 +5,9 @@ import { Tool, ToolContent, ToolHeader } from "@/shared/ui/ai-elements/tool";
 import { useTranscriptRowStateAdapter } from "@/features/chat/transcript/row-state";
 
 export function SessionNotificationDisclosure({
-  enabled,
   sender,
   children,
 }: {
-  enabled: boolean;
   sender?: string;
   children: ReactNode;
 }) {
@@ -19,8 +17,6 @@ export function SessionNotificationDisclosure({
   const durableOpen = rowState?.custom?.sessionNotificationOpen === true;
   const [open, setOpen] = useState(durableOpen);
   useEffect(() => setOpen(durableOpen), [durableOpen]);
-
-  if (!enabled) return children;
 
   return (
     <Tool

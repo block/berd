@@ -1,4 +1,3 @@
-import type { SendSessionArgs } from "../impl/sendSession";
 import { PreCommitSendRejectedError } from "@/features/chat/lib/preCommitSendRejection";
 import {
   assertQueuedSessionReady,
@@ -20,12 +19,21 @@ interface SendSessionResult {
   send_status: "dispatched" | "steered" | "queued" | "deduplicated";
 }
 
+interface DeliverSessionPromptArgs {
+  session_id: string;
+  prompt: string;
+  startup_name?: string;
+  if_running: "refuse" | "steer" | "queue";
+  from?: string;
+  delivery_id?: string;
+}
+
 function runningTargetMessage(sessionId: string): string {
   return `Refusing to send to session "${sessionId}" while its agent is running; use --if-running steer or --if-running queue, or wait for the turn to finish.`;
 }
 
 export async function deliverSessionPrompt(
-  args: SendSessionArgs,
+  args: DeliverSessionPromptArgs,
   eventType?: "notification",
 ): Promise<SendSessionResult> {
   const [
