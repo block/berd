@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+#[cfg(any(test, debug_assertions))]
 use std::sync::LazyLock;
 
 use serde::{Deserialize, Serialize};
@@ -14,6 +15,7 @@ pub use crate::realtime_pipe::{
 use crate::{estimated_spoken_through_utf8, DeliveryProgress, DeliverySegment};
 
 const PROMPT_DOCUMENT: &str = include_str!("../prompts/expert-spokesperson.md");
+const GPT_LIVE_PROMPT_DOCUMENT: &str = include_str!("../prompts/gpt-live-spokesperson.md");
 const ROLE_PLACEHOLDER: &str = "{{ROLE}}";
 const CLIENT_DELEGATION_MESSAGE: &str = "[Authoritative client delegation] GPT Live deliberately delegated the user's latest request because it needs the Expert. Treat the request as actionable, use the recent ordered voice transcript and durable session context to answer it, and resolve this handoff with --mode say. Do not dismiss it merely because the latest utterance is a short follow-up or conversationally phrased.";
 
@@ -21,7 +23,8 @@ pub const OPENAI_REALTIME_VOICE_IDS: &[&str] = &[
     "alloy", "ash", "ballad", "cedar", "coral", "echo", "marin", "sage", "shimmer", "verse",
 ];
 
-static SPOKESPERSON_INSTRUCTIONS: LazyLock<String> =
+#[cfg(any(test, debug_assertions))]
+static LEGACY_SPOKESPERSON_INSTRUCTIONS: LazyLock<String> =
     LazyLock::new(|| realtime_role_instructions("Spokesperson"));
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
@@ -151,7 +154,7 @@ pub fn spokesperson_session_update(options: &RealtimeSpokespersonSessionOptions)
         "type": "session.start",
         "session": {
             "model": "gpt-live-1",
-            "instructions": SPOKESPERSON_INSTRUCTIONS.as_str(),
+            "instructions": GPT_LIVE_PROMPT_DOCUMENT.trim(),
             "audio": {
                 "format": { "type": "audio/pcm", "rate": 24_000 },
                 "output": {
@@ -210,7 +213,7 @@ fn legacy_spokesperson_session_update(options: &RealtimeSpokespersonSessionOptio
         "type": "realtime",
         "output_modalities": ["audio"],
         "max_output_tokens": max_output_tokens,
-        "instructions": SPOKESPERSON_INSTRUCTIONS.as_str(),
+        "instructions": LEGACY_SPOKESPERSON_INSTRUCTIONS.as_str(),
         "audio": {
             "input": {
                 "format": { "type": "audio/pcm", "rate": 24_000 },
@@ -657,8 +660,9 @@ impl RealtimeProtocolReducer {
             "session.input_transcript.delta" => {
                 self.capture_live_transcript_delta(event, RealtimeTranscriptSpeaker::User)
             }
-            "session.output_transcript.delta" => self
-                .capture_live_transcript_delta(event, RealtimeTranscriptSpeaker::Spokesperson),
+            "session.output_transcript.delta" => {
+                self.capture_live_transcript_delta(event, RealtimeTranscriptSpeaker::Spokesperson)
+            }
             "session.delegation.created" => self.capture_client_delegation(event),
             "session.closed" => Ok(self.finish_all_live_transcripts()),
             "output_audio_buffer.stopped" => self.finish_spokesperson_playback(event, false),
@@ -694,7 +698,11 @@ impl RealtimeProtocolReducer {
             }
         }
         if self.pending_live_transcript(speaker).is_none() {
-            let item_id = format!("live-{}-{}", live_speaker_name(speaker), self.next_live_item_id);
+            let item_id = format!(
+                "live-{}-{}",
+                live_speaker_name(speaker),
+                self.next_live_item_id
+            );
             self.next_live_item_id = self.next_live_item_id.saturating_add(1);
             *self.pending_live_transcript(speaker) = Some(PendingLiveTranscript {
                 item_id: item_id.clone(),
@@ -764,9 +772,24 @@ impl RealtimeProtocolReducer {
     }
 
     fn finish_all_live_transcripts(&mut self) -> Vec<RealtimeProtocolEvent> {
-        [RealtimeTranscriptSpeaker::User, RealtimeTranscriptSpeaker::Spokesperson]
+        let mut pending = [
+            (
+                RealtimeTranscriptSpeaker::User,
+                self.pending_live_input
+                    .as_ref()
+                    .map(|transcript| transcript.last_end_ms),
+            ),
+            (
+                RealtimeTranscriptSpeaker::Spokesperson,
+                self.pending_live_output
+                    .as_ref()
+                    .map(|transcript| transcript.last_end_ms),
+            ),
+        ];
+        pending.sort_by_key(|(_, end_ms)| end_ms.unwrap_or(u64::MAX));
+        pending
             .into_iter()
-            .filter_map(|speaker| self.finish_live_transcript(speaker))
+            .filter_map(|(speaker, _)| self.finish_live_transcript(speaker))
             .collect()
     }
 
@@ -1427,6 +1450,8 @@ pub struct RealtimeExpertSpokespersonSession {
     open_handoffs: HashMap<String, RealtimeOpenHandoff>,
     call_scope: String,
     pending_expert_events: Vec<RealtimeExpertDeliveryEvent>,
+    client_delegation_mode: bool,
+    client_transcript_since_delegation: Vec<RealtimeExpertDeliveryEvent>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1527,6 +1552,8 @@ impl RealtimeExpertSpokespersonSession {
             open_handoffs: HashMap::new(),
             call_scope: call_scope.into(),
             pending_expert_events: Vec::new(),
+            client_delegation_mode: false,
+            client_transcript_since_delegation: Vec::new(),
         }
     }
 
@@ -1534,7 +1561,27 @@ impl RealtimeExpertSpokespersonSession {
         &mut self,
         event: &Value,
     ) -> Result<RealtimeSessionReduction, String> {
-        let response_update = self.responses.handle(event)?;
+        let event_type = string_at(event, "/type");
+        if matches!(
+            event_type,
+            Some(
+                "session.started"
+                    | "session.input_transcript.delta"
+                    | "session.output_transcript.delta"
+                    | "session.delegation.created"
+            )
+        ) {
+            self.client_delegation_mode = true;
+        }
+        let response_update = if self.client_delegation_mode {
+            RealtimeCoordinatorUpdate {
+                events: Vec::new(),
+                completed_handoff_ids: Vec::new(),
+                failed_handoff_ids: Vec::new(),
+            }
+        } else {
+            self.responses.handle(event)?
+        };
         for handoff_id in &response_update.completed_handoff_ids {
             self.open_handoffs.remove(handoff_id);
         }
@@ -1544,7 +1591,7 @@ impl RealtimeExpertSpokespersonSession {
             }
         }
         let protocol_events = self.reducer.handle(event)?;
-        let is_client_delegation = string_at(event, "/type") == Some("session.delegation.created");
+        let is_client_delegation = event_type == Some("session.delegation.created");
         let mut client_events = response_update.events;
         let mut expert_delivery = None;
         let mut accepted_handoffs = Vec::new();
@@ -1577,13 +1624,16 @@ impl RealtimeExpertSpokespersonSession {
                                 .record_spokesperson_turn(text.clone(), *interrupted);
                         }
                     }
-                    self.pending_expert_events.push(transcript_delivery_event(
-                        cursor,
-                        *speaker,
-                        text,
-                        *interrupted,
-                    ));
-                    if *speaker == RealtimeTranscriptSpeaker::Spokesperson {
+                    let expert_event =
+                        transcript_delivery_event(cursor, *speaker, text, *interrupted);
+                    if self.client_delegation_mode {
+                        self.remember_client_transcript(expert_event);
+                    } else {
+                        self.pending_expert_events.push(expert_event);
+                    }
+                    if !self.client_delegation_mode
+                        && *speaker == RealtimeTranscriptSpeaker::Spokesperson
+                    {
                         expert_delivery = self.take_expert_delivery(text, Vec::new());
                     }
                 }
@@ -1597,6 +1647,10 @@ impl RealtimeExpertSpokespersonSession {
                     } else {
                         self.record_handoff(message)?
                     };
+                    if is_client_delegation {
+                        self.pending_expert_events
+                            .append(&mut self.client_transcript_since_delegation);
+                    }
                     self.pending_expert_events.push(expert_event);
                     if !is_client_delegation {
                         let tool_output = accepted_handoff_tool_output(call_id, &handoff_id)?;
@@ -1635,7 +1689,14 @@ impl RealtimeExpertSpokespersonSession {
     }
 
     pub fn flush_expert_events(&mut self, display_text: &str) -> Option<RealtimeExpertDelivery> {
+        if self.client_delegation_mode {
+            return None;
+        }
         self.take_expert_delivery(display_text, Vec::new())
+    }
+
+    fn remember_client_transcript(&mut self, event: RealtimeExpertDeliveryEvent) {
+        self.client_transcript_since_delegation.push(event);
     }
 
     pub fn complete_expert_turn_with_delivery(
@@ -2196,15 +2257,18 @@ mod tests {
         let update = spokesperson_session_update(&RealtimeSpokespersonSessionOptions::default());
         assert_eq!(update["type"], "session.start");
         assert_eq!(update["session"]["model"], "gpt-live-1");
+        let instructions = update["session"]["instructions"].as_str().unwrap();
+        assert!(instructions.contains("Delegation policy:"));
+        assert!(instructions
+            .contains("The answer needs current, external, or user-specific information"));
+        assert!(!instructions.contains("Your send_to_spokesperson tool"));
+        assert!(!instructions.contains("Handoff lifecycle"));
         assert_eq!(update["session"]["audio"]["output"]["voice"], "marin");
         assert_eq!(
             update["session"]["audio"]["format"],
             json!({ "type": "audio/pcm", "rate": 24_000 })
         );
-        assert_eq!(
-            update["session"]["delegation"],
-            json!({ "type": "client" })
-        );
+        assert_eq!(update["session"]["delegation"], json!({ "type": "client" }));
     }
 
     #[test]
@@ -2963,10 +3027,18 @@ mod tests {
         let mut session = RealtimeExpertSpokespersonSession::new(0, "live");
         session
             .handle_provider_event(&json!({
+                "type": "session.output_transcript.delta",
+                "delta": "What should I inspect?",
+                "start_ms": 0,
+                "end_ms": 400,
+            }))
+            .unwrap();
+        session
+            .handle_provider_event(&json!({
                 "type": "session.input_transcript.delta",
                 "delta": "Inspect the repository",
-                "start_ms": 0,
-                "end_ms": 800,
+                "start_ms": 600,
+                "end_ms": 1_200,
             }))
             .unwrap();
         let reduction = session
@@ -2989,9 +3061,79 @@ mod tests {
         );
         let delivery = reduction.expert_delivery.unwrap();
         assert_eq!(delivery.handoff_ids, ["dlg_opaque_123"]);
-        assert_eq!(delivery.events[0].text, "Inspect the repository");
-        assert_eq!(delivery.events[1].handoff_id.as_deref(), Some("dlg_opaque_123"));
-        assert!(delivery.events[1].text.contains("Treat the request as actionable"));
+        assert_eq!(delivery.events[0].text, "What should I inspect?");
+        assert_eq!(delivery.events[1].text, "Inspect the repository");
+        assert_eq!(
+            delivery.events[2].handoff_id.as_deref(),
+            Some("dlg_opaque_123")
+        );
+        assert!(delivery.events[2]
+            .text
+            .contains("Treat the request as actionable"));
+    }
+
+    #[test]
+    fn client_delegation_sends_transcripts_since_the_previous_delegation() {
+        let mut session = RealtimeExpertSpokespersonSession::new(0, "live");
+        session
+            .handle_provider_event(&json!({ "type": "session.started" }))
+            .unwrap();
+
+        for turn in 1_u64..=8 {
+            let start_ms = turn * 3_000;
+            let reduction = session
+                .handle_provider_event(&json!({
+                    "type": "session.input_transcript.delta",
+                    "delta": format!("turn {turn}"),
+                    "start_ms": start_ms,
+                    "end_ms": start_ms + 500,
+                }))
+                .unwrap();
+            assert!(reduction.expert_delivery.is_none());
+            assert!(reduction.accepted_handoffs.is_empty());
+        }
+        assert!(session.flush_expert_events("unused").is_none());
+
+        let reduction = session
+            .handle_provider_event(&json!({
+                "type": "session.delegation.created",
+                "offset_ms": 24_500,
+                "delegation": {
+                    "id": "dlg_tail",
+                    "target": "client",
+                },
+            }))
+            .unwrap();
+        let delivery = reduction.expert_delivery.unwrap();
+        assert_eq!(delivery.handoff_ids, ["dlg_tail"]);
+        assert_eq!(delivery.events.len(), 9);
+        assert_eq!(delivery.events[0].text, "turn 1");
+        assert_eq!(delivery.events[7].text, "turn 8");
+        assert_eq!(delivery.events[8].handoff_id.as_deref(), Some("dlg_tail"));
+
+        session
+            .handle_provider_event(&json!({
+                "type": "session.input_transcript.delta",
+                "delta": "turn 9",
+                "start_ms": 27_000,
+                "end_ms": 27_500,
+            }))
+            .unwrap();
+        let second = session
+            .handle_provider_event(&json!({
+                "type": "session.delegation.created",
+                "offset_ms": 27_500,
+                "delegation": {
+                    "id": "dlg_second",
+                    "target": "client",
+                },
+            }))
+            .unwrap()
+            .expert_delivery
+            .unwrap();
+        assert_eq!(second.events.len(), 2);
+        assert_eq!(second.events[0].text, "turn 9");
+        assert_eq!(second.events[1].handoff_id.as_deref(), Some("dlg_second"));
     }
 
     #[test]
@@ -3171,9 +3313,7 @@ mod tests {
         assert_eq!(request.events.len(), 1);
         assert_eq!(
             request.events[0].pointer("/content"),
-            Some(&json!(
-                "[bridge cursor 1] The first answer"
-            ))
+            Some(&json!("[bridge cursor 1] The first answer"))
         );
         assert_eq!(request.events[0]["type"], "session.commentary.append");
         assert_eq!(request.events[0]["delegation_id"], "handoff-1");
