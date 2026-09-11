@@ -2,10 +2,10 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub enum RealtimePipePeer {
-    #[serde(rename = "master")]
-    Expert,
-    #[serde(rename = "emissary")]
-    Spokesperson,
+    #[serde(rename = "backend")]
+    Backend,
+    #[serde(rename = "gptLive")]
+    GptLive,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -52,8 +52,8 @@ pub enum RealtimePipeRejection {
 pub struct RealtimeMessagePipe {
     next_message_id: u64,
     pending: Vec<RealtimePipeMessage>,
-    expert_cursor: u64,
-    spokesperson_cursor: u64,
+    backend_cursor: u64,
+    gpt_live_cursor: u64,
 }
 
 impl RealtimeMessagePipe {
@@ -61,8 +61,8 @@ impl RealtimeMessagePipe {
         Self {
             next_message_id: initial_cursor.saturating_add(1),
             pending: Vec::new(),
-            expert_cursor: initial_cursor,
-            spokesperson_cursor: initial_cursor,
+            backend_cursor: initial_cursor,
+            gpt_live_cursor: initial_cursor,
         }
     }
 
@@ -118,8 +118,8 @@ impl RealtimeMessagePipe {
 
     pub fn cursor(&self, peer: RealtimePipePeer) -> u64 {
         match peer {
-            RealtimePipePeer::Expert => self.expert_cursor,
-            RealtimePipePeer::Spokesperson => self.spokesperson_cursor,
+            RealtimePipePeer::Backend => self.backend_cursor,
+            RealtimePipePeer::GptLive => self.gpt_live_cursor,
         }
     }
 
@@ -136,16 +136,16 @@ impl RealtimeMessagePipe {
 
     fn cursor_mut(&mut self, peer: RealtimePipePeer) -> &mut u64 {
         match peer {
-            RealtimePipePeer::Expert => &mut self.expert_cursor,
-            RealtimePipePeer::Spokesperson => &mut self.spokesperson_cursor,
+            RealtimePipePeer::Backend => &mut self.backend_cursor,
+            RealtimePipePeer::GptLive => &mut self.gpt_live_cursor,
         }
     }
 }
 
 fn other_pipe_peer(peer: RealtimePipePeer) -> RealtimePipePeer {
     match peer {
-        RealtimePipePeer::Expert => RealtimePipePeer::Spokesperson,
-        RealtimePipePeer::Spokesperson => RealtimePipePeer::Expert,
+        RealtimePipePeer::Backend => RealtimePipePeer::GptLive,
+        RealtimePipePeer::GptLive => RealtimePipePeer::Backend,
     }
 }
 
@@ -156,19 +156,19 @@ mod tests {
     #[test]
     fn requires_the_complete_pending_batch_before_reversing_direction() {
         let mut pipe = RealtimeMessagePipe::new(0);
-        let first = pipe.send(RealtimePipePeer::Spokesperson, 0, "one").unwrap();
+        let first = pipe.send(RealtimePipePeer::GptLive, 0, "one").unwrap();
         let first_id = match first {
             RealtimePipeExchange::Accepted(accepted) => accepted.outbound.id,
             RealtimePipeExchange::Rejected(_) => panic!("first message was rejected"),
         };
-        let second = pipe.send(RealtimePipePeer::Spokesperson, 0, "two").unwrap();
+        let second = pipe.send(RealtimePipePeer::GptLive, 0, "two").unwrap();
         let second_id = match second {
             RealtimePipeExchange::Accepted(accepted) => accepted.outbound.id,
             RealtimePipeExchange::Rejected(_) => panic!("second message was rejected"),
         };
 
         assert!(matches!(
-            pipe.send(RealtimePipePeer::Expert, first_id, "stale")
+            pipe.send(RealtimePipePeer::Backend, first_id, "stale")
                 .unwrap(),
             RealtimePipeExchange::Rejected(RealtimePipeRejected {
                 reason: RealtimePipeRejection::PipeBusy,
@@ -176,7 +176,7 @@ mod tests {
             })
         ));
         assert!(matches!(
-            pipe.send(RealtimePipePeer::Expert, second_id, "caught up")
+            pipe.send(RealtimePipePeer::Backend, second_id, "caught up")
                 .unwrap(),
             RealtimePipeExchange::Accepted(_)
         ));

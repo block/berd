@@ -2,10 +2,10 @@ use std::collections::VecDeque;
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
-use crate::expert_spokesperson::SemanticTurn;
+use crate::gpt_live_bridge::SemanticTurn;
 use crate::input::VoiceInputFrame;
-use crate::openai_spokesperson::{
-    OpenAiSpokespersonConfig, OpenAiSpokespersonRuntime, SpokespersonCommand, SpokespersonEvent,
+use crate::gpt_live_runtime::{
+    OpenAiGptLiveConfig, OpenAiGptLiveRuntime, GptLiveCommand, GptLiveEvent,
 };
 use crate::TtsSettings;
 
@@ -29,8 +29,8 @@ pub struct VoiceUpdateTransaction {
     pub base_revision: u64,
     pub settings: TtsSettings,
     pub semantic_revision: u64,
-    runtime: Option<OpenAiSpokespersonRuntime>,
-    events: Receiver<SpokespersonEvent>,
+    runtime: Option<OpenAiGptLiveRuntime>,
+    events: Receiver<GptLiveEvent>,
     phase: VoiceUpdatePhase,
     held_input: VecDeque<Box<VoiceInputFrame>>,
     ready_deadline: Instant,
@@ -44,7 +44,7 @@ pub struct VoiceUpdateRequest {
     pub semantic_revision: u64,
 }
 
-/// Single-flight queue shared by every Expert-Spokesperson host. The queued
+/// Single-flight queue shared by every Backend-GptLive host. The queued
 /// request and the replacement transaction are deliberately separate: hosts
 /// may accept a request while a turn is active, but only one request may be
 /// queued or building at a time.
@@ -91,7 +91,7 @@ pub fn validate_voice_update_settings(
     base_revision: u64,
     settings: &TtsSettings,
     current_revision: u64,
-    runtime_config: &OpenAiSpokespersonConfig,
+    runtime_config: &OpenAiGptLiveConfig,
 ) -> Result<(), String> {
     if base_revision != current_revision {
         return Err(format!(
@@ -100,24 +100,24 @@ pub fn validate_voice_update_settings(
     }
     match settings {
         TtsSettings::OpenAi { model, .. } if model != runtime_config.model() => {
-            Err("Spokesperson model cannot change during a session".into())
+            Err("GptLive model cannot change during a session".into())
         }
         TtsSettings::OpenAi { voice, .. } if voice.trim().is_empty() => {
-            Err("Spokesperson voice must not be empty".into())
+            Err("GptLive voice must not be empty".into())
         }
         TtsSettings::OpenAi { rate, .. } if !rate.is_finite() || !(0.25..=1.5).contains(rate) => {
-            Err("Expert-Spokesperson rate must be between 0.25 and 1.5".into())
+            Err("Backend-GptLive rate must be between 0.25 and 1.5".into())
         }
         TtsSettings::OpenAi { .. } => Ok(()),
-        _ => Err("Expert-Spokesperson requires OpenAI voice settings".into()),
+        _ => Err("Backend-GptLive requires OpenAI voice settings".into()),
     }
 }
 
 pub struct ActivatedVoiceUpdate {
     pub id: u64,
     pub settings: TtsSettings,
-    pub runtime: OpenAiSpokespersonRuntime,
-    pub events: Receiver<SpokespersonEvent>,
+    pub runtime: OpenAiGptLiveRuntime,
+    pub events: Receiver<GptLiveEvent>,
     pub held_input: VecDeque<Box<VoiceInputFrame>>,
     pub purpose: VoiceUpdatePurpose,
 }
@@ -142,7 +142,7 @@ impl VoiceUpdateTransaction {
         request: VoiceUpdateRequest,
         current_revision: u64,
         quiescent: bool,
-        runtime_config: &OpenAiSpokespersonConfig,
+        runtime_config: &OpenAiGptLiveConfig,
         semantic_transcript: Vec<SemanticTurn>,
     ) -> Result<Self, String> {
         Self::start_with_purpose(
@@ -159,7 +159,7 @@ impl VoiceUpdateTransaction {
         request: VoiceUpdateRequest,
         current_revision: u64,
         quiescent: bool,
-        runtime_config: &OpenAiSpokespersonConfig,
+        runtime_config: &OpenAiGptLiveConfig,
         semantic_transcript: Vec<SemanticTurn>,
         purpose: VoiceUpdatePurpose,
     ) -> Result<Self, String> {
@@ -170,16 +170,16 @@ impl VoiceUpdateTransaction {
             runtime_config,
         )?;
         if !quiescent {
-            return Err("Spokesperson voice settings can only change between turns".into());
+            return Err("GptLive voice settings can only change between turns".into());
         }
         let (voice, speed) = match &request.settings {
             TtsSettings::OpenAi { voice, rate, .. } => (voice.clone(), *rate),
-            _ => unreachable!("validated Expert-Spokesperson settings are OpenAI"),
+            _ => unreachable!("validated Backend-GptLive settings are OpenAI"),
         };
         let mut candidate_config = runtime_config.clone();
         candidate_config.set_voice_and_speed(voice, speed);
         candidate_config.semantic_transcript = semantic_transcript;
-        let (runtime, events) = OpenAiSpokespersonRuntime::spawn_observed(candidate_config)?;
+        let (runtime, events) = OpenAiGptLiveRuntime::spawn(candidate_config)?;
         Ok(Self {
             id: request.id,
             base_revision: request.base_revision,
@@ -197,16 +197,16 @@ impl VoiceUpdateTransaction {
     pub fn next_action(&self, now: Instant, safe: bool) -> VoiceUpdateAction {
         if !safe {
             return VoiceUpdateAction::Reject(
-                "Spokesperson conversation changed during voice replacement".into(),
+                "GptLive conversation changed during voice replacement".into(),
             );
         }
         if self.phase == VoiceUpdatePhase::Building && now >= self.ready_deadline {
             return VoiceUpdateAction::Reject(
-                "replacement Spokesperson session timed out before readiness".into(),
+                "replacement GptLive session timed out before readiness".into(),
             );
         }
         match self.try_recv_control_event() {
-            Ok(SpokespersonEvent::Ready) if self.phase == VoiceUpdatePhase::Building => {
+            Ok(GptLiveEvent::Ready) if self.phase == VoiceUpdatePhase::Building => {
                 match self.try_recv_control_event() {
                     Err(TryRecvError::Empty) => {
                         if matches!(self.purpose, VoiceUpdatePurpose::SessionRecovery { .. }) {
@@ -215,38 +215,38 @@ impl VoiceUpdateTransaction {
                             VoiceUpdateAction::BeginInputBarrier
                         }
                     }
-                    Ok(SpokespersonEvent::Failed(message)) => VoiceUpdateAction::Reject(message),
-                    Ok(SpokespersonEvent::SessionLost(message)) => {
+                    Ok(GptLiveEvent::Failed(message)) => VoiceUpdateAction::Reject(message),
+                    Ok(GptLiveEvent::SessionLost(message)) => {
                         VoiceUpdateAction::Reject(message)
                     }
-                    Ok(SpokespersonEvent::Closed) | Err(TryRecvError::Disconnected) => {
+                    Ok(GptLiveEvent::Closed) | Err(TryRecvError::Disconnected) => {
                         VoiceUpdateAction::Reject(
-                            "replacement Spokesperson session closed before activation".into(),
+                            "replacement GptLive session closed before activation".into(),
                         )
                     }
                     Ok(_) => VoiceUpdateAction::Reject(
-                        "replacement Spokesperson emitted live input before activation".into(),
+                        "replacement GptLive emitted live input before activation".into(),
                     ),
                 }
             }
-            Ok(SpokespersonEvent::Failed(message)) => VoiceUpdateAction::Reject(message),
-            Ok(SpokespersonEvent::SessionLost(message)) => VoiceUpdateAction::Reject(message),
-            Ok(SpokespersonEvent::Closed) | Err(TryRecvError::Disconnected) => {
+            Ok(GptLiveEvent::Failed(message)) => VoiceUpdateAction::Reject(message),
+            Ok(GptLiveEvent::SessionLost(message)) => VoiceUpdateAction::Reject(message),
+            Ok(GptLiveEvent::Closed) | Err(TryRecvError::Disconnected) => {
                 VoiceUpdateAction::Reject(
-                    "replacement Spokesperson session closed before activation".into(),
+                    "replacement GptLive session closed before activation".into(),
                 )
             }
             Ok(_) => VoiceUpdateAction::Reject(
-                "replacement Spokesperson emitted live input before activation".into(),
+                "replacement GptLive emitted live input before activation".into(),
             ),
             Err(TryRecvError::Empty) => VoiceUpdateAction::None,
         }
     }
 
-    fn try_recv_control_event(&self) -> Result<SpokespersonEvent, TryRecvError> {
+    fn try_recv_control_event(&self) -> Result<GptLiveEvent, TryRecvError> {
         loop {
             match self.events.try_recv() {
-                Ok(SpokespersonEvent::Provider(_)) => continue,
+                Ok(GptLiveEvent::Provider(_)) => continue,
                 event => return event,
             }
         }
@@ -264,17 +264,17 @@ impl VoiceUpdateTransaction {
         match result {
             Ok(()) if safe => VoiceBarrierAction::Activate,
             Ok(()) => VoiceBarrierAction::Reject(
-                "Spokesperson conversation changed during voice replacement".into(),
+                "GptLive conversation changed during voice replacement".into(),
             ),
             Err(message) => VoiceBarrierAction::Reject(message),
         }
     }
 
-    pub fn begin_input_barrier(&mut self, old: &OpenAiSpokespersonRuntime) -> Result<(), String> {
+    pub fn begin_input_barrier(&mut self, old: &OpenAiGptLiveRuntime) -> Result<(), String> {
         if self.phase != VoiceUpdatePhase::Building {
-            return Err("replacement Spokesperson input barrier began twice".into());
+            return Err("replacement GptLive input barrier began twice".into());
         }
-        old.send(SpokespersonCommand::BeginInputCutover {
+        old.send(GptLiveCommand::BeginInputCutover {
             request_id: self.id,
         })?;
         self.phase = VoiceUpdatePhase::InputBarrier;
@@ -315,12 +315,12 @@ impl VoiceUpdateTransaction {
         }
     }
 
-    pub fn abort(mut self, old: &OpenAiSpokespersonRuntime) -> Result<u64, String> {
+    pub fn abort(mut self, old: &OpenAiGptLiveRuntime) -> Result<u64, String> {
         if self.phase == VoiceUpdatePhase::InputBarrier {
             old.abort_input_cutover()?;
         }
         for frame in self.held_input.drain(..) {
-            old.send(SpokespersonCommand::InputPcm48Khz(
+            old.send(GptLiveCommand::InputPcm48Khz(
                 frame.as_samples().to_vec(),
             ))?;
         }
@@ -352,17 +352,15 @@ impl VoiceUpdateTransaction {
 #[cfg(test)]
 mod tests {
     use super::{validate_voice_update_settings, VoiceUpdateQueue};
-    use crate::openai_realtime_protocol::RealtimeSpokespersonSessionOptions;
-    use crate::openai_spokesperson::OpenAiSpokespersonConfig;
+    use crate::gpt_live_protocol::RealtimeGptLiveSessionOptions;
+    use crate::gpt_live_runtime::OpenAiGptLiveConfig;
     use crate::TtsSettings;
 
-    fn config() -> OpenAiSpokespersonConfig {
-        OpenAiSpokespersonConfig::new(
+    fn config() -> OpenAiGptLiveConfig {
+        OpenAiGptLiveConfig::new(
             "test-key".into(),
-            RealtimeSpokespersonSessionOptions {
-                model: Some("gpt-realtime-2.1".into()),
+            RealtimeGptLiveSessionOptions {
                 voice: Some("marin".into()),
-                speed: Some(1.0),
                 ..Default::default()
             },
             Vec::new(),

@@ -317,7 +317,7 @@ describe("steerPromptInSession voice no-op", () => {
     ).toMatchObject({ created: 100 });
   });
 
-  it("keeps the transcript and suppresses the known empty master response", async () => {
+  it("keeps the transcript and suppresses the known empty backend response", async () => {
     mockAcpSteerMessage.mockRejectedValue(
       new Error(VOICE_CONVERSATION_EMPTY_RESPONSE),
     );

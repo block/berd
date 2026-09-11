@@ -624,7 +624,7 @@ export function useMessageQueue(
           personaName,
           attachments,
           sendOptions,
-          // Transport-only messages (including Emissary → Master
+          // Transport-only messages (including GPT Live → backend
           // coordination) may briefly use the reliable queue at a run
           // boundary, but they must never leak into the user's composer.
           showInComposer:

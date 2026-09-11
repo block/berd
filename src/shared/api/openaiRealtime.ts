@@ -17,33 +17,17 @@ export interface OpenAiRealtimeRuntimeEvent {
   event: Record<string, unknown>;
 }
 
-export interface OpenAiRealtimeSpokespersonSessionOptions {
-  model?: string;
-  transcriptionModel?: string;
-  transcriptionLanguage?: string;
-  transcriptionPrompt?: string;
+export interface OpenAiRealtimeGptLiveSessionOptions {
   voice?: string;
-  speed?: number;
-  turnDetection?: "server_vad" | "semantic_vad";
-  eagerness?: "low" | "medium" | "high" | "auto";
-  interruptResponse?: boolean;
-  createResponse?: boolean;
-  vadThreshold?: number;
-  prefixPaddingMs?: number;
-  silenceDurationMs?: number;
-  idleTimeoutMs?: number | null;
-  noiseReduction?: "off" | "near_field" | "far_field";
-  reasoningEffort?: "default" | "none" | "low" | "medium" | "high";
-  maxOutputTokens?: number | null;
 }
 
-export function startOpenAiRealtimeSpokespersonRuntime(
+export function startOpenAiRealtimeGptLiveRuntime(
   sessionId: string,
   initialCursor: number,
   callId: string,
-  options: OpenAiRealtimeSpokespersonSessionOptions,
+  options: OpenAiRealtimeGptLiveSessionOptions,
 ): Promise<void> {
-  return invoke("start_openai_realtime_spokesperson_runtime", {
+  return invoke("start_openai_realtime_gpt_live_runtime", {
     sessionId,
     initialCursor,
     callId,
@@ -51,26 +35,26 @@ export function startOpenAiRealtimeSpokespersonRuntime(
   });
 }
 
-export function sendOpenAiRealtimeSpokespersonRuntimeEvent(
+export function sendOpenAiRealtimeGptLiveRuntimeEvent(
   sessionId: string,
   event: Record<string, unknown>,
 ): Promise<void> {
-  return invoke("send_openai_realtime_spokesperson_runtime_event", {
+  return invoke("send_openai_realtime_gpt_live_runtime_event", {
     sessionId,
     event,
   });
 }
 
-export function stopOpenAiRealtimeSpokespersonRuntime(
+export function stopOpenAiRealtimeGptLiveRuntime(
   sessionId: string,
 ): Promise<void> {
-  return invoke("stop_openai_realtime_spokesperson_runtime", { sessionId });
+  return invoke("stop_openai_realtime_gpt_live_runtime", { sessionId });
 }
 
-export function releaseOpenAiRealtimeSpokespersonRuntime(
+export function releaseOpenAiRealtimeGptLiveRuntime(
   sessionId: string,
 ): Promise<void> {
-  return invoke("release_openai_realtime_spokesperson_runtime", { sessionId });
+  return invoke("release_openai_realtime_gpt_live_runtime", { sessionId });
 }
 
 export interface OpenAiRealtimeTtsConfigurationSnapshot {
@@ -81,13 +65,13 @@ export interface OpenAiRealtimeTtsConfigurationSnapshot {
   rate: number;
 }
 
-export function updateOpenAiRealtimeSpokespersonSettings(
+export function updateOpenAiRealtimeGptLiveSettings(
   sessionId: string,
   expectedRevision: number,
   voice: string,
   speed: number,
 ): Promise<OpenAiRealtimeTtsConfigurationSnapshot> {
-  return invoke("update_openai_realtime_spokesperson_settings", {
+  return invoke("update_openai_realtime_gpt_live_settings", {
     sessionId,
     expectedRevision,
     voice,
@@ -95,7 +79,7 @@ export function updateOpenAiRealtimeSpokespersonSettings(
   });
 }
 
-export function listenToOpenAiRealtimeSpokespersonRuntime(
+export function listenToOpenAiRealtimeGptLiveRuntime(
   listener: (event: OpenAiRealtimeRuntimeEvent) => void,
 ): Promise<UnlistenFn> {
   return listen<OpenAiRealtimeRuntimeEvent>(
@@ -104,12 +88,12 @@ export function listenToOpenAiRealtimeSpokespersonRuntime(
   );
 }
 
-export function createOpenAiRealtimeExpertInstructions(
+export function createOpenAiRealtimeBackendInstructions(
   sessionId: string,
   initialCursor: number,
   callId: string,
 ): Promise<string> {
-  return invoke("create_openai_realtime_expert_instructions", {
+  return invoke("create_openai_realtime_backend_instructions", {
     sessionId,
     initialCursor,
     callId,
@@ -118,8 +102,8 @@ export function createOpenAiRealtimeExpertInstructions(
 
 export type OpenAiRealtimeTranscriptSeedTurn =
   | { role: "user"; text: string }
-  | { role: "spokesperson"; text: string; interrupted: boolean }
-  | { role: "expert"; text: string };
+  | { role: "gpt_live"; text: string; interrupted: boolean }
+  | { role: "backend"; text: string };
 
 export function createOpenAiRealtimeTranscriptSeed(
   turns: OpenAiRealtimeTranscriptSeedTurn[],
@@ -137,23 +121,29 @@ export type OpenAiRealtimeProtocolEvent =
   | {
       type: "transcript.started";
       itemId: string;
-      speaker: "user" | "spokesperson";
+      speaker: "user" | "gpt_live";
     }
   | {
       type: "transcript.updated";
       itemId: string;
-      speaker: "user" | "spokesperson";
+      speaker: "user" | "gpt_live";
       text: string;
     }
   | {
       type: "transcript.finalized";
       id: number;
       itemId: string;
-      speaker: "user" | "spokesperson";
+      speaker: "user" | "gpt_live";
       text: string;
       interrupted: boolean;
       evidence: "provider_final" | "provider_delta" | "host_played_frames";
-      expertMessage: string;
+      backendMessage: string;
+    }
+  | {
+      type: "transcript.settled";
+      itemId: string;
+      speaker: "user" | "gpt_live";
+      text: string;
     }
   | {
       type: "handoff";
@@ -167,157 +157,60 @@ export type OpenAiRealtimeProtocolEvent =
       toolName: string;
       error: string;
     }
-  | { type: "spokesperson.playback_interrupted"; responseId: string };
+  | { type: "gpt_live.playback_interrupted"; responseId: string };
 
 export interface OpenAiRealtimeReduction {
   protocolEvents: OpenAiRealtimeProtocolEvent[];
   clientEvents: Record<string, unknown>[];
-  completedHandoffIds: string[];
-  failedHandoffIds: string[];
-  expertDelivery?: OpenAiRealtimeExpertDelivery;
+  backendDelivery?: OpenAiRealtimeBackendDelivery;
   acceptedHandoffs: Array<{ handoffId: string; message: string }>;
 }
 
-export interface OpenAiRealtimeExpertDelivery {
-  events: OpenAiRealtimeExpertDeliveryEvent[];
+export interface OpenAiRealtimeBackendDelivery {
+  events: OpenAiRealtimeBackendDeliveryEvent[];
   displayText: string;
   handoffIds: string[];
 }
 
-export interface OpenAiRealtimeExpertDeliveryEvent {
+export interface OpenAiRealtimeBackendDeliveryEvent {
   cursor: number;
-  role:
-    | "user"
-    | "spokesperson"
-    | "spokesperson_interrupted"
-    | "handoff"
-    | "lifecycle";
+  role: "user" | "gpt_live" | "gpt_live_interrupted" | "handoff";
   text: string;
   handoffId?: string;
 }
 
-export interface OpenAiRealtimeCoordinatorResult {
-  status: "sent" | "interrupting" | "queued";
-  events: Record<string, unknown>[];
-}
-
-export type OpenAiRealtimePipeMessage = {
-  id: number;
-  sender: "master" | "emissary";
-  recipient: "master" | "emissary";
-  senderCursor: number;
-  message: string;
-};
-
-export type OpenAiRealtimePipeExchange =
+export type GptLiveAppendResult =
   | {
       accepted: true;
-      outbound: OpenAiRealtimePipeMessage;
       cursor: number;
     }
   | {
       accepted: false;
-      reason: "pipe_busy" | "stale_cursor";
+      reason: "pipe_busy" | "stale_cursor" | "unknown_delegation";
       cursor: number;
     };
 
-export type OpenAiRealtimeExpertMessageDelivery =
-  | {
-      accepted: true;
-      cursor: number;
-      deliveryStatus: "sent" | "interrupting" | "queued";
-      outbound: OpenAiRealtimePipeMessage;
-    }
-  | Exclude<OpenAiRealtimePipeExchange, { accepted: true }>
-  | {
-      accepted: false;
-      reason: "unknown_handoff" | "context_cannot_resolve";
-      cursor: number;
-      handoffIds: string[];
-    };
-
-export function deliverOpenAiRealtimeExpertMessage(
+export function appendOpenAiRealtimeBackendResult(
   sessionId: string,
   cursor: number,
   message: string,
-  mode: "context" | "say",
-  resolvedHandoffIds: string[],
-): Promise<OpenAiRealtimeExpertMessageDelivery> {
-  return invoke("deliver_openai_realtime_expert_message", {
+  channel: "commentary" | "thinking",
+  delegationId?: string,
+): Promise<GptLiveAppendResult> {
+  return invoke("append_openai_realtime_backend_result", {
     sessionId,
     cursor,
     message,
-    mode,
-    resolvedHandoffIds,
+    channel,
+    delegationId,
   });
 }
 
-export type OpenAiRealtimeHandoffDismissal =
-  | {
-      accepted: true;
-      cursor: number;
-      dismissedHandoffIds: string[];
-      deliveryStatus: "sent" | "interrupting" | "queued";
-    }
-  | Exclude<OpenAiRealtimePipeExchange, { accepted: true }>
-  | {
-      accepted: false;
-      reason: "unknown_handoff" | "context_cannot_resolve";
-      cursor: number;
-      handoffIds: string[];
-    };
-
-export function dismissOpenAiRealtimeHandoffsWithContext(
-  sessionId: string,
-  cursor: number,
-  handoffIds: string[],
-  reason: string,
-): Promise<OpenAiRealtimeHandoffDismissal> {
-  return invoke("dismiss_openai_realtime_handoffs_with_context", {
-    sessionId,
-    cursor,
-    handoffIds,
-    reason,
-  });
-}
-
-export type OpenAiRealtimeHandoffReminder =
-  | { status: "none" }
-  | {
-      status: "reminder";
-      handoffIds: string[];
-      attempt: number;
-      requests: string;
-      message: string;
-    }
-  | { status: "exhausted"; handoffIds: string[]; message: string };
-
-export function completeOpenAiRealtimeExpertTurn(
-  sessionId: string,
-  retryingHandoffIds: string[],
-  maxAttempts: number,
-): Promise<{
-  reminder: OpenAiRealtimeHandoffReminder;
-  expertDelivery?: OpenAiRealtimeExpertDelivery;
-}> {
-  return invoke("complete_openai_realtime_expert_turn", {
-    sessionId,
-    retryingHandoffIds,
-    maxAttempts,
-  });
-}
-
-export function flushOpenAiRealtimeExpertEvents(
-  sessionId: string,
-): Promise<OpenAiRealtimeExpertDelivery | null> {
-  return invoke("flush_openai_realtime_expert_events", { sessionId });
-}
-
-export function reduceOpenAiRealtimeSpokespersonEvent(
+export function reduceOpenAiRealtimeGptLiveEvent(
   sessionId: string,
   event: unknown,
 ): Promise<OpenAiRealtimeReduction> {
-  return invoke("reduce_openai_realtime_spokesperson_event", {
+  return invoke("reduce_openai_realtime_gpt_live_event", {
     sessionId,
     event,
   });
@@ -326,7 +219,7 @@ export function reduceOpenAiRealtimeSpokespersonEvent(
 export function requestOpenAiRealtimeTypedUserMessage(
   sessionId: string,
   text: string,
-): Promise<OpenAiRealtimeCoordinatorResult> {
+): Promise<Record<string, unknown>[]> {
   return invoke("request_openai_realtime_typed_user_message", {
     sessionId,
     text,

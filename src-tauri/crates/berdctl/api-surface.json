@@ -1,9 +1,9 @@
 {
   "$comment": "GENERATED FILE — do not hand-edit; run `pnpm generate:berdctl-contract`. Client-neutral wire surface of the Berd desktop app's control API: POST /v1/call {\"command\": \"<group>\", \"args\": {\"action\": \"<action>\", ...fields}} against the loopback endpoint in the berdctl discovery file. protocolVersion mirrors PROTOCOL_VERSION in both discovery.rs copies (berdctl and plugin crate tests pin them equal). Per action: description, fields (flat wire model: name, required, kind, values, description, bounds), and schema (JSON Schema 2020-12 of the args object, minus the action discriminator). Derived from the authoritative zod schemas in the colocated command modules (src/features/berdctl/commands/impl/*.ts); the renderer registry's strict zod parse — not this file — is the trust boundary. vitest asserts freshness (src/features/berdctl/__tests__/apiSurface.test.ts).",
-  "protocolVersion": 4,
+  "protocolVersion": 5,
   "groups": {
     "sessions": {
-      "description": "Manage the user's chat sessions: create (fire-and-forget, on any installed agent harness), send, open, list, get, rename, move, move to group, clear project, send to a live voice Spokesperson, dismiss voice handoffs, fork, archive.",
+      "description": "Manage the user's chat sessions: create (fire-and-forget, on any installed agent harness), send, open, list, get, rename, move, move to group, clear project, append to GPT Live, fork, archive.",
       "actions": {
         "create": {
           "description": "Create a new chat session on any installed agent harness and send the prompt in it. Fire-and-forget: returns the session id immediately and the session runs in the background without changing what the user sees; the user can open it themselves. Use --from to give the delegating session or tool a concise visible label on the initial message. Only check on it later (action \"get\") if the user asks.",
@@ -427,44 +427,46 @@
             "additionalProperties": false
           }
         },
-        "send_to_spokesperson": {
-          "description": "Inject a private coordination message into the OpenAI Realtime voice Spokesperson owned by an existing Berd session. The Spokesperson receives the message either as silent context for future turns or as a request to speak now. The command fails when the target session has no live Realtime voice conversation.",
+        "append_to_gpt_live": {
+          "description": "Append a backend result to an active GPT Live conversation. Commentary is spoken to the user; thinking updates GPT Live silently. Preserve the opaque delegation id when answering a delegation.",
           "fields": [
             {
               "name": "session_id",
               "required": true,
               "kind": "string",
-              "description": "Id of the session that owns the live Realtime Spokesperson.",
+              "description": "Session with an active GPT Live call.",
               "min": 1
             },
             {
               "name": "message",
               "required": true,
               "kind": "string",
-              "description": "Private coordination message to inject into the Spokesperson.",
+              "description": "Result or context to append to GPT Live.",
               "min": 1,
-              "max": 20000
+              "max": 1500
             },
             {
               "name": "cursor",
               "required": true,
               "kind": "number",
-              "description": "Newest cursor from any Expert-bound voice transcript, handoff, reminder, or bridge result.",
+              "description": "Newest cursor supplied with the delegation.",
               "min": 0,
               "max": 4294967295
             },
             {
-              "name": "mode",
+              "name": "channel",
               "required": false,
               "kind": "string",
-              "description": "Delivery mode: context updates future turns silently; say asks the Spokesperson to speak now.",
-              "values": ["context", "say"]
+              "description": "Commentary is spoken; thinking is silent context.",
+              "values": ["commentary", "thinking"]
             },
             {
-              "name": "resolves",
+              "name": "delegation_id",
               "required": false,
-              "kind": "string_array",
-              "description": "Open handoff id resolved by this say message; repeat for multiple handoffs."
+              "kind": "string",
+              "description": "Opaque delegation id supplied by GPT Live.",
+              "min": 1,
+              "max": 200
             }
           ],
           "schema": {
@@ -474,109 +476,34 @@
               "session_id": {
                 "type": "string",
                 "minLength": 1,
-                "description": "Id of the session that owns the live Realtime Spokesperson."
+                "description": "Session with an active GPT Live call."
               },
               "message": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 20000,
-                "description": "Private coordination message to inject into the Spokesperson."
+                "maxLength": 1500,
+                "description": "Result or context to append to GPT Live."
               },
               "cursor": {
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 4294967295,
-                "description": "Newest cursor from any Expert-bound voice transcript, handoff, reminder, or bridge result."
+                "description": "Newest cursor supplied with the delegation."
               },
-              "mode": {
-                "default": "say",
-                "description": "Delivery mode: context updates future turns silently; say asks the Spokesperson to speak now.",
+              "channel": {
+                "default": "commentary",
+                "description": "Commentary is spoken; thinking is silent context.",
                 "type": "string",
-                "enum": ["context", "say"]
+                "enum": ["commentary", "thinking"]
               },
-              "resolves": {
-                "default": [],
-                "description": "Open handoff id resolved by this say message; repeat for multiple handoffs.",
-                "maxItems": 100,
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 100
-                }
+              "delegation_id": {
+                "description": "Opaque delegation id supplied by GPT Live.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
               }
             },
             "required": ["session_id", "message", "cursor"],
-            "additionalProperties": false
-          }
-        },
-        "dismiss_handoffs": {
-          "description": "Explicitly close one or more open Realtime Spokesperson handoffs and deliver the reason as silent context without waking the Spokesperson. Use this only when a spoken response is obsolete, superseded, or already handled. The command and its reason remain visible in the Expert's normal Berd activity.",
-          "fields": [
-            {
-              "name": "session_id",
-              "required": true,
-              "kind": "string",
-              "description": "Id of the session that owns the live Realtime Spokesperson.",
-              "min": 1
-            },
-            {
-              "name": "cursor",
-              "required": true,
-              "kind": "number",
-              "description": "Newest cursor from any Expert-bound voice transcript, handoff, reminder, or bridge result.",
-              "min": 0,
-              "max": 4294967295
-            },
-            {
-              "name": "handoff_id",
-              "required": true,
-              "kind": "string_array",
-              "description": "Open handoff id to dismiss; repeat for multiple handoffs."
-            },
-            {
-              "name": "reason",
-              "required": true,
-              "kind": "string",
-              "description": "Why no spoken response is needed for these handoffs.",
-              "min": 1,
-              "max": 2000
-            }
-          ],
-          "schema": {
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "type": "object",
-            "properties": {
-              "session_id": {
-                "type": "string",
-                "minLength": 1,
-                "description": "Id of the session that owns the live Realtime Spokesperson."
-              },
-              "cursor": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 4294967295,
-                "description": "Newest cursor from any Expert-bound voice transcript, handoff, reminder, or bridge result."
-              },
-              "handoff_id": {
-                "minItems": 1,
-                "maxItems": 100,
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 100
-                },
-                "description": "Open handoff id to dismiss; repeat for multiple handoffs."
-              },
-              "reason": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 2000,
-                "description": "Why no spoken response is needed for these handoffs."
-              }
-            },
-            "required": ["session_id", "cursor", "handoff_id", "reason"],
             "additionalProperties": false
           }
         },

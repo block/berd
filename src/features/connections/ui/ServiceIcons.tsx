@@ -302,7 +302,7 @@ export const AsanaIcon = (props: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
-export const QueryExpertIcon = (props: SVGProps<SVGSVGElement>) => (
+export const QueryBackendIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg
     viewBox="0 0 25 20"
     fill="none"

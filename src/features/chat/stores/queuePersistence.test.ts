@@ -119,9 +119,9 @@ describe("queuePersistence", () => {
         s1: [
           {
             kind: "transport-ready",
-            recordId: "emissary-coordination",
+            recordId: "gptLive-coordination",
             payload: {
-              text: "[Handoff handoff-3 from spokesperson; cursor 3] Check this",
+              text: "[Handoff handoff-3 from gpt_live; cursor 3] Check this",
               showInComposer: false,
               sendOptions: {
                 userMessageMetadata: {

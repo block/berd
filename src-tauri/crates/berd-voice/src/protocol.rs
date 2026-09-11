@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     input::{InputDuringTtsPolicy, InputDuringTtsSnapshot},
-    openai_realtime_protocol::RealtimeExpertDeliveryEvent,
+    gpt_live_protocol::RealtimeBackendDeliveryEvent,
     TtsConfigurationSnapshot, TtsSettings,
 };
 
@@ -86,18 +86,6 @@ pub enum SessionRequest {
         id: u64,
         after: u64,
     },
-    DismissHandoffs {
-        id: u64,
-        cursor: u64,
-        handoff_ids: Vec<String>,
-        reason: String,
-    },
-    CompleteExpertTurn {
-        id: u64,
-        #[serde(default)]
-        retrying_handoff_ids: Vec<String>,
-        max_attempts: u8,
-    },
     Cancel {
         id: u64,
     },
@@ -120,7 +108,7 @@ pub struct PendingUtterance {
 #[serde(rename_all = "snake_case")]
 pub enum UtteranceOrigin {
     User,
-    Spokesperson,
+    GptLive,
     Handoff,
 }
 
@@ -168,22 +156,6 @@ pub enum InputDuringTtsOutcome {
     Rejected,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum DismissHandoffsOutcome {
-    Applied,
-    Rejected,
-}
-
-#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ExpertTurnOutcome {
-    Complete,
-    Reminder,
-    Exhausted,
-    Rejected,
-}
-
 #[derive(Clone, Debug, Serialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SessionMessage {
@@ -223,20 +195,20 @@ pub enum SessionMessage {
         #[serde(skip_serializing_if = "Option::is_none")]
         origin: Option<UtteranceOrigin>,
     },
-    /// A crate-selected batch that is ready to wake the external Expert.
+    /// A crate-selected batch that is ready to wake the external Backend.
     /// `live_event` remains the authoritative transcript projection; this
-    /// message alone controls when the host schedules an Expert turn.
-    ExpertDelivery {
+    /// message alone controls when the host schedules an Backend turn.
+    BackendDelivery {
         through_token: u64,
-        events: Vec<RealtimeExpertDeliveryEvent>,
+        events: Vec<RealtimeBackendDeliveryEvent>,
         display_text: String,
         handoff_ids: Vec<String>,
     },
-    /// Announces output initiated by the live Spokesperson rather than by an
-    /// Expert `prepare_speak` request. The host accepts the following audio
+    /// Announces output initiated by the live GptLive rather than by an
+    /// Backend `prepare_speak` request. The host accepts the following audio
     /// Begin record automatically; the ordinary audio acknowledgement contract
     /// remains unchanged.
-    SpokespersonSpeech {
+    GptLiveSpeech {
         speech_id: u64,
     },
     Pending {
@@ -258,27 +230,6 @@ pub enum SessionMessage {
         utterances_after: Vec<PendingUtterance>,
         #[serde(skip_serializing_if = "Vec::is_empty")]
         unresolved_handoff_ids: Vec<String>,
-    },
-    DismissHandoffsResult {
-        id: u64,
-        outcome: DismissHandoffsOutcome,
-        cursor: u64,
-        dismissed_handoff_ids: Vec<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        message: Option<String>,
-    },
-    ExpertTurnResult {
-        id: u64,
-        outcome: ExpertTurnOutcome,
-        handoff_ids: Vec<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        attempt: Option<u8>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        through_token: Option<u64>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        message: Option<String>,
-        #[serde(skip_serializing_if = "Vec::is_empty")]
-        events: Vec<RealtimeExpertDeliveryEvent>,
     },
     CancelResult {
         id: u64,
@@ -341,7 +292,7 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&SessionMessage::Ready {
                 id: 4,
-                protocol: 4,
+                protocol: 5,
                 session: VoiceSessionSnapshot {
                     tts: TtsConfigurationSnapshot {
                         revision: 1,
@@ -358,7 +309,7 @@ mod tests {
                 },
             })
             .unwrap(),
-            r#"{"type":"ready","id":4,"protocol":4,"session":{"tts":{"revision":1,"backend":"openai","model":"gpt-4o-mini-tts","voice":"marin","rate":1.0},"input_during_tts":{"revision":1,"policy":"allow_barge_in"}}}"#
+            r#"{"type":"ready","id":4,"protocol":5,"session":{"tts":{"revision":1,"backend":"openai","model":"gpt-4o-mini-tts","voice":"marin","rate":1.0},"input_during_tts":{"revision":1,"policy":"allow_barge_in"}}}"#
         );
         assert_eq!(
             serde_json::from_str::<SessionRequest>(
@@ -447,18 +398,18 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&SessionMessage::LiveEvent {
                 token: 7,
-                text: "[Voice transcript] Spokesperson said: hello".into(),
-                origin: Some(UtteranceOrigin::Spokesperson),
+                text: "[Voice transcript] GptLive said: hello".into(),
+                origin: Some(UtteranceOrigin::GptLive),
             })
             .unwrap(),
-            r#"{"type":"live_event","token":7,"text":"[Voice transcript] Spokesperson said: hello","origin":"spokesperson"}"#
+            r#"{"type":"live_event","token":7,"text":"[Voice transcript] GptLive said: hello","origin":"gpt_live"}"#
         );
         assert_eq!(
-            serde_json::to_string(&SessionMessage::ExpertDelivery {
+            serde_json::to_string(&SessionMessage::BackendDelivery {
                 through_token: 7,
-                events: vec![RealtimeExpertDeliveryEvent {
+                events: vec![RealtimeBackendDeliveryEvent {
                     cursor: 7,
-                    role: crate::openai_realtime_protocol::RealtimeExpertDeliveryRole::Spokesperson,
+                    role: crate::gpt_live_protocol::RealtimeBackendDeliveryRole::GptLive,
                     text: "hello".into(),
                     handoff_id: None,
                 }],
@@ -466,36 +417,7 @@ mod tests {
                 handoff_ids: Vec::new(),
             })
             .unwrap(),
-            r#"{"type":"expert_delivery","through_token":7,"events":[{"cursor":7,"role":"spokesperson","text":"hello"}],"display_text":"hello","handoff_ids":[]}"#
-        );
-        assert_eq!(
-            serde_json::to_string(&SessionMessage::DismissHandoffsResult {
-                id: 9,
-                outcome: DismissHandoffsOutcome::Applied,
-                cursor: 7,
-                dismissed_handoff_ids: vec!["call-1".into()],
-                message: None,
-            })
-            .unwrap(),
-            r#"{"type":"dismiss_handoffs_result","id":9,"outcome":"applied","cursor":7,"dismissed_handoff_ids":["call-1"]}"#
-        );
-        assert_eq!(
-            serde_json::to_string(&SessionMessage::ExpertTurnResult {
-                id: 10,
-                outcome: ExpertTurnOutcome::Reminder,
-                handoff_ids: vec!["call-1".into()],
-                attempt: Some(1),
-                through_token: Some(8),
-                message: Some("Resolve call-1".into()),
-                events: vec![RealtimeExpertDeliveryEvent {
-                    cursor: 8,
-                    role: crate::openai_realtime_protocol::RealtimeExpertDeliveryRole::Lifecycle,
-                    text: "Resolve call-1".into(),
-                    handoff_id: None,
-                }],
-            })
-            .unwrap(),
-            r#"{"type":"expert_turn_result","id":10,"outcome":"reminder","handoff_ids":["call-1"],"attempt":1,"through_token":8,"message":"Resolve call-1","events":[{"cursor":8,"role":"lifecycle","text":"Resolve call-1"}]}"#
+            r#"{"type":"backend_delivery","through_token":7,"events":[{"cursor":7,"role":"gpt_live","text":"hello"}],"display_text":"hello","handoff_ids":[]}"#
         );
         assert_eq!(
             serde_json::to_string(&SessionMessage::InputSpeaking { active: true }).unwrap(),

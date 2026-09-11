@@ -1,20 +1,20 @@
 use std::{collections::HashSet, time::Duration};
 
-use crate::spokesperson_voice_update::VoiceUpdatePurpose;
+use crate::gpt_live_voice_update::VoiceUpdatePurpose;
 
-const DEFAULT_SPOKESPERSON_RENEW_AFTER: Duration = Duration::from_secs(55 * 60);
+const DEFAULT_GPT_LIVE_RENEW_AFTER: Duration = Duration::from_secs(55 * 60);
 
-pub fn spokesperson_renew_after() -> Duration {
+pub fn gpt_live_renew_after() -> Duration {
     std::env::var("BERD_VOICE_REALTIME_RENEW_AFTER_MS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|value| *value > 0)
         .map(Duration::from_millis)
-        .unwrap_or(DEFAULT_SPOKESPERSON_RENEW_AFTER)
+        .unwrap_or(DEFAULT_GPT_LIVE_RENEW_AFTER)
 }
 
 /// Transport-independent activity that determines whether an OpenAI Realtime
-/// Spokesperson session may start or activate lifecycle work.
+/// GptLive session may start or activate lifecycle work.
 ///
 /// Playback ownership and presentation remain adapter concerns. Both the
 /// in-process Berd host and the framed VCCLI host feed their observed activity
@@ -30,12 +30,12 @@ pub struct RealtimeHostActivity {
 pub struct RealtimeHostWork {
     pub playback_active: bool,
     pub retained_responses: usize,
-    pub expert_output_reserved: bool,
-    pub pending_expert_prepare: bool,
+    pub backend_output_reserved: bool,
+    pub pending_backend_prepare: bool,
     pub truncation_pending: bool,
 }
 
-/// Shared lifecycle coordinator for every Expert-Spokesperson Realtime host.
+/// Shared lifecycle coordinator for every Backend-GptLive Realtime host.
 ///
 /// Hosts still own transport I/O and playback, but session activity, renewal
 /// admission, maintenance request identity, update safety, and disconnect
@@ -199,11 +199,11 @@ impl RealtimeHostActivity {
     }
 
     pub fn settings_are_quiescent(&self, work: RealtimeHostWork) -> bool {
-        !work.pending_expert_prepare && !self.is_busy(work) && !work.expert_output_reserved
+        !work.pending_backend_prepare && !self.is_busy(work) && !work.backend_output_reserved
     }
 
     pub fn queued_settings_are_ready(&self, work: RealtimeHostWork) -> bool {
-        !self.is_busy(work) && !work.expert_output_reserved && !work.truncation_pending
+        !self.is_busy(work) && !work.backend_output_reserved && !work.truncation_pending
     }
 }
 
@@ -253,7 +253,7 @@ mod tests {
         session_loss_action, voice_update_is_safe, RealtimeHostActivity, RealtimeHostLifecycle,
         RealtimeHostWork, RealtimeSessionLossAction,
     };
-    use crate::spokesperson_voice_update::VoiceUpdatePurpose;
+    use crate::gpt_live_voice_update::VoiceUpdatePurpose;
 
     #[test]
     fn recognition_remains_busy_until_the_user_item_is_finalized() {

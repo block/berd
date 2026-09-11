@@ -37,12 +37,10 @@ export interface VoiceSpeechState {
 }
 
 export type VoiceConversationDebugEvent =
-  | "emissarySpeech"
-  | "emissaryToMaster"
-  | "masterToEmissarySay"
-  | "masterToEmissaryContext"
-  | "masterDismissal"
-  | "handoffReminder";
+  | "gptLiveSpeech"
+  | "gptLiveToBackend"
+  | "backendToGptLiveCommentary"
+  | "backendToGptLiveThinking";
 
 /** ACP TextContent with discriminator and local voice playback state. */
 export type TextContent = AcpTextContent & {

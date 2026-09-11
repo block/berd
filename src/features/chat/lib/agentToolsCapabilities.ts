@@ -35,7 +35,7 @@ const AGENT_TOOLS_PROVIDER_ALIASES: Record<string, string[]> = {
   gmail: ["gmail", "email"],
   jira: ["jira"],
   pagerduty: ["pagerduty", "pager duty"],
-  "query-expert": ["query expert", "query-expert", "snowflake"],
+  "query-backend": ["query backend", "query-backend", "snowflake"],
   sales: ["sales", "salesforce"],
   "salesforce-sq": ["salesforce square", "salesforce sq", "salesforce-sq"],
 };

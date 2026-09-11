@@ -1,12 +1,11 @@
-use berd_voice::openai_realtime_protocol::{
-    expert_session_instructions, realtime_transcript_seed_events, RealtimeCoordinatorResult,
-    RealtimeExpertDelivery, RealtimeExpertSpokespersonSession, RealtimeExpertTurnCompletion,
-    RealtimePipeExchange, RealtimeSessionReduction, RealtimeSpokespersonSessionOptions,
-    RealtimeTranscriptSeedTurn,
+use berd_voice::gpt_live_protocol::{
+    backend_session_instructions, realtime_transcript_seed_events, GptLiveAppendChannel,
+    RealtimeBackendGptLiveSession, RealtimeGptLiveSessionOptions, RealtimePipeExchange,
+    RealtimeSessionReduction, RealtimeTranscriptSeedTurn,
 };
-use berd_voice::openai_spokesperson::{OpenAiSpokespersonConfig, SpokespersonCommand};
+use berd_voice::gpt_live_runtime::{GptLiveCommand, OpenAiGptLiveConfig};
+use berd_voice::gpt_live_voice_update::VoiceUpdateRequest;
 use berd_voice::realtime_host::ManagedRealtimeHost;
-use berd_voice::spokesperson_voice_update::VoiceUpdateRequest;
 use berd_voice::{TtsConfigurationSnapshot, TtsSettings};
 use serde::Serialize;
 use serde_json::json;
@@ -33,7 +32,7 @@ pub struct OpenAiRealtimeRuntimeState {
 struct NativeRealtimeRuntime {
     owner_window: String,
     runtime: Arc<ManagedRealtimeHost>,
-    protocol: RealtimeExpertSpokespersonSession,
+    protocol: RealtimeBackendGptLiveSession,
     semantic_revision: Arc<AtomicU64>,
 }
 
@@ -98,13 +97,13 @@ pub async fn create_openai_realtime_session() -> Result<OpenAiRealtimeSession, S
 }
 
 #[tauri::command]
-pub fn start_openai_realtime_spokesperson_runtime(
+pub fn start_openai_realtime_gpt_live_runtime(
     state: State<'_, OpenAiRealtimeRuntimeState>,
     webview_window: WebviewWindow,
     session_id: String,
     initial_cursor: u64,
     call_id: String,
-    options: RealtimeSpokespersonSessionOptions,
+    options: RealtimeGptLiveSessionOptions,
 ) -> Result<(), String> {
     ensure_native_realtime_playback_supported()?;
     let session_id = non_empty_session_id(session_id)?;
@@ -124,7 +123,7 @@ pub fn start_openai_realtime_spokesperson_runtime(
     }
 
     let api_key = openai_voice_credentials::require(OpenAiVoiceCredential::Realtime)?;
-    let config = OpenAiSpokespersonConfig::new(api_key, options, Vec::new());
+    let config = OpenAiGptLiveConfig::new(api_key, options, Vec::new());
     let semantic_revision = Arc::new(AtomicU64::new(0));
     let event_window = webview_window.clone();
     let event_session_id = session_id.clone();
@@ -135,14 +134,14 @@ pub fn start_openai_realtime_spokesperson_runtime(
         move |event| emit_runtime_provider_event(&event_window, &event_session_id, event),
     )?);
     log::info!(
-        "Starting Expert-Spokesperson session {session_id} with execution_path=berd_voice_in_process transport=websocket playback=native_pcm"
+        "Starting Backend-GptLive session {session_id} with execution_path=berd_voice_in_process transport=websocket playback=native_pcm"
     );
     sessions.insert(
         session_id.clone(),
         NativeRealtimeRuntime {
             owner_window: webview_window.label().into(),
             runtime,
-            protocol: RealtimeExpertSpokespersonSession::new(initial_cursor, call_id),
+            protocol: RealtimeBackendGptLiveSession::new(initial_cursor, call_id),
             semantic_revision,
         },
     );
@@ -160,19 +159,19 @@ fn ensure_native_realtime_playback_supported() -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn send_openai_realtime_spokesperson_runtime_event(
+pub fn send_openai_realtime_gpt_live_runtime_event(
     state: State<'_, OpenAiRealtimeRuntimeState>,
     webview_window: WebviewWindow,
     session_id: String,
     event: serde_json::Value,
 ) -> Result<(), String> {
     with_runtime(state, session_id, webview_window.label(), |runtime| {
-        runtime.send(SpokespersonCommand::Provider(event))
+        runtime.send(GptLiveCommand::Provider(event))
     })
 }
 
 #[tauri::command]
-pub fn push_openai_realtime_spokesperson_audio(
+pub fn push_openai_realtime_gpt_live_audio(
     request: tauri::ipc::Request<'_>,
     state: State<'_, OpenAiRealtimeRuntimeState>,
     webview_window: WebviewWindow,
@@ -189,13 +188,13 @@ pub fn push_openai_realtime_spokesperson_audio(
         .values()
         .find(|entry| entry.owner_window == webview_window.label())
         .ok_or("This window does not own an OpenAI Realtime runtime session")?;
-    entry.runtime.send(SpokespersonCommand::InputPcm48Khz(
-        samples.as_samples().to_vec(),
-    ))
+    entry
+        .runtime
+        .send(GptLiveCommand::InputPcm48Khz(samples.as_samples().to_vec()))
 }
 
 #[tauri::command]
-pub async fn stop_openai_realtime_spokesperson_runtime(
+pub async fn stop_openai_realtime_gpt_live_runtime(
     state: State<'_, OpenAiRealtimeRuntimeState>,
     webview_window: WebviewWindow,
     session_id: String,
@@ -220,7 +219,7 @@ pub async fn stop_openai_realtime_spokesperson_runtime(
 }
 
 #[tauri::command]
-pub async fn release_openai_realtime_spokesperson_runtime(
+pub async fn release_openai_realtime_gpt_live_runtime(
     state: State<'_, OpenAiRealtimeRuntimeState>,
     webview_window: WebviewWindow,
     session_id: String,
@@ -296,7 +295,7 @@ fn with_runtime<T>(
 }
 
 #[tauri::command]
-pub async fn update_openai_realtime_spokesperson_settings(
+pub async fn update_openai_realtime_gpt_live_settings(
     state: State<'_, OpenAiRealtimeRuntimeState>,
     webview_window: WebviewWindow,
     session_id: String,
@@ -323,7 +322,7 @@ pub async fn update_openai_realtime_spokesperson_settings(
     let current = runtime.snapshot()?;
     let model = match current.settings {
         TtsSettings::OpenAi { model, .. } => model,
-        _ => return Err("Expert-Spokesperson requires OpenAI voice settings".into()),
+        _ => return Err("Backend-GptLive requires OpenAI voice settings".into()),
     };
     tauri::async_runtime::spawn_blocking(move || {
         runtime.update_settings(
@@ -341,7 +340,7 @@ pub async fn update_openai_realtime_spokesperson_settings(
         )
     })
     .await
-    .map_err(|error| format!("Spokesperson settings task failed: {error}"))?
+    .map_err(|error| format!("GptLive settings task failed: {error}"))?
 }
 
 fn emit_runtime_provider_event(
@@ -372,12 +371,12 @@ fn create_native_realtime_output() -> Result<Box<dyn berd_voice::PcmAudioOutput>
 }
 
 #[tauri::command]
-pub fn create_openai_realtime_expert_instructions(
+pub fn create_openai_realtime_backend_instructions(
     session_id: String,
     initial_cursor: u64,
     call_id: String,
 ) -> Result<String, String> {
-    Ok(expert_session_instructions(
+    Ok(backend_session_instructions(
         &non_empty_session_id(session_id)?,
         initial_cursor,
         &non_empty_session_id(call_id)?,
@@ -394,14 +393,14 @@ pub fn create_openai_realtime_transcript_seed(
 }
 
 #[tauri::command]
-pub fn deliver_openai_realtime_expert_message(
+pub fn append_openai_realtime_backend_result(
     state: State<'_, OpenAiRealtimeRuntimeState>,
     webview_window: WebviewWindow,
     session_id: String,
     cursor: u64,
     message: String,
-    mode: berd_voice::openai_realtime_protocol::RealtimeExpertMessageMode,
-    resolved_handoff_ids: Vec<String>,
+    channel: String,
+    delegation_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let session_id = non_empty_session_id(session_id)?;
     let mut sessions = state
@@ -412,26 +411,24 @@ pub fn deliver_openai_realtime_expert_message(
         .get_mut(&session_id)
         .ok_or("OpenAI Realtime runtime session is not active")?;
     ensure_runtime_owner(&entry.owner_window, webview_window.label())?;
+    let mode = match channel.as_str() {
+        "commentary" => GptLiveAppendChannel::Commentary,
+        "thinking" => GptLiveAppendChannel::Thinking,
+        _ => return Err("channel must be commentary or thinking".into()),
+    };
+    let resolved_handoff_ids = delegation_id.into_iter().collect::<Vec<_>>();
     let unknown = entry.protocol.unknown_handoff_ids(&resolved_handoff_ids);
     let submission =
         match entry
             .protocol
-            .submit_expert_message(cursor, &message, mode, &resolved_handoff_ids)
+            .submit_backend_message(cursor, &message, mode, &resolved_handoff_ids)
         {
             Ok(submission) => submission,
-            Err(error) if error == "context cannot resolve handoffs" => {
-                return Ok(json!({
-                    "accepted": false,
-                    "reason": "context_cannot_resolve",
-                    "cursor": entry.protocol.expert_pipe_cursor(),
-                    "handoffIds": resolved_handoff_ids,
-                }));
-            }
             Err(_error) if !unknown.is_empty() => {
                 return Ok(json!({
                     "accepted": false,
-                    "reason": "unknown_handoff",
-                    "cursor": entry.protocol.expert_pipe_cursor(),
+                    "reason": "unknown_delegation",
+                    "cursor": entry.protocol.backend_pipe_cursor(),
                     "handoffIds": unknown,
                 }));
             }
@@ -440,110 +437,24 @@ pub fn deliver_openai_realtime_expert_message(
     let accepted = match submission.exchange {
         RealtimePipeExchange::Accepted(accepted) => accepted,
         rejected => {
-            return serde_json::to_value(rejected)
-                .map_err(|error| format!("Could not serialize Expert delivery rejection: {error}"))
-        }
-    };
-    let request = submission
-        .request
-        .ok_or("Accepted Expert delivery did not produce a provider request")?;
-    for event in request.events {
-        entry.runtime.send(SpokespersonCommand::Provider(event))?;
-    }
-    entry.publish_semantic_context()?;
-    Ok(json!({
-        "accepted": true,
-        "cursor": accepted.cursor,
-        "outbound": accepted.outbound,
-        "deliveryStatus": request.status,
-    }))
-}
-
-#[tauri::command]
-pub fn dismiss_openai_realtime_handoffs_with_context(
-    state: State<'_, OpenAiRealtimeRuntimeState>,
-    webview_window: WebviewWindow,
-    session_id: String,
-    cursor: u64,
-    handoff_ids: Vec<String>,
-    reason: String,
-) -> Result<serde_json::Value, String> {
-    let session_id = non_empty_session_id(session_id)?;
-    let mut sessions = state
-        .sessions
-        .lock()
-        .map_err(|_| "OpenAI Realtime runtime state is unavailable".to_string())?;
-    let entry = sessions
-        .get_mut(&session_id)
-        .ok_or("OpenAI Realtime runtime session is not active")?;
-    ensure_runtime_owner(&entry.owner_window, webview_window.label())?;
-    let unknown = entry.protocol.unknown_handoff_ids(&handoff_ids);
-    let dismissal =
-        match entry
-            .protocol
-            .dismiss_handoffs_with_context(cursor, &handoff_ids, &reason)
-        {
-            Ok(dismissal) => dismissal,
-            Err(_error) if !unknown.is_empty() => {
-                return Ok(json!({
-                    "accepted": false,
-                    "reason": "unknown_handoff",
-                    "cursor": entry.protocol.expert_pipe_cursor(),
-                    "handoffIds": unknown,
-                }));
-            }
-            Err(error) => return Err(error),
-        };
-    let accepted = match dismissal.exchange {
-        RealtimePipeExchange::Accepted(accepted) => accepted,
-        rejected => {
             return serde_json::to_value(rejected).map_err(|error| {
-                format!("Could not serialize handoff dismissal rejection: {error}")
+                format!("Could not serialize Backend delivery rejection: {error}")
             })
         }
     };
-    let request = dismissal
-        .request
-        .ok_or("Accepted handoff dismissal did not produce a provider request")?;
-    let delivery_status = request.status;
-    for event in request.events {
-        entry.runtime.send(SpokespersonCommand::Provider(event))?;
-    }
+    let event = submission
+        .event
+        .ok_or("Accepted GPT Live append did not produce a provider event")?;
+    entry.runtime.send(GptLiveCommand::Provider(event))?;
     entry.publish_semantic_context()?;
     Ok(json!({
         "accepted": true,
         "cursor": accepted.cursor,
-        "dismissedHandoffIds": dismissal.dismissed_handoff_ids,
-        "deliveryStatus": delivery_status,
     }))
 }
 
 #[tauri::command]
-pub fn complete_openai_realtime_expert_turn(
-    state: State<'_, OpenAiRealtimeRuntimeState>,
-    webview_window: WebviewWindow,
-    session_id: String,
-    retrying_handoff_ids: Vec<String>,
-    max_attempts: u8,
-) -> Result<RealtimeExpertTurnCompletion, String> {
-    with_protocol_session(state, session_id, webview_window.label(), |session| {
-        session.complete_expert_turn_with_delivery(&retrying_handoff_ids, max_attempts)
-    })
-}
-
-#[tauri::command]
-pub fn flush_openai_realtime_expert_events(
-    state: State<'_, OpenAiRealtimeRuntimeState>,
-    webview_window: WebviewWindow,
-    session_id: String,
-) -> Result<Option<RealtimeExpertDelivery>, String> {
-    with_protocol_session(state, session_id, webview_window.label(), |session| {
-        Ok(session.flush_expert_events("Final voice transcript"))
-    })
-}
-
-#[tauri::command]
-pub fn reduce_openai_realtime_spokesperson_event(
+pub fn reduce_openai_realtime_gpt_live_event(
     state: State<'_, OpenAiRealtimeRuntimeState>,
     webview_window: WebviewWindow,
     session_id: String,
@@ -569,7 +480,7 @@ pub fn request_openai_realtime_typed_user_message(
     webview_window: WebviewWindow,
     session_id: String,
     text: String,
-) -> Result<RealtimeCoordinatorResult, String> {
+) -> Result<Vec<serde_json::Value>, String> {
     with_protocol_session(state, session_id, webview_window.label(), |session| {
         session.request_typed_user_message(&text)
     })
@@ -588,7 +499,7 @@ fn with_protocol_session<T>(
     state: State<'_, OpenAiRealtimeRuntimeState>,
     session_id: String,
     owner_window: &str,
-    operation: impl FnOnce(&mut RealtimeExpertSpokespersonSession) -> Result<T, String>,
+    operation: impl FnOnce(&mut RealtimeBackendGptLiveSession) -> Result<T, String>,
 ) -> Result<T, String> {
     let session_id = non_empty_session_id(session_id)?;
     let mut sessions = state

@@ -736,8 +736,8 @@ describe("MessageBubble", () => {
             [{ type: "text", text: "Please inspect the disk." }],
             {
               metadata: {
-                personaName: "Emissary → Master · Handoff handoff-1",
-                voiceConversationDebugEvent: "emissaryToMaster",
+                personaName: "GPT Live → Backend · Delegation handoff-1",
+                voiceConversationDebugEvent: "gptLiveToBackend",
               },
             },
           )}
@@ -746,10 +746,12 @@ describe("MessageBubble", () => {
     );
 
     const message = container.querySelector(
-      '[data-realtime-voice-debug-event="emissaryToMaster"]',
+      '[data-realtime-voice-debug-event="gptLiveToBackend"]',
     );
     expect(message).toHaveAttribute("data-role", "assistant-message");
-    expect(message).toHaveTextContent("Emissary → Master · Handoff handoff-1");
+    expect(message).toHaveTextContent(
+      "GPT Live → Backend · Delegation handoff-1",
+    );
     expect(
       message?.querySelector('[data-role="message-bubble-surface"]'),
     ).toHaveClass("rounded-lg", "border");

@@ -1,5 +1,5 @@
-use crate::openai_realtime_protocol::{
-    resolve_interrupted_spokesperson_transcript, RealtimeInterruptedTranscriptInput,
+use crate::gpt_live_protocol::{
+    resolve_interrupted_gpt_live_transcript, RealtimeInterruptedTranscriptInput,
     RealtimeTranscriptAudioPart,
 };
 
@@ -56,12 +56,12 @@ impl RealtimeAudioDelivery {
         self.total_frames = self
             .total_frames
             .checked_add(frame_count)
-            .ok_or("Spokesperson audio frame count overflowed")?;
+            .ok_or("GptLive audio frame count overflowed")?;
         let part = &mut self.parts[index];
         part.total_frames = part
             .total_frames
             .checked_add(frame_count)
-            .ok_or("Spokesperson audio part frame count overflowed")?;
+            .ok_or("GptLive audio part frame count overflowed")?;
         part.truncation_required |= require_truncation;
         self.received_audio = true;
         Ok(())
@@ -125,7 +125,7 @@ impl RealtimeAudioDelivery {
         if !interrupted {
             return text;
         }
-        resolve_interrupted_spokesperson_transcript(
+        resolve_interrupted_gpt_live_transcript(
             RealtimeInterruptedTranscriptInput::HostPlayedFrames {
                 text,
                 audio_parts: self
@@ -146,7 +146,7 @@ impl RealtimeAudioDelivery {
 
     pub fn require_all_truncations(&mut self) -> Result<(), String> {
         if self.received_audio && self.parts.is_empty() {
-            return Err("Spokesperson audio had no provider item identity".into());
+            return Err("GptLive audio had no provider item identity".into());
         }
         for part in &mut self.parts {
             if part.total_frames > 0 {
@@ -173,7 +173,7 @@ impl RealtimeAudioDelivery {
                 (part.truncation_required && !part.truncation_sent).then(|| {
                     part_played_frames
                         .checked_mul(1_000)
-                        .ok_or_else(|| "Spokesperson truncation duration overflowed".to_string())
+                        .ok_or_else(|| "GptLive truncation duration overflowed".to_string())
                         .map(|frames_ms| RealtimeAudioTruncation {
                             key: part.key.clone(),
                             audio_end_ms: frames_ms / u64::from(sample_rate.max(1)),
@@ -197,7 +197,7 @@ impl RealtimeAudioDelivery {
                     && part.key.output_index == output_index
                     && part.key.content_index == content_index
             })
-            .ok_or_else(|| "Spokesperson truncation targeted an unknown audio part".to_string())?;
+            .ok_or_else(|| "GptLive truncation targeted an unknown audio part".to_string())?;
         self.parts[index].truncation_sent = true;
         Ok(())
     }
@@ -222,7 +222,7 @@ impl RealtimeAudioDelivery {
             part.key.output_index == output_index && part.key.content_index == content_index
         }) {
             if self.parts[index].key.item_id != item_id {
-                return Err("Spokesperson audio part changed provider item identity".into());
+                return Err("GptLive audio part changed provider item identity".into());
             }
             return Ok(index);
         }
@@ -231,7 +231,7 @@ impl RealtimeAudioDelivery {
                 && part.key.content_index == content_index
                 && part.key.output_index != output_index
         }) {
-            return Err("Spokesperson audio part changed provider output identity".into());
+            return Err("GptLive audio part changed provider output identity".into());
         }
         self.parts.push(RealtimeAudioPart {
             key: RealtimeAudioPartKey {

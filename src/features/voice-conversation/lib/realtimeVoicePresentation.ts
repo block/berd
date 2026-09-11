@@ -9,7 +9,7 @@ export function presentRealtimeVoiceMessages(
   if (
     !messages.some((message) => {
       const event = message.metadata?.voiceConversationDebugEvent;
-      return event && event !== "emissarySpeech";
+      return event && event !== "gptLiveSpeech";
     })
   ) {
     return messages;
@@ -17,6 +17,6 @@ export function presentRealtimeVoiceMessages(
 
   return messages.filter((message) => {
     const event = message.metadata?.voiceConversationDebugEvent;
-    return !event || event === "emissarySpeech";
+    return !event || event === "gptLiveSpeech";
   });
 }

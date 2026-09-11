@@ -12,16 +12,16 @@ use std::{
 use serde_json::{json, Value};
 
 use crate::{
-    expert_spokesperson::SemanticTurn,
+    gpt_live_bridge::SemanticTurn,
     input::{VoiceInputFrame, INPUT_FRAME_SAMPLES},
-    openai_spokesperson::{OpenAiSpokespersonConfig, OpenAiSpokespersonRuntime},
-    openai_spokesperson::{SpokespersonCommand, SpokespersonEvent},
+    gpt_live_runtime::{OpenAiGptLiveConfig, OpenAiGptLiveRuntime},
+    gpt_live_runtime::{GptLiveCommand, GptLiveEvent},
     realtime_audio_delivery::RealtimeAudioDelivery,
     realtime_host_lifecycle::{
-        spokesperson_renew_after, RealtimeHostLifecycle, RealtimeHostWork,
+        gpt_live_renew_after, RealtimeHostLifecycle, RealtimeHostWork,
         RealtimeSessionLossAction,
     },
-    spokesperson_voice_update::{
+    gpt_live_voice_update::{
         validate_voice_update_settings, VoiceBarrierAction, VoiceUpdateAction, VoiceUpdatePurpose,
         VoiceUpdateQueue, VoiceUpdateRequest, VoiceUpdateTransaction,
     },
@@ -47,13 +47,13 @@ struct RealtimePlaybackHost {
 impl RealtimePlaybackHost {
     fn handle_outbound_command(
         &mut self,
-        command: &SpokespersonCommand,
-        send_command: &mut impl FnMut(SpokespersonCommand) -> Result<(), String>,
+        command: &GptLiveCommand,
+        send_command: &mut impl FnMut(GptLiveCommand) -> Result<(), String>,
         emit: &mut impl FnMut(Value) -> Result<(), String>,
     ) -> Result<(), String> {
         if matches!(
             command,
-            SpokespersonCommand::Provider(event)
+            GptLiveCommand::Provider(event)
                 if event.get("type").and_then(Value::as_str)
                     == Some("output_audio_buffer.clear")
         ) {
@@ -64,26 +64,28 @@ impl RealtimePlaybackHost {
 
     fn handle(
         &mut self,
-        event: SpokespersonEvent,
-        send_command: &mut impl FnMut(SpokespersonCommand) -> Result<(), String>,
+        event: GptLiveEvent,
+        send_command: &mut impl FnMut(GptLiveCommand) -> Result<(), String>,
         create_output: &mut impl FnMut() -> Result<Box<dyn PcmAudioOutput>, String>,
         emit: &mut impl FnMut(Value) -> Result<(), String>,
     ) -> Result<bool, String> {
         match event {
-            SpokespersonEvent::Ready => emit(json!({ "type": "berd.realtime.ready" }))?,
-            SpokespersonEvent::Provider(event) => {
-                if !matches!(
-                    event.get("type").and_then(Value::as_str),
-                    Some(
-                        "response.output_audio.delta"
-                            | "session.output_audio.delta"
-                            | "session.output_transcript.delta"
-                    )
-                ) {
-                    emit(event)?;
+            GptLiveEvent::Ready => emit(json!({ "type": "berd.realtime.ready" }))?,
+            GptLiveEvent::Provider(event) => {
+                match event.get("type").and_then(Value::as_str) {
+                    Some("response.output_audio.delta" | "session.output_audio.delta") => {}
+                    Some("output_audio_buffer.stopped") => {
+                        // The provider is finished producing audio. The local player emits
+                        // the authoritative stopped event after its queued PCM drains.
+                    }
+                    Some("output_audio_buffer.cleared") => {
+                        self.clear_active_playback();
+                        emit(event)?;
+                    }
+                    _ => emit(event)?,
                 }
             }
-            SpokespersonEvent::AudioDelta {
+            GptLiveEvent::AudioDelta {
                 response_id,
                 item_id,
                 output_index,
@@ -120,87 +122,20 @@ impl RealtimePlaybackHost {
                 )?;
                 active.output.write(&samples)?;
             }
-            SpokespersonEvent::ResponseFinished { response_id, .. } => {
+            GptLiveEvent::ResponseFinished { response_id, .. } => {
                 if let Some(active) = self.playback.as_mut() {
                     if active.response_id == response_id {
                         active.server_response_done = true;
                     }
                 }
             }
-            SpokespersonEvent::Handoff { response_id, .. } => {
-                send_command(SpokespersonCommand::CancelResponses {
-                    response_ids: vec![response_id.clone()],
-                })?;
-                if self
-                    .playback
-                    .as_ref()
-                    .is_some_and(|active| active.response_id == response_id)
-                {
-                    self.interrupt_active_playback(send_command, emit)?;
-                } else {
-                    self.interrupted_responses.insert(response_id);
-                }
-            }
-            SpokespersonEvent::UserSpeaking { active, .. } => {
-                emit(json!({
-                    "type": "berd.realtime.user_speaking",
-                    "active": active,
-                }))?;
-                if active {
-                    self.interrupt_active_playback(send_command, emit)?;
-                }
-            }
-            SpokespersonEvent::TranscriptDelta {
-                response_id,
-                item_id,
-                output_index,
-                content_index,
-                text,
-            } => {
-                if let Some(active) = self.playback.as_mut() {
-                    if active.response_id == response_id {
-                        active.delivery.append_transcript(
-                            &item_id,
-                            output_index,
-                            content_index,
-                            &text,
-                        )?;
-                    }
-                }
-                emit(json!({
-                    "type": "response.output_audio_transcript.delta",
-                    "response_id": response_id,
-                    "item_id": item_id,
-                    "output_index": output_index,
-                    "content_index": content_index,
-                    "delta": text,
-                }))?;
-            }
-            SpokespersonEvent::TranscriptDone {
-                response_id,
-                item_id,
-                output_index,
-                content_index,
-                text,
-            } => {
-                if let Some(active) = self.playback.as_mut() {
-                    if active.response_id == response_id {
-                        active.delivery.replace_transcript(
-                            &item_id,
-                            output_index,
-                            content_index,
-                            text,
-                        )?;
-                    }
-                }
-            }
-            SpokespersonEvent::Failed(message)
-            | SpokespersonEvent::SessionLost(message)
-            | SpokespersonEvent::Expired(message) => {
+            GptLiveEvent::Failed(message)
+            | GptLiveEvent::SessionLost(message)
+            | GptLiveEvent::Expired(message) => {
                 emit(json!({ "type": "berd.realtime.failed", "message": message }))?;
                 return Ok(true);
             }
-            SpokespersonEvent::Closed => {
+            GptLiveEvent::Closed => {
                 emit(json!({ "type": "berd.realtime.closed" }))?;
                 return Ok(true);
             }
@@ -211,7 +146,7 @@ impl RealtimePlaybackHost {
 
     fn interrupt_active_playback(
         &mut self,
-        send_command: &mut impl FnMut(SpokespersonCommand) -> Result<(), String>,
+        send_command: &mut impl FnMut(GptLiveCommand) -> Result<(), String>,
         emit: &mut impl FnMut(Value) -> Result<(), String>,
     ) -> Result<(), String> {
         let Some(mut active) = self.playback.take() else {
@@ -225,7 +160,7 @@ impl RealtimePlaybackHost {
         active.output.cancel();
         active.delivery.require_all_truncations()?;
         for truncation in active.delivery.unsent_truncations(REALTIME_SAMPLE_RATE)? {
-            send_command(SpokespersonCommand::TruncateOutput {
+            send_command(GptLiveCommand::TruncateOutput {
                 response_id: active.response_id.clone(),
                 item_id: truncation.key.item_id,
                 content_index: truncation.key.content_index,
@@ -239,6 +174,15 @@ impl RealtimePlaybackHost {
             "total_audio_frames": active.delivery.total_frames(),
             "sample_rate": REALTIME_SAMPLE_RATE,
         }))
+    }
+
+    fn clear_active_playback(&mut self) {
+        let Some(active) = self.playback.take() else {
+            return;
+        };
+        self.interrupted_responses
+            .insert(active.response_id.clone());
+        active.output.cancel();
     }
 
     fn finish_drained(
@@ -266,7 +210,7 @@ impl RealtimePlaybackHost {
 }
 
 enum ManagedRealtimeHostCommand {
-    Send(SpokespersonCommand),
+    Send(GptLiveCommand),
     UpdateSemanticContext {
         revision: u64,
         transcript: Vec<SemanticTurn>,
@@ -299,7 +243,7 @@ pub struct ManagedRealtimeHost {
 
 impl ManagedRealtimeHost {
     pub fn spawn(
-        config: OpenAiSpokespersonConfig,
+        config: OpenAiGptLiveConfig,
         semantic_revision: Arc<AtomicU64>,
         create_output: impl FnMut() -> Result<Box<dyn PcmAudioOutput>, String> + Send + 'static,
         emit: impl FnMut(Value) -> Result<(), String> + Send + 'static,
@@ -307,14 +251,14 @@ impl ManagedRealtimeHost {
         Self::spawn_with_renew_after(
             config,
             semantic_revision,
-            spokesperson_renew_after(),
+            gpt_live_renew_after(),
             create_output,
             emit,
         )
     }
 
     fn spawn_with_renew_after(
-        config: OpenAiSpokespersonConfig,
+        config: OpenAiGptLiveConfig,
         semantic_revision: Arc<AtomicU64>,
         renew_after: Duration,
         create_output: impl FnMut() -> Result<Box<dyn PcmAudioOutput>, String> + Send + 'static,
@@ -353,17 +297,17 @@ impl ManagedRealtimeHost {
         })
     }
 
-    pub fn send(&self, command: SpokespersonCommand) -> Result<(), String> {
+    pub fn send(&self, command: GptLiveCommand) -> Result<(), String> {
         self.commands
             .send(ManagedRealtimeHostCommand::Send(command))
-            .map_err(|_| "Spokesperson runtime is unavailable".to_string())
+            .map_err(|_| "GptLive runtime is unavailable".to_string())
     }
 
     pub fn snapshot(&self) -> Result<TtsConfigurationSnapshot, String> {
         self.snapshot
             .lock()
             .map(|snapshot| snapshot.clone())
-            .map_err(|_| "Spokesperson settings are unavailable".into())
+            .map_err(|_| "GptLive settings are unavailable".into())
     }
 
     pub fn update_semantic_context(
@@ -378,7 +322,7 @@ impl ManagedRealtimeHost {
                 transcript,
                 unresolved_handoff,
             })
-            .map_err(|_| "Spokesperson runtime is unavailable".to_string())
+            .map_err(|_| "GptLive runtime is unavailable".to_string())
     }
 
     pub fn update_settings(
@@ -393,10 +337,10 @@ impl ManagedRealtimeHost {
                 semantic_transcript,
                 completed,
             })
-            .map_err(|_| "Spokesperson runtime is unavailable".to_string())?;
+            .map_err(|_| "GptLive runtime is unavailable".to_string())?;
         result
             .recv()
-            .map_err(|_| "Spokesperson settings update was abandoned".to_string())?
+            .map_err(|_| "GptLive settings update was abandoned".to_string())?
     }
 
     pub fn finish(&self) -> Result<(), String> {
@@ -443,7 +387,7 @@ fn reap_managed_worker(worker: thread::JoinHandle<()>) {
 }
 
 fn run_managed_realtime_host(
-    config: OpenAiSpokespersonConfig,
+    config: OpenAiGptLiveConfig,
     semantic_revision: Arc<AtomicU64>,
     renew_after: Duration,
     snapshot: Arc<Mutex<TtsConfigurationSnapshot>>,
@@ -467,7 +411,7 @@ fn run_managed_realtime_host(
 }
 
 fn run_managed_realtime_host_inner(
-    mut config: OpenAiSpokespersonConfig,
+    mut config: OpenAiGptLiveConfig,
     semantic_revision: Arc<AtomicU64>,
     renew_after: Duration,
     snapshot: Arc<Mutex<TtsConfigurationSnapshot>>,
@@ -475,7 +419,7 @@ fn run_managed_realtime_host_inner(
     mut create_output: impl FnMut() -> Result<Box<dyn PcmAudioOutput>, String>,
     emit: &mut impl FnMut(Value) -> Result<(), String>,
 ) -> Result<(), String> {
-    let (mut runtime, mut events) = OpenAiSpokespersonRuntime::spawn_observed(config.clone())?;
+    let (mut runtime, mut events) = OpenAiGptLiveRuntime::spawn(config.clone())?;
     let mut host = RealtimePlaybackHost::default();
     let mut lifecycle = RealtimeHostLifecycle::new(renew_after);
     lifecycle.session_started(Instant::now());
@@ -488,7 +432,7 @@ fn run_managed_realtime_host_inner(
     while !shutting_down {
         loop {
             match commands.try_recv() {
-                Ok(ManagedRealtimeHostCommand::Send(SpokespersonCommand::InputPcm48Khz(
+                Ok(ManagedRealtimeHostCommand::Send(GptLiveCommand::InputPcm48Khz(
                     samples,
                 ))) if pending_update
                     .as_ref()
@@ -514,7 +458,7 @@ fn run_managed_realtime_host_inner(
                     let mut send = |command| runtime.send(command);
                     host.handle_outbound_command(&command, &mut send, emit)?;
                     runtime.send(command).map_err(|error| {
-                        format!("Could not send input to Spokesperson: {error}")
+                        format!("Could not send input to GptLive: {error}")
                     })?;
                 }
                 Ok(ManagedRealtimeHostCommand::UpdateSemanticContext {
@@ -533,10 +477,10 @@ fn run_managed_realtime_host_inner(
                 }) => {
                     let current = snapshot
                         .lock()
-                        .map_err(|_| "Spokesperson settings are unavailable")?
+                        .map_err(|_| "GptLive settings are unavailable")?
                         .clone();
                     let validation = if queued_update.is_busy(pending_update.is_some()) {
-                        Err("another Spokesperson settings update is in progress".into())
+                        Err("another GptLive settings update is in progress".into())
                     } else {
                         validate_voice_update_settings(
                             request.base_revision,
@@ -557,7 +501,7 @@ fn run_managed_realtime_host_inner(
                             queued_update.try_enqueue(pending_update.is_some(), queued)
                         {
                             let _ = queued.completed.send(Err(
-                                "another Spokesperson settings update is in progress".into(),
+                                "another GptLive settings update is in progress".into(),
                             ));
                         }
                     }
@@ -585,7 +529,7 @@ fn run_managed_realtime_host_inner(
         if let Some(queued) = queued_update.take_ready(pending_update.is_some(), quiescent) {
             let current = snapshot
                 .lock()
-                .map_err(|_| "Spokesperson settings are unavailable")?
+                .map_err(|_| "GptLive settings are unavailable")?
                 .clone();
             match VoiceUpdateTransaction::start(
                 queued.request,
@@ -614,7 +558,7 @@ fn run_managed_realtime_host_inner(
         ) {
             let current = snapshot
                 .lock()
-                .map_err(|_| "Spokesperson settings are unavailable")?
+                .map_err(|_| "GptLive settings are unavailable")?
                 .clone();
             let request = VoiceUpdateRequest {
                 id: lifecycle.next_maintenance_id(),
@@ -638,7 +582,7 @@ fn run_managed_realtime_host_inner(
         if let Some(update) = pending_update.as_ref() {
             let current = snapshot
                 .lock()
-                .map_err(|_| "Spokesperson settings are unavailable")?
+                .map_err(|_| "GptLive settings are unavailable")?
                 .clone();
             let safe = lifecycle.voice_update_is_safe(
                 update.transaction.purpose(),
@@ -682,27 +626,16 @@ fn run_managed_realtime_host_inner(
         match events.recv_timeout(Duration::from_millis(10)) {
             Ok(event) => {
                 match &event {
-                    SpokespersonEvent::UserSpeaking {
-                        active: true,
-                        item_id,
-                    } => lifecycle.begin_user_speaking(item_id.clone()),
-                    SpokespersonEvent::UserSpeaking { active: false, .. } => {
-                        lifecycle.finish_user_speaking();
-                    }
-                    SpokespersonEvent::UserTurnDiscarded { item_id }
-                    | SpokespersonEvent::UserFinal { item_id, .. } => {
-                        lifecycle.finish_user_item(item_id);
-                    }
-                    SpokespersonEvent::ResponseStarted { response_id } => {
+                    GptLiveEvent::ResponseStarted { response_id } => {
                         lifecycle.begin_response(response_id.clone());
                     }
-                    SpokespersonEvent::ResponseFinished { response_id, .. } => {
+                    GptLiveEvent::ResponseFinished { response_id, .. } => {
                         lifecycle.finish_response(response_id);
                     }
-                    SpokespersonEvent::InputCutoverFinished { request_id, result } => {
+                    GptLiveEvent::InputCutoverFinished { request_id, result } => {
                         let current = snapshot
                             .lock()
-                            .map_err(|_| "Spokesperson settings are unavailable")?
+                            .map_err(|_| "GptLive settings are unavailable")?
                             .clone();
                         let barrier_work = RealtimeHostWork {
                             playback_active: !host.is_idle(),
@@ -746,11 +679,11 @@ fn run_managed_realtime_host_inner(
                             }
                         }
                     }
-                    SpokespersonEvent::Expired(message)
-                    | SpokespersonEvent::SessionLost(message) => {
+                    GptLiveEvent::Expired(message)
+                    | GptLiveEvent::SessionLost(message) => {
                         if let Some(queued) = queued_update.take() {
                             let _ = queued.completed.send(Err(
-                                "Spokesperson session ended before the queued settings update could begin"
+                                "GptLive session ended before the queued settings update could begin"
                                     .into(),
                             ));
                         }
@@ -776,7 +709,7 @@ fn run_managed_realtime_host_inner(
                                     pending_update.take().expect("matched settings update");
                                 if let Some(completed) = settings_update.completed {
                                     let _ = completed.send(Err(
-                                        "Spokesperson session ended before the settings update completed"
+                                        "GptLive session ended before the settings update completed"
                                             .into(),
                                     ));
                                 }
@@ -788,7 +721,7 @@ fn run_managed_realtime_host_inner(
                         if start_recovery {
                             let current = snapshot
                                 .lock()
-                                .map_err(|_| "Spokesperson settings are unavailable")?
+                                .map_err(|_| "GptLive settings are unavailable")?
                                 .clone();
                             let request = VoiceUpdateRequest {
                                 id: lifecycle.next_maintenance_id(),
@@ -812,7 +745,7 @@ fn run_managed_realtime_host_inner(
                         }
                         continue;
                     }
-                    SpokespersonEvent::Closed
+                    GptLiveEvent::Closed
                         if pending_update.as_ref().is_some_and(|update| {
                             matches!(
                                 update.transaction.purpose(),
@@ -848,15 +781,15 @@ fn run_managed_realtime_host_inner(
     if let Some(queued) = queued_update.take() {
         let _ = queued
             .completed
-            .send(Err("Spokesperson session stopped".into()));
+            .send(Err("GptLive session stopped".into()));
     }
     if let Some(update) = pending_update {
         if let Some(completed) = update.completed {
-            let _ = completed.send(Err("Spokesperson session stopped".into()));
+            let _ = completed.send(Err("GptLive session stopped".into()));
         }
         update.transaction.finish_candidate()?;
     }
-    runtime.send(SpokespersonCommand::Shutdown)?;
+    runtime.send(GptLiveCommand::Shutdown)?;
     let drain_deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < drain_deadline {
         match events.recv_timeout(Duration::from_millis(10)) {
@@ -876,9 +809,9 @@ fn run_managed_realtime_host_inner(
 
 fn activate_managed_update(
     pending: &mut Option<PendingManagedUpdate>,
-    runtime: &mut OpenAiSpokespersonRuntime,
-    events: &mut Receiver<SpokespersonEvent>,
-    config: &mut OpenAiSpokespersonConfig,
+    runtime: &mut OpenAiGptLiveRuntime,
+    events: &mut Receiver<GptLiveEvent>,
+    config: &mut OpenAiGptLiveConfig,
     snapshot: &Arc<Mutex<TtsConfigurationSnapshot>>,
 ) -> Result<(), String> {
     let pending = pending.take().expect("matched pending voice update");
@@ -889,11 +822,11 @@ fn activate_managed_update(
     old_runtime.retire_in_background();
     for frame in activated.held_input {
         runtime
-            .send(SpokespersonCommand::InputPcm48Khz(
+            .send(GptLiveCommand::InputPcm48Khz(
                 frame.as_samples().to_vec(),
             ))
             .map_err(|error| {
-                format!("Could not restore buffered input after Spokesperson cutover: {error}")
+                format!("Could not restore buffered input after GptLive cutover: {error}")
             })?;
     }
     if report_settings {
@@ -903,7 +836,7 @@ fn activate_managed_update(
         let applied = {
             let mut snapshot = snapshot
                 .lock()
-                .map_err(|_| "Spokesperson settings are unavailable")?;
+                .map_err(|_| "GptLive settings are unavailable")?;
             snapshot.revision = snapshot
                 .revision
                 .checked_add(1)
@@ -920,7 +853,7 @@ fn activate_managed_update(
 
 fn reject_managed_update(
     pending: &mut Option<PendingManagedUpdate>,
-    runtime: &OpenAiSpokespersonRuntime,
+    runtime: &OpenAiGptLiveRuntime,
     message: String,
 ) -> Result<(), String> {
     let pending = pending.take().expect("matched pending voice update");
@@ -944,10 +877,10 @@ mod tests {
     use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 
     use crate::{
-        openai_realtime_protocol::RealtimeSpokespersonSessionOptions,
-        openai_spokesperson::{
-            OpenAiSpokespersonConfig, SpokespersonCommand, SpokespersonEvent,
-            SpokespersonResponseStatus,
+        gpt_live_protocol::RealtimeGptLiveSessionOptions,
+        gpt_live_runtime::{
+            OpenAiGptLiveConfig, GptLiveCommand, GptLiveEvent,
+            GptLiveResponseStatus,
         },
         PcmAudioOutput,
     };
@@ -986,17 +919,15 @@ mod tests {
         serde_json::from_str(&text).unwrap()
     }
 
-    async fn acknowledge_session(
-        socket: &mut WebSocketStream<tokio::net::TcpStream>,
-        update: &Value,
-    ) {
+    async fn start_session(socket: &mut WebSocketStream<tokio::net::TcpStream>, start: &Value) {
+        assert_eq!(start["type"], "session.start");
         socket
             .send(Message::Text(
                 json!({
-                    "type": "session.updated",
+                    "type": "session.started",
                     "session": {
-                        "model": "test-model",
-                        "audio": { "output": update["session"]["audio"]["output"].clone() }
+                        "model": "gpt-live-1",
+                        "audio": { "output": start["session"]["audio"]["output"].clone() }
                     }
                 })
                 .to_string()
@@ -1011,7 +942,7 @@ mod tests {
             match socket.next().await {
                 Some(Ok(Message::Close(_))) | None => break,
                 Some(Ok(_)) => {}
-                Some(Err(error)) => panic!("Realtime test socket failed: {error}"),
+                Some(Err(_)) => break,
             }
         }
     }
@@ -1024,23 +955,21 @@ mod tests {
         let server = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
             let mut first = accept_async(stream).await.unwrap();
-            let first_update = receive_json(&mut first).await;
-            assert_eq!(first_update["type"], "session.update");
-            acknowledge_session(&mut first, &first_update).await;
+            let first_start = receive_json(&mut first).await;
+            start_session(&mut first, &first_start).await;
 
             let (stream, _) = listener.accept().await.unwrap();
             let mut second = accept_async(stream).await.unwrap();
-            let second_update = receive_json(&mut second).await;
-            assert_eq!(second_update["type"], "session.update");
-            acknowledge_session(&mut second, &second_update).await;
+            let second_start = receive_json(&mut second).await;
+            start_session(&mut second, &second_start).await;
 
             assert_eq!(
                 receive_json(&mut first).await["type"],
-                "input_audio_buffer.clear"
+                "session.close"
             );
             first
                 .send(Message::Text(
-                    json!({"type": "input_audio_buffer.cleared"})
+                    json!({"type": "session.closed"})
                         .to_string()
                         .into(),
                 ))
@@ -1051,13 +980,11 @@ mod tests {
             wait_for_close(&mut second).await;
         });
 
-        let config = OpenAiSpokespersonConfig {
+        let config = OpenAiGptLiveConfig {
             endpoint,
             api_key: "test-key".into(),
-            session: RealtimeSpokespersonSessionOptions {
-                model: Some("test-model".into()),
+            session: RealtimeGptLiveSessionOptions {
                 voice: Some("test-voice".into()),
-                speed: Some(1.0),
                 ..Default::default()
             },
             semantic_transcript: Vec::new(),
@@ -1105,31 +1032,29 @@ mod tests {
         let server = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
             let mut first = accept_async(stream).await.unwrap();
-            let first_update = receive_json(&mut first).await;
-            acknowledge_session(&mut first, &first_update).await;
+            let first_start = receive_json(&mut first).await;
+            start_session(&mut first, &first_start).await;
             first.send(Message::Close(None)).await.unwrap();
             drop(first);
 
             let (stream, _) = listener.accept().await.unwrap();
             let mut second = accept_async(stream).await.unwrap();
-            let second_update = receive_json(&mut second).await;
-            acknowledge_session(&mut second, &second_update).await;
+            let second_start = receive_json(&mut second).await;
+            start_session(&mut second, &second_start).await;
             candidate_ready_tx.send(()).unwrap();
             assert_eq!(
                 receive_json(&mut second).await["type"],
-                "input_audio_buffer.append"
+                "session.input_audio.append"
             );
             recovered_tx.send(()).unwrap();
             wait_for_close(&mut second).await;
         });
 
-        let config = OpenAiSpokespersonConfig {
+        let config = OpenAiGptLiveConfig {
             endpoint,
             api_key: "test-key".into(),
-            session: RealtimeSpokespersonSessionOptions {
-                model: Some("test-model".into()),
+            session: RealtimeGptLiveSessionOptions {
                 voice: Some("test-voice".into()),
-                speed: Some(1.0),
                 ..Default::default()
             },
             semantic_transcript: Vec::new(),
@@ -1163,7 +1088,7 @@ mod tests {
             .unwrap()
             .unwrap();
         host.send(
-            crate::openai_spokesperson::SpokespersonCommand::InputPcm48Khz(
+            crate::gpt_live_runtime::GptLiveCommand::InputPcm48Khz(
                 vec![0.25; crate::input::INPUT_FRAME_SAMPLES],
             ),
         )
@@ -1199,7 +1124,7 @@ mod tests {
         };
 
         host.handle(
-            SpokespersonEvent::AudioDelta {
+            GptLiveEvent::AudioDelta {
                 response_id: "response-1".into(),
                 item_id: "assistant-1".into(),
                 output_index: 0,
@@ -1212,20 +1137,7 @@ mod tests {
         )
         .unwrap();
         host.handle(
-            SpokespersonEvent::TranscriptDone {
-                response_id: "response-1".into(),
-                item_id: "assistant-1".into(),
-                output_index: 0,
-                content_index: 0,
-                text: "one two three four".into(),
-            },
-            &mut send_command,
-            &mut create_output,
-            &mut emit,
-        )
-        .unwrap();
-        host.handle(
-            SpokespersonEvent::AudioDelta {
+            GptLiveEvent::AudioDelta {
                 response_id: "response-2".into(),
                 item_id: "assistant-2".into(),
                 output_index: 0,
@@ -1240,7 +1152,7 @@ mod tests {
 
         assert!(matches!(
             &commands[..],
-            [crate::openai_spokesperson::SpokespersonCommand::TruncateOutput {
+            [crate::gpt_live_runtime::GptLiveCommand::TruncateOutput {
                 response_id,
                 item_id,
                 content_index: 0,
@@ -1276,24 +1188,12 @@ mod tests {
         };
 
         host.handle(
-            SpokespersonEvent::AudioDelta {
+            GptLiveEvent::AudioDelta {
                 response_id: "response-1".into(),
                 item_id: "assistant-1".into(),
                 output_index: 0,
                 content_index: 0,
                 samples: vec![0.0; 10],
-            },
-            &mut send_command,
-            &mut create_output,
-            &mut emit,
-        )
-        .unwrap();
-        host.handle(
-            SpokespersonEvent::AudioDone {
-                response_id: "response-1".into(),
-                item_id: "assistant-1".into(),
-                output_index: 0,
-                content_index: 0,
             },
             &mut send_command,
             &mut create_output,
@@ -1309,7 +1209,7 @@ mod tests {
         };
 
         host.handle(
-            SpokespersonEvent::AudioDelta {
+            GptLiveEvent::AudioDelta {
                 response_id: "response-1".into(),
                 item_id: "assistant-2".into(),
                 output_index: 1,
@@ -1322,9 +1222,9 @@ mod tests {
         )
         .unwrap();
         host.handle(
-            SpokespersonEvent::ResponseFinished {
+            GptLiveEvent::ResponseFinished {
                 response_id: "response-1".into(),
-                status: SpokespersonResponseStatus::Completed,
+                status: GptLiveResponseStatus::Completed,
             },
             &mut send_command,
             &mut create_output,
@@ -1358,7 +1258,7 @@ mod tests {
             Ok(())
         };
         host.handle(
-            SpokespersonEvent::AudioDelta {
+            GptLiveEvent::AudioDelta {
                 response_id: "response-1".into(),
                 item_id: "assistant-1".into(),
                 output_index: 0,
@@ -1372,7 +1272,7 @@ mod tests {
         .unwrap();
 
         host.handle_outbound_command(
-            &SpokespersonCommand::Provider(json!({
+            &GptLiveCommand::Provider(json!({
                 "type": "output_audio_buffer.clear"
             })),
             &mut send_command,
@@ -1382,7 +1282,7 @@ mod tests {
 
         assert!(matches!(
             commands.as_slice(),
-            [SpokespersonCommand::TruncateOutput { response_id, .. }]
+            [GptLiveCommand::TruncateOutput { response_id, .. }]
                 if response_id == "response-1"
         ));
         assert_eq!(events[1]["type"], "output_audio_buffer.cleared");
@@ -1410,7 +1310,7 @@ mod tests {
         };
 
         host.handle(
-            SpokespersonEvent::Provider(json!({
+            GptLiveEvent::Provider(json!({
                 "type": "session.output_transcript.delta",
                 "delta": "Hello",
             })),
@@ -1420,7 +1320,7 @@ mod tests {
         )
         .unwrap();
         host.handle(
-            SpokespersonEvent::AudioDelta {
+            GptLiveEvent::AudioDelta {
                 response_id: "live-output-1".into(),
                 item_id: "live-output-item-1".into(),
                 output_index: 0,
@@ -1432,83 +1332,11 @@ mod tests {
             &mut emit,
         )
         .unwrap();
-        host.handle(
-            SpokespersonEvent::TranscriptDelta {
-                response_id: "live-output-1".into(),
-                item_id: "live-output-item-1".into(),
-                output_index: 0,
-                content_index: 0,
-                text: "Hello".into(),
-            },
-            &mut send_command,
-            &mut create_output,
-            &mut emit,
-        )
-        .unwrap();
-
         assert_eq!(events.len(), 2);
-        assert_eq!(events[0]["type"], "output_audio_buffer.started");
-        assert_eq!(events[1]["type"], "response.output_audio_transcript.delta");
+        assert_eq!(events[0]["type"], "session.output_transcript.delta");
+        assert_eq!(events[0]["delta"], "Hello");
+        assert_eq!(events[1]["type"], "output_audio_buffer.started");
         assert_eq!(events[1]["response_id"], "live-output-1");
-        assert_eq!(events[1]["item_id"], "live-output-item-1");
-        assert_eq!(events[1]["delta"], "Hello");
     }
 
-    #[test]
-    fn handoff_interrupts_and_cancels_native_playback() {
-        let mut host = RealtimePlaybackHost::default();
-        let mut create_output = || {
-            Ok(Box::new(FakeOutput {
-                played_frames: 40,
-                drained: false,
-            }) as Box<dyn PcmAudioOutput>)
-        };
-        let mut commands = Vec::new();
-        let mut send_command = |command| {
-            commands.push(command);
-            Ok(())
-        };
-        let mut events = Vec::new();
-        let mut emit = |event| {
-            events.push(event);
-            Ok(())
-        };
-        host.handle(
-            SpokespersonEvent::AudioDelta {
-                response_id: "response-1".into(),
-                item_id: "assistant-1".into(),
-                output_index: 0,
-                content_index: 0,
-                samples: vec![0.0; 100],
-            },
-            &mut send_command,
-            &mut create_output,
-            &mut emit,
-        )
-        .unwrap();
-        host.handle(
-            SpokespersonEvent::Handoff {
-                response_id: "response-1".into(),
-                call_id: "call-1".into(),
-                message: "inspect the repository".into(),
-            },
-            &mut send_command,
-            &mut create_output,
-            &mut emit,
-        )
-        .unwrap();
-
-        assert!(matches!(
-            commands.first(),
-            Some(SpokespersonCommand::CancelResponses { response_ids })
-                if response_ids == &["response-1"]
-        ));
-        assert!(matches!(
-            commands.get(1),
-            Some(SpokespersonCommand::TruncateOutput { response_id, .. })
-                if response_id == "response-1"
-        ));
-        assert_eq!(events[1]["type"], "output_audio_buffer.cleared");
-        assert!(host.is_idle());
-    }
 }

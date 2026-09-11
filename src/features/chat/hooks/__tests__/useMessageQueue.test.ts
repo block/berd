@@ -1533,7 +1533,7 @@ describe("useMessageQueue", () => {
     act(() => {
       expect(
         result.current.enqueue(
-          "[Handoff handoff-3 from spokesperson; cursor 3] Check the result",
+          "[Handoff handoff-3 from gpt_live; cursor 3] Check the result",
           undefined,
           undefined,
           {
@@ -1562,7 +1562,7 @@ describe("useMessageQueue", () => {
   it("removes exhausted hidden coordination and drains the next user message", async () => {
     vi.useFakeTimers();
     const privateCoordination =
-      "[Handoff handoff-3 from spokesperson; cursor 3] Private context";
+      "[Handoff handoff-3 from gpt_live; cursor 3] Private context";
     const sendMessage = vi.fn((text: string) => text === "normal user message");
     useChatStore.getState().enqueueTransportReadyMessage("s1", {
       persona: { kind: "inherit" },

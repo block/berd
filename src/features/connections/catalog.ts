@@ -19,7 +19,7 @@ import {
   NotionIcon,
   OracleIcon,
   PagerDutyIcon,
-  QueryExpertIcon,
+  QueryBackendIcon,
   RiskIcon,
   SalesforceIcon,
   SentryIcon,
@@ -153,10 +153,10 @@ export const OAUTH_PROVIDERS: OAuthProviderEntry[] = [
     Icon: DoceboIcon,
   },
   {
-    provider: "query-expert",
-    displayName: "Query Expert",
-    description: "Get access to expert query insights to generate SQL",
-    Icon: QueryExpertIcon,
+    provider: "query-backend",
+    displayName: "Query Backend",
+    description: "Get access to backend query insights to generate SQL",
+    Icon: QueryBackendIcon,
   },
   {
     provider: "risk",

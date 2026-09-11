@@ -9,46 +9,46 @@ use std::collections::HashMap;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LiveSideEvent {
     UserTranscript { text: String },
-    SpokespersonTranscript { text: String, interrupted: bool },
+    GptLiveTranscript { text: String, interrupted: bool },
     Handoff { call_id: String, message: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ExpertDirective {
+pub struct BackendDirective {
     pub acknowledgement: Option<u64>,
     pub message: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ExpertDirectiveRejection {
+pub enum BackendDirectiveRejection {
     EmptyMessage,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ExpertDirectiveOutcome {
+pub enum BackendDirectiveOutcome {
     Pending(Vec<CausalMessage<LiveSideEvent>>),
-    Rejected(ExpertDirectiveRejection),
+    Rejected(BackendDirectiveRejection),
     Accepted {
         confirmed_token: u64,
         message: String,
     },
 }
 
-/// Causal boundary between the durable Expert and the live conversation side.
+/// Causal boundary between the durable Backend and the live conversation side.
 ///
 /// The live side contains the user in every mode and may also contain a
-/// Spokesperson. Both sources enter one ordered inbox. An Expert directive can
+/// GptLive. Both sources enter one ordered inbox. An Backend directive can
 /// cross back only after acknowledging the complete pending live-side batch.
 #[derive(Debug)]
-pub struct ExpertSpokespersonCore {
+pub struct BackendGptLiveCore {
     pipe: RealtimeMessagePipe,
     live_events: Vec<CausalMessage<LiveSideEvent>>,
     semantic_turns: Vec<Option<SemanticTurn>>,
-    spokesperson_turns: HashMap<String, usize>,
+    gpt_live_turns: HashMap<String, usize>,
     semantic_revision: u64,
 }
 
-impl Default for ExpertSpokespersonCore {
+impl Default for BackendGptLiveCore {
     fn default() -> Self {
         Self::new(0)
     }
@@ -57,17 +57,17 @@ impl Default for ExpertSpokespersonCore {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SemanticTurn {
     User(String),
-    Spokesperson { text: String, interrupted: bool },
-    Expert(String),
+    GptLive { text: String, interrupted: bool },
+    Backend(String),
 }
 
-impl ExpertSpokespersonCore {
+impl BackendGptLiveCore {
     pub fn new(initial_cursor: u64) -> Self {
         Self {
             pipe: RealtimeMessagePipe::new(initial_cursor),
             live_events: Vec::new(),
             semantic_turns: Vec::new(),
-            spokesperson_turns: HashMap::new(),
+            gpt_live_turns: HashMap::new(),
             semantic_revision: 0,
         }
     }
@@ -90,16 +90,16 @@ impl ExpertSpokespersonCore {
         &mut self,
         event: LiveSideEvent,
     ) -> Result<CausalMessage<LiveSideEvent>, String> {
-        let cursor = self.pipe.delivery_cursor(RealtimePipePeer::Spokesperson);
+        let cursor = self.pipe.delivery_cursor(RealtimePipePeer::GptLive);
         let pipe_message = live_event_pipe_message(&event);
         let exchange = self
             .pipe
-            .send(RealtimePipePeer::Spokesperson, cursor, &pipe_message)?;
+            .send(RealtimePipePeer::GptLive, cursor, &pipe_message)?;
         let token = match exchange {
             RealtimePipeExchange::Accepted(accepted) => accepted.outbound.id,
             RealtimePipeExchange::Rejected(rejected) => {
                 return Err(format!(
-                    "live event could not enter the Expert pipe ({:?})",
+                    "live event could not enter the Backend pipe ({:?})",
                     rejected.reason
                 ))
             }
@@ -112,17 +112,17 @@ impl ExpertSpokespersonCore {
         Ok(message)
     }
 
-    pub fn prepare_directive(&mut self, directive: ExpertDirective) -> ExpertDirectiveOutcome {
+    pub fn prepare_directive(&mut self, directive: BackendDirective) -> BackendDirectiveOutcome {
         let message = directive.message.trim().to_string();
         if message.is_empty() {
-            return ExpertDirectiveOutcome::Rejected(ExpertDirectiveRejection::EmptyMessage);
+            return BackendDirectiveOutcome::Rejected(BackendDirectiveRejection::EmptyMessage);
         }
 
         let cursor = directive
             .acknowledgement
-            .unwrap_or_else(|| self.pipe.cursor(RealtimePipePeer::Expert));
-        match self.pipe.send(RealtimePipePeer::Expert, cursor, &message) {
-            Ok(RealtimePipeExchange::Accepted(accepted)) => ExpertDirectiveOutcome::Accepted {
+            .unwrap_or_else(|| self.pipe.cursor(RealtimePipePeer::Backend));
+        match self.pipe.send(RealtimePipePeer::Backend, cursor, &message) {
+            Ok(RealtimePipeExchange::Accepted(accepted)) => BackendDirectiveOutcome::Accepted {
                 confirmed_token: accepted.outbound.sender_cursor,
                 message,
             },
@@ -137,22 +137,22 @@ impl ExpertSpokespersonCore {
                         rejected.cursor
                     }
                 });
-                ExpertDirectiveOutcome::Pending(self.events_after(cutoff))
+                BackendDirectiveOutcome::Pending(self.events_after(cutoff))
             }
-            Err(_) => ExpertDirectiveOutcome::Rejected(ExpertDirectiveRejection::EmptyMessage),
+            Err(_) => BackendDirectiveOutcome::Rejected(BackendDirectiveRejection::EmptyMessage),
         }
     }
 
-    pub fn send_expert_message(
+    pub fn send_backend_message(
         &mut self,
         cursor: u64,
         message: &str,
     ) -> Result<RealtimePipeExchange, String> {
-        self.pipe.send(RealtimePipePeer::Expert, cursor, message)
+        self.pipe.send(RealtimePipePeer::Backend, cursor, message)
     }
 
     pub fn confirmed_token(&self) -> u64 {
-        self.pipe.cursor(RealtimePipePeer::Expert)
+        self.pipe.cursor(RealtimePipePeer::Backend)
     }
 
     pub fn next_live_token(&self) -> u64 {
@@ -167,24 +167,24 @@ impl ExpertSpokespersonCore {
             .collect()
     }
 
-    pub fn reserve_spokesperson_turn(&mut self, response_id: String) {
-        if self.spokesperson_turns.contains_key(&response_id) {
+    pub fn reserve_gpt_live_turn(&mut self, response_id: String) {
+        if self.gpt_live_turns.contains_key(&response_id) {
             return;
         }
         let index = self.semantic_turns.len();
         self.semantic_turns.push(None);
-        self.spokesperson_turns.insert(response_id, index);
+        self.gpt_live_turns.insert(response_id, index);
     }
 
-    pub fn finish_spokesperson_turn(&mut self, response_id: &str, text: String, interrupted: bool) {
-        let Some(index) = self.spokesperson_turns.remove(response_id) else {
+    pub fn finish_gpt_live_turn(&mut self, response_id: &str, text: String, interrupted: bool) {
+        let Some(index) = self.gpt_live_turns.remove(response_id) else {
             return;
         };
         let text = text.trim().to_string();
         if text.is_empty() {
             return;
         }
-        self.semantic_turns[index] = Some(SemanticTurn::Spokesperson { text, interrupted });
+        self.semantic_turns[index] = Some(SemanticTurn::GptLive { text, interrupted });
         self.semantic_revision = self.semantic_revision.saturating_add(1);
     }
 
@@ -192,16 +192,16 @@ impl ExpertSpokespersonCore {
         self.record_semantic_turn(SemanticTurn::User(text));
     }
 
-    pub fn record_expert_turn(&mut self, text: String) {
-        self.record_semantic_turn(SemanticTurn::Expert(text));
+    pub fn record_backend_turn(&mut self, text: String) {
+        self.record_semantic_turn(SemanticTurn::Backend(text));
     }
 
-    pub fn record_spokesperson_turn(&mut self, text: String, interrupted: bool) {
+    pub fn record_gpt_live_turn(&mut self, text: String, interrupted: bool) {
         let text = text.trim().to_string();
         if text.is_empty() {
             return;
         }
-        self.record_semantic_turn(SemanticTurn::Spokesperson { text, interrupted });
+        self.record_semantic_turn(SemanticTurn::GptLive { text, interrupted });
     }
 
     pub fn semantic_revision(&self) -> u64 {
@@ -221,16 +221,16 @@ impl ExpertSpokespersonCore {
 fn live_event_pipe_message(event: &LiveSideEvent) -> String {
     match event {
         LiveSideEvent::UserTranscript { text }
-        | LiveSideEvent::SpokespersonTranscript { text, .. }
+        | LiveSideEvent::GptLiveTranscript { text, .. }
             if !text.trim().is_empty() =>
         {
             text.clone()
         }
         LiveSideEvent::UserTranscript { .. } => "[Empty user transcript]".into(),
-        LiveSideEvent::SpokespersonTranscript {
+        LiveSideEvent::GptLiveTranscript {
             interrupted: true, ..
-        } => "[Spokesperson interrupted before any confirmed words]".into(),
-        LiveSideEvent::SpokespersonTranscript { .. } => "[Silent Spokesperson response]".into(),
+        } => "[GptLive interrupted before any confirmed words]".into(),
+        LiveSideEvent::GptLiveTranscript { .. } => "[Silent GptLive response]".into(),
         LiveSideEvent::Handoff { message, .. } => message.clone(),
     }
 }
@@ -239,16 +239,16 @@ fn live_event_pipe_message(event: &LiveSideEvent) -> String {
 mod tests {
     use super::*;
 
-    fn directive(acknowledgement: Option<u64>, message: &str) -> ExpertDirective {
-        ExpertDirective {
+    fn directive(acknowledgement: Option<u64>, message: &str) -> BackendDirective {
+        BackendDirective {
             acknowledgement,
             message: message.into(),
         }
     }
 
     #[test]
-    fn user_and_spokesperson_share_one_ordered_live_side() {
-        let mut core = ExpertSpokespersonCore::default();
+    fn user_and_gpt_live_share_one_ordered_live_side() {
+        let mut core = BackendGptLiveCore::default();
         core.add_live_event(
             1,
             LiveSideEvent::UserTranscript {
@@ -258,8 +258,8 @@ mod tests {
         .unwrap();
         core.add_live_event(
             2,
-            LiveSideEvent::SpokespersonTranscript {
-                text: "I will ask the Expert.".into(),
+            LiveSideEvent::GptLiveTranscript {
+                text: "I will ask the Backend.".into(),
                 interrupted: false,
             },
         )
@@ -267,10 +267,10 @@ mod tests {
 
         assert_eq!(
             core.prepare_directive(directive(Some(1), "I checked.")),
-            ExpertDirectiveOutcome::Pending(vec![CausalMessage {
+            BackendDirectiveOutcome::Pending(vec![CausalMessage {
                 token: 2,
-                payload: LiveSideEvent::SpokespersonTranscript {
-                    text: "I will ask the Expert.".into(),
+                payload: LiveSideEvent::GptLiveTranscript {
+                    text: "I will ask the Backend.".into(),
                     interrupted: false,
                 },
             }])
@@ -278,8 +278,8 @@ mod tests {
     }
 
     #[test]
-    fn acknowledging_the_complete_live_batch_allows_the_expert_to_reverse() {
-        let mut core = ExpertSpokespersonCore::default();
+    fn acknowledging_the_complete_live_batch_allows_the_backend_to_reverse() {
+        let mut core = BackendGptLiveCore::default();
         core.add_live_event(
             1,
             LiveSideEvent::UserTranscript {
@@ -289,8 +289,8 @@ mod tests {
         .unwrap();
         core.add_live_event(
             2,
-            LiveSideEvent::SpokespersonTranscript {
-                text: "I will ask the Expert.".into(),
+            LiveSideEvent::GptLiveTranscript {
+                text: "I will ask the Backend.".into(),
                 interrupted: false,
             },
         )
@@ -298,7 +298,7 @@ mod tests {
 
         assert_eq!(
             core.prepare_directive(directive(Some(2), "  I checked.  ")),
-            ExpertDirectiveOutcome::Accepted {
+            BackendDirectiveOutcome::Accepted {
                 confirmed_token: 2,
                 message: "I checked.".into(),
             }
@@ -307,7 +307,7 @@ mod tests {
 
     #[test]
     fn invalid_directive_does_not_acknowledge_live_input() {
-        let mut core = ExpertSpokespersonCore::default();
+        let mut core = BackendGptLiveCore::default();
         core.add_live_event(
             1,
             LiveSideEvent::UserTranscript {
@@ -318,25 +318,25 @@ mod tests {
 
         assert_eq!(
             core.prepare_directive(directive(Some(1), "  ")),
-            ExpertDirectiveOutcome::Rejected(ExpertDirectiveRejection::EmptyMessage)
+            BackendDirectiveOutcome::Rejected(BackendDirectiveRejection::EmptyMessage)
         );
         assert!(matches!(
             core.prepare_directive(directive(None, "Now reply.")),
-            ExpertDirectiveOutcome::Pending(events) if events.len() == 1
+            BackendDirectiveOutcome::Pending(events) if events.len() == 1
         ));
     }
 
     #[test]
     fn semantic_turns_follow_response_start_not_publication_order() {
-        let mut core = ExpertSpokespersonCore::default();
-        core.reserve_spokesperson_turn("response-1".into());
+        let mut core = BackendGptLiveCore::default();
+        core.reserve_gpt_live_turn("response-1".into());
         core.record_user_turn("Here I am interrupting you".into());
-        core.finish_spokesperson_turn("response-1", "The heard prefix".into(), true);
+        core.finish_gpt_live_turn("response-1", "The heard prefix".into(), true);
 
         assert_eq!(
             core.semantic_transcript(),
             vec![
-                SemanticTurn::Spokesperson {
+                SemanticTurn::GptLive {
                     text: "The heard prefix".into(),
                     interrupted: true,
                 },
@@ -346,11 +346,11 @@ mod tests {
     }
 
     #[test]
-    fn unheard_spokesperson_turn_is_omitted_from_semantic_transcript() {
-        let mut core = ExpertSpokespersonCore::default();
-        core.reserve_spokesperson_turn("response-1".into());
+    fn unheard_gpt_live_turn_is_omitted_from_semantic_transcript() {
+        let mut core = BackendGptLiveCore::default();
+        core.reserve_gpt_live_turn("response-1".into());
         core.record_user_turn("Interrupting immediately".into());
-        core.finish_spokesperson_turn("response-1", String::new(), true);
+        core.finish_gpt_live_turn("response-1", String::new(), true);
 
         assert_eq!(
             core.semantic_transcript(),

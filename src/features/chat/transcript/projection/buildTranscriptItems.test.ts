@@ -43,7 +43,7 @@ describe("getVisibleTranscriptMessages voice no-op", () => {
     const voice = message(
       "voice",
       "user",
-      "Emissary said: Hello",
+      "GptLive said: Hello",
       "voice_conversation",
     );
     const fallback = message(
@@ -59,7 +59,7 @@ describe("getVisibleTranscriptMessages voice no-op", () => {
     const voice = message(
       "voice",
       "user",
-      "Emissary said: Hello",
+      "GptLive said: Hello",
       "voice_conversation",
     );
     const fallback: Message = {
@@ -82,7 +82,7 @@ describe("getVisibleTranscriptMessages voice no-op", () => {
     const voice = message(
       "voice",
       "user",
-      "[Voice transcript] Emissary said: Bonjour",
+      "[Voice transcript] GptLive said: Bonjour",
     );
     const fallback = message(
       "fallback",
@@ -122,7 +122,7 @@ describe("getVisibleTranscriptMessages voice no-op", () => {
     ]);
   });
 
-  it("never renders a transient empty-response fallback inside spoken Emissary text", () => {
+  it("never renders a transient empty-response fallback inside spoken GptLive text", () => {
     const voice = message(
       "voice",
       "user",
@@ -142,7 +142,7 @@ describe("getVisibleTranscriptMessages voice no-op", () => {
       ],
       metadata: {
         origin: "voice_conversation",
-        voiceConversationDebugEvent: "emissarySpeech",
+        voiceConversationDebugEvent: "gptLiveSpeech",
       },
     };
 

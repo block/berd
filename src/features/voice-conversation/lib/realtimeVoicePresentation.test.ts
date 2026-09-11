@@ -17,13 +17,11 @@ function message(id: string, event?: VoiceConversationDebugEvent): Message {
 
 describe("realtime voice presentation", () => {
   const transcript = [
-    message("master"),
-    message("spoken", "emissarySpeech"),
-    message("handoff", "emissaryToMaster"),
-    message("say", "masterToEmissarySay"),
-    message("context", "masterToEmissaryContext"),
-    message("dismissal", "masterDismissal"),
-    message("reminder", "handoffReminder"),
+    message("backend"),
+    message("spoken", "gptLiveSpeech"),
+    message("handoff", "gptLiveToBackend"),
+    message("commentary", "backendToGptLiveCommentary"),
+    message("thinking", "backendToGptLiveThinking"),
   ];
 
   it("keeps every coordination event in debug mode", () => {
@@ -33,13 +31,13 @@ describe("realtime voice presentation", () => {
   it("presents one assistant in subtle mode", () => {
     expect(
       presentRealtimeVoiceMessages(transcript, "subtle").map(({ id }) => id),
-    ).toEqual(["master", "spoken"]);
+    ).toEqual(["backend", "spoken"]);
   });
 
   it("keeps the original transcript when subtle mode has nothing to hide", () => {
     const ordinaryTranscript = [
-      message("master"),
-      message("spoken", "emissarySpeech"),
+      message("backend"),
+      message("spoken", "gptLiveSpeech"),
     ];
 
     expect(presentRealtimeVoiceMessages(ordinaryTranscript, "subtle")).toBe(

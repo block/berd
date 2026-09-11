@@ -1000,7 +1000,7 @@ export const MessageBubble = memo(function MessageBubble({
           shouldReserveMessageActionSpace && "pb-9",
           isUser
             ? "max-w-[var(--chat-user-message-max-width)] items-end"
-            : voiceDebugEvent && voiceDebugEvent !== "emissarySpeech"
+            : voiceDebugEvent && voiceDebugEvent !== "gptLiveSpeech"
               ? "w-full max-w-3xl items-start"
               : "w-full items-start",
         )}
@@ -1044,7 +1044,7 @@ export const MessageBubble = memo(function MessageBubble({
             hasVoiceSpeech &&
               "rounded-lg border border-border/80 px-4 py-3 shadow-sm",
             voiceDebugEvent &&
-              voiceDebugEvent !== "emissarySpeech" &&
+              voiceDebugEvent !== "gptLiveSpeech" &&
               "rounded-lg border px-4 py-3 shadow-sm",
           )}
           onClick={handleContentClick}

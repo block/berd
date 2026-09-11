@@ -1597,7 +1597,7 @@ describe("transcript projection cache", () => {
       ...original,
       metadata: {
         ...original.metadata,
-        voiceConversationDebugEvent: "masterToEmissarySay" as const,
+        voiceConversationDebugEvent: "backendToGptLiveCommentary" as const,
       },
     };
 

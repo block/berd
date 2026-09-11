@@ -12,13 +12,13 @@ const TTS_DELIVERY_FAILURE_OUTCOMES = new Set([
   "Native TTS could not deliver the assistant reply.",
 ]);
 const VOICE_TRANSCRIPT_BOUNDARY =
-  /\n(?=\[(?:Voice transcript(?:; cursor \d+)?|Handoff handoff-[A-Za-z0-9-]+ from spokesperson; cursor \d+)\] )/;
+  /\n(?=\[(?:Voice transcript(?:; cursor \d+)?|Handoff handoff-[A-Za-z0-9-]+ from gpt_live; cursor \d+)\] )/;
 const USER_TRANSCRIPT =
   /^\[Voice transcript(?:; cursor \d+)?\] User said: ([\s\S]*)$/;
-const SPOKESPERSON_TRANSCRIPT =
-  /^\[Voice transcript(?:; cursor \d+)?\] Spokesperson said( \(interrupted; best-effort transcript\))?: ([\s\S]*)$/;
-const SPOKESPERSON_DIRECT_MESSAGE =
-  /^\[Handoff handoff-[A-Za-z0-9-]+ from spokesperson; cursor \d+\] ([\s\S]*)$/;
+const GPT_LIVE_TRANSCRIPT =
+  /^\[Voice transcript(?:; cursor \d+)?\] GptLive said( \(interrupted; best-effort transcript\))?: ([\s\S]*)$/;
+const GPT_LIVE_DIRECT_MESSAGE =
+  /^\[Handoff handoff-[A-Za-z0-9-]+ from gpt_live; cursor \d+\] ([\s\S]*)$/;
 
 function visibleTextAfterTtsDeliveryNotices(text: string): string | null {
   if (!text.startsWith(TTS_DELIVERY_FAILURE_PREFIX)) {
@@ -103,9 +103,9 @@ function restoreRealtimeVoiceMessages(message: Message): Message[] | null {
   const restored: Message[] = [];
   for (const [index, segment] of segments.entries()) {
     const user = USER_TRANSCRIPT.exec(segment);
-    const spokesperson = SPOKESPERSON_TRANSCRIPT.exec(segment);
-    const direct = SPOKESPERSON_DIRECT_MESSAGE.exec(segment);
-    if (!user && !spokesperson && !direct) return null;
+    const gpt_live = GPT_LIVE_TRANSCRIPT.exec(segment);
+    const direct = GPT_LIVE_DIRECT_MESSAGE.exec(segment);
+    if (!user && !gpt_live && !direct) return null;
 
     const id = index === 0 ? message.id : `${message.id}:voice:${index}`;
     if (user) {
@@ -124,8 +124,8 @@ function restoreRealtimeVoiceMessages(message: Message): Message[] | null {
       continue;
     }
 
-    if (spokesperson) {
-      const interrupted = Boolean(spokesperson[1]);
+    if (gpt_live) {
+      const interrupted = Boolean(gpt_live[1]);
       restored.push({
         ...message,
         id,
@@ -133,17 +133,17 @@ function restoreRealtimeVoiceMessages(message: Message): Message[] | null {
         content: [
           {
             type: "text",
-            text: spokesperson[2],
+            text: gpt_live[2],
             speech: interrupted
               ? { status: "interrupted", confidence: "low" }
-              : { status: "spoken", spokenThrough: spokesperson[2].length },
+              : { status: "spoken", spokenThrough: gpt_live[2].length },
           },
         ],
         metadata: {
           ...message.metadata,
           userVisible: true,
           agentVisible: false,
-          voiceConversationDebugEvent: "emissarySpeech",
+          voiceConversationDebugEvent: "gptLiveSpeech",
           completionStatus: "completed",
         },
       });
@@ -159,8 +159,8 @@ function restoreRealtimeVoiceMessages(message: Message): Message[] | null {
         ...message.metadata,
         userVisible: true,
         agentVisible: false,
-        personaName: "Spokesperson → Expert",
-        voiceConversationDebugEvent: "emissaryToMaster",
+        personaName: "GptLive → Backend",
+        voiceConversationDebugEvent: "gptLiveToBackend",
         completionStatus: "completed",
       },
     });

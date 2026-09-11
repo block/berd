@@ -42,7 +42,7 @@ describe("NotificationSettings", () => {
     window.localStorage.removeItem(ASSISTIVE_UX_STORAGE_KEY);
   });
 
-  it("renders the master toggle", () => {
+  it("renders the backend toggle", () => {
     renderWithProviders(<NotificationSettings />);
     expect(
       screen.getByText(enSettings.notifications.enabled.label),
@@ -76,7 +76,7 @@ describe("NotificationSettings", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("calls setNotificationPrefs with enabled:false when master toggle is turned off", async () => {
+  it("calls setNotificationPrefs with enabled:false when backend toggle is turned off", async () => {
     const user = userEvent.setup();
     renderWithProviders(<NotificationSettings />);
     const masterSwitch = screen.getByRole("switch", {

@@ -8,7 +8,7 @@ mod audio_output;
 pub mod benchmark;
 pub mod causal_inbox;
 mod configured_tts;
-pub mod expert_spokesperson;
+pub mod gpt_live_bridge;
 pub mod input;
 pub mod local_assets;
 #[cfg(target_os = "macos")]
@@ -17,8 +17,8 @@ pub mod mac_speech;
 mod macos_audio_output;
 pub mod openai;
 pub mod openai_realtime;
-pub mod openai_realtime_protocol;
-pub mod openai_spokesperson;
+pub mod gpt_live_protocol;
+pub mod gpt_live_runtime;
 mod outbound;
 mod parakeet;
 pub mod parakeet_assets;
@@ -31,7 +31,7 @@ pub mod realtime_host_lifecycle;
 pub mod realtime_pipe;
 pub mod session;
 pub mod siri;
-pub mod spokesperson_voice_update;
+pub mod gpt_live_voice_update;
 mod synthesis;
 mod tts;
 

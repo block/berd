@@ -11,30 +11,27 @@ import { useChatStore } from "@/features/chat/stores/chatStore";
 import { appendSessionSystemPrompt } from "@/shared/api/acpApi";
 import {
   claimVoiceDictationMicrophone,
-  completeOpenAiRealtimeExpertTurn,
-  createOpenAiRealtimeExpertInstructions,
+  createOpenAiRealtimeBackendInstructions,
   createOpenAiRealtimeTranscriptSeed,
-  deliverOpenAiRealtimeExpertMessage,
-  dismissOpenAiRealtimeHandoffsWithContext,
-  flushOpenAiRealtimeExpertEvents,
+  appendOpenAiRealtimeBackendResult,
   listenToOpenAiRealtimeVoiceControls,
-  listenToOpenAiRealtimeSpokespersonRuntime,
+  listenToOpenAiRealtimeGptLiveRuntime,
   publishOpenAiRealtimeVoiceActivity,
   publishOpenAiRealtimeVoiceMicrophoneMuted,
   rebindOpenAiRealtimeVoiceControls,
-  reduceOpenAiRealtimeSpokespersonEvent,
+  reduceOpenAiRealtimeGptLiveEvent,
   requestOpenAiRealtimeTypedUserMessage,
-  sendOpenAiRealtimeSpokespersonRuntimeEvent,
+  sendOpenAiRealtimeGptLiveRuntimeEvent,
   releaseVoiceDictationMicrophone,
   setOpenAiRealtimeVoiceControlsSuppressed,
   startOpenAiRealtimeVoiceControls,
-  startOpenAiRealtimeSpokespersonRuntime,
+  startOpenAiRealtimeGptLiveRuntime,
   stopOpenAiRealtimeVoiceControls,
-  stopOpenAiRealtimeSpokespersonRuntime,
-  releaseOpenAiRealtimeSpokespersonRuntime,
-  updateOpenAiRealtimeSpokespersonSettings,
+  stopOpenAiRealtimeGptLiveRuntime,
+  releaseOpenAiRealtimeGptLiveRuntime,
+  updateOpenAiRealtimeGptLiveSettings,
   type OpenAiRealtimeTranscriptSeedTurn,
-  type OpenAiRealtimeExpertDeliveryEvent,
+  type OpenAiRealtimeBackendDeliveryEvent,
 } from "@/shared/api/openaiRealtime";
 import {
   createSystemNotificationMessage,
@@ -46,17 +43,12 @@ import {
   type NativeMicrophone,
 } from "../lib/nativeMicrophone";
 import {
-  type ActiveRealtimeEmissary,
-  type HandoffDismissal,
-  type MasterMessageDelivery,
-  type RealtimeMasterTurnCompletion,
-  registerRealtimeEmissary,
-  waitForRealtimeEmissaryBridgeReady,
-} from "../lib/realtimeEmissaryBridge";
-import {
-  type MasterMessageMode,
-  sendRealtimeEvents,
-} from "../lib/realtimeEmissaryProtocol";
+  type ActiveGptLiveBridge,
+  type GptLiveAppendChannel,
+  type GptLiveAppendResult,
+  registerGptLiveBridge,
+  waitForGptLiveBridgeReady,
+} from "../lib/gptLiveBridge";
 import {
   requestVoiceConversationEnd,
   trackVoiceAssistantResponse,
@@ -73,11 +65,16 @@ import {
   observeVoiceConversationControlVisibility,
 } from "./useVoiceConversationController";
 
-const MASTER_PROMPT_KEY = "berd-realtime-voice-master";
+const BACKEND_PROMPT_KEY = "berd-gpt-live-backend";
 const MICROPHONE_OWNER_ID = "berd:realtime-voice-conversation";
 const MAX_REALTIME_REPLAY_ITEMS = 12;
-const HANDOFF_REMINDER_IDS_METADATA = "realtimeHandoffReminderIds";
-const MAX_HANDOFF_REMINDER_ATTEMPTS = 3;
+
+function sendRealtimeEvents(
+  transport: { send(data: string): void },
+  events: readonly Record<string, unknown>[],
+): void {
+  for (const event of events) transport.send(JSON.stringify(event));
+}
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -94,33 +91,26 @@ function isMissingActiveRun(error: unknown): boolean {
   return errorText(error).toLowerCase().includes("no active run to steer");
 }
 
-export function renderRealtimeExpertDeliveryEvent(
-  event: OpenAiRealtimeExpertDeliveryEvent,
+export function renderRealtimeBackendDeliveryEvent(
+  event: OpenAiRealtimeBackendDeliveryEvent,
 ): string {
   const cursor = `cursor ${event.cursor}`;
   switch (event.role) {
     case "user":
       return `[Voice transcript; ${cursor}] User said: ${event.text}`;
-    case "spokesperson":
-      return `[Voice transcript; ${cursor}] Spokesperson said: ${event.text}`;
-    case "spokesperson_interrupted":
-      return `[Voice transcript; ${cursor}] Spokesperson said (interrupted; best effort): ${event.text}`;
+    case "gpt_live":
+      return `[Voice transcript; ${cursor}] GPT Live said: ${event.text}`;
+    case "gpt_live_interrupted":
+      return `[Voice transcript; ${cursor}] GPT Live said (interrupted; best effort): ${event.text}`;
     case "handoff":
-      return `[Handoff ${event.handoffId ?? "unknown"} from spokesperson; ${cursor}] ${event.text}`;
-    case "lifecycle":
-      return event.text.startsWith("[Private handoff reminder]")
-        ? event.text.replace(
-            "[Private handoff reminder]",
-            `[Private handoff reminder; ${cursor}]`,
-          )
-        : `[Voice lifecycle; ${cursor}] ${event.text}`;
+      return `[Delegation ${event.handoffId ?? "unknown"} from GPT Live; ${cursor}] ${event.text}`;
   }
 }
 
-export function renderRealtimeExpertDelivery(
-  events: OpenAiRealtimeExpertDeliveryEvent[],
+export function renderRealtimeBackendDelivery(
+  events: OpenAiRealtimeBackendDeliveryEvent[],
 ): string {
-  return events.map(renderRealtimeExpertDeliveryEvent).join("\n");
+  return events.map(renderRealtimeBackendDeliveryEvent).join("\n");
 }
 
 function waitForSessionHydration(
@@ -152,7 +142,7 @@ function waitForSessionHydration(
   });
 }
 
-function waitForMasterIdle(
+function waitForBackendIdle(
   sessionId: string,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -183,11 +173,11 @@ function waitForMasterIdle(
   });
 }
 
-type MasterDeliveryOpportunity = "send" | "steer";
+type BackendDeliveryOpportunity = "send" | "steer";
 
-function masterDeliveryOpportunity(
+function backendDeliveryOpportunity(
   sessionId: string,
-): MasterDeliveryOpportunity | null {
+): BackendDeliveryOpportunity | null {
   const state = useChatStore.getState();
   if ((state.queuedMessageBySession[sessionId]?.length ?? 0) > 0) return null;
   const runtime = state.getSessionRuntime(sessionId);
@@ -199,12 +189,12 @@ function masterDeliveryOpportunity(
   return null;
 }
 
-function waitForMasterDeliveryOpportunity(
+function waitForBackendDeliveryOpportunity(
   sessionId: string,
   signal?: AbortSignal,
-): Promise<MasterDeliveryOpportunity> {
+): Promise<BackendDeliveryOpportunity> {
   signal?.throwIfAborted();
-  const available = masterDeliveryOpportunity(sessionId);
+  const available = backendDeliveryOpportunity(sessionId);
   if (available) return Promise.resolve(available);
 
   return new Promise((resolve, reject) => {
@@ -218,7 +208,7 @@ function waitForMasterDeliveryOpportunity(
       reject(signal?.reason ?? new DOMException("Aborted", "AbortError"));
     };
     unsubscribe = useChatStore.subscribe(() => {
-      const opportunity = masterDeliveryOpportunity(sessionId);
+      const opportunity = backendDeliveryOpportunity(sessionId);
       if (!opportunity) return;
       cleanup();
       resolve(opportunity);
@@ -228,7 +218,7 @@ function waitForMasterDeliveryOpportunity(
   });
 }
 
-function waitForMasterRunBoundary(
+function waitForBackendRunBoundary(
   sessionId: string,
   rejectedRunId: string | null,
   signal?: AbortSignal,
@@ -265,7 +255,6 @@ function waitForMasterRunBoundary(
 
 const MAX_BRIDGE_CURSOR = 4_294_967_295;
 const BRIDGE_CURSOR_RESERVE = 1_000_000;
-const FINAL_TRANSCRIPT_FLUSH_TIMEOUT_MS = 100;
 
 function createBridgeCallScope(): { id: string; initialCursor: number } {
   const id = crypto.randomUUID();
@@ -284,7 +273,7 @@ function isAbortError(error: unknown): boolean {
   );
 }
 
-function createEmissaryTranscriptMessage(
+function createGptLiveTranscriptMessage(
   text: string,
   interrupted: boolean,
   id: string = crypto.randomUUID(),
@@ -312,7 +301,7 @@ function createEmissaryTranscriptMessage(
       userVisible: true,
       agentVisible: false,
       origin: "voice_conversation",
-      voiceConversationDebugEvent: "emissarySpeech",
+      voiceConversationDebugEvent: "gptLiveSpeech",
       completionStatus: provisional ? "inProgress" : "completed",
     },
   };
@@ -360,8 +349,8 @@ function createCoordinationDebugMessage(
 
 function createHandoffDebugMessage(handoffId: string, text: string): Message {
   return createCoordinationDebugMessage(
-    "emissaryToMaster",
-    `Spokesperson → Expert · Handoff ${handoffId}`,
+    "gptLiveToBackend",
+    `GPT Live → Backend · Delegation ${handoffId}`,
     text,
   );
 }
@@ -404,9 +393,9 @@ export function collectRealtimeTranscriptSeedTurns(
       continue;
     // Only the final visible assistant block before the next user turn is
     // useful context. Progress narration and earlier replacements stay in the
-    // durable Expert transcript but do not bloat a resumed voice frontend.
+    // durable Backend transcript but do not bloat a resumed voice frontend.
     pendingAssistant = {
-      role: "spokesperson",
+      role: "gpt_live",
       text,
       interrupted: false,
     };
@@ -452,23 +441,13 @@ class OpenAiRealtimeConversationRuntime {
   private realtimeRuntimeSendQueue = Promise.resolve();
   private releaseControlsListener: (() => void) | null = null;
   private releaseBridge: (() => void) | null = null;
-  private bridgeSender:
+  private bridgeAppender:
     | ((
         message: string,
         cursor: number,
-        mode: MasterMessageMode,
-        resolves: string[],
-      ) => Promise<MasterMessageDelivery>)
-    | null = null;
-  private bridgeHandoffDismissal:
-    | ((
-        cursor: number,
-        handoffIds: string[],
-        reason: string,
-      ) => Promise<HandoffDismissal>)
-    | null = null;
-  private bridgeMasterTurnCompletion:
-    | ((completion: RealtimeMasterTurnCompletion) => void)
+        channel: GptLiveAppendChannel,
+        delegationId?: string,
+      ) => Promise<GptLiveAppendResult>)
     | null = null;
   private activeRun = 0;
   private deliveryQueue = Promise.resolve();
@@ -480,11 +459,10 @@ class OpenAiRealtimeConversationRuntime {
   private ownerMigration = Promise.resolve();
   private historyReplay = Promise.resolve();
   private bridgeCallScope = createBridgeCallScope();
-  private flushPendingExpertEvents: (() => Promise<boolean>) | null = null;
-  private bridgeReady: Promise<ActiveRealtimeEmissary | null> =
+  private bridgeReady: Promise<ActiveGptLiveBridge | null> =
     Promise.resolve(null);
   private resolveBridgeReady:
-    | ((bridge: ActiveRealtimeEmissary | null) => void)
+    | ((bridge: ActiveGptLiveBridge | null) => void)
     | null = null;
 
   readonly subscribe = (listener: () => void): (() => void) => {
@@ -532,13 +510,13 @@ class OpenAiRealtimeConversationRuntime {
         }
         await appendSessionSystemPrompt(
           previousSessionId,
-          MASTER_PROMPT_KEY,
+          BACKEND_PROMPT_KEY,
           "",
         ).catch(() => undefined);
         await appendSessionSystemPrompt(
           sessionId,
-          MASTER_PROMPT_KEY,
-          await createOpenAiRealtimeExpertInstructions(
+          BACKEND_PROMPT_KEY,
+          await createOpenAiRealtimeBackendInstructions(
             sessionId,
             this.bridgeCallScope.initialCursor,
             this.bridgeCallScope.id,
@@ -601,7 +579,7 @@ class OpenAiRealtimeConversationRuntime {
         return;
       }
       this.registerBridge(sessionId);
-      await waitForRealtimeEmissaryBridgeReady();
+      await waitForGptLiveBridgeReady();
       if (isStale()) return;
       const controlsStatus = await startOpenAiRealtimeVoiceControls(sessionId);
       if (isStale()) {
@@ -628,12 +606,16 @@ class OpenAiRealtimeConversationRuntime {
         useChatSessionStore.getState().getSession(sessionId)?.creationState ===
         "pending";
       if (!pendingDraft) {
-        await createOpenAiRealtimeExpertInstructions(
+        await createOpenAiRealtimeBackendInstructions(
           sessionId,
           this.bridgeCallScope.initialCursor,
           this.bridgeCallScope.id,
         ).then((instructions) =>
-          appendSessionSystemPrompt(sessionId, MASTER_PROMPT_KEY, instructions),
+          appendSessionSystemPrompt(
+            sessionId,
+            BACKEND_PROMPT_KEY,
+            instructions,
+          ),
         );
       }
       if (isStale()) return;
@@ -642,7 +624,7 @@ class OpenAiRealtimeConversationRuntime {
         send: (data: string) => {
           const event = JSON.parse(data) as Record<string, unknown>;
           const sent = this.realtimeRuntimeSendQueue.then(() =>
-            sendOpenAiRealtimeSpokespersonRuntimeEvent(sessionId, event),
+            sendOpenAiRealtimeGptLiveRuntimeEvent(sessionId, event),
           );
           this.realtimeRuntimeSendQueue = sent.catch(() => undefined);
           void sent.catch((error) =>
@@ -666,45 +648,33 @@ class OpenAiRealtimeConversationRuntime {
         );
         return result;
       };
-      const deliverExpertEvents = (
+      const deliverBackendEvents = (
         ownerSessionId: string,
         delivery: {
-          events: OpenAiRealtimeExpertDeliveryEvent[];
+          events: OpenAiRealtimeBackendDeliveryEvent[];
           displayText: string;
           handoffIds: string[];
         },
         queueUntilIdle = false,
         continueAfterStop = false,
       ) => {
-        this.deliverToMaster(
+        this.deliverToBackend(
           ownerSessionId,
-          renderRealtimeExpertDelivery(delivery.events),
+          renderRealtimeBackendDelivery(delivery.events),
           delivery.displayText,
           undefined,
           true,
           undefined,
           queueUntilIdle,
-          delivery.handoffIds,
           continueAfterStop,
         );
-      };
-      this.flushPendingExpertEvents = async () => {
-        const delivery = await flushOpenAiRealtimeExpertEvents(sessionId);
-        if (!delivery) return false;
-        deliverExpertEvents(
-          this.snapshot.boundSessionId ?? sessionId,
-          delivery,
-          false,
-          true,
-        );
-        return true;
       };
       const transcriptMessageIds = new Map<string, string>();
       const upsertTranscriptMessage = (
         ownerSessionId: string,
         transcript: {
           itemId: string;
-          speaker: "user" | "emissary";
+          speaker: "user" | "gptLive";
           text: string;
           interrupted?: true;
         },
@@ -720,7 +690,7 @@ class OpenAiRealtimeConversationRuntime {
                 transcript.text,
                 provisional,
               )
-            : createEmissaryTranscriptMessage(
+            : createGptLiveTranscriptMessage(
                 transcript.text,
                 transcript.interrupted === true,
                 messageId,
@@ -739,15 +709,15 @@ class OpenAiRealtimeConversationRuntime {
       };
       const forwardTypedUserMessage = (text: string) => {
         void enqueueProtocolOperation(async () => {
-          const request = await requestOpenAiRealtimeTypedUserMessage(
+          const events = await requestOpenAiRealtimeTypedUserMessage(
             sessionId,
             text,
           );
-          sendRealtimeEvents(transport, request.events);
+          sendRealtimeEvents(transport, events);
         });
       };
-      this.releaseRuntimeListener =
-        await listenToOpenAiRealtimeSpokespersonRuntime((runtimeEvent) => {
+      this.releaseRuntimeListener = await listenToOpenAiRealtimeGptLiveRuntime(
+        (runtimeEvent) => {
           try {
             if (runtimeEvent.sessionId !== sessionId) return;
             if (!this.snapshot.boundSessionId || isStale()) return;
@@ -794,7 +764,7 @@ class OpenAiRealtimeConversationRuntime {
               this.publishActivity("assistant-idle");
             }
             void enqueueProtocolOperation(async () => {
-              const reduction = await reduceOpenAiRealtimeSpokespersonEvent(
+              const reduction = await reduceOpenAiRealtimeGptLiveEvent(
                 sessionId,
                 event,
               );
@@ -808,9 +778,7 @@ class OpenAiRealtimeConversationRuntime {
                     {
                       itemId: bridgeEvent.itemId,
                       speaker:
-                        bridgeEvent.speaker === "spokesperson"
-                          ? "emissary"
-                          : "user",
+                        bridgeEvent.speaker === "gpt_live" ? "gptLive" : "user",
                       text: "",
                     },
                     true,
@@ -821,14 +789,22 @@ class OpenAiRealtimeConversationRuntime {
                     {
                       ...bridgeEvent,
                       speaker:
-                        bridgeEvent.speaker === "spokesperson"
-                          ? "emissary"
-                          : "user",
+                        bridgeEvent.speaker === "gpt_live" ? "gptLive" : "user",
                     },
                     true,
                   );
+                } else if (bridgeEvent.type === "transcript.settled") {
+                  upsertTranscriptMessage(
+                    ownerSessionId,
+                    {
+                      ...bridgeEvent,
+                      speaker:
+                        bridgeEvent.speaker === "gpt_live" ? "gptLive" : "user",
+                    },
+                    false,
+                  );
                 } else if (bridgeEvent.type === "transcript.finalized") {
-                  if (bridgeEvent.speaker === "spokesperson") {
+                  if (bridgeEvent.speaker === "gpt_live") {
                     trackVoiceAssistantResponse();
                   } else {
                     trackVoiceUserUtterance();
@@ -838,9 +814,7 @@ class OpenAiRealtimeConversationRuntime {
                     {
                       ...bridgeEvent,
                       speaker:
-                        bridgeEvent.speaker === "spokesperson"
-                          ? "emissary"
-                          : "user",
+                        bridgeEvent.speaker === "gpt_live" ? "gptLive" : "user",
                       interrupted: bridgeEvent.interrupted || undefined,
                     },
                     false,
@@ -858,37 +832,22 @@ class OpenAiRealtimeConversationRuntime {
                     ),
                   );
               }
-              if (reduction.expertDelivery) {
-                deliverExpertEvents(ownerSessionId, reduction.expertDelivery);
+              if (reduction.backendDelivery) {
+                deliverBackendEvents(ownerSessionId, reduction.backendDelivery);
               }
             });
           } catch (error) {
             void this.fail(this.snapshot.boundSessionId ?? sessionId, error);
           }
-        });
+        },
+      );
 
       const runtimeOptions = {
-        model: preference.model,
-        transcriptionModel: preference.transcriptionModel,
-        transcriptionLanguage: preference.transcriptionLanguage,
-        transcriptionPrompt: preference.transcriptionPrompt,
         voice: preference.voice,
-        speed: preference.speed,
-        turnDetection: preference.turnDetection,
-        eagerness: preference.eagerness,
-        interruptResponse: preference.interruptResponse,
-        createResponse: preference.createResponse,
-        vadThreshold: preference.vadThreshold,
-        prefixPaddingMs: preference.prefixPaddingMs,
-        silenceDurationMs: preference.silenceDurationMs,
-        idleTimeoutMs: preference.idleTimeoutMs,
-        noiseReduction: preference.noiseReduction,
-        reasoningEffort: preference.reasoningEffort,
-        maxOutputTokens: preference.maxOutputTokens,
       };
       this.realtimeRuntimeSessionId = sessionId;
       try {
-        await startOpenAiRealtimeSpokespersonRuntime(
+        await startOpenAiRealtimeGptLiveRuntime(
           sessionId,
           this.bridgeCallScope.initialCursor,
           this.bridgeCallScope.id,
@@ -914,28 +873,21 @@ class OpenAiRealtimeConversationRuntime {
       ]);
       if (isStale()) return;
       let appliedVoice = preference.voice;
-      let appliedSpeed = preference.speed;
       this.releaseVoicePreferenceListener = subscribeToRealtimeVoicePreference(
         (next) => {
-          if (
-            isStale() ||
-            (next.voice === appliedVoice && next.speed === appliedSpeed)
-          )
-            return;
+          if (isStale() || next.voice === appliedVoice) return;
           const requestedVoice = next.voice;
-          const requestedSpeed = next.speed;
           const update = this.realtimeSettingsQueue.then(async () => {
             if (isStale()) return;
-            const snapshot = await updateOpenAiRealtimeSpokespersonSettings(
+            const snapshot = await updateOpenAiRealtimeGptLiveSettings(
               sessionId,
               this.realtimeSettingsRevision,
               requestedVoice,
-              requestedSpeed,
+              1,
             );
             if (isStale()) return;
             this.realtimeSettingsRevision = snapshot.revision;
             appliedVoice = snapshot.voice;
-            appliedSpeed = snapshot.rate;
           });
           this.realtimeSettingsQueue = update.catch((error) => {
             if (!isStale()) {
@@ -947,7 +899,7 @@ class OpenAiRealtimeConversationRuntime {
         },
       );
       const nativeMicrophone = await startNativeMicrophone(
-        "push_openai_realtime_spokesperson_audio",
+        "push_openai_realtime_gpt_live_audio",
       );
       if (isStale()) {
         nativeMicrophone.stop();
@@ -974,108 +926,45 @@ class OpenAiRealtimeConversationRuntime {
           sendRealtimeEvents(transport, events);
         },
       );
-      this.bridgeSender = async (message, cursor, mode, resolves) => {
-        const resolvedHandoffIds = [...new Set(resolves)];
-        const delivery = await enqueueProtocolOperation(() =>
-          deliverOpenAiRealtimeExpertMessage(
+      this.bridgeAppender = async (message, cursor, channel, delegationId) => {
+        const result = await enqueueProtocolOperation(() =>
+          appendOpenAiRealtimeBackendResult(
             sessionId,
             cursor,
             message,
-            mode,
-            resolvedHandoffIds,
+            channel,
+            delegationId,
           ),
         );
-        if (!delivery.accepted) return delivery;
+        if (!result.accepted) return result;
         useChatStore
           .getState()
           .addMessage(
             this.snapshot.boundSessionId ?? sessionId,
             createCoordinationDebugMessage(
-              mode === "say"
-                ? "masterToEmissarySay"
-                : "masterToEmissaryContext",
-              `Expert → Spokesperson · ${mode === "say" ? "Say" : "Context"} · ${delivery.deliveryStatus}`,
+              channel === "commentary"
+                ? "backendToGptLiveCommentary"
+                : "backendToGptLiveThinking",
+              `Backend → GPT Live · ${channel}`,
               message,
             ),
           );
-        return delivery;
-      };
-      this.bridgeHandoffDismissal = async (cursor, handoffIds, reason) => {
-        const dismissedHandoffIds = [...new Set(handoffIds)];
-        const dismissal = await enqueueProtocolOperation(() =>
-          dismissOpenAiRealtimeHandoffsWithContext(
-            sessionId,
-            cursor,
-            dismissedHandoffIds,
-            reason,
-          ),
-        );
-        if (!dismissal.accepted) return dismissal;
-        useChatStore
-          .getState()
-          .addMessage(
-            this.snapshot.boundSessionId ?? sessionId,
-            createCoordinationDebugMessage(
-              "masterDismissal",
-              `Expert → Spokesperson · Dismissed · ${dismissal.deliveryStatus}`,
-              `${dismissedHandoffIds.join(", ")}: ${reason.trim()}`,
-            ),
-          );
-        return dismissal;
-      };
-      this.bridgeMasterTurnCompletion = ({ reminderHandoffIds }) => {
-        const ownerSessionId = this.snapshot.boundSessionId;
-        if (!ownerSessionId) return;
-        void enqueueProtocolOperation(async () => {
-          const completion = await completeOpenAiRealtimeExpertTurn(
-            sessionId,
-            reminderHandoffIds,
-            MAX_HANDOFF_REMINDER_ATTEMPTS,
-          );
-          const reminder = completion.reminder;
-          if (reminder.status === "none") return;
-          if (reminder.status === "exhausted") {
-            throw new Error(reminder.message);
-          }
-          useChatStore
-            .getState()
-            .addMessage(
-              ownerSessionId,
-              createCoordinationDebugMessage(
-                "handoffReminder",
-                `Berd → Expert · Handoff reminder ${reminder.attempt}/${MAX_HANDOFF_REMINDER_ATTEMPTS}`,
-                reminder.requests,
-              ),
-            );
-          if (completion.expertDelivery) {
-            deliverExpertEvents(
-              ownerSessionId,
-              completion.expertDelivery,
-              true,
-            );
-          }
-        });
+        return result;
       };
       const bridgeSessionId = this.snapshot.boundSessionId ?? sessionId;
-      if (
-        !this.bridgeSender ||
-        !this.bridgeHandoffDismissal ||
-        !this.bridgeMasterTurnCompletion
-      ) {
-        throw new Error("The GPT Live Spokesperson bridge did not initialize.");
+      if (!this.bridgeAppender) {
+        throw new Error("The GPT Live bridge did not initialize.");
       }
       this.resolveBridgeReady?.({
         sessionId: bridgeSessionId,
-        sendMasterMessage: this.bridgeSender,
-        dismissHandoffs: this.bridgeHandoffDismissal,
-        completeMasterTurn: this.bridgeMasterTurnCompletion,
+        append: this.bridgeAppender,
       });
       this.resolveBridgeReady = null;
       trackVoiceConversationStarted({
         inputBackend: "openai",
         outputBackend: "openai",
         voiceMode: "openai-realtime",
-        ttsRate: appliedSpeed,
+        ttsRate: 1,
       });
       this.setSnapshot({
         ...this.snapshot,
@@ -1104,23 +993,13 @@ class OpenAiRealtimeConversationRuntime {
     const realtimeRuntimeSessionId = this.realtimeRuntimeSessionId;
     this.realtimeRuntimeSessionId = null;
     if (realtimeRuntimeSessionId) {
-      await stopOpenAiRealtimeSpokespersonRuntime(
-        realtimeRuntimeSessionId,
-      ).catch(() => undefined);
+      await stopOpenAiRealtimeGptLiveRuntime(realtimeRuntimeSessionId).catch(
+        () => undefined,
+      );
     }
     await this.realtimeProtocolQueue.catch(() => undefined);
     await this.realtimeRuntimeSendQueue.catch(() => undefined);
-    const flushedPendingEvents =
-      (await this.flushPendingExpertEvents?.()) ?? false;
-    if (flushedPendingEvents) {
-      await Promise.race([
-        this.deliveryQueue.catch(() => undefined),
-        new Promise<void>((resolve) => {
-          window.setTimeout(resolve, FINAL_TRANSCRIPT_FLUSH_TIMEOUT_MS);
-        }),
-      ]);
-    }
-    await releaseOpenAiRealtimeSpokespersonRuntime(
+    await releaseOpenAiRealtimeGptLiveRuntime(
       realtimeRuntimeSessionId ?? sessionId,
     ).catch(() => undefined);
     await this.cleanupResources(sessionId);
@@ -1163,7 +1042,7 @@ class OpenAiRealtimeConversationRuntime {
     } catch (error) {
       // Mirroring into the voice frontend is secondary to the ordinary Berd
       // send that invoked this callback. Never let a synchronous WebRTC/data
-      // channel failure abort the user's Expert turn.
+      // channel failure abort the user's Backend turn.
       void this.fail(sessionId, error);
     }
   }
@@ -1173,12 +1052,9 @@ class OpenAiRealtimeConversationRuntime {
     await this.realtimeProtocolQueue.catch(() => undefined);
     if (sessionId) await this.cleanupResources(sessionId);
     this.boundOnSend = null;
-    this.bridgeSender = null;
-    this.bridgeHandoffDismissal = null;
-    this.bridgeMasterTurnCompletion = null;
+    this.bridgeAppender = null;
     this.typedUserMessageSink = null;
     this.pendingTypedUserMessages = [];
-    this.flushPendingExpertEvents = null;
     this.failureInProgress = false;
     this.resetDeliveryQueue();
     this.historyReplay = Promise.resolve();
@@ -1186,7 +1062,7 @@ class OpenAiRealtimeConversationRuntime {
     this.setSnapshot(OFF_SNAPSHOT);
   }
 
-  private deliverToMaster(
+  private deliverToBackend(
     sessionId: string,
     text: string,
     displayText: string,
@@ -1194,7 +1070,6 @@ class OpenAiRealtimeConversationRuntime {
     hidden = false,
     userMessageId?: string,
     queueUntilIdle = false,
-    reminderHandoffIds: string[] = [],
     continueAfterStop = false,
   ): void {
     const signal = continueAfterStop
@@ -1207,7 +1082,7 @@ class OpenAiRealtimeConversationRuntime {
         signal?.throwIfAborted();
         // History replay replaces the transcript wholesale. Dispatching a
         // realtime transcript while hydration is still active can therefore
-        // route the Expert's live ACP stream into the replay buffer, or let a
+        // route the Backend's live ACP stream into the replay buffer, or let a
         // subsequent replay replacement erase it. Preserve ordering in the
         // delivery queue and wait for hydration to publish before sending.
         await this.ownerMigration;
@@ -1217,7 +1092,7 @@ class OpenAiRealtimeConversationRuntime {
           sessionId = this.snapshot.boundSessionId ?? sessionId;
         }
         await waitForSessionHydration(sessionId, signal);
-        if (queueUntilIdle) await waitForMasterIdle(sessionId, signal);
+        if (queueUntilIdle) await waitForBackendIdle(sessionId, signal);
         if (
           !onSend ||
           (!continueAfterStop && this.snapshot.boundSessionId !== sessionId)
@@ -1233,9 +1108,6 @@ class OpenAiRealtimeConversationRuntime {
             origin: "voice_conversation",
             userVisible: !hidden,
             agentVisible: false,
-            ...(reminderHandoffIds.length > 0
-              ? { [HANDOFF_REMINDER_IDS_METADATA]: reminderHandoffIds }
-              : {}),
           },
           ...(userMessageId ? { userMessageId } : {}),
         };
@@ -1248,14 +1120,14 @@ class OpenAiRealtimeConversationRuntime {
           );
           if (accepted === false)
             throw new Error(
-              "The Expert session did not accept the voice transcript.",
+              "The Backend session did not accept the voice transcript.",
             );
         };
         if (!continueAfterStop) {
           this.setSnapshot({ ...this.snapshot, state: "agent-working" });
         }
         for (;;) {
-          const opportunity = await waitForMasterDeliveryOpportunity(
+          const opportunity = await waitForBackendDeliveryOpportunity(
             sessionId,
             signal,
           );
@@ -1287,7 +1159,7 @@ class OpenAiRealtimeConversationRuntime {
             // Re-evaluate instead of assuming send: local run state may still
             // be publishing completion, or a newer run may already own the
             // session. Either transition yields the next safe opportunity.
-            await waitForMasterRunBoundary(sessionId, rejectedRunId, signal);
+            await waitForBackendRunBoundary(sessionId, rejectedRunId, signal);
           }
         }
         onDelivered?.();
@@ -1351,12 +1223,9 @@ class OpenAiRealtimeConversationRuntime {
     this.releaseControlsListener?.();
     this.releaseControlsListener = null;
     this.releaseBridge = null;
-    this.bridgeSender = null;
-    this.bridgeHandoffDismissal = null;
-    this.bridgeMasterTurnCompletion = null;
+    this.bridgeAppender = null;
     this.typedUserMessageSink = null;
     this.pendingTypedUserMessages = [];
-    this.flushPendingExpertEvents = null;
     this.nativeMicrophone = null;
     this.releaseRuntimeListener = null;
     this.releaseVoicePreferenceListener = null;
@@ -1368,11 +1237,11 @@ class OpenAiRealtimeConversationRuntime {
       ).catch(() => undefined);
     }
     if (realtimeRuntimeSessionId) {
-      await stopOpenAiRealtimeSpokespersonRuntime(
-        realtimeRuntimeSessionId,
-      ).catch(() => undefined);
+      await stopOpenAiRealtimeGptLiveRuntime(realtimeRuntimeSessionId).catch(
+        () => undefined,
+      );
     }
-    await releaseOpenAiRealtimeSpokespersonRuntime(
+    await releaseOpenAiRealtimeGptLiveRuntime(
       realtimeRuntimeSessionId ?? sessionId,
     ).catch(() => undefined);
     await releaseVoiceDictationMicrophone(MICROPHONE_OWNER_ID).catch(
@@ -1380,7 +1249,7 @@ class OpenAiRealtimeConversationRuntime {
     );
     await appendSessionSystemPrompt(
       activeSessionId,
-      MASTER_PROMPT_KEY,
+      BACKEND_PROMPT_KEY,
       "",
     ).catch(() => undefined);
   }
@@ -1415,22 +1284,12 @@ class OpenAiRealtimeConversationRuntime {
   private registerBridge(sessionId: string): void {
     const bridgeReady = this.bridgeReady;
     this.releaseBridge?.();
-    this.releaseBridge = registerRealtimeEmissary({
+    this.releaseBridge = registerGptLiveBridge({
       sessionId,
-      async sendMasterMessage(message, cursor, mode, resolves) {
+      async append(message, cursor, channel, delegationId) {
         const bridge = await bridgeReady;
-        if (!bridge) throw new Error("The GPT Live Spokesperson stopped.");
-        return bridge.sendMasterMessage(message, cursor, mode, resolves);
-      },
-      async dismissHandoffs(cursor, handoffIds, reason) {
-        const bridge = await bridgeReady;
-        if (!bridge) throw new Error("The GPT Live Spokesperson stopped.");
-        return bridge.dismissHandoffs(cursor, handoffIds, reason);
-      },
-      completeMasterTurn(completion) {
-        void bridgeReady.then((bridge) =>
-          bridge?.completeMasterTurn(completion),
-        );
+        if (!bridge) throw new Error("The GPT Live conversation stopped.");
+        return bridge.append(message, cursor, channel, delegationId);
       },
     });
   }

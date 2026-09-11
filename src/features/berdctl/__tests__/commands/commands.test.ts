@@ -600,17 +600,11 @@ describe("action schemas", () => {
     const validArgs: Record<string, Record<string, unknown>> = {
       "sessions.create": { prompt: "hi" },
       "sessions.send": { session_id: "s1", prompt: "hi" },
-      "sessions.send_to_spokesperson": {
+      "sessions.append_to_gpt_live": {
         session_id: "s1",
         cursor: 0,
         message: "Status update",
-        mode: "context",
-      },
-      "sessions.dismiss_handoffs": {
-        session_id: "s1",
-        cursor: 1,
-        handoff_id: ["handoff-1"],
-        reason: "The request was superseded.",
+        channel: "thinking",
       },
       "sessions.open": { session_id: "s1" },
       "sessions.list": {},

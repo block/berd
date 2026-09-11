@@ -15,6 +15,7 @@ The child selects closed TTS and STT backends at startup:
 berd-voice session --pcm-output-fd FD [--tts-backend siri] --voice NAME --language BCP47 [--rate 0.5..2.0]
 berd-voice session --pcm-output-fd FD --tts-backend openai [--rate 0.75..2.0]
 berd-voice session --pcm-output-fd FD --tts-backend pocket --model-dir ABS --voice ID [--rate 0.75..2.0]
+berd-voice session --pcm-output-fd FD --mode gpt-live --tts-backend openai
 
 berd-voice session [--stt-backend macos]
 berd-voice session --stt-backend parakeet --stt-model-dir ABS
@@ -50,11 +51,11 @@ initial policy; a host-specific `auto` mode must be resolved before the request:
 {"type":"hello","id":1,"input_during_tts":"allow_barge_in"}
 ```
 
-The response uses `protocol:4` as the exact session message-set version. The
+The response uses `protocol:5` as the exact session message-set version. The
 parent must reject a version it does not support:
 
 ```json
-{"type":"ready","id":1,"protocol":4,"session":{"tts":{"revision":1,"backend":"siri","voice":"Aaron","language":"en-US","rate":1.0},"input_during_tts":{"revision":1,"policy":"allow_barge_in"}}}
+{"type":"ready","id":1,"protocol":5,"session":{"tts":{"revision":1,"backend":"siri","voice":"Aaron","language":"en-US","rate":1.0},"input_during_tts":{"revision":1,"policy":"allow_barge_in"}}}
 ```
 
 The `session.tts` object is the authoritative, sanitized TTS configuration.
@@ -253,14 +254,14 @@ The child emits:
 ```text
 {"type":"input_speaking","active":bool}
 {"type":"recognition_pending","active":bool}
-{"type":"live_event","token":u64,"text":string,"origin"?:"user"|"spokesperson"|"handoff"}
+{"type":"live_event","token":u64,"text":string,"origin"?:"user"|"gpt_live"|"handoff"}
 ```
 
 For every final live-side event, the child allocates a strictly increasing token,
 stores it in `SessionCore`, acknowledges the runtime storage receipt, and emits
 `live_event`. Conventional sessions omit `origin`, which means `user`.
-Expert-Spokesperson sessions use `origin` to distinguish user transcripts,
-Spokesperson transcripts, and handoffs. User finals interrupt reserved or playing
+GPT Live sessions use `origin` to distinguish user transcripts,
+GPT Live transcripts, and delegations. User finals interrupt reserved or playing
 assistant output only after storage and emission. Final text is at most 64 KiB.
 
 ## Confirmation and admission
@@ -322,7 +323,7 @@ always correlates a result with its parent request; `cancel` uses the originatin
 live held target then emits `not_admitted(cancelled)`; a live admitted target
 then emits `speech_interrupted`. `spoken_through_utf8` is Berd Voice's conservative UTF-8 byte boundary through the last fully played word; hosts may use it to distinguish the estimated spoken prefix from the unspoken suffix without recreating delivery policy. Repeated or unknown cancellation is stale.
 `cancel_speech.speech_id` targets active output directly, including autonomous
-Spokesperson output that has no originating `prepare_speak`. Its correlated
+GPT Live output that has no originating `prepare_speak`. Its correlated
 `cancel_result.id` echoes the `cancel_speech.id`, while `cancel_result.speech_id`
 names the targeted speech. The result is emitted before Berd Voice requests
 the host's quiescent `audio_cancelled` barrier.

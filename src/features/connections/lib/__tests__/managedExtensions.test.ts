@@ -23,7 +23,7 @@ describe("managed extensions", () => {
     expect(isCompanyManagedExtension(stdioExtension("Google Drive"))).toBe(
       true,
     );
-    expect(isCompanyManagedExtension(stdioExtension("Query Expert"))).toBe(
+    expect(isCompanyManagedExtension(stdioExtension("Query Backend"))).toBe(
       true,
     );
   });
