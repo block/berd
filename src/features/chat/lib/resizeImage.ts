@@ -1,4 +1,7 @@
-const MAX_IMAGE_DIMENSION = 2048;
+// Anthropic applies this stricter per-image limit to every historical image
+// once a request contains more than 20 image or document blocks. Normalizing
+// at ingress keeps an image accepted early in a chat valid as history grows.
+const MAX_IMAGE_DIMENSION = 2000;
 const JPEG_QUALITY = 0.85;
 
 export interface NormalizedImage {
@@ -96,14 +99,23 @@ function loadImageElement(blob: Blob): Promise<HTMLImageElement> {
   });
 }
 
+export function dimensionsForProviderHistory(
+  sourceWidth: number,
+  sourceHeight: number,
+): { width: number; height: number } {
+  const maxDimension = Math.max(sourceWidth, sourceHeight);
+  const scale = Math.min(1, MAX_IMAGE_DIMENSION / maxDimension);
+  return {
+    width: Math.max(1, Math.round(sourceWidth * scale)),
+    height: Math.max(1, Math.round(sourceHeight * scale)),
+  };
+}
+
 function encodeWithCanvas(
   img: HTMLImageElement,
   sourceMimeType: string,
 ): NormalizedImage {
-  const maxDim = Math.max(img.width, img.height);
-  const scale = Math.min(1, MAX_IMAGE_DIMENSION / maxDim);
-  const width = Math.max(1, Math.round(img.width * scale));
-  const height = Math.max(1, Math.round(img.height * scale));
+  const { width, height } = dimensionsForProviderHistory(img.width, img.height);
 
   const canvas = document.createElement("canvas");
   canvas.width = width;
