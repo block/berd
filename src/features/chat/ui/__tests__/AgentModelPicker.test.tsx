@@ -1927,6 +1927,50 @@ describe("AgentModelPicker starred models", () => {
     );
   };
 
+  it.each([
+    ["ArrowDown", 3],
+    ["ArrowUp", 1],
+  ] as const)("navigates %s from the focused middle star's model row", async (key, targetIndex) => {
+    const user = userEvent.setup();
+    const onModelChange = vi.fn();
+    const navigationModels = Array.from({ length: 5 }, (_, index) => ({
+      id: `model-${index}`,
+      name: `Model ${index}`,
+      recommended: true,
+    }));
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="model-0"
+        currentModelName="Model 0"
+        availableModels={navigationModels}
+        onModelChange={onModelChange}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    const picker = screen.getByRole("dialog");
+    const rows = Array.from(picker.querySelectorAll("[data-model-key]"));
+    expect(rows).toHaveLength(5);
+    const middleStar = within(rows[2] as HTMLElement).getByRole("button", {
+      name: /^Star /,
+    });
+    expect(middleStar).not.toHaveAttribute("data-picker-nav-item");
+    middleStar.focus();
+    expect(middleStar).toHaveFocus();
+
+    await user.keyboard(`{${key}}`);
+
+    expect(
+      rows[targetIndex].querySelector("button[data-picker-nav-item]"),
+    ).toHaveFocus();
+    expect(onModelChange).not.toHaveBeenCalled();
+  });
+
   it("shows star actions on the preferred shortlist", async () => {
     const user = userEvent.setup();
     render(

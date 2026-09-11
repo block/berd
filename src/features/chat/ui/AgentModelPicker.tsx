@@ -553,7 +553,14 @@ export function AgentModelPicker({
                 "button[data-picker-nav-item]:not(:disabled)",
               ),
             );
-            const idx = items.indexOf(document.activeElement as HTMLElement);
+            const activeElement = document.activeElement as HTMLElement;
+            const origin =
+              activeElement
+                ?.closest("[data-model-key]")
+                ?.querySelector<HTMLElement>(
+                  "button[data-picker-nav-item]:not(:disabled)",
+                ) ?? activeElement;
+            const idx = items.indexOf(origin);
             const next =
               idx < 0
                 ? e.key === "ArrowDown"
