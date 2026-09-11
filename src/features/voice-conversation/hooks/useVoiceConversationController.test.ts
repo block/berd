@@ -201,6 +201,43 @@ describe("voice transcript delivery coordination", () => {
     ).toBe(false);
   });
 
+  it("silences waiting during a tool-free run without changing the preference", () => {
+    setStatusSoundPreference({ mode: "working-and-waiting" });
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-1",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 3,
+      },
+    });
+    const stopObserving = observeChainedVoiceStatus();
+    const store = useChatStore.getState();
+    store.setChatState("session-1", "thinking");
+    expect(voiceApiMocks.updateStatusSounds).toHaveBeenLastCalledWith(
+      expect.anything(),
+      "waiting",
+      { mode: "off" },
+    );
+    store.setChatState("session-1", "idle");
+    expect(voiceApiMocks.updateStatusSounds).toHaveBeenLastCalledWith(
+      expect.anything(),
+      "waiting",
+      { mode: "working-and-waiting" },
+    );
+    store.setActiveRunId("session-1", "run-1");
+    store.markToolCallInRun("session-1");
+    expect(voiceApiMocks.updateStatusSounds).toHaveBeenLastCalledWith(
+      expect.anything(),
+      "working",
+      { mode: "working-and-waiting" },
+    );
+    stopObserving();
+  });
+
   it("keeps working state until an admitted run actually settles", async () => {
     useVoiceConversationStore.setState({
       status: {
@@ -239,7 +276,11 @@ describe("voice transcript delivery coordination", () => {
     voiceApiMocks.updateStatusSounds.mockClear();
     useChatStore.getState().setActiveRunId("session-1", "run-2");
     expect(useVoiceConversationStore.getState().uiState).toBe("agent-working");
-    expect(voiceApiMocks.updateStatusSounds).not.toHaveBeenCalled();
+    expect(voiceApiMocks.updateStatusSounds).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "session-1" }),
+      "waiting",
+      { mode: "off" },
+    );
     useChatStore.getState().markToolCallInRun("session-1");
     expect(voiceApiMocks.updateStatusSounds).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: "session-1", revision: 3 }),
