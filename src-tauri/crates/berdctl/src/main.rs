@@ -268,7 +268,9 @@ mod tests {
     fn minimal_invocation(noun: &str, verb: &str) -> Option<Vec<&'static str>> {
         Some(match (noun, verb) {
             ("session", "create") => vec!["--prompt", "hi"],
-            ("session", "send") | ("session", "notify") => vec!["--session-id", "s", "--prompt", "hi"],
+            ("session", "send") | ("session", "notify") => {
+                vec!["--session-id", "s", "--prompt", "hi"]
+            }
             ("session", "open") => vec!["--session-id", "s"],
             ("session", "list") => vec![],
             ("session", "get") => vec!["--session-id", "s"],

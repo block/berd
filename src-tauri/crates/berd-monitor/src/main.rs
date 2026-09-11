@@ -1007,14 +1007,7 @@ fn flush_pending(
         let end = pending.active_len;
         let prompt = build_delivery_prompt(label, &pending.bytes[..end], instructions)?;
         let delivery_id = pending.delivery_id(paths);
-        if !deliver_to_session(
-            paths,
-            session_id,
-            &prompt,
-            if_running,
-            &delivery_id,
-            label,
-        ) {
+        if !deliver_to_session(paths, session_id, &prompt, if_running, &delivery_id, label) {
             log_line(paths, "delivery failed; buffered output will be retried")?;
             return Ok(());
         }
