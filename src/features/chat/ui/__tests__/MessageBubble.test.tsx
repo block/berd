@@ -703,7 +703,7 @@ describe("MessageBubble", () => {
     ).toBeNull();
   });
 
-  it("shows steering details when an incoming update is expanded", async () => {
+  it("omits steering details when an incoming update is expanded", async () => {
     const message = userMessage("steered from another session");
     message.metadata = {
       ...message.metadata,
@@ -719,7 +719,8 @@ describe("MessageBubble", () => {
     await userEvent.click(
       screen.getByRole("button", { name: "Incoming update" }),
     );
-    expect(screen.getByText("Steered")).toBeVisible();
+    expect(screen.queryByText("Steered")).not.toBeInTheDocument();
+    expect(screen.getByText("steered from another session")).toBeVisible();
   });
 
   it("keeps ordinary berdctl sends expanded even when the sender is berd-monitor", () => {
