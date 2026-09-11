@@ -3,6 +3,8 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 const MAX_RECORD_BYTES: u64 = 4 * 1024;
+const SCAN_BUFFER_ENTRIES: usize = 256;
+pub(super) const RECOVERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 #[cfg(unix)]
 const RECORD_DIR_MODE: u32 = 0o700;
 #[cfg(unix)]
@@ -12,7 +14,6 @@ const RECORD_FILE_MODE: u32 = 0o600;
 pub(super) struct VerifiedRecord {
     pub(super) bytes: Vec<u8>,
     identity: platform::FileIdentity,
-    #[cfg(windows)]
     file: File,
 }
 
@@ -42,46 +43,73 @@ impl ProcessRecordStore {
         ))
     }
 
-    pub(super) fn publish(&self, destination: &Path, bytes: &[u8]) -> Result<(), String> {
-        let stored_len = bytes
-            .len()
-            .checked_add(1)
-            .ok_or_else(|| format!("process record exceeds {MAX_RECORD_BYTES} bytes"))?;
-        if stored_len as u64 > MAX_RECORD_BYTES {
-            return Err(format!("process record exceeds {MAX_RECORD_BYTES} bytes"));
+    /// The returned handle is the object we created, never a reopened pathname.
+    pub(super) fn publish(
+        &self,
+        destination: &Path,
+        bytes: &[u8],
+    ) -> Result<VerifiedRecord, String> {
+        self.publish_with(destination, bytes, |_| Ok(()))
+    }
+
+    fn publish_with<F>(
+        &self,
+        destination: &Path,
+        bytes: &[u8],
+        after_create: F,
+    ) -> Result<VerifiedRecord, String>
+    where
+        F: FnOnce(&File) -> Result<(), String>,
+    {
+        // A single terminal newline commits the compact, single-line payload.
+        // Readers reject an interrupted write, including an otherwise valid JSON prefix.
+        if bytes.len() as u64 >= MAX_RECORD_BYTES || bytes.contains(&b'\n') {
+            return Err(format!(
+                "process record must be one line and fit within {MAX_RECORD_BYTES} bytes"
+            ));
         }
         ensure_direct_child(&self.root, destination)?;
-        let temp = self.root.join(format!(
+        #[cfg(unix)]
+        let staging = destination.to_path_buf();
+        #[cfg(windows)]
+        let staging = self.root.join(format!(
             ".process-record-{}.tmp",
             uuid::Uuid::new_v4().simple()
         ));
-        let mut temp_identity = None;
+        // Unix has no portable handle-bound rename/unlink. Exclusive creation
+        // avoids both the source-name race and a destructive rollback by name.
+        let mut file =
+            platform::create(&self.root, &self.handle, staging.file_name().expect("name"))?;
+        let identity = platform::file_identity(&file)?;
         let result = (|| {
-            let mut file = platform::create(
-                &self.root,
-                &self.handle,
-                temp.file_name().expect("temp has a name"),
-            )?;
-            temp_identity = Some(platform::file_identity(&file)?);
+            after_create(&file)?;
             file.write_all(bytes)
                 .and_then(|_| file.write_all(b"\n"))
                 .and_then(|_| file.sync_all())
-                .map_err(|error| format!("failed to write {}: {error}", temp.display()))?;
+                .map_err(|error| format!("failed to write {}: {error}", staging.display()))?;
+            #[cfg(windows)]
             platform::rename(
                 &self.handle,
                 &file,
-                temp.file_name().expect("temp has a name"),
-                destination.file_name().expect("destination has a name"),
+                staging.file_name().expect("name"),
+                destination.file_name().expect("name"),
             )?;
-            platform::sync(&self.handle)?;
-            Ok(())
+            platform::sync(&self.handle)
         })();
-        if result.is_err() {
-            if let Some(identity) = temp_identity.as_ref() {
-                let _ = platform::remove(&self.root, &self.handle, &temp, Some(identity));
-            }
+        let mut stored = bytes.to_vec();
+        stored.push(b'\n');
+        let verified = VerifiedRecord {
+            bytes: stored,
+            identity,
+            file,
+        };
+        if let Err(error) = result {
+            // Windows removes only the retained object. Unix deliberately keeps
+            // partial evidence: unlinkat cannot atomically match an open file.
+            let _ = self.remove_verified(&staging, &verified);
+            return Err(error);
         }
-        result
+        Ok(verified)
     }
 
     pub(super) fn read_verified_for_cleanup(
@@ -112,12 +140,6 @@ impl ProcessRecordStore {
                 verified: None,
             })?;
             if metadata.len() > MAX_RECORD_BYTES {
-                #[cfg(unix)]
-                let record = VerifiedRecord {
-                    bytes: Vec::new(),
-                    identity,
-                };
-                #[cfg(windows)]
                 let record = VerifiedRecord {
                     bytes: Vec::new(),
                     identity,
@@ -140,9 +162,6 @@ impl ProcessRecordStore {
                     verified: None,
                 })?;
             if bytes.len() as u64 > MAX_RECORD_BYTES {
-                #[cfg(unix)]
-                let record = VerifiedRecord { bytes, identity };
-                #[cfg(windows)]
                 let record = VerifiedRecord {
                     bytes,
                     identity,
@@ -156,14 +175,20 @@ impl ProcessRecordStore {
                     verified: Some(record),
                 });
             }
-            #[cfg(unix)]
-            return Ok(VerifiedRecord { bytes, identity });
-            #[cfg(windows)]
-            Ok(VerifiedRecord {
+            let record = VerifiedRecord {
                 bytes,
                 identity,
                 file,
-            })
+            };
+            if !record.bytes.ends_with(b"\n")
+                || record.bytes[..record.bytes.len() - 1].contains(&b'\n')
+            {
+                return Err(VerifiedReadError {
+                    message: "incomplete or multiline process record".to_string(),
+                    verified: Some(record),
+                });
+            }
+            Ok(record)
         })();
         read
     }
@@ -179,8 +204,30 @@ impl ProcessRecordStore {
         self.read_verified(path).map(|record| record.bytes)
     }
 
+    /// Enumerate off the async runtime with bounded memory. Dropping the receiver
+    /// at the recovery deadline also releases a producer waiting on a full buffer.
+    pub(super) fn scan(&self) -> Result<tokio::sync::mpsc::Receiver<PathBuf>, String> {
+        let root = self.root.clone();
+        let handle = self.handle.try_clone().map_err(|error| error.to_string())?;
+        let (sender, receiver) = tokio::sync::mpsc::channel(SCAN_BUFFER_ENTRIES);
+        tokio::task::spawn_blocking(move || {
+            if let Err(error) =
+                platform::entries(&root, &handle, |path| sender.blocking_send(path).is_ok())
+            {
+                log::warn!("Failed to enumerate recovery records: {error}");
+            }
+        });
+        Ok(receiver)
+    }
+
+    #[cfg(test)]
     pub(super) fn entries(&self) -> Result<Vec<PathBuf>, String> {
-        platform::entries(&self.root, &self.handle)
+        let mut paths = Vec::new();
+        platform::entries(&self.root, &self.handle, |path| {
+            paths.push(path);
+            true
+        })?;
+        Ok(paths)
     }
 
     pub(super) fn remove_verified(
@@ -240,6 +287,12 @@ mod platform {
 
     #[derive(Debug)]
     pub(super) struct RootHandle(OwnedFd);
+
+    impl RootHandle {
+        pub(super) fn try_clone(&self) -> std::io::Result<Self> {
+            self.0.try_clone().map(Self)
+        }
+    }
 
     fn c_name(name: &OsStr) -> Result<CString, String> {
         CString::new(name.as_bytes()).map_err(|_| "process record name contains NUL".to_string())
@@ -374,122 +427,16 @@ mod platform {
             .map_err(|error| format!("failed to safely open {}: {error}", path.display()))
     }
 
-    fn unlink_name(root: &RootHandle, name: &CString) -> std::io::Result<()> {
-        // SAFETY: root is retained and name is a root-relative direct child.
-        if unsafe { libc::unlinkat(root.0.as_raw_fd(), name.as_ptr(), 0) } != 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        Ok(())
-    }
-
-    fn rename_with_unlink<F>(
-        root: &RootHandle,
-        source: &File,
-        from: &OsStr,
-        to: &OsStr,
-        mut unlink: F,
-    ) -> Result<(), String>
-    where
-        F: FnMut(&RootHandle, &CString) -> std::io::Result<()>,
-    {
-        let from = c_name(from)?;
-        let to = c_name(to)?;
-        let source_identity = file_identity(source)?;
-        let mut current = std::mem::MaybeUninit::<libc::stat>::uninit();
-        // SAFETY: current is writable and from is a root-relative name.
-        if unsafe {
-            libc::fstatat(
-                root.0.as_raw_fd(),
-                from.as_ptr(),
-                current.as_mut_ptr(),
-                libc::AT_SYMLINK_NOFOLLOW,
-            )
-        } != 0
-        {
-            return Err(format!(
-                "failed to bind process record publication: {}",
-                std::io::Error::last_os_error()
-            ));
-        }
-        // SAFETY: successful fstatat initialized current.
-        let current = unsafe { current.assume_init() };
-        if source_identity
-            != (FileIdentity {
-                device: device_id(current.st_dev),
-                inode: current.st_ino,
-            })
-        {
-            return Err("temporary process record changed before publication".to_string());
-        }
-        // linkat is an atomic no-replace publication primitive: it fails if
-        // the destination exists, then unlinkat removes the temporary name.
-        // Both operations are anchored to the retained same-directory fd, and
-        // the source name was just verified against the retained source handle.
-        if unsafe {
-            libc::linkat(
-                root.0.as_raw_fd(),
-                from.as_ptr(),
-                root.0.as_raw_fd(),
-                to.as_ptr(),
-                0,
-            )
-        } != 0
-        {
-            return Err(format!(
-                "failed to publish process record without replacement: {}",
-                std::io::Error::last_os_error()
-            ));
-        }
-        if let Err(temp_error) = unlink(root, &from) {
-            // Publication created `to` as a second name for the retained source.
-            // Roll it back before the caller cleans the identity-bound temp name,
-            // otherwise both names retain nlink == 2 and fail metadata validation.
-            let rollback_error = unlink(root, &to).err();
-            return Err(match rollback_error {
-                Some(rollback_error) => format!(
-                    "published process record but failed to remove temporary name: {temp_error}; \
-                     failed to roll back destination: {rollback_error}"
-                ),
-                None => format!(
-                    "published process record but failed to remove temporary name: {temp_error}; \
-                     rolled back destination"
-                ),
-            });
-        }
-        Ok(())
-    }
-
-    pub(super) fn rename(
-        root: &RootHandle,
-        source: &File,
-        from: &OsStr,
-        to: &OsStr,
-    ) -> Result<(), String> {
-        rename_with_unlink(root, source, from, to, unlink_name)
-    }
-
-    #[cfg(test)]
-    pub(super) fn unlink_name_for_test(root: &RootHandle, name: &CString) -> std::io::Result<()> {
-        unlink_name(root, name)
-    }
-
-    #[cfg(test)]
-    pub(super) fn rename_with_unlink_for_test<F>(
-        root: &RootHandle,
-        source: &File,
-        from: &OsStr,
-        to: &OsStr,
-        unlink: F,
-    ) -> Result<(), String>
-    where
-        F: FnMut(&RootHandle, &CString) -> std::io::Result<()>,
-    {
-        rename_with_unlink(root, source, from, to, unlink)
-    }
-
     fn duplicate_root(root: &RootHandle) -> std::io::Result<libc::c_int> {
-        // SAFETY: F_DUPFD_CLOEXEC returns an independent close-on-exec descriptor.
-        let duplicate = unsafe { libc::fcntl(root.0.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 0) };
+        // A fresh open file description gives each scan its own directory offset.
+        // SAFETY: root is retained and the literal is a NUL-terminated directory name.
+        let duplicate = unsafe {
+            libc::openat(
+                root.0.as_raw_fd(),
+                c".".as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC,
+            )
+        };
         if duplicate < 0 {
             return Err(std::io::Error::last_os_error());
         }
@@ -501,7 +448,11 @@ mod platform {
         duplicate_root(root)
     }
 
-    pub(super) fn entries(root_path: &Path, root: &RootHandle) -> Result<Vec<PathBuf>, String> {
+    pub(super) fn entries(
+        root_path: &Path,
+        root: &RootHandle,
+        mut visit: impl FnMut(PathBuf) -> bool,
+    ) -> Result<(), String> {
         let duplicate = duplicate_root(root)
             .map_err(|error| format!("failed to duplicate process record directory: {error}"))?;
         // SAFETY: fdopendir takes ownership of duplicate.
@@ -513,8 +464,11 @@ mod platform {
                 std::io::Error::last_os_error()
             ));
         }
-        let mut paths = Vec::new();
+        let started = std::time::Instant::now();
         let result = loop {
+            if started.elapsed() >= RECOVERY_TIMEOUT {
+                break Ok(());
+            }
             errno::set_errno(errno::Errno(0));
             // SAFETY: directory remains valid until closed below.
             let entry = unsafe { libc::readdir(directory) };
@@ -526,7 +480,7 @@ mod platform {
                         std::io::Error::from_raw_os_error(read_error.0)
                     ));
                 }
-                break Ok(paths);
+                break Ok(());
             }
             // SAFETY: d_name is NUL-terminated for a valid dirent.
             let bytes = unsafe { std::ffi::CStr::from_ptr((*entry).d_name.as_ptr()) }.to_bytes();
@@ -550,8 +504,8 @@ mod platform {
             {
                 // SAFETY: successful fstatat initialized stat.
                 let stat = unsafe { stat.assume_init() };
-                if stat.st_mode & libc::S_IFMT == libc::S_IFREG {
-                    paths.push(root_path.join(name));
+                if stat.st_mode & libc::S_IFMT == libc::S_IFREG && !visit(root_path.join(name)) {
+                    break Ok(());
                 }
             }
         };
@@ -560,73 +514,36 @@ mod platform {
         result
     }
 
+    #[cfg(test)]
     pub(super) fn remove(
         root_path: &Path,
         root: &RootHandle,
         path: &Path,
-        expected: Option<&FileIdentity>,
+        _expected: Option<&FileIdentity>,
     ) -> Result<(), String> {
         let name = name_for(root_path, path)?;
-        let file = match open_file(root, &name) {
-            Ok(file) => file,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(error) => {
-                return Err(format!("failed to safely open {}: {error}", path.display()));
-            }
-        };
-        validate_metadata(
-            path,
-            &file
-                .metadata()
-                .map_err(|e| format!("failed to inspect {}: {e}", path.display()))?,
-        )?;
-        let opened_identity = file_identity(&file)?;
-        if expected.is_some_and(|expected| *expected != opened_identity) {
-            return Err("process record changed since it was read".to_string());
+        match open_file(root, &name) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            _ => Err(
+                "handle-bound record deletion is unavailable on Unix; retaining evidence"
+                    .to_string(),
+            ),
         }
-        let mut current = std::mem::MaybeUninit::<libc::stat>::uninit();
-        // SAFETY: current is writable and name is root-relative.
-        if unsafe {
-            libc::fstatat(
-                root.0.as_raw_fd(),
-                name.as_ptr(),
-                current.as_mut_ptr(),
-                libc::AT_SYMLINK_NOFOLLOW,
-            )
-        } != 0
-        {
-            return Err(format!(
-                "failed to bind process record deletion: {}",
-                std::io::Error::last_os_error()
-            ));
-        }
-        // SAFETY: successful fstatat initialized current.
-        let current = unsafe { current.assume_init() };
-        if opened_identity
-            != (FileIdentity {
-                device: device_id(current.st_dev),
-                inode: current.st_ino,
-            })
-        {
-            return Err("process record changed before deletion".to_string());
-        }
-        // SAFETY: root is retained and name identifies the validated object.
-        if unsafe { libc::unlinkat(root.0.as_raw_fd(), name.as_ptr(), 0) } != 0 {
-            let error = std::io::Error::last_os_error();
-            if error.kind() != std::io::ErrorKind::NotFound {
-                return Err(format!("failed to remove {}: {error}", path.display()));
-            }
-        }
-        Ok(())
     }
 
     pub(super) fn remove_verified(
         root_path: &Path,
-        root: &RootHandle,
+        _root: &RootHandle,
         path: &Path,
         verified: &VerifiedRecord,
     ) -> Result<(), String> {
-        remove(root_path, root, path, Some(&verified.identity))
+        ensure_direct_child(root_path, path)?;
+        if file_identity(&verified.file)? != verified.identity {
+            return Err("retained process record identity changed".to_string());
+        }
+        // A last-moment fstatat still leaves a race before unlinkat. Never
+        // delete a pathname on the strength of an earlier identity check.
+        Err("handle-bound record deletion is unavailable on Unix; retaining evidence".to_string())
     }
 
     pub(super) fn sync(root: &RootHandle) -> Result<(), String> {
@@ -722,6 +639,14 @@ mod platform {
     #[derive(Debug)]
     pub(super) struct RootHandle {
         directory: File,
+    }
+
+    impl RootHandle {
+        pub(super) fn try_clone(&self) -> std::io::Result<Self> {
+            Ok(Self {
+                directory: self.directory.try_clone()?,
+            })
+        }
     }
 
     struct Handle(HANDLE);
@@ -1213,7 +1138,10 @@ mod platform {
                     .checked_add(7)
                     .map(|value| value & !7)
                     .ok_or_else(|| "directory entry overflow".to_string())?;
-                if next < minimum_next || !next.is_multiple_of(8) || next > remaining.len() {
+                if next < minimum_next
+                    || !next.is_multiple_of(8)
+                    || next > remaining.len().saturating_sub(name_offset)
+                {
                     return Err("overlapping or misaligned directory entry".to_string());
                 }
                 offset = offset
@@ -1230,11 +1158,15 @@ mod platform {
             && attributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY) == 0
     }
 
-    pub(super) fn entries(root_path: &Path, root: &RootHandle) -> Result<Vec<PathBuf>, String> {
+    pub(super) fn entries(
+        root_path: &Path,
+        root: &RootHandle,
+        mut visit: impl FnMut(PathBuf) -> bool,
+    ) -> Result<(), String> {
         validate_owner_and_acl(&root.directory)?;
-        let mut paths = Vec::new();
         let mut restart = 1;
-        loop {
+        let started = std::time::Instant::now();
+        while started.elapsed() < RECOVERY_TIMEOUT {
             let mut storage = vec![0usize; 64 * 1024 / size_of::<usize>()];
             let mut io_status: IO_STATUS_BLOCK = unsafe { zeroed() };
             // SAFETY: buffer and IO status are writable; synchronous retained directory handle remains valid.
@@ -1270,21 +1202,23 @@ mod platform {
             // SAFETY: storage is live and used is bounded by capacity.
             let bytes = unsafe { std::slice::from_raw_parts(storage.as_ptr().cast::<u8>(), used) };
             for (name, attributes) in parse_directory_entries(bytes)? {
-                if is_enumerable_record(&name, attributes) {
-                    paths.push(root_path.join(name));
+                if is_enumerable_record(&name, attributes) && !visit(root_path.join(name)) {
+                    return Ok(());
                 }
             }
         }
-        Ok(paths)
+        Ok(())
     }
 
     pub(super) fn remove_verified(
         root_path: &Path,
-        _root: &RootHandle,
+        root: &RootHandle,
         path: &Path,
         verified: &VerifiedRecord,
     ) -> Result<(), String> {
         super::ensure_direct_child(root_path, path)?;
+        validate_owner_and_acl(&root.directory)?;
+        validate_owner_and_acl(&verified.file)?;
         validate_metadata(
             path,
             &verified
@@ -1319,6 +1253,7 @@ mod platform {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(super) fn remove(
         root_path: &Path,
         root: &RootHandle,
@@ -1326,6 +1261,7 @@ mod platform {
         expected: Option<&FileIdentity>,
     ) -> Result<(), String> {
         super::ensure_direct_child(root_path, path)?;
+        validate_owner_and_acl(&root.directory)?;
         let file = match relative_file(
             root,
             path.file_name().expect("direct child has a name"),
@@ -1342,6 +1278,7 @@ mod platform {
                 .metadata()
                 .map_err(|e| format!("failed to inspect {}: {e}", path.display()))?,
         )?;
+        validate_owner_and_acl(&file)?;
         let opened_identity = file_identity(&file)?;
         if expected.is_some_and(|expected| *expected != opened_identity) {
             return Err("process record changed since it was read".to_string());
@@ -1412,6 +1349,15 @@ mod platform {
         fn rejects_next_offset_beyond_used_bytes() {
             let mut bytes = entry(&[b'a' as u16]);
             let next = ((bytes.len() + 7) & !7) + 8;
+            bytes[0..4].copy_from_slice(&(next as u32).to_le_bytes());
+            assert!(parse_directory_entries(&bytes).is_err());
+        }
+
+        #[test]
+        fn rejects_nonterminal_offset_at_end_of_buffer() {
+            let mut bytes = entry(&[b'a' as u16]);
+            let next = (bytes.len() + 7) & !7;
+            bytes.resize(next, 0);
             bytes[0..4].copy_from_slice(&(next as u32).to_le_bytes());
             assert!(parse_directory_entries(&bytes).is_err());
         }
@@ -1658,6 +1604,47 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
+    fn retained_deletion_revalidates_record_and_root_acls() {
+        for change_root in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let root = temp.path().join("records");
+            let store = ProcessRecordStore::open(root.clone()).unwrap();
+            let path = store.new_record_path(1, 2);
+            let retained = store.publish(&path, b"original").unwrap();
+            replace_dacl_with_everyone_full_control(if change_root { &root } else { &path });
+            assert!(store.remove_verified(&path, &retained).is_err());
+            drop(retained);
+            assert_eq!(fs::read(&path).unwrap(), b"original\n");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn failed_publication_deletes_retained_object_not_replacement() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = ProcessRecordStore::open(temp.path().join("records")).unwrap();
+        let path = store.new_record_path(1, 2);
+        let displaced = store.root.join("displaced.json");
+        let replacement = std::cell::RefCell::new(None);
+        assert!(store
+            .publish_with(&path, b"original", |_| {
+                let staging = store.entries().unwrap().pop().unwrap();
+                fs::rename(&staging, &displaced).unwrap();
+                store.publish(&staging, b"successor").unwrap();
+                *replacement.borrow_mut() = Some(staging);
+                Err("injected write failure".to_string())
+            })
+            .is_err());
+        assert!(!displaced.exists());
+        assert_eq!(
+            fs::read(replacement.into_inner().unwrap()).unwrap(),
+            b"successor\n"
+        );
+        assert!(!path.exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
     fn exact_handle_deletion_removes_displaced_record_not_successor() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("records");
@@ -1670,6 +1657,7 @@ mod tests {
         store.publish(&record, b"successor").unwrap();
 
         store.remove_verified(&record, &verified).unwrap();
+        drop(verified); // Windows completes disposition when the retained handle closes.
 
         assert!(!displaced.exists());
         assert_eq!(fs::read(&record).unwrap(), b"successor\n");
@@ -1700,8 +1688,16 @@ mod tests {
             b"{\"owner_pid\":1,\"serve_pid\":2}\n"
         );
         assert_eq!(store.entries().unwrap(), vec![destination.clone()]);
-        store.remove(&destination).unwrap();
-        assert!(!destination.exists());
+        #[cfg(windows)]
+        {
+            store.remove(&destination).unwrap();
+            assert!(!destination.exists());
+        }
+        #[cfg(unix)]
+        {
+            assert!(store.remove(&destination).is_err());
+            assert!(destination.exists());
+        }
     }
 
     #[cfg(unix)]
@@ -1736,73 +1732,76 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn temp_name_substitution_is_rejected_before_publication() {
+    fn publication_retains_created_object_across_name_substitution() {
         let temp = tempfile::tempdir().unwrap();
-        let root = temp.path().join("records");
-        let store = ProcessRecordStore::open(root.clone()).unwrap();
-        let temp_name = std::ffi::OsStr::new("controlled-temp.tmp");
-        let temp_path = root.join(temp_name);
-        let displaced = root.join("displaced.tmp");
-        let destination = root.join("destination.json");
-        let mut source = super::platform::create(&root, &store.handle, temp_name).unwrap();
-        source.write_all(b"original\n").unwrap();
-        source.sync_all().unwrap();
-        fs::rename(&temp_path, &displaced).unwrap();
-        fs::write(&temp_path, b"substitute\n").unwrap();
-
-        assert!(super::platform::rename(
-            &store.handle,
-            &source,
-            temp_name,
-            destination.file_name().unwrap(),
-        )
-        .is_err());
-
-        assert!(!destination.exists());
-        assert_eq!(fs::read(&temp_path).unwrap(), b"substitute\n");
+        let store = ProcessRecordStore::open(temp.path().join("records")).unwrap();
+        let path = store.new_record_path(1, 2);
+        let displaced = store.root.join("displaced.json");
+        let record = store
+            .publish_with(&path, b"original", |_| {
+                fs::rename(&path, &displaced).unwrap();
+                store.publish(&path, b"successor").unwrap();
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            record.identity,
+            platform::file_identity(&File::open(&displaced).unwrap()).unwrap()
+        );
         assert_eq!(fs::read(&displaced).unwrap(), b"original\n");
+        assert_eq!(fs::read(&path).unwrap(), b"successor\n");
+        assert!(store.remove_verified(&path, &record).is_err());
+        assert!(path.exists() && displaced.exists());
     }
 
     #[cfg(unix)]
     #[test]
-    fn failed_temp_unlink_rolls_back_published_destination() {
-        use std::os::unix::ffi::OsStrExt;
-        use std::os::unix::fs::MetadataExt;
-
+    fn failed_publication_does_not_unlink_a_successor() {
         let temp = tempfile::tempdir().unwrap();
-        let root = temp.path().join("records");
-        let store = ProcessRecordStore::open(root.clone()).unwrap();
-        let temp_name = std::ffi::OsStr::new("controlled-temp.tmp");
-        let temp_path = root.join(temp_name);
-        let destination = root.join("destination.json");
-        let mut source = super::platform::create(&root, &store.handle, temp_name).unwrap();
-        source.write_all(b"original\n").unwrap();
-        source.sync_all().unwrap();
-        let identity = super::platform::file_identity(&source).unwrap();
-        let from_name = std::ffi::CString::new(temp_name.as_bytes()).unwrap();
-        let mut injected = false;
+        let store = ProcessRecordStore::open(temp.path().join("records")).unwrap();
+        let path = store.new_record_path(1, 2);
+        let displaced = store.root.join("partial.json");
+        assert!(store
+            .publish_with(&path, b"original", |_| {
+                fs::rename(&path, &displaced).unwrap();
+                store.publish(&path, b"successor").unwrap();
+                Err("injected write failure".to_string())
+            })
+            .is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"successor\n");
+        assert!(store.read(&displaced).is_err());
+    }
 
-        let error = super::platform::rename_with_unlink_for_test(
-            &store.handle,
-            &source,
-            temp_name,
-            destination.file_name().unwrap(),
-            |root, name| {
-                if !injected && name == &from_name {
-                    injected = true;
-                    return Err(std::io::Error::from_raw_os_error(libc::EACCES));
-                }
-                super::platform::unlink_name_for_test(root, name)
-            },
-        )
-        .unwrap_err();
+    #[test]
+    fn incomplete_payload_is_never_a_published_record() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = ProcessRecordStore::open(temp.path().join("records")).unwrap();
+        let path = store.new_record_path(1, 2);
+        let mut file =
+            platform::create(&store.root, &store.handle, path.file_name().unwrap()).unwrap();
+        file.write_all(b"{}").unwrap();
+        assert!(store.read(&path).is_err());
+        file.write_all(b"\n").unwrap();
+        assert_eq!(store.read(&path).unwrap(), b"{}\n");
+    }
 
-        assert!(error.contains("rolled back destination"));
-        assert!(!destination.exists());
-        assert_eq!(fs::metadata(&temp_path).unwrap().nlink(), 1);
-        assert_eq!(fs::read(&temp_path).unwrap(), b"original\n");
-        super::platform::remove(&root, &store.handle, &temp_path, Some(&identity)).unwrap();
-        assert!(!temp_path.exists());
+    #[tokio::test]
+    async fn bounded_scan_continues_past_its_buffer_capacity() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = ProcessRecordStore::open(temp.path().join("records")).unwrap();
+        for i in 0..SCAN_BUFFER_ENTRIES + 5 {
+            store
+                .publish(&store.new_record_path(1, i as u64), b"{}")
+                .unwrap();
+        }
+        for _ in 0..2 {
+            let mut entries = store.scan().unwrap();
+            let mut count = 0;
+            while entries.recv().await.is_some() {
+                count += 1;
+            }
+            assert_eq!(count, SCAN_BUFFER_ENTRIES + 5);
+        }
     }
 
     #[cfg(unix)]
@@ -1963,8 +1962,8 @@ mod tests {
         assert_eq!(fs::read(retained.join(name)).unwrap(), b"secure\n");
         assert!(!decoy.join(name).exists());
         assert_eq!(store.read(&apparent).unwrap(), b"secure\n");
-        store.remove(&apparent).unwrap();
-        assert!(!retained.join(name).exists());
+        assert!(store.remove(&apparent).is_err());
+        assert!(retained.join(name).exists());
     }
 
     #[cfg(unix)]

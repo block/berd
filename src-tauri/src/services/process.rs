@@ -126,33 +126,101 @@ pub(crate) fn terminate_process(pid: ProcessId) -> bool {
     unsafe { libc::kill(pid, libc::SIGTERM) == 0 }
 }
 
-#[cfg(unix)]
-pub(crate) fn kill_process(pid: ProcessId) -> bool {
-    // SAFETY: sending SIGKILL as a last resort to a process id we previously recorded.
-    unsafe { libc::kill(pid, libc::SIGKILL) == 0 }
+/// A proc directory descriptor pins one Linux process even after PID reuse.
+/// pidfd_send_signal accepts this descriptor; there is deliberately no kill(pid) fallback.
+#[cfg(target_os = "linux")]
+pub(crate) struct RetainedProcess {
+    directory: std::fs::File,
+    pid: u32,
+}
+
+#[cfg(target_os = "linux")]
+impl RetainedProcess {
+    pub(crate) fn open(pid: u32) -> std::io::Result<Self> {
+        use std::os::unix::fs::OpenOptionsExt;
+        let directory = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW)
+            .open(format!("/proc/{pid}"))?;
+        Ok(Self { directory, pid })
+    }
+
+    fn identity(&self) -> std::io::Result<ProcessIdentity> {
+        use std::io::Read;
+        use std::os::fd::{AsRawFd, FromRawFd};
+        use std::os::unix::fs::MetadataExt;
+        let open = |name: &std::ffi::CStr, flags| {
+            // SAFETY: the process directory is retained, and names are constant direct children.
+            let fd = unsafe {
+                libc::openat(
+                    self.directory.as_raw_fd(),
+                    name.as_ptr(),
+                    flags | libc::O_CLOEXEC,
+                )
+            };
+            if fd < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            // SAFETY: openat returned a new owned descriptor.
+            Ok(unsafe { std::fs::File::from_raw_fd(fd) })
+        };
+        let metadata = open(c"exe", libc::O_PATH)?.metadata()?;
+        let mut stat = String::new();
+        open(c"stat", libc::O_RDONLY | libc::O_NOFOLLOW)?
+            .take(4096)
+            .read_to_string(&mut stat)?;
+        let fields = stat
+            .rsplit_once(") ")
+            .ok_or_else(|| std::io::Error::other("malformed proc stat"))?
+            .1;
+        let created_at = fields
+            .split_whitespace()
+            .nth(19)
+            .ok_or_else(|| std::io::Error::other("missing proc start token"))?
+            .parse::<u64>()
+            .map_err(std::io::Error::other)?;
+        Ok(ProcessIdentity {
+            pid: self.pid,
+            created_at,
+            exe: format!("{}:{}", metadata.dev(), metadata.ino()),
+        })
+    }
+
+    pub(crate) fn probe(&self, expected: &ProcessIdentity) -> IdentityProbe {
+        match self.identity() {
+            Ok(current) if current.matches(expected) => IdentityProbe::Matches,
+            Ok(_) => IdentityProbe::Mismatch,
+            Err(error) if matches!(error.raw_os_error(), Some(libc::ENOENT | libc::ESRCH)) => {
+                IdentityProbe::Gone
+            }
+            Err(_) => IdentityProbe::Unverifiable,
+        }
+    }
+
+    pub(crate) fn signal(&self, signal: libc::c_int) -> std::io::Result<()> {
+        use std::os::fd::AsRawFd;
+        // SAFETY: the syscall targets the retained process, never its numeric PID.
+        // Unsupported kernels return an error and recovery retains its evidence.
+        let result = unsafe {
+            libc::syscall(
+                libc::SYS_pidfd_send_signal,
+                self.directory.as_raw_fd(),
+                signal,
+                std::ptr::null::<libc::siginfo_t>(),
+                0u32,
+            )
+        };
+        if result == 0 {
+            Ok(())
+        } else {
+            Err(std::io::Error::last_os_error())
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]
 pub(crate) fn capture_process_identity(pid: u32) -> std::io::Result<ProcessIdentity> {
-    use std::os::unix::fs::MetadataExt;
-
-    let exe_link = std::path::PathBuf::from(format!("/proc/{pid}/exe"));
-    let metadata = std::fs::metadata(&exe_link)?;
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat"))?;
-    let close = stat
-        .rfind(')')
-        .ok_or_else(|| std::io::Error::other("malformed proc stat"))?;
-    let created_at = stat[close + 2..]
-        .split_whitespace()
-        .nth(19)
-        .ok_or_else(|| std::io::Error::other("missing proc start token"))?
-        .parse::<u64>()
-        .map_err(std::io::Error::other)?;
-    Ok(ProcessIdentity {
-        pid,
-        created_at,
-        exe: format!("{}:{}", metadata.dev(), metadata.ino()),
-    })
+    RetainedProcess::open(pid)?.identity()
 }
 
 #[cfg(target_os = "macos")]
@@ -271,6 +339,54 @@ mod tests {
             "background child had a console window: {}",
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn retained_process_signals_cannot_follow_a_reused_pid() {
+        for signal in [libc::SIGTERM, libc::SIGKILL] {
+            let mut child = std::process::Command::new("sleep")
+                .arg("30")
+                .spawn()
+                .unwrap();
+            let retained = RetainedProcess::open(child.id()).unwrap();
+            let identity = capture_process_identity(child.id()).unwrap();
+            assert_eq!(retained.probe(&identity), IdentityProbe::Matches);
+            // Force exit in the exact window between the successful probe and
+            // signal. A later process must not be reachable through this handle.
+            child.kill().unwrap();
+            child.wait().unwrap();
+            let mut successor = std::process::Command::new("sleep")
+                .arg("30")
+                .spawn()
+                .unwrap();
+            let result = retained.signal(signal);
+            let successor_alive = successor.try_wait().unwrap().is_none();
+            successor.kill().unwrap();
+            successor.wait().unwrap();
+            assert_eq!(result.unwrap_err().raw_os_error(), Some(libc::ESRCH));
+            assert!(successor_alive);
+            assert_eq!(retained.probe(&identity), IdentityProbe::Gone);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn retained_process_signal_targets_the_verified_child() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let retained = RetainedProcess::open(child.id()).unwrap();
+        let identity = capture_process_identity(child.id()).unwrap();
+        assert_eq!(retained.probe(&identity), IdentityProbe::Matches);
+        let result = retained.signal(libc::SIGKILL);
+        if result.is_err() {
+            child.kill().unwrap();
+        }
+        child.wait().unwrap();
+        result.expect("Linux recovery requires pidfd_send_signal");
+        assert_eq!(retained.probe(&identity), IdentityProbe::Gone);
     }
 
     #[cfg(unix)]

@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use super::process_record_store::ProcessRecordStore;
+use super::process_record_store::{ProcessRecordStore, VerifiedRecord, RECOVERY_TIMEOUT};
 use crate::services::diagnostic_log::{
     self, DiagnosticCategory, DiagnosticFieldValue, DiagnosticLevel,
 };
@@ -22,7 +22,7 @@ use crate::services::log_redaction::redact_log_line;
 use crate::services::managed_acp_tools;
 use crate::services::path_env;
 #[cfg(unix)]
-use crate::services::process::{kill_process, pid_t_from_u32, terminate_process};
+use crate::services::process::{pid_t_from_u32, terminate_process};
 use crate::services::process::{IdentityProbe, ProcessIdentity};
 
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
@@ -60,6 +60,36 @@ pub struct GooseServeProcess {
 
 /// Global singleton — initialised once at app startup.
 static GOOSE_SERVE: OnceCell<GooseServeProcess> = OnceCell::const_new();
+
+struct FailedStartup {
+    child: Child,
+    store: ProcessRecordStore,
+    path: PathBuf,
+    record: Option<VerifiedRecord>,
+}
+
+static FAILED_STARTUP: tokio::sync::Mutex<Option<FailedStartup>> =
+    tokio::sync::Mutex::const_new(None);
+
+async fn retry_failed_startup(pending: &mut Option<FailedStartup>) -> Result<(), String> {
+    if let Some(failed) = pending.as_mut() {
+        stop_child_and_reap(&mut failed.child)
+            .await
+            .map_err(|error| {
+                format!("Previous goose serve startup has not been reaped: {error}")
+            })?;
+        if let Some(record) = &failed.record {
+            remove_verified_or_warn(
+                &failed.store,
+                &failed.path,
+                record,
+                "failed startup retry confirmed exit",
+            );
+        }
+        *pending = None;
+    }
+    Ok(())
+}
 
 impl GooseServeProcess {
     /// Return the WebSocket URL for connecting to this server.
@@ -108,6 +138,9 @@ impl GooseServeProcess {
     /// Kill the singleton goose serve process if it exists. Called from the
     /// app exit handler.
     pub async fn kill_singleton() {
+        if let Err(error) = retry_failed_startup(&mut *FAILED_STARTUP.lock().await).await {
+            log::warn!("{error}");
+        }
         if let Some(process) = GOOSE_SERVE.get() {
             process.kill().await;
         }
@@ -115,6 +148,7 @@ impl GooseServeProcess {
 
     async fn spawn(app_handle: tauri::AppHandle) -> Result<GooseServeProcess, String> {
         let process_started_at = Instant::now();
+        retry_failed_startup(&mut *FAILED_STARTUP.lock().await).await?;
 
         // Kill any orphaned goose serve process left by a previous run
         // (e.g. tauri dev hot-reload).
@@ -272,27 +306,23 @@ impl GooseServeProcess {
         );
 
         #[cfg(unix)]
-        {
-            let publication = write_pid_file(&process_record_store, &process_record_path, &child);
-            if publication.is_err() {
-                log::warn!("Failed to publish goose serve recovery record; stopping child and failing startup");
-            }
-            require_published_record(&mut child, publication).await?;
-        }
-
+        let publication = write_pid_file(&process_record_store, &process_record_path, &child);
         #[cfg(windows)]
-        {
-            let publication =
-                write_process_record(&process_record_store, &process_record_path, &child);
-            if publication.is_err() {
-                log::warn!("Failed to publish goose serve recovery record; stopping child and failing startup");
+        let publication = write_process_record(&process_record_store, &process_record_path, &child);
+        let process_record = match require_published_record(&mut child, publication).await {
+            Ok(record) => record,
+            Err(error) => {
+                if child.id().is_some() {
+                    *FAILED_STARTUP.lock().await = Some(FailedStartup {
+                        child,
+                        store: process_record_store,
+                        path: process_record_path,
+                        record: None,
+                    });
+                }
+                return Err(error);
             }
-            require_published_record(&mut child, publication).await?;
-        }
-
-        let process_record =
-            retain_published_record(&process_record_store, &process_record_path, &mut child)
-                .await?;
+        };
 
         spawn_log_reader(child.stdout.take(), "stdout");
         spawn_log_reader(child.stderr.take(), "stderr");
@@ -331,6 +361,14 @@ impl GooseServeProcess {
                     &error,
                 )
                 .await;
+                if child.id().is_some() {
+                    *FAILED_STARTUP.lock().await = Some(FailedStartup {
+                        child,
+                        store: process_record_store,
+                        path: process_record_path,
+                        record: Some(process_record),
+                    });
+                }
                 return Err(error);
             }
         }
@@ -430,6 +468,14 @@ where
 
 async fn stop_child_and_reap(child: &mut Child) -> Result<(), String> {
     bounded_child_teardown(CHILD_TEARDOWN_TIMEOUT, async {
+        // try_wait caches exit status; readiness may already have reaped this child.
+        if child
+            .try_wait()
+            .map_err(|error| format!("failed to inspect child: {error}"))?
+            .is_some()
+        {
+            return Ok(());
+        }
         #[cfg(unix)]
         {
             let pid = child.id().and_then(pid_t_from_u32).ok_or_else(|| {
@@ -515,62 +561,21 @@ fn finish_published_child_teardown(
     }
 }
 
-async fn retain_published_record_with<F>(
-    store: &ProcessRecordStore,
-    path: &Path,
-    child: &mut Child,
-    retain: F,
-) -> Result<super::process_record_store::VerifiedRecord, String>
-where
-    F: FnOnce(
-        &ProcessRecordStore,
-        &Path,
-    ) -> Result<
-        super::process_record_store::VerifiedRecord,
-        super::process_record_store::VerifiedReadError,
-    >,
-{
-    match retain(store, path) {
-        Ok(record) => Ok(record),
-        Err(error) => {
-            let startup_error = format!(
-                "Failed to retain published goose serve recovery record {}: {}",
-                path.display(),
-                error.message
-            );
-            teardown_published_child(store, path, error.verified.as_ref(), child, &startup_error)
-                .await;
-            Err(startup_error)
-        }
-    }
-}
-
-async fn retain_published_record(
-    store: &ProcessRecordStore,
-    path: &Path,
-    child: &mut Child,
-) -> Result<super::process_record_store::VerifiedRecord, String> {
-    retain_published_record_with(store, path, child, |store, path| {
-        store.read_verified_for_cleanup(path)
-    })
-    .await
-}
-
 async fn require_published_record(
     child: &mut Child,
-    publication: Result<(), String>,
-) -> Result<(), String> {
-    if let Err(error) = publication {
-        stop_child_and_reap(child).await.map_err(|teardown_error| {
-            format!(
-                "Failed to publish goose serve recovery record: {error}; child teardown also failed: {teardown_error}"
-            )
-        })?;
-        return Err(format!(
-            "Failed to publish goose serve recovery record: {error}"
-        ));
+    publication: Result<VerifiedRecord, String>,
+) -> Result<VerifiedRecord, String> {
+    match publication {
+        Ok(record) => Ok(record),
+        Err(error) => {
+            stop_child_and_reap(child).await.map_err(|teardown_error| {
+                format!("Failed to publish goose serve recovery record: {error}; child teardown also failed: {teardown_error}")
+            })?;
+            Err(format!(
+                "Failed to publish goose serve recovery record: {error}"
+            ))
+        }
     }
-    Ok(())
 }
 
 /// Legacy single-slot PID file used before per-owner process records. It is
@@ -595,7 +600,11 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 }
 
 #[cfg(unix)]
-fn write_pid_file(store: &ProcessRecordStore, path: &Path, child: &Child) -> Result<(), String> {
+fn write_pid_file(
+    store: &ProcessRecordStore,
+    path: &Path,
+    child: &Child,
+) -> Result<VerifiedRecord, String> {
     let serve_pid = child.id().ok_or_else(|| "child has no pid".to_string())?;
     let owner_identity = crate::services::process::capture_process_identity(std::process::id());
     let serve_identity = crate::services::process::capture_process_identity(serve_pid);
@@ -609,7 +618,7 @@ fn write_pid_file(store: &ProcessRecordStore, path: &Path, child: &Child) -> Res
         (Ok(owner), Ok(serve)) => (Some(owner), Some(serve)),
         _ => {
             // macOS currently cannot bind executable vnode identity to a PID
-            // without a pathname race. Publish a deletion-only record so normal
+            // without a pathname race. Publish an evidence-only record so normal
             // startup works, but stale recovery can never authorize signaling.
             (None, None)
         }
@@ -630,7 +639,7 @@ fn write_process_record(
     store: &ProcessRecordStore,
     path: &Path,
     child: &Child,
-) -> Result<(), String> {
+) -> Result<VerifiedRecord, String> {
     let handle = child
         .raw_handle()
         .ok_or_else(|| "child has no process handle".to_string())?;
@@ -660,7 +669,8 @@ fn write_process_record(
 async fn kill_stale_serve_process(store: &ProcessRecordStore) {
     remove_legacy_pid_file();
 
-    let entries = match store.entries() {
+    let deadline = tokio::time::Instant::now() + RECOVERY_TIMEOUT;
+    let mut entries = match store.scan() {
         Ok(entries) => entries,
         Err(error) => {
             log::warn!("Failed to enumerate goose serve process records: {error}");
@@ -668,11 +678,17 @@ async fn kill_stale_serve_process(store: &ProcessRecordStore) {
         }
     };
 
-    for path in entries {
+    while let Ok(Some(path)) = tokio::time::timeout_at(deadline, entries.recv()).await {
         if !is_process_record_path(&path) {
             continue;
         }
-        cleanup_process_record(store, &path).await;
+        if tokio::time::timeout_at(deadline, cleanup_process_record(store, &path))
+            .await
+            .is_err()
+        {
+            log::warn!("Goose serve recovery budget exhausted; retaining remaining records");
+            break;
+        }
     }
 }
 
@@ -800,10 +816,23 @@ async fn cleanup_orphaned_serve_process(
         );
         return;
     };
-    match crate::services::process::kill_process_if_identity_matches(
-        identity,
-        Duration::from_secs(5),
-    ) {
+    let identity = identity.clone();
+    let target = identity.clone();
+    let outcome = tokio::task::spawn_blocking(move || {
+        crate::services::process::kill_process_if_identity_matches(
+            &target,
+            Duration::from_millis(250),
+        )
+    })
+    .await;
+    let outcome = match outcome {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            log::warn!("Windows recovery worker failed: {error}");
+            return;
+        }
+    };
+    match outcome {
         Ok(outcome) if outcome.exit_confirmed() => {
             remove_verified_or_warn(store, path, verified, "confirmed Windows process exit");
         }
@@ -820,28 +849,54 @@ async fn cleanup_orphaned_serve_process(
     }
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 async fn cleanup_orphaned_serve_process(
     store: &ProcessRecordStore,
     path: &Path,
-    verified: &super::process_record_store::VerifiedRecord,
+    verified: &VerifiedRecord,
     record: &ServeProcessRecord,
 ) {
+    let Some(identity) = &record.serve_identity else {
+        return;
+    };
+    let target = match crate::services::process::RetainedProcess::open(identity.pid) {
+        Ok(target) => target,
+        Err(error) => {
+            log::warn!(
+                "Cannot retain stale process {}: {error}; keeping recovery evidence",
+                identity.pid
+            );
+            return;
+        }
+    };
     cleanup_orphaned_serve_process_with_ops(
         store,
         path,
         verified,
         record,
-        crate::services::process::probe_process_identity,
-        terminate_process,
-        kill_process,
+        |identity| target.probe(identity),
+        || target.signal(libc::SIGTERM).is_ok(),
+        || target.signal(libc::SIGKILL).is_ok(),
         Duration::from_millis(200),
         Duration::from_millis(50),
     )
     .await;
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "linux")))]
+async fn cleanup_orphaned_serve_process(
+    _store: &ProcessRecordStore,
+    path: &Path,
+    _verified: &VerifiedRecord,
+    _record: &ServeProcessRecord,
+) {
+    log::debug!(
+        "Process-bound recovery is unavailable; retaining {}",
+        path.display()
+    );
+}
+
+#[cfg(any(target_os = "linux", all(unix, test)))]
 #[allow(clippy::too_many_arguments)]
 async fn cleanup_orphaned_serve_process_with_ops<FProbe, FTerm, FKill>(
     store: &ProcessRecordStore,
@@ -855,8 +910,8 @@ async fn cleanup_orphaned_serve_process_with_ops<FProbe, FTerm, FKill>(
     kill_delay: Duration,
 ) where
     FProbe: FnMut(&ProcessIdentity) -> IdentityProbe,
-    FTerm: FnMut(crate::services::process::ProcessId) -> bool,
-    FKill: FnMut(crate::services::process::ProcessId) -> bool,
+    FTerm: FnMut() -> bool,
+    FKill: FnMut() -> bool,
 {
     let Some(identity) = &record.serve_identity else {
         log::warn!(
@@ -890,15 +945,7 @@ async fn cleanup_orphaned_serve_process_with_ops<FProbe, FTerm, FKill>(
         None,
         diagnostic_log::fields([("pid", (identity.pid as i64).into())]),
     );
-    let Some(pid) = pid_t_from_u32(identity.pid) else {
-        log::warn!(
-            "Invalid stale serve PID {}; keeping {}",
-            identity.pid,
-            path.display()
-        );
-        return;
-    };
-    if !terminate(pid) {
+    if !terminate() {
         match probe(identity) {
             IdentityProbe::Gone | IdentityProbe::Mismatch => {
                 remove_verified_or_warn(
@@ -939,7 +986,7 @@ async fn cleanup_orphaned_serve_process_with_ops<FProbe, FTerm, FKill>(
         None,
         diagnostic_log::fields([("pid", (identity.pid as i64).into())]),
     );
-    if !kill(pid) {
+    if !kill() {
         match probe(identity) {
             IdentityProbe::Gone | IdentityProbe::Mismatch => {
                 remove_verified_or_warn(
@@ -1376,38 +1423,8 @@ pub(crate) fn reserve_free_port() -> Result<u16, String> {
 }
 
 #[cfg(test)]
-mod tests {
-    #[cfg(all(unix, not(target_os = "macos")))]
-    use super::cleanup_process_record;
-    #[cfg(unix)]
-    use super::ServeProcessRecord;
-    use super::{
-        acp_websocket_url, add_release_webview_origin_arg, apply_goose_search_paths_env,
-        apply_runtime_goose_provider_env, apply_shell_env_with_extended_path,
-        apply_shell_env_with_extended_path_inner, require_published_record, stop_child_and_reap,
-        DATABRICKS_HOST_ENV, TAURI_WEBVIEW_ORIGIN,
-    };
-    use crate::commands::runtime_config::default_runtime_config;
-    #[cfg(unix)]
-    use crate::services::acp::process_record_store::ProcessRecordStore;
-    #[cfg(unix)]
-    use crate::services::process::IdentityProbe;
-    use std::collections::HashMap;
-    use std::ffi::OsString;
-    use std::path::{Path, PathBuf};
-    #[cfg(unix)]
-    use std::time::Duration;
-    use tokio::process::Command;
-
-    fn env_value(command: &Command, key: &str) -> Option<OsString> {
-        command.as_std().get_envs().find_map(|(k, v)| {
-            if k == key {
-                v.map(|value| value.to_os_string())
-            } else {
-                None
-            }
-        })
-    }
+mod recovery_tests {
+    use super::*;
 
     #[tokio::test]
     async fn process_record_publication_failure_kills_and_reaps_the_child() {
@@ -1469,7 +1486,7 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn readiness_failure_reaps_child_and_exact_deletes_retained_record() {
+    async fn readiness_failure_reaps_child_and_retains_unix_evidence() {
         let temp = tempfile::tempdir().expect("temp dir");
         let store = ProcessRecordStore::open(temp.path().join("records")).expect("open store");
         let path = store.new_record_path(std::process::id(), 1);
@@ -1496,41 +1513,47 @@ mod tests {
             -1,
             "child must no longer exist"
         );
-        assert!(!path.exists(), "confirmed exit permits exact cleanup");
+        assert!(
+            path.exists(),
+            "Unix retains evidence without pathname deletion"
+        );
     }
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn post_publication_retention_failure_reaps_child_but_keeps_record() {
-        let temp = tempfile::tempdir().expect("temp dir");
-        let store = ProcessRecordStore::open(temp.path().join("records")).expect("open store");
+    async fn already_reaped_child_teardown_succeeds() {
+        let mut child = Command::new("sh").args(["-c", "exit 0"]).spawn().unwrap();
+        child.wait().await.unwrap();
+        stop_child_and_reap(&mut child)
+            .await
+            .expect("already-reaped child is confirmed exited");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn next_startup_reaps_retained_failed_child_even_with_live_owner() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = ProcessRecordStore::open(temp.path().join("records")).unwrap();
         let path = store.new_record_path(std::process::id(), 1);
-        store.publish(&path, b"record").expect("publish");
-        let mut child = Command::new("sh")
-            .args(["-c", "sleep 30"])
+        let record = store.publish(&path, b"{}").unwrap();
+        let child = Command::new("sleep")
+            .arg("30")
+            .kill_on_drop(true)
             .spawn()
-            .expect("spawn child");
-        let pid = child.id().expect("child pid");
-
-        let error = super::retain_published_record_with(&store, &path, &mut child, |_, _| {
-            Err(super::super::process_record_store::VerifiedReadError {
-                message: "forced retention failure".to_string(),
-                verified: None,
-            })
-        })
-        .await
-        .expect_err("retention failure must abort startup");
-
-        assert!(error.contains("forced retention failure"));
-        assert!(child.id().is_none(), "wait must reap the child");
-        assert_eq!(
-            unsafe { libc::kill(pid as i32, 0) },
-            -1,
-            "child must no longer exist"
-        );
+            .unwrap();
+        let pid = child.id().unwrap();
+        let mut pending = Some(super::FailedStartup {
+            child,
+            store,
+            path: path.clone(),
+            record: Some(record),
+        });
+        super::retry_failed_startup(&mut pending).await.unwrap();
+        assert!(pending.is_none());
+        assert_eq!(unsafe { libc::kill(pid as i32, 0) }, -1);
         assert!(
             path.exists(),
-            "without the originally retained object, exact cleanup must not reopen by path"
+            "Unix retains evidence without pathname deletion"
         );
     }
 
@@ -1571,7 +1594,7 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn failed_sigterm_removes_record_when_follow_up_probe_confirms_gone() {
+    async fn failed_sigterm_confirms_gone_without_unsafe_unix_deletion() {
         use std::collections::VecDeque;
 
         let temp = tempfile::tempdir().expect("temp dir");
@@ -1593,19 +1616,22 @@ mod tests {
             &verified,
             &record,
             |_| probes.pop_front().expect("scripted probe"),
-            |_| false,
-            |_| panic!("SIGKILL must not run after failed SIGTERM"),
+            || false,
+            || panic!("SIGKILL must not run after failed SIGTERM"),
             Duration::ZERO,
             Duration::ZERO,
         )
         .await;
 
-        assert!(!path.exists(), "confirmed exit permits exact cleanup");
+        assert!(
+            path.exists(),
+            "Unix retains evidence without pathname deletion"
+        );
     }
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn failed_sigkill_removes_record_when_follow_up_probe_confirms_mismatch() {
+    async fn failed_sigkill_confirms_mismatch_without_unsafe_unix_deletion() {
         use std::collections::VecDeque;
 
         let temp = tempfile::tempdir().expect("temp dir");
@@ -1631,14 +1657,17 @@ mod tests {
             &verified,
             &record,
             |_| probes.pop_front().expect("scripted probe"),
-            |_| true,
-            |_| false,
+            || true,
+            || false,
             Duration::ZERO,
             Duration::ZERO,
         )
         .await;
 
-        assert!(!path.exists(), "confirmed mismatch permits exact cleanup");
+        assert!(
+            path.exists(),
+            "Unix retains evidence without pathname deletion"
+        );
     }
 
     #[cfg(unix)]
@@ -1674,8 +1703,8 @@ mod tests {
             &verified,
             &record,
             |_| probes.pop_front().expect("scripted probe"),
-            |_| true,
-            move |_| {
+            || true,
+            move || {
                 killed_for_closure.set(true);
                 true
             },
@@ -1685,7 +1714,10 @@ mod tests {
         .await;
 
         assert!(!killed.get(), "identity mismatch must suppress SIGKILL");
-        assert!(!path.exists(), "mismatched identity is confirmed gone");
+        assert!(
+            path.exists(),
+            "Unix retains evidence without pathname deletion"
+        );
     }
 
     #[cfg(unix)]
@@ -1721,8 +1753,8 @@ mod tests {
             &verified,
             &record,
             |_| probes.pop_front().expect("scripted probe"),
-            |_| true,
-            |_| true,
+            || true,
+            || true,
             Duration::ZERO,
             Duration::ZERO,
         )
@@ -1733,7 +1765,7 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[tokio::test]
-    async fn macos_publishes_deletion_only_record_when_identity_is_unavailable() {
+    async fn macos_publishes_evidence_only_record_when_identity_is_unavailable() {
         let temp = tempfile::tempdir().expect("temp dir");
         let store = ProcessRecordStore::open(temp.path().join("records")).expect("open store");
         let path = store.new_record_path(std::process::id(), 1);
@@ -1742,7 +1774,7 @@ mod tests {
             .spawn()
             .expect("spawn child");
 
-        super::write_pid_file(&store, &path, &child).expect("publish deletion-only record");
+        super::write_pid_file(&store, &path, &child).expect("publish evidence-only record");
         let bytes = store
             .read_verified_for_cleanup(&path)
             .expect("read record")
@@ -1884,7 +1916,10 @@ mod tests {
 
         cleanup_process_record(&store, &path).await;
 
-        assert!(!path.exists(), "recycled-PID record should be removed");
+        assert!(
+            path.exists(),
+            "Unix retains evidence without pathname deletion"
+        );
         assert!(
             unrelated
                 .try_wait()
@@ -1894,6 +1929,30 @@ mod tests {
         );
         unrelated.kill().await.expect("kill unrelated child");
         unrelated.wait().await.expect("reap unrelated child");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        acp_websocket_url, add_release_webview_origin_arg, apply_goose_search_paths_env,
+        apply_runtime_goose_provider_env, apply_shell_env_with_extended_path,
+        apply_shell_env_with_extended_path_inner, DATABRICKS_HOST_ENV, TAURI_WEBVIEW_ORIGIN,
+    };
+    use crate::commands::runtime_config::default_runtime_config;
+    use std::collections::HashMap;
+    use std::ffi::OsString;
+    use std::path::{Path, PathBuf};
+    use tokio::process::Command;
+
+    fn env_value(command: &Command, key: &str) -> Option<OsString> {
+        command.as_std().get_envs().find_map(|(k, v)| {
+            if k == key {
+                v.map(|value| value.to_os_string())
+            } else {
+                None
+            }
+        })
     }
 
     #[test]
