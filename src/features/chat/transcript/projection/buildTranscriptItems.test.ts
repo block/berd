@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { Message } from "@/shared/types/messages";
 import { VOICE_CONVERSATION_EMPTY_RESPONSE } from "@/features/chat/lib/voiceConversationNoop";
-import { getVisibleTranscriptMessages } from "./buildTranscriptItems";
+import {
+  buildTranscriptItems,
+  getVisibleTranscriptMessages,
+} from "./buildTranscriptItems";
 
 function message(
   id: string,
@@ -189,5 +192,25 @@ describe("getVisibleTranscriptMessages voice no-op", () => {
         ],
       },
     ]);
+  });
+});
+
+describe("buildTranscriptItems notification estimates", () => {
+  it("estimates a collapsed notification from its header rather than its hidden payload", () => {
+    const notification = message("notification", "user", "x".repeat(50_000));
+    notification.metadata = {
+      origin: "berdctl_cross_session",
+      berdEventType: "notification",
+    };
+
+    const item = buildTranscriptItems({
+      messages: [notification],
+      streamingMessageId: null,
+      nowBucket: "2026-09-11",
+      localeKey: "en",
+      calendarRevisionToken: "test",
+    }).find((candidate) => candidate.kind === "message");
+
+    expect(item?.estimatedHeight).toBe(48);
   });
 });
