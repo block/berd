@@ -1645,8 +1645,15 @@ pub async fn start_native_voice_conversation(
             window_label: window_label.clone(),
         });
         runtime.pipeline = pipeline.take();
-        runtime.status_sounds = berd_voice::ManagedStatusSoundRuntime::spawn(
-            super::pocket_voice::selected_output_device(),
+        let output_device = super::pocket_voice::selected_output_device();
+        let effective_output_device =
+            super::pocket_voice::effective_output_device_name(output_device.as_deref());
+        let cue_input_controls =
+            super::pocket_voice::output_device_uses_speakers(effective_output_device.as_deref())
+                .then(|| state.input_controls.clone());
+        runtime.status_sounds = berd_voice::ManagedStatusSoundRuntime::spawn_with_input_controls(
+            output_device,
+            cue_input_controls,
         )
         .map_err(|error| log::warn!("Status sounds unavailable: {error}"))
         .ok();

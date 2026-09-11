@@ -97,6 +97,7 @@ pub struct StatusSoundRuntime {
     player: StatusSoundPlayer,
     output_device: Option<String>,
     conversation_active: bool,
+    input_controls: Option<crate::input::VoiceInputControls>,
 }
 
 impl Default for StatusSoundRuntime {
@@ -107,11 +108,16 @@ impl Default for StatusSoundRuntime {
             player: StatusSoundPlayer::new(),
             output_device: None,
             conversation_active: false,
+            input_controls: None,
         }
     }
 }
 
 impl StatusSoundRuntime {
+    pub fn set_input_controls(&mut self, controls: Option<crate::input::VoiceInputControls>) {
+        self.input_controls = controls;
+    }
+
     pub fn set_output_device(&mut self, output_device: Option<String>) {
         if self.output_device != output_device {
             self.player.stop();
@@ -147,7 +153,7 @@ impl StatusSoundRuntime {
         if self.next_tick.is_some_and(|deadline| now >= deadline) {
             self.next_tick = Some(now + STATUS_SOUND_INTERVAL);
             if let Some(cue) = self.machine.tick(conversation_active) {
-                self.player.play(cue, self.output_device.as_deref())?;
+                self.player.play(cue, self.output_device.as_deref(), self.input_controls.as_ref())?;
             }
         }
         Ok(self.player.is_active())
@@ -174,6 +180,13 @@ struct StatusSoundWorker {
 
 impl ManagedStatusSoundRuntime {
     pub fn spawn(output_device: Option<String>) -> Result<Self, String> {
+        Self::spawn_with_input_controls(output_device, None)
+    }
+
+    pub fn spawn_with_input_controls(
+        output_device: Option<String>,
+        input_controls: Option<crate::input::VoiceInputControls>,
+    ) -> Result<Self, String> {
         let (commands, receiver) = mpsc::channel();
         let worker = thread::Builder::new()
             .name("berd-status-sounds".into())
@@ -181,6 +194,7 @@ impl ManagedStatusSoundRuntime {
                 let mut runtime = StatusSoundRuntime::default();
                 let mut conversation_active = false;
                 runtime.set_output_device(output_device);
+                runtime.set_input_controls(input_controls);
                 loop {
                     match receiver.recv_timeout(Duration::from_millis(10)) {
                         Ok(StatusSoundCommand::Update(status, settings)) => {
@@ -283,7 +297,7 @@ impl StatusSoundPlayer {
         Self
     }
 
-    fn play(&mut self, _cue: StatusSoundCue, _output_device: Option<&str>) -> Result<(), String> {
+    fn play(&mut self, _cue: StatusSoundCue, _output_device: Option<&str>, _input_controls: Option<&crate::input::VoiceInputControls>) -> Result<(), String> {
         Err("status sound playback is only available on macOS".into())
     }
 
@@ -303,6 +317,7 @@ const STATUS_SOUND_OUTPUT_TAIL: Duration = Duration::from_millis(100);
 struct ActiveStatusSound {
     player: crate::macos_audio_output::PocketAudioPlayer,
     output_tail_deadline: Option<Instant>,
+    _input_activity: Option<crate::input::AssistantActivityGuard>,
 }
 
 #[cfg(target_os = "macos")]
@@ -322,7 +337,7 @@ impl StatusSoundPlayer {
         }
     }
 
-    fn play(&mut self, cue: StatusSoundCue, output_device: Option<&str>) -> Result<(), String> {
+    fn play(&mut self, cue: StatusSoundCue, output_device: Option<&str>, input_controls: Option<&crate::input::VoiceInputControls>) -> Result<(), String> {
         let asset = match cue.status {
             ConversationStatus::Working => &self.working,
             ConversationStatus::Waiting => &self.waiting,
@@ -339,10 +354,14 @@ impl StatusSoundPlayer {
             .iter()
             .map(|sample| sample * cue.volume)
             .collect::<Vec<_>>();
+        let input_activity = input_controls.map(|controls| {
+            controls.begin_assistant_activity(0.65, crate::input::InputDuringTtsPolicy::SuppressInput)
+        }).transpose()?;
         player.enqueue(&samples)?;
         self.active.push(ActiveStatusSound {
             player,
             output_tail_deadline: None,
+            _input_activity: input_activity,
         });
         Ok(())
     }
@@ -548,6 +567,7 @@ mod tests {
     #[ignore = "opens the default CoreAudio output and plays the macOS Pop and Purr cues"]
     fn macos_player_decodes_and_queues_both_status_cues() {
         let mut player = StatusSoundPlayer::new();
+        let controls = crate::input::VoiceInputControls::default();
         for status in [ConversationStatus::Working, ConversationStatus::Waiting] {
             player
                 .play(
@@ -556,10 +576,33 @@ mod tests {
                         volume: DEFAULT_STATUS_SOUND_VOLUME,
                     },
                     None,
+                    Some(&controls),
                 )
                 .unwrap();
         }
         assert_eq!(player.active.len(), 2);
+        assert!(controls.is_muted());
         player.stop();
+        assert!(!controls.is_muted());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "opens CoreAudio output and plays a status cue"]
+    fn macos_cue_suppresses_input_until_audio_and_tail_drain() {
+        let controls = crate::input::VoiceInputControls::default();
+        let mut player = StatusSoundPlayer::new();
+        player.play(StatusSoundCue {
+            status: ConversationStatus::Working,
+            volume: DEFAULT_STATUS_SOUND_VOLUME,
+        }, None, Some(&controls)).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while player.is_active() {
+            assert!(controls.is_muted());
+            assert!(Instant::now() < deadline, "status cue did not drain");
+            player.reap();
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(!controls.is_muted());
     }
 }
