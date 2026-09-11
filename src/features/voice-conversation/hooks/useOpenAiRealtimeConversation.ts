@@ -582,26 +582,6 @@ class OpenAiRealtimeConversationRuntime {
       this.registerBridge(sessionId);
       await waitForGptLiveBridgeReady();
       if (isStale()) return;
-      const controlsStatus = await startOpenAiRealtimeVoiceControls(sessionId);
-      if (isStale()) {
-        this.releaseControlsListener();
-        this.releaseControlsListener = null;
-        await stopOpenAiRealtimeVoiceControls(
-          controlsStatus.sessionId ?? sessionId,
-          controlsStatus.revision,
-        ).catch(() => undefined);
-        return;
-      }
-      this.setSnapshot({
-        ...this.snapshot,
-        controlsRevision: controlsStatus.revision,
-        ownerWindowLabel: controlsStatus.ownerWindowLabel,
-      });
-      await claimVoiceDictationMicrophone(MICROPHONE_OWNER_ID).catch(
-        (error) => {
-          if (!isUnavailableDevMicrophoneClaim(error)) throw error;
-        },
-      );
       const preference = getRealtimeVoicePreference();
       const pendingDraft =
         useChatSessionStore.getState().getSession(sessionId)?.creationState ===
@@ -873,6 +853,26 @@ class OpenAiRealtimeConversationRuntime {
         }),
       ]);
       if (isStale()) return;
+      const controlsStatus = await startOpenAiRealtimeVoiceControls(sessionId);
+      if (isStale()) {
+        this.releaseControlsListener();
+        this.releaseControlsListener = null;
+        await stopOpenAiRealtimeVoiceControls(
+          controlsStatus.sessionId ?? sessionId,
+          controlsStatus.revision,
+        ).catch(() => undefined);
+        return;
+      }
+      this.setSnapshot({
+        ...this.snapshot,
+        controlsRevision: controlsStatus.revision,
+        ownerWindowLabel: controlsStatus.ownerWindowLabel,
+      });
+      await claimVoiceDictationMicrophone(MICROPHONE_OWNER_ID).catch(
+        (error) => {
+          if (!isUnavailableDevMicrophoneClaim(error)) throw error;
+        },
+      );
       let appliedVoice = preference.voice;
       this.releaseVoicePreferenceListener = subscribeToRealtimeVoicePreference(
         (next) => {
