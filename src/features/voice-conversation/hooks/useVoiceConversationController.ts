@@ -451,7 +451,8 @@ export function observeChainedVoiceStatus(): () => void {
     }
     const runtime = useChatStore.getState().getSessionRuntime(status.sessionId);
     const conversationStatus =
-      runtime.activeRunId !== null || isSessionRunning(runtime.chatState)
+      runtime.hasToolCallInRun &&
+      (runtime.activeRunId !== null || isSessionRunning(runtime.chatState))
         ? "working"
         : "waiting";
     const settings = getStatusSoundPreference();

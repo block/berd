@@ -134,7 +134,7 @@ impl StatusSoundRuntime {
         let changed = self.machine.update(status, settings);
         if changed {
             self.player.stop();
-            self.next_tick = Some(Instant::now() + STATUS_SOUND_INTERVAL);
+            self.next_tick = Some(Instant::now());
         }
     }
 
@@ -146,7 +146,7 @@ impl StatusSoundRuntime {
         if conversation_active {
             self.stop();
         } else if self.conversation_active {
-            self.next_tick = Some(Instant::now() + STATUS_SOUND_INTERVAL);
+            self.next_tick = Some(Instant::now());
         }
         self.conversation_active = conversation_active;
         if conversation_active {
@@ -498,15 +498,15 @@ mod tests {
     }
 
     #[test]
-    fn first_cue_waits_a_full_window_and_quick_runs_stay_silent() {
+    fn first_status_update_schedules_an_immediate_cue() {
         let mut runtime = StatusSoundRuntime::default();
         let started_at = Instant::now();
         runtime.update(
             ConversationStatus::Working,
             settings(StatusSoundMode::Working),
         );
-        assert!(runtime.next_tick.unwrap() >= started_at + STATUS_SOUND_INTERVAL);
-        assert!(!runtime.poll(false).unwrap());
+        assert!(runtime.next_tick.unwrap() >= started_at);
+        assert!(runtime.next_tick.unwrap() <= Instant::now());
         runtime.update(
             ConversationStatus::Waiting,
             settings(StatusSoundMode::Working),
@@ -564,7 +564,7 @@ mod tests {
     }
 
     #[test]
-    fn resuming_after_conversation_audio_starts_a_fresh_full_window() {
+    fn resuming_after_conversation_audio_plays_without_waiting_for_old_cadence() {
         let mut runtime = StatusSoundRuntime::default();
         runtime.update(
             ConversationStatus::Working,
@@ -572,9 +572,7 @@ mod tests {
         );
         assert!(!runtime.poll(true).unwrap());
         runtime.next_tick = Some(Instant::now() + Duration::from_secs(60));
-        let resumed_at = Instant::now();
-        assert!(!runtime.poll(false).unwrap());
-        assert!(runtime.next_tick.unwrap() >= resumed_at + STATUS_SOUND_INTERVAL);
+        let _ = runtime.poll(false);
         assert!(runtime.next_tick.unwrap() < Instant::now() + STATUS_SOUND_INTERVAL);
     }
 
@@ -622,8 +620,7 @@ mod tests {
             ConversationStatus::Waiting,
             settings(StatusSoundMode::WorkingAndWaiting),
         );
-        assert!(runtime.next_tick.unwrap() > Instant::now() + Duration::from_secs(4));
-        assert!(runtime.next_tick.unwrap() <= Instant::now() + STATUS_SOUND_INTERVAL);
+        assert!(runtime.next_tick.unwrap() <= Instant::now());
     }
 
     #[cfg(target_os = "macos")]

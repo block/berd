@@ -222,6 +222,7 @@ describe("voice transcript delivery coordination", () => {
     expect(useVoiceConversationStore.getState().uiState).toBe("agent-working");
 
     useChatStore.getState().setActiveRunId("session-1", "run-1");
+    useChatStore.getState().markToolCallInRun("session-1");
     voiceApiMocks.updateStatusSounds.mockClear();
     useVoiceConversationStore.getState().setUiState("agent-speaking");
     useVoiceConversationStore.getState().setUiState("listening");
@@ -238,6 +239,8 @@ describe("voice transcript delivery coordination", () => {
     voiceApiMocks.updateStatusSounds.mockClear();
     useChatStore.getState().setActiveRunId("session-1", "run-2");
     expect(useVoiceConversationStore.getState().uiState).toBe("agent-working");
+    expect(voiceApiMocks.updateStatusSounds).not.toHaveBeenCalled();
+    useChatStore.getState().markToolCallInRun("session-1");
     expect(voiceApiMocks.updateStatusSounds).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: "session-1", revision: 3 }),
       "working",
@@ -245,6 +248,8 @@ describe("voice transcript delivery coordination", () => {
     );
 
     voiceApiMocks.updateStatusSounds.mockClear();
+    useChatStore.getState().markToolCallInRun("session-1");
+    expect(voiceApiMocks.updateStatusSounds).not.toHaveBeenCalled();
     useChatStore.getState().setActiveRunId("session-1", null);
     useChatStore.getState().setError("session-1", "run failed");
     expect(useVoiceConversationStore.getState().uiState).toBe("listening");
@@ -302,6 +307,7 @@ describe("voice transcript delivery coordination", () => {
 
     act(() => {
       useChatStore.getState().setActiveRunId("session-1", "run-1");
+      useChatStore.getState().markToolCallInRun("session-1");
       useVoiceConversationStore.getState().setUiState("listening");
       setStatusSoundPreference({ mode: "working-and-waiting" });
     });
@@ -371,7 +377,7 @@ describe("voice transcript delivery coordination", () => {
     );
     expect(voiceApiMocks.updateStatusSounds).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: "session-1", revision: 1 }),
-      "working",
+      "waiting",
       { mode: "working" },
     );
   });

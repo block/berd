@@ -38,6 +38,7 @@ export interface SessionChatRuntime {
   hasUsageSnapshot: boolean;
   streamingMessageId: string | null;
   activeRunId: string | null;
+  hasToolCallInRun: boolean;
   isRunCancellationPending: boolean;
   pendingInterventionBoundary: {
     interventionMessageId: string;
@@ -53,6 +54,7 @@ export const INITIAL_SESSION_CHAT_RUNTIME: SessionChatRuntime = {
   hasUsageSnapshot: false,
   streamingMessageId: null,
   activeRunId: null,
+  hasToolCallInRun: false,
   isRunCancellationPending: false,
   pendingInterventionBoundary: null,
   pendingAssistantProviderId: null,
