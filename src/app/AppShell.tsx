@@ -1,3 +1,4 @@
+import { projectEnvironment } from "@/features/projects/lib/projectEnvironment";
 import {
   useCallback,
   useEffect,
@@ -318,6 +319,8 @@ type DraftSessionCreationReady = {
   >["configOptionsSnapshot"];
 };
 type ProjectChatDraftOptions = {
+  remoteHost?: string;
+  remoteWorkingDir?: string;
   executionTarget?: SessionExecutionTarget;
   reuseExistingDraft?: boolean;
   reasoningEffort?: GlobalComposeOptions["reasoningEffort"];
@@ -2278,6 +2281,9 @@ export function AppShell({
       } = {},
     ) => {
       const shouldActivate = options.activate !== false;
+      options = options.remoteHost
+        ? options
+        : { ...options, ...projectEnvironment(project) };
       const remoteHost = options.remoteHost?.trim() || undefined;
       const remoteWorkingDir = options.remoteWorkingDir?.trim() || undefined;
       if (remoteHost && !remoteWorkingDir) {
@@ -2507,6 +2513,9 @@ export function AppShell({
       project: ProjectInfo,
       options: ProjectChatDraftOptions = {},
     ) => {
+      if (options.remoteHost || projectEnvironment(project)) {
+        return createNewTab(title, project, options);
+      }
       perfLog(
         `[perf:newtab] createNewProjectDraft start (project=${project.id})`,
       );
@@ -2579,6 +2588,7 @@ export function AppShell({
       return session;
     },
     [
+      createNewTab,
       createDraftSession,
       resolveSessionCreationTarget,
       setActiveSession,
@@ -2599,6 +2609,9 @@ export function AppShell({
         remoteWorkingDir?: string;
       } = {},
     ) => {
+      options = options.remoteHost
+        ? options
+        : { ...options, ...projectEnvironment(project) };
       const remoteHost = options.remoteHost?.trim() || undefined;
       const remoteWorkingDir = options.remoteWorkingDir?.trim() || undefined;
       if (remoteHost && !remoteWorkingDir) {
@@ -3045,6 +3058,7 @@ export function AppShell({
       // a remote compose keeps the project association but skips those plans.
       const requiresProjectWorkspaceDraftPlan =
         !options?.remoteHost &&
+        !projectEnvironment(project) &&
         workspaceRepository.mode === "multi" &&
         Boolean(project?.projectWorkspaces.length);
       const shouldRunComposerHandoff =
@@ -3118,7 +3132,7 @@ export function AppShell({
         // chats go through createNewTab, which carries the project association
         // and uses the remote working directory verbatim.
         const createChat =
-          project && !options?.remoteHost
+          project && !options?.remoteHost && !projectEnvironment(project)
             ? createNewProjectDraft(DEFAULT_CHAT_TITLE, project, chatOptions)
             : createNewTab(DEFAULT_CHAT_TITLE, project, chatOptions);
 
@@ -3318,7 +3332,7 @@ export function AppShell({
         // Remote project chats skip the local workspace-startup draft route
         // but keep the project association (see handleGlobalCompose).
         const session =
-          project && !options?.remoteHost
+          project && !options?.remoteHost && !projectEnvironment(project)
             ? await createNewProjectDraft(
                 DEFAULT_CHAT_TITLE,
                 project,

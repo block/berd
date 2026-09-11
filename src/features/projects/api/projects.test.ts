@@ -71,6 +71,53 @@ describe("projects API artifact metadata", () => {
     });
   });
 
+  it("round-trips a project environment and clears it when returning to local", async () => {
+    mocks.sourcesList.mockResolvedValue({ sources: [] });
+    mocks.sourcesCreate.mockImplementation(async (request) => ({
+      source: source(request.properties),
+    }));
+    mocks.sourcesUpdate.mockImplementation(async (request) => ({
+      source: source(request.properties),
+    }));
+    const { createProject, updateProject } = await import("./projects");
+    const environment = {
+      remoteHost: "devbox",
+      remoteWorkingDir: "/home/me/code",
+    };
+    const created = await createProject(
+      "Launch",
+      "",
+      "",
+      "",
+      "olive",
+      [],
+      false,
+      [],
+      environment,
+    );
+    expect(created.environment).toEqual(environment);
+    const renamed = await updateProject(created, { name: "Renamed" });
+    expect(renamed.environment).toEqual(environment);
+    const local = await updateProject(renamed, { environment: null });
+    expect(local.environment).toBeNull();
+    expect(
+      mocks.sourcesUpdate.mock.calls.at(-1)?.[0].properties,
+    ).not.toHaveProperty("environment");
+  });
+
+  it("ignores incomplete or malformed saved environments", async () => {
+    const { parseProjectEnvironment } = await import("./projects");
+    for (const value of [
+      null,
+      {},
+      { remoteHost: "devbox" },
+      { remoteHost: 4, remoteWorkingDir: "/tmp" },
+      { remoteHost: "devbox", remoteWorkingDir: " " },
+    ]) {
+      expect(parseProjectEnvironment(value)).toBeNull();
+    }
+  });
+
   it("stores artifact metadata when creating a project", async () => {
     mocks.sourcesList.mockResolvedValue({ sources: [] });
     mocks.sourcesCreate.mockImplementation(async (request) => ({
