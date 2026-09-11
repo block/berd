@@ -74,7 +74,11 @@ impl RealtimePlaybackHost {
             SpokespersonEvent::Provider(event) => {
                 if !matches!(
                     event.get("type").and_then(Value::as_str),
-                    Some("response.output_audio.delta" | "session.output_audio.delta")
+                    Some(
+                        "response.output_audio.delta"
+                            | "session.output_audio.delta"
+                            | "session.output_transcript.delta"
+                    )
                 ) {
                     emit(event)?;
                 }
@@ -163,6 +167,14 @@ impl RealtimePlaybackHost {
                         )?;
                     }
                 }
+                emit(json!({
+                    "type": "response.output_audio_transcript.delta",
+                    "response_id": response_id,
+                    "item_id": item_id,
+                    "output_index": output_index,
+                    "content_index": content_index,
+                    "delta": text,
+                }))?;
             }
             SpokespersonEvent::TranscriptDone {
                 response_id,
@@ -1375,6 +1387,71 @@ mod tests {
         ));
         assert_eq!(events[1]["type"], "output_audio_buffer.cleared");
         assert!(host.is_idle());
+    }
+
+    #[test]
+    fn live_transcript_uses_the_native_audio_identity() {
+        let mut host = RealtimePlaybackHost::default();
+        let mut create_output = || {
+            Ok(Box::new(FakeOutput {
+                played_frames: 100,
+                drained: false,
+            }) as Box<dyn PcmAudioOutput>)
+        };
+        let mut commands = Vec::new();
+        let mut send_command = |command| {
+            commands.push(command);
+            Ok(())
+        };
+        let mut events = Vec::new();
+        let mut emit = |event| {
+            events.push(event);
+            Ok(())
+        };
+
+        host.handle(
+            SpokespersonEvent::Provider(json!({
+                "type": "session.output_transcript.delta",
+                "delta": "Hello",
+            })),
+            &mut send_command,
+            &mut create_output,
+            &mut emit,
+        )
+        .unwrap();
+        host.handle(
+            SpokespersonEvent::AudioDelta {
+                response_id: "live-output-1".into(),
+                item_id: "live-output-item-1".into(),
+                output_index: 0,
+                content_index: 0,
+                samples: vec![0.0; 100],
+            },
+            &mut send_command,
+            &mut create_output,
+            &mut emit,
+        )
+        .unwrap();
+        host.handle(
+            SpokespersonEvent::TranscriptDelta {
+                response_id: "live-output-1".into(),
+                item_id: "live-output-item-1".into(),
+                output_index: 0,
+                content_index: 0,
+                text: "Hello".into(),
+            },
+            &mut send_command,
+            &mut create_output,
+            &mut emit,
+        )
+        .unwrap();
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0]["type"], "output_audio_buffer.started");
+        assert_eq!(events[1]["type"], "response.output_audio_transcript.delta");
+        assert_eq!(events[1]["response_id"], "live-output-1");
+        assert_eq!(events[1]["item_id"], "live-output-item-1");
+        assert_eq!(events[1]["delta"], "Hello");
     }
 
     #[test]

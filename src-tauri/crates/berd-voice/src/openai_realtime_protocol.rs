@@ -15,6 +15,7 @@ use crate::{estimated_spoken_through_utf8, DeliveryProgress, DeliverySegment};
 
 const PROMPT_DOCUMENT: &str = include_str!("../prompts/expert-spokesperson.md");
 const ROLE_PLACEHOLDER: &str = "{{ROLE}}";
+const CLIENT_DELEGATION_MESSAGE: &str = "[Authoritative client delegation] GPT Live deliberately delegated the user's latest request because it needs the Expert. Treat the request as actionable, use the recent ordered voice transcript and durable session context to answer it, and resolve this handoff with --mode say. Do not dismiss it merely because the latest utterance is a short follow-up or conversationally phrased.";
 
 pub const OPENAI_REALTIME_VOICE_IDS: &[&str] = &[
     "alloy", "ash", "ballad", "cedar", "coral", "echo", "marin", "sage", "shimmer", "verse",
@@ -729,8 +730,7 @@ impl RealtimeProtocolReducer {
         events.push(RealtimeProtocolEvent::Handoff {
             response_id: None,
             call_id: delegation_id.to_string(),
-            message: "Handle the delegated request using the recent voice transcript and durable session context."
-                .into(),
+            message: CLIENT_DELEGATION_MESSAGE.into(),
         });
         Ok(events)
     }
@@ -2236,6 +2236,7 @@ mod tests {
             "When unsure whether a question is routine or authoritative, delegate it",
             "trusted causal cursor, role, and text",
             "handoff events also carry their handoff ID",
+            "An authoritative client delegation is always actionable",
         ] {
             assert!(
                 normalized.contains(required),
@@ -2983,14 +2984,14 @@ mod tests {
             reduction.accepted_handoffs,
             [RealtimeAcceptedHandoff {
                 handoff_id: "dlg_opaque_123".into(),
-                message: "Handle the delegated request using the recent voice transcript and durable session context."
-                    .into(),
+                message: CLIENT_DELEGATION_MESSAGE.into(),
             }]
         );
         let delivery = reduction.expert_delivery.unwrap();
         assert_eq!(delivery.handoff_ids, ["dlg_opaque_123"]);
         assert_eq!(delivery.events[0].text, "Inspect the repository");
         assert_eq!(delivery.events[1].handoff_id.as_deref(), Some("dlg_opaque_123"));
+        assert!(delivery.events[1].text.contains("Treat the request as actionable"));
     }
 
     #[test]

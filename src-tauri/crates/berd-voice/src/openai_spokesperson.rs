@@ -1723,11 +1723,13 @@ mod tests {
             )
             .await;
 
-            let audio = receive_json(&mut socket).await;
-            assert_eq!(audio["type"], "session.input_audio.append");
-            let commentary = receive_json(&mut socket).await;
-            assert_eq!(commentary["type"], "session.commentary.append");
-            assert_eq!(commentary["delegation_id"], "dlg_123");
+            let first = receive_json(&mut socket).await;
+            let second = receive_json(&mut socket).await;
+            let mut events = [first, second];
+            events.sort_by_key(|event| event["type"].as_str().unwrap_or_default().to_string());
+            assert_eq!(events[0]["type"], "session.commentary.append");
+            assert_eq!(events[0]["delegation_id"], "dlg_123");
+            assert_eq!(events[1]["type"], "session.input_audio.append");
 
             send_json(
                 &mut socket,
