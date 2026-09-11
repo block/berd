@@ -68,7 +68,7 @@ const preferenceMocks = vi.hoisted(() => ({
   setRealtimePreference: vi.fn(),
 }));
 const statusSoundState = vi.hoisted(() => ({
-  mode: "working" as "working" | "working-and-waiting",
+  mode: "working" as "off" | "working" | "working-and-waiting",
 }));
 const interruptionState = vi.hoisted(() => ({
   mode: "automatic" as "automatic" | "allowInterruptions" | "preventFeedback",
@@ -338,7 +338,7 @@ describe("VoiceSettings", () => {
     preferenceMocks.setRealtimePreference.mockClear();
   });
 
-  it("offers only the two continuous status sound modes without a volume control", async () => {
+  it("offers off and both repeating status sound modes without a volume control", async () => {
     const user = userEvent.setup();
     renderWithProviders(<VoiceSettings />);
 
@@ -350,7 +350,8 @@ describe("VoiceSettings", () => {
     expect(
       screen.getByRole("option", { name: "While working and waiting" }),
     ).toBeInTheDocument();
-    expect(screen.getAllByRole("option")).toHaveLength(2);
+    expect(screen.getByRole("option", { name: "Off" })).toBeInTheDocument();
+    expect(screen.getAllByRole("option")).toHaveLength(3);
   });
 
   it("describes voice modes by who the user talks with", () => {

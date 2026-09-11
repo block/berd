@@ -1100,10 +1100,12 @@
     "voiceLabel": "Voz de Pocket TTS",
     "statusSounds": "Sonidos de estado",
     "statusSoundModes": {
+      "off": "Desactivados",
       "working": "Mientras trabaja",
       "working-and-waiting": "Mientras trabaja y espera"
     },
     "statusSoundModeDescriptions": {
+      "off": "No reproducir sonidos de estado.",
       "working": "Repite el sonido de trabajo mientras el agente está trabajando.",
       "working-and-waiting": "Repite el sonido de trabajo mientras el agente trabaja y el sonido de espera mientras espera."
     }

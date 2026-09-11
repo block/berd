@@ -24,6 +24,11 @@ describe("status sound preference", () => {
     });
   });
 
+  it("persists off without re-enabling sounds", () => {
+    setStatusSoundPreference({ mode: "off" });
+    expect(getStatusSoundPreference()).toEqual({ mode: "off" });
+  });
+
   it("normalizes malformed persisted values", () => {
     window.localStorage.setItem(
       "goose:voice-status-sound-preference",
@@ -36,7 +41,6 @@ describe("status sound preference", () => {
     ["continuous", "working-and-waiting"],
     ["continuous-while-working", "working"],
     ["once", "working"],
-    ["off", "working"],
   ] as const)("migrates the legacy %s mode to %s", (legacy, expected) => {
     window.localStorage.setItem(
       "goose:voice-status-sound-preference",

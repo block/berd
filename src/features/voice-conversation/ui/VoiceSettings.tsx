@@ -74,6 +74,7 @@ import {
 } from "../lib/openAiVoiceOptions";
 
 const STATUS_SOUND_MODES: StatusSoundMode[] = [
+  "off",
   "working",
   "working-and-waiting",
 ];

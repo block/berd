@@ -1,6 +1,6 @@
 import { useCallback, useSyncExternalStore } from "react";
 
-export type StatusSoundMode = "working" | "working-and-waiting";
+export type StatusSoundMode = "off" | "working" | "working-and-waiting";
 
 export interface StatusSoundPreference {
   mode: StatusSoundMode;
@@ -14,7 +14,7 @@ const DEFAULT_PREFERENCE: StatusSoundPreference = {
 const NORMALIZED_MODES: Record<string, StatusSoundMode> = {
   continuous: "working-and-waiting",
   "continuous-while-working": "working",
-  off: "working",
+  off: "off",
   once: "working",
   working: "working",
   "working-and-waiting": "working-and-waiting",

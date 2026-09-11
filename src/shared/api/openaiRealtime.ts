@@ -55,7 +55,7 @@ export function updateOpenAiRealtimeStatusSounds(
   sessionId: string,
   status: "working" | "waiting",
   settings: {
-    mode: "working" | "working-and-waiting";
+    mode: "off" | "working" | "working-and-waiting";
     volume?: number;
   },
 ): Promise<void> {

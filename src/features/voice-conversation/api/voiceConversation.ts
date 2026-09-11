@@ -590,7 +590,7 @@ export function rejectVoiceConversationTranscript(
 }
 
 export interface VoiceStatusSoundSettings {
-  mode: "working" | "working-and-waiting";
+  mode: "off" | "working" | "working-and-waiting";
   volume?: number;
 }
 

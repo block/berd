@@ -15,6 +15,7 @@ pub const STATUS_SOUND_INTERVAL: Duration = Duration::from_secs(5);
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum StatusSoundMode {
+    Off,
     WorkingAndWaiting,
     #[default]
     Working,
@@ -82,7 +83,8 @@ impl StatusSoundStateMachine {
         let (status, settings) = self.current?;
         let working_only = settings.mode == StatusSoundMode::Working;
         let waiting = status == ConversationStatus::Waiting;
-        if conversation_active || (working_only && waiting) {
+        if settings.mode == StatusSoundMode::Off || conversation_active || (working_only && waiting)
+        {
             return None;
         }
         Some(StatusSoundCue {
@@ -132,7 +134,7 @@ impl StatusSoundRuntime {
         let changed = self.machine.update(status, settings);
         if changed {
             self.player.stop();
-            self.next_tick = Some(Instant::now());
+            self.next_tick = Some(Instant::now() + STATUS_SOUND_INTERVAL);
         }
     }
 
@@ -144,7 +146,7 @@ impl StatusSoundRuntime {
         if conversation_active {
             self.stop();
         } else if self.conversation_active {
-            self.next_tick = Some(Instant::now());
+            self.next_tick = Some(Instant::now() + STATUS_SOUND_INTERVAL);
         }
         self.conversation_active = conversation_active;
         if conversation_active {
@@ -483,6 +485,37 @@ mod tests {
     }
 
     #[test]
+    fn off_suppresses_both_statuses_and_round_trips_on_the_wire() {
+        let mode: StatusSoundMode = serde_json::from_str("\"off\"").unwrap();
+        assert_eq!(mode, StatusSoundMode::Off);
+        assert_eq!(serde_json::to_string(&mode).unwrap(), "\"off\"");
+        let mut machine = StatusSoundStateMachine::default();
+        for status in [ConversationStatus::Working, ConversationStatus::Waiting] {
+            machine.update(status, settings(mode));
+            assert_eq!(machine.tick(false), None);
+            assert_eq!(machine.tick(true), None);
+        }
+    }
+
+    #[test]
+    fn first_cue_waits_a_full_window_and_quick_runs_stay_silent() {
+        let mut runtime = StatusSoundRuntime::default();
+        let started_at = Instant::now();
+        runtime.update(
+            ConversationStatus::Working,
+            settings(StatusSoundMode::Working),
+        );
+        assert!(runtime.next_tick.unwrap() >= started_at + STATUS_SOUND_INTERVAL);
+        assert!(!runtime.poll(false).unwrap());
+        runtime.update(
+            ConversationStatus::Waiting,
+            settings(StatusSoundMode::Working),
+        );
+        assert!(!runtime.poll(false).unwrap());
+        assert_eq!(runtime.machine.tick(false), None);
+    }
+
+    #[test]
     fn defaults_to_working_only() {
         assert_eq!(
             StatusSoundSettings::default(),
@@ -531,7 +564,7 @@ mod tests {
     }
 
     #[test]
-    fn resuming_after_conversation_audio_plays_without_waiting_for_old_cadence() {
+    fn resuming_after_conversation_audio_starts_a_fresh_full_window() {
         let mut runtime = StatusSoundRuntime::default();
         runtime.update(
             ConversationStatus::Working,
@@ -539,7 +572,9 @@ mod tests {
         );
         assert!(!runtime.poll(true).unwrap());
         runtime.next_tick = Some(Instant::now() + Duration::from_secs(60));
-        let _ = runtime.poll(false);
+        let resumed_at = Instant::now();
+        assert!(!runtime.poll(false).unwrap());
+        assert!(runtime.next_tick.unwrap() >= resumed_at + STATUS_SOUND_INTERVAL);
         assert!(runtime.next_tick.unwrap() < Instant::now() + STATUS_SOUND_INTERVAL);
     }
 
@@ -587,7 +622,8 @@ mod tests {
             ConversationStatus::Waiting,
             settings(StatusSoundMode::WorkingAndWaiting),
         );
-        assert!(runtime.next_tick.unwrap() < Instant::now() + Duration::from_secs(1));
+        assert!(runtime.next_tick.unwrap() > Instant::now() + Duration::from_secs(4));
+        assert!(runtime.next_tick.unwrap() <= Instant::now() + STATUS_SOUND_INTERVAL);
     }
 
     #[cfg(target_os = "macos")]
