@@ -77,10 +77,9 @@ impl StatusSoundStateMachine {
 
     pub fn tick(&mut self, conversation_active: bool) -> Option<StatusSoundCue> {
         let (status, settings) = self.current?;
-        if conversation_active
-            || (settings.mode == StatusSoundMode::Working
-                && status == ConversationStatus::Waiting)
-        {
+        let working_only = settings.mode == StatusSoundMode::Working;
+        let waiting = status == ConversationStatus::Waiting;
+        if conversation_active || (working_only && waiting) {
             return None;
         }
         Some(StatusSoundCue {
@@ -358,6 +357,11 @@ mod tests {
         }
     }
 
+    fn assert_status(machine: &mut StatusSoundStateMachine, expected: ConversationStatus) {
+        let actual = machine.tick(false).map(|cue| cue.status);
+        assert_eq!(actual, Some(expected));
+    }
+
     #[test]
     fn defaults_to_working_only() {
         assert_eq!(
@@ -371,11 +375,11 @@ mod tests {
         let mut machine = StatusSoundStateMachine::default();
         let settings = settings(StatusSoundMode::WorkingAndWaiting);
         machine.update(ConversationStatus::Working, settings);
-        assert_eq!(machine.tick(false).unwrap().status, ConversationStatus::Working);
-        assert_eq!(machine.tick(false).unwrap().status, ConversationStatus::Working);
+        assert_status(&mut machine, ConversationStatus::Working);
+        assert_status(&mut machine, ConversationStatus::Working);
         machine.update(ConversationStatus::Waiting, settings);
-        assert_eq!(machine.tick(false).unwrap().status, ConversationStatus::Waiting);
-        assert_eq!(machine.tick(false).unwrap().status, ConversationStatus::Waiting);
+        assert_status(&mut machine, ConversationStatus::Waiting);
+        assert_status(&mut machine, ConversationStatus::Waiting);
     }
 
     #[test]
@@ -383,8 +387,8 @@ mod tests {
         let mut machine = StatusSoundStateMachine::default();
         let settings = settings(StatusSoundMode::Working);
         machine.update(ConversationStatus::Working, settings);
-        assert_eq!(machine.tick(false).unwrap().status, ConversationStatus::Working);
-        assert_eq!(machine.tick(false).unwrap().status, ConversationStatus::Working);
+        assert_status(&mut machine, ConversationStatus::Working);
+        assert_status(&mut machine, ConversationStatus::Working);
         machine.update(ConversationStatus::Waiting, settings);
         assert_eq!(machine.tick(false), None);
         assert_eq!(machine.tick(false), None);
