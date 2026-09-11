@@ -3,7 +3,7 @@
   "protocolVersion": 4,
   "groups": {
     "sessions": {
-      "description": "Manage the user's chat sessions: create (fire-and-forget, on any installed agent harness), send, open, list, get, rename, move, move to group, clear project, send to a live voice Spokesperson, dismiss voice handoffs, fork, archive.",
+      "description": "Manage the user's chat sessions: create (fire-and-forget, on any installed agent harness), send, notify, open, list, get, rename, move, move to group, clear project, send to a live voice Spokesperson, dismiss voice handoffs, fork, archive.",
       "actions": {
         "create": {
           "description": "Create a new chat session on any installed agent harness and send the prompt in it. Fire-and-forget: returns the session id immediately and the session runs in the background without changing what the user sees; the user can open it themselves. Use --from to give the delegating session or tool a concise visible label on the initial message. Only check on it later (action \"get\") if the user asks.",
@@ -169,6 +169,86 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 200
+              },
+              "if_running": {
+                "default": "refuse",
+                "description": "What to do if the target session is running: refuse, steer, or queue.",
+                "type": "string",
+                "enum": ["refuse", "steer", "queue"]
+              },
+              "from": {
+                "description": "Optional visible sender label for this message (1-120 chars).",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120,
+                "pattern": "^[^\\r\\n]*$"
+              },
+              "delivery_id": {
+                "description": "Optional idempotency id; a repeated id for this session is accepted without creating another user turn (1-200 chars).",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "pattern": "^[^\\r\\n]*$"
+              }
+            },
+            "required": ["session_id", "prompt"],
+            "additionalProperties": false
+          }
+        },
+        "notify": {
+          "description": "Deliver an automated event as a collapsed activity entry in the transcript. The event reaches the agent as context and can start a turn. This does not open the session or create an operating-system notification. Running sessions are refused by default; use --if-running steer or --if-running queue. Use --from to identify the event source and --delivery-id to make retries idempotent. Use session send for ordinary messages from another session.",
+          "fields": [
+            {
+              "name": "session_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the existing session to send the prompt into."
+            },
+            {
+              "name": "prompt",
+              "required": true,
+              "kind": "string",
+              "description": "The message to send in the existing session (1-50000 chars).",
+              "min": 1,
+              "max": 50000
+            },
+            {
+              "name": "if_running",
+              "required": false,
+              "kind": "string",
+              "description": "What to do if the target session is running: refuse, steer, or queue.",
+              "values": ["refuse", "steer", "queue"]
+            },
+            {
+              "name": "from",
+              "required": false,
+              "kind": "string",
+              "description": "Optional visible sender label for this message (1-120 chars).",
+              "min": 1,
+              "max": 120
+            },
+            {
+              "name": "delivery_id",
+              "required": false,
+              "kind": "string",
+              "description": "Optional idempotency id; a repeated id for this session is accepted without creating another user turn (1-200 chars).",
+              "min": 1,
+              "max": 200
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "session_id": {
+                "type": "string",
+                "description": "Id of the existing session to send the prompt into."
+              },
+              "prompt": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 50000,
+                "description": "The message to send in the existing session (1-50000 chars)."
               },
               "if_running": {
                 "default": "refuse",

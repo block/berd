@@ -110,6 +110,7 @@ function stripCrossSessionOrigin<T extends Record<string, unknown>>(
   const {
     origin: _origin,
     berdSenderLabel: _berdSenderLabel,
+    berdEventType: _berdEventType,
     berdDeliveryId: _berdDeliveryId,
     ...rest
   } = metadata;

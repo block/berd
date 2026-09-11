@@ -597,24 +597,30 @@ describe("MessageBubble", () => {
     expect(label.closest(".bg-message-user-bg")).not.toHaveClass("py-2.5");
   });
 
-  it("labels berdctl cross-session user messages", () => {
+  it("renders notifications as collapsed activity rather than user-authored bubbles", async () => {
     const message = userMessage("from another session");
     message.metadata = {
       ...message.metadata,
       origin: "berdctl_cross_session",
+      berdEventType: "notification",
     };
 
     render(<MessageBubble message={message} />);
 
-    const label = screen.getByText("Sent by Berd from another session");
+    const label = screen.getByText("Incoming update");
     expect(label).toBeInTheDocument();
-    expect(label).toHaveAttribute(
-      "data-role",
-      "berdctl-cross-session-message-label",
-    );
-    expect(label.closest(".bg-message-user-bg")).toHaveTextContent(
-      "from another session",
-    );
+    expect(label).toHaveAttribute("data-role", "session-notification-label");
+    const activity = label.closest('[data-role="activity-message"]');
+    expect(activity).not.toHaveClass("ml-auto");
+    const trigger = screen.getByRole("button", { name: "Incoming update" });
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("from another session")).not.toBeInTheDocument();
+    await userEvent.click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("from another session")).toBeVisible();
+    expect(activity?.querySelector(".bg-message-user-bg")).toBeNull();
+    await userEvent.keyboard("{Enter}");
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
   });
 
   it("shows a sender descriptor without replacing trusted Berd provenance", () => {
@@ -632,20 +638,114 @@ describe("MessageBubble", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders provenance and steer labels together", () => {
+  it("keeps incoming updates copyable without offering to edit them", async () => {
+    const message = userMessage("Deployment running");
+    message.metadata = {
+      ...message.metadata,
+      origin: "berdctl_cross_session",
+      berdEventType: "notification",
+      berdSenderLabel: "berd-monitor",
+    };
+    render(<MessageBubble message={message} onEditMessage={vi.fn()} />);
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Update from berd-monitor" }),
+    );
+    expect(
+      screen.queryByRole("button", { name: /edit/i }),
+    ).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /copy/i }));
+    expect(mockWriteText).toHaveBeenCalledWith("Deployment running");
+  });
+
+  it("preserves an update disclosure when its virtual row remounts", async () => {
+    const registry = createTranscriptRowStateRegistry();
+    const onPinScrollAnchor = vi.fn();
+    const message = userMessage("Deployment running");
+    message.metadata = {
+      ...message.metadata,
+      origin: "berdctl_cross_session",
+      berdEventType: "notification",
+    };
+    const bubble = (
+      <TranscriptRowStateProvider
+        registry={registry}
+        sessionId="session-1"
+        rowId="update-1"
+        onPinScrollAnchor={onPinScrollAnchor}
+      >
+        <MessageBubble message={message} />
+      </TranscriptRowStateProvider>
+    );
+    const mounted = render(bubble);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Incoming update" }),
+    );
+    expect(onPinScrollAnchor).toHaveBeenCalledTimes(1);
+    mounted.unmount();
+
+    render(bubble);
+    expect(
+      screen.getByRole("button", { name: "Incoming update" }),
+    ).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Deployment running")).toBeVisible();
+  });
+
+  it("does not treat a sender label alone as Berd provenance", () => {
+    const message = userMessage("My own prompt");
+    message.metadata = { ...message.metadata, berdSenderLabel: "berd-monitor" };
+    const { container } = render(<MessageBubble message={message} />);
+    expect(container.querySelector('[data-role="user-message"]')).toHaveClass(
+      "ml-auto",
+    );
+    expect(
+      container.querySelector('[data-role="activity-message"]'),
+    ).toBeNull();
+  });
+
+  it("omits steering details when an incoming update is expanded", async () => {
     const message = userMessage("steered from another session");
     message.metadata = {
       ...message.metadata,
       delivery: "steer",
       origin: "berdctl_cross_session",
+      berdEventType: "notification",
     };
 
     render(<MessageBubble message={message} />);
 
+    expect(screen.getByText("Incoming update")).toBeInTheDocument();
+    expect(screen.queryByText("Steered")).not.toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Incoming update" }),
+    );
+    expect(screen.queryByText("Steered")).not.toBeInTheDocument();
+    expect(screen.getByText("steered from another session")).toBeVisible();
+  });
+
+  it("keeps ordinary berdctl sends expanded even when the sender is berd-monitor", () => {
+    const message = userMessage("Ordinary message");
+    message.metadata = {
+      ...message.metadata,
+      origin: "berdctl_cross_session",
+      berdSenderLabel: "berd-monitor",
+    };
+    const { container } = render(
+      <MessageBubble message={message} onEditMessage={vi.fn()} />,
+    );
+    expect(screen.getByText("Ordinary message")).toBeVisible();
     expect(
-      screen.getByText("Sent by Berd from another session"),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Steered")).toBeInTheDocument();
+      screen.getByText(
+        "Sent by Berd from another session · source: berd-monitor",
+      ),
+    ).toBeVisible();
+    expect(container.querySelector('[data-role="user-message"]')).toHaveClass(
+      "ml-auto",
+    );
+    expect(
+      container.querySelector('[data-role="activity-message"]'),
+    ).toBeNull();
+    expect(screen.getByRole("button", { name: /edit/i })).toBeInTheDocument();
   });
 
   it("renders compaction notifications as centered success messages", () => {
