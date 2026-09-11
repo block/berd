@@ -29,7 +29,7 @@ interface DeliverSessionPromptArgs {
 }
 
 function runningTargetMessage(sessionId: string): string {
-  return `Refusing to send to session "${sessionId}" while its agent is running; use --if-running steer or --if-running queue, or wait for the turn to finish.`;
+  return `Refusing to deliver to session "${sessionId}" while its agent is running; use --if-running steer or --if-running queue, or wait for the turn to finish.`;
 }
 
 export async function deliverSessionPrompt(
@@ -75,7 +75,7 @@ export async function deliverSessionPrompt(
     if (useSessionWindowStore.getState().isOpenInWindow(args.session_id)) {
       throw new CommandError(
         "target_session_running",
-        `Refusing to send to session "${args.session_id}" while it is open in a separate window; close that window first or ask the user.`,
+        `Refusing to deliver to session "${args.session_id}" while it is open in a separate window; close that window first or ask the user.`,
       );
     }
 
