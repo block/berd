@@ -205,12 +205,7 @@ Unknown fields are rejected. IDs are positive. Speak text is at most 16 KiB.
 The parent cannot author speaking state or finalized input; those are derived
 only from PCM by the child runtime.
 
-`StatusSoundSettings` has a `mode` of `working` or `working-and-waiting` and an optional per-session `volume` from 0 to 1 that defaults to `0.8`. No cue
-is emitted until the first `set_conversation_status` request. The runtime then
-ticks immediately and every five seconds. `working` repeats only the working cue
-and stays silent while waiting; `working-and-waiting` repeats the current working
-or waiting cue. Active user input, pending recognition, or assistant output suppresses a tick without consuming its pending cue. On macOS, working uses the system Pop sound and waiting uses Purr through the native PCM player. The applied
-request is acknowledged with:
+`StatusSoundSettings` has a `mode` of `off`, `working`, or `working-and-waiting` and an optional per-session `volume` from 0 to 1 that defaults to `0.8`. No cue is emitted until the first `set_conversation_status` request. Cues play at the end of each five-second window, including the first window and the window after conversation audio ends. `off` disables both cues; `working` repeats only the working cue and stays silent while waiting; `working-and-waiting` repeats the current working or waiting cue. Active user speech or assistant output suppresses playback without changing the working/waiting state. Pending recognition alone does not suppress playback. On macOS, working uses the system Pop sound and waiting uses Purr through the selected output device. The applied request is acknowledged with:
 
 ```text
 {"type":"conversation_status_applied","id":u64,"status":"working"|"waiting","settings":StatusSoundSettings}
