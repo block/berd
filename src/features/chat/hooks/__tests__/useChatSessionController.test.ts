@@ -52,6 +52,7 @@ const mockMarkAgentBuilderSessionPreparationFailed = vi.fn();
 const mockDeletePersonaSource = vi.fn();
 const mockAcpCreateSession = vi.fn();
 const mockAcpSessionArchive = vi.fn();
+const mockAcpSessionProjectUpdate = vi.fn();
 const mockEnsureRemoteHostConnected = vi.fn();
 const mockUseChatRuntime = {
   chatState: "idle",
@@ -139,6 +140,8 @@ vi.mock("@/shared/api/acpConnection", () => {
         mockGoosePreferencesSave(...args),
       GooseUnstableProvidersSupportedModelsList: (...args: unknown[]) =>
         mockSupportedModelsList(...args),
+      GooseUnstableSessionProjectUpdate: (...args: unknown[]) =>
+        mockAcpSessionProjectUpdate(...args),
       GooseUnstableSessionArchive: (...args: unknown[]) =>
         mockAcpSessionArchive(...args),
     },
@@ -6583,6 +6586,76 @@ describe("useChatSessionController", () => {
     beforeEach(() => {
       mockEnsureRemoteHostConnected.mockReset().mockResolvedValue(undefined);
       setExperimentEnabled(REMOTE_SSH_SESSIONS_EXPERIMENT_ID, true);
+    });
+
+    it.each([
+      "succeeds",
+      "fails",
+    ] as const)("keeps the original environment until a project move %s", async (outcome) => {
+      const move = deferred();
+      mockAcpSessionProjectUpdate.mockReturnValueOnce(move.promise);
+      const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+      useChatSessionStore.getState().patchSession("session-1", {
+        projectId: "original",
+      });
+      useProjectStore.setState({
+        projects: [
+          {
+            id: "destination",
+            path: "/tmp/destination.md",
+            name: "Destination",
+            projectWorkspaces: [],
+            workingDirs: [],
+            useWorktrees: false,
+            order: 0,
+            archivedAt: null,
+            artifact: null,
+            description: "",
+            prompt: "",
+            icon: "",
+            color: "",
+            environment: {
+              remoteHost: "destination-host",
+              remoteWorkingDir: "/destination",
+            },
+          },
+        ],
+      });
+      const { result } = renderHook(() =>
+        useChatSessionController({ sessionId: "session-1" }),
+      );
+      act(() => {
+        result.current.handleRemoteHostChange("original-host");
+        result.current.handleRemoteDirChange("/original");
+      });
+      act(() => result.current.handleProjectChange("destination"));
+      await waitFor(() =>
+        expect(mockAcpSessionProjectUpdate).toHaveBeenCalledWith({
+          sessionId: "session-1",
+          projectId: "destination",
+        }),
+      );
+      expect(result.current.selectedProjectId).toBe("original");
+      expect(result.current.selectedRemoteHost).toBe("original-host");
+      expect(result.current.selectedRemoteDir).toBe("/original");
+
+      await act(async () => {
+        if (outcome === "succeeds") move.resolve();
+        else move.reject(new Error("Project move failed"));
+      });
+      expect(result.current.selectedProjectId).toBe(
+        outcome === "succeeds" ? "destination" : "original",
+      );
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.projectId,
+      ).toBe(outcome === "succeeds" ? "destination" : "original");
+      expect(result.current.selectedRemoteHost).toBe(
+        outcome === "succeeds" ? "destination-host" : "original-host",
+      );
+      expect(result.current.selectedRemoteDir).toBe(
+        outcome === "succeeds" ? "/destination" : "/original",
+      );
+      errorLog.mockRestore();
     });
 
     it("is disabled while the experiment is off", () => {
