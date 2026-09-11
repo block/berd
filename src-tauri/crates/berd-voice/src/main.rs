@@ -1237,18 +1237,17 @@ fn run_management_command(command: ManagementCommand) -> Result<(), ManagementFa
 }
 
 fn standard_session_status_cues_suppressed(
-    user_speaking: bool,
-    recognition_pending: bool,
+    core: &SessionCore,
     assistant_output_active: bool,
 ) -> bool {
-    user_speaking || recognition_pending || assistant_output_active
+    core.user_speaking() || assistant_output_active
 }
 
 fn expert_session_status_cues_suppressed(
-    input_blocks_output: bool,
+    turn_gate: &ExpertTurnGate,
     assistant_output_active: bool,
 ) -> bool {
-    input_blocks_output || assistant_output_active
+    turn_gate.lifecycle.user_speaking() || assistant_output_active
 }
 
 fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String> {
@@ -1345,11 +1344,7 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                 },
             )?;
         }
-        let conversation_active = standard_session_status_cues_suppressed(
-            core.user_speaking(),
-            core.recognition_pending(),
-            active.is_some(),
-        );
+        let conversation_active = standard_session_status_cues_suppressed(&core, active.is_some());
         let status_sound_result = status_sound_runtime.poll(conversation_active);
         if let Err(message) = status_sound_result {
             eprintln!("status sound playback disabled: {message}");
@@ -3344,10 +3339,8 @@ fn run_expert_spokesperson_session(
                 )?;
             }
         }
-        let conversation_active = expert_session_status_cues_suppressed(
-            turn_gate.input_blocks_output(),
-            active.is_some(),
-        );
+        let conversation_active =
+            expert_session_status_cues_suppressed(&turn_gate, active.is_some());
         let status_sound_result = status_sound_runtime.poll(conversation_active);
         if let Err(message) = status_sound_result {
             eprintln!("status sound playback disabled: {message}");
@@ -6825,6 +6818,25 @@ mod tests {
     use std::os::unix::net::UnixStream;
     use std::sync::Mutex;
 
+    #[test]
+    fn status_cues_ignore_pending_recognition_but_suppress_actual_audio() {
+        let mut core = SessionCore::default();
+        core.set_recognition_pending(true);
+        assert!(!standard_session_status_cues_suppressed(&core, false));
+        assert!(standard_session_status_cues_suppressed(&core, true));
+        core.set_user_speaking(true);
+        assert!(standard_session_status_cues_suppressed(&core, false));
+        core.set_user_speaking(false);
+        assert!(!standard_session_status_cues_suppressed(&core, false));
+
+        let mut gate = ExpertTurnGate::default();
+        gate.begin_user_speaking("pending-transcript".into());
+        assert!(expert_session_status_cues_suppressed(&gate, false));
+        gate.finish_user_speaking();
+        assert!(gate.input_blocks_output());
+        assert!(!expert_session_status_cues_suppressed(&gate, false));
+        assert!(expert_session_status_cues_suppressed(&gate, true));
+    }
     fn synthesis_config(tts: SynthesisTtsConfig, output: PathBuf) -> SynthesisConfig {
         SynthesisConfig {
             tts,
