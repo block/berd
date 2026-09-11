@@ -154,7 +154,7 @@ pub fn realtime_transcript_seed_events(
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum RealtimeTranscriptSpeaker {
     User,
     GptLive,
@@ -1295,6 +1295,18 @@ mod tests {
         assert_eq!(event["session"]["delegation"]["type"], "client");
         assert_eq!(event["session"]["audio"]["output"]["voice"], "cedar");
         assert!(event["session"].get("instructions").is_none());
+    }
+
+    #[test]
+    fn serializes_transcript_speakers_for_the_client_contract() {
+        assert_eq!(
+            serde_json::to_value(RealtimeTranscriptSpeaker::User).unwrap(),
+            json!("user")
+        );
+        assert_eq!(
+            serde_json::to_value(RealtimeTranscriptSpeaker::GptLive).unwrap(),
+            json!("gpt_live")
+        );
     }
 
     #[test]
