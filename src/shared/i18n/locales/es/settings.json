@@ -948,7 +948,7 @@
     "resettingToDefaults": "Restableciendo…",
     "realtimeAdvanced": "Avanzado",
     "realtimeApiKey": "Clave API de OpenAI",
-    "realtimeApiKeyDescription": "Se guarda de forma segura en el llavero de macOS y se comparte entre la escucha y la voz de Realtime.",
+    "realtimeApiKeyDescription": "Se guarda de forma segura en el llavero de macOS y GPT Live la usa para escuchar, hablar y delegar en el cliente.",
     "realtimeCreateResponse": "Responder automáticamente",
     "realtimeCreateResponseDescription": "Genera una respuesta del asistente de voz cuando termina un turno detectado del usuario.",
     "realtimeEagerness": "Rapidez para tomar el turno",

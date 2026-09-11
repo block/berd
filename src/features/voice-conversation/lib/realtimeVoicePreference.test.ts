@@ -11,7 +11,7 @@ describe("realtime voice preferences", () => {
     expect(getRealtimeVoicePreference()).toBe(getRealtimeVoicePreference());
     expect(getRealtimeVoicePreference()).toMatchObject({
       presentationMode: "debug",
-      model: "gpt-realtime-2.1",
+      model: "gpt-live-1",
       transcriptionModel: "gpt-realtime-whisper",
       voice: "marin",
       speed: 1,
@@ -33,7 +33,11 @@ describe("realtime voice preferences", () => {
       eagerness: "high" as const,
     };
     setRealtimeVoicePreference(preference);
-    expect(getRealtimeVoicePreference()).toBe(preference);
+    expect(getRealtimeVoicePreference()).toMatchObject({
+      ...preference,
+      model: "gpt-live-1",
+      speed: 1,
+    });
     expect(
       window.localStorage.getItem("goose:openai-realtime-voice-options"),
     ).not.toContain("apiKey");

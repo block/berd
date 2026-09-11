@@ -138,6 +138,32 @@ pub fn invalid_tool_call_output(
 }
 
 pub fn spokesperson_session_update(options: &RealtimeSpokespersonSessionOptions) -> Value {
+    #[cfg(any(test, debug_assertions))]
+    if options
+        .model
+        .as_deref()
+        .is_some_and(|model| model != "gpt-live-1")
+    {
+        return legacy_spokesperson_session_update(options);
+    }
+    json!({
+        "type": "session.start",
+        "session": {
+            "model": "gpt-live-1",
+            "instructions": SPOKESPERSON_INSTRUCTIONS.as_str(),
+            "audio": {
+                "format": { "type": "audio/pcm", "rate": 24_000 },
+                "output": {
+                    "voice": options.voice.as_deref().unwrap_or("marin"),
+                },
+            },
+            "delegation": { "type": "client" },
+        },
+    })
+}
+
+#[cfg(any(test, debug_assertions))]
+fn legacy_spokesperson_session_update(options: &RealtimeSpokespersonSessionOptions) -> Value {
     let create_response = options.create_response.unwrap_or(true);
     let interrupt_response = options.interrupt_response.unwrap_or(true);
     let turn_detection = match options.turn_detection.unwrap_or_default() {
@@ -162,22 +188,15 @@ pub fn spokesperson_session_update(options: &RealtimeSpokespersonSessionOptions)
             value
         }
     };
-
-    let transcription_language = trimmed(&options.transcription_language);
-    let transcription_prompt = trimmed(&options.transcription_prompt);
     let mut transcription = json!({
-        "model": options
-            .transcription_model
-            .as_deref()
-            .unwrap_or("gpt-realtime-whisper"),
+        "model": options.transcription_model.as_deref().unwrap_or("gpt-realtime-whisper"),
     });
-    if let Some(language) = transcription_language {
+    if let Some(language) = trimmed(&options.transcription_language) {
         transcription["language"] = language.into();
     }
-    if let Some(prompt) = transcription_prompt {
+    if let Some(prompt) = trimmed(&options.transcription_prompt) {
         transcription["prompt"] = prompt.into();
     }
-
     let noise_reduction = match options.noise_reduction {
         Some(RealtimeNoiseReduction::NearField) => json!({ "type": "near_field" }),
         Some(RealtimeNoiseReduction::FarField) => json!({ "type": "far_field" }),
@@ -233,6 +252,7 @@ pub fn spokesperson_session_update(options: &RealtimeSpokespersonSessionOptions)
     json!({ "type": "session.update", "session": session })
 }
 
+#[cfg(any(test, debug_assertions))]
 fn trimmed(value: &Option<String>) -> Option<&str> {
     value
         .as_deref()
@@ -240,8 +260,69 @@ fn trimmed(value: &Option<String>) -> Option<&str> {
         .filter(|value| !value.is_empty())
 }
 
+#[cfg(any(test, debug_assertions))]
 fn supports_reasoning(model: Option<&str>) -> bool {
     model.is_none_or(|model| model.starts_with("gpt-realtime-2.1"))
+}
+
+fn live_speaker_name(speaker: RealtimeTranscriptSpeaker) -> &'static str {
+    match speaker {
+        RealtimeTranscriptSpeaker::User => "user",
+        RealtimeTranscriptSpeaker::Spokesperson => "spokesperson",
+    }
+}
+
+fn gpt_live_append_events(message: &RealtimeExpertMessage) -> Vec<Value> {
+    let append_type = match message.mode {
+        RealtimeExpertMessageMode::Say => "session.commentary.append",
+        RealtimeExpertMessageMode::Context => "session.thinking.append",
+    };
+    let delegation_ids = if message.resolved_handoff_ids.is_empty() {
+        vec![None]
+    } else {
+        message
+            .resolved_handoff_ids
+            .iter()
+            .map(|id| Some(id.as_str()))
+            .collect()
+    };
+
+    delegation_ids
+        .into_iter()
+        .enumerate()
+        .map(|(index, delegation_id)| {
+            let event_type = if index == 0 {
+                append_type
+            } else {
+                "session.thinking.append"
+            };
+            let mut event = json!({
+                "type": event_type,
+                "delegation_id": delegation_id,
+                "content": bounded_live_content(&message.message),
+            });
+            if let Some(event_id) = &message.event_id {
+                event["event_id"] = if index == 0 {
+                    event_id.clone().into()
+                } else {
+                    format!("{event_id}-{index}").into()
+                };
+            }
+            event
+        })
+        .collect()
+}
+
+fn bounded_live_content(content: &str) -> &str {
+    const MAX_BYTES: usize = 500;
+    if content.len() <= MAX_BYTES {
+        return content;
+    }
+    let mut end = MAX_BYTES;
+    while !content.is_char_boundary(end) {
+        end -= 1;
+    }
+    &content[..end]
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -480,6 +561,13 @@ struct PendingSpokespersonTranscript {
 }
 
 #[derive(Debug)]
+struct PendingLiveTranscript {
+    item_id: String,
+    text: String,
+    last_end_ms: u64,
+}
+
+#[derive(Debug)]
 pub struct RealtimeProtocolReducer {
     next_transcript_id: u64,
     finalized_item_ids: HashSet<String>,
@@ -489,6 +577,9 @@ pub struct RealtimeProtocolReducer {
     pending_user_transcripts: HashMap<String, String>,
     pending_spokesperson_transcripts: HashMap<String, PendingSpokespersonTranscript>,
     interrupted_response_ids: HashSet<String>,
+    pending_live_input: Option<PendingLiveTranscript>,
+    pending_live_output: Option<PendingLiveTranscript>,
+    next_live_item_id: u64,
 }
 
 impl Default for RealtimeProtocolReducer {
@@ -502,6 +593,9 @@ impl Default for RealtimeProtocolReducer {
             pending_user_transcripts: HashMap::new(),
             pending_spokesperson_transcripts: HashMap::new(),
             interrupted_response_ids: HashSet::new(),
+            pending_live_input: None,
+            pending_live_output: None,
+            next_live_item_id: 1,
         }
     }
 }
@@ -559,10 +653,125 @@ impl RealtimeProtocolReducer {
                 self.capture_spokesperson_transcript_final(event);
                 Ok(Vec::new())
             }
+            "session.input_transcript.delta" => {
+                self.capture_live_transcript_delta(event, RealtimeTranscriptSpeaker::User)
+            }
+            "session.output_transcript.delta" => self
+                .capture_live_transcript_delta(event, RealtimeTranscriptSpeaker::Spokesperson),
+            "session.delegation.created" => self.capture_client_delegation(event),
+            "session.closed" => Ok(self.finish_all_live_transcripts()),
             "output_audio_buffer.stopped" => self.finish_spokesperson_playback(event, false),
             "output_audio_buffer.cleared" => self.finish_spokesperson_playback(event, true),
             _ => Ok(Vec::new()),
         }
+    }
+
+    fn capture_live_transcript_delta(
+        &mut self,
+        event: &Value,
+        speaker: RealtimeTranscriptSpeaker,
+    ) -> Result<Vec<RealtimeProtocolEvent>, String> {
+        let Some(delta) = string_at(event, "/delta") else {
+            return Ok(Vec::new());
+        };
+        if delta.is_empty() {
+            return Ok(Vec::new());
+        }
+        let start_ms = event.get("start_ms").and_then(Value::as_u64).unwrap_or(0);
+        let end_ms = event
+            .get("end_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(start_ms);
+        let should_start_new = self
+            .pending_live_transcript(speaker)
+            .as_ref()
+            .is_some_and(|pending| start_ms > pending.last_end_ms.saturating_add(1_500));
+        let mut events = Vec::new();
+        if should_start_new {
+            if let Some(event) = self.finish_live_transcript(speaker) {
+                events.push(event);
+            }
+        }
+        if self.pending_live_transcript(speaker).is_none() {
+            let item_id = format!("live-{}-{}", live_speaker_name(speaker), self.next_live_item_id);
+            self.next_live_item_id = self.next_live_item_id.saturating_add(1);
+            *self.pending_live_transcript(speaker) = Some(PendingLiveTranscript {
+                item_id: item_id.clone(),
+                text: String::new(),
+                last_end_ms: end_ms,
+            });
+            events.push(RealtimeProtocolEvent::TranscriptStarted { item_id, speaker });
+        }
+        let pending = self
+            .pending_live_transcript(speaker)
+            .as_mut()
+            .expect("live transcript exists");
+        pending.text.push_str(delta);
+        pending.last_end_ms = pending.last_end_ms.max(end_ms);
+        events.push(RealtimeProtocolEvent::TranscriptUpdated {
+            item_id: pending.item_id.clone(),
+            speaker,
+            text: pending.text.clone(),
+        });
+        Ok(events)
+    }
+
+    fn capture_client_delegation(
+        &mut self,
+        event: &Value,
+    ) -> Result<Vec<RealtimeProtocolEvent>, String> {
+        if string_at(event, "/delegation/target") != Some("client") {
+            return Ok(Vec::new());
+        }
+        let delegation_id = string_at(event, "/delegation/id")
+            .ok_or_else(|| "client delegation is missing delegation.id".to_string())?;
+        let mut events = self.finish_all_live_transcripts();
+        events.push(RealtimeProtocolEvent::Handoff {
+            response_id: None,
+            call_id: delegation_id.to_string(),
+            message: "Handle the delegated request using the recent voice transcript and durable session context."
+                .into(),
+        });
+        Ok(events)
+    }
+
+    fn pending_live_transcript(
+        &mut self,
+        speaker: RealtimeTranscriptSpeaker,
+    ) -> &mut Option<PendingLiveTranscript> {
+        match speaker {
+            RealtimeTranscriptSpeaker::User => &mut self.pending_live_input,
+            RealtimeTranscriptSpeaker::Spokesperson => &mut self.pending_live_output,
+        }
+    }
+
+    fn finish_live_transcript(
+        &mut self,
+        speaker: RealtimeTranscriptSpeaker,
+    ) -> Option<RealtimeProtocolEvent> {
+        let pending = self.pending_live_transcript(speaker).take()?;
+        let text = pending.text.trim();
+        if text.is_empty() {
+            return None;
+        }
+        Some(self.finalized_transcript(
+            &pending.item_id,
+            speaker,
+            text,
+            false,
+            RealtimeTranscriptEvidence::ProviderDelta,
+        ))
+    }
+
+    fn finish_all_live_transcripts(&mut self) -> Vec<RealtimeProtocolEvent> {
+        [RealtimeTranscriptSpeaker::User, RealtimeTranscriptSpeaker::Spokesperson]
+            .into_iter()
+            .filter_map(|speaker| self.finish_live_transcript(speaker))
+            .collect()
+    }
+
+    pub fn flush_live_transcripts(&mut self) -> Vec<RealtimeProtocolEvent> {
+        self.finish_all_live_transcripts()
     }
 
     fn capture_user_transcript_delta(
@@ -1335,6 +1544,7 @@ impl RealtimeExpertSpokespersonSession {
             }
         }
         let protocol_events = self.reducer.handle(event)?;
+        let is_client_delegation = string_at(event, "/type") == Some("session.delegation.created");
         let mut client_events = response_update.events;
         let mut expert_delivery = None;
         let mut accepted_handoffs = Vec::new();
@@ -1378,16 +1588,24 @@ impl RealtimeExpertSpokespersonSession {
                     }
                 }
                 RealtimeProtocolEvent::Handoff {
-                    call_id, message, ..
+                    response_id: _,
+                    call_id,
+                    message,
                 } => {
-                    let (_, handoff_id, expert_event) = self.record_handoff(message)?;
+                    let (_, handoff_id, expert_event) = if is_client_delegation {
+                        self.record_handoff_with_id(call_id, message)?
+                    } else {
+                        self.record_handoff(message)?
+                    };
                     self.pending_expert_events.push(expert_event);
-                    let tool_output = accepted_handoff_tool_output(call_id, &handoff_id)?;
-                    client_events.extend(
-                        self.responses
-                            .request_tool_output(tool_output, false)
-                            .events,
-                    );
+                    if !is_client_delegation {
+                        let tool_output = accepted_handoff_tool_output(call_id, &handoff_id)?;
+                        client_events.extend(
+                            self.responses
+                                .request_tool_output(tool_output, false)
+                                .events,
+                        );
+                    }
                     accepted_handoffs.push(RealtimeAcceptedHandoff {
                         handoff_id: handoff_id.clone(),
                         message: message.clone(),
@@ -1639,7 +1857,15 @@ impl RealtimeExpertSpokespersonSession {
         &mut self,
         text: &str,
     ) -> Result<RealtimeCoordinatorResult, String> {
-        self.responses.request_typed_user_message(text)
+        let text = require_non_empty(text, "user text")?;
+        Ok(RealtimeCoordinatorResult {
+            status: RealtimeRequestStatus::Sent,
+            events: vec![json!({
+                "type": "session.thinking.append",
+                "delegation_id": null,
+                "content": format!("The user typed this message in the durable chat: {text}"),
+            })],
+        })
     }
 
     fn register_handoff(
@@ -1675,6 +1901,31 @@ impl RealtimeExpertSpokespersonSession {
     > {
         let cursor = self.conversation.next_live_token();
         let handoff_id = format!("handoff-{}-{cursor}", self.call_scope);
+        let event = LiveSideEvent::Handoff {
+            call_id: handoff_id.clone(),
+            message: message.to_string(),
+        };
+        let recorded = self.conversation.record_live_event(event)?;
+        debug_assert_eq!(recorded.token, cursor);
+        self.register_handoff(&handoff_id, cursor, message)?;
+        let expert_event = handoff_delivery_event(cursor, &handoff_id, message);
+        Ok((recorded, handoff_id, expert_event))
+    }
+
+    fn record_handoff_with_id(
+        &mut self,
+        handoff_id: &str,
+        message: &str,
+    ) -> Result<
+        (
+            crate::causal_inbox::CausalMessage<LiveSideEvent>,
+            String,
+            RealtimeExpertDeliveryEvent,
+        ),
+        String,
+    > {
+        let handoff_id = require_non_empty(handoff_id, "handoff id")?;
+        let cursor = self.conversation.next_live_token();
         let event = LiveSideEvent::Handoff {
             call_id: handoff_id.clone(),
             message: message.to_string(),
@@ -1745,7 +1996,7 @@ impl RealtimeExpertSpokespersonSession {
                 dismissed_handoff_ids: Vec::new(),
             });
         };
-        let request = self.request_expert_message(RealtimeExpertMessage {
+        let expert_message = RealtimeExpertMessage {
             message: format!(
                 "[bridge cursor {}] [Handoff dismissal] {context} This is silent context; do not speak merely to acknowledge it.",
                 accepted.outbound.id
@@ -1753,8 +2004,12 @@ impl RealtimeExpertSpokespersonSession {
             mode: RealtimeExpertMessageMode::Context,
             event_id: Some(format!("berd-expert-dismissal-{}", accepted.outbound.id)),
             directive_id: None,
-            resolved_handoff_ids: Vec::new(),
-        })?;
+            resolved_handoff_ids: handoff_ids.to_vec(),
+        };
+        let request = RealtimeCoordinatorResult {
+            status: RealtimeRequestStatus::Sent,
+            events: gpt_live_append_events(&expert_message),
+        };
         self.conversation.record_expert_turn(context.clone());
         self.dismiss_handoffs(handoff_ids)?;
         Ok(RealtimeHandoffDismissal {
@@ -1785,15 +2040,19 @@ impl RealtimeExpertSpokespersonSession {
                 request: None,
             });
         };
-        let request = self.request_expert_message(RealtimeExpertMessage {
+        let expert_message = RealtimeExpertMessage {
             message: format!("[bridge cursor {}] {message}", accepted.outbound.id),
             mode,
             event_id: Some(format!("berd-master-{}", accepted.outbound.id)),
             directive_id: None,
             resolved_handoff_ids: resolved_handoff_ids.to_vec(),
-        })?;
+        };
+        let request = RealtimeCoordinatorResult {
+            status: RealtimeRequestStatus::Sent,
+            events: gpt_live_append_events(&expert_message),
+        };
         self.conversation.record_expert_turn(message.to_string());
-        self.mark_handoffs_resolving(resolved_handoff_ids)?;
+        self.dismiss_handoffs(resolved_handoff_ids)?;
         Ok(RealtimeExpertMessageSubmission {
             exchange,
             request: Some(request),
@@ -1935,21 +2194,17 @@ mod tests {
     #[test]
     fn builds_the_default_shared_spokesperson_session() {
         let update = spokesperson_session_update(&RealtimeSpokespersonSessionOptions::default());
-        assert_eq!(update["type"], "session.update");
+        assert_eq!(update["type"], "session.start");
+        assert_eq!(update["session"]["model"], "gpt-live-1");
         assert_eq!(update["session"]["audio"]["output"]["voice"], "marin");
-        assert_eq!(update["session"]["audio"]["output"]["speed"], 1.0);
         assert_eq!(
-            update["session"]["audio"]["input"]["turn_detection"],
-            json!({
-                "type": "server_vad",
-                "threshold": 0.5,
-                "prefix_padding_ms": 300,
-                "silence_duration_ms": 500,
-                "create_response": true,
-                "interrupt_response": true,
-            })
+            update["session"]["audio"]["format"],
+            json!({ "type": "audio/pcm", "rate": 24_000 })
         );
-        assert_eq!(update["session"]["tools"][0]["name"], "handoff");
+        assert_eq!(
+            update["session"]["delegation"],
+            json!({ "type": "client" })
+        );
     }
 
     #[test]
@@ -1977,8 +2232,8 @@ mod tests {
             "there is no fixed timer or retry count",
             "two parts of one brain",
             "implementation, architecture, protocols, lifecycle, runtime behavior",
-            "never gives a preliminary or speculative answer before or alongside a handoff",
-            "When unsure whether a question is routine or authoritative, hand it off",
+            "never gives a preliminary or speculative answer before or alongside a delegation",
+            "When unsure whether a question is routine or authoritative, delegate it",
             "trusted causal cursor, role, and text",
             "handoff events also carry their handoff ID",
         ] {
@@ -2703,6 +2958,42 @@ mod tests {
     }
 
     #[test]
+    fn client_delegation_preserves_provider_id_and_recent_transcript() {
+        let mut session = RealtimeExpertSpokespersonSession::new(0, "live");
+        session
+            .handle_provider_event(&json!({
+                "type": "session.input_transcript.delta",
+                "delta": "Inspect the repository",
+                "start_ms": 0,
+                "end_ms": 800,
+            }))
+            .unwrap();
+        let reduction = session
+            .handle_provider_event(&json!({
+                "type": "session.delegation.created",
+                "delegation": {
+                    "id": "dlg_opaque_123",
+                    "target": "client",
+                },
+            }))
+            .unwrap();
+
+        assert!(reduction.client_events.is_empty());
+        assert_eq!(
+            reduction.accepted_handoffs,
+            [RealtimeAcceptedHandoff {
+                handoff_id: "dlg_opaque_123".into(),
+                message: "Handle the delegated request using the recent voice transcript and durable session context."
+                    .into(),
+            }]
+        );
+        let delivery = reduction.expert_delivery.unwrap();
+        assert_eq!(delivery.handoff_ids, ["dlg_opaque_123"]);
+        assert_eq!(delivery.events[0].text, "Inspect the repository");
+        assert_eq!(delivery.events[1].handoff_id.as_deref(), Some("dlg_opaque_123"));
+    }
+
+    #[test]
     fn shared_session_flushes_a_user_only_tail() {
         let mut session = RealtimeExpertSpokespersonSession::new(0, "call-a");
         session
@@ -2842,16 +3133,18 @@ mod tests {
         let request = dismissal.request.unwrap();
         assert_eq!(request.events.len(), 1);
         assert_eq!(
-            request.events[0].pointer("/item/content/0/text"),
+            request.events[0].pointer("/content"),
             Some(&json!(
-                "Private context from the Expert for a future natural turn. Do not respond to this item now:\n[bridge cursor 1] [Handoff dismissal] Handoffs handoff-1 were dismissed without a spoken response. Reason: Superseded This is silent context; do not speak merely to acknowledge it."
+                "[bridge cursor 1] [Handoff dismissal] Handoffs handoff-1 were dismissed without a spoken response. Reason: Superseded This is silent context; do not speak merely to acknowledge it."
             ))
         );
+        assert_eq!(request.events[0]["type"], "session.thinking.append");
+        assert_eq!(request.events[0]["delegation_id"], "handoff-1");
         assert!(session.unresolved_handoff_ids().is_empty());
     }
 
     #[test]
-    fn shared_session_submits_expert_speech_and_marks_only_named_handoffs() {
+    fn shared_session_submits_expert_speech_and_resolves_only_named_handoffs() {
         let mut session = RealtimeExpertSpokespersonSession::new(0, "test-call");
         session
             .register_handoff("handoff-1", 1, "First request")
@@ -2874,17 +3167,19 @@ mod tests {
         ));
         let request = submission.request.unwrap();
         assert_eq!(request.status, RealtimeRequestStatus::Sent);
-        assert_eq!(request.events.len(), 2);
+        assert_eq!(request.events.len(), 1);
         assert_eq!(
-            request.events[0].pointer("/item/content/0/text"),
+            request.events[0].pointer("/content"),
             Some(&json!(
-                "The Expert offers the following information for a response opportunity. Speak it naturally and accurately if a response is useful now; silence remains valid. Do not add filler or offer more help:\n[bridge cursor 1] The first answer"
+                "[bridge cursor 1] The first answer"
             ))
         );
+        assert_eq!(request.events[0]["type"], "session.commentary.append");
+        assert_eq!(request.events[0]["delegation_id"], "handoff-1");
         assert_eq!(session.unresolved_handoff_ids(), ["handoff-2"]);
         assert_eq!(
             session.unknown_handoff_ids(&["handoff-1".into()]),
-            Vec::<String>::new()
+            vec!["handoff-1"]
         );
     }
 

@@ -1,4 +1,4 @@
-import { fireEvent, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "@/shared/i18n";
@@ -26,7 +26,7 @@ describe("RealtimeVoiceSettings", () => {
     await i18n.changeLanguage("en");
   });
 
-  it("keeps the voice primary and provider tuning under Advanced", async () => {
+  it("shows only GPT Live's supported voice and presentation controls", async () => {
     const user = userEvent.setup();
     renderWithProviders(<RealtimeVoiceSettings />);
 
@@ -36,29 +36,19 @@ describe("RealtimeVoiceSettings", () => {
       }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("combobox", { name: "Playback speed" }),
-    ).toHaveTextContent("1×");
+      screen.queryByRole("combobox", { name: "Playback speed" }),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("combobox", { name: "Realtime model" }),
     ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("switch", { name: "Interrupt when I speak" }),
-    ).toBeChecked();
-
     await user.click(screen.getByRole("button", { name: "Advanced" }));
 
     expect(
-      screen.getByRole("combobox", { name: "Realtime model" }),
-    ).toHaveTextContent("gpt-realtime-2.1 (default)");
-    expect(
-      screen.getByRole("combobox", { name: "STT model" }),
-    ).toHaveTextContent("gpt-realtime-whisper (default)");
-    expect(
-      screen.getByRole("combobox", { name: "Turn detection" }),
-    ).toHaveTextContent("Server VAD (default)");
-    expect(
       screen.getByRole("combobox", { name: "Conversation presentation" }),
     ).toHaveTextContent("Debug — show agent routing");
+    expect(
+      screen.queryByRole("combobox", { name: "Realtime model" }),
+    ).not.toBeInTheDocument();
   });
 
   it("stores the Realtime key through the shared OpenAI voice credential path", async () => {
@@ -69,56 +59,5 @@ describe("RealtimeVoiceSettings", () => {
     await user.click(screen.getByRole("button", { name: "Save key" }));
 
     expect(openAiVoiceMocks.setApiKey).toHaveBeenCalledWith(" sk-shared ");
-  });
-
-  it("reveals the supported advanced session controls", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<RealtimeVoiceSettings />);
-
-    await user.click(screen.getByRole("button", { name: "Advanced" }));
-
-    expect(
-      screen.getByRole("switch", { name: "Respond automatically" }),
-    ).toBeChecked();
-    expect(
-      screen.getByRole("combobox", { name: "Reasoning effort" }),
-    ).toHaveTextContent("Model default");
-    expect(
-      screen.getByRole("combobox", { name: "Noise reduction" }),
-    ).toHaveTextContent("Off");
-    expect(
-      screen.getByRole("slider", { name: "Voice activation threshold" }),
-    ).toBeInTheDocument();
-  });
-
-  it("rounds and clamps integer-only advanced controls", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<RealtimeVoiceSettings />);
-
-    await user.click(screen.getByRole("button", { name: "Advanced" }));
-    fireEvent.change(screen.getByLabelText("Maximum response tokens"), {
-      target: { value: "5000.4" },
-    });
-    fireEvent.change(screen.getByLabelText("End pause (ms)"), {
-      target: { value: "250.7" },
-    });
-    fireEvent.change(screen.getByLabelText("Speech lead-in (ms)"), {
-      target: { value: "-20" },
-    });
-    fireEvent.change(screen.getByLabelText("Idle timeout (ms)"), {
-      target: { value: "1499.5" },
-    });
-
-    expect(
-      JSON.parse(
-        window.localStorage.getItem("goose:openai-realtime-voice-options") ??
-          "{}",
-      ),
-    ).toMatchObject({
-      maxOutputTokens: 4_096,
-      silenceDurationMs: 251,
-      prefixPaddingMs: 0,
-      idleTimeoutMs: 1_500,
-    });
   });
 });

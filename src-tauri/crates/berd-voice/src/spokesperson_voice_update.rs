@@ -375,7 +375,7 @@ mod tests {
             validate_voice_update_settings(
                 4,
                 &TtsSettings::OpenAi {
-                    model: "gpt-realtime-2.1".into(),
+                    model: "gpt-live-1".into(),
                     voice: "cedar".into(),
                     rate: 1.5,
                 },
@@ -390,7 +390,7 @@ mod tests {
     fn shared_settings_validation_rejects_stale_or_invalid_changes() {
         let config = config();
         let settings = TtsSettings::OpenAi {
-            model: "gpt-realtime-2.1".into(),
+            model: "gpt-live-1".into(),
             voice: "cedar".into(),
             rate: 1.5,
         };
@@ -400,7 +400,7 @@ mod tests {
         assert!(validate_voice_update_settings(
             4,
             &TtsSettings::OpenAi {
-                model: "gpt-realtime-2.1".into(),
+                    model: "gpt-live-1".into(),
                 voice: "cedar".into(),
                 rate: 2.0,
             },

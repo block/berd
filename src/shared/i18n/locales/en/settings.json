@@ -949,7 +949,7 @@
     "resettingToDefaults": "Resetting…",
     "realtimeAdvanced": "Advanced",
     "realtimeApiKey": "OpenAI API key",
-    "realtimeApiKeyDescription": "Saved securely in macOS Keychain and shared by Realtime listening and speech.",
+    "realtimeApiKeyDescription": "Saved securely in macOS Keychain and used by GPT Live for listening, speech, and client delegation.",
     "realtimeCreateResponse": "Respond automatically",
     "realtimeCreateResponseDescription": "Generate a voice assistant response when a detected user turn ends.",
     "realtimeEagerness": "Turn-taking eagerness",

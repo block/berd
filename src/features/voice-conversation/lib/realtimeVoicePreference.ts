@@ -35,7 +35,7 @@ export interface RealtimeVoicePreference {
 
 const DEFAULT_PREFERENCE: RealtimeVoicePreference = {
   presentationMode: import.meta.env.DEV ? "debug" : "subtle",
-  model: "gpt-realtime-2.1",
+  model: "gpt-live-1",
   transcriptionModel: "gpt-realtime-whisper",
   voice: DEFAULT_OPENAI_VOICE,
   speed: 1,
@@ -125,13 +125,13 @@ export function getRealtimeVoicePreference(): RealtimeVoicePreference {
         ["debug", "subtle"],
         DEFAULT_PREFERENCE.presentationMode,
       ),
-      model: stringPreference(parsed.model, DEFAULT_PREFERENCE.model),
+      model: DEFAULT_PREFERENCE.model,
       transcriptionModel: stringPreference(
         parsed.transcriptionModel,
         DEFAULT_PREFERENCE.transcriptionModel,
       ),
       voice: stringPreference(parsed.voice, DEFAULT_PREFERENCE.voice),
-      speed: numberPreference(parsed.speed, 0.25, 1.5, 1),
+      speed: 1,
       turnDetection: enumPreference(
         parsed.turnDetection,
         ["server_vad", "semantic_vad"],
@@ -212,10 +212,15 @@ export function subscribeToRealtimeVoicePreference(
 export function setRealtimeVoicePreference(
   preference: RealtimeVoicePreference,
 ): void {
-  const raw = JSON.stringify(preference);
+  const normalized = {
+    ...preference,
+    model: DEFAULT_PREFERENCE.model,
+    speed: 1,
+  };
+  const raw = JSON.stringify(normalized);
   window.localStorage.setItem(STORAGE_KEY, raw);
   cachedRaw = raw;
-  cachedPreference = preference;
+  cachedPreference = normalized;
   window.dispatchEvent(new Event(CHANGED_EVENT));
 }
 

@@ -764,16 +764,26 @@ class OpenAiRealtimeConversationRuntime {
               const message =
                 event && typeof event === "object" && "message" in event
                   ? String(event.message)
-                  : "OpenAI Realtime runtime failed.";
+                  : "OpenAI GPT Live runtime failed.";
               void this.fail(
                 this.snapshot.boundSessionId ?? sessionId,
                 message,
               );
               return;
             }
-            if (eventType === "input_audio_buffer.speech_started") {
+            if (
+              eventType === "input_audio_buffer.speech_started" ||
+              (eventType === "berd.realtime.user_speaking" &&
+                "active" in (event as object) &&
+                Boolean((event as { active?: unknown }).active))
+            ) {
               this.publishActivity("user-speaking");
-            } else if (eventType === "input_audio_buffer.speech_stopped") {
+            } else if (
+              eventType === "input_audio_buffer.speech_stopped" ||
+              (eventType === "berd.realtime.user_speaking" &&
+                "active" in (event as object) &&
+                !(event as { active?: unknown }).active)
+            ) {
               this.publishActivity("user-idle");
             } else if (eventType === "output_audio_buffer.started") {
               this.publishActivity("assistant-speaking");
@@ -896,7 +906,7 @@ class OpenAiRealtimeConversationRuntime {
           window.setTimeout(
             () =>
               reject(
-                new Error("OpenAI Realtime runtime did not become ready."),
+                new Error("OpenAI GPT Live runtime did not become ready."),
               ),
             35_000,
           );
@@ -929,7 +939,7 @@ class OpenAiRealtimeConversationRuntime {
           });
           this.realtimeSettingsQueue = update.catch((error) => {
             if (!isStale()) {
-              toast.error("Could not update Realtime voice", {
+              toast.error("Could not update GPT Live voice", {
                 description: errorText(error),
               });
             }
@@ -1052,7 +1062,7 @@ class OpenAiRealtimeConversationRuntime {
         !this.bridgeHandoffDismissal ||
         !this.bridgeMasterTurnCompletion
       ) {
-        throw new Error("The Realtime Spokesperson bridge did not initialize.");
+        throw new Error("The GPT Live Spokesperson bridge did not initialize.");
       }
       this.resolveBridgeReady?.({
         sessionId: bridgeSessionId,
@@ -1288,7 +1298,7 @@ class OpenAiRealtimeConversationRuntime {
         if (isAbortError(error)) return;
         if (continueAfterStop) {
           console.warn(
-            "Could not deliver the final Realtime transcript",
+            "Could not deliver the final GPT Live transcript",
             error,
           );
           return;
@@ -1321,7 +1331,7 @@ class OpenAiRealtimeConversationRuntime {
     useChatStore
       .getState()
       .addMessage(sessionId, createSystemNotificationMessage(message, "error"));
-    toast.error("OpenAI Realtime voice failed", { description: message });
+    toast.error("OpenAI GPT Live voice failed", { description: message });
   }
 
   private async cleanupResources(sessionId: string): Promise<void> {
@@ -1409,12 +1419,12 @@ class OpenAiRealtimeConversationRuntime {
       sessionId,
       async sendMasterMessage(message, cursor, mode, resolves) {
         const bridge = await bridgeReady;
-        if (!bridge) throw new Error("The Realtime Spokesperson stopped.");
+        if (!bridge) throw new Error("The GPT Live Spokesperson stopped.");
         return bridge.sendMasterMessage(message, cursor, mode, resolves);
       },
       async dismissHandoffs(cursor, handoffIds, reason) {
         const bridge = await bridgeReady;
-        if (!bridge) throw new Error("The Realtime Spokesperson stopped.");
+        if (!bridge) throw new Error("The GPT Live Spokesperson stopped.");
         return bridge.dismissHandoffs(cursor, handoffIds, reason);
       },
       completeMasterTurn(completion) {
@@ -1533,7 +1543,7 @@ export function useOpenAiRealtimeConversation(options: {
             ),
           onError: (error) =>
             console.warn(
-              "Could not synchronize Realtime floating voice controls",
+              "Could not synchronize GPT Live floating voice controls",
               error,
             ),
         });
@@ -1551,7 +1561,7 @@ export function useOpenAiRealtimeConversation(options: {
           )
           .catch(() => undefined);
         console.warn(
-          "Could not observe the Realtime voice owner window focus",
+          "Could not observe the GPT Live voice owner window focus",
           error,
         );
       });

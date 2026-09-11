@@ -72,8 +72,10 @@ impl RealtimePlaybackHost {
         match event {
             SpokespersonEvent::Ready => emit(json!({ "type": "berd.realtime.ready" }))?,
             SpokespersonEvent::Provider(event) => {
-                if event.get("type").and_then(Value::as_str) != Some("response.output_audio.delta")
-                {
+                if !matches!(
+                    event.get("type").and_then(Value::as_str),
+                    Some("response.output_audio.delta" | "session.output_audio.delta")
+                ) {
                     emit(event)?;
                 }
             }
@@ -135,8 +137,14 @@ impl RealtimePlaybackHost {
                     self.interrupted_responses.insert(response_id);
                 }
             }
-            SpokespersonEvent::UserSpeaking { active: true, .. } => {
-                self.interrupt_active_playback(send_command, emit)?;
+            SpokespersonEvent::UserSpeaking { active, .. } => {
+                emit(json!({
+                    "type": "berd.realtime.user_speaking",
+                    "active": active,
+                }))?;
+                if active {
+                    self.interrupt_active_playback(send_command, emit)?;
+                }
             }
             SpokespersonEvent::TranscriptDelta {
                 response_id,

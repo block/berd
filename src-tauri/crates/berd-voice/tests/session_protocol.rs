@@ -48,6 +48,45 @@ impl ExpertSpokespersonTestSession {
         Self::start_with_options(endpoint, renew_after_ms, None, None, None)
     }
 
+    fn start_live(endpoint: String) -> Self {
+        let (mut command, _pcm, audio_host) = session_command();
+        let mut child = ChildGuard(Some(
+            command
+                .args(["--mode", "expert-spokesperson", "--tts-backend", "openai"])
+                .env("OPENAI_API_KEY", "test-key")
+                .env("OPENAI_LIVE_ENDPOINT", endpoint)
+                .env("OPENAI_REALTIME_VOICE", "marin")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        ));
+        let process = child.0.as_mut().unwrap();
+        let stdin = Arc::new(Mutex::new(process.stdin.take().unwrap()));
+        let output = spawn_session_message_reader(process.stdout.take().unwrap());
+        let stderr = spawn_session_stderr_reader(process.stderr.take().unwrap());
+        let audio_host = spawn_audio_host_with_played_limit(
+            audio_host,
+            Arc::clone(&stdin),
+            None,
+            None,
+            None,
+        );
+        let mut session = Self {
+            child,
+            stdin: Some(stdin),
+            output,
+            stderr,
+            audio_host: Some(audio_host),
+        };
+        session.send(json!({
+            "type":"hello","id":1,"input_during_tts":"allow_barge_in"
+        }));
+        assert_eq!(session.recv(Duration::from_secs(2))["type"], "ready");
+        session
+    }
+
     fn start_with_options(
         endpoint: String,
         renew_after_ms: Option<u64>,
@@ -455,6 +494,50 @@ fn framed_hello_reports_input_initialization_failure_before_ready() {
     let message: Value = serde_json::from_str(&line).unwrap();
     assert_eq!(message["type"], "fatal");
     assert!(!message["message"].as_str().unwrap().is_empty());
+}
+
+#[test]
+fn vccli_expert_spokesperson_starts_and_closes_a_gpt_live_session() {
+    let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
+    let server = std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async move {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                endpoint_tx
+                    .send(format!(
+                        "ws://{}/live/sessions",
+                        listener.local_addr().unwrap()
+                    ))
+                    .unwrap();
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut socket = accept_async(stream).await.unwrap();
+                let start = receive_realtime_json(&mut socket).await;
+                assert_eq!(start["type"], "session.start");
+                assert_eq!(start["session"]["model"], "gpt-live-1");
+                assert_eq!(start["session"]["delegation"]["type"], "client");
+                send_realtime_json(
+                    &mut socket,
+                    json!({
+                        "type": "session.started",
+                        "session": {
+                            "model": "gpt-live-1",
+                            "audio": { "output": { "voice": "marin" } },
+                        },
+                    }),
+                )
+                .await;
+                let close = receive_realtime_json(&mut socket).await;
+                assert_eq!(close["type"], "session.close");
+                send_realtime_json(&mut socket, json!({ "type": "session.closed" })).await;
+            });
+    });
+
+    let session = ExpertSpokespersonTestSession::start_live(endpoint_rx.recv().unwrap());
+    session.shutdown();
+    server.join().unwrap();
 }
 
 #[test]
