@@ -1084,7 +1084,7 @@ export const MessageBubble = memo(function MessageBubble({
                   : t("message.berdctlCrossSessionLabel")}
               </div>
             ) : null}
-            {isSteeredMessage ? (
+            {isSteeredMessage && !isBerdctlNotification ? (
               <div className="mb-1 flex flex-col items-start gap-0.5 text-xs font-normal leading-4 text-muted-foreground">
                 <span data-role="steer-message-label" className="leading-4">
                   {t("message.steerLabel")}
