@@ -1853,7 +1853,9 @@ pub async fn start_native_voice_conversation(
                             admission.close();
                         }
                         if let Some(status_sounds) = current.status_sounds.take() {
-                            status_sounds.finish();
+                            if let Err(error) = status_sounds.finish() {
+                                log::warn!("Status sound shutdown failed: {error}");
+                            }
                         }
                         current.session_id = None;
                         current.lifecycle_id = None;
@@ -2300,7 +2302,9 @@ impl NativeVoiceState {
             return Ok(None);
         };
         if let Some(status_sounds) = status_sounds {
-            status_sounds.finish();
+            if let Err(error) = status_sounds.finish() {
+                log::warn!("Status sound shutdown failed: {error}");
+            }
         }
         // Keep the lifecycle current through the bounded shutdown window so a
         // cooperative worker can flush its final utterance durably. A worker

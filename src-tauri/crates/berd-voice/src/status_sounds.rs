@@ -1,5 +1,5 @@
 use std::{
-    sync::mpsc::{self, RecvTimeoutError, Sender},
+    sync::{mpsc::{self, RecvTimeoutError, Sender}, Arc, Mutex},
     thread,
     time::{Duration, Instant},
 };
@@ -164,7 +164,12 @@ enum StatusSoundCommand {
 /// Thread-safe status-sound service for hosts that do not own a polling loop.
 #[derive(Clone)]
 pub struct ManagedStatusSoundRuntime {
+    inner: Arc<StatusSoundWorker>,
+}
+
+struct StatusSoundWorker {
     commands: Sender<StatusSoundCommand>,
+    worker: Mutex<Option<thread::JoinHandle<()>>>,
 }
 
 impl ManagedStatusSoundRuntime {
@@ -199,8 +204,12 @@ impl ManagedStatusSoundRuntime {
                 }
             })
             .map_err(|error| format!("Could not start status sound runtime: {error}"))?;
-        drop(worker);
-        Ok(Self { commands })
+        Ok(Self {
+            inner: Arc::new(StatusSoundWorker {
+                commands,
+                worker: Mutex::new(Some(worker)),
+            }),
+        })
     }
 
     pub fn update(
@@ -221,14 +230,48 @@ impl ManagedStatusSoundRuntime {
     }
 
     fn send(&self, command: StatusSoundCommand) -> Result<(), String> {
-        self.commands
+        self.inner.commands
             .send(command)
             .map_err(|_| "Status sound runtime is unavailable".to_string())
     }
 
-    pub fn finish(&self) {
-        let _ = self.commands.send(StatusSoundCommand::Shutdown);
+    pub fn finish(&self) -> Result<(), String> {
+        let _ = self.inner.commands.send(StatusSoundCommand::Shutdown);
+        let worker = self.inner.worker.lock()
+            .map_err(|_| "Status sound worker join state is unavailable")?
+            .take();
+        if let Some(worker) = worker {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while !worker.is_finished() {
+                if Instant::now() >= deadline {
+                    reap_status_sound_worker(worker);
+                    return Err("Status sound worker shutdown timed out".into());
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+            worker.join().map_err(|_| "Status sound worker panicked".to_string())?;
+        }
+        Ok(())
     }
+}
+
+impl Drop for StatusSoundWorker {
+    fn drop(&mut self) {
+        let _ = self.commands.send(StatusSoundCommand::Shutdown);
+        if let Ok(worker) = self.worker.get_mut() {
+            if let Some(worker) = worker.take() {
+                reap_status_sound_worker(worker);
+            }
+        }
+    }
+}
+
+fn reap_status_sound_worker(worker: thread::JoinHandle<()>) {
+    let _ = thread::Builder::new()
+        .name("berd-status-sound-reaper".into())
+        .spawn(move || {
+            let _ = worker.join();
+        });
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -360,6 +403,36 @@ mod tests {
     fn assert_status(machine: &mut StatusSoundStateMachine, expected: ConversationStatus) {
         let actual = machine.tick(false).map(|cue| cue.status);
         assert_eq!(actual, Some(expected));
+    }
+
+    #[test]
+    fn managed_worker_finish_joins_and_is_idempotent_across_clones() {
+        let runtime = ManagedStatusSoundRuntime::spawn(None).unwrap();
+        let other = runtime.clone();
+        drop(runtime);
+        other.set_conversation_active(true).unwrap();
+        other.finish().unwrap();
+        assert!(other.inner.worker.lock().unwrap().is_none());
+        assert!(other.set_conversation_active(false).is_err());
+        other.finish().unwrap();
+    }
+
+    #[test]
+    fn last_owner_drop_stops_and_reaps_the_worker() {
+        let (commands, receiver) = mpsc::channel();
+        let (stopped, completed) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            assert!(matches!(receiver.recv(), Ok(StatusSoundCommand::Shutdown)));
+            stopped.send(()).unwrap();
+        });
+        let runtime = ManagedStatusSoundRuntime {
+            inner: Arc::new(StatusSoundWorker {
+                commands,
+                worker: Mutex::new(Some(worker)),
+            }),
+        };
+        drop(runtime);
+        completed.recv_timeout(Duration::from_secs(2)).unwrap();
     }
 
     #[test]

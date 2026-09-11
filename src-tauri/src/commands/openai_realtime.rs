@@ -247,7 +247,9 @@ pub async fn stop_openai_realtime_spokesperson_runtime(
         .map(|entry| {
             ensure_runtime_owner(&entry.owner_window, webview_window.label())?;
             if let Some(status_sounds) = entry.status_sounds.as_ref() {
-                status_sounds.finish();
+                if let Err(error) = status_sounds.finish() {
+                    log::warn!("Status sound shutdown failed: {error}");
+                }
             }
             Ok::<_, String>(Arc::clone(&entry.runtime))
         })
@@ -279,7 +281,9 @@ pub async fn release_openai_realtime_spokesperson_runtime(
     };
     if let Some(entry) = entry {
         if let Some(status_sounds) = entry.status_sounds.as_ref() {
-            status_sounds.finish();
+            if let Err(error) = status_sounds.finish() {
+                log::warn!("Status sound shutdown failed: {error}");
+            }
         }
         tauri::async_runtime::spawn_blocking(move || entry.runtime.finish())
             .await
@@ -302,7 +306,9 @@ pub fn handle_owner_window_destroyed(app: &AppHandle, window_label: &str) {
                 .filter_map(|session_id| sessions.remove(&session_id))
                 .map(|entry| {
                     if let Some(status_sounds) = entry.status_sounds.as_ref() {
-                        status_sounds.finish();
+                        if let Err(error) = status_sounds.finish() {
+                            log::warn!("Status sound shutdown failed: {error}");
+                        }
                     }
                     entry.runtime
                 })
