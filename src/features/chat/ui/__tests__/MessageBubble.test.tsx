@@ -757,6 +757,38 @@ describe("MessageBubble", () => {
     ).toHaveClass("rounded-lg", "border");
   });
 
+  it("renders GPT Live speech as an ordinary identified assistant response", () => {
+    const { container } = render(
+      <MessageBubble
+        message={assistantMessage(
+          [
+            {
+              type: "text",
+              text: "Today is Friday, September 11, 2026.",
+              speech: { status: "spoken" },
+            },
+          ],
+          {
+            metadata: {
+              personaName: "GPT Live",
+              voiceConversationDebugEvent: "gptLiveSpeech",
+            },
+          },
+        )}
+      />,
+    );
+
+    const message = container.querySelector(
+      '[data-realtime-voice-debug-event="gptLiveSpeech"]',
+    );
+    expect(message).toHaveAttribute("data-role", "assistant-message");
+    expect(message).toHaveTextContent("GPT Live");
+    expect(message).not.toHaveClass("ml-auto", "flex-row-reverse");
+    expect(
+      message?.querySelector('[data-role="message-bubble-surface"]'),
+    ).not.toHaveClass("rounded-lg", "border", "bg-message-user-bg");
+  });
+
   it("strikes only the estimated unspoken suffix after barge-in", () => {
     const { container } = render(
       <MessageBubble

@@ -301,6 +301,7 @@ function createGptLiveTranscriptMessage(
       userVisible: true,
       agentVisible: false,
       origin: "voice_conversation",
+      personaName: "GPT Live",
       voiceConversationDebugEvent: "gptLiveSpeech",
       completionStatus: provisional ? "inProgress" : "completed",
     },

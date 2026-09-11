@@ -1042,6 +1042,7 @@ export const MessageBubble = memo(function MessageBubble({
               ? "rounded-sm bg-message-user-bg px-4 py-2 leading-normal"
               : "w-full",
             hasVoiceSpeech &&
+              voiceDebugEvent !== "gptLiveSpeech" &&
               "rounded-lg border border-border/80 px-4 py-3 shadow-sm",
             voiceDebugEvent &&
               voiceDebugEvent !== "gptLiveSpeech" &&

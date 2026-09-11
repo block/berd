@@ -148,7 +148,7 @@ describe("sanitizeReplayMessages", () => {
         role: "assistant",
         content: [{ type: "text", text: "Count the repositories." }],
         metadata: {
-          personaName: "GptLive → Backend",
+          personaName: "GPT Live → Backend",
           voiceConversationDebugEvent: "gptLiveToBackend",
         },
       },
@@ -174,7 +174,7 @@ describe("sanitizeReplayMessages", () => {
         role: "assistant",
         content: [{ type: "text", text: "Check the transcript storage." }],
         metadata: {
-          personaName: "GptLive → Backend",
+          personaName: "GPT Live → Backend",
           userVisible: true,
           agentVisible: false,
           voiceConversationDebugEvent: "gptLiveToBackend",
