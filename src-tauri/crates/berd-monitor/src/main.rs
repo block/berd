@@ -1007,7 +1007,14 @@ fn flush_pending(
         let end = pending.active_len;
         let prompt = build_delivery_prompt(label, &pending.bytes[..end], instructions)?;
         let delivery_id = pending.delivery_id(paths);
-        if !deliver_to_session(paths, session_id, &prompt, if_running, &delivery_id) {
+        if !deliver_to_session(
+            paths,
+            session_id,
+            &prompt,
+            if_running,
+            &delivery_id,
+            label,
+        ) {
             log_line(paths, "delivery failed; buffered output will be retried")?;
             return Ok(());
         }
@@ -1045,6 +1052,7 @@ fn deliver_to_session(
     prompt: &str,
     if_running: RunningMode,
     delivery_id: &str,
+    label: &str,
 ) -> bool {
     deliver_with_candidates(
         paths,
@@ -1052,6 +1060,7 @@ fn deliver_to_session(
         prompt,
         if_running,
         delivery_id,
+        label,
         lock_candidates(),
         berdctl_candidates(),
         DELIVERY_TIMEOUT,
@@ -1064,6 +1073,7 @@ fn deliver_with_candidates(
     prompt: &str,
     if_running: RunningMode,
     delivery_id: &str,
+    label: &str,
     locks: Vec<PathBuf>,
     binaries: Vec<OsString>,
     timeout: Duration,
@@ -1089,7 +1099,7 @@ fn deliver_with_candidates(
                 .arg("--delivery-id")
                 .arg(delivery_id)
                 .arg("--from")
-                .arg("berd-monitor")
+                .arg(label)
                 .arg("--json")
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
@@ -1712,6 +1722,7 @@ mod tests {
             &first,
             RunningMode::Steer,
             "nul-delivery",
+            "test",
             vec![PathBuf::from("stale")],
             vec![binary.clone()],
             Duration::from_secs(2),
@@ -1723,6 +1734,7 @@ mod tests {
             &later,
             RunningMode::Steer,
             "later-delivery",
+            "test",
             vec![PathBuf::from("stale")],
             vec![binary],
             Duration::from_secs(2),
@@ -1732,6 +1744,7 @@ mod tests {
         assert_eq!(delivered.matches("before\u{fffd}after").count(), 1);
         assert!(delivered.contains("later output"));
         assert_eq!(delivered.matches("session\nnotify\n").count(), 2);
+        assert_eq!(delivered.matches("--from\ntest\n").count(), 2);
         assert!(!delivered.contains("session\nsend\n"));
         fs::remove_dir_all(paths.root).unwrap();
     }
@@ -1768,6 +1781,7 @@ mod tests {
                 "test",
                 RunningMode::Steer,
                 "test-delivery",
+                "test",
                 vec![PathBuf::from("stale-a"), PathBuf::from("stale-b")],
                 vec![worker_binary],
                 DELIVERY_TIMEOUT,
@@ -1817,6 +1831,7 @@ mod tests {
             "test",
             RunningMode::Steer,
             "test-delivery",
+            "test",
             vec![PathBuf::from("stale")],
             vec![fake_berdctl.into_os_string()],
             Duration::from_millis(500),
