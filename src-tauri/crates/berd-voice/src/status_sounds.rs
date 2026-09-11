@@ -1,5 +1,8 @@
 use std::{
-    sync::{mpsc::{self, RecvTimeoutError, Sender}, Arc, Mutex},
+    sync::{
+        mpsc::{self, RecvTimeoutError, Sender},
+        Arc, Mutex,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -153,7 +156,11 @@ impl StatusSoundRuntime {
         if self.next_tick.is_some_and(|deadline| now >= deadline) {
             self.next_tick = Some(now + STATUS_SOUND_INTERVAL);
             if let Some(cue) = self.machine.tick(conversation_active) {
-                self.player.play(cue, self.output_device.as_deref(), self.input_controls.as_ref())?;
+                self.player.play(
+                    cue,
+                    self.output_device.as_deref(),
+                    self.input_controls.as_ref(),
+                )?;
             }
         }
         Ok(self.player.is_active())
@@ -244,14 +251,18 @@ impl ManagedStatusSoundRuntime {
     }
 
     fn send(&self, command: StatusSoundCommand) -> Result<(), String> {
-        self.inner.commands
+        self.inner
+            .commands
             .send(command)
             .map_err(|_| "Status sound runtime is unavailable".to_string())
     }
 
     pub fn finish(&self) -> Result<(), String> {
         let _ = self.inner.commands.send(StatusSoundCommand::Shutdown);
-        let worker = self.inner.worker.lock()
+        let worker = self
+            .inner
+            .worker
+            .lock()
             .map_err(|_| "Status sound worker join state is unavailable")?
             .take();
         if let Some(worker) = worker {
@@ -263,7 +274,9 @@ impl ManagedStatusSoundRuntime {
                 }
                 thread::sleep(Duration::from_millis(10));
             }
-            worker.join().map_err(|_| "Status sound worker panicked".to_string())?;
+            worker
+                .join()
+                .map_err(|_| "Status sound worker panicked".to_string())?;
         }
         Ok(())
     }
@@ -297,7 +310,12 @@ impl StatusSoundPlayer {
         Self
     }
 
-    fn play(&mut self, _cue: StatusSoundCue, _output_device: Option<&str>, _input_controls: Option<&crate::input::VoiceInputControls>) -> Result<(), String> {
+    fn play(
+        &mut self,
+        _cue: StatusSoundCue,
+        _output_device: Option<&str>,
+        _input_controls: Option<&crate::input::VoiceInputControls>,
+    ) -> Result<(), String> {
         Err("status sound playback is only available on macOS".into())
     }
 
@@ -337,7 +355,12 @@ impl StatusSoundPlayer {
         }
     }
 
-    fn play(&mut self, cue: StatusSoundCue, output_device: Option<&str>, input_controls: Option<&crate::input::VoiceInputControls>) -> Result<(), String> {
+    fn play(
+        &mut self,
+        cue: StatusSoundCue,
+        output_device: Option<&str>,
+        input_controls: Option<&crate::input::VoiceInputControls>,
+    ) -> Result<(), String> {
         let asset = match cue.status {
             ConversationStatus::Working => &self.working,
             ConversationStatus::Waiting => &self.waiting,
@@ -354,9 +377,14 @@ impl StatusSoundPlayer {
             .iter()
             .map(|sample| sample * cue.volume)
             .collect::<Vec<_>>();
-        let input_activity = input_controls.map(|controls| {
-            controls.begin_assistant_activity(0.65, crate::input::InputDuringTtsPolicy::SuppressInput)
-        }).transpose()?;
+        let input_activity = input_controls
+            .map(|controls| {
+                controls.begin_assistant_activity(
+                    0.65,
+                    crate::input::InputDuringTtsPolicy::SuppressInput,
+                )
+            })
+            .transpose()?;
         player.enqueue(&samples)?;
         self.active.push(ActiveStatusSound {
             player,
@@ -592,10 +620,16 @@ mod tests {
     fn macos_cue_suppresses_input_until_audio_and_tail_drain() {
         let controls = crate::input::VoiceInputControls::default();
         let mut player = StatusSoundPlayer::new();
-        player.play(StatusSoundCue {
-            status: ConversationStatus::Working,
-            volume: DEFAULT_STATUS_SOUND_VOLUME,
-        }, None, Some(&controls)).unwrap();
+        player
+            .play(
+                StatusSoundCue {
+                    status: ConversationStatus::Working,
+                    volume: DEFAULT_STATUS_SOUND_VOLUME,
+                },
+                None,
+                Some(&controls),
+            )
+            .unwrap();
         let deadline = Instant::now() + Duration::from_secs(5);
         while player.is_active() {
             assert!(controls.is_muted());
