@@ -34,7 +34,7 @@ function runningTargetMessage(sessionId: string): string {
 
 export async function deliverSessionPrompt(
   args: DeliverSessionPromptArgs,
-  eventType?: "notification",
+  { eventType }: { eventType?: "notification" } = {},
 ): Promise<SendSessionResult> {
   const [
     { acceptFirstSend },

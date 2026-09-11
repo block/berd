@@ -25,6 +25,6 @@ Result:
     const { deliverSessionPrompt } = await import(
       "../runtime/deliverSessionPrompt"
     );
-    return deliverSessionPrompt(args, "notification");
+    return deliverSessionPrompt(args, { eventType: "notification" });
   },
 });
