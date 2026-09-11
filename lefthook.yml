@@ -1,6 +1,11 @@
 # Equivalent of the aaif-goose/goose Husky hooks, using lefthook.
 # See: https://github.com/evilmartians/lefthook
 
+commit-msg:
+  commands:
+    dco-signoff:
+      run: node ./scripts/validate-dco-signoff.mjs "{1}"
+
 pre-commit:
   commands:
     biome-format:
