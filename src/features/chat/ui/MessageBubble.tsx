@@ -1,3 +1,5 @@
+import { ToolDetailSection } from "./ToolDetailSection";
+import { ToolDetailsViewport } from "@/shared/ui/ai-elements/tool";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, FileText, FolderClosed, ImageIcon } from "lucide-react";
@@ -1058,7 +1060,7 @@ export const MessageBubble = memo(function MessageBubble({
             className={cn(
               "min-w-0 text-sm leading-relaxed",
               isBerdctlNotification
-                ? "w-full rounded-md bg-muted/50 px-3 py-2"
+                ? "w-full"
                 : isUser
                   ? "rounded-sm bg-message-user-bg px-4 py-2 leading-normal"
                   : "w-full",
@@ -1117,6 +1119,20 @@ export const MessageBubble = memo(function MessageBubble({
                 const block = section.items[0] as MessageContent;
                 if (isUser && block.type === "text") {
                   if (!block.text.trim()) return null;
+                  if (isBerdctlNotification) {
+                    return (
+                      <ToolDetailsViewport
+                        key={`${message.id}-${section.key}`}
+                        aria-label={t("tools.details")}
+                        className="max-h-48 overflow-y-auto overscroll-contain py-1"
+                      >
+                        <ToolDetailSection
+                          label={t("tools.result")}
+                          value={block.text}
+                        />
+                      </ToolDetailsViewport>
+                    );
+                  }
                   return couldOverflowUserMessagePreview(block.text) ? (
                     <UserMessageClamp
                       key={`${message.id}-${section.key}`}
