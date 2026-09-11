@@ -173,6 +173,21 @@ describe("acpNotificationHandler", () => {
     ).not.toHaveBeenCalled();
   });
 
+  it("does not mark replayed tool calls as live run activity", async () => {
+    markSessionReplayLoading();
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "old-tool",
+        title: "shell",
+      },
+    } as never);
+    expect(
+      useChatStore.getState().getSessionRuntime("acp-session").hasToolCallInRun,
+    ).toBe(false);
+  });
+
   it("keeps tool calls that arrive before the first text chunk on the pending assistant message", async () => {
     registerPreparedSession("acp-session", "goose", "/Users/aharvard");
     setActiveMessageId("acp-session", "assistant-1");
@@ -185,6 +200,10 @@ describe("acpNotificationHandler", () => {
         title: "mcp_app_bench__inspect_host_info",
       },
     } as never);
+
+    expect(
+      useChatStore.getState().getSessionRuntime("acp-session").hasToolCallInRun,
+    ).toBe(true);
 
     await handleSessionNotification({
       sessionId: "acp-session",

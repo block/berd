@@ -1,10 +1,17 @@
-//! Safe ownership wrapper for the shared macOS AVAudioUnitTimePitch PCM player.
+//! Safe wrappers for the shared macOS audio FFI boundary.
 
 use std::ffi::{c_char, c_void, CStr};
 
 use crate::PcmAudioOutput;
 
 unsafe extern "C" {
+    fn berd_audio_file_load_mono_pcm(
+        path: *const c_char,
+        sample_rate_out: *mut u32,
+        frame_count_out: *mut u32,
+        error_out: *mut *mut c_char,
+    ) -> *mut f32;
+    fn berd_audio_free_samples(samples: *mut f32);
     fn berd_pocket_audio_player_create(
         sample_rate: u32,
         rate: f32,
@@ -23,6 +30,30 @@ unsafe extern "C" {
     fn berd_pocket_audio_player_stop(player: *mut c_void);
     fn berd_pocket_audio_player_release(player: *mut c_void);
     fn berd_siri_tts_free_string(value: *mut c_char);
+}
+
+pub(crate) fn load_mono_audio_file(path: &str) -> Result<(u32, Vec<f32>), String> {
+    let path = std::ffi::CString::new(path).map_err(|_| "audio path contains NUL".to_string())?;
+    let mut sample_rate = 0;
+    let mut frame_count = 0;
+    let mut error = std::ptr::null_mut();
+    // SAFETY: The bridge copies the path and returns an owned allocation with
+    // the reported frame count, released below by its paired free function.
+    let raw = unsafe {
+        berd_audio_file_load_mono_pcm(
+            path.as_ptr(),
+            &mut sample_rate,
+            &mut frame_count,
+            &mut error,
+        )
+    };
+    if raw.is_null() {
+        return Err(take_error(error, "Could not decode audio file"));
+    }
+    // SAFETY: A successful bridge call returns exactly `frame_count` initialized samples.
+    let samples = unsafe { std::slice::from_raw_parts(raw, frame_count as usize) }.to_vec();
+    unsafe { berd_audio_free_samples(raw) };
+    Ok((sample_rate, samples))
 }
 
 pub struct PocketAudioPlayer {

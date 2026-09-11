@@ -641,6 +641,7 @@ function handleLive(sessionId: string, update: SessionUpdate): void {
 
     case "tool_call": {
       flushBufferedStreamingUpdatesForSession(sessionId);
+      store.markToolCallInRun(sessionId);
       const messageId = ensureLiveAssistantMessage(sessionId);
       const identity = getToolCallIdentity(update);
       const chainSummary = getToolChainSummary(update);

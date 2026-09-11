@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     input::{InputDuringTtsPolicy, InputDuringTtsSnapshot},
     openai_realtime_protocol::RealtimeExpertDeliveryEvent,
-    TtsConfigurationSnapshot, TtsSettings,
+    ConversationStatus, StatusSoundSettings, TtsConfigurationSnapshot, TtsSettings,
 };
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -12,6 +12,13 @@ pub enum SessionRequest {
     Hello {
         id: u64,
         input_during_tts: InputDuringTtsPolicy,
+        #[serde(default)]
+        status_sound_output_device: Option<String>,
+    },
+    SetConversationStatus {
+        id: u64,
+        status: ConversationStatus,
+        settings: StatusSoundSettings,
     },
     SetPaused {
         active: bool,
@@ -192,6 +199,11 @@ pub enum SessionMessage {
         protocol: u32,
         session: VoiceSessionSnapshot,
     },
+    ConversationStatusApplied {
+        id: u64,
+        status: ConversationStatus,
+        settings: StatusSoundSettings,
+    },
     TtsSettingsResult {
         id: u64,
         outcome: TtsSettingsOutcome,
@@ -341,7 +353,7 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&SessionMessage::Ready {
                 id: 4,
-                protocol: 4,
+                protocol: 5,
                 session: VoiceSessionSnapshot {
                     tts: TtsConfigurationSnapshot {
                         revision: 1,
@@ -358,7 +370,7 @@ mod tests {
                 },
             })
             .unwrap(),
-            r#"{"type":"ready","id":4,"protocol":4,"session":{"tts":{"revision":1,"backend":"openai","model":"gpt-4o-mini-tts","voice":"marin","rate":1.0},"input_during_tts":{"revision":1,"policy":"allow_barge_in"}}}"#
+            r#"{"type":"ready","id":4,"protocol":5,"session":{"tts":{"revision":1,"backend":"openai","model":"gpt-4o-mini-tts","voice":"marin","rate":1.0},"input_during_tts":{"revision":1,"policy":"allow_barge_in"}}}"#
         );
         assert_eq!(
             serde_json::from_str::<SessionRequest>(

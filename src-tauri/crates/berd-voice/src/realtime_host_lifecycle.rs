@@ -86,6 +86,10 @@ impl RealtimeHostLifecycle {
         self.activity.input_blocks_output()
     }
 
+    pub fn user_speaking(&self) -> bool {
+        self.activity.user_speaking
+    }
+
     pub fn is_busy(&self, work: RealtimeHostWork) -> bool {
         self.activity.is_busy(work)
     }

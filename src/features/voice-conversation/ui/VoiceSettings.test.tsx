@@ -64,7 +64,11 @@ const preferenceMocks = vi.hoisted(() => ({
   setOutputBackend: vi.fn(),
   setInterruptionMode: vi.fn(),
   setMode: vi.fn(),
+  setStatusSounds: vi.fn(),
   setRealtimePreference: vi.fn(),
+}));
+const statusSoundState = vi.hoisted(() => ({
+  mode: "working" as "off" | "working" | "working-and-waiting",
 }));
 const interruptionState = vi.hoisted(() => ({
   mode: "automatic" as "automatic" | "allowInterruptions" | "preventFeedback",
@@ -174,6 +178,13 @@ vi.mock("../lib/voiceConversationModePreference", () => ({
   useVoiceConversationModePreference: () => ({
     mode: modeState.mode,
     setMode: preferenceMocks.setMode,
+  }),
+}));
+vi.mock("../lib/statusSoundPreference", () => ({
+  getDefaultStatusSoundPreference: () => ({ mode: "working" }),
+  useStatusSoundPreference: () => ({
+    ...statusSoundState,
+    update: preferenceMocks.setStatusSounds,
   }),
 }));
 vi.mock("../lib/realtimeVoicePreference", async (importOriginal) => ({
@@ -325,6 +336,22 @@ describe("VoiceSettings", () => {
     preferenceMocks.setInterruptionMode.mockClear();
     preferenceMocks.setMode.mockClear();
     preferenceMocks.setRealtimePreference.mockClear();
+  });
+
+  it("offers off and both repeating status sound modes without a volume control", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<VoiceSettings />);
+
+    expect(screen.queryByText("Status sound volume")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("combobox", { name: "Status sounds" }));
+    expect(
+      screen.getByRole("option", { name: "While working" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "While working and waiting" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Off" })).toBeInTheDocument();
+    expect(screen.getAllByRole("option")).toHaveLength(3);
   });
 
   it("describes voice modes by who the user talks with", () => {
