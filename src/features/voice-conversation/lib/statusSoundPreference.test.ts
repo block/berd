@@ -32,6 +32,19 @@ describe("status sound preference", () => {
     expect(getStatusSoundPreference()).toEqual({ mode: "working" });
   });
 
+  it.each([
+    ["continuous", "working-and-waiting"],
+    ["continuous-while-working", "working"],
+    ["once", "working"],
+    ["off", "working"],
+  ] as const)("migrates the legacy %s mode to %s", (legacy, expected) => {
+    window.localStorage.setItem(
+      "goose:voice-status-sound-preference",
+      JSON.stringify({ mode: legacy }),
+    );
+    expect(getStatusSoundPreference()).toEqual({ mode: expected });
+  });
+
   it("notifies runtime subscribers with the applied preference", () => {
     const listener = vi.fn();
     const unsubscribe = subscribeToStatusSoundPreference(listener);

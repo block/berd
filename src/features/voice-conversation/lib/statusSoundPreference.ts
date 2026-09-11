@@ -11,25 +11,24 @@ const CHANGED_EVENT = "goose:voice-status-sound-preference-changed";
 const DEFAULT_PREFERENCE: StatusSoundPreference = {
   mode: "working",
 };
+const NORMALIZED_MODES: Record<string, StatusSoundMode> = {
+  continuous: "working-and-waiting",
+  "continuous-while-working": "working",
+  off: "working",
+  once: "working",
+  working: "working",
+  "working-and-waiting": "working-and-waiting",
+};
 const DEFAULT_SNAPSHOT = JSON.stringify(DEFAULT_PREFERENCE);
 let volatilePreference: StatusSoundPreference | undefined;
 
 function normalize(value: unknown): StatusSoundPreference {
   if (!value || typeof value !== "object") return DEFAULT_PREFERENCE;
   const candidate = value as { mode?: unknown };
-  const mode = (() => {
-    switch (candidate.mode) {
-      case "working-and-waiting":
-      case "continuous":
-        return "working-and-waiting";
-      case "working":
-      case "continuous-while-working":
-      case "once":
-      case "off":
-      default:
-        return DEFAULT_PREFERENCE.mode;
-    }
-  })();
+  const mode =
+    typeof candidate.mode === "string"
+      ? (NORMALIZED_MODES[candidate.mode] ?? DEFAULT_PREFERENCE.mode)
+      : DEFAULT_PREFERENCE.mode;
   return { mode };
 }
 
