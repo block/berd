@@ -584,7 +584,16 @@ async fn run_inner(
             }
             command = commands.recv(), if shutdown_deadline.is_none() => {
                 match command {
-                    Some(SpokespersonCommand::Provider(event)) => {
+                    Some(SpokespersonCommand::Provider(mut event)) => {
+                        if event.get("type").and_then(serde_json::Value::as_str) == Some("response.cancel") {
+                            if let Some(response_id) = string(&event, "response_id").map(str::to_owned) {
+                                let event_id = format!("berd-cancel-{next_control_event_id}");
+                                next_control_event_id = next_control_event_id.checked_add(1)
+                                    .ok_or("Spokesperson control event space is exhausted")?;
+                                event["event_id"] = serde_json::json!(event_id);
+                                cancellation_events.insert(event_id, response_id);
+                            }
+                        }
                         send_json(&mut socket, event).await?;
                     }
                     Some(SpokespersonCommand::InputPcm48Khz(samples)) => {
@@ -759,6 +768,16 @@ async fn run_inner(
                     }
                 };
                 let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else { continue };
+                // A response can finish before its cancellation reaches the provider.
+                // Consume the correlated no-op before the host's error reducer sees it.
+                if value.get("type").and_then(serde_json::Value::as_str) == Some("error")
+                    && value.pointer("/error/message").and_then(serde_json::Value::as_str)
+                        == Some("Cancellation failed: no active response found")
+                    && value.pointer("/error/event_id").and_then(serde_json::Value::as_str)
+                        .and_then(|event_id| cancellation_events.remove(event_id)).is_some()
+                {
+                    continue;
+                }
                 if forward_provider_events {
                     send_event(events, SpokespersonEvent::Provider(value.clone()))?;
                 }
@@ -1035,11 +1054,9 @@ async fn run_inner(
                         {
                             return Err(format!("Spokesperson output truncation failed: {message}"));
                         } else if let Some(response_id) = cancellation {
-                            if message != "Cancellation failed: no active response found" {
-                                return Err(format!(
-                                    "Spokesperson response {response_id} cancellation failed: {message}"
-                                ));
-                            }
+                            return Err(format!(
+                                "Spokesperson response {response_id} cancellation failed: {message}"
+                            ));
                         } else if value.pointer("/error/code").and_then(|value| value.as_str())
                             == Some("session_expired")
                             || message == "Your session hit the maximum duration of 60 minutes."
@@ -1378,6 +1395,143 @@ mod tests {
         .await
         .unwrap();
         server.await.unwrap();
+    }
+
+    async fn check_cancellation_error(
+        command: SpokespersonCommand,
+        message: &str,
+        correlated: bool,
+        tolerated: bool,
+    ) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("ws://{}/", listener.local_addr().unwrap());
+        let message = message.to_owned();
+        let server_message = message.clone();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_hdr_async(stream, require_test_authorization)
+                .await
+                .unwrap();
+            let update = receive_json(&mut socket).await;
+            acknowledge_initial_session(&mut socket, &update, "test-model").await;
+            let cancel = receive_json(&mut socket).await;
+            assert_eq!(cancel["type"], "response.cancel");
+            let event_id = if correlated {
+                cancel["event_id"].clone()
+            } else {
+                json!("unrelated-event")
+            };
+            send_json(
+                &mut socket,
+                json!({"type":"error", "error": {
+                    "event_id": event_id, "message": server_message
+                }}),
+            )
+            .await;
+            send_json(
+                &mut socket,
+                json!({"type":"input_audio_buffer.speech_started", "item_id":"next-turn"}),
+            )
+            .await;
+            let _ = socket.close(None).await;
+        });
+        let (commands, command_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (_audio, audio_rx) = tokio::sync::mpsc::channel(1);
+        let (events, event_rx) = std::sync::mpsc::channel();
+        let ready = tokio::task::spawn_blocking(move || {
+            let mut observed = Vec::new();
+            loop {
+                let event = event_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                let ready = matches!(event, SpokespersonEvent::Ready);
+                observed.push(event);
+                if ready {
+                    break;
+                }
+            }
+            commands.send(command).unwrap();
+            (commands, event_rx, observed)
+        });
+        let run = tokio::time::timeout(
+            Duration::from_secs(5),
+            super::run_inner(
+                test_config(endpoint, "test-voice", 1.0, Vec::new()),
+                command_rx,
+                audio_rx,
+                &events,
+                true,
+            ),
+        );
+        let (result, ready) = tokio::join!(run, ready);
+        let result = result.unwrap();
+        let (_commands, event_rx, mut observed) = ready.unwrap();
+        observed.extend(event_rx.try_iter());
+        if tolerated {
+            result.unwrap();
+            assert!(
+                !observed.iter().any(|event| matches!(event,
+                    SpokespersonEvent::Provider(value) if value["type"] == "error"
+                )),
+                "benign cancellation must not reach the host reducer: {observed:?}"
+            );
+            assert!(observed.iter().any(|event| matches!(event,
+                SpokespersonEvent::UserSpeaking { active: true, item_id } if item_id == "next-turn"
+            )), "call must keep processing the next turn: {observed:?}");
+        } else {
+            assert!(result.unwrap_err().contains(&message));
+        }
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn provider_cancellation_race_keeps_observed_call_alive() {
+        check_cancellation_error(
+            SpokespersonCommand::Provider(json!({
+                "type":"response.cancel", "response_id":"finished-response"
+            })),
+            "Cancellation failed: no active response found",
+            true,
+            true,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn playback_cancellation_race_does_not_reach_host_reducer() {
+        check_cancellation_error(
+            SpokespersonCommand::CancelResponses {
+                response_ids: vec!["finished-response".into()],
+            },
+            "Cancellation failed: no active response found",
+            true,
+            true,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn unrelated_cancellation_error_remains_fatal() {
+        check_cancellation_error(
+            SpokespersonCommand::CancelResponses {
+                response_ids: vec!["finished-response".into()],
+            },
+            "Cancellation failed: no active response found",
+            false,
+            false,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn unexpected_correlated_cancellation_error_remains_fatal() {
+        check_cancellation_error(
+            SpokespersonCommand::CancelResponses {
+                response_ids: vec!["finished-response".into()],
+            },
+            "Invalid response ID",
+            true,
+            false,
+        )
+        .await;
     }
 
     #[tokio::test]
