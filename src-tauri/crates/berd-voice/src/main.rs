@@ -1350,12 +1350,7 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
             core.recognition_pending(),
             active.is_some(),
         );
-        let status_sound_result = if conversation_active {
-            status_sound_runtime.stop();
-            Ok(false)
-        } else {
-            status_sound_runtime.poll(false)
-        };
+        let status_sound_result = status_sound_runtime.poll(conversation_active);
         if let Err(message) = status_sound_result {
             eprintln!("status sound playback disabled: {message}");
         }
@@ -3353,12 +3348,7 @@ fn run_expert_spokesperson_session(
             turn_gate.input_blocks_output(),
             active.is_some(),
         );
-        let status_sound_result = if conversation_active {
-            status_sound_runtime.stop();
-            Ok(false)
-        } else {
-            status_sound_runtime.poll(false)
-        };
+        let status_sound_result = status_sound_runtime.poll(conversation_active);
         if let Err(message) = status_sound_result {
             eprintln!("status sound playback disabled: {message}");
         }
