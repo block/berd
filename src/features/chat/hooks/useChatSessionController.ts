@@ -1,3 +1,4 @@
+import { projectEnvironment } from "@/features/projects/lib/projectEnvironment";
 import {
   useCallback,
   useContext,
@@ -1496,15 +1497,35 @@ export function useChatSessionController({
 
   const handleProjectChange = useCallback(
     (projectId: string | null) => {
+      const applyProjectEnvironment = () => {
+        if (!remoteHostSelectionEnabled) return;
+        const project = useProjectStore
+          .getState()
+          .projects.find((candidate) => candidate.id === projectId);
+        const environment = projectEnvironment(project);
+        setPendingRemoteHost(environment?.remoteHost ?? null);
+        setPendingRemoteDir(environment?.remoteWorkingDir ?? null);
+      };
       if (!sessionId) {
         setPendingProjectId(projectId);
+        applyProjectEnvironment();
         return;
       }
-      void moveSessionToProject(sessionId, projectId).catch((error) => {
-        console.error("Failed to move session to project:", error);
-      });
+      void moveSessionToProject(sessionId, projectId)
+        .then(() => {
+          // Superseded moves can resolve without changing the session's project.
+          const liveSession = useChatSessionStore
+            .getState()
+            .getSession(sessionId);
+          if (liveSession && liveSession.projectId === projectId) {
+            applyProjectEnvironment();
+          }
+        })
+        .catch((error) => {
+          console.error("Failed to move session to project:", error);
+        });
     },
-    [sessionId],
+    [sessionId, remoteHostSelectionEnabled],
   );
 
   const handleRemoteHostChange = useCallback(

@@ -1,5 +1,7 @@
 {
   "dialog": {
+    "environmentLabel": "Entorno",
+    "environmentDescription": "Los chats nuevos usan este host y carpeta. Los chats existentes conservan su entorno.",
     "addDirectory": "Añadir directorio",
     "addDirectoryDialogTitle": "Seleccionar directorio",
     "chooseColor": "Elegir un color del proyecto",

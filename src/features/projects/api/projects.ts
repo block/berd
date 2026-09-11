@@ -45,6 +45,25 @@ export interface ProjectWorkspace extends WorkspaceAttachment {
   startupMode: ProjectWorkspaceStartupMode;
 }
 
+export interface ProjectEnvironment {
+  remoteHost: string;
+  remoteWorkingDir: string;
+}
+
+export function parseProjectEnvironment(
+  value: unknown,
+): ProjectEnvironment | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Partial<ProjectEnvironment>;
+  const remoteHost =
+    typeof raw.remoteHost === "string" ? raw.remoteHost.trim() : "";
+  const remoteWorkingDir =
+    typeof raw.remoteWorkingDir === "string" ? raw.remoteWorkingDir.trim() : "";
+  return remoteHost && remoteWorkingDir
+    ? { remoteHost, remoteWorkingDir }
+    : null;
+}
+
 export interface ProjectInfo {
   id: string;
   /** Stable on-disk path of the project source. Pass back to update/delete. */
@@ -61,6 +80,7 @@ export interface ProjectInfo {
   archivedAt: string | null;
   artifact?: ProjectArtifactMetadata | null;
   chatGroups?: ProjectChatGroupsMetadata | null;
+  environment?: ProjectEnvironment | null;
 }
 
 export interface ProjectChatGroupMetadata {
@@ -248,6 +268,7 @@ function toProjectInfo(source: SourceEntry): ProjectInfo {
     archivedAt: (p.archivedAt as string) ?? null,
     artifact: parseProjectArtifactMetadata(p.artifact),
     chatGroups: parseProjectChatGroupsMetadata(p.chatGroups),
+    environment: parseProjectEnvironment(p.environment),
   };
 }
 
@@ -262,6 +283,7 @@ interface ProjectMetadataFields {
   archivedAt: string | null;
   artifact?: ProjectArtifactMetadata | null;
   chatGroups?: ProjectChatGroupsMetadata | null;
+  environment?: ProjectEnvironment | null;
 }
 
 function toProperties(info: ProjectMetadataFields): Record<string, unknown> {
@@ -282,6 +304,8 @@ function toProperties(info: ProjectMetadataFields): Record<string, unknown> {
   if (info.archivedAt) props.archivedAt = info.archivedAt;
   if (info.artifact) props.artifact = info.artifact;
   if (info.chatGroups?.groups.length) props.chatGroups = info.chatGroups;
+  const environment = parseProjectEnvironment(info.environment);
+  if (environment) props.environment = environment;
   return props;
 }
 
@@ -389,6 +413,7 @@ export async function createProject(
     workingDirs,
     useWorktrees,
   ),
+  environment?: ProjectEnvironment | null,
 ): Promise<ProjectInfo> {
   const client = await getClient();
   const existing = await listAllProjects();
@@ -424,6 +449,7 @@ export async function createProject(
       archivedAt: null,
       artifact,
       chatGroups: null,
+      environment,
     }),
   });
   return toProjectInfo(raw.source as SourceEntry);
@@ -496,6 +522,7 @@ export async function updateProject(
       archivedAt: merged.archivedAt,
       artifact,
       chatGroups: merged.chatGroups,
+      environment: merged.environment,
     }),
   });
   return toProjectInfo(raw.source as SourceEntry);
