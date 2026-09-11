@@ -6601,6 +6601,9 @@ fn validate_request(request: SessionRequest) -> Result<SessionRequest, String> {
         return Err("request id must be positive".into());
     }
     match &request {
+        SessionRequest::SetConversationStatus { settings, .. } => {
+            settings.validate().map_err(str::to_string)?;
+        }
         SessionRequest::PrepareSpeak { text, .. } if text.len() > MAX_SPEAK_TEXT_BYTES => {
             return Err("speak text exceeds 16 KiB".into())
         }
@@ -9589,6 +9592,35 @@ mod tests {
         };
         assert_eq!(message, "session PCM input queue is full");
         assert!(control_receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn status_sound_requests_validate_volume() {
+        for volume in [-1.0, 2.0, f32::NAN, f32::INFINITY] {
+            let request = SessionRequest::SetConversationStatus {
+                id: 1,
+                status: berd_voice::ConversationStatus::Working,
+                settings: berd_voice::StatusSoundSettings {
+                    volume,
+                    ..Default::default()
+                },
+            };
+            assert_eq!(
+                validate_request(request).unwrap_err(),
+                "status sound volume must be finite and between 0 and 1"
+            );
+        }
+        for volume in [0.0, 0.8, 1.0] {
+            assert!(validate_request(SessionRequest::SetConversationStatus {
+                id: 1,
+                status: berd_voice::ConversationStatus::Working,
+                settings: berd_voice::StatusSoundSettings {
+                    volume,
+                    ..Default::default()
+                },
+            })
+            .is_ok());
+        }
     }
 
     #[test]
