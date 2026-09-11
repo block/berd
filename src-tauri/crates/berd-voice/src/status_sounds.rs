@@ -564,7 +564,7 @@ mod tests {
     }
 
     #[test]
-    fn resuming_after_conversation_audio_plays_without_waiting_for_old_cadence() {
+    fn resuming_after_conversation_audio_schedules_cue_immediately() {
         let mut runtime = StatusSoundRuntime::default();
         runtime.update(
             ConversationStatus::Working,
