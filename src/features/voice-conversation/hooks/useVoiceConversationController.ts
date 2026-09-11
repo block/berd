@@ -437,6 +437,45 @@ export function publishChainedVoiceStatus(
 
 const chainedRunStatusObservers = new Map<string, () => void>();
 
+export function observeChainedVoiceStatus(): () => void {
+  let published: string | null = null;
+  const check = () => {
+    const { status } = useVoiceConversationStore.getState();
+    if (
+      status.lifecycle !== "running" ||
+      !status.sessionId ||
+      status.ownerWindowLabel !== getCurrentWindow().label
+    ) {
+      published = null;
+      return;
+    }
+    const runtime = useChatStore.getState().getSessionRuntime(status.sessionId);
+    const conversationStatus =
+      runtime.activeRunId !== null || isSessionRunning(runtime.chatState)
+        ? "working"
+        : "waiting";
+    const settings = getStatusSoundPreference();
+    const next = JSON.stringify([
+      status.sessionId,
+      status.revision,
+      conversationStatus,
+      settings,
+    ]);
+    if (next === published) return;
+    published = next;
+    publishChainedVoiceStatus(status.sessionId, conversationStatus, settings);
+  };
+  const unsubscribeChat = useChatStore.subscribe(check);
+  const unsubscribeVoice = useVoiceConversationStore.subscribe(check);
+  const unsubscribePreference = subscribeToStatusSoundPreference(check);
+  check();
+  return () => {
+    unsubscribeChat();
+    unsubscribeVoice();
+    unsubscribePreference();
+  };
+}
+
 export function resetVoiceUiWhenRunSettles(
   sessionId: string,
   deliveryRevision: number,
@@ -474,7 +513,6 @@ export function resetVoiceUiWhenRunSettles(
       voice.setUiState(
         nextStatus === "working" ? "agent-working" : "listening",
       );
-      publishChainedVoiceStatus(sessionId, nextStatus);
     }
   };
   const unsubscribeChat = useChatStore.subscribe(check);
@@ -486,16 +524,7 @@ export function resetVoiceUiWhenRunSettles(
 function ensureVoiceEventDeliveryInitialized() {
   if (deliveryInitialized) return;
   deliveryInitialized = true;
-  subscribeToStatusSoundPreference((preference) => {
-    const voice = useVoiceConversationStore.getState();
-    const activeSessionId = voice.status.sessionId;
-    if (voice.status.lifecycle !== "running" || !activeSessionId) return;
-    publishChainedVoiceStatus(
-      activeSessionId,
-      voice.activityFallbackState === "agent-working" ? "working" : "waiting",
-      preference,
-    );
-  });
+  observeChainedVoiceStatus();
   subscribeToVoiceConversationEvents(async (event) => {
     if (event.type === "cleanShutdown" || event.type === "controlsDismissed") {
       return;
@@ -581,7 +610,6 @@ function ensureVoiceEventDeliveryInitialized() {
           displayText: event.text,
         };
         store.setUiState("agent-working");
-        publishChainedVoiceStatus(event.sessionId, "working");
         const delivered =
           opportunity === "steer"
             ? await steerPromptInSession(
@@ -1038,7 +1066,6 @@ export function useVoiceConversationController({
         return "not-completed";
       }
       startAssistantSpeech(assistantSpeechHistory);
-      publishChainedVoiceStatus(sessionId, "waiting");
       return "completed";
     } catch (startError) {
       const backendStatus = useVoiceConversationStore.getState().status;

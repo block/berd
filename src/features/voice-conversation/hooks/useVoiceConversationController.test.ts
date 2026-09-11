@@ -67,6 +67,7 @@ import {
   createVoiceTranscriptDeliveryQueue,
   hasDeliveredVoiceTranscript,
   observeVoiceConversationControlVisibility,
+  observeChainedVoiceStatus,
   replaceActiveVoiceConversation,
   resetVoiceUiWhenRunSettles,
   resolveActiveVoiceButtonAction,
@@ -215,11 +216,16 @@ describe("voice transcript delivery coordination", () => {
       activityFallbackState: "agent-working",
     });
 
+    const stopObserving = observeChainedVoiceStatus();
     resetVoiceUiWhenRunSettles("session-1", 3);
     await Promise.resolve();
     expect(useVoiceConversationStore.getState().uiState).toBe("agent-working");
 
     useChatStore.getState().setActiveRunId("session-1", "run-1");
+    voiceApiMocks.updateStatusSounds.mockClear();
+    useVoiceConversationStore.getState().setUiState("agent-speaking");
+    useVoiceConversationStore.getState().setUiState("listening");
+    expect(voiceApiMocks.updateStatusSounds).not.toHaveBeenCalled();
     useChatStore.getState().setActiveRunId("session-1", null);
 
     expect(useVoiceConversationStore.getState().uiState).toBe("listening");
@@ -247,6 +253,7 @@ describe("voice transcript delivery coordination", () => {
       "waiting",
       { mode: "working" },
     );
+    stopObserving();
   });
 
   beforeEach(() => {
@@ -293,7 +300,11 @@ describe("voice transcript delivery coordination", () => {
       }),
     );
 
-    act(() => setStatusSoundPreference({ mode: "working-and-waiting" }));
+    act(() => {
+      useChatStore.getState().setActiveRunId("session-1", "run-1");
+      useVoiceConversationStore.getState().setUiState("listening");
+      setStatusSoundPreference({ mode: "working-and-waiting" });
+    });
 
     await waitFor(() =>
       expect(voiceApiMocks.updateStatusSounds).toHaveBeenCalledWith(
@@ -306,7 +317,10 @@ describe("voice transcript delivery coordination", () => {
   });
 
   it("delivers a queued transcript after its chat becomes temporarily ineligible", async () => {
-    const onSend = vi.fn().mockResolvedValue(true);
+    const onSend = vi.fn().mockImplementation(async () => {
+      useChatStore.getState().setActiveRunId("session-1", "run-1");
+      return true;
+    });
     useVoiceConversationStore.setState({
       status: {
         available: true,
