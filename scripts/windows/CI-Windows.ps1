@@ -58,6 +58,11 @@ Invoke-CargoCheck -ArgumentList @(
     "test", "--lib", "commands::system::tests::windows_chrome_launch_"
 ) -Label "cargo test Windows Chrome launch"
 
+# SEC-007 recovery needs native handle, ACL and process-lifetime coverage.
+foreach ($filter in @("services::acp::process_record_store", "services::acp::goose_serve::recovery_tests", "services::process::")) {
+    Invoke-CargoCheck -ArgumentList @("test", "--lib", $filter) -Label "cargo test $filter"
+}
+
 # Clippy compiles both configurations, so separate `cargo check` calls only
 # repeat the same compile coverage.
 Invoke-CargoCheck -ArgumentList @(
