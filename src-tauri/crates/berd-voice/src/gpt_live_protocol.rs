@@ -14,6 +14,7 @@ use crate::{estimated_spoken_through_utf8, DeliveryProgress, DeliverySegment};
 
 const CLIENT_DELEGATION_MESSAGE: &str =
     "GPT Live delegated at this point. Handle the unresolved user need using the preceding transcript and durable context.";
+const GPT_LIVE_INSTRUCTIONS: &str = "Backchannel policy: Use moderate backchannels. Acknowledge naturally without competing with the user's speech. When the user asks for backchannels while continuing to talk, use brief listening sounds such as mm-hmm without taking over the turn.\n\nDelegation policy:\nBackend tools:\n- Inspect and work with the user's local files, folders, code, applications, and durable session context.\n- Use tools and careful reasoning to answer questions or take actions the spoken conversation cannot handle directly.\nDelegate to the backend when:\n- The request needs a backend capability, local or current information, an action, or careful reasoning.\nDo not delegate to the backend when:\n- The request is ordinary conversation that you can answer directly.\nDelegate before giving an answer that depends on backend work. Do not claim you cannot access something when the backend can handle it.";
 
 pub const OPENAI_REALTIME_VOICE_IDS: &[&str] = &[
     "alloy", "ash", "ballad", "cedar", "coral", "echo", "marin", "sage", "shimmer", "verse",
@@ -44,6 +45,7 @@ pub fn gpt_live_session_update(options: &RealtimeGptLiveSessionOptions) -> Value
                 },
             },
             "delegation": { "type": "client" },
+            "instructions": GPT_LIVE_INSTRUCTIONS,
         },
     })
 }
@@ -1285,7 +1287,7 @@ mod tests {
     };
 
     #[test]
-    fn starts_gpt_live_with_client_delegation_and_no_custom_instructions() {
+    fn starts_gpt_live_with_client_delegation_and_minimal_policy() {
         let event = gpt_live_session_update(&RealtimeGptLiveSessionOptions {
             voice: Some("cedar".into()),
         });
@@ -1294,7 +1296,10 @@ mod tests {
         assert_eq!(event["session"]["model"], "gpt-live-1");
         assert_eq!(event["session"]["delegation"]["type"], "client");
         assert_eq!(event["session"]["audio"]["output"]["voice"], "cedar");
-        assert!(event["session"].get("instructions").is_none());
+        let instructions = event["session"]["instructions"].as_str().unwrap();
+        assert!(instructions.contains("Backchannel policy:"));
+        assert!(instructions.contains("Delegate to the backend when:"));
+        assert!(instructions.contains("local files, folders, code"));
     }
 
     #[test]

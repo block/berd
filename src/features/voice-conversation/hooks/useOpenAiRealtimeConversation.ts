@@ -991,15 +991,17 @@ class OpenAiRealtimeConversationRuntime {
     this.setSnapshot({ ...this.snapshot, state: "stopping" });
     this.nativeMicrophone?.stop();
     this.nativeMicrophone = null;
+    this.releaseRuntimeListener?.();
+    this.releaseRuntimeListener = null;
     const realtimeRuntimeSessionId = this.realtimeRuntimeSessionId;
     this.realtimeRuntimeSessionId = null;
+    await this.realtimeProtocolQueue.catch(() => undefined);
+    await this.realtimeRuntimeSendQueue.catch(() => undefined);
     if (realtimeRuntimeSessionId) {
       await stopOpenAiRealtimeGptLiveRuntime(realtimeRuntimeSessionId).catch(
         () => undefined,
       );
     }
-    await this.realtimeProtocolQueue.catch(() => undefined);
-    await this.realtimeRuntimeSendQueue.catch(() => undefined);
     await releaseOpenAiRealtimeGptLiveRuntime(
       realtimeRuntimeSessionId ?? sessionId,
     ).catch(() => undefined);

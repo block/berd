@@ -419,9 +419,6 @@ async fn run_live_inner(
                         ready = true;
                         send_event(events, GptLiveEvent::Ready)?;
                     }
-                    "session.input_transcript.delta" => {
-                        finish_live_response(events, &mut current_response)?;
-                    }
                     "session.output_audio.delta" => {
                         let (response_id, item_id) = ensure_live_response(
                             events,
@@ -442,7 +439,7 @@ async fn run_live_inner(
                             })?;
                         }
                     }
-                    "output_audio_buffer.stopped" | "session.delegation.created" => {
+                    kind if finishes_live_response(kind) => {
                         finish_live_response(events, &mut current_response)?;
                     }
                     "session.closed" => return Ok(()),
@@ -451,6 +448,13 @@ async fn run_live_inner(
             }
         }
     }
+}
+
+fn finishes_live_response(event_type: &str) -> bool {
+    matches!(
+        event_type,
+        "output_audio_buffer.stopped" | "session.delegation.created"
+    )
 }
 
 fn finish_live_response(
@@ -566,4 +570,16 @@ fn send_event(
     events
         .send(event)
         .map_err(|_| "GptLive event consumer closed".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::finishes_live_response;
+
+    #[test]
+    fn overlapping_input_transcripts_do_not_split_live_responses() {
+        assert!(!finishes_live_response("session.input_transcript.delta"));
+        assert!(finishes_live_response("output_audio_buffer.stopped"));
+        assert!(finishes_live_response("session.delegation.created"));
+    }
 }
