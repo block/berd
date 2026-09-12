@@ -588,9 +588,11 @@ mod platform {
         FILE_ID_BOTH_DIR_INFORMATION, FILE_NON_DIRECTORY_FILE, FILE_OPEN, FILE_OPEN_REPARSE_POINT,
         FILE_SYNCHRONOUS_IO_NONALERT,
     };
+    #[cfg(test)]
+    use windows_sys::Win32::Foundation::STATUS_OBJECT_NAME_NOT_FOUND;
     use windows_sys::Win32::Foundation::{
         CloseHandle, LocalFree, ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS, HANDLE,
-        STATUS_NO_MORE_FILES, STATUS_OBJECT_NAME_NOT_FOUND, UNICODE_STRING,
+        STATUS_NO_MORE_FILES, UNICODE_STRING,
     };
     use windows_sys::Win32::Security::Authorization::{
         GetExplicitEntriesFromAclW, GetSecurityInfo, SetEntriesInAclW, SetSecurityInfo,
@@ -600,9 +602,10 @@ mod platform {
     #[cfg(test)]
     use windows_sys::Win32::Security::{CreateWellKnownSid, WinWorldSid, SECURITY_MAX_SID_SIZE};
     use windows_sys::Win32::Security::{
-        EqualSid, GetSecurityDescriptorControl, GetTokenInformation, TokenUser, ACL,
+        EqualSid, GetSecurityDescriptorControl, GetTokenInformation, TokenOwner, TokenUser, ACL,
         DACL_SECURITY_INFORMATION, NO_INHERITANCE, OWNER_SECURITY_INFORMATION,
-        PROTECTED_DACL_SECURITY_INFORMATION, PSID, SE_DACL_PROTECTED, TOKEN_QUERY, TOKEN_USER,
+        PROTECTED_DACL_SECURITY_INFORMATION, PSID, SE_DACL_PROTECTED, TOKEN_INFORMATION_CLASS,
+        TOKEN_OWNER, TOKEN_QUERY, TOKEN_USER,
     };
     use windows_sys::Win32::Storage::FileSystem::{
         FileDispositionInfo, FileRenameInfo, GetFileInformationByHandle,
@@ -611,7 +614,7 @@ mod platform {
         FILE_ATTRIBUTE_REPARSE_POINT, FILE_DISPOSITION_INFO, FILE_FLAG_BACKUP_SEMANTICS,
         FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES, FILE_READ_DATA, FILE_RENAME_INFO,
         FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_WRITE_ATTRIBUTES,
-        FILE_WRITE_DATA, READ_CONTROL, SYNCHRONIZE, WRITE_DAC,
+        FILE_WRITE_DATA, READ_CONTROL, SYNCHRONIZE, WRITE_DAC, WRITE_OWNER,
     };
     use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
     use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
@@ -664,6 +667,10 @@ mod platform {
     }
 
     fn current_user_sid() -> Result<(Vec<u8>, PSID), String> {
+        token_sid(TokenUser)
+    }
+
+    fn token_sid(kind: TOKEN_INFORMATION_CLASS) -> Result<(Vec<u8>, PSID), String> {
         let mut token = null_mut();
         // SAFETY: token points to writable handle storage.
         if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
@@ -675,7 +682,7 @@ mod platform {
         let token = Handle(token);
         let mut length = 0;
         // SAFETY: probing required size with a null buffer is documented.
-        unsafe { GetTokenInformation(token.0, TokenUser, null_mut(), 0, &mut length) };
+        unsafe { GetTokenInformation(token.0, kind, null_mut(), 0, &mut length) };
         if std::io::Error::last_os_error().raw_os_error() != Some(ERROR_INSUFFICIENT_BUFFER as i32)
         {
             return Err(format!(
@@ -688,7 +695,7 @@ mod platform {
         if unsafe {
             GetTokenInformation(
                 token.0,
-                TokenUser,
+                kind,
                 buffer.as_mut_ptr().cast(),
                 length,
                 &mut length,
@@ -700,13 +707,48 @@ mod platform {
                 std::io::Error::last_os_error()
             ));
         }
-        // SAFETY: successful TokenUser query initialized TOKEN_USER in buffer.
-        let sid = unsafe { (*(buffer.as_ptr().cast::<TOKEN_USER>())).User.Sid };
+        // SAFETY: each call uses the structure matching the queried token class.
+        let sid = unsafe {
+            if kind == TokenUser {
+                (*(buffer.as_ptr().cast::<TOKEN_USER>())).User.Sid
+            } else {
+                (*(buffer.as_ptr().cast::<TOKEN_OWNER>())).Owner
+            }
+        };
         Ok((buffer, sid))
     }
 
     fn secure_for_current_user(file: &File) -> Result<(), String> {
         let (_sid_buffer, sid) = current_user_sid()?;
+        let (_owner_buffer, default_owner) = token_sid(TokenOwner)?;
+        let mut owner = null_mut();
+        let mut descriptor = null_mut();
+        // Only repair our own objects, including those created with the token's
+        // default owner (which may be Administrators for an elevated process).
+        let status = unsafe {
+            GetSecurityInfo(
+                file.as_raw_handle() as HANDLE,
+                SE_FILE_OBJECT,
+                OWNER_SECURITY_INFORMATION,
+                &mut owner,
+                null_mut(),
+                null_mut(),
+                null_mut(),
+                &mut descriptor,
+            )
+        };
+        if status != ERROR_SUCCESS {
+            return Err(format!(
+                "failed to inspect owner before initialization: {status}"
+            ));
+        }
+        let owned_by_token = !owner.is_null()
+            && unsafe { EqualSid(owner, sid) != 0 || EqualSid(owner, default_owner) != 0 };
+        // SAFETY: GetSecurityInfo allocated descriptor with LocalAlloc.
+        unsafe { LocalFree(descriptor) };
+        if !owned_by_token {
+            return Err("process record object belongs to another owner".to_string());
+        }
         let mut acl: *mut ACL = null_mut();
         let access = EXPLICIT_ACCESS_W {
             grfAccessPermissions: FILE_ALL_ACCESS,
@@ -730,8 +772,10 @@ mod platform {
             SetSecurityInfo(
                 file.as_raw_handle() as HANDLE,
                 SE_FILE_OBJECT,
-                DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-                null_mut(),
+                OWNER_SECURITY_INFORMATION
+                    | DACL_SECURITY_INFORMATION
+                    | PROTECTED_DACL_SECURITY_INFORMATION,
+                sid,
                 null_mut(),
                 acl,
                 null(),
@@ -740,7 +784,9 @@ mod platform {
         // SAFETY: SetEntriesInAclW allocated acl with LocalAlloc.
         unsafe { LocalFree(acl.cast()) };
         if status != ERROR_SUCCESS {
-            return Err(format!("failed to set owner-only ACL by handle: {status}"));
+            return Err(format!(
+                "failed to set current owner and owner-only ACL by handle: {status}"
+            ));
         }
         validate_owner_and_acl(file)
     }
@@ -882,7 +928,12 @@ mod platform {
         OpenOptions::new()
             .read(true)
             .access_mode(
-                FILE_READ_DATA | FILE_READ_ATTRIBUTES | READ_CONTROL | WRITE_DAC | SYNCHRONIZE,
+                FILE_READ_DATA
+                    | FILE_READ_ATTRIBUTES
+                    | READ_CONTROL
+                    | WRITE_DAC
+                    | WRITE_OWNER
+                    | SYNCHRONIZE,
             )
             .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
             .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS)
@@ -1001,6 +1052,7 @@ mod platform {
                 | FILE_WRITE_ATTRIBUTES
                 | READ_CONTROL
                 | WRITE_DAC
+                | WRITE_OWNER
                 | SYNCHRONIZE
                 | DELETE,
             FILE_CREATE,
