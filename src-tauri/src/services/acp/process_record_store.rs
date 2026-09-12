@@ -584,9 +584,9 @@ mod platform {
     use std::ptr::{null, null_mut};
     use windows_sys::Wdk::Foundation::OBJECT_ATTRIBUTES;
     use windows_sys::Wdk::Storage::FileSystem::{
-        FileIdBothDirectoryInformation, NtCreateFile, NtQueryDirectoryFile, FILE_CREATE,
-        FILE_ID_BOTH_DIR_INFORMATION, FILE_NON_DIRECTORY_FILE, FILE_OPEN, FILE_OPEN_REPARSE_POINT,
-        FILE_SYNCHRONOUS_IO_NONALERT,
+        FileIdBothDirectoryInformation, FileRenameInformation, NtCreateFile, NtQueryDirectoryFile,
+        NtSetInformationFile, FILE_CREATE, FILE_ID_BOTH_DIR_INFORMATION, FILE_NON_DIRECTORY_FILE,
+        FILE_OPEN, FILE_OPEN_REPARSE_POINT, FILE_RENAME_INFORMATION, FILE_SYNCHRONOUS_IO_NONALERT,
     };
     #[cfg(test)]
     use windows_sys::Win32::Foundation::STATUS_OBJECT_NAME_NOT_FOUND;
@@ -608,13 +608,12 @@ mod platform {
         TOKEN_OWNER, TOKEN_QUERY, TOKEN_USER,
     };
     use windows_sys::Win32::Storage::FileSystem::{
-        FileDispositionInfo, FileRenameInfo, GetFileInformationByHandle,
-        SetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, DELETE, FILE_ALL_ACCESS,
-        FILE_APPEND_DATA, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL,
-        FILE_ATTRIBUTE_REPARSE_POINT, FILE_DISPOSITION_INFO, FILE_FLAG_BACKUP_SEMANTICS,
-        FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES, FILE_READ_DATA, FILE_RENAME_INFO,
-        FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_WRITE_ATTRIBUTES,
-        FILE_WRITE_DATA, READ_CONTROL, SYNCHRONIZE, WRITE_DAC, WRITE_OWNER,
+        FileDispositionInfo, GetFileInformationByHandle, SetFileInformationByHandle,
+        BY_HANDLE_FILE_INFORMATION, DELETE, FILE_ALL_ACCESS, FILE_APPEND_DATA,
+        FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT,
+        FILE_DISPOSITION_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+        FILE_READ_ATTRIBUTES, FILE_READ_DATA, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA, READ_CONTROL, SYNCHRONIZE, WRITE_DAC, WRITE_OWNER,
     };
     use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
     use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
@@ -1102,12 +1101,12 @@ mod platform {
             .len()
             .checked_mul(size_of::<u16>())
             .ok_or_else(|| "destination name is too long".to_string())?;
-        let total = offset_of!(FILE_RENAME_INFO, FileName)
+        let total = size_of::<FILE_RENAME_INFORMATION>()
             .checked_add(name_bytes)
             .ok_or_else(|| "rename buffer is too large".to_string())?;
         let words = total.div_ceil(size_of::<usize>());
         let mut storage = vec![0usize; words];
-        let info = storage.as_mut_ptr().cast::<FILE_RENAME_INFO>();
+        let info = storage.as_mut_ptr().cast::<FILE_RENAME_INFORMATION>();
         // SAFETY: storage is aligned and sized for header plus complete UTF-16 name.
         unsafe {
             (*info).Anonymous.ReplaceIfExists = 0;
@@ -1120,19 +1119,23 @@ mod platform {
                 name.len(),
             );
         }
-        // SAFETY: source is the exact temp handle; rename target is relative to retained root; replacement is disabled.
-        if unsafe {
-            SetFileInformationByHandle(
+        let mut io_status: IO_STATUS_BLOCK = unsafe { zeroed() };
+        // Use the native API's explicit root-relative rename contract. The Win32
+        // wrapper rejects this relative target on supported Windows runners.
+        // SAFETY: both handles and the aligned buffer live for this synchronous
+        // call; the source has DELETE access and replacement is disabled.
+        let status = unsafe {
+            NtSetInformationFile(
                 source.as_raw_handle() as HANDLE,
-                FileRenameInfo,
+                &mut io_status,
                 storage.as_ptr().cast(),
                 u32::try_from(total).map_err(|_| "rename buffer is too large".to_string())?,
+                FileRenameInformation,
             )
-        } == 0
-        {
+        };
+        if !nt_success(status) {
             return Err(format!(
-                "failed to publish process record by handle: {}",
-                std::io::Error::last_os_error()
+                "failed to publish process record by handle: NTSTATUS {status:#x}"
             ));
         }
         Ok(())
