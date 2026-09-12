@@ -1877,6 +1877,104 @@ mod recovery_tests {
         assert_eq!(std::fs::read(&displaced).unwrap(), b"not-json");
     }
 
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn stale_record_recovery_escalates_and_only_kills_the_recorded_backend() {
+        use std::os::unix::process::ExitStatusExt;
+        use std::process::Stdio;
+        use tokio::io::{AsyncBufReadExt, BufReader};
+
+        let temp = tempfile::tempdir().expect("temp dir");
+        let store = ProcessRecordStore::open(temp.path().join("records")).expect("open store");
+        let mut owner = Command::new("sleep")
+            .arg("30")
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn owner");
+        let owner_identity =
+            crate::services::process::capture_process_identity(owner.id().expect("owner pid"))
+                .expect("capture owner identity");
+        let mut backend = Command::new("sh")
+            // Block in a shell builtin, with no descendant to leak. Readiness
+            // confirms the handler is installed before recovery can signal it.
+            // Report SIGTERM receipt but stay alive until forced termination.
+            .args([
+                "-c",
+                "trap 'printf \"term\\n\"' TERM; printf 'ready\\n'; while :; do read -r stop || :; done",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn backend");
+        let mut output = BufReader::new(backend.stdout.take().expect("backend stdout"));
+        let mut ready = String::new();
+        tokio::time::timeout(Duration::from_secs(5), output.read_line(&mut ready))
+            .await
+            .expect("backend readiness deadline")
+            .expect("backend readiness");
+        assert_eq!(ready, "ready\n");
+        let serve_identity =
+            crate::services::process::capture_process_identity(backend.id().expect("backend pid"))
+                .expect("capture backend identity");
+        let mut unrelated = Command::new("sleep")
+            .arg("30")
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn unrelated child");
+        let record = ServeProcessRecord {
+            owner_pid: owner_identity.pid,
+            serve_pid: serve_identity.pid,
+            owner_identity: Some(owner_identity),
+            serve_identity: Some(serve_identity),
+        };
+        let path = store.new_record_path(record.owner_pid, 1);
+        store
+            .publish(
+                &path,
+                &serde_json::to_vec(&record).expect("serialize record"),
+            )
+            .expect("publish record");
+        owner.kill().await.expect("stop and reap owner");
+
+        // Exercise enumeration, record parsing, orphan detection, identity
+        // verification, and real SIGTERM/SIGKILL without injected operations.
+        let recovery =
+            tokio::time::timeout(Duration::from_secs(5), kill_stale_serve_process(&store)).await;
+        let mut term = String::new();
+        let term_received =
+            tokio::time::timeout(Duration::from_secs(2), output.read_line(&mut term)).await;
+        let exited = tokio::time::timeout(Duration::from_secs(2), backend.wait()).await;
+        let unrelated_alive = unrelated
+            .try_wait()
+            .expect("probe unrelated child")
+            .is_none();
+
+        // Cleanup cannot turn a failed recovery into a passing exit assertion.
+        if exited.is_err() {
+            backend.kill().await.expect("cleanup backend");
+        }
+        unrelated.kill().await.expect("cleanup unrelated child");
+        recovery.expect("recovery deadline");
+        term_received
+            .expect("SIGTERM receipt deadline")
+            .expect("read SIGTERM receipt");
+        assert_eq!(term, "term\n", "recovery must attempt SIGTERM first");
+        let status = exited
+            .expect("backend exit deadline")
+            .expect("reap backend");
+        assert_eq!(
+            status.signal(),
+            Some(libc::SIGKILL),
+            "recovery must escalate"
+        );
+        assert!(
+            unrelated_alive,
+            "recovery must leave the unrelated child alive"
+        );
+        assert!(path.exists(), "Unix retains the recovery evidence");
+    }
+
     #[cfg(all(unix, not(target_os = "macos")))]
     #[tokio::test]
     async fn stale_owner_pid_reuse_does_not_kill_an_unrelated_process() {
