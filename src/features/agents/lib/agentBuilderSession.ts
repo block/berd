@@ -62,6 +62,11 @@ interface CloseSessionDeps {
 }
 
 const localEditSessionIds = new Set<string>();
+// Sessions whose rail reported an edit at any point. Unlike the unsaved flag
+// this never clears on save: a user who only picked an avatar or model has
+// started work even though the saved file still looks like the seeded
+// placeholder, and leaving must not silently throw that away.
+const touchedSessionIds = new Set<string>();
 const localSaveHandlersBySessionId = new Map<
   string,
   () => MaybePromise<boolean>
@@ -74,10 +79,17 @@ export function setAgentBuilderSessionLocalEdits(
 ): void {
   if (hasLocalEdits) {
     localEditSessionIds.add(sessionId);
+    touchedSessionIds.add(sessionId);
     return;
   }
 
   localEditSessionIds.delete(sessionId);
+}
+
+export function resetAgentBuilderSessionStateForTests(): void {
+  localEditSessionIds.clear();
+  touchedSessionIds.clear();
+  localSaveHandlersBySessionId.clear();
 }
 
 export function setAgentBuilderSessionSaveHandler(
@@ -412,17 +424,23 @@ export async function discardDraftAgentSession(
   }
 }
 
-export async function deleteDraftAgentSession(
-  sessionId: string,
-  deps: CloseSessionDeps = {},
+/**
+ * Deletes a draft from the gallery. The card is the file, so the delete is
+ * keyed by the card's path — never by whatever file the bound session would
+ * resolve to, which can differ when two files carry the same session tag.
+ * The bound session, if any, is closed afterwards.
+ */
+export async function deleteDraftAgentSource(
+  path: string,
+  deps: CloseSessionDeps & { sessionId?: string | null } = {},
 ): Promise<void> {
-  const source = await findCurrentBuilderSource(sessionId);
-  if (source?.properties?.draft === true) {
-    await discardAgentBuilderSource(source.path);
-  }
+  await discardAgentBuilderSource(path);
 
-  clearBuilderSessionState(sessionId);
-  await deps.closeSession?.(sessionId);
+  const sessionId = deps.sessionId;
+  if (sessionId) {
+    clearBuilderSessionState(sessionId);
+    await deps.closeSession?.(sessionId);
+  }
 }
 
 export async function promoteDraft(
@@ -458,10 +476,14 @@ export async function isEmptyDraftAgentSession(
   return isEmptyPlaceholderDraft(freshSource);
 }
 
-export async function hasAgentBuilderSessionUserContent(
-  sessionId: string,
-): Promise<boolean> {
-  if (localEditSessionIds.has(sessionId)) {
+/**
+ * The in-memory half of the user-content check: any rail edit this session
+ * (saved or not), composer text or attachments, queued messages, sent
+ * messages. Synchronous on purpose — callers that are about to delete
+ * something re-run this with no await in between.
+ */
+export function hasLocalAgentBuilderUserContent(sessionId: string): boolean {
+  if (localEditSessionIds.has(sessionId) || touchedSessionIds.has(sessionId)) {
     return true;
   }
 
@@ -473,25 +495,37 @@ export async function hasAgentBuilderSessionUserContent(
   ) {
     return true;
   }
-
-  const queuedMessages = chatState.queuedMessageBySession[sessionId] ?? [];
-  if (queuedMessages.some((record) => record.payload.text.trim())) {
+  if ((chatState.draftAttachmentsBySession[sessionId]?.length ?? 0) > 0) {
     return true;
   }
 
-  const hasUserMessage = (chatState.messagesBySession[sessionId] ?? []).some(
-    (message) => {
-      if (message.role !== "user" || message.metadata?.userVisible === false) {
-        return false;
-      }
+  const queuedMessages = chatState.queuedMessageBySession[sessionId] ?? [];
+  if (
+    queuedMessages.some(
+      (record) =>
+        record.payload.text.trim() ||
+        (record.payload.attachments?.length ?? 0) > 0,
+    )
+  ) {
+    return true;
+  }
 
-      return (
-        getTextContent(message).trim().length > 0 ||
-        (message.metadata?.attachments?.length ?? 0) > 0
-      );
-    },
-  );
-  if (hasUserMessage) {
+  return (chatState.messagesBySession[sessionId] ?? []).some((message) => {
+    if (message.role !== "user" || message.metadata?.userVisible === false) {
+      return false;
+    }
+
+    return (
+      getTextContent(message).trim().length > 0 ||
+      (message.metadata?.attachments?.length ?? 0) > 0
+    );
+  });
+}
+
+export async function hasAgentBuilderSessionUserContent(
+  sessionId: string,
+): Promise<boolean> {
+  if (hasLocalAgentBuilderUserContent(sessionId)) {
     return true;
   }
 
@@ -504,7 +538,9 @@ export async function hasAgentBuilderSessionUserContent(
   try {
     freshSource = await readFreshAgentSource(source.path, source);
   } catch {
-    return !isEmptyPlaceholderDraft(source);
+    // Unreadable is not the same as empty. The listed copy may be stale, so
+    // the only safe answer is "assume there is content".
+    return true;
   }
 
   return !isEmptyPlaceholderDraft(freshSource);
@@ -515,6 +551,75 @@ export async function isDraftAgentBuilderSession(
 ): Promise<boolean> {
   const source = await findCurrentBuilderSource(sessionId);
   return source?.properties?.draft === true;
+}
+
+/**
+ * True when leaving this builder session with no user content should simply
+ * discard it: it is a draft, or the agent file it pointed at no longer exists
+ * (moved or removed outside the app). Editing an existing, present agent is
+ * never discardable.
+ */
+export type UntouchedDraftDiscardOutcome =
+  | "discarded"
+  | "kept"
+  | "nothing-to-discard";
+
+/**
+ * Discards the session's draft only if it is still untouched at the moment of
+ * deletion. The last thing before the file goes is a synchronous look at the
+ * in-memory user state, so anything typed while any lookup was in flight
+ * keeps the draft ("kept") instead of being silently thrown away. Editing an existing
+ * agent is never discardable; with no content it reports "nothing-to-discard"
+ * so callers can navigate freely.
+ *
+ * `onBeforeDiscard` runs once the decision is final and before the chat
+ * closes — callers navigate there, because closing the active chat redirects
+ * home and would stomp on where the user was going.
+ */
+export async function discardUntouchedDraftAgentSession(
+  sessionId: string,
+  deps: CloseSessionDeps & { onBeforeDiscard?: () => void } = {},
+): Promise<UntouchedDraftDiscardOutcome> {
+  const source = await findCurrentBuilderSource(sessionId);
+  const isDraft = source === undefined || source.properties?.draft === true;
+
+  if (await hasAgentBuilderSessionUserContent(sessionId)) {
+    return "kept";
+  }
+  // The check above awaited a disk read after its in-memory look. Anything
+  // typed during that read is invisible to it, so look once more — with no
+  // await between here and the delete.
+  if (hasLocalAgentBuilderUserContent(sessionId)) {
+    return "kept";
+  }
+  if (!isDraft) {
+    return "nothing-to-discard";
+  }
+
+  deps.onBeforeDiscard?.();
+  try {
+    if (source) {
+      await discardAgentBuilderSource(source.path);
+    }
+  } catch (error) {
+    // The chat still closes: it is empty. The file is picked up by the next
+    // reconcile pass, which deletes placeholders whose session is gone.
+    console.error(
+      "Failed to delete agent builder draft during discard:",
+      error,
+    );
+  } finally {
+    // A brand-new builder starts under a provisional client ID and is renamed
+    // to the backend's ID while it is being created. Close whichever ID is
+    // live now, or the archive never reaches the backend session.
+    const liveSessionId = resolveAgentBuilderSessionId(sessionId);
+    clearBuilderSessionState(sessionId);
+    if (liveSessionId !== sessionId) {
+      clearBuilderSessionState(liveSessionId);
+    }
+    await deps.closeSession?.(liveSessionId);
+  }
+  return "discarded";
 }
 
 export async function reconcileAgentBuilderSessions(): Promise<void> {

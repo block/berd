@@ -73,11 +73,14 @@ export function isPlaceholderDraftForSession(
   builderSessionId: string,
 ): boolean {
   const properties = source.properties ?? {};
+  // Everything "New agent" seeds on its own — identity, the stored
+  // provider/model preference, and a starter avatar — is not user content.
   const extraPropertyKeys = Object.keys(properties).filter(
     (key) =>
       key !== "draft" &&
       key !== "builderSessionId" &&
       key !== "provider" &&
+      key !== "modelProviderId" &&
       key !== "model" &&
       key !== "avatar",
   );

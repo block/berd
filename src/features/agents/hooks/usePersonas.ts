@@ -16,19 +16,18 @@ const REFRESH_INTERVAL_MS = 60_000;
 export function usePersonas() {
   const personas = useAgentStore(selectPersonas);
   const personasLoading = useAgentStore(selectPersonasLoading);
-  const setPersonas = useAgentStore((s) => s.setPersonas);
+  const refreshGallery = useAgentStore((s) => s.refreshGallery);
+  const mutateGallery = useAgentStore((s) => s.mutateGallery);
   const addPersona = useAgentStore((s) => s.addPersona);
   const updatePersonaInStore = useAgentStore((s) => s.updatePersona);
   const removePersona = useAgentStore((s) => s.removePersona);
   const setPersonasLoading = useAgentStore((s) => s.setPersonasLoading);
   const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const listRequestInFlightRef = useRef(false);
-  const mutationVersionRef = useRef(0);
-  const mutationsInFlightRef = useRef(0);
 
   const replacePersonasFromApi = useCallback(
     async (
-      fetchPersonas: () => Promise<Persona[]>,
+      fetchGallery: () => Promise<api.AgentGalleryListing>,
       options: { showLoading: boolean; errorMessage: string },
     ) => {
       if (listRequestInFlightRef.current) {
@@ -36,19 +35,12 @@ export function usePersonas() {
       }
 
       listRequestInFlightRef.current = true;
-      const mutationVersionAtStart = mutationVersionRef.current;
       if (options.showLoading) {
         setPersonasLoading(true);
       }
 
       try {
-        const personas = await fetchPersonas();
-        if (
-          mutationVersionAtStart === mutationVersionRef.current &&
-          mutationsInFlightRef.current === 0
-        ) {
-          setPersonas(personas);
-        }
+        await refreshGallery(fetchGallery);
       } catch (error) {
         console.error(options.errorMessage, error);
       } finally {
@@ -58,29 +50,18 @@ export function usePersonas() {
         }
       }
     },
-    [setPersonas, setPersonasLoading],
+    [refreshGallery, setPersonasLoading],
   );
 
-  const trackMutation = useCallback(async <T>(mutation: () => Promise<T>) => {
-    mutationVersionRef.current += 1;
-    mutationsInFlightRef.current += 1;
-    try {
-      return await mutation();
-    } finally {
-      mutationsInFlightRef.current -= 1;
-      mutationVersionRef.current += 1;
-    }
-  }, []);
-
   const loadPersonas = useCallback(async () => {
-    await replacePersonasFromApi(api.listPersonas, {
+    await replacePersonasFromApi(api.listAgentGallery, {
       showLoading: true,
       errorMessage: "Failed to load personas:",
     });
   }, [replacePersonasFromApi]);
 
   const refreshFromDisk = useCallback(async () => {
-    await replacePersonasFromApi(api.refreshPersonas, {
+    await replacePersonasFromApi(api.refreshAgentGallery, {
       showLoading: false,
       errorMessage: "Failed to refresh personas from disk:",
     });
@@ -109,11 +90,11 @@ export function usePersonas() {
 
   const createPersona = useCallback(
     async (req: CreatePersonaRequest) => {
-      const persona = await trackMutation(() => api.createPersona(req));
+      const persona = await mutateGallery(() => api.createPersona(req));
       addPersona(persona);
       return persona;
     },
-    [addPersona, trackMutation],
+    [addPersona, mutateGallery],
   );
 
   // Custom gloopies are library citizens, not per-agent attachments: a
@@ -123,21 +104,21 @@ export function usePersonas() {
   // happens here.
   const updatePersona = useCallback(
     async (existing: Persona, req: UpdatePersonaRequest) => {
-      const persona = await trackMutation(() =>
+      const persona = await mutateGallery(() =>
         api.updatePersona(existing, req),
       );
       updatePersonaInStore(existing.id, persona);
       return persona;
     },
-    [trackMutation, updatePersonaInStore],
+    [mutateGallery, updatePersonaInStore],
   );
 
   const deletePersona = useCallback(
     async (id: string) => {
-      await trackMutation(() => api.deletePersona(id));
+      await mutateGallery(() => api.deletePersona(id));
       removePersona(id);
     },
-    [removePersona, trackMutation],
+    [mutateGallery, removePersona],
   );
 
   return {
