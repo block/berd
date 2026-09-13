@@ -2,8 +2,9 @@
 //!
 //! A lazily started, loopback-only HTTP server (`GET /v1/ping`, `POST
 //! /v1/call`) that forwards commands over a request/response bridge into the
-//! main-window renderer. The CLI finds it through a per-instance discovery
-//! file written on start and removed on stop/exit.
+//! main-window renderer. The CLI finds it through a per-instance, owner-private
+//! discovery file written on start and removed on stop/exit, and presents the
+//! file's fresh bearer capability on every broker request.
 //!
 //! Without the `server` feature this crate is an inert stub: build.rs still
 //! generates the command permissions (so capability validation passes in
@@ -24,7 +25,8 @@ mod plugin {
     use crate::bridge::{Bridge, BridgeError, BridgeRequest, BridgeResult};
     use crate::discovery;
     use crate::server::{
-        self, BridgeDispatcher, ServerContext, ServerHandle, TimeoutStore, IN_FLIGHT_LIMIT,
+        self, generate_capability, BridgeDispatcher, ServerContext, ServerHandle, TimeoutStore,
+        IN_FLIGHT_LIMIT,
     };
     use serde::Serialize;
     use std::collections::HashMap;
@@ -150,6 +152,8 @@ mod plugin {
             return Ok(StartedEndpoint { port: handle.port });
         }
         let generation = state.generation.fetch_add(1, Ordering::Relaxed) + 1;
+        let capability = generate_capability()
+            .map_err(|err| format!("failed to generate berdctl capability: {err}"))?;
         // Each server gets its own semaphore: graceful shutdown lets the
         // previous server's in-flight handlers outlive `stop`, and their
         // permits must release slots on that dead instance, not free up (and
@@ -162,6 +166,7 @@ mod plugin {
             state.timeouts.clone(),
             Arc::new(tokio::sync::Semaphore::new(IN_FLIGHT_LIMIT)),
             generation,
+            capability.clone(),
         ));
         let handle = server::start_server(ctx)
             .await
@@ -176,7 +181,8 @@ mod plugin {
             .map_err(|err| format!("failed to resolve app data dir: {err}"))?;
         let pid = std::process::id();
         let path = discovery::discovery_file_path(&app_data_dir, pid);
-        if let Err(err) = discovery::write_discovery_file(&path, port, pid, generation) {
+        if let Err(err) = discovery::write_discovery_file(&path, port, pid, generation, &capability)
+        {
             handle.shutdown();
             return Err(format!(
                 "failed to write berdctl discovery file {}: {err}",

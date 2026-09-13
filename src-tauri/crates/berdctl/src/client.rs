@@ -62,11 +62,26 @@ pub struct PingResponse {
 
 pub struct Endpoint {
     pub port: u16,
+    capability: String,
+}
+
+impl std::fmt::Debug for Endpoint {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Endpoint")
+            .field("port", &self.port)
+            .field("capability", &"[redacted]")
+            .finish()
+    }
 }
 
 fn agent(timeout: Duration) -> ureq::Agent {
     ureq::Agent::config_builder()
         .timeout_global(Some(timeout))
+        // The broker is a literal loopback service. Never hand its bearer
+        // capability to a user-configured proxy or redirect target.
+        .proxy(None)
+        .max_redirects(0)
         // Non-2xx responses carry the broker's structured error body; read it
         // instead of treating the status as a transport error.
         .http_status_as_error(false)
@@ -74,53 +89,112 @@ fn agent(timeout: Duration) -> ureq::Agent {
         .new_agent()
 }
 
+#[derive(Debug)]
+struct PingFailure {
+    detail: String,
+    status: Option<u16>,
+}
+
+impl PingFailure {
+    fn transport(detail: String) -> Self {
+        Self {
+            detail,
+            status: None,
+        }
+    }
+
+    fn status(detail: String, status: u16) -> Self {
+        Self {
+            detail,
+            status: Some(status),
+        }
+    }
+}
+
 /// Probe the listener before sending any payload (command args can contain
 /// prompt text, which must not be sprayed at an unknown local service).
 /// Returns the failure detail only; callers decide the exit class.
-pub fn ping(port: u16) -> Result<PingResponse, String> {
+fn ping(port: u16, capability: &str) -> Result<PingResponse, PingFailure> {
     let url = format!("http://127.0.0.1:{port}/v1/ping");
     let mut response = agent(PING_TIMEOUT)
         .get(&url)
+        .header("Authorization", format!("Bearer {capability}"))
         .call()
-        .map_err(|err| format!("nothing answered on 127.0.0.1:{port} ({err})"))?;
+        .map_err(|err| {
+            PingFailure::transport(format!("nothing answered on 127.0.0.1:{port} ({err})"))
+        })?;
     let status = response.status().as_u16();
     if status != 200 {
-        return Err(format!(
-            "the listener on 127.0.0.1:{port} does not look like the Berd app \
-             control endpoint (ping returned status {status})"
+        return Err(PingFailure::status(
+            format!(
+                "the listener on 127.0.0.1:{port} does not look like the Berd app \
+                 control endpoint (ping returned status {status})"
+            ),
+            status,
         ));
     }
     response
         .body_mut()
         .read_json::<PingResponse>()
         .map_err(|err| {
-            format!(
-                "the listener on 127.0.0.1:{port} does not look like the Berd app \
-                 control endpoint (unrecognized ping response: {err})"
+            PingFailure::status(
+                format!(
+                    "the listener on 127.0.0.1:{port} does not look like the Berd app \
+                     control endpoint (unrecognized ping response: {err})"
+                ),
+                status,
             )
         })
 }
 
 /// Read the discovery file and verify the broker behind it echoes the file's
-/// generation and this binary's protocol version. A generation mismatch means
-/// the file was read across a broker restart: re-read once and retry once.
+/// generation and this binary's protocol version. A generation mismatch or
+/// authentication failure can mean the file was read across a broker restart:
+/// re-read once and retry once.
 pub fn handshake(lock_path: &Path) -> Result<Endpoint, Failure> {
     let mut file = discovery::load_with_retry(lock_path)?;
     for attempt in 0..2 {
         if file.protocol_version != PROTOCOL_VERSION {
             return Err(Failure::env(APP_UPDATED));
         }
-        let ping = ping(file.port).map_err(|detail| {
-            Failure::env(format!(
-                "the Berd desktop app is not reachable: {detail}. The app may have \
-                 quit; {CONTROL_REMEDIATION}"
-            ))
-        })?;
+        let ping = match ping(file.port, &file.capability) {
+            Ok(ping) => ping,
+            Err(failure) if failure.status == Some(403) => {
+                if attempt == 0 {
+                    // Authentication failure can be the observable edge of a
+                    // broker restart: the process has rotated the capability but
+                    // this command opened the previous discovery inode. Re-read
+                    // once, just as for the existing generation-mismatch path.
+                    file = discovery::load(lock_path).map_err(|err| {
+                        Failure::env(format!(
+                            "the Berd desktop app restarted its control endpoint and the new \
+                             one could not be read ({err}); {CONTROL_REMEDIATION}"
+                        ))
+                    })?;
+                    continue;
+                }
+                return Err(Failure::env(format!(
+                    "the Berd desktop app is not reachable: {}. The app may have \
+                     quit; {CONTROL_REMEDIATION}",
+                    failure.detail
+                )));
+            }
+            Err(failure) => {
+                return Err(Failure::env(format!(
+                    "the Berd desktop app is not reachable: {}. The app may have \
+                     quit; {CONTROL_REMEDIATION}",
+                    failure.detail
+                )));
+            }
+        };
         if ping.protocol_version != PROTOCOL_VERSION {
             return Err(Failure::env(APP_UPDATED));
         }
         if ping.generation == file.generation {
-            return Ok(Endpoint { port: file.port });
+            return Ok(Endpoint {
+                port: file.port,
+                capability: file.capability,
+            });
         }
         if attempt == 0 {
             file = discovery::load(lock_path).map_err(|err| {
@@ -140,30 +214,90 @@ pub fn handshake(lock_path: &Path) -> Result<Endpoint, Failure> {
 }
 
 /// POST one command. `args` already contains the `action` discriminator.
+///
+/// A legitimate broker restart can happen after [`handshake`] and before this
+/// request. Its old capability is rejected before dispatch, so re-read and
+/// re-handshake exactly once before retrying. `Expect: 100-continue` prevents
+/// the rejected listener from receiving the command body: the body is sent
+/// only after that listener has accepted the request headers.
 pub fn call(
+    lock_path: &Path,
     endpoint: &Endpoint,
     command: &str,
     args: Map<String, Value>,
     timeout_ms: Option<u64>,
 ) -> Result<Value, Failure> {
-    let url = format!("http://127.0.0.1:{}/v1/call", endpoint.port);
     let mut payload = Map::new();
     payload.insert("command".into(), Value::String(command.into()));
     payload.insert("args".into(), Value::Object(args));
     if let Some(ms) = timeout_ms {
         payload.insert("timeout_ms".into(), Value::from(ms));
     }
+    let payload = Value::Object(payload);
+
+    match call_once(endpoint, &payload) {
+        Ok(result) => Ok(result),
+        Err(CallFailure::BrokerAuthForbidden) => {
+            // The broker emits this 403 before reading the body or dispatching
+            // it. Do not retry any other response: HTTP cannot establish
+            // whether it may already have been dispatched.
+            let endpoint = handshake(lock_path)?;
+            call_once(&endpoint, &payload).map_err(CallFailure::into_failure)
+        }
+        Err(failure) => Err(failure.into_failure()),
+    }
+}
+
+/// A 403 with this exact broker error is known not to have been dispatched:
+/// the broker checks its bearer capability before reading `/v1/call`'s body.
+enum CallFailure {
+    BrokerAuthForbidden,
+    Other(Failure),
+}
+
+impl CallFailure {
+    fn into_failure(self) -> Failure {
+        match self {
+            Self::BrokerAuthForbidden => Failure::transport(
+                "the app control endpoint rejected a retried command before dispatch",
+            ),
+            Self::Other(failure) => failure,
+        }
+    }
+}
+
+fn call_once(endpoint: &Endpoint, payload: &Value) -> Result<Value, CallFailure> {
+    let url = format!("http://127.0.0.1:{}/v1/call", endpoint.port);
     let mut response = agent(CALL_TIMEOUT)
         .post(&url)
-        .send_json(Value::Object(payload))
-        .map_err(|err| transport_error_failure(endpoint.port, &err))?;
+        .header("Authorization", format!("Bearer {}", endpoint.capability))
+        // A final response to this header prevents ureq from sending the body.
+        // This limits a port-reuse listener to request metadata; HTTP cannot
+        // remove the unavoidable TOCTOU after a peer sends 100 Continue.
+        .header("Expect", "100-continue")
+        .send_json(payload)
+        .map_err(|err| CallFailure::Other(transport_error_failure(endpoint.port, &err)))?;
     let status = response.status().as_u16();
     let body = response.body_mut().read_to_string().map_err(|err| {
-        Failure::transport(format!(
+        CallFailure::Other(Failure::transport(format!(
             "the app control endpoint's response could not be read ({err})"
-        ))
+        )))
     })?;
-    classify_response(status, &body)
+    if is_broker_auth_forbidden(status, &body) {
+        return Err(CallFailure::BrokerAuthForbidden);
+    }
+    classify_response(status, &body).map_err(CallFailure::Other)
+}
+
+fn is_broker_auth_forbidden(status: u16, body: &str) -> bool {
+    status == 403
+        && serde_json::from_str::<Value>(body)
+            .ok()
+            .as_ref()
+            .and_then(error_parts)
+            .is_some_and(|(code, message)| {
+                code == "forbidden" && message == "valid bearer capability required"
+            })
 }
 
 /// The app quitting between ping and call surfaces as a refused connection —
@@ -247,6 +381,515 @@ fn error_parts(value: &Value) -> Option<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use std::io::{BufRead, BufReader, Read, Write};
+    #[cfg(unix)]
+    use std::net::{TcpListener, TcpStream};
+    #[cfg(unix)]
+    use std::path::PathBuf;
+    #[cfg(unix)]
+    use std::sync::{mpsc, Arc};
+    #[cfg(unix)]
+    use std::thread;
+
+    #[cfg(unix)]
+    const CURRENT_CAPABILITY: &str =
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    #[cfg(unix)]
+    const STALE_CAPABILITY: &str =
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+
+    // `discovery::load` deliberately verifies Unix ownership and mode bits.
+    // The production Windows reader instead validates a handle's owner/DACL;
+    // do not run this POSIX fixture there with an inherited temp-directory ACL.
+    #[cfg(unix)]
+    struct TempDiscoveryFile(PathBuf);
+
+    #[cfg(unix)]
+    impl TempDiscoveryFile {
+        fn new(label: &str, port: u16, capability: &str) -> Self {
+            let base = std::env::temp_dir().join(format!(
+                "berdctl-client-auth-{}-{label}-{port}",
+                std::process::id()
+            ));
+            std::fs::remove_dir_all(&base).ok();
+            std::fs::create_dir(&base).expect("create discovery directory");
+            let path = base.join("control.json");
+            Self::write(&path, port, capability);
+            Self(path)
+        }
+
+        fn replace(&self, port: u16, capability: &str) {
+            Self::write(&self.0, port, capability);
+        }
+
+        fn write(path: &Path, port: u16, capability: &str) {
+            use std::os::unix::fs::PermissionsExt;
+
+            std::fs::write(
+                path,
+                format!(
+                    r#"{{"port":{port},"pid":4242,"generation":7,"protocolVersion":{PROTOCOL_VERSION},"capability":"{capability}"}}"#
+                ),
+            )
+            .expect("write discovery file");
+            std::fs::set_permissions(
+                path.parent().expect("test discovery has a parent"),
+                std::fs::Permissions::from_mode(0o700),
+            )
+            .expect("make discovery directory private");
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+                .expect("make discovery file private");
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for TempDiscoveryFile {
+        fn drop(&mut self) {
+            if let Some(parent) = self.0.parent() {
+                std::fs::remove_dir_all(parent).ok();
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    struct RecordedRequest {
+        request_line: String,
+        authorization: Option<String>,
+        expects_continue: bool,
+        body: String,
+    }
+
+    #[cfg(unix)]
+    fn read_request(stream: &mut TcpStream) -> RecordedRequest {
+        let mut reader = BufReader::new(stream.try_clone().expect("clone request stream"));
+        let mut request_line = String::new();
+        reader
+            .read_line(&mut request_line)
+            .expect("read request line");
+        let mut authorization = None;
+        let mut content_length = 0;
+        let mut expects_continue = false;
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).expect("read request header");
+            if line == "\r\n" {
+                break;
+            }
+            let Some((name, value)) = line.trim_end().split_once(':') else {
+                continue;
+            };
+            if name.eq_ignore_ascii_case("authorization") {
+                authorization = Some(value.trim().to_string());
+            }
+            if name.eq_ignore_ascii_case("content-length") {
+                content_length = value.trim().parse().expect("valid content length");
+            }
+            if name.eq_ignore_ascii_case("expect")
+                && value.trim().eq_ignore_ascii_case("100-continue")
+            {
+                expects_continue = true;
+            }
+        }
+        if expects_continue {
+            stream
+                .write_all(b"HTTP/1.1 100 Continue\r\n\r\n")
+                .expect("accept request body");
+        }
+        let mut body = vec![0; content_length];
+        reader.read_exact(&mut body).expect("read request body");
+        RecordedRequest {
+            request_line: request_line.trim_end().to_string(),
+            authorization,
+            expects_continue,
+            body: String::from_utf8(body).expect("request body is UTF-8"),
+        }
+    }
+
+    #[cfg(unix)]
+    fn write_response(stream: &mut TcpStream, status: &str, body: &str) {
+        write!(
+            stream,
+            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .expect("write test response");
+    }
+
+    #[cfg(unix)]
+    fn spawn_broker_sequence(
+        expected_requests: Vec<(&'static str, BrokerResponse)>,
+    ) -> (u16, mpsc::Receiver<RecordedRequest>, thread::JoinHandle<()>) {
+        spawn_broker_responses(expected_requests)
+    }
+
+    #[cfg(unix)]
+    #[derive(Clone, Copy)]
+    enum BrokerResponse {
+        Ping {
+            generation: u64,
+        },
+        Call,
+        CallError {
+            status: &'static str,
+            body: &'static str,
+        },
+    }
+
+    #[cfg(unix)]
+    fn spawn_broker_responses(
+        expected_requests: Vec<(&'static str, BrokerResponse)>,
+    ) -> (u16, mpsc::Receiver<RecordedRequest>, thread::JoinHandle<()>) {
+        spawn_broker_responses_with_sync(expected_requests, None)
+    }
+
+    #[cfg(unix)]
+    fn spawn_broker_responses_with_sync(
+        expected_requests: Vec<(&'static str, BrokerResponse)>,
+        first_response_sync: Option<(Arc<std::sync::Barrier>, Arc<std::sync::Barrier>)>,
+    ) -> (u16, mpsc::Receiver<RecordedRequest>, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind test broker");
+        let port = listener.local_addr().expect("test broker address").port();
+        let (requests_tx, requests_rx) = mpsc::channel();
+        let handle = thread::spawn(move || {
+            for (request_number, (expected_capability, response)) in
+                expected_requests.into_iter().enumerate()
+            {
+                let (mut stream, _) = listener.accept().expect("accept client request");
+                let request = read_request(&mut stream);
+                let authorized = request.authorization.as_deref()
+                    == Some(&format!("Bearer {expected_capability}"));
+                requests_tx.send(request).expect("record client request");
+                if request_number == 0 {
+                    if let Some((request_seen, response_ready)) = &first_response_sync {
+                        request_seen.wait();
+                        response_ready.wait();
+                    }
+                }
+                match (authorized, response) {
+                    (true, BrokerResponse::Ping { generation }) => write_response(
+                        &mut stream,
+                        "200 OK",
+                        &format!(
+                            r#"{{"generation":{generation},"protocolVersion":{PROTOCOL_VERSION}}}"#
+                        ),
+                    ),
+                    (true, BrokerResponse::Call) => {
+                        write_response(&mut stream, "200 OK", r#"{"ok":true,"result":"ok"}"#)
+                    }
+                    (true, BrokerResponse::CallError { status, body }) => {
+                        write_response(&mut stream, status, body)
+                    }
+                    (false, _) => write_response(
+                        &mut stream,
+                        "403 Forbidden",
+                        r#"{"ok":false,"error":{"code":"forbidden","message":"valid bearer capability required"}}"#,
+                    ),
+                }
+            }
+        });
+        (port, requests_rx, handle)
+    }
+
+    #[cfg(unix)]
+    fn spawn_broker(
+        expected_capability: &'static str,
+        request_count: usize,
+    ) -> (u16, mpsc::Receiver<RecordedRequest>, thread::JoinHandle<()>) {
+        spawn_broker_responses(
+            (0..request_count)
+                .map(|request_number| {
+                    let response = if request_number == 0 {
+                        BrokerResponse::Ping { generation: 7 }
+                    } else {
+                        BrokerResponse::Call
+                    };
+                    (expected_capability, response)
+                })
+                .collect(),
+        )
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn handshake_and_call_send_current_capability() {
+        let (port, requests, broker) = spawn_broker(CURRENT_CAPABILITY, 2);
+        let lock_file = TempDiscoveryFile::new("current", port, CURRENT_CAPABILITY);
+
+        let endpoint = handshake(&lock_file.0).expect("current capability handshakes");
+        assert_eq!(
+            format!("{endpoint:?}"),
+            format!("Endpoint {{ port: {port}, capability: \"[redacted]\" }}"),
+            "debug output must not disclose the bearer capability"
+        );
+        let result = call(
+            &lock_file.0,
+            &endpoint,
+            "sessions",
+            Map::from_iter([("action".to_string(), Value::String("list".to_string()))]),
+            None,
+        )
+        .expect("current capability calls");
+        assert_eq!(result, Value::String("ok".to_string()));
+
+        let ping = requests.recv().expect("record ping");
+        assert_eq!(ping.request_line, "GET /v1/ping HTTP/1.1");
+        assert_eq!(
+            ping.authorization.as_deref(),
+            Some(format!("Bearer {CURRENT_CAPABILITY}").as_str())
+        );
+        assert!(ping.body.is_empty());
+        assert!(!ping.expects_continue);
+
+        let call = requests.recv().expect("record call");
+        assert_eq!(call.request_line, "POST /v1/call HTTP/1.1");
+        assert_eq!(
+            call.authorization.as_deref(),
+            Some(format!("Bearer {CURRENT_CAPABILITY}").as_str())
+        );
+        assert!(call.expects_continue);
+        let call_body: Value = serde_json::from_str(&call.body).expect("call body is JSON");
+        assert_eq!(call_body["command"], "sessions");
+        assert_eq!(call_body["args"]["action"], "list");
+
+        broker.join().expect("test broker exits");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn call_rehandshakes_once_after_broker_auth_403_and_retries_identical_payload() {
+        let (port, requests, broker) = spawn_broker_sequence(vec![
+            (STALE_CAPABILITY, BrokerResponse::Ping { generation: 7 }),
+            (CURRENT_CAPABILITY, BrokerResponse::Call),
+            (CURRENT_CAPABILITY, BrokerResponse::Ping { generation: 7 }),
+            (CURRENT_CAPABILITY, BrokerResponse::Call),
+        ]);
+        let lock_file = TempDiscoveryFile::new("call-capability-rotation", port, STALE_CAPABILITY);
+        let endpoint = handshake(&lock_file.0).expect("stale endpoint handshakes before rotation");
+        lock_file.replace(port, CURRENT_CAPABILITY);
+
+        let args = Map::from_iter([
+            ("action".to_string(), Value::String("create".to_string())),
+            (
+                "name".to_string(),
+                Value::String("payload must survive retry".to_string()),
+            ),
+        ]);
+        let result = call(&lock_file.0, &endpoint, "sessions", args, Some(4_242))
+            .expect("broker auth rejection is retried with the rotated capability");
+        assert_eq!(result, Value::String("ok".to_string()));
+
+        let initial_ping = requests.recv().expect("record initial ping");
+        let rejected_call = requests.recv().expect("record rejected call");
+        let retry_ping = requests.recv().expect("record retry handshake ping");
+        let retried_call = requests.recv().expect("record retried call");
+        broker
+            .join()
+            .expect("test broker exits after exactly four requests");
+
+        assert_eq!(
+            initial_ping.authorization.as_deref(),
+            Some(format!("Bearer {STALE_CAPABILITY}").as_str())
+        );
+        assert_eq!(
+            rejected_call.authorization.as_deref(),
+            Some(format!("Bearer {STALE_CAPABILITY}").as_str())
+        );
+        assert_eq!(
+            retry_ping.authorization.as_deref(),
+            Some(format!("Bearer {CURRENT_CAPABILITY}").as_str())
+        );
+        assert_eq!(
+            retried_call.authorization.as_deref(),
+            Some(format!("Bearer {CURRENT_CAPABILITY}").as_str())
+        );
+        assert!(rejected_call.expects_continue);
+        assert!(retried_call.expects_continue);
+        assert_eq!(
+            rejected_call.body, retried_call.body,
+            "retry must preserve the complete payload"
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&retried_call.body).expect("retried payload is JSON"),
+            serde_json::json!({
+                "command": "sessions",
+                "args": {"action": "create", "name": "payload must survive retry"},
+                "timeout_ms": 4242,
+            })
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn call_does_not_retry_other_403_responses() {
+        let (port, requests, broker) = spawn_broker_sequence(vec![
+            (CURRENT_CAPABILITY, BrokerResponse::Ping { generation: 7 }),
+            (
+                CURRENT_CAPABILITY,
+                BrokerResponse::CallError {
+                    status: "403 Forbidden",
+                    body: r#"{"ok":false,"error":{"code":"forbidden","message":"origin rejected"}}"#,
+                },
+            ),
+        ]);
+        let lock_file = TempDiscoveryFile::new("call-other-403", port, CURRENT_CAPABILITY);
+        let endpoint = handshake(&lock_file.0).expect("current endpoint handshakes");
+
+        let failure = call(
+            &lock_file.0,
+            &endpoint,
+            "sessions",
+            Map::from_iter([("action".to_string(), Value::String("list".to_string()))]),
+            None,
+        )
+        .expect_err("non-broker 403 must not be retried");
+        assert_eq!(failure.exit, EXIT_TRANSPORT);
+        assert!(failure.message.starts_with("forbidden: origin rejected"));
+
+        let ping = requests.recv().expect("record initial ping");
+        let call = requests.recv().expect("record call");
+        broker
+            .join()
+            .expect("test broker exits after exactly two requests");
+        assert_eq!(ping.request_line, "GET /v1/ping HTTP/1.1");
+        assert_eq!(call.request_line, "POST /v1/call HTTP/1.1");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn handshake_recovers_when_capability_rotates_after_discovery_read() {
+        let first_request = Arc::new(std::sync::Barrier::new(2));
+        let response_ready = Arc::new(std::sync::Barrier::new(2));
+        let (port, requests, broker) = spawn_broker_responses_with_sync(
+            vec![
+                (CURRENT_CAPABILITY, BrokerResponse::Ping { generation: 7 }),
+                (CURRENT_CAPABILITY, BrokerResponse::Ping { generation: 7 }),
+            ],
+            Some((first_request.clone(), response_ready.clone())),
+        );
+        let lock_file = TempDiscoveryFile::new("rotating", port, STALE_CAPABILITY);
+        let path = lock_file.0.clone();
+        let rewrite_first_request = first_request.clone();
+        let rewrite_response_ready = response_ready.clone();
+        let rewrite = thread::spawn(move || {
+            rewrite_first_request.wait();
+            std::fs::write(
+                &path,
+                format!(
+                    r#"{{"port":{port},"pid":4242,"generation":7,"protocolVersion":{PROTOCOL_VERSION},"capability":"{CURRENT_CAPABILITY}"}}"#
+                ),
+            )
+            .expect("publish rotated discovery capability");
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+                    .expect("keep rewritten discovery private");
+            }
+            rewrite_response_ready.wait();
+            let stale_ping = requests.recv().expect("record stale ping");
+            assert_eq!(
+                stale_ping.authorization.as_deref(),
+                Some(format!("Bearer {STALE_CAPABILITY}").as_str())
+            );
+            requests.recv().expect("record retried current ping")
+        });
+
+        let endpoint = handshake(&lock_file.0).expect("rotated capability retries successfully");
+        assert_eq!(endpoint.port, port);
+        let current_ping = rewrite.join().expect("discovery rewrite exits");
+        assert_eq!(
+            current_ping.authorization.as_deref(),
+            Some(format!("Bearer {CURRENT_CAPABILITY}").as_str())
+        );
+        broker.join().expect("test broker exits");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn handshake_retries_generation_mismatch_with_rotated_capability() {
+        let first_request = Arc::new(std::sync::Barrier::new(2));
+        let response_ready = Arc::new(std::sync::Barrier::new(2));
+        let (port, requests, broker) = spawn_broker_responses_with_sync(
+            vec![
+                (STALE_CAPABILITY, BrokerResponse::Ping { generation: 6 }),
+                (CURRENT_CAPABILITY, BrokerResponse::Ping { generation: 7 }),
+            ],
+            Some((first_request.clone(), response_ready.clone())),
+        );
+        let lock_file = TempDiscoveryFile::new("generation-race", port, STALE_CAPABILITY);
+        let path = lock_file.0.clone();
+        let rewrite = thread::spawn(move || {
+            first_request.wait();
+            let stale_ping = requests.recv().expect("record old-generation ping");
+            assert_eq!(
+                stale_ping.authorization.as_deref(),
+                Some(format!("Bearer {STALE_CAPABILITY}").as_str())
+            );
+            std::fs::write(
+                &path,
+                format!(
+                    r#"{{"port":{port},"pid":4242,"generation":7,"protocolVersion":{PROTOCOL_VERSION},"capability":"{CURRENT_CAPABILITY}"}}"#
+                ),
+            )
+            .expect("publish new generation and capability");
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+                    .expect("keep rewritten discovery private");
+            }
+            response_ready.wait();
+            requests.recv().expect("record new-generation ping")
+        });
+
+        let endpoint = handshake(&lock_file.0).expect("generation mismatch retries successfully");
+        assert_eq!(endpoint.port, port);
+        let current_ping = rewrite.join().expect("discovery rewrite exits");
+        assert_eq!(
+            current_ping.authorization.as_deref(),
+            Some(format!("Bearer {CURRENT_CAPABILITY}").as_str())
+        );
+        broker.join().expect("test broker exits");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn handshake_rejects_stale_capability() {
+        // The first 403 triggers the one permitted discovery re-read; an
+        // unchanged stale record must still fail closed on the second probe.
+        let (port, requests, broker) = spawn_broker(CURRENT_CAPABILITY, 2);
+        let lock_file = TempDiscoveryFile::new("stale", port, STALE_CAPABILITY);
+
+        let failure = handshake(&lock_file.0).expect_err("stale capability fails closed");
+        assert_eq!(failure.exit, EXIT_ENV);
+        assert!(failure.message.contains("ping returned status 403"));
+        for _ in 0..2 {
+            let ping = requests.recv().expect("record stale ping");
+            assert_eq!(
+                ping.authorization.as_deref(),
+                Some(format!("Bearer {STALE_CAPABILITY}").as_str())
+            );
+        }
+
+        broker.join().expect("test broker exits");
+    }
+
+    #[test]
+    fn only_the_broker_auth_403_is_safe_to_retry() {
+        assert!(is_broker_auth_forbidden(
+            403,
+            r#"{"ok":false,"error":{"code":"forbidden","message":"valid bearer capability required"}}"#,
+        ));
+        assert!(!is_broker_auth_forbidden(
+            403,
+            r#"{"ok":false,"error":{"code":"forbidden","message":"origin rejected"}}"#,
+        ));
+        assert!(!is_broker_auth_forbidden(
+            500,
+            r#"{"ok":false,"error":{"code":"forbidden","message":"valid bearer capability required"}}"#,
+        ));
+    }
 
     #[test]
     fn ok_true_yields_the_result_verbatim() {
