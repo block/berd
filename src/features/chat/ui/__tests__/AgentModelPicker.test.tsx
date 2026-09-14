@@ -1971,6 +1971,61 @@ describe("AgentModelPicker starred models", () => {
     expect(onModelChange).not.toHaveBeenCalled();
   });
 
+  it("preserves the focused star row when moving across picker columns", async () => {
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="model-0"
+        currentModelName="Model 0"
+        availableModels={Array.from({ length: 3 }, (_, index) => ({
+          id: `model-${index}`,
+          name: `Model ${index}`,
+          recommended: true,
+        }))}
+        onModelChange={vi.fn()}
+        providerColumnMode="visible"
+        reasoningEffort={{
+          config: {
+            configId: "thinking_effort",
+            currentValue: "medium",
+            options: [
+              { id: "low", name: "Low" },
+              { id: "medium", name: "Medium" },
+              { id: "high", name: "High" },
+            ],
+          },
+          onChange: vi.fn(),
+        }}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    const picker = screen.getByRole("dialog");
+    const rows = Array.from(picker.querySelectorAll("[data-model-key]"));
+    const middleStar = within(rows[1] as HTMLElement).getByRole("button", {
+      name: /^Star /,
+    });
+    const agentItems = picker.querySelectorAll<HTMLButtonElement>(
+      '[data-col="agent"] button[data-picker-nav-item]',
+    );
+    const reasoningItems = picker.querySelectorAll<HTMLButtonElement>(
+      '[data-col="reasoning"] button[data-picker-nav-item]',
+    );
+
+    middleStar.focus();
+    await user.keyboard("{ArrowLeft}");
+    expect(agentItems[1]).toHaveFocus();
+
+    middleStar.focus();
+    await user.keyboard("{ArrowRight}");
+    expect(reasoningItems[1]).toHaveFocus();
+  });
+
   it("shows star actions on the preferred shortlist", async () => {
     const user = userEvent.setup();
     render(

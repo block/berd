@@ -542,25 +542,24 @@ export function AgentModelPicker({
           }
         }}
         onKeyDown={(e) => {
+          const activeElement = document.activeElement as HTMLElement;
+          const navigationOrigin =
+            activeElement
+              ?.closest("[data-model-key]")
+              ?.querySelector<HTMLElement>(
+                "button[data-picker-nav-item]:not(:disabled)",
+              ) ?? activeElement;
+
           if (e.key === "ArrowDown" || e.key === "ArrowUp") {
             e.preventDefault();
-            const col = (document.activeElement as HTMLElement)?.closest(
-              "[data-col]",
-            );
+            const col = activeElement?.closest("[data-col]");
             if (!col) return;
             const items = Array.from(
               col.querySelectorAll<HTMLElement>(
                 "button[data-picker-nav-item]:not(:disabled)",
               ),
             );
-            const activeElement = document.activeElement as HTMLElement;
-            const origin =
-              activeElement
-                ?.closest("[data-model-key]")
-                ?.querySelector<HTMLElement>(
-                  "button[data-picker-nav-item]:not(:disabled)",
-                ) ?? activeElement;
-            const idx = items.indexOf(origin);
+            const idx = items.indexOf(navigationOrigin);
             const next =
               idx < 0
                 ? e.key === "ArrowDown"
@@ -578,9 +577,7 @@ export function AgentModelPicker({
                 "[data-col]:not([data-hidden='true'])",
               ),
             );
-            const currentCol = (document.activeElement as HTMLElement)?.closest(
-              "[data-col]",
-            );
+            const currentCol = activeElement?.closest("[data-col]");
             const colIdx = cols.indexOf(currentCol as HTMLElement);
             const targetCol =
               e.key === "ArrowRight"
@@ -597,9 +594,7 @@ export function AgentModelPicker({
                 "button[data-picker-nav-item]:not(:disabled)",
               ) ?? [],
             );
-            const currentIdx = currentItems.indexOf(
-              document.activeElement as HTMLElement,
-            );
+            const currentIdx = currentItems.indexOf(navigationOrigin);
             const target =
               targetItems[Math.min(currentIdx, targetItems.length - 1)] ??
               targetItems[0];
