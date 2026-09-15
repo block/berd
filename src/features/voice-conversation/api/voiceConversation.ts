@@ -589,6 +589,29 @@ export function rejectVoiceConversationTranscript(
   );
 }
 
+export interface VoiceStatusSoundSettings {
+  mode: "off" | "working" | "working-and-waiting";
+  volume?: number;
+}
+
+export async function updateVoiceConversationStatusSounds(
+  status: VoiceConversationStatus,
+  conversationStatus: "working" | "waiting",
+  settings: VoiceStatusSoundSettings,
+): Promise<void> {
+  const { rendererId, rendererEpoch } = await getRendererInstance();
+  return invoke("update_native_voice_status_sounds", {
+    request: {
+      sessionId: status.sessionId,
+      expectedRevision: status.revision,
+      status: conversationStatus,
+      settings,
+      rendererId,
+      rendererEpoch,
+    },
+  });
+}
+
 export async function startVoiceConversation(
   sessionId: string,
   inputBackend: "parakeet" | "macos" | "openai" = "parakeet",

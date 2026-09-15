@@ -1098,6 +1098,17 @@
     "selectedVoice": "Selected voice: {{voice}}",
     "useVoice": "Use {{voice}}",
     "voice": "Voice",
-    "voiceLabel": "Pocket TTS voice"
+    "voiceLabel": "Pocket TTS voice",
+    "statusSounds": "Status sounds",
+    "statusSoundModes": {
+      "off": "Off",
+      "working": "While working",
+      "working-and-waiting": "While working and waiting"
+    },
+    "statusSoundModeDescriptions": {
+      "off": "Do not play status sounds.",
+      "working": "Repeats the working sound while the agent is working.",
+      "working-and-waiting": "Repeats the working sound while the agent is working and the waiting sound while it waits."
+    }
   }
 }

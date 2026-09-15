@@ -2510,7 +2510,7 @@ fn siri_session_reaches_ready_without_openai_credentials() {
     stdin.flush().unwrap();
     let ready = receive();
     assert_eq!(ready["type"], "ready");
-    assert_eq!(ready["protocol"], 4);
+    assert_eq!(ready["protocol"], 5);
     assert_eq!(ready["session"]["tts"]["backend"], "siri");
     assert_eq!(ready["session"]["tts"]["voice"], voice);
     assert_eq!(ready["session"]["tts"]["language"], language);
@@ -2518,6 +2518,25 @@ fn siri_session_reaches_ready_without_openai_credentials() {
     assert_eq!(
         ready["session"]["input_during_tts"],
         json!({"revision":1,"policy":"allow_barge_in"})
+    );
+    write_session_json(
+        &mut stdin,
+        &json!({
+            "type":"set_conversation_status",
+            "id":19,
+            "status":"working",
+            "settings":{"mode":"working"}
+        }),
+    );
+    stdin.flush().unwrap();
+    assert_eq!(
+        receive(),
+        json!({
+            "type":"conversation_status_applied",
+            "id":19,
+            "status":"working",
+            "settings":{"mode":"working"}
+        })
     );
     write_session_json(
         &mut stdin,

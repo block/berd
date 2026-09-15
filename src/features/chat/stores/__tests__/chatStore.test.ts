@@ -120,6 +120,26 @@ describe("chatStore", () => {
     expect(messagesBySession.s11).toHaveLength(1);
   });
 
+  it("latches live tool activity once and clears it between runs", () => {
+    const store = useChatStore.getState();
+    store.setChatState("tools", "thinking");
+    store.setActiveRunId("tools", "run-1");
+    expect(store.getSessionRuntime("tools").hasToolCallInRun).toBe(false);
+    store.markToolCallInRun("tools");
+    const working = store.getSessionRuntime("tools");
+    store.markToolCallInRun("tools");
+    expect(store.getSessionRuntime("tools")).toBe(working);
+    store.setChatState("tools", "streaming");
+    expect(store.getSessionRuntime("tools").hasToolCallInRun).toBe(true);
+    store.setChatState("tools", "idle");
+    store.settleActiveRun("tools");
+    store.setActiveRunId("tools", "run-2");
+    expect(store.getSessionRuntime("tools").hasToolCallInRun).toBe(false);
+    store.markToolCallInRun("tools");
+    store.setActiveRunId("tools", "run-3");
+    expect(store.getSessionRuntime("tools").hasToolCallInRun).toBe(false);
+  });
+
   it("does not evict inactive messages for a running session", () => {
     useChatStore.getState().setActiveSession("running");
     useChatStore

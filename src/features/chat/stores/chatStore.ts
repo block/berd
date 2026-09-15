@@ -455,6 +455,7 @@ interface ChatStoreActions {
   clearSettledStreamingMessage: (sessionId: string) => boolean;
   settleActiveRun: (sessionId: string) => void;
   setActiveRunId: (sessionId: string, runId: string | null) => void;
+  markToolCallInRun: (sessionId: string) => void;
   setRunCancellationPending: (sessionId: string, pending: boolean) => void;
   setPendingInterventionBoundary: (
     sessionId: string,
@@ -924,6 +925,7 @@ const createChatStore: StateCreator<
       const shouldClearStreamTracking = !isSessionRunning(current.chatState);
       if (
         current.activeRunId === null &&
+        !current.hasToolCallInRun &&
         !current.isRunCancellationPending &&
         (!shouldClearStreamTracking ||
           (current.streamingMessageId === null &&
@@ -942,6 +944,7 @@ const createChatStore: StateCreator<
             ...(shouldClearStreamTracking
               ? {
                   streamingMessageId: null,
+                  hasToolCallInRun: false,
                   pendingInterventionBoundary: null,
                 }
               : {}),
@@ -950,17 +953,41 @@ const createChatStore: StateCreator<
       };
     }),
 
-  setActiveRunId: (sessionId, activeRunId) =>
-    set((state) => ({
-      sessionStateById: {
-        ...state.sessionStateById,
-        [sessionId]: {
-          ...(state.sessionStateById[sessionId] ??
-            createInitialSessionRuntime()),
-          activeRunId,
+  markToolCallInRun: (sessionId) =>
+    set((state) => {
+      const current =
+        state.sessionStateById[sessionId] ?? createInitialSessionRuntime();
+      if (current.hasToolCallInRun) return state;
+      return {
+        sessionStateById: {
+          ...state.sessionStateById,
+          [sessionId]: { ...current, hasToolCallInRun: true },
         },
-      },
-    })),
+      };
+    }),
+
+  setActiveRunId: (sessionId, activeRunId) =>
+    set((state) => {
+      const current =
+        state.sessionStateById[sessionId] ?? createInitialSessionRuntime();
+      const replacedRun =
+        current.activeRunId !== null &&
+        activeRunId !== null &&
+        current.activeRunId !== activeRunId;
+      const settled =
+        activeRunId === null && !isSessionRunning(current.chatState);
+      return {
+        sessionStateById: {
+          ...state.sessionStateById,
+          [sessionId]: {
+            ...current,
+            activeRunId,
+            hasToolCallInRun:
+              replacedRun || settled ? false : current.hasToolCallInRun,
+          },
+        },
+      };
+    }),
 
   setRunCancellationPending: (sessionId, isRunCancellationPending) =>
     set((state) => ({
@@ -1302,12 +1329,17 @@ const createChatStore: StateCreator<
       const current =
         state.sessionStateById[sessionId] ?? createInitialSessionRuntime();
       const isIdle = chatState === "idle";
+      const hasToolCallInRun =
+        !isSessionRunning(chatState) && current.activeRunId === null
+          ? false
+          : current.hasToolCallInRun;
       const streamingMessageId = isIdle ? null : current.streamingMessageId;
       const pendingInterventionBoundary = isIdle
         ? null
         : current.pendingInterventionBoundary;
       if (
         current.chatState === chatState &&
+        current.hasToolCallInRun === hasToolCallInRun &&
         current.streamingMessageId === streamingMessageId &&
         current.pendingInterventionBoundary === pendingInterventionBoundary
       ) {
@@ -1320,6 +1352,7 @@ const createChatStore: StateCreator<
           [sessionId]: {
             ...current,
             chatState,
+            hasToolCallInRun,
             streamingMessageId,
             pendingInterventionBoundary,
           },

@@ -1604,6 +1604,99 @@ bool berd_siri_tts_speak(
     }
 }
 
+float *berd_audio_file_load_mono_pcm(
+    const char *pathValue,
+    uint32_t *sampleRateOut,
+    uint32_t *frameCountOut,
+    char **errorOut
+) {
+    @autoreleasepool {
+        if (errorOut) *errorOut = NULL;
+        if (!pathValue || !sampleRateOut || !frameCountOut) {
+            BerdSetError(errorOut, BerdError(38, @"An audio path and output pointers are required."));
+            return NULL;
+        }
+        NSURL *url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:pathValue]];
+        ExtAudioFileRef file = NULL;
+        OSStatus status = ExtAudioFileOpenURL((__bridge CFURLRef)url, &file);
+        if (status != noErr || !file) {
+            BerdSetError(errorOut, BerdError(39, @"Could not open the audio file."));
+            return NULL;
+        }
+        AudioStreamBasicDescription sourceFormat = {0};
+        UInt32 propertySize = sizeof(sourceFormat);
+        status = ExtAudioFileGetProperty(
+            file, kExtAudioFileProperty_FileDataFormat, &propertySize, &sourceFormat);
+        SInt64 sourceFrames = 0;
+        propertySize = sizeof(sourceFrames);
+        if (status == noErr) {
+            status = ExtAudioFileGetProperty(
+                file, kExtAudioFileProperty_FileLengthFrames, &propertySize, &sourceFrames);
+        }
+        AudioStreamBasicDescription clientFormat = {0};
+        clientFormat.mSampleRate = sourceFormat.mSampleRate;
+        clientFormat.mFormatID = kAudioFormatLinearPCM;
+        clientFormat.mFormatFlags = kAudioFormatFlagsNativeFloatPacked;
+        uint32_t channelCount = sourceFormat.mChannelsPerFrame;
+        clientFormat.mBytesPerPacket = sizeof(float) * channelCount;
+        clientFormat.mFramesPerPacket = 1;
+        clientFormat.mBytesPerFrame = sizeof(float) * channelCount;
+        clientFormat.mChannelsPerFrame = channelCount;
+        clientFormat.mBitsPerChannel = 8 * sizeof(float);
+        if (status == noErr) {
+            status = ExtAudioFileSetProperty(
+                file, kExtAudioFileProperty_ClientDataFormat,
+                sizeof(clientFormat), &clientFormat);
+        }
+        if (status != noErr || sourceFrames <= 0 || sourceFrames > UINT32_MAX) {
+            ExtAudioFileDispose(file);
+            BerdSetError(errorOut, BerdError(40, @"Could not prepare the audio file for decoding."));
+            return NULL;
+        }
+        uint32_t capacity = (uint32_t)sourceFrames;
+        float *samples = malloc((size_t)capacity * channelCount * sizeof(float));
+        if (!samples) {
+            ExtAudioFileDispose(file);
+            BerdSetError(errorOut, BerdError(41, @"Could not allocate decoded audio samples."));
+            return NULL;
+        }
+        uint32_t frameCount = 0;
+        while (frameCount < capacity) {
+            UInt32 requestedFrames = capacity - frameCount;
+            AudioBufferList buffers = {0};
+            buffers.mNumberBuffers = 1;
+            buffers.mBuffers[0].mNumberChannels = channelCount;
+            buffers.mBuffers[0].mDataByteSize = requestedFrames * channelCount * sizeof(float);
+            buffers.mBuffers[0].mData = samples + ((size_t)frameCount * channelCount);
+            status = ExtAudioFileRead(file, &requestedFrames, &buffers);
+            if (status != noErr || requestedFrames == 0) break;
+            frameCount += requestedFrames;
+        }
+        ExtAudioFileDispose(file);
+        if (status != noErr || frameCount != capacity) {
+            free(samples);
+            BerdSetError(errorOut, BerdError(42, @"Could not decode the audio file."));
+            return NULL;
+        }
+        if (channelCount > 1) {
+            for (uint32_t frame = 0; frame < frameCount; frame++) {
+                float mixed = 0;
+                for (uint32_t channel = 0; channel < channelCount; channel++) {
+                    mixed += samples[frame * channelCount + channel];
+                }
+                samples[frame] = mixed / channelCount;
+            }
+        }
+        *sampleRateOut = (uint32_t)clientFormat.mSampleRate;
+        *frameCountOut = frameCount;
+        return samples;
+    }
+}
+
+void berd_audio_free_samples(float *samples) {
+    free(samples);
+}
+
 void *berd_pocket_audio_player_create(
     uint32_t sampleRate,
     float rate,

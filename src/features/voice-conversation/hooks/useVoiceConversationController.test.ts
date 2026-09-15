@@ -3,6 +3,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useVoiceConversationStore } from "../stores/voiceConversationStore";
 import { VoiceMicrophoneCaptureError } from "../api/voiceConversation";
+import { setStatusSoundPreference } from "../lib/statusSoundPreference";
 
 const nativeAssistantSpeechMocks = vi.hoisted(() => ({
   capture: vi.fn(() => []),
@@ -13,6 +14,7 @@ const nativeAssistantSpeechMocks = vi.hoisted(() => ({
 const tauriWindowMocks = vi.hoisted(() => ({ label: "main" }));
 const voiceApiMocks = vi.hoisted(() => ({
   confirmForegroundSession: vi.fn<() => Promise<number>>(),
+  updateStatusSounds: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
 }));
 const microphonePermissionMocks = vi.hoisted(() => ({
   getStatus: vi.fn<() => Promise<"authorized" | "denied">>(),
@@ -38,6 +40,7 @@ vi.mock("../api/voiceConversation", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../api/voiceConversation")>()),
   confirmVoiceConversationForegroundSession:
     voiceApiMocks.confirmForegroundSession,
+  updateVoiceConversationStatusSounds: voiceApiMocks.updateStatusSounds,
 }));
 
 vi.mock("../api/microphonePermission", () => ({
@@ -64,6 +67,7 @@ import {
   createVoiceTranscriptDeliveryQueue,
   hasDeliveredVoiceTranscript,
   observeVoiceConversationControlVisibility,
+  observeChainedVoiceStatus,
   replaceActiveVoiceConversation,
   resetVoiceUiWhenRunSettles,
   resolveActiveVoiceButtonAction,
@@ -197,6 +201,43 @@ describe("voice transcript delivery coordination", () => {
     ).toBe(false);
   });
 
+  it("silences waiting during a tool-free run without changing the preference", () => {
+    setStatusSoundPreference({ mode: "working-and-waiting" });
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-1",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 3,
+      },
+    });
+    const stopObserving = observeChainedVoiceStatus();
+    const store = useChatStore.getState();
+    store.setChatState("session-1", "thinking");
+    expect(voiceApiMocks.updateStatusSounds).toHaveBeenLastCalledWith(
+      expect.anything(),
+      "waiting",
+      { mode: "off" },
+    );
+    store.setChatState("session-1", "idle");
+    expect(voiceApiMocks.updateStatusSounds).toHaveBeenLastCalledWith(
+      expect.anything(),
+      "waiting",
+      { mode: "working-and-waiting" },
+    );
+    store.setActiveRunId("session-1", "run-1");
+    store.markToolCallInRun("session-1");
+    expect(voiceApiMocks.updateStatusSounds).toHaveBeenLastCalledWith(
+      expect.anything(),
+      "working",
+      { mode: "working-and-waiting" },
+    );
+    stopObserving();
+  });
+
   it("keeps working state until an admitted run actually settles", async () => {
     useVoiceConversationStore.setState({
       status: {
@@ -212,17 +253,57 @@ describe("voice transcript delivery coordination", () => {
       activityFallbackState: "agent-working",
     });
 
+    const stopObserving = observeChainedVoiceStatus();
     resetVoiceUiWhenRunSettles("session-1", 3);
     await Promise.resolve();
     expect(useVoiceConversationStore.getState().uiState).toBe("agent-working");
 
     useChatStore.getState().setActiveRunId("session-1", "run-1");
+    useChatStore.getState().markToolCallInRun("session-1");
+    voiceApiMocks.updateStatusSounds.mockClear();
+    useVoiceConversationStore.getState().setUiState("agent-speaking");
+    useVoiceConversationStore.getState().setUiState("listening");
+    expect(voiceApiMocks.updateStatusSounds).not.toHaveBeenCalled();
     useChatStore.getState().setActiveRunId("session-1", null);
 
     expect(useVoiceConversationStore.getState().uiState).toBe("listening");
+    expect(voiceApiMocks.updateStatusSounds).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "session-1", revision: 3 }),
+      "waiting",
+      { mode: "working" },
+    );
+
+    voiceApiMocks.updateStatusSounds.mockClear();
+    useChatStore.getState().setActiveRunId("session-1", "run-2");
+    expect(useVoiceConversationStore.getState().uiState).toBe("agent-working");
+    expect(voiceApiMocks.updateStatusSounds).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "session-1" }),
+      "waiting",
+      { mode: "off" },
+    );
+    useChatStore.getState().markToolCallInRun("session-1");
+    expect(voiceApiMocks.updateStatusSounds).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "session-1", revision: 3 }),
+      "working",
+      { mode: "working" },
+    );
+
+    voiceApiMocks.updateStatusSounds.mockClear();
+    useChatStore.getState().markToolCallInRun("session-1");
+    expect(voiceApiMocks.updateStatusSounds).not.toHaveBeenCalled();
+    useChatStore.getState().setActiveRunId("session-1", null);
+    useChatStore.getState().setError("session-1", "run failed");
+    expect(useVoiceConversationStore.getState().uiState).toBe("listening");
+    expect(voiceApiMocks.updateStatusSounds).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "session-1", revision: 3 }),
+      "waiting",
+      { mode: "working" },
+    );
+    stopObserving();
   });
 
   beforeEach(() => {
+    window.localStorage.clear();
     tauriWindowMocks.label = "main";
     nativeAssistantSpeechMocks.capture.mockClear();
     nativeAssistantSpeechMocks.start.mockClear();
@@ -231,13 +312,62 @@ describe("voice transcript delivery coordination", () => {
     nativeAssistantSpeechMocks.takeNotices.mockReturnValue(null);
     voiceApiMocks.confirmForegroundSession.mockReset();
     voiceApiMocks.confirmForegroundSession.mockResolvedValue(1);
+    voiceApiMocks.updateStatusSounds.mockReset();
+    voiceApiMocks.updateStatusSounds.mockResolvedValue(undefined);
     microphonePermissionMocks.getStatus.mockReset();
     microphonePermissionMocks.getStatus.mockResolvedValue("authorized");
     useChatStore.setState({ messagesBySession: {}, sessionStateById: {} });
   });
 
+  it("applies settings changes to an active chained runtime", async () => {
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-1",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 3,
+      },
+      uiState: "agent-speaking",
+      activityFallbackState: "agent-working",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+    });
+    const { unmount } = renderHook(() =>
+      useVoiceConversationController({
+        sessionId: "session-1",
+        onSend: vi.fn(),
+        enabled: true,
+        isGooseSession: true,
+        pocketReady: true,
+        onPocketSetupRequired: vi.fn(),
+      }),
+    );
+
+    act(() => {
+      useChatStore.getState().setActiveRunId("session-1", "run-1");
+      useChatStore.getState().markToolCallInRun("session-1");
+      useVoiceConversationStore.getState().setUiState("listening");
+      setStatusSoundPreference({ mode: "working-and-waiting" });
+    });
+
+    await waitFor(() =>
+      expect(voiceApiMocks.updateStatusSounds).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: "session-1", revision: 3 }),
+        "working",
+        { mode: "working-and-waiting" },
+      ),
+    );
+    unmount();
+  });
+
   it("delivers a queued transcript after its chat becomes temporarily ineligible", async () => {
-    const onSend = vi.fn().mockResolvedValue(true);
+    const onSend = vi.fn().mockImplementation(async () => {
+      useChatStore.getState().setActiveRunId("session-1", "run-1");
+      return true;
+    });
     useVoiceConversationStore.setState({
       status: {
         available: true,
@@ -285,6 +415,11 @@ describe("voice transcript delivery coordination", () => {
       undefined,
       undefined,
       expect.objectContaining({ displayText: "keep this route" }),
+    );
+    expect(voiceApiMocks.updateStatusSounds).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "session-1", revision: 1 }),
+      "waiting",
+      { mode: "working" },
     );
   });
 
