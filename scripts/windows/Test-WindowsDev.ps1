@@ -36,6 +36,17 @@ function Assert-NoThrow {
     }
 }
 
+# Denylist of the PowerShell 6+-only constructs that have actually bitten the
+# Windows scripts: the [semver] type accelerator, Start-ThreadJob, and
+# ForEach-Object -Parallel. It is deliberately not a general 5.1 compatibility
+# checker; that guarantee comes from CI running this whole suite under
+# powershell.exe ("Run Windows script tests under Windows PowerShell 5.1" in
+# .github/workflows/ci.yml).
+function Test-PowerShell7OnlyConstruct {
+    param([string]$Text)
+    return [bool]($Text -match '\[semver\]|Start-ThreadJob|ForEach-Object[^\r\n]*-Parallel\b')
+}
+
 $oldGooseDevRoot = $env:GOOSE_DEV_ROOT
 $oldGooseRepo = $env:GOOSE_DEV_REPO
 $oldGooseTarget = $env:GOOSE_DEV_CARGO_TARGET_DIR
@@ -173,17 +184,25 @@ try {
         Write-Host "SKIP native updater semver ordering (PowerShell $($PSVersionTable.PSVersion) has no SemanticVersion type)" -ForegroundColor Yellow
     }
 
-    # Windows PowerShell 5.1 is the host every justfile Windows recipe pins, so
-    # the Windows scripts must stay clear of PowerShell 6+ only constructs.
-    $powerShell7OnlyPattern = '\[semver\]|Start-ThreadJob|ForEach-Object[^\r\n]*-Parallel\b'
-    # This harness names the forbidden tokens in the pattern above and already
-    # runs under 5.1 in CI, so it is exempt from the scan.
+    # Pin the limited contract of Test-PowerShell7OnlyConstruct: each of the
+    # three denylisted constructs is detected, and look-alike 5.1-safe lines
+    # are not. This is a known-offender scan, not a full 5.1 compatibility
+    # check; the real guarantee is CI running this suite under powershell.exe.
+    Assert-Equal "PowerShell 6+ scan detects [semver]" (Test-PowerShell7OnlyConstruct '[semver]"1.2.3"') $true
+    Assert-Equal "PowerShell 6+ scan detects Start-ThreadJob" (Test-PowerShell7OnlyConstruct 'Start-ThreadJob { }') $true
+    Assert-Equal "PowerShell 6+ scan detects ForEach-Object -Parallel" (Test-PowerShell7OnlyConstruct '1..3 | ForEach-Object -Parallel { $_ }') $true
+    Assert-Equal "PowerShell 6+ scan ignores plain ForEach-Object" (Test-PowerShell7OnlyConstruct 'ForEach-Object { $_ }') $false
+    Assert-Equal "PowerShell 6+ scan ignores the word semver in a string" (Test-PowerShell7OnlyConstruct '$x = "semver"') $false
+    Assert-Equal "PowerShell 6+ scan ignores Start-Job" (Test-PowerShell7OnlyConstruct 'Start-Job { }') $false
+
+    # This harness holds the fixtures above (which spell out the denylisted
+    # tokens) and already runs under 5.1 in CI, so it is exempt from the scan.
     $windowsScripts = Get-ChildItem -Path $PSScriptRoot -File |
         Where-Object { $_.Extension -in @(".ps1", ".psm1") -and $_.Name -ne "Test-WindowsDev.ps1" }
     $powerShell7OnlyOffenders = @($windowsScripts | Where-Object {
-        (Get-Content -Raw -LiteralPath $_.FullName) -match $powerShell7OnlyPattern
+        Test-PowerShell7OnlyConstruct (Get-Content -Raw -LiteralPath $_.FullName)
     } | ForEach-Object { $_.Name })
-    Assert-Equal "Windows scripts stay Windows PowerShell 5.1 compatible ($($powerShell7OnlyOffenders -join ', '))" `
+    Assert-Equal "Windows scripts avoid the known PowerShell 6+-only constructs ([semver], Start-ThreadJob, ForEach-Object -Parallel) ($($powerShell7OnlyOffenders -join ', '))" `
         $powerShell7OnlyOffenders.Count 0
 
     $buildScript = Get-Content -Raw (Join-Path (Get-BerdRepoRoot) "src-tauri\build.rs")

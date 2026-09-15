@@ -18,8 +18,10 @@ Native Berd provider sign-in is intentionally deferred on Windows. The app and
 Use normal PowerShell. You do not need a Visual Studio Developer PowerShell; the
 Windows scripts load the Visual Studio build environment before running Cargo.
 Windows PowerShell 5.1 (the `powershell.exe` every `just` Windows recipe runs)
-and PowerShell 7 are both supported; the scripts avoid PowerShell 6+ only
-constructs and `just test-windows-dev` checks that.
+and PowerShell 7 are both supported. CI runs `just test-windows-dev` under
+`powershell.exe`, which is what keeps the scripts 5.1-compatible; the suite also
+scans the Windows scripts for the PowerShell 6+-only constructs that have bitten
+them before (`[semver]`, `Start-ThreadJob`, `ForEach-Object -Parallel`).
 
 The repeatable entrypoint is `just`, but a completely fresh Windows machine
 still needs two seed steps:
