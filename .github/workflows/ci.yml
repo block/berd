@@ -137,6 +137,12 @@ jobs:
         shell: powershell
         run: just ci-windows
 
+      # Windows PowerShell 5.1 is the host the justfile pins for every Windows
+      # recipe; running the script tests under it keeps them 5.1-compatible.
+      - name: Run Windows script tests under Windows PowerShell 5.1
+        shell: powershell
+        run: just test-windows-dev
+
   transcript-virtualization:
     name: Transcript virtualization
     needs: frontend
