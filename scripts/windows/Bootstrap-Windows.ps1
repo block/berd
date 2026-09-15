@@ -137,7 +137,7 @@ function Invoke-PrerequisiteEvaluation {
 
     $gitBash = $prereqs.GitBash.Path
     if (-not $prereqs.GitBash.Found) {
-        Add-Failure "Git Bash" "Git for Windows bash.exe was not found (the WSL and Microsoft Store bash.exe stubs do not count)" "Git.Git"
+        Add-Failure "Git Bash" "Git for Windows bash.exe was not found in an installed or portable Git, or beside the git.exe on PATH (WSL, Microsoft Store, Cygwin, and MSYS2 bash.exe do not count)" "Git.Git"
     } else {
         Add-Pass "Git Bash" $gitBash
     }

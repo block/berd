@@ -89,13 +89,35 @@ try {
     Assert-Equal "git bash filter accepts the machine-wide Git install" (Test-GitBashCandidatePath "C:\Program Files\Git\bin\bash.exe") $true
     Assert-Equal "git bash filter accepts a per-user Git install" `
         (Test-GitBashCandidatePath "C:\Users\dev\AppData\Local\Programs\Git\usr\bin\bash.exe") $true
+    # Cygwin and MSYS2 ship bash.exe in the same bin\ and usr\bin\ shapes as
+    # Git for Windows, so the layout check must positively require the
+    # <root>\cmd\git.exe that only Git for Windows (installed or portable)
+    # provides. The file-exists probe is injected so no real installs are
+    # needed and the outcome is deterministic on every machine.
+    $gitForWindowsFixture = { param($p) $p -in @("D:\PortableGit\cmd\git.exe", "C:\Program Files\Git\cmd\git.exe") }
+    Assert-Equal "git bash layout rejects Cygwin bash" `
+        (Test-GitForWindowsLayout "C:\cygwin64\bin\bash.exe" -FileExists $gitForWindowsFixture) $false
+    Assert-Equal "git bash layout rejects MSYS2 bash" `
+        (Test-GitForWindowsLayout "C:\msys64\usr\bin\bash.exe" -FileExists $gitForWindowsFixture) $false
+    Assert-Equal "git bash layout accepts portable Git derived from git.exe" `
+        (Test-GitForWindowsLayout "D:\PortableGit\usr\bin\bash.exe" -FileExists $gitForWindowsFixture) $true
+    Assert-Equal "git bash layout accepts the machine-wide Git install" `
+        (Test-GitForWindowsLayout "C:\Program Files\Git\bin\bash.exe" -FileExists $gitForWindowsFixture) $true
+    Assert-Equal "git bash layout rejects a Git-shaped tree without cmd\git.exe" `
+        (Test-GitForWindowsLayout "C:\Program Files\Git\bin\bash.exe" -FileExists { param($p) $false }) $false
+    Assert-Equal "git bash layout rejects bash outside a bin directory" `
+        (Test-GitForWindowsLayout "C:\tools\bash.exe" -FileExists { param($p) $true }) $false
+    Assert-Equal "git bash layout rejects blank paths" (Test-GitForWindowsLayout "" -FileExists { param($p) $true }) $false
     Assert-Equal "git bash lookup applies the filter to every candidate" `
         ((Get-Command Get-GitBashPath -CommandType Function).Definition -match 'Test-GitBashCandidatePath \$candidate') $true
+    Assert-Equal "git bash lookup verifies the Git for Windows layout of every candidate" `
+        ((Get-Command Get-GitBashPath -CommandType Function).Definition -match 'Test-GitForWindowsLayout \$candidate') $true
     Assert-Equal "git bash lookup derives candidates from git.exe" `
         ((Get-Command Get-GitBashPath -CommandType Function).Definition -match 'Get-CommandSource "git"') $true
     $gitBashPath = Get-GitBashPath
     if (-not [string]::IsNullOrWhiteSpace($gitBashPath)) {
         Assert-Equal "git bash lookup result passes its own filter" (Test-GitBashCandidatePath $gitBashPath) $true
+        Assert-Equal "git bash lookup result is a Git for Windows layout" (Test-GitForWindowsLayout $gitBashPath) $true
         Assert-Equal "git bash lookup result exists" (Test-Path -LiteralPath $gitBashPath -PathType Leaf) $true
     }
 

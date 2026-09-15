@@ -1611,12 +1611,43 @@ function Test-GitBashCandidatePath {
     return $true
 }
 
+function Test-GitForWindowsLayout {
+    # True only when a bash.exe path sits inside a Git for Windows tree. Git
+    # for Windows (installed or portable) places bash.exe at <root>\bin\bash.exe
+    # and <root>\usr\bin\bash.exe, and always ships <root>\cmd\git.exe beside
+    # them. Cygwin (C:\cygwin64\bin\bash.exe) and MSYS2
+    # (C:\msys64\usr\bin\bash.exe) use the same bin\ and usr\bin\ shapes but
+    # have no cmd\git.exe, so requiring that file positively identifies Git for
+    # Windows instead of trusting whichever bash.exe happens to be on PATH.
+    # $FileExists is injectable so the check is testable without the files.
+    param(
+        [AllowNull()][string]$BashPath,
+        [scriptblock]$FileExists = { param($p) Test-Path -LiteralPath $p -PathType Leaf }
+    )
+    if ([string]::IsNullOrWhiteSpace($BashPath)) {
+        return $false
+    }
+    # Lazy root so `<root>\usr\bin\bash.exe` yields <root>, not <root>\usr.
+    if ($BashPath -notmatch '^(?<root>.+?)\\(usr\\)?bin\\bash\.exe$') {
+        return $false
+    }
+    # String concatenation instead of Join-Path: Windows PowerShell 5.1's
+    # Join-Path fails when the drive letter does not exist on this machine,
+    # which would break the pure check for injected fixtures.
+    $gitExe = $Matches['root'].TrimEnd('\') + '\cmd\git.exe'
+    return [bool](& $FileExists $gitExe)
+}
+
 function Get-GitBashPath {
     # Prefer Git for Windows' own bash.exe. Machine-wide and per-user (winget
     # user scope) install roots come first, then the root of whichever git.exe
-    # is on PATH, then every bash.exe PATH resolves to; stubs that cannot run
-    # scripts are filtered out. Returns $null when nothing usable exists so
-    # bootstrap and doctor report a real failure instead of the WSL launcher.
+    # is on PATH (covers portable Git), then every bash.exe PATH resolves to.
+    # Every candidate must pass two checks before it is accepted: the string
+    # filter that drops the WSL/Store stubs and Codex runtimes, and a positive
+    # Git for Windows layout check (<root>\cmd\git.exe must exist beside it) so
+    # Cygwin, MSYS2, or a standalone bash.exe on PATH never passes as the Git
+    # Bash prerequisite. Returns $null when nothing usable exists so bootstrap
+    # and doctor report a real failure instead of an unrelated bash.
     $candidates = New-Object System.Collections.Generic.List[string]
     foreach ($root in @($env:ProgramFiles, ${env:ProgramFiles(x86)}, (Join-Path (Get-LocalAppDataRoot) "Programs"))) {
         if (-not [string]::IsNullOrWhiteSpace($root)) {
@@ -1645,7 +1676,7 @@ function Get-GitBashPath {
     }
 
     foreach ($candidate in ($candidates | Select-Object -Unique)) {
-        if ((Test-GitBashCandidatePath $candidate) -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+        if ((Test-GitBashCandidatePath $candidate) -and (Test-GitForWindowsLayout $candidate) -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
             return $candidate
         }
     }
