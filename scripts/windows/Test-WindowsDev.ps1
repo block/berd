@@ -159,10 +159,32 @@ try {
         ($bundleScript -notmatch 'NotePropertyName version -NotePropertyValue \$resolvedVersion\.Version') $true
     Assert-Equal "Tauri config preserves prerelease package identity" `
         ($bundleScript -match 'NotePropertyName version -NotePropertyValue \$resolvedVersion\.RichVersion') $true
-    Assert-Equal "native updater orders rc.2 after rc.1" `
-        ([semver]"1.2.3-rc.2" -gt [semver]"1.2.3-rc.1") $true
-    Assert-Equal "native updater orders stable after prerelease" `
-        ([semver]"1.2.3" -gt [semver]"1.2.3-rc.2") $true
+    # These two assertions exercise System.Management.Automation.SemanticVersion,
+    # the type behind the PowerShell 6+ semver accelerator, not Berd code.
+    # Windows PowerShell 5.1, which every justfile Windows recipe runs, has no
+    # such type, so only check the ordering where it exists.
+    $semanticVersionType = "System.Management.Automation.SemanticVersion" -as [type]
+    if ($null -ne $semanticVersionType) {
+        Assert-Equal "native updater orders rc.2 after rc.1" `
+            (("1.2.3-rc.2" -as $semanticVersionType) -gt ("1.2.3-rc.1" -as $semanticVersionType)) $true
+        Assert-Equal "native updater orders stable after prerelease" `
+            (("1.2.3" -as $semanticVersionType) -gt ("1.2.3-rc.2" -as $semanticVersionType)) $true
+    } else {
+        Write-Host "SKIP native updater semver ordering (PowerShell $($PSVersionTable.PSVersion) has no SemanticVersion type)" -ForegroundColor Yellow
+    }
+
+    # Windows PowerShell 5.1 is the host every justfile Windows recipe pins, so
+    # the Windows scripts must stay clear of PowerShell 6+ only constructs.
+    $powerShell7OnlyPattern = '\[semver\]|Start-ThreadJob|ForEach-Object[^\r\n]*-Parallel\b'
+    # This harness names the forbidden tokens in the pattern above and already
+    # runs under 5.1 in CI, so it is exempt from the scan.
+    $windowsScripts = Get-ChildItem -Path $PSScriptRoot -File |
+        Where-Object { $_.Extension -in @(".ps1", ".psm1") -and $_.Name -ne "Test-WindowsDev.ps1" }
+    $powerShell7OnlyOffenders = @($windowsScripts | Where-Object {
+        (Get-Content -Raw -LiteralPath $_.FullName) -match $powerShell7OnlyPattern
+    } | ForEach-Object { $_.Name })
+    Assert-Equal "Windows scripts stay Windows PowerShell 5.1 compatible ($($powerShell7OnlyOffenders -join ', '))" `
+        $powerShell7OnlyOffenders.Count 0
 
     $buildScript = Get-Content -Raw (Join-Path (Get-BerdRepoRoot) "src-tauri\build.rs")
     Assert-Equal "Rust rebuilds when the resolved app version changes" ($buildScript -match 'cargo:rerun-if-env-changed=BERD_APP_VERSION') $true
