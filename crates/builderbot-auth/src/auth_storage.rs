@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 #[cfg(any(debug_assertions, test))]
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 #[cfg(any(debug_assertions, test))]
 use std::sync::Mutex;
 
@@ -129,7 +129,16 @@ pub fn default_session_storage_for_bb_home(
                     path,
                 ))));
             }
-            Ok(Box::new(KeyringSessionCredentialStorage))
+            // The OS keyring backend exists only on macOS. Elsewhere, default
+            // to the file store under bb home so Windows and Linux builds hold
+            // a session without every user first exporting BB_AUTH_STORAGE.
+            // That file is protected by directory permissions, not a keyring:
+            // 0600 on Unix, the user-profile ACL on Windows.
+            if cfg!(target_os = "macos") {
+                Ok(Box::new(KeyringSessionCredentialStorage))
+            } else {
+                file_storage_from_env(&bb_home)
+            }
         }
         Err(error) => Err(anyhow!("read {BB_AUTH_STORAGE_ENV_VAR}: {error}")),
     }
@@ -140,13 +149,6 @@ pub fn stored_session_credential_header_value(
     server_url: &str,
     bb_home: PathBuf,
 ) -> Result<Option<String>> {
-    #[cfg(not(target_os = "macos"))]
-    if std::env::var_os(BB_AUTH_STORAGE_ENV_VAR).is_none()
-        && std::env::var_os(BB_AUTH_STORAGE_FILE_ENV_VAR).is_none()
-    {
-        return Ok(None);
-    }
-
     let storage = default_session_storage_for_bb_home(bb_home)?;
     let storage_key = SessionStorageKey::new(profile, server_url);
     Ok(storage
@@ -182,10 +184,11 @@ pub fn kgoose_auth_storage_lookup_urls(base_url: &str, service_path: &str) -> Ve
 }
 
 fn supported_storage_values() -> &'static str {
-    if cfg!(debug_assertions) {
-        "keyring, memory, file, or file:<path>"
-    } else {
-        "keyring, file, or file:<path>"
+    match (cfg!(target_os = "macos"), cfg!(debug_assertions)) {
+        (true, true) => "keyring, memory, file, or file:<path>",
+        (true, false) => "keyring, file, or file:<path>",
+        (false, true) => "memory, file, or file:<path> (keyring is macOS-only)",
+        (false, false) => "file or file:<path> (keyring is macOS-only)",
     }
 }
 
@@ -399,7 +402,7 @@ fn keyring_delete_legacy_compose_token(_key: &SessionStorageKey) -> Result<bool>
 #[cfg(not(target_os = "macos"))]
 fn unsupported_keyring_storage<T>() -> Result<T> {
     anyhow::bail!(
-        "OS keyring browser auth storage is currently only implemented on macOS; set {BB_AUTH_STORAGE_ENV_VAR}=file for local testing"
+        "OS keyring browser auth storage is only implemented on macOS; other platforms default to file storage under bb home, or set {BB_AUTH_STORAGE_ENV_VAR}=file:<path>"
     )
 }
 
@@ -414,7 +417,7 @@ fn parse_stored_session(value: &str) -> Result<StoredSessionCredential> {
     }
 }
 
-fn restrict_permissions(path: &PathBuf) -> Result<()> {
+fn restrict_permissions(path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -422,12 +425,243 @@ fn restrict_permissions(path: &PathBuf) -> Result<()> {
         fs::set_permissions(path, permissions)
             .with_context(|| format!("chmod 600 {}", path.display()))?;
     }
+    // Windows has no mode bits to tighten; the file inherits the ACL of the
+    // user's bb home directory.
+    #[cfg(not(unix))]
+    let _ = path;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `default_session_storage_for_bb_home` reads process-global environment
+    /// variables, so the tests that touch them take this lock and restore the
+    /// previous values when the guard drops.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    struct StorageEnv {
+        _guard: std::sync::MutexGuard<'static, ()>,
+        saved: Vec<(&'static str, Option<std::ffi::OsString>)>,
+    }
+
+    impl StorageEnv {
+        fn cleared() -> Self {
+            let guard = ENV_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let names = [BB_AUTH_STORAGE_ENV_VAR, BB_AUTH_STORAGE_FILE_ENV_VAR];
+            let saved = names
+                .iter()
+                .map(|name| (*name, std::env::var_os(name)))
+                .collect();
+            for name in names {
+                std::env::remove_var(name);
+            }
+            Self {
+                _guard: guard,
+                saved,
+            }
+        }
+
+        fn set(&self, name: &str, value: &str) {
+            std::env::set_var(name, value);
+        }
+    }
+
+    impl Drop for StorageEnv {
+        fn drop(&mut self) {
+            for (name, value) in self.saved.drain(..) {
+                match value {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+        }
+    }
+
+    fn scratch_dir(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "bb-auth-storage-{label}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ))
+    }
+
+    fn sample_credential() -> StoredSessionCredential {
+        StoredSessionCredential {
+            session_credential: "session-token".to_string(),
+            expires_at: None,
+        }
+    }
+
+    const SAMPLE_SERVER_URL: &str = "https://kgoose.example.test/cash-app/goose";
+
+    #[test]
+    fn default_storage_without_env_matches_the_platform() {
+        let _env = StorageEnv::cleared();
+        let bb_home = scratch_dir("platform-default");
+
+        let storage = default_session_storage_for_bb_home(bb_home.clone()).expect("storage");
+
+        let expected = if cfg!(target_os = "macos") {
+            "keyring"
+        } else {
+            "file"
+        };
+        assert_eq!(storage.kind(), expected);
+        let _ = fs::remove_dir_all(bb_home);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn default_file_storage_lives_under_bb_home_and_round_trips() {
+        let _env = StorageEnv::cleared();
+        let bb_home = scratch_dir("bb-home-default");
+        let key = SessionStorageKey::new("default", SAMPLE_SERVER_URL);
+
+        let storage = default_session_storage_for_bb_home(bb_home.clone()).expect("storage");
+        storage
+            .set(&key, &sample_credential())
+            .expect("store credential");
+
+        assert!(
+            bb_home.join("auth-sessions.json").is_file(),
+            "default file storage must be <bb_home>/auth-sessions.json"
+        );
+        assert_eq!(
+            storage
+                .get(&key)
+                .expect("read credential")
+                .expect("credential")
+                .session_credential,
+            "session-token"
+        );
+        assert!(storage.delete(&key).expect("delete credential"));
+        assert!(storage.get(&key).expect("read after delete").is_none());
+        let _ = fs::remove_dir_all(bb_home);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn stored_header_value_reads_the_default_file_storage() {
+        let _env = StorageEnv::cleared();
+        let bb_home = scratch_dir("header-default");
+        let key = SessionStorageKey::new("default", SAMPLE_SERVER_URL);
+
+        assert_eq!(
+            stored_session_credential_header_value("default", SAMPLE_SERVER_URL, bb_home.clone())
+                .expect("lookup before storing"),
+            None
+        );
+        default_session_storage_for_bb_home(bb_home.clone())
+            .expect("storage")
+            .set(&key, &sample_credential())
+            .expect("store credential");
+
+        assert_eq!(
+            stored_session_credential_header_value("default", SAMPLE_SERVER_URL, bb_home.clone())
+                .expect("lookup after storing"),
+            Some("session-token".to_string())
+        );
+        let _ = fs::remove_dir_all(bb_home);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn explicit_keyring_request_is_refused_off_macos() {
+        let env = StorageEnv::cleared();
+        env.set(BB_AUTH_STORAGE_ENV_VAR, "keyring");
+        let key = SessionStorageKey::new("default", SAMPLE_SERVER_URL);
+
+        let storage =
+            default_session_storage_for_bb_home(scratch_dir("keyring-refused")).expect("storage");
+
+        assert_eq!(storage.kind(), "keyring");
+        let error = storage.get(&key).expect_err("keyring is macOS-only");
+        assert!(
+            error.to_string().contains("only implemented on macOS"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn explicit_file_path_override_wins_over_the_default() {
+        let env = StorageEnv::cleared();
+        let directory = scratch_dir("file-path-override");
+        let explicit = directory.join("explicit").join("sessions.json");
+        env.set(
+            BB_AUTH_STORAGE_ENV_VAR,
+            &format!("file:{}", explicit.display()),
+        );
+        let key = SessionStorageKey::new("default", SAMPLE_SERVER_URL);
+
+        let storage =
+            default_session_storage_for_bb_home(directory.join("bb-home")).expect("storage");
+        storage
+            .set(&key, &sample_credential())
+            .expect("store credential");
+
+        assert_eq!(storage.kind(), "file");
+        assert!(
+            explicit.is_file(),
+            "credential must land at the explicit path"
+        );
+        assert!(!directory
+            .join("bb-home")
+            .join("auth-sessions.json")
+            .exists());
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn storage_file_env_var_wins_over_the_default() {
+        let env = StorageEnv::cleared();
+        let directory = scratch_dir("file-env-override");
+        let explicit = directory.join("from-env").join("sessions.json");
+        env.set(
+            BB_AUTH_STORAGE_FILE_ENV_VAR,
+            &explicit.display().to_string(),
+        );
+        let key = SessionStorageKey::new("default", SAMPLE_SERVER_URL);
+
+        let storage =
+            default_session_storage_for_bb_home(directory.join("bb-home")).expect("storage");
+        storage
+            .set(&key, &sample_credential())
+            .expect("store credential");
+
+        assert_eq!(storage.kind(), "file");
+        assert!(
+            explicit.is_file(),
+            "credential must land at BB_AUTH_STORAGE_FILE"
+        );
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn unsupported_storage_value_names_the_platform_choices() {
+        let env = StorageEnv::cleared();
+        env.set(BB_AUTH_STORAGE_ENV_VAR, "cloud");
+
+        let error = default_session_storage_for_bb_home(scratch_dir("unsupported"))
+            .err()
+            .expect("unsupported storage must fail");
+
+        let message = error.to_string();
+        assert!(
+            message.contains("file:<path>"),
+            "unexpected error: {message}"
+        );
+        assert_eq!(
+            message.contains("keyring, "),
+            cfg!(target_os = "macos"),
+            "keyring must only be advertised as a choice on macOS: {message}"
+        );
+    }
 
     #[test]
     fn file_storage_scopes_credentials_by_profile_and_server() {
