@@ -63,7 +63,7 @@ Expected result:
 - kgoose validates the state cookie, exchanges the Auth0 code server-side, and redirects to the CLI loopback callback with a one-time exchange code
 - the CLI exchanges that code through kgoose and stores the returned session credential
 
-By default, the CLI stores browser auth sessions in the OS keyring on macOS. On Windows and Linux the default is a JSON file, `<bb home>/auth-sessions.json`, protected by directory permissions rather than a keyring (0600 on Unix, the user-profile ACL on Windows). For local debugging without touching the default store on any platform, use the `BB_AUTH_STORAGE=file` command above.
+By default, the CLI stores browser auth sessions in the OS keyring on macOS. On Windows and Linux the default is a JSON file, `<bb home>/auth-sessions.json`, protected by file permissions rather than a keyring (mode 0600 on Unix; on Windows the file's ACL is reset so only the current user has access). Writes replace the file atomically and are serialized across the desktop app and the CLI through a sibling `auth-sessions.json.lock`. For local debugging without touching the default store on any platform, use the `BB_AUTH_STORAGE=file` command above.
 
 ## Test In Staging
 
