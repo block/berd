@@ -70,7 +70,7 @@ Check-Command "git" "Run: just bootstrap-windows install" $prereqs.Git | Out-Nul
 
 $gitBash = $prereqs.GitBash.Path
 if (-not $prereqs.GitBash.Found) {
-    Fail "Git Bash" "bash.exe not found. Install Git for Windows with: winget install --id Git.Git -e"
+    Fail "Git Bash" "Git for Windows bash.exe not found (the WSL and Microsoft Store bash.exe stubs do not count). Install Git for Windows with: winget install --id Git.Git -e"
 } else {
     Pass "Git Bash" $gitBash
 }
