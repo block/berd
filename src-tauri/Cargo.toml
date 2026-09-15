@@ -46,6 +46,7 @@ ignore = "0.4.25"
 fern = "0.7"
 infer = "0.19.0"
 libc = "0.2"
+errno = "0.3"
 log = "0.4.29"
 mime_guess = "2"
 futures-util = "0.3"
@@ -88,10 +89,16 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 [target.'cfg(windows)'.dependencies]
 keyring = { version = "3.6.3", default-features = false, features = ["windows-native"] }
 windows-sys = { version = "0.59", features = [
+    "Wdk_Foundation",
+    "Wdk_Storage_FileSystem",
     "Win32_Foundation",
     "Win32_Globalization",
+    "Win32_Security",
+    "Win32_Security_Authorization",
     "Win32_Storage_FileSystem",
     "Win32_System_Com",
+    "Win32_System_IO",
+    "Win32_System_Memory",
     "Win32_System_Threading",
     "Win32_UI_Shell",
 ] }
