@@ -3,8 +3,10 @@
 `berd-voice session` is a development, full-authority voice session. The child
 owns speech recognition, finalized-input order, confirmation, speak admission,
 synthesis, source-frame delivery, playback lifecycle, and barge-in. The parent
-owns capture and playback devices: it writes normalized microphone PCM on stdin
-and consumes synthesized PCM from a dedicated inherited pipe. The child writes
+owns capture and conversational playback devices: it writes normalized microphone PCM on
+stdin and consumes synthesized PCM from a dedicated inherited pipe. Status cues are
+the narrow exception: the child plays them on the output-device name supplied by the
+parent, or the system default when none is supplied. The child writes
 flushed JSONL events to stdout. Diagnostics go only to stderr.
 
 ## Startup
@@ -44,17 +46,19 @@ remain terminal speech events.
 has no device-owning or stdout-multiplexed fallback.
 
 The first request must be `hello`. `input_during_tts` is the host's resolved
-initial policy; a host-specific `auto` mode must be resolved before the request:
+initial policy; a host-specific `auto` mode must be resolved before the request.
+`status_sound_output_device` is the host's selected playback-device name; omitting it uses the system default:
 
 ```json
-{"type":"hello","id":1,"input_during_tts":"allow_barge_in"}
+{"type":"hello","id":1,"input_during_tts":"allow_barge_in","status_sound_output_device":"MacBook Pro Speakers"}
 ```
 
-The response uses `protocol:4` as the exact session message-set version. The
-parent must reject a version it does not support:
+The response uses `protocol:5` as the exact session message-set version. The
+parent must reject a version it does not support; the JSON version is independent
+of the fixed binary framing marker described below:
 
 ```json
-{"type":"ready","id":1,"protocol":4,"session":{"tts":{"revision":1,"backend":"siri","voice":"Aaron","language":"en-US","rate":1.0},"input_during_tts":{"revision":1,"policy":"allow_barge_in"}}}
+{"type":"ready","id":1,"protocol":5,"session":{"tts":{"revision":1,"backend":"siri","voice":"Aaron","language":"en-US","rate":1.0},"input_during_tts":{"revision":1,"policy":"allow_barge_in"}}}
 ```
 
 The `session.tts` object is the authoritative, sanitized TTS configuration.
@@ -64,7 +68,9 @@ and `rate`. Credentials, endpoints, and bundle paths never appear on stdout.
 Detailed backend errors are diagnostics on stderr only; protocol rejection and
 fatal messages are sanitized at the stdout boundary.
 `session.input_during_tts` is the authoritative effective assistant-input
-policy and has its own revision.
+policy and has its own revision. Status-sound settings are per-update parameters,
+not session snapshot configuration. The runtime owns cue cadence and playback; it
+does not persist preferences.
 
 ## Stdin framing
 
@@ -179,9 +185,10 @@ it never admits a replacement while old host audio may still be active.
 ## Parent requests
 
 ```text
-{"type":"hello","id":u64,"input_during_tts":"allow_barge_in"|"suppress_input"}
+{"type":"hello","id":u64,"input_during_tts":"allow_barge_in"|"suppress_input","status_sound_output_device":string?}
 {"type":"set_paused","active":bool}
 {"type":"set_input_muted","id":u64,"active":bool}
+{"type":"set_conversation_status","id":u64,"status":"working"|"waiting","settings":StatusSoundSettings}
 {"type":"set_tts_settings","id":u64,"expected_revision":u64,"settings":TtsSettings}
 {"type":"set_input_during_tts","id":u64,"expected_revision":u64,"policy":"allow_barge_in"|"suppress_input"}
 {"type":"reset_input","id":u64}
@@ -197,6 +204,12 @@ audio acknowledgements listed above
 Unknown fields are rejected. IDs are positive. Speak text is at most 16 KiB.
 The parent cannot author speaking state or finalized input; those are derived
 only from PCM by the child runtime.
+
+`StatusSoundSettings` has a `mode` of `off`, `working`, or `working-and-waiting` and an optional per-session `volume` from 0 to 1 that defaults to `0.8`. No cue is emitted until the first `set_conversation_status` request. Cues play immediately on status transitions and repeat every five seconds; repeated identical updates preserve the cadence. After conversation audio ends, the current cue resumes immediately. `off` disables both cues; `working` repeats only the working cue and stays silent while waiting; `working-and-waiting` repeats the current working or waiting cue. Active user speech or assistant output suppresses playback without changing the working/waiting state. Pending recognition alone does not suppress playback. On macOS, working uses the system Pop sound and waiting uses Purr through the selected output device. The applied request is acknowledged with:
+
+```text
+{"type":"conversation_status_applied","id":u64,"status":"working"|"waiting","settings":StatusSoundSettings}
+```
 
 `set_tts_settings` accepts the same tagged public object projected by `ready`,
 without `revision`. It changes settings only for the already-active backend:

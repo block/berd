@@ -18,8 +18,12 @@ Siri bridge emits normalized 48 kHz mono Float32 PCM without opening an audio
 device; the existing Berd Siri player and the CLI use the same decoder.
 
 `berd-voice session` exposes the development voice-session protocol documented
-in [PROTOCOL.md](PROTOCOL.md). Siri TTS and macOS speech recognition are the
-defaults:
+in [PROTOCOL.md](PROTOCOL.md). The host supplies persisted status-sound settings
+and semantic `working` / `waiting` updates through that protocol; the runtime
+owns the five-second cadence, speech suppression, and macOS Pop/Purr playback.
+The default mode is `working`; `working-and-waiting` also plays idle cues, and `off` disables both. Status sounds default to a gain of `0.8`. Cues play immediately on a status transition and repeat every five seconds. When conversation audio ends, the current cue resumes immediately. Repeated identical status updates preserve the cadence. The host determines when work begins; the chained client signals working on its first live tool call and stays working until the run ends.
+
+Siri TTS and macOS speech recognition are the defaults:
 
 ```text
 berd-voice session --voice Aaron --language en-US --rate 1.0

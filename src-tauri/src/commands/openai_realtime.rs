@@ -33,6 +33,7 @@ pub struct OpenAiRealtimeRuntimeState {
 struct NativeRealtimeRuntime {
     owner_window: String,
     runtime: Arc<ManagedRealtimeHost>,
+    status_sounds: Option<berd_voice::ManagedStatusSoundRuntime>,
     protocol: RealtimeExpertSpokespersonSession,
     semantic_revision: Arc<AtomicU64>,
 }
@@ -128,11 +129,24 @@ pub fn start_openai_realtime_spokesperson_runtime(
     let semantic_revision = Arc::new(AtomicU64::new(0));
     let event_window = webview_window.clone();
     let event_session_id = session_id.clone();
+    let status_sounds =
+        berd_voice::ManagedStatusSoundRuntime::spawn(super::pocket_voice::selected_output_device())
+            .map_err(|error| log::warn!("Status sounds unavailable: {error}"))
+            .ok();
+    let runtime_status_sounds = status_sounds.clone();
+    let mut status_sound_activity = RealtimeStatusSoundActivity::default();
     let runtime = Arc::new(ManagedRealtimeHost::spawn(
         config,
         Arc::clone(&semantic_revision),
         create_native_realtime_output,
-        move |event| emit_runtime_provider_event(&event_window, &event_session_id, event),
+        move |event| {
+            update_realtime_status_sound_activity(
+                runtime_status_sounds.as_ref(),
+                &event,
+                &mut status_sound_activity,
+            );
+            emit_runtime_provider_event(&event_window, &event_session_id, event)
+        },
     )?);
     log::info!(
         "Starting Expert-Spokesperson session {session_id} with execution_path=berd_voice_in_process transport=websocket playback=native_pcm"
@@ -142,6 +156,7 @@ pub fn start_openai_realtime_spokesperson_runtime(
         NativeRealtimeRuntime {
             owner_window: webview_window.label().into(),
             runtime,
+            status_sounds,
             protocol: RealtimeExpertSpokespersonSession::new(initial_cursor, call_id),
             semantic_revision,
         },
@@ -157,6 +172,29 @@ fn ensure_native_realtime_playback_supported() -> Result<(), String> {
 #[cfg(not(target_os = "macos"))]
 fn ensure_native_realtime_playback_supported() -> Result<(), String> {
     Err("Native OpenAI Realtime playback is not supported on this platform".into())
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RealtimeStatusSoundUpdate {
+    status: berd_voice::ConversationStatus,
+    settings: berd_voice::StatusSoundSettings,
+}
+
+#[tauri::command]
+pub fn update_openai_realtime_status_sounds(
+    state: State<'_, OpenAiRealtimeRuntimeState>,
+    webview_window: WebviewWindow,
+    session_id: String,
+    update: RealtimeStatusSoundUpdate,
+) -> Result<(), String> {
+    with_runtime_entry(state, session_id, webview_window.label(), |entry| {
+        entry
+            .status_sounds
+            .as_ref()
+            .ok_or_else(|| "Status sound runtime is unavailable".to_string())?
+            .update(update.status, update.settings)
+    })
 }
 
 #[tauri::command]
@@ -208,6 +246,11 @@ pub async fn stop_openai_realtime_spokesperson_runtime(
         .get(&session_id)
         .map(|entry| {
             ensure_runtime_owner(&entry.owner_window, webview_window.label())?;
+            if let Some(status_sounds) = entry.status_sounds.as_ref() {
+                if let Err(error) = status_sounds.finish() {
+                    log::warn!("Status sound shutdown failed: {error}");
+                }
+            }
             Ok::<_, String>(Arc::clone(&entry.runtime))
         })
         .transpose()?;
@@ -237,6 +280,11 @@ pub async fn release_openai_realtime_spokesperson_runtime(
         sessions.remove(&session_id)
     };
     if let Some(entry) = entry {
+        if let Some(status_sounds) = entry.status_sounds.as_ref() {
+            if let Err(error) = status_sounds.finish() {
+                log::warn!("Status sound shutdown failed: {error}");
+            }
+        }
         tauri::async_runtime::spawn_blocking(move || entry.runtime.finish())
             .await
             .map_err(|error| format!("OpenAI Realtime runtime release task failed: {error}"))??;
@@ -256,7 +304,14 @@ pub fn handle_owner_window_destroyed(app: &AppHandle, window_label: &str) {
             owned_session_ids
                 .into_iter()
                 .filter_map(|session_id| sessions.remove(&session_id))
-                .map(|entry| entry.runtime)
+                .map(|entry| {
+                    if let Some(status_sounds) = entry.status_sounds.as_ref() {
+                        if let Err(error) = status_sounds.finish() {
+                            log::warn!("Status sound shutdown failed: {error}");
+                        }
+                    }
+                    entry.runtime
+                })
                 .collect::<Vec<_>>()
         }
         Err(_) => {
@@ -273,6 +328,24 @@ pub fn handle_owner_window_destroyed(app: &AppHandle, window_label: &str) {
             }
         });
     }
+}
+
+fn with_runtime_entry<T>(
+    state: State<'_, OpenAiRealtimeRuntimeState>,
+    session_id: String,
+    owner_window: &str,
+    operation: impl FnOnce(&NativeRealtimeRuntime) -> Result<T, String>,
+) -> Result<T, String> {
+    let session_id = non_empty_session_id(session_id)?;
+    let sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "OpenAI Realtime runtime state is unavailable".to_string())?;
+    let entry = sessions
+        .get(&session_id)
+        .ok_or("OpenAI Realtime runtime session is not active")?;
+    ensure_runtime_owner(&entry.owner_window, owner_window)?;
+    operation(entry)
 }
 
 fn with_runtime<T>(
@@ -342,6 +415,76 @@ pub async fn update_openai_realtime_spokesperson_settings(
     })
     .await
     .map_err(|error| format!("Spokesperson settings task failed: {error}"))?
+}
+
+#[derive(Default)]
+struct RealtimeStatusSoundActivity {
+    speaking_item_ids: std::collections::HashSet<String>,
+    transcription_item_ids: std::collections::HashSet<String>,
+    playback_active: bool,
+}
+
+impl RealtimeStatusSoundActivity {
+    fn update(&mut self, event: &serde_json::Value) -> Option<bool> {
+        let item_id = || {
+            event
+                .get("item_id")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        };
+        match event.get("type").and_then(serde_json::Value::as_str) {
+            Some("input_audio_buffer.speech_started") => {
+                if let Some(item_id) = item_id() {
+                    self.speaking_item_ids.insert(item_id.clone());
+                    self.transcription_item_ids.insert(item_id);
+                }
+            }
+            Some("input_audio_buffer.speech_stopped") => {
+                if let Some(item_id) = item_id() {
+                    self.speaking_item_ids.remove(&item_id);
+                }
+            }
+            Some(
+                "conversation.item.input_audio_transcription.completed"
+                | "conversation.item.input_audio_transcription.failed",
+            ) => {
+                if let Some(item_id) = item_id() {
+                    self.speaking_item_ids.remove(&item_id);
+                    self.transcription_item_ids.remove(&item_id);
+                }
+            }
+            Some("input_audio_buffer.cleared") => {
+                self.speaking_item_ids.clear();
+                self.transcription_item_ids.clear();
+            }
+            Some("output_audio_buffer.started") => self.playback_active = true,
+            Some("output_audio_buffer.stopped" | "output_audio_buffer.cleared") => {
+                self.playback_active = false;
+            }
+            _ => return None,
+        }
+        Some(
+            !self.speaking_item_ids.is_empty()
+                || !self.transcription_item_ids.is_empty()
+                || self.playback_active,
+        )
+    }
+}
+
+fn update_realtime_status_sound_activity(
+    status_sounds: Option<&berd_voice::ManagedStatusSoundRuntime>,
+    event: &serde_json::Value,
+    activity: &mut RealtimeStatusSoundActivity,
+) {
+    let Some(conversation_active) = activity.update(event) else {
+        return;
+    };
+    let Some(status_sounds) = status_sounds else {
+        return;
+    };
+    if let Err(error) = status_sounds.set_conversation_active(conversation_active) {
+        log::warn!("Could not update Realtime status sound activity: {error}");
+    }
 }
 
 fn emit_runtime_provider_event(
@@ -714,6 +857,7 @@ fn client_secret_value(value: &serde_json::Value) -> Option<&str> {
 mod tests {
     use super::{
         ensure_runtime_owner, parse_client_secret, realtime_transcription_client_secret_request,
+        RealtimeStatusSoundActivity,
     };
     use serde_json::json;
 
@@ -726,6 +870,67 @@ mod tests {
                 "This window does not own the OpenAI Realtime runtime session"
             );
         }
+    }
+
+    #[test]
+    fn realtime_status_sound_activity_aggregates_input_and_output() {
+        let mut activity = RealtimeStatusSoundActivity::default();
+
+        assert_eq!(
+            activity.update(
+                &json!({ "type": "input_audio_buffer.speech_started", "item_id": "user-1" })
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            activity.update(&json!({ "type": "output_audio_buffer.started" })),
+            Some(true)
+        );
+        assert_eq!(
+            activity.update(
+                &json!({ "type": "input_audio_buffer.speech_stopped", "item_id": "user-1" })
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            activity.update(&json!({ "type": "output_audio_buffer.stopped" })),
+            Some(true)
+        );
+        assert_eq!(
+            activity.update(&json!({ "type": "conversation.item.input_audio_transcription.completed", "item_id": "user-1" })),
+            Some(false)
+        );
+        assert_eq!(activity.update(&json!({ "type": "response.done" })), None);
+    }
+
+    #[test]
+    fn realtime_status_sound_activity_releases_abandoned_input_when_cleared() {
+        let mut activity = RealtimeStatusSoundActivity::default();
+
+        assert_eq!(
+            activity.update(
+                &json!({ "type": "input_audio_buffer.speech_started", "item_id": "user-1" })
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            activity.update(&json!({ "type": "input_audio_buffer.cleared" })),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn realtime_status_sound_activity_treats_cleared_output_as_inactive() {
+        let mut activity = RealtimeStatusSoundActivity::default();
+
+        assert_eq!(
+            activity.update(&json!({ "type": "output_audio_buffer.started" })),
+            Some(true)
+        );
+        assert_eq!(
+            activity.update(&json!({ "type": "output_audio_buffer.cleared" })),
+            Some(false)
+        );
     }
 
     #[test]

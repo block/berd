@@ -46,6 +46,7 @@ use berd_voice::spokesperson_voice_update::{
     validate_voice_update_settings, VoiceBarrierAction, VoiceUpdateAction, VoiceUpdatePurpose,
     VoiceUpdateQueue, VoiceUpdateRequest, VoiceUpdateTransaction,
 };
+use berd_voice::StatusSoundRuntime;
 use berd_voice::{
     estimated_spoken_through_utf8,
     local_assets::{
@@ -65,7 +66,7 @@ use session_audio::{
     AUDIO_CANCELLED,
 };
 
-const SESSION_PROTOCOL_VERSION: u32 = 4;
+const SESSION_PROTOCOL_VERSION: u32 = 5;
 const INPUT_FRAME_MARKER: u8 = 3;
 const MAX_LINE_BYTES: usize = 1024 * 1024;
 const FRAME_MAGIC: [u8; 2] = *b"BV";
@@ -1235,6 +1236,20 @@ fn run_management_command(command: ManagementCommand) -> Result<(), ManagementFa
     }
 }
 
+fn standard_session_status_cues_suppressed(
+    core: &SessionCore,
+    assistant_output_active: bool,
+) -> bool {
+    core.user_speaking() || assistant_output_active
+}
+
+fn expert_session_status_cues_suppressed(
+    turn_gate: &ExpertTurnGate,
+    assistant_output_active: bool,
+) -> bool {
+    turn_gate.lifecycle.user_speaking() || assistant_output_active
+}
+
 fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String> {
     let (control_tx, control_rx) = mpsc::channel();
     let (pcm_tx, pcm_rx) = mpsc::sync_channel(INPUT_QUEUE_CAPACITY);
@@ -1259,6 +1274,7 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
     let mut processed_pcm = 0_u64;
     let mut held: Option<PrepareRequest> = None;
     let mut active: Option<ActivePlayback> = None;
+    let mut status_sound_runtime = StatusSoundRuntime::default();
 
     loop {
         if let Some(events) = input_events.as_mut() {
@@ -1327,6 +1343,11 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                     message: "output readiness timed out".into(),
                 },
             )?;
+        }
+        let conversation_active = standard_session_status_cues_suppressed(&core, active.is_some());
+        let status_sound_result = status_sound_runtime.poll(conversation_active);
+        if let Err(message) = status_sound_result {
+            eprintln!("status sound playback disabled: {message}");
         }
 
         let Some(input) = receive_session_input(
@@ -1424,6 +1445,7 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
             Input::Request(SessionRequest::Hello {
                 id,
                 input_during_tts,
+                status_sound_output_device,
             }) => {
                 if initialized {
                     write_message(
@@ -1474,6 +1496,7 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                 input_runtime = Some(runtime);
                 input_events = Some(events);
                 initialized = true;
+                status_sound_runtime.set_output_device(status_sound_output_device);
                 let input_policy = InputDuringTtsSlot::new(input_during_tts);
                 let session = VoiceSessionSnapshot {
                     tts: slot.snapshot()?,
@@ -1499,6 +1522,21 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                     },
                 )?;
                 return Ok(());
+            }
+            Input::Request(SessionRequest::SetConversationStatus {
+                id,
+                status,
+                settings,
+            }) => {
+                status_sound_runtime.update(status, settings);
+                write_message(
+                    &mut writer,
+                    &SessionMessage::ConversationStatusApplied {
+                        id,
+                        status,
+                        settings,
+                    },
+                )?;
             }
             Input::Request(SessionRequest::SetInputMuted { id, active: muted }) => {
                 handle_input_muted(
@@ -2445,6 +2483,7 @@ fn run_expert_spokesperson_session(
     let mut input_muted = false;
     let mut queued_tts_settings = VoiceUpdateQueue::<PendingSpokespersonSettingsUpdate>::default();
     let mut pending_voice_update: Option<VoiceUpdateTransaction> = None;
+    let mut status_sound_runtime = StatusSoundRuntime::default();
 
     loop {
         if initialized {
@@ -3300,6 +3339,12 @@ fn run_expert_spokesperson_session(
                 )?;
             }
         }
+        let conversation_active =
+            expert_session_status_cues_suppressed(&turn_gate, active.is_some());
+        let status_sound_result = status_sound_runtime.poll(conversation_active);
+        if let Err(message) = status_sound_result {
+            eprintln!("status sound playback disabled: {message}");
+        }
 
         let Some(input) = receive_session_input(
             &control_rx,
@@ -3393,6 +3438,7 @@ fn run_expert_spokesperson_session(
             Input::Request(SessionRequest::Hello {
                 id,
                 input_during_tts,
+                status_sound_output_device,
             }) => {
                 if initialized {
                     write_protocol_fatal(
@@ -3443,6 +3489,7 @@ fn run_expert_spokesperson_session(
                 session_tts = Some(tts);
                 input_during_tts_slot = Some(input_policy);
                 initialized = true;
+                status_sound_runtime.set_output_device(status_sound_output_device);
                 turn_gate.lifecycle.session_started(Instant::now());
                 write_message(
                     &mut writer,
@@ -3820,6 +3867,21 @@ fn run_expert_spokesperson_session(
                 if outcome == CancelOutcome::Cancelled {
                     cancel_live_playback(&mut active);
                 }
+            }
+            Input::Request(SessionRequest::SetConversationStatus {
+                id,
+                status,
+                settings,
+            }) => {
+                status_sound_runtime.update(status, settings);
+                write_message(
+                    &mut writer,
+                    &SessionMessage::ConversationStatusApplied {
+                        id,
+                        status,
+                        settings,
+                    },
+                )?;
             }
             Input::Request(SessionRequest::SetInputMuted { id, active: muted }) => {
                 if pending_voice_update.is_some() {
@@ -6495,6 +6557,7 @@ fn validate_request(request: SessionRequest) -> Result<SessionRequest, String> {
     let id = match &request {
         SessionRequest::Hello { id, .. }
         | SessionRequest::SetInputMuted { id, .. }
+        | SessionRequest::SetConversationStatus { id, .. }
         | SessionRequest::SetTtsSettings { id, .. }
         | SessionRequest::SetInputDuringTts { id, .. }
         | SessionRequest::ResetInput { id }
@@ -6521,6 +6584,9 @@ fn validate_request(request: SessionRequest) -> Result<SessionRequest, String> {
         return Err("request id must be positive".into());
     }
     match &request {
+        SessionRequest::SetConversationStatus { settings, .. } => {
+            settings.validate().map_err(str::to_string)?;
+        }
         SessionRequest::PrepareSpeak { text, .. } if text.len() > MAX_SPEAK_TEXT_BYTES => {
             return Err("speak text exceeds 16 KiB".into())
         }
@@ -6752,6 +6818,25 @@ mod tests {
     use std::os::unix::net::UnixStream;
     use std::sync::Mutex;
 
+    #[test]
+    fn status_cues_ignore_pending_recognition_but_suppress_actual_audio() {
+        let mut core = SessionCore::default();
+        core.set_recognition_pending(true);
+        assert!(!standard_session_status_cues_suppressed(&core, false));
+        assert!(standard_session_status_cues_suppressed(&core, true));
+        core.set_user_speaking(true);
+        assert!(standard_session_status_cues_suppressed(&core, false));
+        core.set_user_speaking(false);
+        assert!(!standard_session_status_cues_suppressed(&core, false));
+
+        let mut gate = ExpertTurnGate::default();
+        gate.begin_user_speaking("pending-transcript".into());
+        assert!(expert_session_status_cues_suppressed(&gate, false));
+        gate.finish_user_speaking();
+        assert!(gate.input_blocks_output());
+        assert!(!expert_session_status_cues_suppressed(&gate, false));
+        assert!(expert_session_status_cues_suppressed(&gate, true));
+    }
     fn synthesis_config(tts: SynthesisTtsConfig, output: PathBuf) -> SynthesisConfig {
         SynthesisConfig {
             tts,
@@ -9509,6 +9594,35 @@ mod tests {
         };
         assert_eq!(message, "session PCM input queue is full");
         assert!(control_receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn status_sound_requests_validate_volume() {
+        for volume in [-1.0, 2.0, f32::NAN, f32::INFINITY] {
+            let request = SessionRequest::SetConversationStatus {
+                id: 1,
+                status: berd_voice::ConversationStatus::Working,
+                settings: berd_voice::StatusSoundSettings {
+                    volume,
+                    ..Default::default()
+                },
+            };
+            assert_eq!(
+                validate_request(request).unwrap_err(),
+                "status sound volume must be finite and between 0 and 1"
+            );
+        }
+        for volume in [0.0, 0.8, 1.0] {
+            assert!(validate_request(SessionRequest::SetConversationStatus {
+                id: 1,
+                status: berd_voice::ConversationStatus::Working,
+                settings: berd_voice::StatusSoundSettings {
+                    volume,
+                    ..Default::default()
+                },
+            })
+            .is_ok());
+        }
     }
 
     #[test]

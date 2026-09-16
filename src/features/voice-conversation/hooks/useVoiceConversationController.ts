@@ -7,6 +7,7 @@ import type {
   ChatInputVoiceConversation,
 } from "@/features/chat/types";
 import { useChatStore } from "@/features/chat/stores/chatStore";
+import { isSessionRunning } from "@/features/chat/lib/sessionActivity";
 import { createSystemNotificationMessage } from "@/shared/types/messages";
 import { steerPromptInSession } from "@/features/chat/lib/steerCore";
 import {
@@ -23,9 +24,15 @@ import {
   confirmVoiceConversationForegroundSession,
   isVoiceMicrophoneCaptureError,
   setVoiceConversationControlsSuppressed,
+  updateVoiceConversationStatusSounds,
   type PendingVoiceTranscript,
 } from "../api/voiceConversation";
 import { getMicrophonePermissionStatus } from "../api/microphonePermission";
+import {
+  getStatusSoundPreference,
+  subscribeToStatusSoundPreference,
+  type StatusSoundPreference,
+} from "../lib/statusSoundPreference";
 import type { VoiceInputBackend } from "../lib/voiceInputPreference";
 import type { SiriVoiceSelection } from "../api/siriVoice";
 
@@ -409,43 +416,118 @@ export function waitForVoiceDeliveryOpportunity(
   });
 }
 
+export function publishChainedVoiceStatus(
+  sessionId: string,
+  conversationStatus: "working" | "waiting",
+  settings: StatusSoundPreference = getStatusSoundPreference(),
+): void {
+  const status = useVoiceConversationStore.getState().status;
+  if (status.lifecycle !== "running" || status.sessionId !== sessionId) return;
+  void updateVoiceConversationStatusSounds(
+    status,
+    conversationStatus,
+    settings,
+  ).catch((error) =>
+    console.warn(
+      `Could not publish chained voice ${conversationStatus} status`,
+      error,
+    ),
+  );
+}
+
+const chainedRunStatusObservers = new Map<string, () => void>();
+
+export function observeChainedVoiceStatus(): () => void {
+  let published: string | null = null;
+  const check = () => {
+    const { status } = useVoiceConversationStore.getState();
+    if (
+      status.lifecycle !== "running" ||
+      !status.sessionId ||
+      status.ownerWindowLabel !== getCurrentWindow().label
+    ) {
+      published = null;
+      return;
+    }
+    const runtime = useChatStore.getState().getSessionRuntime(status.sessionId);
+    const running =
+      runtime.activeRunId !== null || isSessionRunning(runtime.chatState);
+    const conversationStatus =
+      runtime.hasToolCallInRun && running ? "working" : "waiting";
+    const settings =
+      running && !runtime.hasToolCallInRun
+        ? { mode: "off" as const }
+        : getStatusSoundPreference();
+    const next = JSON.stringify([
+      status.sessionId,
+      status.revision,
+      conversationStatus,
+      settings,
+    ]);
+    if (next === published) return;
+    published = next;
+    publishChainedVoiceStatus(status.sessionId, conversationStatus, settings);
+  };
+  const unsubscribeChat = useChatStore.subscribe(check);
+  const unsubscribeVoice = useVoiceConversationStore.subscribe(check);
+  const unsubscribePreference = subscribeToStatusSoundPreference(check);
+  check();
+  return () => {
+    unsubscribeChat();
+    unsubscribeVoice();
+    unsubscribePreference();
+  };
+}
+
 export function resetVoiceUiWhenRunSettles(
   sessionId: string,
   deliveryRevision: number,
 ): void {
+  chainedRunStatusObservers.get(sessionId)?.();
   let sawRun = false;
+  let publishedStatus: "working" | "waiting" = "working";
+  const cleanup = () => {
+    unsubscribeChat();
+    unsubscribeVoice();
+    if (chainedRunStatusObservers.get(sessionId) === cleanup) {
+      chainedRunStatusObservers.delete(sessionId);
+    }
+  };
   const check = () => {
     const voice = useVoiceConversationStore.getState();
     if (
       voice.status.lifecycle !== "running" ||
       voice.status.sessionId !== sessionId
     ) {
-      unsubscribeChat();
-      unsubscribeVoice();
+      cleanup();
       return;
     }
 
     const runtime = useChatStore.getState().getSessionRuntime(sessionId);
-    if (runtime.activeRunId !== null || runtime.chatState !== "idle") {
-      sawRun = true;
-      return;
-    }
+    const working =
+      runtime.activeRunId !== null || isSessionRunning(runtime.chatState);
+    if (working) sawRun = true;
     if (!sawRun) return;
 
-    unsubscribeChat();
-    unsubscribeVoice();
+    const nextStatus = working ? "working" : "waiting";
+    if (nextStatus === publishedStatus) return;
     if (voice.status.revision >= deliveryRevision) {
-      voice.setUiState("listening");
+      publishedStatus = nextStatus;
+      voice.setUiState(
+        nextStatus === "working" ? "agent-working" : "listening",
+      );
     }
   };
   const unsubscribeChat = useChatStore.subscribe(check);
   const unsubscribeVoice = useVoiceConversationStore.subscribe(check);
+  chainedRunStatusObservers.set(sessionId, cleanup);
   queueMicrotask(check);
 }
 
 function ensureVoiceEventDeliveryInitialized() {
   if (deliveryInitialized) return;
   deliveryInitialized = true;
+  observeChainedVoiceStatus();
   subscribeToVoiceConversationEvents(async (event) => {
     if (event.type === "cleanShutdown" || event.type === "controlsDismissed") {
       return;

@@ -422,7 +422,7 @@ pub(crate) fn effective_output_device_name(configured: Option<&str>) -> Option<S
 }
 
 #[cfg(not(target_os = "macos"))]
-fn effective_output_device_name(configured: Option<&str>) -> Option<String> {
+pub(crate) fn effective_output_device_name(configured: Option<&str>) -> Option<String> {
     configured.map(ToOwned::to_owned)
 }
 
