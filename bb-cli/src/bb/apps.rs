@@ -57,6 +57,7 @@ const CONTROL_PLANE_RESPONSE_MAX_BYTES: usize = 2 * 1024 * 1024;
 const TRUSTED_CONTROL_PLANE_HOSTS: &[&str] = &[
     "compose-ctrl.test.blockstaging.build",
     "compose-ctrl.app.builderlab.xyz",
+    "compose-ctrl.block.builderlab.xyz",
 ];
 
 pub fn command() -> Command {
@@ -3890,6 +3891,8 @@ mod tests {
         for trusted in [
             "https://compose-ctrl.test.blockstaging.build",
             "https://compose-ctrl.app.builderlab.xyz",
+            "https://compose-ctrl.block.builderlab.xyz",
+            "https://compose-ctrl.block.builderlab.xyz:443",
             "https://compose-ctrl.test.blockstaging.build:443",
         ] {
             assert!(
@@ -3900,6 +3903,11 @@ mod tests {
 
         for untrusted in [
             "http://compose-ctrl.test.blockstaging.build",
+            "http://compose-ctrl.block.builderlab.xyz",
+            "https://compose-ctrl.block.builderlab.xyz.attacker.example",
+            "https://compose-ctrl.block.builderlab.xyz:444",
+            "https://user@compose-ctrl.block.builderlab.xyz",
+            "https://test--bpsites.apps.block.builderlab.xyz",
             "https://attacker.example",
             "https://test.blockstaging.build",
             "https://app.builderlab.xyz",
