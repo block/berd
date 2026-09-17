@@ -7,10 +7,9 @@ import type { OneShotExecutionTarget } from "@/shared/api/zeroToolOneShot";
  * Idle trigger for the memory noticer.
  *
  * Each completed turn schedules a debounced pass; another send in the
- * same session resets the timer, so the extraction runs once per lull
- * rather than once per message. Passes only cover user messages that
- * arrived since the session's last pass — nothing is re-extracted, and
- * a session with no new user text schedules nothing.
+ * same session resets the timer, so extraction runs once per lull rather than
+ * once per message. Progress is tracked by stable user-message ids, not array
+ * offsets, so replay or history replacement cannot slice away later messages.
  */
 
 // Dev builds use a short debounce so the loop is testable without a
@@ -18,21 +17,67 @@ import type { OneShotExecutionTarget } from "@/shared/api/zeroToolOneShot";
 const IDLE_DELAY_MS = import.meta.env.DEV ? 15_000 : 90_000;
 
 const idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
-const noticedCounts = new Map<string, number>();
+const watermarks = new Map<string, string | null>();
+const inFlightRuns = new Map<string, Promise<void>>();
+const pendingRuns = new Map<
+  string,
+  {
+    getMessages: () => Message[];
+    target: OneShotExecutionTarget;
+  }
+>();
 
-/** The user's own words from a slice of messages, one line per message. */
+/**
+ * The user's visible text content, one line per message. Hidden steering,
+ * assistant/tool/system/thinking content, and attachments/non-text blocks stay
+ * out of the extractor input.
+ */
 export function userTranscript(messages: Message[]): string {
-  return messages
-    .filter((message) => message.role === "user")
-    .map((message) =>
-      message.content
-        .filter(isTextContent)
-        .map((content) => content.text.trim())
-        .filter(Boolean)
-        .join("\n"),
-    )
+  return messages.map(userMessageText).filter(Boolean).join("\n");
+}
+
+function userMessageText(message: Message): string {
+  if (message.role !== "user" || message.metadata?.userVisible === false) {
+    return "";
+  }
+  return message.content
+    .filter(isTextContent)
+    .filter((content) => isUserVisibleContent(content))
+    .map((content) => content.text.trim())
     .filter(Boolean)
     .join("\n");
+}
+
+function isUserVisibleContent(content: {
+  annotations?: { audience?: string[] | null } | null;
+}) {
+  const audience = content.annotations?.audience;
+  return !audience || audience.length === 0 || audience.includes("user");
+}
+
+function userMessagesWithText(messages: Message[]): Message[] {
+  return messages.filter((message) => userMessageText(message));
+}
+
+function messagesAfterWatermark(
+  messages: Message[],
+  watermarkId: string | null,
+): Message[] {
+  if (!watermarkId) return messages;
+  const watermarkIndex = messages.findIndex(
+    (message) => message.id === watermarkId,
+  );
+  if (watermarkIndex === -1) {
+    // The loaded history was replaced by a replay or cleanup. Reconcile by
+    // treating the current user-text messages as unseen instead of trusting a
+    // stale array offset that may be beyond the new history length.
+    return messages;
+  }
+  return messages.slice(watermarkIndex + 1);
+}
+
+function latestMessageId(messages: Message[]): string | null {
+  return messages.at(-1)?.id ?? null;
 }
 
 /**
@@ -53,9 +98,39 @@ export function scheduleNoticerPass(
   }
   const timer = setTimeout(() => {
     idleTimers.delete(sessionId);
-    void runPass(sessionId, getMessages, target);
+    startRun(sessionId, getMessages, target);
   }, options?.delayMs ?? IDLE_DELAY_MS);
   idleTimers.set(sessionId, timer);
+}
+
+function startRun(
+  sessionId: string,
+  getMessages: () => Message[],
+  target: OneShotExecutionTarget,
+): void {
+  if (inFlightRuns.has(sessionId)) {
+    pendingRuns.set(sessionId, { getMessages, target });
+    void logRendererEvent(
+      "info",
+      `[me:noticer] pass deferred for ${sessionId}: previous pass still running`,
+    );
+    return;
+  }
+  const run: Promise<void> = runPass(sessionId, getMessages, target).finally(
+    () => {
+      if (inFlightRuns.get(sessionId) !== run) {
+        return;
+      }
+      inFlightRuns.delete(sessionId);
+      const pending = pendingRuns.get(sessionId);
+      if (pending) {
+        pendingRuns.delete(sessionId);
+        startRun(sessionId, pending.getMessages, pending.target);
+      }
+    },
+  );
+  inFlightRuns.set(sessionId, run);
+  void run;
 }
 
 async function runPass(
@@ -65,12 +140,15 @@ async function runPass(
 ): Promise<void> {
   try {
     const messages = getMessages();
-    const already = noticedCounts.get(sessionId) ?? 0;
-    const fresh = messages.slice(already);
+    const userMessages = userMessagesWithText(messages);
+    const watermark = watermarks.get(sessionId) ?? null;
+    const fresh = messagesAfterWatermark(userMessages, watermark);
     const freshText = userTranscript(fresh);
+    const nextWatermark = latestMessageId(userMessages);
     // Mark before extracting: a failed pass skips these messages rather
-    // than retrying them forever on every subsequent lull.
-    noticedCounts.set(sessionId, messages.length);
+    // than retrying them forever on every subsequent lull. Because the marker
+    // is an id, a replaced shorter replay reconciles safely on the next pass.
+    watermarks.set(sessionId, nextWatermark);
     if (!freshText) {
       void logRendererEvent(
         "info",
@@ -78,11 +156,8 @@ async function runPass(
       );
       return;
     }
-    // New user text is only the *trigger*. Extract from the whole
-    // conversation: a single message in isolation ("I like small venues")
-    // reads as nothing worth keeping, which is exactly how early passes
-    // returned NONE on conversations full of durable facts. Re-seeing old
-    // messages is harmless — the queue and dismissal tombstones dedupe.
+    // New user text is only the *trigger*. Extract from the whole visible
+    // user-authored conversation; the queue and dismissal tombstones dedupe.
     const transcript = userTranscript(messages);
     void logRendererEvent(
       "info",
@@ -93,8 +168,6 @@ async function runPass(
       "info",
       `[me:noticer] pass finished for ${sessionId}: queued ${queued} candidate(s)`,
     );
-    // Proposals remain local and non-recallable until the person reviews and
-    // approves them in Settings. The session panel notices the queued record.
   } catch (error) {
     void logRendererEvent("warn", `[me:noticer] pass failed: ${error}`);
     console.warn("[me] noticer pass failed", error);
@@ -108,6 +181,8 @@ export function cancelNoticerPass(sessionId: string): void {
     clearTimeout(timer);
     idleTimers.delete(sessionId);
   }
+  watermarks.delete(sessionId);
+  pendingRuns.delete(sessionId);
 }
 
 /** Test hook. */
@@ -116,5 +191,7 @@ export function resetNoticerTracking(): void {
     clearTimeout(timer);
   }
   idleTimers.clear();
-  noticedCounts.clear();
+  watermarks.clear();
+  inFlightRuns.clear();
+  pendingRuns.clear();
 }
