@@ -20,7 +20,8 @@
     "externalBin": [
       "binaries/goosed",
       "binaries/berdctl",
-      "binaries/berd-monitor"
+      "binaries/berd-monitor",
+      "binaries/berd-memory-mcp"
     ],
     "windows": {
       "webviewInstallMode": {
