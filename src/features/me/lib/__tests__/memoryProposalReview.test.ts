@@ -3,21 +3,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   approveMemoryProposal: vi.fn(),
   resolveMemoryProposal: vi.fn(),
-  loadMeFile: vi.fn(),
-  publishMeFile: vi.fn(),
 }));
 
 vi.mock("@/shared/api/system", () => ({
   approveMemoryProposal: mocks.approveMemoryProposal,
   resolveMemoryProposal: mocks.resolveMemoryProposal,
 }));
-vi.mock("../meFile", () => ({ loadMeFile: mocks.loadMeFile }));
-vi.mock("../mePublish", () => ({ publishMeFile: mocks.publishMeFile }));
 
 import {
   approveMemoryProposal,
   CredentialMemoryError,
   declineMemoryProposal,
+  UnsafeMemoryTextError,
 } from "../memoryProposalReview";
 
 const proposal = {
@@ -32,18 +29,18 @@ const proposal = {
 describe("memory proposal review", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.approveMemoryProposal.mockResolvedValue({
-      approved: true,
-      refreshProjection: true,
-    });
-    mocks.loadMeFile.mockResolvedValue({ status: "missing" });
+    mocks.approveMemoryProposal.mockResolvedValue({ approved: true });
   });
 
-  it("delegates edited approval to the backend", async () => {
-    await approveMemoryProposal(proposal, "Prefers window seats.");
+  it("delegates the exact normalized reviewed approval to the backend", async () => {
+    await approveMemoryProposal(
+      proposal,
+      "  Prefers cafe\u0301 seats.\r\n",
+      " Travel\r\n ",
+    );
     expect(mocks.approveMemoryProposal).toHaveBeenCalledWith(
       proposal.id,
-      "Prefers window seats.",
+      "Prefers café seats.",
       "Travel",
     );
   });
@@ -52,6 +49,19 @@ describe("memory proposal review", () => {
     await expect(
       approveMemoryProposal(proposal, "API key: ghp_16CharsAtLeastHere00"),
     ).rejects.toBeInstanceOf(CredentialMemoryError);
+    expect(mocks.approveMemoryProposal).not.toHaveBeenCalled();
+  });
+
+  it("rejects hidden Unicode before backend admission", async () => {
+    await expect(
+      approveMemoryProposal(
+        proposal,
+        "API key: ghp_16Chars\u200bAtLeastHere00",
+      ),
+    ).rejects.toBeInstanceOf(UnsafeMemoryTextError);
+    await expect(
+      approveMemoryProposal(proposal, "Safe content.", "Tra\u202evel"),
+    ).rejects.toBeInstanceOf(UnsafeMemoryTextError);
     expect(mocks.approveMemoryProposal).not.toHaveBeenCalled();
   });
 

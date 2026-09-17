@@ -14,6 +14,7 @@ vi.mock("@/shared/api/system", () => ({
 
 import { CredentialMemoryError } from "../memoryCredentialGuard";
 import { saveMemoryDocument } from "../saveMemoryDocument";
+import { UnsafeMemoryTextError } from "../memoryTextContract";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -55,14 +56,45 @@ describe("saveMemoryDocument", () => {
     expect(mocks.resolveMemoryProposal).not.toHaveBeenCalled();
   });
 
+  it("normalizes direct Settings document saves before write and diff", async () => {
+    await saveMemoryDocument({
+      path: "/home/u/.me/topics/travel.md",
+      contents: "# Cafe\u0301\r\n\r\n- Packs light.\r\n",
+      topic: " Travel\r\n ",
+    });
+
+    expect(mocks.writeTextFile).toHaveBeenCalledWith(
+      "/home/u/.me/topics/travel.md",
+      "# Café\n\n- Packs light.\n",
+    );
+  });
+
   it("blocks credential-shaped edits before writing", async () => {
     await expect(
       saveMemoryDocument({
         path: "/home/u/.me/me.md",
-        contents: "# Me\n\n- API key: ghp_16CharsAtLeastHere00\n",
+        contents: "# Me\n\n- PIN: 1234\n",
         topic: null,
       }),
     ).rejects.toBeInstanceOf(CredentialMemoryError);
+    expect(mocks.writeTextFile).not.toHaveBeenCalled();
+  });
+
+  it("blocks hidden Unicode before writing", async () => {
+    await expect(
+      saveMemoryDocument({
+        path: "/home/u/.me/me.md",
+        contents: "# Me\n\n- token ghp_16Chars\u200bAtLeastHere00\n",
+        topic: null,
+      }),
+    ).rejects.toBeInstanceOf(UnsafeMemoryTextError);
+    await expect(
+      saveMemoryDocument({
+        path: "/home/u/.me/topics/travel.md",
+        contents: "# Travel\n\n- Packs light.\n",
+        topic: "Tra\u202evel",
+      }),
+    ).rejects.toBeInstanceOf(UnsafeMemoryTextError);
     expect(mocks.writeTextFile).not.toHaveBeenCalled();
   });
 });

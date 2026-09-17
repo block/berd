@@ -6,7 +6,7 @@
 //! Every memory mutation resolves against the canonical `~/.me` root here,
 //! follows symlinks for existing ancestors, and rejects anything that escapes.
 
-use berd_memory::{content_is_approved, looks_like_credential, mark_content_approved};
+use berd_memory::{content_is_approved, mark_content_approved, normalize_memory_document_text};
 use cap_std::ambient_authority;
 use cap_std::fs::Dir;
 use std::fs;
@@ -91,7 +91,7 @@ fn store_relative_path(target: &Path, root: &Path) -> Result<PathBuf, String> {
 
 pub(crate) fn write_from_store_handle(
     target: &Path,
-    contents: String,
+    contents: &str,
     create_new: bool,
 ) -> Result<(), String> {
     write_from_store_handle_at(target, &memory_store_root()?, contents, create_new)
@@ -100,12 +100,9 @@ pub(crate) fn write_from_store_handle(
 pub(crate) fn write_from_store_handle_at(
     target: &Path,
     root: &Path,
-    contents: String,
+    contents: &str,
     create_new: bool,
 ) -> Result<(), String> {
-    if looks_like_credential(&contents) {
-        return Err("Authentication and access data can't be saved to memory.".to_string());
-    }
     fs::create_dir_all(root).map_err(|error| format!("Failed to create memory store: {error}"))?;
     let relative = store_relative_path(target, root)?;
     let parent = relative
@@ -140,6 +137,15 @@ pub(crate) fn write_from_store_handle_at(
         .map_err(|error| format!("Failed to write memory file: {error}"))
 }
 
+fn admit_reviewed_memory_document(contents: String) -> Result<String, String> {
+    let normalized =
+        normalize_memory_document_text(&contents).map_err(|error| error.to_string())?;
+    if berd_memory::looks_like_credential(&normalized) {
+        return Err("Authentication and access data can't be saved to memory".to_string());
+    }
+    Ok(normalized)
+}
+
 pub(crate) fn record_approved_content(target: &Path, contents: &str) -> Result<(), String> {
     record_approved_content_at(target, &memory_store_root()?, contents)
 }
@@ -161,6 +167,7 @@ pub fn is_approved_memory_content(target: &Path, contents: &str) -> bool {
 #[tauri::command]
 pub fn is_memory_content_approved(path: String, contents: String) -> Result<bool, String> {
     let target = validate_memory_path(&path)?;
+    let contents = normalize_memory_document_text(&contents).map_err(|error| error.to_string())?;
     Ok(is_approved_memory_content(&target, &contents))
 }
 
@@ -168,7 +175,8 @@ pub fn is_memory_content_approved(path: String, contents: String) -> Result<bool
 #[tauri::command]
 pub fn create_memory_text_file(path: String, contents: String) -> Result<(), String> {
     let target = validate_memory_path(&path)?;
-    write_from_store_handle(&target, contents.clone(), true)?;
+    let contents = admit_reviewed_memory_document(contents)?;
+    write_from_store_handle(&target, &contents, true)?;
     record_approved_content(&target, &contents)
 }
 
@@ -176,7 +184,8 @@ pub fn create_memory_text_file(path: String, contents: String) -> Result<(), Str
 #[tauri::command]
 pub fn write_memory_text_file(path: String, contents: String) -> Result<(), String> {
     let target = validate_memory_path(&path)?;
-    write_from_store_handle(&target, contents.clone(), false)?;
+    let contents = admit_reviewed_memory_document(contents)?;
+    write_from_store_handle(&target, &contents, false)?;
     record_approved_content(&target, &contents)
 }
 
@@ -226,45 +235,26 @@ mod tests {
         assert!(validate(&root, &root.join("escaped/secret.md")).is_err());
     }
     #[test]
-    fn rust_write_funnel_rejects_credentials_before_file_or_approval_metadata() {
+    fn memory_document_writes_persist_the_exact_normalized_approved_text() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join(".me");
+        fs::create_dir_all(&root).unwrap();
         let target = root.join("me.md");
+        let reviewed = "# Cafe\u{301}\r\n\n- Prefers São Paulo.\n";
+        let normalized = "# Café\n\n- Prefers São Paulo.\n";
 
-        let result = write_from_store_handle_at(
-            &target,
-            &root,
-            "API key: ghp_16CharsAtLeastHere00".to_string(),
-            false,
-        );
+        let contents = admit_reviewed_memory_document(reviewed.into()).unwrap();
+        write_from_store_handle_at(&target, &root, &contents, false).unwrap();
+        record_approved_content_at(&target, &root, &contents).unwrap();
 
-        assert!(result.is_err());
-        assert!(!target.exists());
-        assert!(!root.join(".approved-content.json").exists());
+        assert_eq!(fs::read_to_string(&target).unwrap(), normalized);
+        assert!(content_is_approved(&root, &target, normalized));
+        assert!(!content_is_approved(&root, &target, reviewed));
     }
 
     #[test]
-    fn rust_write_funnel_accepts_template_warning_prose() {
-        let temp = tempfile::tempdir().unwrap();
-        let root = temp.path().join(".me");
-        let target = root.join("me.md");
-        let template =
-            "# Me\n\n*Don't add passwords, credentials, or other access information here.*\n";
-
-        write_from_store_handle_at(&target, &root, template.to_string(), true).unwrap();
-
-        assert_eq!(fs::read_to_string(target).unwrap(), template);
-    }
-
-    #[test]
-    fn rust_write_funnel_accepts_explicit_policy_files() {
-        let temp = tempfile::tempdir().unwrap();
-        let root = temp.path().join(".me");
-        let target = root.join("policy.json");
-        let policy = "{\n  \"enabled\": false\n}\n";
-
-        write_from_store_handle_at(&target, &root, policy.to_string(), true).unwrap();
-
-        assert_eq!(fs::read_to_string(target).unwrap(), policy);
+    fn memory_document_writes_reject_unsafe_text_and_credentials() {
+        assert!(admit_reviewed_memory_document("# Me\nabc\u{202e}txt\n".into()).is_err());
+        assert!(admit_reviewed_memory_document("# Me\nPIN: 1234\n".into()).is_err());
     }
 }

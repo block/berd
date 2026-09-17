@@ -32,12 +32,8 @@ import {
 import { useMemoryProposals } from "../hooks/useMemoryProposals";
 import type { MemoryProposal } from "../lib/meProposals";
 import { CredentialMemoryError } from "../lib/memoryCredentialGuard";
+import { UnsafeMemoryTextError } from "../lib/memoryTextContract";
 import { readMemoryPolicy, writeMemoryPolicy } from "../lib/memoryPolicyFile";
-import { publishMeFile } from "../lib/mePublish";
-import {
-  isMemoryContentApproved,
-  writeMemoryAgentsProjection,
-} from "@/shared/api/system";
 
 type LoadState = { status: "loading" } | { status: "error" } | MeFileState;
 type ViewMode = "preview" | "edit";
@@ -47,6 +43,7 @@ interface DocumentPanelProps {
   onSave: (next: string) => Promise<void> | void;
   editorLabel: string;
   saveErrorText: string;
+  unsafeUnicodeErrorText: string;
   cancelText: string;
   saveText: string;
   previewText: string;
@@ -67,6 +64,7 @@ function DocumentPanel({
   onSave,
   editorLabel,
   saveErrorText,
+  unsafeUnicodeErrorText,
   cancelText,
   saveText,
   previewText,
@@ -78,7 +76,7 @@ function DocumentPanel({
 }: DocumentPanelProps) {
   const [mode, setMode] = useState<ViewMode>("preview");
   const [draft, setDraft] = useState<string | null>(null);
-  const [saveFailed, setSaveFailed] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const isEditing = mode === "edit";
   const hasUnsavedChanges = draft !== null && draft !== contents;
@@ -86,14 +84,14 @@ function DocumentPanel({
   const handleModeChange = (next: string) => {
     if (next === "edit" && draft === null) {
       setDraft(contents);
-      setSaveFailed(false);
+      setSaveError(null);
     }
     setMode(next === "edit" ? "edit" : "preview");
   };
 
   const handleCancel = () => {
     setDraft(null);
-    setSaveFailed(false);
+    setSaveError(null);
     setMode("preview");
   };
 
@@ -102,10 +100,14 @@ function DocumentPanel({
     try {
       await onSave(draft);
       setDraft(null);
-      setSaveFailed(false);
+      setSaveError(null);
       setMode("preview");
-    } catch {
-      setSaveFailed(true);
+    } catch (error) {
+      setSaveError(
+        error instanceof UnsafeMemoryTextError
+          ? unsafeUnicodeErrorText
+          : saveErrorText,
+      );
     }
   };
 
@@ -141,9 +143,9 @@ function DocumentPanel({
         </article>
       )}
 
-      {saveFailed && (
+      {saveError && (
         <p className="text-sm text-destructive" role="alert">
-          {saveErrorText}
+          {saveError}
         </p>
       )}
 
@@ -193,7 +195,7 @@ export function MeSettings() {
   const [creatingTopic, setCreatingTopic] = useState(false);
   const [newTopicName, setNewTopicName] = useState("");
   const [topicError, setTopicError] = useState(false);
-  const [memoryEnabled, setMemoryEnabled] = useState(true);
+  const [memoryEnabled, setMemoryEnabled] = useState(false);
   const { proposals, approve, decline } = useMemoryProposals();
   const [proposalDrafts, setProposalDrafts] = useState<Record<string, string>>(
     {},
@@ -202,16 +204,7 @@ export function MeSettings() {
 
   const refresh = useCallback(async () => {
     try {
-      const loaded = await loadMeFile();
-      setState(loaded);
-      if (
-        loaded.status === "present" &&
-        !(await isMemoryContentApproved(loaded.path, loaded.contents))
-      ) {
-        // A same-user process may have bypassed Berd's approval boundary.
-        // Remove the stale projection until the person explicitly saves.
-        await writeMemoryAgentsProjection(null);
-      }
+      setState(await loadMeFile());
     } catch {
       setState({ status: "error" });
     }
@@ -222,19 +215,16 @@ export function MeSettings() {
       // rather than breaking the page.
       setTopics([]);
     }
-    // policy.json is the one durable owner. Missing policy defaults on.
+    // policy.json is the one durable owner. Missing or malformed policy is off.
     const policy = await readMemoryPolicy();
-    setMemoryEnabled(policy?.enabled ?? true);
+    setMemoryEnabled(policy?.enabled === true);
   }, []);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
-  // Memory is on by default, so most people arrive here without ever having
-  // touched the switch. Seed the store on first visit for the same reason the
-  // toggle does: the file existing is the normal state, and asking for a
-  // decision the rest of the system makes silently is the odd one.
+  // Create the starter file only after the person explicitly enables memory.
   useEffect(() => {
     if (!memoryEnabled || state.status !== "missing") return;
     void createMeFile()
@@ -262,7 +252,9 @@ export function MeSettings() {
       setProposalError(
         error instanceof CredentialMemoryError
           ? t("me.proposals.credentialError")
-          : t("me.proposals.approveError"),
+          : error instanceof UnsafeMemoryTextError
+            ? t("me.proposals.unsafeUnicodeError")
+            : t("me.proposals.approveError"),
       );
     }
   };
@@ -276,23 +268,18 @@ export function MeSettings() {
     // store failed to persist.
     if (!(await writeMemoryPolicy(enabled))) {
       const policy = await readMemoryPolicy();
-      setMemoryEnabled(policy?.enabled ?? true);
+      setMemoryEnabled(policy?.enabled === true);
       return;
     }
     setMemoryEnabled(enabled);
 
-    let contents = state.status === "present" ? state.contents : "";
     if (enabled && state.status !== "present") {
       try {
-        const created = await createMeFile();
-        setState(created);
-        if (created.status === "present") contents = created.contents;
+        setState(await createMeFile());
       } catch {
         // A failed seed leaves the create button in place.
       }
     }
-    // Off removes the managed projection; on restores it.
-    await publishMeFile(contents);
   };
 
   // The store folder, derived from the canonical spine path.
@@ -323,6 +310,7 @@ export function MeSettings() {
   const docStrings = {
     editorLabel: t("me.editorLabel"),
     saveErrorText: t("me.saveError"),
+    unsafeUnicodeErrorText: t("me.unsafeUnicodeError"),
     cancelText: t("me.cancel"),
     saveText: t("me.save"),
     previewText: t("me.previewTab"),
@@ -350,7 +338,6 @@ export function MeSettings() {
                       .{" "}
                     </>
                   )}
-                  {t("me.projectionHint")}
                 </span>
               </>
             }
@@ -371,7 +358,7 @@ export function MeSettings() {
           </div>
         )}
 
-        {memoryEnabled && proposals.length > 0 && (
+        {proposals.length > 0 && (
           <SettingsSection
             title={t("me.proposals.title")}
             className="border-b border-border pb-11"
