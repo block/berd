@@ -8,8 +8,8 @@
  * declined before it becomes memory.
  *
  * Credentials are different because undo cannot retract content already
- * exposed to agents or projections. The reliable defense is refusing the
- * write, which is why this is code rather than only a sentence in a prompt.
+ * exposed to agents. The reliable defense is refusing the write, which is why
+ * this is code rather than only a sentence in a prompt.
  *
  * Deliberately conservative in one direction: it would rather reject a
  * legitimate entry than admit a secret. That trade is only defensible because
@@ -98,8 +98,8 @@ export class CredentialMemoryError extends Error {
  * True when an entry looks like it carries a credential and must not be
  * written to a memory file.
  *
- * Checked at the single write funnel, so it covers both doors: the noticer's
- * extraction pass and live `propose_memory` calls from any agent.
+ * Mirrored by the authoritative Rust write funnel so renderer checks remain
+ * immediate UX, not the security boundary.
  */
 export function looksLikeCredential(content: string): boolean {
   const text = content.trim();
