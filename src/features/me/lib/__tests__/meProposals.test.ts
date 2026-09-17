@@ -1,7 +1,52 @@
 import { describe, expect, it } from "vitest";
 
-import { appendBullet, insertIntoSection, removeBullet } from "../meProposals";
+import {
+  appendBullet,
+  insertIntoSection,
+  parseProposalLine,
+  removeBullet,
+} from "../meProposals";
 import { vocabularyTopicName } from "../memoryTopicVocabulary";
+
+describe("parseProposalLine", () => {
+  it("normalizes proposal text and topic before Settings display", () => {
+    const proposal = parseProposalLine(
+      JSON.stringify({
+        id: "p-1",
+        content: " cafe\u0301 prefers 中文\r\n",
+        topic: " Travel\r\n ",
+      }),
+    );
+    expect(proposal?.content).toBe("café prefers 中文");
+    expect(proposal?.topic).toBe("Travel");
+  });
+
+  it("rejects unsafe hidden Unicode before Settings display", () => {
+    expect(
+      parseProposalLine(JSON.stringify({ id: "p-1", content: "abc\u202etxt" })),
+    ).toBeNull();
+    expect(
+      parseProposalLine(JSON.stringify({ id: "p-1", content: "abc\u0007txt" })),
+    ).toBeNull();
+    expect(
+      parseProposalLine(
+        JSON.stringify({ id: "p-1", content: "family 👨‍👩‍👧‍👦" }),
+      ),
+    ).toBeNull();
+    expect(
+      parseProposalLine(
+        JSON.stringify({ id: "p-1", content: "safe", topic: "Tra\u202evel" }),
+      ),
+    ).toBeNull();
+  });
+
+  it("preserves ordinary visible Unicode and non-ZWJ emoji", () => {
+    const text = "São Paulo résumé Привет 中文 🚀";
+    expect(
+      parseProposalLine(JSON.stringify({ id: "p-1", content: text }))?.content,
+    ).toBe(text);
+  });
+});
 
 describe("appendBullet", () => {
   it("appends a bullet to existing content with one trailing newline", () => {

@@ -1,5 +1,4 @@
 import {
-  createTextFile,
   getHomeDir,
   listDirectoryEntries,
   pathExists,
@@ -138,15 +137,15 @@ function topicTemplate(name: string): string {
 }
 
 /**
- * Create a new, empty topic doc. Refuses to overwrite (createTextFile's
- * contract), so an existing topic can't be clobbered by a name collision.
+ * Create a new, empty topic doc through the reviewed memory write funnel, so
+ * an existing topic can't be clobbered by a name collision.
  */
 export async function createTopic(name: string): Promise<TopicDoc> {
   const homeDir = await getHomeDir();
   const fileName = topicFileName(name);
   const path = `${topicsDirPath(homeDir)}/${fileName}`;
   const contents = topicTemplate(name);
-  await createTextFile(path, contents);
+  await saveMemoryDocument({ path, contents, topic: name });
   const meta = parseTopicMeta(contents, fileName);
   return { path, fileName, contents, ...meta };
 }
