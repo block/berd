@@ -102,7 +102,7 @@ export class CredentialMemoryError extends Error {
  * immediate UX, not the security boundary.
  */
 export function looksLikeCredential(content: string): boolean {
-  const text = content.trim();
+  const text = content.normalize("NFC").trim();
   if (!text) return false;
 
   for (const pattern of TOKEN_PATTERNS) {
