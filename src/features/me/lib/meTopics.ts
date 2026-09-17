@@ -13,9 +13,8 @@ import {
  * deeper, domain-scoped knowledge (style, family, work) that loads only
  * when relevant instead of riding into every session.
  *
- * This module is the read/edit surface for Settings → Memory. The memory
- * server owns agent-driven creation and proposals; here the user edits the
- * files directly through Settings.
+ * This module is the read/edit surface for Settings → Memory. Here the user
+ * edits files directly through Settings.
  */
 
 export interface TopicDoc {
@@ -130,7 +129,7 @@ function topicTemplate(name: string): string {
   const label = name.trim();
   return `# ${label}
 
-*What agents should know about ${label.toLowerCase()} — add entries below, or let an agent propose them as it learns.*
+*What Berd can provide to agents about ${label.toLowerCase()} when memory is on — add entries below.*
 `;
 }
 

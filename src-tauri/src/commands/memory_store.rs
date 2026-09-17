@@ -6,7 +6,7 @@
 //! Every memory mutation resolves against the canonical `~/.me` root here,
 //! follows symlinks for existing ancestors, and rejects anything that escapes.
 
-use berd_memory::{content_is_approved, mark_content_approved};
+use berd_memory::{content_is_approved, looks_like_credential, mark_content_approved};
 use cap_std::ambient_authority;
 use cap_std::fs::Dir;
 use std::fs;
@@ -103,6 +103,9 @@ pub(crate) fn write_from_store_handle_at(
     contents: String,
     create_new: bool,
 ) -> Result<(), String> {
+    if looks_like_credential(&contents) {
+        return Err("Authentication and access data can't be saved to memory.".to_string());
+    }
     fs::create_dir_all(root).map_err(|error| format!("Failed to create memory store: {error}"))?;
     let relative = store_relative_path(target, root)?;
     let parent = relative
@@ -223,62 +226,45 @@ mod tests {
         assert!(validate(&root, &root.join("escaped/secret.md")).is_err());
     }
     #[test]
-    fn projection_preserves_content_outside_berds_markers() {
-        let existing = format!("before\n\n{PROJECTION_BEGIN}\nold\n{PROJECTION_END}\n\nafter\n");
-        let next = splice_projection(&existing, Some("new block")).unwrap();
-        assert!(next.contains("before"));
-        assert!(next.contains("after"));
-        assert!(next.contains("new block"));
-        assert!(!next.contains("old"));
+    fn rust_write_funnel_rejects_credentials_before_file_or_approval_metadata() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join(".me");
+        let target = root.join("me.md");
+
+        let result = write_from_store_handle_at(
+            &target,
+            &root,
+            "API key: ghp_16CharsAtLeastHere00".to_string(),
+            false,
+        );
+
+        assert!(result.is_err());
+        assert!(!target.exists());
+        assert!(!root.join(".approved-content.json").exists());
     }
 
     #[test]
-    fn projection_removal_keeps_the_users_content() {
-        let existing = format!("rules\n\n{PROJECTION_BEGIN}\nmemory\n{PROJECTION_END}\n");
-        let next = splice_projection(&existing, None).unwrap();
-        assert_eq!(next, "rules\n\n");
-    }
-}
+    fn rust_write_funnel_accepts_template_warning_prose() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join(".me");
+        let target = root.join("me.md");
+        let template =
+            "# Me\n\n*Don't add passwords, credentials, or other access information here.*\n";
 
-const PROJECTION_BEGIN: &str =
-    "<!-- BEGIN Berd managed block (from ~/.me/me.md — do not edit here; edit via your me file) -->";
-const PROJECTION_END: &str = "<!-- END Berd managed block -->";
+        write_from_store_handle_at(&target, &root, template.to_string(), true).unwrap();
 
-fn splice_projection(existing: &str, block: Option<&str>) -> Option<String> {
-    let begin = existing.find(PROJECTION_BEGIN);
-    let end = existing.find(PROJECTION_END);
-    if let (Some(begin), Some(end)) = (begin, end) {
-        if end > begin {
-            let before = &existing[..begin];
-            let after = &existing[end + PROJECTION_END.len()..];
-            let next = match block {
-                Some(block) => format!("{before}{block}{after}"),
-                None => format!("{before}{}", after.trim_start_matches('\n')),
-            };
-            return (next != existing).then_some(next);
-        }
+        assert_eq!(fs::read_to_string(target).unwrap(), template);
     }
-    let block = block?;
-    if existing.trim().is_empty() {
-        Some(format!("{block}\n"))
-    } else {
-        Some(format!("{}\n\n{block}\n", existing.trim_end()))
-    }
-}
 
-/// Publish/remove Berd's managed memory projection at the one sanctioned
-/// app-agnostic target. The renderer cannot choose another file.
-#[tauri::command]
-pub fn write_memory_agents_projection(block: Option<String>) -> Result<(), String> {
-    let home = dirs::home_dir().ok_or_else(|| "Could not determine home directory".to_string())?;
-    let path = home.join(".agents/AGENTS.md");
-    let existing = fs::read_to_string(&path).unwrap_or_default();
-    let Some(next) = splice_projection(&existing, block.as_deref()) else {
-        return Ok(());
-    };
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("Failed to create '{}': {error}", parent.display()))?;
+    #[test]
+    fn rust_write_funnel_accepts_explicit_policy_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join(".me");
+        let target = root.join("policy.json");
+        let policy = "{\n  \"enabled\": false\n}\n";
+
+        write_from_store_handle_at(&target, &root, policy.to_string(), true).unwrap();
+
+        assert_eq!(fs::read_to_string(target).unwrap(), policy);
     }
-    fs::write(&path, next).map_err(|error| format!("Failed to write '{}': {error}", path.display()))
 }
