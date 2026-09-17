@@ -2,11 +2,7 @@
 name = "berd-memory"
 version = "0.1.0"
 edition = "2021"
-description = "Berd's memory MCP server — a minimal stdio server exposing consent-gated memory tools over the user's ~/.me/ files."
-
-[[bin]]
-name = "berd-memory-mcp"
-path = "src/main.rs"
+description = "Shared Rust core for Berd's consent-gated memory files."
 
 [dependencies]
 dirs = "6"

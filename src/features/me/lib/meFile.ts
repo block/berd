@@ -7,16 +7,6 @@ import {
 } from "@/shared/api/system";
 
 /**
- * Best-effort publication into the agent files other tools read (see
- * mePublish.ts). The me.md write is the contract; publication never surfaces
- * as a save failure.
- */
-async function tryPublish(contents: string): Promise<void> {
-  const { publishMeFile } = await import("./mePublish");
-  await publishMeFile(contents);
-}
-
-/**
  * Canonical home for the user's me.md, relative to the home directory.
  *
  * This is deliberately a neutral location (`~/.me/`), not Berd's dotfolder:
@@ -54,8 +44,8 @@ export function toDisplayPath(path: string, homeDir: string): string {
  * not UI copy — it is intentionally not localized, and the user can rewrite
  * or delete any of it.
  *
- * Structure follows the memory-v2 hub-and-spokes shape: this file is the
- * spine — small, cross-cutting, read by every agent in every session —
+ * Structure follows a hub-and-spokes shape: this file is the small,
+ * cross-cutting spine Berd can inject when memory is explicitly enabled,
  * while deeper domain knowledge lives in topic files beside it (style.md,
  * family.md), read only when that part of life is relevant. Topics are
  * named by the user, not enumerated by us — agents should preserve any
@@ -63,12 +53,13 @@ export function toDisplayPath(path: string, homeDir: string): string {
  */
 export const ME_FILE_TEMPLATE = `# Me
 
-*This file is yours. Agents read it to learn how to work with you. Italic
-notes like this one are just for you — agents never see them.*
+*This file is yours. When memory is on, Berd can read it to learn how to work
+with you. Italic notes like this one are just for you — agents never see them.*
 
-*Don't add passwords, credentials, or other access information here. When
-memory is on, approved content can be made available to agents and compatible
-agent tools.*
+*Don't add passwords, credentials, or other access information here. This is
+plaintext Markdown in user-owned local files, not a secrets vault. It is not
+protected from other processes running as you. Berd does not automatically copy
+approved memory into other tools.*
 
 ## About me
 
@@ -126,7 +117,6 @@ export async function createMeFile(): Promise<MeFileState> {
     return existing;
   }
   await createTextFile(existing.path, ME_FILE_TEMPLATE);
-  void tryPublish(ME_FILE_TEMPLATE);
   const payload = await readTextFile(existing.path);
   return {
     status: "present",
@@ -142,5 +132,4 @@ export async function saveMeFile(
   contents: string,
 ): Promise<void> {
   await writeTextFile(path, contents);
-  void tryPublish(contents);
 }

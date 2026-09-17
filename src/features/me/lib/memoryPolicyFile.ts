@@ -42,9 +42,8 @@ async function policyPath(): Promise<string | null> {
 }
 
 /**
- * Reads the store's policy. Returns null when there's no policy file at all,
- * which is different from `{ enabled: false }` — absence means "no opinion",
- * so Berd's own preference decides.
+ * Reads the store's policy. Returns null when there's no explicit boolean
+ * policy. Absence or malformed policy is fail-closed, not "enabled".
  */
 export async function readMemoryPolicy(): Promise<MemoryPolicy | null> {
   const path = await policyPath();
@@ -62,9 +61,9 @@ export async function readMemoryPolicy(): Promise<MemoryPolicy | null> {
   }
 }
 
-/** Canonical memory-enable decision. Missing or malformed policy defaults on. */
+/** Canonical memory-enable decision. Missing or malformed policy fails closed. */
 export async function isMemoryEnabledByPolicy(): Promise<boolean> {
-  return (await readMemoryPolicy())?.enabled ?? true;
+  return (await readMemoryPolicy())?.enabled === true;
 }
 
 /**

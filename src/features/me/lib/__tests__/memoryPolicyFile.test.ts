@@ -10,7 +10,11 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/shared/api/system", () => mocks);
 
-import { readMemoryPolicy, writeMemoryPolicy } from "../memoryPolicyFile";
+import {
+  isMemoryEnabledByPolicy,
+  readMemoryPolicy,
+  writeMemoryPolicy,
+} from "../memoryPolicyFile";
 
 const POLICY = "/home/u/.me/policy.json";
 
@@ -21,8 +25,6 @@ beforeEach(() => {
 
 describe("readMemoryPolicy", () => {
   it("returns null when there is no policy file", async () => {
-    // Absence means "no opinion", which is different from disabled — Berd's
-    // own preference decides in that case.
     mocks.pathExists.mockResolvedValue(false);
     expect(await readMemoryPolicy()).toBeNull();
   });
@@ -47,6 +49,32 @@ describe("readMemoryPolicy", () => {
     mocks.pathExists.mockResolvedValue(true);
     mocks.readTextFile.mockResolvedValue({ contents: "not json" });
     expect(await readMemoryPolicy()).toBeNull();
+  });
+});
+
+describe("isMemoryEnabledByPolicy", () => {
+  it("defaults off when policy is missing", async () => {
+    mocks.pathExists.mockResolvedValue(false);
+    await expect(isMemoryEnabledByPolicy()).resolves.toBe(false);
+  });
+
+  it("defaults off when policy is malformed", async () => {
+    mocks.pathExists.mockResolvedValue(true);
+    mocks.readTextFile.mockResolvedValue({ contents: "not json" });
+    await expect(isMemoryEnabledByPolicy()).resolves.toBe(false);
+  });
+
+  it("only enables memory for explicit enabled true", async () => {
+    mocks.pathExists.mockResolvedValue(true);
+    mocks.readTextFile.mockResolvedValue({
+      contents: JSON.stringify({ enabled: true }),
+    });
+    await expect(isMemoryEnabledByPolicy()).resolves.toBe(true);
+
+    mocks.readTextFile.mockResolvedValue({
+      contents: JSON.stringify({ enabled: false }),
+    });
+    await expect(isMemoryEnabledByPolicy()).resolves.toBe(false);
   });
 });
 

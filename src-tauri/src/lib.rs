@@ -656,7 +656,6 @@ pub fn run() {
             commands::memory_store::create_memory_text_file,
             commands::memory_store::write_memory_text_file,
             commands::memory_store::is_memory_content_approved,
-            commands::memory_store::write_memory_agents_projection,
             commands::terminal::start_terminal,
             commands::terminal::write_terminal,
             commands::terminal::resize_terminal,
