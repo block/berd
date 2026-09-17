@@ -4,6 +4,7 @@ const acpMocks = vi.hoisted(() => ({
   deleteSession: vi.fn(),
   newSession: vi.fn(),
   promptForText: vi.fn(),
+  cancelSession: vi.fn(),
   setModel: vi.fn(),
   setSessionSystemPrompt: vi.fn(),
 }));
@@ -34,6 +35,7 @@ describe("security explanation inference", () => {
     acpMocks.setModel.mockResolvedValue(undefined);
     acpMocks.setSessionSystemPrompt.mockResolvedValue(undefined);
     acpMocks.deleteSession.mockResolvedValue(undefined);
+    acpMocks.cancelSession.mockResolvedValue(undefined);
     acpMocks.promptForText.mockResolvedValue(
       "The encoded payload resembles obfuscated execution.",
     );
@@ -88,6 +90,7 @@ describe("security explanation inference", () => {
       expect.any(Array),
       20000,
     );
+    expect(acpMocks.cancelSession).toHaveBeenCalledWith("inference-session");
     expect(acpMocks.deleteSession).toHaveBeenCalledWith("inference-session");
     // Verify ordering: system prompt → prompt → delete
     expect(
