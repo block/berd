@@ -3,11 +3,12 @@ import { useEffect } from "react";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import type { SessionExecutionTarget } from "@/features/chat/lib/sessionExecutionTarget";
+import type { ChatState } from "@/shared/types/chat";
 import { scheduleNoticerPass } from "../lib/noticerTrigger";
 
 export function noticerTargetForCompletedTurn(
-  before: string | undefined,
-  now: string | undefined,
+  before: ChatState | undefined,
+  now: ChatState | undefined,
   target: SessionExecutionTarget | undefined,
 ): { providerId: string; modelId: string } | null {
   if (
