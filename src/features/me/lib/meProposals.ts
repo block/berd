@@ -1,4 +1,9 @@
 import { getHomeDir, pathExists, readTextFile } from "@/shared/api/system";
+import {
+  normalizeMemoryProposalText,
+  normalizeMemoryProposalTopic,
+  UnsafeMemoryTextError,
+} from "./memoryTextContract";
 
 /**
  * Reviewable memory proposals. Agent and noticer output stops here until the
@@ -30,17 +35,18 @@ function queuePath(homeDir: string): string {
 export function parseProposalLine(line: string): MemoryProposal | null {
   try {
     const raw = JSON.parse(line) as Record<string, unknown>;
-    const content = typeof raw.content === "string" ? raw.content.trim() : "";
     const id = typeof raw.id === "string" ? raw.id.trim() : "";
-    if (!id || !content) return null;
+    if (!id || typeof raw.content !== "string") return null;
+    const content = normalizeMemoryProposalText(raw.content);
+    if (!content) return null;
     const ts = typeof raw.ts === "number" ? raw.ts : 0;
     return {
       id,
       ts,
       content,
       topic:
-        typeof raw.topic === "string" && raw.topic.trim()
-          ? raw.topic.trim()
+        typeof raw.topic === "string"
+          ? normalizeMemoryProposalTopic(raw.topic)
           : null,
       agent:
         typeof raw.agent === "string" && raw.agent.trim()
@@ -51,7 +57,8 @@ export function parseProposalLine(line: string): MemoryProposal | null {
           ? raw.sessionId.trim()
           : null,
     };
-  } catch {
+  } catch (error) {
+    if (error instanceof UnsafeMemoryTextError) return null;
     return null;
   }
 }

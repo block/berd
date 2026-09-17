@@ -6,34 +6,26 @@ import {
   CredentialMemoryError,
   looksLikeCredential,
 } from "./memoryCredentialGuard";
+import {
+  normalizeMemoryProposalText,
+  normalizeMemoryProposalTopic,
+} from "./memoryTextContract";
 import type { MemoryProposal } from "./meProposals";
-import { loadMeFile } from "./meFile";
-import { publishMeFile } from "./mePublish";
 
 export { CredentialMemoryError } from "./memoryCredentialGuard";
+export { UnsafeMemoryTextError } from "./memoryTextContract";
 
 export async function approveMemoryProposal(
   proposal: MemoryProposal,
   content = proposal.content,
   topic = proposal.topic,
 ): Promise<void> {
-  const edited = content.trim();
-  if (!edited) throw new Error("Memory content is required.");
-  if (looksLikeCredential(edited)) throw new CredentialMemoryError();
+  const reviewed = normalizeMemoryProposalText(content);
+  if (!reviewed) throw new Error("Memory content is required.");
+  if (looksLikeCredential(reviewed)) throw new CredentialMemoryError();
 
-  const result = await approveMemoryProposalInBackend(
-    proposal.id,
-    edited,
-    topic?.trim() || null,
-  );
-  if (result.approved && result.refreshProjection) {
-    // Projection is derived output. Approval remains complete if this
-    // best-effort refresh fails and will be repaired by the next refresh.
-    const state = await loadMeFile();
-    if (state.status === "present") {
-      await publishMeFile(state.contents).catch(() => {});
-    }
-  }
+  const reviewedTopic = normalizeMemoryProposalTopic(topic);
+  await approveMemoryProposalInBackend(proposal.id, reviewed, reviewedTopic);
 }
 
 export async function declineMemoryProposal(

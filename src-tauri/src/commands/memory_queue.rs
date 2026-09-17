@@ -1,8 +1,9 @@
 //! Backend-owned proposal queue operations.
 
 use berd_memory::{
-    acquire_queue_lock, append_jsonl, is_suppressed, jsonl_records, memory_root, now_epoch_seconds,
-    same_fact, suppression_fingerprint, write_jsonl, DISMISSED_FILE, PENDING_FILE,
+    acquire_queue_lock, append_jsonl, is_suppressed, jsonl_records, memory_root,
+    normalize_memory_proposal_text, normalize_memory_proposal_topic, now_epoch_seconds, same_fact,
+    suppression_fingerprint, write_jsonl, DISMISSED_FILE, PENDING_FILE,
 };
 use serde_json::{json, Value};
 use std::fs;
@@ -28,7 +29,6 @@ const ME_TEMPLATE: &str = "# Me\n\n## About me\n\n## Preferences\n\n## Boundarie
 #[serde(rename_all = "camelCase")]
 pub struct ApprovalResult {
     pub approved: bool,
-    pub refresh_projection: bool,
 }
 
 #[derive(serde::Deserialize)]
@@ -159,16 +159,18 @@ fn approve_memory_proposal_at(
     content: String,
     topic: Option<String>,
 ) -> Result<ApprovalResult, String> {
-    let content = content.trim();
+    let content = normalize_memory_proposal_text(&content).map_err(|error| error.to_string())?;
     if content.is_empty() {
         return Err("Memory content is required".to_string());
     }
     if content.chars().count() > 300 {
         return Err("Memory entries must be 300 characters or fewer".to_string());
     }
-    if berd_memory::looks_like_credential(content) {
+    if berd_memory::looks_like_credential(&content) {
         return Err("Authentication and access data can't be saved to memory".to_string());
     }
+    let topic =
+        normalize_memory_proposal_topic(topic.as_deref()).map_err(|error| error.to_string())?;
 
     let dir = root.join("proposals");
     let _lock = acquire_queue_lock(&dir)?;
@@ -178,10 +180,7 @@ fn approve_memory_proposal_at(
         .iter()
         .any(|record| record.get("id").and_then(Value::as_str) == Some(id.as_str()))
     {
-        return Ok(ApprovalResult {
-            approved: false,
-            refresh_projection: false,
-        });
+        return Ok(ApprovalResult { approved: false });
     }
 
     let (target, spine) = approval_target(root, topic.as_deref())?;
@@ -193,11 +192,11 @@ fn approve_memory_proposal_at(
         }
     });
     let next = if spine {
-        insert_preference(&current, content)
+        insert_preference(&current, &content)
     } else {
-        append_bullet(&current, content)
+        append_bullet(&current, &content)
     };
-    write_from_store_handle_at(&target, root, next.clone(), false)?;
+    write_from_store_handle_at(&target, root, &next, false)?;
     record_approved_content_at(&target, root, &next)?;
 
     let kept: Vec<Value> = records
@@ -205,10 +204,7 @@ fn approve_memory_proposal_at(
         .filter(|record| record.get("id").and_then(Value::as_str) != Some(id.as_str()))
         .collect();
     write_jsonl(&pending_path, &kept)?;
-    Ok(ApprovalResult {
-        approved: true,
-        refresh_projection: true,
-    })
+    Ok(ApprovalResult { approved: true })
 }
 
 #[cfg(test)]
@@ -271,6 +267,69 @@ mod tests {
     }
 
     #[test]
+    fn approval_persists_the_exact_normalized_reviewed_text() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join(".me");
+        seed(&root, "p-1", "placeholder", Some("Travel"));
+
+        approve_memory_proposal_at(
+            &root,
+            "p-1".into(),
+            "  cafe\u{301} preferences\r\n".into(),
+            Some("Travel".into()),
+        )
+        .unwrap();
+
+        let contents = fs::read_to_string(root.join("topics/travel.md")).unwrap();
+        assert_eq!(contents, "# Travel\n- café preferences\n");
+        assert!(berd_memory::content_is_approved(
+            &root,
+            &root.join("topics/travel.md"),
+            &contents,
+        ));
+    }
+
+    #[test]
+    fn approval_rejects_hidden_topic_unicode_without_resolving_proposal() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join(".me");
+        seed(&root, "p-1", "placeholder", Some("Travel"));
+
+        assert!(approve_memory_proposal_at(
+            &root,
+            "p-1".into(),
+            "Safe content.".into(),
+            Some("Tra\u{202e}vel".into()),
+        )
+        .is_err());
+        assert_eq!(
+            jsonl_records(&root.join("proposals/pending.jsonl")).len(),
+            1
+        );
+        assert!(!root.join("topics/travel.md").exists());
+    }
+
+    #[test]
+    fn approval_rejects_hidden_unicode_without_resolving_proposal() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join(".me");
+        seed(&root, "p-1", "placeholder", None);
+
+        assert!(approve_memory_proposal_at(
+            &root,
+            "p-1".into(),
+            "ghp_16Chars\u{200b}AtLeastHere00".into(),
+            None,
+        )
+        .is_err());
+        assert_eq!(
+            jsonl_records(&root.join("proposals/pending.jsonl")).len(),
+            1
+        );
+        assert!(!root.join("me.md").exists());
+    }
+
+    #[test]
     fn credentials_are_rejected_without_resolving_proposal() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join(".me");
@@ -301,21 +360,27 @@ pub fn resolve_memory_proposal(
     let path = dir.join(PENDING_FILE);
     let records = jsonl_records(&path);
 
-    if let Some(content) = declined_content.filter(|content| !content.trim().is_empty()) {
-        let salt = uuid::Uuid::new_v4().simple().to_string();
-        append_jsonl(
-            &dir.join(DISMISSED_FILE),
-            &json!({
-                "id": id,
-                "ts": now_epoch_seconds(),
-                "salt": salt,
-                "fingerprint": suppression_fingerprint(
-                    &content,
-                    declined_topic.as_deref(),
-                    &salt,
-                ),
-            }),
-        )?;
+    let declined_topic = normalize_memory_proposal_topic(declined_topic.as_deref())
+        .map_err(|error| error.to_string())?;
+    if let Some(content) = declined_content {
+        let content =
+            normalize_memory_proposal_text(&content).map_err(|error| error.to_string())?;
+        if !content.is_empty() {
+            let salt = uuid::Uuid::new_v4().simple().to_string();
+            append_jsonl(
+                &dir.join(DISMISSED_FILE),
+                &json!({
+                    "id": id,
+                    "ts": now_epoch_seconds(),
+                    "salt": salt,
+                    "fingerprint": suppression_fingerprint(
+                        &content,
+                        declined_topic.as_deref(),
+                        &salt,
+                    ),
+                }),
+            )?;
+        }
     }
 
     let kept: Vec<Value> = records
@@ -328,10 +393,17 @@ pub fn resolve_memory_proposal(
 /// Append noticer candidates under the same lock used by the MCP sidecar.
 #[tauri::command]
 pub fn append_memory_proposals(candidates: Vec<MemoryCandidateInput>) -> Result<usize, String> {
+    append_memory_proposals_at(&memory_root()?, candidates)
+}
+
+fn append_memory_proposals_at(
+    root: &Path,
+    candidates: Vec<MemoryCandidateInput>,
+) -> Result<usize, String> {
     if candidates.is_empty() {
         return Ok(0);
     }
-    let dir = memory_root()?.join("proposals");
+    let dir = root.join("proposals");
     let _lock = acquire_queue_lock(&dir)?;
     let pending_path = dir.join(PENDING_FILE);
     let mut pending = jsonl_records(&pending_path);
@@ -339,16 +411,21 @@ pub fn append_memory_proposals(candidates: Vec<MemoryCandidateInput>) -> Result<
     let mut count = 0;
 
     for candidate in candidates {
-        let content = candidate.content.trim();
+        let Ok(content) = normalize_memory_proposal_text(&candidate.content) else {
+            continue;
+        };
+        let Ok(topic) = normalize_memory_proposal_topic(candidate.topic.as_deref()) else {
+            continue;
+        };
         if content.is_empty()
             || content.chars().count() > 300
-            || berd_memory::looks_like_credential(content)
+            || berd_memory::looks_like_credential(&content)
             || pending
                 .iter()
-                .any(|record| same_fact(record, content, candidate.topic.as_deref()))
+                .any(|record| same_fact(record, &content, topic.as_deref()))
             || dismissed
                 .iter()
-                .any(|record| is_suppressed(record, content, candidate.topic.as_deref()))
+                .any(|record| is_suppressed(record, &content, topic.as_deref()))
         {
             continue;
         }
@@ -356,7 +433,7 @@ pub fn append_memory_proposals(candidates: Vec<MemoryCandidateInput>) -> Result<
             "id": format!("n-{}", uuid::Uuid::new_v4()),
             "ts": now_epoch_seconds(),
             "content": content,
-            "topic": candidate.topic,
+            "topic": topic,
             "agent": "noticer",
             "sessionId": candidate.session_id,
             "host": "berd",
@@ -366,4 +443,56 @@ pub fn append_memory_proposals(candidates: Vec<MemoryCandidateInput>) -> Result<
         count += 1;
     }
     Ok(count)
+}
+
+#[cfg(test)]
+mod append_tests {
+    use super::*;
+
+    #[test]
+    fn append_normalizes_before_queueing_scanning_and_deduping() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join(".me");
+        let candidates = vec![
+            MemoryCandidateInput {
+                content: " cafe\u{301} preference\r\n".into(),
+                topic: Some("Travel".into()),
+                session_id: Some("s-1".into()),
+            },
+            MemoryCandidateInput {
+                content: "café preference".into(),
+                topic: Some("Travel".into()),
+                session_id: Some("s-1".into()),
+            },
+            MemoryCandidateInput {
+                content: "PIN: 1234".into(),
+                topic: None,
+                session_id: None,
+            },
+            MemoryCandidateInput {
+                content: "token ghp_16Chars\u{200b}AtLeastHere00".into(),
+                topic: None,
+                session_id: None,
+            },
+            MemoryCandidateInput {
+                content: "safe but hidden topic".into(),
+                topic: Some("Tra\u{202e}vel".into()),
+                session_id: None,
+            },
+            MemoryCandidateInput {
+                content: "safe but tag topic".into(),
+                topic: Some("Tra\u{e0020}vel".into()),
+                session_id: None,
+            },
+        ];
+
+        let count = append_memory_proposals_at(&root, candidates).unwrap();
+
+        assert_eq!(count, 1);
+        let records = jsonl_records(&root.join("proposals").join(PENDING_FILE));
+        assert_eq!(
+            records[0].get("content").and_then(Value::as_str),
+            Some("café preference")
+        );
+    }
 }

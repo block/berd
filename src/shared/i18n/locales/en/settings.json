@@ -65,23 +65,23 @@
     }
   },
   "archive": {
-    "title": "Archive",
     "autoArchive": {
-      "sectionTitle": "Automatic archiving",
-      "label": "Archive inactive chats",
-      "description": "Automatically archive chats after this much time without a message. Chats pinned to Home are never archived automatically.",
-      "confirmTitle": "Turn on automatic archiving?",
-      "confirmDescription": "Berd will archive unpinned chats {{duration}} without another prompt. You can restore them from Archive or turn this off at any time.",
       "confirmAction": "Turn on",
+      "confirmDescription": "Berd will archive unpinned chats {{duration}} without another prompt. You can restore them from Archive or turn this off at any time.",
+      "confirmTitle": "Turn on automatic archiving?",
+      "description": "Automatically archive chats after this much time without a message. Chats pinned to Home are never archived automatically.",
+      "label": "Archive inactive chats",
       "options": {
-        "never": "Never",
         "1-day": "After 1 day",
-        "7-days": "After 7 days",
         "14-days": "After 14 days",
         "30-days": "After 30 days",
-        "90-days": "After 90 days"
-      }
-    }
+        "7-days": "After 7 days",
+        "90-days": "After 90 days",
+        "never": "Never"
+      },
+      "sectionTitle": "Automatic archiving"
+    },
+    "title": "Archive"
   },
   "chats": {
     "empty": "Archived chats will show here.",
@@ -105,6 +105,9 @@
     "title": "Compaction"
   },
   "connections": {
+    "askAgent": "Add connection",
+    "askAgentPrompt": "Help me add a connection. First ask whether I want a company-managed service or a local MCP, then explain the setup and access requirements. Ask before changing any configuration and never print or copy credentials.",
+    "askAgentTitle": "Add a connection",
     "configure": "Configure",
     "connect": "Connect",
     "connectError": "Couldn't open the connect flow. Try again.",
@@ -119,12 +122,20 @@
     "expiresToday": "Expires today",
     "expiresTomorrow": "Expires tomorrow",
     "extendAccess": "Extend access",
+    "localError": {
+      "description": "Try again in a moment.",
+      "partialDescription": "Berd couldn’t read every local configuration source.",
+      "partialTitle": "Some local MCPs may be missing",
+      "retry": "Try again",
+      "retrying": "Trying…",
+      "title": "Couldn’t load your local MCPs"
+    },
     "noResults": "No connections match your search.",
     "reconnect": "Reconnect",
     "search": "Search connections",
     "sections": {
-      "managed": "Company managed",
-      "local": "Local"
+      "local": "Local",
+      "managed": "Company managed"
     },
     "status": {
       "active": "Active",
@@ -132,18 +143,7 @@
       "expired": "Expired"
     },
     "title": "Connections",
-    "worksWith": "Works with: {{harnesses}}",
-    "localError": {
-      "title": "Couldn’t load your local MCPs",
-      "description": "Try again in a moment.",
-      "partialTitle": "Some local MCPs may be missing",
-      "partialDescription": "Berd couldn’t read every local configuration source.",
-      "retry": "Try again",
-      "retrying": "Trying…"
-    },
-    "askAgent": "Add connection",
-    "askAgentTitle": "Add a connection",
-    "askAgentPrompt": "Help me add a connection. First ask whether I want a company-managed service or a local MCP, then explain the setup and access requirements. Ask before changing any configuration and never print or copy credentials."
+    "worksWith": "Works with: {{harnesses}}"
   },
   "deleteProject": {
     "description": "Removes the project and all its data. You can't undo this.",
@@ -211,9 +211,9 @@
       "description": "Show the Builderbot tasks and automations surface.",
       "title": "Builderbot"
     },
-    "relatedPullRequests": {
-      "description": "Show the PR Inbox and the current status of pull requests linked in a chat.",
-      "title": "PR Inbox"
+    "chatOnCanvas": {
+      "description": "Expand pinned chats into live conversation cards on Home where you can read and respond.",
+      "title": "Chat on canvas"
     },
     "defaultLabel": "default",
     "description": "Opt into in-progress Berd features on this device. Experiments can change, break, or disappear.",
@@ -234,6 +234,10 @@
     "promptPins": {
       "description": "Pin saved prompts to Home that run with one click, optionally with an attached agent.",
       "title": "Prompt pins"
+    },
+    "relatedPullRequests": {
+      "description": "Show the PR Inbox and the current status of pull requests linked in a chat.",
+      "title": "PR Inbox"
     },
     "remoteSshSessions": {
       "description": "Run sessions on a remote machine over SSH using hosts from your SSH config. Berd starts and tunnels to a Goose daemon on the remote host.",
@@ -260,10 +264,6 @@
     "voiceConversation": {
       "description": "Try continuous two-way voice conversations in Goose chats.",
       "title": "Voice conversations"
-    },
-    "chatOnCanvas": {
-      "title": "Chat on canvas",
-      "description": "Expand pinned chats into live conversation cards on Home where you can read and respond."
     }
   },
   "extensions": {
@@ -416,6 +416,52 @@
     },
     "title": "General"
   },
+  "me": {
+    "addTopic": "Add topic",
+    "addTopicAction": "Add",
+    "cancel": "Cancel",
+    "closeTopic": "Close",
+    "create": "Create my file",
+    "description": "Approved details, preferences, and boundaries that can help agents work better with you across chats.",
+    "editTab": "Edit",
+    "editorLabel": "Edit your me.md",
+    "livesIn": "Approved memories stay in plain-text files on your computer at",
+    "loadError": "Couldn't read your file. It may have been moved or deleted.",
+    "newTopicDescription": "A topic is its own document. Agents read it only when that part of your life is what's going on.",
+    "newTopicError": "Couldn't create that topic. A topic with a similar name may already exist.",
+    "newTopicLabel": "Name your topic",
+    "newTopicPlaceholder": "Style, Family, Travel…",
+    "noTopics": "No topics yet. Topics hold deeper knowledge, like style, family, or work, that only loads when it's relevant.",
+    "offBanner": {
+      "description": "Berd won’t use your approved memories or suggest new ones. Memory files and pending proposals will stay on your computer unless you remove them."
+    },
+    "openTopic": "View",
+    "previewTab": "Preview",
+    "refresh": "Refresh",
+    "save": "Save",
+    "saveError": "Couldn't save your changes. Your edits are still here, so try again.",
+    "unsafeUnicodeError": "Memory text can't include hidden Unicode control characters.",
+    "spineTitle": "About you",
+    "title": "Memory",
+    "toggle": {
+      "description": "Memory helps Berd remember what matters about you and how you like to work. Berd may suggest memories from your chats, but nothing is saved without your approval. Review, edit, or delete anything at any time here.",
+      "label": "Use memory"
+    },
+    "topicsHint": "Topics provide more specific knowledge that only loads when it's relevant. Add or update them here.",
+    "topicsTitle": "Topics",
+    "unsavedChanges": "Unsaved changes",
+    "proposals": {
+      "title": "Memory proposed",
+      "description": "Review these suggestions before anything is added to your memory. You can edit the wording first.",
+      "review": "Review",
+      "dismiss": "Decline",
+      "approve": "Add to memory",
+      "editorLabel": "Edit proposed memory",
+      "credentialError": "Authentication and access data can't be saved to memory.",
+      "unsafeUnicodeError": "Memory text can't include hidden Unicode control characters.",
+      "approveError": "Couldn't add this memory. Try again."
+    }
+  },
   "nav": {
     "appearance": "Appearance",
     "archive": "Archive",
@@ -426,6 +472,7 @@
     "experiments": "Experiments",
     "extensions": "Extensions",
     "general": "General",
+    "me": "Memory",
     "notifications": "Notifications",
     "providers": "AI providers",
     "providersUpdateAvailable": "Update available",
@@ -434,7 +481,6 @@
     "system": "System",
     "updates": "Updates",
     "voice": "Voice",
-    "me": "Memory",
     "memoryProposalsPending": "{{count}} memory proposals to review"
   },
   "navigationLabel": "Settings navigation",
@@ -934,83 +980,16 @@
     }
   },
   "voice": {
-    "conversationMode": "Voice mode",
-    "conversationModeDescription": "Choose who you talk with during a voice conversation.",
-    "defaultOption": "{{value}} (default)",
-    "modeChained": "Talk to your coding agent",
-    "modeChainedDescription": "Your speech becomes a message to your coding agent, and its response is read aloud. Best for direct, project-aware work.",
-    "modeOpenAiRealtime": "Talk through a voice assistant",
-    "modeOpenAiRealtimeDescription": "Have a lower-latency, more natural conversation with a voice assistant that consults your coding agent when it needs your project or tools. Requires an OpenAI API key.",
-    "cloud": "Cloud",
-    "local": "Local",
-    "recommended": "Recommended",
-    "resetToDefaults": "Reset to defaults",
-    "resetToDefaultsDescription": "Restores “Talk to your coding agent” with the recommended speech backends. API keys and downloaded models are kept.",
-    "resetToDefaultsConfirmTitle": "Reset all voice settings?",
-    "resetToDefaultsConfirmDescription": "This restores “Talk to your coding agent,” the recommended speech-to-text and text-to-speech backends, the default voice and speed, and all advanced defaults. API keys and downloaded models are kept.",
-    "resettingToDefaults": "Resetting…",
-    "realtimeAdvanced": "Advanced",
-    "realtimeApiKey": "OpenAI API key",
-    "realtimeApiKeyDescription": "Saved securely in macOS Keychain and shared by Realtime listening and speech.",
-    "realtimeCreateResponse": "Respond automatically",
-    "realtimeCreateResponseDescription": "Generate a voice assistant response when a detected user turn ends.",
-    "realtimeEagerness": "Turn-taking eagerness",
-    "realtimeEagernessAuto": "Balanced (automatic)",
-    "realtimeEagernessHigh": "Eager",
-    "realtimeEagernessLow": "Patient",
-    "realtimeEagernessMedium": "Moderate",
-    "realtimeIdleTimeout": "Idle timeout (ms)",
-    "realtimeInterruptResponse": "Interrupt when I speak",
-    "realtimeInterruptResponseDescription": "Stops the voice assistant's current response when new speech begins.",
-    "realtimeMaxOutputTokens": "Maximum response tokens",
-    "realtimeModel": "Realtime model",
-    "realtimeNoiseReduction": "Noise reduction",
-    "realtimeNoiseReductionFar": "Far-field microphone",
-    "realtimeNoiseReductionNear": "Near-field microphone",
-    "realtimeNoiseReductionOff": "Off",
-    "realtimeOff": "Off",
-    "realtimePrefixPadding": "Speech lead-in (ms)",
-    "realtimePresentation": "Conversation presentation",
-    "realtimePresentationDebug": "Debug — show agent routing",
-    "realtimePresentationDescription": "Debug shows color-coded voice assistant speech and private routing. Subtle presents one seamless assistant and keeps routing in the background.",
-    "realtimePresentationSubtle": "Subtle — one assistant",
-    "realtimeReasoningEffort": "Reasoning effort",
-    "realtimeReasoningEfforts": {
-      "default": "Model default",
-      "high": "High",
-      "low": "Low",
-      "medium": "Medium",
-      "none": "None"
-    },
-    "realtimeServerVad": "Server VAD tuning",
-    "realtimeSilenceDuration": "End pause (ms)",
-    "realtimeSpeed": "Speaking speed",
-    "realtimeSpeedDescription": "Adjusts generated speech from 0.25× to 1.5×. Applies when the next voice session starts.",
-    "realtimeTranscriptionLanguage": "Transcription language",
-    "realtimeTranscriptionLanguagePlaceholder": "Automatic (for example, en)",
-    "realtimeTranscriptionModel": "STT model",
-    "realtimeTranscriptionModelDescription": "Realtime Whisper balances fast partial transcripts with accuracy; choose another model to tune the tradeoff.",
-    "realtimeTranscriptionPrompt": "Transcription hints",
-    "realtimeTranscriptionPromptDescription": "Guides transcription without changing the spoken conversation.",
-    "realtimeTranscriptionPromptPlaceholder": "Names, technical terms, or expected vocabulary",
-    "realtimeTurnDetection": "Turn detection",
-    "realtimeTurnDetectionSemantic": "Semantic VAD",
-    "realtimeTurnDetectionServer": "Server VAD",
-    "realtimeUnlimited": "Unlimited",
-    "realtimeVadThreshold": "Voice activation threshold",
-    "realtimeVoice": "Voice",
-    "backendMacSpeech": "Apple STT",
-    "backendOpenAiStt": "OpenAI STT",
-    "backendOpenAiTts": "OpenAI TTS",
+    "backendMacSpeech": "Apple speech recognition",
+    "backendOpenAiStt": "OpenAI speech-to-text",
+    "backendOpenAiTts": "OpenAI text-to-speech",
     "backendParakeet": "Parakeet STT",
     "backendPocket": "Pocket TTS",
-    "backendSiri": "Apple TTS",
+    "backendSiri": "Siri voices",
     "chooseVoice": "Choose…",
     "chooseVoiceLabel": "Choose a voice: {{voice}}",
     "chooseVoiceTitle": "Choose a voice",
     "download": "Download model",
-    "downloadVoice": "Download {{voice}}",
-    "downloadingVoice": "Downloading {{voice}}",
     "downloadPhase": {
       "complete": "Installed",
       "downloading": "Downloading",
@@ -1020,13 +999,10 @@
       "verifying": "Verifying model"
     },
     "downloadProgress": "{{downloaded}} of {{total}}",
-    "inputBackendDescription": "Choose a backend.",
-    "macSpeechDownloading": "Downloading dictation model… {{progress}}%",
-    "macSpeechLoading": "Checking macOS speech recognition…",
-    "macSpeechLocaleUnsupported": "Apple speech recognition does not support {{locale}}.",
-    "macSpeechModel": "On-device dictation",
-    "macSpeechNotInstalled": "Not installed for {{locale}}",
-    "macSpeechSystemLocale": "the system language",
+    "downloadVoice": "Download {{voice}}",
+    "downloadingVoice": "Downloading {{voice}}",
+    "inputBackendDescription": "Choose how Berd transcribes your speech.",
+    "interruptionDescription": "Choose what happens when you speak while Berd is talking.",
     "interruptionMode": "Interruptions",
     "interruptionModeDescriptions": {
       "allowInterruptions": "Berd keeps listening on every audio device. You can interrupt, but speaker audio may be mistaken for your voice.",
@@ -1038,10 +1014,19 @@
       "automatic": "Automatic",
       "preventFeedback": "Prevent feedback"
     },
+    "macSpeechDownloading": "Downloading dictation model… {{progress}}%",
+    "macSpeechLoading": "Checking macOS speech recognition…",
+    "macSpeechLocaleUnsupported": "Apple speech recognition does not support {{locale}}.",
+    "macSpeechModel": "On-device dictation",
+    "macSpeechNotInstalled": "Not installed for {{locale}}",
+    "macSpeechSystemLocale": "the system language",
+    "microphonePermissionDenied": "Microphone access is turned off for Berd. Allow access in System Settings to use Voice Conversation.",
+    "microphonePermissionTitle": "Microphone access is required",
     "modelInstalled": "Installed",
     "modelInstalledSize": "{{size}} · Installed",
     "modelMissingSize": "Not installed · {{size}} download",
     "modelNotInstalled": "Not installed",
+    "noVoiceSelected": "No voice selected",
     "notReadyInput": "Parakeet STT is not installed. Download it below to use Voice Conversation.",
     "notReadyInputAndOpenAiOutput": "Parakeet STT is not installed, and the shared OpenAI voice API key is missing. Complete both steps below to use Voice Conversation.",
     "notReadyInputAndPocketOutput": "Parakeet STT and Pocket TTS are not installed. Download both below to use Voice Conversation.",
@@ -1059,9 +1044,6 @@
     "notReadyPocketOutput": "Pocket TTS is not installed. Download it below to use Voice Conversation.",
     "notReadySiriOutput": "No installed Siri voice is selected. Download or select one below to use Voice Conversation.",
     "notReadyTitle": "Voice Conversation isn't ready",
-    "microphonePermissionDenied": "Microphone access is turned off for Berd. Allow access in System Settings to use Voice Conversation.",
-    "microphonePermissionTitle": "Microphone access is required",
-    "noVoiceSelected": "No voice selected",
     "openMicrophoneSettings": "Open Microphone Settings",
     "openMicrophoneSettingsError": "Couldn't open Microphone Settings. Open System Settings and select Privacy & Security > Microphone.",
     "openAiApiKeyConfigured": "Saved securely and shared by OpenAI transcription and voice playback.",
@@ -1076,7 +1058,7 @@
     "openAiTtsConfigured": "Uses {{model}} and the {{voice}} voice. OpenAI voices are AI-generated.",
     "openAiTtsNeedsKey": "Add the shared OpenAI voice API key to use this voice.",
     "openAiTtsUnsupportedPlatform": "OpenAI voice playback is currently supported on macOS only.",
-    "outputBackendDescription": "Choose a backend.",
+    "outputBackendDescription": "Choose how Berd speaks assistant responses.",
     "playbackSpeed": "Playback speed",
     "playing": "Playing",
     "playingVoice": "Playing preview for {{voice}}",
@@ -1090,62 +1072,16 @@
     "removingModel": "Removing model…",
     "retryDownload": "Retry model download",
     "saveApiKey": "Save key",
-    "settingsDescription": "Choose how speech and your coding agent work together.",
+    "selectedVoice": "Selected voice: {{voice}}",
+    "settingsDescription": "Choose how Berd speaks, install speech recognition, and preview available voices.",
     "siriLanguage": "Language",
     "siriLoading": "Loading Siri voices…",
     "siriNoVoices": "No Siri voices are available for this language.",
     "siriUnsupported": "Siri voices are available on macOS only.",
-    "speechInput": "Speech to text (STT)",
-    "speechOutput": "Text to speech (TTS)",
-    "selectedVoice": "Selected voice: {{voice}}",
+    "speechInput": "Speech input",
+    "speechOutput": "Speech output",
     "useVoice": "Use {{voice}}",
     "voice": "Voice",
     "voiceLabel": "Pocket TTS voice"
-  },
-  "me": {
-    "addTopic": "Add topic",
-    "addTopicAction": "Add",
-    "cancel": "Cancel",
-    "closeTopic": "Close",
-    "create": "Create my file",
-    "description": "Approved details, preferences, and boundaries that can help agents work better with you across chats.",
-    "editTab": "Edit",
-    "editorLabel": "Edit your me.md",
-    "livesIn": "Approved memories stay in plain-text files on your computer at",
-    "loadError": "Couldn't read your file. It may have been moved or deleted.",
-    "newTopicDescription": "A topic is its own document. Agents read it only when that part of your life is what's going on.",
-    "newTopicError": "Couldn't create that topic. A topic with a similar name may already exist.",
-    "newTopicLabel": "Name your topic",
-    "newTopicPlaceholder": "Style, Family, Travel…",
-    "noTopics": "No topics yet. Topics hold deeper knowledge, like style, family, or work, that only loads when it's relevant.",
-    "offBanner": {
-      "description": "Berd won’t use your approved memories or suggest new ones. Memory files and pending proposals will stay on your computer unless you remove them."
-    },
-    "openTopic": "View",
-    "previewTab": "Preview",
-    "refresh": "Refresh",
-    "save": "Save",
-    "saveError": "Couldn't save your changes. Your edits are still here, so try again.",
-    "unsafeUnicodeError": "Memory text can't include hidden Unicode control characters.",
-    "spineTitle": "About you",
-    "title": "Memory",
-    "toggle": {
-      "description": "Memory helps Berd remember what matters about you and how you like to work. Berd may suggest memories from your chats, but nothing is saved without your approval. Review, edit, or delete anything at any time here.",
-      "label": "Use memory"
-    },
-    "topicsHint": "Topics provide more specific knowledge that only loads when it's relevant. Add or update them here.",
-    "topicsTitle": "Topics",
-    "unsavedChanges": "Unsaved changes",
-    "proposals": {
-      "title": "Memory proposed",
-      "description": "Review these suggestions before anything is added to your memory. You can edit the wording first.",
-      "review": "Review",
-      "dismiss": "Decline",
-      "approve": "Add to memory",
-      "editorLabel": "Edit proposed memory",
-      "credentialError": "Authentication and access data can't be saved to memory.",
-      "unsafeUnicodeError": "Memory text can't include hidden Unicode control characters.",
-      "approveError": "Couldn't add this memory. Try again."
-    }
   }
 }

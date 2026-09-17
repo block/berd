@@ -8,6 +8,10 @@ import {
   CredentialMemoryError,
   looksLikeCredential,
 } from "./memoryCredentialGuard";
+import {
+  normalizeMemoryDocumentText,
+  normalizeMemoryProposalTopic,
+} from "./memoryTextContract";
 
 /** One reviewed Settings edit for either the spine or a topic document. */
 export async function saveMemoryDocument({
@@ -19,20 +23,22 @@ export async function saveMemoryDocument({
   contents: string;
   topic: string | null;
 }): Promise<void> {
-  if (looksLikeCredential(contents)) throw new CredentialMemoryError();
+  const reviewed = normalizeMemoryDocumentText(contents);
+  const reviewedTopic = normalizeMemoryProposalTopic(topic);
+  if (looksLikeCredential(reviewed)) throw new CredentialMemoryError();
 
   const before = await readTextFile(path)
-    .then((payload) => payload.contents)
+    .then((payload) => normalizeMemoryDocumentText(payload.contents))
     .catch(() => "");
-  const removed = removedMemoryEntries(before, contents);
+  const removed = removedMemoryEntries(before, reviewed);
 
   // The edit must land before its deletions become durable suppression
   // decisions. A failed write must not suppress content still in the file.
-  await writeTextFile(path, contents);
+  await writeTextFile(path, reviewed);
   for (const entry of removed) {
     await resolveMemoryProposal(`manual-delete-${crypto.randomUUID()}`, {
       content: entry,
-      topic,
+      topic: reviewedTopic,
     });
   }
 }
