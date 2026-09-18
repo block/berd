@@ -187,6 +187,7 @@ vi.mock("@/features/projects/api/projects", async (importOriginal) => {
     isWorktreeStartupMode: actual.isWorktreeStartupMode,
     normalizeProjectWorkspaces: actual.normalizeProjectWorkspaces,
     projectWorkspaceFromDirectory: actual.projectWorkspaceFromDirectory,
+    findProjectByWorkingDirectory: actual.findProjectByWorkingDirectory,
     listProjects: (...args: unknown[]) => mocks.listProjects(...args),
     createProject: (...args: unknown[]) => mocks.createProject(...args),
     archiveProject: (...args: unknown[]) => mocks.archiveProject(...args),
@@ -3851,6 +3852,31 @@ describe("projects", () => {
     expect(result).toEqual({ project_id: "p-new" });
   });
 
+  it("create warns (but still creates) when a working dir duplicates an existing active project", async () => {
+    const existing = makeProject({
+      id: "existing",
+      name: "Existing Project",
+      workingDirs: ["/work"],
+    });
+    mocks.listProjects.mockResolvedValue([existing]);
+    mocks.createProject.mockResolvedValue(makeProject({ id: "p-new" }));
+
+    const result = await dispatchCommand(
+      "projects",
+      {
+        action: "create",
+        name: "Duplicate Project",
+        working_dir: ["/work"],
+      },
+      ctx,
+    );
+
+    expect(result).toEqual({
+      project_id: "p-new",
+      warning: expect.stringContaining('"Existing Project" (existing)'),
+    });
+  });
+
   it("list refetches from the backend and excludes archived projects", async () => {
     // Stale cache that the refetch must replace.
     useProjectStore.setState({ projects: [makeProject({ id: "stale" })] });
@@ -5180,6 +5206,41 @@ describe("info", () => {
       ),
       "harness_not_ready",
     );
+  });
+
+  it("get_context pairs the stable active project id with its current display name", async () => {
+    controller.getAppContext.mockReturnValue({
+      view: "chat",
+      activeSessionId: "session-2",
+      activeProjectId: "project-9",
+    });
+    useProjectStore.setState({
+      projects: [
+        makeProject({ id: "project-9", name: "Renamed Display Name" }),
+      ],
+      hasFetchedProjects: true,
+    });
+    mocks.getVoiceConversationStatus.mockResolvedValue({
+      available: true,
+      unavailableReason: null,
+      lifecycle: "stopped",
+      sessionId: null,
+      ownerWindowLabel: null,
+      microphoneMuted: false,
+      revision: 0,
+    });
+
+    const result = (await dispatchCommand(
+      "info",
+      { action: "get_context" },
+      ctx,
+    )) as {
+      active_project_id: string | null;
+      active_project_name: string | null;
+    };
+
+    expect(result.active_project_id).toBe("project-9");
+    expect(result.active_project_name).toBe("Renamed Display Name");
   });
 
   it("get_context reports app and active voice context", async () => {

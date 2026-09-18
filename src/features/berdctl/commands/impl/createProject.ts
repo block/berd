@@ -24,26 +24,45 @@ export const createProjectCommand = defineCommand({
   destructive: false,
   summary: "Create a new project",
   description:
-    "Create a new project; it appears immediately in the app's project list.",
+    "Create a new project; it appears immediately in the app's project list. " +
+    "The result includes a warning if a working directory is already " +
+    "attached to another active project.",
   helpFooter: `Example:
   berdctl project create --name "Code reviews" \\
     --instructions "Prefer small diffs" \\
     --working-dir /Users/me/src/api --working-dir /Users/me/src/web
 
 Result:
-  {"project_id": "..."} — the project appears immediately in the app's
-  project list with both directories attached.`,
+  {"project_id": "...", "warning": "..."?} — the project appears
+  immediately in the app's project list with both directories attached.`,
   schema: createProjectSchema,
   execute: async (args) => {
     const [
       { DEFAULT_PROJECT_COLOR },
       { DEFAULT_PROJECT_ICON },
       { useProjectStore },
+      { findProjectByWorkingDirectory },
+      { loadProjectsForBerdctl },
     ] = await Promise.all([
       import("@/features/projects/lib/projectDefaults"),
       import("@/features/projects/lib/projectIcons"),
       import("@/features/projects/stores/projectStore"),
+      import("@/features/projects/api/projects"),
+      import("../runtime/projects"),
     ]);
+    const workingDirs = args.working_dir ?? [];
+    let duplicate: { id: string; name: string } | null = null;
+    if (workingDirs.length > 0) {
+      await loadProjectsForBerdctl();
+      const existingProjects = useProjectStore.getState().projects;
+      for (const dir of workingDirs) {
+        const match = findProjectByWorkingDirectory(existingProjects, dir);
+        if (match) {
+          duplicate = match;
+          break;
+        }
+      }
+    }
     // Deliberately no berd_project Create Completed telemetry: berdctl
     // creates are agent/automation-driven, and the event tracks human-driven
     // UI surfaces only — matching the documented berdctl exclusions in the
@@ -57,9 +76,16 @@ Result:
         args.instructions ?? "",
         DEFAULT_PROJECT_ICON,
         DEFAULT_PROJECT_COLOR,
-        args.working_dir ?? [],
+        workingDirs,
         false,
       );
-    return { project_id: project.id };
+    return {
+      project_id: project.id,
+      ...(duplicate
+        ? {
+            warning: `A working directory is already attached to project "${duplicate.name}" (${duplicate.id}); the new project was created anyway.`,
+          }
+        : {}),
+    };
   },
 });

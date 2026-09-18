@@ -289,6 +289,8 @@ describe("projects API artifact metadata", () => {
     });
 
     const updateRequest = mocks.sourcesUpdate.mock.calls[0]?.[0];
+    // The source name (the project's stable id) must not change on rename.
+    expect(updateRequest.name).toBe("launch");
     expect(updateRequest.properties.artifact).toEqual(
       createProjectArtifactMetadata({
         projectId: "launch",
@@ -340,6 +342,32 @@ describe("projects API artifact metadata", () => {
     const updateRequest = mocks.sourcesUpdate.mock.calls[0]?.[0];
     expect(updateRequest.properties.chatGroups).toEqual(chatGroups);
     expect(project.chatGroups).toEqual(chatGroups);
+  });
+});
+
+describe("findProjectByWorkingDirectory", () => {
+  it("finds an active project via a path-equivalent working directory", async () => {
+    const { findProjectByWorkingDirectory } = await import("./projects");
+    const existing = projectInfo({
+      id: "existing",
+      workingDirs: ["/tmp/launch/"],
+    });
+
+    expect(findProjectByWorkingDirectory([existing], "/tmp/launch")).toEqual(
+      existing,
+    );
+    expect(findProjectByWorkingDirectory([existing], "/tmp/other")).toBeNull();
+  });
+
+  it("ignores archived projects", async () => {
+    const { findProjectByWorkingDirectory } = await import("./projects");
+    const archived = projectInfo({
+      id: "archived",
+      workingDirs: ["/tmp/launch"],
+      archivedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    expect(findProjectByWorkingDirectory([archived], "/tmp/launch")).toBeNull();
   });
 });
 

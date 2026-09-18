@@ -124,6 +124,12 @@ copies to `src-tauri/binaries/goosed-$(rustc -vV | sed -n 's|host: ||p')`, which
 is the filename Tauri expects. Use `GOOSE_BIN=/path/to/goose` only as an explicit
 local override.
 
+## Projects
+
+`ProjectInfo.id` is assigned when a project is created and must remain
+stable. Renaming a project updates only its display name; sessions, chat
+groups, and other persisted references continue to use the original id.
+
 ## Conventions
 
 - Use `@/` imports for frontend code.

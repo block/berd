@@ -354,7 +354,10 @@ function slugify(name: string): string {
 /** Pick a slug for `name` that does not collide with any existing project ID
  *  (active or archived). Two display names that normalize to the same slug
  *  (e.g. "My App" and "my-app", or both collapsing to "project" because they
- *  contain no ASCII alphanumerics) are disambiguated with a numeric suffix. */
+ *  contain no ASCII alphanumerics) are disambiguated with a numeric suffix.
+ *
+ *  This becomes `ProjectInfo.id` and is computed once, at creation; renaming
+ *  a project must never recompute it (see AGENTS.md). */
 function uniqueProjectSlug(name: string, existingIds: Set<string>): string {
   const base = slugify(name);
   if (!existingIds.has(base)) {
@@ -388,6 +391,28 @@ export async function listProjects(): Promise<ProjectInfo[]> {
     .map(toProjectInfo)
     .filter((p) => p.archivedAt === null)
     .sort((a, b) => a.order - b.order);
+}
+
+/** Returns the first active project that already has `workingDir` among its
+ *  working directories, or null. Does not block creation of a duplicate;
+ *  callers use this to warn instead. */
+export function findProjectByWorkingDirectory(
+  projects: ProjectInfo[],
+  workingDir: string,
+): ProjectInfo | null {
+  const normalized = normalizeWorkspacePath(workingDir);
+  if (!normalized) return null;
+  const key = toIdentityKey(normalized);
+  for (const project of projects) {
+    if (project.archivedAt !== null) continue;
+    for (const dir of project.workingDirs) {
+      const candidate = normalizeWorkspacePath(dir);
+      if (candidate && toIdentityKey(candidate) === key) {
+        return project;
+      }
+    }
+  }
+  return null;
 }
 
 export async function scanProjectIcons(
