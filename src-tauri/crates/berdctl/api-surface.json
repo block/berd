@@ -924,7 +924,7 @@
       "description": "Manage the user's projects: create, list, get, attach folder, detach folder, set startup mode, archive.",
       "actions": {
         "create": {
-          "description": "Create a new project; it appears immediately in the app's project list.",
+          "description": "Create a new project; it appears immediately in the app's project list. The result includes a warning if a working directory is already attached to another active project.",
           "fields": [
             {
               "name": "name",
