@@ -4,10 +4,21 @@ version = "0.1.0"
 edition = "2021"
 description = "Shared Rust core for Berd's consent-gated memory files."
 
+[[bin]]
+name = "berd-memory-mcp"
+path = "src/main.rs"
+
 [dependencies]
+aes-gcm = { version = "0.10", features = ["zeroize"] }
+cap-std = "3.4.5"
+cap-fs-ext = "3.4.5"
+fs2 = "0.4"
+rand = "0.8"
+zeroize = "1"
 dirs = "6"
 hex = "0.4"
 regex = "1"
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 unicode-general-category = "1"
@@ -16,3 +27,12 @@ uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 tempfile = "3"
+
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["windows-native"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["sync-secret-service", "crypto-rust", "vendored"] }

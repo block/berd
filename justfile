@@ -189,6 +189,7 @@ clippy:
 _clippy-unix:
     just _tauri-cargo-unix clippy -- -D warnings
     just _tauri-cargo-unix clippy --features {{ app_features }} -- -D warnings
+    just _tauri-cargo-unix clippy -p berd-memory --all-targets -- -D warnings
     just _tauri-cargo-unix clippy -p berdctl -- -D warnings
     just _tauri-cargo-unix clippy -p tauri-plugin-berdctl --features server -- -D warnings
 
@@ -196,6 +197,7 @@ _clippy-unix:
 _clippy-windows:
     just _tauri-cargo-windows clippy -- -D warnings
     just _tauri-cargo-windows clippy --features {{ app_features }} -- -D warnings
+    just _tauri-cargo-windows clippy -p berd-memory --all-targets -- -D warnings
     just _tauri-cargo-windows clippy -p berdctl -- -D warnings
     just _tauri-cargo-windows clippy -p tauri-plugin-berdctl --features server -- -D warnings
 
@@ -241,6 +243,8 @@ _tauri-test-unix:
     if [ "$(uname -s)" = "Linux" ]; then rm -rf src-tauri/target/sherpa-onnx-prebuilt; fi
     just _tauri-cargo-unix test -p tauri-plugin-berdctl --features server
     just _tauri-cargo-unix test -p berdctl
+    just _tauri-cargo-unix test -p berd-memory
+    just _tauri-cargo-unix test --lib commands::memory_
     just _tauri-cargo-unix test --lib telemetry
     just _tauri-cargo-unix test --lib --features block-telemetry-enforced telemetry
     just _tauri-test-skill-marketplace
@@ -253,6 +257,8 @@ _tauri-test-skill-marketplace:
 _tauri-test-windows:
     just _tauri-cargo-windows test -p tauri-plugin-berdctl --features server
     just _tauri-cargo-windows test -p berdctl
+    just _tauri-cargo-windows test -p berd-memory
+    just _tauri-cargo-windows test --lib commands::memory_
     just _tauri-cargo-windows test --lib telemetry
     just _tauri-cargo-windows test --lib --features block-telemetry-enforced telemetry
     just _tauri-test-skill-marketplace

@@ -444,7 +444,7 @@
     "spineTitle": "About you",
     "title": "Memory",
     "toggle": {
-      "description": "Memory helps Berd remember what matters about you and how you like to work. Berd may suggest memories from your chats, but nothing is saved without your approval. Review, edit, or delete anything at any time here.",
+      "description": "Memory helps Berd remember what matters about you and how you like to work. Berd may suggest memories from your chats, but only approved memories are available to agents. Review, edit, or delete anything at any time here.",
       "label": "Use memory"
     },
     "topicsHint": "Topics provide more specific knowledge that only loads when it's relevant. Add or update them here.",
@@ -459,7 +459,29 @@
       "editorLabel": "Edit proposed memory",
       "credentialError": "Authentication and access data can't be saved to memory.",
       "unsafeUnicodeError": "Memory text can't include hidden Unicode control characters.",
-      "approveError": "Couldn't add this memory. Try again."
+      "approveError": "Couldn't add this memory. Try again.",
+      "declineError": "Couldn't decline this memory. Try again."
+    },
+    "retryInitialization": "Retry memory setup",
+    "importReview": "Imported as an unsaved draft. Review it, then Save to replace this document.",
+    "importError": "Couldn't import Markdown. Your document has not changed.",
+    "exportComplete": "Saved a plaintext Markdown export.",
+    "exportError": "Couldn't export Markdown. Your document has not changed.",
+    "importMarkdown": "Import Markdown",
+    "exportMarkdown": "Export Markdown",
+    "exportTitle": "Export plaintext Markdown?",
+    "exportWarning": "The exported file will not be encrypted. Anyone with access to it can read your memory. Choose a safe location and share it carefully.",
+    "encryptedLivesIn": "Memory is stored in encrypted local files at",
+    "storageBoundary": "Edit memory here. Markdown exports are plaintext. Memory is not a secrets vault; encryption does not guarantee protection from other processes running as you.",
+    "storeUnavailable": "Couldn't read encrypted memory. The store may be damaged or unavailable. Existing memory has not been replaced. Resolve the store problem, then refresh.",
+    "policyError": "Couldn't change the memory setting. The saved setting is unchanged.",
+    "topicEditorLabel": "Edit memory topic",
+    "storeErrors": {
+      "missingKey": "The encryption key for this memory store is missing. Existing memory has not been replaced. Restore access to the original key, then refresh.",
+      "keyUnavailable": "The memory encryption key is unavailable. Unlock or restore access to your system keychain, then refresh. Existing memory has not been replaced.",
+      "legacy": "This memory store needs an explicit migration before Berd can read it. Existing files have not been replaced. Plaintext files are not imported automatically.",
+      "initialization": "Couldn't initialize encrypted memory. Check access to your system keychain and memory folder, then try again. Existing memory has not been replaced.",
+      "unavailable": "Couldn't read encrypted memory. The store may be damaged or unavailable. Existing memory has not been replaced. Resolve the store problem, then refresh."
     }
   },
   "nav": {

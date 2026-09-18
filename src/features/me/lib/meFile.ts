@@ -1,19 +1,17 @@
-import { getHomeDir, pathExists, readTextFile } from "@/shared/api/system";
+import {
+  getHomeDir,
+  initializeMemoryStore,
+  listMemoryDocuments,
+  readMemoryTextFile,
+} from "@/shared/api/system";
+import { normalizeMemoryPath } from "./memoryPaths";
 import { saveMemoryDocument } from "./saveMemoryDocument";
 
-/**
- * Canonical home for the user's me.md, relative to the home directory.
- *
- * This is deliberately a neutral location (`~/.me/`), not Berd's dotfolder:
- * the file is the user's, and other tools they trust should be able to find
- * it without asking Berd. Berd is one reader among (eventually) many. The
- * location and structure follow the me.md protocol exploration — see the
- * compat proposal for the shared-spine + contexts contract.
- */
+/** Logical paths in the encrypted, user-owned memory store. */
 export const ME_FILE_SEGMENTS = [".me", "me.md"] as const;
 
 function joinHome(homeDir: string, segments: readonly string[]): string {
-  const trimmed = homeDir.replace(/\/+$/, "");
+  const trimmed = normalizeMemoryPath(homeDir);
   return [trimmed, ...segments].join("/");
 }
 
@@ -28,10 +26,11 @@ export function meFileDisplayPath(): string {
 
 /** Shorten an absolute path to ~-relative form for display. */
 export function toDisplayPath(path: string, homeDir: string): string {
-  const trimmed = homeDir.replace(/\/+$/, "");
-  return path.startsWith(`${trimmed}/`)
-    ? `~${path.slice(trimmed.length)}`
-    : path;
+  const trimmed = normalizeMemoryPath(homeDir);
+  const canonical = normalizeMemoryPath(path);
+  return canonical.startsWith(`${trimmed}/`)
+    ? `~${canonical.slice(trimmed.length)}`
+    : canonical;
 }
 
 /**
@@ -52,8 +51,9 @@ export const ME_FILE_TEMPLATE = `# Me
 with you. Italic notes like this one are just for you — agents never see them.*
 
 *Don't add passwords, credentials, or other access information here. This is
-plaintext Markdown in user-owned local files, not a secrets vault. It is not
-protected from other processes running as you. Berd does not automatically copy
+stored in encrypted local files, not a secrets vault. Markdown exports are
+plaintext. Encryption does not guarantee protection from other processes running as you.
+Berd does not automatically copy
 approved memory into other tools.*
 
 ## About me
@@ -89,8 +89,10 @@ export type MeFileState =
 export async function loadMeFile(): Promise<MeFileState> {
   const homeDir = await getHomeDir();
   const canonical = meFilePath(homeDir);
-  if (await pathExists(canonical)) {
-    const payload = await readTextFile(canonical);
+  const payload = (await listMemoryDocuments()).find(
+    (doc) => doc.path === canonical,
+  );
+  if (payload) {
     return {
       status: "present",
       path: canonical,
@@ -107,6 +109,7 @@ export async function loadMeFile(): Promise<MeFileState> {
 
 /** Seed the starter me.md if none exists yet, then return its state. */
 export async function createMeFile(): Promise<MeFileState> {
+  await initializeMemoryStore();
   const existing = await loadMeFile();
   if (existing.status === "present") {
     return existing;
@@ -115,8 +118,9 @@ export async function createMeFile(): Promise<MeFileState> {
     path: existing.path,
     contents: ME_FILE_TEMPLATE,
     topic: null,
+    create: true,
   });
-  const payload = await readTextFile(existing.path);
+  const payload = await readMemoryTextFile(existing.path);
   return {
     status: "present",
     path: existing.path,
@@ -129,6 +133,7 @@ export async function createMeFile(): Promise<MeFileState> {
 export async function saveMeFile(
   path: string,
   contents: string,
+  create = false,
 ): Promise<void> {
-  await saveMemoryDocument({ path, contents, topic: null });
+  await saveMemoryDocument({ path, contents, topic: null, create });
 }

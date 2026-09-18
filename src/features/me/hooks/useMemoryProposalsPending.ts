@@ -4,7 +4,7 @@ import { listProposals } from "../lib/meProposals";
 
 /**
  * Count of pending proposals for the Memory nav badge. The badge is a real
- * review queue: nothing enters durable or recallable memory until resolved.
+ * review queue: pending suggestions are stored locally but are not recallable.
  *
  * Polling is deliberately lazy (a tiny local file); a focus listener
  * catches the common "came back to the app" moment.

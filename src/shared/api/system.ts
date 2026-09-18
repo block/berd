@@ -204,8 +204,73 @@ export async function statFile(path: string): Promise<FileStatPayload> {
   return invoke("stat_file", { path });
 }
 
+/** Explicitly initialize the encrypted store before creating active memory. */
+export async function initializeMemoryStore(): Promise<void> {
+  return invoke("initialize_memory_store");
+}
+
+export interface MemoryTextFile {
+  path: string;
+  contents: string;
+}
+
+export interface MemoryDocument extends MemoryTextFile {
+  fileName: string;
+}
+
+/** Decrypt active memory or the pending queue; never use the generic file reader. */
+export async function readMemoryTextFile(
+  path: string,
+): Promise<MemoryTextFile> {
+  return invoke("read_memory_text_file", { path });
+}
+
+export async function listMemoryDocuments(): Promise<MemoryDocument[]> {
+  return invoke("list_memory_documents");
+}
+
+/** Approved documents and policy checked together under the encrypted store lock. */
+export async function readMemoryRecallSnapshot(): Promise<{
+  documents: MemoryDocument[];
+} | null> {
+  return invoke("read_memory_recall_snapshot");
+}
+
+/** Atomically save a reviewed edit, its approval, and deletion suppression. */
+export async function saveReviewedMemoryDocument(
+  path: string,
+  contents: string,
+  topic: string | null,
+): Promise<void> {
+  return invoke("save_reviewed_memory_document", { path, contents, topic });
+}
+
+export interface MemoryPolicy {
+  enabled: boolean;
+}
+
+export async function readMemoryPolicy(): Promise<MemoryPolicy | null> {
+  return invoke("read_memory_policy");
+}
+
+export async function writeMemoryPolicy(enabled: boolean): Promise<void> {
+  return invoke("write_memory_policy", { enabled });
+}
+
+/** Native picker exports a saved document as plaintext Markdown. */
+export async function exportMemoryMarkdown(
+  path: string,
+): Promise<string | null> {
+  return invoke("export_memory_markdown", { path });
+}
+
+/** Native picker returns a draft only. The person must review and Save it. */
+export async function importMemoryMarkdown(): Promise<string | null> {
+  return invoke("import_memory_markdown");
+}
+
 /**
- * Create a text file (and any missing parent directories) only if it does
+ * Create an encrypted active memory document only if it does
  * not already exist. Fails rather than overwriting existing content.
  */
 export async function createTextFile(
@@ -216,7 +281,7 @@ export async function createTextFile(
 }
 
 /**
- * Overwrite a UTF-8 text file, creating parent directories as needed. For
+ * Overwrite an encrypted active memory document. For
  * user-initiated edits of user-owned files (e.g. the Settings → Me editor)
  * — agent writes must not route through this.
  */

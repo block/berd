@@ -8,16 +8,20 @@
 //! must not be asserted as user-originated memory through MCP.
 //!
 //! Deliberately hand-rolled: MCP over stdio is newline-delimited
-//! JSON-RPC, and serde_json is the only dependency. No SDK, no async
+//! JSON-RPC. The shared encrypted store owns persistence. No SDK, no async
 //! runtime, nothing to break.
 
+#[cfg(test)]
 use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 
-use berd_memory::{content_is_approved, memory_root};
+use berd_memory::{
+    memory_root,
+    store::{policy_enabled, MemoryStore},
+};
 
 const PROTOCOL_VERSION: &str = "2024-11-05";
 const SERVER_NAME: &str = "berd-memory";
@@ -26,25 +30,36 @@ const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 fn main() {
     let stdin = io::stdin();
     let stdout = io::stdout();
-    let mut out = stdout.lock();
+    let _ = serve(stdin.lock(), stdout.lock(), handle_message);
+}
 
-    for line in stdin.lock().lines() {
-        let Ok(line) = line else { break };
+fn serve(
+    input: impl BufRead,
+    mut output: impl Write,
+    mut dispatch: impl FnMut(&Value) -> Option<Value>,
+) -> io::Result<()> {
+    for line in input.lines() {
+        let line = line?;
         if line.trim().is_empty() {
             continue;
         }
         let Ok(message) = serde_json::from_str::<Value>(&line) else {
-            continue; // Not JSON; ignore rather than die.
+            continue;
         };
-        if let Some(response) = handle_message(&message) {
-            let _ = serde_json::to_writer(&mut out, &response);
-            let _ = out.write_all(b"\n");
-            let _ = out.flush();
+        if let Some(response) = dispatch(&message) {
+            serde_json::to_writer(&mut output, &response)?;
+            output.write_all(b"\n")?;
+            output.flush()?;
         }
     }
+    Ok(())
 }
 
 fn handle_message(message: &Value) -> Option<Value> {
+    handle_message_with_tool(message, call_tool)
+}
+
+fn handle_message_with_tool(message: &Value, tool: impl FnOnce(&Value) -> Value) -> Option<Value> {
     let method = message.get("method")?.as_str()?;
     let id = message.get("id").cloned();
 
@@ -64,7 +79,7 @@ fn handle_message(message: &Value) -> Option<Value> {
         "tools/list" => json!({ "tools": tool_definitions() }),
         "tools/call" => {
             let params = message.get("params").cloned().unwrap_or(json!({}));
-            call_tool(&params)
+            tool(&params)
         }
         _ => {
             return Some(json!({
@@ -110,13 +125,7 @@ fn memory_enabled_in(me: &Option<PathBuf>) -> bool {
 }
 
 fn policy_enables_memory(path: &Path) -> bool {
-    let Ok(contents) = fs::read_to_string(path) else {
-        return false;
-    };
-    serde_json::from_str::<Value>(&contents)
-        .ok()
-        .and_then(|value| value.get("enabled").and_then(Value::as_bool))
-        == Some(true)
+    path.parent().is_some_and(policy_enabled)
 }
 
 fn call_tool(params: &Value) -> Value {
@@ -124,6 +133,14 @@ fn call_tool(params: &Value) -> Value {
 }
 
 fn call_tool_with_root(params: &Value, me: Option<PathBuf>) -> Value {
+    call_tool_with_opener(params, me, MemoryStore::open)
+}
+
+fn call_tool_with_opener(
+    params: &Value,
+    me: Option<PathBuf>,
+    open: impl FnOnce(&Path) -> Result<MemoryStore, String>,
+) -> Value {
     let name = params.get("name").and_then(Value::as_str).unwrap_or("");
     let args = params.get("arguments").cloned().unwrap_or(json!({}));
 
@@ -134,14 +151,24 @@ fn call_tool_with_root(params: &Value, me: Option<PathBuf>) -> Value {
         });
     }
 
-    let outcome = match name {
-        "list_topics" => list_topics_with_root(me.as_deref()),
-        "recall" => recall_with_root(
-            me.as_deref(),
-            args.get("topic").and_then(Value::as_str).unwrap_or(""),
-        ),
-        other => Err(format!("Unknown tool: {other}")),
-    };
+    let outcome = (|| {
+        let root = me.as_deref().ok_or("No home directory")?;
+        // Open never initializes a store or creates a key. The lock keeps
+        // approval/document reads coherent with app mutations and policy writes.
+        let store = open(root)?;
+        let _lock = store.lock()?;
+        if !policy_enabled(root) {
+            return Err("Memory is off or unavailable. Don't read or create memory files.".into());
+        }
+        match name {
+            "list_topics" => list_topics(&store),
+            "recall" => recall(
+                &store,
+                args.get("topic").and_then(Value::as_str).unwrap_or(""),
+            ),
+            other => Err(format!("Unknown tool: {other}")),
+        }
+    })();
 
     match outcome {
         Ok(text) => json!({ "content": [{ "type": "text", "text": text }], "isError": false }),
@@ -153,40 +180,17 @@ fn me_dir() -> Result<PathBuf, String> {
     memory_root()
 }
 
-fn topic_docs_with_root(me: &Path) -> Result<Vec<(String, String)>, String> {
-    let me = me.canonicalize().unwrap_or_else(|_| me.to_path_buf());
+fn topic_docs(store: &MemoryStore) -> Result<Vec<(String, String)>, String> {
     let mut docs = Vec::new();
-    for dir in [me.join("topics")] {
-        let Ok(entries) = fs::read_dir(&dir) else {
+    for relative in store.document_paths()? {
+        let Some(file_name) = relative.strip_prefix("topics/") else {
             continue;
         };
-        for entry in entries.flatten() {
-            let Ok(file_type) = entry.file_type() else {
-                continue;
-            };
-            if !file_type.is_file() || file_type.is_symlink() {
-                continue;
-            }
-            let Ok(canonical_dir) = dir.canonicalize() else {
-                continue;
-            };
-            let Ok(canonical_path) = entry.path().canonicalize() else {
-                continue;
-            };
-            if !canonical_path.starts_with(&canonical_dir) {
-                continue;
-            }
-            let file_name = entry.file_name().to_string_lossy().to_string();
-            if !file_name.ends_with(".md") || file_name == "me.md" {
-                continue;
-            }
-            let Ok(contents) = fs::read_to_string(&canonical_path) else {
-                continue;
-            };
-            if !content_is_approved(&me, &canonical_path, &contents) {
-                continue;
-            }
-            docs.push((file_name, contents));
+        let contents = store
+            .read(&relative)?
+            .ok_or("Memory topic disappeared during recall")?;
+        if store.is_approved(&relative, &contents)? {
+            docs.push((file_name.to_string(), contents));
         }
     }
     Ok(docs)
@@ -229,12 +233,9 @@ fn topic_meta(contents: &str, file_name: &str) -> (String, Option<String>) {
     (label.unwrap_or(fallback), description)
 }
 
-fn list_topics_with_root(me: Option<&Path>) -> Result<String, String> {
-    let Some(me) = me else {
-        return Err("No home directory".to_string());
-    };
+fn list_topics(store: &MemoryStore) -> Result<String, String> {
     let mut lines = Vec::new();
-    for (file_name, contents) in topic_docs_with_root(me)? {
+    for (file_name, contents) in topic_docs(store)? {
         let (label, description) = topic_meta(&contents, &file_name);
         match description {
             Some(desc) => lines.push(format!("- {label} ({file_name}): {desc}")),
@@ -244,7 +245,10 @@ fn list_topics_with_root(me: Option<&Path>) -> Result<String, String> {
     lines.sort();
 
     if lines.is_empty() {
-        return Ok("The user has no approved memory topics yet. Don't write memory files yourself.".to_string());
+        return Ok(
+            "The user has no approved memory topics yet. Don't write memory files yourself."
+                .to_string(),
+        );
     }
     Ok(format!(
         "The user's memory topics — recall one only when it's relevant to what you're helping with:\n{}",
@@ -265,17 +269,13 @@ fn strip_notes(contents: &str) -> String {
         .join("\n\n")
 }
 
-fn recall_with_root(me: Option<&Path>, topic: &str) -> Result<String, String> {
+fn recall(store: &MemoryStore, topic: &str) -> Result<String, String> {
     let query = topic.trim();
     if query.is_empty() {
         return Err("Which topic? Call list_topics to see what exists.".to_string());
     }
 
-    let Some(me) = me else {
-        return Err("No home directory".to_string());
-    };
-
-    for (file_name, contents) in topic_docs_with_root(me)? {
+    for (file_name, contents) in topic_docs(store)? {
         let stem = file_name.trim_end_matches(".md");
         let (label, _) = topic_meta(&contents, &file_name);
         if topic_matches(stem, &label, query) {
@@ -295,7 +295,7 @@ mod tests {
     use super::*;
     use std::sync::{Mutex, OnceLock};
 
-    use berd_memory::{mark_content_approved, now_epoch_seconds, same_fact};
+    use berd_memory::same_fact;
 
     static TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
@@ -307,7 +307,11 @@ mod tests {
     }
 
     fn call(name: &str, args: Value, me: &Path) -> Value {
-        call_tool_with_root(&json!({ "name": name, "arguments": args }), Some(me.to_path_buf()))
+        call_tool_with_opener(
+            &json!({ "name": name, "arguments": args }),
+            Some(me.to_path_buf()),
+            |root| MemoryStore::with_key(root, [17; 32]),
+        )
     }
 
     fn assert_memory_blocked(result: &Value) {
@@ -320,17 +324,23 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn topic_symlinks_are_not_listed() {
+    fn topic_symlinks_fail_closed_in_real_dispatch() {
         use std::os::unix::fs::symlink;
         let temp = tempfile::tempdir().unwrap();
         let me = temp.path().join(".me");
-        let topics = me.join("topics");
-        fs::create_dir_all(&topics).unwrap();
+        let store = MemoryStore::with_key(&me, [17; 32]).unwrap();
+        store
+            .write("topics/style.md", "# Style\n\n- concise", true)
+            .unwrap();
         let outside = temp.path().join("private.md");
-        fs::write(&outside, "# Private\n\nsecret").unwrap();
-        symlink(&outside, topics.join("linked.md")).unwrap();
-        let entry = fs::read_dir(&topics).unwrap().next().unwrap().unwrap();
-        assert!(entry.file_type().unwrap().is_symlink());
+        fs::write(&outside, "private-sentinel").unwrap();
+        symlink(&outside, me.join("topics/linked.md")).unwrap();
+        fs::write(me.join("policy.json"), r#"{"enabled":true}"#).unwrap();
+        for name in ["list_topics", "recall"] {
+            let result = call(name, json!({"topic":"Style"}), &me);
+            assert_eq!(result["isError"], true);
+            assert!(!result.to_string().contains("private-sentinel"));
+        }
     }
 
     #[test]
@@ -383,12 +393,8 @@ mod tests {
 
     #[test]
     fn memory_policy_fails_closed_unless_explicitly_enabled() {
-        let dir = std::env::temp_dir().join(format!(
-            "berd-memory-policy-{}-{}",
-            std::process::id(),
-            now_epoch_seconds()
-        ));
-        fs::create_dir_all(&dir).unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path();
         let policy = dir.join("policy.json");
         assert!(!policy_enables_memory(&policy));
         fs::write(&policy, r#"{ "enabled": false }"#).unwrap();
@@ -397,7 +403,6 @@ mod tests {
         assert!(policy_enables_memory(&policy));
         fs::write(&policy, "not json").unwrap();
         assert!(!policy_enables_memory(&policy));
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -431,12 +436,10 @@ mod tests {
         let me = temp.path().join(".me");
         let topics = me.join("topics");
         fs::create_dir_all(&topics).unwrap();
-        let topic = topics.join("style.md");
         let contents = "# Style\n\n*Private note.*\n\n- Use concise bullets.";
-        fs::write(&topic, contents).unwrap();
-        let me = me.canonicalize().unwrap();
-        let topic = topic.canonicalize().unwrap();
-        mark_content_approved(&me, &topic, contents).unwrap();
+        let store = MemoryStore::with_key(&me, [17; 32]).unwrap();
+        store.write("topics/style.md", contents, true).unwrap();
+        store.mark_approved("topics/style.md", contents).unwrap();
         fs::write(me.join("policy.json"), r#"{ "enabled": true }"#).unwrap();
 
         let result = call("recall", json!({ "topic": "Style" }), &me);
@@ -490,10 +493,7 @@ mod tests {
             ("list_topics", json!({})),
             ("recall", json!({ "topic": "Style" })),
         ] {
-            let result = call_tool_with_root(
-                &json!({ "name": name, "arguments": args }),
-                None,
-            );
+            let result = call_tool_with_root(&json!({ "name": name, "arguments": args }), None);
             assert_eq!(result["isError"], true, "{name} should be blocked");
             assert_memory_blocked(&result);
         }
@@ -505,15 +505,23 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let me = temp.path().join(".me");
         fs::create_dir_all(me.join("topics")).unwrap();
-        fs::write(me.join("policy.json"), "not json").unwrap();
-
-        for (name, args) in [
-            ("list_topics", json!({})),
-            ("recall", json!({ "topic": "Style" })),
+        for policy in [
+            "not json",
+            r#"{"enabled":true,"extra":"unsupported"}"#,
+            r#"{"enabled":true,"extra":null}"#,
+            r#"{"enabled":true,"enabled":true}"#,
+            r#"{"enabled":"true"}"#,
+            r#"{"enabled":1}"#,
         ] {
-            let result = call(name, args, &me);
-            assert_eq!(result["isError"], true, "{name} should be blocked");
-            assert_memory_blocked(&result);
+            fs::write(me.join("policy.json"), policy).unwrap();
+            for (name, args) in [
+                ("list_topics", json!({})),
+                ("recall", json!({ "topic": "Style" })),
+            ] {
+                let result = call(name, args, &me);
+                assert_eq!(result["isError"], true, "{name} should reject {policy}");
+                assert_memory_blocked(&result);
+            }
         }
     }
 
@@ -524,12 +532,10 @@ mod tests {
         let me = temp.path().join(".me");
         let topics = me.join("topics");
         fs::create_dir_all(&topics).unwrap();
-        let topic = topics.join("style.md");
         let contents = "# Style\n\n- concise";
-        fs::write(&topic, contents).unwrap();
-        let me = me.canonicalize().unwrap();
-        let topic = topic.canonicalize().unwrap();
-        mark_content_approved(&me, &topic, contents).unwrap();
+        let store = MemoryStore::with_key(&me, [17; 32]).unwrap();
+        store.write("topics/style.md", contents, true).unwrap();
+        store.mark_approved("topics/style.md", contents).unwrap();
         fs::write(me.join("policy.json"), r#"{ "enabled": false }"#).unwrap();
 
         for (name, args) in [
@@ -549,14 +555,12 @@ mod tests {
         let me = temp.path().join(".me");
         let topics = me.join("topics");
         fs::create_dir_all(&topics).unwrap();
-        let topic = topics.join("style.md");
         let contents = "# Style
 
 - concise";
-        fs::write(&topic, contents).unwrap();
-        let me = me.canonicalize().unwrap();
-        let topic = topic.canonicalize().unwrap();
-        mark_content_approved(&me, &topic, contents).unwrap();
+        let store = MemoryStore::with_key(&me, [17; 32]).unwrap();
+        store.write("topics/style.md", contents, true).unwrap();
+        store.mark_approved("topics/style.md", contents).unwrap();
 
         fs::write(me.join("policy.json"), r#"{ "enabled": false }"#).unwrap();
         let first = call("list_topics", json!({}), &me);
@@ -565,7 +569,10 @@ mod tests {
         fs::write(me.join("policy.json"), r#"{ "enabled": true }"#).unwrap();
         let second = call("list_topics", json!({}), &me);
         assert_eq!(second["isError"], false);
-        assert!(second["content"][0]["text"].as_str().unwrap().contains("Style"));
+        assert!(second["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Style"));
 
         fs::write(me.join("policy.json"), r#"{ "enabled": false }"#).unwrap();
         let third = call("list_topics", json!({}), &me);
@@ -579,5 +586,71 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(resp["error"]["code"], -32601);
+    }
+    #[test]
+    fn encrypted_recall_runs_through_newline_protocol_with_injected_store() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = MemoryStore::with_key(temp.path(), [17; 32]).unwrap();
+        let text = "# Style\n\n*Hidden user note.*\n\n- Use concise bullets.";
+        store.write("topics/style.md", text, true).unwrap();
+        store.mark_approved("topics/style.md", text).unwrap();
+        store
+            .write("topics/private.md", "# Private\n\nDo not disclose", true)
+            .unwrap();
+        fs::write(temp.path().join("policy.json"), r#"{"enabled":true}"#).unwrap();
+        let input = [
+            json!({"id":1,"method":"initialize"}),
+            json!({"method":"notifications/initialized"}),
+            json!({"id":2,"method":"tools/list"}),
+            json!({"id":3,"method":"tools/call","params":{"name":"list_topics"}}),
+            json!({"id":4,"method":"tools/call","params":{"name":"recall","arguments":{"topic":"Style"}}}),
+            json!({"id":5,"method":"tools/call","params":{"name":"recall","arguments":{"topic":"Private"}}}),
+        ].map(|v| v.to_string()).join("\n");
+        let mut output = Vec::new();
+        serve(io::Cursor::new(input), &mut output, |message| {
+            handle_message_with_tool(message, |params| {
+                call_tool_with_opener(params, Some(temp.path().to_path_buf()), |root| {
+                    MemoryStore::with_key(root, [17; 32])
+                })
+            })
+        })
+        .unwrap();
+        let output = String::from_utf8(output).unwrap();
+        let responses: Vec<Value> = output
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(responses.len(), 5);
+        assert_eq!(responses[0]["result"]["serverInfo"]["name"], SERVER_NAME);
+        assert_eq!(responses[1]["result"]["tools"].as_array().unwrap().len(), 2);
+        assert_eq!(responses[2]["result"]["isError"], false);
+        assert!(responses[2].to_string().contains("Style"));
+        assert!(!responses[2].to_string().contains("Private"));
+        assert_eq!(responses[3]["result"]["isError"], false);
+        assert!(responses[3]
+            .to_string()
+            .contains("BEGIN UNTRUSTED USER-AUTHORED MEMORY CONTEXT"));
+        assert!(!responses[3].to_string().contains("Hidden user note"));
+        assert_eq!(responses[4]["result"]["isError"], true);
+        assert!(!output.contains("Do not disclose"));
+    }
+
+    #[test]
+    fn corrupt_encrypted_topic_is_an_error_not_an_empty_list() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = MemoryStore::with_key(temp.path(), [17; 32]).unwrap();
+        store.write("topics/style.md", "# Style", true).unwrap();
+        store.mark_approved("topics/style.md", "# Style").unwrap();
+        fs::write(
+            temp.path().join("topics/style.md"),
+            "plaintext-substitution",
+        )
+        .unwrap();
+        fs::write(temp.path().join("policy.json"), r#"{"enabled":true}"#).unwrap();
+        for name in ["list_topics", "recall"] {
+            let result = call(name, json!({"topic":"Style"}), temp.path());
+            assert_eq!(result["isError"], true);
+            assert!(!result.to_string().contains("plaintext-substitution"));
+        }
     }
 }

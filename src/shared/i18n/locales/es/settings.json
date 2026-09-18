@@ -444,7 +444,7 @@
     "spineTitle": "Sobre ti",
     "title": "Memoria",
     "toggle": {
-      "description": "La memoria ayuda a Berd a recordar lo que te importa y cómo prefieres trabajar. Berd puede sugerir recuerdos de tus chats, pero nada se guarda sin tu aprobación. Revisa, edita o elimina cualquier cosa aquí en cualquier momento.",
+      "description": "La memoria ayuda a Berd a recordar lo que te importa y cómo prefieres trabajar. Berd puede sugerir recuerdos de tus chats, pero solo los recuerdos aprobados están disponibles para los agentes. Revisa, edita o elimina cualquier cosa aquí en cualquier momento.",
       "label": "Usar memoria"
     },
     "topicsHint": "Los temas proporcionan conocimientos más específicos que solo se cargan cuando son relevantes. Añádelos o actualízalos aquí.",
@@ -459,7 +459,29 @@
       "editorLabel": "Editar memoria propuesta",
       "credentialError": "Los datos de autenticación y acceso no se pueden guardar en la memoria.",
       "unsafeUnicodeError": "El texto de memoria no puede incluir caracteres de control Unicode ocultos.",
-      "approveError": "No se pudo agregar esta memoria. Inténtalo de nuevo."
+      "approveError": "No se pudo agregar esta memoria. Inténtalo de nuevo.",
+      "declineError": "No se pudo rechazar este recuerdo. Inténtalo de nuevo."
+    },
+    "retryInitialization": "Reintentar configuración de memoria",
+    "importReview": "Se importó como un borrador sin guardar. Revísalo y selecciona Guardar para reemplazar este documento.",
+    "importError": "No se pudo importar el archivo Markdown. Tu documento no ha cambiado.",
+    "exportComplete": "Se guardó una copia en Markdown sin cifrar.",
+    "exportError": "No se pudo exportar el archivo Markdown. Tu documento no ha cambiado.",
+    "importMarkdown": "Importar Markdown",
+    "exportMarkdown": "Exportar Markdown",
+    "exportTitle": "¿Exportar Markdown sin cifrar?",
+    "exportWarning": "El archivo exportado no estará cifrado. Cualquier persona con acceso al archivo podrá leer tu memoria. Elige una ubicación segura y compártelo con cuidado.",
+    "encryptedLivesIn": "La memoria se guarda en archivos locales cifrados en",
+    "storageBoundary": "Edita la memoria aquí. Las exportaciones Markdown no están cifradas. La memoria no es una bóveda de secretos; el cifrado no garantiza protección frente a otros procesos que se ejecuten con tu cuenta.",
+    "storeUnavailable": "No se pudo leer la memoria cifrada. El almacén puede estar dañado o no disponible. No se ha reemplazado la memoria existente. Resuelve el problema y actualiza.",
+    "policyError": "No se pudo cambiar la configuración de memoria. La configuración guardada no ha cambiado.",
+    "topicEditorLabel": "Editar tema de memoria",
+    "storeErrors": {
+      "missingKey": "Falta la clave de cifrado de este almacén de memoria. No se ha reemplazado la memoria existente. Restaura el acceso a la clave original y actualiza.",
+      "keyUnavailable": "La clave de cifrado de la memoria no está disponible. Desbloquea el llavero del sistema o restaura el acceso y actualiza. No se ha reemplazado la memoria existente.",
+      "legacy": "Este almacén de memoria requiere una migración explícita para que Berd pueda leerlo. No se han reemplazado los archivos existentes. Los archivos sin cifrar no se importan automáticamente.",
+      "initialization": "No se pudo inicializar la memoria cifrada. Comprueba el acceso al llavero del sistema y a la carpeta de memoria e inténtalo de nuevo. No se ha reemplazado la memoria existente.",
+      "unavailable": "No se pudo leer la memoria cifrada. El almacén puede estar dañado o no disponible. No se ha reemplazado la memoria existente. Resuelve el problema y actualiza."
     }
   },
   "nav": {

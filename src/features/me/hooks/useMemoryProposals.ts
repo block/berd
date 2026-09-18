@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
+import {
+  memoryStoreErrorKind,
+  type MemoryStoreErrorKind,
+} from "../lib/memoryStoreError";
 import { listProposals, type MemoryProposal } from "../lib/meProposals";
 import {
   approveMemoryProposal,
@@ -11,17 +15,23 @@ export function useMemoryProposals(
   sessionId?: string,
   options?: { sessionlessOnly?: boolean },
 ) {
+  const [error, setError] = useState<MemoryStoreErrorKind | null>(null);
   const [proposals, setProposals] = useState<MemoryProposal[]>([]);
 
   const refresh = useCallback(async () => {
-    const all = await listProposals();
-    setProposals(
-      sessionId
-        ? all.filter((proposal) => proposal.sessionId === sessionId)
-        : options?.sessionlessOnly
-          ? all.filter((proposal) => proposal.sessionId === null)
-          : all,
-    );
+    try {
+      const all = await listProposals();
+      setError(null);
+      setProposals(
+        sessionId
+          ? all.filter((proposal) => proposal.sessionId === sessionId)
+          : options?.sessionlessOnly
+            ? all.filter((proposal) => proposal.sessionId === null)
+            : all,
+      );
+    } catch (error) {
+      setError(memoryStoreErrorKind(error));
+    }
   }, [sessionId, options?.sessionlessOnly]);
 
   useEffect(() => {
@@ -54,5 +64,5 @@ export function useMemoryProposals(
     [refresh],
   );
 
-  return { proposals, approve, decline, refresh };
+  return { proposals, approve, decline, refresh, error };
 }

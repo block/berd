@@ -2,21 +2,30 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getHomeDir: vi.fn(),
-  pathExists: vi.fn(),
-  readTextFile: vi.fn(),
+  initializeMemoryStore: vi.fn(),
+  listMemoryDocuments: vi.fn(),
+  readMemoryTextFile: vi.fn(),
   saveMemoryDocument: vi.fn(),
 }));
 
 vi.mock("@/shared/api/system", () => ({
   getHomeDir: mocks.getHomeDir,
-  pathExists: mocks.pathExists,
-  readTextFile: mocks.readTextFile,
+  initializeMemoryStore: mocks.initializeMemoryStore,
+  listMemoryDocuments: mocks.listMemoryDocuments,
+  readMemoryTextFile: mocks.readMemoryTextFile,
 }));
 vi.mock("../saveMemoryDocument", () => ({
   saveMemoryDocument: mocks.saveMemoryDocument,
 }));
 
-import { createMeFile, ME_FILE_TEMPLATE, saveMeFile } from "../meFile";
+import {
+  createMeFile,
+  loadMeFile,
+  meFilePath,
+  toDisplayPath,
+  ME_FILE_TEMPLATE,
+  saveMeFile,
+} from "../meFile";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -26,8 +35,8 @@ beforeEach(() => {
 
 describe("me file writes", () => {
   it("creates only ~/.me/me.md and does not automatically project memory elsewhere", async () => {
-    mocks.pathExists.mockResolvedValue(false);
-    mocks.readTextFile.mockResolvedValue({ contents: ME_FILE_TEMPLATE });
+    mocks.listMemoryDocuments.mockResolvedValue([]);
+    mocks.readMemoryTextFile.mockResolvedValue({ contents: ME_FILE_TEMPLATE });
 
     await createMeFile();
 
@@ -35,6 +44,7 @@ describe("me file writes", () => {
       path: "/home/u/.me/me.md",
       contents: ME_FILE_TEMPLATE,
       topic: null,
+      create: true,
     });
   });
 
@@ -45,12 +55,31 @@ describe("me file writes", () => {
       path: "/home/u/.me/me.md",
       contents: "## Preferences\n\n- Keep it brief.",
       topic: null,
+      create: false,
     });
   });
 
-  it("documents the plaintext local-filesystem boundary in the starter file", () => {
-    expect(ME_FILE_TEMPLATE).toContain("plaintext Markdown");
+  it("documents the encrypted local-filesystem boundary in the starter file", () => {
+    expect(ME_FILE_TEMPLATE).toContain("encrypted local files");
     expect(ME_FILE_TEMPLATE).toContain("not a secrets vault");
     expect(ME_FILE_TEMPLATE).toContain("not automatically copy");
+  });
+});
+
+it("matches normalized backend documents and shortens Windows paths", async () => {
+  const home = "C:\\Users\\someone\\";
+  const path = "C:/Users/someone/.me/me.md";
+  mocks.getHomeDir.mockResolvedValue(home);
+  mocks.listMemoryDocuments.mockResolvedValue([
+    { path, fileName: "me.md", contents: "# Me" },
+  ]);
+  expect(meFilePath(home)).toBe(path);
+  expect(toDisplayPath("C:\\Users\\someone\\.me\\me.md", home)).toBe(
+    "~/.me/me.md",
+  );
+  await expect(loadMeFile()).resolves.toMatchObject({
+    status: "present",
+    path,
+    displayPath: "~/.me/me.md",
   });
 });
