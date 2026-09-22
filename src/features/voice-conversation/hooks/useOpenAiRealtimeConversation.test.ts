@@ -1305,6 +1305,51 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     expect(owner.result.current.state).toBe("off");
   });
 
+  it("drains queued provider events before stopping the native runtime", async () => {
+    let finishProviderSend!: () => void;
+    mocks.sendRealtimeEvents.mockImplementation(
+      (
+        transport: { send(data: string): void },
+        events: Array<Record<string, unknown>>,
+      ) => {
+        for (const event of events) transport.send(JSON.stringify(event));
+      },
+    );
+    const owner = renderConversation("session-a");
+    await act(async () => owner.result.current.onToggle());
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+
+    mocks.sendRuntimeEvent.mockClear();
+    mocks.sendRuntimeEvent.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishProviderSend = resolve;
+        }),
+    );
+    act(() => {
+      channel.dispatchEvent(
+        new MessageEvent("message", {
+          data: JSON.stringify({ type: "test.invalid_tool_call" }),
+        }),
+      );
+    });
+    await waitFor(() => expect(mocks.sendRuntimeEvent).toHaveBeenCalledOnce());
+
+    let stop = Promise.resolve();
+    act(() => {
+      stop = Promise.resolve(owner.result.current.onToggle());
+    });
+    await waitFor(() => expect(owner.result.current.state).toBe("stopping"));
+    expect(mocks.stopRuntime).not.toHaveBeenCalled();
+
+    finishProviderSend();
+    await act(async () => stop);
+
+    expect(mocks.stopRuntime).toHaveBeenCalledWith("session-a");
+    expect(mocks.releaseRuntime).toHaveBeenCalledWith("session-a");
+    expect(owner.result.current.state).toBe("off");
+  });
+
   it("publishes running controls only after the cross-renderer bridge is ready", async () => {
     let resolveBridge!: () => void;
     mocks.waitForBridgeReady.mockReturnValueOnce(

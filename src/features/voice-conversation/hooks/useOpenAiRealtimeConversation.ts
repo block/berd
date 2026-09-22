@@ -684,6 +684,11 @@ class OpenAiRealtimeConversationRuntime {
 
       const transport = {
         send: (data: string) => {
+          if (
+            this.snapshot.state === "stopping" ||
+            this.snapshot.state === "off"
+          )
+            return;
           const event = JSON.parse(data) as Record<string, unknown>;
           const sent = this.realtimeRuntimeSendQueue.then(() =>
             sendOpenAiRealtimeSpokespersonRuntimeEvent(sessionId, event),
@@ -1148,6 +1153,7 @@ class OpenAiRealtimeConversationRuntime {
     this.nativeMicrophone = null;
     const realtimeRuntimeSessionId = this.realtimeRuntimeSessionId;
     this.realtimeRuntimeSessionId = null;
+    await this.realtimeRuntimeSendQueue.catch(() => undefined);
     if (realtimeRuntimeSessionId) {
       await stopOpenAiRealtimeSpokespersonRuntime(
         realtimeRuntimeSessionId,
