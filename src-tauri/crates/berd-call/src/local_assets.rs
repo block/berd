@@ -9,8 +9,8 @@ use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
-// This persisted coordination identity stays stable across package renames so
-// concurrently running app versions still serialize access to the same store.
+// This persisted lock identity coordinates access to the shared model store
+// across concurrently running app versions.
 const LOCK_FILE: &str = ".berd-voice-assets.lock";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
