@@ -26,8 +26,13 @@ Run `berd-call help <command>` for command-specific usage."#;
 const SESSION_HELP: &str = r#"Run the host-facing framed voice-session protocol.
 
 Usage:
-  berd-call session --pcm-output-fd FD [--tts-backend siri|openai|pocket]
-    [--model-dir PATH] [--voice ID] [--language BCP47] [--rate FLOAT]
+  berd-call session --pcm-output-fd FD --voice NAME --language BCP47
+  berd-call session --pcm-output-fd FD --tts-backend openai
+  berd-call session --pcm-output-fd FD --tts-backend pocket
+    --model-dir ABSOLUTE_PATH --voice ID
+
+Each form also accepts:
+    [--rate FLOAT]
     [--stt-backend macos|parakeet|openai] [--stt-model-dir PATH]
     [--mode conventional|expert-spokesperson]
 
@@ -106,36 +111,44 @@ pub(crate) fn parse(args: &[String]) -> Result<Option<MetaCommand>, String> {
             .last()
             .is_some_and(|value| matches!(*value, "-h" | "--help")) =>
         {
-            let topic = values
-                .iter()
-                .take_while(|value| !value.starts_with('-'))
-                .copied()
-                .collect::<Vec<_>>();
-            help_for(&topic)
-                .map(|help| Some(MetaCommand::Help(help)))
-                .ok_or_else(|| format!("unknown help topic: {}", topic.join(" ")))
+            let topic = &values[..values.len() - 1];
+            if topic.iter().any(|value| value.starts_with('-')) {
+                return Ok(None);
+            }
+            match help_for(topic) {
+                Some(help) => Ok(Some(MetaCommand::Help(help))),
+                None => Err(format!("unknown help topic: {}", topic.join(" "))),
+            }
         }
         _ => Ok(None),
     }
 }
 
 fn help_for(topic: &[&str]) -> Option<&'static str> {
-    match topic {
-        [] => Some(TOP_LEVEL_HELP),
-        ["session"] => Some(SESSION_HELP),
-        ["synthesize"] => Some(SYNTHESIZE_HELP),
-        ["voices"] | ["voices", "list" | "download"] => Some(VOICES_HELP),
-        ["models"]
-        | ["models", "macos" | "openai" | "pocket" | "parakeet"]
-        | ["models", "macos", "status" | "install"]
-        | ["models", "openai", "voices"]
-        | ["models", "pocket", "status" | "install" | "voices"]
-        | ["models", "parakeet", "status" | "install"] => Some(MODELS_HELP),
-        ["benchmark"] => Some(BENCHMARK_HELP),
-        ["benchmark", "tts"] => Some(BENCHMARK_TTS_HELP),
-        ["benchmark", "stt"] => Some(BENCHMARK_STT_HELP),
-        _ => None,
+    match topic.first().copied() {
+        None => Some(TOP_LEVEL_HELP),
+        Some("session") => Some(SESSION_HELP),
+        Some("synthesize") => Some(SYNTHESIZE_HELP),
+        Some("voices") => Some(VOICES_HELP),
+        Some("models") => Some(MODELS_HELP),
+        Some("benchmark") => match topic.get(1).copied() {
+            None => Some(BENCHMARK_HELP),
+            Some("tts") => Some(BENCHMARK_TTS_HELP),
+            Some("stt") => Some(BENCHMARK_STT_HELP),
+            Some(_) => None,
+        },
+        Some(_) => None,
     }
+}
+
+pub(crate) fn usage_for(args: &[String]) -> &'static str {
+    let topic = args
+        .iter()
+        .skip(1)
+        .take_while(|value| !value.starts_with('-'))
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    help_for(&topic).unwrap_or(TOP_LEVEL_HELP)
 }
 
 #[cfg(test)]
@@ -171,5 +184,14 @@ mod tests {
     fn rejects_help_for_commands_the_binary_does_not_implement() {
         let error = parse(&args(&["berd-call", "help", "start"])).unwrap_err();
         assert_eq!(error, "unknown help topic: start");
+    }
+
+    #[test]
+    fn preserves_help_shaped_option_values_for_operational_parsers() {
+        assert!(
+            parse(&args(&["berd-call", "synthesize", "--text", "--help",]))
+                .unwrap()
+                .is_none()
+        );
     }
 }

@@ -471,7 +471,7 @@ struct SynthesisWavResult {
 
 fn main() {
     let args: Vec<_> = std::env::args().collect();
-    match cli_help::parse(&args).unwrap_or_else(|error| usage_error(&error)) {
+    match cli_help::parse(&args).unwrap_or_else(|error| usage_error(&error, &args)) {
         Some(cli_help::MetaCommand::Help(help)) => {
             println!("{help}");
             return;
@@ -485,8 +485,8 @@ fn main() {
     match args.get(1).map(String::as_str) {
         Some("session") => {
             let pcm_output_fd =
-                parse_pcm_output_fd(&args).unwrap_or_else(|error| usage_error(&error));
-            let config = parse_args(&args).unwrap_or_else(|error| usage_error(&error));
+                parse_pcm_output_fd(&args).unwrap_or_else(|error| usage_error(&error, &args));
+            let config = parse_args(&args).unwrap_or_else(|error| usage_error(&error, &args));
             let result = match config.mode {
                 SessionMode::Conventional => run_session(config, pcm_output_fd),
                 SessionMode::ExpertSpokesperson => {
@@ -500,7 +500,7 @@ fn main() {
         }
         Some("benchmark") if args.get(2).map(String::as_str) == Some("tts") => {
             let config =
-                parse_tts_benchmark_args(&args).unwrap_or_else(|error| usage_error(&error));
+                parse_tts_benchmark_args(&args).unwrap_or_else(|error| usage_error(&error, &args));
             if let Err(error) = run_tts_benchmark(config) {
                 eprintln!("berd-call benchmark tts failed: {error}");
                 std::process::exit(1);
@@ -508,7 +508,7 @@ fn main() {
         }
         Some("benchmark") if args.get(2).map(String::as_str) == Some("stt") => {
             let config =
-                parse_stt_benchmark_args(&args).unwrap_or_else(|error| usage_error(&error));
+                parse_stt_benchmark_args(&args).unwrap_or_else(|error| usage_error(&error, &args));
             if let Err(error) = run_stt_benchmark(config) {
                 eprintln!("berd-call benchmark stt failed: {error}");
                 std::process::exit(1);
@@ -516,7 +516,7 @@ fn main() {
         }
         Some("synthesize") => {
             let config =
-                parse_synthesis_args(&args).unwrap_or_else(|error| usage_error(&error));
+                parse_synthesis_args(&args).unwrap_or_else(|error| usage_error(&error, &args));
             if let Err(failure) = run_synthesis_command(config) {
                 if failure.code != "output_failed" {
                     let envelope = ManagementErrorEnvelope {
@@ -537,7 +537,8 @@ fn main() {
             }
         }
         Some("voices" | "models") => {
-            let command = parse_management_args(&args).unwrap_or_else(|error| usage_error(&error));
+            let command =
+                parse_management_args(&args).unwrap_or_else(|error| usage_error(&error, &args));
             let operation = command.operation();
             if let Err(failure) = run_management_command(command) {
                 if failure.code == "output_failed" {
@@ -554,37 +555,14 @@ fn main() {
         }
         _ => usage_error(
             "supported commands are session, synthesize, voices, models, benchmark tts, and benchmark stt",
+            &args,
         ),
     }
 }
 
-fn usage_error(error: &str) -> ! {
+fn usage_error(error: &str, args: &[String]) -> ! {
     eprintln!("{error}");
-    eprintln!(
-        "usage:\n  berd-call session --pcm-output-fd FD [--tts-backend siri|openai|pocket] \
-         [--model-dir PATH] [--voice ID] [--language BCP47] [--rate FLOAT] \
-         [--stt-backend macos|parakeet|openai] [--stt-model-dir PATH] \
-         [--mode conventional|expert-spokesperson]\n  \
-         berd-call synthesize --tts-backend siri|openai|pocket --voice ID \
-         [--language BCP47] [--model MODEL] [--model-dir ABSOLUTE_PATH] [--rate FLOAT] \
-         [--allow-paid-openai] --text TEXT --output PATH\n  \
-         berd-call benchmark tts --tts-backend openai|siri|pocket \
-         [--model-dir PATH] [--voice ID] [--language BCP47] [--rate FLOAT] \
-         (--text TEXT --runs COUNT | --prompt-manifest english-short-v1) \
-         --mode fresh-backend|warm [--allow-paid-openai]\n  \
-         berd-call benchmark stt --stt-backend macos|parakeet|openai \
-         [--stt-model-dir PATH] --runs COUNT --mode cold|warm \
-         [--allow-paid-openai]\n  \
-         berd-call voices list [--language BCP47]\n  \
-         berd-call voices download --voice NAME --language BCP47 \
-         [--availability-wait-seconds 1..1800]\n  \
-         berd-call models macos status\n  \
-         berd-call models macos install\n  \
-         berd-call models openai voices\n  \
-         berd-call models pocket status|install --store-root ABSOLUTE_PATH\n  \
-         berd-call models pocket voices\n  \
-         berd-call models parakeet status|install --store-root ABSOLUTE_PATH"
-    );
+    eprintln!("{}", cli_help::usage_for(args));
     std::process::exit(2);
 }
 

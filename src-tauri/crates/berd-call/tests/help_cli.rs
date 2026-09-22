@@ -67,3 +67,13 @@ fn unknown_help_topics_remain_usage_errors() {
         .expect("UTF-8 stderr")
         .contains("unknown help topic: start"));
 }
+
+#[test]
+fn help_shaped_option_values_reach_the_operational_parser() {
+    let output = berd_call(&["synthesize", "--text", "--help"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).expect("UTF-8 stderr");
+    assert!(stderr.contains("--tts-backend is required"));
+    assert!(stderr.contains("Render text through a configured TTS backend"));
+}
