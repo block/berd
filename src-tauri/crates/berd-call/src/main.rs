@@ -78,6 +78,7 @@ const PCM_FRAME_BYTES: usize = INPUT_FRAME_SAMPLES * std::mem::size_of::<f32>();
 const MAX_FINAL_TEXT_BYTES: usize = 64 * 1024;
 const MAX_SPEAK_TEXT_BYTES: usize = 16 * 1024;
 const MAX_HANDOFF_IDS: usize = 64;
+const HELP_REQUESTED: &str = "berd-call-help-requested";
 const MAX_HANDOFF_ID_BYTES: usize = 512;
 const MAX_HANDOFF_REASON_BYTES: usize = 4 * 1024;
 const INPUT_QUEUE_CAPACITY: usize = 32;
@@ -484,9 +485,8 @@ fn main() {
     }
     match args.get(1).map(String::as_str) {
         Some("session") => {
-            let pcm_output_fd =
-                parse_pcm_output_fd(&args).unwrap_or_else(|error| usage_error(&error, &args));
-            let config = parse_args(&args).unwrap_or_else(|error| usage_error(&error, &args));
+            let config = parse_or_exit(parse_args(&args), &args);
+            let pcm_output_fd = parse_or_exit(parse_pcm_output_fd(&args), &args);
             let result = match config.mode {
                 SessionMode::Conventional => run_session(config, pcm_output_fd),
                 SessionMode::ExpertSpokesperson => {
@@ -499,24 +499,21 @@ fn main() {
             }
         }
         Some("benchmark") if args.get(2).map(String::as_str) == Some("tts") => {
-            let config =
-                parse_tts_benchmark_args(&args).unwrap_or_else(|error| usage_error(&error, &args));
+            let config = parse_or_exit(parse_tts_benchmark_args(&args), &args);
             if let Err(error) = run_tts_benchmark(config) {
                 eprintln!("berd-call benchmark tts failed: {error}");
                 std::process::exit(1);
             }
         }
         Some("benchmark") if args.get(2).map(String::as_str) == Some("stt") => {
-            let config =
-                parse_stt_benchmark_args(&args).unwrap_or_else(|error| usage_error(&error, &args));
+            let config = parse_or_exit(parse_stt_benchmark_args(&args), &args);
             if let Err(error) = run_stt_benchmark(config) {
                 eprintln!("berd-call benchmark stt failed: {error}");
                 std::process::exit(1);
             }
         }
         Some("synthesize") => {
-            let config =
-                parse_synthesis_args(&args).unwrap_or_else(|error| usage_error(&error, &args));
+            let config = parse_or_exit(parse_synthesis_args(&args), &args);
             if let Err(failure) = run_synthesis_command(config) {
                 if failure.code != "output_failed" {
                     let envelope = ManagementErrorEnvelope {
@@ -537,8 +534,7 @@ fn main() {
             }
         }
         Some("voices" | "models") => {
-            let command =
-                parse_management_args(&args).unwrap_or_else(|error| usage_error(&error, &args));
+            let command = parse_or_exit(parse_management_args(&args), &args);
             let operation = command.operation();
             if let Err(failure) = run_management_command(command) {
                 if failure.code == "output_failed" {
@@ -553,9 +549,30 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Some("benchmark") => match args.get(2) {
+            Some(command) => {
+                usage_error(&format!("unrecognized benchmark command: {command}"), &args)
+            }
+            None => usage_error("benchmark requires tts or stt", &args),
+        },
         Some(command) => usage_error(&format!("unrecognized command: {command}"), &args),
         None => usage_error("a command is required", &args),
     }
+}
+
+fn parse_or_exit<T>(result: Result<T, String>, args: &[String]) -> T {
+    match result {
+        Ok(value) => value,
+        Err(error) if error == HELP_REQUESTED => {
+            println!("{}", cli_help::usage_for(args));
+            std::process::exit(0);
+        }
+        Err(error) => usage_error(&error, args),
+    }
+}
+
+fn is_help_flag(value: &str) -> bool {
+    matches!(value, "-h" | "--help")
 }
 
 fn usage_error(error: &str, args: &[String]) -> ! {
@@ -565,6 +582,21 @@ fn usage_error(error: &str, args: &[String]) -> ! {
 }
 
 fn parse_management_args(args: &[String]) -> Result<ManagementCommand, String> {
+    if args.last().is_some_and(|value| is_help_flag(value)) {
+        let path = args[1..args.len() - 1]
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        if matches!(
+            path.as_slice(),
+            ["models", "macos", "status" | "install"]
+                | ["models", "openai", "voices"]
+                | ["models", "pocket", "status" | "install" | "voices"]
+                | ["models", "parakeet", "status" | "install"]
+        ) {
+            return Err(HELP_REQUESTED.into());
+        }
+    }
     match (
         args.get(1).map(String::as_str),
         args.get(2).map(String::as_str),
@@ -575,6 +607,9 @@ fn parse_management_args(args: &[String]) -> Result<ManagementCommand, String> {
             let mut index = 3;
             while index < args.len() {
                 let flag = args[index].as_str();
+                if is_help_flag(flag) {
+                    return Err(HELP_REQUESTED.into());
+                }
                 let value = args
                     .get(index + 1)
                     .ok_or_else(|| format!("{flag} requires a value"))?;
@@ -599,6 +634,9 @@ fn parse_management_args(args: &[String]) -> Result<ManagementCommand, String> {
             let mut index = 3;
             while index < args.len() {
                 let flag = args[index].as_str();
+                if is_help_flag(flag) {
+                    return Err(HELP_REQUESTED.into());
+                }
                 let value = args
                     .get(index + 1)
                     .ok_or_else(|| format!("{flag} requires a value"))?;
@@ -667,6 +705,9 @@ fn parse_management_args(args: &[String]) -> Result<ManagementCommand, String> {
 }
 
 fn parse_local_model_roots(args: &[String]) -> Result<LocalAssetRoots, String> {
+    if args.len() == 7 && args.last().is_some_and(|value| is_help_flag(value)) {
+        return Err(HELP_REQUESTED.into());
+    }
     if args.len() != 6 || args.get(4).map(String::as_str) != Some("--store-root") {
         return Err("local model status/install requires --store-root exactly once".into());
     }
@@ -4668,6 +4709,9 @@ fn parse_args(args: &[String]) -> Result<SessionConfig, String> {
     let mut index = 2;
     while index < args.len() {
         let flag = args[index].as_str();
+        if is_help_flag(flag) {
+            return Err(HELP_REQUESTED.into());
+        }
         let value = args
             .get(index + 1)
             .ok_or_else(|| format!("{flag} requires a value"))?;
@@ -4740,6 +4784,9 @@ fn parse_synthesis_args(args: &[String]) -> Result<SynthesisConfig, String> {
     let mut index = 2;
     while index < args.len() {
         let flag = args[index].as_str();
+        if is_help_flag(flag) {
+            return Err(HELP_REQUESTED.into());
+        }
         if flag == "--allow-paid-openai" {
             if allow_paid_openai {
                 return Err("--allow-paid-openai may be provided only once".into());
@@ -4969,6 +5016,9 @@ fn parse_tts_benchmark_args(args: &[String]) -> Result<TtsBenchmarkConfig, Strin
     let mut index = 3;
     while index < args.len() {
         let flag = args[index].as_str();
+        if is_help_flag(flag) {
+            return Err(HELP_REQUESTED.into());
+        }
         if flag == "--allow-paid-openai" {
             allow_paid_openai = true;
             index += 1;
@@ -5186,6 +5236,9 @@ fn parse_stt_benchmark_args(args: &[String]) -> Result<SttBenchmarkConfig, Strin
     let mut index = 3;
     while index < args.len() {
         let flag = args[index].as_str();
+        if is_help_flag(flag) {
+            return Err(HELP_REQUESTED.into());
+        }
         if flag == "--allow-paid-openai" {
             allow_paid_openai = true;
             index += 1;

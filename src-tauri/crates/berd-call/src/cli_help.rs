@@ -107,20 +107,6 @@ pub(crate) fn parse(args: &[String]) -> Result<Option<MetaCommand>, String> {
         ["help", topic @ ..] => help_for(topic)
             .map(|help| Some(MetaCommand::Help(help)))
             .ok_or_else(|| format!("unknown help topic: {}", topic.join(" "))),
-        _ if values
-            .last()
-            .is_some_and(|value| matches!(*value, "-h" | "--help")) =>
-        {
-            let preceding = &values[..values.len() - 1];
-            let topic = command_path(preceding);
-            if trailing_help_is_option_value(preceding, topic.len()) {
-                return Ok(None);
-            }
-            match help_for(&topic) {
-                Some(help) => Ok(Some(MetaCommand::Help(help))),
-                None => Err(format!("unknown help topic: {}", topic.join(" "))),
-            }
-        }
         _ => Ok(None),
     }
 }
@@ -130,12 +116,8 @@ fn help_for(topic: &[&str]) -> Option<&'static str> {
         [] => Some(TOP_LEVEL_HELP),
         ["session"] => Some(SESSION_HELP),
         ["synthesize"] => Some(SYNTHESIZE_HELP),
-        ["voices"] | ["voices", "list" | "download"] => Some(VOICES_HELP),
-        ["models"]
-        | ["models", "macos", "status" | "install"]
-        | ["models", "openai", "voices"]
-        | ["models", "pocket", "status" | "install" | "voices"]
-        | ["models", "parakeet", "status" | "install"] => Some(MODELS_HELP),
+        ["voices"] => Some(VOICES_HELP),
+        ["models"] => Some(MODELS_HELP),
         ["benchmark"] => Some(BENCHMARK_HELP),
         ["benchmark", "tts"] => Some(BENCHMARK_TTS_HELP),
         ["benchmark", "stt"] => Some(BENCHMARK_STT_HELP),
@@ -151,23 +133,6 @@ fn command_path<'a>(values: &'a [&str]) -> Vec<&'a str> {
         .collect()
 }
 
-fn trailing_help_is_option_value(values: &[&str], command_path_len: usize) -> bool {
-    let mut index = command_path_len;
-    while index < values.len() {
-        if values[index] == "--allow-paid-openai" {
-            index += 1;
-        } else if values[index].starts_with('-') {
-            if index + 1 == values.len() {
-                return true;
-            }
-            index += 2;
-        } else {
-            index += 1;
-        }
-    }
-    false
-}
-
 pub(crate) fn usage_for(args: &[String]) -> &'static str {
     let values = args.iter().skip(1).map(String::as_str).collect::<Vec<_>>();
     let mut topic = command_path(&values);
@@ -178,69 +143,5 @@ pub(crate) fn usage_for(args: &[String]) -> &'static str {
         if topic.pop().is_none() {
             return TOP_LEVEL_HELP;
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{parse, MetaCommand, TOP_LEVEL_HELP};
-
-    fn args(values: &[&str]) -> Vec<String> {
-        values.iter().map(|value| (*value).to_string()).collect()
-    }
-
-    #[test]
-    fn parses_global_help_and_version_without_claiming_an_operational_command() {
-        assert!(matches!(
-            parse(&args(&["berd-call", "--help"])).unwrap(),
-            Some(MetaCommand::Help(TOP_LEVEL_HELP))
-        ));
-        assert!(matches!(
-            parse(&args(&["berd-call", "version"])).unwrap(),
-            Some(MetaCommand::Version)
-        ));
-        assert!(parse(&args(&["berd-call", "session"])).unwrap().is_none());
-    }
-
-    #[test]
-    fn accepts_both_help_forms_for_nested_commands() {
-        let prefixed = parse(&args(&["berd-call", "help", "benchmark", "tts"])).unwrap();
-        let suffixed = parse(&args(&["berd-call", "benchmark", "tts", "--help"])).unwrap();
-        assert!(matches!(prefixed, Some(MetaCommand::Help(_))));
-        assert!(matches!(suffixed, Some(MetaCommand::Help(_))));
-    }
-
-    #[test]
-    fn rejects_extra_segments_in_explicit_help_topics() {
-        let error = parse(&args(&["berd-call", "help", "session", "bogus"])).unwrap_err();
-        assert_eq!(error, "unknown help topic: session bogus");
-    }
-
-    #[test]
-    fn accepts_suffix_help_after_complete_options() {
-        let parsed = parse(&args(&[
-            "berd-call",
-            "benchmark",
-            "tts",
-            "--allow-paid-openai",
-            "--help",
-        ]))
-        .unwrap();
-        assert!(matches!(parsed, Some(MetaCommand::Help(_))));
-    }
-
-    #[test]
-    fn rejects_help_for_commands_the_binary_does_not_implement() {
-        let error = parse(&args(&["berd-call", "help", "start"])).unwrap_err();
-        assert_eq!(error, "unknown help topic: start");
-    }
-
-    #[test]
-    fn preserves_help_shaped_option_values_for_operational_parsers() {
-        assert!(
-            parse(&args(&["berd-call", "synthesize", "--text", "--help",]))
-                .unwrap()
-                .is_none()
-        );
     }
 }

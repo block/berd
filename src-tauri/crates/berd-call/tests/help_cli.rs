@@ -92,3 +92,13 @@ fn suffix_help_after_a_complete_boolean_option_is_successful() {
         .expect("UTF-8 stdout")
         .contains("Benchmark a TTS backend"));
 }
+
+#[test]
+fn invalid_benchmark_subcommands_name_the_invalid_leaf() {
+    let output = berd_call(&["benchmark", "bogus"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).expect("UTF-8 stderr");
+    assert!(stderr.contains("unrecognized benchmark command: bogus"));
+    assert!(stderr.contains("Benchmark speech backends"));
+}
