@@ -122,11 +122,11 @@ impl RealtimePlaybackHost {
                 }
             }
             SpokespersonEvent::Handoff { response_id, .. } => {
-                if self
+                let preamble_is_playing = self
                     .playback
                     .as_ref()
-                    .is_none_or(|active| active.response_id != response_id)
-                {
+                    .is_some_and(|active| active.response_id == response_id);
+                if !preamble_is_playing {
                     self.interrupted_responses.insert(response_id);
                 }
             }

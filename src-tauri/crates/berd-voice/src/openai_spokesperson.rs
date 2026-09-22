@@ -128,6 +128,20 @@ pub enum SpokespersonCommand {
     Shutdown,
 }
 
+fn provider_command(event: serde_json::Value) -> SpokespersonCommand {
+    if event.get("type").and_then(serde_json::Value::as_str) == Some("response.cancel")
+        && event.get("event_id").is_none()
+    {
+        string(&event, "response_id")
+            .map(|response_id| SpokespersonCommand::CancelResponses {
+                response_ids: vec![response_id.into()],
+            })
+            .unwrap_or(SpokespersonCommand::Provider(event))
+    } else {
+        SpokespersonCommand::Provider(event)
+    }
+}
+
 #[derive(Debug)]
 pub enum SpokespersonEvent {
     /// Raw provider event for an in-process host that owns the shared protocol
@@ -362,6 +376,10 @@ impl OpenAiSpokespersonRuntime {
         }
     }
 
+    pub fn send_provider_event(&self, event: serde_json::Value) -> Result<(), String> {
+        self.send(provider_command(event))
+    }
+
     pub fn reset_input(&self) -> Result<(), String> {
         let (completed, result) = std::sync::mpsc::sync_channel(1);
         self.send(SpokespersonCommand::ResetInput { completed })?;
@@ -584,16 +602,7 @@ async fn run_inner(
             }
             command = commands.recv(), if shutdown_deadline.is_none() => {
                 match command {
-                    Some(SpokespersonCommand::Provider(mut event)) => {
-                        if event.get("type").and_then(serde_json::Value::as_str) == Some("response.cancel") {
-                            if let Some(response_id) = string(&event, "response_id").map(str::to_owned) {
-                                let event_id = format!("berd-cancel-{next_control_event_id}");
-                                next_control_event_id = next_control_event_id.checked_add(1)
-                                    .ok_or("Spokesperson control event space is exhausted")?;
-                                event["event_id"] = serde_json::json!(event_id);
-                                cancellation_events.insert(event_id, response_id);
-                            }
-                        }
+                    Some(SpokespersonCommand::Provider(event)) => {
                         send_json(&mut socket, event).await?;
                     }
                     Some(SpokespersonCommand::InputPcm48Khz(samples)) => {
@@ -768,20 +777,26 @@ async fn run_inner(
                     }
                 };
                 let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else { continue };
+                let kind = value.get("type").and_then(|value| value.as_str()).unwrap_or("");
+                let cancellation = (kind == "error")
+                    .then(|| {
+                        value
+                            .pointer("/error/event_id")
+                            .and_then(serde_json::Value::as_str)
+                            .and_then(|event_id| cancellation_events.remove(event_id))
+                    })
+                    .flatten();
                 // A response can finish before its cancellation reaches the provider.
-                // Consume the correlated no-op before the host's error reducer sees it.
-                if value.get("type").and_then(serde_json::Value::as_str) == Some("error")
+                // Consume that correlated no-op before observed provider events reach the host.
+                if cancellation.is_some()
                     && value.pointer("/error/message").and_then(serde_json::Value::as_str)
                         == Some("Cancellation failed: no active response found")
-                    && value.pointer("/error/event_id").and_then(serde_json::Value::as_str)
-                        .and_then(|event_id| cancellation_events.remove(event_id)).is_some()
                 {
                     continue;
                 }
                 if forward_provider_events {
                     send_event(events, SpokespersonEvent::Provider(value.clone()))?;
                 }
-                let kind = value.get("type").and_then(|value| value.as_str()).unwrap_or("");
                 let protocol_events = if matches!(
                     kind,
                     "error" | "conversation.item.input_audio_transcription.failed"
@@ -1024,10 +1039,6 @@ async fn run_inner(
                     }
                     "error" => {
                         let message = value.pointer("/error/message").and_then(|value| value.as_str()).unwrap_or("OpenAI Realtime failed").to_string();
-                        let cancellation = value
-                            .pointer("/error/event_id")
-                            .and_then(|value| value.as_str())
-                            .and_then(|event_id| cancellation_events.remove(event_id));
                         if pending_input_reset.as_ref().is_some_and(|reset| {
                             value.pointer("/error/event_id").and_then(|value| value.as_str())
                                 == Some(reset.event_id.as_str())
@@ -1482,17 +1493,25 @@ mod tests {
         server.await.unwrap();
     }
 
-    #[tokio::test]
-    async fn provider_cancellation_race_keeps_observed_call_alive() {
-        check_cancellation_error(
-            SpokespersonCommand::Provider(json!({
-                "type":"response.cancel", "response_id":"finished-response"
+    #[test]
+    fn provider_cancellation_uses_typed_path_without_overwriting_owned_ids() {
+        assert!(matches!(
+            super::provider_command(json!({
+                "type":"response.cancel", "response_id":"active-response"
             })),
-            "Cancellation failed: no active response found",
-            true,
-            true,
-        )
-        .await;
+            SpokespersonCommand::CancelResponses { response_ids }
+                if response_ids == ["active-response"]
+        ));
+
+        let event = json!({
+            "event_id":"coordinator-owned",
+            "type":"response.cancel",
+            "response_id":"active-response"
+        });
+        assert!(matches!(
+            super::provider_command(event.clone()),
+            SpokespersonCommand::Provider(forwarded) if forwarded == event
+        ));
     }
 
     #[tokio::test]
