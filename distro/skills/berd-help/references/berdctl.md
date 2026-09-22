@@ -21,3 +21,5 @@ organized as `berdctl <noun> <verb>` (for example `berdctl session list`,
   command claims to do something the user can't also see reflected in the
   UI, that's a signal to double check with `--help` rather than trust
   recall.
+
+Use `berdctl session send` for an ordinary message from another session. Use `berdctl session notify` for an automated event such as a monitor update; it appears as a collapsed activity entry and still reaches the agent as context. Both commands support queueing, steering, source attribution, and idempotent delivery.

@@ -79,6 +79,17 @@ pub struct MicrophoneMuteRequest {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct StatusSoundUpdateRequest {
+    session_id: String,
+    expected_revision: u64,
+    status: berd_call::ConversationStatus,
+    settings: berd_call::StatusSoundSettings,
+    renderer_id: String,
+    renderer_epoch: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AssistantSpeakingRequest {
     session_id: String,
     expected_revision: u64,
@@ -236,12 +247,15 @@ struct Runtime {
     lifecycle_id: Option<String>,
     revision: u64,
     owner: Option<RuntimeOwner>,
-    pipeline: Option<berd_voice::input::VoiceInputRuntime>,
+    pipeline: Option<berd_call::input::VoiceInputRuntime>,
     controls_ready: bool,
     controls_suppressed: bool,
     controls_visibility_generation: u64,
     controls_window_revision: Option<u64>,
     native_microphone_mute_control: bool,
+    status_sounds: Option<berd_call::ManagedStatusSoundRuntime>,
+    status_sound_user_speaking: bool,
+    status_sound_playbacks: usize,
     admission: Option<Arc<BerdAdmissionCoordinator>>,
     voice_input_quarantined: bool,
 }
@@ -254,7 +268,7 @@ struct ActiveAdmission {
 
 #[derive(Debug, Default)]
 struct BerdAdmissionInner {
-    core: berd_voice::session::SessionCore,
+    core: berd_call::session::SessionCore,
     next_token: u64,
     tokens: HashMap<VoiceTranscriptReference, u64>,
     active: Option<ActiveAdmission>,
@@ -366,20 +380,20 @@ impl BerdAdmissionCoordinator {
                     None => None,
                 };
                 match inner.core.prepare_after_host_confirmation(
-                    berd_voice::session::PrepareRequest {
+                    berd_call::session::PrepareRequest {
                         id: 0,
                         acknowledgement,
                         text: text.clone(),
                     },
                 ) {
-                    berd_voice::session::PrepareOutcome::Hold => None,
-                    berd_voice::session::PrepareOutcome::Pending(_) => {
+                    berd_call::session::PrepareOutcome::Hold => None,
+                    berd_call::session::PrepareOutcome::Pending(_) => {
                         Some(PrepareAssistantSpeechOutcome::Pending)
                     }
-                    berd_voice::session::PrepareOutcome::NotAdmitted(_) => {
+                    berd_call::session::PrepareOutcome::NotAdmitted(_) => {
                         Some(PrepareAssistantSpeechOutcome::NotAdmitted)
                     }
-                    berd_voice::session::PrepareOutcome::Admitted { speech_id, .. } => {
+                    berd_call::session::PrepareOutcome::Admitted { speech_id, .. } => {
                         inner.active = Some(ActiveAdmission {
                             speech_id,
                             playback_active: None,
@@ -528,7 +542,8 @@ struct VoiceStartBlock {
 type StopSnapshot = (
     Option<String>,
     u64,
-    Option<berd_voice::input::VoiceInputRuntime>,
+    Option<berd_call::input::VoiceInputRuntime>,
+    Option<berd_call::ManagedStatusSoundRuntime>,
     Option<(RuntimeOwner, String)>,
 );
 
@@ -548,12 +563,38 @@ pub struct NativeVoiceState {
     start_blocks: Arc<Mutex<HashMap<String, Vec<VoiceStartBlock>>>>,
     pending: Arc<Mutex<VecDeque<PendingTranscript>>>,
     microphone_muted: Arc<AtomicBool>,
-    input_controls: berd_voice::input::VoiceInputControls,
+    input_controls: berd_call::input::VoiceInputControls,
 }
 
 #[must_use = "assistant speech policy ends when the guard is dropped"]
 pub(crate) struct AssistantSpeechGuard {
-    _activity: Option<berd_voice::input::AssistantActivityGuard>,
+    _activity: Option<berd_call::input::AssistantActivityGuard>,
+    runtime: Arc<Mutex<Runtime>>,
+}
+
+impl Runtime {
+    fn status_sound_suppressed(&self) -> bool {
+        self.status_sound_user_speaking || self.status_sound_playbacks > 0
+    }
+
+    fn publish_status_sound_suppression(&self) {
+        if let Some(status_sounds) = self.status_sounds.as_ref() {
+            if let Err(error) =
+                status_sounds.set_conversation_active(self.status_sound_suppressed())
+            {
+                log::warn!("Could not update status sound activity: {error}");
+            }
+        }
+    }
+}
+
+impl Drop for AssistantSpeechGuard {
+    fn drop(&mut self) {
+        if let Ok(mut runtime) = self.runtime.lock() {
+            runtime.status_sound_playbacks -= 1;
+            runtime.publish_status_sound_suppression();
+        }
+    }
 }
 
 impl NativeVoiceState {
@@ -571,7 +612,7 @@ impl NativeVoiceState {
 
     fn record_voice_input_finish(
         &self,
-        result: Result<(), berd_voice::input::VoiceInputFinishError>,
+        result: Result<(), berd_call::input::VoiceInputFinishError>,
     ) -> Option<String> {
         let error = result.err()?;
         log::error!("Native voice recognizer shutdown failed: {error}");
@@ -587,7 +628,7 @@ impl NativeVoiceState {
 
     async fn finish_uninstalled_pipeline(
         &self,
-        pipeline: berd_voice::input::VoiceInputRuntime,
+        pipeline: berd_call::input::VoiceInputRuntime,
         startup_error: String,
     ) -> String {
         self.record_voice_input_finish(shutdown_pipeline(pipeline).await)
@@ -772,14 +813,19 @@ impl NativeVoiceState {
     pub(crate) fn begin_assistant_speech(
         &self,
         sensitivity: InterruptionSensitivity,
-        input_during_tts: berd_voice::input::InputDuringTtsPolicy,
+        input_during_tts: berd_call::input::InputDuringTtsPolicy,
     ) -> AssistantSpeechGuard {
         let activity = self
             .input_controls
             .begin_assistant_activity(sensitivity.vad_threshold(), input_during_tts)
             .ok();
+        if let Ok(mut runtime) = self.runtime.lock() {
+            runtime.status_sound_playbacks += 1;
+            runtime.publish_status_sound_suppression();
+        }
         AssistantSpeechGuard {
             _activity: activity,
+            runtime: Arc::clone(&self.runtime),
         }
     }
 
@@ -997,32 +1043,6 @@ impl NativeVoiceState {
         Ok(())
     }
 
-    fn assistant_activity_target(
-        &self,
-        caller_window_label: &str,
-        session_id: &str,
-        expected_revision: u64,
-    ) -> Result<Option<(String, u64)>, String> {
-        let runtime = self
-            .runtime
-            .lock()
-            .map_err(|_| "native voice state lock was poisoned".to_string())?;
-        if runtime.session_id.as_deref() != Some(session_id)
-            || runtime.revision != expected_revision
-        {
-            return Ok(None);
-        }
-        let owner_window_label = runtime
-            .owner
-            .as_ref()
-            .map(|owner| owner.window_label.clone())
-            .ok_or_else(|| "The native voice conversation has no owning window.".to_string())?;
-        if owner_window_label != caller_window_label {
-            return Err("Only the voice conversation owner can report assistant activity.".into());
-        }
-        Ok(Some((owner_window_label, runtime.revision)))
-    }
-
     fn set_assistant_speaking(
         &self,
         app: &AppHandle,
@@ -1031,10 +1051,27 @@ impl NativeVoiceState {
         expected_revision: u64,
         speaking: bool,
     ) -> Result<(), String> {
-        let Some((owner_window_label, revision)) =
-            self.assistant_activity_target(caller_window_label, session_id, expected_revision)?
-        else {
-            return Ok(());
+        let (owner_window_label, revision) = {
+            let runtime = self
+                .runtime
+                .lock()
+                .map_err(|_| "native voice state lock was poisoned".to_string())?;
+            if runtime.session_id.as_deref() != Some(session_id)
+                || runtime.revision != expected_revision
+            {
+                return Ok(());
+            }
+            let owner_window_label = runtime
+                .owner
+                .as_ref()
+                .map(|owner| owner.window_label.clone())
+                .ok_or_else(|| "The native voice conversation has no owning window.".to_string())?;
+            if owner_window_label != caller_window_label {
+                return Err(
+                    "Only the voice conversation owner can report assistant activity.".into(),
+                );
+            }
+            (owner_window_label, runtime.revision)
         };
         let event = NativeVoiceEvent::Activity {
             session_id: session_id.to_string(),
@@ -1050,6 +1087,22 @@ impl NativeVoiceState {
         }
         super::voice_buddy::emit(app, event);
         Ok(())
+    }
+
+    fn set_status_sound_input_activity(
+        &self,
+        session_id: &str,
+        revision: u64,
+        user_speaking: bool,
+    ) {
+        let Ok(mut runtime) = self.runtime.lock() else {
+            return;
+        };
+        if runtime.session_id.as_deref() != Some(session_id) || runtime.revision != revision {
+            return;
+        }
+        runtime.status_sound_user_speaking = user_speaking;
+        runtime.publish_status_sound_suppression();
     }
 
     fn take_stop_snapshot(
@@ -1075,6 +1128,7 @@ impl NativeVoiceState {
             session_id,
             runtime.revision,
             runtime.pipeline.take(),
+            runtime.status_sounds.take(),
             owner.zip(owner_id),
         )))
     }
@@ -1107,8 +1161,8 @@ impl NativeVoiceState {
 }
 
 async fn shutdown_pipeline(
-    pipeline: berd_voice::input::VoiceInputRuntime,
-) -> Result<(), berd_voice::input::VoiceInputFinishError> {
+    pipeline: berd_call::input::VoiceInputRuntime,
+) -> Result<(), berd_call::input::VoiceInputFinishError> {
     pipeline.finish().await
 }
 async fn status_with_availability<F, Fut>(
@@ -1462,13 +1516,13 @@ pub async fn start_native_voice_conversation(
         VoiceInputBackend::Parakeet => {
             parakeet_model_for_loading(&app).map(|(model_dir, assets)| {
                 parakeet_assets = Some(assets);
-                berd_voice::input::VoiceInputEngineConfig::Parakeet { model_dir }
+                berd_call::input::VoiceInputEngineConfig::Parakeet { model_dir }
             })
         }
         VoiceInputBackend::Macos => {
             #[cfg(target_os = "macos")]
             {
-                Ok(berd_voice::input::VoiceInputEngineConfig::MacSpeech)
+                Ok(berd_call::input::VoiceInputEngineConfig::MacSpeech)
             }
             #[cfg(not(target_os = "macos"))]
             {
@@ -1484,7 +1538,7 @@ pub async fn start_native_voice_conversation(
             }
         }
         VoiceInputBackend::Openai => super::openai_audio::realtime_endpoint().map(|endpoint| {
-            berd_voice::input::VoiceInputEngineConfig::OpenAi {
+            berd_call::input::VoiceInputEngineConfig::OpenAi {
                 endpoint,
                 api_key: openai_api_key.expect("OpenAI key resolved for OpenAI input"),
                 model: super::openai_audio::transcription_model(),
@@ -1500,12 +1554,11 @@ pub async fn start_native_voice_conversation(
             return Err(error);
         }
     };
-    let pipeline =
-        berd_voice::input::VoiceInputRuntime::start(berd_voice::input::VoiceInputConfig {
-            engine,
-            speech_vad_threshold: VAD_THRESHOLD,
-            controls: state.input_controls.clone(),
-        });
+    let pipeline = berd_call::input::VoiceInputRuntime::start(berd_call::input::VoiceInputConfig {
+        engine,
+        speech_vad_threshold: VAD_THRESHOLD,
+        controls: state.input_controls.clone(),
+    });
     let (pipeline, mut events) = match pipeline {
         Ok(result) => result,
         Err(error) => {
@@ -1516,8 +1569,8 @@ pub async fn start_native_voice_conversation(
         }
     };
     let readiness = match tokio::time::timeout(INPUT_STARTUP_TIMEOUT, events.recv()).await {
-        Ok(Some(berd_voice::input::VoiceInputEvent::Ready)) => Ok(()),
-        Ok(Some(berd_voice::input::VoiceInputEvent::Failed(error))) => Err(error),
+        Ok(Some(berd_call::input::VoiceInputEvent::Ready)) => Ok(()),
+        Ok(Some(berd_call::input::VoiceInputEvent::Failed(error))) => Err(error),
         Ok(Some(_)) => Err("Voice input emitted activity before it was ready.".to_string()),
         Ok(None) => Err("Voice input stopped before it was ready.".to_string()),
         Err(_) => Err("Voice input did not become ready within 60 seconds.".to_string()),
@@ -1591,6 +1644,20 @@ pub async fn start_native_voice_conversation(
             window_label: window_label.clone(),
         });
         runtime.pipeline = pipeline.take();
+        let output_device = super::pocket_voice::selected_output_device();
+        let effective_output_device =
+            super::pocket_voice::effective_output_device_name(output_device.as_deref());
+        let cue_input_controls =
+            super::pocket_voice::output_device_uses_speakers(effective_output_device.as_deref())
+                .then(|| state.input_controls.clone());
+        runtime.status_sounds = berd_call::ManagedStatusSoundRuntime::spawn_with_input_controls(
+            output_device,
+            cue_input_controls,
+        )
+        .map_err(|error| log::warn!("Status sounds unavailable: {error}"))
+        .ok();
+        runtime.status_sound_user_speaking = false;
+        runtime.publish_status_sound_suppression();
         runtime.admission = Some(Arc::new(BerdAdmissionCoordinator::default()));
         runtime.controls_ready = false;
         // Voice always starts from its owning session, where the in-session
@@ -1702,11 +1769,12 @@ pub async fn start_native_voice_conversation(
                 break;
             }
             match event {
-                berd_voice::input::VoiceInputEvent::Ready => {
+                berd_call::input::VoiceInputEvent::Ready => {
                     log::warn!("Voice input emitted duplicate readiness");
                 }
-                berd_voice::input::VoiceInputEvent::SpeakingChanged(speaking) => {
+                berd_call::input::VoiceInputEvent::SpeakingChanged(speaking) => {
                     admission.set_user_speaking(speaking);
+                    event_state.set_status_sound_input_activity(&session_id, revision, speaking);
                     let event = NativeVoiceEvent::Activity {
                         session_id: session_id.clone(),
                         activity: if speaking {
@@ -1719,12 +1787,12 @@ pub async fn start_native_voice_conversation(
                     let _ = event_window.emit(EVENT_NAME, event.clone());
                     super::voice_buddy::emit(&event_app, event);
                 }
-                berd_voice::input::VoiceInputEvent::RecognitionPendingChanged(pending) => {
+                berd_call::input::VoiceInputEvent::RecognitionPendingChanged(pending) => {
                     admission.set_recognition_pending(pending);
                     // The runtime owns recognition-pending sequencing. Berd's
                     // renderer does not project that state yet.
                 }
-                berd_voice::input::VoiceInputEvent::FinalTranscript {
+                berd_call::input::VoiceInputEvent::FinalTranscript {
                     text,
                     storage_receipt,
                 } => {
@@ -1773,7 +1841,7 @@ pub async fn start_native_voice_conversation(
                         },
                     );
                 }
-                berd_voice::input::VoiceInputEvent::Failed(message) => {
+                berd_call::input::VoiceInputEvent::Failed(message) => {
                     let _stop_guard = event_state.stop_serial.lock().await;
                     let pipeline = {
                         let Ok(mut current) = runtime.lock() else {
@@ -1789,6 +1857,11 @@ pub async fn start_native_voice_conversation(
                         current.native_microphone_mute_control = false;
                         if let Some(admission) = current.admission.take() {
                             admission.close();
+                        }
+                        if let Some(status_sounds) = current.status_sounds.take() {
+                            if let Err(error) = status_sounds.finish() {
+                                log::warn!("Status sound shutdown failed: {error}");
+                            }
                         }
                         current.session_id = None;
                         current.lifecycle_id = None;
@@ -1861,6 +1934,44 @@ pub async fn set_native_voice_microphone_muted(
         )?;
     }
     Ok(status(&app, &state).await)
+}
+
+#[tauri::command]
+pub fn update_native_voice_status_sounds(
+    state: State<'_, NativeVoiceState>,
+    capture: State<'_, VoiceCaptureState>,
+    webview_window: WebviewWindow,
+    request: StatusSoundUpdateRequest,
+) -> Result<(), String> {
+    capture.with_active_renderer(
+        webview_window.label(),
+        &request.renderer_id,
+        request.renderer_epoch,
+        || {
+            let runtime = state
+                .runtime
+                .lock()
+                .map_err(|_| "native voice state lock was poisoned".to_string())?;
+            if runtime.session_id.as_deref() != Some(request.session_id.as_str())
+                || runtime.revision != request.expected_revision
+            {
+                return Ok(());
+            }
+            if runtime
+                .owner
+                .as_ref()
+                .map(|owner| owner.window_label.as_str())
+                != Some(webview_window.label())
+            {
+                return Err("Only the voice conversation owner can update status sounds.".into());
+            }
+            runtime
+                .status_sounds
+                .as_ref()
+                .ok_or_else(|| "Status sound runtime is unavailable".to_string())?
+                .update(request.status, request.settings)
+        },
+    )
 }
 
 #[tauri::command]
@@ -2191,11 +2302,16 @@ impl NativeVoiceState {
         &self,
         expected_lifecycle: Option<(&str, u64)>,
     ) -> Result<Option<StopCompletion>, String> {
-        let Some((session_id, revision, pipeline, owner)) =
+        let Some((session_id, revision, pipeline, status_sounds, owner)) =
             self.take_stop_snapshot(expected_lifecycle)?
         else {
             return Ok(None);
         };
+        if let Some(status_sounds) = status_sounds {
+            if let Err(error) = status_sounds.finish() {
+                log::warn!("Status sound shutdown failed: {error}");
+            }
+        }
         // Keep the lifecycle current through the bounded shutdown window so a
         // cooperative worker can flush its final utterance durably. A worker
         // that misses the deadline is quarantined; its revision-bound late
@@ -2544,18 +2660,18 @@ fn push_audio_for_window(
 
 pub(super) fn decode_voice_input_frame(
     bytes: &[u8],
-) -> Result<berd_voice::input::VoiceInputFrame, String> {
-    if bytes.len() != berd_voice::input::INPUT_FRAME_SAMPLES * size_of::<f32>() {
+) -> Result<berd_call::input::VoiceInputFrame, String> {
+    if bytes.len() != berd_call::input::INPUT_FRAME_SAMPLES * size_of::<f32>() {
         return Err(format!(
             "native voice audio must contain exactly {} mono f32 samples",
-            berd_voice::input::INPUT_FRAME_SAMPLES
+            berd_call::input::INPUT_FRAME_SAMPLES
         ));
     }
     let samples = bytes
         .chunks_exact(size_of::<f32>())
         .map(|sample| f32::from_le_bytes(sample.try_into().expect("four-byte chunk")))
         .collect::<Vec<_>>();
-    berd_voice::input::VoiceInputFrame::try_from_samples(&samples)
+    berd_call::input::VoiceInputFrame::try_from_samples(&samples)
 }
 
 #[cfg(test)]
@@ -2865,7 +2981,7 @@ mod tests {
             runtime.revision = 4;
         }
         let message = state
-            .record_voice_input_finish(Err(berd_voice::input::VoiceInputFinishError::Quarantined {
+            .record_voice_input_finish(Err(berd_call::input::VoiceInputFinishError::Quarantined {
                 timeout: Duration::from_millis(20),
             }))
             .expect("quarantine is terminal");
@@ -2911,7 +3027,7 @@ mod tests {
         let panicked = NativeVoiceState::default();
         assert_eq!(
             panicked.record_voice_input_finish(Err(
-                berd_voice::input::VoiceInputFinishError::WorkerPanicked,
+                berd_call::input::VoiceInputFinishError::WorkerPanicked,
             )),
             Some("voice input runtime worker panicked".to_string())
         );
@@ -3256,13 +3372,47 @@ mod tests {
     }
 
     #[test]
+    fn status_sound_suppression_ends_between_speech_segments() {
+        let state = NativeVoiceState::default();
+        for _ in 0..2 {
+            let speech = state.begin_assistant_speech(
+                InterruptionSensitivity::Balanced,
+                berd_call::input::InputDuringTtsPolicy::AllowBargeIn,
+            );
+            assert!(state.runtime.lock().unwrap().status_sound_suppressed());
+            drop(speech);
+            assert!(!state.runtime.lock().unwrap().status_sound_suppressed());
+        }
+    }
+
+    #[test]
+    fn status_sounds_wait_for_all_audio_to_stop() {
+        let state = NativeVoiceState::default();
+        let first = state.begin_assistant_speech(
+            InterruptionSensitivity::Balanced,
+            berd_call::input::InputDuringTtsPolicy::AllowBargeIn,
+        );
+        let second = state.begin_assistant_speech(
+            InterruptionSensitivity::Balanced,
+            berd_call::input::InputDuringTtsPolicy::AllowBargeIn,
+        );
+        drop(first);
+        assert!(state.runtime.lock().unwrap().status_sound_suppressed());
+        state.runtime.lock().unwrap().status_sound_user_speaking = true;
+        drop(second);
+        assert!(state.runtime.lock().unwrap().status_sound_suppressed());
+        state.runtime.lock().unwrap().status_sound_user_speaking = false;
+        assert!(!state.runtime.lock().unwrap().status_sound_suppressed());
+    }
+
+    #[test]
     fn assistant_suppression_uses_the_shared_input_controls() {
         let state = NativeVoiceState::default();
         assert!(!state.input_controls.is_muted());
 
         let guard = state.begin_assistant_speech(
             InterruptionSensitivity::Balanced,
-            berd_voice::input::InputDuringTtsPolicy::SuppressInput,
+            berd_call::input::InputDuringTtsPolicy::SuppressInput,
         );
         assert!(state.input_controls.is_muted());
 
@@ -3280,7 +3430,7 @@ mod tests {
         }
         let guard = state.begin_assistant_speech(
             InterruptionSensitivity::Less,
-            berd_voice::input::InputDuringTtsPolicy::SuppressInput,
+            berd_call::input::InputDuringTtsPolicy::SuppressInput,
         );
         state
             .take_stop_snapshot(Some(("old-session", 7)))
@@ -3295,43 +3445,6 @@ mod tests {
         assert!(state.input_controls.is_muted());
         drop(guard);
         assert!(!state.input_controls.is_muted());
-    }
-
-    #[test]
-    fn assistant_activity_is_bound_to_the_exact_voice_lifecycle() {
-        let state = NativeVoiceState::default();
-        {
-            let mut runtime = state.runtime.lock().expect("lock native runtime");
-            runtime.session_id = Some("session-1".to_string());
-            runtime.revision = 7;
-            runtime.owner = Some(RuntimeOwner {
-                window_label: "main".to_string(),
-            });
-        }
-
-        assert_eq!(
-            state
-                .assistant_activity_target("main", "session-1", 7)
-                .expect("current activity target"),
-            Some(("main".to_string(), 7)),
-        );
-        assert_eq!(
-            state
-                .assistant_activity_target("main", "session-1", 6)
-                .expect("stale activity is ignored"),
-            None,
-        );
-        assert!(state
-            .assistant_activity_target("session:other", "session-1", 7)
-            .is_err());
-
-        state.runtime.lock().expect("lock native runtime").revision = 8;
-        assert_eq!(
-            state
-                .assistant_activity_target("main", "session-1", 7)
-                .expect("prior lifecycle activity is ignored after restart"),
-            None,
-        );
     }
 
     #[test]
@@ -3614,7 +3727,7 @@ mod tests {
 
     #[test]
     fn audio_transport_decodes_only_exact_finite_frames() {
-        let samples = [0.0_f32; berd_voice::input::INPUT_FRAME_SAMPLES];
+        let samples = [0.0_f32; berd_call::input::INPUT_FRAME_SAMPLES];
         let bytes = samples
             .iter()
             .flat_map(|sample| sample.to_le_bytes())

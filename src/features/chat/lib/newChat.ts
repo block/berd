@@ -69,6 +69,7 @@ function isReusableDraft(
 ): boolean {
   return (
     !session.archivedAt &&
+    !session.remoteSessionUnavailable &&
     session.intent !== "build-agent" &&
     session.messageCount === 0 &&
     (localMessages?.length ?? 0) === 0

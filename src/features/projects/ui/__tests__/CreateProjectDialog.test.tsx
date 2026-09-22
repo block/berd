@@ -237,6 +237,28 @@ describe("CreateProjectDialog", () => {
     vi.mocked(checkDirectoriesExist).mockResolvedValue([]);
   });
 
+  it("loads and preserves the saved SSH environment when editing", async () => {
+    const user = userEvent.setup();
+    const environment = {
+      remoteHost: "devbox",
+      remoteWorkingDir: "/home/me/code",
+    };
+    const editingProject = makeEditingProject({ environment });
+    render(
+      <CreateProjectDialog
+        {...defaultProps}
+        isOpen={true}
+        editingProject={editingProject}
+      />,
+    );
+    expect(screen.getByText("devbox")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(updateProject).toHaveBeenCalledWith(
+      editingProject,
+      expect.objectContaining({ environment }),
+    );
+  });
+
   describe("form populates on open", () => {
     it("populates the name field when opening with an editingProject", async () => {
       const editingProject = makeEditingProject();
@@ -465,6 +487,7 @@ describe("CreateProjectDialog", () => {
         [],
         false,
         [],
+        null,
       );
     });
 

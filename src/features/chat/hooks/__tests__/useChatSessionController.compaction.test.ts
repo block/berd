@@ -127,6 +127,7 @@ import { useChatSessionController } from "../useChatSessionController";
 describe("useChatSessionController compaction behavior", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockHandleModelChange.mockReturnValue(true);
     mockCompactConversation.mockResolvedValue("completed");
     mockResolveSessionCwd.mockResolvedValue("/tmp/project");
     mockTokenState = { ...INITIAL_TOKEN_STATE };

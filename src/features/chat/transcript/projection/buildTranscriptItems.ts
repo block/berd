@@ -44,6 +44,7 @@ const ASSISTANT_FRAGMENT_CODE_MIN_LINE_COUNT = 20;
 const ASSISTANT_FRAGMENT_TARGET_LINE_COUNT = 40;
 const ASSISTANT_FRAGMENT_BLANK_LINE_SEARCH_RADIUS = 8;
 const ASSISTANT_FRAGMENT_CHROME_ESTIMATE = 32;
+const SESSION_NOTIFICATION_ESTIMATED_HEIGHT = 48;
 const SINGLE_TEXT_BLOCK_IDS = ["text:0"] as const;
 const STATIC_TEXT_MEASUREMENT_DECISION = {
   policy: "measure-shell",
@@ -1942,6 +1943,13 @@ function estimateMessageHeight(
   message: Message,
   visibleContent: readonly MessageContent[],
 ): number {
+  if (
+    message.metadata?.origin === "berdctl_cross_session" &&
+    message.metadata.berdEventType === "notification"
+  ) {
+    return SESSION_NOTIFICATION_ESTIMATED_HEIGHT;
+  }
+
   const baseHeight = message.role === "user" ? 76 : 96;
   const contentHeight = visibleContent.reduce((total, content) => {
     switch (content.type) {

@@ -1,6 +1,13 @@
-# berd-voice
+# berd-call
 
-Berd-owned voice primitives, TTS, and speech recognition.
+Berd's reusable voice-call runtime and standalone CLI.
+
+This Cargo package contains the reusable `berd_call` library and the
+`berd-call` command. Desktop Berd links the library directly. Together they
+provide the voice-call lifecycle, speech backends, local speech-model
+management, synthesis and benchmark tools described below. Desktop Berd and
+other hosts retain their own device integration, persisted settings, transcript
+delivery, and user interface.
 
 This crate owns the neutral PCM output contract and backend-neutral TTS stream
 used by Berd, plus the April ONNX runtime and text chunking used by Berd's native
@@ -17,16 +24,20 @@ inside the shared runtime. OpenAI emits 24 kHz mono Float32 PCM. On macOS, the s
 Siri bridge emits normalized 48 kHz mono Float32 PCM without opening an audio
 device; the existing Berd Siri player and the CLI use the same decoder.
 
-`berd-voice session` exposes the development voice-session protocol documented
-in [PROTOCOL.md](PROTOCOL.md). Siri TTS and macOS speech recognition are the
-defaults:
+`berd-call session` exposes the development voice-session protocol documented
+in [PROTOCOL.md](PROTOCOL.md). The host supplies persisted status-sound settings
+and semantic `working` / `waiting` updates through that protocol; the runtime
+owns the five-second cadence, speech suppression, and macOS Pop/Purr playback.
+The default mode is `working`; `working-and-waiting` also plays idle cues, and `off` disables both. Status sounds default to a gain of `0.8`. Cues play immediately on a status transition and repeat every five seconds. When conversation audio ends, the current cue resumes immediately. Repeated identical status updates preserve the cadence. The host determines when work begins; the chained client signals working on its first live tool call and stays working until the run ends.
+
+Siri TTS and macOS speech recognition are the defaults:
 
 ```text
-berd-voice session --voice Aaron --language en-US --rate 1.0
-berd-voice session --tts-backend openai --rate 1.0
-berd-voice session --tts-backend pocket --model-dir /path/to/native-voice-v2 --voice george --rate 1.0
-berd-voice session --stt-backend parakeet --stt-model-dir /path/to/parakeet
-berd-voice session --stt-backend openai
+berd-call session --voice Aaron --language en-US --rate 1.0
+berd-call session --tts-backend openai --rate 1.0
+berd-call session --tts-backend pocket --model-dir /path/to/native-voice-v2 --voice george --rate 1.0
+berd-call session --stt-backend parakeet --stt-model-dir /path/to/parakeet
+berd-call session --stt-backend openai
 ```
 
 The default Siri backend still requires an exact installed voice name and
@@ -42,12 +53,12 @@ can still fail and is reported through the normal terminal speech lifecycle.
 `synthesize` renders through the same TTS backends without opening an audio device. It writes mono signed 16-bit little-endian PCM WAV to a new file:
 
 ```sh
-berd-voice synthesize --tts-backend siri --voice Aaron --language en-US \
+berd-call synthesize --tts-backend siri --voice Aaron --language en-US \
   --rate 1.0 --text "Hello" --output hello.wav
-berd-voice synthesize --tts-backend pocket \
+berd-call synthesize --tts-backend pocket \
   --model-dir /absolute/path/to/native-voice-v2 --voice mary --rate 1.0 \
   --text "Hello" --output hello.wav
-berd-voice synthesize --tts-backend openai --model gpt-4o-mini-tts \
+berd-call synthesize --tts-backend openai --model gpt-4o-mini-tts \
   --voice marin --rate 1.0 --allow-paid-openai \
   --text "Hello" --output hello.wav
 ```
@@ -58,7 +69,7 @@ Pocket rendering supports only rate `1.0`: its other rates are a host playback t
 
 Success emits one schema-version-one JSON line with the public backend identity, requested rate, and WAV encoding, sample rate, channels, bit depth, source frames, duration, and byte count. It never serializes the prompt, credential, endpoint, Pocket bundle path, or temporary path. Operation failure emits one sanitized error line and exits 1; usage failure emits no JSON and exits 2. Stdout is reserved for this machine-readable terminal record, not audio data.
 
-The public `berd_voice::siri` management API is also the single native boundary
+The public `berd_call::siri` management API is also the single native boundary
 used by Berd for Siri catalog discovery, represented languages, exact installed
 voice validation, and download. A voice identity is its case-sensitive catalog
 name plus a normalized BCP-47 language tag; private Apple identifiers are never
@@ -75,18 +86,18 @@ The standalone commands are thin projections of the same shared management
 APIs used by Berd:
 
 ```sh
-berd-voice voices list
-berd-voice voices list --language en-US
-berd-voice voices download --voice Aaron --language en-US
-berd-voice voices download --voice Aaron --language en-US \
+berd-call voices list
+berd-call voices list --language en-US
+berd-call voices download --voice Aaron --language en-US
+berd-call voices download --voice Aaron --language en-US \
   --availability-wait-seconds 300
-berd-voice models macos status
-berd-voice models macos install
-berd-voice models pocket status --store-root /absolute/portable-store
-berd-voice models pocket install --store-root /absolute/portable-store
-berd-voice models pocket voices
-berd-voice models parakeet status --store-root /absolute/portable-store
-berd-voice models parakeet install --store-root /absolute/portable-store
+berd-call models macos status
+berd-call models macos install
+berd-call models pocket status --store-root /absolute/portable-store
+berd-call models pocket install --store-root /absolute/portable-store
+berd-call models pocket voices
+berd-call models parakeet status --store-root /absolute/portable-store
+berd-call models parakeet install --store-root /absolute/portable-store
 ```
 
 The Siri language filter is an exact normalized BCP-47 language, not a prefix.
@@ -194,9 +205,9 @@ application-specific cache path is assumed.
 device. It emits one JSON report on stdout and diagnostics on stderr:
 
 ```text
-berd-voice benchmark tts --tts-backend siri --voice Aaron --language en-US \
+berd-call benchmark tts --tts-backend siri --voice Aaron --language en-US \
   --prompt-manifest english-short-v1 --mode fresh-backend
-berd-voice benchmark tts --tts-backend pocket \
+berd-call benchmark tts --tts-backend pocket \
   --model-dir /path/to/native-voice-v2 --voice mary \
   --prompt-manifest english-short-v1 --mode warm
 ```
@@ -257,8 +268,8 @@ through the same `VoiceInputRuntime` used by Berd and the voice session. It does
 not open an input device:
 
 ```text
-berd-voice benchmark stt --stt-backend macos --runs 1 --mode cold
-berd-voice benchmark stt --stt-backend parakeet \
+berd-call benchmark stt --stt-backend macos --runs 1 --mode cold
+berd-call benchmark stt --stt-backend parakeet \
   --stt-model-dir /path/to/parakeet --runs 3 --mode warm
 ```
 

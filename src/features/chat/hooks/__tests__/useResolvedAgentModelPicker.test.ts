@@ -18,6 +18,21 @@ const mockUseAgentModelPickerState = vi.fn();
 const mockGetClient = vi.fn();
 const mockToastError = vi.fn();
 const mockPrepareSession = vi.fn();
+const mockAgentStatus = vi.fn();
+vi.mock("@/features/providers/hooks/useAgentProviderStatus", () => ({
+  useAgentProviderStatus: () => mockAgentStatus(),
+}));
+vi.mock("@/features/providers/hooks/useProviderModels", () => ({
+  useProviderModels: () => ({
+    configuredModelProviderIds: [],
+    modelCacheRefreshProviderIds: [],
+    getModelsForAgent: () => [{ id: "opus", name: "Claude Opus" }],
+    refreshAllModelProviders: vi.fn(),
+    isRefreshingProvider: () => false,
+    getError: () => null,
+    isModelInventoryAuthoritative: () => true,
+  }),
+}));
 
 function makeSession(
   executionTarget: ChatSession["executionTarget"],
@@ -145,6 +160,162 @@ describe("useResolvedAgentModelPicker", () => {
           onProviderSelected(providerId),
         handleModelChange: vi.fn(),
       }),
+    );
+  });
+
+  it.each([
+    ["not_ready", "composer"],
+    ["not_installed", "composer"],
+    ["not_ready", "pending"],
+    ["not_installed", "pending"],
+    ["not_ready", "started"],
+    ["not_installed", "started"],
+  ])("blocks a %s foreign favorite for a %s session before intent", async (readiness, state) => {
+    const { useAgentModelPickerState } = await vi.importActual<
+      typeof import("../useAgentModelPickerState")
+    >("../useAgentModelPickerState");
+    mockUseAgentModelPickerState.mockImplementation(useAgentModelPickerState);
+    mockAgentStatus.mockReturnValue({
+      readyAgentIds: new Set(["goose"]),
+      agentReadiness: new Map([
+        ["goose", "ready"],
+        ["claude-acp", readiness],
+      ]),
+      refresh: vi.fn(),
+    });
+    const session = makeSession(
+      {
+        harnessId: "goose",
+        modelProviderId: "openai",
+        modelId: "current",
+        modelName: "Current",
+      },
+      state === "pending" ? { creationState: "pending" } : { messageCount: 1 },
+    );
+    useChatSessionStore.setState({ sessions: [session] });
+    const setPendingExecutionTarget = vi.fn();
+    const setPendingModelSelection = vi.fn();
+    const setGlobalSelectedProvider = vi.fn();
+    const applySessionModelSelection = vi.fn();
+    const { result } = renderModelPicker({
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "claude-acp", label: "Claude Code" },
+      ],
+      sessionId: state === "composer" ? null : session.id,
+      session: state === "composer" ? undefined : session,
+      sessionHasStarted: state === "started",
+      setPendingExecutionTarget,
+      setPendingModelSelection,
+      setGlobalSelectedProvider,
+      applySessionModelSelection,
+    });
+    const storageBefore = { ...localStorage };
+    act(() =>
+      result.current.handleModelChange(
+        "opus",
+        { id: "opus", name: "Claude Opus" },
+        "claude-acp",
+      ),
+    );
+    expect(setPendingExecutionTarget).not.toHaveBeenCalled();
+    expect(setPendingModelSelection).not.toHaveBeenCalled();
+    expect(setGlobalSelectedProvider).not.toHaveBeenCalled();
+    expect(applySessionModelSelection).not.toHaveBeenCalled();
+    expect(mockPrepareSession).not.toHaveBeenCalled();
+    expect(getSessionTargetSelection(session.id)).toBeUndefined();
+    expect(useChatSessionStore.getState().sessions[0]).toEqual(session);
+    expect({ ...localStorage }).toEqual(storageBefore);
+  });
+
+  it("creates one pending target for a cross-agent model choice", () => {
+    const setPendingExecutionTarget = vi.fn();
+    const setPendingModelSelection = vi.fn();
+    const setGlobalSelectedProvider = vi.fn();
+    mockUseAgentModelPickerState.mockImplementation(({ onModelSelected }) => ({
+      pickerAgents: [{ id: "claude-acp", label: "Claude Code" }],
+      availableModels: [],
+      modelsLoading: false,
+      modelStatusMessage: null,
+      handleProviderChange: vi.fn(),
+      handleModelChange: () =>
+        onModelSelected?.({ id: "opus", name: "Claude Opus" }, "claude-acp"),
+    }));
+
+    const { result } = renderModelPicker({
+      sessionId: null,
+      session: undefined,
+      setPendingExecutionTarget,
+      setPendingModelSelection,
+      setGlobalSelectedProvider,
+    });
+    act(() =>
+      result.current.handleModelChange("opus", undefined, "claude-acp"),
+    );
+
+    expect(setPendingExecutionTarget).toHaveBeenCalledOnce();
+    expect(setPendingExecutionTarget).toHaveBeenCalledWith({
+      harnessId: "claude-acp",
+      modelProviderId: "claude-acp",
+      modelId: "opus",
+      modelName: "Claude Opus",
+    });
+    expect(setPendingModelSelection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "opus",
+        modelProviderId: "claude-acp",
+      }),
+    );
+    expect(setGlobalSelectedProvider).toHaveBeenCalledWith("claude-acp");
+  });
+
+  it("publishes one complete cross-agent target for a started session", async () => {
+    const session = makeSession(
+      {
+        harnessId: "goose",
+        modelProviderId: "openai",
+        modelId: "current",
+        modelName: "Current",
+      },
+      { messageCount: 1 },
+    );
+    let onModelSelected:
+      | ((model: { id: string; name: string }, agentId?: string) => void)
+      | undefined;
+    mockUseAgentModelPickerState.mockImplementation((args) => {
+      onModelSelected = args.onModelSelected;
+      return {
+        pickerAgents: [],
+        availableModels: [],
+        modelsLoading: false,
+        modelStatusMessage: null,
+        handleProviderChange: vi.fn(),
+        handleModelChange: vi.fn(),
+      };
+    });
+    const applySessionModelSelection = vi.fn().mockResolvedValue(true);
+    renderModelPicker({
+      session,
+      sessionHasStarted: true,
+      applySessionModelSelection,
+    });
+
+    act(() =>
+      onModelSelected?.({ id: "opus", name: "Claude Opus" }, "claude-acp"),
+    );
+
+    expect(getSessionTargetSelection("session-1")?.target).toEqual({
+      harnessId: "claude-acp",
+      modelProviderId: "claude-acp",
+      modelId: "opus",
+      modelName: "Claude Opus",
+    });
+    await waitFor(() =>
+      expect(applySessionModelSelection).toHaveBeenCalledWith(
+        "claude-acp",
+        expect.objectContaining({ id: "opus" }),
+        expect.any(String),
+      ),
     );
   });
 

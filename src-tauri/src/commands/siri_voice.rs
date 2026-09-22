@@ -31,20 +31,18 @@ use super::pocket_voice::{
 };
 use crate::services::atomic_file::write_bytes_atomically;
 #[cfg(target_os = "macos")]
-use berd_voice::input::InputDuringTtsPolicy;
+use berd_call::input::InputDuringTtsPolicy;
 #[cfg(target_os = "macos")]
-use berd_voice::siri::{
+use berd_call::siri::{
     download_voice as download_managed_siri_voice, SiriDownloadAvailabilityWait,
 };
-use berd_voice::siri::{
-    load_voice_catalog, validate_installed_voice, SiriVoice, SiriVoiceIdentity,
-};
+use berd_call::siri::{load_voice_catalog, validate_installed_voice, SiriVoice, SiriVoiceIdentity};
 #[cfg(any(test, target_os = "macos"))]
-use berd_voice::DeliveryProgress as VoiceDeliveryProgress;
+use berd_call::DeliveryProgress as VoiceDeliveryProgress;
 #[cfg(test)]
-use berd_voice::DeliverySegment as VoiceDeliverySegment;
+use berd_call::DeliverySegment as VoiceDeliverySegment;
 #[cfg(target_os = "macos")]
-use berd_voice::{
+use berd_call::{
     ConfiguredTtsSlot, DrainPolicy, OutboundFailure, OutboundOutcome, OutboundPlayback,
     PcmAudioOutput, PocketAudioPlayer, StreamingTextChunk, StreamingTtsText, TtsBackend,
     TtsConfiguration,

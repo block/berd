@@ -599,6 +599,7 @@ describe("action schemas", () => {
   it("every action schema rejects unknown keys (derived from the registry)", () => {
     const validArgs: Record<string, Record<string, unknown>> = {
       "sessions.create": { prompt: "hi" },
+      "sessions.notify": { session_id: "s", prompt: "event" },
       "sessions.send": { session_id: "s1", prompt: "hi" },
       "sessions.send_to_spokesperson": {
         session_id: "s1",
@@ -1926,6 +1927,164 @@ describe("sessions.send", () => {
     );
 
     expect(error.message).toContain("single line");
+  });
+});
+
+describe("sessions.notify", () => {
+  it("delivers a notification with explicit metadata without opening the session", async () => {
+    mockSessionFound({ providerId: "codex-acp", modelId: "gpt-6" });
+    const result = await dispatchCommand(
+      "sessions",
+      {
+        action: "notify",
+        session_id: "session-1",
+        prompt: "Deployment complete",
+      },
+      ctx,
+    );
+    expect(result).toEqual({
+      session_id: "session-1",
+      send_status: "dispatched",
+    });
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[0]?.metadata,
+    ).toMatchObject({
+      origin: "berdctl_cross_session",
+      berdEventType: "notification",
+    });
+    await vi.waitFor(() =>
+      expect(mocks.acpSendMessage).toHaveBeenCalledWith(
+        "session-1",
+        "Deployment complete",
+        expect.objectContaining({
+          goose: {
+            origin: "berdctl_cross_session",
+            berdEventType: "notification",
+          },
+        }),
+      ),
+    );
+    expect(controller.openSession).not.toHaveBeenCalled();
+  });
+  it("reports steering without marking the message steered before delivery", async () => {
+    mockSessionFound();
+    useChatStore.getState().setChatState("session-1", "streaming");
+    useChatStore.getState().setActiveRunId("session-1", "run-1");
+
+    const result = await dispatchCommand(
+      "sessions",
+      {
+        action: "notify",
+        session_id: "session-1",
+        prompt: "make it shorter",
+        if_running: "steer",
+      },
+      ctx,
+    );
+
+    expect(result).toEqual({
+      session_id: "session-1",
+      send_status: "steered",
+    });
+    const messages = useChatStore.getState().messagesBySession["session-1"];
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      id: "steer-message",
+      metadata: {
+        delivery: "steering",
+        origin: "berdctl_cross_session",
+        berdEventType: "notification",
+      },
+    });
+    expect(mocks.acpSteerMessage).toHaveBeenCalledWith(
+      "session-1",
+      "run-1",
+      "make it shorter",
+      expect.objectContaining({
+        goose: {
+          origin: "berdctl_cross_session",
+          berdEventType: "notification",
+        },
+      }),
+    );
+    expect(mocks.acpPrepareSession).not.toHaveBeenCalled();
+    expect(mocks.acpSendMessage).not.toHaveBeenCalled();
+  });
+
+  it("preserves a visible sender label on queued prompts", async () => {
+    mockSessionFound();
+    useChatStore.getState().setChatState("session-1", "streaming");
+
+    const result = await dispatchCommand(
+      "sessions",
+      {
+        action: "notify",
+        session_id: "session-1",
+        prompt: "[monitor: checks] complete",
+        if_running: "queue",
+        from: "the Berd session handling berd-monitor implementation",
+        delivery_id: "monitor-event-1",
+      },
+      ctx,
+    );
+
+    expect(result).toEqual({ session_id: "session-1", send_status: "queued" });
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-1"]?.[0]?.payload
+        .sendOptions,
+    ).toEqual({
+      userMessageMetadata: {
+        origin: "berdctl_cross_session",
+        berdEventType: "notification",
+        berdSenderLabel:
+          "the Berd session handling berd-monitor implementation",
+        berdDeliveryId: "monitor-event-1",
+      },
+      acpGooseMetadata: {
+        origin: "berdctl_cross_session",
+        berdEventType: "notification",
+        berdSenderLabel:
+          "the Berd session handling berd-monitor implementation",
+        berdDeliveryId: "monitor-event-1",
+      },
+    });
+  });
+
+  it("accepts a repeated delivery id without queueing another user turn", async () => {
+    mockSessionFound();
+    useChatStore.getState().setChatState("session-1", "streaming");
+
+    const first = await dispatchCommand(
+      "sessions",
+      {
+        action: "notify",
+        session_id: "session-1",
+        prompt: "monitor event",
+        if_running: "queue",
+        delivery_id: "monitor-event-1",
+      },
+      ctx,
+    );
+    const duplicate = await dispatchCommand(
+      "sessions",
+      {
+        action: "notify",
+        session_id: "session-1",
+        prompt: "monitor event retried",
+        if_running: "queue",
+        delivery_id: "monitor-event-1",
+      },
+      ctx,
+    );
+
+    expect(first).toEqual({ session_id: "session-1", send_status: "queued" });
+    expect(duplicate).toEqual({
+      session_id: "session-1",
+      send_status: "deduplicated",
+    });
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-1"],
+    ).toHaveLength(1);
   });
 });
 

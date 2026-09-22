@@ -1,3 +1,5 @@
+import * as remoteSession from "@/features/chat/lib/remoteSession";
+import { REMOTE_SSH_SESSIONS_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { getModelSelectionIntent } from "@/features/chat/model-selection/modelSelectionIntent";
 import { beginModelSelectionIntent } from "@/features/chat/model-selection/modelSelectionIntent";
 import {
@@ -5652,6 +5654,50 @@ describe("AppShell global navigation", () => {
       screen.getByRole("button", { name: "Open builderbot automation" }),
     );
     expect(screen.queryByRole("link", { name: "Daily docs" })).toBeNull();
+  });
+
+  it.each([
+    true,
+    false,
+  ])("applies project SSH defaults only when enabled (%s)", async (enabled) => {
+    setExperimentEnabled(REMOTE_SSH_SESSIONS_EXPERIMENT_ID, enabled);
+    const connect = vi
+      .spyOn(remoteSession, "ensureRemoteHostConnected")
+      .mockImplementation(() => new Promise<void>(() => {}));
+    const project: ProjectInfo = {
+      id: "project-2",
+      path: "/tmp/project.md",
+      name: "Remote project",
+      description: "",
+      prompt: "",
+      icon: "",
+      color: "olive",
+      workingDirs: ["/local/repo"],
+      projectWorkspaces: [],
+      useWorktrees: false,
+      order: 0,
+      archivedAt: null,
+      environment: { remoteHost: "devbox", remoteWorkingDir: "/home/me/repo" },
+    };
+    useProjectStore.setState({ projects: [project] });
+    const user = userEvent.setup();
+    renderAppShell();
+    try {
+      await user.click(
+        screen.getByRole("button", { name: "Sidebar new project 2 chat" }),
+      );
+      await waitFor(() => {
+        const state = useChatSessionStore.getState();
+        const session = state.sessions.find(
+          (candidate) => candidate.id === state.activeSessionId,
+        );
+        expect(session?.projectId).toBe(project.id);
+        expect(session?.remoteHost).toBe(enabled ? "devbox" : undefined);
+        if (enabled) expect(session?.workingDir).toBe("/home/me/repo");
+      });
+    } finally {
+      connect.mockRestore();
+    }
   });
 
   it("shows only the session title for a project chat", async () => {

@@ -10,43 +10,44 @@ use std::sync::{
 use std::thread;
 use std::time::{Duration, Instant};
 
-use berd_voice::benchmark::{
+use berd_call::benchmark::{
     benchmark_stt, benchmark_tts, benchmark_tts_manifest, load_bundled_stt_fixture_pack,
     load_bundled_tts_prompt_manifest, SttBenchmarkEnvironment, SttBenchmarkMode,
     SttBenchmarkTarget, TtsBenchmarkMode, TtsBenchmarkPromptManifest, TtsBenchmarkTarget,
 };
-use berd_voice::expert_spokesperson::{ExpertDirectiveOutcome, LiveSideEvent};
-use berd_voice::input::{
+use berd_call::expert_spokesperson::{ExpertDirectiveOutcome, LiveSideEvent};
+use berd_call::input::{
     AssistantActivityGuard, InputDuringTtsSlot, InputDuringTtsSnapshot, VoiceInputConfig,
     VoiceInputControls, VoiceInputEngineConfig, VoiceInputEvent, VoiceInputFrame,
     VoiceInputRuntime, INPUT_FRAME_SAMPLES,
 };
-use berd_voice::openai_realtime_protocol::{
+use berd_call::openai_realtime_protocol::{
     expert_handoff_message, expert_transcript_message, RealtimeExpertMessage,
     RealtimeExpertMessageMode, RealtimeExpertSpokespersonSession, RealtimeHandoffReminder,
     RealtimeTranscriptSpeaker,
 };
-use berd_voice::openai_spokesperson::{
+use berd_call::openai_spokesperson::{
     OpenAiSpokespersonConfig, OpenAiSpokespersonRuntime, SpokespersonCommand, SpokespersonEvent,
     SpokespersonResponseStatus,
 };
-use berd_voice::protocol::{
+use berd_call::protocol::{
     CancelOutcome, DismissHandoffsOutcome, ExpertTurnOutcome, InputDuringTtsOutcome,
     NotAdmittedReason, OutputReadyOutcome, SessionMessage, SessionRequest, TtsSettingsOutcome,
     VoiceSessionSnapshot,
 };
-use berd_voice::realtime_audio_delivery::RealtimeAudioDelivery;
-use berd_voice::realtime_host_lifecycle::RealtimeSessionLossAction;
-use berd_voice::realtime_host_lifecycle::{
+use berd_call::realtime_audio_delivery::RealtimeAudioDelivery;
+use berd_call::realtime_host_lifecycle::RealtimeSessionLossAction;
+use berd_call::realtime_host_lifecycle::{
     spokesperson_renew_after, RealtimeHostLifecycle, RealtimeHostWork,
 };
-use berd_voice::realtime_pipe::RealtimePipeExchange;
-use berd_voice::session::{PrepareOutcome, PrepareRequest, SessionCore};
-use berd_voice::spokesperson_voice_update::{
+use berd_call::realtime_pipe::RealtimePipeExchange;
+use berd_call::session::{PrepareOutcome, PrepareRequest, SessionCore};
+use berd_call::spokesperson_voice_update::{
     validate_voice_update_settings, VoiceBarrierAction, VoiceUpdateAction, VoiceUpdatePurpose,
     VoiceUpdateQueue, VoiceUpdateRequest, VoiceUpdateTransaction,
 };
-use berd_voice::{
+use berd_call::StatusSoundRuntime;
+use berd_call::{
     estimated_spoken_through_utf8,
     local_assets::{
         LocalAssetLockError, LocalAssetRoots, LocalInstallError, LocalInstallErrorKind,
@@ -65,7 +66,7 @@ use session_audio::{
     AUDIO_CANCELLED,
 };
 
-const SESSION_PROTOCOL_VERSION: u32 = 4;
+const SESSION_PROTOCOL_VERSION: u32 = 5;
 const INPUT_FRAME_MARKER: u8 = 3;
 const MAX_LINE_BYTES: usize = 1024 * 1024;
 const FRAME_MAGIC: [u8; 2] = *b"BV";
@@ -118,7 +119,7 @@ struct PlaybackFailure {
 struct TtsConfigurationEvent {
     attempt: u64,
     id: u64,
-    result: Result<berd_voice::TtsConfigurationReplacement, TtsConfigurationRejection>,
+    result: Result<berd_call::TtsConfigurationReplacement, TtsConfigurationRejection>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -238,8 +239,8 @@ enum ManagementCommand {
         language: Option<String>,
     },
     DownloadVoice {
-        identity: berd_voice::siri::SiriVoiceIdentity,
-        availability_wait: berd_voice::siri::SiriDownloadAvailabilityWait,
+        identity: berd_call::siri::SiriVoiceIdentity,
+        availability_wait: berd_call::siri::SiriDownloadAvailabilityWait,
     },
     MacosModelStatus,
     InstallMacosModel,
@@ -292,15 +293,15 @@ impl LocalModelKind {
 
     fn model_id(self) -> &'static str {
         match self {
-            Self::Pocket => berd_voice::pocket_assets::MODEL_ID,
-            Self::Parakeet => berd_voice::parakeet_assets::MODEL_ID,
+            Self::Pocket => berd_call::pocket_assets::MODEL_ID,
+            Self::Parakeet => berd_call::parakeet_assets::MODEL_ID,
         }
     }
 
     fn total_download_bytes(self) -> u64 {
         match self {
-            Self::Pocket => berd_voice::pocket_assets::download_bytes(),
-            Self::Parakeet => berd_voice::parakeet_assets::download_bytes(),
+            Self::Pocket => berd_call::pocket_assets::download_bytes(),
+            Self::Parakeet => berd_call::parakeet_assets::download_bytes(),
         }
     }
 }
@@ -362,14 +363,14 @@ struct VoicesListResult {
     supported: bool,
     language_filter: Option<String>,
     available_languages: Vec<String>,
-    voices: Vec<berd_voice::siri::SiriVoice>,
+    voices: Vec<berd_call::siri::SiriVoice>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct VoiceDownloadResult {
     backend: &'static str,
-    voice: berd_voice::siri::SiriVoiceIdentity,
+    voice: berd_call::siri::SiriVoiceIdentity,
     installed: bool,
     availability_wait_seconds: u64,
 }
@@ -481,7 +482,7 @@ fn main() {
                 }
             };
             if let Err(error) = result {
-                eprintln!("berd-voice session failed: {error}");
+                eprintln!("berd-call session failed: {error}");
                 std::process::exit(1);
             }
         }
@@ -489,7 +490,7 @@ fn main() {
             let config =
                 parse_tts_benchmark_args(&args).unwrap_or_else(|error| usage_error(&error));
             if let Err(error) = run_tts_benchmark(config) {
-                eprintln!("berd-voice benchmark tts failed: {error}");
+                eprintln!("berd-call benchmark tts failed: {error}");
                 std::process::exit(1);
             }
         }
@@ -497,7 +498,7 @@ fn main() {
             let config =
                 parse_stt_benchmark_args(&args).unwrap_or_else(|error| usage_error(&error));
             if let Err(error) = run_stt_benchmark(config) {
-                eprintln!("berd-voice benchmark stt failed: {error}");
+                eprintln!("berd-call benchmark stt failed: {error}");
                 std::process::exit(1);
             }
         }
@@ -516,10 +517,10 @@ fn main() {
                         },
                     };
                     if let Err(error) = write_json_line(io::stdout().lock(), &envelope) {
-                        eprintln!("berd-voice could not write synthesis error: {error}");
+                        eprintln!("berd-call could not write synthesis error: {error}");
                     }
                 }
-                eprintln!("berd-voice synthesize failed: {}", failure.detail);
+                eprintln!("berd-call synthesize failed: {}", failure.detail);
                 std::process::exit(1);
             }
         }
@@ -528,14 +529,14 @@ fn main() {
             let operation = command.operation();
             if let Err(failure) = run_management_command(command) {
                 if failure.code == "output_failed" {
-                    eprintln!("berd-voice {operation} failed: {}", failure.detail);
+                    eprintln!("berd-call {operation} failed: {}", failure.detail);
                     std::process::exit(1);
                 }
                 let envelope = management_error_envelope(operation, &failure);
                 if let Err(error) = write_json_line(io::stdout().lock(), &envelope) {
-                    eprintln!("berd-voice could not write management error: {error}");
+                    eprintln!("berd-call could not write management error: {error}");
                 }
-                eprintln!("berd-voice {operation} failed: {}", failure.detail);
+                eprintln!("berd-call {operation} failed: {}", failure.detail);
                 std::process::exit(1);
             }
         }
@@ -548,29 +549,29 @@ fn main() {
 fn usage_error(error: &str) -> ! {
     eprintln!("{error}");
     eprintln!(
-        "usage:\n  berd-voice session --pcm-output-fd FD [--tts-backend siri|openai|pocket] \
+        "usage:\n  berd-call session --pcm-output-fd FD [--tts-backend siri|openai|pocket] \
          [--model-dir PATH] [--voice ID] [--language BCP47] [--rate FLOAT] \
          [--stt-backend macos|parakeet|openai] [--stt-model-dir PATH] \
          [--mode conventional|expert-spokesperson]\n  \
-         berd-voice synthesize --tts-backend siri|openai|pocket --voice ID \
+         berd-call synthesize --tts-backend siri|openai|pocket --voice ID \
          [--language BCP47] [--model MODEL] [--model-dir ABSOLUTE_PATH] [--rate FLOAT] \
          [--allow-paid-openai] --text TEXT --output PATH\n  \
-         berd-voice benchmark tts --tts-backend openai|siri|pocket \
+         berd-call benchmark tts --tts-backend openai|siri|pocket \
          [--model-dir PATH] [--voice ID] [--language BCP47] [--rate FLOAT] \
          (--text TEXT --runs COUNT | --prompt-manifest english-short-v1) \
          --mode fresh-backend|warm [--allow-paid-openai]\n  \
-         berd-voice benchmark stt --stt-backend macos|parakeet|openai \
+         berd-call benchmark stt --stt-backend macos|parakeet|openai \
          [--stt-model-dir PATH] --runs COUNT --mode cold|warm \
          [--allow-paid-openai]\n  \
-         berd-voice voices list [--language BCP47]\n  \
-         berd-voice voices download --voice NAME --language BCP47 \
+         berd-call voices list [--language BCP47]\n  \
+         berd-call voices download --voice NAME --language BCP47 \
          [--availability-wait-seconds 1..1800]\n  \
-         berd-voice models macos status\n  \
-         berd-voice models macos install\n  \
-         berd-voice models openai voices\n  \
-         berd-voice models pocket status|install --store-root ABSOLUTE_PATH\n  \
-         berd-voice models pocket voices\n  \
-         berd-voice models parakeet status|install --store-root ABSOLUTE_PATH"
+         berd-call models macos status\n  \
+         berd-call models macos install\n  \
+         berd-call models openai voices\n  \
+         berd-call models pocket status|install --store-root ABSOLUTE_PATH\n  \
+         berd-call models pocket voices\n  \
+         berd-call models parakeet status|install --store-root ABSOLUTE_PATH"
     );
     std::process::exit(2);
 }
@@ -598,14 +599,14 @@ fn parse_management_args(args: &[String]) -> Result<ManagementCommand, String> {
             }
             let language = language
                 .as_deref()
-                .map(berd_voice::siri::normalize_language)
+                .map(berd_call::siri::normalize_language)
                 .transpose()?;
             Ok(ManagementCommand::ListVoices { language })
         }
         (Some("voices"), Some("download"), _) => {
             let mut voice = None;
             let mut language = None;
-            let mut availability_wait = berd_voice::siri::SiriDownloadAvailabilityWait::default();
+            let mut availability_wait = berd_call::siri::SiriDownloadAvailabilityWait::default();
             let mut wait_seen = false;
             let mut index = 3;
             while index < args.len() {
@@ -622,7 +623,7 @@ fn parse_management_args(args: &[String]) -> Result<ManagementCommand, String> {
                                 .to_string()
                         })?;
                         availability_wait =
-                            berd_voice::siri::SiriDownloadAvailabilityWait::from_seconds(seconds)?;
+                            berd_call::siri::SiriDownloadAvailabilityWait::from_seconds(seconds)?;
                         wait_seen = true;
                     }
                     "--voice" | "--language" | "--availability-wait-seconds" => {
@@ -635,7 +636,7 @@ fn parse_management_args(args: &[String]) -> Result<ManagementCommand, String> {
             let voice = voice.ok_or_else(|| "--voice is required".to_string())?;
             let language = language.ok_or_else(|| "--language is required".to_string())?;
             Ok(ManagementCommand::DownloadVoice {
-                identity: berd_voice::siri::SiriVoiceIdentity::new(voice, &language)?,
+                identity: berd_call::siri::SiriVoiceIdentity::new(voice, &language)?,
                 availability_wait,
             })
         }
@@ -694,9 +695,9 @@ fn parse_local_model_roots(args: &[String]) -> Result<LocalAssetRoots, String> {
 fn local_model_roots(store_root: &std::path::Path) -> Result<LocalAssetRoots, String> {
     LocalAssetRoots::new(
         store_root,
-        store_root.join(berd_voice::pocket_assets::MODEL_ID),
+        store_root.join(berd_call::pocket_assets::MODEL_ID),
         store_root
-            .join(berd_voice::pocket_assets::MODEL_ID)
+            .join(berd_call::pocket_assets::MODEL_ID)
             .join("stt"),
     )
     .map_err(|error| error.to_string())
@@ -705,7 +706,7 @@ fn local_model_roots(store_root: &std::path::Path) -> Result<LocalAssetRoots, St
 fn voices_list_report(
     supported: bool,
     language_filter: Option<String>,
-    catalog: berd_voice::siri::SiriVoiceCatalog,
+    catalog: berd_call::siri::SiriVoiceCatalog,
 ) -> VoicesListResult {
     VoicesListResult {
         backend: "siri",
@@ -717,8 +718,8 @@ fn voices_list_report(
 }
 
 fn voice_download_report(
-    identity: &berd_voice::siri::SiriVoiceIdentity,
-    availability_wait: berd_voice::siri::SiriDownloadAvailabilityWait,
+    identity: &berd_call::siri::SiriVoiceIdentity,
+    availability_wait: berd_call::siri::SiriDownloadAvailabilityWait,
 ) -> VoiceDownloadResult {
     VoiceDownloadResult {
         backend: "siri",
@@ -731,9 +732,9 @@ fn voice_download_report(
 fn pocket_voices_report() -> PocketVoicesResult {
     PocketVoicesResult {
         backend: "pocket",
-        model_id: berd_voice::pocket_assets::MODEL_ID,
-        voice_license_id: berd_voice::pocket_assets::VOICE_LICENSE_ID,
-        voices: berd_voice::pocket_assets::voices()
+        model_id: berd_call::pocket_assets::MODEL_ID,
+        voice_license_id: berd_call::pocket_assets::VOICE_LICENSE_ID,
+        voices: berd_call::pocket_assets::voices()
             .iter()
             .map(|voice| PocketVoiceResult {
                 id: voice.id,
@@ -746,7 +747,7 @@ fn pocket_voices_report() -> PocketVoicesResult {
 fn openai_voices_report() -> OpenAiVoicesResult {
     OpenAiVoicesResult {
         backend: "openai",
-        voices: berd_voice::openai_realtime_protocol::OPENAI_REALTIME_VOICE_IDS,
+        voices: berd_call::openai_realtime_protocol::OPENAI_REALTIME_VOICE_IDS,
     }
 }
 
@@ -787,9 +788,9 @@ fn read_local_model_status(
         Ok(_) => {}
     }
     let _assets =
-        berd_voice::local_assets::try_lock_for_read(roots).map_err(local_model_lock_failure)?;
+        berd_call::local_assets::try_lock_for_read(roots).map_err(local_model_lock_failure)?;
     let state = match model {
-        LocalModelKind::Pocket => match berd_voice::pocket_assets::inspect(
+        LocalModelKind::Pocket => match berd_call::pocket_assets::inspect(
             roots.pocket_bundle_root(),
         )
         .map_err(|error| {
@@ -799,14 +800,14 @@ fn read_local_model_status(
                 error,
             )
         })? {
-            berd_voice::pocket_assets::PocketAssetStatus::Missing => LocalModelState::Missing,
-            berd_voice::pocket_assets::PocketAssetStatus::Invalid => LocalModelState::Invalid,
-            berd_voice::pocket_assets::PocketAssetStatus::Ready { verified_bytes } => {
+            berd_call::pocket_assets::PocketAssetStatus::Missing => LocalModelState::Missing,
+            berd_call::pocket_assets::PocketAssetStatus::Invalid => LocalModelState::Invalid,
+            berd_call::pocket_assets::PocketAssetStatus::Ready { verified_bytes } => {
                 LocalModelState::Ready { verified_bytes }
             }
         },
         LocalModelKind::Parakeet => {
-            match berd_voice::parakeet_assets::inspect(roots.parakeet_bundle_root()).map_err(
+            match berd_call::parakeet_assets::inspect(roots.parakeet_bundle_root()).map_err(
                 |error| {
                     management_failure(
                         "integrity_failed",
@@ -815,13 +816,13 @@ fn read_local_model_status(
                     )
                 },
             )? {
-                berd_voice::parakeet_assets::ParakeetAssetStatus::Missing => {
+                berd_call::parakeet_assets::ParakeetAssetStatus::Missing => {
                     LocalModelState::Missing
                 }
-                berd_voice::parakeet_assets::ParakeetAssetStatus::Invalid => {
+                berd_call::parakeet_assets::ParakeetAssetStatus::Invalid => {
                     LocalModelState::Invalid
                 }
-                berd_voice::parakeet_assets::ParakeetAssetStatus::Ready { verified_bytes } => {
+                berd_call::parakeet_assets::ParakeetAssetStatus::Ready { verified_bytes } => {
                     LocalModelState::Ready { verified_bytes }
                 }
             }
@@ -863,7 +864,7 @@ fn unsupported_macos_model_status() -> MacosModelStatus {
 
 #[cfg(target_os = "macos")]
 fn current_macos_model_status() -> Result<MacosModelStatus, String> {
-    let status = berd_voice::mac_speech::mac_speech_status()?;
+    let status = berd_call::mac_speech::mac_speech_status()?;
     Ok(MacosModelStatus {
         supported: status.supported,
         locale: status.locale,
@@ -898,7 +899,7 @@ fn macos_install_needs_mutation(status: &MacosModelStatus) -> Result<bool, Manag
 
 #[cfg(target_os = "macos")]
 fn install_macos_model_platform() -> Result<(), String> {
-    berd_voice::mac_speech::install_mac_speech_model(write_management_progress)
+    berd_call::mac_speech::install_mac_speech_model(write_management_progress)
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -932,7 +933,7 @@ fn write_management_result<T: Serialize>(operation: &'static str, result: T) -> 
 
 fn write_management_progress(progress: f64) {
     let Some(fraction) = normalized_install_progress(progress) else {
-        eprintln!("berd-voice ignored invalid macOS model install progress: {progress}");
+        eprintln!("berd-call ignored invalid macOS model install progress: {progress}");
         return;
     };
     let envelope = ManagementProgressEnvelope {
@@ -942,7 +943,7 @@ fn write_management_progress(progress: f64) {
         fraction,
     };
     if let Err(error) = write_json_line(io::stdout().lock(), &envelope) {
-        eprintln!("berd-voice could not write install progress: {error}");
+        eprintln!("berd-call could not write install progress: {error}");
     }
 }
 
@@ -966,7 +967,7 @@ fn write_local_model_progress(operation: &'static str, progress: LocalInstallPro
         total_download_bytes: progress.total_download_bytes,
     };
     if let Err(error) = write_json_line(io::stdout().lock(), &envelope) {
-        eprintln!("berd-voice could not write local model install progress: {error}");
+        eprintln!("berd-call could not write local model install progress: {error}");
     }
 }
 
@@ -1028,13 +1029,13 @@ fn run_local_model_install(
         })?;
     let (outcome, verified_bytes, cleanup_pending) = match model {
         LocalModelKind::Pocket => {
-            match runtime.block_on(berd_voice::pocket_assets::install(&roots, |progress| {
+            match runtime.block_on(berd_call::pocket_assets::install(&roots, |progress| {
                 write_local_model_progress(operation, progress);
             })) {
-                Ok(berd_voice::pocket_assets::PocketInstallOutcome::AlreadyReady {
+                Ok(berd_call::pocket_assets::PocketInstallOutcome::AlreadyReady {
                     verified_bytes,
                 }) => ("alreadyReady", verified_bytes, None),
-                Ok(berd_voice::pocket_assets::PocketInstallOutcome::Installed {
+                Ok(berd_call::pocket_assets::PocketInstallOutcome::Installed {
                     verified_bytes,
                     cleanup_pending,
                 }) => ("installed", verified_bytes, cleanup_pending),
@@ -1042,13 +1043,13 @@ fn run_local_model_install(
             }
         }
         LocalModelKind::Parakeet => {
-            match runtime.block_on(berd_voice::parakeet_assets::install(&roots, |progress| {
+            match runtime.block_on(berd_call::parakeet_assets::install(&roots, |progress| {
                 write_local_model_progress(operation, progress);
             })) {
-                Ok(berd_voice::parakeet_assets::ParakeetInstallOutcome::AlreadyReady {
+                Ok(berd_call::parakeet_assets::ParakeetInstallOutcome::AlreadyReady {
                     verified_bytes,
                 }) => ("alreadyReady", verified_bytes, None),
-                Ok(berd_voice::parakeet_assets::ParakeetInstallOutcome::Installed {
+                Ok(berd_call::parakeet_assets::ParakeetInstallOutcome::Installed {
                     verified_bytes,
                     cleanup_pending,
                 }) => ("installed", verified_bytes, cleanup_pending),
@@ -1058,7 +1059,7 @@ fn run_local_model_install(
     };
     if let Some(path) = cleanup_pending.as_ref() {
         eprintln!(
-            "berd-voice installed the {} model; prior backup cleanup remains at {}",
+            "berd-call installed the {} model; prior backup cleanup remains at {}",
             model.backend(),
             path.display()
         );
@@ -1101,14 +1102,14 @@ fn management_error_envelope(
 }
 
 #[cfg(any(test, target_os = "macos"))]
-fn voice_download_failure(error: berd_voice::siri::SiriVoiceDownloadError) -> ManagementFailure {
+fn voice_download_failure(error: berd_call::siri::SiriVoiceDownloadError) -> ManagementFailure {
     match error {
-        berd_voice::siri::SiriVoiceDownloadError::NotFound(_) => management_failure(
+        berd_call::siri::SiriVoiceDownloadError::NotFound(_) => management_failure(
             "voice_not_found",
             "The requested Siri voice was not found",
             error.to_string(),
         ),
-        berd_voice::siri::SiriVoiceDownloadError::Operation(_) => management_failure(
+        berd_call::siri::SiriVoiceDownloadError::Operation(_) => management_failure(
             "operation_failed",
             "Could not make the requested Siri voice available",
             error.to_string(),
@@ -1121,7 +1122,7 @@ fn run_management_command(command: ManagementCommand) -> Result<(), ManagementFa
     match command {
         ManagementCommand::ListVoices { language } => {
             let catalog =
-                berd_voice::siri::load_voice_catalog(language.as_deref()).map_err(|error| {
+                berd_call::siri::load_voice_catalog(language.as_deref()).map_err(|error| {
                     management_failure("operation_failed", "Could not list Siri voices", error)
                 })?;
             write_management_result(
@@ -1147,7 +1148,7 @@ fn run_management_command(command: ManagementCommand) -> Result<(), ManagementFa
             }
             #[cfg(target_os = "macos")]
             {
-                let identity = berd_voice::siri::download_voice(&identity, availability_wait)
+                let identity = berd_call::siri::download_voice(&identity, availability_wait)
                     .map_err(voice_download_failure)?;
                 let result = voice_download_report(&identity, availability_wait);
                 write_management_result(operation, result).map_err(|error| {
@@ -1235,6 +1236,20 @@ fn run_management_command(command: ManagementCommand) -> Result<(), ManagementFa
     }
 }
 
+fn standard_session_status_cues_suppressed(
+    core: &SessionCore,
+    assistant_output_active: bool,
+) -> bool {
+    core.user_speaking() || assistant_output_active
+}
+
+fn expert_session_status_cues_suppressed(
+    turn_gate: &ExpertTurnGate,
+    assistant_output_active: bool,
+) -> bool {
+    turn_gate.lifecycle.user_speaking() || assistant_output_active
+}
+
 fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String> {
     let (control_tx, control_rx) = mpsc::channel();
     let (pcm_tx, pcm_rx) = mpsc::sync_channel(INPUT_QUEUE_CAPACITY);
@@ -1259,6 +1274,7 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
     let mut processed_pcm = 0_u64;
     let mut held: Option<PrepareRequest> = None;
     let mut active: Option<ActivePlayback> = None;
+    let mut status_sound_runtime = StatusSoundRuntime::default();
 
     loop {
         if let Some(events) = input_events.as_mut() {
@@ -1327,6 +1343,11 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                     message: "output readiness timed out".into(),
                 },
             )?;
+        }
+        let conversation_active = standard_session_status_cues_suppressed(&core, active.is_some());
+        let status_sound_result = status_sound_runtime.poll(conversation_active);
+        if let Err(message) = status_sound_result {
+            eprintln!("status sound playback disabled: {message}");
         }
 
         let Some(input) = receive_session_input(
@@ -1424,6 +1445,7 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
             Input::Request(SessionRequest::Hello {
                 id,
                 input_during_tts,
+                status_sound_output_device,
             }) => {
                 if initialized {
                     write_message(
@@ -1474,6 +1496,7 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                 input_runtime = Some(runtime);
                 input_events = Some(events);
                 initialized = true;
+                status_sound_runtime.set_output_device(status_sound_output_device);
                 let input_policy = InputDuringTtsSlot::new(input_during_tts);
                 let session = VoiceSessionSnapshot {
                     tts: slot.snapshot()?,
@@ -1499,6 +1522,21 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                     },
                 )?;
                 return Ok(());
+            }
+            Input::Request(SessionRequest::SetConversationStatus {
+                id,
+                status,
+                settings,
+            }) => {
+                status_sound_runtime.update(status, settings);
+                write_message(
+                    &mut writer,
+                    &SessionMessage::ConversationStatusApplied {
+                        id,
+                        status,
+                        settings,
+                    },
+                )?;
             }
             Input::Request(SessionRequest::SetInputMuted { id, active: muted }) => {
                 handle_input_muted(
@@ -1909,7 +1947,7 @@ struct PendingSpokespersonSettingsUpdate {
 fn rollback_spokesperson_voice_update(
     pending: &mut Option<VoiceUpdateTransaction>,
     old_runtime: &OpenAiSpokespersonRuntime,
-    snapshot: &berd_voice::TtsConfigurationSnapshot,
+    snapshot: &berd_call::TtsConfigurationSnapshot,
     message: String,
     writer: &mut impl Write,
 ) -> Result<(), String> {
@@ -1930,7 +1968,7 @@ fn activate_spokesperson_voice_update(
     runtime: &mut Option<OpenAiSpokespersonRuntime>,
     runtime_events: &mut Option<Receiver<SpokespersonEvent>>,
     runtime_config: &mut Option<OpenAiSpokespersonConfig>,
-    snapshot: &mut berd_voice::TtsConfigurationSnapshot,
+    snapshot: &mut berd_call::TtsConfigurationSnapshot,
     writer: &mut impl Write,
 ) -> Result<(), String> {
     let activated = pending
@@ -2253,7 +2291,7 @@ fn spokesperson_pcm_allowed(
 ) -> bool {
     !(input_muted
         || playback_active
-            && input_policy.policy == berd_voice::input::InputDuringTtsPolicy::SuppressInput)
+            && input_policy.policy == berd_call::input::InputDuringTtsPolicy::SuppressInput)
 }
 
 fn set_spokesperson_input_muted(
@@ -2285,7 +2323,7 @@ fn reset_spokesperson_input(
 fn set_spokesperson_input_policy(
     id: u64,
     expected_revision: u64,
-    policy: berd_voice::input::InputDuringTtsPolicy,
+    policy: berd_call::input::InputDuringTtsPolicy,
     slot: &InputDuringTtsSlot,
     writer: &mut impl Write,
 ) -> Result<(), String> {
@@ -2305,7 +2343,7 @@ fn set_spokesperson_input_policy(
 
 fn reject_spokesperson_tts_settings(
     id: u64,
-    snapshot: &berd_voice::TtsConfigurationSnapshot,
+    snapshot: &berd_call::TtsConfigurationSnapshot,
     message: String,
     writer: &mut impl Write,
 ) -> Result<(), String> {
@@ -2360,7 +2398,7 @@ fn queued_spokesperson_settings_are_ready(
 
 fn validate_queued_spokesperson_settings(
     request: &PendingSpokespersonSettingsUpdate,
-    snapshot: &berd_voice::TtsConfigurationSnapshot,
+    snapshot: &berd_call::TtsConfigurationSnapshot,
     runtime_config: &OpenAiSpokespersonConfig,
 ) -> Result<(), String> {
     validate_voice_update_settings(
@@ -2374,7 +2412,7 @@ fn validate_queued_spokesperson_settings(
 fn spokesperson_voice_update_is_safe(
     update: &VoiceUpdateTransaction,
     core: &RealtimeExpertSpokespersonSession,
-    snapshot: &berd_voice::TtsConfigurationSnapshot,
+    snapshot: &berd_call::TtsConfigurationSnapshot,
     gate: &ExpertTurnGate,
     work: RealtimeHostWork,
 ) -> bool {
@@ -2440,11 +2478,12 @@ fn run_expert_spokesperson_session(
     let mut waiting_responses = VecDeque::<String>::new();
     let mut active: Option<LivePlayback> = None;
     let mut turn_gate = ExpertTurnGate::new(spokesperson_renew_after());
-    let mut session_tts: Option<berd_voice::TtsConfigurationSnapshot> = None;
+    let mut session_tts: Option<berd_call::TtsConfigurationSnapshot> = None;
     let mut input_during_tts_slot: Option<InputDuringTtsSlot> = None;
     let mut input_muted = false;
     let mut queued_tts_settings = VoiceUpdateQueue::<PendingSpokespersonSettingsUpdate>::default();
     let mut pending_voice_update: Option<VoiceUpdateTransaction> = None;
+    let mut status_sound_runtime = StatusSoundRuntime::default();
 
     loop {
         if initialized {
@@ -3300,6 +3339,12 @@ fn run_expert_spokesperson_session(
                 )?;
             }
         }
+        let conversation_active =
+            expert_session_status_cues_suppressed(&turn_gate, active.is_some());
+        let status_sound_result = status_sound_runtime.poll(conversation_active);
+        if let Err(message) = status_sound_result {
+            eprintln!("status sound playback disabled: {message}");
+        }
 
         let Some(input) = receive_session_input(
             &control_rx,
@@ -3393,6 +3438,7 @@ fn run_expert_spokesperson_session(
             Input::Request(SessionRequest::Hello {
                 id,
                 input_during_tts,
+                status_sound_output_device,
             }) => {
                 if initialized {
                     write_protocol_fatal(
@@ -3404,7 +3450,7 @@ fn run_expert_spokesperson_session(
                 }
                 let mut spokesperson_config = OpenAiSpokespersonConfig::from_environment()?;
                 apply_spokesperson_startup_settings(&config, &mut spokesperson_config)?;
-                let tts = berd_voice::TtsConfigurationSnapshot {
+                let tts = berd_call::TtsConfigurationSnapshot {
                     revision: 1,
                     settings: TtsSettings::OpenAi {
                         model: spokesperson_config.model().into(),
@@ -3443,6 +3489,7 @@ fn run_expert_spokesperson_session(
                 session_tts = Some(tts);
                 input_during_tts_slot = Some(input_policy);
                 initialized = true;
+                status_sound_runtime.set_output_device(status_sound_output_device);
                 turn_gate.lifecycle.session_started(Instant::now());
                 write_message(
                     &mut writer,
@@ -3820,6 +3867,21 @@ fn run_expert_spokesperson_session(
                 if outcome == CancelOutcome::Cancelled {
                     cancel_live_playback(&mut active);
                 }
+            }
+            Input::Request(SessionRequest::SetConversationStatus {
+                id,
+                status,
+                settings,
+            }) => {
+                status_sound_runtime.update(status, settings);
+                write_message(
+                    &mut writer,
+                    &SessionMessage::ConversationStatusApplied {
+                        id,
+                        status,
+                        settings,
+                    },
+                )?;
             }
             Input::Request(SessionRequest::SetInputMuted { id, active: muted }) => {
                 if pending_voice_update.is_some() {
@@ -4309,23 +4371,23 @@ fn handle_live_audio_ack(
 }
 
 fn pending_live_event(
-    event: berd_voice::causal_inbox::CausalMessage<LiveSideEvent>,
-) -> berd_voice::protocol::PendingUtterance {
+    event: berd_call::causal_inbox::CausalMessage<LiveSideEvent>,
+) -> berd_call::protocol::PendingUtterance {
     let origin = live_event_origin(&event.payload);
-    berd_voice::protocol::PendingUtterance {
+    berd_call::protocol::PendingUtterance {
         token: event.token,
         text: render_live_event(event.token, &event.payload),
         origin: Some(origin),
     }
 }
 
-fn live_event_origin(event: &LiveSideEvent) -> berd_voice::protocol::UtteranceOrigin {
+fn live_event_origin(event: &LiveSideEvent) -> berd_call::protocol::UtteranceOrigin {
     match event {
-        LiveSideEvent::UserTranscript { .. } => berd_voice::protocol::UtteranceOrigin::User,
+        LiveSideEvent::UserTranscript { .. } => berd_call::protocol::UtteranceOrigin::User,
         LiveSideEvent::SpokespersonTranscript { .. } => {
-            berd_voice::protocol::UtteranceOrigin::Spokesperson
+            berd_call::protocol::UtteranceOrigin::Spokesperson
         }
-        LiveSideEvent::Handoff { .. } => berd_voice::protocol::UtteranceOrigin::Handoff,
+        LiveSideEvent::Handoff { .. } => berd_call::protocol::UtteranceOrigin::Handoff,
     }
 }
 
@@ -4783,7 +4845,7 @@ fn parse_synthesis_args(args: &[String]) -> Result<SynthesisConfig, String> {
                 voice, language, ..
             } = &mut local
             {
-                let identity = berd_voice::siri::SiriVoiceIdentity::new(voice.clone(), language)?;
+                let identity = berd_call::siri::SiriVoiceIdentity::new(voice.clone(), language)?;
                 *voice = identity.name().to_string();
                 *language = identity.language().to_string();
             }
@@ -5189,7 +5251,7 @@ fn parse_stt_benchmark_args(args: &[String]) -> Result<SttBenchmarkConfig, Strin
 
 fn validate_stt_benchmark_workload(
     config: &SttBenchmarkConfig,
-    workload: &berd_voice::benchmark::SttBenchmarkWorkload,
+    workload: &berd_call::benchmark::SttBenchmarkWorkload,
 ) -> Result<(), String> {
     if !matches!(config.stt, SttBackendConfig::OpenAi) {
         return Ok(());
@@ -5224,7 +5286,7 @@ fn run_stt_benchmark(config: SttBenchmarkConfig) -> Result<(), String> {
 
 fn create_stt_benchmark_report(
     config: &SttBenchmarkConfig,
-) -> Result<berd_voice::benchmark::SttBenchmarkReport, String> {
+) -> Result<berd_call::benchmark::SttBenchmarkReport, String> {
     let pack = load_bundled_stt_fixture_pack()?;
     let workload = pack.workload(config.runs, config.mode);
     validate_stt_benchmark_workload(config, &workload)?;
@@ -5259,7 +5321,7 @@ fn stt_benchmark_target(config: &SttBackendConfig) -> Result<SttBenchmarkTarget,
         SttBackendConfig::Macos => {
             #[cfg(target_os = "macos")]
             {
-                let status = berd_voice::mac_speech::mac_speech_status()?;
+                let status = berd_call::mac_speech::mac_speech_status()?;
                 Ok(SttBenchmarkTarget {
                     backend: "macos".into(),
                     model: Some(status.model_status),
@@ -5330,7 +5392,7 @@ fn create_tts_configuration(config: &TtsBackendConfig) -> Result<TtsConfiguratio
             rate,
         } => Ok(TtsConfiguration::pocket(
             model_dir.clone(),
-            berd_voice::pocket_assets::MODEL_ID.into(),
+            berd_call::pocket_assets::MODEL_ID.into(),
             voice.clone(),
             *rate,
         )),
@@ -5429,7 +5491,7 @@ fn prepare_synthesis_output(path: &Path) -> Result<tempfile::NamedTempFile, Synt
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
     tempfile::Builder::new()
-        .prefix(".berd-voice-synthesize-")
+        .prefix(".berd-call-synthesize-")
         .suffix(".wav.tmp")
         .tempfile_in(parent)
         .map_err(|error| {
@@ -5452,7 +5514,7 @@ fn synthesis_identity(config: &SynthesisConfig) -> (Option<String>, String, Opti
             rate,
         }) => (None, voice.clone(), Some(language.clone()), *rate),
         SynthesisTtsConfig::Local(TtsBackendConfig::Pocket { voice, rate, .. }) => (
-            Some(berd_voice::pocket_assets::MODEL_ID.into()),
+            Some(berd_call::pocket_assets::MODEL_ID.into()),
             voice.clone(),
             None,
             *rate,
@@ -5478,31 +5540,31 @@ fn run_synthesis_with_factory(
         )
     })?;
     let wav =
-        berd_voice::synthesize_pcm16_wav(backend.as_ref(), &config.text, temporary.as_file_mut())
+        berd_call::synthesize_pcm16_wav(backend.as_ref(), &config.text, temporary.as_file_mut())
             .map_err(|error| {
-            let (code, message) = match error.kind {
-                WavSynthesisErrorKind::Backend => (
-                    "synthesis_failed",
-                    "The TTS backend could not synthesize the text",
-                ),
-                WavSynthesisErrorKind::Cancelled => {
-                    ("synthesis_cancelled", "TTS synthesis was cancelled")
-                }
-                WavSynthesisErrorKind::Empty => {
-                    ("invalid_audio", "TTS synthesis produced no audio")
-                }
-                WavSynthesisErrorKind::InvalidPcm => {
-                    ("invalid_audio", "TTS synthesis produced invalid audio")
-                }
-                WavSynthesisErrorKind::TooLong => {
-                    ("audio_too_long", "TTS synthesis exceeded ten minutes")
-                }
-                WavSynthesisErrorKind::Output => {
-                    ("output_unavailable", "The WAV output could not be written")
-                }
-            };
-            synthesis_failure(code, message, error.detail)
-        })?;
+                let (code, message) = match error.kind {
+                    WavSynthesisErrorKind::Backend => (
+                        "synthesis_failed",
+                        "The TTS backend could not synthesize the text",
+                    ),
+                    WavSynthesisErrorKind::Cancelled => {
+                        ("synthesis_cancelled", "TTS synthesis was cancelled")
+                    }
+                    WavSynthesisErrorKind::Empty => {
+                        ("invalid_audio", "TTS synthesis produced no audio")
+                    }
+                    WavSynthesisErrorKind::InvalidPcm => {
+                        ("invalid_audio", "TTS synthesis produced invalid audio")
+                    }
+                    WavSynthesisErrorKind::TooLong => {
+                        ("audio_too_long", "TTS synthesis exceeded ten minutes")
+                    }
+                    WavSynthesisErrorKind::Output => {
+                        ("output_unavailable", "The WAV output could not be written")
+                    }
+                };
+                synthesis_failure(code, message, error.detail)
+            })?;
     temporary.as_file().sync_all().map_err(|error| {
         synthesis_failure(
             "output_unavailable",
@@ -5579,7 +5641,7 @@ fn create_input_runtime(
         SttBackendConfig::Macos => {
             #[cfg(target_os = "macos")]
             {
-                let status = berd_voice::mac_speech::mac_speech_status().map_err(|error| {
+                let status = berd_call::mac_speech::mac_speech_status().map_err(|error| {
                     format!(
                         "Could not check the default macOS speech recognition engine: {error}. Open Berd Voice settings to verify or install the current-locale model"
                     )
@@ -5637,7 +5699,7 @@ fn create_input_runtime(
 
 #[cfg(target_os = "macos")]
 fn validate_macos_stt_status(
-    status: &berd_voice::mac_speech::MacSpeechEngineStatus,
+    status: &berd_call::mac_speech::MacSpeechEngineStatus,
 ) -> Result<(), String> {
     if status.ready {
         return Ok(());
@@ -6495,6 +6557,7 @@ fn validate_request(request: SessionRequest) -> Result<SessionRequest, String> {
     let id = match &request {
         SessionRequest::Hello { id, .. }
         | SessionRequest::SetInputMuted { id, .. }
+        | SessionRequest::SetConversationStatus { id, .. }
         | SessionRequest::SetTtsSettings { id, .. }
         | SessionRequest::SetInputDuringTts { id, .. }
         | SessionRequest::ResetInput { id }
@@ -6521,6 +6584,9 @@ fn validate_request(request: SessionRequest) -> Result<SessionRequest, String> {
         return Err("request id must be positive".into());
     }
     match &request {
+        SessionRequest::SetConversationStatus { settings, .. } => {
+            settings.validate().map_err(str::to_string)?;
+        }
         SessionRequest::PrepareSpeak { text, .. } if text.len() > MAX_SPEAK_TEXT_BYTES => {
             return Err("speak text exceeds 16 KiB".into())
         }
@@ -6677,7 +6743,7 @@ fn synthesize_to_output(
     speech_id: u64,
     text: &str,
     backend: &dyn TtsBackend,
-    output: &dyn berd_voice::PcmAudioOutput,
+    output: &dyn berd_call::PcmAudioOutput,
     active: &AtomicBool,
     sender: &mpsc::Sender<PlaybackEvent>,
 ) -> Result<bool, PlaybackFailure> {
@@ -6691,12 +6757,12 @@ fn synthesize_to_output(
 fn synthesize_to_output_with_finish(
     text: &str,
     backend: &dyn TtsBackend,
-    output: &dyn berd_voice::PcmAudioOutput,
+    output: &dyn berd_call::PcmAudioOutput,
     active: &AtomicBool,
     finish_writes: &mut dyn FnMut() -> Result<(), String>,
     on_started: &mut dyn FnMut() -> Result<(), String>,
 ) -> Result<(bool, DeliveryProgress), PlaybackFailure> {
-    use berd_voice::{DrainPolicy, DrainTimeoutOutcome, OutboundOutcome, OutboundPlayback};
+    use berd_call::{DrainPolicy, DrainTimeoutOutcome, OutboundOutcome, OutboundPlayback};
 
     let spec = backend.pcm_spec();
     let initial_frames = usize::try_from(spec.sample_rate / 5).map_err(|_| PlaybackFailure {
@@ -6744,14 +6810,33 @@ fn synthesize_to_output_with_finish(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use berd_voice::input::InputDuringTtsPolicy;
-    use berd_voice::{PcmAudioOutput, TtsOutcome, TtsPcmSpec};
+    use berd_call::input::InputDuringTtsPolicy;
+    use berd_call::{PcmAudioOutput, TtsOutcome, TtsPcmSpec};
     use serde_json::{json, Value};
     use std::io::{Cursor, Read, Write};
     use std::os::fd::IntoRawFd;
     use std::os::unix::net::UnixStream;
     use std::sync::Mutex;
 
+    #[test]
+    fn status_cues_ignore_pending_recognition_but_suppress_actual_audio() {
+        let mut core = SessionCore::default();
+        core.set_recognition_pending(true);
+        assert!(!standard_session_status_cues_suppressed(&core, false));
+        assert!(standard_session_status_cues_suppressed(&core, true));
+        core.set_user_speaking(true);
+        assert!(standard_session_status_cues_suppressed(&core, false));
+        core.set_user_speaking(false);
+        assert!(!standard_session_status_cues_suppressed(&core, false));
+
+        let mut gate = ExpertTurnGate::default();
+        gate.begin_user_speaking("pending-transcript".into());
+        assert!(expert_session_status_cues_suppressed(&gate, false));
+        gate.finish_user_speaking();
+        assert!(gate.input_blocks_output());
+        assert!(!expert_session_status_cues_suppressed(&gate, false));
+        assert!(expert_session_status_cues_suppressed(&gate, true));
+    }
     fn synthesis_config(tts: SynthesisTtsConfig, output: PathBuf) -> SynthesisConfig {
         SynthesisConfig {
             tts,
@@ -7487,7 +7572,7 @@ mod tests {
     #[test]
     fn parses_closed_synthesis_surface_for_each_backend() {
         let siri = parse_synthesis_args(&args(&[
-            "berd-voice",
+            "berd-call",
             "synthesize",
             "--tts-backend",
             "siri",
@@ -7513,7 +7598,7 @@ mod tests {
         ));
 
         let pocket = parse_synthesis_args(&args(&[
-            "berd-voice",
+            "berd-call",
             "synthesize",
             "--tts-backend",
             "pocket",
@@ -7535,7 +7620,7 @@ mod tests {
         ));
 
         let openai = parse_synthesis_args(&args(&[
-            "berd-voice",
+            "berd-call",
             "synthesize",
             "--tts-backend",
             "openai",
@@ -7601,13 +7686,13 @@ mod tests {
             ],
         ];
         for mut flags in cases {
-            let mut values = vec!["berd-voice", "synthesize"];
+            let mut values = vec!["berd-call", "synthesize"];
             values.append(&mut flags);
             values.extend(["--text", "hello", "--output", "voice.wav"]);
             assert!(parse_synthesis_args(&args(&values)).is_err(), "{values:?}");
         }
         assert!(parse_synthesis_args(&args(&[
-            "berd-voice",
+            "berd-call",
             "synthesize",
             "--tts-backend",
             "siri",
@@ -7674,10 +7759,7 @@ mod tests {
         })
         .unwrap();
         assert_eq!(value["result"]["backend"], "pocket");
-        assert_eq!(
-            value["result"]["model"],
-            berd_voice::pocket_assets::MODEL_ID
-        );
+        assert_eq!(value["result"]["model"], berd_call::pocket_assets::MODEL_ID);
         assert_eq!(value["result"]["voice"], "mary");
         let serialized = value.to_string();
         assert!(!serialized.contains("/private"));
@@ -8110,10 +8192,10 @@ mod tests {
     #[test]
     fn public_tts_protocol_messages_never_expose_private_paths() {
         let private_path = "/Users/alice/private/native-voice-v2";
-        let snapshot = berd_voice::TtsConfigurationSnapshot {
+        let snapshot = berd_call::TtsConfigurationSnapshot {
             revision: 1,
-            settings: berd_voice::TtsSettings::Pocket {
-                model: berd_voice::pocket_assets::MODEL_ID.into(),
+            settings: berd_call::TtsSettings::Pocket {
+                model: berd_call::pocket_assets::MODEL_ID.into(),
                 voice: "mary".into(),
                 rate: 1.0,
             },
@@ -8161,12 +8243,12 @@ mod tests {
     #[test]
     fn management_cli_parses_only_the_closed_command_shapes() {
         assert_eq!(
-            parse_management_args(&args(&["berd-voice", "voices", "list"])).unwrap(),
+            parse_management_args(&args(&["berd-call", "voices", "list"])).unwrap(),
             ManagementCommand::ListVoices { language: None }
         );
         assert_eq!(
             parse_management_args(&args(&[
-                "berd-voice",
+                "berd-call",
                 "voices",
                 "list",
                 "--language",
@@ -8179,7 +8261,7 @@ mod tests {
         );
         assert_eq!(
             parse_management_args(&args(&[
-                "berd-voice",
+                "berd-call",
                 "voices",
                 "download",
                 "--voice",
@@ -8189,13 +8271,13 @@ mod tests {
             ]))
             .unwrap(),
             ManagementCommand::DownloadVoice {
-                identity: berd_voice::siri::SiriVoiceIdentity::new("Aaron", "en-US").unwrap(),
-                availability_wait: berd_voice::siri::SiriDownloadAvailabilityWait::default(),
+                identity: berd_call::siri::SiriVoiceIdentity::new("Aaron", "en-US").unwrap(),
+                availability_wait: berd_call::siri::SiriDownloadAvailabilityWait::default(),
             }
         );
         assert_eq!(
             parse_management_args(&args(&[
-                "berd-voice",
+                "berd-call",
                 "voices",
                 "download",
                 "--voice",
@@ -8207,28 +8289,28 @@ mod tests {
             ]))
             .unwrap(),
             ManagementCommand::DownloadVoice {
-                identity: berd_voice::siri::SiriVoiceIdentity::new("Aaron", "en-US").unwrap(),
-                availability_wait: berd_voice::siri::SiriDownloadAvailabilityWait::from_seconds(12)
+                identity: berd_call::siri::SiriVoiceIdentity::new("Aaron", "en-US").unwrap(),
+                availability_wait: berd_call::siri::SiriDownloadAvailabilityWait::from_seconds(12)
                     .unwrap(),
             }
         );
         assert_eq!(
-            parse_management_args(&args(&["berd-voice", "models", "macos", "status"])).unwrap(),
+            parse_management_args(&args(&["berd-call", "models", "macos", "status"])).unwrap(),
             ManagementCommand::MacosModelStatus
         );
         assert_eq!(
-            parse_management_args(&args(&["berd-voice", "models", "macos", "install"])).unwrap(),
+            parse_management_args(&args(&["berd-call", "models", "macos", "install"])).unwrap(),
             ManagementCommand::InstallMacosModel
         );
         assert_eq!(
-            parse_management_args(&args(&["berd-voice", "models", "openai", "voices"])).unwrap(),
+            parse_management_args(&args(&["berd-call", "models", "openai", "voices"])).unwrap(),
             ManagementCommand::ListOpenAiVoices
         );
-        let store = std::env::temp_dir().join("berd-voice-management-parser");
+        let store = std::env::temp_dir().join("berd-call-management-parser");
         let roots = local_model_roots(&store).unwrap();
         assert_eq!(
             parse_management_args(&args(&[
-                "berd-voice",
+                "berd-call",
                 "models",
                 "pocket",
                 "status",
@@ -8242,7 +8324,7 @@ mod tests {
         );
         assert_eq!(
             parse_management_args(&args(&[
-                "berd-voice",
+                "berd-call",
                 "models",
                 "pocket",
                 "install",
@@ -8256,7 +8338,7 @@ mod tests {
         );
         assert_eq!(
             parse_management_args(&args(&[
-                "berd-voice",
+                "berd-call",
                 "models",
                 "parakeet",
                 "status",
@@ -8270,7 +8352,7 @@ mod tests {
         );
         assert_eq!(
             parse_management_args(&args(&[
-                "berd-voice",
+                "berd-call",
                 "models",
                 "parakeet",
                 "install",
@@ -8281,16 +8363,16 @@ mod tests {
             ManagementCommand::InstallParakeetModel { roots }
         );
         assert_eq!(
-            parse_management_args(&args(&["berd-voice", "models", "pocket", "voices"])).unwrap(),
+            parse_management_args(&args(&["berd-call", "models", "pocket", "voices"])).unwrap(),
             ManagementCommand::ListPocketVoices
         );
 
         for invalid in [
-            vec!["berd-voice", "voices", "list", "--language"],
-            vec!["berd-voice", "voices", "list", "--unknown", "en-US"],
-            vec!["berd-voice", "voices", "download", "--voice", "Aaron"],
+            vec!["berd-call", "voices", "list", "--language"],
+            vec!["berd-call", "voices", "list", "--unknown", "en-US"],
+            vec!["berd-call", "voices", "download", "--voice", "Aaron"],
             vec![
-                "berd-voice",
+                "berd-call",
                 "voices",
                 "download",
                 "--voice",
@@ -8301,7 +8383,7 @@ mod tests {
                 "0",
             ],
             vec![
-                "berd-voice",
+                "berd-call",
                 "voices",
                 "download",
                 "--voice",
@@ -8312,7 +8394,7 @@ mod tests {
                 "1801",
             ],
             vec![
-                "berd-voice",
+                "berd-call",
                 "voices",
                 "download",
                 "--voice",
@@ -8320,10 +8402,10 @@ mod tests {
                 "--language",
                 "en-US",
             ],
-            vec!["berd-voice", "models", "macos", "status", "extra"],
-            vec!["berd-voice", "models", "pocket", "status"],
+            vec!["berd-call", "models", "macos", "status", "extra"],
+            vec!["berd-call", "models", "pocket", "status"],
             vec![
-                "berd-voice",
+                "berd-call",
                 "models",
                 "pocket",
                 "status",
@@ -8331,7 +8413,7 @@ mod tests {
                 "relative",
             ],
             vec![
-                "berd-voice",
+                "berd-call",
                 "models",
                 "parakeet",
                 "install",
@@ -8339,14 +8421,14 @@ mod tests {
                 "/tmp/../outside",
             ],
             vec![
-                "berd-voice",
+                "berd-call",
                 "models",
                 "pocket",
                 "status",
                 "--store-root",
                 "/tmp/./store",
             ],
-            vec!["berd-voice", "models", "pocket", "voices", "extra"],
+            vec!["berd-call", "models", "pocket", "voices", "extra"],
         ] {
             assert!(
                 parse_management_args(&args(&invalid)).is_err(),
@@ -8354,7 +8436,7 @@ mod tests {
             );
         }
         assert_eq!(
-            parse_management_args(&args(&["berd-voice", "models", "pocket", "typo"])).unwrap_err(),
+            parse_management_args(&args(&["berd-call", "models", "pocket", "typo"])).unwrap_err(),
             "expected a supported models command"
         );
     }
@@ -8364,9 +8446,9 @@ mod tests {
         let list = voices_list_report(
             true,
             Some("en-US".into()),
-            berd_voice::siri::SiriVoiceCatalog {
+            berd_call::siri::SiriVoiceCatalog {
                 available_languages: vec!["en-US".into()],
-                voices: vec![berd_voice::siri::SiriVoice {
+                voices: vec![berd_call::siri::SiriVoice {
                     name: "Aaron".into(),
                     language: "en-US".into(),
                     size_bytes: 42,
@@ -8419,7 +8501,7 @@ mod tests {
                     "state": "missing",
                     "ready": false,
                     "verifiedBytes": null,
-                    "totalDownloadBytes": berd_voice::pocket_assets::download_bytes()
+                    "totalDownloadBytes": berd_call::pocket_assets::download_bytes()
                 }
             })
         );
@@ -8469,7 +8551,7 @@ mod tests {
                 "event": "result",
                 "result": {
                     "backend": "openai",
-                    "voices": berd_voice::openai_realtime_protocol::OPENAI_REALTIME_VOICE_IDS
+                    "voices": berd_call::openai_realtime_protocol::OPENAI_REALTIME_VOICE_IDS
                 }
             })
         );
@@ -8481,7 +8563,7 @@ mod tests {
                 event: "result",
                 result: LocalModelInstallResult {
                     backend: "parakeet",
-                    model_id: berd_voice::parakeet_assets::MODEL_ID,
+                    model_id: berd_call::parakeet_assets::MODEL_ID,
                     outcome: "installed",
                     ready: true,
                     verified_bytes: 123,
@@ -8504,7 +8586,7 @@ mod tests {
             })
         );
 
-        let identity = berd_voice::siri::SiriVoiceIdentity::new("Aaron", "en_US").unwrap();
+        let identity = berd_call::siri::SiriVoiceIdentity::new("Aaron", "en_US").unwrap();
         assert_eq!(
             serde_json::to_value(ManagementResultEnvelope {
                 schema_version: MANAGEMENT_SCHEMA_VERSION,
@@ -8512,7 +8594,7 @@ mod tests {
                 event: "result",
                 result: voice_download_report(
                     &identity,
-                    berd_voice::siri::SiriDownloadAvailabilityWait::default(),
+                    berd_call::siri::SiriDownloadAvailabilityWait::default(),
                 ),
             })
             .unwrap(),
@@ -8626,8 +8708,8 @@ mod tests {
         );
         assert!(!json.contains("/Users/alice/private"));
 
-        let missing = voice_download_failure(berd_voice::siri::SiriVoiceDownloadError::NotFound(
-            berd_voice::siri::SiriVoiceIdentity::new("Missing", "en-US").unwrap(),
+        let missing = voice_download_failure(berd_call::siri::SiriVoiceDownloadError::NotFound(
+            berd_call::siri::SiriVoiceIdentity::new("Missing", "en-US").unwrap(),
         ));
         assert_eq!(missing.code, "voice_not_found");
 
@@ -8687,13 +8769,13 @@ mod tests {
 
     #[test]
     fn cli_defaults_to_exact_siri_and_macos_without_cloud_fallback() {
-        let missing_voice = parse_args(&args(&["berd-voice", "session"])).unwrap_err();
+        let missing_voice = parse_args(&args(&["berd-call", "session"])).unwrap_err();
         assert!(missing_voice.contains("Siri TTS is the default"));
         assert!(missing_voice.contains("--voice NAME and --language BCP47"));
 
         assert_eq!(
             parse_args(&args(&[
-                "berd-voice",
+                "berd-call",
                 "session",
                 "--voice",
                 "Aaron",
@@ -8713,7 +8795,7 @@ mod tests {
         );
 
         assert_eq!(
-            parse_args(&args(&["berd-voice", "session", "--tts-backend", "openai"])).unwrap(),
+            parse_args(&args(&["berd-call", "session", "--tts-backend", "openai"])).unwrap(),
             SessionConfig {
                 tts: TtsBackendConfig::OpenAi { rate: 1.0 },
                 stt: SttBackendConfig::Macos,
@@ -8726,7 +8808,7 @@ mod tests {
     #[test]
     fn native_default_availability_errors_are_actionable() {
         let unavailable_siri = create_tts_backend(&TtsBackendConfig::Siri {
-            voice: "__berd_voice_does_not_exist__".into(),
+            voice: "__berd_call_does_not_exist__".into(),
             language: "en-US".into(),
             rate: 1.0,
         })
@@ -8736,7 +8818,7 @@ mod tests {
         assert!(unavailable_siri.contains("Download it in Berd Voice settings"));
 
         let status = |supported: bool, locale_supported: bool, model_status: &str, ready: bool| {
-            berd_voice::mac_speech::MacSpeechEngineStatus {
+            berd_call::mac_speech::MacSpeechEngineStatus {
                 supported,
                 locale: locale_supported.then(|| "en-US".into()),
                 locale_supported,
@@ -8775,7 +8857,7 @@ mod tests {
     fn cli_requires_exact_siri_selection_and_bounds_rate() {
         assert_eq!(
             parse_args(&args(&[
-                "berd-voice",
+                "berd-call",
                 "session",
                 "--tts-backend",
                 "siri",
@@ -8796,7 +8878,7 @@ mod tests {
             }
         );
         assert!(parse_args(&args(&[
-            "berd-voice",
+            "berd-call",
             "session",
             "--tts-backend",
             "siri",
@@ -8814,7 +8896,7 @@ mod tests {
     fn cli_accepts_openai_rate_two_and_rejects_out_of_range_rates() {
         assert_eq!(
             parse_args(&args(&[
-                "berd-voice",
+                "berd-call",
                 "session",
                 "--tts-backend",
                 "openai",
@@ -8826,7 +8908,7 @@ mod tests {
             TtsBackendConfig::OpenAi { rate: 2.0 }
         );
         assert!(parse_args(&args(&[
-            "berd-voice",
+            "berd-call",
             "session",
             "--tts-backend",
             "openai",
@@ -8851,7 +8933,7 @@ mod tests {
         let mut realtime = OpenAiSpokespersonConfig {
             endpoint: "ws://localhost".into(),
             api_key: "test-key".into(),
-            session: berd_voice::openai_realtime_protocol::RealtimeSpokespersonSessionOptions {
+            session: berd_call::openai_realtime_protocol::RealtimeSpokespersonSessionOptions {
                 model: Some("test-model".into()),
                 transcription_model: Some("test-transcription".into()),
                 voice: Some("marin".into()),
@@ -8871,7 +8953,7 @@ mod tests {
     fn cli_requires_explicit_pocket_bundle_and_voice() {
         assert_eq!(
             parse_args(&args(&[
-                "berd-voice",
+                "berd-call",
                 "session",
                 "--tts-backend",
                 "pocket",
@@ -8892,7 +8974,7 @@ mod tests {
             }
         );
         assert!(parse_args(&args(&[
-            "berd-voice",
+            "berd-call",
             "session",
             "--tts-backend",
             "pocket",
@@ -8902,7 +8984,7 @@ mod tests {
         .unwrap_err()
         .contains("--model-dir is required"));
         assert!(parse_args(&args(&[
-            "berd-voice",
+            "berd-call",
             "session",
             "--tts-backend",
             "pocket",
@@ -8916,7 +8998,7 @@ mod tests {
         .unwrap_err()
         .contains("0.75 and 2.0"));
         assert!(parse_args(&args(&[
-            "berd-voice",
+            "berd-call",
             "session",
             "--tts-backend",
             "pocket",
@@ -8933,7 +9015,7 @@ mod tests {
     fn cli_stt_selection_is_closed_and_parakeet_owns_only_an_explicit_bundle() {
         assert_eq!(
             parse_args(&args(&[
-                "berd-voice",
+                "berd-call",
                 "session",
                 "--tts-backend",
                 "openai",
@@ -8952,7 +9034,7 @@ mod tests {
             }
         );
         assert!(parse_args(&args(&[
-            "berd-voice",
+            "berd-call",
             "session",
             "--tts-backend",
             "openai",
@@ -8962,7 +9044,7 @@ mod tests {
         .unwrap_err()
         .contains("--stt-model-dir is required"));
         assert!(parse_args(&args(&[
-            "berd-voice",
+            "berd-call",
             "session",
             "--tts-backend",
             "openai",
@@ -8974,7 +9056,7 @@ mod tests {
         .unwrap_err()
         .contains("only valid with Parakeet"));
         assert!(parse_args(&args(&[
-            "berd-voice",
+            "berd-call",
             "session",
             "--tts-backend",
             "openai",
@@ -8991,7 +9073,7 @@ mod tests {
     fn benchmark_cli_requires_explicit_comparable_inputs() {
         assert_eq!(
             parse_tts_benchmark_args(&args(&[
-                "berd-voice",
+                "berd-call",
                 "benchmark",
                 "tts",
                 "--tts-backend",
@@ -9022,7 +9104,7 @@ mod tests {
             }
         );
         assert!(parse_tts_benchmark_args(&args(&[
-            "berd-voice",
+            "berd-call",
             "benchmark",
             "tts",
             "--tts-backend",
@@ -9035,7 +9117,7 @@ mod tests {
         .unwrap_err()
         .contains("--runs is required"));
         assert!(parse_tts_benchmark_args(&args(&[
-            "berd-voice",
+            "berd-call",
             "benchmark",
             "tts",
             "--tts-backend",
@@ -9054,7 +9136,7 @@ mod tests {
     #[test]
     fn benchmark_cli_reuses_backend_specific_validation() {
         assert!(parse_tts_benchmark_args(&args(&[
-            "berd-voice",
+            "berd-call",
             "benchmark",
             "tts",
             "--tts-backend",
@@ -9073,7 +9155,7 @@ mod tests {
         .unwrap_err()
         .contains("absolute path"));
         assert!(parse_tts_benchmark_args(&args(&[
-            "berd-voice",
+            "berd-call",
             "benchmark",
             "tts",
             "--tts-backend",
@@ -9094,7 +9176,7 @@ mod tests {
     #[test]
     fn benchmark_cli_selects_fixed_distinct_prompt_manifest() {
         let config = parse_tts_benchmark_args(&args(&[
-            "berd-voice",
+            "berd-call",
             "benchmark",
             "tts",
             "--tts-backend",
@@ -9116,7 +9198,7 @@ mod tests {
         assert_eq!(manifest.prompts.len(), 5);
 
         assert!(parse_tts_benchmark_args(&args(&[
-            "berd-voice",
+            "berd-call",
             "benchmark",
             "tts",
             "--tts-backend",
@@ -9133,7 +9215,7 @@ mod tests {
         .unwrap_err()
         .contains("requires Siri language en-US"));
         assert!(parse_tts_benchmark_args(&args(&[
-            "berd-voice",
+            "berd-call",
             "benchmark",
             "tts",
             "--tts-backend",
@@ -9169,7 +9251,7 @@ mod tests {
     #[test]
     fn benchmark_cli_requires_and_bounds_paid_openai_consent() {
         let base = [
-            "berd-voice",
+            "berd-call",
             "benchmark",
             "tts",
             "--tts-backend",
@@ -9190,7 +9272,7 @@ mod tests {
         assert!(parse_tts_benchmark_args(&consented).is_ok());
 
         let warm_limit = args(&[
-            "berd-voice",
+            "berd-call",
             "benchmark",
             "tts",
             "--tts-backend",
@@ -9209,7 +9291,7 @@ mod tests {
 
         let oversized_text = "a".repeat(4_000);
         let oversized_workload = vec![
-            "berd-voice".into(),
+            "berd-call".into(),
             "benchmark".into(),
             "tts".into(),
             "--tts-backend".into(),
@@ -9231,7 +9313,7 @@ mod tests {
     fn stt_benchmark_cli_is_explicit_and_reuses_engine_validation() {
         assert_eq!(
             parse_stt_benchmark_args(&args(&[
-                "berd-voice",
+                "berd-call",
                 "benchmark",
                 "stt",
                 "--stt-backend",
@@ -9250,7 +9332,7 @@ mod tests {
             }
         );
         assert!(parse_stt_benchmark_args(&args(&[
-            "berd-voice",
+            "berd-call",
             "benchmark",
             "stt",
             "--stt-backend",
@@ -9263,7 +9345,7 @@ mod tests {
         .unwrap_err()
         .contains("--stt-model-dir is required"));
         assert!(parse_stt_benchmark_args(&args(&[
-            "berd-voice",
+            "berd-call",
             "benchmark",
             "stt",
             "--stt-backend",
@@ -9282,7 +9364,7 @@ mod tests {
     #[test]
     fn stt_benchmark_paid_openai_consent_bounds_full_streamed_workload() {
         let base = [
-            "berd-voice",
+            "berd-call",
             "benchmark",
             "stt",
             "--stt-backend",
@@ -9298,7 +9380,7 @@ mod tests {
 
         let pack = load_bundled_stt_fixture_pack().unwrap();
         let allowed = parse_stt_benchmark_args(&args(&[
-            "berd-voice",
+            "berd-call",
             "benchmark",
             "stt",
             "--stt-backend",
@@ -9372,7 +9454,7 @@ mod tests {
     fn siri_tts_and_openai_stt_selection_are_orthogonal() {
         assert_eq!(
             parse_args(&args(&[
-                "berd-voice",
+                "berd-call",
                 "session",
                 "--tts-backend",
                 "siri",
@@ -9399,18 +9481,18 @@ mod tests {
     #[test]
     fn session_requires_one_inherited_pcm_output_descriptor() {
         assert_eq!(
-            parse_pcm_output_fd(&args(&["berd-voice", "session", "--pcm-output-fd", "9"])).unwrap(),
+            parse_pcm_output_fd(&args(&["berd-call", "session", "--pcm-output-fd", "9"])).unwrap(),
             9
         );
         assert_eq!(
-            parse_pcm_output_fd(&args(&["berd-voice", "session"])).unwrap_err(),
+            parse_pcm_output_fd(&args(&["berd-call", "session"])).unwrap_err(),
             "--pcm-output-fd is required"
         );
         assert!(
-            parse_pcm_output_fd(&args(&["berd-voice", "session", "--pcm-output-fd", "2"])).is_err()
+            parse_pcm_output_fd(&args(&["berd-call", "session", "--pcm-output-fd", "2"])).is_err()
         );
         assert!(parse_pcm_output_fd(&args(&[
-            "berd-voice",
+            "berd-call",
             "session",
             "--pcm-output-fd",
             "7",
@@ -9509,6 +9591,35 @@ mod tests {
         };
         assert_eq!(message, "session PCM input queue is full");
         assert!(control_receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn status_sound_requests_validate_volume() {
+        for volume in [-1.0, 2.0, f32::NAN, f32::INFINITY] {
+            let request = SessionRequest::SetConversationStatus {
+                id: 1,
+                status: berd_call::ConversationStatus::Working,
+                settings: berd_call::StatusSoundSettings {
+                    volume,
+                    ..Default::default()
+                },
+            };
+            assert_eq!(
+                validate_request(request).unwrap_err(),
+                "status sound volume must be finite and between 0 and 1"
+            );
+        }
+        for volume in [0.0, 0.8, 1.0] {
+            assert!(validate_request(SessionRequest::SetConversationStatus {
+                id: 1,
+                status: berd_call::ConversationStatus::Working,
+                settings: berd_call::StatusSoundSettings {
+                    volume,
+                    ..Default::default()
+                },
+            })
+            .is_ok());
+        }
     }
 
     #[test]
@@ -9651,7 +9762,7 @@ mod tests {
         let replacement = slot
             .prepare_replacement(
                 1,
-                berd_voice::TtsSettings::OpenAi {
+                berd_call::TtsSettings::OpenAi {
                     model: "test-model".into(),
                     voice: "next-voice".into(),
                     rate: 2.0,
@@ -9697,7 +9808,7 @@ mod tests {
             id,
             result: slot.prepare_replacement(
                 1,
-                berd_voice::TtsSettings::OpenAi {
+                berd_call::TtsSettings::OpenAi {
                     model: "test-model".into(),
                     voice: voice.into(),
                     rate: 2.0,

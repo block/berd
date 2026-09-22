@@ -5,6 +5,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mockInstallRendererDiagnostics = vi.hoisted(() => vi.fn());
 const mockReportRendererError = vi.hoisted(() => vi.fn());
 const mockInvoke = vi.hoisted(() => vi.fn());
+const createdReactRoots = vi.hoisted(
+  () => [] as Array<{ unmount: () => void }>,
+);
+
+vi.mock("react-dom/client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-dom/client")>();
+  return {
+    ...actual,
+    createRoot: (...args: Parameters<typeof actual.createRoot>) => {
+      const root = actual.createRoot(...args);
+      createdReactRoots.push(root);
+      return root;
+    },
+  };
+});
 
 vi.mock("@xterm/xterm/css/xterm.css", () => ({}));
 vi.mock("@/shared/styles/globals.css", () => ({}));
@@ -81,7 +96,15 @@ describe("main entrypoint telemetry startup", () => {
     globalThis.fetch = vi.fn() as typeof globalThis.fetch;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // main.tsx owns these roots instead of Testing Library. Unmount them
+    // before clearing the container so lazy startup work cannot update a
+    // detached root after jsdom has torn down the window.
+    await act(async () => {
+      for (const root of createdReactRoots.splice(0)) {
+        root.unmount();
+      }
+    });
     document.body.innerHTML = "";
     localStorage.clear();
     globalThis.fetch = originalFetch;

@@ -127,7 +127,8 @@ function drainQueuedMessage(queuedSessionId: string, ownerId: string): void {
       returnOnDispatch: true,
       ...(queuedMessage.payload.sendOptions?.userMessageMetadata
         ?.berdSenderLabel ||
-      queuedMessage.payload.sendOptions?.userMessageMetadata?.berdDeliveryId
+      queuedMessage.payload.sendOptions?.userMessageMetadata?.berdDeliveryId ||
+      queuedMessage.payload.sendOptions?.userMessageMetadata?.berdEventType
         ? { sendOptions: queuedMessage.payload.sendOptions }
         : {}),
       ...(deliveryId

@@ -1,3 +1,4 @@
+import { projectEnvironment } from "@/features/projects/lib/projectEnvironment";
 import {
   useCallback,
   useContext,
@@ -1162,6 +1163,7 @@ export function useChatSessionController({
     selectedAgentId,
     pickerAgents,
     availableModels,
+    favoriteModels,
     getModelsForAgent,
     modelsLoading,
     modelStatusMessage,
@@ -1405,28 +1407,17 @@ export function useChatSessionController({
   );
 
   const handleModelChangeWithContextReset = useCallback(
-    (modelId: string, model?: ModelOption) => {
-      const nextModelProviderId = model?.providerId;
-      if (
-        modelId === effectiveModelSelection?.id &&
-        (!nextModelProviderId ||
-          nextModelProviderId === effectiveModelSelection?.modelProviderId)
-      ) {
-        return;
+    (modelId: string, model?: ModelOption, agentId?: string) => {
+      if (!handleModelChange(modelId, model, agentId)) {
+        return false;
       }
       if (sessionId) {
         delete pendingDefaultReasoningEffortBySessionRef.current[sessionId];
       }
       useChatStore.getState().resetTokenState(stateSessionId);
-      handleModelChange(modelId, model);
+      return true;
     },
-    [
-      effectiveModelSelection?.id,
-      effectiveModelSelection?.modelProviderId,
-      handleModelChange,
-      sessionId,
-      stateSessionId,
-    ],
+    [handleModelChange, sessionId, stateSessionId],
   );
 
   useEffect(() => {
@@ -1496,15 +1487,35 @@ export function useChatSessionController({
 
   const handleProjectChange = useCallback(
     (projectId: string | null) => {
+      const applyProjectEnvironment = () => {
+        if (!remoteHostSelectionEnabled) return;
+        const project = useProjectStore
+          .getState()
+          .projects.find((candidate) => candidate.id === projectId);
+        const environment = projectEnvironment(project);
+        setPendingRemoteHost(environment?.remoteHost ?? null);
+        setPendingRemoteDir(environment?.remoteWorkingDir ?? null);
+      };
       if (!sessionId) {
         setPendingProjectId(projectId);
+        applyProjectEnvironment();
         return;
       }
-      void moveSessionToProject(sessionId, projectId).catch((error) => {
-        console.error("Failed to move session to project:", error);
-      });
+      void moveSessionToProject(sessionId, projectId)
+        .then(() => {
+          // Superseded moves can resolve without changing the session's project.
+          const liveSession = useChatSessionStore
+            .getState()
+            .getSession(sessionId);
+          if (liveSession && liveSession.projectId === projectId) {
+            applyProjectEnvironment();
+          }
+        })
+        .catch((error) => {
+          console.error("Failed to move session to project:", error);
+        });
     },
-    [sessionId],
+    [sessionId, remoteHostSelectionEnabled],
   );
 
   const handleRemoteHostChange = useCallback(
@@ -3556,6 +3567,7 @@ export function useChatSessionController({
     currentModelName: effectiveModelSelection?.name ?? null,
     currentExecutionTarget: session?.executionTarget,
     availableModels,
+    favoriteModels,
     modelsLoading,
     modelStatusMessage,
     handleModelChange: handleModelChangeWithContextReset,

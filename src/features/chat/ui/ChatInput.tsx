@@ -110,6 +110,7 @@ function stripCrossSessionOrigin<T extends Record<string, unknown>>(
   const {
     origin: _origin,
     berdSenderLabel: _berdSenderLabel,
+    berdEventType: _berdEventType,
     berdDeliveryId: _berdDeliveryId,
     ...rest
   } = metadata;
@@ -341,6 +342,7 @@ export function ChatInput({
     currentModelProviderId = null,
     currentModel,
     availableModels = [],
+    favoriteModels,
     modelsLoading = false,
     modelStatusMessage = null,
     onModelChange,
@@ -1966,6 +1968,7 @@ export function ChatInput({
                   currentModelProviderId,
                   currentModel: resolvedCurrentModel,
                   availableModels,
+                  favoriteModels,
                   modelsLoading,
                   modelStatusMessage,
                   onModelChange,

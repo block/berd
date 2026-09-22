@@ -8,7 +8,7 @@ version = "0.6.4"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
- "berd-voice",
+ "berd-call",
  "block2",
  "builderbot-auth",
  "bytes",
@@ -580,17 +580,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a8241f3ebb85c056b509d4327ad0358fbbba6ffb340bf388f26350aeda225b1"
 
 [[package]]
-name = "berd-monitor"
-version = "0.6.2"
-dependencies = [
- "clap",
- "fs2",
- "libc",
- "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "berd-voice"
+name = "berd-call"
 version = "0.1.0"
 dependencies = [
  "audioadapter-buffers",
@@ -622,6 +612,16 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "uuid",
+]
+
+[[package]]
+name = "berd-monitor"
+version = "0.6.2"
+dependencies = [
+ "clap",
+ "fs2",
+ "libc",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

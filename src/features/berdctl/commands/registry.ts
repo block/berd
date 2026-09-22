@@ -31,6 +31,7 @@ import { moveSessionToGroupCommand } from "./impl/moveSessionToGroup";
 import { openFeedbackCommand } from "./impl/openFeedback";
 import { openSessionCommand } from "./impl/openSession";
 import { renameSessionCommand } from "./impl/renameSession";
+import { notifySessionCommand } from "./impl/notifySession";
 import { sendSessionCommand } from "./impl/sendSession";
 import { sendToSpokespersonSessionCommand } from "./impl/sendToSpokespersonSession";
 import { setProjectStartupModeCommand } from "./impl/setProjectStartupMode";
@@ -58,15 +59,16 @@ export const ALL_TOOL_GROUPS = {
   sessions: {
     description:
       "Manage the user's chat sessions: create (fire-and-forget, on any " +
-      "installed agent harness), send, open, list, get, rename, move, " +
+      "installed agent harness), send, notify, open, list, get, rename, move, " +
       "move to group, clear project, send to a live voice Spokesperson, dismiss voice handoffs, fork, archive.",
     cli: {
       noun: "session",
       about:
-        "Manage chat sessions: create, send, open, list, get, rename, move, move to group, clear project, send to Spokesperson, dismiss handoffs, fork, archive",
+        "Manage chat sessions: create, send, notify, open, list, get, rename, move, move to group, clear project, send to Spokesperson, dismiss handoffs, fork, archive",
       verbs: {
         create: "create",
         send: "send",
+        notify: "notify",
         open: "open",
         list: "list",
         get: "get",
@@ -83,6 +85,7 @@ export const ALL_TOOL_GROUPS = {
     actions: {
       create: createSessionCommand,
       send: sendSessionCommand,
+      notify: notifySessionCommand,
       open: openSessionCommand,
       list: listSessionsCommand,
       get: getSessionCommand,

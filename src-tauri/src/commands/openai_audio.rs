@@ -8,7 +8,7 @@ use std::sync::{
 use std::time::Duration;
 
 #[cfg(target_os = "macos")]
-use berd_voice::{
+use berd_call::{
     ConfiguredTtsSlot, DeliveryProgress as VoiceDeliveryProgress, DrainPolicy, OutboundFailure,
     OutboundOutcome, OutboundPlayback, PocketAudioPlayer, StreamingTextChunk, StreamingTtsText,
     TtsBackend, TtsConfiguration,
@@ -33,7 +33,7 @@ use super::{
 };
 use crate::services::atomic_file::write_bytes_atomically;
 #[cfg(target_os = "macos")]
-use berd_voice::input::InputDuringTtsPolicy;
+use berd_call::input::InputDuringTtsPolicy;
 #[cfg(any(test, target_os = "macos"))]
 use std::time::Instant;
 

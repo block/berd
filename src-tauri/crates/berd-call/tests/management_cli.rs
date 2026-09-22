@@ -2,11 +2,11 @@ use std::process::Command;
 
 use serde_json::Value;
 
-fn berd_voice(args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_berd-voice"))
+fn berd_call(args: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_berd-call"))
         .args(args)
         .output()
-        .expect("run berd-voice")
+        .expect("run berd-call")
 }
 
 #[test]
@@ -28,7 +28,7 @@ fn management_usage_errors_are_exit_two_and_do_not_emit_json() {
         vec!["models", "parakeet", "install", "--store-root", "relative"],
         vec!["models", "pocket", "status", "--store-root", "/tmp/./store"],
     ] {
-        let output = berd_voice(&args);
+        let output = berd_call(&args);
         assert_eq!(output.status.code(), Some(2), "{args:?}");
         assert!(output.stdout.is_empty(), "{args:?}");
         assert!(
@@ -50,7 +50,7 @@ fn local_model_management_is_process_stable_without_network_or_root_creation() {
         ("pocket", "native-voice-v2"),
         ("parakeet", "parakeet-tdt-ctc-110m-en-int8"),
     ] {
-        let output = berd_voice(&[
+        let output = berd_call(&[
             "models",
             engine,
             "status",
@@ -81,7 +81,7 @@ fn local_model_management_is_process_stable_without_network_or_root_creation() {
         );
     }
 
-    let output = berd_voice(&["models", "pocket", "voices"]);
+    let output = berd_call(&["models", "pocket", "voices"]);
     assert!(output.status.success());
     let lines = String::from_utf8(output.stdout).expect("UTF-8 stdout");
     let lines = lines.lines().collect::<Vec<_>>();
@@ -97,7 +97,7 @@ fn local_model_management_is_process_stable_without_network_or_root_creation() {
         })
     }));
 
-    let output = berd_voice(&["models", "openai", "voices"]);
+    let output = berd_call(&["models", "openai", "voices"]);
     assert!(output.status.success());
     let value: Value = serde_json::from_slice(&output.stdout).expect("JSON result");
     assert_eq!(value["operation"], "models.openai.voices");
@@ -117,7 +117,7 @@ fn local_model_management_is_process_stable_without_network_or_root_creation() {
         let invalid_file = invalid_store.join(relative_file);
         std::fs::create_dir_all(invalid_file.parent().unwrap()).expect("create invalid bundle");
         std::fs::write(invalid_file, b"invalid").expect("write invalid bundle");
-        let output = berd_voice(&[
+        let output = berd_call(&[
             "models",
             engine,
             "status",
@@ -134,7 +134,7 @@ fn local_model_management_is_process_stable_without_network_or_root_creation() {
     let blocked_store = temporary.path().join("blocked-store");
     std::fs::write(&blocked_store, b"not a directory").expect("write blocked store");
     for engine in ["pocket", "parakeet"] {
-        let output = berd_voice(&[
+        let output = berd_call(&[
             "models",
             engine,
             "install",
@@ -187,7 +187,7 @@ fn unsupported_platform_management_contract_is_process_stable() {
             "unsupported",
         ),
     ] {
-        let output = berd_voice(&args);
+        let output = berd_call(&args);
         assert_eq!(output.status.code(), Some(exit), "{args:?}");
         let stdout = String::from_utf8(output.stdout).expect("UTF-8 stdout");
         let lines = stdout.lines().collect::<Vec<_>>();
@@ -210,7 +210,7 @@ fn unsupported_platform_management_contract_is_process_stable() {
 #[test]
 #[ignore = "safe opt-in probe of the native Siri catalog; no download, synthesis, or playback"]
 fn native_voice_list_emits_one_terminal_json_line() {
-    let output = berd_voice(&["voices", "list", "--language", "en_US"]);
+    let output = berd_call(&["voices", "list", "--language", "en_US"]);
     assert!(
         output.status.success(),
         "{}",
@@ -234,11 +234,11 @@ fn native_voice_list_emits_one_terminal_json_line() {
 #[test]
 #[ignore = "safe opt-in exact-catalog miss; proves failure before download mutation"]
 fn native_missing_voice_emits_one_not_found_terminal() {
-    let output = berd_voice(&[
+    let output = berd_call(&[
         "voices",
         "download",
         "--voice",
-        "__berd_voice_missing__",
+        "__berd_call_missing__",
         "--language",
         "en-US",
         "--availability-wait-seconds",
@@ -260,7 +260,7 @@ fn native_missing_voice_emits_one_not_found_terminal() {
 #[test]
 #[ignore = "safe opt-in probe of native SpeechTranscriber status; no installation or audio"]
 fn native_macos_model_status_emits_one_terminal_json_line() {
-    let output = berd_voice(&["models", "macos", "status"]);
+    let output = berd_call(&["models", "macos", "status"]);
     assert!(
         output.status.success(),
         "{}",

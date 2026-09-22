@@ -583,7 +583,7 @@ fn reap_dropped_worker(worker: thread::JoinHandle<()>) {
     // Drop must not block on a native recognizer. Explicit shutdown uses the
     // bounded quarantine path above when the caller needs a completion result.
     let _ = thread::Builder::new()
-        .name("berd-voice-input-reaper".to_string())
+        .name("berd-call-input-reaper".to_string())
         .spawn(move || {
             let _ = worker.join();
         });

@@ -58,7 +58,7 @@ impl ExpertSpokespersonTestSession {
         let (mut command, _pcm, audio_host) = session_command();
         if let Some(renew_after_ms) = renew_after_ms {
             command.env(
-                "BERD_VOICE_REALTIME_RENEW_AFTER_MS",
+                "BERD_CALL_REALTIME_RENEW_AFTER_MS",
                 renew_after_ms.to_string(),
             );
         }
@@ -272,7 +272,7 @@ fn session_command() -> (Command, File, UnixStream) {
     let source_fd = unsafe { libc::fcntl(pcm.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 64) };
     assert!(source_fd >= 64);
     let inherited = unsafe { File::from_raw_fd(source_fd) };
-    let mut command = Command::new(env!("CARGO_BIN_EXE_berd-voice"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_berd-call"));
     command.args(["session", "--pcm-output-fd", "9"]);
     unsafe {
         command.pre_exec(move || {
@@ -393,7 +393,7 @@ fn session_rejects_a_read_only_pcm_descriptor_before_hello() {
     let source_fd = unsafe { libc::fcntl(read.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 64) };
     assert!(source_fd >= 64);
     let read_guard = unsafe { File::from_raw_fd(source_fd) };
-    let mut command = Command::new(env!("CARGO_BIN_EXE_berd-voice"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_berd-call"));
     command
         .args(["session", "--pcm-output-fd", "9", "--tts-backend", "openai"])
         .env("OPENAI_API_KEY", "test-key-not-used")
@@ -420,10 +420,8 @@ fn session_rejects_a_read_only_pcm_descriptor_before_hello() {
 
 #[test]
 fn framed_hello_reports_input_initialization_failure_before_ready() {
-    let missing = std::env::temp_dir().join(format!(
-        "berd-voice-missing-parakeet-{}",
-        std::process::id()
-    ));
+    let missing =
+        std::env::temp_dir().join(format!("berd-call-missing-parakeet-{}", std::process::id()));
     assert!(!missing.exists(), "test path must remain absent");
     let (mut command, _pcm, _host) = session_command();
     let mut child = command
@@ -2510,7 +2508,7 @@ fn siri_session_reaches_ready_without_openai_credentials() {
     stdin.flush().unwrap();
     let ready = receive();
     assert_eq!(ready["type"], "ready");
-    assert_eq!(ready["protocol"], 4);
+    assert_eq!(ready["protocol"], 5);
     assert_eq!(ready["session"]["tts"]["backend"], "siri");
     assert_eq!(ready["session"]["tts"]["voice"], voice);
     assert_eq!(ready["session"]["tts"]["language"], language);
@@ -2518,6 +2516,25 @@ fn siri_session_reaches_ready_without_openai_credentials() {
     assert_eq!(
         ready["session"]["input_during_tts"],
         json!({"revision":1,"policy":"allow_barge_in"})
+    );
+    write_session_json(
+        &mut stdin,
+        &json!({
+            "type":"set_conversation_status",
+            "id":19,
+            "status":"working",
+            "settings":{"mode":"working"}
+        }),
+    );
+    stdin.flush().unwrap();
+    assert_eq!(
+        receive(),
+        json!({
+            "type":"conversation_status_applied",
+            "id":19,
+            "status":"working",
+            "settings":{"mode":"working"}
+        })
     );
     write_session_json(
         &mut stdin,

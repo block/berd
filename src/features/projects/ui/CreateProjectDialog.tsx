@@ -1,3 +1,7 @@
+import { RemoteHostSelector } from "@/features/chat/ui/RemoteHostSelector";
+import { RemoteDirectoryPicker } from "@/features/chat/ui/RemoteDirectoryPicker";
+import { useExperiment } from "@/features/experiments/experimentPreferences";
+import { REMOTE_SSH_SESSIONS_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import {
   useState,
   useEffect,
@@ -324,6 +328,11 @@ export function CreateProjectDialog({
   const { t } = useTranslation(["projects", "common"]);
   const workspaceRepository = useWorkspaceRepository();
   const isMultiWorkspaceMode = workspaceRepository.mode === "multi";
+  const remoteEnabled =
+    useExperiment(REMOTE_SSH_SESSIONS_EXPERIMENT_ID)?.enabled === true;
+  const [remoteHost, setRemoteHost] = useState<string | null>(null);
+  const [remoteDir, setRemoteDir] = useState<string | null>(null);
+  const [remoteDirectoryOpen, setRemoteDirectoryOpen] = useState(false);
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState("");
   const [projectWorkspaces, setProjectWorkspaces] = useState<
@@ -523,6 +532,9 @@ export function CreateProjectDialog({
   }
 
   if (justOpened || projectIdChanged) {
+    setRemoteHost(editingProject?.environment?.remoteHost ?? null);
+    setRemoteDir(editingProject?.environment?.remoteWorkingDir ?? null);
+    setRemoteDirectoryOpen(false);
     if (editingProject) {
       const projectWorkspaceSet =
         workspaceRepository.projectWorkspaces(editingProject);
@@ -555,7 +567,10 @@ export function CreateProjectDialog({
     }
   }
 
-  const canSave = name.trim().length > 0 && !saving;
+  const canSave =
+    name.trim().length > 0 &&
+    !saving &&
+    (!remoteHost || Boolean(remoteDir?.trim()));
 
   const handleClose = () => {
     setName("");
@@ -572,6 +587,8 @@ export function CreateProjectDialog({
   };
 
   const handleSave = async (e: FormEvent) => {
+    // SSH dialogs render forms in portals; their submissions bubble through React.
+    if (e.target !== e.currentTarget) return;
     e.preventDefault();
     if (!canSave) return;
     setSaving(true);
@@ -623,6 +640,10 @@ export function CreateProjectDialog({
     const savedWorkingDirs = sanitizedProjectWorkspaces.map(
       (workspace) => workspace.path,
     );
+    const environment =
+      remoteHost && remoteDir
+        ? { remoteHost, remoteWorkingDir: remoteDir }
+        : null;
     try {
       let savedProject: ProjectInfo;
       if (isEditing) {
@@ -635,6 +656,7 @@ export function CreateProjectDialog({
           workingDirs: savedWorkingDirs,
           useWorktrees: editingProject.useWorktrees,
           projectWorkspaces: sanitizedProjectWorkspaces,
+          environment,
         });
         // Completed only after the persist resolves; the returned ProjectInfo is
         // authoritative for has_working_dir / has_prompt.
@@ -649,6 +671,7 @@ export function CreateProjectDialog({
           savedWorkingDirs,
           false,
           sanitizedProjectWorkspaces,
+          environment,
         );
         trackProjectCreateCompleted(savedProject);
       }
@@ -1034,7 +1057,39 @@ export function CreateProjectDialog({
                 />
               </div>
 
-              {!isMultiWorkspaceMode ? (
+              {(remoteEnabled || remoteHost) && (
+                <div className="space-y-2">
+                  <Label className={panelLabelClass}>
+                    {t("dialog.environmentLabel")}
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    {t("dialog.environmentDescription")}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <RemoteHostSelector
+                      selectedHost={remoteHost}
+                      disabled={!remoteEnabled}
+                      onHostChange={(host) => {
+                        setRemoteHost(host);
+                        setRemoteDir(null);
+                      }}
+                    />
+                    {remoteHost && (
+                      <RemoteDirectoryPicker
+                        key={remoteHost}
+                        host={remoteHost}
+                        selectedDir={remoteDir}
+                        onDirChange={setRemoteDir}
+                        open={remoteDirectoryOpen}
+                        onOpenChange={setRemoteDirectoryOpen}
+                        disabled={!remoteEnabled}
+                      />
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {remoteHost ? null : !isMultiWorkspaceMode ? (
                 <div className="group/field space-y-2">
                   <div className="flex items-center gap-1.5">
                     <Label className={panelLabelClass}>

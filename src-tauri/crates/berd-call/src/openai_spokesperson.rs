@@ -327,7 +327,7 @@ impl OpenAiSpokespersonRuntime {
         let (audio, audio_rx) = mpsc::channel(INPUT_QUEUE_FRAMES);
         let (events, event_rx) = std::sync::mpsc::channel();
         let worker = thread::Builder::new()
-            .name("berd-voice-spokesperson".into())
+            .name("berd-call-spokesperson".into())
             .spawn(move || {
                 let runtime = match tokio::runtime::Builder::new_current_thread()
                     .enable_all()
@@ -428,7 +428,7 @@ fn reap_spokesperson_worker(
     audio_lifetime: mpsc::Sender<Vec<f32>>,
 ) {
     let _ = thread::Builder::new()
-        .name("berd-voice-spokesperson-reaper".into())
+        .name("berd-call-spokesperson-reaper".into())
         .spawn(move || {
             let _ = worker.join();
             drop(audio_lifetime);

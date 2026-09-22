@@ -14,6 +14,7 @@ export type ReplayUserMetadata = Pick<
   | "delivery"
   | "origin"
   | "berdSenderLabel"
+  | "berdEventType"
   | "berdDeliveryId"
   | "voiceUtteranceId"
   | "voiceConversationLifecycleId"
@@ -83,6 +84,10 @@ export function getReplayUserMetadata(
     origin === "berdctl_cross_session"
       ? boundedSingleLineString(goose.berdSenderLabel, 120)
       : undefined;
+  const berdEventType =
+    origin === "berdctl_cross_session" && goose.berdEventType === "notification"
+      ? "notification"
+      : undefined;
   const berdDeliveryId =
     origin === "berdctl_cross_session"
       ? boundedSingleLineString(goose.berdDeliveryId, 200)
@@ -118,6 +123,7 @@ export function getReplayUserMetadata(
     ...(delivery ? { delivery } : {}),
     ...(origin ? { origin } : {}),
     ...(berdSenderLabel ? { berdSenderLabel } : {}),
+    ...(berdEventType ? { berdEventType } : {}),
     ...(berdDeliveryId ? { berdDeliveryId } : {}),
     ...(voiceUtteranceId ? { voiceUtteranceId } : {}),
     ...(voiceConversationLifecycleId ? { voiceConversationLifecycleId } : {}),

@@ -1589,21 +1589,98 @@ function Get-RustHostTriple {
     return $null
 }
 
+function Test-GitBashCandidatePath {
+    # True when a bash.exe path can plausibly run repository scripts. Windows
+    # ships two bash.exe stubs that often precede Git for Windows on PATH and
+    # cannot: the WSL launcher in System32 and the Microsoft Store
+    # app-execution alias under WindowsApps. Pure string check so it is
+    # testable without those files present.
+    param([AllowNull()][string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return $false
+    }
+    if ($Path -match '\\WindowsApps\\') {
+        return $false
+    }
+    if ($Path -match '\\(System32|SysWOW64)\\bash\.exe$') {
+        return $false
+    }
+    if (Test-CodexRuntimePath $Path) {
+        return $false
+    }
+    return $true
+}
+
+function Test-GitForWindowsLayout {
+    # True only when a bash.exe path sits inside a Git for Windows tree. Git
+    # for Windows (installed or portable) places bash.exe at <root>\bin\bash.exe
+    # and <root>\usr\bin\bash.exe, and always ships <root>\cmd\git.exe beside
+    # them. Cygwin (C:\cygwin64\bin\bash.exe) and MSYS2
+    # (C:\msys64\usr\bin\bash.exe) use the same bin\ and usr\bin\ shapes but
+    # have no cmd\git.exe, so requiring that file positively identifies Git for
+    # Windows instead of trusting whichever bash.exe happens to be on PATH.
+    # $FileExists is injectable so the check is testable without the files.
+    param(
+        [AllowNull()][string]$BashPath,
+        [scriptblock]$FileExists = { param($p) Test-Path -LiteralPath $p -PathType Leaf }
+    )
+    if ([string]::IsNullOrWhiteSpace($BashPath)) {
+        return $false
+    }
+    # Lazy root so `<root>\usr\bin\bash.exe` yields <root>, not <root>\usr.
+    if ($BashPath -notmatch '^(?<root>.+?)\\(usr\\)?bin\\bash\.exe$') {
+        return $false
+    }
+    # String concatenation instead of Join-Path: Windows PowerShell 5.1's
+    # Join-Path fails when the drive letter does not exist on this machine,
+    # which would break the pure check for injected fixtures.
+    $gitExe = $Matches['root'].TrimEnd('\') + '\cmd\git.exe'
+    return [bool](& $FileExists $gitExe)
+}
+
 function Get-GitBashPath {
-    $candidates = @()
-    if (-not [string]::IsNullOrWhiteSpace($env:ProgramFiles)) {
-        $candidates += (Join-Path $env:ProgramFiles "Git\bin\bash.exe")
+    # Prefer Git for Windows' own bash.exe. Machine-wide and per-user (winget
+    # user scope) install roots come first, then the root of whichever git.exe
+    # is on PATH (covers portable Git), then every bash.exe PATH resolves to.
+    # Every candidate must pass two checks before it is accepted: the string
+    # filter that drops the WSL/Store stubs and Codex runtimes, and a positive
+    # Git for Windows layout check (<root>\cmd\git.exe must exist beside it) so
+    # Cygwin, MSYS2, or a standalone bash.exe on PATH never passes as the Git
+    # Bash prerequisite. Returns $null when nothing usable exists so bootstrap
+    # and doctor report a real failure instead of an unrelated bash.
+    $candidates = New-Object System.Collections.Generic.List[string]
+    foreach ($root in @($env:ProgramFiles, ${env:ProgramFiles(x86)}, (Join-Path (Get-LocalAppDataRoot) "Programs"))) {
+        if (-not [string]::IsNullOrWhiteSpace($root)) {
+            $candidates.Add((Join-Path $root "Git\bin\bash.exe"))
+        }
     }
-    $programFilesX86 = ${env:ProgramFiles(x86)}
-    if (-not [string]::IsNullOrWhiteSpace($programFilesX86)) {
-        $candidates += (Join-Path $programFilesX86 "Git\bin\bash.exe")
+
+    $git = Get-CommandSource "git"
+    if (-not [string]::IsNullOrWhiteSpace($git) -and -not (Test-CodexRuntimePath $git)) {
+        # <root>\cmd\git.exe or <root>\bin\git.exe; bash lives under <root>\bin
+        # and <root>\usr\bin.
+        $gitRoot = Split-Path -Parent (Split-Path -Parent $git)
+        if (-not [string]::IsNullOrWhiteSpace($gitRoot)) {
+            $candidates.Add((Join-Path $gitRoot "bin\bash.exe"))
+            $candidates.Add((Join-Path $gitRoot "usr\bin\bash.exe"))
+        }
     }
-    foreach ($candidate in $candidates) {
-        if (Test-Path $candidate -PathType Leaf) {
+
+    $whereBash = Invoke-CaptureCommand -FilePath "where.exe" -ArgumentList @("bash")
+    if ($whereBash.ExitCode -eq 0) {
+        foreach ($line in ($whereBash.Output -split "`r?`n")) {
+            if (-not [string]::IsNullOrWhiteSpace($line)) {
+                $candidates.Add($line.Trim())
+            }
+        }
+    }
+
+    foreach ($candidate in ($candidates | Select-Object -Unique)) {
+        if ((Test-GitBashCandidatePath $candidate) -and (Test-GitForWindowsLayout $candidate) -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
             return $candidate
         }
     }
-    return (Get-CommandSource "bash")
+    return $null
 }
 
 function Get-VsWherePath {

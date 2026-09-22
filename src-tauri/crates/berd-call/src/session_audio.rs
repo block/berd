@@ -7,7 +7,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use berd_voice::{PcmAudioOutput, TtsPcmSpec};
+use berd_call::{PcmAudioOutput, TtsPcmSpec};
 
 pub const AUDIO_FRAME_MAGIC: [u8; 2] = *b"BA";
 pub const AUDIO_FRAME_MARKER: u8 = 3;

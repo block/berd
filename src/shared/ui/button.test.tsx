@@ -546,6 +546,28 @@ describe("preserveWidth duplicate label layers (BOT-1466)", () => {
     }
   });
 
+  it("derives ghost toggle semantics from selected", () => {
+    const { rerender } = render(
+      <Button variant="ghost" selected={true} aria-label="Favorite" />,
+    );
+
+    const button = screen.getByRole("button", { name: "Favorite" });
+    expect(button).toHaveAttribute("aria-pressed", "true");
+    expect(button).toHaveClass("text-foreground/80");
+
+    rerender(<Button variant="ghost" selected={false} aria-label="Favorite" />);
+    expect(button).toHaveAttribute("aria-pressed", "false");
+    expect(button).toHaveClass("text-muted-foreground");
+
+    rerender(<Button variant="ghost" aria-label="Favorite" />);
+    expect(button).not.toHaveAttribute("aria-pressed");
+
+    rerender(
+      <Button variant="outline" selected={true} aria-label="Favorite" />,
+    );
+    expect(button).not.toHaveAttribute("aria-pressed");
+  });
+
   it("keeps the opacity cross-fade when labels are distinct", () => {
     render(
       <Button preserveWidth loadingLabel="Checking..." feedbackState="idle">

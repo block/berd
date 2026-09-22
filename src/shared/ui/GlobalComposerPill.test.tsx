@@ -10,6 +10,7 @@ import {
 import type { ComponentProps } from "react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { setModelStarred } from "@/features/chat/lib/starredModels";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { useDefaultProviderReadinessStore } from "@/features/providers/stores/defaultProviderReadinessStore";
@@ -644,6 +645,7 @@ describe("GlobalComposerPill", () => {
     await user.click(
       screen.getByRole("button", { name: /choose agent and model/i }),
     );
+    await user.click(screen.getByRole("button", { name: "Switch agent" }));
     await user.click(screen.getByRole("button", { name: "Claude Code" }));
 
     expect(
@@ -1515,6 +1517,7 @@ describe("GlobalComposerPill", () => {
     await user.click(
       screen.getByRole("button", { name: /choose agent and model/i }),
     );
+    await user.click(screen.getByRole("button", { name: "Switch agent" }));
     await user.click(screen.getByRole("button", { name: "Claude Code" }));
 
     expect(onExecutionTargetChange).toHaveBeenCalledWith({
@@ -2127,11 +2130,62 @@ describe("GlobalComposerPill", () => {
     await user.click(
       screen.getByRole("button", { name: /choose agent and model/i }),
     );
+    await user.click(screen.getByRole("button", { name: "Switch agent" }));
     await user.click(screen.getByRole("button", { name: "Claude Code" }));
     await user.click(screen.getByRole("button", { name: /send message/i }));
 
     expectSent(onSend, "Use Claude", {
       executionTarget: { harnessId: "claude-acp" },
+    });
+  });
+
+  it.each([
+    undefined,
+    "anthropic",
+  ])("selects a ready foreign favorite with provider %s as one agent/model intent", async (providerId) => {
+    const user = userEvent.setup();
+    const foreignModel = {
+      id: "foreign-sonnet",
+      name: "Foreign Sonnet",
+      displayName: "Foreign Sonnet",
+      providerId,
+    };
+    mockGetModelsForAgent.mockImplementation((agentId: string) =>
+      agentId === "claude-acp"
+        ? [foreignModel]
+        : [{ id: "gpt-5", name: "GPT 5", providerId: "openai" }],
+    );
+    setModelStarred(providerId ?? "claude-acp", foreignModel.id, true);
+    const onExecutionTargetChange = vi.fn();
+    const onSend = renderGlobalComposer(vi.fn(), {
+      currentExecutionTarget: { harnessId: "goose" },
+      onExecutionTargetChange,
+    });
+    const textbox = screen.getByRole("textbox");
+    await user.click(textbox);
+    await user.type(textbox, "Use foreign favorite");
+    const trigger = screen.getByRole("button", {
+      name: /choose agent and model/i,
+    });
+    await user.click(trigger);
+    await user.click(
+      screen.getByRole("button", { name: "Foreign Sonnet, Claude Code" }),
+    );
+
+    const expectedTarget = {
+      harnessId: "claude-acp",
+      modelProviderId: providerId ?? "claude-acp",
+      modelId: foreignModel.id,
+      modelName: foreignModel.name,
+    };
+    expect(onExecutionTargetChange).toHaveBeenCalledExactlyOnceWith(
+      expectedTarget,
+    );
+    expect(useAgentStore.getState().selectedProvider).toBe("claude-acp");
+    expect(trigger).toHaveTextContent("Foreign Sonnet");
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+    expectSent(onSend, "Use foreign favorite", {
+      executionTarget: expectedTarget,
     });
   });
 

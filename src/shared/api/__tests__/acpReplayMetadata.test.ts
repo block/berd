@@ -155,6 +155,41 @@ describe("getReplayUserMetadata", () => {
     });
   });
 
+  it("restores notification type only with valid Berd provenance", () => {
+    expect(
+      getReplayUserMetadata({
+        _meta: {
+          goose: {
+            origin: "berdctl_cross_session",
+            berdEventType: "notification",
+          },
+        },
+      }),
+    ).toEqual({
+      origin: "berdctl_cross_session",
+      berdEventType: "notification",
+    });
+    expect(
+      getReplayUserMetadata({
+        _meta: {
+          goose: {
+            berdEventType: "notification",
+          },
+        },
+      }),
+    ).toBeUndefined();
+    expect(
+      getReplayUserMetadata({
+        _meta: {
+          goose: {
+            origin: "berdctl_cross_session",
+            berdEventType: "unknown",
+          },
+        },
+      }),
+    ).toEqual({ origin: "berdctl_cross_session" });
+  });
+
   it("restores voice conversation origin metadata", () => {
     expect(
       getReplayUserMetadata({

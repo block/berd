@@ -18,6 +18,27 @@ function makeSession(
 }
 
 describe("findExistingDraft", () => {
+  it("does not reuse an unavailable remote project chat", () => {
+    const missing = makeSession("remote-missing", {
+      projectId: "alpha",
+      remoteHost: "devbox",
+      remoteSessionUnavailable: true,
+    });
+    expect(
+      findExistingDraft({
+        sessions: [missing],
+        activeSessionId: missing.id,
+        draftsBySession: { [missing.id]: "Continue this work" },
+        messagesBySession: {},
+        request: {
+          title: "New chat",
+          projectId: "alpha",
+          remoteHost: "devbox",
+        },
+      }),
+    ).toBeUndefined();
+  });
+
   it("reuses a matching project draft with content", () => {
     const draft = makeSession("alpha-draft", {
       projectId: "alpha",

@@ -5,7 +5,7 @@ use crate::spokesperson_voice_update::VoiceUpdatePurpose;
 const DEFAULT_SPOKESPERSON_RENEW_AFTER: Duration = Duration::from_secs(55 * 60);
 
 pub fn spokesperson_renew_after() -> Duration {
-    std::env::var("BERD_VOICE_REALTIME_RENEW_AFTER_MS")
+    std::env::var("BERD_CALL_REALTIME_RENEW_AFTER_MS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|value| *value > 0)
@@ -84,6 +84,10 @@ impl RealtimeHostLifecycle {
 
     pub fn input_blocks_output(&self) -> bool {
         self.activity.input_blocks_output()
+    }
+
+    pub fn user_speaking(&self) -> bool {
+        self.activity.user_speaking
     }
 
     pub fn is_busy(&self, work: RealtimeHostWork) -> bool {

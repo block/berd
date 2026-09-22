@@ -3,7 +3,7 @@
   "nouns": {
     "session": {
       "group": "sessions",
-      "about": "Manage chat sessions: create, send, open, list, get, rename, move, move to group, clear project, send to Spokesperson, dismiss handoffs, fork, archive",
+      "about": "Manage chat sessions: create, send, notify, open, list, get, rename, move, move to group, clear project, send to Spokesperson, dismiss handoffs, fork, archive",
       "verbs": {
         "create": {
           "action": "create",
@@ -14,6 +14,11 @@
           "action": "send",
           "about": "Send a prompt into an existing chat session",
           "afterHelp": "Example:\n  berdctl session send --session-id <session-id> \\\n    --prompt \"Check the latest CI failure\" --if-running queue \\\n    --from \"the Berd session handling CI\" --delivery-id <stable-id> --json\n\nResult:\n  {\"session_id\": \"...\", \"send_status\": \"dispatched\"|\"steered\"|\"queued\"|\"deduplicated\"}\n  The user's current view does not change."
+        },
+        "notify": {
+          "action": "notify",
+          "about": "Deliver an automated event to an existing chat session",
+          "afterHelp": "Example:\n  berdctl session notify --session-id <session-id> --prompt \"Deployment completed\" --from berd-monitor --if-running queue --delivery-id <stable-id> --json\n\nResult:\n  {\"session_id\": \"...\", \"send_status\": \"dispatched\"|\"steered\"|\"queued\"|\"deduplicated\"}\n  The event stays visible in the transcript and does not change the user's current view."
         },
         "open": {
           "action": "open",

@@ -93,3 +93,82 @@ describe("background token", () => {
     );
   });
 });
+
+type TokenDeclarations = Map<string, string>;
+
+function declarationsMap(selector: string): TokenDeclarations {
+  const map: TokenDeclarations = new Map();
+  for (const match of declarationsFor(selector).matchAll(
+    /^\s*(--[\w-]+):\s*([^;]+);/gm,
+  )) {
+    map.set(match[1], match[2].trim());
+  }
+  return map;
+}
+
+/** Resolve a custom property to a literal color, following var() chains. */
+function resolveToken(
+  token: string,
+  theme: TokenDeclarations,
+  palette: TokenDeclarations,
+): string {
+  let value: string = theme.get(token) ?? palette.get(token) ?? "";
+  if (value === "") {
+    throw new Error(`Missing ${token}`);
+  }
+  const seen = new Set<string>();
+  for (;;) {
+    const ref = value.match(/^var\((--[\w-]+)(?:,\s*([^)]+))?\)$/);
+    if (!ref) {
+      return value;
+    }
+    if (seen.has(ref[1])) {
+      throw new Error(`Circular var() reference at ${ref[1]}`);
+    }
+    seen.add(ref[1]);
+    const next: string =
+      theme.get(ref[1]) ?? palette.get(ref[1]) ?? ref[2]?.trim() ?? "";
+    if (next === "") {
+      throw new Error(`Unresolved var() reference ${ref[1]} in ${token}`);
+    }
+    value = next;
+  }
+}
+
+function srgbChannelToLinear(channel: number): number {
+  return channel <= 0.04045
+    ? channel / 12.92
+    : ((channel + 0.055) / 1.055) ** 2.4;
+}
+
+/** WCAG 2.x relative luminance of a #rrggbb color. */
+function relativeLuminance(hex: string): number {
+  const digits = hex.replace(/^#/, "");
+  if (!/^[0-9a-fA-F]{6}$/.test(digits)) {
+    throw new Error(`Unsupported color for contrast math: ${hex}`);
+  }
+  const [red, green, blue] = [0, 2, 4].map((offset) =>
+    srgbChannelToLinear(parseInt(digits.slice(offset, offset + 2), 16) / 255),
+  );
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+}
+
+function contrastRatio(foreground: string, background: string): number {
+  const [lighter, darker] = [
+    relativeLuminance(foreground),
+    relativeLuminance(background),
+  ].sort((left, right) => right - left);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+describe("muted-foreground on popover", () => {
+  it("clears 3:1 non-text contrast in both themes for icon-only controls (model picker star)", () => {
+    const palette = declarationsMap("@theme {");
+    for (const selector of [":root {", '[data-theme="dark"],']) {
+      const theme = declarationsMap(selector);
+      const foreground = resolveToken("--muted-foreground", theme, palette);
+      const background = resolveToken("--popover", theme, palette);
+      expect(contrastRatio(foreground, background)).toBeGreaterThanOrEqual(3);
+    }
+  });
+});

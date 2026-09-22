@@ -54,6 +54,10 @@ const buttonVariants = cva(
         true: "",
         false: "",
       },
+      selected: {
+        true: "",
+        false: "",
+      },
     },
     compoundVariants: [
       {
@@ -120,12 +124,18 @@ const buttonVariants = cva(
         className:
           "bg-transparent text-muted-foreground hover:bg-transparent hover:text-foreground active:bg-transparent data-[state=open]:text-foreground aria-expanded:text-foreground",
       },
+      {
+        variant: "ghost",
+        selected: true,
+        className: "text-foreground/80 hover:text-foreground/80",
+      },
     ],
     defaultVariants: {
       variant: "primary",
       size: "default",
       destructive: false,
       flush: false,
+      selected: false,
     },
   },
 );
@@ -279,7 +289,7 @@ export function isButtonDestructiveEmphasis(
 }
 
 export type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> &
-  Omit<ButtonCvaProps, "destructive" | "flush"> & {
+  Omit<ButtonCvaProps, "destructive" | "flush" | "selected"> & {
     /**
      * Danger intent. Recolors the emphasis recipe with destructive tokens:
      * primary = red fill, outline = red border + red text, subtle = red
@@ -296,6 +306,16 @@ export type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> &
      * on ghost; other variants ignore it (dev builds warn).
      */
     flush?: boolean;
+    /**
+     * On/pressed state for toggle controls that lean on Button as their
+     * chrome (icon toggles like the model picker star). Ghost buttons rest
+     * the label or icon at foreground/80 — softer than idle content yet
+     * well above the 3:1 non-text contrast bar. Explicit true and false
+     * states keep their respective color on hover, so toggle groups do not
+     * show mixed shades. Only meaningful on ghost; other variants ignore
+     * it (dev builds warn).
+     */
+    selected?: boolean;
     asChild?: boolean;
     leftIcon?: React.ReactNode;
     rightIcon?: React.ReactNode;
@@ -322,6 +342,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       size,
       destructive,
       flush,
+      selected,
       asChild = false,
       leftIcon,
       rightIcon,
@@ -338,6 +359,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       disabled,
       onClick,
       "aria-disabled": ariaDisabled,
+      "aria-pressed": ariaPressed,
       ...props
     },
     ref,
@@ -359,6 +381,12 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     if (import.meta.env.DEV && flush && !resolvedFlush) {
       console.warn(
         `Button: the flush flag is only supported on the ghost variant; it is ignored on variant="${resolvedEmphasis}".`,
+      );
+    }
+    const resolvedSelected = Boolean(selected && resolvedEmphasis === "ghost");
+    if (import.meta.env.DEV && selected && !resolvedSelected) {
+      console.warn(
+        `Button: the selected flag is only supported on the ghost variant; it is ignored on variant="${resolvedEmphasis}".`,
       );
     }
     const Comp = asChild ? Slot : "button";
@@ -517,6 +545,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           props: {
             destructive: resolvedDestructive,
             flush: resolvedFlush,
+            selected: resolvedSelected,
             asChild,
             disabled: resolvedDisabled,
             leftIcon: Boolean(resolvedLeftIcon),
@@ -529,6 +558,11 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         data-slot="button"
         data-feedback-state={feedbackState}
         aria-busy={isLoading}
+        aria-pressed={
+          resolvedEmphasis === "ghost" && selected !== undefined
+            ? resolvedSelected
+            : ariaPressed
+        }
         aria-disabled={
           asChild && resolvedDisabled
             ? true
@@ -543,8 +577,14 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
             size,
             destructive: resolvedDestructive,
             flush: resolvedFlush,
+            selected: resolvedSelected,
             className,
           }),
+          resolvedEmphasis === "ghost" &&
+            selected !== undefined &&
+            (resolvedSelected
+              ? "text-foreground/80 hover:text-foreground/80"
+              : "text-muted-foreground hover:text-muted-foreground"),
           asChild && resolvedDisabled && "pointer-events-none",
         )}
         onClick={handleClick}
