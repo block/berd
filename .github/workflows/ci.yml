@@ -84,7 +84,9 @@ jobs:
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          workspaces: src-tauri -> target
+          workspaces: |
+            src-tauri -> target
+            crates/builderbot-auth -> target
 
       - name: Install Linux Tauri dependencies
         if: runner.os == 'Linux'
@@ -105,6 +107,9 @@ jobs:
 
       - name: Run Rust tests
         run: just tauri-test
+
+      - name: Run builderbot-auth tests
+        run: just builderbot-auth-test
 
       - name: Run clippy
         run: just clippy
@@ -131,7 +136,9 @@ jobs:
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          workspaces: src-tauri -> target
+          workspaces: |
+            src-tauri -> target
+            crates/builderbot-auth -> target
 
       - name: Run Windows-native Rust tests
         shell: powershell
@@ -142,6 +149,11 @@ jobs:
       - name: Run Windows script tests under Windows PowerShell 5.1
         shell: powershell
         run: just test-windows-dev
+
+      # The file credential store's Windows ACL path only runs here.
+      - name: Run builderbot-auth tests
+        shell: powershell
+        run: just builderbot-auth-test
 
   transcript-virtualization:
     name: Transcript virtualization
