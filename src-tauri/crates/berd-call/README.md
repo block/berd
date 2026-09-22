@@ -28,7 +28,12 @@ device; the existing Berd Siri player and the CLI use the same decoder.
 in [PROTOCOL.md](PROTOCOL.md). The host supplies persisted status-sound settings
 and semantic `working` / `waiting` updates through that protocol; the runtime
 owns the five-second cadence, speech suppression, and macOS Pop/Purr playback.
-The default mode is `working`; `working-and-waiting` also plays idle cues, and `off` disables both. Status sounds default to a gain of `0.8`. Cues play immediately on a status transition and repeat every five seconds. When conversation audio ends, the current cue resumes immediately. Repeated identical status updates preserve the cadence. The host determines when work begins; the chained client signals working on its first live tool call and stays working until the run ends.
+The default mode is `working`; `working-and-waiting` also plays idle cues, and `off` disables both. Status sounds default to a gain of `0.8`. Cues play immediately on a status transition and repeat every five seconds. Conversation audio cancels the current cue and restarts the full cadence when it ends; missed cues are never replayed. Repeated identical status updates preserve the cadence. The host determines when work begins; the chained client signals working on its first live tool call and stays working until the run ends.
+Status-cue playback is single-flight: a cadence tick never queues behind a cue
+that is still draining. Hosts claim overlapping user and assistant audio through
+shared activity guards, and the runtime resumes cues only after the final guard
+ends. This keeps status audio subordinate to conversation audio without asking
+each host to maintain its own suppression counter.
 
 Siri TTS and macOS speech recognition are the defaults:
 

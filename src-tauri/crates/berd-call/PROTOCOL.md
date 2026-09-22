@@ -9,6 +9,11 @@ the narrow exception: the child plays them on the output-device name supplied by
 parent, or the system default when none is supplied. The child writes
 flushed JSONL events to stdout. Diagnostics go only to stderr.
 
+Status-cue playback is single-flight and subordinate to conversation audio. A
+tick is coalesced while an earlier cue is still draining, and user or assistant
+speech stops the cue before conversational playback proceeds. When speech ends,
+the full cadence restarts; no missed cue is replayed.
+
 ## Startup
 
 The child selects closed TTS and STT backends at startup:

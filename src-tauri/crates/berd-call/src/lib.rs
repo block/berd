@@ -57,6 +57,7 @@ pub use pocket::{
 pub use siri::SiriTts;
 pub use status_sounds::ConversationStatus;
 pub use status_sounds::ManagedStatusSoundRuntime;
+pub use status_sounds::StatusSoundActivityGuard;
 pub use status_sounds::StatusSoundMode;
 pub use status_sounds::StatusSoundRuntime;
 pub use status_sounds::StatusSoundSettings;
