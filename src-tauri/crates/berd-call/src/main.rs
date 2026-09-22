@@ -59,6 +59,7 @@ use berd_call::{
 };
 use serde::Serialize;
 
+mod cli_help;
 mod session_audio;
 
 use session_audio::{
@@ -470,6 +471,17 @@ struct SynthesisWavResult {
 
 fn main() {
     let args: Vec<_> = std::env::args().collect();
+    match cli_help::parse(&args).unwrap_or_else(|error| usage_error(&error)) {
+        Some(cli_help::MetaCommand::Help(help)) => {
+            println!("{help}");
+            return;
+        }
+        Some(cli_help::MetaCommand::Version) => {
+            println!("berd-call {}", env!("CARGO_PKG_VERSION"));
+            return;
+        }
+        None => {}
+    }
     match args.get(1).map(String::as_str) {
         Some("session") => {
             let pcm_output_fd =

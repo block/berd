@@ -9,6 +9,24 @@ management, synthesis and benchmark tools described below. Desktop Berd and
 other hosts retain their own device integration, persisted settings, transcript
 delivery, and user interface.
 
+## Command-line interface
+
+The standalone command exposes the host-facing runtime protocol plus speech,
+model-management, synthesis, and diagnostic tools. It does not own agent
+integration, audio-device capture or playback, persisted host settings, or a
+background service lifecycle.
+
+```text
+berd-call --help
+berd-call help session
+berd-call version
+```
+
+Help and version commands exit successfully, write only to stdout, and do not
+initialize an audio or model backend. Invalid commands and help topics remain
+usage errors on stderr with exit status 2. Operational JSONL commands retain
+stdout for their documented machine-readable records.
+
 This crate owns the neutral PCM output contract and backend-neutral TTS stream
 used by Berd, plus the April ONNX runtime and text chunking used by Berd's native
 voice commands. It also owns the concrete Parakeet model loader and complete
