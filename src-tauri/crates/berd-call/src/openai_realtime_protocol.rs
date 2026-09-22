@@ -711,8 +711,9 @@ impl RealtimeProtocolReducer {
             } else {
                 RealtimeTranscriptEvidence::ProviderFinal
             };
-            let settle_unplayed_transcript = interrupted
-                && event.get("played_audio_frames").and_then(Value::as_u64) == Some(0);
+            let no_audio_played =
+                event.get("played_audio_frames").and_then(Value::as_u64) == Some(0);
+            let settle_unplayed_transcript = interrupted && no_audio_played;
             if (!text.trim().is_empty() || settle_unplayed_transcript)
                 && !self.finalized_item_ids.contains(&pending.display_item_id)
             {
