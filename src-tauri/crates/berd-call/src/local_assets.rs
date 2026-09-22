@@ -9,7 +9,9 @@ use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
-const LOCK_FILE: &str = ".berd-call-assets.lock";
+// This persisted coordination identity stays stable across package renames so
+// concurrently running app versions still serialize access to the same store.
+const LOCK_FILE: &str = ".berd-voice-assets.lock";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
 const TOTAL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
@@ -831,6 +833,16 @@ mod tests {
             parent.join("native-voice-v2/stt"),
         )
         .expect("asset roots")
+    }
+
+    #[test]
+    fn lock_path_preserves_the_existing_store_coordination_identity() {
+        let root = tempfile::tempdir().expect("temporary directory");
+        let roots = roots(root.path());
+        let _lock = try_lock_for_mutation(&roots).expect("mutation lock");
+
+        assert!(root.path().join(".berd-voice-assets.lock").is_file());
+        assert!(!root.path().join(".berd-call-assets.lock").exists());
     }
 
     #[test]
