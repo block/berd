@@ -425,6 +425,49 @@ fn estimated_transcript_prefix(
     text[..estimated_spoken_through_utf8(text, &delivery)].to_string()
 }
 
+enum InterruptedTranscriptResolutionInput {
+    Discarded,
+    Resolve(RealtimeInterruptedTranscriptInput),
+}
+
+fn interrupted_transcript_resolution_input(
+    event: &Value,
+    text: String,
+) -> InterruptedTranscriptResolutionInput {
+    let Some(played_audio_frames) = event.get("played_audio_frames").and_then(Value::as_u64)
+    else {
+        return InterruptedTranscriptResolutionInput::Resolve(
+            RealtimeInterruptedTranscriptInput::ProviderDelta { text },
+        );
+    };
+    if played_audio_frames == 0 {
+        return InterruptedTranscriptResolutionInput::Discarded;
+    }
+    let Some(total_audio_frames) = event.get("total_audio_frames").and_then(Value::as_u64) else {
+        return InterruptedTranscriptResolutionInput::Resolve(
+            RealtimeInterruptedTranscriptInput::ProviderDelta { text },
+        );
+    };
+    let Some(sample_rate) = event
+        .get("sample_rate")
+        .and_then(Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+    else {
+        return InterruptedTranscriptResolutionInput::Resolve(
+            RealtimeInterruptedTranscriptInput::ProviderDelta { text },
+        );
+    };
+    InterruptedTranscriptResolutionInput::Resolve(
+        RealtimeInterruptedTranscriptInput::HostPlayedFrames {
+            text,
+            audio_parts: Vec::new(),
+            played_audio_frames,
+            total_audio_frames,
+            sample_rate,
+        },
+    )
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type")]
 pub enum RealtimeProtocolEvent {
@@ -687,44 +730,19 @@ impl RealtimeProtocolReducer {
         let pending = self.pending_spokesperson_transcripts.remove(response_id);
         let mut events = Vec::new();
         if let Some(pending) = pending {
-            let no_audio_played = interrupted
-                && event.get("played_audio_frames").and_then(Value::as_u64) == Some(0);
-            if no_audio_played {
-                for item_id in &pending.item_order {
-                    self.finalized_item_ids.insert(item_id.clone());
+            let text = combined_spokesperson_transcript(&pending, !interrupted);
+            let resolved = if interrupted {
+                match interrupted_transcript_resolution_input(event, text) {
+                    InterruptedTranscriptResolutionInput::Discarded => None,
+                    InterruptedTranscriptResolutionInput::Resolve(input) => {
+                        let resolved = resolve_interrupted_spokesperson_transcript(input);
+                        Some((resolved.0, resolved.1))
+                    }
                 }
-                events.push(RealtimeProtocolEvent::TranscriptDiscarded {
-                    item_id: pending.display_item_id,
-                });
             } else {
-                let mut text = combined_spokesperson_transcript(&pending, !interrupted);
-                let evidence = if interrupted {
-                    let played_audio_frames =
-                        event.get("played_audio_frames").and_then(Value::as_u64);
-                    let total_audio_frames =
-                        event.get("total_audio_frames").and_then(Value::as_u64);
-                    let sample_rate = event
-                        .get("sample_rate")
-                        .and_then(Value::as_u64)
-                        .and_then(|value| u32::try_from(value).ok());
-                    let input = match (played_audio_frames, total_audio_frames, sample_rate) {
-                        (Some(played_audio_frames), Some(total_audio_frames), Some(sample_rate)) => {
-                            RealtimeInterruptedTranscriptInput::HostPlayedFrames {
-                                text,
-                                audio_parts: Vec::new(),
-                                played_audio_frames,
-                                total_audio_frames,
-                                sample_rate,
-                            }
-                        }
-                        _ => RealtimeInterruptedTranscriptInput::ProviderDelta { text },
-                    };
-                    let resolved = resolve_interrupted_spokesperson_transcript(input);
-                    text = resolved.0;
-                    resolved.1
-                } else {
-                    RealtimeTranscriptEvidence::ProviderFinal
-                };
+                Some((text, RealtimeTranscriptEvidence::ProviderFinal))
+            };
+            if let Some((text, evidence)) = resolved {
                 if !text.trim().is_empty()
                     && !self.finalized_item_ids.contains(&pending.display_item_id)
                 {
@@ -739,6 +757,13 @@ impl RealtimeProtocolReducer {
                         evidence,
                     ));
                 }
+            } else {
+                for item_id in &pending.item_order {
+                    self.finalized_item_ids.insert(item_id.clone());
+                }
+                events.push(RealtimeProtocolEvent::TranscriptDiscarded {
+                    item_id: pending.display_item_id,
+                });
             }
         }
         if interrupted {
