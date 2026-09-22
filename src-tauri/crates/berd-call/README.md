@@ -2,9 +2,12 @@
 
 Berd's reusable voice-call runtime and standalone CLI.
 
-The `berd_call` library owns call semantics and speech backends. The
-`berd-call` binary is a separate client of that library; desktop Berd uses the
-same library directly. Host-specific orchestration stays outside the library.
+This Cargo package contains the reusable `berd_call` library and the
+`berd-call` command. Desktop Berd links the library directly. Together they
+provide the voice-call lifecycle, speech backends, local speech-model
+management, synthesis and benchmark tools described below. Desktop Berd and
+other hosts retain their own device integration, persisted settings, transcript
+delivery, and user interface.
 
 This crate owns the neutral PCM output contract and backend-neutral TTS stream
 used by Berd, plus the April ONNX runtime and text chunking used by Berd's native
