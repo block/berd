@@ -78,7 +78,6 @@ const PCM_FRAME_BYTES: usize = INPUT_FRAME_SAMPLES * std::mem::size_of::<f32>();
 const MAX_FINAL_TEXT_BYTES: usize = 64 * 1024;
 const MAX_SPEAK_TEXT_BYTES: usize = 16 * 1024;
 const MAX_HANDOFF_IDS: usize = 64;
-const HELP_REQUESTED: &str = "berd-call-help-requested";
 const MAX_HANDOFF_ID_BYTES: usize = 512;
 const MAX_HANDOFF_REASON_BYTES: usize = 4 * 1024;
 const INPUT_QUEUE_CAPACITY: usize = 32;
@@ -471,7 +470,7 @@ struct SynthesisWavResult {
 }
 
 fn main() {
-    let args: Vec<_> = std::env::args().collect();
+    let mut args: Vec<_> = std::env::args().collect();
     match cli_help::parse(&args).unwrap_or_else(|error| usage_error(&error, &args)) {
         Some(cli_help::MetaCommand::Help(help)) => {
             println!("{help}");
@@ -480,6 +479,11 @@ fn main() {
         Some(cli_help::MetaCommand::Version) => {
             println!("berd-call {}", env!("CARGO_PKG_VERSION"));
             return;
+        }
+        Some(cli_help::MetaCommand::HelpTopic(topic)) => {
+            args.truncate(1);
+            args.extend(topic);
+            args.push("--help".into());
         }
         None => {}
     }
@@ -549,6 +553,9 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Some("benchmark") if args.get(2).is_some_and(|value| is_help_flag(value)) => {
+            help_and_exit(&args)
+        }
         Some("benchmark") => match args.get(2) {
             Some(command) => {
                 usage_error(&format!("unrecognized benchmark command: {command}"), &args)
@@ -560,15 +567,50 @@ fn main() {
     }
 }
 
-fn parse_or_exit<T>(result: Result<T, String>, args: &[String]) -> T {
-    match result {
-        Ok(value) => value,
-        Err(error) if error == HELP_REQUESTED => {
-            println!("{}", cli_help::usage_for(args));
-            std::process::exit(0);
-        }
-        Err(error) => usage_error(&error, args),
+#[derive(Debug, PartialEq, Eq)]
+enum ParseFailure {
+    HelpRequested,
+    Usage(String),
+}
+
+impl ParseFailure {
+    fn contains(&self, pattern: &str) -> bool {
+        matches!(self, Self::Usage(message) if message.contains(pattern))
     }
+}
+
+impl From<String> for ParseFailure {
+    fn from(message: String) -> Self {
+        Self::Usage(message)
+    }
+}
+
+impl From<&str> for ParseFailure {
+    fn from(message: &str) -> Self {
+        Self::Usage(message.into())
+    }
+}
+
+impl PartialEq<&str> for ParseFailure {
+    fn eq(&self, other: &&str) -> bool {
+        matches!(self, Self::Usage(message) if message == *other)
+    }
+}
+
+fn parse_or_exit<T, E>(result: Result<T, E>, args: &[String]) -> T
+where
+    E: Into<ParseFailure>,
+{
+    match result.map_err(Into::into) {
+        Ok(value) => value,
+        Err(ParseFailure::HelpRequested) => help_and_exit(args),
+        Err(ParseFailure::Usage(error)) => usage_error(&error, args),
+    }
+}
+
+fn help_and_exit(args: &[String]) -> ! {
+    println!("{}", cli_help::usage_for(args));
+    std::process::exit(0);
 }
 
 fn is_help_flag(value: &str) -> bool {
@@ -581,22 +623,7 @@ fn usage_error(error: &str, args: &[String]) -> ! {
     std::process::exit(2);
 }
 
-fn parse_management_args(args: &[String]) -> Result<ManagementCommand, String> {
-    if args.last().is_some_and(|value| is_help_flag(value)) {
-        let path = args[1..args.len() - 1]
-            .iter()
-            .map(String::as_str)
-            .collect::<Vec<_>>();
-        if matches!(
-            path.as_slice(),
-            ["models", "macos", "status" | "install"]
-                | ["models", "openai", "voices"]
-                | ["models", "pocket", "status" | "install" | "voices"]
-                | ["models", "parakeet", "status" | "install"]
-        ) {
-            return Err(HELP_REQUESTED.into());
-        }
-    }
+fn parse_management_args(args: &[String]) -> Result<ManagementCommand, ParseFailure> {
     match (
         args.get(1).map(String::as_str),
         args.get(2).map(String::as_str),
@@ -608,7 +635,7 @@ fn parse_management_args(args: &[String]) -> Result<ManagementCommand, String> {
             while index < args.len() {
                 let flag = args[index].as_str();
                 if is_help_flag(flag) {
-                    return Err(HELP_REQUESTED.into());
+                    return Err(ParseFailure::HelpRequested);
                 }
                 let value = args
                     .get(index + 1)
@@ -616,7 +643,7 @@ fn parse_management_args(args: &[String]) -> Result<ManagementCommand, String> {
                 match flag {
                     "--language" if language.is_none() => language = Some(value.clone()),
                     "--language" => return Err("--language may be provided only once".into()),
-                    _ => return Err(format!("unknown voices list argument: {flag}")),
+                    _ => return Err(format!("unknown voices list argument: {flag}").into()),
                 }
                 index += 2;
             }
@@ -635,7 +662,7 @@ fn parse_management_args(args: &[String]) -> Result<ManagementCommand, String> {
             while index < args.len() {
                 let flag = args[index].as_str();
                 if is_help_flag(flag) {
-                    return Err(HELP_REQUESTED.into());
+                    return Err(ParseFailure::HelpRequested);
                 }
                 let value = args
                     .get(index + 1)
@@ -653,9 +680,9 @@ fn parse_management_args(args: &[String]) -> Result<ManagementCommand, String> {
                         wait_seen = true;
                     }
                     "--voice" | "--language" | "--availability-wait-seconds" => {
-                        return Err(format!("{flag} may be provided only once"))
+                        return Err(format!("{flag} may be provided only once").into())
                     }
-                    _ => return Err(format!("unknown voices download argument: {flag}")),
+                    _ => return Err(format!("unknown voices download argument: {flag}").into()),
                 }
                 index += 2;
             }
@@ -665,6 +692,21 @@ fn parse_management_args(args: &[String]) -> Result<ManagementCommand, String> {
                 identity: berd_call::siri::SiriVoiceIdentity::new(voice, &language)?,
                 availability_wait,
             })
+        }
+        (Some("models"), Some("macos"), Some("status" | "install"))
+            if args.len() == 5 && args.get(4).is_some_and(|value| is_help_flag(value)) =>
+        {
+            Err(ParseFailure::HelpRequested)
+        }
+        (Some("models"), Some("openai"), Some("voices"))
+            if args.len() == 5 && args.get(4).is_some_and(|value| is_help_flag(value)) =>
+        {
+            Err(ParseFailure::HelpRequested)
+        }
+        (Some("models"), Some("pocket"), Some("voices"))
+            if args.len() == 5 && args.get(4).is_some_and(|value| is_help_flag(value)) =>
+        {
+            Err(ParseFailure::HelpRequested)
         }
         (Some("models"), Some("macos"), Some("status")) if args.len() == 4 => {
             Ok(ManagementCommand::MacosModelStatus)
@@ -704,21 +746,32 @@ fn parse_management_args(args: &[String]) -> Result<ManagementCommand, String> {
     }
 }
 
-fn parse_local_model_roots(args: &[String]) -> Result<LocalAssetRoots, String> {
-    if args.len() == 7 && args.last().is_some_and(|value| is_help_flag(value)) {
-        return Err(HELP_REQUESTED.into());
+fn parse_local_model_roots(args: &[String]) -> Result<LocalAssetRoots, ParseFailure> {
+    let mut store_root = None;
+    let mut index = 4;
+    while index < args.len() {
+        let flag = args[index].as_str();
+        if is_help_flag(flag) {
+            return Err(ParseFailure::HelpRequested);
+        }
+        let value = args
+            .get(index + 1)
+            .ok_or_else(|| format!("{flag} requires a value"))?;
+        if flag != "--store-root" || store_root.is_some() {
+            return Err("local model status/install requires --store-root exactly once".into());
+        }
+        store_root = Some(value);
+        index += 2;
     }
-    if args.len() != 6 || args.get(4).map(String::as_str) != Some("--store-root") {
-        return Err("local model status/install requires --store-root exactly once".into());
-    }
-    let value = &args[5];
+    let value =
+        store_root.ok_or("local model status/install requires --store-root exactly once")?;
     if value
         .split(['/', '\\'])
         .any(|component| matches!(component, "." | ".."))
     {
         return Err("--store-root must not contain . or .. components".into());
     }
-    local_model_roots(std::path::Path::new(value))
+    Ok(local_model_roots(std::path::Path::new(value))?)
 }
 
 fn local_model_roots(store_root: &std::path::Path) -> Result<LocalAssetRoots, String> {
@@ -4694,7 +4747,7 @@ fn finish_unready_input_runtime(runtime: VoiceInputRuntime) -> Result<(), String
         .map_err(|error| format!("finish unready voice input runtime: {error}"))
 }
 
-fn parse_args(args: &[String]) -> Result<SessionConfig, String> {
+fn parse_args(args: &[String]) -> Result<SessionConfig, ParseFailure> {
     if args.get(1).map(String::as_str) != Some("session") {
         return Err("the only supported command is session".into());
     }
@@ -4710,7 +4763,7 @@ fn parse_args(args: &[String]) -> Result<SessionConfig, String> {
     while index < args.len() {
         let flag = args[index].as_str();
         if is_help_flag(flag) {
-            return Err(HELP_REQUESTED.into());
+            return Err(ParseFailure::HelpRequested);
         }
         let value = args
             .get(index + 1)
@@ -4737,7 +4790,7 @@ fn parse_args(args: &[String]) -> Result<SessionConfig, String> {
                 }
             }
             "--pcm-output-fd" => {}
-            _ => return Err(format!("unknown argument: {flag}")),
+            _ => return Err(format!("unknown argument: {flag}").into()),
         }
         index += 2;
     }
@@ -4768,7 +4821,7 @@ fn parse_pcm_output_fd(args: &[String]) -> Result<RawFd, String> {
     Ok(fd)
 }
 
-fn parse_synthesis_args(args: &[String]) -> Result<SynthesisConfig, String> {
+fn parse_synthesis_args(args: &[String]) -> Result<SynthesisConfig, ParseFailure> {
     if args.get(1).map(String::as_str) != Some("synthesize") {
         return Err("expected synthesize".into());
     }
@@ -4785,7 +4838,7 @@ fn parse_synthesis_args(args: &[String]) -> Result<SynthesisConfig, String> {
     while index < args.len() {
         let flag = args[index].as_str();
         if is_help_flag(flag) {
-            return Err(HELP_REQUESTED.into());
+            return Err(ParseFailure::HelpRequested);
         }
         if flag == "--allow-paid-openai" {
             if allow_paid_openai {
@@ -4818,10 +4871,10 @@ fn parse_synthesis_args(args: &[String]) -> Result<SynthesisConfig, String> {
                 index += 2;
                 continue;
             }
-            _ => return Err(format!("unknown synthesize argument: {flag}")),
+            _ => return Err(format!("unknown synthesize argument: {flag}").into()),
         };
         if destination.is_some() {
-            return Err(format!("{flag} may be provided only once"));
+            return Err(format!("{flag} may be provided only once").into());
         }
         *destination = Some(value.clone());
         index += 2;
@@ -4833,7 +4886,7 @@ fn parse_synthesis_args(args: &[String]) -> Result<SynthesisConfig, String> {
         return Err("--text must be nonempty".into());
     }
     if text.len() > MAX_SPEAK_TEXT_BYTES {
-        return Err(format!("--text exceeds {MAX_SPEAK_TEXT_BYTES} UTF-8 bytes"));
+        return Err(format!("--text exceeds {MAX_SPEAK_TEXT_BYTES} UTF-8 bytes").into());
     }
     let output = PathBuf::from(output.ok_or_else(|| "--output is required".to_string())?);
     if output.as_os_str().is_empty() || output == Path::new("-") {
@@ -4889,7 +4942,7 @@ fn parse_synthesis_args(args: &[String]) -> Result<SynthesisConfig, String> {
             }
             SynthesisTtsConfig::Local(local)
         }
-        value => return Err(format!("unsupported TTS backend: {value}")),
+        value => return Err(format!("unsupported TTS backend: {value}").into()),
     };
     Ok(SynthesisConfig { tts, text, output })
 }
@@ -4997,7 +5050,7 @@ fn build_tts_backend_config(
     }
 }
 
-fn parse_tts_benchmark_args(args: &[String]) -> Result<TtsBenchmarkConfig, String> {
+fn parse_tts_benchmark_args(args: &[String]) -> Result<TtsBenchmarkConfig, ParseFailure> {
     if args.get(1).map(String::as_str) != Some("benchmark")
         || args.get(2).map(String::as_str) != Some("tts")
     {
@@ -5017,7 +5070,7 @@ fn parse_tts_benchmark_args(args: &[String]) -> Result<TtsBenchmarkConfig, Strin
     while index < args.len() {
         let flag = args[index].as_str();
         if is_help_flag(flag) {
-            return Err(HELP_REQUESTED.into());
+            return Err(ParseFailure::HelpRequested);
         }
         if flag == "--allow-paid-openai" {
             allow_paid_openai = true;
@@ -5057,7 +5110,7 @@ fn parse_tts_benchmark_args(args: &[String]) -> Result<TtsBenchmarkConfig, Strin
                     _ => return Err("--mode must be fresh-backend or warm".into()),
                 })
             }
-            _ => return Err(format!("unknown argument: {flag}")),
+            _ => return Err(format!("unknown argument: {flag}").into()),
         }
         index += 2;
     }
@@ -5068,7 +5121,7 @@ fn parse_tts_benchmark_args(args: &[String]) -> Result<TtsBenchmarkConfig, Strin
                 return Err("--text must be nonempty".into());
             }
             if text.len() > MAX_SPEAK_TEXT_BYTES {
-                return Err(format!("--text exceeds {MAX_SPEAK_TEXT_BYTES} UTF-8 bytes"));
+                return Err(format!("--text exceeds {MAX_SPEAK_TEXT_BYTES} UTF-8 bytes").into());
             }
             TtsBenchmarkPrompts::ExactRepeat { text, runs }
         }
@@ -5098,7 +5151,8 @@ fn parse_tts_benchmark_args(args: &[String]) -> Result<TtsBenchmarkConfig, Strin
             return Err(format!(
                 "TTS prompt manifest {} requires Siri language {}",
                 manifest.id, manifest.language
-            ));
+            )
+            .into());
         }
     }
     let (request_count, total_text_bytes) = match &prompts {
@@ -5134,12 +5188,14 @@ fn parse_tts_benchmark_args(args: &[String]) -> Result<TtsBenchmarkConfig, Strin
         if request_count > MAX_OPENAI_BENCHMARK_REQUESTS {
             return Err(format!(
                 "OpenAI benchmark would make {request_count} requests; maximum is {MAX_OPENAI_BENCHMARK_REQUESTS}"
-            ));
+            )
+            .into());
         }
         if total_text_bytes > MAX_OPENAI_BENCHMARK_TEXT_BYTES {
             return Err(format!(
                 "OpenAI benchmark would submit {total_text_bytes} total UTF-8 text bytes; maximum is {MAX_OPENAI_BENCHMARK_TEXT_BYTES}"
-            ));
+            )
+            .into());
         }
     } else if allow_paid_openai {
         return Err("--allow-paid-openai is only valid with OpenAI".into());
@@ -5222,7 +5278,7 @@ fn tts_benchmark_target(
     }
 }
 
-fn parse_stt_benchmark_args(args: &[String]) -> Result<SttBenchmarkConfig, String> {
+fn parse_stt_benchmark_args(args: &[String]) -> Result<SttBenchmarkConfig, ParseFailure> {
     if args.get(1).map(String::as_str) != Some("benchmark")
         || args.get(2).map(String::as_str) != Some("stt")
     {
@@ -5237,7 +5293,7 @@ fn parse_stt_benchmark_args(args: &[String]) -> Result<SttBenchmarkConfig, Strin
     while index < args.len() {
         let flag = args[index].as_str();
         if is_help_flag(flag) {
-            return Err(HELP_REQUESTED.into());
+            return Err(ParseFailure::HelpRequested);
         }
         if flag == "--allow-paid-openai" {
             allow_paid_openai = true;
@@ -5266,7 +5322,7 @@ fn parse_stt_benchmark_args(args: &[String]) -> Result<SttBenchmarkConfig, Strin
                     _ => return Err("--mode must be cold or warm".into()),
                 })
             }
-            _ => return Err(format!("unknown argument: {flag}")),
+            _ => return Err(format!("unknown argument: {flag}").into()),
         }
         index += 2;
     }

@@ -8,7 +8,7 @@ fn berd_call(args: &[&str]) -> std::process::Output {
 }
 
 #[test]
-fn global_help_is_successful_and_lists_only_implemented_commands() {
+fn global_help_is_successful_and_lists_only_supported_commands() {
     for argument in ["-h", "--help", "help"] {
         let output = berd_call(&[argument]);
         assert!(output.status.success(), "{argument}");
@@ -18,11 +18,8 @@ fn global_help_is_successful_and_lists_only_implemented_commands() {
         for command in ["session", "synthesize", "voices", "models", "benchmark"] {
             assert!(stdout.contains(command), "{argument}: {command}");
         }
-        for unimplemented in ["start", "speak", "status", "stop"] {
-            assert!(
-                !stdout.contains(unimplemented),
-                "{argument}: {unimplemented}"
-            );
+        for unsupported in ["start", "speak", "status", "stop"] {
+            assert!(!stdout.contains(unsupported), "{argument}: {unsupported}");
         }
     }
 }
@@ -34,6 +31,8 @@ fn command_help_is_available_in_prefix_and_suffix_forms() {
         vec!["session", "--help"],
         vec!["help", "benchmark", "tts"],
         vec!["benchmark", "tts", "--help"],
+        vec!["benchmark", "--help"],
+        vec!["help", "models", "pocket", "status"],
         vec!["models", "pocket", "status", "--help"],
     ] {
         let output = berd_call(&args);
@@ -60,17 +59,19 @@ fn version_is_successful_and_machine_readable_as_one_line() {
 
 #[test]
 fn unknown_help_topics_remain_usage_errors() {
-    for args in [vec!["help", "start"], vec!["help", "session", "bogus"]] {
-        let output = berd_call(&args);
-        assert_eq!(output.status.code(), Some(2), "{args:?}");
-        assert!(output.stdout.is_empty(), "{args:?}");
-        assert!(
-            String::from_utf8(output.stderr)
-                .expect("UTF-8 stderr")
-                .contains("unknown help topic:"),
-            "{args:?}"
-        );
-    }
+    let output = berd_call(&["help", "start"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8(output.stderr)
+        .expect("UTF-8 stderr")
+        .contains("unknown help topic: start"));
+
+    let output = berd_call(&["help", "session", "bogus"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8(output.stderr)
+        .expect("UTF-8 stderr")
+        .contains("unknown argument: bogus"));
 }
 
 #[test]

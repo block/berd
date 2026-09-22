@@ -96,6 +96,7 @@ Usage:
 #[derive(Debug)]
 pub(crate) enum MetaCommand {
     Help(&'static str),
+    HelpTopic(Vec<String>),
     Version,
 }
 
@@ -104,11 +105,19 @@ pub(crate) fn parse(args: &[String]) -> Result<Option<MetaCommand>, String> {
     match values.as_slice() {
         ["-h" | "--help" | "help"] => Ok(Some(MetaCommand::Help(TOP_LEVEL_HELP))),
         ["-V" | "--version" | "version"] => Ok(Some(MetaCommand::Version)),
-        ["help", topic @ ..] => help_for(topic)
-            .map(|help| Some(MetaCommand::Help(help)))
-            .ok_or_else(|| format!("unknown help topic: {}", topic.join(" "))),
+        ["help", topic @ ..] if is_supported_command(topic.first().copied()) => Ok(Some(
+            MetaCommand::HelpTopic(topic.iter().map(|value| (*value).to_string()).collect()),
+        )),
+        ["help", topic @ ..] => Err(format!("unknown help topic: {}", topic.join(" "))),
         _ => Ok(None),
     }
+}
+
+fn is_supported_command(command: Option<&str>) -> bool {
+    matches!(
+        command,
+        Some("session" | "synthesize" | "voices" | "models" | "benchmark")
+    )
 }
 
 fn help_for(topic: &[&str]) -> Option<&'static str> {
