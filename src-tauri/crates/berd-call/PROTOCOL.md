@@ -333,11 +333,11 @@ cancellation and shutdown terminals.
 always correlates a result with its parent request; `cancel` uses the originating
 `prepare_speak.id` as that request ID. `cancel_result` is emitted first. A
 live held target then emits `not_admitted(cancelled)`; a live admitted target
-then emits `speech_interrupted`. `spoken_through_utf8` is Berd Voice's conservative UTF-8 byte boundary through the last fully played word; hosts may use it to distinguish the estimated spoken prefix from the unspoken suffix without recreating delivery policy. Repeated or unknown cancellation is stale.
+then emits `speech_interrupted`. `spoken_through_utf8` is the runtime's conservative UTF-8 byte boundary through the last fully played word; hosts may use it to distinguish the estimated spoken prefix from the unspoken suffix without recreating delivery policy. Repeated or unknown cancellation is stale.
 `cancel_speech.speech_id` targets active output directly, including autonomous
 Spokesperson output that has no originating `prepare_speak`. Its correlated
 `cancel_result.id` echoes the `cancel_speech.id`, while `cancel_result.speech_id`
-names the targeted speech. The result is emitted before Berd Voice requests
+names the targeted speech. The result is emitted before the runtime requests
 the host's quiescent `audio_cancelled` barrier.
 Every speech event carries the originating prepare ID. `speech_started` appears
 only after the first PCM Chunk is accepted by the host, and exactly one terminal

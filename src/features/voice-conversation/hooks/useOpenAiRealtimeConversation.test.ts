@@ -911,7 +911,7 @@ afterEach(async () => {
 });
 
 describe("useOpenAiRealtimeConversation lifecycle", () => {
-  it("queues live voice settings through the managed Berd Voice runtime", async () => {
+  it("queues live voice settings through the managed call runtime", async () => {
     const owner = renderConversation("session-a");
 
     await act(async () => owner.result.current.onToggle());
