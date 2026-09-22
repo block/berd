@@ -295,9 +295,11 @@ impl FileSessionCredentialStorage {
         result
     }
 
-    /// Writes the full document to a temporary sibling, restricts it, then
-    /// renames it over the store. Readers therefore see either the previous or
-    /// the new complete document, never a truncated or half-written one.
+    /// Writes the full document to a private temporary sibling, then renames
+    /// it over the store. The temporary file is restricted to the current
+    /// user before any credential bytes reach it, so no other principal can
+    /// observe the document at any point, and readers see either the previous
+    /// or the new complete document, never a truncated or half-written one.
     fn write_entries(&self, entries: &BTreeMap<String, StoredSessionCredential>) -> Result<()> {
         let parent = self.parent_dir();
         fs::create_dir_all(&parent).with_context(|| format!("create {}", parent.display()))?;
@@ -320,8 +322,13 @@ impl FileSessionCredentialStorage {
     }
 
     fn replace_with(&self, temp_path: &Path, json: &[u8]) -> Result<()> {
-        fs::write(temp_path, json).with_context(|| format!("write {}", temp_path.display()))?;
-        restrict_permissions(temp_path)?;
+        use std::io::Write;
+        let mut file = create_private_file(temp_path)?;
+        file.write_all(json)
+            .with_context(|| format!("write {}", temp_path.display()))?;
+        file.sync_all()
+            .with_context(|| format!("flush {}", temp_path.display()))?;
+        drop(file);
         fs::rename(temp_path, &self.path).with_context(|| {
             format!(
                 "replace {} with {}",
@@ -484,6 +491,31 @@ fn parse_stored_session(value: &str) -> Result<StoredSessionCredential> {
             expires_at: None,
         }),
     }
+}
+
+/// Creates `path` as a new, empty file that only the current user can read
+/// and returns the open handle. On Unix the 0600 mode is part of the create
+/// call, so the process umask never gets a say; on Windows the file is
+/// created empty, its ACL is reset with `icacls` while it still holds no
+/// bytes, and only then is the handle handed back for writing. Fails if
+/// `path` already exists, so a stale temporary file is never reused.
+fn create_private_file(path: &Path) -> Result<fs::File> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options
+        .open(path)
+        .with_context(|| format!("create {}", path.display()))?;
+    if let Err(error) = restrict_permissions(path) {
+        drop(file);
+        let _ = fs::remove_file(path);
+        return Err(error);
+    }
+    Ok(file)
 }
 
 /// Makes the credential file readable by the current user only: mode 0600 on
@@ -1057,25 +1089,82 @@ mod tests {
             )
             .expect("store credential");
 
-        let output = std::process::Command::new("icacls")
-            .arg(&path)
-            .output()
-            .expect("icacls lists the ACL");
-        let listing = String::from_utf8_lossy(&output.stdout);
-        let aces: Vec<&str> = listing.lines().filter(|line| line.contains(":(")).collect();
-        let user = std::env::var("USERNAME").expect("USERNAME");
+        assert_private(&path, "credential store");
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    /// Asserts that only the current user can access `path`: mode 0600 on
+    /// Unix, a single access entry naming `%USERNAME%` on Windows.
+    fn assert_private(path: &Path, what: &str) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(path).expect("metadata").permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "{what} must be mode 0600, got {mode:o}");
+        }
+        #[cfg(windows)]
+        {
+            let output = std::process::Command::new("icacls")
+                .arg(path)
+                .output()
+                .expect("icacls lists the ACL");
+            let listing = String::from_utf8_lossy(&output.stdout);
+            let aces: Vec<&str> = listing.lines().filter(|line| line.contains(":(")).collect();
+            let user = std::env::var("USERNAME").expect("USERNAME");
+            assert_eq!(
+                aces.len(),
+                1,
+                "{what}: exactly one access entry expected:\n{listing}"
+            );
+            assert!(
+                aces[0].to_lowercase().contains(&user.to_lowercase()),
+                "{what}: the only access entry must be the current user:\n{listing}"
+            );
+            assert!(
+                !listing.contains("BUILTIN\\") && !listing.contains("NT AUTHORITY\\"),
+                "{what}: inherited entries must be gone:\n{listing}"
+            );
+        }
+        #[cfg(not(any(unix, windows)))]
+        let _ = (path, what);
+    }
+
+    #[test]
+    fn private_temp_file_is_restricted_before_any_bytes_are_written() {
+        use std::io::Write;
+        let directory = scratch_dir("private-temp");
+        fs::create_dir_all(&directory).expect("scratch dir");
+        let path = directory.join(".sessions.json.tmp-test");
+
+        let mut file = create_private_file(&path).expect("create private file");
         assert_eq!(
-            aces.len(),
-            1,
-            "exactly one access entry expected:\n{listing}"
+            fs::metadata(&path).expect("metadata").len(),
+            0,
+            "the file must be private before it holds any bytes"
         );
-        assert!(
-            aces[0].to_lowercase().contains(&user.to_lowercase()),
-            "the only access entry must be the current user:\n{listing}"
-        );
-        assert!(
-            !listing.contains("BUILTIN\\") && !listing.contains("NT AUTHORITY\\"),
-            "inherited entries must be gone:\n{listing}"
+        assert_private(&path, "empty temporary file");
+
+        file.write_all(b"{\"secret\":true}").expect("write");
+        file.sync_all().expect("sync");
+        drop(file);
+        assert_private(&path, "written temporary file");
+        assert_eq!(fs::read(&path).expect("read"), b"{\"secret\":true}");
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn private_temp_file_never_reuses_an_existing_path() {
+        let directory = scratch_dir("private-temp-existing");
+        fs::create_dir_all(&directory).expect("scratch dir");
+        let path = directory.join("existing");
+        fs::write(&path, b"stale").expect("seed");
+
+        let error = create_private_file(&path).expect_err("an existing path must be refused");
+        assert!(error.to_string().contains("create"), "{error}");
+        assert_eq!(
+            fs::read(&path).expect("read"),
+            b"stale",
+            "the existing file is left untouched"
         );
         let _ = fs::remove_dir_all(directory);
     }
