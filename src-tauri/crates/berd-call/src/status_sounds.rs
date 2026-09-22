@@ -146,7 +146,7 @@ impl StatusSoundRuntime {
         if conversation_active {
             self.stop();
         } else if self.conversation_active {
-            self.next_tick = Some(Instant::now());
+            self.next_tick = Some(Instant::now() + STATUS_SOUND_INTERVAL);
         }
         self.conversation_active = conversation_active;
         if conversation_active {
@@ -171,7 +171,10 @@ impl StatusSoundRuntime {
 
 enum StatusSoundCommand {
     Update(ConversationStatus, StatusSoundSettings),
-    ConversationActive(bool),
+    ConversationActive {
+        active: bool,
+        applied: Option<Sender<Result<(), String>>>,
+    },
     OutputDevice(Option<String>),
     Shutdown,
 }
@@ -185,6 +188,29 @@ pub struct ManagedStatusSoundRuntime {
 struct StatusSoundWorker {
     commands: Sender<StatusSoundCommand>,
     worker: Mutex<Option<thread::JoinHandle<()>>>,
+    activity: Mutex<StatusSoundActivityState>,
+}
+
+#[derive(Debug, Default)]
+struct StatusSoundActivityState {
+    explicit_active: bool,
+    guards: usize,
+}
+
+impl StatusSoundActivityState {
+    fn is_active(&self) -> bool {
+        self.explicit_active || self.guards > 0
+    }
+}
+
+/// A scoped conversation-activity claim that suppresses status cues until dropped.
+///
+/// Hosts use one guard per independently active user- or assistant-audio source.
+/// The shared runtime combines overlapping claims and only resumes cues after the
+/// final claim ends.
+#[must_use = "status sounds resume when the activity guard is dropped"]
+pub struct StatusSoundActivityGuard {
+    worker: Arc<StatusSoundWorker>,
 }
 
 impl ManagedStatusSoundRuntime {
@@ -205,23 +231,30 @@ impl ManagedStatusSoundRuntime {
                 runtime.set_output_device(output_device);
                 runtime.set_input_controls(input_controls);
                 loop {
-                    match receiver.recv_timeout(Duration::from_millis(10)) {
+                    let applied = match receiver.recv_timeout(Duration::from_millis(10)) {
                         Ok(StatusSoundCommand::Update(status, settings)) => {
                             runtime.update(status, settings);
+                            None
                         }
-                        Ok(StatusSoundCommand::ConversationActive(active)) => {
+                        Ok(StatusSoundCommand::ConversationActive { active, applied }) => {
                             conversation_active = active;
+                            applied
                         }
                         Ok(StatusSoundCommand::OutputDevice(device)) => {
                             runtime.set_output_device(device);
+                            None
                         }
                         Ok(StatusSoundCommand::Shutdown) | Err(RecvTimeoutError::Disconnected) => {
                             runtime.stop();
                             break;
                         }
-                        Err(RecvTimeoutError::Timeout) => {}
+                        Err(RecvTimeoutError::Timeout) => None,
+                    };
+                    let poll_result = runtime.poll(conversation_active).map(|_| ());
+                    if let Some(applied) = applied {
+                        let _ = applied.send(poll_result.clone());
                     }
-                    if let Err(message) = runtime.poll(conversation_active) {
+                    if let Err(message) = poll_result {
                         eprintln!("status sound playback disabled: {message}");
                     }
                 }
@@ -231,6 +264,7 @@ impl ManagedStatusSoundRuntime {
             inner: Arc::new(StatusSoundWorker {
                 commands,
                 worker: Mutex::new(Some(worker)),
+                activity: Mutex::new(StatusSoundActivityState::default()),
             }),
         })
     }
@@ -245,7 +279,47 @@ impl ManagedStatusSoundRuntime {
     }
 
     pub fn set_conversation_active(&self, active: bool) -> Result<(), String> {
-        self.send(StatusSoundCommand::ConversationActive(active))
+        let mut activity = self
+            .inner
+            .activity
+            .lock()
+            .map_err(|_| "Status sound activity state is unavailable".to_string())?;
+        let previous = activity.is_active();
+        let previous_explicit = activity.explicit_active;
+        activity.explicit_active = active;
+        let current = activity.is_active();
+        if previous != current {
+            if let Err(error) = self.apply_conversation_active(current) {
+                activity.explicit_active = previous_explicit;
+                let _ = self.send_conversation_active(previous, None);
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn begin_conversation_activity(&self) -> Result<StatusSoundActivityGuard, String> {
+        let mut activity = self
+            .inner
+            .activity
+            .lock()
+            .map_err(|_| "Status sound activity state is unavailable".to_string())?;
+        let was_active = activity.is_active();
+        activity.guards = activity
+            .guards
+            .checked_add(1)
+            .ok_or_else(|| "Too many overlapping status sound activity guards".to_string())?;
+        if !was_active {
+            if let Err(error) = self.apply_conversation_active(true) {
+                activity.guards -= 1;
+                let _ = self.send_conversation_active(activity.is_active(), None);
+                return Err(error);
+            }
+        }
+        drop(activity);
+        Ok(StatusSoundActivityGuard {
+            worker: Arc::clone(&self.inner),
+        })
     }
 
     pub fn set_output_device(&self, output_device: Option<String>) -> Result<(), String> {
@@ -257,6 +331,22 @@ impl ManagedStatusSoundRuntime {
             .commands
             .send(command)
             .map_err(|_| "Status sound runtime is unavailable".to_string())
+    }
+
+    fn apply_conversation_active(&self, active: bool) -> Result<(), String> {
+        let (applied, acknowledgement) = mpsc::channel();
+        self.send_conversation_active(active, Some(applied))?;
+        acknowledgement
+            .recv_timeout(Duration::from_secs(2))
+            .map_err(|_| "Status sound activity update timed out".to_string())?
+    }
+
+    fn send_conversation_active(
+        &self,
+        active: bool,
+        applied: Option<Sender<Result<(), String>>>,
+    ) -> Result<(), String> {
+        self.send(StatusSoundCommand::ConversationActive { active, applied })
     }
 
     pub fn finish(&self) -> Result<(), String> {
@@ -281,6 +371,23 @@ impl ManagedStatusSoundRuntime {
                 .map_err(|_| "Status sound worker panicked".to_string())?;
         }
         Ok(())
+    }
+}
+
+impl Drop for StatusSoundActivityGuard {
+    fn drop(&mut self) {
+        let Ok(mut activity) = self.worker.activity.lock() else {
+            return;
+        };
+        debug_assert!(activity.guards > 0);
+        activity.guards = activity.guards.saturating_sub(1);
+        if !activity.is_active() {
+            let command = StatusSoundCommand::ConversationActive {
+                active: false,
+                applied: None,
+            };
+            let _ = self.worker.commands.send(command);
+        }
     }
 }
 
@@ -344,7 +451,7 @@ struct ActiveStatusSound {
 struct StatusSoundPlayer {
     working: Result<StatusSoundAsset, String>,
     waiting: Result<StatusSoundAsset, String>,
-    active: Vec<ActiveStatusSound>,
+    active: Option<ActiveStatusSound>,
 }
 
 #[cfg(target_os = "macos")]
@@ -353,7 +460,7 @@ impl StatusSoundPlayer {
         Self {
             working: load_system_sound("Pop"),
             waiting: load_system_sound("Purr"),
-            active: Vec::new(),
+            active: None,
         }
     }
 
@@ -363,6 +470,10 @@ impl StatusSoundPlayer {
         output_device: Option<&str>,
         input_controls: Option<&crate::input::VoiceInputControls>,
     ) -> Result<(), String> {
+        self.reap();
+        if self.active.is_some() {
+            return Ok(());
+        }
         let asset = match cue.status {
             ConversationStatus::Working => &self.working,
             ConversationStatus::Waiting => &self.waiting,
@@ -388,7 +499,7 @@ impl StatusSoundPlayer {
             })
             .transpose()?;
         player.enqueue(&samples)?;
-        self.active.push(ActiveStatusSound {
+        self.active = Some(ActiveStatusSound {
             player,
             output_tail_deadline: None,
             _input_activity: input_activity,
@@ -398,24 +509,27 @@ impl StatusSoundPlayer {
 
     fn reap(&mut self) {
         let now = Instant::now();
-        self.active.retain_mut(|sound| {
+        let should_clear = self.active.as_mut().is_some_and(|sound| {
             if !sound.player.is_empty() {
                 sound.output_tail_deadline = None;
-                return true;
+                return false;
             }
             let deadline = sound
                 .output_tail_deadline
                 .get_or_insert(now + STATUS_SOUND_OUTPUT_TAIL);
-            now < *deadline
+            now >= *deadline
         });
+        if should_clear {
+            self.active = None;
+        }
     }
 
     fn is_active(&self) -> bool {
-        !self.active.is_empty()
+        self.active.is_some()
     }
 
     fn stop(&mut self) {
-        for sound in self.active.drain(..) {
+        if let Some(sound) = self.active.take() {
             sound.player.stop();
         }
     }
@@ -478,6 +592,7 @@ mod tests {
             inner: Arc::new(StatusSoundWorker {
                 commands,
                 worker: Mutex::new(Some(worker)),
+                activity: Mutex::new(StatusSoundActivityState::default()),
             }),
         };
         drop(runtime);
@@ -564,7 +679,7 @@ mod tests {
     }
 
     #[test]
-    fn resuming_after_conversation_audio_schedules_cue_immediately() {
+    fn resuming_after_conversation_audio_restarts_the_full_cadence() {
         let mut runtime = StatusSoundRuntime::default();
         runtime.update(
             ConversationStatus::Working,
@@ -573,7 +688,12 @@ mod tests {
         assert!(!runtime.poll(true).unwrap());
         runtime.next_tick = Some(Instant::now() + Duration::from_secs(60));
         let _ = runtime.poll(false);
-        assert!(runtime.next_tick.unwrap() < Instant::now() + STATUS_SOUND_INTERVAL);
+        let remaining = runtime
+            .next_tick
+            .unwrap()
+            .saturating_duration_since(Instant::now());
+        assert!(remaining > STATUS_SOUND_INTERVAL - Duration::from_millis(100));
+        assert!(remaining <= STATUS_SOUND_INTERVAL);
     }
 
     #[test]
@@ -623,10 +743,28 @@ mod tests {
         assert!(runtime.next_tick.unwrap() <= Instant::now());
     }
 
+    #[test]
+    fn activity_guards_keep_cues_suppressed_until_every_owner_finishes() {
+        let runtime = ManagedStatusSoundRuntime::spawn(None).unwrap();
+        let first = runtime.begin_conversation_activity().unwrap();
+        let second = runtime.begin_conversation_activity().unwrap();
+        assert!(runtime.inner.activity.lock().unwrap().is_active());
+
+        drop(first);
+        assert!(runtime.inner.activity.lock().unwrap().is_active());
+        runtime.set_conversation_active(true).unwrap();
+        drop(second);
+        assert!(runtime.inner.activity.lock().unwrap().is_active());
+
+        runtime.set_conversation_active(false).unwrap();
+        assert!(!runtime.inner.activity.lock().unwrap().is_active());
+        runtime.finish().unwrap();
+    }
+
     #[cfg(target_os = "macos")]
     #[test]
     #[ignore = "opens the default CoreAudio output and plays the macOS Pop and Purr cues"]
-    fn macos_player_decodes_and_queues_both_status_cues() {
+    fn macos_player_keeps_only_one_status_cue_in_flight() {
         let mut player = StatusSoundPlayer::new();
         let controls = crate::input::VoiceInputControls::default();
         for status in [ConversationStatus::Working, ConversationStatus::Waiting] {
@@ -641,7 +779,7 @@ mod tests {
                 )
                 .unwrap();
         }
-        assert_eq!(player.active.len(), 2);
+        assert!(player.active.is_some());
         assert!(controls.is_muted());
         player.stop();
         assert!(!controls.is_muted());
