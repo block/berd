@@ -532,6 +532,9 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Some("voices" | "models") if args.get(2).is_some_and(|value| is_help_flag(value)) => {
+            help_and_exit(&args)
+        }
         Some("voices" | "models") => {
             let command = parse_or_exit(parse_management_args(&args), &args);
             let operation = command.operation();
