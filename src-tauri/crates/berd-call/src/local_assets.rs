@@ -9,7 +9,7 @@ use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
-const LOCK_FILE: &str = ".berd-voice-assets.lock";
+const LOCK_FILE: &str = ".berd-call-assets.lock";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
 const TOTAL_TIMEOUT: Duration = Duration::from_secs(30 * 60);

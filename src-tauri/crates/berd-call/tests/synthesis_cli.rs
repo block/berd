@@ -2,15 +2,15 @@ use std::process::Command;
 
 use serde_json::Value;
 
-fn berd_voice(args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_berd-voice"))
+fn berd_call(args: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_berd-call"))
         .args(args)
         .env_remove("OPENAI_API_KEY")
         .env_remove("OPENAI_BASE_URL")
         .env_remove("OPENAI_TTS_MODEL")
         .env_remove("OPENAI_TTS_VOICE")
         .output()
-        .expect("run berd-voice")
+        .expect("run berd-call")
 }
 
 fn terminal(output: &std::process::Output) -> Value {
@@ -65,7 +65,7 @@ fn synthesis_usage_errors_are_exit_two_and_emit_no_json() {
             "-",
         ],
     ] {
-        let output = berd_voice(&args);
+        let output = berd_call(&args);
         assert_eq!(output.status.code(), Some(2), "{args:?}");
         assert!(output.stdout.is_empty(), "{args:?}");
         assert!(String::from_utf8_lossy(&output.stderr).contains("usage:"));
@@ -77,7 +77,7 @@ fn existing_output_fails_before_openai_credentials_or_any_request() {
     let directory = tempfile::tempdir().expect("temporary directory");
     let path = directory.path().join("owned.wav");
     std::fs::write(&path, b"owned").expect("write target");
-    let output = berd_voice(&[
+    let output = berd_call(&[
         "synthesize",
         "--tts-backend",
         "openai",
@@ -105,7 +105,7 @@ fn existing_output_fails_before_openai_credentials_or_any_request() {
 fn missing_openai_key_is_one_sanitized_terminal_and_leaves_no_artifact() {
     let directory = tempfile::tempdir().expect("temporary directory");
     let path = directory.path().join("voice.wav");
-    let output = berd_voice(&[
+    let output = berd_call(&[
         "synthesize",
         "--tts-backend",
         "openai",

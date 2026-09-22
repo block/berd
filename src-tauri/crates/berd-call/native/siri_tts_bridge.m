@@ -297,7 +297,7 @@ typedef void (^BerdAudioHandler)(
 @end
 
 /// Stateful sirittsd packet decoder. Both the app-owned streaming player and
-/// the standalone berd-voice session use this one normalization path.
+/// the standalone berd-call session use this one normalization path.
 @interface BerdSiriAudioDecoder : NSObject
 @property(nonatomic, strong) AVAudioConverter *opusConverter;
 @property(nonatomic, strong) AVAudioFormat *opusSourceFormat;

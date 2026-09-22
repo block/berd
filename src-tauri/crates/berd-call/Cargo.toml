@@ -1,15 +1,15 @@
 [package]
-name = "berd-voice"
+name = "berd-call"
 version = "0.1.0"
 edition = "2021"
 # Rust sources are Apache-2.0; the embedded LibriSpeech benchmark fixture is
 # CC-BY-4.0 and carries its attribution notice in every benchmark report.
 license = "Apache-2.0 AND CC-BY-4.0"
 repository = "https://github.com/block/berd"
-description = "Device-local voice primitives for Berd"
+description = "Reusable voice-call runtime and CLI for Berd"
 
 [[bin]]
-name = "berd-voice"
+name = "berd-call"
 path = "src/main.rs"
 
 [features]

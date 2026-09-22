@@ -8,7 +8,7 @@ version = "0.6.4"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
- "berd-voice",
+ "berd-call",
  "block2",
  "builderbot-auth",
  "bytes",
@@ -590,7 +590,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "berd-voice"
+name = "berd-call"
 version = "0.1.0"
 dependencies = [
  "audioadapter-buffers",

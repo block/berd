@@ -986,7 +986,7 @@ mod tests {
     #[test]
     #[cfg(target_os = "macos")]
     fn exact_uninstalled_voice_is_rejected_without_synthesis() {
-        let error = SiriTts::new("en-US", "__berd_voice_does_not_exist__", 1.0).unwrap_err();
+        let error = SiriTts::new("en-US", "__berd_call_does_not_exist__", 1.0).unwrap_err();
         assert!(error.contains("not installed") || error.contains("validating Siri voice"));
     }
 

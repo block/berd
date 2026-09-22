@@ -58,7 +58,7 @@ impl ExpertSpokespersonTestSession {
         let (mut command, _pcm, audio_host) = session_command();
         if let Some(renew_after_ms) = renew_after_ms {
             command.env(
-                "BERD_VOICE_REALTIME_RENEW_AFTER_MS",
+                "BERD_CALL_REALTIME_RENEW_AFTER_MS",
                 renew_after_ms.to_string(),
             );
         }
@@ -272,7 +272,7 @@ fn session_command() -> (Command, File, UnixStream) {
     let source_fd = unsafe { libc::fcntl(pcm.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 64) };
     assert!(source_fd >= 64);
     let inherited = unsafe { File::from_raw_fd(source_fd) };
-    let mut command = Command::new(env!("CARGO_BIN_EXE_berd-voice"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_berd-call"));
     command.args(["session", "--pcm-output-fd", "9"]);
     unsafe {
         command.pre_exec(move || {
@@ -393,7 +393,7 @@ fn session_rejects_a_read_only_pcm_descriptor_before_hello() {
     let source_fd = unsafe { libc::fcntl(read.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 64) };
     assert!(source_fd >= 64);
     let read_guard = unsafe { File::from_raw_fd(source_fd) };
-    let mut command = Command::new(env!("CARGO_BIN_EXE_berd-voice"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_berd-call"));
     command
         .args(["session", "--pcm-output-fd", "9", "--tts-backend", "openai"])
         .env("OPENAI_API_KEY", "test-key-not-used")
@@ -420,10 +420,8 @@ fn session_rejects_a_read_only_pcm_descriptor_before_hello() {
 
 #[test]
 fn framed_hello_reports_input_initialization_failure_before_ready() {
-    let missing = std::env::temp_dir().join(format!(
-        "berd-voice-missing-parakeet-{}",
-        std::process::id()
-    ));
+    let missing =
+        std::env::temp_dir().join(format!("berd-call-missing-parakeet-{}", std::process::id()));
     assert!(!missing.exists(), "test path must remain absent");
     let (mut command, _pcm, _host) = session_command();
     let mut child = command

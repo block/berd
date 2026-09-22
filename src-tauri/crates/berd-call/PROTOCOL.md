@@ -1,6 +1,6 @@
-# berd-voice session protocol
+# berd-call session protocol
 
-`berd-voice session` is a development, full-authority voice session. The child
+`berd-call session` is a development, full-authority voice session. The child
 owns speech recognition, finalized-input order, confirmation, speak admission,
 synthesis, source-frame delivery, playback lifecycle, and barge-in. The parent
 owns capture and conversational playback devices: it writes normalized microphone PCM on
@@ -14,13 +14,13 @@ flushed JSONL events to stdout. Diagnostics go only to stderr.
 The child selects closed TTS and STT backends at startup:
 
 ```text
-berd-voice session --pcm-output-fd FD [--tts-backend siri] --voice NAME --language BCP47 [--rate 0.5..2.0]
-berd-voice session --pcm-output-fd FD --tts-backend openai [--rate 0.75..2.0]
-berd-voice session --pcm-output-fd FD --tts-backend pocket --model-dir ABS --voice ID [--rate 0.75..2.0]
+berd-call session --pcm-output-fd FD [--tts-backend siri] --voice NAME --language BCP47 [--rate 0.5..2.0]
+berd-call session --pcm-output-fd FD --tts-backend openai [--rate 0.75..2.0]
+berd-call session --pcm-output-fd FD --tts-backend pocket --model-dir ABS --voice ID [--rate 0.75..2.0]
 
-berd-voice session [--stt-backend macos]
-berd-voice session --stt-backend parakeet --stt-model-dir ABS
-berd-voice session --stt-backend openai
+berd-call session [--stt-backend macos]
+berd-call session --stt-backend parakeet --stt-model-dir ABS
+berd-call session --stt-backend openai
 ```
 
 Siri TTS and macOS STT are the defaults. Siri selection is exact and requires

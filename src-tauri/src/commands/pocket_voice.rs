@@ -11,19 +11,19 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
-use berd_voice::input::InputDuringTtsPolicy;
-use berd_voice::local_assets::{self, LocalAssetRoots, LocalInstallPhase};
+use berd_call::input::InputDuringTtsPolicy;
+use berd_call::local_assets::{self, LocalAssetRoots, LocalInstallPhase};
 #[cfg(any(test, target_os = "macos"))]
-use berd_voice::DeliveryProgress as VoiceDeliveryProgress;
+use berd_call::DeliveryProgress as VoiceDeliveryProgress;
 #[cfg(target_os = "macos")]
-use berd_voice::SAMPLE_RATE;
+use berd_call::SAMPLE_RATE;
 #[cfg(target_os = "macos")]
-use berd_voice::{
+use berd_call::{
     load_pocket_voice_style, load_text_to_speech, ConfiguredTtsSlot, DrainPolicy,
     DrainTimeoutOutcome, OutboundFailure, OutboundOutcome, OutboundPlayback, StreamingTextChunk,
     StreamingTtsText, TtsBackend, TtsConfiguration,
 };
-use berd_voice::{parakeet_assets, pocket_assets};
+use berd_call::{parakeet_assets, pocket_assets};
 #[cfg(target_os = "macos")]
 use objc2_core_audio::{
     kAudioDevicePropertyScopeOutput, kAudioDevicePropertyStreams, kAudioDeviceTransportTypeBuiltIn,
@@ -46,7 +46,7 @@ use super::{
 };
 use crate::services::atomic_file::write_bytes_atomically;
 #[cfg(target_os = "macos")]
-use berd_voice::PocketAudioPlayer;
+use berd_call::PocketAudioPlayer;
 
 const CACHE_VERSION: &str = pocket_assets::MODEL_ID;
 const POCKET_EVENT: &str = "pocket-voice:event";
@@ -2165,7 +2165,7 @@ fn pocket_native_drain_timeout(
 ) -> Duration {
     let remaining_source_frames = total_source_frames.saturating_sub(completed_source_frames);
     let remaining_playback_seconds =
-        remaining_source_frames as f64 / f64::from(berd_voice::SAMPLE_RATE) / f64::from(rate);
+        remaining_source_frames as f64 / f64::from(berd_call::SAMPLE_RATE) / f64::from(rate);
     Duration::from_secs_f64(remaining_playback_seconds)
         .saturating_add(POCKET_SOURCE_COMPLETION_TIMEOUT)
 }
@@ -2354,7 +2354,7 @@ fn synthesize_and_stream(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use berd_voice::DeliverySegment as VoiceDeliverySegment;
+    use berd_call::DeliverySegment as VoiceDeliverySegment;
 
     #[test]
     fn playback_snapshots_speed_when_the_utterance_begins() {
@@ -2373,7 +2373,7 @@ mod tests {
     #[test]
     fn failed_stream_retains_only_delivery_with_played_audio() {
         let progress = VoiceDeliveryProgress {
-            sample_rate: berd_voice::SAMPLE_RATE,
+            sample_rate: berd_call::SAMPLE_RATE,
             segments: vec![VoiceDeliverySegment {
                 text: "Partly heard.".to_string(),
                 played_frames: 1_200,
@@ -2390,7 +2390,7 @@ mod tests {
         );
 
         let unheard = VoiceDeliveryProgress {
-            sample_rate: berd_voice::SAMPLE_RATE,
+            sample_rate: berd_call::SAMPLE_RATE,
             segments: vec![VoiceDeliverySegment {
                 text: "Not heard.".to_string(),
                 played_frames: 0,

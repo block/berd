@@ -50,7 +50,7 @@ pub struct SttBenchmarkTarget {
 pub struct SttBenchmarkEnvironment {
     pub os: String,
     pub architecture: String,
-    pub berd_voice_version: String,
+    pub berd_call_version: String,
 }
 
 impl Default for SttBenchmarkEnvironment {
@@ -58,7 +58,7 @@ impl Default for SttBenchmarkEnvironment {
         Self {
             os: std::env::consts::OS.to_string(),
             architecture: std::env::consts::ARCH.to_string(),
-            berd_voice_version: env!("CARGO_PKG_VERSION").to_string(),
+            berd_call_version: env!("CARGO_PKG_VERSION").to_string(),
         }
     }
 }

@@ -1,13 +1,13 @@
-use berd_voice::openai_realtime_protocol::{
+use berd_call::openai_realtime_protocol::{
     expert_session_instructions, realtime_transcript_seed_events, RealtimeCoordinatorResult,
     RealtimeExpertDelivery, RealtimeExpertSpokespersonSession, RealtimeExpertTurnCompletion,
     RealtimePipeExchange, RealtimeSessionReduction, RealtimeSpokespersonSessionOptions,
     RealtimeTranscriptSeedTurn,
 };
-use berd_voice::openai_spokesperson::{OpenAiSpokespersonConfig, SpokespersonCommand};
-use berd_voice::realtime_host::ManagedRealtimeHost;
-use berd_voice::spokesperson_voice_update::VoiceUpdateRequest;
-use berd_voice::{TtsConfigurationSnapshot, TtsSettings};
+use berd_call::openai_spokesperson::{OpenAiSpokespersonConfig, SpokespersonCommand};
+use berd_call::realtime_host::ManagedRealtimeHost;
+use berd_call::spokesperson_voice_update::VoiceUpdateRequest;
+use berd_call::{TtsConfigurationSnapshot, TtsSettings};
 use serde::Serialize;
 use serde_json::json;
 use std::{
@@ -33,7 +33,7 @@ pub struct OpenAiRealtimeRuntimeState {
 struct NativeRealtimeRuntime {
     owner_window: String,
     runtime: Arc<ManagedRealtimeHost>,
-    status_sounds: Option<berd_voice::ManagedStatusSoundRuntime>,
+    status_sounds: Option<berd_call::ManagedStatusSoundRuntime>,
     protocol: RealtimeExpertSpokespersonSession,
     semantic_revision: Arc<AtomicU64>,
 }
@@ -130,7 +130,7 @@ pub fn start_openai_realtime_spokesperson_runtime(
     let event_window = webview_window.clone();
     let event_session_id = session_id.clone();
     let status_sounds =
-        berd_voice::ManagedStatusSoundRuntime::spawn(super::pocket_voice::selected_output_device())
+        berd_call::ManagedStatusSoundRuntime::spawn(super::pocket_voice::selected_output_device())
             .map_err(|error| log::warn!("Status sounds unavailable: {error}"))
             .ok();
     let runtime_status_sounds = status_sounds.clone();
@@ -177,8 +177,8 @@ fn ensure_native_realtime_playback_supported() -> Result<(), String> {
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RealtimeStatusSoundUpdate {
-    status: berd_voice::ConversationStatus,
-    settings: berd_voice::StatusSoundSettings,
+    status: berd_call::ConversationStatus,
+    settings: berd_call::StatusSoundSettings,
 }
 
 #[tauri::command]
@@ -472,7 +472,7 @@ impl RealtimeStatusSoundActivity {
 }
 
 fn update_realtime_status_sound_activity(
-    status_sounds: Option<&berd_voice::ManagedStatusSoundRuntime>,
+    status_sounds: Option<&berd_call::ManagedStatusSoundRuntime>,
     event: &serde_json::Value,
     activity: &mut RealtimeStatusSoundActivity,
 ) {
@@ -504,13 +504,13 @@ fn emit_runtime_provider_event(
 }
 
 #[cfg(target_os = "macos")]
-fn create_native_realtime_output() -> Result<Box<dyn berd_voice::PcmAudioOutput>, String> {
-    berd_voice::PocketAudioPlayer::new(24_000, 1.0, None)
-        .map(|output| Box::new(output) as Box<dyn berd_voice::PcmAudioOutput>)
+fn create_native_realtime_output() -> Result<Box<dyn berd_call::PcmAudioOutput>, String> {
+    berd_call::PocketAudioPlayer::new(24_000, 1.0, None)
+        .map(|output| Box::new(output) as Box<dyn berd_call::PcmAudioOutput>)
 }
 
 #[cfg(not(target_os = "macos"))]
-fn create_native_realtime_output() -> Result<Box<dyn berd_voice::PcmAudioOutput>, String> {
+fn create_native_realtime_output() -> Result<Box<dyn berd_call::PcmAudioOutput>, String> {
     Err("Native OpenAI Realtime playback is not supported on this platform".into())
 }
 
@@ -543,7 +543,7 @@ pub fn deliver_openai_realtime_expert_message(
     session_id: String,
     cursor: u64,
     message: String,
-    mode: berd_voice::openai_realtime_protocol::RealtimeExpertMessageMode,
+    mode: berd_call::openai_realtime_protocol::RealtimeExpertMessageMode,
     resolved_handoff_ids: Vec<String>,
 ) -> Result<serde_json::Value, String> {
     let session_id = non_empty_session_id(session_id)?;
