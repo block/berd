@@ -1,3 +1,5 @@
+Stop: bb-cli code is being migrated to [builderlab-cli](https://github.com/block/builderlab-cli). Please make all updates over there.
+
 # bb-cli
 
 `bb-cli` packages Rust-powered CLI binaries for BuilderBot/kgoose workflows
