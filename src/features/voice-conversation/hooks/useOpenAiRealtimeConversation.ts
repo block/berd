@@ -1170,7 +1170,6 @@ class OpenAiRealtimeConversationRuntime {
       ).catch(() => undefined);
     }
     await this.realtimeProtocolQueue.catch(() => undefined);
-    await this.realtimeRuntimeSendQueue.catch(() => undefined);
     const flushedPendingEvents =
       (await this.flushPendingExpertEvents?.()) ?? false;
     if (flushedPendingEvents) {

@@ -687,54 +687,58 @@ impl RealtimeProtocolReducer {
         let pending = self.pending_spokesperson_transcripts.remove(response_id);
         let mut events = Vec::new();
         if let Some(pending) = pending {
-            let mut text = combined_spokesperson_transcript(&pending, !interrupted);
-            let evidence = if interrupted {
-                let played_audio_frames = event.get("played_audio_frames").and_then(Value::as_u64);
-                let total_audio_frames = event.get("total_audio_frames").and_then(Value::as_u64);
-                let sample_rate = event
-                    .get("sample_rate")
-                    .and_then(Value::as_u64)
-                    .and_then(|value| u32::try_from(value).ok());
-                let input = match (played_audio_frames, total_audio_frames, sample_rate) {
-                    (Some(played_audio_frames), Some(total_audio_frames), Some(sample_rate)) => {
-                        RealtimeInterruptedTranscriptInput::HostPlayedFrames {
-                            text,
-                            audio_parts: Vec::new(),
-                            played_audio_frames,
-                            total_audio_frames,
-                            sample_rate,
-                        }
-                    }
-                    _ => RealtimeInterruptedTranscriptInput::ProviderDelta { text },
-                };
-                let resolved = resolve_interrupted_spokesperson_transcript(input);
-                text = resolved.0;
-                resolved.1
-            } else {
-                RealtimeTranscriptEvidence::ProviderFinal
-            };
-            let no_audio_played =
-                event.get("played_audio_frames").and_then(Value::as_u64) == Some(0);
-            if interrupted && no_audio_played {
+            let no_audio_played = interrupted
+                && event.get("played_audio_frames").and_then(Value::as_u64) == Some(0);
+            if no_audio_played {
                 for item_id in &pending.item_order {
                     self.finalized_item_ids.insert(item_id.clone());
                 }
                 events.push(RealtimeProtocolEvent::TranscriptDiscarded {
                     item_id: pending.display_item_id,
                 });
-            } else if !text.trim().is_empty()
-                && !self.finalized_item_ids.contains(&pending.display_item_id)
-            {
-                for item_id in &pending.item_order {
-                    self.finalized_item_ids.insert(item_id.clone());
+            } else {
+                let mut text = combined_spokesperson_transcript(&pending, !interrupted);
+                let evidence = if interrupted {
+                    let played_audio_frames =
+                        event.get("played_audio_frames").and_then(Value::as_u64);
+                    let total_audio_frames =
+                        event.get("total_audio_frames").and_then(Value::as_u64);
+                    let sample_rate = event
+                        .get("sample_rate")
+                        .and_then(Value::as_u64)
+                        .and_then(|value| u32::try_from(value).ok());
+                    let input = match (played_audio_frames, total_audio_frames, sample_rate) {
+                        (Some(played_audio_frames), Some(total_audio_frames), Some(sample_rate)) => {
+                            RealtimeInterruptedTranscriptInput::HostPlayedFrames {
+                                text,
+                                audio_parts: Vec::new(),
+                                played_audio_frames,
+                                total_audio_frames,
+                                sample_rate,
+                            }
+                        }
+                        _ => RealtimeInterruptedTranscriptInput::ProviderDelta { text },
+                    };
+                    let resolved = resolve_interrupted_spokesperson_transcript(input);
+                    text = resolved.0;
+                    resolved.1
+                } else {
+                    RealtimeTranscriptEvidence::ProviderFinal
+                };
+                if !text.trim().is_empty()
+                    && !self.finalized_item_ids.contains(&pending.display_item_id)
+                {
+                    for item_id in &pending.item_order {
+                        self.finalized_item_ids.insert(item_id.clone());
+                    }
+                    events.push(self.finalized_transcript(
+                        &pending.display_item_id,
+                        RealtimeTranscriptSpeaker::Spokesperson,
+                        text.trim(),
+                        interrupted,
+                        evidence,
+                    ));
                 }
-                events.push(self.finalized_transcript(
-                    &pending.display_item_id,
-                    RealtimeTranscriptSpeaker::Spokesperson,
-                    text.trim(),
-                    interrupted,
-                    evidence,
-                ));
             }
         }
         if interrupted {
@@ -1017,10 +1021,10 @@ impl RealtimeResponseCoordinator {
                 events: vec![item, response],
             });
         }
-        let can_replace_draining_preamble = self.can_replace_draining_preamble();
+        let request_is_next = self.pending_responses.is_empty();
         self.pending_responses
             .push_back(PendingResponse::Say(message));
-        if can_replace_draining_preamble {
+        if request_is_next && self.pending_say_may_replace_active() {
             let mut events = vec![item];
             events.extend(self.finish_active_response()?);
             return Ok(RealtimeCoordinatorResult {
@@ -1154,18 +1158,15 @@ impl RealtimeResponseCoordinator {
                 }
             }
             "response.done" => {
-                let expert_say_is_next = self
-                    .pending_responses
-                    .front()
-                    .is_some_and(|pending| matches!(pending, PendingResponse::Say(_)));
+                let mut response_finished_without_playback = false;
                 if let Some(active) = self.match_active_response(event) {
                     active.generation_done = true;
                     active.succeeded = string_at(event, "/response/status") == Some("completed");
-                    let release_expert_say = active.say.is_none() && expert_say_is_next;
-                    if !active.output_active || release_expert_say {
-                        let events = self.finish_active_response()?;
-                        return Ok(self.take_update(events));
-                    }
+                    response_finished_without_playback = !active.output_active;
+                }
+                if response_finished_without_playback || self.pending_say_may_replace_active() {
+                    let events = self.finish_active_response()?;
+                    return Ok(self.take_update(events));
                 }
             }
             "output_audio_buffer.stopped" | "output_audio_buffer.cleared" => {
@@ -1198,8 +1199,10 @@ impl RealtimeResponseCoordinator {
         }
     }
 
-    fn can_replace_draining_preamble(&self) -> bool {
-        self.pending_responses.is_empty()
+    fn pending_say_may_replace_active(&self) -> bool {
+        self.pending_responses
+            .front()
+            .is_some_and(|pending| matches!(pending, PendingResponse::Say(_)))
             && self.active_response.as_ref().is_some_and(|active| {
                 active.generation_done && active.output_active && active.say.is_none()
             })
@@ -2194,16 +2197,15 @@ mod tests {
                 .as_slice(),
             [RealtimeProtocolEvent::TranscriptUpdated { .. }]
         ));
+        let cleared = json!({
+            "type": "output_audio_buffer.cleared",
+            "response_id": "response-1",
+            "played_audio_frames": 0,
+            "total_audio_frames": 0,
+            "sample_rate": 24_000,
+        });
         assert_eq!(
-            reducer
-                .handle(&json!({
-                    "type": "output_audio_buffer.cleared",
-                    "response_id": "response-1",
-                    "played_audio_frames": 0,
-                    "total_audio_frames": 0,
-                    "sample_rate": 24_000,
-            }))
-                .unwrap(),
+            reducer.handle(&cleared).unwrap(),
             vec![
                 RealtimeProtocolEvent::TranscriptDiscarded {
                     item_id: "assistant-1".into(),
