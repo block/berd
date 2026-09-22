@@ -553,10 +553,8 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        _ => usage_error(
-            "supported commands are session, synthesize, voices, models, benchmark tts, and benchmark stt",
-            &args,
-        ),
+        Some(command) => usage_error(&format!("unrecognized command: {command}"), &args),
+        None => usage_error("a command is required", &args),
     }
 }
 

@@ -60,12 +60,17 @@ fn version_is_successful_and_machine_readable_as_one_line() {
 
 #[test]
 fn unknown_help_topics_remain_usage_errors() {
-    let output = berd_call(&["help", "start"]);
-    assert_eq!(output.status.code(), Some(2));
-    assert!(output.stdout.is_empty());
-    assert!(String::from_utf8(output.stderr)
-        .expect("UTF-8 stderr")
-        .contains("unknown help topic: start"));
+    for args in [vec!["help", "start"], vec!["help", "session", "bogus"]] {
+        let output = berd_call(&args);
+        assert_eq!(output.status.code(), Some(2), "{args:?}");
+        assert!(output.stdout.is_empty(), "{args:?}");
+        assert!(
+            String::from_utf8(output.stderr)
+                .expect("UTF-8 stderr")
+                .contains("unknown help topic:"),
+            "{args:?}"
+        );
+    }
 }
 
 #[test]
@@ -76,4 +81,14 @@ fn help_shaped_option_values_reach_the_operational_parser() {
     let stderr = String::from_utf8(output.stderr).expect("UTF-8 stderr");
     assert!(stderr.contains("--tts-backend is required"));
     assert!(stderr.contains("Render text through a configured TTS backend"));
+}
+
+#[test]
+fn suffix_help_after_a_complete_boolean_option_is_successful() {
+    let output = berd_call(&["benchmark", "tts", "--allow-paid-openai", "--help"]);
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    assert!(String::from_utf8(output.stdout)
+        .expect("UTF-8 stdout")
+        .contains("Benchmark a TTS backend"));
 }
