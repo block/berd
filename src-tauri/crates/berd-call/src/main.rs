@@ -470,7 +470,7 @@ struct SynthesisWavResult {
 }
 
 fn main() {
-    let mut args: Vec<_> = std::env::args().collect();
+    let args: Vec<_> = std::env::args().collect();
     match cli_help::parse(&args).unwrap_or_else(|error| usage_error(&error, &args)) {
         Some(cli_help::MetaCommand::Help(help)) => {
             println!("{help}");
@@ -479,11 +479,6 @@ fn main() {
         Some(cli_help::MetaCommand::Version) => {
             println!("berd-call {}", env!("CARGO_PKG_VERSION"));
             return;
-        }
-        Some(cli_help::MetaCommand::HelpTopic(topic)) => {
-            args.truncate(1);
-            args.extend(topic);
-            args.push("--help".into());
         }
         None => {}
     }
@@ -573,6 +568,7 @@ enum ParseFailure {
     Usage(String),
 }
 
+#[cfg(test)]
 impl ParseFailure {
     fn contains(&self, pattern: &str) -> bool {
         matches!(self, Self::Usage(message) if message.contains(pattern))
@@ -591,6 +587,7 @@ impl From<&str> for ParseFailure {
     }
 }
 
+#[cfg(test)]
 impl PartialEq<&str> for ParseFailure {
     fn eq(&self, other: &&str) -> bool {
         matches!(self, Self::Usage(message) if message == *other)

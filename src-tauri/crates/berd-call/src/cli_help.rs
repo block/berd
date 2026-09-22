@@ -96,7 +96,6 @@ Usage:
 #[derive(Debug)]
 pub(crate) enum MetaCommand {
     Help(&'static str),
-    HelpTopic(Vec<String>),
     Version,
 }
 
@@ -105,19 +104,12 @@ pub(crate) fn parse(args: &[String]) -> Result<Option<MetaCommand>, String> {
     match values.as_slice() {
         ["-h" | "--help" | "help"] => Ok(Some(MetaCommand::Help(TOP_LEVEL_HELP))),
         ["-V" | "--version" | "version"] => Ok(Some(MetaCommand::Version)),
-        ["help", topic @ ..] if is_supported_command(topic.first().copied()) => Ok(Some(
-            MetaCommand::HelpTopic(topic.iter().map(|value| (*value).to_string()).collect()),
-        )),
-        ["help", topic @ ..] => Err(format!("unknown help topic: {}", topic.join(" "))),
+        ["help", topic @ ..] => help_for(topic)
+            .map(MetaCommand::Help)
+            .map(Some)
+            .ok_or_else(|| format!("unknown help topic: {}", topic.join(" "))),
         _ => Ok(None),
     }
-}
-
-fn is_supported_command(command: Option<&str>) -> bool {
-    matches!(
-        command,
-        Some("session" | "synthesize" | "voices" | "models" | "benchmark")
-    )
 }
 
 fn help_for(topic: &[&str]) -> Option<&'static str> {
@@ -125,8 +117,12 @@ fn help_for(topic: &[&str]) -> Option<&'static str> {
         [] => Some(TOP_LEVEL_HELP),
         ["session"] => Some(SESSION_HELP),
         ["synthesize"] => Some(SYNTHESIZE_HELP),
-        ["voices"] => Some(VOICES_HELP),
-        ["models"] => Some(MODELS_HELP),
+        ["voices"] | ["voices", "list" | "download"] => Some(VOICES_HELP),
+        ["models"]
+        | ["models", "macos", "status" | "install"]
+        | ["models", "openai", "voices"]
+        | ["models", "pocket", "status" | "install" | "voices"]
+        | ["models", "parakeet", "status" | "install"] => Some(MODELS_HELP),
         ["benchmark"] => Some(BENCHMARK_HELP),
         ["benchmark", "tts"] => Some(BENCHMARK_TTS_HELP),
         ["benchmark", "stt"] => Some(BENCHMARK_STT_HELP),

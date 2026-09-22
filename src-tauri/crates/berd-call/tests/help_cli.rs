@@ -29,6 +29,8 @@ fn command_help_is_available_in_prefix_and_suffix_forms() {
     for args in [
         vec!["help", "session"],
         vec!["session", "--help"],
+        vec!["help", "voices"],
+        vec!["help", "models"],
         vec!["help", "benchmark", "tts"],
         vec!["benchmark", "tts", "--help"],
         vec!["benchmark", "--help"],
@@ -71,7 +73,7 @@ fn unknown_help_topics_remain_usage_errors() {
     assert!(output.stdout.is_empty());
     assert!(String::from_utf8(output.stderr)
         .expect("UTF-8 stderr")
-        .contains("unknown argument: bogus"));
+        .contains("unknown help topic: session bogus"));
 }
 
 #[test]
