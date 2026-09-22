@@ -169,6 +169,7 @@ export type OpenAiRealtimeProtocolEvent =
       evidence: "provider_final" | "provider_delta" | "host_played_frames";
       expertMessage: string;
     }
+  | { type: "transcript.discarded"; itemId: string }
   | {
       type: "handoff";
       responseId?: string;

@@ -449,6 +449,8 @@ pub enum RealtimeProtocolEvent {
         evidence: RealtimeTranscriptEvidence,
         expert_message: String,
     },
+    #[serde(rename = "transcript.discarded", rename_all = "camelCase")]
+    TranscriptDiscarded { item_id: String },
     #[serde(rename = "handoff", rename_all = "camelCase")]
     Handoff {
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -713,8 +715,14 @@ impl RealtimeProtocolReducer {
             };
             let no_audio_played =
                 event.get("played_audio_frames").and_then(Value::as_u64) == Some(0);
-            let settle_unplayed_transcript = interrupted && no_audio_played;
-            if (!text.trim().is_empty() || settle_unplayed_transcript)
+            if interrupted && no_audio_played {
+                for item_id in &pending.item_order {
+                    self.finalized_item_ids.insert(item_id.clone());
+                }
+                events.push(RealtimeProtocolEvent::TranscriptDiscarded {
+                    item_id: pending.display_item_id,
+                });
+            } else if !text.trim().is_empty()
                 && !self.finalized_item_ids.contains(&pending.display_item_id)
             {
                 for item_id in &pending.item_order {
@@ -982,6 +990,7 @@ enum PendingResponse {
 #[derive(Debug, Default)]
 pub struct RealtimeResponseCoordinator {
     active_response: Option<ActiveResponse>,
+    draining_response_id: Option<String>,
     pending_responses: VecDeque<PendingResponse>,
     completed_handoff_ids: Vec<String>,
     failed_handoff_ids: Vec<String>,
@@ -1008,10 +1017,7 @@ impl RealtimeResponseCoordinator {
                 events: vec![item, response],
             });
         }
-        let can_replace_draining_preamble = self.pending_responses.is_empty()
-            && self.active_response.as_ref().is_some_and(|active| {
-                active.generation_done && active.output_active && active.say.is_none()
-            });
+        let can_replace_draining_preamble = self.can_replace_draining_preamble();
         self.pending_responses
             .push_back(PendingResponse::Say(message));
         if can_replace_draining_preamble {
@@ -1095,7 +1101,7 @@ impl RealtimeResponseCoordinator {
         if let Some(response_id) = active.id.as_deref().filter(|_| !active.generation_done) {
             events.push(json!({ "type": "response.cancel", "response_id": response_id }));
         }
-        if active.output_active {
+        if active.output_active || self.draining_response_id.is_some() {
             events.push(json!({ "type": "output_audio_buffer.clear" }));
         }
         events.push(json!({ "type": "input_audio_buffer.clear" }));
@@ -1163,6 +1169,11 @@ impl RealtimeResponseCoordinator {
                 }
             }
             "output_audio_buffer.stopped" | "output_audio_buffer.cleared" => {
+                let response_id = string_at(event, "/response_id");
+                if response_id.is_some() && response_id == self.draining_response_id.as_deref() {
+                    self.draining_response_id = None;
+                    return Ok(self.take_update(Vec::new()));
+                }
                 if let Some(active) = self.match_active_response(event) {
                     active.output_active = false;
                     if active.generation_done {
@@ -1187,8 +1198,18 @@ impl RealtimeResponseCoordinator {
         }
     }
 
+    fn can_replace_draining_preamble(&self) -> bool {
+        self.pending_responses.is_empty()
+            && self.active_response.as_ref().is_some_and(|active| {
+                active.generation_done && active.output_active && active.say.is_none()
+            })
+    }
+
     fn finish_active_response(&mut self) -> Result<Vec<Value>, String> {
         if let Some(completed) = self.active_response.take() {
+            if completed.output_active {
+                self.draining_response_id = completed.id.clone();
+            }
             if let Some(message) = completed.say {
                 let target = if completed.succeeded && completed.output_produced {
                     &mut self.completed_handoff_ids
@@ -1400,6 +1421,7 @@ impl RealtimeExpertSpokespersonSession {
                         expert_delivery = self.take_expert_delivery(text, Vec::new());
                     }
                 }
+                RealtimeProtocolEvent::TranscriptDiscarded { .. } => {}
                 RealtimeProtocolEvent::Handoff {
                     call_id, message, ..
                 } => {
@@ -2180,18 +2202,11 @@ mod tests {
                     "played_audio_frames": 0,
                     "total_audio_frames": 0,
                     "sample_rate": 24_000,
-                }))
+            }))
                 .unwrap(),
             vec![
-                RealtimeProtocolEvent::TranscriptFinalized {
-                    id: 1,
+                RealtimeProtocolEvent::TranscriptDiscarded {
                     item_id: "assistant-1".into(),
-                    speaker: RealtimeTranscriptSpeaker::Spokesperson,
-                    text: String::new(),
-                    interrupted: true,
-                    evidence: RealtimeTranscriptEvidence::HostPlayedFrames,
-                    expert_message:
-                        "[Voice transcript] Spokesperson said (interrupted; best effort): ".into(),
                 },
                 RealtimeProtocolEvent::PlaybackInterrupted {
                     response_id: "response-1".into(),
@@ -2359,6 +2374,39 @@ mod tests {
             .unwrap()
             .events
             .is_empty());
+    }
+
+    #[test]
+    fn typed_user_message_interrupts_a_replaced_preamble_while_it_drains() {
+        let mut coordinator = RealtimeResponseCoordinator::default();
+        coordinator
+            .handle(&json!({ "type": "response.created", "response": { "id": "routine" } }))
+            .unwrap();
+        coordinator
+            .handle(&json!({ "type": "output_audio_buffer.started", "response_id": "routine" }))
+            .unwrap();
+        coordinator
+            .handle(&json!({ "type": "response.done", "response": { "id": "routine", "status": "completed" } }))
+            .unwrap();
+        coordinator
+            .request_expert_message(RealtimeExpertMessage {
+                message: "The answer is 21.".into(),
+                mode: RealtimeExpertMessageMode::Say,
+                event_id: Some("expert-1".into()),
+                directive_id: None,
+                resolved_handoff_ids: vec!["handoff-1".into()],
+            })
+            .unwrap();
+
+        let request = coordinator
+            .request_typed_user_message("New direction")
+            .unwrap();
+
+        assert_eq!(request.status, RealtimeRequestStatus::Queued);
+        assert!(request
+            .events
+            .iter()
+            .any(|event| event["type"] == "output_audio_buffer.clear"));
     }
 
     #[test]

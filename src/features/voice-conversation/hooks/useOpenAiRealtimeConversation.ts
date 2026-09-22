@@ -884,6 +884,16 @@ class OpenAiRealtimeConversationRuntime {
                     },
                     false,
                   );
+                } else if (bridgeEvent.type === "transcript.discarded") {
+                  const messageId = transcriptMessageIds.get(
+                    bridgeEvent.itemId,
+                  );
+                  if (messageId) {
+                    useChatStore
+                      .getState()
+                      .removeMessage(ownerSessionId, messageId);
+                    transcriptMessageIds.delete(bridgeEvent.itemId);
+                  }
                 }
               }
               for (const handoff of reduction.acceptedHandoffs) {

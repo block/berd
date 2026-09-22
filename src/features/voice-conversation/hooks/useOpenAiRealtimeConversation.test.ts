@@ -119,6 +119,13 @@ const mocks = vi.hoisted(() => ({
             type: "transcript.updated",
           },
         ];
+      if (event.type === "test.emissary_discarded")
+        return [
+          {
+            itemId: "emissary-item-multi",
+            type: "transcript.discarded",
+          },
+        ];
       if (event.type === "test.handoff")
         return [
           {
@@ -2323,6 +2330,40 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
         },
       });
     });
+
+    await act(async () => owner.result.current.onToggle());
+  });
+
+  it("removes a provisional emissary transcript when no audio played", async () => {
+    const owner = renderConversation("session-a");
+    await act(async () => owner.result.current.onToggle());
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+
+    act(() => {
+      channel.dispatchEvent(
+        new MessageEvent("message", {
+          data: JSON.stringify({ type: "test.emissary_partial_first" }),
+        }),
+      );
+    });
+    await waitFor(() =>
+      expect(
+        useChatStore.getState().messagesBySession["session-a"],
+      ).toHaveLength(1),
+    );
+
+    act(() => {
+      channel.dispatchEvent(
+        new MessageEvent("message", {
+          data: JSON.stringify({ type: "test.emissary_discarded" }),
+        }),
+      );
+    });
+    await waitFor(() =>
+      expect(
+        useChatStore.getState().messagesBySession["session-a"] ?? [],
+      ).toHaveLength(0),
+    );
 
     await act(async () => owner.result.current.onToggle());
   });
