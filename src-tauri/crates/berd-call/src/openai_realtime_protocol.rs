@@ -711,7 +711,9 @@ impl RealtimeProtocolReducer {
             } else {
                 RealtimeTranscriptEvidence::ProviderFinal
             };
-            if !text.trim().is_empty()
+            let settle_unplayed_transcript = interrupted
+                && event.get("played_audio_frames").and_then(Value::as_u64) == Some(0);
+            if (!text.trim().is_empty() || settle_unplayed_transcript)
                 && !self.finalized_item_ids.contains(&pending.display_item_id)
             {
                 for item_id in &pending.item_order {
@@ -1005,8 +1007,20 @@ impl RealtimeResponseCoordinator {
                 events: vec![item, response],
             });
         }
+        let can_replace_draining_preamble = self.pending_responses.is_empty()
+            && self.active_response.as_ref().is_some_and(|active| {
+                active.generation_done && active.output_active && active.say.is_none()
+            });
         self.pending_responses
             .push_back(PendingResponse::Say(message));
+        if can_replace_draining_preamble {
+            let mut events = vec![item];
+            events.extend(self.finish_active_response()?);
+            return Ok(RealtimeCoordinatorResult {
+                status: RealtimeRequestStatus::Sent,
+                events,
+            });
+        }
         Ok(RealtimeCoordinatorResult {
             status: RealtimeRequestStatus::Queued,
             events: vec![item],
@@ -1133,10 +1147,15 @@ impl RealtimeResponseCoordinator {
                 }
             }
             "response.done" => {
+                let expert_say_is_next = self
+                    .pending_responses
+                    .front()
+                    .is_some_and(|pending| matches!(pending, PendingResponse::Say(_)));
                 if let Some(active) = self.match_active_response(event) {
                     active.generation_done = true;
                     active.succeeded = string_at(event, "/response/status") == Some("completed");
-                    if !active.output_active {
+                    let release_expert_say = active.say.is_none() && expert_say_is_next;
+                    if !active.output_active || release_expert_say {
                         let events = self.finish_active_response()?;
                         return Ok(self.take_update(events));
                     }
@@ -1160,7 +1179,7 @@ impl RealtimeResponseCoordinator {
         let response_id =
             string_at(event, "/response_id").or_else(|| string_at(event, "/response/id"));
         let active = self.active_response.as_mut()?;
-        if response_id.is_none() || active.id.is_none() || response_id == active.id.as_deref() {
+        if response_id.is_none() || response_id == active.id.as_deref() {
             Some(active)
         } else {
             None
@@ -1346,6 +1365,9 @@ impl RealtimeExpertSpokespersonSession {
                     interrupted,
                     ..
                 } => {
+                    if text.trim().is_empty() {
+                        continue;
+                    }
                     let live_event = match speaker {
                         RealtimeTranscriptSpeaker::User => {
                             LiveSideEvent::UserTranscript { text: text.clone() }
@@ -2135,6 +2157,58 @@ mod tests {
     }
 
     #[test]
+    fn clears_unplayed_handoff_transcript_and_ignores_late_provider_text() {
+        let mut reducer = RealtimeProtocolReducer::default();
+        assert!(matches!(
+            reducer
+                .handle(&json!({
+                    "type": "response.output_audio_transcript.delta",
+                    "response_id": "response-1",
+                    "item_id": "assistant-1",
+                    "delta": "This was never heard",
+                }))
+                .unwrap()
+                .as_slice(),
+            [RealtimeProtocolEvent::TranscriptUpdated { .. }]
+        ));
+        assert_eq!(
+            reducer
+                .handle(&json!({
+                    "type": "output_audio_buffer.cleared",
+                    "response_id": "response-1",
+                    "played_audio_frames": 0,
+                    "total_audio_frames": 0,
+                    "sample_rate": 24_000,
+                }))
+                .unwrap(),
+            vec![
+                RealtimeProtocolEvent::TranscriptFinalized {
+                    id: 1,
+                    item_id: "assistant-1".into(),
+                    speaker: RealtimeTranscriptSpeaker::Spokesperson,
+                    text: String::new(),
+                    interrupted: true,
+                    evidence: RealtimeTranscriptEvidence::HostPlayedFrames,
+                    expert_message:
+                        "[Voice transcript] Spokesperson said (interrupted; best effort): ".into(),
+                },
+                RealtimeProtocolEvent::PlaybackInterrupted {
+                    response_id: "response-1".into(),
+                },
+            ]
+        );
+        assert!(reducer
+            .handle(&json!({
+                "type": "response.output_audio_transcript.done",
+                "response_id": "response-1",
+                "item_id": "assistant-1",
+                "transcript": "This was never heard",
+            }))
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
     fn native_playback_frames_bound_the_interrupted_spokesperson_transcript() {
         let mut reducer = RealtimeProtocolReducer::default();
         reducer
@@ -2244,7 +2318,50 @@ mod tests {
     }
 
     #[test]
-    fn queues_expert_say_until_the_active_response_and_playback_finish() {
+    fn expert_say_replaces_preamble_after_generation_while_playback_drains() {
+        let mut coordinator = RealtimeResponseCoordinator::default();
+        coordinator
+            .handle(&json!({ "type": "response.created", "response": { "id": "routine" } }))
+            .unwrap();
+        coordinator
+            .handle(&json!({ "type": "output_audio_buffer.started", "response_id": "routine" }))
+            .unwrap();
+        let update = coordinator
+            .handle(&json!({ "type": "response.done", "response": { "id": "routine", "status": "completed" } }))
+            .unwrap();
+        assert!(update.events.is_empty());
+        let request = coordinator
+            .request_expert_message(RealtimeExpertMessage {
+                message: "The answer is 21.".into(),
+                mode: RealtimeExpertMessageMode::Say,
+                event_id: Some("expert-1".into()),
+                directive_id: None,
+                resolved_handoff_ids: vec!["handoff-1".into()],
+            })
+            .unwrap();
+        assert_eq!(request.status, RealtimeRequestStatus::Sent);
+        assert_eq!(request.events.len(), 2);
+        assert_eq!(request.events[1]["type"], "response.create");
+        assert!(coordinator
+            .handle(&json!({ "type": "output_audio_buffer.stopped", "response_id": "routine" }))
+            .unwrap()
+            .events
+            .is_empty());
+        coordinator
+            .handle(&json!({ "type": "response.created", "response": { "id": "expert" } }))
+            .unwrap();
+        coordinator
+            .handle(&json!({ "type": "output_audio_buffer.started", "response_id": "expert" }))
+            .unwrap();
+        assert!(coordinator
+            .handle(&json!({ "type": "output_audio_buffer.stopped", "response_id": "routine" }))
+            .unwrap()
+            .events
+            .is_empty());
+    }
+
+    #[test]
+    fn queued_expert_say_releases_when_preamble_generation_finishes() {
         let mut coordinator = RealtimeResponseCoordinator::default();
         coordinator
             .handle(&json!({ "type": "response.created", "response": { "id": "routine" } }))
@@ -2263,14 +2380,14 @@ mod tests {
             .unwrap();
         assert_eq!(request.status, RealtimeRequestStatus::Queued);
         assert_eq!(request.events.len(), 1);
-        assert!(coordinator
-            .handle(&json!({ "type": "response.done", "response": { "id": "routine", "status": "completed" } }))
-            .unwrap()
-            .events
-            .is_empty());
+
         let update = coordinator
-            .handle(&json!({ "type": "output_audio_buffer.stopped", "response_id": "routine" }))
+            .handle(&json!({
+                "type": "response.done",
+                "response": { "id": "routine", "status": "completed" },
+            }))
             .unwrap();
+        assert_eq!(update.events.len(), 1);
         assert_eq!(update.events[0]["type"], "response.create");
     }
 

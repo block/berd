@@ -127,7 +127,14 @@ impl RealtimePlaybackHost {
                     .as_ref()
                     .is_some_and(|active| active.response_id == response_id);
                 if !preamble_is_playing {
-                    self.interrupted_responses.insert(response_id);
+                    self.interrupted_responses.insert(response_id.clone());
+                    emit(json!({
+                        "type": "output_audio_buffer.cleared",
+                        "response_id": response_id,
+                        "played_audio_frames": 0,
+                        "total_audio_frames": 0,
+                        "sample_rate": REALTIME_SAMPLE_RATE,
+                    }))?;
                 }
             }
             SpokespersonEvent::UserSpeaking { active: true, .. } => {
@@ -1496,7 +1503,11 @@ mod tests {
         .unwrap();
 
         assert!(commands.is_empty());
-        assert!(events.is_empty());
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["type"], "output_audio_buffer.cleared");
+        assert_eq!(events[0]["response_id"], "response-1");
+        assert_eq!(events[0]["played_audio_frames"], 0);
+        assert_eq!(events[0]["total_audio_frames"], 0);
         assert_eq!(created, 0);
         assert!(host.is_idle());
     }
