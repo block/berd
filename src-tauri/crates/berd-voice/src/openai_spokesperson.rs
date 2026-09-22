@@ -362,6 +362,10 @@ impl OpenAiSpokespersonRuntime {
     }
 
     pub fn send(&self, command: SpokespersonCommand) -> Result<(), String> {
+        let command = match command {
+            SpokespersonCommand::Provider(event) => provider_command(event),
+            command => command,
+        };
         match command {
             SpokespersonCommand::InputPcm48Khz(samples) => {
                 self.audio.try_send(samples).map_err(|error| match error {
@@ -374,10 +378,6 @@ impl OpenAiSpokespersonRuntime {
                 .send(command)
                 .map_err(|_| "Spokesperson runtime is closed".into()),
         }
-    }
-
-    pub fn send_provider_event(&self, event: serde_json::Value) -> Result<(), String> {
-        self.send(provider_command(event))
     }
 
     pub fn reset_input(&self) -> Result<(), String> {
@@ -1494,7 +1494,7 @@ mod tests {
     }
 
     #[test]
-    fn provider_cancellation_uses_typed_path_without_overwriting_owned_ids() {
+    fn provider_cancellation_preserves_event_id_ownership() {
         assert!(matches!(
             super::provider_command(json!({
                 "type":"response.cancel", "response_id":"active-response"

@@ -3552,7 +3552,7 @@ fn run_expert_spokesperson_session(
                         runtime
                             .as_ref()
                             .expect("initialized runtime")
-                            .send_provider_event(event)?;
+                            .send(SpokespersonCommand::Provider(event))?;
                     }
                     match dismissal.exchange {
                         RealtimePipeExchange::Accepted(accepted) => write_message(
@@ -4048,7 +4048,7 @@ fn submit_expert_prepare(
                 resolved_handoff_ids,
             })?;
             for event in coordination.events {
-                runtime.send_provider_event(event)?;
+                runtime.send(SpokespersonCommand::Provider(event))?;
             }
             write_message(
                 writer,
@@ -4236,7 +4236,7 @@ fn apply_external_coordinator_event(
 ) -> Result<(), String> {
     let update = core.handle_response_event(event)?;
     for event in update.events {
-        runtime.send_provider_event(event)?;
+        runtime.send(SpokespersonCommand::Provider(event))?;
     }
     Ok(())
 }

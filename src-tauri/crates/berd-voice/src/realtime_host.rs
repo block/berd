@@ -1502,7 +1502,7 @@ mod tests {
     }
 
     #[test]
-    fn user_speech_still_interrupts_active_preamble() {
+    fn user_speech_interrupts_active_preamble() {
         let mut host = RealtimePlaybackHost::default();
         let mut create_output = || {
             Ok(Box::new(FakeOutput {
