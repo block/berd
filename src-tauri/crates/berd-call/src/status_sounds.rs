@@ -382,10 +382,11 @@ impl Drop for StatusSoundActivityGuard {
         debug_assert!(activity.guards > 0);
         activity.guards = activity.guards.saturating_sub(1);
         if !activity.is_active() {
-            let _ = self.worker.commands.send(StatusSoundCommand::ConversationActive {
+            let command = StatusSoundCommand::ConversationActive {
                 active: false,
                 applied: None,
-            });
+            };
+            let _ = self.worker.commands.send(command);
         }
     }
 }
