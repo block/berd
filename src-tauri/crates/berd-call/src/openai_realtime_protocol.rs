@@ -434,11 +434,13 @@ fn interrupted_transcript_resolution_input(
     event: &Value,
     text: String,
 ) -> InterruptedTranscriptResolutionInput {
-    let Some(played_audio_frames) = event.get("played_audio_frames").and_then(Value::as_u64)
-    else {
-        return InterruptedTranscriptResolutionInput::Resolve(
-            RealtimeInterruptedTranscriptInput::ProviderDelta { text },
-        );
+    let played_audio_frames = match event.get("played_audio_frames").and_then(Value::as_u64) {
+        Some(value) => value,
+        None => {
+            return InterruptedTranscriptResolutionInput::Resolve(
+                RealtimeInterruptedTranscriptInput::ProviderDelta { text },
+            );
+        }
     };
     if played_audio_frames == 0 {
         return InterruptedTranscriptResolutionInput::Discarded;
