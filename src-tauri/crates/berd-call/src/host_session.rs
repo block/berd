@@ -350,6 +350,25 @@ impl HostControl for SessionControl {
         })
     }
 
+    fn set_rate(&self, rate: f32) -> Result<Value, String> {
+        let (settings, expected_revision) = {
+            let session = self
+                .ready
+                .session
+                .lock()
+                .map_err(|_| "session settings lock failed")?;
+            (
+                session.tts.settings.clone().with_rate(rate),
+                session.tts.revision,
+            )
+        };
+        self.request(|response| ControlCommand::TtsSettings {
+            settings,
+            expected_revision,
+            response,
+        })
+    }
+
     fn set_input_during_tts(&self, policy: InputDuringTtsPolicy) -> Result<Value, String> {
         let expected_revision = self
             .ready
@@ -1724,6 +1743,46 @@ mod tests {
         drop(receiver);
         assert_eq!(control.stop().unwrap(), json!({"stopping":true}));
         assert!(stop_requested.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn rate_updates_keep_the_current_voice_and_revision() {
+        let (commands, receiver) = mpsc::sync_channel(1);
+        let control = SessionControl {
+            commands,
+            running: Arc::new(AtomicBool::new(true)),
+            ready: ReadyState {
+                session: Arc::new(Mutex::new(test_snapshot())),
+            },
+            non_blocking: Arc::new(AtomicBool::new(false)),
+            stop_requested: Arc::new(AtomicBool::new(false)),
+            muted: AtomicBool::new(false),
+            stream: false,
+            session_arguments: vec!["session".into()],
+        };
+        let worker = thread::spawn(move || match receiver.recv().unwrap() {
+            ControlCommand::TtsSettings {
+                settings,
+                expected_revision,
+                response,
+            } => {
+                response.send(Ok(json!({}))).unwrap();
+                (settings, expected_revision)
+            }
+            _ => panic!("expected a TTS settings command"),
+        });
+        control.set_rate(1.5).unwrap();
+        assert_eq!(
+            worker.join().unwrap(),
+            (
+                berd_call::TtsSettings::Siri {
+                    voice: "Aaron".into(),
+                    language: "en-US".into(),
+                    rate: 1.5,
+                },
+                1
+            )
+        );
     }
 
     #[test]

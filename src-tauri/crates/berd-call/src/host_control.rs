@@ -25,6 +25,7 @@ pub(crate) trait HostControl: Send + Sync + 'static {
     fn stop(&self) -> Result<Value, String>;
     fn set_non_blocking(&self, enabled: bool) -> Result<Value, String>;
     fn set_tts(&self, settings: berd_call::TtsSettings) -> Result<Value, String>;
+    fn set_rate(&self, rate: f32) -> Result<Value, String>;
     fn set_input_during_tts(
         &self,
         policy: berd_call::input::InputDuringTtsPolicy,
@@ -107,6 +108,9 @@ pub(crate) enum ControlRequest {
     TtsSettings {
         settings: berd_call::TtsSettings,
     },
+    Rate {
+        rate: f32,
+    },
     InputDuringTts {
         policy: berd_call::input::InputDuringTtsPolicy,
     },
@@ -132,6 +136,7 @@ pub(crate) fn request(port: u16, request: ControlRequest) -> Result<Value, Strin
         &request,
         ControlRequest::Speak { .. }
             | ControlRequest::TtsSettings { .. }
+            | ControlRequest::Rate { .. }
             | ControlRequest::Restart { .. }
     ) {
         None
@@ -174,6 +179,7 @@ fn handle_connection(mut stream: TcpStream, control: &dyn HostControl) -> Result
                 }
                 ControlRequest::Stop => control.stop(),
                 ControlRequest::TtsSettings { settings } => control.set_tts(settings),
+                ControlRequest::Rate { rate } => control.set_rate(rate),
                 ControlRequest::NonBlocking { enabled } => control.set_non_blocking(enabled),
                 ControlRequest::InputDuringTts { policy } => control.set_input_during_tts(policy),
                 ControlRequest::Muted { muted } => control.set_muted(muted),
@@ -276,6 +282,9 @@ mod tests {
     impl HostControl for FakeControl {
         fn set_tts(&self, settings: berd_call::TtsSettings) -> Result<Value, String> {
             Ok(serde_json::to_value(settings).unwrap())
+        }
+        fn set_rate(&self, rate: f32) -> Result<Value, String> {
+            Ok(json!({"rate": rate}))
         }
         fn set_non_blocking(&self, enabled: bool) -> Result<Value, String> {
             Ok(json!({"nonBlocking": enabled}))

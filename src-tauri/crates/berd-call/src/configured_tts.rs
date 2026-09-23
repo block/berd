@@ -48,6 +48,15 @@ impl TtsSettings {
         }
     }
 
+    pub fn with_rate(mut self, new_rate: f32) -> Self {
+        match &mut self {
+            Self::OpenAi { rate, .. } | Self::Siri { rate, .. } | Self::Pocket { rate, .. } => {
+                *rate = new_rate;
+            }
+        }
+        self
+    }
+
     fn backend_name(&self) -> &'static str {
         match self {
             Self::OpenAi { .. } => "openai",
