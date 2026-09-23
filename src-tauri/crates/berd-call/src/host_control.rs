@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, Shutdown, SocketAddrV4, TcpListener, TcpStream};
 use std::sync::Arc;
@@ -8,8 +9,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 const MAX_REQUEST_BYTES: u64 = 64 * 1024;
+const MAX_SPEAK_TEXT_BYTES: usize = 16 * 1024;
+const MAX_HANDOFF_IDS: usize = 64;
+const MAX_HANDOFF_ID_BYTES: usize = 512;
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
-const SPEAK_TIMEOUT: Duration = Duration::from_secs(125);
 
 pub(crate) trait HostControl: Send + Sync + 'static {
     fn status(&self) -> Result<Value, String>;
@@ -81,7 +84,7 @@ impl ControlServer {
 
 #[derive(Deserialize, Serialize)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
-enum ControlRequest {
+pub(crate) enum ControlRequest {
     Status,
     Speak {
         text: String,
@@ -100,13 +103,11 @@ struct ControlResponse {
     message: Option<String>,
 }
 
-pub(crate) fn request(port: u16, request: Value) -> Result<Value, String> {
-    let request: ControlRequest = serde_json::from_value(request)
-        .map_err(|error| format!("could not encode berd-call request: {error}"))?;
+pub(crate) fn request(port: u16, request: ControlRequest) -> Result<Value, String> {
     let read_timeout = if matches!(&request, ControlRequest::Speak { .. }) {
-        SPEAK_TIMEOUT
+        None
     } else {
-        IO_TIMEOUT
+        Some(IO_TIMEOUT)
     };
     let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port))
         .map_err(|error| format!("could not connect to berd-call on port {port}: {error}"))?;
@@ -129,7 +130,7 @@ pub(crate) fn request(port: u16, request: Value) -> Result<Value, String> {
 }
 
 fn handle_connection(mut stream: TcpStream, control: &dyn HostControl) -> Result<(), String> {
-    configure_stream(&stream, IO_TIMEOUT)?;
+    configure_stream(&stream, Some(IO_TIMEOUT))?;
     let result =
         read_json_line::<ControlRequest>(&mut stream, "request").and_then(
             |request| match request {
@@ -168,10 +169,10 @@ fn handle_connection(mut stream: TcpStream, control: &dyn HostControl) -> Result
     Ok(())
 }
 
-fn configure_stream(stream: &TcpStream, read_timeout: Duration) -> Result<(), String> {
+fn configure_stream(stream: &TcpStream, read_timeout: Option<Duration>) -> Result<(), String> {
     stream
         .set_nonblocking(false)
-        .and_then(|()| stream.set_read_timeout(Some(read_timeout)))
+        .and_then(|()| stream.set_read_timeout(read_timeout))
         .and_then(|()| stream.set_write_timeout(Some(IO_TIMEOUT)))
         .map_err(|error| format!("could not configure berd-call connection: {error}"))
 }
@@ -211,15 +212,19 @@ fn validate_speak(text: &str, resolved_handoff_ids: &[String]) -> Result<(), Str
     if text.trim().is_empty() {
         return Err("speak text must not be empty".into());
     }
-    if text.len() > 16 * 1024 {
+    if text.len() > MAX_SPEAK_TEXT_BYTES {
         return Err("speak text is larger than 16 KiB".into());
     }
-    if resolved_handoff_ids.len() > 64
+    if resolved_handoff_ids.len() > MAX_HANDOFF_IDS
         || resolved_handoff_ids
             .iter()
-            .any(|id| id.is_empty() || id.len() > 512)
+            .any(|id| id.is_empty() || id.len() > MAX_HANDOFF_ID_BYTES)
     {
         return Err("resolved handoff IDs are invalid".into());
+    }
+    let unique = resolved_handoff_ids.iter().collect::<HashSet<_>>();
+    if unique.len() != resolved_handoff_ids.len() {
+        return Err("resolved handoff IDs must be unique".into());
     }
     Ok(())
 }
@@ -273,18 +278,17 @@ mod tests {
         });
 
         assert_eq!(
-            request(port, json!({"command":"status"})).unwrap()["running"],
+            request(port, ControlRequest::Status).unwrap()["running"],
             true
         );
         assert_eq!(
             request(
                 port,
-                json!({
-                    "command":"speak",
-                    "text":"hello",
-                    "acknowledgement":7,
-                    "resolvedHandoffIds":["call-1"],
-                })
+                ControlRequest::Speak {
+                    text: "hello".into(),
+                    acknowledgement: Some(7),
+                    resolved_handoff_ids: vec!["call-1".into()],
+                }
             )
             .unwrap(),
             json!({
@@ -294,7 +298,7 @@ mod tests {
             })
         );
         assert_eq!(
-            request(port, json!({"command":"stop"})).unwrap()["stopping"],
+            request(port, ControlRequest::Stop).unwrap()["stopping"],
             true
         );
         worker.join().unwrap();
@@ -305,5 +309,6 @@ mod tests {
         assert!(validate_speak(" ", &[]).is_err());
         assert!(validate_speak(&"x".repeat(16 * 1024 + 1), &[]).is_err());
         assert!(validate_speak("hello", &["".into()]).is_err());
+        assert!(validate_speak("hello", &["same".into(), "same".into()]).is_err());
     }
 }

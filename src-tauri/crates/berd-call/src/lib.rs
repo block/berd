@@ -15,6 +15,8 @@ pub mod local_assets;
 pub mod mac_speech;
 #[cfg(target_os = "macos")]
 mod macos_audio_output;
+#[cfg(target_os = "macos")]
+pub mod macos_audio_route;
 pub mod openai;
 pub mod openai_realtime;
 pub mod openai_realtime_protocol;

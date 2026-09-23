@@ -6,7 +6,7 @@ use crate::{
     ConversationStatus, StatusSoundSettings, TtsConfigurationSnapshot, TtsSettings,
 };
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SessionRequest {
     Hello {

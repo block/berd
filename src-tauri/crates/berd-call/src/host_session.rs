@@ -6,7 +6,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::os::fd::{FromRawFd, RawFd};
 use std::os::unix::process::CommandExt;
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -15,6 +15,8 @@ use std::time::{Duration, Instant};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use serde_json::{json, Value};
 
+use berd_call::input::InputDuringTtsPolicy;
+use berd_call::protocol::SessionRequest;
 use berd_call::PocketAudioPlayer;
 
 use crate::host_control::{ControlServer, HostControl};
@@ -22,16 +24,13 @@ use crate::session_audio::{
     AUDIO_BEGIN_KIND, AUDIO_CANCEL_KIND, AUDIO_CHUNK_KIND, AUDIO_END_KIND,
     AUDIO_FRAME_HEADER_BYTES, AUDIO_FRAME_MAGIC, AUDIO_FRAME_MARKER,
 };
+use crate::session_framing::{
+    encode_frame, JSON_FRAME_KIND, PCM_FRAME_KIND, SESSION_PROTOCOL_VERSION,
+};
 use crate::StartOptions;
 
-const SESSION_PROTOCOL_VERSION: u64 = 5;
-const FRAME_MAGIC: [u8; 2] = *b"BV";
-const FRAME_MARKER: u8 = 3;
-const JSON_KIND: u8 = 1;
-const PCM_KIND: u8 = 2;
 const INPUT_FRAME_SAMPLES: usize = 960;
 const MAX_AUDIO_RECORD_BYTES: usize = 4096 * std::mem::size_of::<f32>() + 16;
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 
 pub(crate) fn run(options: StartOptions) -> Result<(), String> {
     let server = ControlServer::bind(options.port)?;
@@ -40,25 +39,25 @@ pub(crate) fn run(options: StartOptions) -> Result<(), String> {
     let (event_tx, event_rx) = mpsc::sync_channel(128);
     spawn_stdout_reader(child.take_stdout()?, event_tx.clone())?;
     let (audio_command_tx, audio_command_rx) = mpsc::sync_channel(16);
-    let fatal = Arc::new(Mutex::new(None));
+    let (failure_tx, failure_rx) = mpsc::sync_channel(1);
     spawn_audio_host(
         child.take_audio()?,
         Arc::clone(&writer),
         audio_command_rx,
-        Arc::clone(&fatal),
+        failure_tx.clone(),
     )?;
 
-    send_json(
+    send_request(
         &writer,
-        &json!({
-            "type":"hello",
-            "id":1,
-            "input_during_tts":default_input_during_tts_policy()
-        }),
+        &SessionRequest::Hello {
+            id: 1,
+            input_during_tts: default_input_during_tts_policy(),
+            status_sound_output_device: None,
+        },
     )?;
     let ready = receive_ready(&event_rx)?;
     let running = Arc::new(AtomicBool::new(true));
-    let capture = InputCapture::start(Arc::clone(&writer), Arc::clone(&fatal))?;
+    let capture = InputCapture::start(Arc::clone(&writer), failure_tx)?;
     let (command_tx, command_rx) = mpsc::sync_channel(32);
     let control: Arc<dyn HostControl> = Arc::new(SessionControl {
         commands: command_tx,
@@ -84,8 +83,12 @@ pub(crate) fn run(options: StartOptions) -> Result<(), String> {
     while running.load(Ordering::SeqCst) {
         server.poll(Arc::clone(&control))?;
         actor.poll()?;
-        if let Some(message) = fatal.lock().expect("capture failure lock").take() {
-            return Err(message);
+        match failure_rx.try_recv() {
+            Ok(message) => return Err(message),
+            Err(TryRecvError::Empty) => {}
+            Err(TryRecvError::Disconnected) => {
+                return Err("voice host workers stopped unexpectedly".into())
+            }
         }
         if actor.stopping {
             running.store(false, Ordering::SeqCst);
@@ -98,26 +101,12 @@ pub(crate) fn run(options: StartOptions) -> Result<(), String> {
     Ok(())
 }
 
-fn default_input_during_tts_policy() -> &'static str {
-    let output_name = cpal::default_host()
-        .default_output_device()
-        .and_then(|device| device.description().ok())
-        .map(|description| description.name().to_string());
-    if output_name
-        .as_deref()
-        .is_some_and(output_name_uses_speakers)
-    {
-        "suppress_input"
+fn default_input_during_tts_policy() -> InputDuringTtsPolicy {
+    if berd_call::macos_audio_route::output_device_is_builtin_speaker(None) {
+        InputDuringTtsPolicy::SuppressInput
     } else {
-        "allow_barge_in"
+        InputDuringTtsPolicy::AllowBargeIn
     }
-}
-
-fn output_name_uses_speakers(name: &str) -> bool {
-    let normalized = name.to_lowercase();
-    ["speaker", "altavo"]
-        .iter()
-        .any(|keyword| normalized.contains(keyword))
 }
 
 #[derive(Clone)]
@@ -166,8 +155,8 @@ impl HostControl for SessionControl {
                 response: tx,
             })
             .map_err(|_| "voice call is not running".to_string())?;
-        rx.recv_timeout(REQUEST_TIMEOUT)
-            .map_err(|_| "timed out waiting for speech".to_string())?
+        rx.recv()
+            .map_err(|_| "voice call stopped before speech completed".to_string())?
     }
 
     fn stop(&self) -> Result<Value, String> {
@@ -182,7 +171,6 @@ impl HostControl for SessionControl {
 
 struct PendingSpeak {
     prepare_id: u64,
-    speech_id: Option<u64>,
     response: SyncSender<Result<Value, String>>,
 }
 
@@ -196,7 +184,7 @@ struct SessionActor {
     events: Receiver<Value>,
     commands: Receiver<ControlCommand>,
     audio_commands: SyncSender<AudioCommand>,
-    next_id: AtomicU64,
+    next_id: u64,
     pending_speak: Option<PendingSpeak>,
     stream: bool,
     expert_spokesperson: bool,
@@ -217,7 +205,7 @@ impl SessionActor {
             events,
             commands,
             audio_commands,
-            next_id: AtomicU64::new(2),
+            next_id: 2,
             pending_speak: None,
             stream,
             expert_spokesperson,
@@ -264,24 +252,22 @@ impl SessionActor {
                     return Ok(());
                 }
                 let id = self.next_id();
-                send_json(
+                send_request(
                     &self.writer,
-                    &json!({
-                        "type":"prepare_speak",
-                        "id":id,
-                        "acknowledgement":acknowledgement,
-                        "text":text,
-                        "resolved_handoff_ids":resolved_handoff_ids,
-                    }),
+                    &SessionRequest::PrepareSpeak {
+                        id,
+                        acknowledgement,
+                        text,
+                        resolved_handoff_ids,
+                    },
                 )?;
                 self.pending_speak = Some(PendingSpeak {
                     prepare_id: id,
-                    speech_id: None,
                     response,
                 });
             }
             ControlCommand::Stop { response } => {
-                send_json(&self.writer, &json!({"type":"shutdown"}))?;
+                send_request(&self.writer, &SessionRequest::Shutdown)?;
                 self.stopping = true;
                 let _ = response.send(Ok(json!({"stopping":true})));
             }
@@ -367,10 +353,12 @@ impl SessionActor {
             }
             "admitted" if event_id == Some(pending.prepare_id) => {
                 let speech_id = required_u64(&event, "speech_id")?;
-                pending.speech_id = Some(speech_id);
-                send_json(
+                send_request(
                     &self.writer,
-                    &output_ready_message(pending.prepare_id, speech_id),
+                    &SessionRequest::OutputReady {
+                        id: pending.prepare_id,
+                        speech_id,
+                    },
                 )?;
             }
             "output_ready_result" if event_id == Some(pending.prepare_id) => {
@@ -434,8 +422,10 @@ impl SessionActor {
             .map_err(|error| format!("could not flush expert delivery: {error}"))
     }
 
-    fn next_id(&self) -> u64 {
-        self.next_id.fetch_add(1, Ordering::SeqCst)
+    fn next_id(&mut self) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        id
     }
 
     fn finish_pending(&mut self, message: &str) {
@@ -459,10 +449,6 @@ fn expert_delivery_rows(event: &Value) -> Result<Vec<(u64, String, String)>, Str
         .collect()
 }
 
-fn output_ready_message(prepare_id: u64, speech_id: u64) -> Value {
-    json!({"type":"output_ready","id":prepare_id,"speech_id":speech_id})
-}
-
 fn receive_ready(events: &Receiver<Value>) -> Result<ReadyState, String> {
     let event = events
         .recv_timeout(Duration::from_secs(60))
@@ -476,7 +462,8 @@ fn receive_ready(events: &Receiver<Value>) -> Result<ReadyState, String> {
     }
     if event.get("type").and_then(Value::as_str) != Some("ready")
         || event.get("id").and_then(Value::as_u64) != Some(1)
-        || event.get("protocol").and_then(Value::as_u64) != Some(SESSION_PROTOCOL_VERSION)
+        || event.get("protocol").and_then(Value::as_u64)
+            != Some(u64::from(SESSION_PROTOCOL_VERSION))
     {
         return Err("voice session returned an invalid ready handshake".into());
     }
@@ -626,10 +613,10 @@ fn spawn_stdout_reader(
         .map_err(|error| format!("could not start voice event reader: {error}"))
 }
 
-fn send_json(writer: &Arc<Mutex<ChildStdin>>, value: &Value) -> Result<(), String> {
-    let payload = serde_json::to_vec(value)
+fn send_request(writer: &Arc<Mutex<ChildStdin>>, request: &SessionRequest) -> Result<(), String> {
+    let payload = serde_json::to_vec(request)
         .map_err(|error| format!("could not encode voice session request: {error}"))?;
-    write_frame(writer, JSON_KIND, &payload)
+    write_frame(writer, JSON_FRAME_KIND, &payload)
 }
 
 fn send_pcm(writer: &Arc<Mutex<ChildStdin>>, samples: &[f32]) -> Result<(), String> {
@@ -637,17 +624,11 @@ fn send_pcm(writer: &Arc<Mutex<ChildStdin>>, samples: &[f32]) -> Result<(), Stri
     for sample in samples {
         payload.extend_from_slice(&sample.to_le_bytes());
     }
-    write_frame(writer, PCM_KIND, &payload)
+    write_frame(writer, PCM_FRAME_KIND, &payload)
 }
 
 fn write_frame(writer: &Arc<Mutex<ChildStdin>>, kind: u8, payload: &[u8]) -> Result<(), String> {
-    let length = u32::try_from(payload.len()).map_err(|_| "voice session request is too large")?;
-    let mut frame = Vec::with_capacity(8 + payload.len());
-    frame.extend_from_slice(&FRAME_MAGIC);
-    frame.push(FRAME_MARKER);
-    frame.push(kind);
-    frame.extend_from_slice(&length.to_le_bytes());
-    frame.extend_from_slice(payload);
+    let frame = encode_frame(kind, payload)?;
     let mut writer = writer
         .lock()
         .map_err(|_| "voice session input lock was poisoned")?;
@@ -662,10 +643,7 @@ struct InputCapture {
 }
 
 impl InputCapture {
-    fn start(
-        writer: Arc<Mutex<ChildStdin>>,
-        fatal: Arc<Mutex<Option<String>>>,
-    ) -> Result<Self, String> {
+    fn start(writer: Arc<Mutex<ChildStdin>>, failures: SyncSender<String>) -> Result<Self, String> {
         let host = cpal::default_host();
         let device = host
             .default_input_device()
@@ -678,13 +656,13 @@ impl InputCapture {
         let channels = usize::from(config.channels);
         let sample_rate = config.sample_rate;
         let (frames_tx, frames_rx) = mpsc::sync_channel::<[f32; INPUT_FRAME_SAMPLES]>(32);
-        let writer_fatal = Arc::clone(&fatal);
+        let writer_failures = failures.clone();
         thread::Builder::new()
             .name("berd-call-microphone-writer".into())
             .spawn(move || {
                 while let Ok(frame) = frames_rx.recv() {
                     if let Err(message) = send_pcm(&writer, &frame) {
-                        *writer_fatal.lock().expect("capture failure lock") = Some(message);
+                        report_failure(&writer_failures, message);
                         break;
                     }
                 }
@@ -697,10 +675,10 @@ impl InputCapture {
                     sample_rate,
                     channels,
                     frames_tx.clone(),
-                    Arc::clone(&fatal),
+                    failures.clone(),
                     |sample: f32| sample,
                 ),
-                capture_error(Arc::clone(&fatal)),
+                capture_error(failures.clone()),
                 None,
             ),
             cpal::SampleFormat::I16 => device.build_input_stream(
@@ -709,10 +687,10 @@ impl InputCapture {
                     sample_rate,
                     channels,
                     frames_tx.clone(),
-                    Arc::clone(&fatal),
+                    failures.clone(),
                     |sample: i16| f32::from(sample) / f32::from(i16::MAX),
                 ),
-                capture_error(Arc::clone(&fatal)),
+                capture_error(failures.clone()),
                 None,
             ),
             cpal::SampleFormat::U16 => device.build_input_stream(
@@ -721,10 +699,10 @@ impl InputCapture {
                     sample_rate,
                     channels,
                     frames_tx,
-                    Arc::clone(&fatal),
+                    failures.clone(),
                     |sample: u16| (f32::from(sample) / f32::from(u16::MAX)) * 2.0 - 1.0,
                 ),
-                capture_error(Arc::clone(&fatal)),
+                capture_error(failures),
                 None,
             ),
             _ => {
@@ -745,31 +723,28 @@ fn capture_callback<T: Copy + Send + 'static>(
     sample_rate: u32,
     channels: usize,
     frames: SyncSender<[f32; INPUT_FRAME_SAMPLES]>,
-    fatal: Arc<Mutex<Option<String>>>,
+    failures: SyncSender<String>,
     convert: impl Fn(T) -> f32 + Send + 'static,
 ) -> impl FnMut(&[T], &cpal::InputCallbackInfo) + Send + 'static {
     let mut normalizer = InputNormalizer::new(sample_rate, channels);
     move |data, _| {
-        if fatal.lock().expect("capture failure lock").is_some() {
-            return;
-        }
         for frame in normalizer.push(data.iter().copied().map(&convert)) {
             if frames.try_send(frame).is_err() {
-                *fatal.lock().expect("capture failure lock") =
-                    Some("microphone input could not keep up".into());
+                report_failure(&failures, "microphone input could not keep up".into());
                 break;
             }
         }
     }
 }
 
-fn capture_error(
-    fatal: Arc<Mutex<Option<String>>>,
-) -> impl FnMut(cpal::StreamError) + Send + 'static {
+fn capture_error(failures: SyncSender<String>) -> impl FnMut(cpal::StreamError) + Send + 'static {
     move |error| {
-        *fatal.lock().expect("capture error lock") =
-            Some(format!("microphone capture failed: {error}"));
+        report_failure(&failures, format!("microphone capture failed: {error}"));
     }
+}
+
+fn report_failure(failures: &SyncSender<String>, message: String) {
+    let _ = failures.try_send(message);
 }
 
 struct InputNormalizer {
@@ -832,11 +807,17 @@ struct ActiveAudio {
     ended_sequence: Option<u64>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RetiredAudio {
+    speech_id: u64,
+    played_frames: u64,
+}
+
 fn spawn_audio_host(
     mut audio: File,
     writer: Arc<Mutex<ChildStdin>>,
     commands: Receiver<AudioCommand>,
-    fatal: Arc<Mutex<Option<String>>>,
+    failures: SyncSender<String>,
 ) -> Result<(), String> {
     let flags = unsafe { libc::fcntl(audio.as_raw_fd(), libc::F_GETFL) };
     if flags < 0
@@ -852,6 +833,9 @@ fn spawn_audio_host(
         .spawn(move || {
             let mut bytes = Vec::new();
             let mut active: Option<ActiveAudio> = None;
+            let mut retired: Option<RetiredAudio> = None;
+            let suspension_latency =
+                berd_call::macos_audio_route::playback_latency_safety_duration(None);
             loop {
                 let mut chunk = [0_u8; 8192];
                 match audio.read(&mut chunk) {
@@ -860,48 +844,89 @@ fn spawn_audio_host(
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
                     Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
                     Err(error) => {
-                        eprintln!("berd-call audio pipe failed: {error}");
-                        break;
+                        report_failure(&failures, format!("berd-call audio pipe failed: {error}"));
+                        return;
                     }
                 }
                 loop {
                     match take_audio_record(&mut bytes) {
                         Ok(Some((kind, payload))) => {
-                            if let Err(error) =
-                                handle_audio_record(kind, &payload, &writer, &mut active)
-                            {
-                                *fatal.lock().expect("audio failure lock") = Some(error);
+                            if let Err(error) = handle_audio_record(
+                                kind,
+                                &payload,
+                                &writer,
+                                &mut active,
+                                &mut retired,
+                            ) {
+                                report_failure(&failures, error);
                                 return;
                             }
                         }
                         Ok(None) => break,
                         Err(error) => {
-                            *fatal.lock().expect("audio failure lock") = Some(error);
+                            report_failure(&failures, error);
                             return;
                         }
                     }
                 }
                 while let Ok(command) = commands.try_recv() {
-                    if let Err(error) = handle_audio_command(command, &writer, &mut active) {
-                        *fatal.lock().expect("audio failure lock") = Some(error);
+                    if let Err(error) = handle_audio_command(
+                        command,
+                        &writer,
+                        &mut active,
+                        retired,
+                        suspension_latency,
+                    ) {
+                        report_failure(&failures, error);
                         return;
                     }
                 }
                 if let Some(playback) = active.as_mut() {
                     if let Err(error) = playback.player.check_health() {
-                        *fatal.lock().expect("audio failure lock") = Some(error);
-                        return;
+                        let speech_id = playback.speech_id;
+                        let played_frames = playback.player.played_frames();
+                        let _ = send_request(
+                            &writer,
+                            &SessionRequest::AudioFailed {
+                                speech_id,
+                                played_frames,
+                                message: error,
+                            },
+                        );
+                        retired = Some(RetiredAudio {
+                            speech_id,
+                            played_frames,
+                        });
+                        active = None;
+                        continue;
                     }
                     let played = playback.player.played_frames();
                     if played > playback.last_played {
                         playback.last_played = played;
-                        let _ = send_json(&writer, &json!({"type":"audio_played","speech_id":playback.speech_id,"played_frames":played}));
+                        let _ = send_request(
+                            &writer,
+                            &SessionRequest::AudioPlayed {
+                                speech_id: playback.speech_id,
+                                played_frames: played,
+                            },
+                        );
                     }
                     if let Some(sequence) = playback.ended_sequence {
                         if playback.player.is_empty() {
                             let speech_id = playback.speech_id;
                             let played_frames = playback.player.completed_source_frames();
-                            let _ = send_json(&writer, &json!({"type":"audio_drained","speech_id":speech_id,"sequence":sequence,"played_frames":played_frames}));
+                            let _ = send_request(
+                                &writer,
+                                &SessionRequest::AudioDrained {
+                                    speech_id,
+                                    sequence,
+                                    played_frames,
+                                },
+                            );
+                            retired = Some(RetiredAudio {
+                                speech_id,
+                                played_frames,
+                            });
                             active = None;
                         }
                     }
@@ -941,6 +966,7 @@ fn handle_audio_record(
     payload: &[u8],
     writer: &Arc<Mutex<ChildStdin>>,
     active: &mut Option<ActiveAudio>,
+    retired: &mut Option<RetiredAudio>,
 ) -> Result<(), String> {
     match kind {
         AUDIO_BEGIN_KIND if payload.len() == 16 => {
@@ -954,17 +980,27 @@ fn handle_audio_record(
                     .try_into()
                     .map_err(|_| "invalid audio rate")?,
             );
-            let player = PocketAudioPlayer::new(sample_rate, rate, None)?;
+            let player = match PocketAudioPlayer::new(sample_rate, rate, None) {
+                Ok(player) => player,
+                Err(message) => {
+                    return send_request(
+                        writer,
+                        &SessionRequest::AudioBeginFailed {
+                            speech_id,
+                            played_frames: 0,
+                            message,
+                        },
+                    );
+                }
+            };
             *active = Some(ActiveAudio {
                 speech_id,
                 player,
                 last_played: 0,
                 ended_sequence: None,
             });
-            send_json(
-                writer,
-                &json!({"type":"audio_begin_accepted","speech_id":speech_id}),
-            )
+            *retired = None;
+            send_request(writer, &SessionRequest::AudioBeginAccepted { speech_id })
         }
         AUDIO_CHUNK_KIND if payload.len() >= 16 && (payload.len() - 16).is_multiple_of(4) => {
             let speech_id = le_u64(&payload[0..8])?;
@@ -979,10 +1015,28 @@ fn handle_audio_record(
                     sample.try_into().expect("four-byte chunk"),
                 ));
             }
-            playback.player.enqueue(&samples)?;
-            send_json(
+            if let Err(message) = playback.player.enqueue(&samples) {
+                let played_frames = playback.player.played_frames();
+                *active = None;
+                *retired = Some(RetiredAudio {
+                    speech_id,
+                    played_frames,
+                });
+                return send_request(
+                    writer,
+                    &SessionRequest::AudioFailed {
+                        speech_id,
+                        played_frames,
+                        message,
+                    },
+                );
+            }
+            send_request(
                 writer,
-                &json!({"type":"audio_chunk_accepted","speech_id":speech_id,"sequence":sequence}),
+                &SessionRequest::AudioChunkAccepted {
+                    speech_id,
+                    sequence,
+                },
             )
         }
         AUDIO_END_KIND if payload.len() == 24 => {
@@ -1003,9 +1057,16 @@ fn handle_audio_record(
                 .ok_or_else(|| "voice session cancelled inactive audio".to_string())?;
             let played_frames = playback.player.played_frames();
             playback.player.stop();
-            send_json(
+            *retired = Some(RetiredAudio {
+                speech_id,
+                played_frames,
+            });
+            send_request(
                 writer,
-                &json!({"type":"audio_cancelled","speech_id":speech_id,"played_frames":played_frames}),
+                &SessionRequest::AudioCancelled {
+                    speech_id,
+                    played_frames,
+                },
             )
         }
         _ => Err("voice session emitted an invalid audio record".into()),
@@ -1016,6 +1077,8 @@ fn handle_audio_command(
     command: AudioCommand,
     writer: &Arc<Mutex<ChildStdin>>,
     active: &mut Option<ActiveAudio>,
+    retired: Option<RetiredAudio>,
+    suspension_latency: Duration,
 ) -> Result<(), String> {
     match command {
         AudioCommand::Suspend(speech_id) => {
@@ -1023,13 +1086,17 @@ fn handle_audio_command(
                 active.as_ref().filter(|value| value.speech_id == speech_id)
             {
                 playback.player.pause();
+                thread::sleep(suspension_latency);
                 playback.player.played_frames()
             } else {
-                0
+                retired_played_frames(retired, speech_id)
             };
-            send_json(
+            send_request(
                 writer,
-                &json!({"type":"audio_suspended","speech_id":speech_id,"played_frames":played_frames}),
+                &SessionRequest::AudioSuspended {
+                    speech_id,
+                    played_frames,
+                },
             )
         }
         AudioCommand::Resume(speech_id) => {
@@ -1039,14 +1106,23 @@ fn handle_audio_command(
                 playback.player.resume();
                 playback.player.played_frames()
             } else {
-                0
+                retired_played_frames(retired, speech_id)
             };
-            send_json(
+            send_request(
                 writer,
-                &json!({"type":"audio_resumed","speech_id":speech_id,"played_frames":played_frames}),
+                &SessionRequest::AudioResumed {
+                    speech_id,
+                    played_frames,
+                },
             )
         }
     }
+}
+
+fn retired_played_frames(retired: Option<RetiredAudio>, speech_id: u64) -> u64 {
+    retired
+        .filter(|value| value.speech_id == speech_id)
+        .map_or(0, |value| value.played_frames)
 }
 
 fn le_u64(bytes: &[u8]) -> Result<u64, String> {
@@ -1143,18 +1219,12 @@ mod tests {
     }
 
     #[test]
-    fn built_in_speaker_names_default_to_feedback_prevention() {
-        assert!(output_name_uses_speakers("MacBook Pro Speakers"));
-        assert!(output_name_uses_speakers("Altavoces del MacBook Pro"));
-        assert!(!output_name_uses_speakers("John's AirPods Pro"));
-        assert!(!output_name_uses_speakers("BlackHole 2ch"));
-    }
-
-    #[test]
-    fn output_ready_reuses_the_prepare_id() {
-        assert_eq!(
-            output_ready_message(17, 29),
-            json!({"type":"output_ready","id":17,"speech_id":29})
-        );
+    fn drained_audio_retains_progress_for_late_suspend_and_resume() {
+        let retired = Some(RetiredAudio {
+            speech_id: 17,
+            played_frames: 48_000,
+        });
+        assert_eq!(retired_played_frames(retired, 17), 48_000);
+        assert_eq!(retired_played_frames(retired, 18), 0);
     }
 }

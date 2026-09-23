@@ -64,19 +64,19 @@ mod host_control;
 #[cfg(target_os = "macos")]
 mod host_session;
 mod session_audio;
+mod session_framing;
 
 use session_audio::{
     AudioHostAck, AudioOutputControlRequest, AudioPipeTransport, RemotePcmAudioOutput,
     AUDIO_CANCELLED,
 };
 
-const SESSION_PROTOCOL_VERSION: u32 = 5;
-const INPUT_FRAME_MARKER: u8 = 3;
+use session_framing::{
+    FRAME_HEADER_BYTES, FRAME_MAGIC, FRAME_MARKER as INPUT_FRAME_MARKER, JSON_FRAME_KIND,
+    PCM_FRAME_KIND, SESSION_PROTOCOL_VERSION,
+};
+
 const MAX_LINE_BYTES: usize = 1024 * 1024;
-const FRAME_MAGIC: [u8; 2] = *b"BV";
-const JSON_FRAME_KIND: u8 = 1;
-const PCM_FRAME_KIND: u8 = 2;
-const FRAME_HEADER_BYTES: usize = 8;
 const PCM_FRAME_BYTES: usize = INPUT_FRAME_SAMPLES * std::mem::size_of::<f32>();
 const MAX_FINAL_TEXT_BYTES: usize = 64 * 1024;
 const MAX_SPEAK_TEXT_BYTES: usize = 16 * 1024;
@@ -505,25 +505,24 @@ fn main() {
                 parse_or_exit(parse_speak_control_args(&args), &args);
             let response = host_control::request(
                 port,
-                serde_json::json!({
-                    "command":"speak",
-                    "text":text,
-                    "acknowledgement":acknowledgement,
-                    "resolvedHandoffIds":resolved_handoff_ids,
-                }),
+                host_control::ControlRequest::Speak {
+                    text,
+                    acknowledgement,
+                    resolved_handoff_ids,
+                },
             )
             .unwrap_or_else(|error| operational_error("speak", error));
             print_pretty_json(&response).unwrap_or_else(|error| operational_error("speak", error));
         }
         Some("status") => {
             let port = parse_or_exit(parse_control_port(&args), &args);
-            let response = host_control::request(port, serde_json::json!({"command":"status"}))
+            let response = host_control::request(port, host_control::ControlRequest::Status)
                 .unwrap_or_else(|error| operational_error("status", error));
             print_pretty_json(&response).unwrap_or_else(|error| operational_error("status", error));
         }
         Some("stop") => {
             let port = parse_or_exit(parse_control_port(&args), &args);
-            let response = host_control::request(port, serde_json::json!({"command":"stop"}))
+            let response = host_control::request(port, host_control::ControlRequest::Stop)
                 .unwrap_or_else(|error| operational_error("stop", error));
             print_pretty_json(&response).unwrap_or_else(|error| operational_error("stop", error));
         }

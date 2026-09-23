@@ -595,6 +595,7 @@ dependencies = [
  "futures-util",
  "hound",
  "libc",
+ "objc2-core-audio",
  "ort",
  "ort-sys",
  "rand 0.10.2",
