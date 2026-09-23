@@ -589,6 +589,7 @@ dependencies = [
  "cc",
  "claxon",
  "coreaudio-rs",
+ "cpal",
  "earshot",
  "fs2",
  "futures-util",

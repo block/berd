@@ -28,6 +28,8 @@ unsafe extern "C" {
     fn berd_pocket_audio_player_pending_buffers(player: *mut c_void) -> u64;
     fn berd_pocket_audio_player_failed(player: *mut c_void) -> bool;
     fn berd_pocket_audio_player_stop(player: *mut c_void);
+    fn berd_pocket_audio_player_pause(player: *mut c_void);
+    fn berd_pocket_audio_player_resume(player: *mut c_void);
     fn berd_pocket_audio_player_release(player: *mut c_void);
     fn berd_siri_tts_free_string(value: *mut c_char);
 }
@@ -132,6 +134,16 @@ impl PocketAudioPlayer {
     pub fn stop(&self) {
         // SAFETY: `self.raw` is a live retained player and stop is idempotent.
         unsafe { berd_pocket_audio_player_stop(self.raw) };
+    }
+
+    pub fn pause(&self) {
+        // SAFETY: `self.raw` is a live retained player and pause is idempotent.
+        unsafe { berd_pocket_audio_player_pause(self.raw) };
+    }
+
+    pub fn resume(&self) {
+        // SAFETY: `self.raw` is a live retained player and resume is idempotent.
+        unsafe { berd_pocket_audio_player_resume(self.raw) };
     }
 }
 

@@ -6,6 +6,10 @@ Usage:
   berd-call <command> [options]
 
 Call runtime:
+  start                   Run a microphone-backed local voice call
+  speak                   Speak through the active local call
+  status                  Inspect the active local call
+  stop                    Stop the active local call
   session                 Run the host-facing framed voice-session protocol
 
 Speech and models:
@@ -22,6 +26,32 @@ Other:
   version                 Print the installed version
 
 Run `berd-call help <command>` for command-specific usage."#;
+
+const START_HELP: &str = r#"Run a local voice call backed by the shared session runtime.
+
+Usage:
+  berd-call start [--port PORT] [--stream]
+    --voice NAME --language BCP47 [session options]
+
+The foreground process owns the default microphone and audio output. Session
+options are the same as `berd-call session`, except the PCM descriptor is owned
+internally. `--stream` prints cursor, role, and text as TSV."#;
+
+const SPEAK_HELP: &str = r#"Speak through the active local voice call.
+
+Usage:
+  berd-call speak [--port PORT] [--re CURSOR]
+    [--resolves HANDOFF_ID]... TEXT"#;
+
+const STATUS_HELP: &str = r#"Inspect the active local voice call.
+
+Usage:
+  berd-call status [--port PORT]"#;
+
+const STOP_HELP: &str = r#"Stop the active local voice call.
+
+Usage:
+  berd-call stop [--port PORT]"#;
 
 const SESSION_HELP: &str = r#"Run the host-facing framed voice-session protocol.
 
@@ -115,6 +145,10 @@ pub(crate) fn parse(args: &[String]) -> Result<Option<MetaCommand>, String> {
 fn help_for(topic: &[&str]) -> Option<&'static str> {
     match topic {
         [] => Some(TOP_LEVEL_HELP),
+        ["start"] => Some(START_HELP),
+        ["speak"] => Some(SPEAK_HELP),
+        ["status"] => Some(STATUS_HELP),
+        ["stop"] => Some(STOP_HELP),
         ["session"] => Some(SESSION_HELP),
         ["synthesize"] => Some(SYNTHESIZE_HELP),
         ["voices"] | ["voices", "list" | "download"] => Some(VOICES_HELP),

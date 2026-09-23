@@ -5,19 +5,22 @@ Berd's reusable voice-call runtime and standalone CLI.
 This Cargo package contains the reusable `berd_call` library and the
 `berd-call` command. Desktop Berd links the library directly. Together they
 provide the voice-call lifecycle, speech backends, local speech-model
-management, synthesis and benchmark tools described below. Desktop Berd and
-other hosts retain their own device integration, persisted settings, transcript
-delivery, and user interface.
+management, synthesis and benchmark tools described below. Desktop Berd keeps
+its persisted settings and user interface. The standalone command includes a
+small macOS host for default-device capture, playback, and transcript delivery.
 
 ## Command-line interface
 
 The standalone command exposes the host-facing runtime protocol plus speech,
-model-management, synthesis, and diagnostic tools. It does not own agent
-integration, audio-device capture or playback, persisted host settings, or a
-background service lifecycle.
+model-management, synthesis, and diagnostic tools. `berd-call start` runs a
+foreground call on macOS using the default input and output devices. Its
+loopback-only control endpoint supports `speak`, `status`, and `stop`; it does
+not add persisted host settings, a menu-bar process, an updater, or a second
+implementation of the shared call runtime.
 
 ```text
 berd-call --help
+berd-call help start
 berd-call help session
 berd-call version
 ```
@@ -26,6 +29,24 @@ Help and version commands exit successfully, write only to stdout, and do not
 initialize an audio or model backend. Invalid commands and help topics remain
 usage errors on stderr with exit status 2. Operational JSONL commands retain
 stdout for their documented machine-readable records.
+
+Start a call with the same backend flags accepted by `session`:
+
+```sh
+berd-call start --voice Aaron --language en-US --stream
+berd-call status
+berd-call speak --re 7 "I found the cause."
+berd-call stop
+```
+
+`start` stays in the foreground and owns the child session process. The control
+server listens only on `127.0.0.1:5222` by default; all four commands accept
+`--port` when more than one local call must be addressed. `--stream` writes one
+TSV row per delivered transcript event after the `cursor`, `role`, and `text`
+header. The standalone host intentionally uses only the default devices in this
+first slice. It suppresses recognition during playback when the default output
+identifies itself as built-in speakers, preventing the call from transcribing
+its own speech; headphone-like outputs retain barge-in.
 
 This crate owns the neutral PCM output contract and backend-neutral TTS stream
 used by Berd, plus the April ONNX runtime and text chunking used by Berd's native

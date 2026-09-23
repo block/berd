@@ -60,6 +60,9 @@ use berd_call::{
 use serde::Serialize;
 
 mod cli_help;
+mod host_control;
+#[cfg(target_os = "macos")]
+mod host_session;
 mod session_audio;
 
 use session_audio::{
@@ -483,6 +486,47 @@ fn main() {
         None => {}
     }
     match args.get(1).map(String::as_str) {
+        Some("start") => {
+            let options = parse_or_exit(parse_start_args(&args), &args);
+            #[cfg(target_os = "macos")]
+            if let Err(error) = host_session::run(options) {
+                eprintln!("berd-call start failed: {error}");
+                std::process::exit(1);
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let _ = options;
+                eprintln!("berd-call start is not yet supported on this platform");
+                std::process::exit(1);
+            }
+        }
+        Some("speak") => {
+            let (port, acknowledgement, resolved_handoff_ids, text) =
+                parse_or_exit(parse_speak_control_args(&args), &args);
+            let response = host_control::request(
+                port,
+                serde_json::json!({
+                    "command":"speak",
+                    "text":text,
+                    "acknowledgement":acknowledgement,
+                    "resolvedHandoffIds":resolved_handoff_ids,
+                }),
+            )
+            .unwrap_or_else(|error| operational_error("speak", error));
+            print_pretty_json(&response).unwrap_or_else(|error| operational_error("speak", error));
+        }
+        Some("status") => {
+            let port = parse_or_exit(parse_control_port(&args), &args);
+            let response = host_control::request(port, serde_json::json!({"command":"status"}))
+                .unwrap_or_else(|error| operational_error("status", error));
+            print_pretty_json(&response).unwrap_or_else(|error| operational_error("status", error));
+        }
+        Some("stop") => {
+            let port = parse_or_exit(parse_control_port(&args), &args);
+            let response = host_control::request(port, serde_json::json!({"command":"stop"}))
+                .unwrap_or_else(|error| operational_error("stop", error));
+            print_pretty_json(&response).unwrap_or_else(|error| operational_error("stop", error));
+        }
         Some("session") => {
             let config = parse_or_exit(parse_args(&args), &args);
             let pcm_output_fd = parse_or_exit(parse_pcm_output_fd(&args), &args);
@@ -563,6 +607,152 @@ fn main() {
         Some(command) => usage_error(&format!("unrecognized command: {command}"), &args),
         None => usage_error("a command is required", &args),
     }
+}
+
+struct StartOptions {
+    port: u16,
+    stream: bool,
+    expert_spokesperson: bool,
+    session_arguments: Vec<String>,
+}
+
+fn parse_start_args(args: &[String]) -> Result<StartOptions, ParseFailure> {
+    let mut port = 5222_u16;
+    let mut port_seen = false;
+    let mut stream = false;
+    let mut session_arguments = vec!["session".to_string()];
+    let mut index = 2;
+    while index < args.len() {
+        match args[index].as_str() {
+            "-h" | "--help" => return Err(ParseFailure::HelpRequested),
+            "--stream" if !stream => {
+                stream = true;
+                index += 1;
+            }
+            "--stream" => return Err("--stream may be provided only once".into()),
+            "--port" if !port_seen => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "--port requires a value".to_string())?;
+                port = parse_port(value)?;
+                port_seen = true;
+                index += 2;
+            }
+            "--port" => return Err("--port may be provided only once".into()),
+            "--pcm-output-fd" => {
+                return Err("berd-call start owns its PCM output descriptor".into())
+            }
+            _ => {
+                session_arguments.push(args[index].clone());
+                index += 1;
+            }
+        }
+    }
+    let mut validation = vec!["berd-call".to_string()];
+    validation.extend(session_arguments.iter().cloned());
+    let config = parse_args(&validation)?;
+    Ok(StartOptions {
+        port,
+        stream,
+        expert_spokesperson: config.mode == SessionMode::ExpertSpokesperson,
+        session_arguments,
+    })
+}
+
+fn parse_speak_control_args(
+    args: &[String],
+) -> Result<(u16, Option<u64>, Vec<String>, String), ParseFailure> {
+    let mut port = 5222_u16;
+    let mut port_seen = false;
+    let mut acknowledgement = None;
+    let mut resolved_handoff_ids = Vec::new();
+    let mut text = None;
+    let mut index = 2;
+    while index < args.len() {
+        match args[index].as_str() {
+            "-h" | "--help" => return Err(ParseFailure::HelpRequested),
+            "--port" if !port_seen => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "--port requires a value".to_string())?;
+                port = parse_port(value)?;
+                port_seen = true;
+                index += 2;
+            }
+            "--port" => return Err("--port may be provided only once".into()),
+            "--re" if acknowledgement.is_none() => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "--re requires a value".to_string())?;
+                acknowledgement = Some(
+                    value
+                        .parse::<u64>()
+                        .map_err(|_| "--re must be a nonnegative integer".to_string())?,
+                );
+                index += 2;
+            }
+            "--re" => return Err("--re may be provided only once".into()),
+            "--resolves" => {
+                let value = args
+                    .get(index + 1)
+                    .filter(|value| !value.is_empty() && value.len() <= MAX_HANDOFF_ID_BYTES)
+                    .ok_or_else(|| {
+                        "--resolves requires a handoff ID up to 512 bytes".to_string()
+                    })?;
+                if resolved_handoff_ids.len() >= MAX_HANDOFF_IDS {
+                    return Err("--resolves may be provided at most 64 times".into());
+                }
+                resolved_handoff_ids.push(value.clone());
+                index += 2;
+            }
+            value if value.starts_with('-') => {
+                return Err(format!("unknown speak argument: {value}").into())
+            }
+            value if text.is_none() => {
+                text = Some(value.to_string());
+                index += 1;
+            }
+            _ => return Err("speak accepts exactly one text argument".into()),
+        }
+    }
+    let text = text
+        .filter(|text| !text.trim().is_empty())
+        .ok_or_else(|| ParseFailure::Usage("speak text is required".into()))?;
+    if text.len() > MAX_SPEAK_TEXT_BYTES {
+        return Err("speak text is larger than 16 KiB".into());
+    }
+    Ok((port, acknowledgement, resolved_handoff_ids, text))
+}
+
+fn parse_control_port(args: &[String]) -> Result<u16, ParseFailure> {
+    match args.get(2..).unwrap_or_default() {
+        [] => Ok(5222),
+        [help] if is_help_flag(help) => Err(ParseFailure::HelpRequested),
+        [flag, value] if flag == "--port" => parse_port(value).map_err(Into::into),
+        _ => Err(format!("{} accepts only --port PORT", args[1]).into()),
+    }
+}
+
+fn parse_port(value: &str) -> Result<u16, String> {
+    value
+        .parse::<u16>()
+        .ok()
+        .filter(|port| *port > 0)
+        .ok_or_else(|| "--port must be an integer from 1 to 65535".into())
+}
+
+fn print_pretty_json(value: &serde_json::Value) -> Result<(), String> {
+    println!(
+        "{}",
+        serde_json::to_string_pretty(value)
+            .map_err(|error| format!("could not encode command result: {error}"))?
+    );
+    Ok(())
+}
+
+fn operational_error(operation: &str, error: String) -> ! {
+    eprintln!("berd-call {operation} failed: {error}");
+    std::process::exit(1)
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -10543,5 +10733,64 @@ mod tests {
             failure["message"],
             "playback worker disconnected during shutdown"
         );
+    }
+
+    #[test]
+    fn start_parser_keeps_only_session_options_for_the_child() {
+        let parsed = parse_start_args(&args(&[
+            "berd-call",
+            "start",
+            "--port",
+            "5300",
+            "--stream",
+            "--voice",
+            "Aaron",
+            "--language",
+            "en-US",
+        ]))
+        .unwrap();
+        assert_eq!(parsed.port, 5300);
+        assert!(parsed.stream);
+        assert!(!parsed.expert_spokesperson);
+        assert_eq!(
+            parsed.session_arguments,
+            ["session", "--voice", "Aaron", "--language", "en-US"]
+        );
+        assert!(parse_start_args(&args(&[
+            "berd-call",
+            "start",
+            "--voice",
+            "Aaron",
+            "--language",
+            "en-US",
+            "--pcm-output-fd",
+            "9",
+        ]))
+        .is_err());
+    }
+
+    #[test]
+    fn control_command_parsers_are_closed_and_correlated() {
+        assert_eq!(
+            parse_speak_control_args(&args(&[
+                "berd-call",
+                "speak",
+                "--port",
+                "5300",
+                "--re",
+                "17",
+                "hello",
+            ]))
+            .unwrap(),
+            (5300, Some(17), Vec::new(), "hello".into())
+        );
+        assert_eq!(
+            parse_control_port(&args(&["berd-call", "status", "--port", "5301"])).unwrap(),
+            5301
+        );
+        assert!(
+            parse_speak_control_args(&args(&["berd-call", "speak", "--legacy", "hello",])).is_err()
+        );
+        assert!(parse_control_port(&args(&["berd-call", "stop", "extra"])).is_err());
     }
 }

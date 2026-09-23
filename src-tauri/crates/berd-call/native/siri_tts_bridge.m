@@ -719,6 +719,8 @@ typedef void (^BerdAudioHandler)(
             frameCount:(AVAudioFrameCount)frameCount
                  error:(NSError **)error;
 - (uint64_t)completedSourceFramesSnapshot;
+- (void)pause;
+- (void)resume;
 - (void)stop;
 @end
 
@@ -830,6 +832,20 @@ typedef void (^BerdAudioHandler)(
 
 - (uint64_t)completedSourceFramesSnapshot {
     @synchronized (self) { return self.completedSourceFrames; }
+}
+
+- (void)pause {
+    @synchronized (self) {
+        if (self.stopped || !self.player.isPlaying) return;
+        [self.player pause];
+    }
+}
+
+- (void)resume {
+    @synchronized (self) {
+        if (self.stopped || self.player.isPlaying) return;
+        [self.player play];
+    }
 }
 
 - (void)stop {
@@ -1761,6 +1777,16 @@ bool berd_pocket_audio_player_failed(void *playerValue) {
 void berd_pocket_audio_player_stop(void *playerValue) {
     if (!playerValue) return;
     [(__bridge BerdPocketAudioPlayer *)playerValue stop];
+}
+
+void berd_pocket_audio_player_pause(void *playerValue) {
+    if (!playerValue) return;
+    [(__bridge BerdPocketAudioPlayer *)playerValue pause];
+}
+
+void berd_pocket_audio_player_resume(void *playerValue) {
+    if (!playerValue) return;
+    [(__bridge BerdPocketAudioPlayer *)playerValue resume];
 }
 
 void berd_pocket_audio_player_release(void *playerValue) {

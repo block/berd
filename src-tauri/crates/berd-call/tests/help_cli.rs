@@ -15,11 +15,18 @@ fn global_help_is_successful_and_lists_only_supported_commands() {
         assert!(output.stderr.is_empty(), "{argument}");
         let stdout = String::from_utf8(output.stdout).expect("UTF-8 stdout");
         assert!(stdout.starts_with("Berd Call\n"), "{argument}");
-        for command in ["session", "synthesize", "voices", "models", "benchmark"] {
+        for command in [
+            "start",
+            "speak",
+            "status",
+            "stop",
+            "session",
+            "synthesize",
+            "voices",
+            "models",
+            "benchmark",
+        ] {
             assert!(stdout.contains(command), "{argument}: {command}");
-        }
-        for unsupported in ["start", "speak", "status", "stop"] {
-            assert!(!stdout.contains(unsupported), "{argument}: {unsupported}");
         }
     }
 }
@@ -29,6 +36,14 @@ fn command_help_is_available_in_prefix_and_suffix_forms() {
     for args in [
         vec!["help", "session"],
         vec!["session", "--help"],
+        vec!["help", "start"],
+        vec!["start", "--help"],
+        vec!["help", "speak"],
+        vec!["speak", "--help"],
+        vec!["help", "status"],
+        vec!["status", "--help"],
+        vec!["help", "stop"],
+        vec!["stop", "--help"],
         vec!["help", "voices"],
         vec!["help", "models"],
         vec!["voices", "--help"],
@@ -65,12 +80,12 @@ fn version_is_successful_and_machine_readable_as_one_line() {
 
 #[test]
 fn unknown_help_topics_remain_usage_errors() {
-    let output = berd_call(&["help", "start"]);
+    let output = berd_call(&["help", "start", "bogus"]);
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty());
     assert!(String::from_utf8(output.stderr)
         .expect("UTF-8 stderr")
-        .contains("unknown help topic: start"));
+        .contains("unknown help topic: start bogus"));
 
     let output = berd_call(&["help", "session", "bogus"]);
     assert_eq!(output.status.code(), Some(2));
