@@ -60,6 +60,8 @@ use berd_call::{
 use serde::Serialize;
 
 mod cli_help;
+#[cfg(target_os = "macos")]
+mod codex;
 mod host_control;
 #[cfg(target_os = "macos")]
 mod host_session;
@@ -622,6 +624,7 @@ fn main() {
 struct StartOptions {
     port: u16,
     stream: bool,
+    codex: bool,
     non_blocking: bool,
     expert_spokesperson: bool,
     session_arguments: Vec<String>,
@@ -647,6 +650,7 @@ fn parse_start_args(args: &[String]) -> Result<StartOptions, ParseFailure> {
     let mut port = 5222_u16;
     let mut port_seen = false;
     let mut stream = false;
+    let mut codex = false;
     let mut non_blocking = false;
     let mut session_arguments = vec!["session".to_string()];
     let mut index = 2;
@@ -658,6 +662,11 @@ fn parse_start_args(args: &[String]) -> Result<StartOptions, ParseFailure> {
                 index += 1;
             }
             "--stream" => return Err("--stream may be provided only once".into()),
+            "--codex" if !codex => {
+                codex = true;
+                index += 1;
+            }
+            "--codex" => return Err("--codex may be provided only once".into()),
             "--non-blocking" if !non_blocking => {
                 non_blocking = true;
                 index += 1;
@@ -682,14 +691,19 @@ fn parse_start_args(args: &[String]) -> Result<StartOptions, ParseFailure> {
         }
     }
     let expert_spokesperson = validate_session_arguments(&session_arguments)?;
-    if non_blocking && !stream {
+    if stream && codex {
+        return Err("choose either --stream or --codex for transcript delivery".into());
+    }
+    if non_blocking && !(stream || codex) {
         return Err(
-            "non-blocking speech requires --stream for interruption and failure events".into(),
+            "non-blocking speech requires --stream or --codex for interruption and failure events"
+                .into(),
         );
     }
     Ok(StartOptions {
         port,
         stream,
+        codex,
         non_blocking,
         expert_spokesperson,
         session_arguments,
@@ -10892,6 +10906,21 @@ mod tests {
             "9",
         ]))
         .is_err());
+    }
+
+    #[test]
+    fn start_parser_accepts_one_transcript_destination() {
+        let start = |flags: &[&str]| {
+            let mut all = vec!["berd-call", "start"];
+            all.extend_from_slice(flags);
+            all.extend(["--voice", "Aaron", "--language", "en-US"]);
+            parse_start_args(&args(&all))
+        };
+        let parsed = start(&["--codex", "--non-blocking"]).unwrap();
+        assert!(parsed.codex && parsed.non_blocking && !parsed.stream);
+        assert!(start(&["--codex", "--stream"]).is_err());
+        assert!(start(&["--codex", "--codex"]).is_err());
+        assert!(start(&["--non-blocking"]).is_err());
     }
 
     #[test]

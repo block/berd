@@ -25,6 +25,7 @@ use berd_call::protocol::{
 };
 use berd_call::PocketAudioPlayer;
 
+use crate::codex::{self, CodexRecord, CodexRelay, CodexTarget};
 use crate::host_control::{ControlServer, HostControl};
 use crate::session_audio::{
     AUDIO_BEGIN_KIND, AUDIO_CANCEL_KIND, AUDIO_CHUNK_KIND, AUDIO_END_KIND,
@@ -35,17 +36,15 @@ use crate::session_framing::{
 };
 use crate::StartOptions;
 
+const NON_BLOCKING_REQUIRES_DELIVERY: &str =
+    "non-blocking speech requires start --stream or --codex for delivery events";
 const INPUT_FRAME_SAMPLES: usize = 960;
 const MAX_AUDIO_RECORD_BYTES: usize = 4096 * std::mem::size_of::<f32>() + 16;
 
 pub(crate) fn run(options: StartOptions) -> Result<(), String> {
     let server = ControlServer::bind(options.port)?;
-    if options.stream {
-        println!("cursor\trole\ttext");
-        std::io::stdout()
-            .flush()
-            .map_err(|error| format!("could not flush stream header: {error}"))?;
-    }
+    let transcript = Arc::new(Transcript::for_options(&options)?);
+    transcript.start()?;
     let non_blocking = Arc::new(AtomicBool::new(options.non_blocking));
     let mut session = SessionStart {
         arguments: options.session_arguments,
@@ -55,19 +54,114 @@ pub(crate) fn run(options: StartOptions) -> Result<(), String> {
         restarted: None,
     };
     loop {
-        match run_session(&server, session, options.stream, &non_blocking)? {
-            None => return Ok(()),
-            Some(next) => {
-                if options.stream {
-                    println!("0\tlifecycle\tsession restarted; transcript cursors reset");
-                    std::io::stdout()
-                        .flush()
-                        .map_err(|error| format!("could not flush voice stream: {error}"))?;
-                }
+        match run_session(&server, session, &transcript, &non_blocking) {
+            Ok(None) => {
+                transcript.finish(
+                    "Berd Call stopped after a stop request. This is a clean shutdown, not a crash. Do not restart it unless asked.",
+                );
+                return Ok(());
+            }
+            Ok(Some(next)) => {
+                transcript.record(
+                    Some(0),
+                    "lifecycle",
+                    None,
+                    "session restarted; transcript cursors reset",
+                )?;
                 session = next;
+            }
+            Err(message) => {
+                transcript.finish(&format!("Berd Call failed: {message}"));
+                return Err(message);
             }
         }
     }
+}
+
+/// Where live transcript records go: nowhere, stdout TSV, or a Codex task.
+pub(crate) enum Transcript {
+    Silent,
+    Stdout,
+    Codex(CodexRelay),
+}
+
+impl Transcript {
+    fn for_options(options: &StartOptions) -> Result<Self, String> {
+        if options.codex {
+            let target = CodexTarget::from_environment()?;
+            let executable = std::env::current_exe()
+                .map_err(|error| format!("could not resolve the berd-call executable: {error}"))?;
+            return Ok(Self::Codex(CodexRelay::start(
+                target,
+                codex::guidance(&executable, options.port),
+            )));
+        }
+        Ok(if options.stream {
+            Self::Stdout
+        } else {
+            Self::Silent
+        })
+    }
+
+    /// Whether interruption and failure reports reach the agent.
+    fn delivers(&self) -> bool {
+        !matches!(self, Self::Silent)
+    }
+
+    fn start(&self) -> Result<(), String> {
+        match self {
+            Self::Stdout => print_flushed("cursor\trole\ttext"),
+            Self::Codex(_) => {
+                println!("Berd Call is delivering transcripts to this Codex task.");
+                Ok(())
+            }
+            Self::Silent => Ok(()),
+        }
+    }
+
+    fn record(
+        &self,
+        cursor: Option<u64>,
+        role: &str,
+        handoff_id: Option<&str>,
+        text: &str,
+    ) -> Result<(), String> {
+        match self {
+            Self::Silent => Ok(()),
+            Self::Stdout => print_flushed(&format!(
+                "{}\t{role}\t{}",
+                cursor.unwrap_or_default(),
+                stream_text(text)
+            )),
+            Self::Codex(relay) => {
+                relay.send(CodexRecord {
+                    cursor,
+                    role: role.to_string(),
+                    handoff_id: handoff_id.map(str::to_string),
+                    text: text.to_string(),
+                });
+                Ok(())
+            }
+        }
+    }
+
+    fn finish(&self, text: &str) {
+        if let Self::Codex(relay) = self {
+            relay.finish(Some(CodexRecord {
+                cursor: None,
+                role: "lifecycle".into(),
+                handoff_id: None,
+                text: text.to_string(),
+            }));
+        }
+    }
+}
+
+fn print_flushed(line: &str) -> Result<(), String> {
+    println!("{line}");
+    std::io::stdout()
+        .flush()
+        .map_err(|error| format!("could not flush voice stream: {error}"))
 }
 
 struct SessionStart {
@@ -81,7 +175,7 @@ struct SessionStart {
 fn run_session(
     server: &ControlServer,
     start: SessionStart,
-    stream: bool,
+    transcript: &Arc<Transcript>,
     non_blocking: &Arc<AtomicBool>,
 ) -> Result<Option<SessionStart>, String> {
     let SessionStart {
@@ -96,7 +190,7 @@ fn run_session(
         expert_spokesperson,
         muted,
         input_during_tts,
-        stream,
+        transcript,
         non_blocking,
     );
     let StartedSession {
@@ -171,7 +265,7 @@ fn start_session(
     expert_spokesperson: bool,
     muted: bool,
     input_during_tts: InputDuringTtsPolicy,
-    stream: bool,
+    transcript: &Arc<Transcript>,
     non_blocking: &Arc<AtomicBool>,
 ) -> Result<StartedSession, String> {
     let mut child = SessionProcess::spawn(arguments.clone())?;
@@ -204,7 +298,7 @@ fn start_session(
         command_rx,
         audio_command_tx,
         Arc::clone(&ready.session),
-        stream,
+        Arc::clone(transcript),
         expert_spokesperson,
     );
     if muted {
@@ -220,7 +314,7 @@ fn start_session(
         ready: ready.clone(),
         non_blocking: Arc::clone(non_blocking),
         muted: AtomicBool::new(muted),
-        stream,
+        transcript: Arc::clone(transcript),
         session_arguments: arguments,
     });
     Ok(StartedSession {
@@ -290,7 +384,7 @@ struct SessionControl {
     ready: ReadyState,
     non_blocking: Arc<AtomicBool>,
     muted: AtomicBool,
-    stream: bool,
+    transcript: Arc<Transcript>,
     session_arguments: Vec<String>,
 }
 
@@ -362,8 +456,8 @@ impl HostControl for SessionControl {
     }
 
     fn set_non_blocking(&self, enabled: bool) -> Result<Value, String> {
-        if enabled && !self.stream {
-            return Err("non-blocking speech requires start --stream for delivery events".into());
+        if enabled && !self.transcript.delivers() {
+            return Err(NON_BLOCKING_REQUIRES_DELIVERY.into());
         }
         self.non_blocking.store(enabled, Ordering::SeqCst);
         self.status()
@@ -431,7 +525,7 @@ struct SessionActor {
     pending_settings: std::collections::HashMap<u64, SyncSender<Result<Value, String>>>,
     waiting_speaks: VecDeque<ControlCommand>,
     session: Arc<Mutex<VoiceSessionSnapshot>>,
-    stream: bool,
+    transcript: Arc<Transcript>,
     expert_spokesperson: bool,
     stopping: bool,
     restart: Option<PendingRestart>,
@@ -444,7 +538,7 @@ impl SessionActor {
         commands: Receiver<ControlCommand>,
         audio_commands: SyncSender<AudioCommand>,
         session: Arc<Mutex<VoiceSessionSnapshot>>,
-        stream: bool,
+        transcript: Arc<Transcript>,
         expert_spokesperson: bool,
     ) -> Self {
         Self {
@@ -457,7 +551,7 @@ impl SessionActor {
             pending_settings: std::collections::HashMap::new(),
             waiting_speaks: VecDeque::new(),
             session,
-            stream,
+            transcript,
             expert_spokesperson,
             stopping: false,
             restart: None,
@@ -544,10 +638,8 @@ impl SessionActor {
                 non_blocking,
                 response,
             } => {
-                if non_blocking && !self.stream {
-                    let _ = response.send(Err(
-                        "non-blocking speech requires start --stream for delivery events".into(),
-                    ));
+                if non_blocking && !self.transcript.delivers() {
+                    let _ = response.send(Err(NON_BLOCKING_REQUIRES_DELIVERY.into()));
                     return Ok(());
                 }
                 if self.pending_speak.is_some() {
@@ -745,8 +837,12 @@ impl SessionActor {
                     Err(message) => json!({"status":"failed", "message":message}),
                 };
                 if should_notify_delivery(&result) {
-                    println!("{}\tspeech_result\t{}", pending.prepare_id, result);
-                    let _ = std::io::stdout().flush();
+                    let _ = self.transcript.record(
+                        Some(pending.prepare_id),
+                        "speech_result",
+                        None,
+                        &result.to_string(),
+                    );
                 }
             }
         }
@@ -758,26 +854,20 @@ impl SessionActor {
         origin: Option<UtteranceOrigin>,
         text: &str,
     ) -> Result<(), String> {
-        if !self.stream {
-            return Ok(());
-        }
         let role = utterance_origin_name(origin.unwrap_or(UtteranceOrigin::User));
-        println!("{token}\t{role}\t{}", stream_text(text));
-        std::io::stdout()
-            .flush()
-            .map_err(|error| format!("could not flush voice stream: {error}"))
+        self.transcript.record(Some(token), role, None, text)
     }
 
     fn stream_expert_delivery(&self, events: &[RealtimeExpertDeliveryEvent]) -> Result<(), String> {
-        if !self.stream {
-            return Ok(());
+        for event in events {
+            self.transcript.record(
+                Some(event.cursor),
+                expert_delivery_role_name(event.role),
+                event.handoff_id.as_deref(),
+                &event.text,
+            )?;
         }
-        for (cursor, role, text) in expert_delivery_rows(events) {
-            println!("{cursor}\t{role}\t{text}");
-        }
-        std::io::stdout()
-            .flush()
-            .map_err(|error| format!("could not flush expert delivery: {error}"))
+        Ok(())
     }
 
     fn next_id(&mut self) -> u64 {
@@ -797,19 +887,6 @@ impl SessionActor {
             }
         }
     }
-}
-
-fn expert_delivery_rows(events: &[RealtimeExpertDeliveryEvent]) -> Vec<(u64, String, String)> {
-    events
-        .iter()
-        .map(|event| {
-            (
-                event.cursor,
-                expert_delivery_role_name(event.role).to_string(),
-                stream_text(&event.text),
-            )
-        })
-        .collect()
 }
 
 fn receive_ready(events: &Receiver<SessionMessage>) -> Result<ReadyState, String> {
@@ -1655,7 +1732,7 @@ mod tests {
             commands,
             audio_commands,
             session,
-            true,
+            Arc::new(Transcript::Stdout),
             false,
         )
     }
@@ -1763,31 +1840,6 @@ mod tests {
         assert_eq!(
             take_audio_record(&mut bytes).unwrap(),
             Some((AUDIO_CANCEL_KIND, 7_u64.to_le_bytes().to_vec()))
-        );
-    }
-
-    #[test]
-    fn expert_delivery_preserves_causal_rows() {
-        let rows = expert_delivery_rows(&[
-            RealtimeExpertDeliveryEvent {
-                cursor: 4,
-                role: RealtimeExpertDeliveryRole::User,
-                text: "hello".into(),
-                handoff_id: None,
-            },
-            RealtimeExpertDeliveryEvent {
-                cursor: 5,
-                role: RealtimeExpertDeliveryRole::SpokespersonInterrupted,
-                text: "hi\nthere".into(),
-                handoff_id: None,
-            },
-        ]);
-        assert_eq!(
-            rows,
-            vec![
-                (4, "user".into(), "hello".into()),
-                (5, "spokesperson_interrupted".into(), "hi there".into())
-            ]
         );
     }
 

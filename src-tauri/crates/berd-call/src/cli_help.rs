@@ -31,12 +31,13 @@ Run `berd-call help <command>` for command-specific usage."#;
 const START_HELP: &str = r#"Run a local voice call backed by the shared session runtime.
 
 Usage:
-  berd-call start [--port PORT] [--stream] [--non-blocking]
+  berd-call start [--port PORT] [--stream | --codex] [--non-blocking]
     --voice NAME --language BCP47 [session options]
 
 The foreground process owns the default microphone and audio output. Session
 options are the same as `berd-call session`, except the PCM descriptor is owned
-internally. `--stream` prints cursor, role, and text as TSV."#;
+internally. `--stream` prints cursor, role, and text as TSV. `--codex` delivers
+the same records to the calling Codex task (requires CODEX_THREAD_ID)."#;
 
 const SPEAK_HELP: &str = r#"Speak through the active local voice call.
 
@@ -45,7 +46,7 @@ Usage:
     [--resolves HANDOFF_ID]... TEXT
 
 Speech waits for admission. The session setting controls whether it also waits
-for delivery. Non-blocking sessions require --stream and emit speech_result
+for delivery. Non-blocking sessions require --stream or --codex and emit speech_result
 rows only for interruptions, failures, or pending user input. Interrupted results include
 estimatedSpokenText, a best-effort prefix based on delivered audio."#;
 
@@ -59,7 +60,7 @@ Usage:
   berd-call settings [--port PORT] --restart [session options]
 
 The setting applies to subsequent speak calls. Non-blocking delivery requires
-a call started with --stream. Successful delivery produces no notification."#;
+a call started with --stream or --codex. Successful delivery produces no notification."#;
 
 const STATUS_HELP: &str = r#"Inspect the active local voice call.
 
