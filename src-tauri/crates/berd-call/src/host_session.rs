@@ -139,6 +139,11 @@ fn run_session(
     let control: Arc<dyn HostControl> = control;
     while running.load(Ordering::SeqCst) {
         server.poll(Arc::clone(&control))?;
+        // A stop can be recorded by a control connection that outlived the
+        // session it was sent to, so the flag, not the command, is authoritative.
+        if stop_requested.load(Ordering::SeqCst) {
+            actor.stop()?;
+        }
         actor.poll()?;
         match failure_rx.try_recv() {
             Ok(message) => return Err(message),
@@ -625,15 +630,21 @@ impl SessionActor {
                 });
             }
             ControlCommand::Stop { response } => {
-                if let Some(restart) = self.restart.take() {
-                    let _ = restart.response.send(Err("voice call stopped".into()));
-                }
-                if !self.stopping {
-                    send_request(&self.writer, &SessionRequest::Shutdown)?;
-                    self.stopping = true;
-                }
+                self.stop()?;
                 let _ = response.send(Ok(json!({"stopping":true})));
             }
+        }
+        Ok(())
+    }
+
+    /// Ends the call, cancelling any restart it would otherwise hand off to.
+    fn stop(&mut self) -> Result<(), String> {
+        if let Some(restart) = self.restart.take() {
+            let _ = restart.response.send(Err("voice call stopped".into()));
+        }
+        if !self.stopping {
+            send_request(&self.writer, &SessionRequest::Shutdown)?;
+            self.stopping = true;
         }
         Ok(())
     }
