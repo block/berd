@@ -839,10 +839,33 @@ export async function promotePersonaSource(
   return promoted;
 }
 
+export interface AgentGalleryListing {
+  personas: Persona[];
+  /** In-progress builder drafts, as they exist on disk right now. */
+  drafts: AgentSourceEntry[];
+}
+
+/**
+ * Single read of the agent sources, split into finished agents and builder
+ * drafts. The gallery renders both from this one listing so a draft card can
+ * only exist while its file does — same as a finished agent.
+ */
+export async function listAgentGallery(): Promise<AgentGalleryListing> {
+  const sources = await listAgentSources();
+  const personas: Persona[] = [];
+  const drafts: AgentSourceEntry[] = [];
+  for (const source of sources) {
+    if (source.properties?.draft === true) {
+      drafts.push(source);
+    } else {
+      personas.push(agentSourceToPersona(source));
+    }
+  }
+  return { personas, drafts };
+}
+
 export async function listPersonas(): Promise<Persona[]> {
-  return (await listAgentSources())
-    .filter((source) => source.properties?.draft !== true)
-    .map(agentSourceToPersona);
+  return (await listAgentGallery()).personas;
 }
 
 export async function createPersona(
@@ -947,6 +970,10 @@ export async function deletePersona(id: string): Promise<void> {
 
 export async function refreshPersonas(): Promise<Persona[]> {
   return listPersonas();
+}
+
+export async function refreshAgentGallery(): Promise<AgentGalleryListing> {
+  return listAgentGallery();
 }
 
 export async function repairBundledAgent(fileName: string): Promise<void> {
