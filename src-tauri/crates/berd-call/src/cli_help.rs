@@ -9,6 +9,7 @@ Call runtime:
   start                   Run a microphone-backed local voice call
   speak                   Speak through the active local call
   status                  Inspect the active local call
+  settings                Update the active local call settings
   stop                    Stop the active local call
   session                 Run the host-facing framed voice-session protocol
 
@@ -30,7 +31,7 @@ Run `berd-call help <command>` for command-specific usage."#;
 const START_HELP: &str = r#"Run a local voice call backed by the shared session runtime.
 
 Usage:
-  berd-call start [--port PORT] [--stream]
+  berd-call start [--port PORT] [--stream] [--non-blocking]
     --voice NAME --language BCP47 [session options]
 
 The foreground process owns the default microphone and audio output. Session
@@ -41,12 +42,20 @@ const SPEAK_HELP: &str = r#"Speak through the active local voice call.
 
 Usage:
   berd-call speak [--port PORT] [--re CURSOR]
-    [--resolves HANDOFF_ID]... [--non-blocking] TEXT
+    [--resolves HANDOFF_ID]... TEXT
 
-Blocking speech returns its delivery result. --non-blocking requires start
---stream and returns a requestId immediately; a speech_result TSV row with
-that request ID reports the eventual result. Interrupted results include
+Speech waits for admission. The session setting controls whether it also waits
+for delivery. Non-blocking sessions require --stream and emit speech_result
+rows only for interruptions, failures, or pending user input. Interrupted results include
 estimatedSpokenText, a best-effort prefix based on delivered audio."#;
+
+const SETTINGS_HELP: &str = r#"Update settings for the active local voice call.
+
+Usage:
+  berd-call settings [--port PORT] --non-blocking true|false
+
+The setting applies to subsequent speak calls. Non-blocking delivery requires
+a call started with --stream. Successful delivery produces no notification."#;
 
 const STATUS_HELP: &str = r#"Inspect the active local voice call.
 
@@ -153,6 +162,7 @@ fn help_for(topic: &[&str]) -> Option<&'static str> {
         ["start"] => Some(START_HELP),
         ["speak"] => Some(SPEAK_HELP),
         ["status"] => Some(STATUS_HELP),
+        ["settings"] => Some(SETTINGS_HELP),
         ["stop"] => Some(STOP_HELP),
         ["session"] => Some(SESSION_HELP),
         ["synthesize"] => Some(SYNTHESIZE_HELP),

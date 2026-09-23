@@ -21,9 +21,9 @@ pub(crate) trait HostControl: Send + Sync + 'static {
         text: String,
         acknowledgement: Option<u64>,
         resolved_handoff_ids: Vec<String>,
-        non_blocking: bool,
     ) -> Result<Value, String>;
     fn stop(&self) -> Result<Value, String>;
+    fn set_non_blocking(&self, enabled: bool) -> Result<Value, String>;
 }
 
 pub(crate) struct ControlServer {
@@ -92,10 +92,12 @@ pub(crate) enum ControlRequest {
         acknowledgement: Option<u64>,
         #[serde(rename = "resolvedHandoffIds")]
         resolved_handoff_ids: Vec<String>,
-        #[serde(default, rename = "nonBlocking")]
-        non_blocking: bool,
     },
     Stop,
+    Settings {
+        #[serde(rename = "nonBlocking")]
+        non_blocking: bool,
+    },
 }
 
 #[derive(Deserialize, Serialize)]
@@ -142,12 +144,12 @@ fn handle_connection(mut stream: TcpStream, control: &dyn HostControl) -> Result
                     text,
                     acknowledgement,
                     resolved_handoff_ids,
-                    non_blocking,
                 } => {
                     validate_speak(&text, &resolved_handoff_ids)?;
-                    control.speak(text, acknowledgement, resolved_handoff_ids, non_blocking)
+                    control.speak(text, acknowledgement, resolved_handoff_ids)
                 }
                 ControlRequest::Stop => control.stop(),
+                ControlRequest::Settings { non_blocking } => control.set_non_blocking(non_blocking),
             },
         );
     let response = match result {
@@ -244,6 +246,9 @@ mod tests {
     }
 
     impl HostControl for FakeControl {
+        fn set_non_blocking(&self, enabled: bool) -> Result<Value, String> {
+            Ok(json!({"nonBlocking": enabled}))
+        }
         fn status(&self) -> Result<Value, String> {
             Ok(json!({"running": !self.stopped.load(Ordering::SeqCst)}))
         }
@@ -253,7 +258,6 @@ mod tests {
             text: String,
             acknowledgement: Option<u64>,
             resolved_handoff_ids: Vec<String>,
-            _non_blocking: bool,
         ) -> Result<Value, String> {
             Ok(json!({
                 "spoken":text,
@@ -293,7 +297,6 @@ mod tests {
                     text: "hello".into(),
                     acknowledgement: Some(7),
                     resolved_handoff_ids: vec!["call-1".into()],
-                    non_blocking: false,
                 }
             )
             .unwrap(),

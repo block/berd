@@ -506,7 +506,6 @@ fn main() {
                 acknowledgement,
                 resolved_handoff_ids,
                 text,
-                non_blocking,
             } = parse_or_exit(parse_speak_control_args(&args), &args);
             let response = host_control::request(
                 port,
@@ -514,7 +513,6 @@ fn main() {
                     text,
                     acknowledgement,
                     resolved_handoff_ids,
-                    non_blocking,
                 },
             )
             .unwrap_or_else(|error| operational_error("speak", error));
@@ -525,6 +523,16 @@ fn main() {
             let response = host_control::request(port, host_control::ControlRequest::Status)
                 .unwrap_or_else(|error| operational_error("status", error));
             print_pretty_json(&response).unwrap_or_else(|error| operational_error("status", error));
+        }
+        Some("settings") => {
+            let (port, non_blocking) = parse_or_exit(parse_host_settings_args(&args), &args);
+            let response = host_control::request(
+                port,
+                host_control::ControlRequest::Settings { non_blocking },
+            )
+            .unwrap_or_else(|error| operational_error("settings", error));
+            print_pretty_json(&response)
+                .unwrap_or_else(|error| operational_error("settings", error));
         }
         Some("stop") => {
             let port = parse_or_exit(parse_control_port(&args), &args);
@@ -617,6 +625,7 @@ fn main() {
 struct StartOptions {
     port: u16,
     stream: bool,
+    non_blocking: bool,
     expert_spokesperson: bool,
     session_arguments: Vec<String>,
 }
@@ -625,6 +634,7 @@ fn parse_start_args(args: &[String]) -> Result<StartOptions, ParseFailure> {
     let mut port = 5222_u16;
     let mut port_seen = false;
     let mut stream = false;
+    let mut non_blocking = false;
     let mut session_arguments = vec!["session".to_string()];
     let mut index = 2;
     while index < args.len() {
@@ -635,6 +645,11 @@ fn parse_start_args(args: &[String]) -> Result<StartOptions, ParseFailure> {
                 index += 1;
             }
             "--stream" => return Err("--stream may be provided only once".into()),
+            "--non-blocking" if !non_blocking => {
+                non_blocking = true;
+                index += 1;
+            }
+            "--non-blocking" => return Err("--non-blocking may be provided only once".into()),
             "--port" if !port_seen => {
                 let value = args
                     .get(index + 1)
@@ -656,9 +671,15 @@ fn parse_start_args(args: &[String]) -> Result<StartOptions, ParseFailure> {
     let mut validation = vec!["berd-call".to_string()];
     validation.extend(session_arguments.iter().cloned());
     let config = parse_args(&validation)?;
+    if non_blocking && !stream {
+        return Err(
+            "non-blocking speech requires --stream for interruption and failure events".into(),
+        );
+    }
     Ok(StartOptions {
         port,
         stream,
+        non_blocking,
         expert_spokesperson: config.mode == SessionMode::ExpertSpokesperson,
         session_arguments,
     })
@@ -670,7 +691,6 @@ struct SpeakOptions {
     acknowledgement: Option<u64>,
     resolved_handoff_ids: Vec<String>,
     text: String,
-    non_blocking: bool,
 }
 
 fn parse_speak_control_args(args: &[String]) -> Result<SpeakOptions, ParseFailure> {
@@ -678,7 +698,6 @@ fn parse_speak_control_args(args: &[String]) -> Result<SpeakOptions, ParseFailur
     let mut port_seen = false;
     let mut acknowledgement = None;
     let mut resolved_handoff_ids = Vec::new();
-    let mut non_blocking = false;
     let mut text = None;
     let mut index = 2;
     while index < args.len() {
@@ -718,10 +737,6 @@ fn parse_speak_control_args(args: &[String]) -> Result<SpeakOptions, ParseFailur
                 resolved_handoff_ids.push(value.clone());
                 index += 2;
             }
-            "--non-blocking" if !non_blocking => {
-                non_blocking = true;
-                index += 1;
-            }
             value if value.starts_with('-') => {
                 return Err(format!("unknown speak argument: {value}").into())
             }
@@ -743,8 +758,33 @@ fn parse_speak_control_args(args: &[String]) -> Result<SpeakOptions, ParseFailur
         acknowledgement,
         resolved_handoff_ids,
         text,
-        non_blocking,
     })
+}
+
+fn parse_host_settings_args(args: &[String]) -> Result<(u16, bool), ParseFailure> {
+    let mut port_args = args[..2].to_vec();
+    let mut non_blocking = None;
+    let mut index = 2;
+    while index < args.len() {
+        if args[index] == "--non-blocking" {
+            if non_blocking.is_some() {
+                return Err("--non-blocking may be provided only once".into());
+            }
+            non_blocking = Some(match args.get(index + 1).map(String::as_str) {
+                Some("true") => true,
+                Some("false") => false,
+                _ => return Err("--non-blocking requires true or false".into()),
+            });
+            index += 2;
+        } else {
+            port_args.push(args[index].clone());
+            index += 1;
+        }
+    }
+    Ok((
+        parse_control_port(&port_args)?,
+        non_blocking.ok_or_else(|| ParseFailure::Usage("--non-blocking is required".into()))?,
+    ))
 }
 
 fn parse_control_port(args: &[String]) -> Result<u16, ParseFailure> {
@@ -10794,11 +10834,13 @@ mod tests {
 
     #[test]
     fn control_command_parsers_are_closed_and_correlated() {
-        assert!(
-            parse_speak_control_args(&args(&["berd-call", "speak", "--non-blocking", "hello"]))
-                .unwrap()
-                .non_blocking
-        );
+        assert!(parse_speak_control_args(&args(&[
+            "berd-call",
+            "speak",
+            "--non-blocking",
+            "hello"
+        ]))
+        .is_err());
         assert!(parse_speak_control_args(&args(&[
             "berd-call",
             "speak",
@@ -10823,7 +10865,6 @@ mod tests {
                 acknowledgement: Some(17),
                 resolved_handoff_ids: Vec::new(),
                 text: "hello".into(),
-                non_blocking: false
             }
         );
         assert_eq!(

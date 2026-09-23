@@ -50,13 +50,17 @@ its own speech; headphone-like outputs retain barge-in.
 
 `speak` waits for delivery by default. Interrupted results contain
 `spokenThroughUtf8` and `estimatedSpokenText`, a best-effort prefix of the
-submitted text. To return immediately, use `speak --non-blocking` with a call
-started using `--stream`. The command returns `status: accepted` and a
+submitted text. To return without waiting for delivery, start the call with
+`--stream --non-blocking`, or change the live session using
+`berd-call settings --non-blocking true`. Speak calls inherit this setting;
+they wait for pending speech before attempting admission. The command returns `status: accepted` and a
 `requestId`; a later `speech_result` TSV row uses that request ID in its first
-column and contains the JSON delivery result in its text column. These IDs
+column and contains the JSON delivery result in its text column. Successful
+delivery stays silent; only interruptions and failures produce result rows. Newly
+finalized user input and admission failures are returned directly by `speak`.
+These IDs
 identify speech requests, not transcript cursors, and must not be passed as
-`--re` acknowledgements. Acceptance means the host received the request;
-runtime admission failures are reported in the result event.
+`--re` acknowledgements. Acceptance means the runtime admitted playback.
 
 This crate owns the neutral PCM output contract and backend-neutral TTS stream
 used by Berd, plus the April ONNX runtime and text chunking used by Berd's native

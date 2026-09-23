@@ -69,6 +69,8 @@ pub(crate) fn run(options: StartOptions) -> Result<(), String> {
         commands: command_tx,
         running: Arc::clone(&running),
         ready: ready.clone(),
+        non_blocking: AtomicBool::new(options.non_blocking),
+        stream: options.stream,
     });
 
     if options.stream {
@@ -137,13 +139,24 @@ struct SessionControl {
     commands: SyncSender<ControlCommand>,
     running: Arc<AtomicBool>,
     ready: ReadyState,
+    non_blocking: AtomicBool,
+    stream: bool,
 }
 
 impl HostControl for SessionControl {
+    fn set_non_blocking(&self, enabled: bool) -> Result<Value, String> {
+        if enabled && !self.stream {
+            return Err("non-blocking speech requires start --stream for delivery events".into());
+        }
+        self.non_blocking.store(enabled, Ordering::SeqCst);
+        self.status()
+    }
+
     fn status(&self) -> Result<Value, String> {
         Ok(json!({
             "running": self.running.load(Ordering::SeqCst),
             "session": self.ready.session,
+            "nonBlocking": self.non_blocking.load(Ordering::SeqCst),
         }))
     }
 
@@ -152,7 +165,6 @@ impl HostControl for SessionControl {
         text: String,
         acknowledgement: Option<u64>,
         resolved_handoff_ids: Vec<String>,
-        non_blocking: bool,
     ) -> Result<Value, String> {
         let (tx, rx) = mpsc::sync_channel(1);
         self.commands
@@ -160,7 +172,7 @@ impl HostControl for SessionControl {
                 text,
                 acknowledgement,
                 resolved_handoff_ids,
-                non_blocking,
+                non_blocking: self.non_blocking.load(Ordering::SeqCst),
                 response: tx,
             })
             .map_err(|_| "voice call is not running".to_string())?;
@@ -181,6 +193,7 @@ impl HostControl for SessionControl {
 struct PendingSpeak {
     prepare_id: u64,
     text: String,
+    non_blocking: bool,
     response: Option<SyncSender<Result<Value, String>>>,
 }
 
@@ -196,6 +209,7 @@ struct SessionActor {
     audio_commands: SyncSender<AudioCommand>,
     next_id: u64,
     pending_speak: Option<PendingSpeak>,
+    waiting_speaks: VecDeque<ControlCommand>,
     stream: bool,
     expert_spokesperson: bool,
     stopping: bool,
@@ -217,6 +231,7 @@ impl SessionActor {
             audio_commands,
             next_id: 2,
             pending_speak: None,
+            waiting_speaks: VecDeque::new(),
             stream,
             expert_spokesperson,
             stopping: false,
@@ -246,6 +261,11 @@ impl SessionActor {
                 }
             }
         }
+        if !self.stopping && self.pending_speak.is_none() {
+            if let Some(command) = self.waiting_speaks.pop_front() {
+                self.handle_command(command)?;
+            }
+        }
         Ok(())
     }
 
@@ -265,7 +285,13 @@ impl SessionActor {
                     return Ok(());
                 }
                 if self.pending_speak.is_some() {
-                    let _ = response.send(Err("speech is already in progress".into()));
+                    self.waiting_speaks.push_back(ControlCommand::Speak {
+                        text,
+                        acknowledgement,
+                        resolved_handoff_ids,
+                        non_blocking,
+                        response,
+                    });
                     return Ok(());
                 }
                 let id = self.next_id();
@@ -278,16 +304,11 @@ impl SessionActor {
                         resolved_handoff_ids,
                     },
                 )?;
-                let response = if non_blocking {
-                    let _ = response.send(Ok(json!({"status":"accepted", "requestId":id})));
-                    None
-                } else {
-                    Some(response)
-                };
                 self.pending_speak = Some(PendingSpeak {
                     prepare_id: id,
                     text,
-                    response,
+                    non_blocking,
+                    response: Some(response),
                 });
             }
             ControlCommand::Stop { response } => {
@@ -324,10 +345,17 @@ impl SessionActor {
                 send_request(&self.writer, &SessionRequest::OutputReady { id, speech_id })?;
             }
             SessionMessage::OutputReadyResult { id, outcome, .. }
-                if self.pending_prepare_id() == Some(id)
-                    && outcome != OutputReadyOutcome::Accepted =>
+                if self.pending_prepare_id() == Some(id) =>
             {
-                self.respond_speak(Err("speech output reservation became stale".into()));
+                if outcome != OutputReadyOutcome::Accepted {
+                    self.respond_speak(Err("speech output reservation became stale".into()));
+                } else if let Some(pending) = self.pending_speak.as_mut() {
+                    if pending.non_blocking {
+                        if let Some(response) = pending.response.take() {
+                            let _ = response.send(Ok(json!({"status":"accepted", "requestId":id})));
+                        }
+                    }
+                }
             }
             SessionMessage::SpeechCompleted { id, .. } if self.pending_prepare_id() == Some(id) => {
                 self.respond_speak(Ok(json!({"spoke":true,"status":"completed"})));
@@ -392,8 +420,10 @@ impl SessionActor {
                     Ok(value) => value,
                     Err(message) => json!({"status":"failed", "message":message}),
                 };
-                println!("{}\tspeech_result\t{}", pending.prepare_id, result);
-                let _ = std::io::stdout().flush();
+                if should_notify_delivery(&result) {
+                    println!("{}\tspeech_result\t{}", pending.prepare_id, result);
+                    let _ = std::io::stdout().flush();
+                }
             }
         }
     }
@@ -434,6 +464,11 @@ impl SessionActor {
 
     fn finish_pending(&mut self, message: &str) {
         self.respond_speak(Err(message.to_string()));
+        for command in self.waiting_speaks.drain(..) {
+            if let ControlCommand::Speak { response, .. } = command {
+                let _ = response.send(Err(message.to_string()));
+            }
+        }
     }
 }
 
@@ -1186,6 +1221,10 @@ fn estimated_spoken_text(text: &str, through_utf8: u64) -> &str {
     &text[..end]
 }
 
+fn should_notify_delivery(result: &Value) -> bool {
+    result.get("status").and_then(Value::as_str) != Some("completed")
+}
+
 fn suspension_settle_time(route_latency: Duration) -> Duration {
     route_latency
 }
@@ -1221,6 +1260,61 @@ fn expert_delivery_role_name(role: RealtimeExpertDeliveryRole) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn speak_waits_for_pending_delivery_and_shutdown_releases_waiters() {
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let (_events_tx, events) = mpsc::sync_channel(1);
+        let (_commands_tx, commands) = mpsc::sync_channel(1);
+        let (audio_commands, _audio_rx) = mpsc::sync_channel(1);
+        let mut actor = SessionActor::new(writer, events, commands, audio_commands, true, false);
+        let (first_tx, first_rx) = mpsc::sync_channel(1);
+        actor.pending_speak = Some(PendingSpeak {
+            prepare_id: 2,
+            text: "first".into(),
+            non_blocking: false,
+            response: Some(first_tx),
+        });
+        let (next_tx, next_rx) = mpsc::sync_channel(1);
+        actor
+            .handle_command(ControlCommand::Speak {
+                text: "next".into(),
+                acknowledgement: Some(7),
+                resolved_handoff_ids: Vec::new(),
+                non_blocking: true,
+                response: next_tx,
+            })
+            .unwrap();
+        assert!(matches!(next_rx.try_recv(), Err(TryRecvError::Empty)));
+        assert_eq!(actor.waiting_speaks.len(), 1);
+        actor.finish_pending("voice call stopped");
+        assert!(first_rx.recv().unwrap().is_err());
+        assert!(next_rx.recv().unwrap().is_err());
+        assert!(actor.waiting_speaks.is_empty());
+        drop(actor);
+        assert!(child.wait().unwrap().success());
+    }
+
+    #[test]
+    fn non_blocking_delivery_assumes_success_but_reports_actionable_results() {
+        assert!(!should_notify_delivery(
+            &json!({"spoke":true,"status":"completed"})
+        ));
+        assert!(should_notify_delivery(
+            &json!({"spoke":true,"status":"interrupted"})
+        ));
+        assert!(should_notify_delivery(
+            &json!({"status":"failed","message":"output failed"})
+        ));
+        assert!(should_notify_delivery(
+            &json!({"spoke":false,"utterances":[{"token":2,"text":"stop"}]})
+        ));
+    }
 
     #[test]
     fn estimated_speech_uses_utf8_bytes_without_splitting_characters() {
