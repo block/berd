@@ -230,13 +230,14 @@ fn run_session(
         thread::sleep(Duration::from_millis(2));
     }
     drop(capture);
+    child.wait_for_exit()?;
+    actor.close_commands()?;
     let restart = actor.restart.take();
     actor.finish_pending(if restart.is_some() {
         "voice session restarted"
     } else {
         "voice call stopped"
     });
-    child.wait_for_exit()?;
     Ok(restart.map(|restart| SessionStart {
         arguments: restart.arguments,
         expert_spokesperson: restart.expert_spokesperson,
@@ -370,6 +371,19 @@ enum ControlCommand {
         expert_spokesperson: bool,
         response: SyncSender<Result<Value, String>>,
     },
+}
+
+impl ControlCommand {
+    fn response(self) -> SyncSender<Result<Value, String>> {
+        match self {
+            Self::InputDuringTts { response, .. }
+            | Self::Muted { response, .. }
+            | Self::TtsSettings { response, .. }
+            | Self::Speak { response, .. }
+            | Self::Stop { response }
+            | Self::Restart { response, .. } => response,
+        }
+    }
 }
 
 struct PendingRestart {
@@ -584,6 +598,25 @@ impl SessionActor {
         if !self.stopping && self.pending_speak.is_none() {
             if let Some(command) = self.waiting_speaks.pop_front() {
                 self.handle_command(command)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Answers commands that arrived after the session loop stopped polling,
+    /// so a stop during a restart handoff cancels the restart instead of
+    /// waiting on a session that will never read it.
+    fn close_commands(&mut self) -> Result<(), String> {
+        let (_, closed) = mpsc::sync_channel(0);
+        let commands = std::mem::replace(&mut self.commands, closed);
+        while let Ok(command) = commands.try_recv() {
+            match command {
+                ControlCommand::Stop { .. } => self.handle_command(command)?,
+                command => {
+                    let _ = command
+                        .response()
+                        .send(Err("voice call is stopping".into()));
+                }
             }
         }
         Ok(())
@@ -1735,6 +1768,51 @@ mod tests {
             Arc::new(Transcript::Stdout),
             false,
         )
+    }
+
+    #[test]
+    fn stop_queued_during_restart_handoff_cancels_the_restart() {
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let (_events_tx, events) = mpsc::sync_channel(1);
+        let (commands_tx, commands) = mpsc::sync_channel(4);
+        let (audio_commands, _audio_rx) = mpsc::sync_channel(1);
+        let mut actor = test_actor(writer, events, commands, audio_commands);
+        let (restart_tx, restart_rx) = mpsc::sync_channel(1);
+        actor
+            .handle_command(ControlCommand::Restart {
+                arguments: vec!["session".into()],
+                expert_spokesperson: false,
+                response: restart_tx,
+            })
+            .unwrap();
+        let (stop_tx, stop_rx) = mpsc::sync_channel(1);
+        let (mute_tx, mute_rx) = mpsc::sync_channel(1);
+        commands_tx
+            .send(ControlCommand::Muted {
+                muted: true,
+                response: mute_tx,
+            })
+            .unwrap();
+        commands_tx
+            .send(ControlCommand::Stop { response: stop_tx })
+            .unwrap();
+        actor.close_commands().unwrap();
+        assert!(actor.restart.is_none());
+        assert!(restart_rx.recv().unwrap().is_err());
+        assert!(mute_rx.recv().unwrap().is_err());
+        assert!(stop_rx.recv().unwrap().is_ok());
+        let (late_tx, _late_rx) = mpsc::sync_channel(1);
+        assert!(commands_tx
+            .send(ControlCommand::Stop { response: late_tx })
+            .is_err());
+        drop(actor);
+        let _ = child.kill();
+        let _ = child.wait();
     }
 
     #[test]
