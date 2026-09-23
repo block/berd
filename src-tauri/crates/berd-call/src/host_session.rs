@@ -230,6 +230,7 @@ fn start_session(
         stream,
         expert_spokesperson,
     );
+    actor.muted.store(muted, Ordering::SeqCst);
     if muted {
         // Requests and captured PCM share one ordered pipe, so the replacement
         // session is muted before it can receive any microphone input.
@@ -243,7 +244,7 @@ fn start_session(
         ready: ready.clone(),
         non_blocking: Arc::clone(non_blocking),
         stop_requested: Arc::clone(stop_requested),
-        muted: AtomicBool::new(muted),
+        muted: Arc::clone(&actor.muted),
         stream,
         session_arguments: arguments,
     });
@@ -314,7 +315,7 @@ struct SessionControl {
     ready: ReadyState,
     non_blocking: Arc<AtomicBool>,
     stop_requested: Arc<AtomicBool>,
-    muted: AtomicBool,
+    muted: Arc<AtomicBool>,
     stream: bool,
     session_arguments: Vec<String>,
 }
@@ -386,7 +387,6 @@ impl HostControl for SessionControl {
 
     fn set_muted(&self, muted: bool) -> Result<Value, String> {
         self.request(|response| ControlCommand::Muted { muted, response })?;
-        self.muted.store(muted, Ordering::SeqCst);
         self.status()
     }
 
@@ -489,6 +489,7 @@ struct SessionActor {
     expert_spokesperson: bool,
     stopping: bool,
     restart: Option<PendingRestart>,
+    muted: Arc<AtomicBool>,
 }
 
 impl SessionActor {
@@ -515,6 +516,7 @@ impl SessionActor {
             expert_spokesperson,
             stopping: false,
             restart: None,
+            muted: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -702,6 +704,8 @@ impl SessionActor {
                 }
             }
             SessionMessage::InputMuteApplied { id, active } => {
+                // Commit before acknowledging so a restart cannot read a stale value.
+                self.muted.store(active, Ordering::SeqCst);
                 if let Some(response) = self.pending_settings.remove(&id) {
                     let _ = response.send(Ok(json!({"muted":active})));
                 }
@@ -1725,6 +1729,37 @@ mod tests {
     }
 
     #[test]
+    fn mute_is_committed_before_it_is_acknowledged() {
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let (_events_tx, events) = mpsc::sync_channel(1);
+        let (_commands_tx, commands) = mpsc::sync_channel(1);
+        let (audio_commands, _audio_rx) = mpsc::sync_channel(1);
+        let mut actor = test_actor(writer, events, commands, audio_commands);
+        let muted = Arc::clone(&actor.muted);
+        let (response, acknowledged) = mpsc::sync_channel(1);
+        let id = actor.next_id;
+        actor
+            .handle_command(ControlCommand::Muted {
+                muted: true,
+                response,
+            })
+            .unwrap();
+        actor
+            .handle_event(SessionMessage::InputMuteApplied { id, active: true })
+            .unwrap();
+        acknowledged.recv().unwrap().unwrap();
+        // A restart that runs before the caller resumes reads this flag.
+        assert!(muted.load(Ordering::SeqCst));
+        drop(actor);
+        assert!(child.wait().unwrap().success());
+    }
+
+    #[test]
     fn stop_is_recorded_even_when_the_session_never_reads_it() {
         let (commands, receiver) = mpsc::sync_channel(1);
         let stop_requested = Arc::new(AtomicBool::new(false));
@@ -1736,7 +1771,7 @@ mod tests {
             },
             non_blocking: Arc::new(AtomicBool::new(false)),
             stop_requested: Arc::clone(&stop_requested),
-            muted: AtomicBool::new(false),
+            muted: Arc::new(AtomicBool::new(false)),
             stream: false,
             session_arguments: vec!["session".into()],
         };
@@ -1756,7 +1791,7 @@ mod tests {
             },
             non_blocking: Arc::new(AtomicBool::new(false)),
             stop_requested: Arc::new(AtomicBool::new(false)),
-            muted: AtomicBool::new(false),
+            muted: Arc::new(AtomicBool::new(false)),
             stream: false,
             session_arguments: vec!["session".into()],
         };
