@@ -794,10 +794,15 @@ fn parse_host_settings_args(
         let setting = match flag {
             "-h" | "--help" => return Err(ParseFailure::HelpRequested),
             "--restart" => {
+                // Restart consumes the rest of argv as session options.
+                if request.is_some() {
+                    return Err(SETTINGS_CHOICE_ERROR.into());
+                }
                 let mut session_arguments = vec!["session".to_string()];
                 session_arguments.extend(args[index + 1..].iter().cloned());
                 validate_session_arguments(&session_arguments)?;
-                host_control::ControlRequest::Restart { session_arguments }
+                request = Some(host_control::ControlRequest::Restart { session_arguments });
+                break;
             }
             "--non-blocking" => host_control::ControlRequest::NonBlocking {
                 enabled: parse_bool_setting(flag, args.get(index + 1))?,
@@ -823,11 +828,7 @@ fn parse_host_settings_args(
             }
             _ => return Err(format!("unrecognized settings option: {flag}").into()),
         };
-        index = if matches!(setting, host_control::ControlRequest::Restart { .. }) {
-            args.len()
-        } else {
-            index + 2
-        };
+        index += 2;
         if request.replace(setting).is_some() {
             return Err(SETTINGS_CHOICE_ERROR.into());
         }
