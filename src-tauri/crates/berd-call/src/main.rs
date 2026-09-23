@@ -839,6 +839,13 @@ fn parse_host_settings_args(
                     _ => return Err("--input-during-tts requires allow or suppress".into()),
                 },
             },
+            "--rate" => host_control::ControlRequest::Rate {
+                rate: args
+                    .get(index + 1)
+                    .and_then(|value| value.parse::<f32>().ok())
+                    .filter(|rate| rate.is_finite() && *rate > 0.0)
+                    .ok_or("--rate requires a positive number")?,
+            },
             "--tts" => {
                 let value = args
                     .get(index + 1)
@@ -862,7 +869,7 @@ fn parse_host_settings_args(
 }
 
 const SETTINGS_CHOICE_ERROR: &str =
-    "provide exactly one of --non-blocking, --tts, --input-during-tts, --muted, or --restart";
+    "provide exactly one of --non-blocking, --rate, --tts, --input-during-tts, --muted, or --restart";
 
 fn parse_bool_setting(flag: &str, value: Option<&String>) -> Result<bool, String> {
     match value.map(String::as_str) {
@@ -10931,6 +10938,16 @@ mod tests {
         assert!(start(&["--codex", "--stream"]).is_err());
         assert!(start(&["--codex", "--codex"]).is_err());
         assert!(start(&["--non-blocking"]).is_err());
+    }
+
+    #[test]
+    fn settings_rate_changes_only_the_speech_rate() {
+        let (_, request) =
+            parse_host_settings_args(&args(&["berd-call", "settings", "--rate", "1.5"])).unwrap();
+        assert!(matches!(request, host_control::ControlRequest::Rate { rate } if rate == 1.5));
+        assert!(
+            parse_host_settings_args(&args(&["berd-call", "settings", "--rate", "fast"])).is_err()
+        );
     }
 
     #[test]

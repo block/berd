@@ -54,6 +54,7 @@ const SETTINGS_HELP: &str = r#"Update settings for the active local voice call.
 
 Usage:
   berd-call settings [--port PORT] --non-blocking true|false
+  berd-call settings [--port PORT] --rate FLOAT
   berd-call settings [--port PORT] --tts JSON
   berd-call settings [--port PORT] --input-during-tts allow|suppress
   berd-call settings [--port PORT] --muted true|false
