@@ -101,9 +101,8 @@ pub(crate) enum ControlRequest {
         resolved_handoff_ids: Vec<String>,
     },
     Stop,
-    Settings {
-        #[serde(rename = "nonBlocking")]
-        non_blocking: bool,
+    NonBlocking {
+        enabled: bool,
     },
     TtsSettings {
         settings: berd_call::TtsSettings,
@@ -175,7 +174,7 @@ fn handle_connection(mut stream: TcpStream, control: &dyn HostControl) -> Result
                 }
                 ControlRequest::Stop => control.stop(),
                 ControlRequest::TtsSettings { settings } => control.set_tts(settings),
-                ControlRequest::Settings { non_blocking } => control.set_non_blocking(non_blocking),
+                ControlRequest::NonBlocking { enabled } => control.set_non_blocking(enabled),
                 ControlRequest::InputDuringTts { policy } => control.set_input_during_tts(policy),
                 ControlRequest::Muted { muted } => control.set_muted(muted),
                 ControlRequest::Restart { session_arguments } => control.restart(session_arguments),

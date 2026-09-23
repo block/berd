@@ -681,9 +681,7 @@ fn parse_start_args(args: &[String]) -> Result<StartOptions, ParseFailure> {
             }
         }
     }
-    let mut validation = vec!["berd-call".to_string()];
-    validation.extend(session_arguments.iter().cloned());
-    let config = parse_args(&validation)?;
+    let expert_spokesperson = validate_session_arguments(&session_arguments)?;
     if non_blocking && !stream {
         return Err(
             "non-blocking speech requires --stream for interruption and failure events".into(),
@@ -693,7 +691,7 @@ fn parse_start_args(args: &[String]) -> Result<StartOptions, ParseFailure> {
         port,
         stream,
         non_blocking,
-        expert_spokesperson: config.mode == SessionMode::ExpertSpokesperson,
+        expert_spokesperson,
         session_arguments,
     })
 }
@@ -777,95 +775,78 @@ fn parse_speak_control_args(args: &[String]) -> Result<SpeakOptions, ParseFailur
 fn parse_host_settings_args(
     args: &[String],
 ) -> Result<(u16, host_control::ControlRequest), ParseFailure> {
-    let mut port_args = args[..2].to_vec();
-    let mut non_blocking = None;
-    let mut tts = None;
-    let mut input_during_tts = None;
-    let mut muted = None;
-    let mut restart = None;
+    let mut port = None;
+    let mut request = None;
     let mut index = 2;
     while index < args.len() {
-        if args[index] == "--restart" {
-            let mut session_arguments = vec!["session".to_string()];
-            session_arguments.extend(args[index + 1..].iter().cloned());
-            validate_session_arguments(&session_arguments)?;
-            restart = Some(session_arguments);
-            break;
+        let flag = args[index].as_str();
+        if flag == "--port" {
+            if port.is_some() {
+                return Err("--port may be provided only once".into());
+            }
+            let value = args
+                .get(index + 1)
+                .ok_or_else(|| "--port requires a value".to_string())?;
+            port = Some(parse_port(value)?);
+            index += 2;
+            continue;
         }
-        if args[index] == "--non-blocking" {
-            if non_blocking.is_some() {
-                return Err("--non-blocking may be provided only once".into());
+        let setting = match flag {
+            "-h" | "--help" => return Err(ParseFailure::HelpRequested),
+            "--restart" => {
+                let mut session_arguments = vec!["session".to_string()];
+                session_arguments.extend(args[index + 1..].iter().cloned());
+                validate_session_arguments(&session_arguments)?;
+                host_control::ControlRequest::Restart { session_arguments }
             }
-            non_blocking = Some(match args.get(index + 1).map(String::as_str) {
-                Some("true") => true,
-                Some("false") => false,
-                _ => return Err("--non-blocking requires true or false".into()),
-            });
-            index += 2;
-        } else if args[index] == "--input-during-tts" {
-            if input_during_tts.is_some() {
-                return Err("--input-during-tts may be provided only once".into());
+            "--non-blocking" => host_control::ControlRequest::NonBlocking {
+                enabled: parse_bool_setting(flag, args.get(index + 1))?,
+            },
+            "--muted" => host_control::ControlRequest::Muted {
+                muted: parse_bool_setting(flag, args.get(index + 1))?,
+            },
+            "--input-during-tts" => host_control::ControlRequest::InputDuringTts {
+                policy: match args.get(index + 1).map(String::as_str) {
+                    Some("allow") => berd_call::input::InputDuringTtsPolicy::AllowBargeIn,
+                    Some("suppress") => berd_call::input::InputDuringTtsPolicy::SuppressInput,
+                    _ => return Err("--input-during-tts requires allow or suppress".into()),
+                },
+            },
+            "--tts" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "--tts requires a JSON settings object".to_string())?;
+                host_control::ControlRequest::TtsSettings {
+                    settings: serde_json::from_str(value)
+                        .map_err(|error| format!("invalid TTS settings: {error}"))?,
+                }
             }
-            input_during_tts = Some(match args.get(index + 1).map(String::as_str) {
-                Some("allow") => berd_call::input::InputDuringTtsPolicy::AllowBargeIn,
-                Some("suppress") => berd_call::input::InputDuringTtsPolicy::SuppressInput,
-                _ => return Err("--input-during-tts requires allow or suppress".into()),
-            });
-            index += 2;
-        } else if args[index] == "--muted" {
-            if muted.is_some() {
-                return Err("--muted may be provided only once".into());
-            }
-            muted = Some(match args.get(index + 1).map(String::as_str) {
-                Some("true") => true,
-                Some("false") => false,
-                _ => return Err("--muted requires true or false".into()),
-            });
-            index += 2;
-        } else if args[index] == "--tts" {
-            if tts.is_some() {
-                return Err("--tts may be provided only once".into());
-            }
-            let value = args.get(index + 1).ok_or_else(|| {
-                ParseFailure::Usage("--tts requires a JSON settings object".into())
-            })?;
-            tts =
-                Some(serde_json::from_str(value).map_err(|error| {
-                    ParseFailure::Usage(format!("invalid TTS settings: {error}"))
-                })?);
-            index += 2;
+            _ => return Err(format!("unrecognized settings option: {flag}").into()),
+        };
+        index = if matches!(setting, host_control::ControlRequest::Restart { .. }) {
+            args.len()
         } else {
-            port_args.push(args[index].clone());
-            index += 1;
+            index + 2
+        };
+        if request.replace(setting).is_some() {
+            return Err(SETTINGS_CHOICE_ERROR.into());
         }
     }
-    if let Some(session_arguments) = restart {
-        if non_blocking.is_some() || tts.is_some() || input_during_tts.is_some() || muted.is_some()
-        {
-            return Err("--restart cannot be combined with live settings".into());
-        }
-        return Ok((
-            parse_control_port(&port_args)?,
-            host_control::ControlRequest::Restart { session_arguments },
-        ));
+    Ok((
+        port.unwrap_or(5222),
+        request.ok_or_else(|| ParseFailure::Usage(SETTINGS_CHOICE_ERROR.into()))?,
+    ))
+}
+
+const SETTINGS_CHOICE_ERROR: &str =
+    "provide exactly one of --non-blocking, --tts, --input-during-tts, --muted, or --restart";
+
+fn parse_bool_setting(flag: &str, value: Option<&String>) -> Result<bool, String> {
+    match value.map(String::as_str) {
+        Some("true") => Ok(true),
+        Some("false") => Ok(false),
+        _ => Err(format!("{flag} requires true or false")),
     }
-    let request = match (non_blocking, tts, input_during_tts, muted) {
-        (Some(non_blocking), None, None, None) => {
-            host_control::ControlRequest::Settings { non_blocking }
-        }
-        (None, Some(settings), None, None) => {
-            host_control::ControlRequest::TtsSettings { settings }
-        }
-        (None, None, Some(policy), None) => host_control::ControlRequest::InputDuringTts { policy },
-        (None, None, None, Some(muted)) => host_control::ControlRequest::Muted { muted },
-        _ => {
-            return Err(
-                "provide exactly one of --non-blocking, --tts, --input-during-tts, or --muted"
-                    .into(),
-            )
-        }
-    };
-    Ok((parse_control_port(&port_args)?, request))
 }
 
 fn parse_control_port(args: &[String]) -> Result<u16, ParseFailure> {

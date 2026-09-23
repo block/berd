@@ -99,7 +99,14 @@ fn run_session(
         stream,
         non_blocking,
     );
-    let (mut child, mut actor, control, capture, failure_rx, running) = match started {
+    let StartedSession {
+        mut child,
+        mut actor,
+        control,
+        capture,
+        failure_rx,
+        running,
+    } = match started {
         Ok(started) => started,
         Err(message) => {
             if let Some(response) = restarted {
@@ -111,7 +118,7 @@ fn run_session(
     if let Some(response) = restarted {
         let _ = response.send(control.status());
     }
-    let session = Arc::clone(&control.ready.session);
+    let session_control = Arc::clone(&control);
     let control: Arc<dyn HostControl> = control;
     while running.load(Ordering::SeqCst) {
         server.poll(Arc::clone(&control))?;
@@ -139,8 +146,10 @@ fn run_session(
     Ok(restart.map(|restart| SessionStart {
         arguments: restart.arguments,
         expert_spokesperson: restart.expert_spokesperson,
-        muted: actor.muted,
-        input_during_tts: session
+        muted: session_control.muted.load(Ordering::SeqCst),
+        input_during_tts: session_control
+            .ready
+            .session
             .lock()
             .map(|session| session.input_during_tts.policy)
             .unwrap_or(input_during_tts),
@@ -148,14 +157,14 @@ fn run_session(
     }))
 }
 
-type StartedSession = (
-    SessionProcess,
-    SessionActor,
-    Arc<SessionControl>,
-    InputCapture,
-    Receiver<String>,
-    Arc<AtomicBool>,
-);
+struct StartedSession {
+    child: SessionProcess,
+    actor: SessionActor,
+    control: Arc<SessionControl>,
+    capture: InputCapture,
+    failure_rx: Receiver<String>,
+    running: Arc<AtomicBool>,
+}
 
 fn start_session(
     arguments: Vec<String>,
@@ -188,8 +197,23 @@ fn start_session(
     )?;
     let ready = receive_ready(&event_rx)?;
     let running = Arc::new(AtomicBool::new(true));
-    let capture = InputCapture::start(Arc::clone(&writer), failure_tx)?;
     let (command_tx, command_rx) = mpsc::sync_channel(32);
+    let mut actor = SessionActor::new(
+        Arc::clone(&writer),
+        event_rx,
+        command_rx,
+        audio_command_tx,
+        Arc::clone(&ready.session),
+        stream,
+        expert_spokesperson,
+    );
+    if muted {
+        // Requests and captured PCM share one ordered pipe, so the replacement
+        // session is muted before it can receive any microphone input.
+        let id = actor.next_id();
+        send_request(&writer, &SessionRequest::SetInputMuted { id, active: true })?;
+    }
+    let capture = InputCapture::start(writer, failure_tx)?;
     let control = Arc::new(SessionControl {
         commands: command_tx,
         running: Arc::clone(&running),
@@ -199,19 +223,14 @@ fn start_session(
         stream,
         session_arguments: arguments,
     });
-    let mut actor = SessionActor::new(
-        writer,
-        event_rx,
-        command_rx,
-        audio_command_tx,
-        stream,
-        expert_spokesperson,
-    );
-    if muted {
-        let (response, _) = mpsc::sync_channel(1);
-        actor.handle_command(ControlCommand::Muted { muted, response })?;
-    }
-    Ok((child, actor, control, capture, failure_rx, running))
+    Ok(StartedSession {
+        child,
+        actor,
+        control,
+        capture,
+        failure_rx,
+        running,
+    })
 }
 
 fn default_input_during_tts_policy() -> InputDuringTtsPolicy {
@@ -299,29 +318,11 @@ impl HostControl for SessionControl {
             .map_err(|_| "session settings lock failed")?
             .tts
             .revision;
-        let (response, result) = mpsc::sync_channel(1);
-        self.commands
-            .send(ControlCommand::TtsSettings {
-                settings,
-                expected_revision,
-                response,
-            })
-            .map_err(|_| "voice call is not running")?;
-        let result = result
-            .recv()
-            .map_err(|_| "voice call stopped during settings update")??;
-        let snapshot: berd_call::TtsConfigurationSnapshot =
-            serde_json::from_value(result["snapshot"].clone())
-                .map_err(|error| error.to_string())?;
-        let mut session = self
-            .ready
-            .session
-            .lock()
-            .map_err(|_| "session settings lock failed")?;
-        if snapshot.revision >= session.tts.revision {
-            session.tts = snapshot;
-        }
-        Ok(result)
+        self.request(|response| ControlCommand::TtsSettings {
+            settings,
+            expected_revision,
+            response,
+        })
     }
 
     fn set_input_during_tts(&self, policy: InputDuringTtsPolicy) -> Result<Value, String> {
@@ -332,23 +333,11 @@ impl HostControl for SessionControl {
             .map_err(|_| "session settings lock failed")?
             .input_during_tts
             .revision;
-        let result = self.request(|response| ControlCommand::InputDuringTts {
+        self.request(|response| ControlCommand::InputDuringTts {
             policy,
             expected_revision,
             response,
-        })?;
-        let snapshot: berd_call::input::InputDuringTtsSnapshot =
-            serde_json::from_value(result["snapshot"].clone())
-                .map_err(|error| error.to_string())?;
-        let mut session = self
-            .ready
-            .session
-            .lock()
-            .map_err(|_| "session settings lock failed")?;
-        if snapshot.revision >= session.input_during_tts.revision {
-            session.input_during_tts = snapshot;
-        }
-        Ok(result)
+        })
     }
 
     fn set_muted(&self, muted: bool) -> Result<Value, String> {
@@ -441,10 +430,10 @@ struct SessionActor {
     pending_speak: Option<PendingSpeak>,
     pending_settings: std::collections::HashMap<u64, SyncSender<Result<Value, String>>>,
     waiting_speaks: VecDeque<ControlCommand>,
+    session: Arc<Mutex<VoiceSessionSnapshot>>,
     stream: bool,
     expert_spokesperson: bool,
     stopping: bool,
-    muted: bool,
     restart: Option<PendingRestart>,
 }
 
@@ -454,6 +443,7 @@ impl SessionActor {
         events: Receiver<SessionMessage>,
         commands: Receiver<ControlCommand>,
         audio_commands: SyncSender<AudioCommand>,
+        session: Arc<Mutex<VoiceSessionSnapshot>>,
         stream: bool,
         expert_spokesperson: bool,
     ) -> Self {
@@ -466,10 +456,10 @@ impl SessionActor {
             pending_speak: None,
             pending_settings: std::collections::HashMap::new(),
             waiting_speaks: VecDeque::new(),
+            session,
             stream,
             expert_spokesperson,
             stopping: false,
-            muted: false,
             restart: None,
         }
     }
@@ -524,7 +514,6 @@ impl SessionActor {
                 self.pending_settings.insert(id, response);
             }
             ControlCommand::Muted { muted, response } => {
-                self.muted = muted;
                 let id = self.next_id();
                 send_request(
                     &self.writer,
@@ -593,6 +582,10 @@ impl SessionActor {
                 expert_spokesperson,
                 response,
             } => {
+                if self.stopping {
+                    let _ = response.send(Err("voice call is stopping".into()));
+                    return Ok(());
+                }
                 send_request(&self.writer, &SessionRequest::Shutdown)?;
                 self.stopping = true;
                 self.restart = Some(PendingRestart {
@@ -602,8 +595,13 @@ impl SessionActor {
                 });
             }
             ControlCommand::Stop { response } => {
-                send_request(&self.writer, &SessionRequest::Shutdown)?;
-                self.stopping = true;
+                if let Some(restart) = self.restart.take() {
+                    let _ = restart.response.send(Err("voice call stopped".into()));
+                }
+                if !self.stopping {
+                    send_request(&self.writer, &SessionRequest::Shutdown)?;
+                    self.stopping = true;
+                }
                 let _ = response.send(Ok(json!({"stopping":true})));
             }
         }
@@ -618,6 +616,11 @@ impl SessionActor {
                 snapshot,
                 message,
             } => {
+                if let Ok(mut session) = self.session.lock() {
+                    if snapshot.revision >= session.tts.revision {
+                        session.tts = snapshot.clone();
+                    }
+                }
                 if let Some(response) = self.pending_settings.remove(&id) {
                     let _ = response.send(Ok(
                         json!({"outcome":outcome,"snapshot":snapshot,"message":message}),
@@ -629,6 +632,11 @@ impl SessionActor {
                 outcome,
                 snapshot,
             } => {
+                if let Ok(mut session) = self.session.lock() {
+                    if snapshot.revision >= session.input_during_tts.revision {
+                        session.input_during_tts = snapshot;
+                    }
+                }
                 if let Some(response) = self.pending_settings.remove(&id) {
                     let _ = response.send(Ok(json!({"outcome":outcome,"snapshot":snapshot})));
                 }
@@ -1593,7 +1601,7 @@ mod tests {
         let (_events_tx, events) = mpsc::sync_channel(1);
         let (_commands_tx, commands) = mpsc::sync_channel(1);
         let (audio_commands, _audio_rx) = mpsc::sync_channel(1);
-        let mut actor = SessionActor::new(writer, events, commands, audio_commands, true, false);
+        let mut actor = test_actor(writer, events, commands, audio_commands);
         let (first_tx, first_rx) = mpsc::sync_channel(1);
         actor.pending_speak = Some(PendingSpeak {
             prepare_id: 2,
@@ -1617,6 +1625,78 @@ mod tests {
         assert!(first_rx.recv().unwrap().is_err());
         assert!(next_rx.recv().unwrap().is_err());
         assert!(actor.waiting_speaks.is_empty());
+        drop(actor);
+        assert!(child.wait().unwrap().success());
+    }
+
+    fn test_actor(
+        writer: Arc<Mutex<ChildStdin>>,
+        events: Receiver<SessionMessage>,
+        commands: Receiver<ControlCommand>,
+        audio_commands: SyncSender<AudioCommand>,
+    ) -> SessionActor {
+        let session = Arc::new(Mutex::new(VoiceSessionSnapshot {
+            tts: berd_call::TtsConfigurationSnapshot {
+                revision: 1,
+                settings: berd_call::TtsSettings::Siri {
+                    voice: "Aaron".into(),
+                    language: "en-US".into(),
+                    rate: 1.0,
+                },
+            },
+            input_during_tts: berd_call::input::InputDuringTtsSnapshot {
+                revision: 1,
+                policy: InputDuringTtsPolicy::AllowBargeIn,
+            },
+        }));
+        SessionActor::new(
+            writer,
+            events,
+            commands,
+            audio_commands,
+            session,
+            true,
+            false,
+        )
+    }
+
+    #[test]
+    fn stop_cancels_a_pending_restart() {
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let (_events_tx, events) = mpsc::sync_channel(1);
+        let (_commands_tx, commands) = mpsc::sync_channel(1);
+        let (audio_commands, _audio_rx) = mpsc::sync_channel(1);
+        let mut actor = test_actor(writer, events, commands, audio_commands);
+        let (restart_tx, restart_rx) = mpsc::sync_channel(1);
+        actor
+            .handle_command(ControlCommand::Restart {
+                arguments: vec!["session".into()],
+                expert_spokesperson: false,
+                response: restart_tx,
+            })
+            .unwrap();
+        let (stop_tx, stop_rx) = mpsc::sync_channel(1);
+        actor
+            .handle_command(ControlCommand::Stop { response: stop_tx })
+            .unwrap();
+        assert!(actor.restart.is_none());
+        assert!(restart_rx.recv().unwrap().is_err());
+        assert!(stop_rx.recv().unwrap().is_ok());
+        let (late_tx, late_rx) = mpsc::sync_channel(1);
+        actor
+            .handle_command(ControlCommand::Restart {
+                arguments: vec!["session".into()],
+                expert_spokesperson: false,
+                response: late_tx,
+            })
+            .unwrap();
+        assert!(actor.restart.is_none());
+        assert!(late_rx.recv().unwrap().is_err());
         drop(actor);
         assert!(child.wait().unwrap().success());
     }
