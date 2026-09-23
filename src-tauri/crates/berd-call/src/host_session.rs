@@ -642,6 +642,7 @@ enum AudioCommand {
 
 struct SessionActor {
     input_speaking: bool,
+    recognition_pending: bool,
     pending_polls: Vec<PendingInputPoll>,
     writer: Arc<Mutex<ChildStdin>>,
     events: Receiver<SessionMessage>,
@@ -671,6 +672,7 @@ impl SessionActor {
     ) -> Self {
         Self {
             input_speaking: false,
+            recognition_pending: false,
             pending_polls: Vec::new(),
             writer,
             events,
@@ -862,6 +864,7 @@ impl SessionActor {
     fn handle_event(&mut self, event: SessionMessage) -> Result<(), String> {
         match event {
             SessionMessage::InputSpeaking { active } => self.input_speaking = active,
+            SessionMessage::RecognitionPending { active } => self.recognition_pending = active,
             SessionMessage::State {
                 id,
                 confirmed_token,
@@ -882,7 +885,10 @@ impl SessionActor {
                     let actionable = utterances
                         .iter()
                         .any(|item| item.origin != Some(UtteranceOrigin::Spokesperson));
-                    if !self.input_speaking && (!poll.wait || actionable) {
+                    if !self.input_speaking
+                        && !self.recognition_pending
+                        && (!poll.wait || actionable)
+                    {
                         let cursor = utterances.last().map_or(since, |item| item.token);
                         let poll = self.pending_polls.remove(index);
                         let _ = poll.response.send(Ok(json!({
@@ -1099,14 +1105,22 @@ impl SessionActor {
             }
             if now >= self.pending_polls[index].deadline {
                 let poll = self.pending_polls.remove(index);
-                let _ = poll.response.send(Ok(json!({
-                    "utterances": [], "cursor": poll.since.unwrap_or(0),
-                    "unresolvedHandoffIds": [], "timedOut": true,
-                })));
+                let result = poll
+                    .since
+                    .map(|cursor| {
+                        json!({
+                            "utterances": [], "cursor": cursor,
+                            "unresolvedHandoffIds": [], "timedOut": true,
+                        })
+                    })
+                    .ok_or_else(|| {
+                        "timed out before the session reported its acknowledged cursor".to_string()
+                    });
+                let _ = poll.response.send(result);
                 continue;
             }
             let poll = &self.pending_polls[index];
-            if poll.request_id.is_none() && now >= poll.next_query && !self.input_speaking {
+            if poll.request_id.is_none() && now >= poll.next_query {
                 let after = poll.since.unwrap_or(0);
                 let id = self.next_id();
                 send_request(&self.writer, &SessionRequest::QueryState { id, after })?;
@@ -1119,6 +1133,8 @@ impl SessionActor {
 }
 
 struct PendingInputPoll {
+    // None means use the acknowledged cursor; the first correlated State reply
+    // resolves it. Until then, a timeout is an error, not an invented cursor.
     since: Option<u64>,
     wait: bool,
     deadline: Instant,
@@ -2010,7 +2026,7 @@ mod tests {
             .handle_event(SessionMessage::InputSpeaking { active: true })
             .unwrap();
         actor.poll_input_requests().unwrap();
-        assert!(actor.pending_polls[0].request_id.is_none());
+        assert!(actor.pending_polls[0].request_id.is_some());
         assert!(result.try_recv().is_err());
         actor
             .handle_event(SessionMessage::InputSpeaking { active: false })
@@ -2106,6 +2122,102 @@ mod tests {
             "voice session restarted"
         );
         child.kill().unwrap();
+        child.wait().unwrap();
+    }
+
+    #[test]
+    fn catch_up_waits_for_recognition_to_finalize() {
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let (_event_tx, events) = mpsc::sync_channel(1);
+        let (_command_tx, commands) = mpsc::sync_channel(1);
+        let (audio, _audio_rx) = mpsc::sync_channel(1);
+        let mut actor = test_actor(writer, events, commands, audio);
+        let (response, result) = mpsc::sync_channel(1);
+        actor
+            .handle_command(ControlCommand::PollInput {
+                since: Some(0),
+                wait: false,
+                timeout_seconds: 30,
+                response,
+            })
+            .unwrap();
+        actor
+            .handle_event(SessionMessage::RecognitionPending { active: true })
+            .unwrap();
+        actor.poll_input_requests().unwrap();
+        let id = actor.pending_polls[0].request_id.unwrap();
+        actor
+            .handle_event(SessionMessage::State {
+                id,
+                confirmed_token: 0,
+                utterances_after: vec![],
+                unresolved_handoff_ids: vec![],
+            })
+            .unwrap();
+        assert!(
+            result.try_recv().is_err(),
+            "catch-up returned before recognition finalized"
+        );
+        actor
+            .handle_event(SessionMessage::RecognitionPending { active: false })
+            .unwrap();
+        actor.pending_polls[0].next_query = Instant::now();
+        actor.poll_input_requests().unwrap();
+        let id = actor.pending_polls[0].request_id.unwrap();
+        actor
+            .handle_event(SessionMessage::State {
+                id,
+                confirmed_token: 0,
+                utterances_after: vec![berd_call::protocol::PendingUtterance {
+                    token: 1,
+                    text: "recognized text".into(),
+                    origin: Some(UtteranceOrigin::User),
+                }],
+                unresolved_handoff_ids: vec![],
+            })
+            .unwrap();
+        assert_eq!(
+            result.recv().unwrap().unwrap()["utterances"][0]["text"],
+            "recognized text"
+        );
+        drop(actor);
+        child.wait().unwrap();
+    }
+
+    #[test]
+    fn timeout_without_known_acknowledged_cursor_does_not_fabricate_zero() {
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let (_event_tx, events) = mpsc::sync_channel(1);
+        let (_command_tx, commands) = mpsc::sync_channel(1);
+        let (audio, _audio_rx) = mpsc::sync_channel(1);
+        let mut actor = test_actor(writer, events, commands, audio);
+        let (response, result) = mpsc::sync_channel(1);
+        actor
+            .handle_command(ControlCommand::PollInput {
+                since: None,
+                wait: true,
+                timeout_seconds: 1,
+                response,
+            })
+            .unwrap();
+        actor.input_speaking = true;
+        actor.pending_polls[0].deadline = Instant::now();
+        actor.poll_input_requests().unwrap();
+        assert!(
+            result.recv().unwrap().is_err(),
+            "unknown baseline must not become cursor zero"
+        );
+        drop(actor);
         child.wait().unwrap();
     }
 
