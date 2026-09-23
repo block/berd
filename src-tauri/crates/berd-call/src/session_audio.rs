@@ -1120,6 +1120,45 @@ mod tests {
     }
 
     #[test]
+    fn rapid_resume_waits_for_host_suspension_acknowledgement() {
+        let (output, mut host, controls) = fixture_with_control(
+            TtsPcmSpec {
+                sample_rate: 24_000,
+                playback_rate: 1.0,
+            },
+            AUDIO_OPERATION_TIMEOUT,
+        );
+        start(&output, &mut host);
+        output.request_suspend().unwrap();
+        assert_eq!(
+            controls.try_recv().unwrap(),
+            AudioOutputControlRequest::Suspend { speech_id: 7 }
+        );
+        output.request_resume().unwrap();
+        assert!(matches!(
+            controls.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        output
+            .handle_ack(AudioHostAck::Suspended { played_frames: 0 })
+            .unwrap();
+        assert_eq!(
+            controls.try_recv().unwrap(),
+            AudioOutputControlRequest::Resume { speech_id: 7 }
+        );
+        output
+            .handle_ack(AudioHostAck::Resumed { played_frames: 0 })
+            .unwrap();
+        assert!(matches!(
+            controls.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        let state = output.state.lock().unwrap();
+        assert_eq!(state.suspension, SuspensionPhase::Running);
+        assert!(state.suspension_deadline.is_none());
+    }
+
+    #[test]
     fn suspension_before_begin_and_early_settlement_are_correlated() {
         let (output, mut host, controls) = fixture_with_control(
             TtsPcmSpec {
