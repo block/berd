@@ -1892,7 +1892,7 @@ mod tests {
             non_blocking: Arc::new(AtomicBool::new(false)),
             stop_requested: Arc::new(AtomicBool::new(false)),
             muted: AtomicBool::new(false),
-            stream: false,
+            transcript: Arc::new(Transcript::Silent),
             session_arguments: vec!["session".into()],
         };
         let worker = thread::spawn(move || match receiver.recv().unwrap() {
