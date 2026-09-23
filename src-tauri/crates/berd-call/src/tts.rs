@@ -21,6 +21,11 @@ pub enum TtsOutcome {
 
 pub enum TtsSynthesisEvent<'a> {
     Frames(&'a [f32]),
+    /// Provider synthesis finished, including frames buffered upstream of the
+    /// output callback. This may arrive after output cancellation.
+    SynthesisComplete {
+        total_frames: u64,
+    },
     /// A lifecycle polling opportunity while synthesis is blocked waiting for
     /// more PCM or a terminal provider result.
     Poll,

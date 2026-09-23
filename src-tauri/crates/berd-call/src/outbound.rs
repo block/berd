@@ -336,6 +336,16 @@ impl<'a> OutboundPlayback<'a> {
         }
         self.ledger.begin_segment(text.to_string());
         let outcome = backend.synthesize_with_poll(text, self.active, &mut |event| match event {
+            TtsSynthesisEvent::SynthesisComplete { total_frames } => {
+                if let Some(segment) = self.ledger.segments.last_mut() {
+                    if total_frames < segment.total_frames {
+                        return Err("synthesis length is shorter than delivered PCM".into());
+                    }
+                    segment.total_frames = total_frames;
+                    segment.synthesis_complete = true;
+                }
+                Ok(())
+            }
             TtsSynthesisEvent::Frames(samples) => {
                 if samples.is_empty() {
                     return Ok(());
@@ -627,6 +637,38 @@ mod tests {
 
     struct PollThenFramesTts;
 
+    struct BufferedSynthesisTts;
+
+    impl TtsBackend for BufferedSynthesisTts {
+        fn pcm_spec(&self) -> TtsPcmSpec {
+            TtsPcmSpec {
+                sample_rate: 100,
+                playback_rate: 1.5,
+            }
+        }
+
+        fn synthesize(
+            &self,
+            _: &str,
+            _: &AtomicBool,
+            _: &mut dyn FnMut(&[f32]) -> Result<(), String>,
+        ) -> Result<TtsOutcome, String> {
+            unreachable!()
+        }
+
+        fn synthesize_with_poll(
+            &self,
+            _: &str,
+            active: &AtomicBool,
+            on_event: &mut dyn FnMut(TtsSynthesisEvent<'_>) -> Result<(), String>,
+        ) -> Result<TtsOutcome, String> {
+            on_event(TtsSynthesisEvent::Frames(&[0.1; 60]))?;
+            active.store(false, Ordering::SeqCst);
+            on_event(TtsSynthesisEvent::SynthesisComplete { total_frames: 100 })?;
+            Ok(TtsOutcome::Cancelled)
+        }
+    }
+
     struct UnquiescedOutput;
 
     impl PcmAudioOutput for UnquiescedOutput {
@@ -839,6 +881,32 @@ mod tests {
             .segments
             .iter()
             .all(|segment| segment.synthesis_complete));
+    }
+
+    #[test]
+    fn interrupted_buffered_synthesis_uses_full_provider_duration() {
+        let active = AtomicBool::new(true);
+        let output = FakeOutput::new(0);
+        output.played.store(50, Ordering::SeqCst);
+        let text = "One two three four five six seven eight nine ten";
+        let mut playback = OutboundPlayback::new(&output, &active, 100, 0).unwrap();
+        let outcome = playback
+            .synthesize_segment(
+                &BufferedSynthesisTts,
+                text,
+                &mut |_| Ok(()),
+                &mut || Ok(()),
+                &mut |_| Ok(()),
+            )
+            .unwrap();
+        assert_eq!(outcome, OutboundOutcome::Interrupted);
+        let delivery = playback.snapshot();
+        assert_eq!(delivery.segments[0].total_frames, 100);
+        assert!(delivery.segments[0].synthesis_complete);
+        assert_eq!(
+            &text[..estimated_spoken_through_utf8(text, &delivery)],
+            "One two three four five"
+        );
     }
 
     #[test]

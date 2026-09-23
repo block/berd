@@ -514,7 +514,7 @@ impl TtsBackend for SiriTts {
     ) -> Result<TtsOutcome, String> {
         self.synthesize_with_poll(text, active, &mut |event| match event {
             TtsSynthesisEvent::Frames(frames) => on_frames(frames),
-            TtsSynthesisEvent::Poll => Ok(()),
+            TtsSynthesisEvent::Poll | TtsSynthesisEvent::SynthesisComplete { .. } => Ok(()),
         })
     }
 
@@ -565,6 +565,7 @@ impl TtsBackend for SiriTts {
                     Err(take_error(error, "Siri synthesis failed"))
                 }
             });
+            let mut forwarded_frames = 0_u64;
             let receive_result = receive_pcm_until_complete(
                 receiver,
                 &callback_cancelled,
@@ -572,11 +573,21 @@ impl TtsBackend for SiriTts {
                 &frames,
                 SYNTHESIS_POLL_INTERVAL,
                 SIRI_SYNTHESIS_STALL_TIMEOUT,
-                on_event,
+                &mut |event| {
+                    if let TtsSynthesisEvent::Frames(samples) = &event {
+                        forwarded_frames += samples.len() as u64;
+                    }
+                    on_event(event)
+                },
             );
             let native = native
                 .join()
                 .map_err(|_| "Siri synthesis thread panicked".to_string())?;
+            if native.is_ok() {
+                let total_frames = forwarded_frames
+                    + frames.lock().map_err(|_| "Siri PCM queue failed")?.len() as u64;
+                on_event(TtsSynthesisEvent::SynthesisComplete { total_frames })?;
+            }
             receive_result.and(native)
         });
         result?;
@@ -862,6 +873,7 @@ mod tests {
                 match event {
                     TtsSynthesisEvent::Frames(frames) => samples.extend_from_slice(frames),
                     TtsSynthesisEvent::Poll => idle_polls += 1,
+                    TtsSynthesisEvent::SynthesisComplete { .. } => {}
                 }
                 Ok(())
             },
