@@ -42,21 +42,32 @@ Result:
       { DEFAULT_PROJECT_ICON },
       { useProjectStore },
       { findProjectByWorkingDirectory },
+      { getHomeDir },
       { loadProjectsForBerdctl },
     ] = await Promise.all([
       import("@/features/projects/lib/projectDefaults"),
       import("@/features/projects/lib/projectIcons"),
       import("@/features/projects/stores/projectStore"),
       import("@/features/projects/api/projects"),
+      import("@/shared/api/system"),
       import("../runtime/projects"),
     ]);
     const workingDirs = args.working_dir ?? [];
     let duplicate: { id: string; name: string } | null = null;
     if (workingDirs.length > 0) {
-      await loadProjectsForBerdctl();
+      const [, homeDir] = await Promise.all([
+        loadProjectsForBerdctl(),
+        // The duplicate warning is best effort; a failed Home lookup must not
+        // prevent creation after project data was successfully loaded.
+        getHomeDir().catch(() => null),
+      ]);
       const existingProjects = useProjectStore.getState().projects;
       for (const dir of workingDirs) {
-        const match = findProjectByWorkingDirectory(existingProjects, dir);
+        const match = findProjectByWorkingDirectory(
+          existingProjects,
+          dir,
+          homeDir ?? undefined,
+        );
         if (match) {
           duplicate = match;
           break;

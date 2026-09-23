@@ -55,6 +55,7 @@ const mocks = vi.hoisted(() => ({
   updateSessionTitle: vi.fn(),
   moveSessionToProject: vi.fn(),
   listProjects: vi.fn(),
+  listAllProjects: vi.fn(),
   createProject: vi.fn(),
   archiveProject: vi.fn(),
   updateProject: vi.fn(),
@@ -189,6 +190,7 @@ vi.mock("@/features/projects/api/projects", async (importOriginal) => {
     projectWorkspaceFromDirectory: actual.projectWorkspaceFromDirectory,
     findProjectByWorkingDirectory: actual.findProjectByWorkingDirectory,
     listProjects: (...args: unknown[]) => mocks.listProjects(...args),
+    listAllProjects: (...args: unknown[]) => mocks.listAllProjects(...args),
     createProject: (...args: unknown[]) => mocks.createProject(...args),
     archiveProject: (...args: unknown[]) => mocks.archiveProject(...args),
     updateProject: (...args: unknown[]) => mocks.updateProject(...args),
@@ -441,6 +443,7 @@ beforeEach(() => {
     nextCursor: null,
   });
   mocks.listProjects.mockResolvedValue([]);
+  mocks.listAllProjects.mockResolvedValue([]);
   mocks.listPersonas.mockResolvedValue([]);
   mocks.listSkills.mockResolvedValue([]);
   mocks.getVoiceConversationStatus.mockResolvedValue({
@@ -3877,6 +3880,23 @@ describe("projects", () => {
     });
   });
 
+  it("create succeeds when the home directory lookup fails", async () => {
+    mocks.createProject.mockResolvedValue(makeProject({ id: "p-new" }));
+    mocks.getHomeDir.mockRejectedValue(new Error("system API unavailable"));
+
+    await expect(
+      dispatchCommand(
+        "projects",
+        {
+          action: "create",
+          name: "My Project",
+          working_dir: ["~/work"],
+        },
+        ctx,
+      ),
+    ).resolves.toEqual({ project_id: "p-new" });
+  });
+
   it("list refetches from the backend and excludes archived projects", async () => {
     // Stale cache that the refetch must replace.
     useProjectStore.setState({ projects: [makeProject({ id: "stale" })] });
@@ -5215,11 +5235,12 @@ describe("info", () => {
       activeProjectId: "project-9",
     });
     useProjectStore.setState({
-      projects: [
-        makeProject({ id: "project-9", name: "Renamed Display Name" }),
-      ],
+      projects: [makeProject({ id: "project-9", name: "Stale Display Name" })],
       hasFetchedProjects: true,
     });
+    mocks.listAllProjects.mockResolvedValue([
+      makeProject({ id: "project-9", name: "Renamed Display Name" }),
+    ]);
     mocks.getVoiceConversationStatus.mockResolvedValue({
       available: true,
       unavailableReason: null,
@@ -5239,8 +5260,89 @@ describe("info", () => {
       active_project_name: string | null;
     };
 
-    expect(result.active_project_id).toBe("project-9");
-    expect(result.active_project_name).toBe("Renamed Display Name");
+    expect(result).toMatchObject({
+      active_project_id: "project-9",
+      active_project_name: "Renamed Display Name",
+    });
+    expect(mocks.listAllProjects).toHaveBeenCalledTimes(1);
+  });
+
+  it("get_context loads the active project name when the local project store is empty", async () => {
+    controller.getAppContext.mockReturnValue({
+      view: "chat",
+      activeSessionId: "session-2",
+      activeProjectId: "project-9",
+    });
+    mocks.listAllProjects.mockResolvedValue([
+      makeProject({ id: "project-9", name: "Current Display Name" }),
+    ]);
+
+    const result = (await dispatchCommand(
+      "info",
+      { action: "get_context" },
+      ctx,
+    )) as {
+      active_project_id: string | null;
+      active_project_name: string | null;
+    };
+
+    expect(result).toMatchObject({
+      active_project_id: "project-9",
+      active_project_name: "Current Display Name",
+    });
+    expect(mocks.listAllProjects).toHaveBeenCalledTimes(1);
+  });
+
+  it("get_context resolves an archived active project name from current data", async () => {
+    controller.getAppContext.mockReturnValue({
+      view: "chat",
+      activeSessionId: "session-2",
+      activeProjectId: "project-9",
+    });
+    mocks.listAllProjects.mockResolvedValue([
+      makeProject({
+        id: "project-9",
+        name: "Archived Project",
+        archivedAt: "2026-09-23T00:00:00.000Z",
+      }),
+    ]);
+
+    const result = (await dispatchCommand(
+      "info",
+      { action: "get_context" },
+      ctx,
+    )) as {
+      active_project_id: string | null;
+      active_project_name: string | null;
+    };
+
+    expect(result).toMatchObject({
+      active_project_id: "project-9",
+      active_project_name: "Archived Project",
+    });
+  });
+
+  it("get_context does not refresh projects when no project is active", async () => {
+    controller.getAppContext.mockReturnValue({
+      view: "home",
+      activeSessionId: null,
+      activeProjectId: null,
+    });
+
+    const result = (await dispatchCommand(
+      "info",
+      { action: "get_context" },
+      ctx,
+    )) as {
+      active_project_id: string | null;
+      active_project_name: string | null;
+    };
+
+    expect(result).toMatchObject({
+      active_project_id: null,
+      active_project_name: null,
+    });
+    expect(mocks.listAllProjects).not.toHaveBeenCalled();
   });
 
   it("get_context reports app and active voice context", async () => {

@@ -13,6 +13,7 @@ import {
   normalizeWorkspacePath,
   workspaceAttachmentIdForPath,
 } from "@/features/chat/lib/workspaceAttachments";
+import { expandHomePath } from "@/shared/lib/homePath";
 import { toIdentityKey } from "@/shared/lib/pathIdentity";
 import type { ProjectArtifactMetadata } from "../artifact/types";
 
@@ -399,14 +400,19 @@ export async function listProjects(): Promise<ProjectInfo[]> {
 export function findProjectByWorkingDirectory(
   projects: ProjectInfo[],
   workingDir: string,
+  homeDir?: string,
 ): ProjectInfo | null {
-  const normalized = normalizeWorkspacePath(workingDir);
+  const normalized = normalizeWorkspacePath(
+    homeDir ? expandHomePath(workingDir, homeDir) : workingDir,
+  );
   if (!normalized) return null;
   const key = toIdentityKey(normalized);
   for (const project of projects) {
     if (project.archivedAt !== null) continue;
     for (const dir of project.workingDirs) {
-      const candidate = normalizeWorkspacePath(dir);
+      const candidate = normalizeWorkspacePath(
+        homeDir ? expandHomePath(dir, homeDir) : dir,
+      );
       if (candidate && toIdentityKey(candidate) === key) {
         return project;
       }
@@ -574,8 +580,8 @@ export async function getProject(id: string): Promise<ProjectInfo> {
   return match;
 }
 
-/** List both archived and active projects. */
-async function listAllProjects(): Promise<ProjectInfo[]> {
+/** List both archived and active projects from one backend snapshot. */
+export async function listAllProjects(): Promise<ProjectInfo[]> {
   const client = await getClient();
   const raw = await client.goose.GooseUnstableSourcesList({
     type: "project",
