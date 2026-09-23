@@ -25,6 +25,11 @@ pub(crate) trait HostControl: Send + Sync + 'static {
     fn stop(&self) -> Result<Value, String>;
     fn set_non_blocking(&self, enabled: bool) -> Result<Value, String>;
     fn set_tts(&self, settings: berd_call::TtsSettings) -> Result<Value, String>;
+    fn set_input_during_tts(
+        &self,
+        policy: berd_call::input::InputDuringTtsPolicy,
+    ) -> Result<Value, String>;
+    fn set_muted(&self, muted: bool) -> Result<Value, String>;
 }
 
 pub(crate) struct ControlServer {
@@ -102,6 +107,12 @@ pub(crate) enum ControlRequest {
     TtsSettings {
         settings: berd_call::TtsSettings,
     },
+    InputDuringTts {
+        policy: berd_call::input::InputDuringTtsPolicy,
+    },
+    Muted {
+        muted: bool,
+    },
 }
 
 #[derive(Deserialize, Serialize)]
@@ -158,6 +169,8 @@ fn handle_connection(mut stream: TcpStream, control: &dyn HostControl) -> Result
                 ControlRequest::Stop => control.stop(),
                 ControlRequest::TtsSettings { settings } => control.set_tts(settings),
                 ControlRequest::Settings { non_blocking } => control.set_non_blocking(non_blocking),
+                ControlRequest::InputDuringTts { policy } => control.set_input_during_tts(policy),
+                ControlRequest::Muted { muted } => control.set_muted(muted),
             },
         );
     let response = match result {
@@ -259,6 +272,15 @@ mod tests {
         }
         fn set_non_blocking(&self, enabled: bool) -> Result<Value, String> {
             Ok(json!({"nonBlocking": enabled}))
+        }
+        fn set_input_during_tts(
+            &self,
+            policy: berd_call::input::InputDuringTtsPolicy,
+        ) -> Result<Value, String> {
+            Ok(json!({"inputDuringTts": policy}))
+        }
+        fn set_muted(&self, muted: bool) -> Result<Value, String> {
+            Ok(json!({"muted": muted}))
         }
         fn status(&self) -> Result<Value, String> {
             Ok(json!({"running": !self.stopped.load(Ordering::SeqCst)}))

@@ -70,6 +70,7 @@ pub(crate) fn run(options: StartOptions) -> Result<(), String> {
         running: Arc::clone(&running),
         ready: ready.clone(),
         non_blocking: AtomicBool::new(options.non_blocking),
+        muted: AtomicBool::new(false),
         stream: options.stream,
     });
 
@@ -123,6 +124,15 @@ struct ReadyState {
 }
 
 enum ControlCommand {
+    InputDuringTts {
+        policy: InputDuringTtsPolicy,
+        expected_revision: u64,
+        response: SyncSender<Result<Value, String>>,
+    },
+    Muted {
+        muted: bool,
+        response: SyncSender<Result<Value, String>>,
+    },
     TtsSettings {
         settings: berd_call::TtsSettings,
         expected_revision: u64,
@@ -145,7 +155,23 @@ struct SessionControl {
     running: Arc<AtomicBool>,
     ready: ReadyState,
     non_blocking: AtomicBool,
+    muted: AtomicBool,
     stream: bool,
+}
+
+impl SessionControl {
+    fn request(
+        &self,
+        command: impl FnOnce(SyncSender<Result<Value, String>>) -> ControlCommand,
+    ) -> Result<Value, String> {
+        let (response, result) = mpsc::sync_channel(1);
+        self.commands
+            .send(command(response))
+            .map_err(|_| "voice call is not running")?;
+        result
+            .recv()
+            .map_err(|_| "voice call stopped during settings update")?
+    }
 }
 
 impl HostControl for SessionControl {
@@ -182,6 +208,39 @@ impl HostControl for SessionControl {
         Ok(result)
     }
 
+    fn set_input_during_tts(&self, policy: InputDuringTtsPolicy) -> Result<Value, String> {
+        let expected_revision = self
+            .ready
+            .session
+            .lock()
+            .map_err(|_| "session settings lock failed")?
+            .input_during_tts
+            .revision;
+        let result = self.request(|response| ControlCommand::InputDuringTts {
+            policy,
+            expected_revision,
+            response,
+        })?;
+        let snapshot: berd_call::input::InputDuringTtsSnapshot =
+            serde_json::from_value(result["snapshot"].clone())
+                .map_err(|error| error.to_string())?;
+        let mut session = self
+            .ready
+            .session
+            .lock()
+            .map_err(|_| "session settings lock failed")?;
+        if snapshot.revision >= session.input_during_tts.revision {
+            session.input_during_tts = snapshot;
+        }
+        Ok(result)
+    }
+
+    fn set_muted(&self, muted: bool) -> Result<Value, String> {
+        self.request(|response| ControlCommand::Muted { muted, response })?;
+        self.muted.store(muted, Ordering::SeqCst);
+        self.status()
+    }
+
     fn set_non_blocking(&self, enabled: bool) -> Result<Value, String> {
         if enabled && !self.stream {
             return Err("non-blocking speech requires start --stream for delivery events".into());
@@ -195,6 +254,7 @@ impl HostControl for SessionControl {
             "running": self.running.load(Ordering::SeqCst),
             "session": *self.ready.session.lock().map_err(|_| "session settings lock failed")?,
             "nonBlocking": self.non_blocking.load(Ordering::SeqCst),
+            "muted": self.muted.load(Ordering::SeqCst),
         }))
     }
 
@@ -311,6 +371,30 @@ impl SessionActor {
 
     fn handle_command(&mut self, command: ControlCommand) -> Result<(), String> {
         match command {
+            ControlCommand::InputDuringTts {
+                policy,
+                expected_revision,
+                response,
+            } => {
+                let id = self.next_id();
+                send_request(
+                    &self.writer,
+                    &SessionRequest::SetInputDuringTts {
+                        id,
+                        expected_revision,
+                        policy,
+                    },
+                )?;
+                self.pending_settings.insert(id, response);
+            }
+            ControlCommand::Muted { muted, response } => {
+                let id = self.next_id();
+                send_request(
+                    &self.writer,
+                    &SessionRequest::SetInputMuted { id, active: muted },
+                )?;
+                self.pending_settings.insert(id, response);
+            }
             ControlCommand::TtsSettings {
                 settings,
                 expected_revision,
@@ -388,6 +472,20 @@ impl SessionActor {
                     let _ = response.send(Ok(
                         json!({"outcome":outcome,"snapshot":snapshot,"message":message}),
                     ));
+                }
+            }
+            SessionMessage::InputDuringTtsResult {
+                id,
+                outcome,
+                snapshot,
+            } => {
+                if let Some(response) = self.pending_settings.remove(&id) {
+                    let _ = response.send(Ok(json!({"outcome":outcome,"snapshot":snapshot})));
+                }
+            }
+            SessionMessage::InputMuteApplied { id, active } => {
+                if let Some(response) = self.pending_settings.remove(&id) {
+                    let _ = response.send(Ok(json!({"muted":active})));
                 }
             }
             SessionMessage::LiveEvent {

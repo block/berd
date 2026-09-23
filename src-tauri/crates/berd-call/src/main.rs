@@ -764,6 +764,8 @@ fn parse_host_settings_args(
     let mut port_args = args[..2].to_vec();
     let mut non_blocking = None;
     let mut tts = None;
+    let mut input_during_tts = None;
+    let mut muted = None;
     let mut index = 2;
     while index < args.len() {
         if args[index] == "--non-blocking" {
@@ -774,6 +776,26 @@ fn parse_host_settings_args(
                 Some("true") => true,
                 Some("false") => false,
                 _ => return Err("--non-blocking requires true or false".into()),
+            });
+            index += 2;
+        } else if args[index] == "--input-during-tts" {
+            if input_during_tts.is_some() {
+                return Err("--input-during-tts may be provided only once".into());
+            }
+            input_during_tts = Some(match args.get(index + 1).map(String::as_str) {
+                Some("allow") => berd_call::input::InputDuringTtsPolicy::AllowBargeIn,
+                Some("suppress") => berd_call::input::InputDuringTtsPolicy::SuppressInput,
+                _ => return Err("--input-during-tts requires allow or suppress".into()),
+            });
+            index += 2;
+        } else if args[index] == "--muted" {
+            if muted.is_some() {
+                return Err("--muted may be provided only once".into());
+            }
+            muted = Some(match args.get(index + 1).map(String::as_str) {
+                Some("true") => true,
+                Some("false") => false,
+                _ => return Err("--muted requires true or false".into()),
             });
             index += 2;
         } else if args[index] == "--tts" {
@@ -793,10 +815,21 @@ fn parse_host_settings_args(
             index += 1;
         }
     }
-    let request = match (non_blocking, tts) {
-        (Some(non_blocking), None) => host_control::ControlRequest::Settings { non_blocking },
-        (None, Some(settings)) => host_control::ControlRequest::TtsSettings { settings },
-        _ => return Err("provide exactly one of --non-blocking or --tts".into()),
+    let request = match (non_blocking, tts, input_during_tts, muted) {
+        (Some(non_blocking), None, None, None) => {
+            host_control::ControlRequest::Settings { non_blocking }
+        }
+        (None, Some(settings), None, None) => {
+            host_control::ControlRequest::TtsSettings { settings }
+        }
+        (None, None, Some(policy), None) => host_control::ControlRequest::InputDuringTts { policy },
+        (None, None, None, Some(muted)) => host_control::ControlRequest::Muted { muted },
+        _ => {
+            return Err(
+                "provide exactly one of --non-blocking, --tts, --input-during-tts, or --muted"
+                    .into(),
+            )
+        }
     };
     Ok((parse_control_port(&port_args)?, request))
 }
@@ -10864,6 +10897,25 @@ mod tests {
         assert!(
             parse_host_settings_args(&args(&["berd-call", "settings", "--tts", "{}"])).is_err()
         );
+        assert!(matches!(
+            parse_host_settings_args(&args(&[
+                "berd-call",
+                "settings",
+                "--input-during-tts",
+                "suppress",
+            ]))
+            .unwrap()
+            .1,
+            host_control::ControlRequest::InputDuringTts {
+                policy: berd_call::input::InputDuringTtsPolicy::SuppressInput
+            }
+        ));
+        assert!(matches!(
+            parse_host_settings_args(&args(&["berd-call", "settings", "--muted", "true"]))
+                .unwrap()
+                .1,
+            host_control::ControlRequest::Muted { muted: true }
+        ));
         assert!(parse_host_settings_args(&args(&[
             "berd-call",
             "settings",
