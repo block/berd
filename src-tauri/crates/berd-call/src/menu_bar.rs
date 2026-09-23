@@ -22,11 +22,20 @@ use objc2_foundation::{NSObjectProtocol, NSString, NSTimer};
 use serde_json::Value;
 
 use berd_call::input::InputDuringTtsPolicy;
+use berd_call::StatusSoundMode;
 
 use crate::host_control::{self, ControlRequest};
 use crate::StartOptions;
 
 const RATES: [f32; 7] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
+const STATUS_SOUND_MODES: [(StatusSoundMode, &str); 3] = [
+    (StatusSoundMode::Off, "Off"),
+    (StatusSoundMode::Working, "While Working"),
+    (
+        StatusSoundMode::WorkingAndWaiting,
+        "While Working and Waiting",
+    ),
+];
 
 /// Runs the call on a worker thread while the main thread owns the menu bar.
 /// The process exits when the call ends.
@@ -60,6 +69,7 @@ pub(crate) enum MenuAction {
     Rate(f32),
     Muted(bool),
     InputDuringTts(InputDuringTtsPolicy),
+    StatusSounds(StatusSoundMode),
     Stop,
 }
 
@@ -109,6 +119,14 @@ pub(crate) fn menu_model(status: Option<&Value>) -> Vec<MenuNode> {
             ..item(rate_title(option), Some(MenuAction::Rate(option)))
         })
         .collect();
+    let current_sounds = serde_json::from_value(status["statusSounds"].clone()).ok();
+    let status_sounds = STATUS_SOUND_MODES
+        .iter()
+        .map(|&(mode, title)| MenuNode {
+            checked: current_sounds == Some(mode),
+            ..item(title, Some(MenuAction::StatusSounds(mode)))
+        })
+        .collect();
     vec![
         item(format!("Berd Call · {}", mode_name(status)), None),
         SEPARATOR,
@@ -127,6 +145,10 @@ pub(crate) fn menu_model(status: Option<&Value>) -> Vec<MenuNode> {
                 })),
             )
         },
+        MenuNode {
+            children: status_sounds,
+            ..item("Status Sounds", None)
+        },
         SEPARATOR,
         MenuNode {
             checked: muted,
@@ -144,6 +166,7 @@ pub(crate) fn control_request(action: &MenuAction) -> ControlRequest {
         MenuAction::Rate(rate) => ControlRequest::Rate { rate: *rate },
         MenuAction::Muted(muted) => ControlRequest::Muted { muted: *muted },
         MenuAction::InputDuringTts(policy) => ControlRequest::InputDuringTts { policy: *policy },
+        MenuAction::StatusSounds(mode) => ControlRequest::StatusSounds { mode: *mode },
         MenuAction::Stop => ControlRequest::Stop,
     }
 }
@@ -391,6 +414,7 @@ mod tests {
                 "tts": {"backend": "siri", "voice": "Aaron", "language": "en-US", "rate": 1.25, "revision": 3},
             },
             "sessionArguments": arguments,
+            "statusSounds": "working-and-waiting",
         })
     }
 
@@ -440,6 +464,13 @@ mod tests {
                 ..
             }
         ));
+        let sounds: Vec<_> = find(&nodes, "Status Sounds")
+            .children
+            .iter()
+            .filter(|node| node.checked)
+            .map(|node| node.title.as_str())
+            .collect();
+        assert_eq!(sounds, ["While Working and Waiting"]);
         assert_eq!(icon_symbol(Some(&status)), "mic.slash");
         find(&menu_model(None), "End Call");
     }
@@ -453,6 +484,13 @@ mod tests {
         assert_eq!(
             serde_json::to_value(control_request(&MenuAction::Stop)).unwrap(),
             json!({"command": "stop"})
+        );
+        assert_eq!(
+            serde_json::to_value(control_request(&MenuAction::StatusSounds(
+                StatusSoundMode::Off
+            )))
+            .unwrap(),
+            json!({"command": "status_sounds", "mode": "off"})
         );
     }
 

@@ -31,6 +31,7 @@ pub(crate) trait HostControl: Send + Sync + 'static {
         policy: berd_call::input::InputDuringTtsPolicy,
     ) -> Result<Value, String>;
     fn set_muted(&self, muted: bool) -> Result<Value, String>;
+    fn set_status_sounds(&self, mode: berd_call::StatusSoundMode) -> Result<Value, String>;
     fn restart(&self, session_arguments: Vec<String>) -> Result<Value, String>;
 }
 
@@ -117,6 +118,9 @@ pub(crate) enum ControlRequest {
     Muted {
         muted: bool,
     },
+    StatusSounds {
+        mode: berd_call::StatusSoundMode,
+    },
     Restart {
         #[serde(rename = "sessionArguments")]
         session_arguments: Vec<String>,
@@ -183,6 +187,7 @@ fn handle_connection(mut stream: TcpStream, control: &dyn HostControl) -> Result
                 ControlRequest::NonBlocking { enabled } => control.set_non_blocking(enabled),
                 ControlRequest::InputDuringTts { policy } => control.set_input_during_tts(policy),
                 ControlRequest::Muted { muted } => control.set_muted(muted),
+                ControlRequest::StatusSounds { mode } => control.set_status_sounds(mode),
                 ControlRequest::Restart { session_arguments } => control.restart(session_arguments),
             },
         );
@@ -297,6 +302,9 @@ mod tests {
         }
         fn set_muted(&self, muted: bool) -> Result<Value, String> {
             Ok(json!({"muted": muted}))
+        }
+        fn set_status_sounds(&self, mode: berd_call::StatusSoundMode) -> Result<Value, String> {
+            Ok(json!({"statusSounds": mode}))
         }
         fn restart(&self, session_arguments: Vec<String>) -> Result<Value, String> {
             Ok(json!({"sessionArguments": session_arguments}))

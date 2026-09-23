@@ -61,8 +61,12 @@ Usage:
   berd-call settings [--port PORT] --tts JSON
   berd-call settings [--port PORT] --input-during-tts allow|suppress
   berd-call settings [--port PORT] --muted true|false
+  berd-call settings [--port PORT] --status-sounds off|working|working-and-waiting
   berd-call settings [--port PORT] --restart [session options]
 
+Status sounds play Pop while the agent works on a reply and, with
+working-and-waiting, Purr while it waits for you. They are off by default until
+agent hooks can report when the agent is working.
 The setting applies to subsequent speak calls. Non-blocking delivery requires
 a call started with --stream or --codex. Successful delivery produces no notification."#;
 

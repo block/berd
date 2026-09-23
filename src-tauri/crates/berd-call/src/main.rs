@@ -849,6 +849,18 @@ fn parse_host_settings_args(
                     _ => return Err("--input-during-tts requires allow or suppress".into()),
                 },
             },
+            "--status-sounds" => host_control::ControlRequest::StatusSounds {
+                mode: match args.get(index + 1).map(String::as_str) {
+                    Some("off") => berd_call::StatusSoundMode::Off,
+                    Some("working") => berd_call::StatusSoundMode::Working,
+                    Some("working-and-waiting") => berd_call::StatusSoundMode::WorkingAndWaiting,
+                    _ => {
+                        return Err(
+                            "--status-sounds requires off, working, or working-and-waiting".into(),
+                        )
+                    }
+                },
+            },
             "--rate" => host_control::ControlRequest::Rate {
                 rate: args
                     .get(index + 1)
@@ -879,7 +891,7 @@ fn parse_host_settings_args(
 }
 
 const SETTINGS_CHOICE_ERROR: &str =
-    "provide exactly one of --non-blocking, --rate, --tts, --input-during-tts, --muted, or --restart";
+    "provide exactly one of --non-blocking, --rate, --tts, --input-during-tts, --muted, --status-sounds, or --restart";
 
 fn parse_bool_setting(flag: &str, value: Option<&String>) -> Result<bool, String> {
     match value.map(String::as_str) {
@@ -1677,7 +1689,7 @@ fn standard_session_status_cues_suppressed(
     core: &SessionCore,
     assistant_output_active: bool,
 ) -> bool {
-    core.user_speaking() || assistant_output_active
+    core.user_speaking() || core.recognition_pending() || assistant_output_active
 }
 
 fn expert_session_status_cues_suppressed(
@@ -1934,6 +1946,9 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                 input_events = Some(events);
                 initialized = true;
                 status_sound_runtime.set_output_device(status_sound_output_device);
+                // Cues are speaker output too: suppress the microphone while
+                // they play so they cannot be transcribed as user speech.
+                status_sound_runtime.set_input_controls(input_controls.clone());
                 let input_policy = InputDuringTtsSlot::new(input_during_tts);
                 let session = VoiceSessionSnapshot {
                     tts: slot.snapshot()?,
@@ -7271,9 +7286,12 @@ mod tests {
     use std::sync::Mutex;
 
     #[test]
-    fn status_cues_ignore_pending_recognition_but_suppress_actual_audio() {
+    fn status_cues_wait_for_pending_recognition_and_suppress_actual_audio() {
         let mut core = SessionCore::default();
         core.set_recognition_pending(true);
+        // Conventional cues mute input, which would discard pending recognition.
+        assert!(standard_session_status_cues_suppressed(&core, false));
+        core.set_recognition_pending(false);
         assert!(!standard_session_status_cues_suppressed(&core, false));
         assert!(standard_session_status_cues_suppressed(&core, true));
         core.set_user_speaking(true);
@@ -10979,6 +10997,21 @@ mod tests {
     }
 
     #[test]
+    fn settings_choice_error_lists_every_setting() {
+        for flag in [
+            "--non-blocking",
+            "--rate",
+            "--tts",
+            "--input-during-tts",
+            "--muted",
+            "--status-sounds",
+            "--restart",
+        ] {
+            assert!(SETTINGS_CHOICE_ERROR.contains(flag), "{flag}");
+        }
+    }
+
+    #[test]
     fn control_command_parsers_are_closed_and_correlated() {
         let (port, request) = parse_host_settings_args(&args(&[
             "berd-call",
@@ -11015,6 +11048,26 @@ mod tests {
                 .1,
             host_control::ControlRequest::Muted { muted: true }
         ));
+        assert!(matches!(
+            parse_host_settings_args(&args(&[
+                "berd-call",
+                "settings",
+                "--status-sounds",
+                "working-and-waiting",
+            ]))
+            .unwrap()
+            .1,
+            host_control::ControlRequest::StatusSounds {
+                mode: berd_call::StatusSoundMode::WorkingAndWaiting
+            }
+        ));
+        assert!(parse_host_settings_args(&args(&[
+            "berd-call",
+            "settings",
+            "--status-sounds",
+            "loud",
+        ]))
+        .is_err());
         assert!(matches!(
             parse_host_settings_args(&args(&[
                 "berd-call",
