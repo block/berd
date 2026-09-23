@@ -37,7 +37,6 @@ use crate::StartOptions;
 
 const INPUT_FRAME_SAMPLES: usize = 960;
 const MAX_AUDIO_RECORD_BYTES: usize = 4096 * std::mem::size_of::<f32>() + 16;
-const MAX_SUSPENSION_SETTLE_TIME: Duration = Duration::from_millis(1_500);
 
 pub(crate) fn run(options: StartOptions) -> Result<(), String> {
     let server = ControlServer::bind(options.port)?;
@@ -1128,7 +1127,7 @@ fn stream_text(text: &str) -> String {
 }
 
 fn suspension_settle_time(route_latency: Duration) -> Duration {
-    route_latency.min(MAX_SUSPENSION_SETTLE_TIME)
+    route_latency
 }
 
 fn utterance_origin_name(origin: UtteranceOrigin) -> &'static str {
@@ -1240,10 +1239,10 @@ mod tests {
     }
 
     #[test]
-    fn suspension_settle_time_leaves_acknowledgement_margin() {
+    fn suspension_settle_time_preserves_route_safety_duration() {
         assert_eq!(
             suspension_settle_time(Duration::from_secs(2)),
-            Duration::from_millis(1_500)
+            Duration::from_secs(2)
         );
         assert_eq!(
             suspension_settle_time(Duration::from_millis(100)),

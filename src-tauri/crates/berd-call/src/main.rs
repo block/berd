@@ -496,7 +496,7 @@ fn main() {
             #[cfg(not(target_os = "macos"))]
             {
                 let _ = options;
-                eprintln!("berd-call start is not yet supported on this platform");
+                eprintln!("berd-call start is supported only on macOS");
                 std::process::exit(1);
             }
         }

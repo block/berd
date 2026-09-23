@@ -20,7 +20,8 @@ pub const MAX_AUDIO_CHUNK_FRAMES: usize = 4096;
 const MIN_ACCEPTED_AUDIO_RUNWAY_MS: f64 = 400.0;
 const MAX_ACCEPTED_NOT_PLAYED_CHUNKS: usize = 64;
 
-const AUDIO_OPERATION_TIMEOUT: Duration = Duration::from_secs(2);
+const AUDIO_PIPE_WRITE_TIMEOUT: Duration = Duration::from_secs(2);
+const AUDIO_OPERATION_TIMEOUT: Duration = Duration::from_secs(3);
 pub const AUDIO_CANCELLED: &str = "remote PCM output was cancelled";
 
 #[derive(Clone, Debug, PartialEq)]
@@ -128,7 +129,7 @@ impl AudioPipeTransport {
         record.extend_from_slice(&length.to_le_bytes());
         record.extend_from_slice(payload);
 
-        let deadline = Instant::now() + AUDIO_OPERATION_TIMEOUT;
+        let deadline = Instant::now() + AUDIO_PIPE_WRITE_TIMEOUT;
         let file = self.file.lock().expect("audio pipe lock");
         let fd = file.as_raw_fd();
         let mut offset = 0;
