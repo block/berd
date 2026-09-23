@@ -62,6 +62,7 @@ These IDs
 identify speech requests, not transcript cursors, and must not be passed as
 `--re` acknowledgements. Acceptance means the runtime admitted playback.
 
+||||||| cd34c5aa
 This crate owns the neutral PCM output contract and backend-neutral TTS stream
 used by Berd, plus the April ONNX runtime and text chunking used by Berd's native
 voice commands. It also owns the concrete Parakeet model loader and complete

@@ -11,6 +11,7 @@ Call runtime:
   status                  Inspect the active local call
   settings                Update the active local call settings
   stop                    Stop the active local call
+||||||| cd34c5aa
   session                 Run the host-facing framed voice-session protocol
 
 Speech and models:
@@ -67,6 +68,7 @@ const STOP_HELP: &str = r#"Stop the active local voice call.
 Usage:
   berd-call stop [--port PORT]"#;
 
+||||||| cd34c5aa
 const SESSION_HELP: &str = r#"Run the host-facing framed voice-session protocol.
 
 Usage:
@@ -164,6 +166,7 @@ fn help_for(topic: &[&str]) -> Option<&'static str> {
         ["status"] => Some(STATUS_HELP),
         ["settings"] => Some(SETTINGS_HELP),
         ["stop"] => Some(STOP_HELP),
+||||||| cd34c5aa
         ["session"] => Some(SESSION_HELP),
         ["synthesize"] => Some(SYNTHESIZE_HELP),
         ["voices"] | ["voices", "list" | "download"] => Some(VOICES_HELP),

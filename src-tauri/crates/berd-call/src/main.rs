@@ -540,6 +540,7 @@ fn main() {
                 .unwrap_or_else(|error| operational_error("stop", error));
             print_pretty_json(&response).unwrap_or_else(|error| operational_error("stop", error));
         }
+||||||| cd34c5aa
         Some("session") => {
             let config = parse_or_exit(parse_args(&args), &args);
             let pcm_output_fd = parse_or_exit(parse_pcm_output_fd(&args), &args);
@@ -818,6 +819,7 @@ fn operational_error(operation: &str, error: String) -> ! {
     std::process::exit(1)
 }
 
+||||||| cd34c5aa
 #[derive(Debug, PartialEq, Eq)]
 enum ParseFailure {
     HelpRequested,
@@ -10876,4 +10878,5 @@ mod tests {
         );
         assert!(parse_control_port(&args(&["berd-call", "stop", "extra"])).is_err());
     }
+||||||| cd34c5aa
 }
