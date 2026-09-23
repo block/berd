@@ -404,7 +404,7 @@ fn start_session(
         non_blocking: Arc::clone(non_blocking),
         stop_requested: Arc::clone(stop_requested),
         muted: Arc::clone(&actor.muted),
-        status_sounds: Mutex::new(status_sounds),
+        status_sounds: Arc::clone(&actor.acknowledged_status_sounds),
         transcript: Arc::clone(transcript),
         session_arguments: arguments,
     });
@@ -480,7 +480,7 @@ struct SessionControl {
     non_blocking: Arc<AtomicBool>,
     stop_requested: Arc<AtomicBool>,
     muted: Arc<AtomicBool>,
-    status_sounds: Mutex<StatusSoundMode>,
+    status_sounds: Arc<Mutex<StatusSoundMode>>,
     transcript: Arc<Transcript>,
     session_arguments: Vec<String>,
 }
@@ -557,10 +557,6 @@ impl HostControl for SessionControl {
 
     fn set_status_sounds(&self, mode: StatusSoundMode) -> Result<Value, String> {
         self.request(|response| ControlCommand::StatusSounds { mode, response })?;
-        *self
-            .status_sounds
-            .lock()
-            .map_err(|_| "session settings lock failed")? = mode;
         self.status()
     }
 
@@ -668,6 +664,8 @@ struct SessionActor {
     stopping: bool,
     restart: Option<PendingRestart>,
     muted: Arc<AtomicBool>,
+    /// The acknowledged sound mode, shared with the control side and restart.
+    acknowledged_status_sounds: Arc<Mutex<StatusSoundMode>>,
 }
 
 impl SessionActor {
@@ -700,6 +698,7 @@ impl SessionActor {
             stopping: false,
             restart: None,
             muted: Arc::new(AtomicBool::new(false)),
+            acknowledged_status_sounds: Arc::new(Mutex::new(status_sounds)),
         }
     }
 
@@ -916,6 +915,10 @@ impl SessionActor {
                 }
             }
             SessionMessage::ConversationStatusApplied { id, settings, .. } => {
+                // Commit before acknowledging so a restart cannot read a stale value.
+                if let Ok(mut mode) = self.acknowledged_status_sounds.lock() {
+                    *mode = settings.mode;
+                }
                 if let Some(response) = self.pending_settings.remove(&id) {
                     let _ = response.send(Ok(json!({"statusSounds":settings.mode})));
                 }
@@ -1952,6 +1955,44 @@ mod tests {
     }
 
     #[test]
+    fn status_sounds_are_committed_before_they_are_acknowledged() {
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let (_events_tx, events) = mpsc::sync_channel(1);
+        let (_commands_tx, commands) = mpsc::sync_channel(1);
+        let (audio_commands, _audio_rx) = mpsc::sync_channel(1);
+        let mut actor = test_actor(writer, events, commands, audio_commands);
+        let acknowledged_mode = Arc::clone(&actor.acknowledged_status_sounds);
+        let (response, acknowledged) = mpsc::sync_channel(1);
+        let id = actor.next_id;
+        actor
+            .handle_command(ControlCommand::StatusSounds {
+                mode: StatusSoundMode::Off,
+                response,
+            })
+            .unwrap();
+        actor
+            .handle_event(SessionMessage::ConversationStatusApplied {
+                id,
+                status: ConversationStatus::Waiting,
+                settings: StatusSoundSettings {
+                    mode: StatusSoundMode::Off,
+                    ..StatusSoundSettings::default()
+                },
+            })
+            .unwrap();
+        acknowledged.recv().unwrap().unwrap();
+        // A restart that runs before the caller resumes reads this value.
+        assert_eq!(*acknowledged_mode.lock().unwrap(), StatusSoundMode::Off);
+        drop(actor);
+        assert!(child.wait().unwrap().success());
+    }
+
+    #[test]
     fn mute_is_committed_before_it_is_acknowledged() {
         let mut child = Command::new("/bin/cat")
             .stdin(Stdio::piped())
@@ -2041,7 +2082,7 @@ mod tests {
             stop_requested: Arc::clone(&stop_requested),
             muted: Arc::new(AtomicBool::new(false)),
             transcript: Arc::new(Transcript::Silent),
-            status_sounds: Mutex::new(StatusSoundMode::default()),
+            status_sounds: Arc::new(Mutex::new(StatusSoundMode::default())),
             session_arguments: vec!["session".into()],
         };
         drop(receiver);
@@ -2062,7 +2103,7 @@ mod tests {
             stop_requested: Arc::new(AtomicBool::new(false)),
             muted: Arc::new(AtomicBool::new(false)),
             transcript: Arc::new(Transcript::Silent),
-            status_sounds: Mutex::new(StatusSoundMode::default()),
+            status_sounds: Arc::new(Mutex::new(StatusSoundMode::default())),
             session_arguments: vec!["session".into()],
         };
         let worker = thread::spawn(move || match receiver.recv().unwrap() {
