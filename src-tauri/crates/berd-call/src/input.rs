@@ -191,7 +191,7 @@ pub enum InputDuringTtsPolicy {
     SuppressInput,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct InputDuringTtsSnapshot {
     pub revision: u64,
     pub policy: InputDuringTtsPolicy,

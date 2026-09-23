@@ -16,7 +16,13 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use serde_json::{json, Value};
 
 use berd_call::input::InputDuringTtsPolicy;
-use berd_call::protocol::SessionRequest;
+use berd_call::openai_realtime_protocol::{
+    RealtimeExpertDeliveryEvent, RealtimeExpertDeliveryRole,
+};
+use berd_call::protocol::{
+    NotAdmittedReason, OutputReadyOutcome, SessionMessage, SessionRequest, UtteranceOrigin,
+    VoiceSessionSnapshot,
+};
 use berd_call::PocketAudioPlayer;
 
 use crate::host_control::{ControlServer, HostControl};
@@ -31,6 +37,7 @@ use crate::StartOptions;
 
 const INPUT_FRAME_SAMPLES: usize = 960;
 const MAX_AUDIO_RECORD_BYTES: usize = 4096 * std::mem::size_of::<f32>() + 16;
+const MAX_SUSPENSION_SETTLE_TIME: Duration = Duration::from_millis(1_500);
 
 pub(crate) fn run(options: StartOptions) -> Result<(), String> {
     let server = ControlServer::bind(options.port)?;
@@ -111,7 +118,7 @@ fn default_input_during_tts_policy() -> InputDuringTtsPolicy {
 
 #[derive(Clone)]
 struct ReadyState {
-    session: Value,
+    session: VoiceSessionSnapshot,
 }
 
 enum ControlCommand {
@@ -181,7 +188,7 @@ enum AudioCommand {
 
 struct SessionActor {
     writer: Arc<Mutex<ChildStdin>>,
-    events: Receiver<Value>,
+    events: Receiver<SessionMessage>,
     commands: Receiver<ControlCommand>,
     audio_commands: SyncSender<AudioCommand>,
     next_id: u64,
@@ -194,7 +201,7 @@ struct SessionActor {
 impl SessionActor {
     fn new(
         writer: Arc<Mutex<ChildStdin>>,
-        events: Receiver<Value>,
+        events: Receiver<SessionMessage>,
         commands: Receiver<ControlCommand>,
         audio_commands: SyncSender<AudioCommand>,
         stream: bool,
@@ -275,117 +282,79 @@ impl SessionActor {
         Ok(())
     }
 
-    fn handle_event(&mut self, event: Value) -> Result<(), String> {
-        let kind = event
-            .get("type")
-            .and_then(Value::as_str)
-            .ok_or_else(|| "voice session emitted an untyped event".to_string())?
-            .to_string();
-        match kind.as_str() {
-            "live_event" if !self.expert_spokesperson => self.stream_live_event(&event)?,
-            "expert_delivery" if self.expert_spokesperson => self.stream_expert_delivery(&event)?,
-            "live_event" | "expert_delivery" => {}
-            "pending"
-            | "not_admitted"
-            | "admitted"
-            | "output_ready_result"
-            | "speech_started"
-            | "speech_completed"
-            | "speech_interrupted"
-            | "speech_failed" => self.handle_speech_event(&kind, event)?,
-            "audio_suspend" | "audio_resume" => {
-                let speech_id = required_u64(&event, "speech_id")?;
-                let command = if kind == "audio_suspend" {
-                    AudioCommand::Suspend(speech_id)
-                } else {
-                    AudioCommand::Resume(speech_id)
-                };
-                self.audio_commands
-                    .send(command)
-                    .map_err(|_| "audio host stopped".to_string())?;
+    fn handle_event(&mut self, event: SessionMessage) -> Result<(), String> {
+        match event {
+            SessionMessage::LiveEvent {
+                token,
+                text,
+                origin,
+            } if !self.expert_spokesperson => self.stream_live_event(token, origin, &text)?,
+            SessionMessage::ExpertDelivery { events, .. } if self.expert_spokesperson => {
+                self.stream_expert_delivery(&events)?
             }
-            "fatal" => {
-                let message = event
-                    .get("message")
-                    .and_then(Value::as_str)
-                    .unwrap_or("voice session failed")
-                    .to_string();
-                self.finish_pending(&message);
-                return Err(message);
-            }
-            "input_speaking"
-            | "recognition_pending"
-            | "conversation_status_applied"
-            | "tts_settings_result"
-            | "input_during_tts_result"
-            | "input_mute_applied"
-            | "input_reset_applied"
-            | "state"
-            | "dismiss_handoffs_result"
-            | "expert_turn_result"
-            | "cancel_result"
-            | "spokesperson_speech" => {}
-            "ready" => return Err("voice session emitted ready more than once".into()),
-            other => return Err(format!("voice session emitted unknown event: {other}")),
-        }
-        Ok(())
-    }
-
-    fn handle_speech_event(&mut self, kind: &str, event: Value) -> Result<(), String> {
-        let Some(pending) = self.pending_speak.as_mut() else {
-            return Ok(());
-        };
-        let event_id = event.get("id").and_then(Value::as_u64);
-        match kind {
-            "pending" if event_id == Some(pending.prepare_id) => {
-                let utterances = event
-                    .get("utterances")
-                    .cloned()
-                    .unwrap_or_else(|| json!([]));
+            SessionMessage::Pending { id, utterances } if self.pending_prepare_id() == Some(id) => {
                 self.respond_speak(Ok(json!({"spoke":false,"utterances":utterances})));
             }
-            "not_admitted" if event_id == Some(pending.prepare_id) => {
-                let reason = event
-                    .get("reason")
-                    .and_then(Value::as_str)
-                    .unwrap_or("not admitted");
-                self.respond_speak(Err(format!("speech was not admitted: {reason}")));
+            SessionMessage::NotAdmitted { id, reason } if self.pending_prepare_id() == Some(id) => {
+                self.respond_speak(Err(format!(
+                    "speech was not admitted: {}",
+                    not_admitted_reason_name(reason)
+                )));
             }
-            "admitted" if event_id == Some(pending.prepare_id) => {
-                let speech_id = required_u64(&event, "speech_id")?;
-                send_request(
-                    &self.writer,
-                    &SessionRequest::OutputReady {
-                        id: pending.prepare_id,
-                        speech_id,
-                    },
-                )?;
+            SessionMessage::Admitted { id, speech_id, .. }
+                if self.pending_prepare_id() == Some(id) =>
+            {
+                send_request(&self.writer, &SessionRequest::OutputReady { id, speech_id })?;
             }
-            "output_ready_result" if event_id == Some(pending.prepare_id) => {
-                if event.get("outcome").and_then(Value::as_str) != Some("accepted") {
-                    self.respond_speak(Err("speech output reservation became stale".into()));
-                }
+            SessionMessage::OutputReadyResult { id, outcome, .. }
+                if self.pending_prepare_id() == Some(id)
+                    && outcome != OutputReadyOutcome::Accepted =>
+            {
+                self.respond_speak(Err("speech output reservation became stale".into()));
             }
-            "speech_completed" if event_id == Some(pending.prepare_id) => {
+            SessionMessage::SpeechCompleted { id, .. } if self.pending_prepare_id() == Some(id) => {
                 self.respond_speak(Ok(json!({"spoke":true,"status":"completed"})));
             }
-            "speech_interrupted" if event_id == Some(pending.prepare_id) => {
+            SessionMessage::SpeechInterrupted {
+                id,
+                spoken_through_utf8,
+                ..
+            } if self.pending_prepare_id() == Some(id) => {
                 self.respond_speak(Ok(json!({
                     "spoke":true,
                     "status":"interrupted",
-                    "spokenThroughUtf8":event.get("spoken_through_utf8").cloned().unwrap_or(json!(0)),
+                    "spokenThroughUtf8":spoken_through_utf8,
                 })));
             }
-            "speech_failed" if event_id == Some(pending.prepare_id) => {
-                let message = event
-                    .get("message")
-                    .and_then(Value::as_str)
-                    .unwrap_or("speech failed");
-                self.respond_speak(Err(message.to_string()));
+            SessionMessage::SpeechFailed { id, message, .. }
+                if self.pending_prepare_id() == Some(id) =>
+            {
+                self.respond_speak(Err(message));
+            }
+            SessionMessage::AudioSuspend { speech_id } => self
+                .audio_commands
+                .send(AudioCommand::Suspend(speech_id))
+                .map_err(|_| "audio host stopped".to_string())?,
+            SessionMessage::AudioResume { speech_id } => self
+                .audio_commands
+                .send(AudioCommand::Resume(speech_id))
+                .map_err(|_| "audio host stopped".to_string())?,
+            SessionMessage::Fatal { message } => {
+                self.finish_pending(&message);
+                return Err(message);
+            }
+            SessionMessage::Ready { .. } => {
+                return Err("voice session emitted ready more than once".into())
             }
             _ => {}
         }
         Ok(())
+    }
+
+    fn pending_prepare_id(&self) -> Option<u64> {
+        self.pending_speak
+            .as_ref()
+            .map(|pending| pending.prepare_id)
     }
 
     fn respond_speak(&mut self, result: Result<Value, String>) {
@@ -394,27 +363,27 @@ impl SessionActor {
         }
     }
 
-    fn stream_live_event(&self, event: &Value) -> Result<(), String> {
+    fn stream_live_event(
+        &self,
+        token: u64,
+        origin: Option<UtteranceOrigin>,
+        text: &str,
+    ) -> Result<(), String> {
         if !self.stream {
             return Ok(());
         }
-        let token = required_u64(event, "token")?;
-        let text = required_str(event, "text")?;
-        let role = event
-            .get("origin")
-            .and_then(Value::as_str)
-            .unwrap_or("user");
+        let role = utterance_origin_name(origin.unwrap_or(UtteranceOrigin::User));
         println!("{token}\t{role}\t{}", stream_text(text));
         std::io::stdout()
             .flush()
             .map_err(|error| format!("could not flush voice stream: {error}"))
     }
 
-    fn stream_expert_delivery(&self, event: &Value) -> Result<(), String> {
+    fn stream_expert_delivery(&self, events: &[RealtimeExpertDeliveryEvent]) -> Result<(), String> {
         if !self.stream {
             return Ok(());
         }
-        for (cursor, role, text) in expert_delivery_rows(event)? {
+        for (cursor, role, text) in expert_delivery_rows(events) {
             println!("{cursor}\t{role}\t{text}");
         }
         std::io::stdout()
@@ -433,43 +402,32 @@ impl SessionActor {
     }
 }
 
-fn expert_delivery_rows(event: &Value) -> Result<Vec<(u64, String, String)>, String> {
-    event
-        .get("events")
-        .and_then(Value::as_array)
-        .ok_or_else(|| "expert delivery has invalid events".to_string())?
+fn expert_delivery_rows(events: &[RealtimeExpertDeliveryEvent]) -> Vec<(u64, String, String)> {
+    events
         .iter()
-        .map(|entry| {
-            Ok((
-                required_u64(entry, "cursor")?,
-                required_str(entry, "role")?.to_string(),
-                stream_text(required_str(entry, "text")?),
-            ))
+        .map(|event| {
+            (
+                event.cursor,
+                expert_delivery_role_name(event.role).to_string(),
+                stream_text(&event.text),
+            )
         })
         .collect()
 }
 
-fn receive_ready(events: &Receiver<Value>) -> Result<ReadyState, String> {
+fn receive_ready(events: &Receiver<SessionMessage>) -> Result<ReadyState, String> {
     let event = events
         .recv_timeout(Duration::from_secs(60))
         .map_err(|_| "timed out waiting for voice session startup".to_string())?;
-    if event.get("type").and_then(Value::as_str) == Some("fatal") {
-        return Err(event
-            .get("message")
-            .and_then(Value::as_str)
-            .unwrap_or("voice session failed during startup")
-            .to_string());
+    match event {
+        SessionMessage::Ready {
+            id: 1,
+            protocol: SESSION_PROTOCOL_VERSION,
+            session,
+        } => Ok(ReadyState { session }),
+        SessionMessage::Fatal { message } => Err(message),
+        _ => Err("voice session returned an invalid ready handshake".into()),
     }
-    if event.get("type").and_then(Value::as_str) != Some("ready")
-        || event.get("id").and_then(Value::as_u64) != Some(1)
-        || event.get("protocol").and_then(Value::as_u64)
-            != Some(u64::from(SESSION_PROTOCOL_VERSION))
-    {
-        return Err("voice session returned an invalid ready handshake".into());
-    }
-    Ok(ReadyState {
-        session: event.get("session").cloned().unwrap_or(Value::Null),
-    })
 }
 
 struct SessionProcess {
@@ -594,14 +552,14 @@ impl Drop for SessionProcess {
 
 fn spawn_stdout_reader(
     stdout: std::process::ChildStdout,
-    events: SyncSender<Value>,
+    events: SyncSender<SessionMessage>,
 ) -> Result<(), String> {
     thread::Builder::new()
         .name("berd-call-session-events".into())
         .spawn(move || {
             for line in BufReader::new(stdout).lines() {
                 let Ok(line) = line else { break };
-                let Ok(value) = serde_json::from_str::<Value>(&line) else {
+                let Ok(value) = serde_json::from_str::<SessionMessage>(&line) else {
                     break;
                 };
                 if events.send(value).is_err() {
@@ -813,6 +771,43 @@ struct RetiredAudio {
     played_frames: u64,
 }
 
+enum AudioPlaybackState {
+    Idle,
+    Playing(ActiveAudio),
+    Finished(RetiredAudio),
+}
+
+impl AudioPlaybackState {
+    fn playing_mut(&mut self, speech_id: u64) -> Option<&mut ActiveAudio> {
+        match self {
+            Self::Playing(playback) if playback.speech_id == speech_id => Some(playback),
+            _ => None,
+        }
+    }
+
+    fn played_frames(&self, speech_id: u64) -> u64 {
+        match self {
+            Self::Playing(playback) if playback.speech_id == speech_id => {
+                playback.player.played_frames()
+            }
+            Self::Finished(retired) if retired.speech_id == speech_id => retired.played_frames,
+            _ => 0,
+        }
+    }
+
+    fn finish(&mut self, speech_id: u64, played_frames: u64) {
+        *self = Self::Finished(RetiredAudio {
+            speech_id,
+            played_frames,
+        });
+    }
+}
+
+struct PendingSuspension {
+    speech_id: u64,
+    ready_at: Instant,
+}
+
 fn spawn_audio_host(
     mut audio: File,
     writer: Arc<Mutex<ChildStdin>>,
@@ -832,10 +827,11 @@ fn spawn_audio_host(
         .name("berd-call-audio-host".into())
         .spawn(move || {
             let mut bytes = Vec::new();
-            let mut active: Option<ActiveAudio> = None;
-            let mut retired: Option<RetiredAudio> = None;
-            let suspension_latency =
-                berd_call::macos_audio_route::playback_latency_safety_duration(None);
+            let mut playback = AudioPlaybackState::Idle;
+            let mut pending_suspension: Option<PendingSuspension> = None;
+            let suspension_latency = suspension_settle_time(
+                berd_call::macos_audio_route::playback_latency_safety_duration(None),
+            );
             loop {
                 let mut chunk = [0_u8; 8192];
                 match audio.read(&mut chunk) {
@@ -851,13 +847,9 @@ fn spawn_audio_host(
                 loop {
                     match take_audio_record(&mut bytes) {
                         Ok(Some((kind, payload))) => {
-                            if let Err(error) = handle_audio_record(
-                                kind,
-                                &payload,
-                                &writer,
-                                &mut active,
-                                &mut retired,
-                            ) {
+                            if let Err(error) =
+                                handle_audio_record(kind, &payload, &writer, &mut playback)
+                            {
                                 report_failure(&failures, error);
                                 return;
                             }
@@ -873,18 +865,19 @@ fn spawn_audio_host(
                     if let Err(error) = handle_audio_command(
                         command,
                         &writer,
-                        &mut active,
-                        retired,
+                        &mut playback,
+                        &mut pending_suspension,
                         suspension_latency,
                     ) {
                         report_failure(&failures, error);
                         return;
                     }
                 }
-                if let Some(playback) = active.as_mut() {
-                    if let Err(error) = playback.player.check_health() {
-                        let speech_id = playback.speech_id;
-                        let played_frames = playback.player.played_frames();
+                let mut finished = None;
+                if let AudioPlaybackState::Playing(active) = &mut playback {
+                    if let Err(error) = active.player.check_health() {
+                        let speech_id = active.speech_id;
+                        let played_frames = active.player.played_frames();
                         let _ = send_request(
                             &writer,
                             &SessionRequest::AudioFailed {
@@ -893,42 +886,55 @@ fn spawn_audio_host(
                                 message: error,
                             },
                         );
-                        retired = Some(RetiredAudio {
-                            speech_id,
-                            played_frames,
-                        });
-                        active = None;
-                        continue;
-                    }
-                    let played = playback.player.played_frames();
-                    if played > playback.last_played {
-                        playback.last_played = played;
-                        let _ = send_request(
-                            &writer,
-                            &SessionRequest::AudioPlayed {
-                                speech_id: playback.speech_id,
-                                played_frames: played,
-                            },
-                        );
-                    }
-                    if let Some(sequence) = playback.ended_sequence {
-                        if playback.player.is_empty() {
-                            let speech_id = playback.speech_id;
-                            let played_frames = playback.player.completed_source_frames();
+                        finished = Some((speech_id, played_frames));
+                    } else {
+                        let played = active.player.played_frames();
+                        if played > active.last_played {
+                            active.last_played = played;
                             let _ = send_request(
                                 &writer,
-                                &SessionRequest::AudioDrained {
-                                    speech_id,
-                                    sequence,
-                                    played_frames,
+                                &SessionRequest::AudioPlayed {
+                                    speech_id: active.speech_id,
+                                    played_frames: played,
                                 },
                             );
-                            retired = Some(RetiredAudio {
-                                speech_id,
-                                played_frames,
-                            });
-                            active = None;
                         }
+                        if let Some(sequence) = active.ended_sequence {
+                            if active.player.is_empty() {
+                                let speech_id = active.speech_id;
+                                let played_frames = active.player.completed_source_frames();
+                                let _ = send_request(
+                                    &writer,
+                                    &SessionRequest::AudioDrained {
+                                        speech_id,
+                                        sequence,
+                                        played_frames,
+                                    },
+                                );
+                                finished = Some((speech_id, played_frames));
+                            }
+                        }
+                    }
+                }
+                if let Some((speech_id, played_frames)) = finished {
+                    playback.finish(speech_id, played_frames);
+                }
+                if pending_suspension
+                    .as_ref()
+                    .is_some_and(|pending| Instant::now() >= pending.ready_at)
+                {
+                    let pending = pending_suspension
+                        .take()
+                        .expect("checked pending suspension");
+                    if let Err(error) = send_request(
+                        &writer,
+                        &SessionRequest::AudioSuspended {
+                            speech_id: pending.speech_id,
+                            played_frames: playback.played_frames(pending.speech_id),
+                        },
+                    ) {
+                        report_failure(&failures, error);
+                        return;
                     }
                 }
                 thread::sleep(Duration::from_millis(2));
@@ -965,12 +971,11 @@ fn handle_audio_record(
     kind: u8,
     payload: &[u8],
     writer: &Arc<Mutex<ChildStdin>>,
-    active: &mut Option<ActiveAudio>,
-    retired: &mut Option<RetiredAudio>,
+    playback: &mut AudioPlaybackState,
 ) -> Result<(), String> {
     match kind {
         AUDIO_BEGIN_KIND if payload.len() == 16 => {
-            if active.is_some() {
+            if matches!(playback, AudioPlaybackState::Playing(_)) {
                 return Err("voice session began overlapping audio".into());
             }
             let speech_id = le_u64(&payload[0..8])?;
@@ -993,21 +998,19 @@ fn handle_audio_record(
                     );
                 }
             };
-            *active = Some(ActiveAudio {
+            *playback = AudioPlaybackState::Playing(ActiveAudio {
                 speech_id,
                 player,
                 last_played: 0,
                 ended_sequence: None,
             });
-            *retired = None;
             send_request(writer, &SessionRequest::AudioBeginAccepted { speech_id })
         }
         AUDIO_CHUNK_KIND if payload.len() >= 16 && (payload.len() - 16).is_multiple_of(4) => {
             let speech_id = le_u64(&payload[0..8])?;
             let sequence = le_u64(&payload[8..16])?;
-            let playback = active
-                .as_mut()
-                .filter(|value| value.speech_id == speech_id)
+            let active = playback
+                .playing_mut(speech_id)
                 .ok_or_else(|| "voice session sent audio for an inactive speech".to_string())?;
             let mut samples = Vec::with_capacity((payload.len() - 16) / 4);
             for sample in payload[16..].chunks_exact(4) {
@@ -1015,13 +1018,9 @@ fn handle_audio_record(
                     sample.try_into().expect("four-byte chunk"),
                 ));
             }
-            if let Err(message) = playback.player.enqueue(&samples) {
-                let played_frames = playback.player.played_frames();
-                *active = None;
-                *retired = Some(RetiredAudio {
-                    speech_id,
-                    played_frames,
-                });
+            if let Err(message) = active.player.enqueue(&samples) {
+                let played_frames = active.player.played_frames();
+                playback.finish(speech_id, played_frames);
                 return send_request(
                     writer,
                     &SessionRequest::AudioFailed {
@@ -1042,25 +1041,20 @@ fn handle_audio_record(
         AUDIO_END_KIND if payload.len() == 24 => {
             let speech_id = le_u64(&payload[0..8])?;
             let sequence = le_u64(&payload[8..16])?;
-            let playback = active
-                .as_mut()
-                .filter(|value| value.speech_id == speech_id)
+            let active = playback
+                .playing_mut(speech_id)
                 .ok_or_else(|| "voice session ended inactive audio".to_string())?;
-            playback.ended_sequence = Some(sequence);
+            active.ended_sequence = Some(sequence);
             Ok(())
         }
         AUDIO_CANCEL_KIND if payload.len() == 8 => {
             let speech_id = le_u64(payload)?;
-            let playback = active
-                .take()
-                .filter(|value| value.speech_id == speech_id)
+            let active = playback
+                .playing_mut(speech_id)
                 .ok_or_else(|| "voice session cancelled inactive audio".to_string())?;
-            let played_frames = playback.player.played_frames();
-            playback.player.stop();
-            *retired = Some(RetiredAudio {
-                speech_id,
-                played_frames,
-            });
+            let played_frames = active.player.played_frames();
+            active.player.stop();
+            playback.finish(speech_id, played_frames);
             send_request(
                 writer,
                 &SessionRequest::AudioCancelled {
@@ -1076,37 +1070,35 @@ fn handle_audio_record(
 fn handle_audio_command(
     command: AudioCommand,
     writer: &Arc<Mutex<ChildStdin>>,
-    active: &mut Option<ActiveAudio>,
-    retired: Option<RetiredAudio>,
+    playback: &mut AudioPlaybackState,
+    pending_suspension: &mut Option<PendingSuspension>,
     suspension_latency: Duration,
 ) -> Result<(), String> {
     match command {
         AudioCommand::Suspend(speech_id) => {
-            let played_frames = if let Some(playback) =
-                active.as_ref().filter(|value| value.speech_id == speech_id)
-            {
-                playback.player.pause();
-                thread::sleep(suspension_latency);
-                playback.player.played_frames()
-            } else {
-                retired_played_frames(retired, speech_id)
-            };
-            send_request(
-                writer,
-                &SessionRequest::AudioSuspended {
+            if let Some(active) = playback.playing_mut(speech_id) {
+                active.player.pause();
+                *pending_suspension = Some(PendingSuspension {
                     speech_id,
-                    played_frames,
-                },
-            )
+                    ready_at: Instant::now() + suspension_latency,
+                });
+                Ok(())
+            } else {
+                send_request(
+                    writer,
+                    &SessionRequest::AudioSuspended {
+                        speech_id,
+                        played_frames: playback.played_frames(speech_id),
+                    },
+                )
+            }
         }
         AudioCommand::Resume(speech_id) => {
-            let played_frames = if let Some(playback) =
-                active.as_ref().filter(|value| value.speech_id == speech_id)
-            {
-                playback.player.resume();
-                playback.player.played_frames()
+            let played_frames = if let Some(active) = playback.playing_mut(speech_id) {
+                active.player.resume();
+                active.player.played_frames()
             } else {
-                retired_played_frames(retired, speech_id)
+                playback.played_frames(speech_id)
             };
             send_request(
                 writer,
@@ -1117,12 +1109,6 @@ fn handle_audio_command(
             )
         }
     }
-}
-
-fn retired_played_frames(retired: Option<RetiredAudio>, speech_id: u64) -> u64 {
-    retired
-        .filter(|value| value.speech_id == speech_id)
-        .map_or(0, |value| value.played_frames)
 }
 
 fn le_u64(bytes: &[u8]) -> Result<u64, String> {
@@ -1137,22 +1123,40 @@ fn le_u32(bytes: &[u8]) -> Result<u32, String> {
     ))
 }
 
-fn required_u64(value: &Value, field: &str) -> Result<u64, String> {
-    value
-        .get(field)
-        .and_then(Value::as_u64)
-        .ok_or_else(|| format!("voice session event has invalid {field}"))
-}
-
-fn required_str<'a>(value: &'a Value, field: &str) -> Result<&'a str, String> {
-    value
-        .get(field)
-        .and_then(Value::as_str)
-        .ok_or_else(|| format!("voice session event has invalid {field}"))
-}
-
 fn stream_text(text: &str) -> String {
     text.replace(['\r', '\n', '\t'], " ")
+}
+
+fn suspension_settle_time(route_latency: Duration) -> Duration {
+    route_latency.min(MAX_SUSPENSION_SETTLE_TIME)
+}
+
+fn utterance_origin_name(origin: UtteranceOrigin) -> &'static str {
+    match origin {
+        UtteranceOrigin::User => "user",
+        UtteranceOrigin::Spokesperson => "spokesperson",
+        UtteranceOrigin::Handoff => "handoff",
+    }
+}
+
+fn not_admitted_reason_name(reason: NotAdmittedReason) -> &'static str {
+    match reason {
+        NotAdmittedReason::Paused => "paused",
+        NotAdmittedReason::InProgress => "in_progress",
+        NotAdmittedReason::Cancelled => "cancelled",
+        NotAdmittedReason::EmptyText => "empty_text",
+        NotAdmittedReason::InvalidHandoff => "invalid_handoff",
+    }
+}
+
+fn expert_delivery_role_name(role: RealtimeExpertDeliveryRole) -> &'static str {
+    match role {
+        RealtimeExpertDeliveryRole::User => "user",
+        RealtimeExpertDeliveryRole::Spokesperson => "spokesperson",
+        RealtimeExpertDeliveryRole::SpokespersonInterrupted => "spokesperson_interrupted",
+        RealtimeExpertDeliveryRole::Handoff => "handoff",
+        RealtimeExpertDeliveryRole::Lifecycle => "lifecycle",
+    }
 }
 
 #[cfg(test)]
@@ -1202,13 +1206,20 @@ mod tests {
 
     #[test]
     fn expert_delivery_preserves_causal_rows() {
-        let rows = expert_delivery_rows(&json!({
-            "events": [
-                {"cursor": 4, "role": "user", "text": "hello"},
-                {"cursor": 5, "role": "spokesperson_interrupted", "text": "hi\nthere"}
-            ]
-        }))
-        .unwrap();
+        let rows = expert_delivery_rows(&[
+            RealtimeExpertDeliveryEvent {
+                cursor: 4,
+                role: RealtimeExpertDeliveryRole::User,
+                text: "hello".into(),
+                handoff_id: None,
+            },
+            RealtimeExpertDeliveryEvent {
+                cursor: 5,
+                role: RealtimeExpertDeliveryRole::SpokespersonInterrupted,
+                text: "hi\nthere".into(),
+                handoff_id: None,
+            },
+        ]);
         assert_eq!(
             rows,
             vec![
@@ -1220,11 +1231,23 @@ mod tests {
 
     #[test]
     fn drained_audio_retains_progress_for_late_suspend_and_resume() {
-        let retired = Some(RetiredAudio {
+        let playback = AudioPlaybackState::Finished(RetiredAudio {
             speech_id: 17,
             played_frames: 48_000,
         });
-        assert_eq!(retired_played_frames(retired, 17), 48_000);
-        assert_eq!(retired_played_frames(retired, 18), 0);
+        assert_eq!(playback.played_frames(17), 48_000);
+        assert_eq!(playback.played_frames(18), 0);
+    }
+
+    #[test]
+    fn suspension_settle_time_leaves_acknowledgement_margin() {
+        assert_eq!(
+            suspension_settle_time(Duration::from_secs(2)),
+            Duration::from_millis(1_500)
+        );
+        assert_eq!(
+            suspension_settle_time(Duration::from_millis(100)),
+            Duration::from_millis(100)
+        );
     }
 }

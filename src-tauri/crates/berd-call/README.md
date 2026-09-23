@@ -43,8 +43,8 @@ berd-call stop
 server listens only on `127.0.0.1:5222` by default; all four commands accept
 `--port` when more than one local call must be addressed. `--stream` writes one
 TSV row per delivered transcript event after the `cursor`, `role`, and `text`
-header. The standalone host intentionally uses only the default devices in this
-first slice. It suppresses recognition during playback when the default output
+header. The standalone host intentionally uses only the default devices. It
+suppresses recognition during playback when the default output
 identifies itself as built-in speakers, preventing the call from transcribing
 its own speech; headphone-like outputs retain barge-in.
 

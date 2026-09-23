@@ -1333,7 +1333,7 @@ pub struct RealtimeExpertDelivery {
     pub handoff_ids: Vec<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RealtimeExpertDeliveryRole {
     User,
@@ -1343,7 +1343,7 @@ pub enum RealtimeExpertDeliveryRole {
     Lifecycle,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RealtimeExpertDeliveryEvent {
     pub cursor: u64,

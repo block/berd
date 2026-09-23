@@ -16,6 +16,10 @@ const LOCAL_PLAYBACK_LATENCY: Duration = Duration::from_millis(100);
 const BLUETOOTH_PLAYBACK_LATENCY: Duration = Duration::from_millis(500);
 const AIRPLAY_PLAYBACK_LATENCY: Duration = Duration::from_secs(2);
 const UNKNOWN_PLAYBACK_LATENCY: Duration = Duration::from_secs(2);
+const BUILT_IN_TRANSPORT: u32 = kAudioDeviceTransportTypeBuiltIn;
+const BLUETOOTH_TRANSPORT: u32 = 0x626c_7565;
+const BLUETOOTH_LE_TRANSPORT: u32 = 0x626c_6561;
+const AIRPLAY_TRANSPORT: u32 = 0x6169_7270;
 
 pub fn playback_latency_safety_duration(output_device: Option<&str>) -> Duration {
     let device_id = resolve_output_device(output_device);
@@ -35,6 +39,8 @@ pub fn output_device_is_builtin_speaker(output_device: Option<&str>) -> bool {
         mElement: kAudioObjectPropertyElementMain,
     };
     let mut streams_size = 0;
+    // SAFETY: `streams_address` and `streams_size` remain valid for the duration
+    // of this synchronous CoreAudio property-size query.
     let status = unsafe {
         AudioObjectGetPropertyDataSize(
             device_id,
@@ -50,6 +56,8 @@ pub fn output_device_is_builtin_speaker(output_device: Option<&str>) -> bool {
 
     let mut streams =
         vec![0 as AudioObjectID; streams_size as usize / mem::size_of::<AudioObjectID>()];
+    // SAFETY: CoreAudio writes at most `streams_size` bytes into the allocated
+    // `streams` buffer, whose pointer remains valid for this synchronous call.
     let status = unsafe {
         AudioObjectGetPropertyData(
             device_id,
@@ -74,6 +82,8 @@ pub fn output_device_is_builtin_speaker(output_device: Option<&str>) -> bool {
         };
         let mut terminal_type = 0;
         let mut terminal_size = mem::size_of::<u32>() as u32;
+        // SAFETY: `terminal_type` is a live `u32` output buffer and
+        // `terminal_size` accurately describes it for this synchronous call.
         let status = unsafe {
             AudioObjectGetPropertyData(
                 stream_id,
@@ -97,15 +107,10 @@ fn resolve_output_device(output_device: Option<&str>) -> Option<AudioObjectID> {
 }
 
 pub fn playback_latency_safety_duration_for_transport(transport: Option<u32>) -> Duration {
-    const BUILT_IN: u32 = 0x626c_746e;
-    const BLUETOOTH: u32 = 0x626c_7565;
-    const BLUETOOTH_LE: u32 = 0x626c_6561;
-    const AIRPLAY: u32 = 0x6169_7270;
-
     match transport {
-        Some(BUILT_IN) => LOCAL_PLAYBACK_LATENCY,
-        Some(BLUETOOTH) | Some(BLUETOOTH_LE) => BLUETOOTH_PLAYBACK_LATENCY,
-        Some(AIRPLAY) => AIRPLAY_PLAYBACK_LATENCY,
+        Some(BUILT_IN_TRANSPORT) => LOCAL_PLAYBACK_LATENCY,
+        Some(BLUETOOTH_TRANSPORT) | Some(BLUETOOTH_LE_TRANSPORT) => BLUETOOTH_PLAYBACK_LATENCY,
+        Some(AIRPLAY_TRANSPORT) => AIRPLAY_PLAYBACK_LATENCY,
         Some(_) | None => UNKNOWN_PLAYBACK_LATENCY,
     }
 }
@@ -127,15 +132,15 @@ mod tests {
     #[test]
     fn route_latency_is_conservative_for_wireless_and_unknown_devices() {
         assert_eq!(
-            playback_latency_safety_duration_for_transport(Some(0x626c_746e)),
+            playback_latency_safety_duration_for_transport(Some(BUILT_IN_TRANSPORT)),
             Duration::from_millis(100)
         );
         assert_eq!(
-            playback_latency_safety_duration_for_transport(Some(0x626c_7565)),
+            playback_latency_safety_duration_for_transport(Some(BLUETOOTH_TRANSPORT)),
             Duration::from_millis(500)
         );
         assert_eq!(
-            playback_latency_safety_duration_for_transport(Some(0x6169_7270)),
+            playback_latency_safety_duration_for_transport(Some(AIRPLAY_TRANSPORT)),
             Duration::from_secs(2)
         );
         assert_eq!(
