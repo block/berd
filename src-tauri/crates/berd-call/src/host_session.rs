@@ -2060,6 +2060,46 @@ mod tests {
                 response,
             })
             .unwrap();
+        actor.poll_input_requests().unwrap();
+        let id = actor.pending_polls[0].request_id.unwrap();
+        let handoff = berd_call::protocol::PendingUtterance {
+            token: 3,
+            text: "Look up the branch".into(),
+            origin: Some(UtteranceOrigin::Handoff),
+        };
+        actor
+            .handle_event(SessionMessage::State {
+                id: id + 100,
+                confirmed_token: 2,
+                utterances_after: vec![handoff.clone()],
+                unresolved_handoff_ids: vec!["handoff-external-3".into()],
+            })
+            .unwrap();
+        assert!(
+            result.try_recv().is_err(),
+            "unrelated state must not finish a poll"
+        );
+        actor
+            .handle_event(SessionMessage::State {
+                id,
+                confirmed_token: 2,
+                utterances_after: vec![handoff],
+                unresolved_handoff_ids: vec!["handoff-external-3".into()],
+            })
+            .unwrap();
+        let value = result.recv().unwrap().unwrap();
+        assert_eq!(value["cursor"], 3);
+        assert_eq!(value["utterances"][0]["text"], "Look up the branch");
+        assert_eq!(value["unresolvedHandoffIds"], json!(["handoff-external-3"]));
+        let (response, result) = mpsc::sync_channel(1);
+        actor
+            .handle_command(ControlCommand::PollInput {
+                since: Some(2),
+                wait: true,
+                timeout_seconds: 30,
+                response,
+            })
+            .unwrap();
         actor.finish_pending("voice session restarted");
         assert_eq!(
             result.recv().unwrap().unwrap_err(),
