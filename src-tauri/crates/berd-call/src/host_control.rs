@@ -24,6 +24,7 @@ pub(crate) trait HostControl: Send + Sync + 'static {
     ) -> Result<Value, String>;
     fn stop(&self) -> Result<Value, String>;
     fn set_non_blocking(&self, enabled: bool) -> Result<Value, String>;
+    fn set_tts(&self, settings: berd_call::TtsSettings) -> Result<Value, String>;
 }
 
 pub(crate) struct ControlServer {
@@ -98,6 +99,9 @@ pub(crate) enum ControlRequest {
         #[serde(rename = "nonBlocking")]
         non_blocking: bool,
     },
+    TtsSettings {
+        settings: berd_call::TtsSettings,
+    },
 }
 
 #[derive(Deserialize, Serialize)]
@@ -109,7 +113,10 @@ struct ControlResponse {
 }
 
 pub(crate) fn request(port: u16, request: ControlRequest) -> Result<Value, String> {
-    let read_timeout = if matches!(&request, ControlRequest::Speak { .. }) {
+    let read_timeout = if matches!(
+        &request,
+        ControlRequest::Speak { .. } | ControlRequest::TtsSettings { .. }
+    ) {
         None
     } else {
         Some(IO_TIMEOUT)
@@ -149,6 +156,7 @@ fn handle_connection(mut stream: TcpStream, control: &dyn HostControl) -> Result
                     control.speak(text, acknowledgement, resolved_handoff_ids)
                 }
                 ControlRequest::Stop => control.stop(),
+                ControlRequest::TtsSettings { settings } => control.set_tts(settings),
                 ControlRequest::Settings { non_blocking } => control.set_non_blocking(non_blocking),
             },
         );
@@ -246,6 +254,9 @@ mod tests {
     }
 
     impl HostControl for FakeControl {
+        fn set_tts(&self, settings: berd_call::TtsSettings) -> Result<Value, String> {
+            Ok(serde_json::to_value(settings).unwrap())
+        }
         fn set_non_blocking(&self, enabled: bool) -> Result<Value, String> {
             Ok(json!({"nonBlocking": enabled}))
         }

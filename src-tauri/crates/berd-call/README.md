@@ -62,6 +62,11 @@ These IDs
 identify speech requests, not transcript cursors, and must not be passed as
 `--re` acknowledgements. Acceptance means the runtime admitted playback.
 
+Use `berd-call settings --tts '{"backend":"siri","voice":"Aaron","language":"en-US","rate":1.5}'`
+to update the running call through the runtime's revision-checked TTS settings.
+The result includes `outcome` and the acknowledged `snapshot`; `status` reflects
+that snapshot. Changes apply to subsequent speech without restarting the call.
+
 This crate owns the neutral PCM output contract and backend-neutral TTS stream
 used by Berd, plus the April ONNX runtime and text chunking used by Berd's native
 voice commands. It also owns the concrete Parakeet model loader and complete

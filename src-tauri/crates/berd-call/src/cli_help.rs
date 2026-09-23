@@ -53,6 +53,7 @@ const SETTINGS_HELP: &str = r#"Update settings for the active local voice call.
 
 Usage:
   berd-call settings [--port PORT] --non-blocking true|false
+  berd-call settings [--port PORT] --tts JSON
 
 The setting applies to subsequent speak calls. Non-blocking delivery requires
 a call started with --stream. Successful delivery produces no notification."#;

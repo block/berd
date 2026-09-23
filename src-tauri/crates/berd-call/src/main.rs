@@ -525,12 +525,9 @@ fn main() {
             print_pretty_json(&response).unwrap_or_else(|error| operational_error("status", error));
         }
         Some("settings") => {
-            let (port, non_blocking) = parse_or_exit(parse_host_settings_args(&args), &args);
-            let response = host_control::request(
-                port,
-                host_control::ControlRequest::Settings { non_blocking },
-            )
-            .unwrap_or_else(|error| operational_error("settings", error));
+            let (port, request) = parse_or_exit(parse_host_settings_args(&args), &args);
+            let response = host_control::request(port, request)
+                .unwrap_or_else(|error| operational_error("settings", error));
             print_pretty_json(&response)
                 .unwrap_or_else(|error| operational_error("settings", error));
         }
@@ -761,9 +758,12 @@ fn parse_speak_control_args(args: &[String]) -> Result<SpeakOptions, ParseFailur
     })
 }
 
-fn parse_host_settings_args(args: &[String]) -> Result<(u16, bool), ParseFailure> {
+fn parse_host_settings_args(
+    args: &[String],
+) -> Result<(u16, host_control::ControlRequest), ParseFailure> {
     let mut port_args = args[..2].to_vec();
     let mut non_blocking = None;
+    let mut tts = None;
     let mut index = 2;
     while index < args.len() {
         if args[index] == "--non-blocking" {
@@ -776,15 +776,29 @@ fn parse_host_settings_args(args: &[String]) -> Result<(u16, bool), ParseFailure
                 _ => return Err("--non-blocking requires true or false".into()),
             });
             index += 2;
+        } else if args[index] == "--tts" {
+            if tts.is_some() {
+                return Err("--tts may be provided only once".into());
+            }
+            let value = args.get(index + 1).ok_or_else(|| {
+                ParseFailure::Usage("--tts requires a JSON settings object".into())
+            })?;
+            tts =
+                Some(serde_json::from_str(value).map_err(|error| {
+                    ParseFailure::Usage(format!("invalid TTS settings: {error}"))
+                })?);
+            index += 2;
         } else {
             port_args.push(args[index].clone());
             index += 1;
         }
     }
-    Ok((
-        parse_control_port(&port_args)?,
-        non_blocking.ok_or_else(|| ParseFailure::Usage("--non-blocking is required".into()))?,
-    ))
+    let request = match (non_blocking, tts) {
+        (Some(non_blocking), None) => host_control::ControlRequest::Settings { non_blocking },
+        (None, Some(settings)) => host_control::ControlRequest::TtsSettings { settings },
+        _ => return Err("provide exactly one of --non-blocking or --tts".into()),
+    };
+    Ok((parse_control_port(&port_args)?, request))
 }
 
 fn parse_control_port(args: &[String]) -> Result<u16, ParseFailure> {
@@ -10834,6 +10848,31 @@ mod tests {
 
     #[test]
     fn control_command_parsers_are_closed_and_correlated() {
+        let (port, request) = parse_host_settings_args(&args(&[
+            "berd-call",
+            "settings",
+            "--port",
+            "5340",
+            "--tts",
+            r#"{"backend":"siri","voice":"Aaron","language":"en-US","rate":1.5}"#,
+        ]))
+        .unwrap();
+        assert_eq!(port, 5340);
+        assert!(
+            matches!(request, host_control::ControlRequest::TtsSettings { settings: TtsSettings::Siri { rate, .. } } if rate == 1.5)
+        );
+        assert!(
+            parse_host_settings_args(&args(&["berd-call", "settings", "--tts", "{}"])).is_err()
+        );
+        assert!(parse_host_settings_args(&args(&[
+            "berd-call",
+            "settings",
+            "--non-blocking",
+            "true",
+            "--tts",
+            r#"{"backend":"siri","voice":"Aaron","language":"en-US","rate":1.5}"#
+        ]))
+        .is_err());
         assert!(parse_speak_control_args(&args(&[
             "berd-call",
             "speak",

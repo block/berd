@@ -119,10 +119,15 @@ fn default_input_during_tts_policy() -> InputDuringTtsPolicy {
 
 #[derive(Clone)]
 struct ReadyState {
-    session: VoiceSessionSnapshot,
+    session: Arc<Mutex<VoiceSessionSnapshot>>,
 }
 
 enum ControlCommand {
+    TtsSettings {
+        settings: berd_call::TtsSettings,
+        expected_revision: u64,
+        response: SyncSender<Result<Value, String>>,
+    },
     Speak {
         text: String,
         acknowledgement: Option<u64>,
@@ -144,6 +149,39 @@ struct SessionControl {
 }
 
 impl HostControl for SessionControl {
+    fn set_tts(&self, settings: berd_call::TtsSettings) -> Result<Value, String> {
+        let expected_revision = self
+            .ready
+            .session
+            .lock()
+            .map_err(|_| "session settings lock failed")?
+            .tts
+            .revision;
+        let (response, result) = mpsc::sync_channel(1);
+        self.commands
+            .send(ControlCommand::TtsSettings {
+                settings,
+                expected_revision,
+                response,
+            })
+            .map_err(|_| "voice call is not running")?;
+        let result = result
+            .recv()
+            .map_err(|_| "voice call stopped during settings update")??;
+        let snapshot: berd_call::TtsConfigurationSnapshot =
+            serde_json::from_value(result["snapshot"].clone())
+                .map_err(|error| error.to_string())?;
+        let mut session = self
+            .ready
+            .session
+            .lock()
+            .map_err(|_| "session settings lock failed")?;
+        if snapshot.revision >= session.tts.revision {
+            session.tts = snapshot;
+        }
+        Ok(result)
+    }
+
     fn set_non_blocking(&self, enabled: bool) -> Result<Value, String> {
         if enabled && !self.stream {
             return Err("non-blocking speech requires start --stream for delivery events".into());
@@ -155,7 +193,7 @@ impl HostControl for SessionControl {
     fn status(&self) -> Result<Value, String> {
         Ok(json!({
             "running": self.running.load(Ordering::SeqCst),
-            "session": self.ready.session,
+            "session": *self.ready.session.lock().map_err(|_| "session settings lock failed")?,
             "nonBlocking": self.non_blocking.load(Ordering::SeqCst),
         }))
     }
@@ -209,6 +247,7 @@ struct SessionActor {
     audio_commands: SyncSender<AudioCommand>,
     next_id: u64,
     pending_speak: Option<PendingSpeak>,
+    pending_settings: std::collections::HashMap<u64, SyncSender<Result<Value, String>>>,
     waiting_speaks: VecDeque<ControlCommand>,
     stream: bool,
     expert_spokesperson: bool,
@@ -231,6 +270,7 @@ impl SessionActor {
             audio_commands,
             next_id: 2,
             pending_speak: None,
+            pending_settings: std::collections::HashMap::new(),
             waiting_speaks: VecDeque::new(),
             stream,
             expert_spokesperson,
@@ -271,6 +311,22 @@ impl SessionActor {
 
     fn handle_command(&mut self, command: ControlCommand) -> Result<(), String> {
         match command {
+            ControlCommand::TtsSettings {
+                settings,
+                expected_revision,
+                response,
+            } => {
+                let id = self.next_id();
+                send_request(
+                    &self.writer,
+                    &SessionRequest::SetTtsSettings {
+                        id,
+                        expected_revision,
+                        settings,
+                    },
+                )?;
+                self.pending_settings.insert(id, response);
+            }
             ControlCommand::Speak {
                 text,
                 acknowledgement,
@@ -322,6 +378,18 @@ impl SessionActor {
 
     fn handle_event(&mut self, event: SessionMessage) -> Result<(), String> {
         match event {
+            SessionMessage::TtsSettingsResult {
+                id,
+                outcome,
+                snapshot,
+                message,
+            } => {
+                if let Some(response) = self.pending_settings.remove(&id) {
+                    let _ = response.send(Ok(
+                        json!({"outcome":outcome,"snapshot":snapshot,"message":message}),
+                    ));
+                }
+            }
             SessionMessage::LiveEvent {
                 token,
                 text,
@@ -463,6 +531,9 @@ impl SessionActor {
     }
 
     fn finish_pending(&mut self, message: &str) {
+        for (_, response) in self.pending_settings.drain() {
+            let _ = response.send(Err(message.to_string()));
+        }
         self.respond_speak(Err(message.to_string()));
         for command in self.waiting_speaks.drain(..) {
             if let ControlCommand::Speak { response, .. } = command {
@@ -502,7 +573,9 @@ fn receive_ready(events: &Receiver<SessionMessage>) -> Result<ReadyState, String
             id: 1,
             protocol: SESSION_PROTOCOL_VERSION,
             session,
-        } => Ok(ReadyState { session }),
+        } => Ok(ReadyState {
+            session: Arc::new(Mutex::new(session)),
+        }),
         SessionMessage::Fatal { message } => Err(message),
         _ => Err("voice session returned an invalid ready handshake".into()),
     }
