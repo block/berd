@@ -125,6 +125,7 @@ enum ControlCommand {
         text: String,
         acknowledgement: Option<u64>,
         resolved_handoff_ids: Vec<String>,
+        non_blocking: bool,
         response: SyncSender<Result<Value, String>>,
     },
     Stop {
@@ -151,6 +152,7 @@ impl HostControl for SessionControl {
         text: String,
         acknowledgement: Option<u64>,
         resolved_handoff_ids: Vec<String>,
+        non_blocking: bool,
     ) -> Result<Value, String> {
         let (tx, rx) = mpsc::sync_channel(1);
         self.commands
@@ -158,6 +160,7 @@ impl HostControl for SessionControl {
                 text,
                 acknowledgement,
                 resolved_handoff_ids,
+                non_blocking,
                 response: tx,
             })
             .map_err(|_| "voice call is not running".to_string())?;
@@ -177,7 +180,8 @@ impl HostControl for SessionControl {
 
 struct PendingSpeak {
     prepare_id: u64,
-    response: SyncSender<Result<Value, String>>,
+    text: String,
+    response: Option<SyncSender<Result<Value, String>>>,
 }
 
 enum AudioCommand {
@@ -251,8 +255,15 @@ impl SessionActor {
                 text,
                 acknowledgement,
                 resolved_handoff_ids,
+                non_blocking,
                 response,
             } => {
+                if non_blocking && !self.stream {
+                    let _ = response.send(Err(
+                        "non-blocking speech requires start --stream for delivery events".into(),
+                    ));
+                    return Ok(());
+                }
                 if self.pending_speak.is_some() {
                     let _ = response.send(Err("speech is already in progress".into()));
                     return Ok(());
@@ -263,12 +274,19 @@ impl SessionActor {
                     &SessionRequest::PrepareSpeak {
                         id,
                         acknowledgement,
-                        text,
+                        text: text.clone(),
                         resolved_handoff_ids,
                     },
                 )?;
+                let response = if non_blocking {
+                    let _ = response.send(Ok(json!({"status":"accepted", "requestId":id})));
+                    None
+                } else {
+                    Some(response)
+                };
                 self.pending_speak = Some(PendingSpeak {
                     prepare_id: id,
+                    text,
                     response,
                 });
             }
@@ -319,10 +337,19 @@ impl SessionActor {
                 spoken_through_utf8,
                 ..
             } if self.pending_prepare_id() == Some(id) => {
+                let spoken_text = estimated_spoken_text(
+                    &self
+                        .pending_speak
+                        .as_ref()
+                        .expect("matched pending speech")
+                        .text,
+                    spoken_through_utf8,
+                );
                 self.respond_speak(Ok(json!({
                     "spoke":true,
                     "status":"interrupted",
                     "spokenThroughUtf8":spoken_through_utf8,
+                    "estimatedSpokenText":spoken_text,
                 })));
             }
             SessionMessage::SpeechFailed { id, message, .. }
@@ -358,7 +385,16 @@ impl SessionActor {
 
     fn respond_speak(&mut self, result: Result<Value, String>) {
         if let Some(pending) = self.pending_speak.take() {
-            let _ = pending.response.send(result);
+            if let Some(response) = pending.response {
+                let _ = response.send(result);
+            } else {
+                let result = match result {
+                    Ok(value) => value,
+                    Err(message) => json!({"status":"failed", "message":message}),
+                };
+                println!("{}\tspeech_result\t{}", pending.prepare_id, result);
+                let _ = std::io::stdout().flush();
+            }
         }
     }
 
@@ -1140,6 +1176,16 @@ fn stream_text(text: &str) -> String {
     text.replace(['\r', '\n', '\t'], " ")
 }
 
+fn estimated_spoken_text(text: &str, through_utf8: u64) -> &str {
+    let mut end = usize::try_from(through_utf8)
+        .unwrap_or(usize::MAX)
+        .min(text.len());
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+
 fn suspension_settle_time(route_latency: Duration) -> Duration {
     route_latency
 }
@@ -1175,6 +1221,14 @@ fn expert_delivery_role_name(role: RealtimeExpertDeliveryRole) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn estimated_speech_uses_utf8_bytes_without_splitting_characters() {
+        assert_eq!(estimated_spoken_text("Hi, René!", 0), "");
+        assert_eq!(estimated_spoken_text("Hi, René!", 8), "Hi, Ren");
+        assert_eq!(estimated_spoken_text("Hi, René!", 9), "Hi, René");
+        assert_eq!(estimated_spoken_text("Hi, René!", u64::MAX), "Hi, René!");
+    }
 
     #[test]
     fn input_normalizer_emits_exact_twenty_millisecond_frames() {

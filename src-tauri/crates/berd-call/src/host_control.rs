@@ -21,6 +21,7 @@ pub(crate) trait HostControl: Send + Sync + 'static {
         text: String,
         acknowledgement: Option<u64>,
         resolved_handoff_ids: Vec<String>,
+        non_blocking: bool,
     ) -> Result<Value, String>;
     fn stop(&self) -> Result<Value, String>;
 }
@@ -91,6 +92,8 @@ pub(crate) enum ControlRequest {
         acknowledgement: Option<u64>,
         #[serde(rename = "resolvedHandoffIds")]
         resolved_handoff_ids: Vec<String>,
+        #[serde(default, rename = "nonBlocking")]
+        non_blocking: bool,
     },
     Stop,
 }
@@ -139,9 +142,10 @@ fn handle_connection(mut stream: TcpStream, control: &dyn HostControl) -> Result
                     text,
                     acknowledgement,
                     resolved_handoff_ids,
+                    non_blocking,
                 } => {
                     validate_speak(&text, &resolved_handoff_ids)?;
-                    control.speak(text, acknowledgement, resolved_handoff_ids)
+                    control.speak(text, acknowledgement, resolved_handoff_ids, non_blocking)
                 }
                 ControlRequest::Stop => control.stop(),
             },
@@ -249,6 +253,7 @@ mod tests {
             text: String,
             acknowledgement: Option<u64>,
             resolved_handoff_ids: Vec<String>,
+            _non_blocking: bool,
         ) -> Result<Value, String> {
             Ok(json!({
                 "spoken":text,
@@ -288,6 +293,7 @@ mod tests {
                     text: "hello".into(),
                     acknowledgement: Some(7),
                     resolved_handoff_ids: vec!["call-1".into()],
+                    non_blocking: false,
                 }
             )
             .unwrap(),

@@ -41,7 +41,12 @@ const SPEAK_HELP: &str = r#"Speak through the active local voice call.
 
 Usage:
   berd-call speak [--port PORT] [--re CURSOR]
-    [--resolves HANDOFF_ID]... TEXT"#;
+    [--resolves HANDOFF_ID]... [--non-blocking] TEXT
+
+Blocking speech returns its delivery result. --non-blocking requires start
+--stream and returns a requestId immediately; a speech_result TSV row with
+that request ID reports the eventual result. Interrupted results include
+estimatedSpokenText, a best-effort prefix based on delivered audio."#;
 
 const STATUS_HELP: &str = r#"Inspect the active local voice call.
 

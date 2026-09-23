@@ -501,14 +501,20 @@ fn main() {
             }
         }
         Some("speak") => {
-            let (port, acknowledgement, resolved_handoff_ids, text) =
-                parse_or_exit(parse_speak_control_args(&args), &args);
+            let SpeakOptions {
+                port,
+                acknowledgement,
+                resolved_handoff_ids,
+                text,
+                non_blocking,
+            } = parse_or_exit(parse_speak_control_args(&args), &args);
             let response = host_control::request(
                 port,
                 host_control::ControlRequest::Speak {
                     text,
                     acknowledgement,
                     resolved_handoff_ids,
+                    non_blocking,
                 },
             )
             .unwrap_or_else(|error| operational_error("speak", error));
@@ -658,13 +664,21 @@ fn parse_start_args(args: &[String]) -> Result<StartOptions, ParseFailure> {
     })
 }
 
-fn parse_speak_control_args(
-    args: &[String],
-) -> Result<(u16, Option<u64>, Vec<String>, String), ParseFailure> {
+#[derive(Debug, PartialEq)]
+struct SpeakOptions {
+    port: u16,
+    acknowledgement: Option<u64>,
+    resolved_handoff_ids: Vec<String>,
+    text: String,
+    non_blocking: bool,
+}
+
+fn parse_speak_control_args(args: &[String]) -> Result<SpeakOptions, ParseFailure> {
     let mut port = 5222_u16;
     let mut port_seen = false;
     let mut acknowledgement = None;
     let mut resolved_handoff_ids = Vec::new();
+    let mut non_blocking = false;
     let mut text = None;
     let mut index = 2;
     while index < args.len() {
@@ -704,6 +718,10 @@ fn parse_speak_control_args(
                 resolved_handoff_ids.push(value.clone());
                 index += 2;
             }
+            "--non-blocking" if !non_blocking => {
+                non_blocking = true;
+                index += 1;
+            }
             value if value.starts_with('-') => {
                 return Err(format!("unknown speak argument: {value}").into())
             }
@@ -720,7 +738,13 @@ fn parse_speak_control_args(
     if text.len() > MAX_SPEAK_TEXT_BYTES {
         return Err("speak text is larger than 16 KiB".into());
     }
-    Ok((port, acknowledgement, resolved_handoff_ids, text))
+    Ok(SpeakOptions {
+        port,
+        acknowledgement,
+        resolved_handoff_ids,
+        text,
+        non_blocking,
+    })
 }
 
 fn parse_control_port(args: &[String]) -> Result<u16, ParseFailure> {
@@ -10770,6 +10794,19 @@ mod tests {
 
     #[test]
     fn control_command_parsers_are_closed_and_correlated() {
+        assert!(
+            parse_speak_control_args(&args(&["berd-call", "speak", "--non-blocking", "hello"]))
+                .unwrap()
+                .non_blocking
+        );
+        assert!(parse_speak_control_args(&args(&[
+            "berd-call",
+            "speak",
+            "--non-blocking",
+            "--non-blocking",
+            "hello"
+        ]))
+        .is_err());
         assert_eq!(
             parse_speak_control_args(&args(&[
                 "berd-call",
@@ -10781,7 +10818,13 @@ mod tests {
                 "hello",
             ]))
             .unwrap(),
-            (5300, Some(17), Vec::new(), "hello".into())
+            SpeakOptions {
+                port: 5300,
+                acknowledgement: Some(17),
+                resolved_handoff_ids: Vec::new(),
+                text: "hello".into(),
+                non_blocking: false
+            }
         );
         assert_eq!(
             parse_control_port(&args(&["berd-call", "status", "--port", "5301"])).unwrap(),

@@ -48,6 +48,16 @@ suppresses recognition during playback when the default output
 identifies itself as built-in speakers, preventing the call from transcribing
 its own speech; headphone-like outputs retain barge-in.
 
+`speak` waits for delivery by default. Interrupted results contain
+`spokenThroughUtf8` and `estimatedSpokenText`, a best-effort prefix of the
+submitted text. To return immediately, use `speak --non-blocking` with a call
+started using `--stream`. The command returns `status: accepted` and a
+`requestId`; a later `speech_result` TSV row uses that request ID in its first
+column and contains the JSON delivery result in its text column. These IDs
+identify speech requests, not transcript cursors, and must not be passed as
+`--re` acknowledgements. Acceptance means the host received the request;
+runtime admission failures are reported in the result event.
+
 This crate owns the neutral PCM output contract and backend-neutral TTS stream
 used by Berd, plus the April ONNX runtime and text chunking used by Berd's native
 voice commands. It also owns the concrete Parakeet model loader and complete
