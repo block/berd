@@ -534,7 +534,10 @@ fn main() {
             print_pretty_json(&response).unwrap_or_else(|error| operational_error("status", error));
         }
         Some(operation @ ("catch-up" | "wait-for-input")) => {
-            let (port, request) = parse_or_exit(parse_poll_input_args(&args), &args);
+            let (port, request) = parse_or_exit(
+                parse_poll_input_args(operation == "wait-for-input", &args),
+                &args,
+            );
             let response = host_control::request(port, request)
                 .unwrap_or_else(|error| operational_error(operation, error));
             print_pretty_json(&response)
@@ -906,15 +909,20 @@ fn parse_control_port(args: &[String]) -> Result<u16, ParseFailure> {
 }
 
 fn parse_poll_input_args(
+    wait: bool,
     args: &[String],
 ) -> Result<(u16, host_control::ControlRequest), ParseFailure> {
     let mut port = 5222;
     let mut since = None;
     let mut timeout_seconds = 30;
+    let mut seen = std::collections::HashSet::new();
     let mut options = args.iter().skip(2);
     while let Some(flag) = options.next() {
         if is_help_flag(flag) {
             return Err(ParseFailure::HelpRequested);
+        }
+        if !seen.insert(flag) {
+            return Err(format!("duplicate polling option: {flag}").into());
         }
         let value = options
             .next()
@@ -932,7 +940,7 @@ fn parse_poll_input_args(
                 timeout_seconds = value
                     .parse::<u64>()
                     .ok()
-                    .filter(|v| (1..=3600).contains(v))
+                    .filter(|v| host_control::POLL_TIMEOUT_SECONDS.contains(v))
                     .ok_or("--timeout requires seconds from 1 to 3600")?;
             }
             _ => return Err(format!("unknown polling option: {flag}").into()),
@@ -942,7 +950,7 @@ fn parse_poll_input_args(
         port,
         host_control::ControlRequest::PollInput {
             since,
-            wait: args[1] == "wait-for-input",
+            wait,
             timeout_seconds,
         },
     ))
@@ -11029,17 +11037,38 @@ mod tests {
     }
 
     #[test]
+    fn polling_options_reject_duplicates_and_use_camel_case_wire_fields() {
+        for (flag, value) in [("--port", "5338"), ("--since", "9"), ("--timeout", "2")] {
+            assert!(
+                parse_poll_input_args(
+                    false,
+                    &args(&["berd-call", "catch-up", flag, value, flag, value])
+                )
+                .is_err(),
+                "accepted duplicate {flag}"
+            );
+        }
+        let (_, request) = parse_poll_input_args(false, &args(&["berd-call", "catch-up"])).unwrap();
+        let wire = serde_json::to_value(request).unwrap();
+        assert_eq!(wire["timeoutSeconds"], 30);
+        assert!(wire.get("timeout_seconds").is_none());
+    }
+
+    #[test]
     fn polling_options_preserve_cursor_and_bound_timeout() {
-        let (port, request) = parse_poll_input_args(&args(&[
-            "berd-call",
-            "wait-for-input",
-            "--port",
-            "5338",
-            "--since",
-            "9",
-            "--timeout",
-            "2",
-        ]))
+        let (port, request) = parse_poll_input_args(
+            true,
+            &args(&[
+                "berd-call",
+                "wait-for-input",
+                "--port",
+                "5338",
+                "--since",
+                "9",
+                "--timeout",
+                "2",
+            ]),
+        )
         .unwrap();
         assert_eq!(port, 5338);
         assert!(matches!(
@@ -11050,7 +11079,7 @@ mod tests {
                 timeout_seconds: 2
             }
         ));
-        let (_, request) = parse_poll_input_args(&args(&["berd-call", "catch-up"])).unwrap();
+        let (_, request) = parse_poll_input_args(false, &args(&["berd-call", "catch-up"])).unwrap();
         assert!(matches!(
             request,
             host_control::ControlRequest::PollInput {
@@ -11060,12 +11089,10 @@ mod tests {
             }
         ));
         for invalid in ["0", "3601", "-1", "NaN"] {
-            assert!(parse_poll_input_args(&args(&[
-                "berd-call",
-                "wait-for-input",
-                "--timeout",
-                invalid
-            ]))
+            assert!(parse_poll_input_args(
+                true,
+                &args(&["berd-call", "wait-for-input", "--timeout", invalid])
+            )
             .is_err());
         }
     }

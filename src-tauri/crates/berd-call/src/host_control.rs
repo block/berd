@@ -13,6 +13,7 @@ const MAX_SPEAK_TEXT_BYTES: usize = 16 * 1024;
 const MAX_HANDOFF_IDS: usize = 64;
 const MAX_HANDOFF_ID_BYTES: usize = 512;
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
+pub(crate) const POLL_TIMEOUT_SECONDS: std::ops::RangeInclusive<u64> = 1..=3600;
 
 pub(crate) trait HostControl: Send + Sync + 'static {
     fn poll_input(
@@ -103,6 +104,7 @@ pub(crate) enum ControlRequest {
     PollInput {
         since: Option<u64>,
         wait: bool,
+        #[serde(rename = "timeoutSeconds")]
         timeout_seconds: u64,
     },
     Status,
@@ -147,7 +149,7 @@ pub(crate) fn request(port: u16, request: ControlRequest) -> Result<Value, Strin
         timeout_seconds, ..
     } = &request
     {
-        if !(1..=3600).contains(timeout_seconds) {
+        if !POLL_TIMEOUT_SECONDS.contains(timeout_seconds) {
             return Err("timeout must be between 1 and 3600 seconds".into());
         }
         Some(Duration::from_secs(*timeout_seconds) + IO_TIMEOUT)
@@ -192,7 +194,7 @@ fn handle_connection(mut stream: TcpStream, control: &dyn HostControl) -> Result
                     wait,
                     timeout_seconds,
                 } => {
-                    if !(1..=3600).contains(&timeout_seconds) {
+                    if !POLL_TIMEOUT_SECONDS.contains(&timeout_seconds) {
                         return Err("timeout must be between 1 and 3600 seconds".into());
                     }
                     control.poll_input(since, wait, timeout_seconds)
