@@ -15,6 +15,12 @@ const MAX_HANDOFF_ID_BYTES: usize = 512;
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub(crate) trait HostControl: Send + Sync + 'static {
+    fn poll_input(
+        &self,
+        since: Option<u64>,
+        wait: bool,
+        timeout_seconds: u64,
+    ) -> Result<Value, String>;
     fn status(&self) -> Result<Value, String>;
     fn speak(
         &self,
@@ -94,6 +100,11 @@ impl ControlServer {
 #[derive(Deserialize, Serialize)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum ControlRequest {
+    PollInput {
+        since: Option<u64>,
+        wait: bool,
+        timeout_seconds: u64,
+    },
     Status,
     Speak {
         text: String,
@@ -132,7 +143,15 @@ struct ControlResponse {
 }
 
 pub(crate) fn request(port: u16, request: ControlRequest) -> Result<Value, String> {
-    let read_timeout = if matches!(
+    let read_timeout = if let ControlRequest::PollInput {
+        timeout_seconds, ..
+    } = &request
+    {
+        if !(1..=3600).contains(timeout_seconds) {
+            return Err("timeout must be between 1 and 3600 seconds".into());
+        }
+        Some(Duration::from_secs(*timeout_seconds) + IO_TIMEOUT)
+    } else if matches!(
         &request,
         ControlRequest::Speak { .. }
             | ControlRequest::TtsSettings { .. }
@@ -168,6 +187,16 @@ fn handle_connection(mut stream: TcpStream, control: &dyn HostControl) -> Result
     let result =
         read_json_line::<ControlRequest>(&mut stream, "request").and_then(
             |request| match request {
+                ControlRequest::PollInput {
+                    since,
+                    wait,
+                    timeout_seconds,
+                } => {
+                    if !(1..=3600).contains(&timeout_seconds) {
+                        return Err("timeout must be between 1 and 3600 seconds".into());
+                    }
+                    control.poll_input(since, wait, timeout_seconds)
+                }
                 ControlRequest::Status => control.status(),
                 ControlRequest::Speak {
                     text,
@@ -280,6 +309,14 @@ mod tests {
     }
 
     impl HostControl for FakeControl {
+        fn poll_input(
+            &self,
+            since: Option<u64>,
+            wait: bool,
+            timeout_seconds: u64,
+        ) -> Result<Value, String> {
+            Ok(json!({"since": since, "wait": wait, "timeoutSeconds": timeout_seconds}))
+        }
         fn set_tts(&self, settings: berd_call::TtsSettings) -> Result<Value, String> {
             Ok(serde_json::to_value(settings).unwrap())
         }
@@ -333,7 +370,7 @@ mod tests {
         });
         let control: Arc<dyn HostControl> = concrete.clone();
         let worker = thread::spawn(move || {
-            for _ in 0..3 {
+            for _ in 0..4 {
                 server.serve_one(control.as_ref()).unwrap();
             }
         });
@@ -341,6 +378,18 @@ mod tests {
         assert_eq!(
             request(port, ControlRequest::Status).unwrap()["running"],
             true
+        );
+        assert_eq!(
+            request(
+                port,
+                ControlRequest::PollInput {
+                    since: Some(7),
+                    wait: true,
+                    timeout_seconds: 1
+                }
+            )
+            .unwrap(),
+            json!({"since":7,"wait":true,"timeoutSeconds":1})
         );
         assert_eq!(
             request(

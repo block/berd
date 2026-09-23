@@ -533,6 +533,13 @@ fn main() {
                 .unwrap_or_else(|error| operational_error("status", error));
             print_pretty_json(&response).unwrap_or_else(|error| operational_error("status", error));
         }
+        Some(operation @ ("catch-up" | "wait-for-input")) => {
+            let (port, request) = parse_or_exit(parse_poll_input_args(&args), &args);
+            let response = host_control::request(port, request)
+                .unwrap_or_else(|error| operational_error(operation, error));
+            print_pretty_json(&response)
+                .unwrap_or_else(|error| operational_error(operation, error));
+        }
         Some("settings") => {
             let (port, request) = parse_or_exit(parse_host_settings_args(&args), &args);
             let response = host_control::request(port, request)
@@ -896,6 +903,49 @@ fn parse_control_port(args: &[String]) -> Result<u16, ParseFailure> {
         [flag, value] if flag == "--port" => parse_port(value).map_err(Into::into),
         _ => Err(format!("{} accepts only --port PORT", args[1]).into()),
     }
+}
+
+fn parse_poll_input_args(
+    args: &[String],
+) -> Result<(u16, host_control::ControlRequest), ParseFailure> {
+    let mut port = 5222;
+    let mut since = None;
+    let mut timeout_seconds = 30;
+    let mut options = args.iter().skip(2);
+    while let Some(flag) = options.next() {
+        if is_help_flag(flag) {
+            return Err(ParseFailure::HelpRequested);
+        }
+        let value = options
+            .next()
+            .ok_or_else(|| format!("{flag} requires a value"))?;
+        match flag.as_str() {
+            "--port" => port = parse_port(value)?,
+            "--since" => {
+                since = Some(
+                    value
+                        .parse::<u64>()
+                        .map_err(|_| "--since requires a nonnegative integer")?,
+                )
+            }
+            "--timeout" => {
+                timeout_seconds = value
+                    .parse::<u64>()
+                    .ok()
+                    .filter(|v| (1..=3600).contains(v))
+                    .ok_or("--timeout requires seconds from 1 to 3600")?;
+            }
+            _ => return Err(format!("unknown polling option: {flag}").into()),
+        }
+    }
+    Ok((
+        port,
+        host_control::ControlRequest::PollInput {
+            since,
+            wait: args[1] == "wait-for-input",
+            timeout_seconds,
+        },
+    ))
 }
 
 fn parse_port(value: &str) -> Result<u16, String> {
@@ -10976,6 +11026,48 @@ mod tests {
         assert!(
             parse_host_settings_args(&args(&["berd-call", "settings", "--rate", "fast"])).is_err()
         );
+    }
+
+    #[test]
+    fn polling_options_preserve_cursor_and_bound_timeout() {
+        let (port, request) = parse_poll_input_args(&args(&[
+            "berd-call",
+            "wait-for-input",
+            "--port",
+            "5338",
+            "--since",
+            "9",
+            "--timeout",
+            "2",
+        ]))
+        .unwrap();
+        assert_eq!(port, 5338);
+        assert!(matches!(
+            request,
+            host_control::ControlRequest::PollInput {
+                since: Some(9),
+                wait: true,
+                timeout_seconds: 2
+            }
+        ));
+        let (_, request) = parse_poll_input_args(&args(&["berd-call", "catch-up"])).unwrap();
+        assert!(matches!(
+            request,
+            host_control::ControlRequest::PollInput {
+                since: None,
+                wait: false,
+                timeout_seconds: 30
+            }
+        ));
+        for invalid in ["0", "3601", "-1", "NaN"] {
+            assert!(parse_poll_input_args(&args(&[
+                "berd-call",
+                "wait-for-input",
+                "--timeout",
+                invalid
+            ]))
+            .is_err());
+        }
     }
 
     #[test]

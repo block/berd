@@ -418,6 +418,12 @@ struct ReadyState {
 }
 
 enum ControlCommand {
+    PollInput {
+        since: Option<u64>,
+        wait: bool,
+        timeout_seconds: u64,
+        response: SyncSender<Result<Value, String>>,
+    },
     InputDuringTts {
         policy: InputDuringTtsPolicy,
         expected_revision: u64,
@@ -482,6 +488,19 @@ impl SessionControl {
 }
 
 impl HostControl for SessionControl {
+    fn poll_input(
+        &self,
+        since: Option<u64>,
+        wait: bool,
+        timeout_seconds: u64,
+    ) -> Result<Value, String> {
+        self.request(|response| ControlCommand::PollInput {
+            since,
+            wait,
+            timeout_seconds,
+            response,
+        })
+    }
     fn set_tts(&self, settings: berd_call::TtsSettings) -> Result<Value, String> {
         let expected_revision = self
             .ready
@@ -622,6 +641,8 @@ enum AudioCommand {
 }
 
 struct SessionActor {
+    input_speaking: bool,
+    pending_polls: Vec<PendingInputPoll>,
     writer: Arc<Mutex<ChildStdin>>,
     events: Receiver<SessionMessage>,
     commands: Receiver<ControlCommand>,
@@ -649,6 +670,8 @@ impl SessionActor {
         expert_spokesperson: bool,
     ) -> Self {
         Self {
+            input_speaking: false,
+            pending_polls: Vec::new(),
             writer,
             events,
             commands,
@@ -689,6 +712,7 @@ impl SessionActor {
                 }
             }
         }
+        self.poll_input_requests()?;
         if !self.stopping && self.pending_speak.is_none() {
             if let Some(command) = self.waiting_speaks.pop_front() {
                 self.handle_command(command)?;
@@ -699,6 +723,27 @@ impl SessionActor {
 
     fn handle_command(&mut self, command: ControlCommand) -> Result<(), String> {
         match command {
+            ControlCommand::PollInput {
+                since,
+                wait,
+                timeout_seconds,
+                response,
+            } => {
+                if self.stopping || self.pending_polls.len() >= 32 {
+                    let _ = response.send(Err(
+                        "voice call is stopping or has too many input waiters".into(),
+                    ));
+                } else {
+                    self.pending_polls.push(PendingInputPoll {
+                        since,
+                        wait,
+                        response,
+                        request_id: None,
+                        deadline: Instant::now() + Duration::from_secs(timeout_seconds),
+                        next_query: Instant::now(),
+                    });
+                }
+            }
             ControlCommand::InputDuringTts {
                 policy,
                 expected_revision,
@@ -816,6 +861,40 @@ impl SessionActor {
 
     fn handle_event(&mut self, event: SessionMessage) -> Result<(), String> {
         match event {
+            SessionMessage::InputSpeaking { active } => self.input_speaking = active,
+            SessionMessage::State {
+                id,
+                confirmed_token,
+                utterances_after,
+                unresolved_handoff_ids,
+            } => {
+                if let Some(index) = self
+                    .pending_polls
+                    .iter()
+                    .position(|poll| poll.request_id == Some(id))
+                {
+                    let poll = &mut self.pending_polls[index];
+                    let since = *poll.since.get_or_insert(confirmed_token);
+                    let utterances: Vec<_> = utterances_after
+                        .into_iter()
+                        .filter(|item| item.token > since)
+                        .collect();
+                    let actionable = utterances
+                        .iter()
+                        .any(|item| item.origin != Some(UtteranceOrigin::Spokesperson));
+                    if !self.input_speaking && (!poll.wait || actionable) {
+                        let cursor = utterances.last().map_or(since, |item| item.token);
+                        let poll = self.pending_polls.remove(index);
+                        let _ = poll.response.send(Ok(json!({
+                            "utterances": utterances, "cursor": cursor,
+                            "unresolvedHandoffIds": unresolved_handoff_ids, "timedOut": false,
+                        })));
+                    } else {
+                        poll.request_id = None;
+                        poll.next_query = Instant::now() + Duration::from_millis(50);
+                    }
+                }
+            }
             SessionMessage::TtsSettingsResult {
                 id,
                 outcome,
@@ -993,6 +1072,9 @@ impl SessionActor {
     }
 
     fn finish_pending(&mut self, message: &str) {
+        for poll in self.pending_polls.drain(..) {
+            let _ = poll.response.send(Err(message.to_string()));
+        }
         for (_, response) in self.pending_settings.drain() {
             let _ = response.send(Err(message.to_string()));
         }
@@ -1003,6 +1085,46 @@ impl SessionActor {
             }
         }
     }
+
+    fn poll_input_requests(&mut self) -> Result<(), String> {
+        let now = Instant::now();
+        let mut index = 0;
+        while index < self.pending_polls.len() {
+            if self.stopping {
+                let poll = self.pending_polls.remove(index);
+                let _ = poll
+                    .response
+                    .send(Err("voice session stopped or restarted".into()));
+                continue;
+            }
+            if now >= self.pending_polls[index].deadline {
+                let poll = self.pending_polls.remove(index);
+                let _ = poll.response.send(Ok(json!({
+                    "utterances": [], "cursor": poll.since.unwrap_or(0),
+                    "unresolvedHandoffIds": [], "timedOut": true,
+                })));
+                continue;
+            }
+            let poll = &self.pending_polls[index];
+            if poll.request_id.is_none() && now >= poll.next_query && !self.input_speaking {
+                let after = poll.since.unwrap_or(0);
+                let id = self.next_id();
+                send_request(&self.writer, &SessionRequest::QueryState { id, after })?;
+                self.pending_polls[index].request_id = Some(id);
+            }
+            index += 1;
+        }
+        Ok(())
+    }
+}
+
+struct PendingInputPoll {
+    since: Option<u64>,
+    wait: bool,
+    deadline: Instant,
+    next_query: Instant,
+    request_id: Option<u64>,
+    response: SyncSender<Result<Value, String>>,
 }
 
 fn receive_ready(events: &Receiver<SessionMessage>) -> Result<ReadyState, String> {
@@ -1861,6 +1983,147 @@ mod tests {
             Arc::new(Transcript::Stdout),
             false,
         )
+    }
+
+    #[test]
+    fn polling_waits_for_finalized_input_and_releases_waiters_on_shutdown() {
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let (_event_tx, events) = mpsc::sync_channel(1);
+        let (_command_tx, commands) = mpsc::sync_channel(1);
+        let (audio, _audio_rx) = mpsc::sync_channel(1);
+        let mut actor = test_actor(writer, events, commands, audio);
+        let (response, result) = mpsc::sync_channel(1);
+        actor
+            .handle_command(ControlCommand::PollInput {
+                since: Some(0),
+                wait: true,
+                timeout_seconds: 30,
+                response,
+            })
+            .unwrap();
+        actor
+            .handle_event(SessionMessage::InputSpeaking { active: true })
+            .unwrap();
+        actor.poll_input_requests().unwrap();
+        assert!(actor.pending_polls[0].request_id.is_none());
+        assert!(result.try_recv().is_err());
+        actor
+            .handle_event(SessionMessage::InputSpeaking { active: false })
+            .unwrap();
+        actor.poll_input_requests().unwrap();
+        let id = actor.pending_polls[0].request_id.unwrap();
+        actor
+            .handle_event(SessionMessage::State {
+                id,
+                confirmed_token: 0,
+                utterances_after: vec![berd_call::protocol::PendingUtterance {
+                    token: 1,
+                    text: "hello".into(),
+                    origin: Some(UtteranceOrigin::Spokesperson),
+                }],
+                unresolved_handoff_ids: vec![],
+            })
+            .unwrap();
+        assert!(
+            result.try_recv().is_err(),
+            "spokesperson speech must not wake input waiters"
+        );
+        actor.pending_polls[0].next_query = Instant::now();
+        actor.poll_input_requests().unwrap();
+        let id = actor.pending_polls[0].request_id.unwrap();
+        actor
+            .handle_event(SessionMessage::State {
+                id,
+                confirmed_token: 0,
+                utterances_after: vec![berd_call::protocol::PendingUtterance {
+                    token: 2,
+                    text: "question".into(),
+                    origin: Some(UtteranceOrigin::User),
+                }],
+                unresolved_handoff_ids: vec![],
+            })
+            .unwrap();
+        let value = result.recv().unwrap().unwrap();
+        assert_eq!(value["cursor"], 2);
+        assert_eq!(value["utterances"][0]["text"], "question");
+        let (response, result) = mpsc::sync_channel(1);
+        actor
+            .handle_command(ControlCommand::PollInput {
+                since: Some(2),
+                wait: true,
+                timeout_seconds: 30,
+                response,
+            })
+            .unwrap();
+        actor.finish_pending("voice session restarted");
+        assert_eq!(
+            result.recv().unwrap().unwrap_err(),
+            "voice session restarted"
+        );
+        child.kill().unwrap();
+        child.wait().unwrap();
+    }
+
+    #[test]
+    fn catch_up_uses_acknowledged_cursor_and_wait_timeout_does_not_acknowledge() {
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let (_event_tx, events) = mpsc::sync_channel(1);
+        let (_command_tx, commands) = mpsc::sync_channel(1);
+        let (audio, _audio_rx) = mpsc::sync_channel(1);
+        let mut actor = test_actor(writer, events, commands, audio);
+        let (response, result) = mpsc::sync_channel(1);
+        actor
+            .handle_command(ControlCommand::PollInput {
+                since: None,
+                wait: false,
+                timeout_seconds: 30,
+                response,
+            })
+            .unwrap();
+        actor.poll_input_requests().unwrap();
+        let id = actor.pending_polls[0].request_id.unwrap();
+        actor
+            .handle_event(SessionMessage::State {
+                id,
+                confirmed_token: 2,
+                utterances_after: vec![berd_call::protocol::PendingUtterance {
+                    token: 2,
+                    text: "already answered".into(),
+                    origin: None,
+                }],
+                unresolved_handoff_ids: vec![],
+            })
+            .unwrap();
+        let value = result.recv().unwrap().unwrap();
+        assert_eq!(value["cursor"], 2);
+        assert_eq!(value["utterances"], json!([]));
+        let (response, result) = mpsc::sync_channel(1);
+        actor
+            .handle_command(ControlCommand::PollInput {
+                since: Some(2),
+                wait: true,
+                timeout_seconds: 30,
+                response,
+            })
+            .unwrap();
+        actor.pending_polls[0].deadline = Instant::now();
+        actor.poll_input_requests().unwrap();
+        let value = result.recv().unwrap().unwrap();
+        assert_eq!(value["timedOut"], true);
+        assert_eq!(value["cursor"], 2);
+        assert!(actor.pending_polls.is_empty());
+        child.kill().unwrap();
+        child.wait().unwrap();
     }
 
     #[test]
