@@ -585,6 +585,7 @@ version = "0.1.0"
 dependencies = [
  "audioadapter-buffers",
  "base64 0.22.1",
+ "block2",
  "bzip2 0.6.1",
  "cc",
  "claxon",
@@ -595,7 +596,10 @@ dependencies = [
  "futures-util",
  "hound",
  "libc",
+ "objc2",
+ "objc2-app-kit",
  "objc2-core-audio",
+ "objc2-foundation",
  "ort",
  "ort-sys",
  "rand 0.10.2",
