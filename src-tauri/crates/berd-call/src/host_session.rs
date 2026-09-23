@@ -38,8 +38,56 @@ use crate::{StartOptions, TranscriptDestination};
 
 const NON_BLOCKING_REQUIRES_DELIVERY: &str =
     "non-blocking speech requires start --stream or --codex for delivery events";
+const CLEAN_STOP: &str = "Berd Call stopped after a stop request. This is a clean shutdown, not a crash. Do not restart it unless asked.";
 const INPUT_FRAME_SAMPLES: usize = 960;
 const MAX_AUDIO_RECORD_BYTES: usize = 4096 * std::mem::size_of::<f32>() + 16;
+
+/// Turns Ctrl-C and SIGTERM into the same stop request `berd-call stop`
+/// sends, so the call ends through its normal shutdown and reports it.
+/// Must run before any other thread starts so every thread inherits the mask.
+pub(crate) fn route_stop_signals(port: u16) -> Result<(), String> {
+    // SAFETY: the set is initialized by sigemptyset before use.
+    let signals = unsafe {
+        let mut signals = std::mem::zeroed::<libc::sigset_t>();
+        libc::sigemptyset(&mut signals);
+        libc::sigaddset(&mut signals, libc::SIGINT);
+        libc::sigaddset(&mut signals, libc::SIGTERM);
+        // An inherited SIG_IGN (e.g. a background job) would discard the
+        // signal before sigwait could receive it.
+        libc::signal(libc::SIGINT, libc::SIG_DFL);
+        libc::signal(libc::SIGTERM, libc::SIG_DFL);
+        if libc::pthread_sigmask(libc::SIG_BLOCK, &signals, std::ptr::null_mut()) != 0 {
+            return Err("could not route stop signals".into());
+        }
+        signals
+    };
+    thread::Builder::new()
+        .name("berd-call-signals".into())
+        .spawn(move || {
+            let mut stopping = false;
+            loop {
+                let mut signal = 0;
+                // SAFETY: `signals` is blocked on every thread, so sigwait
+                // is the only receiver.
+                if unsafe { libc::sigwait(&signals, &mut signal) } != 0 {
+                    continue;
+                }
+                if stopping {
+                    std::process::exit(130);
+                }
+                stopping = true;
+                thread::spawn(move || {
+                    if crate::host_control::request(port, crate::host_control::ControlRequest::Stop)
+                        .is_err()
+                    {
+                        std::process::exit(130);
+                    }
+                });
+            }
+        })
+        .map(drop)
+        .map_err(|error| format!("could not route stop signals: {error}"))
+}
 
 pub(crate) fn run(options: StartOptions) -> Result<(), String> {
     let server = ControlServer::bind(options.port)?;
@@ -63,9 +111,7 @@ pub(crate) fn run(options: StartOptions) -> Result<(), String> {
             &stop_requested,
         ) {
             Ok(None) => {
-                transcript.finish(
-                    "Berd Call stopped after a stop request. This is a clean shutdown, not a crash. Do not restart it unless asked.",
-                );
+                transcript.finish(CLEAN_STOP);
                 return Ok(());
             }
             // A stop recorded while the old session was shutting down wins
@@ -74,9 +120,7 @@ pub(crate) fn run(options: StartOptions) -> Result<(), String> {
                 if let Some(response) = next.restarted {
                     let _ = response.send(Err("voice call stopped".into()));
                 }
-                transcript.finish(
-                    "Berd Call stopped after a stop request. This is a clean shutdown, not a crash. Do not restart it unless asked.",
-                );
+                transcript.finish(CLEAN_STOP);
                 return Ok(());
             }
             Ok(Some(next)) => {
@@ -157,14 +201,19 @@ impl Transcript {
         }
     }
 
+    /// Reports why the call ended, then drains any pending delivery.
     fn finish(&self, text: &str) {
-        if let Self::Codex(relay) = self {
-            relay.finish(Some(CodexRecord {
+        match self {
+            Self::Silent => {}
+            Self::Stdout => {
+                let _ = self.record(None, "lifecycle", None, text);
+            }
+            Self::Codex(relay) => relay.finish(Some(CodexRecord {
                 cursor: None,
                 role: "lifecycle".into(),
                 handoff_id: None,
                 text: text.to_string(),
-            }));
+            })),
         }
     }
 }
@@ -989,6 +1038,12 @@ impl SessionProcess {
             .stderr(Stdio::inherit());
         unsafe {
             command.pre_exec(move || {
+                // The host owns Ctrl-C: keep terminal signals away from the
+                // child and restore the default mask the host blocked.
+                libc::setpgid(0, 0);
+                let mut signals = std::mem::zeroed::<libc::sigset_t>();
+                libc::sigemptyset(&mut signals);
+                libc::pthread_sigmask(libc::SIG_SETMASK, &signals, std::ptr::null_mut());
                 libc::close(read_fd);
                 let flags = libc::fcntl(write_fd, libc::F_GETFD);
                 if flags < 0 || libc::fcntl(write_fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) < 0
