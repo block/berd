@@ -56,28 +56,31 @@ name and may not match the id (e.g. "goose-internal" / "Berd").`,
       { getAppNavigationController },
       { getVoiceConversationStatus },
       { useVoiceConversationStore },
-      { useProjectStore },
+      { findCurrentProjectForBerdctl },
     ] = await Promise.all([
       import("../../../../../package.json"),
       import("../../navigation"),
       import("@/features/voice-conversation/api/voiceConversation"),
       import("@/features/voice-conversation/stores/voiceConversationStore"),
-      import("@/features/projects/stores/projectStore"),
+      import("../runtime/projects"),
     ]);
     const context = getAppNavigationController().getAppContext();
+    // Capture the ID before refreshing projects so the ID and name describe the
+    // same project even if app navigation changes while the backend request runs.
+    const activeProjectId = context.activeProjectId;
     const voiceBeforeRefresh = useVoiceConversationStore.getState();
-    const nativeVoiceStatus = await getVoiceConversationStatus();
+    const [nativeVoiceStatus, activeProject] = await Promise.all([
+      getVoiceConversationStatus(),
+      activeProjectId
+        ? findCurrentProjectForBerdctl(activeProjectId)
+        : Promise.resolve(null),
+    ]);
     const voiceAfterRefresh = useVoiceConversationStore.getState();
-    const activeProjectName = context.activeProjectId
-      ? (useProjectStore
-          .getState()
-          .projects.find((project) => project.id === context.activeProjectId)
-          ?.name ?? null)
-      : null;
+    const activeProjectName = activeProject?.name ?? null;
     return {
       view: context.view,
       active_session_id: context.activeSessionId,
-      active_project_id: context.activeProjectId,
+      active_project_id: activeProjectId,
       active_project_name: activeProjectName,
       voice_session_active:
         nativeVoiceStatus.sessionId !== null ||

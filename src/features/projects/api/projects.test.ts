@@ -359,6 +359,22 @@ describe("findProjectByWorkingDirectory", () => {
     expect(findProjectByWorkingDirectory([existing], "/tmp/other")).toBeNull();
   });
 
+  it("matches home-relative and absolute working directories", async () => {
+    const { findProjectByWorkingDirectory } = await import("./projects");
+    const existing = projectInfo({
+      id: "existing",
+      workingDirs: ["~/src/berd"],
+    });
+
+    expect(
+      findProjectByWorkingDirectory(
+        [existing],
+        "/Users/me/src/berd",
+        "/Users/me",
+      ),
+    ).toEqual(existing);
+  });
+
   it("ignores archived projects", async () => {
     const { findProjectByWorkingDirectory } = await import("./projects");
     const archived = projectInfo({
