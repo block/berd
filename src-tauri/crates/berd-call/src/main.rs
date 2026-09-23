@@ -621,10 +621,17 @@ fn main() {
     }
 }
 
+/// Where a call's transcript records go.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum TranscriptDestination {
+    None,
+    Stdout,
+    Codex,
+}
+
 struct StartOptions {
     port: u16,
-    stream: bool,
-    codex: bool,
+    transcript: TranscriptDestination,
     non_blocking: bool,
     expert_spokesperson: bool,
     session_arguments: Vec<String>,
@@ -649,24 +656,24 @@ fn validate_session_arguments(arguments: &[String]) -> Result<bool, String> {
 fn parse_start_args(args: &[String]) -> Result<StartOptions, ParseFailure> {
     let mut port = 5222_u16;
     let mut port_seen = false;
-    let mut stream = false;
-    let mut codex = false;
+    let mut transcript = TranscriptDestination::None;
     let mut non_blocking = false;
     let mut session_arguments = vec!["session".to_string()];
     let mut index = 2;
     while index < args.len() {
         match args[index].as_str() {
             "-h" | "--help" => return Err(ParseFailure::HelpRequested),
-            "--stream" if !stream => {
-                stream = true;
+            flag @ ("--stream" | "--codex") => {
+                if transcript != TranscriptDestination::None {
+                    return Err("choose one of --stream or --codex for transcript delivery".into());
+                }
+                transcript = if flag == "--stream" {
+                    TranscriptDestination::Stdout
+                } else {
+                    TranscriptDestination::Codex
+                };
                 index += 1;
             }
-            "--stream" => return Err("--stream may be provided only once".into()),
-            "--codex" if !codex => {
-                codex = true;
-                index += 1;
-            }
-            "--codex" => return Err("--codex may be provided only once".into()),
             "--non-blocking" if !non_blocking => {
                 non_blocking = true;
                 index += 1;
@@ -691,10 +698,7 @@ fn parse_start_args(args: &[String]) -> Result<StartOptions, ParseFailure> {
         }
     }
     let expert_spokesperson = validate_session_arguments(&session_arguments)?;
-    if stream && codex {
-        return Err("choose either --stream or --codex for transcript delivery".into());
-    }
-    if non_blocking && !(stream || codex) {
+    if non_blocking && transcript == TranscriptDestination::None {
         return Err(
             "non-blocking speech requires --stream or --codex for interruption and failure events"
                 .into(),
@@ -702,8 +706,7 @@ fn parse_start_args(args: &[String]) -> Result<StartOptions, ParseFailure> {
     }
     Ok(StartOptions {
         port,
-        stream,
-        codex,
+        transcript,
         non_blocking,
         expert_spokesperson,
         session_arguments,
@@ -10890,7 +10893,7 @@ mod tests {
         ]))
         .unwrap();
         assert_eq!(parsed.port, 5300);
-        assert!(parsed.stream);
+        assert_eq!(parsed.transcript, TranscriptDestination::Stdout);
         assert!(!parsed.expert_spokesperson);
         assert_eq!(
             parsed.session_arguments,
@@ -10918,7 +10921,8 @@ mod tests {
             parse_start_args(&args(&all))
         };
         let parsed = start(&["--codex", "--non-blocking"]).unwrap();
-        assert!(parsed.codex && parsed.non_blocking && !parsed.stream);
+        assert_eq!(parsed.transcript, TranscriptDestination::Codex);
+        assert!(parsed.non_blocking);
         assert!(start(&["--codex", "--stream"]).is_err());
         assert!(start(&["--codex", "--codex"]).is_err());
         assert!(start(&["--non-blocking"]).is_err());

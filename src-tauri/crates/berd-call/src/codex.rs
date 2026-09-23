@@ -88,9 +88,8 @@ impl CodexTarget {
         }
     }
 
-    fn deliver(&self, prompt: &str) -> Result<(), String> {
+    fn deliver(&self, message_id: &str, prompt: &str) -> Result<(), String> {
         let mut connection = IpcConnection::open(&self.socket)?;
-        let message_id = uuid::Uuid::new_v4().to_string();
         let input = json!([{"type": "text", "text": prompt, "text_elements": []}]);
         let created_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -144,40 +143,47 @@ impl CodexTarget {
 
 /// Delivers records to Codex in order, retrying until they are accepted.
 pub(crate) struct CodexRelay {
-    records: Mutex<Option<Sender<RelayMessage>>>,
-    worker: Mutex<Option<JoinHandle<()>>>,
-}
-
-enum RelayMessage {
-    Record(CodexRecord),
-    Finish(CodexRecord),
+    records: Mutex<Option<Sender<CodexRecord>>>,
+    worker: Mutex<Option<(JoinHandle<()>, Receiver<()>)>>,
 }
 
 impl CodexRelay {
     pub(crate) fn start(target: CodexTarget, guidance: String) -> Self {
         let (records, receiver) = mpsc::channel();
-        let worker = thread::spawn(move || relay_worker(&target, &guidance, &receiver));
+        let (done, finished) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            let _done = done;
+            relay_worker(&target, &guidance, &receiver);
+        });
         Self {
             records: Mutex::new(Some(records)),
-            worker: Mutex::new(Some(worker)),
+            worker: Mutex::new(Some((worker, finished))),
         }
     }
 
     pub(crate) fn send(&self, record: CodexRecord) {
         if let Some(records) = lock(&self.records).as_ref() {
-            let _ = records.send(RelayMessage::Record(record));
+            let _ = records.send(record);
         }
     }
 
-    /// Queues the terminal record and waits briefly for everything to deliver.
+    /// Queues the terminal record and waits, within the shutdown budget, for
+    /// everything to deliver. An unresponsive Codex cannot hold the call open.
     pub(crate) fn finish(&self, record: Option<CodexRecord>) {
         if let Some(records) = lock(&self.records).take() {
             if let Some(record) = record {
-                let _ = records.send(RelayMessage::Finish(record));
+                let _ = records.send(record);
             }
         }
-        if let Some(worker) = lock(&self.worker).take() {
-            let _ = worker.join();
+        if let Some((worker, finished)) = lock(&self.worker).take() {
+            match finished.recv_timeout(SHUTDOWN_DELIVERY_TIMEOUT) {
+                Err(RecvTimeoutError::Timeout) => {
+                    eprintln!("berd-call: gave up delivering final records to Codex");
+                }
+                _ => {
+                    let _ = worker.join();
+                }
+            }
         }
     }
 }
@@ -194,68 +200,65 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-fn relay_worker(target: &CodexTarget, guidance: &str, receiver: &Receiver<RelayMessage>) {
-    let mut pending = VecDeque::new();
-    let mut guidance = Some(guidance);
-    let mut deadline = None;
-    let mut open = true;
+fn relay_worker(target: &CodexTarget, guidance: &str, receiver: &Receiver<CodexRecord>) {
+    let mut delivery = Delivery::new(guidance);
+    // While the call runs, deliver records as they arrive and retry failures.
     loop {
-        if pending.is_empty() {
-            if deadline.is_some() {
-                return;
-            }
-            match receiver.recv() {
-                Ok(message) => queue(message, &mut pending, &mut deadline),
-                Err(_) => return,
-            }
-        }
-        while let Ok(message) = receiver.try_recv() {
-            queue(message, &mut pending, &mut deadline);
-        }
-        while !pending.is_empty() {
-            let count = batch_len(&pending);
-            let prompt = delivery_prompt(pending.iter().take(count), guidance);
-            if let Err(error) = target.deliver(&prompt) {
-                eprintln!("berd-call: Codex delivery failed; retrying: {error}");
-                break;
-            }
-            pending.drain(..count);
-            guidance = None;
-        }
-        if pending.is_empty() {
-            continue;
-        }
-        let wait = match deadline {
-            Some(deadline) if Instant::now() >= deadline => return,
-            Some(deadline) => RETRY_INTERVAL.min(deadline - Instant::now()),
-            None => RETRY_INTERVAL,
+        let received = if delivery.pending.is_empty() {
+            receiver.recv().map_err(|_| RecvTimeoutError::Disconnected)
+        } else {
+            receiver.recv_timeout(RETRY_INTERVAL)
         };
-        if !open {
-            thread::sleep(wait);
-            continue;
-        }
-        match receiver.recv_timeout(wait) {
-            Ok(message) => queue(message, &mut pending, &mut deadline),
+        match received {
+            Ok(record) => delivery.pending.push_back(record),
             Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => {
-                open = false;
-                deadline.get_or_insert_with(|| Instant::now() + SHUTDOWN_DELIVERY_TIMEOUT);
-            }
+            Err(RecvTimeoutError::Disconnected) => break,
         }
+        delivery.pending.extend(receiver.try_iter());
+        delivery.flush(|id, prompt| target.deliver(id, prompt));
+    }
+    // After the call ends, keep retrying briefly so the final records land.
+    let deadline = Instant::now() + SHUTDOWN_DELIVERY_TIMEOUT;
+    while !delivery.flush(|id, prompt| target.deliver(id, prompt)) && Instant::now() < deadline {
+        thread::sleep(RETRY_INTERVAL.min(deadline.saturating_duration_since(Instant::now())));
     }
 }
 
-fn queue(
-    message: RelayMessage,
-    pending: &mut VecDeque<CodexRecord>,
-    deadline: &mut Option<Instant>,
-) {
-    match message {
-        RelayMessage::Record(record) => pending.push_back(record),
-        RelayMessage::Finish(record) => {
-            pending.push_back(record);
-            deadline.get_or_insert_with(|| Instant::now() + SHUTDOWN_DELIVERY_TIMEOUT);
+/// Records awaiting delivery. A batch keeps its message ID and extent across
+/// retries so Codex can recognize a retry of a message it already accepted.
+struct Delivery<'a> {
+    pending: VecDeque<CodexRecord>,
+    guidance: Option<&'a str>,
+    batch: Option<(String, usize)>,
+}
+
+impl<'a> Delivery<'a> {
+    fn new(guidance: &'a str) -> Self {
+        Self {
+            pending: VecDeque::new(),
+            guidance: Some(guidance),
+            batch: None,
         }
+    }
+
+    /// Delivers pending records in order; returns whether all were accepted.
+    fn flush(&mut self, mut deliver: impl FnMut(&str, &str) -> Result<(), String>) -> bool {
+        while !self.pending.is_empty() {
+            let pending = &self.pending;
+            let (id, count) = self
+                .batch
+                .get_or_insert_with(|| (uuid::Uuid::new_v4().to_string(), batch_len(pending)))
+                .clone();
+            let prompt = delivery_prompt(self.pending.iter().take(count), self.guidance);
+            if let Err(error) = deliver(&id, &prompt) {
+                eprintln!("berd-call: Codex delivery failed; retrying: {error}");
+                return false;
+            }
+            self.pending.drain(..count);
+            self.batch = None;
+            self.guidance = None;
+        }
+        true
     }
 }
 
@@ -507,6 +510,30 @@ mod tests {
             1
         );
         assert_eq!(batch_len(&VecDeque::from([small, large])), 1);
+    }
+
+    #[test]
+    fn a_retried_batch_keeps_its_message_id_and_records() {
+        let mut delivery = Delivery::new("guidance");
+        delivery.pending.push_back(record(Some(1), "user", "first"));
+        let mut attempts = Vec::new();
+        assert!(!delivery.flush(|id, prompt| {
+            attempts.push((id.to_string(), prompt.to_string()));
+            Err("timed out".into())
+        }));
+        delivery
+            .pending
+            .push_back(record(Some(2), "user", "second"));
+        assert!(delivery.flush(|id, prompt| {
+            attempts.push((id.to_string(), prompt.to_string()));
+            Ok(())
+        }));
+        assert_eq!(attempts.len(), 3);
+        assert_eq!(attempts[0], attempts[1]);
+        assert!(!attempts[1].1.contains("second"));
+        assert_ne!(attempts[2].0, attempts[1].0);
+        assert!(attempts[2].1.contains("second") && !attempts[2].1.contains("guidance"));
+        assert!(delivery.pending.is_empty());
     }
 
     #[test]
