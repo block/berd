@@ -7,7 +7,7 @@ use std::{
 use etcetera::{choose_app_strategy, AppStrategy, AppStrategyArgs};
 
 pub(crate) const ADDITIONAL_CONFIG_FILES_ENV: &str = "GOOSE_ADDITIONAL_CONFIG_FILES";
-const GOOSE_PATH_ROOT_ENV: &str = "GOOSE_PATH_ROOT";
+pub(crate) const GOOSE_PATH_ROOT_ENV: &str = "GOOSE_PATH_ROOT";
 pub(crate) const CONFIG_FILE_NAME: &str = "config.yaml";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,18 +19,40 @@ pub(crate) struct AdditionalConfigFiles {
 /// Resolve the upstream goose config file path. Matches
 /// `crates/goose/src/config/paths.rs::Paths::config_dir`.
 pub(crate) fn config_path() -> Result<PathBuf, String> {
-    if let Some(root) = validated_path_root(env::var_os(GOOSE_PATH_ROOT_ENV)) {
+    config_path_from_values(env::var_os(GOOSE_PATH_ROOT_ENV), None)
+}
+
+pub(crate) fn data_dir_from_values(
+    process_path_root: Option<OsString>,
+    shell_path_root: Option<OsString>,
+) -> Result<PathBuf, String> {
+    if let Some(root) = validated_path_root(shell_path_root.or(process_path_root)) {
+        return Ok(root.join("data"));
+    }
+
+    let strategy = goose_app_strategy()?;
+    Ok(strategy.data_dir())
+}
+
+fn config_path_from_values(
+    process_path_root: Option<OsString>,
+    shell_path_root: Option<OsString>,
+) -> Result<PathBuf, String> {
+    if let Some(root) = validated_path_root(shell_path_root.or(process_path_root)) {
         return Ok(root.join("config").join(CONFIG_FILE_NAME));
     }
 
-    let strategy = choose_app_strategy(AppStrategyArgs {
+    let strategy = goose_app_strategy()?;
+    Ok(strategy.config_dir().join(CONFIG_FILE_NAME))
+}
+
+fn goose_app_strategy() -> Result<impl AppStrategy, String> {
+    choose_app_strategy(AppStrategyArgs {
         top_level_domain: "Block".to_string(),
         author: "Block".to_string(),
         app_name: "goose".to_string(),
     })
-    .map_err(|err| format!("Failed to resolve goose config directory: {err}"))?;
-
-    Ok(strategy.config_dir().join(CONFIG_FILE_NAME))
+    .map_err(|err| format!("Failed to resolve Goose application directory: {err}"))
 }
 
 /// Resolve the upstream Goose state directory using the same path strategy as
@@ -126,6 +148,21 @@ mod tests {
         assert_eq!(
             validated_path_root(Some(absolute.clone().into_os_string())),
             Some(absolute)
+        );
+    }
+
+    #[test]
+    fn shell_path_root_matches_goose_serve_precedence() {
+        let process = std::env::current_dir().unwrap().join("process-root");
+        let shell = std::env::current_dir().unwrap().join("shell-root");
+
+        assert_eq!(
+            data_dir_from_values(
+                Some(process.into_os_string()),
+                Some(shell.clone().into_os_string()),
+            )
+            .unwrap(),
+            shell.join("data")
         );
     }
 }
