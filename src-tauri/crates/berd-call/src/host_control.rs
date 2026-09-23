@@ -30,6 +30,7 @@ pub(crate) trait HostControl: Send + Sync + 'static {
         policy: berd_call::input::InputDuringTtsPolicy,
     ) -> Result<Value, String>;
     fn set_muted(&self, muted: bool) -> Result<Value, String>;
+    fn restart(&self, session_arguments: Vec<String>) -> Result<Value, String>;
 }
 
 pub(crate) struct ControlServer {
@@ -113,6 +114,10 @@ pub(crate) enum ControlRequest {
     Muted {
         muted: bool,
     },
+    Restart {
+        #[serde(rename = "sessionArguments")]
+        session_arguments: Vec<String>,
+    },
 }
 
 #[derive(Deserialize, Serialize)]
@@ -126,7 +131,9 @@ struct ControlResponse {
 pub(crate) fn request(port: u16, request: ControlRequest) -> Result<Value, String> {
     let read_timeout = if matches!(
         &request,
-        ControlRequest::Speak { .. } | ControlRequest::TtsSettings { .. }
+        ControlRequest::Speak { .. }
+            | ControlRequest::TtsSettings { .. }
+            | ControlRequest::Restart { .. }
     ) {
         None
     } else {
@@ -171,6 +178,7 @@ fn handle_connection(mut stream: TcpStream, control: &dyn HostControl) -> Result
                 ControlRequest::Settings { non_blocking } => control.set_non_blocking(non_blocking),
                 ControlRequest::InputDuringTts { policy } => control.set_input_during_tts(policy),
                 ControlRequest::Muted { muted } => control.set_muted(muted),
+                ControlRequest::Restart { session_arguments } => control.restart(session_arguments),
             },
         );
     let response = match result {
@@ -281,6 +289,9 @@ mod tests {
         }
         fn set_muted(&self, muted: bool) -> Result<Value, String> {
             Ok(json!({"muted": muted}))
+        }
+        fn restart(&self, session_arguments: Vec<String>) -> Result<Value, String> {
+            Ok(json!({"sessionArguments": session_arguments}))
         }
         fn status(&self) -> Result<Value, String> {
             Ok(json!({"running": !self.stopped.load(Ordering::SeqCst)}))

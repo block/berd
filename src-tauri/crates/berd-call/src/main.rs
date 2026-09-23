@@ -627,6 +627,22 @@ struct StartOptions {
     session_arguments: Vec<String>,
 }
 
+fn validate_session_arguments(arguments: &[String]) -> Result<bool, String> {
+    if arguments
+        .iter()
+        .any(|argument| argument == "--pcm-output-fd")
+    {
+        return Err("berd-call start owns its PCM output descriptor".into());
+    }
+    let mut validation = vec!["berd-call".to_string()];
+    validation.extend(arguments.iter().cloned());
+    match parse_args(&validation) {
+        Ok(config) => Ok(config.mode == SessionMode::ExpertSpokesperson),
+        Err(ParseFailure::HelpRequested) => Err("session options must not request help".into()),
+        Err(ParseFailure::Usage(message)) => Err(message),
+    }
+}
+
 fn parse_start_args(args: &[String]) -> Result<StartOptions, ParseFailure> {
     let mut port = 5222_u16;
     let mut port_seen = false;
@@ -766,8 +782,16 @@ fn parse_host_settings_args(
     let mut tts = None;
     let mut input_during_tts = None;
     let mut muted = None;
+    let mut restart = None;
     let mut index = 2;
     while index < args.len() {
+        if args[index] == "--restart" {
+            let mut session_arguments = vec!["session".to_string()];
+            session_arguments.extend(args[index + 1..].iter().cloned());
+            validate_session_arguments(&session_arguments)?;
+            restart = Some(session_arguments);
+            break;
+        }
         if args[index] == "--non-blocking" {
             if non_blocking.is_some() {
                 return Err("--non-blocking may be provided only once".into());
@@ -814,6 +838,16 @@ fn parse_host_settings_args(
             port_args.push(args[index].clone());
             index += 1;
         }
+    }
+    if let Some(session_arguments) = restart {
+        if non_blocking.is_some() || tts.is_some() || input_during_tts.is_some() || muted.is_some()
+        {
+            return Err("--restart cannot be combined with live settings".into());
+        }
+        return Ok((
+            parse_control_port(&port_args)?,
+            host_control::ControlRequest::Restart { session_arguments },
+        ));
     }
     let request = match (non_blocking, tts, input_during_tts, muted) {
         (Some(non_blocking), None, None, None) => {
@@ -10916,6 +10950,32 @@ mod tests {
                 .1,
             host_control::ControlRequest::Muted { muted: true }
         ));
+        assert!(matches!(
+            parse_host_settings_args(&args(&[
+                "berd-call",
+                "settings",
+                "--port",
+                "5340",
+                "--restart",
+                "--voice",
+                "Aaron",
+                "--language",
+                "en-US",
+                "--mode",
+                "expert-spokesperson",
+            ]))
+            .unwrap(),
+            (5340, host_control::ControlRequest::Restart { session_arguments })
+                if session_arguments.last().map(String::as_str) == Some("expert-spokesperson")
+        ));
+        assert!(parse_host_settings_args(&args(&[
+            "berd-call",
+            "settings",
+            "--restart",
+            "--mode",
+            "sideways",
+        ]))
+        .is_err());
         assert!(parse_host_settings_args(&args(&[
             "berd-call",
             "settings",

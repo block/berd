@@ -56,6 +56,7 @@ Usage:
   berd-call settings [--port PORT] --tts JSON
   berd-call settings [--port PORT] --input-during-tts allow|suppress
   berd-call settings [--port PORT] --muted true|false
+  berd-call settings [--port PORT] --restart [session options]
 
 The setting applies to subsequent speak calls. Non-blocking delivery requires
 a call started with --stream. Successful delivery produces no notification."#;

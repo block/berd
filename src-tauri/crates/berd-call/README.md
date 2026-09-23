@@ -71,6 +71,12 @@ Use `berd-call settings --input-during-tts allow|suppress` to change whether
 microphone input can interrupt speech, and `berd-call settings --muted true|false`
 to mute or unmute microphone input. Both apply live and are reflected by `status`.
 
+Settings the runtime cannot change live, such as STT backend or call mode, use
+`berd-call settings --restart [session options]`. The replacement options are
+complete `berd-call session` options. The call keeps its control port, stream,
+blocking policy, mute state, and input-during-TTS policy; the stream emits a lifecycle row because
+transcript cursors restart with the new session.
+
 This crate owns the neutral PCM output contract and backend-neutral TTS stream
 used by Berd, plus the April ONNX runtime and text chunking used by Berd's native
 voice commands. It also owns the concrete Parakeet model loader and complete
