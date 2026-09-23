@@ -490,6 +490,7 @@ fn main() {
     match args.get(1).map(String::as_str) {
         Some("start") => {
             let options = parse_or_exit(parse_start_args(&args), &args);
+            #[cfg(target_os = "macos")]
             if let Err(error) = host_session::route_stop_signals(options.port) {
                 eprintln!("berd-call start failed: {error}");
                 std::process::exit(1);
