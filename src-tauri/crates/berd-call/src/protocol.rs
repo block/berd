@@ -336,6 +336,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn host_decodes_realtime_ready_snapshot() {
+        let message = r#"{"type":"ready","id":1,"protocol":5,"session":{"tts":{"revision":1,"backend":"openai","model":"gpt-realtime-2.1","voice":"marin","rate":1.0},"input_during_tts":{"revision":1,"policy":"allow_barge_in"}}}"#;
+        let decoded = serde_json::from_str::<SessionMessage>(message).unwrap();
+        assert!(matches!(decoded, SessionMessage::Ready { id: 1, .. }));
+    }
+
+    #[test]
     fn protocol_is_stably_tagged() {
         let request: SessionRequest = serde_json::from_str(
             r#"{"type":"prepare_speak","id":4,"acknowledgement":0,"text":"hi"}"#,

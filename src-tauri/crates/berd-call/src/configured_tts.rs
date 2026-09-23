@@ -58,7 +58,6 @@ impl TtsSettings {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-#[serde(deny_unknown_fields)]
 pub struct TtsConfigurationSnapshot {
     pub revision: u64,
     #[serde(flatten)]

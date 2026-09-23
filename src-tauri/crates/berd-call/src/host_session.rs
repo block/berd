@@ -43,7 +43,7 @@ pub(crate) fn run(options: StartOptions) -> Result<(), String> {
     let mut child = SessionProcess::spawn(options.session_arguments)?;
     let writer = Arc::new(Mutex::new(child.take_stdin()?));
     let (event_tx, event_rx) = mpsc::sync_channel(128);
-    spawn_stdout_reader(child.take_stdout()?, event_tx.clone())?;
+    spawn_stdout_reader(child.take_stdout()?, event_tx)?;
     let (audio_command_tx, audio_command_rx) = mpsc::sync_channel(16);
     let (failure_tx, failure_rx) = mpsc::sync_channel(1);
     spawn_audio_host(
@@ -417,7 +417,15 @@ fn expert_delivery_rows(events: &[RealtimeExpertDeliveryEvent]) -> Vec<(u64, Str
 fn receive_ready(events: &Receiver<SessionMessage>) -> Result<ReadyState, String> {
     let event = events
         .recv_timeout(Duration::from_secs(60))
-        .map_err(|_| "timed out waiting for voice session startup".to_string())?;
+        .map_err(|error| {
+            match error {
+                mpsc::RecvTimeoutError::Timeout => "timed out waiting for voice session startup",
+                mpsc::RecvTimeoutError::Disconnected => {
+                    "voice session event stream closed during startup"
+                }
+            }
+            .to_string()
+        })?;
     match event {
         SessionMessage::Ready {
             id: 1,
@@ -558,8 +566,14 @@ fn spawn_stdout_reader(
         .spawn(move || {
             for line in BufReader::new(stdout).lines() {
                 let Ok(line) = line else { break };
-                let Ok(value) = serde_json::from_str::<SessionMessage>(&line) else {
-                    break;
+                let value = match serde_json::from_str::<SessionMessage>(&line) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        let _ = events.send(SessionMessage::Fatal {
+                            message: format!("could not decode voice session event: {error}"),
+                        });
+                        break;
+                    }
                 };
                 if events.send(value).is_err() {
                     break;
