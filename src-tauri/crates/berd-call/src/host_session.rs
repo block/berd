@@ -99,7 +99,9 @@ pub(crate) fn run(options: StartOptions) -> Result<(), String> {
         saved: options.saved.clone(),
         arguments: options.session_arguments,
         expert_spokesperson: options.expert_spokesperson,
-        muted: false,
+        muted: Arc::new(AtomicBool::new(false)),
+        mute_epoch: Arc::new(AtomicU64::new(0)),
+        system_input_mute: None,
         input_during_tts: options
             .saved
             .as_ref()
@@ -234,7 +236,9 @@ struct SessionStart {
     saved: Option<(std::path::PathBuf, crate::saved_settings::SavedSettings)>,
     arguments: Vec<String>,
     expert_spokesperson: bool,
-    muted: bool,
+    muted: Arc<AtomicBool>,
+    mute_epoch: Arc<AtomicU64>,
+    system_input_mute: Option<crate::system_input_mute::SystemInputMute>,
     input_during_tts: InputDuringTtsPolicy,
     restarted: Option<SyncSender<Result<Value, String>>>,
 }
@@ -251,6 +255,8 @@ fn run_session(
         arguments,
         expert_spokesperson,
         muted,
+        mute_epoch,
+        system_input_mute,
         input_during_tts,
         restarted,
     } = start;
@@ -258,6 +264,8 @@ fn run_session(
         arguments,
         expert_spokesperson,
         muted,
+        mute_epoch,
+        system_input_mute,
         input_during_tts,
         transcript,
         non_blocking,
@@ -289,7 +297,6 @@ fn run_session(
         )?;
         let _ = response.send(control.status());
     }
-    let session_control = Arc::clone(&control);
     let control: Arc<dyn HostControl> = control;
     while running.load(Ordering::SeqCst) {
         server.poll(Arc::clone(&control))?;
@@ -322,23 +329,36 @@ fn run_session(
     } else {
         "voice call stopped"
     });
-    Ok(restart.map(|restart| SessionStart {
-        saved: actor.saved.take().map(|(path, mut saved)| {
-            saved.arguments = restart.arguments[1..].to_vec();
-            saved.tts = None;
-            (path, saved)
-        }),
-        arguments: restart.arguments,
-        expert_spokesperson: restart.expert_spokesperson,
-        muted: session_control.muted.load(Ordering::SeqCst),
-        input_during_tts: session_control
-            .ready
-            .session
-            .lock()
-            .map(|session| session.input_during_tts.policy)
-            .unwrap_or(input_during_tts),
-        restarted: Some(restart.response),
-    }))
+    Ok(restart.map(|restart| actor.restart_start(restart, input_during_tts)))
+}
+
+impl SessionActor {
+    fn restart_start(
+        &mut self,
+        restart: PendingRestart,
+        input_during_tts: InputDuringTtsPolicy,
+    ) -> SessionStart {
+        SessionStart {
+            saved: self.saved.take().map(|(path, mut saved)| {
+                saved.arguments = restart.arguments[1..].to_vec();
+                saved.tts = None;
+                (path, saved)
+            }),
+            arguments: restart.arguments,
+            expert_spokesperson: restart.expert_spokesperson,
+            // Keep native registration and shared intent across session handoffs
+            // so gestures remain effective.
+            muted: self.capture_muted.clone(),
+            mute_epoch: self.capture_mute_epoch.clone(),
+            system_input_mute: self.system_input_mute.take(),
+            input_during_tts: self
+                .session
+                .lock()
+                .map(|session| session.input_during_tts.policy)
+                .unwrap_or(input_during_tts),
+            restarted: Some(restart.response),
+        }
+    }
 }
 
 struct StartedSession {
@@ -354,7 +374,9 @@ struct StartedSession {
 fn start_session(
     arguments: Vec<String>,
     expert_spokesperson: bool,
-    muted: bool,
+    muted: Arc<AtomicBool>,
+    mute_epoch: Arc<AtomicU64>,
+    system_input_mute: Option<crate::system_input_mute::SystemInputMute>,
     input_during_tts: InputDuringTtsPolicy,
     transcript: &Arc<Transcript>,
     non_blocking: &Arc<AtomicBool>,
@@ -395,7 +417,21 @@ fn start_session(
         expert_spokesperson,
     );
     actor.saved = saved;
-    actor.muted.store(muted, Ordering::SeqCst);
+    actor
+        .muted
+        .store(muted.load(Ordering::SeqCst), Ordering::SeqCst);
+    actor.capture_muted = muted;
+    actor.capture_mute_epoch = mute_epoch;
+    actor.system_input_mute = system_input_mute;
+    if actor.system_input_mute.is_none() {
+        match crate::system_input_mute::SystemInputMute::install(
+            actor.capture_muted.clone(),
+            actor.capture_mute_epoch.clone(),
+        ) {
+            Ok(listener) => actor.system_input_mute = Some(listener),
+            Err(error) => eprintln!("System input mute unavailable: {error}"),
+        }
+    }
     if let Some(settings) = actor
         .saved
         .as_ref()
@@ -409,13 +445,13 @@ fn start_session(
             .revision;
         actor.restore_saved_tts(settings, revision, Duration::from_secs(30))?;
     }
-    if muted {
-        // Requests and captured PCM share one ordered pipe, so the replacement
-        // session is muted before it can receive any microphone input.
-        let id = actor.next_id();
-        send_request(&writer, &SessionRequest::SetInputMuted { id, active: true })?;
-    }
-    let capture = DefaultInputCapture::start(writer, failure_tx)?;
+    actor.restore_input_mute()?;
+    let capture = DefaultInputCapture::start(
+        writer,
+        failure_tx,
+        actor.capture_muted.clone(),
+        actor.capture_mute_epoch.clone(),
+    )?;
     actor.persist_settings(SavedPreference::SessionStart);
     let control = Arc::new(SessionControl {
         commands: command_tx,
@@ -738,9 +774,37 @@ struct SessionActor {
     restart: Option<PendingRestart>,
     muted: Arc<AtomicBool>,
     suppress_startup_persist: bool,
+    // Immediate requested mute gates capture before the child acknowledges it.
+    // Native callbacks and manual controls write it; `muted` above holds only
+    // the acknowledged value used for status and persistence. Restart carries
+    // current capture intent, including native changes still awaiting a reply.
+    capture_muted: Arc<AtomicBool>,
+    capture_mute_epoch: Arc<AtomicU64>,
+    system_input_mute: Option<crate::system_input_mute::SystemInputMute>,
 }
 
 impl SessionActor {
+    fn restore_input_mute(&mut self) -> Result<(), String> {
+        // Restore current capture intent rather than stale acknowledged state.
+        let (muted, mute_epoch) = crate::system_input_mute::mute_state_snapshot(
+            &self.capture_muted,
+            &self.capture_mute_epoch,
+        );
+        if muted {
+            // Requests and captured PCM share one ordered pipe, so the replacement
+            // session is muted before it can receive any microphone input.
+            let id = self.next_id();
+            send_request(
+                &self.writer,
+                &SessionRequest::SetInputMuted { id, active: true },
+            )?;
+        }
+        if let Some(listener) = self.system_input_mute.as_mut() {
+            listener.mark_forwarded(muted, mute_epoch);
+        }
+        Ok(())
+    }
+
     fn new(
         writer: Arc<Mutex<ChildStdin>>,
         events: Receiver<SessionMessage>,
@@ -770,6 +834,9 @@ impl SessionActor {
             restart: None,
             muted: Arc::new(AtomicBool::new(false)),
             suppress_startup_persist: false,
+            capture_muted: Arc::new(AtomicBool::new(false)),
+            capture_mute_epoch: Arc::new(AtomicU64::new(0)),
+            system_input_mute: None,
         }
     }
 
@@ -835,6 +902,22 @@ impl SessionActor {
     }
 
     fn poll(&mut self) -> Result<(), String> {
+        if !self.stopping {
+            if let Some(muted) = self
+                .system_input_mute
+                .as_mut()
+                .and_then(|listener| listener.take_change())
+            {
+                // Do not write the native intent back: another gesture may have
+                // arrived after take_change. The ordered child acknowledgement
+                // commits this request while the next poll handles the newer one.
+                let id = self.next_id();
+                send_request(
+                    &self.writer,
+                    &SessionRequest::SetInputMuted { id, active: muted },
+                )?;
+            }
+        }
         loop {
             match self.commands.try_recv() {
                 Ok(command) => self.handle_command(command)?,
@@ -906,6 +989,17 @@ impl SessionActor {
                 self.pending_settings.insert(id, response);
             }
             ControlCommand::Muted { muted, response } => {
+                if let Some(listener) = self.system_input_mute.as_mut() {
+                    if let Err(error) = listener.set_muted(muted) {
+                        eprintln!("could not synchronize system input mute: {error}");
+                    }
+                } else {
+                    crate::system_input_mute::update_mute_state(
+                        &self.capture_muted,
+                        &self.capture_mute_epoch,
+                        muted,
+                    );
+                }
                 let id = self.next_id();
                 send_request(
                     &self.writer,
@@ -1542,12 +1636,91 @@ fn send_request(writer: &Arc<Mutex<ChildStdin>>, request: &SessionRequest) -> Re
     write_frame(writer, JSON_FRAME_KIND, &payload)
 }
 
-fn send_pcm(writer: &Arc<Mutex<ChildStdin>>, samples: &[f32]) -> Result<(), String> {
-    let mut payload = Vec::with_capacity(samples.len() * 4);
-    for sample in samples {
+fn send_captured_pcm(
+    writer: &Arc<Mutex<ChildStdin>>,
+    frame: &CapturedFrame,
+    muted: &AtomicBool,
+    mute_epoch: &AtomicU64,
+) -> Result<(), String> {
+    let mut payload = Vec::with_capacity(frame.samples.len() * 4);
+    for sample in &frame.samples {
         payload.extend_from_slice(&sample.to_le_bytes());
     }
-    write_frame(writer, PCM_FRAME_KIND, &payload)
+    let encoded = encode_frame(PCM_FRAME_KIND, &payload)?;
+    let mut writer = writer
+        .lock()
+        .map_err(|_| "voice session input lock was poisoned")?;
+    if !captured_frame_is_current(
+        frame,
+        muted.load(Ordering::SeqCst),
+        mute_epoch.load(Ordering::SeqCst),
+    ) {
+        return Ok(());
+    }
+    write_cancellable_pcm(&mut *writer, &encoded, frame, muted, mute_epoch)
+}
+
+struct FileStatusFlagsGuard {
+    fd: RawFd,
+    flags: libc::c_int,
+}
+
+impl Drop for FileStatusFlagsGuard {
+    fn drop(&mut self) {
+        // SAFETY: `fd` stays open while this guard is held under the writer lock.
+        let _ = unsafe { libc::fcntl(self.fd, libc::F_SETFL, self.flags) };
+    }
+}
+
+fn write_cancellable_pcm(
+    writer: &mut (impl Write + AsRawFd),
+    encoded: &[u8],
+    frame: &CapturedFrame,
+    muted: &AtomicBool,
+    mute_epoch: &AtomicU64,
+) -> Result<(), String> {
+    let fd = writer.as_raw_fd();
+    // SAFETY: `fd` is owned by `writer` and protected by its mutex.
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
+        return Err(format!(
+            "could not configure cancellable voice input: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    let _flags = FileStatusFlagsGuard { fd, flags };
+    let mut offset = 0;
+    loop {
+        if !captured_frame_is_current(
+            frame,
+            muted.load(Ordering::SeqCst),
+            mute_epoch.load(Ordering::SeqCst),
+        ) {
+            if offset == 0 {
+                return Ok(());
+            }
+            return Err("input mute changed during a PCM frame".into());
+        }
+        match writer.write(&encoded[offset..]) {
+            Ok(0) => return Err("voice session input closed during a PCM frame".into()),
+            Ok(written) => {
+                offset += written;
+                if offset != encoded.len() {
+                    continue;
+                }
+                return writer
+                    .flush()
+                    .map_err(|error| format!("could not write voice session input: {error}"));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(1));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(error) => {
+                return Err(format!("could not write voice session input: {error}"));
+            }
+        }
+    }
 }
 
 fn write_frame(writer: &Arc<Mutex<ChildStdin>>, kind: u8, payload: &[u8]) -> Result<(), String> {
@@ -1566,6 +1739,8 @@ struct DefaultInputCapture {
     writer: Arc<Mutex<ChildStdin>>,
     failures: SyncSender<String>,
     next_check: Instant,
+    muted: Arc<AtomicBool>,
+    mute_epoch: Arc<AtomicU64>,
 }
 
 fn default_input() -> Result<(String, cpal::Device), String> {
@@ -1588,14 +1763,27 @@ fn default_input() -> Result<(String, cpal::Device), String> {
 }
 
 impl DefaultInputCapture {
-    fn start(writer: Arc<Mutex<ChildStdin>>, failures: SyncSender<String>) -> Result<Self, String> {
+    fn start(
+        writer: Arc<Mutex<ChildStdin>>,
+        failures: SyncSender<String>,
+        muted: Arc<AtomicBool>,
+        mute_epoch: Arc<AtomicU64>,
+    ) -> Result<Self, String> {
         let (key, device) = default_input()?;
-        let capture = InputCapture::start(device, writer.clone(), failures.clone())?;
+        let capture = InputCapture::start(
+            device,
+            writer.clone(),
+            failures.clone(),
+            muted.clone(),
+            mute_epoch.clone(),
+        )?;
         Ok(Self {
             recovery: crate::microphone_recovery::MicrophoneRecovery::new(key, capture),
             writer,
             failures,
             next_check: Instant::now() + Duration::from_millis(500),
+            muted,
+            mute_epoch,
         })
     }
 
@@ -1632,11 +1820,17 @@ impl DefaultInputCapture {
         if self
             .recovery
             .reconcile(now, key, failed, InputCapture::stop, || {
-                // The old stream and its forwarder have stopped before this reset.
+                // The previous stream and its forwarder have stopped before this reset.
                 // ResetInput preserves acknowledged mute and input policy settings.
                 let id = actor.next_id();
                 send_request(writer, &SessionRequest::ResetInput { id })?;
-                InputCapture::start(desired?.1, writer.clone(), failures.clone())
+                InputCapture::start(
+                    desired?.1,
+                    writer.clone(),
+                    failures.clone(),
+                    self.muted.clone(),
+                    self.mute_epoch.clone(),
+                )
             })?
         {
             actor.input_speaking = false;
@@ -1650,6 +1844,15 @@ struct InputCapture {
     forwarder: Option<thread::JoinHandle<()>>,
     errors: Receiver<String>,
     activity: Arc<CaptureActivity>,
+}
+
+struct CapturedFrame {
+    samples: [f32; INPUT_FRAME_SAMPLES],
+    mute_epoch: u64,
+}
+
+fn captured_frame_is_current(frame: &CapturedFrame, muted: bool, mute_epoch: u64) -> bool {
+    !muted && frame.mute_epoch == mute_epoch
 }
 
 struct CaptureActivity {
@@ -1721,6 +1924,8 @@ impl InputCapture {
         device: cpal::Device,
         writer: Arc<Mutex<ChildStdin>>,
         failures: SyncSender<String>,
+        muted: Arc<AtomicBool>,
+        mute_epoch: Arc<AtomicU64>,
     ) -> Result<Self, String> {
         let supported = device
             .default_input_config()
@@ -1729,15 +1934,22 @@ impl InputCapture {
         let config: cpal::StreamConfig = supported.into();
         let channels = usize::from(config.channels);
         let sample_rate = config.sample_rate;
-        let (frames_tx, frames_rx) = mpsc::sync_channel::<[f32; INPUT_FRAME_SAMPLES]>(32);
+        let (frames_tx, frames_rx) = mpsc::sync_channel::<CapturedFrame>(32);
         let (capture_failure_tx, errors) = mpsc::sync_channel(1);
         let activity = Arc::new(CaptureActivity::new(Instant::now()));
         let writer_failures = failures.clone();
+        let forwarding_muted = muted.clone();
+        let forwarding_mute_epoch = mute_epoch.clone();
         let forwarder = thread::Builder::new()
             .name("berd-call-microphone-writer".into())
             .spawn(move || {
                 while let Ok(frame) = frames_rx.recv() {
-                    if let Err(message) = send_pcm(&writer, &frame) {
+                    if let Err(message) = send_captured_pcm(
+                        &writer,
+                        &frame,
+                        &forwarding_muted,
+                        &forwarding_mute_epoch,
+                    ) {
                         report_failure(&writer_failures, message);
                         break;
                     }
@@ -1753,6 +1965,8 @@ impl InputCapture {
                     channels,
                     frames_tx.clone(),
                     failures.clone(),
+                    muted.clone(),
+                    mute_epoch.clone(),
                     |sample: f32| sample,
                 ),
                 capture_error(capture_failure_tx.clone()),
@@ -1766,6 +1980,8 @@ impl InputCapture {
                     channels,
                     frames_tx.clone(),
                     failures.clone(),
+                    muted.clone(),
+                    mute_epoch.clone(),
                     |sample: i16| f32::from(sample) / f32::from(i16::MAX),
                 ),
                 capture_error(capture_failure_tx.clone()),
@@ -1779,6 +1995,8 @@ impl InputCapture {
                     channels,
                     frames_tx,
                     failures.clone(),
+                    muted,
+                    mute_epoch,
                     |sample: u16| (f32::from(sample) / f32::from(u16::MAX)) * 2.0 - 1.0,
                 ),
                 capture_error(capture_failure_tx),
@@ -1807,14 +2025,41 @@ fn capture_callback<T: Copy + Send + 'static>(
     activity: Arc<CaptureActivity>,
     sample_rate: u32,
     channels: usize,
-    frames: SyncSender<[f32; INPUT_FRAME_SAMPLES]>,
+    frames: SyncSender<CapturedFrame>,
     failures: SyncSender<String>,
+    muted: Arc<AtomicBool>,
+    mute_epoch: Arc<AtomicU64>,
     convert: impl Fn(T) -> f32 + Send + 'static,
 ) -> impl FnMut(&[T], &cpal::InputCallbackInfo) + Send + 'static {
     let mut normalizer = InputNormalizer::new(sample_rate, channels);
+    let mut normalizer_epoch = crate::system_input_mute::mute_state_snapshot(&muted, &mute_epoch).1;
     move |data, _| {
         activity.record(Instant::now());
-        for frame in normalizer.push(data.iter().copied().map(&convert)) {
+        let (callback_muted, callback_epoch) =
+            crate::system_input_mute::mute_state_snapshot(&muted, &mute_epoch);
+        if callback_epoch != normalizer_epoch {
+            normalizer = InputNormalizer::new(sample_rate, channels);
+            normalizer_epoch = callback_epoch;
+        }
+        if callback_muted {
+            // Muted samples must never enter the queue or survive in a partial
+            // normalized frame that could be forwarded after unmuting.
+            normalizer = InputNormalizer::new(sample_rate, channels);
+            return;
+        }
+        let normalized = normalizer.push(data.iter().copied().map(&convert));
+        let (after_muted, after_epoch) =
+            crate::system_input_mute::mute_state_snapshot(&muted, &mute_epoch);
+        if after_muted || after_epoch != callback_epoch {
+            normalizer = InputNormalizer::new(sample_rate, channels);
+            normalizer_epoch = after_epoch;
+            return;
+        }
+        for frame in normalized {
+            let frame = CapturedFrame {
+                samples: frame,
+                mute_epoch: callback_epoch,
+            };
             if frames.try_send(frame).is_err() {
                 report_failure(&failures, "microphone input could not keep up".into());
                 break;
@@ -2345,7 +2590,16 @@ mod tests {
             activity: activity.clone(),
         };
         assert!(capture.failed(Instant::now()));
-        let mut callback = capture_callback(activity, 48_000, 1, frames, failures, |x: f32| x);
+        let mut callback = capture_callback(
+            activity,
+            48_000,
+            1,
+            frames,
+            failures,
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicU64::new(0)),
+            |x: f32| x,
+        );
         let instant = cpal::StreamInstant::new(0, 0);
         let info = cpal::InputCallbackInfo::new(cpal::InputStreamTimestamp {
             callback: instant,
@@ -2399,6 +2653,423 @@ mod tests {
             reopened,
             "a silent callback stall must reopen the unchanged device"
         );
+    }
+
+    #[test]
+    fn gesture_after_restart_preparation_reaches_replacement() {
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let (_events_tx, events) = mpsc::sync_channel(1);
+        let (_commands_tx, commands) = mpsc::sync_channel(1);
+        let (audio, _audio_rx) = mpsc::sync_channel(1);
+        let mut actor = test_actor(writer, events, commands, audio);
+        let native_intent = actor.capture_muted.clone();
+        let (response, _reply) = mpsc::sync_channel(1);
+        let start = actor.restart_start(
+            PendingRestart {
+                arguments: vec!["session".into()],
+                expert_spokesperson: false,
+                response,
+            },
+            InputDuringTtsPolicy::AllowBargeIn,
+        );
+        // Native mute changes during handoff must remain visible to the replacement session.
+        native_intent.store(true, Ordering::SeqCst);
+        drop(actor);
+        assert!(child.wait().unwrap().success());
+        assert!(
+            start.muted.load(Ordering::SeqCst),
+            "restart discarded a later native mute gesture"
+        );
+    }
+
+    #[test]
+    fn restart_preserves_native_intent_before_child_acknowledgement() {
+        for requested in [true, false] {
+            let mut child = Command::new("/bin/cat")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .spawn()
+                .unwrap();
+            let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+            let (_events_tx, events) = mpsc::sync_channel(1);
+            let (_commands_tx, commands) = mpsc::sync_channel(1);
+            let (audio, _audio_rx) = mpsc::sync_channel(1);
+            let mut actor = test_actor(writer, events, commands, audio);
+            actor.muted.store(!requested, Ordering::SeqCst);
+            // A native callback updates the capture gate before its child reply.
+            actor.capture_muted.store(requested, Ordering::SeqCst);
+            let (response, _reply) = mpsc::sync_channel(1);
+            actor
+                .handle_command(ControlCommand::Restart {
+                    arguments: vec!["session".into()],
+                    expert_spokesperson: false,
+                    response,
+                })
+                .unwrap();
+            let restart = actor.restart.take().unwrap();
+            let start = actor.restart_start(restart, InputDuringTtsPolicy::AllowBargeIn);
+            drop(actor);
+            assert!(child.wait().unwrap().success());
+            assert_eq!(start.muted.load(Ordering::SeqCst), requested);
+        }
+    }
+
+    #[test]
+    fn startup_preserves_unmute_intent_before_child_acknowledgement() {
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let (_events_tx, events) = mpsc::sync_channel(1);
+        let (_commands_tx, commands) = mpsc::sync_channel(1);
+        let (audio, _audio_rx) = mpsc::sync_channel(1);
+        let mut actor = test_actor(writer, events, commands, audio);
+        actor.muted.store(true, Ordering::SeqCst);
+        actor.capture_muted.store(false, Ordering::SeqCst);
+        // Startup must preserve current capture intent rather than the
+        // acknowledged mute state.
+        let id = actor.next_id();
+        let request = SessionRequest::SetInputMuted { id, active: false };
+        send_request(&actor.writer, &request).unwrap();
+        actor.restore_input_mute().unwrap();
+        drop(actor);
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success());
+        assert_eq!(
+            output.stdout,
+            encode_frame(JSON_FRAME_KIND, &serde_json::to_vec(&request).unwrap()).unwrap()
+        );
+    }
+
+    #[test]
+    fn muted_capture_never_queues_audio_for_later_unmute() {
+        let (frames, queued) = mpsc::sync_channel(32);
+        let (failures, _errors) = mpsc::sync_channel(1);
+        let muted = Arc::new(AtomicBool::new(true));
+        let mute_epoch = Arc::new(AtomicU64::new(0));
+        let activity = Arc::new(CaptureActivity::new(
+            Instant::now() - Duration::from_secs(3),
+        ));
+        let mut capture = capture_callback(
+            activity.clone(),
+            16_000,
+            1,
+            frames,
+            failures,
+            muted.clone(),
+            mute_epoch.clone(),
+            |x: f32| x,
+        );
+        let instant = cpal::StreamInstant::new(0, 0);
+        let info = cpal::InputCallbackInfo::new(cpal::InputStreamTimestamp {
+            callback: instant,
+            capture: instant,
+        });
+        capture(&vec![0.75; INPUT_FRAME_SAMPLES * 2], &info);
+        assert!(
+            activity.last_callback_ms.load(Ordering::Relaxed) >= 3_000,
+            "muted capture must still report callback activity"
+        );
+        crate::system_input_mute::update_mute_state(&muted, &mute_epoch, false);
+        assert!(
+            queued.try_recv().is_err(),
+            "muted audio survived until unmute"
+        );
+        capture(&vec![0.25; INPUT_FRAME_SAMPLES * 2], &info);
+        let frame = queued.try_recv().expect("unmuted capture must continue");
+        assert!(frame
+            .samples
+            .iter()
+            .all(|sample| (*sample - 0.25).abs() < 0.001));
+    }
+
+    #[test]
+    fn queued_audio_is_invalidated_by_a_mute_unmute_cycle() {
+        let (frames, queued) = mpsc::sync_channel(32);
+        let (failures, _errors) = mpsc::sync_channel(1);
+        let muted = Arc::new(AtomicBool::new(false));
+        let mute_epoch = Arc::new(AtomicU64::new(0));
+        let activity = Arc::new(CaptureActivity::new(Instant::now()));
+        let mut capture = capture_callback(
+            activity,
+            16_000,
+            1,
+            frames,
+            failures,
+            muted.clone(),
+            mute_epoch.clone(),
+            |x: f32| x,
+        );
+        let instant = cpal::StreamInstant::new(0, 0);
+        let info = cpal::InputCallbackInfo::new(cpal::InputStreamTimestamp {
+            callback: instant,
+            capture: instant,
+        });
+        capture(&vec![0.5; INPUT_FRAME_SAMPLES * 2], &info);
+        crate::system_input_mute::update_mute_state(&muted, &mute_epoch, true);
+        crate::system_input_mute::update_mute_state(&muted, &mute_epoch, false);
+
+        let stale = queued
+            .try_recv()
+            .expect("fixture must queue pre-mute audio");
+        assert!(!captured_frame_is_current(
+            &stale,
+            muted.load(Ordering::SeqCst),
+            mute_epoch.load(Ordering::SeqCst),
+        ));
+    }
+
+    #[test]
+    fn partial_audio_is_not_relabelled_after_a_complete_mute_cycle() {
+        let (frames, queued) = mpsc::sync_channel(32);
+        let (failures, _errors) = mpsc::sync_channel(1);
+        let muted = Arc::new(AtomicBool::new(false));
+        let mute_epoch = Arc::new(AtomicU64::new(0));
+        let mut capture = capture_callback(
+            Arc::new(CaptureActivity::new(Instant::now())),
+            48_000,
+            1,
+            frames,
+            failures,
+            muted.clone(),
+            mute_epoch.clone(),
+            |x: f32| x,
+        );
+        let instant = cpal::StreamInstant::new(0, 0);
+        let info = cpal::InputCallbackInfo::new(cpal::InputStreamTimestamp {
+            callback: instant,
+            capture: instant,
+        });
+
+        capture(&vec![0.5; INPUT_FRAME_SAMPLES / 2], &info);
+        crate::system_input_mute::update_mute_state(&muted, &mute_epoch, true);
+        crate::system_input_mute::update_mute_state(&muted, &mute_epoch, false);
+        capture(&vec![0.25; INPUT_FRAME_SAMPLES / 2], &info);
+        assert!(
+            queued.try_recv().is_err(),
+            "pre-cycle partial audio was relabelled with the current epoch"
+        );
+
+        capture(&vec![0.25; INPUT_FRAME_SAMPLES / 2 + 1], &info);
+        let frame = queued.try_recv().expect("post-cycle audio must continue");
+        assert!(frame
+            .samples
+            .iter()
+            .all(|sample| (*sample - 0.25).abs() < 0.001));
+    }
+
+    #[test]
+    fn audio_is_discarded_when_a_complete_mute_cycle_races_with_capture() {
+        let (frames, queued) = mpsc::sync_channel(32);
+        let (failures, _errors) = mpsc::sync_channel(1);
+        let muted = Arc::new(AtomicBool::new(false));
+        let mute_epoch = Arc::new(AtomicU64::new(0));
+        let (started_tx, started_rx) = mpsc::sync_channel(1);
+        let (resume_tx, resume_rx) = mpsc::sync_channel(1);
+        let first_sample = AtomicBool::new(true);
+        let mut capture = capture_callback(
+            Arc::new(CaptureActivity::new(Instant::now())),
+            16_000,
+            1,
+            frames,
+            failures,
+            muted.clone(),
+            mute_epoch.clone(),
+            move |x: f32| {
+                if first_sample.swap(false, Ordering::SeqCst) {
+                    started_tx.send(()).unwrap();
+                    resume_rx.recv().unwrap();
+                }
+                x
+            },
+        );
+        let worker = thread::spawn(move || {
+            let instant = cpal::StreamInstant::new(0, 0);
+            let info = cpal::InputCallbackInfo::new(cpal::InputStreamTimestamp {
+                callback: instant,
+                capture: instant,
+            });
+            capture(&vec![0.5; INPUT_FRAME_SAMPLES], &info);
+        });
+
+        started_rx.recv().unwrap();
+        crate::system_input_mute::update_mute_state(&muted, &mute_epoch, true);
+        crate::system_input_mute::update_mute_state(&muted, &mute_epoch, false);
+        resume_tx.send(()).unwrap();
+        worker.join().unwrap();
+        assert!(
+            queued.try_recv().is_err(),
+            "audio captured across the mute cycle was accepted"
+        );
+    }
+
+    #[test]
+    fn queued_audio_is_revalidated_inside_the_writer_lock() {
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let guard = writer.lock().unwrap();
+        let muted = Arc::new(AtomicBool::new(false));
+        let mute_epoch = Arc::new(AtomicU64::new(0));
+        let frame = CapturedFrame {
+            samples: [0.5; INPUT_FRAME_SAMPLES],
+            mute_epoch: 0,
+        };
+        let (started_tx, started) = mpsc::sync_channel(1);
+        let worker_writer = writer.clone();
+        let worker_muted = muted.clone();
+        let worker_epoch = mute_epoch.clone();
+        let worker = thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            send_captured_pcm(&worker_writer, &frame, &worker_muted, &worker_epoch)
+        });
+        started.recv().unwrap();
+        crate::system_input_mute::update_mute_state(&muted, &mute_epoch, true);
+        crate::system_input_mute::update_mute_state(&muted, &mute_epoch, false);
+        drop(guard);
+        worker.join().unwrap().unwrap();
+        drop(writer);
+
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success());
+        assert!(output.stdout.is_empty(), "stale PCM crossed the mute cycle");
+    }
+
+    #[test]
+    fn blocked_pcm_write_is_cancelled_by_a_mute_transition() {
+        let mut child = Command::new("/bin/sleep")
+            .arg("5")
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let stdin = child.stdin.take().unwrap();
+        let flags = unsafe { libc::fcntl(stdin.as_raw_fd(), libc::F_GETFL) };
+        assert!(flags >= 0);
+        assert_eq!(
+            unsafe { libc::fcntl(stdin.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK) },
+            0
+        );
+        let mut stdin = stdin;
+        let fill = [0_u8; 4096];
+        loop {
+            match stdin.write(&fill) {
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
+                Err(error) => panic!("could not fill child input pipe: {error}"),
+            }
+        }
+        assert_eq!(
+            unsafe { libc::fcntl(stdin.as_raw_fd(), libc::F_SETFL, flags) },
+            0
+        );
+
+        let writer = Arc::new(Mutex::new(stdin));
+        let muted = Arc::new(AtomicBool::new(false));
+        let mute_epoch = Arc::new(AtomicU64::new(0));
+        let frame = CapturedFrame {
+            samples: [0.5; INPUT_FRAME_SAMPLES],
+            mute_epoch: 0,
+        };
+        let (started_tx, started_rx) = mpsc::sync_channel(1);
+        let (finished_tx, finished_rx) = mpsc::sync_channel(1);
+        let worker_writer = writer.clone();
+        let worker_muted = muted.clone();
+        let worker_epoch = mute_epoch.clone();
+        let worker = thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            let result = send_captured_pcm(&worker_writer, &frame, &worker_muted, &worker_epoch);
+            finished_tx.send(result).unwrap();
+        });
+        started_rx.recv().unwrap();
+        thread::sleep(Duration::from_millis(20));
+        crate::system_input_mute::update_mute_state(&muted, &mute_epoch, true);
+        let cancelled = finished_rx.recv_timeout(Duration::from_millis(100)).is_ok();
+        child.kill().unwrap();
+        let _ = child.wait();
+        worker.join().unwrap();
+        assert!(
+            cancelled,
+            "stale PCM remained blocked after the mute transition"
+        );
+    }
+
+    #[test]
+    fn current_pcm_frame_larger_than_pipe_buf_is_written_completely() {
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let muted = AtomicBool::new(false);
+        let mute_epoch = AtomicU64::new(0);
+        let frame = CapturedFrame {
+            samples: [0.5; INPUT_FRAME_SAMPLES],
+            mute_epoch: 0,
+        };
+        send_captured_pcm(&writer, &frame, &muted, &mute_epoch).unwrap();
+        drop(writer);
+
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success());
+        assert!(output.stdout.len() > libc::PIPE_BUF as usize);
+        assert_eq!(output.stdout[3], PCM_FRAME_KIND);
+    }
+
+    #[test]
+    fn mute_transition_after_partial_pcm_write_aborts_the_transport() {
+        struct PartialWriter {
+            fd: std::fs::File,
+            mute_epoch: Arc<AtomicU64>,
+            first_write: bool,
+        }
+
+        impl Write for PartialWriter {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                if self.first_write {
+                    self.first_write = false;
+                    self.mute_epoch.fetch_add(1, Ordering::SeqCst);
+                    return Ok(1);
+                }
+                Ok(bytes.len())
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        impl AsRawFd for PartialWriter {
+            fn as_raw_fd(&self) -> RawFd {
+                self.fd.as_raw_fd()
+            }
+        }
+
+        let muted = AtomicBool::new(false);
+        let mute_epoch = Arc::new(AtomicU64::new(0));
+        let frame = CapturedFrame {
+            samples: [0.5; INPUT_FRAME_SAMPLES],
+            mute_epoch: 0,
+        };
+        let mut writer = PartialWriter {
+            fd: std::fs::File::open("/dev/null").unwrap(),
+            mute_epoch: mute_epoch.clone(),
+            first_write: true,
+        };
+
+        let error = write_cancellable_pcm(&mut writer, &[0_u8; 16], &frame, &muted, &mute_epoch)
+            .unwrap_err();
+        assert!(error.contains("mute changed during a PCM frame"));
     }
 
     #[test]
@@ -3211,6 +3882,75 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "changes this test process's macOS input mute state"]
+    fn native_gesture_uses_actor_acknowledgement() {
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let (_event_tx, events) = mpsc::sync_channel(1);
+        let (_command_tx, commands) = mpsc::sync_channel(1);
+        let (audio, _audio_rx) = mpsc::sync_channel(1);
+        let mut actor = test_actor(writer, events, commands, audio);
+        actor.system_input_mute = Some(
+            crate::system_input_mute::SystemInputMute::install(
+                actor.capture_muted.clone(),
+                actor.capture_mute_epoch.clone(),
+            )
+            .unwrap(),
+        );
+        let application = unsafe { objc2_avf_audio::AVAudioApplication::sharedInstance() };
+        unsafe { application.setInputMuted_error(true) }.unwrap();
+        actor.poll().unwrap();
+        assert!(actor.capture_muted.load(Ordering::SeqCst));
+        assert!(!actor.muted.load(Ordering::SeqCst));
+        assert!(actor.pending_settings.is_empty());
+        let id = actor.next_id - 1;
+        actor
+            .handle_event(SessionMessage::InputMuteApplied { id, active: true })
+            .unwrap();
+        assert!(actor.muted.load(Ordering::SeqCst));
+        let (response, result) = mpsc::sync_channel(1);
+        actor
+            .handle_command(ControlCommand::Muted {
+                muted: false,
+                response,
+            })
+            .unwrap();
+        assert!(!actor.capture_muted.load(Ordering::SeqCst));
+        assert!(!unsafe { application.isInputMuted() });
+        let id = *actor.pending_settings.keys().next().unwrap();
+        actor
+            .handle_event(SessionMessage::InputMuteApplied { id, active: false })
+            .unwrap();
+        assert_eq!(result.recv().unwrap().unwrap()["muted"], false);
+        actor.poll().unwrap();
+        assert!(
+            actor.pending_settings.is_empty(),
+            "programmatic mute echoed as another command"
+        );
+        let (response, _reply) = mpsc::sync_channel(1);
+        let start = actor.restart_start(
+            PendingRestart {
+                arguments: vec!["session".into()],
+                expert_spokesperson: false,
+                response,
+            },
+            InputDuringTtsPolicy::AllowBargeIn,
+        );
+        assert!(start.system_input_mute.is_some());
+        drop(actor);
+        unsafe { application.setInputMuted_error(true) }.unwrap();
+        assert!(start.muted.load(Ordering::SeqCst));
+        unsafe { application.setInputMuted_error(false) }.unwrap();
+        assert!(!start.muted.load(Ordering::SeqCst));
+        child.kill().unwrap();
+        child.wait().unwrap();
+    }
+
+    #[test]
     fn mute_is_committed_before_it_is_acknowledged() {
         let mut child = Command::new("/bin/cat")
             .stdin(Stdio::piped())
@@ -3235,7 +3975,7 @@ mod tests {
             .handle_event(SessionMessage::InputMuteApplied { id, active: true })
             .unwrap();
         acknowledged.recv().unwrap().unwrap();
-        // A restart that runs before the caller resumes reads this flag.
+        // The acknowledged mute state remains available across restart handoff.
         assert!(muted.load(Ordering::SeqCst));
         drop(actor);
         assert!(child.wait().unwrap().success());
