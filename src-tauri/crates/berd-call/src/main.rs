@@ -72,6 +72,8 @@ mod microphone_recovery;
 mod saved_settings;
 mod session_audio;
 mod session_framing;
+#[cfg(target_os = "macos")]
+mod system_input_mute;
 
 use session_audio::{
     AudioHostAck, AudioOutputControlRequest, AudioPipeTransport, RemotePcmAudioOutput,
