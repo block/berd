@@ -498,9 +498,21 @@ fn main() {
         Some("start") => {
             let options = parse_or_exit(parse_saved_start_args(&args), &args);
             #[cfg(target_os = "macos")]
+            let _update_guard = match berd_call::update_guard::hold_call() {
+                Ok(guard) => Some(guard),
+                Err(error) => {
+                    eprintln!("berd-call could not guard app updates during this call: {error}");
+                    None
+                }
+            };
+            #[cfg(target_os = "macos")]
             if let Err(error) = host_session::route_stop_signals(options.port) {
                 eprintln!("berd-call start failed: {error}");
                 std::process::exit(1);
+            }
+            #[cfg(target_os = "macos")]
+            if _update_guard.is_some() {
+                request_bundled_app_update();
             }
             #[cfg(target_os = "macos")]
             if let Err(error) = menu_bar::run(options) {
@@ -640,6 +652,49 @@ fn main() {
         },
         Some(command) => usage_error(&format!("unrecognized command: {command}"), &args),
         None => usage_error("a command is required", &args),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn bundled_app_path(executable: &Path) -> Option<PathBuf> {
+    if executable.file_name()?.to_str()? != "berd-call" {
+        return None;
+    }
+    let macos = executable.parent()?;
+    if macos.file_name()?.to_str()? != "MacOS" {
+        return None;
+    }
+    let contents = macos.parent()?;
+    if contents.file_name()?.to_str()? != "Contents" {
+        return None;
+    }
+    let app = contents.parent()?;
+    (app.file_name()?.to_str()? == "Berd.app").then(|| app.to_path_buf())
+}
+
+#[cfg(target_os = "macos")]
+fn request_bundled_app_update() {
+    let Some(app_path) = std::env::current_exe()
+        .ok()
+        .and_then(|executable| bundled_app_path(&executable))
+    else {
+        return;
+    };
+    // `open -g` returns promptly and routes the URL to an already-running app,
+    // or starts this same bundle in the background. Berd owns update trust.
+    match std::process::Command::new("/usr/bin/open")
+        .arg("-g")
+        .arg("-a")
+        .arg(app_path)
+        .arg("berd://update-check")
+        .spawn()
+    {
+        Ok(mut child) => {
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+        }
+        Err(error) => eprintln!("berd-call could not request a background app update: {error}"),
     }
 }
 
@@ -7384,6 +7439,18 @@ mod tests {
     use std::os::fd::IntoRawFd;
     use std::os::unix::net::UnixStream;
     use std::sync::Mutex;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn update_check_only_targets_the_owning_app_bundle() {
+        let bundle = Path::new("/Applications/Berd.app/Contents/MacOS/berd-call");
+        assert_eq!(
+            bundled_app_path(bundle),
+            Some(PathBuf::from("/Applications/Berd.app"))
+        );
+        assert!(bundled_app_path(Path::new("/tmp/berd-call")).is_none());
+        assert!(bundled_app_path(Path::new("/Applications/Berd.app/Contents/MacOS/other")).is_none());
+    }
 
     #[test]
     fn status_cues_ignore_pending_recognition_but_suppress_actual_audio() {

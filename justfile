@@ -630,7 +630,7 @@ stage-sidecar:
 
 [unix]
 _stage-sidecar-unix:
-    TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)" && GOOSE_BUILD_PROFILE=debug ./scripts/prepare-goose-sidecar.sh && CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-berdctl-sidecar.sh && ./scripts/prepare-catch-sidecar.sh
+    TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)" && GOOSE_BUILD_PROFILE=debug ./scripts/prepare-goose-sidecar.sh && BERD_CALL_BUNDLE=0 CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-berdctl-sidecar.sh && ./scripts/prepare-catch-sidecar.sh
 
 [windows]
 _stage-sidecar-windows:

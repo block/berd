@@ -562,6 +562,26 @@ describe("development Block-feature resources", () => {
 });
 
 describe("build-macos Block-service feature seam", () => {
+  it("bundles the same berd-call binary as the macOS app update", async () => {
+    const config = JSON.parse(
+      await readFile(join(repo, "src-tauri/tauri.conf.json"), "utf8"),
+    );
+    const stage = await readFile(
+      join(repo, "scripts/prepare-berdctl-sidecar.sh"),
+      "utf8",
+    );
+    const release = await readFile(
+      join(repo, "scripts/release/build-macos.sh"),
+      "utf8",
+    );
+    expect(config.bundle.externalBin).toContain("binaries/berd-call");
+    expect(stage).toContain("CARGO_ARGS+=(-p berd-call)");
+    expect(stage).toContain('CALL_OUT="$OUT_DIR/berd-call-$TRIPLE"');
+    expect(release).toContain(
+      './scripts/prepare-berdctl-sidecar.sh "$TARGET_TRIPLE"',
+    );
+  });
+
   it("defaults every Block-service family off and maps each opt-in to packaging", async () => {
     const script = await readFile(
       join(repo, "scripts/release/build-macos.sh"),
