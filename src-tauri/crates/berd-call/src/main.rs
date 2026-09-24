@@ -67,6 +67,7 @@ mod host_control;
 mod host_session;
 #[cfg(target_os = "macos")]
 mod menu_bar;
+mod saved_settings;
 mod session_audio;
 mod session_framing;
 
@@ -491,7 +492,7 @@ fn main() {
     }
     match args.get(1).map(String::as_str) {
         Some("start") => {
-            let options = parse_or_exit(parse_start_args(&args), &args);
+            let options = parse_or_exit(parse_saved_start_args(&args), &args);
             #[cfg(target_os = "macos")]
             if let Err(error) = host_session::route_stop_signals(options.port) {
                 eprintln!("berd-call start failed: {error}");
@@ -647,6 +648,7 @@ enum TranscriptDestination {
 }
 
 struct StartOptions {
+    saved: Option<(PathBuf, saved_settings::SavedSettings)>,
     port: u16,
     transcript: TranscriptDestination,
     menu_bar: bool,
@@ -729,6 +731,7 @@ fn parse_start_args(args: &[String]) -> Result<StartOptions, ParseFailure> {
         );
     }
     Ok(StartOptions {
+        saved: None,
         port,
         transcript,
         menu_bar,
@@ -736,6 +739,66 @@ fn parse_start_args(args: &[String]) -> Result<StartOptions, ParseFailure> {
         expert_spokesperson,
         session_arguments,
     })
+}
+
+fn parse_saved_start_args(args: &[String]) -> Result<StartOptions, ParseFailure> {
+    if args.iter().skip(2).any(|arg| is_help_flag(arg)) {
+        return Err(ParseFailure::HelpRequested);
+    }
+    let path = saved_settings::path()?;
+    parse_saved_start_args_at(args, path)
+}
+
+fn parse_saved_start_args_at(args: &[String], path: PathBuf) -> Result<StartOptions, ParseFailure> {
+    let mut saved = saved_settings::load(&path)?;
+    // Restore the accepted runtime rate through its own backend validation.
+    // Realtime and conventional synthesis may have different startup bounds.
+    if saved.tts.is_some() {
+        saved.arguments = saved
+            .arguments
+            .chunks_exact(2)
+            .filter(|pair| pair[0] != "--rate")
+            .flat_map(|pair| pair.iter().cloned())
+            .collect();
+    }
+    let mut merged = args[..2].to_vec();
+    merged.extend(saved_settings::merge_arguments(
+        &saved.arguments,
+        &args[2..],
+    ));
+    let mut options = parse_start_args(&merged)?;
+    // Explicit synthesis or mode choices use normal startup validation.
+    if args
+        .iter()
+        .any(|arg| matches!(arg.as_str(), "--tts-backend" | "--mode" | "--model-dir"))
+    {
+        saved.tts = None;
+    }
+    if let Some(settings) = &mut saved.tts {
+        for pair in args[2..].windows(2) {
+            match pair[0].as_str() {
+                "--rate" => {
+                    *settings = settings
+                        .clone()
+                        .with_rate(pair[1].parse::<f32>().map_err(|_| "invalid rate")?)
+                }
+                "--voice" => match settings {
+                    TtsSettings::Siri { voice, .. }
+                    | TtsSettings::Pocket { voice, .. }
+                    | TtsSettings::OpenAi { voice, .. } => *voice = pair[1].clone(),
+                },
+                "--language" => {
+                    if let TtsSettings::Siri { language, .. } = settings {
+                        *language = pair[1].clone();
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    saved.arguments = options.session_arguments[1..].to_vec();
+    options.saved = Some((path, saved));
+    Ok(options)
 }
 
 #[derive(Debug, PartialEq)]
@@ -11034,6 +11097,38 @@ mod tests {
         assert!(
             parse_host_settings_args(&args(&["berd-call", "settings", "--rate", "fast"])).is_err()
         );
+    }
+
+    #[test]
+    fn saved_start_restores_preferences_but_not_agent_routing() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        saved_settings::save(
+            &path,
+            &saved_settings::SavedSettings {
+                arguments: args(&["--voice", "Aaron", "--language", "en-US", "--rate", "1.5"]),
+                tts: Some(TtsSettings::Siri {
+                    voice: "Aaron".into(),
+                    language: "en-US".into(),
+                    rate: 1.5,
+                }),
+                input_policy: Some(berd_call::input::InputDuringTtsPolicy::SuppressInput),
+            },
+        )
+        .unwrap();
+        let restored =
+            parse_saved_start_args_at(&args(&["berd-call", "start"]), path.clone()).unwrap();
+        assert_eq!(restored.transcript, TranscriptDestination::None);
+        assert_eq!(restored.saved.unwrap().1.tts.unwrap().rate(), 1.5);
+        let changed = parse_saved_start_args_at(
+            &args(&["berd-call", "start", "--rate", "1.2", "--codex"]),
+            path,
+        )
+        .unwrap();
+        assert_eq!(changed.transcript, TranscriptDestination::Codex);
+        let saved = changed.saved.unwrap().1;
+        assert_eq!(saved.tts.unwrap().rate(), 1.2);
+        assert!(!saved.arguments.contains(&"--codex".into()));
     }
 
     #[test]

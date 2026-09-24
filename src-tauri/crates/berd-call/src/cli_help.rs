@@ -42,7 +42,14 @@ options are the same as `berd-call session`, except the PCM descriptor is owned
 internally. `--stream` prints cursor, role, and text as TSV. `--codex` delivers
 the same records to the calling Codex task (requires CODEX_THREAD_ID). A
 menu-bar item controls speech rate, input muting, and ending the call; pass
-`--no-menu-bar` to omit it."#;
+`--no-menu-bar` to omit it.
+
+Accepted voice, rate, and input policy settings are saved for the next call.
+Microphone mute is temporary; each new call starts unmuted. Explicit startup
+options override saved defaults. Preferences are stored in
+$XDG_CONFIG_HOME/berd-call/settings.json or
+$HOME/.config/berd-call/settings.json. BERD_CALL_SETTINGS_FILE selects an
+alternate file. Agent identity and transcript routing are never saved."#;
 
 const SPEAK_HELP: &str = r#"Speak through the active local voice call.
 
@@ -222,5 +229,17 @@ pub(crate) fn usage_for(args: &[String]) -> &'static str {
         if topic.pop().is_none() {
             return TOP_LEVEL_HELP;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::START_HELP;
+
+    #[test]
+    fn start_help_distinguishes_saved_preferences_from_transient_mute() {
+        assert!(START_HELP.contains("Accepted voice, rate, and input policy settings are saved"));
+        assert!(START_HELP.contains("Microphone mute is temporary"));
+        assert!(!START_HELP.contains("microphone mute settings are saved"));
     }
 }
