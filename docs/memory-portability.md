@@ -89,10 +89,11 @@ isolated run. The dedicated VM was stopped after validation. These results
 prove neither native credential access nor Windows runtime behavior. Rosetta
 execution does not replace final Intel-hardware acceptance.
 
-The local integrated Mac worktree also passed 45 app memory tests, 214 release-
-script tests, frontend checks (including typecheck/i18n), Tauri-check variants,
-and diff whitespace checks after these changes. This is a focused integration
-result, not the final full CI gate.
+The integrated Mac implementation subsequently passed the full `just ci` gate:
+7,962 frontend tests (one skipped), 214 release-script tests, configured Rust
+lanes, formatting/lint/typecheck/i18n, Tauri checks, clippy, and build. The broader
+focused app-memory filter passed 45 tests. Branch reconstruction matched the
+tested source; the published PR still requires its own CI and native acceptance.
 
 Native Windows/MSVC execution, full app/sidecar integration on newly supported
 targets, platform packaging, real isolated keystore lifecycle tests, and the

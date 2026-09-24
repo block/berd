@@ -1,61 +1,114 @@
 # Memory encryption handoff
 
-## Status
+## Status and stack
 
-Encryption is published as draft PR #347, originally based on memory PR #290 at `7aa3392ea272d058af9a2390dbfdc8452ce46a50`. Draft #348 separately repairs the voice catalog regression in #289. A local macOS-first integration brings current main and the catalog repair together without rewriting the stack owner's branches.
+Draft #347 extends memory MCP #290 (`clay/memory-mcp`); it does not replace
+foundation #288 or reviewed-proposals #289. The follow-up branch includes the
+attributable #348 voice-catalog repair and main at `2f93fb34`, matching the tested
+integration. The owner branches are unchanged; later stack refresh remains
+coordinated with their owner. This is not a claim of validation against the
+latest main.
 
-**Implementation in progress; keep draft.** This follow-up limits memory to Apple-silicon macOS, with absence checks on Windows, Linux, and Intel Mac. Native signed app/sidecar key access, final integrated validation, security review, and the existing-data/recovery rollout decisions remain open. The test table below records the earlier encryption revision, not completed validation of this follow-up.
+**Full local integration validation passed. Keep the PR draft.** Default desktop
+memory availability remains Apple-silicon macOS. The `portable-store` feature
+validates the shared encrypted store/MCP on Intel Mac, Linux, and Windows without
+enabling those desktop commands, UI, managed registration, or packages. Actual
+signed app/sidecar key access and rollout decisions remain open.
 
 ## What changed
 
-- Shared authenticated encryption for active documents, pending proposals, suppression fingerprints, approval metadata, and transaction journals.
-- OS-keystore key management with explicit, retriable initialization; established missing keys never regenerate.
-- Cross-process locking and recoverable encrypted transactions for document/approval/deletion-suppression changes.
-- Memory-specific UI reads and policy-gated approved recall snapshots; MCP reads the encrypted store and never creates keys.
-- Explicit Markdown import into an unsaved review draft; plaintext export behind a warning and native picker.
-- Backend normalization, credential rejection, strict policy schema, no-follow storage access, and no corrupted-data-as-empty fallback.
-- Memory-specific Rust tests and a corrected MCP binary target name. The original change staged Linux memory too; the macOS-first follow-up removes unsupported-target runtime/packaging and tests its absence.
-- Product-law update: editable in Berd and portable as Markdown, rather than live plaintext-file editing.
+- Authenticated encryption for documents, pending proposals, suppression
+  fingerprints, approval metadata, and transaction journals.
+- Explicit, retryable key initialization; established missing keys never
+  regenerate. No plaintext fallback or automatic legacy migration.
+- Pending key authorization does not hold the policy/transaction lock.
+  Initialization is separately serialized and root/markers are revalidated
+  before recovery/publication. Blocking app operations use bounded workers;
+  cancelled async waiters do not pretend to cancel native credential calls.
+- Policy-gated approved recall and read-only MCP. Repeated memory-off transitions
+  reach external harnesses; unapproved/private content remains excluded.
+- In-app editing and explicit Markdown import/export. Import is an unsaved
+  review draft; export warns that the selected file is plaintext.
+- Compiled-target availability enforced through native, frontend, MCP, and
+  packaging paths, including stale settings and managed config fragments.
+- Linux directory-sync repair, Windows contention classification, retained-handle
+  identity checks, and opt-in portable-store validation with real key backends.
+- A read-only signature-inspection helper and native acceptance procedure.
+  Signature metadata does not prove key authorization.
 
 ## Validation
 
-All data tests use synthetic fixtures. No live memory files or production credential entries were accessed. Native probe scope is described separately.
+The implementation snapshot passed the full repository `just ci` gate on
+September 24, 2026. Reconstruction of the PR branch matched all 2,617 recorded
+source entries; subsequent documentation updates reconcile this report. Raw
+logs, session data, and local machine paths are not included in the repository.
 
 | Check | Result |
 |---|---|
-| Shared storage, MCP and stdio tests | 55 passed |
-| Tauri memory command tests | 29 passed |
-| Frontend memory tests, including initialization retry | 113 passed |
-| `just check` | Passed |
+| Full frontend suite | 7,962 passed, one skipped, across 652 files |
+| Release-script suite | 214 passed |
+| Configured Rust test lanes | 267 passed, one ignored across invocations |
+| Shared-store/MCP/stdio on Apple-silicon Mac | 47 + 20 + 1 passed |
+| Memory commands within full CI | 32 passed |
+| Broader focused app-memory filter | 45 passed, including resolver/config tests |
+| Frontend/Rust formatting, lint, i18n, typecheck | Passed |
+| Tauri-check and configured clippy variants | Passed |
 | Frontend production build | Passed |
-| `just tauri-check` | Passed, including app features and berdctl |
-| Rust formatting and whitespace checks | Passed |
-| `just clippy` | Passed with warnings denied, including app feature variants, memory crate/tests, CLI and broker |
-| Release-script suite | 104 passed |
-| Final full frontend suite | 7,912 passed, 14 failed, 1 skipped; all 14 failing test names exactly match the initial voice-settings failures. |
-| Release-mode MCP staging | Passed on aarch64 macOS |
-| Staged release MCP smoke | Initialize, two read-only tools, policy-off rejection passed in an isolated HOME; no store files created |
-| UI browser fixture | Import does not write; explicit Save makes one atomic save IPC. Export warning and cancel verified. Native pickers mocked. |
-| Independent final source review | No new high-confidence actionable findings; not a substitute for platform/security acceptance |
-| Native keychain probe | Parent create/read passed; separate reader timed out. Exact synthetic entry deleted and confirmed absent. Shared access is NOT established. |
+| Intel-target runtime under Rosetta | 68 portable tests passed; disabled-target tests also passed |
+| Isolated Linux arm64 runtime | 68 portable tests passed; disabled-target tests also passed |
+| Windows GNU check and clippy | Default/portable compilation passed; no Windows runtime execution |
+| Portable crate clippy on Mac/Linux | Passed with warnings denied |
 
-Full local `just ci` stopped at the voice failures after the preceding gates passed. Those failures were later traced to #289's changed/missing voice translations, not current main; #348 fixes the catalog. Release-script tests and the frontend build passed separately, not within that stopped CI invocation.
+The Rust lanes are those configured by `just ci`, not an unfiltered test of every
+app module. Existing ignored/skipped tests were not newly disabled for this work.
+Non-fatal test-build and frontend bundler warnings remain. Generic frontend
+build success does not establish native packaging or signed acceptance.
 
-The published encryption revision then exposed Linux `EBADF` publication failures and Windows lock-related failures in CI. These remain deferred unsupported-platform defects, not fixed findings. In macOS CI, all shared memory/MCP tests passed before the broader app test build failed on missing `sherpa-onnx-c-api`. The macOS-first follow-up must clear full applicable CI and prove absence on excluded targets. Raw local logs are not included in the shareable package.
+Data tests use synthetic temporary stores/injected keys. Linux tests ran in a
+local container with networking disabled, no host-home mounts, and no credential
+service. The VM was stopped afterward. Windows protocol unit tests inject a
+store; the HOME-isolated subprocess test is Unix-only because Windows Known
+Folder discovery does not honor that isolation.
 
-## Before merge
+Earlier revisions had voice-catalog failures, Linux `EBADF` directory-sync
+failures, Windows lock-contention failures, and a missing Sherpa native cache
+library. The catalog/cache repairs are integrated, Linux runtime regression now
+passes, and Windows source repairs compile. Windows runtime behavior still needs
+native verification; no claim is made that cross-compilation closes it.
 
-1. **Resolve native key access using actual signed app and bundled sidecar.** The local debug probe did not prove interoperability. Test prompts, denial, relaunch, update, and unavailable credentials. If shared access is unreliable or unacceptable, have the app serve approved recall to the sidecar over authenticated local IPC. That broker is not implemented here.
-2. **Decide existing-data rollout.** Legacy plaintext stores are refused, left untouched. If testers/users already have memory, add an explicit migration covering documents, proposals, suppression, and approval state. No silent reset or automatic approval. No key recovery/transfer flow is claimed.
-3. **Prove the target boundary and final Mac behavior.** Only Apple-silicon macOS supports memory. Windows, Linux, and Intel Mac must have no memory command dispatch, managed sidecar startup, store/key access, or background requests, including stale enabled settings and old app-managed MCP fragments. Keep ordinary Windows/Linux CI. Actual signed Mac lifecycle acceptance is still required.
-4. **Keep the threat boundary honest.** Topic filenames and file sizes are visible. Exports, historical backups, and agent transcripts are outside encrypted storage. No complete same-user isolation or authenticated-snapshot rollback protection is claimed. Old plaintext writers can damage the same-root encrypted store; select a downgrade policy before rollout.
-5. **Close the actual #290 executable-pathjacking finding.** The unresolved review at https://github.com/block/berd/pull/290#discussion_r3929898945 concerns sidecar executable resolution, not Markdown import. Confirm the hardened resolver and Mac-only runtime meet the agreed threat requirement, with a targeted regression. An outdated thread is not a closed finding.
-6. **Validate import separately.** Import uses a parent directory capability, no-follow leaf opening, descriptor validation, bounded UTF-8 reads, and nonblocking Unix opens. Tests must exercise native Mac import/cancel/review behavior. The implementation does not promise picker-time file identity, an immutable snapshot, or a general I/O deadline.
+Prior UI validation used synthetic fixtures for edit/save, unsaved import,
+export confirmation/cancel, and unavailable routes. Native pickers and real
+credential prompts still require acceptance. Narrow reviews are not an
+independent approval of the complete final change.
 
-If encryption is required for launch, treat the four-PR sequence as one release unit. Do not ship the lower memory layers without encryption merely because those PRs merge first.
+## Before merge or release
 
-## Best delivery path
+1. **Signed native key access:** test the actual app and bundled sidecar in an
+   isolated interactive account, including pending/denied authorization, off,
+   relaunch, update, unavailable credentials, and missing keys. The historical
+   debug reader timed out; its cause is unknown. Use an approved non-publishing
+   artifact path, not the release workflow merely to obtain a probe.
+2. **Existing-data rollout:** determine whether draft users need migration.
+   Legacy stores are preserved but refused. No recovery key, transfer, or
+   destructive reset flow is provided.
+3. **Platform promotion:** retain ordinary Windows/Linux CI and disabled-target
+   tests. Native Windows/MSVC, Linux Secret Service, Intel hardware/package, and
+   full desktop registration/UI/package acceptance must precede opening those
+   platform gates. See [portability](memory-portability.md).
+4. **Threat boundary:** filenames/sizes/policy remain visible; exports, historical
+   backups, transcripts, and compromised/same-user processes are outside the
+   encryption claim. Complete authenticated rollback is undetected. Older
+   plaintext writers can damage the same-root encrypted store. Select and
+   document the accepted rollout controls/limitations.
+5. **Existing security review:** confirm #290's executable-pathjacking requirement
+   with its owner. Hardened resolution does not guarantee immunity from later
+   bundle replacement. Markdown import hardening does not close that finding.
+6. **Native import/export:** verify review-before-save, cancel, plaintext warning,
+   and destination behavior. No picker-time identity, immutable snapshot, or
+   general I/O deadline is promised.
+7. **Published candidate:** keep DCO and code-owner review requirements, verify CI
+   on the actual PR head, and coordinate any subsequent stack/base changes.
 
-Offer the stack owner a draft integration PR based on `clay/memory-mcp` (#290), keeping all readers and writers together. Do not submit it as a competing replacement for the stack or mix in the abandoned prototype. Include this test table, screenshots, and the native keychain result in the PR body.
-
-The stack owner can review the coherent patch first, then either keep one follow-up commit or fold the storage/UI changes into #288, queue changes into #289, and recall changes into #290. Splitting into independently mergeable partial encryption commits would leave broken readers or unencrypted queues.
+Encryption and the lower memory layers must reach users as one release unit.
+The owner may retain the coherent follow-up or fold its hunks into the lower
+stack; do not ship partially encrypted readers/writers or plaintext queues.

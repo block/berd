@@ -1,12 +1,12 @@
 # Encrypted memory implementation
 
-The encryption implementation is draft PR #347, originally based on memory PR #290 at `7aa3392ea272d058af9a2390dbfdc8452ce46a50`. The macOS-first follow-up is in local integration; no release readiness is implied. Validation results belong in the handoff report, not inferred from this design.
+The encryption implementation is draft PR #347, originally based on memory PR #290 at `7aa3392ea272d058af9a2390dbfdc8452ce46a50`. The follow-up has passed local integration validation; signed native acceptance and rollout decisions remain open. Validation results belong in the handoff report, not inferred from this design.
 
 ## Platform availability
 
 The first supported target is Apple-silicon macOS (`aarch64-apple-darwin`). Memory availability is a compiled-platform boundary, separate from the person's explicit memory policy. The target gate applies to commands, storage, MCP startup, renderer callers, and resolved packaging. Windows, Linux, and Intel Mac builds must not operate Berd memory. They leave existing memory files and credentials unchanged; a stale enabled policy or dev override must not activate it.
 
-Frontend platform labels and browser user agents are not security boundaries. Native target gates remain authoritative even if renderer calls are forced. The absence guarantee covers Berd's memory subsystem and managed MCP registration, not arbitrary user-installed tools or older binaries launched separately. Keep normal Windows/Linux CI and add tests for feature absence instead of claiming their unsupported memory-operation defects are fixed.
+Frontend platform labels and browser user agents are not security boundaries. Native target gates remain authoritative even if renderer calls are forced. The absence guarantee covers Berd's memory subsystem and managed MCP registration, not arbitrary user-installed tools or older binaries launched separately. Keep normal Windows/Linux CI and tests for feature absence. An explicit `portable-store` crate feature exercises the shared store and standalone MCP on Intel Mac, Linux, and Windows without opening desktop/package gates. Linux directory-sync and Windows contention repairs are included; Linux runtime and Windows cross-compilation passed, but Windows execution and real credential access remain unverified. See [portability scope](memory-portability.md).
 
 ## Boundary
 

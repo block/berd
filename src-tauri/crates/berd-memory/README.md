@@ -120,11 +120,14 @@ recovery; they are not automatically deleted or treated as a fresh store.
 
 The keyring service is `com.block.berd.memory.active.v1`, with account
 `active-store-<store UUID>`. These names are separate from the abandoned prototype.
-Native storage and the MCP executable are active only on Apple-silicon macOS;
-Windows, Linux, and Intel Mac builds exclude them. The active backend is macOS
-Keychain. Signed app/sidecar authorization, prompts, relaunch, and upgrades still
-need isolated native acceptance; automated tests do not access a real keychain.
-Unsupported-platform memory defects remain deferred, not fixed by this gate.
+By default, native storage and the MCP executable are active only on
+Apple-silicon macOS. Explicit `portable-store` builds enable this crate on Intel
+Mac, Windows (Credential Manager), and Linux (Secret Service with encrypted
+transport). Desktop availability and packaging on those targets remain disabled.
+Signed app/sidecar authorization, prompts, relaunch, and upgrades still need
+isolated native acceptance; automated tests do not access real credential stores.
+Linux sync and Windows contention repairs are included, but Windows runtime
+acceptance remains outstanding. See the portability report for exact evidence.
 
 Capability-relative directory/file operations reject symlink roots, record
 parents, files, journals, and locks. No-follow operations retain directory
