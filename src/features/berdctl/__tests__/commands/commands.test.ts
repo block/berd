@@ -5322,6 +5322,33 @@ describe("info", () => {
     });
   });
 
+  it("get_context preserves context when the project lookup fails", async () => {
+    controller.getAppContext.mockReturnValue({
+      view: "chat",
+      activeSessionId: "session-2",
+      activeProjectId: "project-9",
+    });
+    mocks.listAllProjects.mockRejectedValue(new Error("backend unavailable"));
+
+    const result = (await dispatchCommand(
+      "info",
+      { action: "get_context" },
+      ctx,
+    )) as {
+      view: string;
+      active_session_id: string | null;
+      active_project_id: string | null;
+      active_project_name: string | null;
+    };
+
+    expect(result).toMatchObject({
+      view: "chat",
+      active_session_id: "session-2",
+      active_project_id: "project-9",
+      active_project_name: null,
+    });
+  });
+
   it("get_context does not refresh projects when no project is active", async () => {
     controller.getAppContext.mockReturnValue({
       view: "home",

@@ -72,7 +72,7 @@ name and may not match the id (e.g. "goose-internal" / "Berd").`,
     const [nativeVoiceStatus, activeProject] = await Promise.all([
       getVoiceConversationStatus(),
       activeProjectId
-        ? findCurrentProjectForBerdctl(activeProjectId)
+        ? findCurrentProjectForBerdctl(activeProjectId).catch(() => null)
         : Promise.resolve(null),
     ]);
     const voiceAfterRefresh = useVoiceConversationStore.getState();
