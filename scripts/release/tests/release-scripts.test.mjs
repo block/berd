@@ -564,7 +564,7 @@ describe("development Block-feature resources", () => {
 describe("build-macos Block-service feature seam", () => {
   it("bundles the same berd-call binary as the macOS app update", async () => {
     const config = JSON.parse(
-      await readFile(join(repo, "src-tauri/tauri.conf.json"), "utf8"),
+      await readFile(join(repo, "src-tauri/tauri.macos.conf.json"), "utf8"),
     );
     const stage = await readFile(
       join(repo, "scripts/prepare-berdctl-sidecar.sh"),

@@ -13,8 +13,8 @@ usage() {
   cat <<'USAGE'
 Usage: scripts/prepare-berdctl-sidecar.sh [target-triple]
 
-Builds the berdctl, berd-call, and berd-monitor workspace crates in release mode and
-copies their binaries into src-tauri/binaries with the target triple suffix
+Builds the berdctl and berd-monitor workspace crates in release mode, plus
+berd-call for macOS targets, and copies their binaries with the triple suffix
 required by Tauri.
 
 The triple defaults to the rustc host. Pass it explicitly (or set
@@ -34,9 +34,6 @@ fi
 
 EXPLICIT_TRIPLE="${1:-${BERDCTL_TRIPLE:-}}"
 CARGO_ARGS=(build -p berdctl -p berd-monitor --release)
-if [[ "${BERD_CALL_BUNDLE:-1}" == "1" ]]; then
-  CARGO_ARGS+=(-p berd-call)
-fi
 if [[ "${VITE_FEEDBACK:-0}" == "1" ]]; then
   CARGO_ARGS+=(--features berdctl/block-feedback)
 fi
@@ -49,6 +46,9 @@ else
     echo "Could not determine rust host target." >&2
     exit 1
   fi
+fi
+if [[ "$TRIPLE" == *apple-darwin && "${BERD_CALL_BUNDLE:-1}" == "1" ]]; then
+  CARGO_ARGS+=(-p berd-call)
 fi
 
 (cd src-tauri && cargo "${CARGO_ARGS[@]}")
@@ -83,7 +83,7 @@ cp "$BUILT" "$OUT"
 chmod +x "$OUT"
 echo "Staged berdctl sidecar: $OUT"
 
-if [[ "${BERD_CALL_BUNDLE:-1}" == "1" ]]; then
+if [[ "$TRIPLE" == *apple-darwin && "${BERD_CALL_BUNDLE:-1}" == "1" ]]; then
   if [[ -n "$EXPLICIT_TRIPLE" ]]; then
     CALL_BUILT="$TARGET_DIR/$TRIPLE/release/berd-call"
   else

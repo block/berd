@@ -20,6 +20,7 @@ fn lock_file() -> io::Result<File> {
 fn lock_file_at(path: &Path) -> io::Result<File> {
     OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(path)
