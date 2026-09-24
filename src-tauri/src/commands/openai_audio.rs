@@ -28,6 +28,7 @@ use super::pocket_voice::{
 use super::{
     native_voice::{InterruptionSensitivity, NativeVoiceState},
     openai_voice_credentials::{self, OpenAiVoiceCredential},
+    openai_voice_endpoints::{self, VoiceEndpointKind},
     pocket_voice::VoiceInterruptionMode,
     voice_capture::VoiceCaptureState,
 };
@@ -127,6 +128,7 @@ enum OpenAiStreamCommand {
 pub struct OpenAiVoiceStatus {
     stt_configured: bool,
     tts_configured: bool,
+    realtime_configured: bool,
     stt_configuration_source: OpenAiVoiceConfigurationSource,
     tts_configuration_source: OpenAiVoiceConfigurationSource,
     stt_unavailable_reason: Option<String>,
@@ -205,7 +207,7 @@ fn normalize_openai_base_url(raw_url: String) -> Result<String, String> {
     Ok(url.to_string().trim_end_matches('/').to_string())
 }
 
-fn base_url() -> Result<String, String> {
+pub(crate) fn base_url() -> Result<String, String> {
     if let Some(base_url) = env_trimmed(BASE_URL_ENV) {
         return normalize_openai_base_url(base_url);
     }
@@ -213,20 +215,7 @@ fn base_url() -> Result<String, String> {
 }
 
 pub(crate) fn realtime_endpoint() -> Result<String, String> {
-    let mut url = reqwest::Url::parse(&endpoint("realtime")?)
-        .map_err(|error| format!("OpenAI realtime endpoint is invalid: {error}"))?;
-    url.query_pairs_mut().append_pair("intent", "transcription");
-    match url.scheme() {
-        "http" => url.set_scheme("ws").expect("compatible scheme"),
-        "https" => url.set_scheme("wss").expect("compatible scheme"),
-        "ws" | "wss" => {}
-        scheme => {
-            return Err(format!(
-                "OpenAI realtime endpoint has unsupported scheme: {scheme}"
-            ))
-        }
-    }
-    Ok(url.to_string())
+    openai_voice_endpoints::effective_url(VoiceEndpointKind::Stt)
 }
 
 pub(crate) fn transcription_model() -> String {
@@ -263,11 +252,7 @@ fn stt_configuration_source() -> OpenAiVoiceConfigurationSource {
     }
 }
 
-fn endpoint(path: &str) -> Result<String, String> {
-    endpoint_for_base_url(&base_url()?, path)
-}
-
-fn endpoint_for_base_url(base_url: &str, path: &str) -> Result<String, String> {
+pub(crate) fn endpoint_for_base_url(base_url: &str, path: &str) -> Result<String, String> {
     let mut url = reqwest::Url::parse(base_url)
         .map_err(|error| format!("OpenAI voice endpoint is invalid: {error}"))?;
     let base_path = url.path().trim_end_matches('/');
@@ -377,21 +362,29 @@ pub async fn get_openai_voice_status(
     let tts_available = cfg!(target_os = "macos");
     let credential_revision = state.credential_revision.load(Ordering::Acquire);
     let credential_result = tauri::async_runtime::spawn_blocking(move || {
-        openai_voice_credentials::read(OpenAiVoiceCredential::SpeechToText)
+        (
+            openai_voice_credentials::is_present(OpenAiVoiceCredential::SpeechToText),
+            openai_voice_credentials::is_present(OpenAiVoiceCredential::TextToSpeech),
+            openai_voice_credentials::is_present(OpenAiVoiceCredential::Realtime),
+        )
     })
     .await
     .map_err(|error| format!("Could not check OpenAI voice credentials: {error}"))?;
-    let credential_error = credential_result.as_ref().err().cloned();
-    let stt_error = credential_error.clone();
-    let tts_error = tts_available.then_some(credential_error).flatten();
-    let stt_configured = credential_result.unwrap_or(None).is_some();
-    let tts_configured = tts_available && stt_configured;
+    let (stt_result, tts_result, realtime_result) = credential_result;
+    let stt_error = stt_result.as_ref().err().cloned();
+    let tts_error = tts_available
+        .then(|| tts_result.as_ref().err().cloned())
+        .flatten();
+    let stt_configured = stt_result.unwrap_or(false);
+    let tts_configured = tts_available && tts_result.unwrap_or(false);
+    let realtime_configured = realtime_result?;
     if state.credential_revision.load(Ordering::Acquire) == credential_revision {
         state.configured.store(stt_configured, Ordering::Release);
     }
     Ok(OpenAiVoiceStatus {
         stt_configured,
         tts_configured,
+        realtime_configured,
         stt_configuration_source: stt_configuration_source(),
         tts_configuration_source: tts_configuration_source(),
         stt_unavailable_reason: stt_error,
@@ -472,7 +465,10 @@ pub async fn set_openai_tts_api_key(
             stop_openai_voice_inner(&state)?;
             openai_voice_credentials::store(OpenAiVoiceCredential::TextToSpeech, api_key)?;
             state.credential_revision.fetch_add(1, Ordering::AcqRel);
-            state.configured.store(true, Ordering::Release);
+            state.configured.store(
+                openai_voice_credentials::is_present(OpenAiVoiceCredential::SpeechToText)?,
+                Ordering::Release,
+            );
             app.emit(SETTINGS_CHANGED_EVENT, ())
                 .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))
         })
@@ -491,7 +487,10 @@ pub async fn clear_openai_tts_api_key(
             stop_openai_voice_inner(&state)?;
             openai_voice_credentials::clear(OpenAiVoiceCredential::TextToSpeech)?;
             state.credential_revision.fetch_add(1, Ordering::AcqRel);
-            state.configured.store(false, Ordering::Release);
+            state.configured.store(
+                openai_voice_credentials::is_present(OpenAiVoiceCredential::SpeechToText)?,
+                Ordering::Release,
+            );
             app.emit(SETTINGS_CHANGED_EVENT, ())
                 .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))
         })
@@ -694,6 +693,7 @@ pub fn reset_openai_voice_settings(
     state: State<'_, OpenAiVoiceState>,
 ) -> Result<(), String> {
     let defaults = OpenAiVoiceSettings::default();
+    openai_voice_endpoints::reset()?;
     {
         let mut playback = state
             .playback
@@ -810,7 +810,7 @@ fn run_openai_voice_stream(
     voice: String,
 ) -> Result<StreamOutcome, StreamFailure> {
     let tts = ConfiguredTtsSlot::new(TtsConfiguration::openai(
-        endpoint("audio/speech")?,
+        openai_voice_endpoints::effective_url(VoiceEndpointKind::Tts)?,
         key,
         speech_model(),
         voice,

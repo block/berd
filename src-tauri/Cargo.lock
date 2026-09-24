@@ -41,6 +41,7 @@ dependencies = [
  "portable-pty",
  "reqwest 0.13.4",
  "rodio",
+ "security-framework 3.7.0",
  "semver",
  "serde",
  "serde_json",

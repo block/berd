@@ -111,7 +111,12 @@ berd-call session --tts-backend openai --rate 1.0
 berd-call session --tts-backend pocket --model-dir /path/to/native-voice-v2 --voice george --rate 1.0
 berd-call session --stt-backend parakeet --stt-model-dir /path/to/parakeet
 berd-call session --stt-backend openai
+berd-call session --tts-backend openai --mode expert-spokesperson --realtime-url ws://127.0.0.1:18870/v1/realtime
+berd-call session --tts-backend openai --tts-url https://proxy.example/v1/audio/speech
+berd-call session --stt-backend openai --stt-url wss://proxy.example/v1/realtime?intent=transcription
 ```
+
+The three URL flags take full endpoints and override only their matching service for that call. Expert–Spokesperson uses `--realtime-url` for both input and output; `--stt-url` and `--tts-url` apply only to conventional mode. Without an override, each service uses its OpenAI endpoint (or its existing environment override). `OPENAI_API_KEY` supplies the CLI credential; the desktop app stores keys separately by endpoint URL in Keychain.
 
 The default Siri backend still requires an exact installed voice name and
 language. Missing or unavailable Siri voice configuration and an unavailable

@@ -10,6 +10,7 @@ import type {
 export interface OpenAiVoiceStatus {
   sttConfigured: boolean;
   ttsConfigured: boolean;
+  realtimeConfigured: boolean;
   sttConfigurationSource: "default" | "environment";
   ttsConfigurationSource: "default" | "environment";
   sttUnavailableReason: string | null;
@@ -36,6 +37,33 @@ export const getOpenAiVoiceStatus = shareInFlight(
 
 export function setOpenAiTtsApiKey(apiKey: string): Promise<void> {
   return invoke("set_openai_tts_api_key", { apiKey });
+}
+
+export type OpenAiVoiceEndpointKind = "realtime" | "stt" | "tts";
+
+export interface OpenAiVoiceEndpoints {
+  realtime: string | null;
+  stt: string | null;
+  tts: string | null;
+}
+
+export function getOpenAiVoiceEndpoints(): Promise<OpenAiVoiceEndpoints> {
+  return invoke("get_openai_voice_endpoints");
+}
+
+export function setOpenAiVoiceEndpoint(
+  kind: OpenAiVoiceEndpointKind,
+  url: string,
+): Promise<void> {
+  return invoke("set_openai_voice_endpoint", { kind, url });
+}
+
+export function setOpenAiRealtimeApiKey(apiKey: string): Promise<void> {
+  return invoke("set_openai_realtime_api_key", { apiKey });
+}
+
+export function clearOpenAiRealtimeApiKey(): Promise<void> {
+  return invoke("clear_openai_realtime_api_key");
 }
 
 export function setOpenAiSttApiKey(apiKey: string): Promise<void> {

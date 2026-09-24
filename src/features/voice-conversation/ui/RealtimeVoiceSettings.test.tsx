@@ -7,16 +7,22 @@ import { RealtimeVoiceSettings } from "./RealtimeVoiceSettings";
 
 const openAiVoiceMocks = vi.hoisted(() => ({
   clearApiKey: vi.fn(() => Promise.resolve()),
-  getStatus: vi.fn(() => Promise.resolve({ sttConfigured: true })),
+  getStatus: vi.fn(() => Promise.resolve({ realtimeConfigured: true })),
+  getEndpoints: vi.fn(() =>
+    Promise.resolve({ realtime: null, stt: null, tts: null }),
+  ),
+  setEndpoint: vi.fn(() => Promise.resolve()),
   listenToSettings: vi.fn(() => Promise.resolve(() => undefined)),
   setApiKey: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock("../api/openAiVoice", () => ({
-  clearOpenAiSttApiKey: openAiVoiceMocks.clearApiKey,
+  clearOpenAiRealtimeApiKey: openAiVoiceMocks.clearApiKey,
+  getOpenAiVoiceEndpoints: openAiVoiceMocks.getEndpoints,
+  setOpenAiVoiceEndpoint: openAiVoiceMocks.setEndpoint,
   getOpenAiVoiceStatus: openAiVoiceMocks.getStatus,
   listenToOpenAiVoiceSettings: openAiVoiceMocks.listenToSettings,
-  setOpenAiSttApiKey: openAiVoiceMocks.setApiKey,
+  setOpenAiRealtimeApiKey: openAiVoiceMocks.setApiKey,
 }));
 
 describe("RealtimeVoiceSettings", () => {
@@ -61,9 +67,23 @@ describe("RealtimeVoiceSettings", () => {
     ).toHaveTextContent("Debug — show agent routing");
   });
 
-  it("stores the Realtime key through the shared OpenAI voice credential path", async () => {
+  it("shows the default realtime URL above its URL-scoped key", async () => {
     const user = userEvent.setup();
     renderWithProviders(<RealtimeVoiceSettings />);
+
+    expect(screen.getByLabelText("Realtime endpoint URL")).toHaveAttribute(
+      "placeholder",
+      "wss://api.openai.com/v1/realtime",
+    );
+    await user.type(
+      screen.getByLabelText("Realtime endpoint URL"),
+      "ws://127.0.0.1:18870/v1/realtime",
+    );
+    await user.click(screen.getByRole("button", { name: "Save URL" }));
+    expect(openAiVoiceMocks.setEndpoint).toHaveBeenCalledWith(
+      "realtime",
+      "ws://127.0.0.1:18870/v1/realtime",
+    );
 
     await user.type(screen.getByLabelText("OpenAI API key"), " sk-shared ");
     await user.click(screen.getByRole("button", { name: "Save key" }));

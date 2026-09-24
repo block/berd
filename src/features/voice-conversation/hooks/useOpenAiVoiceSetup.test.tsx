@@ -37,6 +37,7 @@ function status(configured: boolean): OpenAiVoiceStatus {
   return {
     sttConfigured: configured,
     ttsConfigured: configured,
+    realtimeConfigured: configured,
     sttConfigurationSource: "default",
     ttsConfigurationSource: "default",
     sttUnavailableReason: null,
