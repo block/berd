@@ -6,7 +6,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::os::fd::{FromRawFd, RawFd};
 use std::os::unix::process::CommandExt;
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -268,7 +268,7 @@ fn run_session(
         mut child,
         mut actor,
         control,
-        capture,
+        mut capture,
         failure_rx,
         running,
     } = match started {
@@ -299,6 +299,9 @@ fn run_session(
             actor.stop()?;
         }
         actor.poll()?;
+        if !actor.stopping {
+            capture.poll(&mut actor)?;
+        }
         match failure_rx.try_recv() {
             Ok(message) => return Err(message),
             Err(TryRecvError::Empty) => {}
@@ -342,7 +345,7 @@ struct StartedSession {
     child: SessionProcess,
     actor: SessionActor,
     control: Arc<SessionControl>,
-    capture: InputCapture,
+    capture: DefaultInputCapture,
     failure_rx: Receiver<String>,
     running: Arc<AtomicBool>,
 }
@@ -412,7 +415,7 @@ fn start_session(
         let id = actor.next_id();
         send_request(&writer, &SessionRequest::SetInputMuted { id, active: true })?;
     }
-    let capture = InputCapture::start(writer, failure_tx)?;
+    let capture = DefaultInputCapture::start(writer, failure_tx)?;
     actor.persist_settings(SavedPreference::SessionStart);
     let control = Arc::new(SessionControl {
         commands: command_tx,
@@ -1558,16 +1561,167 @@ fn write_frame(writer: &Arc<Mutex<ChildStdin>>, kind: u8, payload: &[u8]) -> Res
         .map_err(|error| format!("could not write voice session input: {error}"))
 }
 
+struct DefaultInputCapture {
+    recovery: crate::microphone_recovery::MicrophoneRecovery<InputCapture>,
+    writer: Arc<Mutex<ChildStdin>>,
+    failures: SyncSender<String>,
+    next_check: Instant,
+}
+
+fn default_input() -> Result<(String, cpal::Device), String> {
+    let device = cpal::default_host()
+        .default_input_device()
+        .ok_or_else(|| "no default microphone is available".to_string())?;
+    let id = device
+        .id()
+        .map_err(|error| format!("could not identify microphone: {error}"))?;
+    let config = device
+        .default_input_config()
+        .map_err(|error| format!("could not inspect microphone: {error}"))?;
+    let key = format!(
+        "{id:?}:{:?}:{}:{}",
+        config.sample_format(),
+        config.sample_rate(),
+        config.channels()
+    );
+    Ok((key, device))
+}
+
+impl DefaultInputCapture {
+    fn start(writer: Arc<Mutex<ChildStdin>>, failures: SyncSender<String>) -> Result<Self, String> {
+        let (key, device) = default_input()?;
+        let capture = InputCapture::start(device, writer.clone(), failures.clone())?;
+        Ok(Self {
+            recovery: crate::microphone_recovery::MicrophoneRecovery::new(key, capture),
+            writer,
+            failures,
+            next_check: Instant::now() + Duration::from_millis(500),
+        })
+    }
+
+    fn poll(&mut self, actor: &mut SessionActor) -> Result<(), String> {
+        let now = Instant::now();
+        if now < self.next_check {
+            return Ok(());
+        }
+        self.next_check = now + Duration::from_millis(500);
+        let failed = self
+            .recovery
+            .capture()
+            .is_some_and(|capture| capture.failed(now));
+        if !failed
+            && self.recovery.capture().is_some_and(|capture| {
+                capture.activity.last_callback_ms.load(Ordering::Relaxed) != 0
+            })
+            && self.recovery.confirm_activity()
+        {
+            actor.transcript.record(
+                None,
+                "lifecycle",
+                None,
+                "default microphone capture recovered",
+            )?;
+        }
+        let desired = default_input();
+        let key = desired
+            .as_ref()
+            .map(|(key, _)| key.clone())
+            .map_err(Clone::clone);
+        let writer = &self.writer;
+        let failures = &self.failures;
+        if self
+            .recovery
+            .reconcile(now, key, failed, InputCapture::stop, || {
+                // The old stream and its forwarder have stopped before this reset.
+                // ResetInput preserves acknowledged mute and input policy settings.
+                let id = actor.next_id();
+                send_request(writer, &SessionRequest::ResetInput { id })?;
+                InputCapture::start(desired?.1, writer.clone(), failures.clone())
+            })?
+        {
+            actor.input_speaking = false;
+        }
+        Ok(())
+    }
+}
+
 struct InputCapture {
-    _stream: cpal::Stream,
+    stream: Option<cpal::Stream>,
+    forwarder: Option<thread::JoinHandle<()>>,
+    errors: Receiver<String>,
+    activity: Arc<CaptureActivity>,
+}
+
+struct CaptureActivity {
+    started: Instant,
+    last_callback_ms: AtomicU64,
+}
+
+impl CaptureActivity {
+    fn new(started: Instant) -> Self {
+        Self {
+            started,
+            last_callback_ms: AtomicU64::new(0),
+        }
+    }
+
+    fn record(&self, now: Instant) {
+        self.last_callback_ms.store(
+            // Zero means no callback yet, including during startup grace.
+            now.saturating_duration_since(self.started).as_millis() as u64 + 1,
+            Ordering::Relaxed,
+        );
+    }
+}
+
+impl Drop for InputCapture {
+    fn drop(&mut self) {
+        let _ = self.stop();
+    }
 }
 
 impl InputCapture {
-    fn start(writer: Arc<Mutex<ChildStdin>>, failures: SyncSender<String>) -> Result<Self, String> {
-        let host = cpal::default_host();
-        let device = host
-            .default_input_device()
-            .ok_or_else(|| "no default microphone is available".to_string())?;
+    fn stop(&mut self) -> Result<(), String> {
+        drop(self.stream.take());
+        if let Some(forwarder) = self.forwarder.take() {
+            let deadline = Instant::now() + Duration::from_millis(250);
+            while !forwarder.is_finished() {
+                if Instant::now() >= deadline {
+                    // Fail the call before resetting or opening another capture.
+                    // SessionProcess cleanup kills the child, releasing its pipe.
+                    return Err("microphone forwarding did not stop within 250 milliseconds".into());
+                }
+                thread::sleep(Duration::from_millis(2));
+            }
+            forwarder
+                .join()
+                .map_err(|_| "microphone forwarding panicked".to_string())?;
+        }
+        Ok(())
+    }
+}
+
+impl InputCapture {
+    fn failed(&self, now: Instant) -> bool {
+        // CoreAudio can stop callbacks without reporting an error or changing
+        // device identity. Silent samples and muted capture still deliver callbacks.
+        let elapsed_ms = now
+            .saturating_duration_since(self.activity.started)
+            .as_millis();
+        let last_ms = u128::from(
+            self.activity
+                .last_callback_ms
+                .load(Ordering::Relaxed)
+                .saturating_sub(1),
+        );
+        self.errors.try_recv().is_ok() || elapsed_ms.saturating_sub(last_ms) >= 2_000
+    }
+
+    fn start(
+        device: cpal::Device,
+        writer: Arc<Mutex<ChildStdin>>,
+        failures: SyncSender<String>,
+    ) -> Result<Self, String> {
         let supported = device
             .default_input_config()
             .map_err(|error| format!("could not inspect the default microphone: {error}"))?;
@@ -1576,8 +1730,10 @@ impl InputCapture {
         let channels = usize::from(config.channels);
         let sample_rate = config.sample_rate;
         let (frames_tx, frames_rx) = mpsc::sync_channel::<[f32; INPUT_FRAME_SAMPLES]>(32);
+        let (capture_failure_tx, errors) = mpsc::sync_channel(1);
+        let activity = Arc::new(CaptureActivity::new(Instant::now()));
         let writer_failures = failures.clone();
-        thread::Builder::new()
+        let forwarder = thread::Builder::new()
             .name("berd-call-microphone-writer".into())
             .spawn(move || {
                 while let Ok(frame) = frames_rx.recv() {
@@ -1592,37 +1748,40 @@ impl InputCapture {
             cpal::SampleFormat::F32 => device.build_input_stream(
                 &config,
                 capture_callback(
+                    activity.clone(),
                     sample_rate,
                     channels,
                     frames_tx.clone(),
                     failures.clone(),
                     |sample: f32| sample,
                 ),
-                capture_error(failures.clone()),
+                capture_error(capture_failure_tx.clone()),
                 None,
             ),
             cpal::SampleFormat::I16 => device.build_input_stream(
                 &config,
                 capture_callback(
+                    activity.clone(),
                     sample_rate,
                     channels,
                     frames_tx.clone(),
                     failures.clone(),
                     |sample: i16| f32::from(sample) / f32::from(i16::MAX),
                 ),
-                capture_error(failures.clone()),
+                capture_error(capture_failure_tx.clone()),
                 None,
             ),
             cpal::SampleFormat::U16 => device.build_input_stream(
                 &config,
                 capture_callback(
+                    activity.clone(),
                     sample_rate,
                     channels,
                     frames_tx,
                     failures.clone(),
                     |sample: u16| (f32::from(sample) / f32::from(u16::MAX)) * 2.0 - 1.0,
                 ),
-                capture_error(failures),
+                capture_error(capture_failure_tx),
                 None,
             ),
             _ => {
@@ -1635,11 +1794,17 @@ impl InputCapture {
         stream
             .play()
             .map_err(|error| format!("could not start the default microphone: {error}"))?;
-        Ok(Self { _stream: stream })
+        Ok(Self {
+            stream: Some(stream),
+            forwarder: Some(forwarder),
+            errors,
+            activity,
+        })
     }
 }
 
 fn capture_callback<T: Copy + Send + 'static>(
+    activity: Arc<CaptureActivity>,
     sample_rate: u32,
     channels: usize,
     frames: SyncSender<[f32; INPUT_FRAME_SAMPLES]>,
@@ -1648,6 +1813,7 @@ fn capture_callback<T: Copy + Send + 'static>(
 ) -> impl FnMut(&[T], &cpal::InputCallbackInfo) + Send + 'static {
     let mut normalizer = InputNormalizer::new(sample_rate, channels);
     move |data, _| {
+        activity.record(Instant::now());
         for frame in normalizer.push(data.iter().copied().map(&convert)) {
             if frames.try_send(frame).is_err() {
                 report_failure(&failures, "microphone input could not keep up".into());
@@ -2138,6 +2304,102 @@ fn expert_delivery_role_name(role: RealtimeExpertDeliveryRole) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn microphone_teardown_reports_a_blocked_forwarder() {
+        let (_release, blocked) = mpsc::sync_channel::<()>(1);
+        let (started_tx, started) = mpsc::sync_channel(1);
+        let forwarder = thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            // Bounded test fixture: the production writer can block indefinitely.
+            let _ = blocked.recv_timeout(Duration::from_secs(2));
+        });
+        started.recv().unwrap();
+        let (_errors_tx, errors) = mpsc::sync_channel(1);
+        let mut capture = InputCapture {
+            stream: None,
+            forwarder: Some(forwarder),
+            errors,
+            activity: Arc::new(CaptureActivity::new(Instant::now())),
+        };
+        let started = Instant::now();
+        let result = capture.stop();
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(
+            result.is_err(),
+            "blocked forwarding must abort recovery, not hang or reopen"
+        );
+    }
+
+    #[test]
+    fn silent_pcm_callback_keeps_capture_activity_alive() {
+        let activity = Arc::new(CaptureActivity::new(
+            Instant::now() - Duration::from_secs(3),
+        ));
+        let (frames, _queued) = mpsc::sync_channel(32);
+        let (failures, errors) = mpsc::sync_channel(1);
+        let capture = InputCapture {
+            stream: None,
+            forwarder: None,
+            errors,
+            activity: activity.clone(),
+        };
+        assert!(capture.failed(Instant::now()));
+        let mut callback = capture_callback(activity, 48_000, 1, frames, failures, |x: f32| x);
+        let instant = cpal::StreamInstant::new(0, 0);
+        let info = cpal::InputCallbackInfo::new(cpal::InputStreamTimestamp {
+            callback: instant,
+            capture: instant,
+        });
+        callback(&[0.0; INPUT_FRAME_SAMPLES], &info);
+        assert!(!capture.failed(Instant::now()));
+    }
+
+    #[test]
+    fn stalled_microphone_reopens_even_when_device_and_error_channel_are_unchanged() {
+        let now = Instant::now();
+        let (_errors_tx, errors) = mpsc::sync_channel(1);
+        let activity = Arc::new(CaptureActivity::new(now));
+        let capture = InputCapture {
+            stream: None,
+            forwarder: None,
+            errors,
+            activity: activity.clone(),
+        };
+        let mut recovery =
+            crate::microphone_recovery::MicrophoneRecovery::new("same-device".into(), capture);
+        assert!(!recovery
+            .capture()
+            .unwrap()
+            .failed(now + Duration::from_secs(1)));
+        // Silent PCM callbacks still count as live capture; signal RMS is irrelevant.
+        activity.record(now + Duration::from_secs(1));
+        assert!(!recovery
+            .capture()
+            .unwrap()
+            .failed(now + Duration::from_secs(2)));
+        let failed = recovery
+            .capture()
+            .unwrap()
+            .failed(now + Duration::from_secs(4));
+        let mut reopened = false;
+        recovery
+            .reconcile(
+                now + Duration::from_secs(4),
+                Ok("same-device".into()),
+                failed,
+                InputCapture::stop,
+                || {
+                    reopened = true;
+                    Err("simulated reconnect still unavailable".into())
+                },
+            )
+            .unwrap();
+        assert!(
+            reopened,
+            "a silent callback stall must reopen the unchanged device"
+        );
+    }
 
     #[test]
     fn speak_waits_for_pending_delivery_and_shutdown_releases_waiters() {

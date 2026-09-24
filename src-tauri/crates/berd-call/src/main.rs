@@ -67,6 +67,8 @@ mod host_control;
 mod host_session;
 #[cfg(target_os = "macos")]
 mod menu_bar;
+#[cfg(any(target_os = "macos", test))]
+mod microphone_recovery;
 mod saved_settings;
 mod session_audio;
 mod session_framing;
