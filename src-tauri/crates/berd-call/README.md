@@ -30,9 +30,9 @@ until the call ends. An unavailable update service does not prevent the call.
 The standalone command exposes the host-facing runtime protocol plus speech,
 model-management, synthesis, and diagnostic tools. `berd-call start` runs a
 foreground call on macOS using the default input and output devices. Its
-loopback-only control endpoint supports `speak`, `status`, and `stop`; it does
-not add persisted host settings, a separate updater, or a second
-implementation of the shared call runtime.
+loopback-only control endpoint supports `speak`, `status`, and `stop`. The CLI
+uses Berd's updater when it runs from the app bundle; it does not implement a
+second updater or call runtime.
 
 ```text
 berd-call --help
