@@ -65,6 +65,8 @@ mod codex;
 mod host_control;
 #[cfg(target_os = "macos")]
 mod host_session;
+#[cfg(target_os = "macos")]
+mod menu_bar;
 mod session_audio;
 mod session_framing;
 
@@ -496,7 +498,7 @@ fn main() {
                 std::process::exit(1);
             }
             #[cfg(target_os = "macos")]
-            if let Err(error) = host_session::run(options) {
+            if let Err(error) = menu_bar::run(options) {
                 eprintln!("berd-call start failed: {error}");
                 std::process::exit(1);
             }
@@ -637,6 +639,7 @@ enum TranscriptDestination {
 struct StartOptions {
     port: u16,
     transcript: TranscriptDestination,
+    menu_bar: bool,
     non_blocking: bool,
     expert_spokesperson: bool,
     session_arguments: Vec<String>,
@@ -662,6 +665,7 @@ fn parse_start_args(args: &[String]) -> Result<StartOptions, ParseFailure> {
     let mut port = 5222_u16;
     let mut port_seen = false;
     let mut transcript = TranscriptDestination::None;
+    let mut menu_bar = true;
     let mut non_blocking = false;
     let mut session_arguments = vec!["session".to_string()];
     let mut index = 2;
@@ -679,6 +683,11 @@ fn parse_start_args(args: &[String]) -> Result<StartOptions, ParseFailure> {
                 };
                 index += 1;
             }
+            "--no-menu-bar" if menu_bar => {
+                menu_bar = false;
+                index += 1;
+            }
+            "--no-menu-bar" => return Err("--no-menu-bar may be provided only once".into()),
             "--non-blocking" if !non_blocking => {
                 non_blocking = true;
                 index += 1;
@@ -712,6 +721,7 @@ fn parse_start_args(args: &[String]) -> Result<StartOptions, ParseFailure> {
     Ok(StartOptions {
         port,
         transcript,
+        menu_bar,
         non_blocking,
         expert_spokesperson,
         session_arguments,
@@ -10938,6 +10948,24 @@ mod tests {
         assert!(start(&["--codex", "--stream"]).is_err());
         assert!(start(&["--codex", "--codex"]).is_err());
         assert!(start(&["--non-blocking"]).is_err());
+    }
+
+    #[test]
+    fn start_parser_shows_the_menu_bar_unless_disabled() {
+        let start = |flags: &[&str]| {
+            let mut all = vec!["berd-call", "start"];
+            all.extend_from_slice(flags);
+            all.extend(["--voice", "Aaron", "--language", "en-US"]);
+            parse_start_args(&args(&all))
+        };
+        assert!(start(&[]).unwrap().menu_bar);
+        let parsed = start(&["--no-menu-bar"]).unwrap();
+        assert!(!parsed.menu_bar);
+        assert!(!parsed
+            .session_arguments
+            .iter()
+            .any(|arg| arg == "--no-menu-bar"));
+        assert!(start(&["--no-menu-bar", "--no-menu-bar"]).is_err());
     }
 
     #[test]

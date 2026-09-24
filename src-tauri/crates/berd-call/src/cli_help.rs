@@ -32,12 +32,15 @@ const START_HELP: &str = r#"Run a local voice call backed by the shared session 
 
 Usage:
   berd-call start [--port PORT] [--stream | --codex] [--non-blocking]
+    [--no-menu-bar]
     --voice NAME --language BCP47 [session options]
 
 The foreground process owns the default microphone and audio output. Session
 options are the same as `berd-call session`, except the PCM descriptor is owned
 internally. `--stream` prints cursor, role, and text as TSV. `--codex` delivers
-the same records to the calling Codex task (requires CODEX_THREAD_ID)."#;
+the same records to the calling Codex task (requires CODEX_THREAD_ID). A
+menu-bar item controls speech rate, input muting, and ending the call; pass
+`--no-menu-bar` to omit it."#;
 
 const SPEAK_HELP: &str = r#"Speak through the active local voice call.
 
