@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import type { OpenAiRealtimeProtocolEvent } from "@/shared/api/openaiRealtime";
+import { setStatusSoundPreference } from "../lib/statusSoundPreference";
 import {
   collectRealtimeTranscriptSeedTurns,
   requestOpenAiRealtimeConversationStart,
@@ -118,6 +119,13 @@ const mocks = vi.hoisted(() => ({
             type: "transcript.updated",
           },
         ];
+      if (event.type === "test.emissary_discarded")
+        return [
+          {
+            itemId: "emissary-item-multi",
+            type: "transcript.discarded",
+          },
+        ];
       if (event.type === "test.handoff")
         return [
           {
@@ -200,6 +208,7 @@ const mocks = vi.hoisted(() => ({
   setControlsSuppressed: vi.fn(),
   startControls: vi.fn(),
   startRuntime: vi.fn(),
+  updateStatusSounds: vi.fn<() => Promise<void>>(),
   stopControls: vi.fn(),
   stopRuntime: vi.fn(),
   updateRuntimeSettings: vi.fn(),
@@ -358,6 +367,7 @@ vi.mock("@/shared/api/openaiRealtime", () => ({
   stopOpenAiRealtimeVoiceControls: mocks.stopControls,
   stopOpenAiRealtimeSpokespersonRuntime: mocks.stopRuntime,
   updateOpenAiRealtimeSpokespersonSettings: mocks.updateRuntimeSettings,
+  updateOpenAiRealtimeStatusSounds: mocks.updateStatusSounds,
   unknownOpenAiRealtimeHandoffIds: mocks.unknownHandoffIds,
 }));
 
@@ -510,6 +520,7 @@ describe("collectRealtimeTranscriptSeedTurns", () => {
 });
 
 beforeEach(() => {
+  window.localStorage.clear();
   vi.clearAllMocks();
   mocks.activeEmissary = null;
   mocks.createResponse = true;
@@ -538,6 +549,8 @@ beforeEach(() => {
     value: { getUserMedia: vi.fn().mockResolvedValue(stream) },
   });
   mocks.appendSessionSystemPrompt.mockResolvedValue(undefined);
+  mocks.updateStatusSounds.mockReset();
+  mocks.updateStatusSounds.mockResolvedValue(undefined);
   mocks.claimMicrophone.mockResolvedValue(undefined);
   mocks.createHandoffToolOutput.mockReturnValue({
     type: "conversation.item.create",
@@ -905,11 +918,22 @@ afterEach(async () => {
 });
 
 describe("useOpenAiRealtimeConversation lifecycle", () => {
-  it("queues live voice settings through the managed Berd Voice runtime", async () => {
+  it("queues live voice settings through the managed call runtime", async () => {
     const owner = renderConversation("session-a");
 
     await act(async () => owner.result.current.onToggle());
     await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+    expect(mocks.updateStatusSounds).toHaveBeenCalledWith(
+      "session-a",
+      "waiting",
+      { mode: "working" },
+    );
+    act(() => setStatusSoundPreference({ mode: "working-and-waiting" }));
+    expect(mocks.updateStatusSounds).toHaveBeenLastCalledWith(
+      "session-a",
+      "waiting",
+      { mode: "working-and-waiting" },
+    );
     act(() => {
       mocks.preferenceListener?.({ voice: "cedar", speed: 1.5 });
     });
@@ -921,6 +945,60 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
         "cedar",
         1.5,
       ),
+    );
+  });
+
+  it("keeps working status until the admitted master run settles", async () => {
+    const onSend = vi.fn().mockImplementation(async () => {
+      useChatStore.getState().setChatState("session-a", "thinking");
+      useChatStore.getState().setActiveRunId("session-a", "run-1");
+      return true;
+    });
+    const owner = renderConversation("session-a", onSend);
+
+    await act(async () => owner.result.current.onToggle());
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+    mocks.updateStatusSounds.mockClear();
+
+    act(() => {
+      channel.dispatchEvent(
+        new MessageEvent("message", {
+          data: JSON.stringify({ type: "test.emissary" }),
+        }),
+      );
+    });
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+    expect(owner.result.current.state).toBe("agent-working");
+    expect(mocks.updateStatusSounds).toHaveBeenLastCalledWith(
+      "session-a",
+      "working",
+      { mode: "working" },
+    );
+
+    act(() => {
+      useChatStore.getState().setActiveRunId("session-a", null);
+      useChatStore.getState().setChatState("session-a", "idle");
+    });
+
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+    expect(mocks.updateStatusSounds).toHaveBeenLastCalledWith(
+      "session-a",
+      "waiting",
+      { mode: "working" },
+    );
+
+    act(() => {
+      useChatStore.getState().setChatState("session-a", "thinking");
+      useChatStore.getState().setActiveRunId("session-a", "run-2");
+    });
+    await waitFor(() =>
+      expect(owner.result.current.state).toBe("agent-working"),
+    );
+    expect(mocks.updateStatusSounds).toHaveBeenLastCalledWith(
+      "session-a",
+      "working",
+      { mode: "working" },
     );
   });
 
@@ -1231,6 +1309,51 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
     await act(async () => Promise.all([start, stop]));
 
     expect(track.stop).toHaveBeenCalledOnce();
+    expect(owner.result.current.state).toBe("off");
+  });
+
+  it("drains queued provider events before stopping the native runtime", async () => {
+    let finishProviderSend!: () => void;
+    mocks.sendRealtimeEvents.mockImplementation(
+      (
+        transport: { send(data: string): void },
+        events: Array<Record<string, unknown>>,
+      ) => {
+        for (const event of events) transport.send(JSON.stringify(event));
+      },
+    );
+    const owner = renderConversation("session-a");
+    await act(async () => owner.result.current.onToggle());
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+
+    mocks.sendRuntimeEvent.mockClear();
+    mocks.sendRuntimeEvent.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishProviderSend = resolve;
+        }),
+    );
+    act(() => {
+      channel.dispatchEvent(
+        new MessageEvent("message", {
+          data: JSON.stringify({ type: "test.invalid_tool_call" }),
+        }),
+      );
+    });
+    await waitFor(() => expect(mocks.sendRuntimeEvent).toHaveBeenCalledOnce());
+
+    let stop = Promise.resolve();
+    act(() => {
+      stop = Promise.resolve(owner.result.current.onToggle());
+    });
+    await waitFor(() => expect(owner.result.current.state).toBe("stopping"));
+    expect(mocks.stopRuntime).not.toHaveBeenCalled();
+
+    finishProviderSend();
+    await act(async () => stop);
+
+    expect(mocks.stopRuntime).toHaveBeenCalledWith("session-a");
+    expect(mocks.releaseRuntime).toHaveBeenCalledWith("session-a");
     expect(owner.result.current.state).toBe("off");
   });
 
@@ -2207,6 +2330,40 @@ describe("useOpenAiRealtimeConversation lifecycle", () => {
         },
       });
     });
+
+    await act(async () => owner.result.current.onToggle());
+  });
+
+  it("removes a provisional emissary transcript when no audio played", async () => {
+    const owner = renderConversation("session-a");
+    await act(async () => owner.result.current.onToggle());
+    await waitFor(() => expect(owner.result.current.state).toBe("listening"));
+
+    act(() => {
+      channel.dispatchEvent(
+        new MessageEvent("message", {
+          data: JSON.stringify({ type: "test.emissary_partial_first" }),
+        }),
+      );
+    });
+    await waitFor(() =>
+      expect(
+        useChatStore.getState().messagesBySession["session-a"],
+      ).toHaveLength(1),
+    );
+
+    act(() => {
+      channel.dispatchEvent(
+        new MessageEvent("message", {
+          data: JSON.stringify({ type: "test.emissary_discarded" }),
+        }),
+      );
+    });
+    await waitFor(() =>
+      expect(
+        useChatStore.getState().messagesBySession["session-a"] ?? [],
+      ).toHaveLength(0),
+    );
 
     await act(async () => owner.result.current.onToggle());
   });

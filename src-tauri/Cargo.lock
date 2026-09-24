@@ -8,8 +8,8 @@ version = "0.6.4"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "berd-call",
  "berd-memory",
- "berd-voice",
  "block2",
  "builderbot-auth",
  "bytes",
@@ -648,17 +648,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "berd-monitor"
-version = "0.6.2"
-dependencies = [
- "clap",
- "fs2",
- "libc",
- "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "berd-voice"
+name = "berd-call"
 version = "0.1.0"
 dependencies = [
  "audioadapter-buffers",
@@ -667,11 +657,13 @@ dependencies = [
  "cc",
  "claxon",
  "coreaudio-rs",
+ "cpal",
  "earshot",
  "fs2",
  "futures-util",
  "hound",
  "libc",
+ "objc2-core-audio",
  "ort",
  "ort-sys",
  "rand 0.10.2",
@@ -690,6 +682,16 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "uuid",
+]
+
+[[package]]
+name = "berd-monitor"
+version = "0.6.2"
+dependencies = [
+ "clap",
+ "fs2",
+ "libc",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

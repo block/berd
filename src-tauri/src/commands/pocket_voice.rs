@@ -11,26 +11,19 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
-use berd_voice::input::InputDuringTtsPolicy;
-use berd_voice::local_assets::{self, LocalAssetRoots, LocalInstallPhase};
+use berd_call::input::InputDuringTtsPolicy;
+use berd_call::local_assets::{self, LocalAssetRoots, LocalInstallPhase};
 #[cfg(any(test, target_os = "macos"))]
-use berd_voice::DeliveryProgress as VoiceDeliveryProgress;
+use berd_call::DeliveryProgress as VoiceDeliveryProgress;
 #[cfg(target_os = "macos")]
-use berd_voice::SAMPLE_RATE;
+use berd_call::SAMPLE_RATE;
 #[cfg(target_os = "macos")]
-use berd_voice::{
+use berd_call::{
     load_pocket_voice_style, load_text_to_speech, ConfiguredTtsSlot, DrainPolicy,
     DrainTimeoutOutcome, OutboundFailure, OutboundOutcome, OutboundPlayback, StreamingTextChunk,
     StreamingTtsText, TtsBackend, TtsConfiguration,
 };
-use berd_voice::{parakeet_assets, pocket_assets};
-#[cfg(target_os = "macos")]
-use objc2_core_audio::{
-    kAudioDevicePropertyScopeOutput, kAudioDevicePropertyStreams, kAudioDeviceTransportTypeBuiltIn,
-    kAudioHardwareNoError, kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal,
-    kAudioStreamPropertyTerminalType, kAudioStreamTerminalTypeSpeaker, AudioObjectGetPropertyData,
-    AudioObjectGetPropertyDataSize, AudioObjectID, AudioObjectPropertyAddress,
-};
+use berd_call::{parakeet_assets, pocket_assets};
 #[cfg(target_os = "macos")]
 use rodio::DeviceTrait;
 use serde::{Deserialize, Serialize};
@@ -46,7 +39,7 @@ use super::{
 };
 use crate::services::atomic_file::write_bytes_atomically;
 #[cfg(target_os = "macos")]
-use berd_voice::PocketAudioPlayer;
+use berd_call::PocketAudioPlayer;
 
 const CACHE_VERSION: &str = pocket_assets::MODEL_ID;
 const POCKET_EVENT: &str = "pocket-voice:event";
@@ -58,50 +51,13 @@ const DOWNLOAD_PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
 const STREAMING_EMIT_FRAMES: usize = 12;
 #[cfg(target_os = "macos")]
 const PLAYBACK_PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
-#[cfg(target_os = "macos")]
-const LOCAL_PLAYBACK_LATENCY_SAFETY_DURATION: Duration = Duration::from_millis(100);
-#[cfg(target_os = "macos")]
-const BLUETOOTH_PLAYBACK_LATENCY_SAFETY_DURATION: Duration = Duration::from_millis(500);
-#[cfg(target_os = "macos")]
-const AIRPLAY_PLAYBACK_LATENCY_SAFETY_DURATION: Duration = Duration::from_secs(2);
-#[cfg(target_os = "macos")]
-const UNKNOWN_PLAYBACK_LATENCY_SAFETY_DURATION: Duration = Duration::from_secs(2);
 #[cfg(any(test, target_os = "macos"))]
 const POCKET_SOURCE_COMPLETION_TIMEOUT: Duration = Duration::from_secs(2);
 pub(crate) static POCKET_SETTINGS_LOCK: Mutex<()> = Mutex::new(());
 
 #[cfg(target_os = "macos")]
-fn playback_latency_safety_duration_for_transport(transport: Option<u32>) -> Duration {
-    // CoreAudio transport FOURCC values. Bluetooth and AirPlay routes buffer
-    // beyond the local hardware callback, while an unknown/virtual route has
-    // no trustworthy upper bound. Keep capture protected conservatively for
-    // those routes instead of promising feedback prevention on a 100 ms guess.
-    const BUILT_IN: u32 = 0x626c_746e;
-    const BLUETOOTH: u32 = 0x626c_7565;
-    const BLUETOOTH_LE: u32 = 0x626c_6561;
-    const AIRPLAY: u32 = 0x6169_7270;
-
-    match transport {
-        Some(BUILT_IN) => LOCAL_PLAYBACK_LATENCY_SAFETY_DURATION,
-        Some(BLUETOOTH) | Some(BLUETOOTH_LE) => BLUETOOTH_PLAYBACK_LATENCY_SAFETY_DURATION,
-        Some(AIRPLAY) => AIRPLAY_PLAYBACK_LATENCY_SAFETY_DURATION,
-        Some(_) | None => UNKNOWN_PLAYBACK_LATENCY_SAFETY_DURATION,
-    }
-}
-
-#[cfg(target_os = "macos")]
 pub(crate) fn playback_latency_safety_duration(output_device: Option<&str>) -> Duration {
-    use coreaudio::audio_unit::macos_helpers::{
-        get_default_device_id, get_device_id_from_name, get_device_transport_type,
-    };
-
-    let device_id = match output_device {
-        Some(name) => get_device_id_from_name(name, false),
-        None => get_default_device_id(false),
-    };
-    playback_latency_safety_duration_for_transport(
-        device_id.and_then(|id| get_device_transport_type(id).ok()),
-    )
+    berd_call::macos_audio_route::playback_latency_safety_duration(output_device)
 }
 type PocketVoice = pocket_assets::PocketVoiceDescriptor;
 
@@ -422,7 +378,7 @@ pub(crate) fn effective_output_device_name(configured: Option<&str>) -> Option<S
 }
 
 #[cfg(not(target_os = "macos"))]
-fn effective_output_device_name(configured: Option<&str>) -> Option<String> {
+pub(crate) fn effective_output_device_name(configured: Option<&str>) -> Option<String> {
     configured.map(ToOwned::to_owned)
 }
 
@@ -438,98 +394,12 @@ pub(crate) fn output_device_uses_speakers(output_device: Option<&str>) -> bool {
 
     #[cfg(target_os = "macos")]
     {
-        output_device_is_builtin_speaker(output_device)
+        output_device.is_some()
+            && berd_call::macos_audio_route::output_device_is_builtin_speaker(output_device)
     }
 
     #[cfg(not(target_os = "macos"))]
     false
-}
-
-#[cfg(target_os = "macos")]
-fn output_device_is_builtin_speaker(output_device: Option<&str>) -> bool {
-    use coreaudio::audio_unit::macos_helpers::{
-        get_device_id_from_name, get_device_transport_type,
-    };
-    use std::mem;
-    use std::ptr::{null, NonNull};
-
-    let device_id = output_device.and_then(|name| get_device_id_from_name(name, false));
-    let Some(device_id) = device_id else {
-        return false;
-    };
-    let transport_type = get_device_transport_type(device_id).ok();
-
-    let streams_address = AudioObjectPropertyAddress {
-        mSelector: kAudioDevicePropertyStreams,
-        mScope: kAudioDevicePropertyScopeOutput,
-        mElement: kAudioObjectPropertyElementMain,
-    };
-    let mut streams_size = 0;
-    // SAFETY: Core Audio writes only the property byte count into the valid stack value.
-    let status = unsafe {
-        AudioObjectGetPropertyDataSize(
-            device_id,
-            NonNull::from(&streams_address),
-            0,
-            null(),
-            NonNull::from(&mut streams_size),
-        )
-    };
-    if status != kAudioHardwareNoError || streams_size == 0 {
-        return false;
-    }
-
-    let mut streams =
-        vec![0 as AudioObjectID; streams_size as usize / mem::size_of::<AudioObjectID>()];
-    // SAFETY: The buffer is sized from Core Audio's preceding property-size query.
-    let status = unsafe {
-        AudioObjectGetPropertyData(
-            device_id,
-            NonNull::from(&streams_address),
-            0,
-            null(),
-            NonNull::from(&mut streams_size),
-            NonNull::new(streams.as_mut_ptr())
-                .expect("non-empty stream buffer")
-                .cast(),
-        )
-    };
-    if status != kAudioHardwareNoError {
-        return false;
-    }
-
-    streams.into_iter().any(|stream_id| {
-        let terminal_address = AudioObjectPropertyAddress {
-            mSelector: kAudioStreamPropertyTerminalType,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain,
-        };
-        let mut terminal_type = 0;
-        let mut terminal_size = mem::size_of::<u32>() as u32;
-        // SAFETY: Core Audio writes one u32 into the valid terminal_type stack value.
-        let status = unsafe {
-            AudioObjectGetPropertyData(
-                stream_id,
-                NonNull::from(&terminal_address),
-                0,
-                null(),
-                NonNull::from(&mut terminal_size),
-                NonNull::from(&mut terminal_type).cast(),
-            )
-        };
-        status == kAudioHardwareNoError
-            && output_metadata_uses_builtin_speakers(transport_type, terminal_type)
-    })
-}
-
-#[cfg(target_os = "macos")]
-fn output_metadata_uses_builtin_speakers(transport_type: Option<u32>, terminal_type: u32) -> bool {
-    // Apple's built-in Mac speaker stream currently reports the USB Audio
-    // speaker terminal code, while other Core Audio devices may report 'spkr'.
-    const USB_AUDIO_SPEAKER_TERMINAL: u32 = 0x0301;
-    transport_type == Some(kAudioDeviceTransportTypeBuiltIn)
-        && (terminal_type == kAudioStreamTerminalTypeSpeaker
-            || terminal_type == USB_AUDIO_SPEAKER_TERMINAL)
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
@@ -2165,7 +2035,7 @@ fn pocket_native_drain_timeout(
 ) -> Duration {
     let remaining_source_frames = total_source_frames.saturating_sub(completed_source_frames);
     let remaining_playback_seconds =
-        remaining_source_frames as f64 / f64::from(berd_voice::SAMPLE_RATE) / f64::from(rate);
+        remaining_source_frames as f64 / f64::from(berd_call::SAMPLE_RATE) / f64::from(rate);
     Duration::from_secs_f64(remaining_playback_seconds)
         .saturating_add(POCKET_SOURCE_COMPLETION_TIMEOUT)
 }
@@ -2354,7 +2224,7 @@ fn synthesize_and_stream(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use berd_voice::DeliverySegment as VoiceDeliverySegment;
+    use berd_call::DeliverySegment as VoiceDeliverySegment;
 
     #[test]
     fn playback_snapshots_speed_when_the_utterance_begins() {
@@ -2373,7 +2243,7 @@ mod tests {
     #[test]
     fn failed_stream_retains_only_delivery_with_played_audio() {
         let progress = VoiceDeliveryProgress {
-            sample_rate: berd_voice::SAMPLE_RATE,
+            sample_rate: berd_call::SAMPLE_RATE,
             segments: vec![VoiceDeliverySegment {
                 text: "Partly heard.".to_string(),
                 played_frames: 1_200,
@@ -2390,7 +2260,7 @@ mod tests {
         );
 
         let unheard = VoiceDeliveryProgress {
-            sample_rate: berd_voice::SAMPLE_RATE,
+            sample_rate: berd_call::SAMPLE_RATE,
             segments: vec![VoiceDeliverySegment {
                 text: "Not heard.".to_string(),
                 played_frames: 0,
@@ -2637,18 +2507,24 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn localized_builtin_speaker_metadata_is_distinct_from_headphones() {
-        assert!(output_metadata_uses_builtin_speakers(
-            Some(kAudioDeviceTransportTypeBuiltIn),
-            kAudioStreamTerminalTypeSpeaker,
-        ));
-        assert!(output_metadata_uses_builtin_speakers(
-            Some(kAudioDeviceTransportTypeBuiltIn),
-            0x0301,
-        ));
-        assert!(!output_metadata_uses_builtin_speakers(
-            Some(kAudioDeviceTransportTypeBuiltIn),
-            0x0302,
-        ));
+        assert!(
+            berd_call::macos_audio_route::output_metadata_uses_builtin_speakers(
+                Some(0x626c_746e),
+                0x7370_6b72,
+            )
+        );
+        assert!(
+            berd_call::macos_audio_route::output_metadata_uses_builtin_speakers(
+                Some(0x626c_746e),
+                0x0301,
+            )
+        );
+        assert!(
+            !berd_call::macos_audio_route::output_metadata_uses_builtin_speakers(
+                Some(0x626c_746e),
+                0x0302,
+            )
+        );
     }
 
     #[test]
@@ -2707,27 +2583,37 @@ mod tests {
         const VIRTUAL: u32 = 0x7669_7274;
 
         assert_eq!(
-            playback_latency_safety_duration_for_transport(Some(BUILT_IN)),
+            berd_call::macos_audio_route::playback_latency_safety_duration_for_transport(Some(
+                BUILT_IN
+            )),
             Duration::from_millis(100)
         );
         assert_eq!(
-            playback_latency_safety_duration_for_transport(Some(BLUETOOTH)),
+            berd_call::macos_audio_route::playback_latency_safety_duration_for_transport(Some(
+                BLUETOOTH
+            )),
             Duration::from_millis(500)
         );
         assert_eq!(
-            playback_latency_safety_duration_for_transport(Some(AIRPLAY)),
+            berd_call::macos_audio_route::playback_latency_safety_duration_for_transport(Some(
+                AIRPLAY
+            )),
             Duration::from_secs(2)
         );
         assert_eq!(
-            playback_latency_safety_duration_for_transport(Some(VIRTUAL)),
+            berd_call::macos_audio_route::playback_latency_safety_duration_for_transport(Some(
+                VIRTUAL
+            )),
             Duration::from_secs(2)
         );
         assert_eq!(
-            playback_latency_safety_duration_for_transport(Some(0x3f3f_3f3f)),
+            berd_call::macos_audio_route::playback_latency_safety_duration_for_transport(Some(
+                0x3f3f_3f3f
+            )),
             Duration::from_secs(2)
         );
         assert_eq!(
-            playback_latency_safety_duration_for_transport(None),
+            berd_call::macos_audio_route::playback_latency_safety_duration_for_transport(None),
             Duration::from_secs(2)
         );
     }

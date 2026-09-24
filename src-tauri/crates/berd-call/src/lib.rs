@@ -1,0 +1,70 @@
+//! Reusable voice primitives for Berd.
+
+/// Maximum time the macOS recognizer waits for native completion after input ends.
+pub const MAC_SPEECH_RECOGNITION_FINISH_TIMEOUT_SECONDS: u64 = 5;
+
+mod asset_verification;
+mod audio_output;
+pub mod benchmark;
+pub mod causal_inbox;
+mod configured_tts;
+pub mod expert_spokesperson;
+pub mod input;
+pub mod local_assets;
+#[cfg(target_os = "macos")]
+pub mod mac_speech;
+#[cfg(target_os = "macos")]
+mod macos_audio_output;
+#[cfg(target_os = "macos")]
+pub mod macos_audio_route;
+pub mod openai;
+pub mod openai_realtime;
+pub mod openai_realtime_protocol;
+pub mod openai_spokesperson;
+mod outbound;
+mod parakeet;
+pub mod parakeet_assets;
+mod pocket;
+pub mod pocket_assets;
+pub mod protocol;
+pub mod realtime_audio_delivery;
+pub mod realtime_host;
+pub mod realtime_host_lifecycle;
+pub mod realtime_pipe;
+pub mod session;
+pub mod siri;
+pub mod spokesperson_voice_update;
+mod status_sounds;
+mod synthesis;
+mod tts;
+
+pub use audio_output::{wait_until_drained, PcmAudioOutput};
+pub use configured_tts::{
+    ConfiguredTtsSlot, TtsConfiguration, TtsConfigurationLease, TtsConfigurationRejection,
+    TtsConfigurationRejectionKind, TtsConfigurationReplacement, TtsConfigurationSnapshot,
+    TtsSettings,
+};
+#[cfg(target_os = "macos")]
+pub use macos_audio_output::PocketAudioPlayer;
+pub use outbound::{
+    estimated_spoken_through_utf8, DeliveryProgress, DeliverySegment, DrainPolicy,
+    DrainTimeoutOutcome, OutboundFailure, OutboundOutcome, OutboundPlayback,
+};
+pub use parakeet::ParakeetRecognizer;
+pub use pocket::{
+    load_pocket_voice_style, load_text_to_speech, load_voice_style, PocketTts, VoiceStyle,
+    SAMPLE_RATE,
+};
+#[cfg(target_os = "macos")]
+pub use siri::SiriTts;
+pub use status_sounds::ConversationStatus;
+pub use status_sounds::ManagedStatusSoundRuntime;
+pub use status_sounds::StatusSoundActivityGuard;
+pub use status_sounds::StatusSoundMode;
+pub use status_sounds::StatusSoundRuntime;
+pub use status_sounds::StatusSoundSettings;
+pub use synthesis::{synthesize_pcm16_wav, WavSynthesis, WavSynthesisError, WavSynthesisErrorKind};
+pub use tts::{
+    OpenAiTts, PocketTtsBackend, StreamingTextChunk, StreamingTextChunks, StreamingTtsText,
+    TtsBackend, TtsOutcome, TtsPcmSpec, TtsSynthesisEvent,
+};

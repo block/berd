@@ -51,6 +51,20 @@ export function startOpenAiRealtimeSpokespersonRuntime(
   });
 }
 
+export function updateOpenAiRealtimeStatusSounds(
+  sessionId: string,
+  status: "working" | "waiting",
+  settings: {
+    mode: "off" | "working" | "working-and-waiting";
+    volume?: number;
+  },
+): Promise<void> {
+  return invoke("update_openai_realtime_status_sounds", {
+    sessionId,
+    update: { status, settings },
+  });
+}
+
 export function sendOpenAiRealtimeSpokespersonRuntimeEvent(
   sessionId: string,
   event: Record<string, unknown>,
@@ -155,6 +169,7 @@ export type OpenAiRealtimeProtocolEvent =
       evidence: "provider_final" | "provider_delta" | "host_played_frames";
       expertMessage: string;
     }
+  | { type: "transcript.discarded"; itemId: string }
   | {
       type: "handoff";
       responseId?: string;
