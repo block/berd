@@ -96,10 +96,15 @@ pub(crate) fn run(options: StartOptions) -> Result<(), String> {
     let non_blocking = Arc::new(AtomicBool::new(options.non_blocking));
     let stop_requested = Arc::new(AtomicBool::new(false));
     let mut session = SessionStart {
+        saved: options.saved.clone(),
         arguments: options.session_arguments,
         expert_spokesperson: options.expert_spokesperson,
         muted: false,
-        input_during_tts: default_input_during_tts_policy(),
+        input_during_tts: options
+            .saved
+            .as_ref()
+            .and_then(|(_, saved)| saved.input_policy)
+            .unwrap_or_else(default_input_during_tts_policy),
         restarted: None,
     };
     loop {
@@ -226,6 +231,7 @@ fn print_flushed(line: &str) -> Result<(), String> {
 }
 
 struct SessionStart {
+    saved: Option<(std::path::PathBuf, crate::saved_settings::SavedSettings)>,
     arguments: Vec<String>,
     expert_spokesperson: bool,
     muted: bool,
@@ -241,6 +247,7 @@ fn run_session(
     stop_requested: &Arc<AtomicBool>,
 ) -> Result<Option<SessionStart>, String> {
     let SessionStart {
+        saved,
         arguments,
         expert_spokesperson,
         muted,
@@ -255,6 +262,7 @@ fn run_session(
         transcript,
         non_blocking,
         stop_requested,
+        saved,
     );
     let StartedSession {
         mut child,
@@ -312,6 +320,11 @@ fn run_session(
         "voice call stopped"
     });
     Ok(restart.map(|restart| SessionStart {
+        saved: actor.saved.take().map(|(path, mut saved)| {
+            saved.arguments = restart.arguments[1..].to_vec();
+            saved.tts = None;
+            (path, saved)
+        }),
         arguments: restart.arguments,
         expert_spokesperson: restart.expert_spokesperson,
         muted: session_control.muted.load(Ordering::SeqCst),
@@ -334,6 +347,7 @@ struct StartedSession {
     running: Arc<AtomicBool>,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn start_session(
     arguments: Vec<String>,
     expert_spokesperson: bool,
@@ -342,6 +356,7 @@ fn start_session(
     transcript: &Arc<Transcript>,
     non_blocking: &Arc<AtomicBool>,
     stop_requested: &Arc<AtomicBool>,
+    saved: Option<(std::path::PathBuf, crate::saved_settings::SavedSettings)>,
 ) -> Result<StartedSession, String> {
     let mut child = SessionProcess::spawn(arguments.clone())?;
     let writer = Arc::new(Mutex::new(child.take_stdin()?));
@@ -376,7 +391,21 @@ fn start_session(
         Arc::clone(transcript),
         expert_spokesperson,
     );
+    actor.saved = saved;
     actor.muted.store(muted, Ordering::SeqCst);
+    if let Some(settings) = actor
+        .saved
+        .as_ref()
+        .and_then(|(_, saved)| saved.tts.clone())
+    {
+        let revision = ready
+            .session
+            .lock()
+            .map_err(|_| "session settings lock failed")?
+            .tts
+            .revision;
+        actor.restore_saved_tts(settings, revision, Duration::from_secs(30))?;
+    }
     if muted {
         // Requests and captured PCM share one ordered pipe, so the replacement
         // session is muted before it can receive any microphone input.
@@ -384,6 +413,7 @@ fn start_session(
         send_request(&writer, &SessionRequest::SetInputMuted { id, active: true })?;
     }
     let capture = InputCapture::start(writer, failure_tx)?;
+    actor.persist_settings(SavedPreference::SessionStart);
     let control = Arc::new(SessionControl {
         commands: command_tx,
         running: Arc::clone(&running),
@@ -640,7 +670,14 @@ enum AudioCommand {
     Resume(u64),
 }
 
+enum SavedPreference {
+    SessionStart,
+    Tts,
+    InputPolicy,
+}
+
 struct SessionActor {
+    saved: Option<(std::path::PathBuf, crate::saved_settings::SavedSettings)>,
     input_speaking: bool,
     recognition_pending: bool,
     pending_polls: Vec<PendingInputPoll>,
@@ -658,6 +695,7 @@ struct SessionActor {
     stopping: bool,
     restart: Option<PendingRestart>,
     muted: Arc<AtomicBool>,
+    suppress_startup_persist: bool,
 }
 
 impl SessionActor {
@@ -671,6 +709,7 @@ impl SessionActor {
         expert_spokesperson: bool,
     ) -> Self {
         Self {
+            saved: None,
             input_speaking: false,
             recognition_pending: false,
             pending_polls: Vec::new(),
@@ -688,6 +727,68 @@ impl SessionActor {
             stopping: false,
             restart: None,
             muted: Arc::new(AtomicBool::new(false)),
+            suppress_startup_persist: false,
+        }
+    }
+
+    fn restore_saved_tts(
+        &mut self,
+        settings: berd_call::TtsSettings,
+        expected_revision: u64,
+        timeout: Duration,
+    ) -> Result<(), String> {
+        let (response, result) = mpsc::sync_channel(1);
+        self.handle_command(ControlCommand::TtsSettings {
+            settings: settings.clone(),
+            expected_revision,
+            response,
+        })?;
+        let deadline = Instant::now() + timeout;
+        let failure = loop {
+            self.poll()?;
+            match result.try_recv() {
+                Ok(Ok(value)) if value["outcome"] == "applied" => return Ok(()),
+                Ok(result) => break format!("saved TTS settings were rejected: {result:?}"),
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    break "saved TTS settings restore disconnected".into()
+                }
+                Err(mpsc::TryRecvError::Empty) if Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(2))
+                }
+                Err(_) => break "timed out restoring saved TTS settings".into(),
+            }
+        };
+        eprintln!("berd-call: {failure}; continuing with startup configuration");
+        self.suppress_startup_persist = true;
+        self.quarantine_saved_tts(&settings);
+        Ok(())
+    }
+
+    fn quarantine_saved_tts(&mut self, rejected: &berd_call::TtsSettings) {
+        let Some((path, _)) = &self.saved else {
+            return;
+        };
+        let path = path.clone();
+        let mut quarantined = false;
+        let mut current = None;
+        if let Err(error) = crate::saved_settings::update(&path, |latest| {
+            if latest.tts.as_ref() == Some(rejected) {
+                latest.tts = None;
+                latest.arguments = crate::saved_settings::without_tts(&latest.arguments);
+                quarantined = true;
+            }
+            current = Some(latest.clone());
+        }) {
+            eprintln!("berd-call: could not quarantine saved TTS settings: {error}");
+            return;
+        }
+        if let Some(current) = current {
+            self.saved = Some((path, current));
+        }
+        if !quarantined {
+            eprintln!(
+                "berd-call: saved TTS settings changed during restore; preserving the newer choice"
+            );
         }
     }
 
@@ -912,6 +1013,9 @@ impl SessionActor {
                         session.tts = snapshot.clone();
                     }
                 }
+                if outcome == berd_call::protocol::TtsSettingsOutcome::Applied {
+                    self.persist_settings(SavedPreference::Tts);
+                }
                 if let Some(response) = self.pending_settings.remove(&id) {
                     let _ = response.send(Ok(
                         json!({"outcome":outcome,"snapshot":snapshot,"message":message}),
@@ -927,6 +1031,12 @@ impl SessionActor {
                     if snapshot.revision >= session.input_during_tts.revision {
                         session.input_during_tts = snapshot;
                     }
+                }
+                if outcome == berd_call::protocol::InputDuringTtsOutcome::Applied {
+                    if let Some((_, saved)) = &mut self.saved {
+                        saved.input_policy = Some(snapshot.policy);
+                    }
+                    self.persist_settings(SavedPreference::InputPolicy);
                 }
                 if let Some(response) = self.pending_settings.remove(&id) {
                     let _ = response.send(Ok(json!({"outcome":outcome,"snapshot":snapshot})));
@@ -1089,6 +1199,69 @@ impl SessionActor {
             if let ControlCommand::Speak { response, .. } = command {
                 let _ = response.send(Err(message.to_string()));
             }
+        }
+    }
+
+    fn persist_settings(&mut self, changed: SavedPreference) {
+        if matches!(changed, SavedPreference::SessionStart) && self.suppress_startup_persist {
+            self.suppress_startup_persist = false;
+            return;
+        }
+        let Some((path, saved)) = &mut self.saved else {
+            return;
+        };
+        let Ok(session) = self.session.lock() else {
+            return;
+        };
+        saved.tts = Some(session.tts.settings.clone());
+        let settings = &session.tts.settings;
+        let pocket_model_dir = saved
+            .arguments
+            .chunks_exact(2)
+            .find(|pair| pair[0] == "--model-dir")
+            .map(|pair| pair[1].clone());
+        let backend = match settings {
+            berd_call::TtsSettings::Siri { .. } => "siri",
+            berd_call::TtsSettings::Pocket { .. } => "pocket",
+            berd_call::TtsSettings::OpenAi { .. } => "openai",
+        };
+        let mut replacement = vec![
+            "--tts-backend".to_string(),
+            backend.to_string(),
+            "--rate".to_string(),
+            settings.rate().to_string(),
+        ];
+        match settings {
+            berd_call::TtsSettings::Siri {
+                voice, language, ..
+            } => replacement.extend([
+                "--voice".into(),
+                voice.clone(),
+                "--language".into(),
+                language.clone(),
+            ]),
+            berd_call::TtsSettings::Pocket { voice, .. } => {
+                if let Some(model_dir) = pocket_model_dir {
+                    replacement.extend(["--model-dir".into(), model_dir]);
+                }
+                replacement.extend(["--voice".into(), voice.clone()])
+            }
+            berd_call::TtsSettings::OpenAi { .. } => {}
+        }
+        saved.arguments = crate::saved_settings::merge_arguments(&saved.arguments, &replacement);
+        if let Err(error) = crate::saved_settings::update(path, |latest| match changed {
+            SavedPreference::SessionStart => {
+                latest.arguments = saved.arguments.clone();
+                latest.tts = saved.tts.clone();
+            }
+            SavedPreference::Tts => {
+                latest.arguments =
+                    crate::saved_settings::merge_arguments(&latest.arguments, &replacement);
+                latest.tts = saved.tts.clone();
+            }
+            SavedPreference::InputPolicy => latest.input_policy = saved.input_policy,
+        }) {
+            eprintln!("berd-call: live settings applied but could not be saved: {error}");
         }
     }
 
@@ -2276,6 +2449,464 @@ mod tests {
         assert!(actor.pending_polls.is_empty());
         child.kill().unwrap();
         child.wait().unwrap();
+    }
+
+    #[test]
+    fn independent_calls_do_not_overwrite_other_saved_preferences() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let make_actor = || {
+            let mut child = Command::new("/bin/cat")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .spawn()
+                .unwrap();
+            let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+            let (_events, receiver) = mpsc::sync_channel(1);
+            let (_commands, commands) = mpsc::sync_channel(1);
+            let (audio, _audio_rx) = mpsc::sync_channel(1);
+            let mut actor = test_actor(writer, receiver, commands, audio);
+            actor.saved = Some((
+                path.clone(),
+                crate::saved_settings::SavedSettings::default(),
+            ));
+            (actor, child)
+        };
+        let (mut first, mut first_child) = make_actor();
+        let (mut second, mut second_child) = make_actor();
+        crate::saved_settings::save(
+            &path,
+            &crate::saved_settings::SavedSettings {
+                arguments: [
+                    "--tts-backend",
+                    "siri",
+                    "--voice",
+                    "Aaron",
+                    "--language",
+                    "en-US",
+                    "--stt-backend",
+                    "openai",
+                    "--mode",
+                    "expert-spokesperson",
+                ]
+                .map(str::to_string)
+                .to_vec(),
+                ..crate::saved_settings::SavedSettings::default()
+            },
+        )
+        .unwrap();
+        first
+            .handle_event(SessionMessage::InputMuteApplied {
+                id: 1,
+                active: true,
+            })
+            .unwrap();
+        let mut snapshot = test_snapshot().tts;
+        snapshot.settings = berd_call::TtsSettings::OpenAi {
+            model: "gpt-4o-mini-tts".into(),
+            voice: "marin".into(),
+            rate: 1.5,
+        };
+        second
+            .handle_event(SessionMessage::TtsSettingsResult {
+                id: 2,
+                outcome: berd_call::protocol::TtsSettingsOutcome::Applied,
+                snapshot,
+                message: None,
+            })
+            .unwrap();
+        let saved = crate::saved_settings::load(&path).unwrap();
+        assert!(!std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("\"muted\""));
+        assert!(matches!(
+            saved.tts,
+            Some(berd_call::TtsSettings::OpenAi { rate: 1.5, .. })
+        ));
+        assert!(saved
+            .arguments
+            .windows(2)
+            .any(|pair| pair == ["--tts-backend", "openai"]));
+        assert!(!saved.arguments.iter().any(|argument| argument == "siri"));
+        assert!(saved
+            .arguments
+            .windows(2)
+            .any(|pair| pair == ["--stt-backend", "openai"]));
+        assert!(saved
+            .arguments
+            .windows(2)
+            .any(|pair| pair == ["--mode", "expert-spokesperson"]));
+        drop(first);
+        drop(second);
+        first_child.wait().unwrap();
+        second_child.wait().unwrap();
+    }
+
+    #[test]
+    fn pocket_tts_save_preserves_the_active_bundle_path() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let bundle = directory.path().join("pocket-bundle");
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let (_events, receiver) = mpsc::sync_channel(1);
+        let (_commands, commands) = mpsc::sync_channel(1);
+        let (audio, _audio_rx) = mpsc::sync_channel(1);
+        let mut actor = test_actor(writer, receiver, commands, audio);
+        actor.saved = Some((
+            path.clone(),
+            crate::saved_settings::SavedSettings {
+                arguments: [
+                    "--tts-backend".to_string(),
+                    "pocket".to_string(),
+                    "--model-dir".to_string(),
+                    bundle.display().to_string(),
+                ]
+                .to_vec(),
+                ..crate::saved_settings::SavedSettings::default()
+            },
+        ));
+        let mut snapshot = test_snapshot().tts;
+        snapshot.settings = berd_call::TtsSettings::Pocket {
+            model: "en_US-hfc_female-medium".into(),
+            voice: "default".into(),
+            rate: 1.2,
+        };
+        actor
+            .handle_event(SessionMessage::TtsSettingsResult {
+                id: 1,
+                outcome: berd_call::protocol::TtsSettingsOutcome::Applied,
+                snapshot,
+                message: None,
+            })
+            .unwrap();
+
+        let saved = crate::saved_settings::load(&path).unwrap();
+        assert!(saved.arguments.windows(2).any(|pair| {
+            pair == [
+                "--model-dir",
+                bundle.to_str().expect("temporary path is UTF-8"),
+            ]
+        }));
+        drop(actor);
+        child.wait().unwrap();
+    }
+
+    #[test]
+    fn only_accepted_settings_are_saved_before_acknowledgement() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let (_event_tx, events) = mpsc::sync_channel(1);
+        let (_command_tx, commands) = mpsc::sync_channel(1);
+        let (audio, _audio_rx) = mpsc::sync_channel(1);
+        let mut actor = test_actor(writer, events, commands, audio);
+        actor.saved = Some((
+            path.clone(),
+            crate::saved_settings::SavedSettings::default(),
+        ));
+        let mut snapshot = test_snapshot().tts;
+        snapshot.settings = snapshot.settings.with_rate(1.5);
+        actor
+            .handle_event(SessionMessage::TtsSettingsResult {
+                id: 42,
+                outcome: berd_call::protocol::TtsSettingsOutcome::Rejected,
+                snapshot: snapshot.clone(),
+                message: Some("rejected".into()),
+            })
+            .unwrap();
+        assert!(!path.exists());
+        let (response, result) = mpsc::sync_channel(1);
+        actor.pending_settings.insert(43, response);
+        actor
+            .handle_event(SessionMessage::TtsSettingsResult {
+                id: 43,
+                outcome: berd_call::protocol::TtsSettingsOutcome::Applied,
+                snapshot,
+                message: None,
+            })
+            .unwrap();
+        result.recv().unwrap().unwrap();
+        assert_eq!(
+            crate::saved_settings::load(&path)
+                .unwrap()
+                .tts
+                .unwrap()
+                .rate(),
+            1.5
+        );
+        let before_mute = std::fs::read(&path).unwrap();
+        actor
+            .handle_event(SessionMessage::InputMuteApplied {
+                id: 44,
+                active: true,
+            })
+            .unwrap();
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            before_mute,
+            "transient microphone mute changed saved preferences"
+        );
+        assert_eq!(
+            crate::saved_settings::load(&path).unwrap().input_policy,
+            None,
+            "saving unrelated settings must not freeze the route-derived policy"
+        );
+        actor
+            .handle_event(SessionMessage::InputDuringTtsResult {
+                id: 45,
+                outcome: berd_call::protocol::InputDuringTtsOutcome::Applied,
+                snapshot: berd_call::input::InputDuringTtsSnapshot {
+                    revision: 2,
+                    policy: InputDuringTtsPolicy::SuppressInput,
+                },
+            })
+            .unwrap();
+        assert_eq!(
+            crate::saved_settings::load(&path).unwrap().input_policy,
+            Some(InputDuringTtsPolicy::SuppressInput)
+        );
+        child.kill().unwrap();
+        child.wait().unwrap();
+    }
+
+    fn saved_preferences_with_tts() -> crate::saved_settings::SavedSettings {
+        crate::saved_settings::SavedSettings {
+            arguments: [
+                "--mode",
+                "chained",
+                "--stt-backend",
+                "macos",
+                "--tts-backend",
+                "siri",
+                "--voice",
+                "Missing Voice",
+                "--language",
+                "en-US",
+            ]
+            .map(str::to_string)
+            .to_vec(),
+            tts: Some(berd_call::TtsSettings::Siri {
+                voice: "Missing Voice".into(),
+                language: "en-US".into(),
+                rate: 1.0,
+            }),
+            input_policy: Some(InputDuringTtsPolicy::SuppressInput),
+        }
+    }
+
+    fn assert_only_tts_was_quarantined(path: &std::path::Path) {
+        let saved = crate::saved_settings::load(path).unwrap();
+        assert!(saved.tts.is_none());
+        assert_eq!(
+            saved.input_policy,
+            Some(InputDuringTtsPolicy::SuppressInput)
+        );
+        assert!(saved
+            .arguments
+            .windows(2)
+            .any(|pair| pair == ["--mode", "chained"]));
+        assert!(saved
+            .arguments
+            .windows(2)
+            .any(|pair| pair == ["--stt-backend", "macos"]));
+        assert!(!saved.arguments.iter().any(|argument| {
+            matches!(
+                argument.as_str(),
+                "--tts-backend" | "--voice" | "--language" | "--rate" | "--model-dir"
+            )
+        }));
+    }
+
+    #[test]
+    fn rejected_saved_tts_does_not_block_startup_and_is_quarantined() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        crate::saved_settings::save(&path, &saved_preferences_with_tts()).unwrap();
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let (events_tx, events) = mpsc::sync_channel(1);
+        let (_commands_tx, commands) = mpsc::sync_channel(1);
+        let (audio_commands, _audio_rx) = mpsc::sync_channel(1);
+        let mut actor = test_actor(writer, events, commands, audio_commands);
+        actor.saved = Some((path.clone(), saved_preferences_with_tts()));
+        events_tx
+            .send(SessionMessage::TtsSettingsResult {
+                id: 2,
+                outcome: berd_call::protocol::TtsSettingsOutcome::Rejected,
+                snapshot: test_snapshot().tts,
+                message: Some("voice unavailable".into()),
+            })
+            .unwrap();
+
+        actor
+            .restore_saved_tts(
+                saved_preferences_with_tts().tts.unwrap(),
+                1,
+                Duration::from_millis(50),
+            )
+            .unwrap();
+        assert_only_tts_was_quarantined(&path);
+        drop(actor);
+        assert!(child.wait().unwrap().success());
+    }
+
+    #[test]
+    fn timed_out_saved_tts_does_not_block_startup_and_is_quarantined() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        crate::saved_settings::save(&path, &saved_preferences_with_tts()).unwrap();
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let (_events_tx, events) = mpsc::sync_channel(1);
+        let (_commands_tx, commands) = mpsc::sync_channel(1);
+        let (audio_commands, _audio_rx) = mpsc::sync_channel(1);
+        let mut actor = test_actor(writer, events, commands, audio_commands);
+        actor.saved = Some((path.clone(), saved_preferences_with_tts()));
+
+        actor
+            .restore_saved_tts(saved_preferences_with_tts().tts.unwrap(), 1, Duration::ZERO)
+            .unwrap();
+        assert_only_tts_was_quarantined(&path);
+        drop(actor);
+        assert!(child.wait().unwrap().success());
+    }
+
+    #[test]
+    fn rejected_restore_does_not_overwrite_newer_saved_tts() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let stale = saved_preferences_with_tts();
+        crate::saved_settings::save(&path, &stale).unwrap();
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let (events_tx, events) = mpsc::sync_channel(1);
+        let (_commands_tx, commands) = mpsc::sync_channel(1);
+        let (audio_commands, _audio_rx) = mpsc::sync_channel(1);
+        let mut actor = test_actor(writer, events, commands, audio_commands);
+        actor.saved = Some((path.clone(), stale.clone()));
+
+        let mut newer = stale;
+        newer.tts = Some(berd_call::TtsSettings::Siri {
+            voice: "Samantha".into(),
+            language: "en-US".into(),
+            rate: 1.25,
+        });
+        newer.arguments = crate::saved_settings::merge_arguments(
+            &newer.arguments,
+            &[
+                "--tts-backend".into(),
+                "siri".into(),
+                "--voice".into(),
+                "Samantha".into(),
+                "--language".into(),
+                "en-US".into(),
+                "--rate".into(),
+                "1.25".into(),
+            ],
+        );
+        crate::saved_settings::save(&path, &newer).unwrap();
+        events_tx
+            .send(SessionMessage::TtsSettingsResult {
+                id: 2,
+                outcome: berd_call::protocol::TtsSettingsOutcome::Rejected,
+                snapshot: test_snapshot().tts,
+                message: Some("voice unavailable".into()),
+            })
+            .unwrap();
+
+        actor
+            .restore_saved_tts(
+                saved_preferences_with_tts().tts.unwrap(),
+                1,
+                Duration::from_millis(50),
+            )
+            .unwrap();
+        actor.persist_settings(SavedPreference::SessionStart);
+
+        actor.saved.as_mut().unwrap().1.input_policy = Some(InputDuringTtsPolicy::SuppressInput);
+        actor.persist_settings(SavedPreference::InputPolicy);
+
+        let saved = crate::saved_settings::load(&path).unwrap();
+        assert_eq!(saved.tts, newer.tts);
+        assert_eq!(
+            saved.input_policy,
+            Some(InputDuringTtsPolicy::SuppressInput)
+        );
+        assert!(saved
+            .arguments
+            .windows(2)
+            .any(|pair| pair == ["--voice", "Samantha"]));
+        drop(actor);
+        assert!(child.wait().unwrap().success());
+    }
+
+    #[test]
+    fn failed_restore_never_persists_fallback_over_a_later_tts_save() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let stale = saved_preferences_with_tts();
+        crate::saved_settings::save(&path, &stale).unwrap();
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let (events_tx, events) = mpsc::sync_channel(1);
+        let (_commands_tx, commands) = mpsc::sync_channel(1);
+        let (audio_commands, _audio_rx) = mpsc::sync_channel(1);
+        let mut actor = test_actor(writer, events, commands, audio_commands);
+        actor.saved = Some((path.clone(), stale));
+        events_tx
+            .send(SessionMessage::TtsSettingsResult {
+                id: 2,
+                outcome: berd_call::protocol::TtsSettingsOutcome::Rejected,
+                snapshot: test_snapshot().tts,
+                message: Some("voice unavailable".into()),
+            })
+            .unwrap();
+        actor
+            .restore_saved_tts(
+                saved_preferences_with_tts().tts.unwrap(),
+                1,
+                Duration::from_millis(50),
+            )
+            .unwrap();
+
+        let mut newer = saved_preferences_with_tts();
+        newer.tts = Some(berd_call::TtsSettings::Siri {
+            voice: "Samantha".into(),
+            language: "en-US".into(),
+            rate: 1.25,
+        });
+        crate::saved_settings::save(&path, &newer).unwrap();
+        actor.persist_settings(SavedPreference::SessionStart);
+
+        assert_eq!(crate::saved_settings::load(&path).unwrap().tts, newer.tts);
+        drop(actor);
+        assert!(child.wait().unwrap().success());
     }
 
     #[test]
