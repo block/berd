@@ -35,6 +35,8 @@ const MAX_TRANSACTION_BYTES: usize = 32 * 1024 * 1024;
 const MAX_TRANSACTION_RECORDS: usize = 64;
 const MARKER: &str = ".berd-memory-store.json";
 const LOCK: &str = ".berd-memory-store.lock";
+// Serializes initializers, never policy changes. Acquire before LOCK, not under it.
+const INIT_LOCK: &str = ".berd-memory-init.lock";
 const APPROVALS: &str = ".approved-content.json";
 const FORMAT: &str = "berd-memory-aes256gcm-v1";
 const MAGIC: &[u8] = b"BERDMEM\x01";
@@ -43,6 +45,30 @@ const KEY_ACCOUNT_PREFIX: &str = "active-store-";
 /// Maximum UTF-8 plaintext bytes in one document, queue, or approval manifest.
 pub const MAX_RECORD_BYTES: usize = 8 * 1024 * 1024;
 const MAX_SEALED_BYTES: usize = MAX_RECORD_BYTES + 8 + 12 + 16;
+
+#[derive(PartialEq, Eq)]
+struct StoreMarkers {
+    established: Option<(String, Vec<u8>)>,
+    initializing: Option<(String, Vec<u8>)>,
+}
+impl StoreMarkers {
+    fn read(dir: &Dir) -> Result<Self, String> {
+        Ok(Self {
+            established: read_marker(dir)?,
+            initializing: read_named_marker(dir, INITIALIZING)?,
+        })
+    }
+
+    // Called with LOCK held after an unlocked credential operation. A pinned
+    // directory alone is insufficient: policy uses the current root pathname.
+    fn revalidate(&self, root: &Path, dir: &Dir) -> Result<(), String> {
+        let (_, current) = open_root(root, false)?;
+        if !same_directory(dir, &current)? || *self != Self::read(dir)? {
+            return Err("Memory store changed during key access; try again".into());
+        }
+        Ok(())
+    }
+}
 
 pub struct MemoryStore {
     root: PathBuf,
@@ -103,7 +129,8 @@ impl KeyProvider for OsKeyProvider {
         }
     }
     fn create(&self, id: &str, key: &[u8; 32]) -> Result<(), String> {
-        // This is called only under the store lock with a fresh random identity.
+        // Called only under INIT_LOCK with a fresh random identity. LOCK is
+        // deliberately not held while Keychain authorization may wait.
         if self.get(id)?.is_some() {
             return Err("Memory key already exists".into());
         }
@@ -128,6 +155,7 @@ impl MemoryStore {
     /// the keychain. Initializes an empty root or authenticates an existing one.
     pub fn with_key(root: &Path, key: [u8; 32]) -> Result<Self, String> {
         let (root, dir) = open_root(root, true)?;
+        let _initialization = lock_named(&dir, INIT_LOCK)?;
         let _lock = lock_dir(&dir)?;
         let (id, proof) = match read_marker(&dir)? {
             Some(marker) => marker,
@@ -154,56 +182,89 @@ impl MemoryStore {
     }
     fn open_with_provider(root: &Path, provider: &dyn KeyProvider) -> Result<Self, String> {
         let (root, dir) = open_root(root, false)?;
+        let markers = {
+            let _lock = lock_dir(&dir)?;
+            StoreMarkers::read(&dir)?
+        };
+        let (id, proof) = markers
+            .established
+            .as_ref()
+            .ok_or("Memory store is not initialized; open Memory in Berd")?;
+        // Keychain can await interactive authorization indefinitely. Never hold
+        // the policy/transaction lock across this call.
+        let key = Zeroizing::new(
+            provider
+                .get(id)?
+                .ok_or("Memory encryption key is missing; the existing store was not changed")?,
+        );
         let _lock = lock_dir(&dir)?;
-        let (id, proof) =
-            read_marker(&dir)?.ok_or("Memory store is not initialized; open Memory in Berd")?;
-        let key = provider
-            .get(&id)?
-            .ok_or("Memory encryption key is missing; the existing store was not changed")?;
-        Self::finish_open(root, dir, id, key, proof)
+        markers.revalidate(&root, &dir)?;
+        Self::finish_open(root, dir, id.clone(), *key, proof.clone())
     }
     fn initialize_with_provider(root: &Path, provider: &dyn KeyProvider) -> Result<Self, String> {
         let (root, dir) = open_root(root, true)?;
-        let _lock = lock_dir(&dir)?;
-        if let Some((id, proof)) = read_marker(&dir)? {
-            let key = provider
-                .get(&id)?
-                .ok_or("Memory encryption key is missing; refusing to replace it")?;
-            return Self::finish_open(root, dir, id, key, proof);
+        // Keep initialization serialized across processes while allowing policy
+        // writes during credential lookup/create. No caller takes these in the
+        // opposite order. OS exit releases either lock; neither file is removed.
+        let _initialization = lock_named(&dir, INIT_LOCK)?;
+        let mut markers = {
+            let _lock = lock_dir(&dir)?;
+            let markers = StoreMarkers::read(&dir)?;
+            if markers.established.is_none() {
+                ensure_fresh_except(&dir, markers.initializing.is_some())?;
+            }
+            markers
+        };
+        if let Some((id, proof)) = &markers.established {
+            let key = Zeroizing::new(
+                provider
+                    .get(id)?
+                    .ok_or("Memory encryption key is missing; refusing to replace it")?,
+            );
+            let _lock = lock_dir(&dir)?;
+            markers.revalidate(&root, &dir)?;
+            return Self::finish_open(root, dir, id.clone(), *key, proof.clone());
         }
-        let initializing = read_named_marker(&dir, INITIALIZING)?;
-        if initializing.is_some() {
-            // Absolutely no record or ciphertext temporary may exist before a
-            // missing key can be created. This exception is initialization-only.
-            ensure_fresh_initialization(&dir)?;
-        } else {
-            ensure_fresh(&dir)?;
-        }
-        let id = initializing
+        let id = markers
+            .initializing
             .as_ref()
             .map(|m| m.0.clone())
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-        let (key, proof) = match provider.get(&id)? {
-            Some(key) => {
-                let (_, proof) = initializing.ok_or("Unexpected orphan memory key")?;
-                verify_marker(&id, &key, &proof)?;
-                (Zeroizing::new(key), proof)
-            }
-            None => {
-                let mut key = Zeroizing::new([0; 32]);
-                OsRng
-                    .try_fill_bytes(key.as_mut())
-                    .map_err(|_| "Secure random source unavailable".to_string())?;
-                let proof = marker_proof(&id, &key)?;
-                write_named_marker(&dir, INITIALIZING, &id, &proof, false)?;
-                // An error may still have saved the key. Leave the proof intact;
-                // a retry authenticates that key instead of overwriting it.
-                provider.create(&id, &key)?;
-                (key, proof)
+        let existing_key = provider.get(&id)?.map(Zeroizing::new);
+        let (key, proof, needs_create) = {
+            let _lock = lock_dir(&dir)?;
+            markers.revalidate(&root, &dir)?;
+            ensure_fresh_except(&dir, markers.initializing.is_some())?;
+            match existing_key {
+                Some(key) => {
+                    let (_, proof) = markers
+                        .initializing
+                        .as_ref()
+                        .ok_or("Unexpected orphan memory key")?;
+                    verify_marker(&id, &key, proof)?;
+                    (key, proof.clone(), false)
+                }
+                None => {
+                    let mut key = Zeroizing::new([0; 32]);
+                    OsRng
+                        .try_fill_bytes(key.as_mut())
+                        .map_err(|_| "Secure random source unavailable".to_string())?;
+                    let proof = marker_proof(&id, &key)?;
+                    write_named_marker(&dir, INITIALIZING, &id, &proof, false)?;
+                    markers.initializing = Some((id.clone(), proof.clone()));
+                    (key, proof, true)
+                }
             }
         };
-        // Key-first final publication. A crash before this leaves an explicitly
-        // initializing, empty store with a verifiable existing key.
+        if needs_create {
+            // An error may still have saved the key. Leave its proof intact;
+            // retry authenticates the saved key instead of overwriting it.
+            provider.create(&id, &key)?;
+        }
+        let _lock = lock_dir(&dir)?;
+        markers.revalidate(&root, &dir)?;
+        ensure_fresh_initialization(&dir)?;
+        // Key-first final publication. Policy changes never enable memory here.
         write_marker(&dir, &id, &proof)?;
         Self::finish_open(root, dir, id, *key, proof)
     }
@@ -668,13 +729,35 @@ fn remove_synced(dir: &Dir, name: &str) -> Result<(), String> {
     sync_dir(dir)
 }
 fn sync_dir(dir: &Dir) -> Result<(), String> {
-    #[cfg(unix)]
-    dir.try_clone()
-        .and_then(|d| d.into_std_file().sync_all())
-        .map_err(|e| format!("Couldn't sync memory directory: {e}"))?;
-    #[cfg(not(unix))]
-    let _ = dir;
+    sync_dir_impl(dir).map_err(|e| format!("Couldn't sync memory directory: {e}"))
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn sync_dir_impl(dir: &Dir) -> std::io::Result<()> {
+    let readable = dir.open_with(".", OpenOptions::new().read(true))?;
+    readable.into_std().sync_all()
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
+fn sync_dir_impl(dir: &Dir) -> std::io::Result<()> {
+    dir.try_clone()?.into_std_file().sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_dir_impl(_dir: &Dir) -> std::io::Result<()> {
     Ok(())
+}
+
+fn same_directory(pinned: &Dir, current: &Dir) -> Result<bool, String> {
+    // Keep both handles open while comparing their stable OS file identities.
+    // same-file uses device/inode on Unix and volume/file index on Windows.
+    let identity = |dir: &Dir| -> Result<same_file::Handle, String> {
+        same_file::Handle::from_file(dir.try_clone().map_err(|e| e.to_string())?.into_std_file())
+            .map_err(|e| format!("Couldn't verify memory store identity: {e}"))
+    };
+    let pinned = identity(pinned)?;
+    let current = identity(current)?;
+    Ok(pinned == current)
 }
 
 fn record_kind(relative: &str) -> Result<&'static str, String> {
@@ -761,17 +844,33 @@ fn open_root(root: &Path, create: bool) -> Result<(PathBuf, Dir), String> {
         .map_err(|e| format!("Couldn't open memory store: {e}"))?;
     Ok((parent.join(name), dir))
 }
+fn lock_is_contended(error: &std::io::Error) -> bool {
+    // Windows ERROR_LOCK_VIOLATION need not map to WouldBlock. Only retry
+    // fs2's documented contention result, not unrelated permission/I/O errors.
+    error.kind() == ErrorKind::WouldBlock
+        || error
+            .raw_os_error()
+            .is_some_and(|code| Some(code) == fs2::lock_contended_error().raw_os_error())
+}
 fn lock_dir(dir: &Dir) -> Result<StoreLock, String> {
+    lock_named(dir, LOCK)
+}
+fn lock_named(dir: &Dir, name: &str) -> Result<StoreLock, String> {
     let mut options = OpenOptions::new();
     options
         .read(true)
         .write(true)
-        .create(true)
-        .follow(FollowSymlinks::No);
-    let file = dir
-        .open_with(LOCK, &options)
-        .map_err(|e| format!("Couldn't open memory lock: {e}"))?
-        .into_std();
+        .follow(FollowSymlinks::No)
+        .nonblock(true);
+    // Atomically establish one persistent inode. Separate create-new from
+    // opening an existing lock: macOS can reject concurrent O_CREAT opens.
+    let file = match dir.open_with(name, options.clone().create_new(true)) {
+        Ok(file) => Ok(file),
+        Err(error) if error.kind() == ErrorKind::AlreadyExists => dir.open_with(name, &options),
+        Err(error) => Err(error),
+    }
+    .map_err(|e| format!("Couldn't open memory lock {name}: {e}"))?
+    .into_std();
     if !file.metadata().map_err(|e| e.to_string())?.is_file() {
         return Err("Memory lock must be a regular file".into());
     }
@@ -779,7 +878,7 @@ fn lock_dir(dir: &Dir) -> Result<StoreLock, String> {
     loop {
         match fs2::FileExt::try_lock_exclusive(&file) {
             Ok(()) => return Ok(StoreLock(file, None)),
-            Err(e) if e.kind() == ErrorKind::WouldBlock => {
+            Err(e) if lock_is_contended(&e) => {
                 if start.elapsed() >= Duration::from_secs(5) {
                     return Err("Memory store is busy; try again shortly".into());
                 }
@@ -871,8 +970,7 @@ fn atomic_bytes(dir: &Dir, name: &str, bytes: &[u8], create_new: bool) -> Result
             // retaining directory capabilities throughout path resolution.
             dir.rename(&temporary, dir, name)?;
         }
-        #[cfg(unix)]
-        dir.try_clone()?.into_std_file().sync_all()?;
+        sync_dir_impl(dir)?;
         Ok::<_, std::io::Error>(())
     })();
     if result.is_err() {
@@ -989,7 +1087,11 @@ fn ensure_fresh_except(dir: &Dir, initializing: bool) -> Result<(), String> {
     for entry in dir.entries().map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
         let name = entry.file_name();
-        if name == LOCK || name == "policy.json" || (initializing && name == INITIALIZING) {
+        if name == LOCK
+            || name == INIT_LOCK
+            || name == "policy.json"
+            || (initializing && name == INITIALIZING)
+        {
             if !entry.file_type().map_err(|e| e.to_string())?.is_file() {
                 return Err("Memory initialization metadata must be a regular file".into());
             }
@@ -1100,18 +1202,22 @@ mod tests {
     struct FakeKeys {
         keys: Mutex<BTreeMap<String, [u8; 32]>>,
         creates: Mutex<usize>,
+        gets: Mutex<usize>,
+        create_attempts: Mutex<usize>,
         fail: bool,
         fail_create: bool,
         partial_create: bool,
     }
     impl KeyProvider for FakeKeys {
         fn get(&self, id: &str) -> Result<Option<[u8; 32]>, String> {
+            *self.gets.lock().unwrap() += 1;
             if self.fail {
                 return Err("Test keychain is locked".into());
             }
             Ok(self.keys.lock().unwrap().get(id).copied())
         }
         fn create(&self, id: &str, key: &[u8; 32]) -> Result<(), String> {
+            *self.create_attempts.lock().unwrap() += 1;
             if self.fail || self.fail_create {
                 return Err("Test keychain is locked".into());
             }
@@ -1208,6 +1314,13 @@ mod tests {
                 let path = entry.unwrap().path();
                 if path.is_dir() {
                     scan(&path, sentinel);
+                } else if path
+                    .file_name()
+                    .is_some_and(|name| name == LOCK || name == INIT_LOCK)
+                {
+                    // These persistent coordination files contain no content.
+                    // Windows byte-range locks reject another handle's reads.
+                    assert_eq!(fs::metadata(path).unwrap().len(), 0);
                 } else {
                     assert!(!fs::read(path)
                         .unwrap()
@@ -1354,6 +1467,198 @@ mod tests {
             .to_string_lossy()
             .starts_with(".ciphertext-")));
     }
+    // Channel-controlled credential waits; no OS credentials, sleeps, or HOME.
+    struct PausedKeys {
+        keys: Arc<FakeKeys>,
+        pause_create: bool,
+        entered: std::sync::mpsc::Sender<()>,
+        resume: Mutex<std::sync::mpsc::Receiver<()>>,
+    }
+    impl PausedKeys {
+        fn pause(&self) -> Result<(), String> {
+            self.entered
+                .send(())
+                .map_err(|_| "Test controller exited")?;
+            self.resume
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(15))
+                .map_err(|_| "Test credential wait expired".to_string())
+        }
+    }
+    impl KeyProvider for PausedKeys {
+        fn get(&self, id: &str) -> Result<Option<[u8; 32]>, String> {
+            if !self.pause_create {
+                self.pause()?;
+            }
+            self.keys.get(id)
+        }
+        fn create(&self, id: &str, key: &[u8; 32]) -> Result<(), String> {
+            if self.pause_create {
+                self.pause()?;
+            }
+            self.keys.create(id, key)
+        }
+    }
+    fn paused_keys(
+        keys: Arc<FakeKeys>,
+        pause_create: bool,
+    ) -> (
+        PausedKeys,
+        std::sync::mpsc::Receiver<()>,
+        std::sync::mpsc::Sender<()>,
+    ) {
+        let (entered, waiting) = std::sync::mpsc::channel();
+        let (resume, receiver) = std::sync::mpsc::channel();
+        (
+            PausedKeys {
+                keys,
+                pause_create,
+                entered,
+                resume: Mutex::new(receiver),
+            },
+            waiting,
+            resume,
+        )
+    }
+
+    #[test]
+    fn pending_established_key_reads_do_not_block_policy_off() {
+        for initialize in [false, true] {
+            let keys = Arc::new(FakeKeys::default());
+            let (temp, store) = established_fixture(&keys);
+            let before = content_snapshot(temp.path(), &ESTABLISHED_FILES);
+            drop(store);
+            let (provider, waiting, resume) = paused_keys(keys.clone(), false);
+            let root = temp.path().to_path_buf();
+            let reader = thread::spawn(move || {
+                if initialize {
+                    MemoryStore::initialize_with_provider(&root, &provider)
+                } else {
+                    MemoryStore::open_with_provider(&root, &provider)
+                }
+            });
+            waiting.recv_timeout(Duration::from_secs(3)).unwrap();
+            // Must complete before releasing the credential wait.
+            let off = write_policy(temp.path(), false);
+            let policy = read_policy(temp.path());
+            resume.send(()).unwrap();
+            let opened = reader.join().unwrap().unwrap();
+            off.unwrap();
+            assert_eq!(policy.unwrap(), Some(false));
+            assert!(!policy_enabled(opened.root()));
+            assert_eq!(content_snapshot(temp.path(), &ESTABLISHED_FILES), before);
+            assert_eq!(*keys.creates.lock().unwrap(), 1);
+        }
+    }
+
+    #[test]
+    fn pending_initial_key_lookup_and_create_allow_policy_off_and_keep_one_key() {
+        for pause_create in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            write_policy(temp.path(), true).unwrap();
+            let keys = Arc::new(FakeKeys::default());
+            let (provider, waiting, resume) = paused_keys(keys.clone(), pause_create);
+            let root = temp.path().to_path_buf();
+            let initializer =
+                thread::spawn(move || MemoryStore::initialize_with_provider(&root, &provider));
+            waiting.recv_timeout(Duration::from_secs(3)).unwrap();
+            let off = write_policy(temp.path(), false);
+            let policy = read_policy(temp.path());
+            // A competing cooperating initializer must wait for INIT_LOCK,
+            // rather than publish another key while the first is paused.
+            let other_root = temp.path().to_path_buf();
+            let other_keys = keys.clone();
+            let other = thread::spawn(move || {
+                MemoryStore::initialize_with_provider(&other_root, &*other_keys)
+            });
+            resume.send(()).unwrap();
+            let first = initializer.join().unwrap().unwrap();
+            let second = other.join().unwrap().unwrap();
+            off.unwrap();
+            assert_eq!(policy.unwrap(), Some(false));
+            assert_eq!(read_policy(temp.path()).unwrap(), Some(false));
+            assert_eq!(first.id, second.id);
+            assert_eq!(*keys.creates.lock().unwrap(), 1);
+            assert_eq!(*keys.create_attempts.lock().unwrap(), 1);
+        }
+    }
+
+    #[test]
+    fn changed_markers_during_key_wait_fail_before_recovery_or_publication() {
+        for initialize in [false, true] {
+            let keys = Arc::new(FakeKeys::default());
+            let (temp, store) = established_fixture(&keys);
+            let id = store.id.clone();
+            let (provider, waiting, resume) = paused_keys(keys, false);
+            let root = temp.path().to_path_buf();
+            let reader = thread::spawn(move || {
+                if initialize {
+                    MemoryStore::initialize_with_provider(&root, &provider)
+                } else {
+                    MemoryStore::open_with_provider(&root, &provider)
+                }
+            });
+            waiting.recv_timeout(Duration::from_secs(3)).unwrap();
+            // Same UUID with a changed proof still counts as a different state.
+            {
+                let _lock = store.lock().unwrap();
+                let proof = marker_proof(&id, &[92; 32]).unwrap();
+                write_named_marker(&store.dir, MARKER, &id, &proof, false).unwrap();
+            }
+            let before = content_snapshot(temp.path(), &ESTABLISHED_FILES);
+            resume.send(()).unwrap();
+            let error = reader.join().unwrap().err().unwrap();
+            assert!(error.contains("changed during key access"), "{error}");
+            assert_eq!(content_snapshot(temp.path(), &ESTABLISHED_FILES), before);
+        }
+    }
+
+    #[test]
+    fn root_replacement_during_key_wait_is_rejected() {
+        let keys = Arc::new(FakeKeys::default());
+        let outer = tempfile::tempdir().unwrap();
+        let root = outer.path().join("store");
+        MemoryStore::initialize_with_provider(&root, &*keys).unwrap();
+        let (provider, waiting, resume) = paused_keys(keys, false);
+        let read_root = root.clone();
+        let reader = thread::spawn(move || MemoryStore::open_with_provider(&read_root, &provider));
+        waiting.recv_timeout(Duration::from_secs(3)).unwrap();
+        let moved = outer.path().join("old");
+        fs::rename(&root, &moved).unwrap();
+        fs::create_dir(&root).unwrap();
+        // Even identical marker bytes must not authenticate a different root.
+        fs::copy(moved.join(MARKER), root.join(MARKER)).unwrap();
+        resume.send(()).unwrap();
+        assert!(reader
+            .join()
+            .unwrap()
+            .err()
+            .unwrap()
+            .contains("changed during key access"));
+    }
+
+    #[test]
+    fn data_added_during_initial_key_creation_blocks_final_publication() {
+        let temp = tempfile::tempdir().unwrap();
+        let keys = Arc::new(FakeKeys::default());
+        let (provider, waiting, resume) = paused_keys(keys.clone(), true);
+        let root = temp.path().to_path_buf();
+        let initializer =
+            thread::spawn(move || MemoryStore::initialize_with_provider(&root, &provider));
+        waiting.recv_timeout(Duration::from_secs(3)).unwrap();
+        let sentinel = b"synthetic legacy record";
+        fs::write(temp.path().join("me.md"), sentinel).unwrap();
+        resume.send(()).unwrap();
+        assert!(initializer.join().unwrap().is_err());
+        assert!(!temp.path().join(MARKER).exists());
+        assert!(temp.path().join(INITIALIZING).exists());
+        assert_eq!(fs::read(temp.path().join("me.md")).unwrap(), sentinel);
+        assert_eq!(*keys.creates.lock().unwrap(), 1);
+        assert!(MemoryStore::initialize_with_provider(temp.path(), &*keys).is_err());
+        assert_eq!(*keys.creates.lock().unwrap(), 1);
+    }
+
     #[test]
     fn initialize_is_serialized_idempotent_and_open_never_creates_keys() {
         let temp = tempfile::tempdir().unwrap();
@@ -1522,6 +1827,232 @@ mod tests {
         fs::remove_file(temp.path().join(MARKER)).unwrap();
         assert!(MemoryStore::initialize_with_provider(temp.path(), &FakeKeys::default()).is_err());
     }
+    // Snapshot only named content/metadata. Refusal may create the advisory
+    // LOCK file; none of these tests claim entire-directory byte equality.
+    const ESTABLISHED_FILES: [&str; 5] = [
+        "me.md",
+        "proposals/pending.jsonl",
+        "proposals/dismissed.jsonl",
+        APPROVALS,
+        MARKER,
+    ];
+
+    fn content_snapshot(root: &Path, paths: &[&str]) -> BTreeMap<String, Vec<u8>> {
+        paths
+            .iter()
+            .map(|path| (path.to_string(), fs::read(root.join(path)).unwrap()))
+            .collect()
+    }
+
+    fn suppression(content: &str) -> Value {
+        json!({
+            "salt": "synthetic-salt",
+            "fingerprint": crate::suppression_fingerprint(content, None, "synthetic-salt")
+        })
+    }
+
+    fn established_fixture(provider: &FakeKeys) -> (tempfile::TempDir, MemoryStore) {
+        let temp = tempfile::tempdir().unwrap();
+        let store = MemoryStore::initialize_with_provider(temp.path(), provider).unwrap();
+        {
+            let _guard = store.lock().unwrap();
+            store
+                .commit_reviewed_document(
+                    "me.md",
+                    "Earlier preference",
+                    true,
+                    Some(&[suppression("Earlier removal")]),
+                )
+                .unwrap();
+            store
+                .write_records(
+                    "proposals/pending.jsonl",
+                    &[json!({"content": "Pending preference"})],
+                )
+                .unwrap();
+        }
+        write_policy(temp.path(), true).unwrap();
+        (temp, store)
+    }
+
+    #[test]
+    fn established_missing_denied_and_wrong_keys_preserve_all_content_and_never_create() {
+        for failure in ["missing", "denied", "wrong"] {
+            let mut provider = FakeKeys::default();
+            let (temp, store) = established_fixture(&provider);
+            let id = store.id.clone();
+            let key = *store.key;
+            drop(store);
+            let before = content_snapshot(temp.path(), &ESTABLISHED_FILES);
+            let policy_before = fs::read(temp.path().join("policy.json")).unwrap();
+            match failure {
+                "missing" => {
+                    provider.keys.lock().unwrap().clear();
+                }
+                "denied" => {
+                    provider.fail = true;
+                }
+                "wrong" => {
+                    provider.keys.lock().unwrap().insert(id.clone(), [0; 32]);
+                }
+                _ => unreachable!(),
+            }
+            assert!(
+                MemoryStore::open_with_provider(temp.path(), &provider).is_err(),
+                "{failure}"
+            );
+            assert!(
+                MemoryStore::initialize_with_provider(temp.path(), &provider).is_err(),
+                "{failure}"
+            );
+            assert_eq!(
+                content_snapshot(temp.path(), &ESTABLISHED_FILES),
+                before,
+                "{failure}"
+            );
+            assert_eq!(
+                fs::read(temp.path().join("policy.json")).unwrap(),
+                policy_before
+            );
+            assert_eq!(*provider.creates.lock().unwrap(), 1);
+            assert_eq!(*provider.create_attempts.lock().unwrap(), 1);
+
+            let gets = *provider.gets.lock().unwrap();
+            write_policy(temp.path(), false).unwrap();
+            assert_eq!(read_policy(temp.path()).unwrap(), Some(false));
+            assert_eq!(*provider.gets.lock().unwrap(), gets);
+            assert_eq!(content_snapshot(temp.path(), &ESTABLISHED_FILES), before);
+
+            // Restoring only the injected original key recovers the same data;
+            // the failed attempts did not silently replace or reset anything.
+            provider.fail = false;
+            provider.keys.lock().unwrap().insert(id, key);
+            let restored = MemoryStore::open_with_provider(temp.path(), &provider).unwrap();
+            assert_eq!(
+                restored.read("me.md").unwrap().as_deref(),
+                Some("Earlier preference")
+            );
+            assert!(restored.is_approved("me.md", "Earlier preference").unwrap());
+            assert_eq!(
+                restored.records("proposals/pending.jsonl").unwrap().len(),
+                1
+            );
+            assert!(crate::is_suppressed(
+                &restored.records("proposals/dismissed.jsonl").unwrap()[0],
+                "Earlier removal",
+                None
+            ));
+            assert_eq!(*provider.create_attempts.lock().unwrap(), 1);
+        }
+    }
+
+    #[test]
+    fn every_legacy_content_kind_and_old_queue_lock_refuse_before_provider_use() {
+        for path in [
+            "me.md",
+            "topics/style.md",
+            "proposals/pending.jsonl",
+            "proposals/dismissed.jsonl",
+            APPROVALS,
+            "proposals/.queue.lock",
+        ] {
+            let temp = tempfile::tempdir().unwrap();
+            let target = temp.path().join(path);
+            fs::create_dir_all(target.parent().unwrap()).unwrap();
+            fs::write(&target, "synthetic legacy content").unwrap();
+            let before = content_snapshot(temp.path(), &[path]);
+            let provider = FakeKeys {
+                fail: true,
+                ..Default::default()
+            };
+            assert!(
+                MemoryStore::open_with_provider(temp.path(), &provider).is_err(),
+                "{path}"
+            );
+            assert!(
+                MemoryStore::initialize_with_provider(temp.path(), &provider).is_err(),
+                "{path}"
+            );
+            assert!(
+                MemoryStore::with_key(temp.path(), [23; 32]).is_err(),
+                "{path}"
+            );
+            assert_eq!(*provider.gets.lock().unwrap(), 0, "{path}");
+            assert_eq!(*provider.create_attempts.lock().unwrap(), 0, "{path}");
+            assert_eq!(content_snapshot(temp.path(), &[path]), before);
+            assert!(!temp.path().join(MARKER).exists());
+            assert!(!temp.path().join(INITIALIZING).exists());
+            // LOCK creation is allowed; legacy content is not migrated/deleted.
+        }
+    }
+
+    #[test]
+    fn old_plaintext_writer_can_corrupt_same_root_but_reads_and_edits_fail_without_repair() {
+        let provider = FakeKeys::default();
+        let (temp, store) = established_fixture(&provider);
+        drop(store);
+        fs::write(temp.path().join("me.md"), "# Legacy plaintext overwrite").unwrap();
+        let corrupted = content_snapshot(temp.path(), &ESTABLISHED_FILES);
+        // Opening authenticates the marker, not every document. Access to the
+        // overwritten document fails rather than accepting or repairing it.
+        let reopened = MemoryStore::open_with_provider(temp.path(), &provider).unwrap();
+        let _guard = reopened.lock().unwrap();
+        assert!(reopened.read("me.md").is_err());
+        assert!(reopened.write("me.md", "replacement", false).is_err());
+        assert!(reopened
+            .commit_reviewed_document("me.md", "replacement", false, None)
+            .is_err());
+        assert_eq!(content_snapshot(temp.path(), &ESTABLISHED_FILES), corrupted);
+        assert_eq!(*provider.create_attempts.lock().unwrap(), 1);
+    }
+
+    #[test]
+    fn complete_authenticated_snapshot_rollback_restores_old_approvals_suppression_and_policy() {
+        // Characterizes the current cryptographic limitation, not prevention:
+        // no external monotonic state distinguishes a complete old snapshot.
+        let provider = FakeKeys::default();
+        let (temp, store) = established_fixture(&provider);
+        let mut files = ESTABLISHED_FILES.to_vec();
+        files.push("policy.json");
+        let earlier = content_snapshot(temp.path(), &files);
+        {
+            let _guard = store.lock().unwrap();
+            store
+                .commit_reviewed_document(
+                    "me.md",
+                    "Later preference",
+                    false,
+                    Some(&[suppression("Later removal")]),
+                )
+                .unwrap();
+            store.write_records("proposals/pending.jsonl", &[]).unwrap();
+            assert!(store.is_approved("me.md", "Later preference").unwrap());
+            assert!(!store.is_approved("me.md", "Earlier preference").unwrap());
+        }
+        write_policy(temp.path(), false).unwrap();
+        assert!(!policy_enabled(temp.path()));
+        drop(store);
+        for (path, bytes) in earlier {
+            fs::write(temp.path().join(path), bytes).unwrap();
+        }
+        let restored = MemoryStore::open_with_provider(temp.path(), &provider).unwrap();
+        assert_eq!(
+            restored.read("me.md").unwrap().as_deref(),
+            Some("Earlier preference")
+        );
+        assert!(restored.is_approved("me.md", "Earlier preference").unwrap());
+        assert!(!restored.is_approved("me.md", "Later preference").unwrap());
+        let dismissed = restored.records("proposals/dismissed.jsonl").unwrap();
+        assert!(crate::is_suppressed(&dismissed[0], "Earlier removal", None));
+        assert!(!crate::is_suppressed(&dismissed[0], "Later removal", None));
+        assert_eq!(
+            restored.records("proposals/pending.jsonl").unwrap().len(),
+            1
+        );
+        assert!(policy_enabled(temp.path()));
+        assert_eq!(*provider.create_attempts.lock().unwrap(), 1);
+    }
+
     #[test]
     fn locks_serialize_multi_step_updates_and_are_not_age_deleted() {
         let (temp, _) = fixture();
@@ -1545,11 +2076,68 @@ mod tests {
         }
         let store = MemoryStore::with_key(temp.path(), [23; 32]).unwrap();
         assert_eq!(store.records("proposals/pending.jsonl").unwrap().len(), 6);
-        let _lock = store.lock().unwrap();
-        let file = File::open(temp.path().join(LOCK)).unwrap();
-        assert!(fs2::FileExt::try_lock_exclusive(&file).is_err());
+        let guard = store.lock().unwrap();
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(temp.path().join(LOCK))
+            .unwrap();
+        let error = fs2::FileExt::try_lock_exclusive(&file).unwrap_err();
+        assert!(lock_is_contended(&error));
+        let identity = same_file::Handle::from_file(file.try_clone().unwrap()).unwrap();
+        drop(guard);
+        fs2::FileExt::try_lock_exclusive(&file).unwrap();
+        fs2::FileExt::unlock(&file).unwrap();
+        assert_eq!(
+            identity,
+            same_file::Handle::from_path(temp.path().join(LOCK)).unwrap()
+        );
         assert!(temp.path().join(LOCK).exists());
     }
+    #[test]
+    fn contention_classification_retries_only_would_block_or_fs2_contention() {
+        assert!(lock_is_contended(&fs2::lock_contended_error()));
+        assert!(lock_is_contended(&std::io::Error::from(
+            ErrorKind::WouldBlock
+        )));
+        assert!(!lock_is_contended(&std::io::Error::from(
+            ErrorKind::PermissionDenied
+        )));
+        assert!(!lock_is_contended(&std::io::Error::from(
+            ErrorKind::InvalidInput
+        )));
+        #[cfg(windows)]
+        assert!(lock_is_contended(&std::io::Error::from_raw_os_error(33)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn directory_sync_covers_create_replace_and_remove_through_pinned_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = Dir::open_ambient_dir(temp.path(), ambient_authority()).unwrap();
+        sync_dir(&dir).unwrap();
+        atomic_bytes(&dir, "synthetic-record", b"first", true).unwrap();
+        atomic_bytes(&dir, "synthetic-record", b"second", false).unwrap();
+        assert_eq!(
+            fs::read(temp.path().join("synthetic-record")).unwrap(),
+            b"second"
+        );
+        remove_synced(&dir, "synthetic-record").unwrap();
+        assert!(!temp.path().join("synthetic-record").exists());
+        assert!(remove_synced(&dir, "synthetic-record").is_err());
+    }
+
+    #[test]
+    fn directory_identity_distinguishes_live_handles_without_path_strings() {
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let a = Dir::open_ambient_dir(first.path(), ambient_authority()).unwrap();
+        let alias = Dir::open_ambient_dir(first.path(), ambient_authority()).unwrap();
+        let b = Dir::open_ambient_dir(second.path(), ambient_authority()).unwrap();
+        assert!(same_directory(&a, &alias).unwrap());
+        assert!(!same_directory(&a, &b).unwrap());
+    }
+
     #[test]
     fn policy_needs_no_key_and_fails_closed() {
         let temp = tempfile::tempdir().unwrap();

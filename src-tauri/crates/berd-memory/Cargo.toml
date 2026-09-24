@@ -8,14 +8,15 @@ description = "Shared Rust core for Berd's consent-gated memory files."
 name = "berd-memory-mcp"
 path = "src/main.rs"
 
+[features]
+default = []
+# Local validation only; desktop release availability remains target-gated.
+portable-store = [
+    "dep:aes-gcm", "dep:cap-std", "dep:cap-fs-ext", "dep:fs2", "dep:rand",
+    "dep:zeroize", "dep:dirs", "dep:uuid", "dep:same-file", "dep:keyring",
+]
+
 [dependencies]
-aes-gcm = { version = "0.10", features = ["zeroize"] }
-cap-std = "3.4.5"
-cap-fs-ext = "3.4.5"
-fs2 = "0.4"
-rand = "0.8"
-zeroize = "1"
-dirs = "6"
 hex = "0.4"
 regex = "1"
 serde = { version = "1", features = ["derive"] }
@@ -23,16 +24,39 @@ serde_json = "1"
 sha2 = "0.10"
 unicode-general-category = "1"
 unicode-normalization = "0.1"
-uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 tempfile = "3"
 
-[target.'cfg(windows)'.dependencies]
-keyring = { version = "3.6.3", default-features = false, features = ["windows-native"] }
-
-[target.'cfg(target_os = "macos")'.dependencies]
+[target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
+aes-gcm = { version = "0.10", features = ["zeroize"] }
+cap-std = "3.4.5"
+cap-fs-ext = "3.4.5"
+fs2 = "0.4"
+rand = "0.8"
+zeroize = "1"
+dirs = "6"
+uuid = { version = "1", features = ["v4"] }
 keyring = { version = "3.6.3", default-features = false, features = ["apple-native"] }
 
+same-file = "1"
+
+[target.'cfg(any(all(target_os = "macos", not(target_arch = "aarch64")), target_os = "linux", target_os = "windows"))'.dependencies]
+aes-gcm = { version = "0.10", features = ["zeroize"], optional = true }
+cap-std = { version = "3.4.5", optional = true }
+cap-fs-ext = { version = "3.4.5", optional = true }
+fs2 = { version = "0.4", optional = true }
+rand = { version = "0.8", optional = true }
+zeroize = { version = "1", optional = true }
+dirs = { version = "6", optional = true }
+uuid = { version = "1", features = ["v4"], optional = true }
+same-file = { version = "1", optional = true }
+
+[target.'cfg(all(target_os = "macos", not(target_arch = "aarch64")))'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["apple-native"], optional = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["windows-native"], optional = true }
+
 [target.'cfg(target_os = "linux")'.dependencies]
-keyring = { version = "3.6.3", default-features = false, features = ["sync-secret-service", "crypto-rust", "vendored"] }
+keyring = { version = "3.6.3", default-features = false, features = ["sync-secret-service", "crypto-rust", "vendored"], optional = true }

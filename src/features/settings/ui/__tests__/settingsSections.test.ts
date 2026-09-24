@@ -1,3 +1,10 @@
+import {
+  beforeEach as beforeSupportedMemory,
+  afterEach as afterSupportedMemory,
+  vi as memoryEnv,
+} from "vitest";
+beforeSupportedMemory(() => memoryEnv.stubEnv("VITE_MEMORY_SUPPORTED", "1"));
+afterSupportedMemory(() => memoryEnv.unstubAllEnvs());
 import { describe, expect, it } from "vitest";
 import type { ProfileCapabilityState } from "@/shared/profile/capabilities";
 import {
@@ -117,4 +124,13 @@ describe("settingsSections", () => {
       getVisibleSettingsSections(capabilities).map((section) => section.id),
     ).not.toContain("voice");
   });
+});
+
+it("hides unsupported memory but preserves a direct route for the notice", () => {
+  memoryEnv.stubEnv("VITE_MEMORY_SUPPORTED", "0");
+  expect(
+    getVisibleSettingsSections(enabledCapabilities).map((s) => s.id),
+  ).not.toContain("me");
+  expect(resolveSettingsSection("me")).toBe("me");
+  expect(resolveEnabledSettingsSection("me", enabledCapabilities)).toBe("me");
 });

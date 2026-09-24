@@ -1,3 +1,4 @@
+import { isMemorySupported } from "@/features/me/lib/memoryAvailability";
 import {
   getHomeDir,
   pathExists,
@@ -70,6 +71,7 @@ export function parseProposalLine(line: string): MemoryProposal | null {
 
 /** Pending proposals. Only a missing queue is empty; read failures propagate. */
 export async function listProposals(): Promise<MemoryProposal[]> {
+  if (!isMemorySupported()) return [];
   const path = queuePath(await getHomeDir());
   if (!(await pathExists(path))) return [];
   const payload = await readMemoryTextFile(path);

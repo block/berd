@@ -3,6 +3,7 @@ import {
   __resetAllPersonaHandoffs,
   buildPersonaHandoffPreamble,
   claimPersonaHandoff,
+  preparePersonaHandoff,
   isExternalAgentProvider,
   isGooseManagedProvider,
   resetPersonaHandoff,
@@ -175,5 +176,29 @@ describe("resetPersonaHandoff", () => {
     expect(
       claimPersonaHandoff("s2", "claude-acp", "You are Starfriend."),
     ).toBeNull();
+  });
+});
+
+describe("latest delivered handoff state", () => {
+  it("re-delivers a returning persona while retaining independent provider state", () => {
+    expect(claimPersonaHandoff("s1", "claude-acp", "A")).toContain("A");
+    expect(claimPersonaHandoff("s1", "codex-acp", "A")).toContain("A");
+    expect(claimPersonaHandoff("s1", "claude-acp", "B")).toContain("B");
+    expect(claimPersonaHandoff("s1", "claude-acp", "A")).toContain("A");
+    expect(claimPersonaHandoff("s1", "codex-acp", "A")).toBeNull();
+    resetPersonaHandoff("s1");
+    expect(claimPersonaHandoff("s1", "claude-acp", "A")).not.toBeNull();
+    expect(claimPersonaHandoff("s1", "codex-acp", "A")).not.toBeNull();
+  });
+
+  it("keeps the delivered state until a prepared claim is marked", () => {
+    claimPersonaHandoff("s1", "claude-acp", "A");
+    expect(preparePersonaHandoff("s1", "claude-acp", "B")).not.toBeNull();
+    expect(preparePersonaHandoff("s1", "claude-acp", "A")).toBeNull();
+    const retry = preparePersonaHandoff("s1", "claude-acp", "B");
+    expect(retry).not.toBeNull();
+    retry?.markDelivered();
+    expect(preparePersonaHandoff("s1", "claude-acp", "B")).toBeNull();
+    expect(preparePersonaHandoff("s1", "claude-acp", "A")).not.toBeNull();
   });
 });

@@ -1,3 +1,4 @@
+import { isMemorySupported } from "@/features/me/lib/memoryAvailability";
 import type { ComponentType } from "react";
 import {
   Archive,
@@ -174,7 +175,10 @@ export function getVisibleSettingsSections(
   capabilities: ProfileCapabilityState,
 ) {
   return SETTINGS_SECTIONS.filter((section) => {
-    if (isSectionHidden(section)) {
+    if (
+      (section.id === "me" && !isMemorySupported()) ||
+      isSectionHidden(section)
+    ) {
       return false;
     }
     const capability = getSectionCapability(section);

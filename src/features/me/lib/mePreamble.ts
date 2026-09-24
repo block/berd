@@ -1,3 +1,4 @@
+import { isMemorySupported } from "@/features/me/lib/memoryAvailability";
 import { getHomeDir, readMemoryRecallSnapshot } from "@/shared/api/system";
 import { meFilePath, meFileDisplayPath } from "./meFile";
 import { memoryRootPath } from "./memoryPaths";
@@ -144,6 +145,7 @@ export const MEMORY_OFF_PREAMBLE =
   "[Memory is off] The user has turned Berd's memory off. Don't offer to remember things, don't propose saving preferences, and don't create or read memory files (~/.me/).";
 
 export async function getMePreamble(): Promise<string | null> {
+  if (!isMemorySupported()) return null;
   if (!window.__TAURI_INTERNALS__) {
     return null;
   }

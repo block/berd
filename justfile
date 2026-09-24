@@ -165,6 +165,7 @@ tauri-fmt-check:
 
 [unix]
 _tauri-cargo-unix *ARGS:
+    TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)" && cd src-tauri && python3 ../scripts/repair-sherpa-cache.py "$TAURI_CARGO_TARGET_DIR"
     TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)" && cd src-tauri && CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" TAURI_CONFIG='{"bundle":{"externalBin":[],"resources":[]}}' cargo {{ ARGS }}
 
 [windows]
@@ -239,12 +240,9 @@ _tauri-test-skill-marketplace:
 
 [unix]
 _tauri-test-unix:
-    # rust-cache can restore Sherpa's generated cache directory without its native libraries.
-    if [ "$(uname -s)" = "Linux" ]; then rm -rf src-tauri/target/sherpa-onnx-prebuilt; fi
     just _tauri-cargo-unix test -p tauri-plugin-berdctl --features server
     just _tauri-cargo-unix test -p berdctl
-    just _tauri-cargo-unix test -p berd-memory
-    just _tauri-cargo-unix test --lib commands::memory_
+    ./scripts/test-memory-target.sh
     just _tauri-cargo-unix test --lib telemetry
     just _tauri-cargo-unix test --lib --features block-telemetry-enforced telemetry
     just _tauri-test-skill-marketplace
@@ -258,7 +256,6 @@ _tauri-test-windows:
     just _tauri-cargo-windows test -p tauri-plugin-berdctl --features server
     just _tauri-cargo-windows test -p berdctl
     just _tauri-cargo-windows test -p berd-memory
-    just _tauri-cargo-windows test --lib commands::memory_
     just _tauri-cargo-windows test --lib telemetry
     just _tauri-cargo-windows test --lib --features block-telemetry-enforced telemetry
     just _tauri-test-skill-marketplace
@@ -368,7 +365,6 @@ _bundle-unix:
     fi
     GOOSE_BUILD_PROFILE=release ./scripts/prepare-goose-sidecar.sh
     VITE_FEEDBACK="${VITE_FEEDBACK:-0}" CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-berdctl-sidecar.sh
-    CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-memory-sidecar.sh
     ./scripts/prepare-catch-sidecar.sh
 
     CARGO_FEATURES_CSV="$(./scripts/block-feature-gates.sh berdctl)"
@@ -388,8 +384,9 @@ _bundle-unix:
       '{ version: $v } + if $agent_tools then { bundle: { resources: { "../resources/bb": "bb" } } } else {} end' \
       > "$VERSION_CONFIG"
 
-    TAURI_BUILD_ARGS=(pnpm tauri build --features "$CARGO_FEATURES_CSV" --config "$VERSION_CONFIG")
-    if [[ "$(uname -s)" = "Darwin" ]]; then
+    COMPILE_TARGET="${CARGO_BUILD_TARGET:-$(rustc -vV | sed -n 's|host: ||p')}"
+    TAURI_BUILD_ARGS=(node scripts/tauri-memory.mjs build --target "$COMPILE_TARGET" --features "$CARGO_FEATURES_CSV" --config "$VERSION_CONFIG")
+    if [[ "$COMPILE_TARGET" == *-apple-darwin ]]; then
       TAURI_BUILD_ARGS+=(--bundles app)
     fi
 
@@ -400,17 +397,14 @@ _bundle-unix:
       VITE_APP_VERSION="$BERD_APP_VERSION_RICH" \
       "${TAURI_BUILD_ARGS[@]}"
 
-    if [[ "$(uname -s)" = "Darwin" ]]; then
-      APP_PATH="$TAURI_CARGO_TARGET_DIR/release/bundle/macos/Berd.app"
+    if [[ "$COMPILE_TARGET" == *-apple-darwin ]]; then
+      APP_PATH="$TAURI_CARGO_TARGET_DIR/$COMPILE_TARGET/release/bundle/macos/Berd.app"
       # Local Tauri builds are ad-hoc signed before resources are sealed. Re-sign
       # after app bundling so the local DMG contains a verifiable app bundle.
       codesign --force --deep --sign - "$APP_PATH"
-      DMG_DIR="$TAURI_CARGO_TARGET_DIR/release/bundle/dmg"
+      DMG_DIR="$TAURI_CARGO_TARGET_DIR/$COMPILE_TARGET/release/bundle/dmg"
       mkdir -p "$DMG_DIR"
-      case "$(uname -m)" in
-        arm64) DMG_ARCH="aarch64" ;;
-        *) DMG_ARCH="$(uname -m)" ;;
-      esac
+      DMG_ARCH="${COMPILE_TARGET%%-*}"
       ./scripts/package-macos-dmg.sh "$APP_PATH" "$DMG_DIR/berd_${BERD_APP_VERSION}_${DMG_ARCH}.dmg"
     fi
 
@@ -448,7 +442,6 @@ _bundle-debug-unix:
     fi
     GOOSE_BUILD_PROFILE=debug ./scripts/prepare-goose-sidecar.sh
     VITE_FEEDBACK="${VITE_FEEDBACK:-0}" CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-berdctl-sidecar.sh
-    CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-memory-sidecar.sh
     ./scripts/prepare-catch-sidecar.sh
 
     CARGO_FEATURES_CSV="$(./scripts/block-feature-gates.sh berdctl,devtools)"
@@ -474,7 +467,7 @@ _bundle-debug-unix:
       VITE_AUTH_GATE="${VITE_AUTH_GATE:-0}" \
       VITE_BYO_KEY_PROVIDERS="${VITE_BYO_KEY_PROVIDERS:-1}" \
       VITE_APP_VERSION="$BERD_APP_VERSION_RICH" \
-      pnpm tauri build --features "$CARGO_FEATURES_CSV" --config "$DEBUG_CONFIG"
+      node scripts/tauri-memory.mjs build --features "$CARGO_FEATURES_CSV" --config "$DEBUG_CONFIG"
 
 # ── Test ─────────────────────────────────────────────────────
 
@@ -537,12 +530,6 @@ dev:
     echo "Using berdctl CLI: ${BERDCTL_BIN}"
     echo "Using berd-monitor CLI: ${BERD_MONITOR_BIN}"
 
-    # Same story for the memory MCP server: workspace member, resolved at
-    # runtime via BERD_MEMORY_MCP_BIN in dev builds.
-    (cd src-tauri && cargo build -p berd-memory)
-    export BERD_MEMORY_MCP_BIN="${CARGO_TARGET_DIR}/debug/berd-memory-mcp"
-    echo "Using memory MCP server: ${BERD_MEMORY_MCP_BIN}"
-
     if [[ "${VITE_AGENT_TOOLS:-0}" == "1" ]]; then
         ./scripts/prepare-bb-cli-resource.sh
     fi
@@ -579,7 +566,7 @@ dev:
     fi
 
     CARGO_FEATURES="$(./scripts/block-feature-gates.sh "{{ app_features }}")"
-    VITE_AUTH_GATE="${VITE_BUILDERBOT:-0}" pnpm tauri dev --features "$CARGO_FEATURES" "${EXTRA_CONFIG_ARGS[@]}"
+    VITE_AUTH_GATE="${VITE_BUILDERBOT:-0}" node scripts/tauri-memory.mjs dev --features "$CARGO_FEATURES" "${EXTRA_CONFIG_ARGS[@]}"
 
 [unix]
 dev-debug: dev
@@ -644,7 +631,7 @@ stage-sidecar:
 
 [unix]
 _stage-sidecar-unix:
-    TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)" && GOOSE_BUILD_PROFILE=debug ./scripts/prepare-goose-sidecar.sh && CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-berdctl-sidecar.sh && CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-memory-sidecar.sh && ./scripts/prepare-catch-sidecar.sh
+    TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)" && GOOSE_BUILD_PROFILE=debug ./scripts/prepare-goose-sidecar.sh && CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-berdctl-sidecar.sh && CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-memory-sidecar.sh "${CARGO_BUILD_TARGET:-$(rustc -vV | sed -n 's|host: ||p')}" && ./scripts/prepare-catch-sidecar.sh
 
 [windows]
 _stage-sidecar-windows:

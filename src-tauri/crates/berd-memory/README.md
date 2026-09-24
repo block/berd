@@ -5,6 +5,12 @@ MCP sidecar. The app explicitly calls `initialize`; the sidecar only calls
 `open`. Neither method reads legacy plaintext records. Existing plaintext stores
 need an explicit migration that is **not implemented** here.
 
+The default desktop availability remains Apple-silicon macOS. For local native
+validation, `--features portable-store` enables this crate's encrypted store and
+MCP on Intel macOS, Windows, and Linux with their OS key backends. It does not
+enable the app or release packaging. See [portability status and commands](../../../../docs/memory-portability.md)
+for the test matrix and remaining acceptance requirements.
+
 ## API and locking
 
 - `open(&Path)` requires an initialized store and its existing OS key.
@@ -47,9 +53,25 @@ operation and recovery must finish it. Reads and ordinary mutations refuse to
 proceed while any journal remains. Never treat a transaction error as proof
 that no change committed.
 
+Credential lookup and creation run without the transaction/policy lock. An
+established open snapshots both markers under that lock, requests its existing
+key unlocked, then rechecks the root directory identity and both markers before
+verification or recovery. Initialization holds a separate
+`.berd-memory-init.lock` across credential calls, taking the transaction lock
+only for inspection and publication. Initializers always take the initialization
+lock first; policy writes never take it. Freshness is rechecked before final
+publication, and established missing keys still cannot be replaced.
+
 Lock files are persistent; they must not be deleted on a timer or on release.
-OS advisory locks serialize cooperating app and MCP processes and are released
-on process exit. Non-cooperating filesystem writers are outside that guarantee.
+OS advisory locks serialize cooperating app and MCP processes using this
+protocol and are released on process exit. Non-cooperating filesystem writers
+and older binaries that do not implement this protocol are outside that guarantee.
+The app runs blocking memory I/O off synchronous command dispatch, with at most
+four outstanding key-access workers. Cancelling an async waiter does not cancel
+a native call or free its worker permit. Policy writes and off-state recall/
+proposal results do not require a key-worker permit. This preserves the off
+switch during pending key authorization; it does not impose a Keychain deadline
+or prove native prompt behavior.
 
 ## Storage format and recovery
 
@@ -98,11 +120,11 @@ recovery; they are not automatically deleted or treated as a fresh store.
 
 The keyring service is `com.block.berd.memory.active.v1`, with account
 `active-store-<store UUID>`. These names are separate from the abandoned prototype.
-The configured backends are macOS Keychain, Windows Credential Manager, and Linux
-Secret Service. Linux enables the `crypto-rust` transport feature rather than
-using a plain Secret Service session. Native keychain prompts, platform access
-controls, and Linux Secret Service interoperability need platform testing;
-the automated tests do not access a real keychain.
+Native storage and the MCP executable are active only on Apple-silicon macOS;
+Windows, Linux, and Intel Mac builds exclude them. The active backend is macOS
+Keychain. Signed app/sidecar authorization, prompts, relaunch, and upgrades still
+need isolated native acceptance; automated tests do not access a real keychain.
+Unsupported-platform memory defects remain deferred, not fixed by this gate.
 
 Capability-relative directory/file operations reject symlink roots, record
 parents, files, journals, and locks. No-follow operations retain directory
@@ -128,6 +150,10 @@ through every constructor and `lock`, corrupt/conflicting journals, plaintext
 absence, path/store swaps, missing keys, initialization races, cross-process
 locking, atomic create-new races, symlink rejection, legacy refusal, strict
 policy schema, encrypted approval/queue metadata, and MCP policy/approval
-enforcement. Encrypted recall is tested through the newline protocol with an
-injected store. A Unix subprocess test exercises the production stdio binary
+enforcement. Channel-paused credential tests cover policy-off during established
+lookup, initialization lookup and creation, concurrent initializers, and state
+changes before publication. App/MCP tests cover recall and proposal policy
+rechecks after paused opens; app tests cover bounded workers, cancellation, and
+off-state behavior with all key workers occupied. Encrypted recall is tested
+through the newline protocol with an injected store. A Unix subprocess test exercises the production stdio binary
 with an isolated HOME and a missing marker (before keychain access).

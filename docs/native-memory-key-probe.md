@@ -33,6 +33,8 @@ approved recall, relaunch, upgrades, denied prompts, and unavailable credentials
 Never automate credential-prompt approval or access production entries for this
 test. Use a unique test namespace and verify exact-entry cleanup.
 
-See [packaging acceptance](memory-encryption.md#packaging-acceptance) for the
-required scenarios. Do not describe this historical timeout as successful
-native interoperability.
+See [macOS acceptance](memory-macos-acceptance.md) for the isolated signed-build
+procedure and read-only signature-inspection helper. That helper verifies
+metadata, not Keychain authorization. Windows, Linux, and Intel Mac memory
+support is deferred; their first-release checks establish feature absence.
+Do not describe this historical timeout as successful native interoperability.

@@ -417,6 +417,7 @@
     "title": "General"
   },
   "me": {
+    "unsupported": "Memory is available only in Berd builds for Macs with Apple silicon. It is unavailable in this build.",
     "addTopic": "Add topic",
     "addTopicAction": "Add",
     "cancel": "Cancel",

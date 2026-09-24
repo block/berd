@@ -3,7 +3,7 @@
 
 use crate::commands::memory_store::{
     admit_reviewed_memory_document, documents_at, memory_store_root, policy_enabled_at,
-    relative_path, write_reviewed_document,
+    relative_path, run_enabled_memory_operation, run_memory_operation, write_reviewed_document,
 };
 use berd_memory::store::MemoryStore;
 use berd_memory::{
@@ -124,7 +124,16 @@ fn approval_target(store: &MemoryStore, topic: Option<&str>) -> Result<(String, 
 /// Save and suppress pure deletions from the actual previous document in one
 /// encrypted transaction. The renderer cannot supply a removed-entry list.
 #[tauri::command]
-pub fn save_reviewed_memory_document(
+pub async fn save_reviewed_memory_document(
+    path: String,
+    contents: String,
+    topic: Option<String>,
+) -> Result<(), String> {
+    run_memory_operation(move || save_reviewed_memory_document_blocking(path, contents, topic))
+        .await
+}
+
+pub(crate) fn save_reviewed_memory_document_blocking(
     path: String,
     contents: String,
     topic: Option<String>,
@@ -235,7 +244,15 @@ fn save_reviewed_at(
 }
 
 #[tauri::command]
-pub fn approve_memory_proposal(
+pub async fn approve_memory_proposal(
+    id: String,
+    content: String,
+    topic: Option<String>,
+) -> Result<ApprovalResult, String> {
+    run_memory_operation(move || approve_memory_proposal_blocking(id, content, topic)).await
+}
+
+pub(crate) fn approve_memory_proposal_blocking(
     id: String,
     content: String,
     topic: Option<String>,
@@ -297,7 +314,18 @@ fn approve_at(
 }
 
 #[tauri::command]
-pub fn resolve_memory_proposal(
+pub async fn resolve_memory_proposal(
+    id: String,
+    declined_content: Option<String>,
+    declined_topic: Option<String>,
+) -> Result<(), String> {
+    run_memory_operation(move || {
+        resolve_memory_proposal_blocking(id, declined_content, declined_topic)
+    })
+    .await
+}
+
+pub(crate) fn resolve_memory_proposal_blocking(
     id: String,
     declined_content: Option<String>,
     declined_topic: Option<String>,
@@ -352,12 +380,27 @@ fn resolve_at(
 }
 
 #[tauri::command]
-pub fn append_memory_proposals(candidates: Vec<MemoryCandidateInput>) -> Result<usize, String> {
-    let root = memory_store_root()?;
-    if candidates.is_empty() || !policy_enabled_at(&root) {
+pub async fn append_memory_proposals(
+    candidates: Vec<MemoryCandidateInput>,
+) -> Result<usize, String> {
+    if candidates.is_empty() {
         return Ok(0);
     }
-    let store = MemoryStore::open(&root)?;
+    run_enabled_memory_operation(memory_store_root()?, 0, move |root| {
+        append_with_opener(root, candidates, MemoryStore::open)
+    })
+    .await
+}
+
+fn append_with_opener(
+    root: &std::path::Path,
+    candidates: Vec<MemoryCandidateInput>,
+    open: impl FnOnce(&std::path::Path) -> Result<MemoryStore, String>,
+) -> Result<usize, String> {
+    if candidates.is_empty() || !policy_enabled_at(root) {
+        return Ok(0);
+    }
+    let store = open(root)?;
     append_at(&store, candidates)
 }
 
@@ -682,6 +725,38 @@ mod tests {
         )
         .is_err());
         assert!(store.read("me.md").unwrap().is_none());
+    }
+
+    #[test]
+    fn proposals_recheck_policy_after_a_paused_opener() {
+        let (_temp, store) = fixture();
+        let root = store.root().to_path_buf();
+        write_policy_at(&root, true).unwrap();
+        let read_root = root.clone();
+        let (entered, waiting) = std::sync::mpsc::channel();
+        let (release, resume) = std::sync::mpsc::channel();
+        let writer = std::thread::spawn(move || {
+            append_with_opener(
+                &read_root,
+                vec![candidate("Synthetic pending preference")],
+                |_| {
+                    entered.send(()).unwrap();
+                    resume
+                        .recv_timeout(std::time::Duration::from_secs(10))
+                        .unwrap();
+                    Ok(store)
+                },
+            )
+        });
+        waiting
+            .recv_timeout(std::time::Duration::from_secs(3))
+            .unwrap();
+        let off = write_policy_at(&root, false);
+        release.send(()).unwrap();
+        let count = writer.join().unwrap();
+        off.unwrap();
+        assert_eq!(count.unwrap(), 0);
+        assert!(!root.join(PENDING).exists());
     }
 
     #[test]

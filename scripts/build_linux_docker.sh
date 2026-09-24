@@ -122,9 +122,15 @@ fi
   cd /work
   GOOSE_DEV_MODE=required GOOSE_BUILD_PROFILE=release ./scripts/ensure-local-goose.sh
   ./scripts/build_linux.sh
+  rustc -vV | sed -n "s|host: ||p" > /work/.docker-cache/tauri-compile-target
 '
 
-bundle_dir=".docker-cache/tauri-target/release/bundle"
+compile_target="$(cat .docker-cache/tauri-compile-target)"
+if [[ ! "$compile_target" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+  echo "Invalid Linux compile target." >&2
+  exit 1
+fi
+bundle_dir=".docker-cache/tauri-target/$compile_target/release/bundle"
 if [[ ! -d "$bundle_dir" ]]; then
   echo "Expected Linux bundle output under $bundle_dir, but it was not found." >&2
   exit 1

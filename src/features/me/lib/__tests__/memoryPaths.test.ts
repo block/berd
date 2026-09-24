@@ -1,3 +1,6 @@
+import { afterEach } from "vitest";
+beforeEach(() => vi.stubEnv("VITE_MEMORY_SUPPORTED", "1"));
+afterEach(() => vi.unstubAllEnvs());
 import { beforeEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getHomeDir: vi.fn(),

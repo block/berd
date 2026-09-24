@@ -198,7 +198,7 @@ Write-WindowsDevInfo "Using Tauri dev config: $devConfigPath"
 
 $env:VITE_AUTH_GATE = if ($env:VITE_BUILDERBOT -eq "1") { "1" } else { "0" }
 $tauriArguments = @(
-    "exec", "tauri", "dev",
+    "scripts/tauri-memory.mjs", "dev",
     "--features", (Get-BerdAppFeatures),
     "--config", "src-tauri/tauri.dev.conf.json",
     "--config", $devConfigPath
@@ -209,4 +209,4 @@ if ($E2eMode) {
     # own in-flight compile before the test driver publishes readiness.
     $tauriArguments += "--no-watch"
 }
-Invoke-CheckedCommand -FilePath $pnpm -ArgumentList $tauriArguments -Label "pnpm exec tauri dev"
+Invoke-CheckedCommand -FilePath "node" -ArgumentList $tauriArguments -Label "target-aware tauri dev"

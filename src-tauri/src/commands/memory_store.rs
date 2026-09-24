@@ -7,10 +7,70 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, LazyLock};
 use tauri::Window;
 use tauri_plugin_dialog::DialogExt;
 
 pub(crate) const MAX_DOCUMENT_BYTES: usize = 1024 * 1024;
+
+// Bound outstanding blocking key operations. A native authorization request
+// cannot be cancelled by dropping its async waiter; the permit stays with the
+// worker until it exits. Policy uses a separate path so saturation cannot
+// prevent the person from turning memory off.
+static MEMORY_KEY_WORKERS: LazyLock<Arc<tokio::sync::Semaphore>> =
+    LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(4)));
+
+pub(crate) async fn run_memory_operation<T: Send + 'static>(
+    operation: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    run_memory_operation_with_workers(MEMORY_KEY_WORKERS.clone(), operation).await
+}
+
+async fn run_memory_operation_with_workers<T: Send + 'static>(
+    workers: Arc<tokio::sync::Semaphore>,
+    operation: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    let permit = workers.try_acquire_owned().map_err(|_| {
+        "Memory key access is busy; finish the pending authorization or try again".to_string()
+    })?;
+    run_memory_io(move || {
+        let _permit = permit;
+        operation()
+    })
+    .await
+}
+
+/// Off-state never depends on a credential-worker slot. The operation must
+/// still recheck policy under the store lock after any native key wait.
+pub(crate) async fn run_enabled_memory_operation<T: Send + 'static>(
+    root: PathBuf,
+    disabled: T,
+    operation: impl FnOnce(&Path) -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    run_enabled_memory_operation_with_workers(root, disabled, MEMORY_KEY_WORKERS.clone(), operation)
+        .await
+}
+
+async fn run_enabled_memory_operation_with_workers<T: Send + 'static>(
+    root: PathBuf,
+    disabled: T,
+    workers: Arc<tokio::sync::Semaphore>,
+    operation: impl FnOnce(&Path) -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    let policy_root = root.clone();
+    if !run_memory_io(move || Ok(policy_enabled_at(&policy_root))).await? {
+        return Ok(disabled);
+    }
+    run_memory_operation_with_workers(workers, move || operation(&root)).await
+}
+
+async fn run_memory_io<T: Send + 'static>(
+    operation: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tokio::task::spawn_blocking(operation)
+        .await
+        .map_err(|_| "Memory operation did not finish".to_string())?
+}
 
 pub fn memory_store_root() -> Result<PathBuf, String> {
     berd_memory::memory_root()
@@ -150,12 +210,20 @@ pub(crate) fn documents_at(store: &MemoryStore) -> Result<Vec<MemoryDocument>, S
 }
 
 #[tauri::command]
-pub fn initialize_memory_store() -> Result<(), String> {
+pub async fn initialize_memory_store() -> Result<(), String> {
+    run_memory_operation(initialize_memory_store_blocking).await
+}
+
+pub(crate) fn initialize_memory_store_blocking() -> Result<(), String> {
     MemoryStore::initialize(&memory_store_root()?).map(|_| ())
 }
 
 #[tauri::command]
-pub fn read_memory_text_file(path: String) -> Result<MemoryTextPayload, String> {
+pub async fn read_memory_text_file(path: String) -> Result<MemoryTextPayload, String> {
+    run_memory_operation(move || read_memory_text_file_blocking(path)).await
+}
+
+pub(crate) fn read_memory_text_file_blocking(path: String) -> Result<MemoryTextPayload, String> {
     let root = memory_store_root()?;
     let relative = relative_path(&path, &root, true)?;
     let store = MemoryStore::open(&root)?;
@@ -175,7 +243,11 @@ pub fn read_memory_text_file(path: String) -> Result<MemoryTextPayload, String> 
 }
 
 #[tauri::command]
-pub fn list_memory_documents() -> Result<Vec<MemoryDocument>, String> {
+pub async fn list_memory_documents() -> Result<Vec<MemoryDocument>, String> {
+    run_memory_operation(list_memory_documents_blocking).await
+}
+
+pub(crate) fn list_memory_documents_blocking() -> Result<Vec<MemoryDocument>, String> {
     let root = memory_store_root()?;
     if is_uninitialized(&root)? {
         return Ok(Vec::new());
@@ -194,8 +266,11 @@ pub struct MemoryRecallSnapshot {
 /// Recall is a separate capability from the Settings reader: policy is checked
 /// before requesting a key, and again under the same lock used by policy writes.
 #[tauri::command]
-pub fn read_memory_recall_snapshot() -> Result<Option<MemoryRecallSnapshot>, String> {
-    recall_snapshot_with(&memory_store_root()?, MemoryStore::open)
+pub async fn read_memory_recall_snapshot() -> Result<Option<MemoryRecallSnapshot>, String> {
+    run_enabled_memory_operation(memory_store_root()?, None, |root| {
+        recall_snapshot_with(root, MemoryStore::open)
+    })
+    .await
 }
 
 fn recall_snapshot_with(
@@ -246,7 +321,14 @@ fn recall_snapshot_at(store: &MemoryStore) -> Result<Option<MemoryRecallSnapshot
 }
 
 #[tauri::command]
-pub fn is_memory_content_approved(path: String, contents: String) -> Result<bool, String> {
+pub async fn is_memory_content_approved(path: String, contents: String) -> Result<bool, String> {
+    run_memory_operation(move || is_memory_content_approved_blocking(path, contents)).await
+}
+
+pub(crate) fn is_memory_content_approved_blocking(
+    path: String,
+    contents: String,
+) -> Result<bool, String> {
     let root = memory_store_root()?;
     let relative = relative_path(&path, &root, false)?;
     let contents = admit_reviewed_memory_document(&contents)?;
@@ -268,13 +350,27 @@ fn save_document(path: String, contents: String, create_new: bool) -> Result<(),
 }
 
 #[tauri::command]
-pub fn create_memory_text_file(path: String, contents: String) -> Result<(), String> {
+pub async fn create_memory_text_file(path: String, contents: String) -> Result<(), String> {
+    run_memory_operation(move || create_memory_text_file_blocking(path, contents)).await
+}
+
+pub(crate) fn create_memory_text_file_blocking(
+    path: String,
+    contents: String,
+) -> Result<(), String> {
     save_document(path, contents, true)
 }
 
 #[tauri::command]
-pub fn write_memory_text_file(path: String, contents: String) -> Result<(), String> {
-    super::memory_queue::save_reviewed_memory_document(path, contents, None)
+pub async fn write_memory_text_file(path: String, contents: String) -> Result<(), String> {
+    run_memory_operation(move || write_memory_text_file_blocking(path, contents)).await
+}
+
+pub(crate) fn write_memory_text_file_blocking(
+    path: String,
+    contents: String,
+) -> Result<(), String> {
+    super::memory_queue::save_reviewed_memory_document_blocking(path, contents, None)
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -296,12 +392,20 @@ pub(crate) fn policy_enabled_at(root: &Path) -> bool {
 }
 
 #[tauri::command]
-pub fn read_memory_policy() -> Result<Option<MemoryPolicy>, String> {
+pub async fn read_memory_policy() -> Result<Option<MemoryPolicy>, String> {
+    run_memory_io(read_memory_policy_blocking).await
+}
+
+pub(crate) fn read_memory_policy_blocking() -> Result<Option<MemoryPolicy>, String> {
     read_policy_at(&memory_store_root()?)
 }
 
 #[tauri::command]
-pub fn write_memory_policy(enabled: bool) -> Result<(), String> {
+pub async fn write_memory_policy(enabled: bool) -> Result<(), String> {
+    run_memory_io(move || write_memory_policy_blocking(enabled)).await
+}
+
+pub(crate) fn write_memory_policy_blocking(enabled: bool) -> Result<(), String> {
     write_policy_at(&memory_store_root()?, enabled)
 }
 
@@ -316,6 +420,10 @@ fn import_text_at(path: &Path) -> Result<String, String> {
 
 #[tauri::command]
 pub async fn import_memory_markdown(window: Window) -> Result<Option<String>, String> {
+    run_memory_io(move || import_memory_markdown_blocking(window)).await
+}
+
+fn import_memory_markdown_blocking(window: Window) -> Result<Option<String>, String> {
     let mut dialog = window
         .dialog()
         .file()
@@ -369,14 +477,26 @@ pub async fn export_memory_markdown(
 ) -> Result<Option<String>, String> {
     let root = memory_store_root()?;
     let relative = relative_path(&path, &root, false)?;
-    let contents = {
-        let store = MemoryStore::open(&root)?;
+    let read_root = root.clone();
+    let read_relative = relative.clone();
+    let contents = run_memory_operation(move || {
+        let store = MemoryStore::open(&read_root)?;
         let _lock = store.lock()?;
-        store
-            .read(&relative)?
-            .ok_or("Memory document does not exist")?
-    };
-    let contents = admit_reviewed_memory_document(&contents)?;
+        let contents = store
+            .read(&read_relative)?
+            .ok_or("Memory document does not exist")?;
+        admit_reviewed_memory_document(&contents)
+    })
+    .await?;
+    run_memory_io(move || export_memory_markdown_blocking(window, root, relative, contents)).await
+}
+
+fn export_memory_markdown_blocking(
+    window: Window,
+    root: PathBuf,
+    relative: String,
+    contents: String,
+) -> Result<Option<String>, String> {
     let mut dialog = window
         .dialog()
         .file()
@@ -414,6 +534,112 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let store = MemoryStore::with_key(&temp.path().join(".me"), [37; 32]).unwrap();
         (temp, store)
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn blocked_key_workers_are_bounded_and_policy_stays_responsive_after_cancellation() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().to_path_buf();
+        write_policy_at(&root, true).unwrap();
+        let slots = Arc::new(tokio::sync::Semaphore::new(4));
+        let mut workers = Vec::new();
+        let mut releases = Vec::new();
+        for _ in 0..4 {
+            let (entered, waiting) = tokio::sync::oneshot::channel();
+            let (release, resume) = std::sync::mpsc::channel();
+            workers.push(tokio::spawn(run_memory_operation_with_workers(
+                slots.clone(),
+                move || {
+                    let _ = entered.send(());
+                    resume
+                        .recv_timeout(std::time::Duration::from_secs(10))
+                        .map_err(|_| "Synthetic key wait expired".to_string())
+                },
+            )));
+            releases.push(release);
+            tokio::time::timeout(std::time::Duration::from_secs(3), waiting)
+                .await
+                .unwrap()
+                .unwrap();
+        }
+        assert!(
+            run_memory_operation_with_workers(slots.clone(), || -> Result<(), String> {
+                panic!("must not spawn a fifth key worker")
+            })
+            .await
+            .unwrap_err()
+            .contains("busy")
+        );
+        for worker in workers {
+            worker.abort();
+            assert!(worker.await.unwrap_err().is_cancelled());
+        }
+        // Dropping waiters must not release permits held by live native calls.
+        assert_eq!(slots.available_permits(), 0);
+        let policy_root = root.clone();
+        let off = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            run_memory_io(move || write_policy_at(&policy_root, false)),
+        )
+        .await;
+        let off_recall = run_enabled_memory_operation_with_workers(
+            root.clone(),
+            None::<MemoryRecallSnapshot>,
+            slots.clone(),
+            |_| panic!("off recall must not need a worker"),
+        )
+        .await;
+        let off_proposals =
+            run_enabled_memory_operation_with_workers(root.clone(), 0_usize, slots.clone(), |_| {
+                panic!("off proposals must not need a worker")
+            })
+            .await;
+        // Release synthetic workers even if a responsiveness assertion fails.
+        for release in releases {
+            let _ = release.send(());
+        }
+        off.unwrap().unwrap();
+        assert!(!read_policy_at(&root).unwrap().unwrap().enabled);
+        assert!(off_recall.unwrap().is_none());
+        assert_eq!(off_proposals.unwrap(), 0);
+        let permits =
+            tokio::time::timeout(std::time::Duration::from_secs(3), slots.acquire_many(4))
+                .await
+                .unwrap()
+                .unwrap();
+        drop(permits);
+    }
+
+    #[test]
+    fn recall_rechecks_policy_after_a_paused_opener() {
+        let (_temp, store) = fixture();
+        let root = store.root().to_path_buf();
+        {
+            let _lock = store.lock().unwrap();
+            write_reviewed_document(&store, "me.md", "# Me\nSynthetic recall sentinel", true)
+                .unwrap();
+        }
+        write_policy_at(&root, true).unwrap();
+        let read_root = root.clone();
+        let (entered, waiting) = std::sync::mpsc::channel();
+        let (release, resume) = std::sync::mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            recall_snapshot_with(&read_root, |_| {
+                entered.send(()).unwrap();
+                resume
+                    .recv_timeout(std::time::Duration::from_secs(10))
+                    .unwrap();
+                Ok(store)
+            })
+        });
+        waiting
+            .recv_timeout(std::time::Duration::from_secs(3))
+            .unwrap();
+        let off = write_policy_at(&root, false);
+        release.send(()).unwrap();
+        let snapshot = reader.join().unwrap();
+        off.unwrap();
+        assert!(snapshot.unwrap().is_none());
     }
 
     #[test]

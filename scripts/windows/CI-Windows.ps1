@@ -58,9 +58,8 @@ Invoke-CargoCheck -ArgumentList @(
     "test", "--lib", "commands::system::tests::windows_chrome_launch_"
 ) -Label "cargo test Windows Chrome launch"
 
-Invoke-CargoCheck -ArgumentList @("test", "-p", "berd-memory") -Label "cargo test encrypted memory store"
-Invoke-CargoCheck -ArgumentList @("clippy", "-p", "berd-memory", "--all-targets", "--", "-D", "warnings") -Label "cargo clippy encrypted memory store"
-Invoke-CargoCheck -ArgumentList @("test", "--lib", "commands::memory_") -Label "cargo test memory commands"
+Invoke-CargoCheck -ArgumentList @("test", "-p", "berd-memory") -Label "cargo test memory pure helpers and unsupported absence"
+Invoke-CargoCheck -ArgumentList @("clippy", "-p", "berd-memory", "--all-targets", "--", "-D", "warnings") -Label "cargo clippy unsupported memory entry"
 
 # Clippy compiles both configurations, so separate `cargo check` calls only
 # repeat the same compile coverage.

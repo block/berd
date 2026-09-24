@@ -1,3 +1,4 @@
+import { isMemorySupported } from "@/features/me/lib/memoryAvailability";
 import { useCallback, useEffect, useState } from "react";
 
 import { listProposals } from "../lib/meProposals";
@@ -15,6 +16,7 @@ export function useMemoryProposalsPending(): number {
   const [count, setCount] = useState(0);
 
   const refresh = useCallback(async () => {
+    if (!isMemorySupported()) return;
     try {
       setCount((await listProposals()).length);
     } catch {
@@ -24,6 +26,7 @@ export function useMemoryProposalsPending(): number {
   }, []);
 
   useEffect(() => {
+    if (!isMemorySupported()) return;
     void refresh();
     const interval = setInterval(() => void refresh(), POLL_INTERVAL_MS);
     const onFocus = () => void refresh();

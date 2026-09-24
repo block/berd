@@ -1,3 +1,4 @@
+import { requireMemorySupported } from "./memoryAvailability";
 import {
   getHomeDir,
   initializeMemoryStore,
@@ -87,6 +88,7 @@ export type MeFileState =
 
 /** Load the user's canonical me.md file. */
 export async function loadMeFile(): Promise<MeFileState> {
+  requireMemorySupported();
   const homeDir = await getHomeDir();
   const canonical = meFilePath(homeDir);
   const payload = (await listMemoryDocuments()).find(

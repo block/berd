@@ -417,6 +417,7 @@
     "title": "General"
   },
   "me": {
+    "unsupported": "La memoria solo está disponible en las versiones de Berd para Mac con chip de Apple. No está disponible en esta versión.",
     "addTopic": "Añadir tema",
     "addTopicAction": "Añadir",
     "cancel": "Cancelar",

@@ -1,6 +1,18 @@
 //! Subprocess coverage uses only an isolated HOME with an uninitialized store.
 //! Opening a missing marker fails before any OS keychain operation.
-#![cfg(unix)]
+// Windows dirs::home_dir uses the Known Folder API, not HOME/USERPROFILE.
+// Do not run this HOME-isolated subprocess test there: it could inspect real
+// memory. Windows protocol coverage uses injected-store unit tests instead.
+#![cfg(all(
+    unix,
+    any(
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(
+            feature = "portable-store",
+            any(target_os = "macos", target_os = "linux")
+        )
+    )
+))]
 
 use serde_json::{json, Value};
 use std::{

@@ -1,3 +1,4 @@
+import { isMemorySupported } from "../lib/memoryAvailability";
 import { Button } from "@/shared/ui/button";
 import { revealInFileManager } from "@/shared/lib/fileManager";
 
@@ -17,6 +18,7 @@ export function StorePathLink({
       variant="link"
       size="xs"
       onClick={() => {
+        if (!isMemorySupported()) return;
         void revealInFileManager(path).catch(() => {});
       }}
     >

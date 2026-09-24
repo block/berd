@@ -625,29 +625,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a8241f3ebb85c056b509d4327ad0358fbbba6ffb340bf388f26350aeda225b1"
 
 [[package]]
-name = "berd-memory"
-version = "0.1.0"
-dependencies = [
- "aes-gcm",
- "cap-fs-ext",
- "cap-std",
- "dirs",
- "fs2",
- "hex",
- "keyring",
- "rand 0.8.7",
- "regex",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "unicode-general-category",
- "unicode-normalization",
- "uuid",
- "zeroize",
-]
-
-[[package]]
 name = "berd-call"
 version = "0.1.0"
 dependencies = [
@@ -682,6 +659,30 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "uuid",
+]
+
+[[package]]
+name = "berd-memory"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "cap-fs-ext",
+ "cap-std",
+ "dirs",
+ "fs2",
+ "hex",
+ "keyring",
+ "rand 0.8.7",
+ "regex",
+ "same-file",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "unicode-general-category",
+ "unicode-normalization",
+ "uuid",
+ "zeroize",
 ]
 
 [[package]]

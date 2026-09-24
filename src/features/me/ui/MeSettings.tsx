@@ -1,3 +1,4 @@
+import { isMemorySupported } from "@/features/me/lib/memoryAvailability";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
@@ -311,6 +312,18 @@ export function DocumentPanel({
 }
 
 export function MeSettings() {
+  const { t } = useTranslation("settings");
+  if (!isMemorySupported()) {
+    return (
+      <SettingsPage title={t("nav.me")}>
+        <p>{t("me.unsupported")}</p>
+      </SettingsPage>
+    );
+  }
+  return <SupportedMeSettings />;
+}
+
+function SupportedMeSettings() {
   const { t } = useTranslation("settings");
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [topics, setTopics] = useState<TopicDoc[]>([]);

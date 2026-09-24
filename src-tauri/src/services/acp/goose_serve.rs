@@ -214,18 +214,29 @@ impl GooseServeProcess {
             berdctl_paths.berdctl_bin.as_deref(),
         );
         // Berd-owned config fragments handed to goosed: the distro bundle
-        // config (if any) plus the memory MCP registration (absent when
-        // memory is toggled off or the sidecar is missing).
+        // config (if any) plus memory registration on supported targets when
+        // a trusted sidecar is available. Consent is checked per memory call.
         let mut berd_config_paths: Vec<PathBuf> = Vec::new();
         if let Some(config_path) = distro_config_path {
             berd_config_paths.push(config_path);
         }
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         if let Some(fragment) = crate::services::memory_mcp::ensure_fragment(&app_handle) {
             berd_config_paths.push(fragment);
         }
-        if !berd_config_paths.is_empty() {
-            apply_additional_config_files_env(&mut command, &shell_env, &berd_config_paths);
-        }
+        // Always rebuild the inherited list, even without new fragments: an old
+        // app-owned memory registration must not survive an unsupported install
+        // (or a supported install where trusted sidecar resolution failed).
+        let app_data_dir = app_handle
+            .path()
+            .app_data_dir()
+            .map_err(|error| format!("Cannot identify managed Goose config directory: {error}"))?;
+        apply_additional_config_files_env(
+            &mut command,
+            &shell_env,
+            &berd_config_paths,
+            &app_data_dir,
+        );
         super::security_env::apply(&mut command);
         match runtime_config_for_spawn(&app_handle).await {
             Ok(runtime_config) => apply_runtime_goose_provider_env(&mut command, &runtime_config),
@@ -1167,16 +1178,32 @@ fn apply_additional_config_files_env(
     command: &mut Command,
     shell_env: &HashMap<String, String>,
     berd_config_paths: &[PathBuf],
+    app_data_dir: &Path,
 ) {
     let process_value = std::env::var_os(goose_config::ADDITIONAL_CONFIG_FILES_ENV);
-    let mut config_files = goose_config::additional_config_files_from_values(
+    apply_additional_config_files_values(
+        command,
         process_value.as_deref(),
         shell_env
             .get(goose_config::ADDITIONAL_CONFIG_FILES_ENV)
             .map(std::ffi::OsStr::new),
-        berd_config_paths.first().map(PathBuf::as_path),
+        berd_config_paths,
+        app_data_dir,
     );
-    for path in berd_config_paths.iter().skip(1) {
+}
+
+// Explicit inputs keep inheritance tests independent of the test runner's env.
+fn apply_additional_config_files_values(
+    command: &mut Command,
+    process_value: Option<&std::ffi::OsStr>,
+    shell_value: Option<&std::ffi::OsStr>,
+    berd_config_paths: &[PathBuf],
+    app_data_dir: &Path,
+) {
+    let mut config_files =
+        goose_config::additional_config_files_from_values(process_value, shell_value, None);
+    remove_inherited_memory_fragment(&mut config_files.paths, app_data_dir);
+    for path in berd_config_paths {
         if !config_files.paths.contains(path) {
             config_files.paths.push(path.clone());
         }
@@ -1186,6 +1213,96 @@ fn apply_additional_config_files_env(
         goose_config::ADDITIONAL_CONFIG_FILES_ENV,
         goose_config::join_additional_config_files(&config_files.paths),
     );
+}
+
+/// Remove only the reserved app-owned path from the child environment. Never
+/// read, rewrite, or delete configs, and never filter user files by basename.
+fn remove_inherited_memory_fragment(paths: &mut Vec<PathBuf>, app_data_dir: &Path) {
+    let managed = app_data_dir.join("memory-mcp.goose.yaml");
+    paths.retain(|path| !same_managed_config_path(path, &managed));
+}
+
+// Lexical only: do not open a user config or resolve its symlinks to decide
+// ownership. Dot/parent aliases of the reserved path cannot bypass the filter.
+fn same_managed_config_path(left: &Path, right: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        if let (Some(left), Some(right)) = (left.to_str(), right.to_str()) {
+            if let (Some(left), Some(right)) = (
+                normalized_windows_config_path(left),
+                normalized_windows_config_path(right),
+            ) {
+                return left == right;
+            }
+        }
+        left == right
+    }
+    #[cfg(not(windows))]
+    {
+        lexical_config_path(left) == lexical_config_path(right)
+    }
+}
+
+#[cfg(not(windows))]
+fn lexical_config_path(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if matches!(
+                    normalized.components().next_back(),
+                    Some(Component::Normal(_))
+                ) {
+                    normalized.pop();
+                } else if !normalized.has_root() {
+                    normalized.push(component.as_os_str());
+                }
+            }
+            _ => normalized.push(component.as_os_str()),
+        }
+    }
+    normalized
+}
+
+// Test Windows spellings on every host. Fold ASCII case in the managed Windows
+// namespace and recognize drive/UNC extended prefixes, without filesystem I/O.
+#[cfg(any(windows, test))]
+fn normalized_windows_config_path(path: &str) -> Option<String> {
+    let mut path = path.replace('\\', "/");
+    path.make_ascii_lowercase();
+    if let Some(rest) = path.strip_prefix("//?/") {
+        path = if let Some(unc) = rest.strip_prefix("unc/") {
+            format!("//{unc}")
+        } else {
+            rest.to_string()
+        };
+    }
+    let (prefix, root_parts) = if path.starts_with("//") {
+        ("//", 2)
+    } else if path.as_bytes().get(1) == Some(&b':')
+        && path.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
+        && path.as_bytes().get(2) == Some(&b'/')
+    {
+        ("", 1)
+    } else if path.starts_with('/') {
+        ("/", 0)
+    } else {
+        return None;
+    };
+    let mut parts = Vec::new();
+    for part in path.split('/').filter(|part| !part.is_empty()) {
+        match part {
+            "." => {}
+            ".." if parts.len() > root_parts => {
+                parts.pop();
+            }
+            ".." => {}
+            _ => parts.push(part),
+        }
+    }
+    (parts.len() >= root_parts).then(|| format!("{prefix}{}", parts.join("/")))
 }
 
 async fn runtime_config_for_spawn(app_handle: &tauri::AppHandle) -> Result<RuntimeConfig, String> {
@@ -1309,6 +1426,102 @@ mod tests {
             env_value(&command, "LANG"),
             Some(OsString::from("en_US.UTF-8"))
         );
+    }
+
+    #[test]
+    fn stale_memory_registration_is_removed_even_without_new_fragments() {
+        let app_data = Path::new("/synthetic/app-data");
+        let owned = app_data.join("memory-mcp.goose.yaml");
+        let key = crate::services::goose_config::ADDITIONAL_CONFIG_FILES_ENV;
+        let mut command = Command::new("not-executed");
+        super::apply_additional_config_files_values(
+            &mut command,
+            Some(owned.as_os_str()),
+            None,
+            &[],
+            app_data,
+        );
+        assert_eq!(env_value(&command, key), Some(OsString::new()));
+
+        let user = PathBuf::from("/synthetic/user/memory-mcp.goose.yaml");
+        let shell_value = std::env::join_paths([&owned, &user]).unwrap();
+        super::apply_additional_config_files_values(
+            &mut command,
+            None,
+            Some(&shell_value),
+            &[],
+            app_data,
+        );
+        assert_eq!(env_value(&command, key), Some(user.into_os_string()));
+
+        // Supported registration can add a freshly validated fragment back.
+        super::apply_additional_config_files_values(
+            &mut command,
+            None,
+            Some(&shell_value),
+            std::slice::from_ref(&owned),
+            app_data,
+        );
+        let paths: Vec<_> = std::env::split_paths(&env_value(&command, key).unwrap()).collect();
+        assert_eq!(paths.last(), Some(&owned));
+    }
+
+    #[test]
+    fn managed_memory_fragment_filters_lexical_aliases_only() {
+        let app_data = Path::new("/synthetic/app-data");
+        let mut paths = vec![
+            PathBuf::from("/synthetic/./app-data/memory-mcp.goose.yaml"),
+            PathBuf::from("/synthetic/app-data/nested/../memory-mcp.goose.yaml"),
+            PathBuf::from("/synthetic/other/../app-data/memory-mcp.goose.yaml"),
+            PathBuf::from("/synthetic/user/memory-mcp.goose.yaml"),
+            PathBuf::from("/synthetic/app-data/another.yaml"),
+        ];
+        super::remove_inherited_memory_fragment(&mut paths, app_data);
+        assert_eq!(
+            paths,
+            vec![
+                PathBuf::from("/synthetic/user/memory-mcp.goose.yaml"),
+                PathBuf::from("/synthetic/app-data/another.yaml"),
+            ]
+        );
+    }
+
+    #[test]
+    fn windows_managed_memory_path_aliases_do_not_require_config_reads() {
+        let normalized = super::normalized_windows_config_path;
+        let managed = normalized(r"C:\Users\Test\AppData\Berd\memory-mcp.goose.yaml").unwrap();
+        for alias in [
+            r"c:\users\test\appdata\berd\MEMORY-MCP.GOOSE.YAML",
+            r"\\?\C:\Users\Test\AppData\Berd\.\memory-mcp.goose.yaml",
+            r"C:\Users\Test\AppData\Berd\nested\..\memory-mcp.goose.yaml",
+            "C:/Users/Test/AppData/Other/../Berd/memory-mcp.goose.yaml",
+        ] {
+            assert_eq!(
+                normalized(alias).as_deref(),
+                Some(managed.as_str()),
+                "{alias}"
+            );
+        }
+        assert_eq!(
+            normalized(r"\\?\UNC\Server\Share\Berd\memory-mcp.goose.yaml"),
+            normalized(r"\\server\share\Berd\.\memory-mcp.goose.yaml"),
+        );
+        assert_ne!(
+            normalized(r"C:\Users\Test\User\memory-mcp.goose.yaml"),
+            Some(managed)
+        );
+        assert!(normalized(r"relative\memory-mcp.goose.yaml").is_none());
+    }
+
+    #[test]
+    fn inherited_memory_fragment_filter_preserves_user_configs() {
+        let app_data = Path::new("/synthetic/app-data");
+        let owned = app_data.join("memory-mcp.goose.yaml");
+        let user = PathBuf::from("/synthetic/user/memory-mcp.goose.yaml");
+        let unrelated = app_data.join("custom.yaml");
+        let mut paths = vec![owned.clone(), user.clone(), unrelated.clone(), owned];
+        super::remove_inherited_memory_fragment(&mut paths, app_data);
+        assert_eq!(paths, vec![user, unrelated]);
     }
 
     #[cfg(windows)]

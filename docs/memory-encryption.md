@@ -1,6 +1,12 @@
 # Encrypted memory implementation
 
-Local implementation based on the memory stack through #290, commit `7aa3392ea272d058af9a2390dbfdc8452ce46a50`. Not published. Validation results belong in the handoff report, not inferred from this design.
+The encryption implementation is draft PR #347, originally based on memory PR #290 at `7aa3392ea272d058af9a2390dbfdc8452ce46a50`. The macOS-first follow-up is in local integration; no release readiness is implied. Validation results belong in the handoff report, not inferred from this design.
+
+## Platform availability
+
+The first supported target is Apple-silicon macOS (`aarch64-apple-darwin`). Memory availability is a compiled-platform boundary, separate from the person's explicit memory policy. The target gate applies to commands, storage, MCP startup, renderer callers, and resolved packaging. Windows, Linux, and Intel Mac builds must not operate Berd memory. They leave existing memory files and credentials unchanged; a stale enabled policy or dev override must not activate it.
+
+Frontend platform labels and browser user agents are not security boundaries. Native target gates remain authoritative even if renderer calls are forced. The absence guarantee covers Berd's memory subsystem and managed MCP registration, not arbitrary user-installed tools or older binaries launched separately. Keep normal Windows/Linux CI and add tests for feature absence instead of claiming their unsupported memory-operation defects are fixed.
 
 ## Boundary
 
@@ -14,7 +20,15 @@ Topic filenames, file sizes, and policy state remain visible. Suppression retain
 
 The shared `berd-memory` crate owns authenticated encryption and memory record access. The app and bundled MCP sidecar share the storage reader. The app initializes a new store explicitly; the sidecar never initializes or replaces keys. Keys remain outside renderer IPC, child arguments, configuration files, and environment variables. A local synthetic macOS probe could create/read a key in its parent process, but its separately named reader timed out. Cleanup was verified. Shared native key access is therefore not established; see [native probe results](native-memory-key-probe.md).
 
-OS-keystore availability and authorization depend on platform and session. The wrapper does not establish a Berd-only access-control list. Missing, denied, locked, malformed, or unavailable keys must not become an empty store or trigger plaintext writes.
+OS-keystore availability and authorization depend on platform and session. The pinned macOS backend uses legacy generic-password Keychain operations, not an explicit Berd trusted-app list or access group. Same service/account selects an entry; same team/bundle identity alone does not prove sidecar authorization. Missing, denied, locked, malformed, or unavailable keys must not become an empty store or trigger plaintext writes. See the [native acceptance procedure](memory-macos-acceptance.md) for required evidence and isolation.
+
+Pending credential authorization does not hold the transaction/policy lock.
+Initializers use a separate persistent lock; established opens revalidate the
+root identity and markers after key lookup. Blocking app commands run on worker
+threads with bounded outstanding key operations, while policy-off remains
+key-worker-independent. Synthetic paused-provider and caller tests cover these
+properties. This does not establish a deadline or cancellation for native
+Keychain calls, or signed app/sidecar interoperability.
 
 Writers validate and normalize plaintext before encrypting. Approval metadata is authenticated and encrypted. Pending proposals remain non-recallable. Ciphertext is bound to its record identity, and temporary files contain ciphertext only. Multi-step approval and suppression changes use one writer lock and preserve retry safety.
 
@@ -24,7 +38,9 @@ The initial local implementation refuses legacy plaintext stores rather than mig
 
 Before release, establish whether people already have memory to migrate. If so, a deliberate migration must cover documents, queue, suppression, and approval state, with interrupted-operation recovery. Do not automatically approve legacy content or leave new plaintext backups. Deleting files cannot promise removal from SSD history, snapshots, or backups.
 
-Key loss is not silently repaired. A backup of ciphertext alone is insufficient to recover memory without the key. Recovery, machine transfer, rollback to older plaintext writers, and any destructive reset need explicit product behavior before broad release.
+Key loss is not silently repaired. A backup of ciphertext alone is insufficient to recover memory without the key. No recovery key, machine-transfer, destructive reset, or authenticated-snapshot rollback detection is implemented. Accept those limitations explicitly or implement the required behavior before broad release.
+
+Older plaintext writers do not honor the encrypted store marker or lock. They can overwrite encrypted documents, approvals, and queues. New version checks cannot restrain already-installed older development binaries. Same-root downgrade safety is therefore not established: a version/launch restriction, root isolation, or an explicitly accepted rollout limitation must be chosen. Refusing legacy data is not a migration, and preserving files is not sufficient if supported testers require continued in-app access.
 
 ## Packaging acceptance
 
@@ -34,7 +50,8 @@ Tests with injected keys establish storage behavior, not OS authorization. Test 
 2. Have the app initialize a new store; confirm the bundled sidecar recalls approved content and excludes pending content.
 3. Relaunch, then update the app and sidecar together; confirm the same key remains accessible.
 4. Deny/cancel credential prompts and make the credential service unavailable; confirm errors, no replacement key, no plaintext fallback, and a working memory-off switch.
-5. Test macOS, Windows, and supported Linux desktop credential services. Metadata inspection and a local debug binary are not substitutes.
+5. Run the supported Apple-silicon macOS lifecycle matrix on the final candidate. Windows/Linux/Intel acceptance for this release proves absence of the feature, sidecar, and memory requests; native credential-service support is deferred. Metadata inspection and a local debug binary are not substitutes for signed Mac acceptance.
+6. If an earlier signed run is used to choose shared-Keychain versus app-broker architecture, rerun acceptance after any subsequent storage, migration, sidecar, or packaging changes. Do not use the public release workflow solely to obtain a signing probe: it stages release assets. Use an approved non-publishing artifact path.
 
 A synthetic credential probe, if used, must have a unique service/account namespace, never enumerate or touch production entries, never output the secret, and verify cleanup. Do not automate approving keychain prompts.
 

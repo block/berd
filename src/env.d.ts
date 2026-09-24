@@ -4,6 +4,7 @@ declare global {
   }
 
   interface ImportMetaEnv {
+    readonly VITE_MEMORY_SUPPORTED: "0" | "1";
     readonly VITE_APP_VERSION?: string;
     readonly VITE_ENVIRONMENT?: string;
     readonly VITE_AUTH_GATE?: string;

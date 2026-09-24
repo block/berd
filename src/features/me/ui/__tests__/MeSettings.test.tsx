@@ -1,3 +1,10 @@
+import {
+  beforeEach as beforeSupportedMemory,
+  afterEach as afterSupportedMemory,
+  vi as memoryEnv,
+} from "vitest";
+beforeSupportedMemory(() => memoryEnv.stubEnv("VITE_MEMORY_SUPPORTED", "1"));
+afterSupportedMemory(() => memoryEnv.unstubAllEnvs());
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
@@ -170,4 +177,14 @@ it("offers explicit initialization retry without initializing on refresh", async
   await waitFor(() =>
     expect(screen.queryByRole("alert")).not.toBeInTheDocument(),
   );
+});
+
+it("renders a static unsupported direct route despite stale enabled policy", () => {
+  vi.stubEnv("VITE_MEMORY_SUPPORTED", "0");
+  render(<MeSettings />);
+  expect(screen.getByText("me.unsupported")).toBeInTheDocument();
+  expect(mocks.loadMeFile).not.toHaveBeenCalled();
+  expect(mocks.listTopics).not.toHaveBeenCalled();
+  expect(mocks.readMemoryPolicy).not.toHaveBeenCalled();
+  expect(screen.queryByRole("switch")).not.toBeInTheDocument();
 });

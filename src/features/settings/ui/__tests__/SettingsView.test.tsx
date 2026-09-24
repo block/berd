@@ -68,6 +68,7 @@ function renderSettingsView(
 
 describe("SettingsView", () => {
   afterEach(() => {
+    vi.unstubAllEnvs();
     securityMlEnabled = true;
     voiceConversationEnabled = true;
   });
@@ -142,4 +143,11 @@ describe("SettingsView", () => {
     expect(screen.getByText("security.title")).toBeInTheDocument();
     expect(panesOf()).toEqual([initialPane]);
   });
+});
+
+it("renders the unsupported notice when navigating directly to Memory", () => {
+  vi.stubEnv("VITE_MEMORY_SUPPORTED", "0");
+  renderSettingsView("me");
+  expect(screen.getByText("me.unsupported")).toBeInTheDocument();
+  expect(screen.queryByRole("switch")).not.toBeInTheDocument();
 });

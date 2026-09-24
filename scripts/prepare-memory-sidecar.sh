@@ -16,8 +16,7 @@ Usage: scripts/prepare-memory-sidecar.sh [target-triple]
 Builds the berd-memory workspace crate in release mode and copies the binary
 into src-tauri/binaries with the target triple suffix required by Tauri.
 
-The triple defaults to the rustc host. Pass it explicitly (or set
-BERD_MEMORY_TRIPLE) when the Tauri build itself uses an explicit --target, so
+Pass the compile target explicitly (or set TAURI_ENV_TARGET_TRIPLE), so
 the staged name matches the triple Tauri resolves (e.g. aarch64-apple-darwin
 in release CI).
 USAGE
@@ -28,18 +27,16 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   exit 0
 fi
 
-EXPLICIT_TRIPLE="${1:-${BERD_MEMORY_TRIPLE:-}}"
-CARGO_ARGS=(build -p berd-memory --release)
-if [[ -n "$EXPLICIT_TRIPLE" ]]; then
-  TRIPLE="$EXPLICIT_TRIPLE"
-  CARGO_ARGS+=(--target "$TRIPLE")
-else
-  TRIPLE="$(rustc -vV | sed -n 's|host: ||p')"
-  if [[ -z "$TRIPLE" ]]; then
-    echo "Could not determine rust host target." >&2
-    exit 1
-  fi
+# No host fallback: callers must share their explicit compile target.
+TRIPLE="${1:-${TAURI_ENV_TARGET_TRIPLE:-${CARGO_BUILD_TARGET:-}}}"
+if [[ "$TRIPLE" != "aarch64-apple-darwin" ]]; then
+  # Stale artifacts must not survive a switch to an unsupported/unknown target.
+  rm -f src-tauri/binaries/berd-memory-mcp src-tauri/binaries/berd-memory-mcp-* src-tauri/binaries/berd-memory-mcp.*
+  echo "Skipping memory MCP: unsupported compile target '${TRIPLE:-unknown}'."
+  exit 0
 fi
+EXPLICIT_TRIPLE="$TRIPLE"
+CARGO_ARGS=(build -p berd-memory --release --target "$TRIPLE")
 
 (cd src-tauri && cargo "${CARGO_ARGS[@]}")
 

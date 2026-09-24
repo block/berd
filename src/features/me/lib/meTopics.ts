@@ -1,3 +1,4 @@
+import { requireMemorySupported } from "./memoryAvailability";
 import { getHomeDir, listMemoryDocuments } from "@/shared/api/system";
 import { memoryRootPath } from "./memoryPaths";
 import { saveMemoryDocument } from "./saveMemoryDocument";
@@ -62,6 +63,7 @@ export function parseTopicMeta(
 
 /** List every topic document, sorted by label. */
 export async function listTopics(): Promise<TopicDoc[]> {
+  requireMemorySupported();
   const homeDir = await getHomeDir();
 
   const prefix = `${topicsDirPath(homeDir)}/`;
@@ -103,6 +105,7 @@ function topicTemplate(name: string): string {
  * an existing topic can't be clobbered by a name collision.
  */
 export async function createTopic(name: string): Promise<TopicDoc> {
+  requireMemorySupported();
   const homeDir = await getHomeDir();
   const fileName = topicFileName(name);
   const path = `${topicsDirPath(homeDir)}/${fileName}`;

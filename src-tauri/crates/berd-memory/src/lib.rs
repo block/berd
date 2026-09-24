@@ -1,7 +1,42 @@
+#![cfg_attr(
+    not(any(
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(
+            feature = "portable-store",
+            any(target_os = "macos", target_os = "linux", target_os = "windows")
+        )
+    )),
+    doc = "Native storage is absent on unsupported targets.
+
+```compile_fail
+use berd_memory::store::MemoryStore;
+```
+
+Home discovery is absent too.
+
+```compile_fail
+use berd_memory::memory_root;
+```"
+)]
+
+#[cfg(any(
+    all(target_os = "macos", target_arch = "aarch64"),
+    all(
+        feature = "portable-store",
+        any(target_os = "macos", target_os = "linux", target_os = "windows")
+    )
+))]
 pub mod store;
 
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+#[cfg(any(
+    all(target_os = "macos", target_arch = "aarch64"),
+    all(
+        feature = "portable-store",
+        any(target_os = "macos", target_os = "linux", target_os = "windows")
+    )
+))]
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use unicode_general_category::{get_general_category, GeneralCategory};
@@ -10,6 +45,13 @@ use unicode_normalization::UnicodeNormalization;
 pub const PENDING_FILE: &str = "pending.jsonl";
 pub const DISMISSED_FILE: &str = "dismissed.jsonl";
 
+#[cfg(any(
+    all(target_os = "macos", target_arch = "aarch64"),
+    all(
+        feature = "portable-store",
+        any(target_os = "macos", target_os = "linux", target_os = "windows")
+    )
+))]
 pub fn memory_root() -> Result<PathBuf, String> {
     dirs::home_dir()
         .map(|home| home.join(".me"))

@@ -1,3 +1,4 @@
+import { isMemorySupported } from "@/features/me/lib/memoryAvailability";
 import { useCallback, useEffect, useState } from "react";
 import {
   memoryStoreErrorKind,
@@ -19,6 +20,7 @@ export function useMemoryProposals(
   const [proposals, setProposals] = useState<MemoryProposal[]>([]);
 
   const refresh = useCallback(async () => {
+    if (!isMemorySupported()) return;
     try {
       const all = await listProposals();
       setError(null);
@@ -35,6 +37,7 @@ export function useMemoryProposals(
   }, [sessionId, options?.sessionlessOnly]);
 
   useEffect(() => {
+    if (!isMemorySupported()) return;
     void refresh();
     const interval = setInterval(() => void refresh(), POLL_INTERVAL_MS);
     const onFocus = () => void refresh();
@@ -51,6 +54,7 @@ export function useMemoryProposals(
       content?: string,
       topic?: string | null,
     ) => {
+      if (!isMemorySupported()) return;
       await approveMemoryProposal(proposal, content, topic);
       await refresh();
     },
@@ -58,6 +62,7 @@ export function useMemoryProposals(
   );
   const decline = useCallback(
     async (proposal: MemoryProposal) => {
+      if (!isMemorySupported()) return;
       await declineMemoryProposal(proposal);
       await refresh();
     },

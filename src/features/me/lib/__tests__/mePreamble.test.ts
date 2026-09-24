@@ -1,3 +1,10 @@
+import {
+  beforeEach as beforeSupportedMemory,
+  afterEach as afterSupportedMemory,
+  vi as memoryEnv,
+} from "vitest";
+beforeSupportedMemory(() => memoryEnv.stubEnv("VITE_MEMORY_SUPPORTED", "1"));
+afterSupportedMemory(() => memoryEnv.unstubAllEnvs());
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -146,6 +153,14 @@ describe("getMePreamble", () => {
     mocks.readMemoryRecallSnapshot.mockResolvedValue({ documents: [spine] });
     mocks.isMemoryEnabledByPolicy.mockResolvedValue(true);
     window.__TAURI_INTERNALS__ = {};
+  });
+
+  it("returns no preamble on unsupported native builds before policy, home, or snapshot reads", async () => {
+    vi.stubEnv("VITE_MEMORY_SUPPORTED", "0");
+    expect(await getMePreamble()).toBeNull();
+    expect(mocks.isMemoryEnabledByPolicy).not.toHaveBeenCalled();
+    expect(mocks.getHomeDir).not.toHaveBeenCalled();
+    expect(mocks.readMemoryRecallSnapshot).not.toHaveBeenCalled();
   });
 
   it("never requests the snapshot when memory is off", async () => {
