@@ -47,7 +47,9 @@ else
     exit 1
   fi
 fi
+BUNDLE_BERD_CALL=0
 if [[ "$TRIPLE" == *apple-darwin && "${BERD_CALL_BUNDLE:-1}" == "1" ]]; then
+  BUNDLE_BERD_CALL=1
   CARGO_ARGS+=(-p berd-call)
 fi
 
@@ -83,7 +85,7 @@ cp "$BUILT" "$OUT"
 chmod +x "$OUT"
 echo "Staged berdctl sidecar: $OUT"
 
-if [[ "$TRIPLE" == *apple-darwin && "${BERD_CALL_BUNDLE:-1}" == "1" ]]; then
+if [[ "$BUNDLE_BERD_CALL" == "1" ]]; then
   if [[ -n "$EXPLICIT_TRIPLE" ]]; then
     CALL_BUILT="$TARGET_DIR/$TRIPLE/release/berd-call"
   else

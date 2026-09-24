@@ -498,21 +498,25 @@ fn main() {
         Some("start") => {
             let options = parse_or_exit(parse_saved_start_args(&args), &args);
             #[cfg(target_os = "macos")]
-            let _update_guard = match berd_call::update_guard::hold_call() {
-                Ok(guard) => Some(guard),
-                Err(error) => {
-                    eprintln!("berd-call could not guard app updates during this call: {error}");
-                    None
-                }
-            };
+            let _update_guard = std::env::current_exe()
+                .ok()
+                .and_then(|executable| bundled_app_path(&executable))
+                .and_then(|app_path| match berd_call::update_guard::hold_call() {
+                    Ok(guard) => {
+                        request_bundled_app_update(&app_path);
+                        Some(guard)
+                    }
+                    Err(error) => {
+                        eprintln!(
+                            "berd-call could not guard app updates during this call: {error}"
+                        );
+                        None
+                    }
+                });
             #[cfg(target_os = "macos")]
             if let Err(error) = host_session::route_stop_signals(options.port) {
                 eprintln!("berd-call start failed: {error}");
                 std::process::exit(1);
-            }
-            #[cfg(target_os = "macos")]
-            if _update_guard.is_some() {
-                request_bundled_app_update();
             }
             #[cfg(target_os = "macos")]
             if let Err(error) = menu_bar::run(options) {
@@ -657,6 +661,7 @@ fn main() {
 
 #[cfg(target_os = "macos")]
 fn bundled_app_path(executable: &Path) -> Option<PathBuf> {
+    let executable = executable.canonicalize().ok()?;
     if executable.file_name()?.to_str()? != "berd-call" {
         return None;
     }
@@ -673,13 +678,7 @@ fn bundled_app_path(executable: &Path) -> Option<PathBuf> {
 }
 
 #[cfg(target_os = "macos")]
-fn request_bundled_app_update() {
-    let Some(app_path) = std::env::current_exe()
-        .ok()
-        .and_then(|executable| bundled_app_path(&executable))
-    else {
-        return;
-    };
+fn request_bundled_app_update(app_path: &Path) {
     // `open -g` returns promptly and routes the URL to an already-running app,
     // or starts this same bundle in the background. Berd owns update trust.
     match std::process::Command::new("/usr/bin/open")
@@ -7443,13 +7442,32 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn update_check_only_targets_the_owning_app_bundle() {
-        let bundle = Path::new("/Applications/Berd.app/Contents/MacOS/berd-call");
-        assert_eq!(
-            bundled_app_path(bundle),
-            Some(PathBuf::from("/Applications/Berd.app"))
-        );
+        let directory = tempfile::tempdir().unwrap();
+        let app = directory.path().join("Berd.app");
+        let bundle = app.join("Contents/MacOS/berd-call");
+        std::fs::create_dir_all(bundle.parent().unwrap()).unwrap();
+        std::fs::write(&bundle, []).unwrap();
+        assert_eq!(bundled_app_path(&bundle), Some(app.canonicalize().unwrap()));
         assert!(bundled_app_path(Path::new("/tmp/berd-call")).is_none());
-        assert!(bundled_app_path(Path::new("/Applications/Berd.app/Contents/MacOS/other")).is_none());
+        let other = bundle.with_file_name("other");
+        std::fs::write(&other, []).unwrap();
+        assert!(bundled_app_path(&other).is_none());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn update_check_recognizes_a_path_symlink_to_the_bundled_cli() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let app = directory.path().join("Berd.app");
+        let executable = app.join("Contents/MacOS/berd-call");
+        std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        std::fs::write(&executable, []).unwrap();
+        let link = directory.path().join("berd-call");
+        symlink(&executable, &link).unwrap();
+
+        assert_eq!(bundled_app_path(&link), Some(app.canonicalize().unwrap()));
     }
 
     #[test]
