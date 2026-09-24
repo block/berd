@@ -881,10 +881,23 @@ fn parse_host_settings_args(
     args: &[String],
 ) -> Result<(u16, host_control::ControlRequest), ParseFailure> {
     let mut port = None;
+    let mut language = None;
     let mut request = None;
     let mut index = 2;
     while index < args.len() {
         let flag = args[index].as_str();
+        if flag == "--language" {
+            if language.is_some() {
+                return Err("--language may be provided only once".into());
+            }
+            language = Some(
+                args.get(index + 1)
+                    .ok_or("--language requires a value")?
+                    .clone(),
+            );
+            index += 2;
+            continue;
+        }
         if flag == "--port" {
             if port.is_some() {
                 return Err("--port may be provided only once".into());
@@ -929,6 +942,14 @@ fn parse_host_settings_args(
                     .filter(|rate| rate.is_finite() && *rate > 0.0)
                     .ok_or("--rate requires a positive number")?,
             },
+            "--voice" => host_control::ControlRequest::Voice {
+                voice: args
+                    .get(index + 1)
+                    .filter(|value| !value.trim().is_empty())
+                    .ok_or("--voice requires a name")?
+                    .clone(),
+                language: None,
+            },
             "--tts" => {
                 let value = args
                     .get(index + 1)
@@ -945,14 +966,22 @@ fn parse_host_settings_args(
             return Err(SETTINGS_CHOICE_ERROR.into());
         }
     }
-    Ok((
-        port.unwrap_or(5222),
-        request.ok_or_else(|| ParseFailure::Usage(SETTINGS_CHOICE_ERROR.into()))?,
-    ))
+    let mut request = request.ok_or_else(|| ParseFailure::Usage(SETTINGS_CHOICE_ERROR.into()))?;
+    if language.is_some() {
+        if let host_control::ControlRequest::Voice {
+            language: selected, ..
+        } = &mut request
+        {
+            *selected = language;
+        } else {
+            return Err("--language requires --voice".into());
+        }
+    }
+    Ok((port.unwrap_or(5222), request))
 }
 
 const SETTINGS_CHOICE_ERROR: &str =
-    "provide exactly one of --non-blocking, --rate, --tts, --input-during-tts, --muted, or --restart";
+    "provide exactly one of --non-blocking, --rate, --voice, --tts, --input-during-tts, --muted, or --restart";
 
 fn parse_bool_setting(flag: &str, value: Option<&String>) -> Result<bool, String> {
     match value.map(String::as_str) {
@@ -11190,6 +11219,31 @@ mod tests {
             )
             .is_err());
         }
+    }
+
+    #[test]
+    fn voice_setting_accepts_locale_without_other_settings() {
+        let (_, request) = parse_host_settings_args(&args(&[
+            "berd-call",
+            "settings",
+            "--language",
+            "en-GB",
+            "--voice",
+            "Daniel",
+        ]))
+        .unwrap();
+        assert!(
+            matches!(request, host_control::ControlRequest::Voice { voice, language: Some(language) } if voice == "Daniel" && language == "en-GB")
+        );
+        assert!(parse_host_settings_args(&args(&[
+            "berd-call",
+            "settings",
+            "--language",
+            "en-GB",
+            "--rate",
+            "1.2"
+        ]))
+        .is_err());
     }
 
     #[test]

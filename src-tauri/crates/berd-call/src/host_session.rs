@@ -565,6 +565,45 @@ impl HostControl for SessionControl {
         })
     }
 
+    fn set_voice(&self, voice: String, language: Option<String>) -> Result<Value, String> {
+        let (mut settings, expected_revision) = {
+            let session = self
+                .ready
+                .session
+                .lock()
+                .map_err(|_| "session settings lock failed")?;
+            (session.tts.settings.clone(), session.tts.revision)
+        };
+        match &mut settings {
+            berd_call::TtsSettings::Siri {
+                voice: selected,
+                language: locale,
+                ..
+            } => {
+                *selected = voice;
+                if let Some(language) = language {
+                    *locale = language;
+                }
+            }
+            berd_call::TtsSettings::Pocket {
+                voice: selected, ..
+            }
+            | berd_call::TtsSettings::OpenAi {
+                voice: selected, ..
+            } => {
+                if language.is_some() {
+                    return Err("language applies only to Siri voices".into());
+                }
+                *selected = voice;
+            }
+        }
+        self.request(|response| ControlCommand::TtsSettings {
+            settings,
+            expected_revision,
+            response,
+        })
+    }
+
     fn set_input_during_tts(&self, policy: InputDuringTtsPolicy) -> Result<Value, String> {
         let expected_revision = self
             .ready
@@ -2959,6 +2998,50 @@ mod tests {
         drop(receiver);
         assert_eq!(control.stop().unwrap(), json!({"stopping":true}));
         assert!(stop_requested.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn voice_updates_preserve_the_latest_rate_and_revision() {
+        let (commands, receiver) = mpsc::sync_channel(1);
+        let mut snapshot = test_snapshot();
+        snapshot.tts.settings = snapshot.tts.settings.with_rate(1.5);
+        let control = SessionControl {
+            commands,
+            running: Arc::new(AtomicBool::new(true)),
+            ready: ReadyState {
+                session: Arc::new(Mutex::new(snapshot)),
+            },
+            non_blocking: Arc::new(AtomicBool::new(false)),
+            stop_requested: Arc::new(AtomicBool::new(false)),
+            muted: Arc::new(AtomicBool::new(false)),
+            transcript: Arc::new(Transcript::Silent),
+            session_arguments: vec!["session".into()],
+        };
+        let worker = thread::spawn(move || match receiver.recv().unwrap() {
+            ControlCommand::TtsSettings {
+                settings,
+                expected_revision,
+                response,
+            } => {
+                response.send(Ok(json!({}))).unwrap();
+                (settings, expected_revision)
+            }
+            _ => panic!("expected a settings update without a restart"),
+        });
+        control
+            .set_voice("Daniel".into(), Some("en-GB".into()))
+            .unwrap();
+        assert_eq!(
+            worker.join().unwrap(),
+            (
+                berd_call::TtsSettings::Siri {
+                    voice: "Daniel".into(),
+                    language: "en-GB".into(),
+                    rate: 1.5,
+                },
+                1
+            )
+        );
     }
 
     #[test]
