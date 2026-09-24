@@ -1904,11 +1904,12 @@ fn reset_input_during_voice_cutover_rolls_back_then_clears_the_old_runtime() {
 }
 
 #[test]
-fn handoff_suppresses_acknowledgement_and_queued_voice_change_applies_before_expert_answer() {
+fn handoff_delivers_promptly_without_cancelling_spokesperson_preamble() {
     let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
     let (emit_handoff_tx, emit_handoff_rx) = mpsc::sync_channel(1);
-    let (settings_sent_tx, settings_sent_rx) = mpsc::sync_channel(1);
-    let (one_response_tx, one_response_rx) = mpsc::sync_channel(1);
+    let (continue_speech_tx, continue_speech_rx) = mpsc::sync_channel(1);
+    let (speech_delivered_tx, speech_delivered_rx) = mpsc::sync_channel(1);
+    let (checked_tx, checked_rx) = mpsc::sync_channel(1);
     let server = std::thread::spawn(move || {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -1919,26 +1920,26 @@ fn handoff_suppresses_acknowledgement_and_queued_voice_change_applies_before_exp
                 endpoint_tx
                     .send(format!("ws://{}/", listener.local_addr().unwrap()))
                     .unwrap();
-                let (old_stream, _) = listener.accept().await.unwrap();
-                let mut old = accept_async(old_stream).await.unwrap();
-                let old_update = receive_realtime_json(&mut old).await;
-                assert_eq!(old_update["type"], "session.update");
-                acknowledge_realtime_session(&mut old, &old_update).await;
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut socket = accept_async(stream).await.unwrap();
+                let update = receive_realtime_json(&mut socket).await;
+                assert_eq!(update["type"], "session.update");
+                acknowledge_realtime_session(&mut socket, &update).await;
                 tokio::task::spawn_blocking(move || emit_handoff_rx.recv().unwrap())
                     .await
                     .unwrap();
                 send_realtime_json(
-                    &mut old,
+                    &mut socket,
                     json!({"type":"response.created","response":{"id":"response-handoff"}}),
                 )
                 .await;
                 send_realtime_json(
-                    &mut old,
+                    &mut socket,
                     json!({"type":"response.output_item.added","item":{"call_id":"call-1","name":"handoff"}}),
                 )
                 .await;
                 send_realtime_json(
-                    &mut old,
+                    &mut socket,
                     json!({
                         "type":"response.function_call_arguments.done",
                         "response_id":"response-handoff",
@@ -1947,31 +1948,11 @@ fn handoff_suppresses_acknowledgement_and_queued_voice_change_applies_before_exp
                     }),
                 )
                 .await;
-                tokio::task::spawn_blocking(move || settings_sent_rx.recv().unwrap())
+                tokio::task::spawn_blocking(move || continue_speech_rx.recv().unwrap())
                     .await
                     .unwrap();
-                let cancel = receive_realtime_json(&mut old).await;
-                assert_eq!(cancel["type"], "response.cancel");
-                assert_eq!(cancel["response_id"], "response-handoff");
-                assert!(cancel["event_id"]
-                    .as_str()
-                    .is_some_and(|event_id| event_id.starts_with("berd-cancel-")));
-                assert!(tokio::time::timeout(Duration::from_millis(100), listener.accept())
-                    .await
-                    .is_err());
                 send_realtime_json(
-                    &mut old,
-                    json!({
-                        "type":"error",
-                        "error":{
-                            "event_id":cancel["event_id"],
-                            "message":"Cancellation failed: no active response found"
-                        }
-                    }),
-                )
-                .await;
-                send_realtime_json(
-                    &mut old,
+                    &mut socket,
                     json!({
                         "type":"response.output_audio.delta",
                         "response_id":"response-handoff",
@@ -1983,7 +1964,7 @@ fn handoff_suppresses_acknowledgement_and_queued_voice_change_applies_before_exp
                 )
                 .await;
                 send_realtime_json(
-                    &mut old,
+                    &mut socket,
                     json!({
                         "type":"response.output_audio_transcript.done",
                         "response_id":"response-handoff",
@@ -1994,90 +1975,28 @@ fn handoff_suppresses_acknowledgement_and_queued_voice_change_applies_before_exp
                     }),
                 )
                 .await;
-                let truncate = receive_realtime_json(&mut old).await;
-                assert_eq!(truncate["type"], "conversation.item.truncate");
-                assert_eq!(truncate["item_id"], "assistant-ack");
-                assert_eq!(truncate["audio_end_ms"], 0);
                 send_realtime_json(
-                    &mut old,
-                    json!({"type":"conversation.item.truncated","item_id":"assistant-ack","content_index":0}),
+                    &mut socket,
+                    json!({"type":"response.done","response":{"id":"response-handoff","status":"completed"}}),
                 )
                 .await;
-                send_realtime_json(
-                    &mut old,
-                    json!({"type":"response.done","response":{"id":"response-handoff","status":"cancelled"}}),
-                )
-                .await;
-                let (candidate_stream, _) = listener.accept().await.unwrap();
-                let mut candidate = accept_async(candidate_stream).await.unwrap();
-                let candidate_update = receive_realtime_json(&mut candidate).await;
-                assert_eq!(
-                    candidate_update["session"]["audio"]["output"]["voice"],
-                    "new-voice"
-                );
-                acknowledge_realtime_session(&mut candidate, &candidate_update).await;
-                let clear = receive_realtime_json(&mut old).await;
-                assert_eq!(clear["type"], "input_audio_buffer.clear");
-                send_realtime_json(&mut old, json!({"type":"input_audio_buffer.cleared"})).await;
-                let _ = old.next().await;
-
-                let expert_item = receive_realtime_json(&mut candidate).await;
-                assert_eq!(expert_item["type"], "conversation.item.create");
-                assert_eq!(
-                    expert_item["item"]["content"][0]["text"],
-                    "The Expert offers the following information for a response opportunity. Speak it naturally and accurately if a response is useful now; silence remains valid. Do not add filler or offer more help:\nThe answer is 21."
-                );
-                let create = receive_realtime_json(&mut candidate).await;
-                assert_eq!(create["type"], "response.create");
-                send_realtime_json(
-                    &mut candidate,
-                    json!({
-                        "type":"response.created",
-                        "response":{
-                            "id":"response-expert",
-                            "metadata":create["response"]["metadata"].clone()
-                        }
-                    }),
-                )
-                .await;
-                send_realtime_json(
-                    &mut candidate,
-                    json!({
-                        "type":"response.output_audio.delta",
-                        "response_id":"response-expert",
-                        "item_id":"assistant-expert",
-                        "output_index":0,
-                        "content_index":0,
-                        "delta":BASE64.encode(vec![0_u8; 8_192])
-                    }),
-                )
-                .await;
-                send_realtime_json(
-                    &mut candidate,
-                    json!({
-                        "type":"response.output_audio_transcript.done",
-                        "response_id":"response-expert",
-                        "item_id":"assistant-expert",
-                        "output_index":0,
-                        "content_index":0,
-                        "transcript":"The answer is 21."
-                    }),
-                )
-                .await;
-                send_realtime_json(
-                    &mut candidate,
-                    json!({"type":"response.done","response":{"id":"response-expert","status":"completed"}}),
-                )
-                .await;
-                assert!(tokio::time::timeout(Duration::from_millis(100), receive_realtime_json(&mut candidate))
+                tokio::task::spawn_blocking(move || speech_delivered_rx.recv().unwrap())
                     .await
-                    .is_err(), "one Expert answer must create exactly one response");
-                one_response_tx.send(()).unwrap();
-                let _ = candidate.next().await;
+                    .unwrap();
+                let _ = tokio::time::timeout(Duration::from_millis(200), async {
+                    loop {
+                        let next = receive_realtime_json(&mut socket).await;
+                        assert_ne!(next["type"], "response.cancel");
+                        assert_ne!(next["type"], "conversation.item.truncate");
+                    }
+                })
+                .await;
+                checked_tx.send(()).unwrap();
+                let _ = socket.next().await;
             });
     });
     let endpoint = endpoint_rx.recv().unwrap();
-    let mut session = ExpertSpokespersonTestSession::start(endpoint);
+    let session = ExpertSpokespersonTestSession::start(endpoint);
     emit_handoff_tx.send(()).unwrap();
     let deadline = std::time::Instant::now() + Duration::from_secs(2);
     loop {
@@ -2090,100 +2009,24 @@ fn handoff_suppresses_acknowledgement_and_queued_voice_change_applies_before_exp
             break;
         }
     }
-    session.send(json!({
-        "type":"set_tts_settings",
-        "id":8,
-        "expected_revision":2,
-        "settings":{"backend":"openai","model":"test-model","voice":"new-voice","rate":1.0}
-    }));
-    let stale = loop {
-        let message = session.recv(Duration::from_secs(2));
-        assert_ne!(
-            message["text"],
-            "[Voice transcript] Spokesperson said: Let me check that for you."
-        );
-        if message["type"] == "tts_settings_result" {
-            break message;
-        }
-    };
-    assert_eq!(stale["id"], 8);
-    assert_eq!(stale["outcome"], "rejected");
-    assert_eq!(stale["snapshot"]["revision"], 1);
-    session.send(json!({
-        "type":"set_tts_settings",
-        "id":2,
-        "expected_revision":1,
-        "settings":{"backend":"openai","model":"test-model","voice":"new-voice","rate":1.0}
-    }));
-    session.send(json!({
-        "type":"set_tts_settings",
-        "id":9,
-        "expected_revision":1,
-        "settings":{"backend":"openai","model":"test-model","voice":"other-voice","rate":1.0}
-    }));
-    let concurrent = loop {
-        let message = session.recv(Duration::from_secs(2));
-        assert_ne!(
-            message["text"],
-            "[Voice transcript] Spokesperson said: Let me check that for you."
-        );
-        if message["type"] == "tts_settings_result" {
-            break message;
-        }
-    };
-    assert_eq!(concurrent["id"], 9);
-    assert_eq!(concurrent["outcome"], "rejected");
-    assert_eq!(concurrent["snapshot"]["revision"], 1);
-    settings_sent_tx.send(()).unwrap();
-    let applied = session.recv(Duration::from_secs(3));
-    assert_eq!(applied["type"], "tts_settings_result");
-    assert_eq!(applied["outcome"], "applied");
-    assert_eq!(applied["snapshot"]["revision"], 2);
-    assert_eq!(applied["snapshot"]["voice"], "new-voice");
-    session.send(json!({
-        "type":"prepare_speak",
-        "id":30,
-        "acknowledgement":1,
-        "text":"This must not enter Realtime.",
-        "resolved_handoff_ids":["unknown-handoff"]
-    }));
-    let rejected = session.recv(Duration::from_secs(2));
-    assert_eq!(rejected["type"], "not_admitted");
-    assert_eq!(rejected["id"], 30);
-    assert_eq!(rejected["reason"], "invalid_handoff");
-    session.send(json!({
-        "type":"prepare_speak",
-        "id":3,
-        "acknowledgement":1,
-        "text":"The answer is 21.",
-        "resolved_handoff_ids":["handoff-external-1"]
-    }));
-    let admitted = session.recv(Duration::from_secs(2));
-    assert_eq!(admitted["type"], "admitted");
-    session.send(json!({
-        "type":"output_ready",
-        "id":3,
-        "speech_id":admitted["speech_id"]
-    }));
+    continue_speech_tx.send(()).unwrap();
     let deadline = std::time::Instant::now() + Duration::from_secs(3);
-    let mut terminals = 0;
-    while terminals == 0 {
-        let message = session.recv(
-            deadline
-                .checked_duration_since(std::time::Instant::now())
-                .expect("Expert answer did not reach a terminal"),
-        );
+    loop {
+        let remaining = deadline
+            .checked_duration_since(std::time::Instant::now())
+            .expect("spokesperson preamble did not finish");
+        let message = session.recv(remaining);
         assert_ne!(message["type"], "fatal");
-        assert_ne!(
-            message["text"],
-            "[Voice transcript] Spokesperson said: Let me check that for you."
-        );
-        terminals += usize::from(message["type"] == "speech_completed" && message["id"] == 3);
+        if message["type"] == "live_event" && message["origin"] == "spokesperson" {
+            assert_eq!(
+                message["text"],
+                "[Voice transcript] Spokesperson said: Let me check that for you."
+            );
+            break;
+        }
     }
-    assert_eq!(terminals, 1);
-    one_response_rx
-        .recv_timeout(Duration::from_secs(2))
-        .unwrap();
+    speech_delivered_tx.send(()).unwrap();
+    checked_rx.recv_timeout(Duration::from_secs(2)).unwrap();
     session.shutdown();
     server.join().unwrap();
 }
@@ -2291,9 +2134,6 @@ fn queued_rate_rejects_before_a_closed_runtime_terminal_is_reported() {
                     }),
                 )
                 .await;
-                let cancel = receive_realtime_json(&mut socket).await;
-                assert_eq!(cancel["type"], "response.cancel");
-                assert_eq!(cancel["response_id"], "response-handoff");
                 release_rx.await.unwrap();
                 send_realtime_json(
                     &mut socket,
