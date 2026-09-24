@@ -646,20 +646,25 @@ fn main() {
 }
 
 #[cfg(target_os = "macos")]
-fn bundled_app_path(executable: &Path) -> Option<PathBuf> {
+fn resolved_executable_path(executable: &Path) -> PathBuf {
     // Replacement may briefly remove the executable after this process has
-    // started. Keep recognizing its bundle so the call still takes the lock.
-    let executable = executable.canonicalize().unwrap_or_else(|_| {
-        std::fs::read_link(executable)
-            .map(|target| {
-                if target.is_absolute() {
-                    target
-                } else {
-                    executable.parent().unwrap_or(Path::new("")).join(target)
-                }
-            })
-            .unwrap_or_else(|_| executable.to_path_buf())
-    });
+    // started. The symlink target or original path still identifies its bundle.
+    if let Ok(path) = executable.canonicalize() {
+        return path;
+    }
+    match std::fs::read_link(executable) {
+        Ok(target) if target.is_absolute() => target,
+        Ok(target) => executable
+            .parent()
+            .map(|parent| parent.join(target))
+            .unwrap_or_else(|| executable.to_path_buf()),
+        Err(_) => executable.to_path_buf(),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn bundled_app_path(executable: &Path) -> Option<PathBuf> {
+    let executable = resolved_executable_path(executable);
     if executable.file_name()?.to_str()? != "berd-call" {
         return None;
     }
