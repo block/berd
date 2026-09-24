@@ -2770,7 +2770,6 @@ struct LiveResponse {
     server_finished: bool,
     playback_complete: bool,
     interrupted: bool,
-    handoff_suppressed: bool,
     speech_terminal_sent: bool,
 }
 
@@ -2788,7 +2787,6 @@ impl LiveResponse {
             server_finished: false,
             playback_complete: false,
             interrupted: false,
-            handoff_suppressed: false,
             speech_terminal_sent: false,
         }
     }
@@ -3595,7 +3593,7 @@ fn run_expert_spokesperson_session(
                         )?;
                     }
                     SpokespersonEvent::Handoff {
-                        response_id,
+                        response_id: _,
                         call_id,
                         message,
                     } => {
@@ -3605,39 +3603,6 @@ fn run_expert_spokesperson_session(
                             LiveSideEvent::Handoff { call_id, message },
                             &mut writer,
                         )?;
-                        let active_response_id =
-                            active.as_ref().map(|playback| playback.response_id.clone());
-                        if active_response_id.as_deref() == Some(response_id.as_str()) {
-                            cancel_live_playback(&mut active);
-                        }
-                        let interrupted = HashSet::from([response_id.clone()]);
-                        interrupt_live_responses(
-                            &interrupted,
-                            active_response_id.as_deref(),
-                            &mut responses,
-                            &mut waiting_responses,
-                        );
-                        let response = responses
-                            .entry(response_id.clone())
-                            .or_insert_with(|| LiveResponse::new(None, None));
-                        response.handoff_suppressed = true;
-                        let runtime_open = runtime
-                            .as_ref()
-                            .expect("initialized runtime")
-                            .send(SpokespersonCommand::CancelResponses {
-                                response_ids: vec![response_id.clone()],
-                            })
-                            .is_ok();
-                        require_live_response_truncation(response)?;
-                        if runtime_open
-                            && active_response_id.as_deref() != Some(response_id.as_str())
-                        {
-                            send_live_response_truncation(
-                                &response_id,
-                                response,
-                                runtime.as_ref().expect("initialized runtime"),
-                            )?;
-                        }
                     }
                     event @ (SpokespersonEvent::Expired(_) | SpokespersonEvent::SessionLost(_)) => {
                         let (message, connection_lost) = match event {
@@ -5069,10 +5034,6 @@ fn publish_live_response_if_complete(
     let transcript = response
         .delivery
         .delivered_transcript(response.interrupted, 24_000);
-    if response.handoff_suppressed && transcript.is_empty() {
-        core.finish_spokesperson_turn(response_id, String::new(), false);
-        return Ok(());
-    }
     core.finish_spokesperson_turn(response_id, transcript.clone(), response.interrupted);
     record_and_emit_live_event(
         core,

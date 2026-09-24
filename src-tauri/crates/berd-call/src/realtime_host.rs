@@ -121,22 +121,7 @@ impl RealtimePlaybackHost {
                     }
                 }
             }
-            SpokespersonEvent::Handoff { response_id, .. } => {
-                let preamble_is_playing = self
-                    .playback
-                    .as_ref()
-                    .is_some_and(|active| active.response_id == response_id);
-                if !preamble_is_playing {
-                    self.interrupted_responses.insert(response_id.clone());
-                    emit(json!({
-                        "type": "output_audio_buffer.cleared",
-                        "response_id": response_id,
-                        "played_audio_frames": 0,
-                        "total_audio_frames": 0,
-                        "sample_rate": REALTIME_SAMPLE_RATE,
-                    }))?;
-                }
-            }
+            SpokespersonEvent::Handoff { .. } => {}
             SpokespersonEvent::UserSpeaking { active: true, .. } => {
                 self.interrupt_active_playback(send_command, emit)?;
             }
@@ -214,13 +199,14 @@ impl RealtimePlaybackHost {
                 audio_end_ms: truncation.audio_end_ms,
             })?;
         }
-        emit(json!({
+        let cleared = json!({
             "type": "output_audio_buffer.cleared",
             "response_id": active.response_id,
             "played_audio_frames": active.delivery.played_frames(),
             "total_audio_frames": active.delivery.total_frames(),
             "sample_rate": REALTIME_SAMPLE_RATE,
-        }))
+        });
+        emit(cleared)
     }
 
     fn finish_drained(
@@ -1372,7 +1358,7 @@ mod tests {
     }
 
     #[test]
-    fn handoff_preserves_active_preamble_until_expert_audio_replaces_it() {
+    fn handoff_does_not_interrupt_active_preamble() {
         let mut host = RealtimePlaybackHost::default();
         let mut create_output = || {
             Ok(Box::new(FakeOutput {
@@ -1456,7 +1442,7 @@ mod tests {
     }
 
     #[test]
-    fn handoff_suppresses_audio_that_has_not_started() {
+    fn handoff_does_not_suppress_audio_that_has_not_started() {
         let mut host = RealtimePlaybackHost::default();
         let mut created = 0;
         let mut create_output = || {
@@ -1504,12 +1490,10 @@ mod tests {
 
         assert!(commands.is_empty());
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0]["type"], "output_audio_buffer.cleared");
+        assert_eq!(events[0]["type"], "output_audio_buffer.started");
         assert_eq!(events[0]["response_id"], "response-1");
-        assert_eq!(events[0]["played_audio_frames"], 0);
-        assert_eq!(events[0]["total_audio_frames"], 0);
-        assert_eq!(created, 0);
-        assert!(host.is_idle());
+        assert_eq!(created, 1);
+        assert!(!host.is_idle());
     }
 
     #[test]
@@ -1538,6 +1522,18 @@ mod tests {
                 output_index: 0,
                 content_index: 0,
                 samples: vec![0.0; 100],
+            },
+            &mut send_command,
+            &mut create_output,
+            &mut emit,
+        )
+        .unwrap();
+
+        host.handle(
+            SpokespersonEvent::Handoff {
+                response_id: "response-1".into(),
+                call_id: "call-1".into(),
+                message: "inspect the repository".into(),
             },
             &mut send_command,
             &mut create_output,
