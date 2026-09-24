@@ -17,7 +17,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 members = [
   "crates/berd-memory",
   "crates/berd-monitor",
-  "crates/berd-voice",
+  "crates/berd-call",
   "crates/berdctl",
   "plugins/berdctl",
 ]
@@ -35,8 +35,7 @@ base64 = "0.22"
 builderbot-auth = { path = "../crates/builderbot-auth", features = ["blocking-client"] }
 bytes = "1"
 bzip2 = "0.6"
-berd-memory = { path = "crates/berd-memory" }
-berd-voice = { path = "crates/berd-voice", features = ["static"] }
+berd-call = { path = "crates/berd-call", features = ["static"] }
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "6.0.0"
 dunce = "1"
@@ -173,3 +172,6 @@ admin-runtime-config = []
 # native Windows gate resolves the bridge launcher through the exact
 # `which_in_global` path goosed uses, so PATHEXT resolution is under test.
 which = { version = "8", default-features = false, features = ["real-sys"] }
+
+[target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
+berd-memory = { path = "crates/berd-memory" }

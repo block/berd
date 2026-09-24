@@ -205,7 +205,7 @@ describe("Docker Linux build environment", () => {
     );
     await writeFile(
       join(bin, "docker"),
-      `#!/bin/sh\nprintf '%s\\n' "${dollar}@" >> "${dollar}DOCKER_CAPTURE"\ncalls=$(cat "${dollar}DOCKER_CALLS" 2>/dev/null || true)\ncalls="${dollar}calls x"\nprintf '%s' "${dollar}calls" > "${dollar}DOCKER_CALLS"\nif [ "${dollar}calls" = ' x x' ]; then mkdir -p .docker-cache/tauri-target/release/bundle; touch .docker-cache/tauri-target/release/bundle/Berd.deb; fi\n`,
+      `#!/bin/sh\nprintf '%s\\n' "${dollar}@" >> "${dollar}DOCKER_CAPTURE"\ncalls=$(cat "${dollar}DOCKER_CALLS" 2>/dev/null || true)\ncalls="${dollar}calls x"\nprintf '%s' "${dollar}calls" > "${dollar}DOCKER_CALLS"\nif [ "${dollar}calls" = ' x x' ]; then mkdir -p .docker-cache/tauri-target/x86_64-unknown-linux-gnu/release/bundle; touch .docker-cache/tauri-target/x86_64-unknown-linux-gnu/release/bundle/Berd.deb; echo x86_64-unknown-linux-gnu > .docker-cache/tauri-compile-target; fi\n`,
     );
     await Promise.all([
       chmod(join(bin, "npm"), 0o755),
@@ -504,7 +504,7 @@ describe("local macOS bundle version propagation", () => {
       `${versionEnvironment}"\${TAURI_BUILD_ARGS[@]}"`,
     );
     expect(justfile).toContain(
-      `${versionEnvironment}pnpm tauri build --features "$CARGO_FEATURES_CSV" --config "$DEBUG_CONFIG"`,
+      `${versionEnvironment}node scripts/tauri-memory.mjs build --features "$CARGO_FEATURES_CSV" --config "$DEBUG_CONFIG"`,
     );
   });
 });

@@ -1,20 +1,9 @@
-import {
-  getHomeDir,
-  listDirectoryEntries,
-  pathExists,
-  readTextFile,
-} from "@/shared/api/system";
+import { requireMemorySupported } from "./memoryAvailability";
+import { getHomeDir, listMemoryDocuments } from "@/shared/api/system";
+import { memoryRootPath } from "./memoryPaths";
 import { saveMemoryDocument } from "./saveMemoryDocument";
 
-/**
- * Topic docs: the spokes of the memory-v2 hub-and-spokes shape. Every
- * markdown file in `~/.me/` other than the spine (`me.md`) is a topic —
- * deeper, domain-scoped knowledge (style, family, work) that loads only
- * when relevant instead of riding into every session.
- *
- * This module is the read/edit surface for Settings → Memory. Here the user
- * edits files directly through Settings.
- */
+/** Topic documents are edited in Settings, with explicit Markdown import/export. */
 
 export interface TopicDoc {
   /** Absolute path to the topic file. */
@@ -28,13 +17,9 @@ export interface TopicDoc {
   contents: string;
 }
 
-function meDirPath(homeDir: string): string {
-  return `${homeDir}/.me`;
-}
-
 /** Topic docs live under `~/.me/topics/`, away from protocol files. */
 function topicsDirPath(homeDir: string): string {
-  return `${meDirPath(homeDir)}/topics`;
+  return `${memoryRootPath(homeDir)}/topics`;
 }
 
 /**
@@ -78,34 +63,13 @@ export function parseTopicMeta(
 
 /** List every topic document, sorted by label. */
 export async function listTopics(): Promise<TopicDoc[]> {
+  requireMemorySupported();
   const homeDir = await getHomeDir();
 
-  const dir = topicsDirPath(homeDir);
-  if (!(await pathExists(dir))) return [];
-  const topicFiles = (await listDirectoryEntries(dir)).filter(
-    (entry) => entry.kind === "file" && entry.name.endsWith(".md"),
-  );
-
-  const topics = await Promise.all(
-    topicFiles.map(async (entry): Promise<TopicDoc | null> => {
-      try {
-        const payload = await readTextFile(entry.path);
-        const meta = parseTopicMeta(payload.contents, entry.name);
-        return {
-          path: entry.path,
-          fileName: entry.name,
-          contents: payload.contents,
-          ...meta,
-        };
-      } catch {
-        // Unreadable (binary, oversized) files simply aren't topics.
-        return null;
-      }
-    }),
-  );
-
-  return topics
-    .filter((topic): topic is TopicDoc => topic !== null)
+  const prefix = `${topicsDirPath(homeDir)}/`;
+  return (await listMemoryDocuments())
+    .filter((doc) => doc.path.startsWith(prefix))
+    .map((doc) => ({ ...doc, ...parseTopicMeta(doc.contents, doc.fileName) }))
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
@@ -141,11 +105,12 @@ function topicTemplate(name: string): string {
  * an existing topic can't be clobbered by a name collision.
  */
 export async function createTopic(name: string): Promise<TopicDoc> {
+  requireMemorySupported();
   const homeDir = await getHomeDir();
   const fileName = topicFileName(name);
   const path = `${topicsDirPath(homeDir)}/${fileName}`;
   const contents = topicTemplate(name);
-  await saveMemoryDocument({ path, contents, topic: name });
+  await saveMemoryDocument({ path, contents, topic: name, create: true });
   const meta = parseTopicMeta(contents, fileName);
   return { path, fileName, contents, ...meta };
 }

@@ -1,23 +1,20 @@
+import {
+  beforeEach as beforeSupportedMemory,
+  afterEach as afterSupportedMemory,
+  vi as memoryEnv,
+} from "vitest";
+beforeSupportedMemory(() => memoryEnv.stubEnv("VITE_MEMORY_SUPPORTED", "1"));
+afterSupportedMemory(() => memoryEnv.unstubAllEnvs());
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  loadMeFile: vi.fn(),
-  listTopics: vi.fn(),
+  getHomeDir: vi.fn(),
+  readMemoryRecallSnapshot: vi.fn(),
   isMemoryEnabledByPolicy: vi.fn(),
-  isMemoryContentApproved: vi.fn(),
 }));
-
-vi.mock("../meFile", () => ({
-  loadMeFile: (...args: unknown[]) => mocks.loadMeFile(...args),
-}));
-
-vi.mock("../meTopics", () => ({
-  listTopics: (...args: unknown[]) => mocks.listTopics(...args),
-}));
-
 vi.mock("@/shared/api/system", () => ({
-  isMemoryContentApproved: (...args: unknown[]) =>
-    mocks.isMemoryContentApproved(...args),
+  getHomeDir: mocks.getHomeDir,
+  readMemoryRecallSnapshot: mocks.readMemoryRecallSnapshot,
 }));
 
 vi.mock("../memoryPolicyFile", () => ({
@@ -126,7 +123,7 @@ describe("buildTopicIndexBlock", () => {
       { fileName: "work.md", label: "Work", description: null },
     ]);
 
-    expect(block).toContain("read one only when that part of their life");
+    expect(block).toContain("use the memory recall tool only when relevant");
     expect(block).toContain("- Style (style.md): Brands and fits.");
     expect(block).toContain("- Work (work.md)");
     expect(block).not.toContain("work.md):");
@@ -145,102 +142,136 @@ describe("buildTopicIndexBlock", () => {
 });
 
 describe("getMePreamble", () => {
+  const spine = {
+    path: "/Users/someone/.me/me.md",
+    fileName: "me.md",
+    contents: "## Preferences\n\n- Draft before sending.",
+  };
   beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.listTopics.mockResolvedValue([]);
+    vi.resetAllMocks();
+    mocks.getHomeDir.mockResolvedValue("/Users/someone");
+    mocks.readMemoryRecallSnapshot.mockResolvedValue({ documents: [spine] });
     mocks.isMemoryEnabledByPolicy.mockResolvedValue(true);
-    mocks.isMemoryContentApproved.mockResolvedValue(true);
     window.__TAURI_INTERNALS__ = {};
   });
 
-  it("returns the memory-off notice instead of the file when policy is not explicitly enabled", async () => {
-    mocks.isMemoryEnabledByPolicy.mockResolvedValue(false);
-
-    const preamble = await getMePreamble();
-
-    expect(preamble).toContain("[Memory is off]");
-    expect(preamble).toContain("Don't offer to remember things");
-    expect(preamble).toContain("don't propose saving preferences");
-    // The file is never read — off means off for running and future sends.
-    expect(mocks.loadMeFile).not.toHaveBeenCalled();
-    expect(mocks.listTopics).not.toHaveBeenCalled();
+  it("returns no preamble on unsupported native builds before policy, home, or snapshot reads", async () => {
+    vi.stubEnv("VITE_MEMORY_SUPPORTED", "0");
+    expect(await getMePreamble()).toBeNull();
+    expect(mocks.isMemoryEnabledByPolicy).not.toHaveBeenCalled();
+    expect(mocks.getHomeDir).not.toHaveBeenCalled();
+    expect(mocks.readMemoryRecallSnapshot).not.toHaveBeenCalled();
   });
 
-  it("returns the framed file when present", async () => {
-    mocks.loadMeFile.mockResolvedValue({
-      status: "present",
-      path: "/Users/someone/.me/me.md",
-      displayPath: DISPLAY_PATH,
-      contents: "## Standing rules\n\n- Draft before sending.",
-    });
+  it("never requests the snapshot when memory is off", async () => {
+    mocks.isMemoryEnabledByPolicy.mockResolvedValue(false);
+    expect(await getMePreamble()).toContain("[Memory is off]");
+    expect(mocks.readMemoryRecallSnapshot).not.toHaveBeenCalled();
+  });
 
+  it("returns the off notice when the backend observed off under its lock", async () => {
+    mocks.readMemoryRecallSnapshot.mockResolvedValue(null);
+    expect(await getMePreamble()).toContain("[Memory is off]");
+    expect(mocks.getHomeDir).not.toHaveBeenCalled();
+  });
+
+  it("frames only the approved snapshot, with no editor reads or individual approval calls", async () => {
     const preamble = await getMePreamble();
-
     expect(preamble).toContain("- Draft before sending.");
     expect(preamble).toContain(DISPLAY_PATH);
+    expect(mocks.readMemoryRecallSnapshot).toHaveBeenCalledOnce();
+    expect(mocks.isMemoryEnabledByPolicy).toHaveBeenCalledTimes(2);
   });
 
-  it("appends the derived topic index after the file", async () => {
-    mocks.loadMeFile.mockResolvedValue({
-      status: "present",
-      path: "/Users/someone/.me/me.md",
-      displayPath: DISPLAY_PATH,
-      contents: "## Preferences\n\n- Keep answers brief.",
+  it("derives sorted topic metadata from that same approved snapshot", async () => {
+    mocks.readMemoryRecallSnapshot.mockResolvedValue({
+      documents: [
+        spine,
+        {
+          path: "/Users/someone/.me/topics/work.md",
+          fileName: "work.md",
+          contents: "# Work\n\n- Topic body not injected.",
+        },
+        {
+          path: "/Users/someone/.me/topics/style.md",
+          fileName: "style.md",
+          contents: "# Style\n\n*Brands and fits.*",
+        },
+      ],
     });
-    mocks.listTopics.mockResolvedValue([
-      {
-        path: "/Users/someone/.me/style.md",
-        fileName: "style.md",
-        label: "Style",
-        description: "Brands and fits.",
-        contents: "# Style",
-      },
-    ]);
-
     const preamble = await getMePreamble();
-
     expect(preamble).toContain("- Style (style.md): Brands and fits.");
-    // Index only — topic contents are never injected.
-    const endOfFile = preamble?.indexOf("--- end of file ---") ?? -1;
-    const indexAt = preamble?.indexOf("Topic files under ~/.me/topics/") ?? -1;
-    expect(indexAt).toBeGreaterThan(endOfFile);
+    expect(preamble).not.toContain("Topic body not injected");
+    expect(preamble?.indexOf("- Style (style.md)")).toBeLessThan(
+      preamble?.indexOf("- Work (work.md)") ?? 0,
+    );
   });
 
-  it("ships the preamble without the index when topic listing fails", async () => {
-    mocks.loadMeFile.mockResolvedValue({
-      status: "present",
-      path: "/Users/someone/.me/me.md",
-      displayPath: DISPLAY_PATH,
-      contents: "## Preferences\n\n- Keep answers brief.",
+  it("matches slash-normalized backend paths with a Windows home directory", async () => {
+    mocks.getHomeDir.mockResolvedValue("C:\\Users\\someone\\");
+    mocks.readMemoryRecallSnapshot.mockResolvedValue({
+      documents: [
+        { ...spine, path: "C:/Users/someone/.me/me.md" },
+        {
+          path: "C:/Users/someone/.me/topics/work.md",
+          fileName: "work.md",
+          contents: "# Work",
+        },
+      ],
     });
-    mocks.listTopics.mockRejectedValue(new Error("folder unreadable"));
-
     const preamble = await getMePreamble();
-
-    expect(preamble).toContain("- Keep answers brief.");
-    expect(preamble).not.toContain("Topic files under ~/.me/topics/ —");
+    expect(preamble).toContain("Draft before sending.");
+    expect(preamble).toContain("- Work (work.md)");
   });
 
-  it("returns null when the file is missing", async () => {
-    mocks.loadMeFile.mockResolvedValue({
-      status: "missing",
-      path: "/Users/someone/.me/me.md",
-      displayPath: DISPLAY_PATH,
-    });
+  it("drops the snapshot when memory turns off during its pending read", async () => {
+    let resolve!: (value: { documents: (typeof spine)[] }) => void;
+    mocks.readMemoryRecallSnapshot.mockReturnValue(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    const pending = getMePreamble();
+    await vi.waitFor(() =>
+      expect(mocks.readMemoryRecallSnapshot).toHaveBeenCalledOnce(),
+    );
+    mocks.isMemoryEnabledByPolicy.mockResolvedValue(false);
+    resolve({ documents: [spine] });
+    expect(await pending).toContain("[Memory is off]");
+  });
 
+  it("rechecks policy after the last other await, including home lookup", async () => {
+    let resolve!: (value: string) => void;
+    mocks.getHomeDir.mockReturnValue(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    const pending = getMePreamble();
+    await vi.waitFor(() => expect(mocks.getHomeDir).toHaveBeenCalledOnce());
+    mocks.isMemoryEnabledByPolicy.mockResolvedValue(false);
+    resolve("/Users/someone");
+    expect(await pending).toContain("[Memory is off]");
+  });
+
+  it("returns null for a snapshot with no approved spine", async () => {
+    mocks.readMemoryRecallSnapshot.mockResolvedValue({ documents: [] });
     await expect(getMePreamble()).resolves.toBeNull();
   });
 
-  it("returns null instead of throwing when the read fails", async () => {
-    mocks.loadMeFile.mockRejectedValue(new Error("disk unhappy"));
-
+  it("fails closed on snapshot failure without logging private error details", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.readMemoryRecallSnapshot.mockRejectedValue(
+      new Error("private path or content"),
+    );
     await expect(getMePreamble()).resolves.toBeNull();
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 
-  it("returns null outside a Tauri window", async () => {
+  it("returns null outside Tauri", async () => {
     delete (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
-
     await expect(getMePreamble()).resolves.toBeNull();
-    expect(mocks.loadMeFile).not.toHaveBeenCalled();
+    expect(mocks.readMemoryRecallSnapshot).not.toHaveBeenCalled();
   });
 });

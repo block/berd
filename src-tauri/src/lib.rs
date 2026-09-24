@@ -612,6 +612,7 @@ pub fn run() {
             commands::openai_realtime::stop_openai_realtime_spokesperson_runtime,
             commands::openai_realtime::release_openai_realtime_spokesperson_runtime,
             commands::openai_realtime::update_openai_realtime_spokesperson_settings,
+            commands::openai_realtime::update_openai_realtime_status_sounds,
             commands::openai_realtime::create_openai_realtime_expert_instructions,
             commands::openai_realtime::create_openai_realtime_transcript_seed,
             commands::openai_realtime::deliver_openai_realtime_expert_message,
@@ -652,11 +653,35 @@ pub fn run() {
             commands::system::read_image_attachment,
             commands::system::read_text_file,
             commands::system::stat_file,
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            commands::memory_store::initialize_memory_store,
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            commands::memory_store::read_memory_text_file,
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            commands::memory_store::list_memory_documents,
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            commands::memory_store::read_memory_recall_snapshot,
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            commands::memory_queue::save_reviewed_memory_document,
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
             commands::memory_store::create_memory_text_file,
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
             commands::memory_store::write_memory_text_file,
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
             commands::memory_store::is_memory_content_approved,
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            commands::memory_store::read_memory_policy,
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            commands::memory_store::write_memory_policy,
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            commands::memory_store::import_memory_markdown,
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            commands::memory_store::export_memory_markdown,
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
             commands::memory_queue::append_memory_proposals,
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
             commands::memory_queue::approve_memory_proposal,
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
             commands::memory_queue::resolve_memory_proposal,
             commands::terminal::start_terminal,
             commands::terminal::write_terminal,
@@ -719,6 +744,7 @@ pub fn run() {
             commands::native_voice::cancel_native_voice_assistant_speech,
             commands::native_voice::set_native_voice_microphone_muted,
             commands::native_voice::set_native_voice_assistant_speaking,
+            commands::native_voice::update_native_voice_status_sounds,
             commands::native_voice::drain_native_voice_conversation_transcripts,
             commands::native_voice::acknowledge_native_voice_conversation_transcript,
             commands::native_voice::reject_native_voice_conversation_transcript,

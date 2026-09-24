@@ -1,13 +1,8 @@
+import { isMemorySupported } from "../lib/memoryAvailability";
+import { Button } from "@/shared/ui/button";
 import { revealInFileManager } from "@/shared/lib/fileManager";
 
-/**
- * A store path that opens where it points.
- *
- * The path *is* the link: naming a location and then offering a separate
- * "Go to file" said the same thing twice, and the path is the part a person
- * recognizes. Best-effort — if the file manager can't open it, the text still
- * answers the question on its own.
- */
+/** Reveal the encrypted store folder, not an editable plaintext document. */
 export function StorePathLink({
   path,
   label,
@@ -18,14 +13,16 @@ export function StorePathLink({
   label: string;
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="link"
+      size="xs"
       onClick={() => {
+        if (!isMemorySupported()) return;
         void revealInFileManager(path).catch(() => {});
       }}
-      className="underline underline-offset-2 hover:text-foreground"
     >
       {label}
-    </button>
+    </Button>
   );
 }

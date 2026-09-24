@@ -42,10 +42,10 @@ fn unsupported_status() -> MacSpeechStatus {
 pub fn status() -> Result<MacSpeechStatus, String> {
     #[cfg(target_os = "macos")]
     {
-        if !berd_voice::mac_speech::mac_speech_is_supported() {
+        if !berd_call::mac_speech::mac_speech_is_supported() {
             return Ok(unsupported_status());
         }
-        let status = berd_voice::mac_speech::mac_speech_status()?;
+        let status = berd_call::mac_speech::mac_speech_status()?;
         Ok(MacSpeechStatus {
             supported: status.supported,
             unavailable_reason: (!status.supported)
@@ -102,7 +102,7 @@ pub async fn install_mac_speech_model(app: AppHandle) -> Result<MacSpeechStatus,
     {
         let progress_app = app.clone();
         let result = match tauri::async_runtime::spawn_blocking(move || {
-            berd_voice::mac_speech::install_mac_speech_model(move |value| {
+            berd_call::mac_speech::install_mac_speech_model(move |value| {
                 let mut next = status().unwrap_or_else(|error| MacSpeechStatus {
                     error: Some(error),
                     ..unsupported_status()

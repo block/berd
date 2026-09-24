@@ -459,12 +459,11 @@ jq 'del(.bundle.macOS.signingIdentity) | del(.bundle.createUpdaterArtifacts)' \
 # development. No TAURI_SIGNING_PRIVATE_KEY needed — signing happens in
 # publish-updater.sh.
 TARGET_TRIPLE="aarch64-apple-darwin"
-echo "+++ :hammer: pnpm tauri build (unsigned)"
+echo "+++ :hammer: node scripts/tauri-memory.mjs build (unsigned)"
 GOOSE_BUILD_PROFILE=release ./scripts/prepare-goose-sidecar.sh
 # ACP bridges are installed into the managed Node runtime on demand; they are
 # no longer staged as build resources.
 VITE_FEEDBACK="$VITE_FEEDBACK_VALUE" ./scripts/prepare-berdctl-sidecar.sh "$TARGET_TRIPLE"
-./scripts/prepare-memory-sidecar.sh "$TARGET_TRIPLE"
 if [[ "$VITE_AGENT_TOOLS_VALUE" == "1" ]]; then
   ./scripts/prepare-bb-cli-resource.sh "$TARGET_TRIPLE"
   tmp="$(mktemp)"
@@ -477,7 +476,7 @@ fi
 # classifies `VITE_*=…` assignment prefixes at parse time — it never
 # re-classifies words produced by a later expansion, so an array element would
 # be taken as the command name and fail (`VITE_VOICE_DICTATION=0: command not
-# found`) before `pnpm tauri build` ever runs. `env` applies every name=value
+# found`) before `node scripts/tauri-memory.mjs build` ever runs. `env` applies every name=value
 # argument at runtime. The guarded expansion contributes nothing for official
 # builds (empty array under `set -u`).
 env \
@@ -497,7 +496,7 @@ env \
   VITE_UPDATER_ENABLED="$VITE_UPDATER_ENABLED_VALUE" \
   VITE_BETA_LINEAR_LABEL_ID="$VITE_BETA_LINEAR_LABEL_ID_VALUE" \
   ${VITE_EXTRA_ENV[@]+"${VITE_EXTRA_ENV[@]}"} \
-  pnpm tauri build --no-sign --target "$TARGET_TRIPLE" --features "$CARGO_FEATURES" \
+  node scripts/tauri-memory.mjs build --no-sign --target "$TARGET_TRIPLE" --features "$CARGO_FEATURES" \
     --config src-tauri/tauri.release.conf.json
 
 TAURI_TARGET_DIR="$(

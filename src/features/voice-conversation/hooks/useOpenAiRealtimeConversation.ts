@@ -33,6 +33,7 @@ import {
   stopOpenAiRealtimeSpokespersonRuntime,
   releaseOpenAiRealtimeSpokespersonRuntime,
   updateOpenAiRealtimeSpokespersonSettings,
+  updateOpenAiRealtimeStatusSounds,
   type OpenAiRealtimeTranscriptSeedTurn,
   type OpenAiRealtimeExpertDeliveryEvent,
 } from "@/shared/api/openaiRealtime";
@@ -58,16 +59,21 @@ import {
   sendRealtimeEvents,
 } from "../lib/realtimeEmissaryProtocol";
 import {
+  getStatusSoundPreference,
+  subscribeToStatusSoundPreference,
+  type StatusSoundPreference,
+} from "../lib/statusSoundPreference";
+import {
+  getRealtimeVoicePreference,
+  subscribeToRealtimeVoicePreference,
+} from "../lib/realtimeVoicePreference";
+import {
   requestVoiceConversationEnd,
   trackVoiceAssistantResponse,
   trackVoiceConversationEnded,
   trackVoiceConversationStarted,
   trackVoiceUserUtterance,
 } from "../lib/voiceTelemetry";
-import {
-  getRealtimeVoicePreference,
-  subscribeToRealtimeVoicePreference,
-} from "../lib/realtimeVoicePreference";
 import {
   beginVoiceControlsVisibilityLease,
   observeVoiceConversationControlVisibility,
@@ -439,12 +445,50 @@ const OFF_SNAPSHOT: Snapshot = {
   ownerWindowLabel: null,
 };
 
+function publishRealtimeStatus(
+  sessionId: string,
+  status: "working" | "waiting",
+  settings: StatusSoundPreference = getStatusSoundPreference(),
+): void {
+  void updateOpenAiRealtimeStatusSounds(sessionId, status, settings).catch(
+    (error) =>
+      console.warn(`Could not publish Realtime voice ${status} status`, error),
+  );
+}
+
+function resetRealtimeStatusWhenRunSettles(
+  runtime: OpenAiRealtimeConversationRuntime,
+  sessionId: string,
+): void {
+  let sawRun = false;
+  let publishedStatus: "working" | "waiting" = "working";
+  const check = () => {
+    if (runtime.getSnapshot().boundSessionId !== sessionId) {
+      unsubscribe();
+      return;
+    }
+    const master = useChatStore.getState().getSessionRuntime(sessionId);
+    const working =
+      master.activeRunId !== null || isSessionRunning(master.chatState);
+    if (working) sawRun = true;
+    if (!sawRun) return;
+    const nextStatus = working ? "working" : "waiting";
+    if (nextStatus === publishedStatus) return;
+    publishedStatus = nextStatus;
+    if (working) runtime.markWorking(sessionId);
+    else runtime.markWaiting(sessionId);
+  };
+  const unsubscribe = useChatStore.subscribe(check);
+  queueMicrotask(check);
+}
+
 class OpenAiRealtimeConversationRuntime {
   private snapshot: Snapshot = OFF_SNAPSHOT;
   private readonly listeners = new Set<() => void>();
   private nativeMicrophone: NativeMicrophone | null = null;
   private releaseRuntimeListener: (() => void) | null = null;
   private releaseVoicePreferenceListener: (() => void) | null = null;
+  private releaseStatusSoundPreferenceListener: (() => void) | null = null;
   private realtimeSettingsRevision = 1;
   private realtimeSettingsQueue = Promise.resolve();
   private realtimeRuntimeSessionId: string | null = null;
@@ -640,6 +684,11 @@ class OpenAiRealtimeConversationRuntime {
 
       const transport = {
         send: (data: string) => {
+          if (
+            this.snapshot.state === "stopping" ||
+            this.snapshot.state === "off"
+          )
+            return;
           const event = JSON.parse(data) as Record<string, unknown>;
           const sent = this.realtimeRuntimeSendQueue.then(() =>
             sendOpenAiRealtimeSpokespersonRuntimeEvent(sessionId, event),
@@ -835,6 +884,16 @@ class OpenAiRealtimeConversationRuntime {
                     },
                     false,
                   );
+                } else if (bridgeEvent.type === "transcript.discarded") {
+                  const messageId = transcriptMessageIds.get(
+                    bridgeEvent.itemId,
+                  );
+                  if (messageId) {
+                    useChatStore
+                      .getState()
+                      .removeMessage(ownerSessionId, messageId);
+                    transcriptMessageIds.delete(bridgeEvent.itemId);
+                  }
                 }
               }
               for (const handoff of reduction.acceptedHandoffs) {
@@ -884,6 +943,17 @@ class OpenAiRealtimeConversationRuntime {
           this.bridgeCallScope.id,
           runtimeOptions,
         );
+        publishRealtimeStatus(sessionId, "waiting");
+        this.releaseStatusSoundPreferenceListener =
+          subscribeToStatusSoundPreference((settings) => {
+            if (isStale() || this.realtimeRuntimeSessionId !== sessionId)
+              return;
+            publishRealtimeStatus(
+              sessionId,
+              this.snapshot.state === "agent-working" ? "working" : "waiting",
+              settings,
+            );
+          });
       } catch (error) {
         if (this.realtimeRuntimeSessionId === sessionId) {
           this.realtimeRuntimeSessionId = null;
@@ -1093,13 +1163,13 @@ class OpenAiRealtimeConversationRuntime {
     this.nativeMicrophone = null;
     const realtimeRuntimeSessionId = this.realtimeRuntimeSessionId;
     this.realtimeRuntimeSessionId = null;
+    await this.realtimeRuntimeSendQueue.catch(() => undefined);
     if (realtimeRuntimeSessionId) {
       await stopOpenAiRealtimeSpokespersonRuntime(
         realtimeRuntimeSessionId,
       ).catch(() => undefined);
     }
     await this.realtimeProtocolQueue.catch(() => undefined);
-    await this.realtimeRuntimeSendQueue.catch(() => undefined);
     const flushedPendingEvents =
       (await this.flushPendingExpertEvents?.()) ?? false;
     if (flushedPendingEvents) {
@@ -1176,6 +1246,24 @@ class OpenAiRealtimeConversationRuntime {
     this.setSnapshot(OFF_SNAPSHOT);
   }
 
+  markWorking(sessionId: string): void {
+    if (this.snapshot.boundSessionId !== sessionId) return;
+    this.setSnapshot({ ...this.snapshot, state: "agent-working" });
+    const runtimeSessionId = this.realtimeRuntimeSessionId;
+    if (runtimeSessionId) {
+      publishRealtimeStatus(runtimeSessionId, "working");
+    }
+  }
+
+  markWaiting(sessionId: string): void {
+    if (this.snapshot.boundSessionId !== sessionId) return;
+    this.setSnapshot({ ...this.snapshot, state: "listening" });
+    const runtimeSessionId = this.realtimeRuntimeSessionId;
+    if (runtimeSessionId) {
+      publishRealtimeStatus(runtimeSessionId, "waiting");
+    }
+  }
+
   private deliverToMaster(
     sessionId: string,
     text: string,
@@ -1243,6 +1331,10 @@ class OpenAiRealtimeConversationRuntime {
         };
         if (!continueAfterStop) {
           this.setSnapshot({ ...this.snapshot, state: "agent-working" });
+          const runtimeSessionId = this.realtimeRuntimeSessionId;
+          if (runtimeSessionId) {
+            publishRealtimeStatus(runtimeSessionId, "working");
+          }
         }
         for (;;) {
           const opportunity = await waitForMasterDeliveryOpportunity(
@@ -1281,8 +1373,9 @@ class OpenAiRealtimeConversationRuntime {
           }
         }
         onDelivered?.();
-        if (this.snapshot.boundSessionId === sessionId)
-          this.setSnapshot({ ...this.snapshot, state: "listening" });
+        if (this.snapshot.boundSessionId === sessionId) {
+          resetRealtimeStatusWhenRunSettles(this, sessionId);
+        }
       })
       .catch((error) => {
         if (isAbortError(error)) return;
@@ -1336,6 +1429,7 @@ class OpenAiRealtimeConversationRuntime {
     this.nativeMicrophone?.stop();
     this.releaseRuntimeListener?.();
     this.releaseVoicePreferenceListener?.();
+    this.releaseStatusSoundPreferenceListener?.();
     const realtimeRuntimeSessionId = this.realtimeRuntimeSessionId;
     this.realtimeRuntimeSessionId = null;
     this.releaseControlsListener?.();
@@ -1350,6 +1444,7 @@ class OpenAiRealtimeConversationRuntime {
     this.nativeMicrophone = null;
     this.releaseRuntimeListener = null;
     this.releaseVoicePreferenceListener = null;
+    this.releaseStatusSoundPreferenceListener = null;
     this.realtimeSettingsQueue = Promise.resolve();
     if (controlsRevision > 0) {
       await stopOpenAiRealtimeVoiceControls(

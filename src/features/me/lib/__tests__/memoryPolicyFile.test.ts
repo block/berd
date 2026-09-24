@@ -1,112 +1,53 @@
+import {
+  beforeEach as beforeSupportedMemory,
+  afterEach as afterSupportedMemory,
+  vi as memoryEnv,
+} from "vitest";
+beforeSupportedMemory(() => memoryEnv.stubEnv("VITE_MEMORY_SUPPORTED", "1"));
+afterSupportedMemory(() => memoryEnv.unstubAllEnvs());
 import { beforeEach, describe, expect, it, vi } from "vitest";
-
 const mocks = vi.hoisted(() => ({
-  getHomeDir: vi.fn(),
-  pathExists: vi.fn(),
-  readTextFile: vi.fn(),
-  writeTextFile: vi.fn(),
-  createTextFile: vi.fn(),
+  readMemoryPolicy: vi.fn(),
+  writeMemoryPolicy: vi.fn(),
 }));
-
 vi.mock("@/shared/api/system", () => mocks);
-
 import {
   isMemoryEnabledByPolicy,
   readMemoryPolicy,
   writeMemoryPolicy,
 } from "../memoryPolicyFile";
-
-const POLICY = "/home/u/.me/policy.json";
-
 beforeEach(() => {
-  vi.clearAllMocks();
-  mocks.getHomeDir.mockResolvedValue("/home/u");
+  vi.resetAllMocks();
 });
-
-describe("readMemoryPolicy", () => {
-  it("returns null when there is no policy file", async () => {
-    mocks.pathExists.mockResolvedValue(false);
+describe("memory policy", () => {
+  it.each([
+    null,
+    {},
+    { enabled: "yes" },
+  ])("fails closed for absent or malformed policy %j", async (policy) => {
+    mocks.readMemoryPolicy.mockResolvedValue(policy);
     expect(await readMemoryPolicy()).toBeNull();
+    expect(await isMemoryEnabledByPolicy()).toBe(false);
   });
-
-  it("reads the enabled flag from the store", async () => {
-    mocks.pathExists.mockResolvedValue(true);
-    mocks.readTextFile.mockResolvedValue({
-      contents: JSON.stringify({ enabled: false }),
+  it("fails closed for unavailable policy", async () => {
+    mocks.readMemoryPolicy.mockRejectedValue(new Error("locked"));
+    expect(await isMemoryEnabledByPolicy()).toBe(false);
+  });
+  it.each([true, false])("reads explicit enabled %s", async (enabled) => {
+    mocks.readMemoryPolicy.mockResolvedValue({
+      enabled,
+      arbitrary: "not retained",
     });
-    expect(await readMemoryPolicy()).toEqual({ enabled: false });
+    expect(await readMemoryPolicy()).toEqual({ enabled });
+    expect(await isMemoryEnabledByPolicy()).toBe(enabled);
   });
-
-  it("ignores a policy file that doesn't state enabled", async () => {
-    mocks.pathExists.mockResolvedValue(true);
-    mocks.readTextFile.mockResolvedValue({
-      contents: JSON.stringify({ somethingElse: true }),
-    });
-    expect(await readMemoryPolicy()).toBeNull();
+  it("writes only the boolean through the dedicated command", async () => {
+    expect(await writeMemoryPolicy(false)).toBe(true);
+    expect(mocks.writeMemoryPolicy).toHaveBeenCalledExactlyOnceWith(false);
+    expect(mocks.readMemoryPolicy).not.toHaveBeenCalled();
   });
-
-  it("survives unparseable policy written by another tool", async () => {
-    mocks.pathExists.mockResolvedValue(true);
-    mocks.readTextFile.mockResolvedValue({ contents: "not json" });
-    expect(await readMemoryPolicy()).toBeNull();
-  });
-});
-
-describe("isMemoryEnabledByPolicy", () => {
-  it("defaults off when policy is missing", async () => {
-    mocks.pathExists.mockResolvedValue(false);
-    await expect(isMemoryEnabledByPolicy()).resolves.toBe(false);
-  });
-
-  it("defaults off when policy is malformed", async () => {
-    mocks.pathExists.mockResolvedValue(true);
-    mocks.readTextFile.mockResolvedValue({ contents: "not json" });
-    await expect(isMemoryEnabledByPolicy()).resolves.toBe(false);
-  });
-
-  it("only enables memory for explicit enabled true", async () => {
-    mocks.pathExists.mockResolvedValue(true);
-    mocks.readTextFile.mockResolvedValue({
-      contents: JSON.stringify({ enabled: true }),
-    });
-    await expect(isMemoryEnabledByPolicy()).resolves.toBe(true);
-
-    mocks.readTextFile.mockResolvedValue({
-      contents: JSON.stringify({ enabled: false }),
-    });
-    await expect(isMemoryEnabledByPolicy()).resolves.toBe(false);
-  });
-});
-
-describe("writeMemoryPolicy", () => {
-  it("creates the policy file when the store has none", async () => {
-    mocks.pathExists.mockResolvedValue(false);
-    await writeMemoryPolicy(false);
-    expect(mocks.createTextFile).toHaveBeenCalledWith(
-      POLICY,
-      expect.stringContaining('"enabled": false'),
-    );
-  });
-
-  it("preserves keys another host put in the policy", async () => {
-    // Two hosts share one store, so a round trip through Berd must not drop
-    // fields it doesn't understand.
-    mocks.pathExists.mockResolvedValue(true);
-    mocks.readTextFile.mockResolvedValue({
-      contents: JSON.stringify({ enabled: true, audiences: ["work"] }),
-    });
-    await writeMemoryPolicy(false);
-    const [, body] = mocks.writeTextFile.mock.calls[0];
-    const written = JSON.parse(body as string);
-    expect(written).toEqual({ enabled: false, audiences: ["work"] });
-  });
-
-  it("never throws when the store is unwritable", async () => {
-    mocks.pathExists.mockResolvedValue(true);
-    mocks.readTextFile.mockResolvedValue({
-      contents: JSON.stringify({ enabled: true }),
-    });
-    mocks.writeTextFile.mockRejectedValue(new Error("read-only"));
-    await expect(writeMemoryPolicy(false)).resolves.toBe(false);
+  it("reports failure rather than presenting an unpersisted switch", async () => {
+    mocks.writeMemoryPolicy.mockRejectedValue(new Error("read-only"));
+    expect(await writeMemoryPolicy(false)).toBe(false);
   });
 });

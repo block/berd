@@ -5,6 +5,11 @@ import { resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
+import {
+  isMemoryTargetSupported,
+  MEMORY_TARGET,
+} from "./scripts/memory-target.mjs";
+
 const host = process.env.TAURI_DEV_HOST;
 const rootDir = fileURLToPath(new URL(".", import.meta.url));
 const packageJson = JSON.parse(
@@ -72,7 +77,18 @@ function resolveOtlpLogsEndpoint(): string {
 }
 
 export default defineConfig(async ({ command }) => {
+  if (
+    isMemoryTargetSupported(process.env) &&
+    process.env.BERD_MEMORY_BUILD_TARGET !== MEMORY_TARGET
+  ) {
+    throw new Error(
+      "Supported memory builds must use node scripts/tauri-memory.mjs build (or dev) to prepare the matching sidecar.",
+    );
+  }
   const define: Record<string, string> = {
+    "import.meta.env.VITE_MEMORY_SUPPORTED": JSON.stringify(
+      isMemoryTargetSupported(process.env) ? "1" : "0",
+    ),
     "import.meta.env.VITE_APP_VERSION": JSON.stringify(resolveAppVersion()),
     "import.meta.env.VITE_OTLP_LOGS_ENDPOINT": JSON.stringify(
       resolveOtlpLogsEndpoint(),

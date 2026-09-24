@@ -1,3 +1,4 @@
+import { isMemorySupported } from "@/features/me/lib/memoryAvailability";
 import {
   useCallback,
   useEffect,
@@ -757,7 +758,7 @@ export function ChatView({
           />
         ) : null}
         <SecurityConfirmationPanel sessionId={sessionId} />
-        <MemoryProposalToasts sessionId={sessionId} />
+        {isMemorySupported() && <MemoryProposalToasts sessionId={sessionId} />}
         <ConversationComposerCapability
           binding={composerBinding}
           onUserTextCommitted={

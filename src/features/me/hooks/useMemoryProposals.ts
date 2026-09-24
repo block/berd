@@ -1,4 +1,9 @@
+import { isMemorySupported } from "@/features/me/lib/memoryAvailability";
 import { useCallback, useEffect, useState } from "react";
+import {
+  memoryStoreErrorKind,
+  type MemoryStoreErrorKind,
+} from "../lib/memoryStoreError";
 import { listProposals, type MemoryProposal } from "../lib/meProposals";
 import {
   approveMemoryProposal,
@@ -11,20 +16,28 @@ export function useMemoryProposals(
   sessionId?: string,
   options?: { sessionlessOnly?: boolean },
 ) {
+  const [error, setError] = useState<MemoryStoreErrorKind | null>(null);
   const [proposals, setProposals] = useState<MemoryProposal[]>([]);
 
   const refresh = useCallback(async () => {
-    const all = await listProposals();
-    setProposals(
-      sessionId
-        ? all.filter((proposal) => proposal.sessionId === sessionId)
-        : options?.sessionlessOnly
-          ? all.filter((proposal) => proposal.sessionId === null)
-          : all,
-    );
+    if (!isMemorySupported()) return;
+    try {
+      const all = await listProposals();
+      setError(null);
+      setProposals(
+        sessionId
+          ? all.filter((proposal) => proposal.sessionId === sessionId)
+          : options?.sessionlessOnly
+            ? all.filter((proposal) => proposal.sessionId === null)
+            : all,
+      );
+    } catch (error) {
+      setError(memoryStoreErrorKind(error));
+    }
   }, [sessionId, options?.sessionlessOnly]);
 
   useEffect(() => {
+    if (!isMemorySupported()) return;
     void refresh();
     const interval = setInterval(() => void refresh(), POLL_INTERVAL_MS);
     const onFocus = () => void refresh();
@@ -41,6 +54,7 @@ export function useMemoryProposals(
       content?: string,
       topic?: string | null,
     ) => {
+      if (!isMemorySupported()) return;
       await approveMemoryProposal(proposal, content, topic);
       await refresh();
     },
@@ -48,11 +62,12 @@ export function useMemoryProposals(
   );
   const decline = useCallback(
     async (proposal: MemoryProposal) => {
+      if (!isMemorySupported()) return;
       await declineMemoryProposal(proposal);
       await refresh();
     },
     [refresh],
   );
 
-  return { proposals, approve, decline, refresh };
+  return { proposals, approve, decline, refresh, error };
 }

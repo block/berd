@@ -1,4 +1,10 @@
-import { getHomeDir, pathExists, readTextFile } from "@/shared/api/system";
+import { isMemorySupported } from "@/features/me/lib/memoryAvailability";
+import {
+  getHomeDir,
+  pathExists,
+  readMemoryTextFile,
+} from "@/shared/api/system";
+import { memoryRootPath } from "./memoryPaths";
 import {
   normalizeMemoryProposalText,
   normalizeMemoryProposalTopic,
@@ -29,7 +35,7 @@ export interface MemoryProposal {
 }
 
 function queuePath(homeDir: string): string {
-  return `${homeDir}/.me/proposals/pending.jsonl`;
+  return `${memoryRootPath(homeDir)}/proposals/pending.jsonl`;
 }
 
 export function parseProposalLine(line: string): MemoryProposal | null {
@@ -63,21 +69,21 @@ export function parseProposalLine(line: string): MemoryProposal | null {
   }
 }
 
-/** Pending proposals, oldest first. Missing or unreadable queue = none. */
+/** Pending proposals. Only a missing queue is empty; read failures propagate. */
 export async function listProposals(): Promise<MemoryProposal[]> {
-  try {
-    const path = queuePath(await getHomeDir());
-    if (!(await pathExists(path))) return [];
-    const payload = await readTextFile(path);
-    return payload.contents
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map(parseProposalLine)
-      .filter((proposal): proposal is MemoryProposal => proposal !== null);
-  } catch {
-    return [];
-  }
+  if (!isMemorySupported()) return [];
+  const path = queuePath(await getHomeDir());
+  if (!(await pathExists(path))) return [];
+  const payload = await readMemoryTextFile(path);
+  return payload.contents
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const proposal = parseProposalLine(line);
+      if (!proposal) throw new Error("Invalid encrypted memory queue record");
+      return proposal;
+    });
 }
 
 /** Append a bullet to the end of a doc, normalizing trailing whitespace. */

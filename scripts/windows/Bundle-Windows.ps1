@@ -159,13 +159,13 @@ if ($schemaExisted) {
     Copy-Item -LiteralPath $schemaPath -Destination $schemaBackup
 }
 try {
-    Invoke-CheckedCommand -FilePath $pnpm -ArgumentList @(
-        "exec", "tauri", "build",
+    Invoke-CheckedCommand -FilePath "node" -ArgumentList @(
+        "scripts/tauri-memory.mjs", "build",
         "--target", $targetTriple,
         "--features", $features,
         "--bundles", $Bundle,
         "--config", $configPath
-    ) -Label "pnpm exec tauri build --bundles $Bundle"
+    ) -Label "target-aware tauri build --bundles $Bundle"
 } finally {
     Remove-Item -Path $configPath -Force -ErrorAction SilentlyContinue
     if ($schemaExisted) {

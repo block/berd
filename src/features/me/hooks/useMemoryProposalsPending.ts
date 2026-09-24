@@ -1,10 +1,11 @@
+import { isMemorySupported } from "@/features/me/lib/memoryAvailability";
 import { useCallback, useEffect, useState } from "react";
 
 import { listProposals } from "../lib/meProposals";
 
 /**
  * Count of pending proposals for the Memory nav badge. The badge is a real
- * review queue: nothing enters durable or recallable memory until resolved.
+ * review queue: pending suggestions are stored locally but are not recallable.
  *
  * Polling is deliberately lazy (a tiny local file); a focus listener
  * catches the common "came back to the app" moment.
@@ -15,6 +16,7 @@ export function useMemoryProposalsPending(): number {
   const [count, setCount] = useState(0);
 
   const refresh = useCallback(async () => {
+    if (!isMemorySupported()) return;
     try {
       setCount((await listProposals()).length);
     } catch {
@@ -24,6 +26,7 @@ export function useMemoryProposalsPending(): number {
   }, []);
 
   useEffect(() => {
+    if (!isMemorySupported()) return;
     void refresh();
     const interval = setInterval(() => void refresh(), POLL_INTERVAL_MS);
     const onFocus = () => void refresh();

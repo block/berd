@@ -75,7 +75,7 @@ printf 'BERD_E2E_RUN_ROOT=%q\nAPP_TEST_DRIVER_TOKEN=%q\n' \
 chmod 600 "$BERD_E2E_RUN_ROOT/client.env"
 
 CARGO_FEATURES="$(./scripts/block-feature-gates.sh "berdctl,app-test-driver")"
-VITE_AUTH_GATE="${VITE_BUILDERBOT:-0}" pnpm tauri dev \
+VITE_AUTH_GATE="${VITE_BUILDERBOT:-0}" node scripts/tauri-memory.mjs dev \
   --features "$CARGO_FEATURES" \
   --config src-tauri/tauri.dev.conf.json \
   --config "$TAURI_E2E_CONFIG" \

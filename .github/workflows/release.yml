@@ -450,11 +450,12 @@ jobs:
           GOOSE_BUILD_PROFILE=release scripts/prepare-goose-sidecar.sh
           CARGO_TARGET_DIR="$BERD_TAURI_CARGO_TARGET_DIR" scripts/prepare-berdctl-sidecar.sh x86_64-unknown-linux-gnu
           scripts/prepare-catch-sidecar.sh x86_64-unknown-linux-gnu
+          CARGO_TARGET_DIR="$BERD_TAURI_CARGO_TARGET_DIR" scripts/prepare-memory-sidecar.sh x86_64-unknown-linux-gnu
           CARGO_FEATURES="$(scripts/block-feature-gates.sh berdctl)"
           BERD_APP_VERSION="$VERSION" \
           VITE_APP_VERSION="$VERSION" \
           VITE_UPDATER_ENABLED=false \
-          pnpm tauri build --bundles appimage,deb --features "$CARGO_FEATURES" \
+          node scripts/tauri-memory.mjs build --target x86_64-unknown-linux-gnu --bundles appimage,deb --features "$CARGO_FEATURES" \
             --config src-tauri/tauri.release.conf.json
 
       - name: Package and sign Linux updater archive
@@ -464,7 +465,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          bundle_dir="$BERD_TAURI_CARGO_TARGET_DIR/release/bundle"
+          bundle_dir="$BERD_TAURI_CARGO_TARGET_DIR/x86_64-unknown-linux-gnu/release/bundle"
           built_appimage=$(find "$bundle_dir/appimage" -maxdepth 1 -type f -name '*.AppImage' -print -quit)
           built_deb=$(find "$bundle_dir/deb" -maxdepth 1 -type f -name '*.deb' -print -quit)
           : "${built_appimage:?Linux build produced no AppImage}"

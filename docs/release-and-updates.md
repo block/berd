@@ -81,6 +81,16 @@ gh workflow run release.yml \
 
 Recovery verifies the selected tag and is source-bound to that immutable tag and commit. A complete platform payload is reused; an incomplete platform payload is deleted as a unit and rebuilt. Promotion reverifies every platform selected for the rolling feed.
 
+## Target-aware memory packaging
+
+Use `pnpm tauri build` / `pnpm tauri dev` or the normal platform recipes. The package script delegates to `scripts/tauri-memory.mjs`, which selects one explicit Rust compile target and applies the memory sidecar filter after platform and custom configuration overlays. Other Tauri subcommands pass through unchanged. Native command/storage gates still enforce the target independently of the renderer.
+
+Memory is supported only for `aarch64-apple-darwin`. The base and Windows bundle manifests are memory-free. Windows, Linux, and Intel Mac builds exclude the memory sidecar, including stale staged copies. Supported builds stage the matching sidecar and derive renderer availability from the same target. Do not use `VITE_MEMORY_SUPPORTED` as an opt-in or infer availability from the build host. Direct supported-target Tauri builds that bypass sidecar preparation are rejected by the frontend configuration.
+
+Because the wrapper passes `--target` explicitly, Cargo app/package output is under `<cargo-target-directory>/<target-triple>/<profile>/`, including native builds. Scripts that collect packages must use that layout rather than assuming `<cargo-target-directory>/<profile>/`. This does not change updater-channel or signing policy.
+
+Memory native acceptance is separate from release publication. Follow [macOS memory acceptance](memory-macos-acceptance.md) using approved non-publishing signed artifacts; do not run the public release workflow just to obtain a Keychain probe.
+
 ## Downstream distributions
 
 Berd keeps build and bundle mechanics CI-neutral. A downstream distribution

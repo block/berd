@@ -1,3 +1,10 @@
+import {
+  beforeEach as beforeSupportedMemory,
+  afterEach as afterSupportedMemory,
+  vi as memoryEnv,
+} from "vitest";
+beforeSupportedMemory(() => memoryEnv.stubEnv("VITE_MEMORY_SUPPORTED", "1"));
+afterSupportedMemory(() => memoryEnv.unstubAllEnvs());
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_RUNTIME_CONFIG,
@@ -412,6 +419,25 @@ describe("acpSendMessage", () => {
     );
   });
 
+  it("does not request a memory preamble for unsupported external sessions", async () => {
+    vi.stubEnv("VITE_MEMORY_SUPPORTED", "0");
+    mockGetMePreamble.mockReturnValue("stale memory");
+    mockGetMePreamble.mockClear();
+    const registry = await import("../acpSessionRegistry");
+    const { __resetAllPersonaHandoffs } = await import("../acpPersonaHandoff");
+    const { acpSendMessage } = await import("../acp");
+    __resetAllPersonaHandoffs();
+    registry.registerPreparedSession(
+      "unsupported-memory",
+      "claude-acp",
+      "/tmp/project",
+      "test-model",
+    );
+    await acpSendMessage("unsupported-memory", "hello");
+    expect(mockGetMePreamble).not.toHaveBeenCalled();
+    expect(JSON.stringify(mockPrompt.mock.calls)).not.toContain("stale memory");
+  });
+
   it("hands the me.md preamble off in-band for external agents, before the persona", async () => {
     mockGetMePreamble.mockReturnValue(
       "[The user's file]\n- Keep answers brief.",
@@ -522,6 +548,71 @@ describe("acpSendMessage", () => {
       type: "text",
       text: "hello",
     });
+  });
+
+  it("delivers every memory-off transition without repeating unchanged state", async () => {
+    const registry = await import("../acpSessionRegistry");
+    const { acpSendMessage } = await import("../acp");
+    registry.registerPreparedSession(
+      "memory-transitions",
+      "claude-acp",
+      "/tmp/project",
+      "test-model",
+    );
+    const off = "[Memory is off] Do not recall or propose memory.";
+    const states = ["Approved memory A", off, "Approved memory B", off, off];
+    for (const state of states) {
+      mockGetMePreamble.mockReturnValue(state);
+      await acpSendMessage("memory-transitions", "hello");
+    }
+    for (let i = 0; i < 4; i += 1) {
+      expect(mockPrompt.mock.calls[i][1][0].text).toContain(states[i]);
+      expect(mockPrompt.mock.calls[i][1][0].annotations).toEqual({
+        audience: ["assistant"],
+      });
+    }
+    expect(mockPrompt.mock.calls[4][1]).toEqual([
+      { type: "text", text: "hello" },
+    ]);
+  });
+
+  it.each([
+    "failed",
+    "aborted",
+  ])("retries a %s memory-off claim without consuming the transition", async (outcome) => {
+    const registry = await import("../acpSessionRegistry");
+    const { acpSendMessage } = await import("../acp");
+    registry.registerPreparedSession(
+      "memory-retry",
+      "claude-acp",
+      "/tmp/project",
+      "test-model",
+    );
+    mockGetMePreamble.mockReturnValue("Approved memory A");
+    await acpSendMessage("memory-retry", "initial");
+    const off = "[Memory is off] Do not recall or propose memory.";
+    mockGetMePreamble.mockReturnValue(off);
+    if (outcome === "failed") {
+      mockPrompt.mockImplementationOnce(() => {
+        throw new Error("dispatch failed");
+      });
+    }
+    await expect(
+      acpSendMessage("memory-retry", "attempt", {
+        onPromptDispatching:
+          outcome === "aborted"
+            ? () => {
+                throw new DOMException("dispatch aborted", "AbortError");
+              }
+            : undefined,
+      }),
+    ).rejects.toThrow("dispatch");
+    await acpSendMessage("memory-retry", "retry");
+    expect(mockPrompt.mock.calls[2][1][0].text).toContain(off);
+    await acpSendMessage("memory-retry", "unchanged");
+    expect(mockPrompt.mock.calls[3][1]).toEqual([
+      { type: "text", text: "unchanged" },
+    ]);
   });
 
   it("does not consume an external persona handoff when ownership fails", async () => {
