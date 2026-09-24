@@ -268,7 +268,7 @@ pub enum SessionMessage {
         id: u64,
         confirmed_token: u64,
         utterances_after: Vec<PendingUtterance>,
-        #[serde(skip_serializing_if = "Vec::is_empty")]
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
         unresolved_handoff_ids: Vec<String>,
     },
     DismissHandoffsResult {
@@ -333,6 +333,22 @@ pub enum SessionMessage {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn state_without_handoffs_round_trips_for_host_polling() {
+        let message = super::SessionMessage::State {
+            id: 1,
+            confirmed_token: 0,
+            utterances_after: Vec::new(),
+            unresolved_handoff_ids: Vec::new(),
+        };
+        let encoded = serde_json::to_string(&message).unwrap();
+        assert!(!encoded.contains("unresolved_handoff_ids"));
+        assert_eq!(
+            serde_json::from_str::<super::SessionMessage>(&encoded).unwrap(),
+            message
+        );
+    }
+
     use super::*;
 
     #[test]

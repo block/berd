@@ -9,6 +9,8 @@ Call runtime:
   start                   Run a microphone-backed local voice call
   speak                   Speak through the active local call
   status                  Inspect the active local call
+  catch-up                Read finalized input after a cursor
+  wait-for-input          Wait for finalized input after a cursor
   settings                Update the active local call settings
   stop                    Stop the active local call
   session                 Run the host-facing framed voice-session protocol
@@ -70,6 +72,19 @@ const STATUS_HELP: &str = r#"Inspect the active local voice call.
 
 Usage:
   berd-call status [--port PORT]"#;
+
+const POLL_INPUT_HELP: &str = r#"Read input from the active local voice call.
+
+Usage:
+  berd-call catch-up [--port PORT] [--since CURSOR] [--timeout SECONDS]
+  berd-call wait-for-input [--port PORT] [--since CURSOR] [--timeout SECONDS]
+
+Both wait for active speech to finish. Catch-up returns immediately when there
+is no active speech; wait-for-input also waits for new user input or a handoff.
+The default cursor is the session's acknowledged input. Reading does not
+acknowledge input: reply using speak --re CURSOR. Results are JSON with
+utterances, cursor, unresolvedHandoffIds, and timedOut. Timeout defaults to
+30 seconds (range 1..3600). Cursors reset when the session restarts."#;
 
 const STOP_HELP: &str = r#"Stop the active local voice call.
 
@@ -171,6 +186,7 @@ fn help_for(topic: &[&str]) -> Option<&'static str> {
         ["start"] => Some(START_HELP),
         ["speak"] => Some(SPEAK_HELP),
         ["status"] => Some(STATUS_HELP),
+        ["catch-up"] | ["wait-for-input"] => Some(POLL_INPUT_HELP),
         ["settings"] => Some(SETTINGS_HELP),
         ["stop"] => Some(STOP_HELP),
         ["session"] => Some(SESSION_HELP),
