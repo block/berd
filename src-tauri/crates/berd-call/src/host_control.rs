@@ -33,6 +33,7 @@ pub(crate) trait HostControl: Send + Sync + 'static {
     fn set_non_blocking(&self, enabled: bool) -> Result<Value, String>;
     fn set_tts(&self, settings: berd_call::TtsSettings) -> Result<Value, String>;
     fn set_rate(&self, rate: f32) -> Result<Value, String>;
+    fn set_voice(&self, voice: String, language: Option<String>) -> Result<Value, String>;
     fn set_input_during_tts(
         &self,
         policy: berd_call::input::InputDuringTtsPolicy,
@@ -124,6 +125,10 @@ pub(crate) enum ControlRequest {
     Rate {
         rate: f32,
     },
+    Voice {
+        voice: String,
+        language: Option<String>,
+    },
     InputDuringTts {
         policy: berd_call::input::InputDuringTtsPolicy,
     },
@@ -145,6 +150,29 @@ struct ControlResponse {
 }
 
 pub(crate) fn request(port: u16, request: ControlRequest) -> Result<Value, String> {
+    begin_request(port, request)?.finish()
+}
+
+pub(crate) struct PendingResponse {
+    stream: TcpStream,
+}
+
+impl PendingResponse {
+    pub(crate) fn finish(mut self) -> Result<Value, String> {
+        let response: ControlResponse = read_json_line(&mut self.stream, "response")?;
+        if response.ok {
+            response
+                .value
+                .ok_or_else(|| "berd-call returned an empty response".to_string())
+        } else {
+            Err(response
+                .message
+                .unwrap_or_else(|| "berd-call request failed".into()))
+        }
+    }
+}
+
+pub(crate) fn begin_request(port: u16, request: ControlRequest) -> Result<PendingResponse, String> {
     let read_timeout = if let ControlRequest::PollInput {
         timeout_seconds, ..
     } = &request
@@ -158,6 +186,7 @@ pub(crate) fn request(port: u16, request: ControlRequest) -> Result<Value, Strin
         ControlRequest::Speak { .. }
             | ControlRequest::TtsSettings { .. }
             | ControlRequest::Rate { .. }
+            | ControlRequest::Voice { .. }
             | ControlRequest::Restart { .. }
     ) {
         None
@@ -172,16 +201,7 @@ pub(crate) fn request(port: u16, request: ControlRequest) -> Result<Value, Strin
         .shutdown(Shutdown::Write)
         .map_err(|error| format!("could not finish berd-call request: {error}"))?;
 
-    let response: ControlResponse = read_json_line(&mut stream, "response")?;
-    if response.ok {
-        response
-            .value
-            .ok_or_else(|| "berd-call returned an empty response".to_string())
-    } else {
-        Err(response
-            .message
-            .unwrap_or_else(|| "berd-call request failed".into()))
-    }
+    Ok(PendingResponse { stream })
 }
 
 fn handle_connection(mut stream: TcpStream, control: &dyn HostControl) -> Result<(), String> {
@@ -211,6 +231,7 @@ fn handle_connection(mut stream: TcpStream, control: &dyn HostControl) -> Result
                 ControlRequest::Stop => control.stop(),
                 ControlRequest::TtsSettings { settings } => control.set_tts(settings),
                 ControlRequest::Rate { rate } => control.set_rate(rate),
+                ControlRequest::Voice { voice, language } => control.set_voice(voice, language),
                 ControlRequest::NonBlocking { enabled } => control.set_non_blocking(enabled),
                 ControlRequest::InputDuringTts { policy } => control.set_input_during_tts(policy),
                 ControlRequest::Muted { muted } => control.set_muted(muted),
@@ -324,6 +345,9 @@ mod tests {
         }
         fn set_rate(&self, rate: f32) -> Result<Value, String> {
             Ok(json!({"rate": rate}))
+        }
+        fn set_voice(&self, voice: String, language: Option<String>) -> Result<Value, String> {
+            Ok(json!({"voice": voice, "language": language}))
         }
         fn set_non_blocking(&self, enabled: bool) -> Result<Value, String> {
             Ok(json!({"nonBlocking": enabled}))
