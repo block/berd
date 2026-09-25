@@ -133,8 +133,8 @@ pub fn default_session_storage_for_bb_home(
             // to the file store under bb home so Windows and Linux builds hold
             // a session without every user first exporting BB_AUTH_STORAGE.
             // That file is protected by file permissions, not a keyring (0600
-            // on Unix, a current-user-only ACL on Windows), replaced
-            // atomically, and locked across processes; see
+            // on Unix; on Windows an explicit ACL that no other user can
+            // read), replaced atomically, and locked across processes; see
             // FileSessionCredentialStorage.
             if cfg!(target_os = "macos") {
                 Ok(Box::new(KeyringSessionCredentialStorage))
@@ -493,8 +493,8 @@ fn parse_stored_session(value: &str) -> Result<StoredSessionCredential> {
     }
 }
 
-/// Creates `path` as a new, empty file that only the current user can read
-/// and returns the open handle. On Unix the 0600 mode is part of the create
+/// Creates `path` as a new, empty file that no other user can read (see
+/// `restrict_permissions`) and returns the open handle. On Unix the 0600 mode is part of the create
 /// call, so the process umask never gets a say; on Windows the file is
 /// created empty, its ACL is reset with `icacls` while it still holds no
 /// bytes, and only then is the handle handed back for writing. Fails if
@@ -518,11 +518,16 @@ fn create_private_file(path: &Path) -> Result<fs::File> {
     Ok(file)
 }
 
-/// Makes the credential file readable by the current user only: mode 0600 on
-/// Unix; on Windows the ACL is reset so inherited entries (Administrators,
-/// SYSTEM, anything granted on the parent) are dropped and only the current
-/// user keeps access. Windows uses `icacls`, which ships with every supported
-/// release, so no additional dependency is needed.
+/// Makes the credential file unreadable by other users: mode 0600 on Unix.
+/// On Windows the ACL is detached from the parent (`/inheritance:r`, so
+/// nothing granted on the directory, such as `Users` or `Everyone`, applies)
+/// and the current user is granted full control. Any other entry left is
+/// one Windows wrote from the creating process's default ACL when the parent
+/// passed nothing down: `SYSTEM` and `Administrators`, which can take
+/// ownership of any file anyway. That is the same set Windows OpenSSH
+/// accepts on a private key, and the Windows counterpart of root still
+/// being able to read a 0600 file. Windows uses `icacls`, which ships with
+/// every supported release, so no additional dependency is needed.
 fn restrict_permissions(path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
@@ -1093,8 +1098,46 @@ mod tests {
         let _ = fs::remove_dir_all(directory);
     }
 
-    /// Asserts that only the current user can access `path`: mode 0600 on
-    /// Unix, a single access entry naming `%USERNAME%` on Windows.
+    /// A parent that grants other users access but passes nothing down makes
+    /// Windows stamp new files from the process's default ACL instead of
+    /// inheriting; the store must still end up private. This reproduces the
+    /// GitHub Windows runner's temp directory on any machine.
+    #[cfg(windows)]
+    #[test]
+    fn windows_file_storage_is_private_when_the_parent_passes_nothing_down() {
+        let directory = scratch_dir("acl-no-inherit");
+        fs::create_dir_all(&directory).expect("scratch dir");
+        let status = std::process::Command::new("icacls")
+            .arg(&directory)
+            .args(["/inheritance:r", "/grant:r", "*S-1-5-32-545:(RX)"])
+            .arg("/grant")
+            .arg(format!(
+                "{}\\{}:(F)",
+                std::env::var("USERDOMAIN").expect("USERDOMAIN"),
+                std::env::var("USERNAME").expect("USERNAME")
+            ))
+            .output()
+            .expect("icacls sets the parent ACL");
+        assert!(status.status.success(), "parent ACL setup failed");
+        let path = directory.join("sessions.json");
+        let storage = FileSessionCredentialStorage::new(path.clone());
+        storage
+            .set(
+                &SessionStorageKey::new("default", SAMPLE_SERVER_URL),
+                &sample_credential(),
+            )
+            .expect("store credential");
+
+        assert_private(&path, "credential store under a non-inheriting parent");
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    /// Asserts that no other user can access `path`: mode 0600 on Unix. On
+    /// Windows, no entry is inherited, the current user holds full control,
+    /// and every other entry is `SYSTEM` or `Administrators` (present only
+    /// when the parent passed nothing down and Windows applied the creating
+    /// process's default ACL, which is how GitHub's Windows runners create
+    /// files in their temp directory).
     fn assert_private(path: &Path, what: &str) {
         #[cfg(unix)]
         {
@@ -1108,22 +1151,43 @@ mod tests {
                 .arg(path)
                 .output()
                 .expect("icacls lists the ACL");
+            assert!(output.status.success(), "icacls failed for {what}");
             let listing = String::from_utf8_lossy(&output.stdout);
-            let aces: Vec<&str> = listing.lines().filter(|line| line.contains(":(")).collect();
-            let user = std::env::var("USERNAME").expect("USERNAME");
-            assert_eq!(
-                aces.len(),
-                1,
-                "{what}: exactly one access entry expected:\n{listing}"
-            );
+            // icacls prints `<path> <principal>:(<rights>)` on the first line
+            // and `<padding><principal>:(<rights>)` on the rest.
+            let echoed_path = path.to_string_lossy();
+            let aces: Vec<(String, String)> = listing
+                .lines()
+                .filter(|line| line.contains(":("))
+                .map(|line| {
+                    let entry = line
+                        .strip_prefix(echoed_path.as_ref())
+                        .unwrap_or(line)
+                        .trim();
+                    let (principal, rights) = entry.split_once(":(").expect("ACE shape");
+                    (principal.trim().to_lowercase(), rights.to_string())
+                })
+                .collect();
+            let user = std::env::var("USERNAME").expect("USERNAME").to_lowercase();
+            let is_user =
+                |principal: &str| principal == user || principal.ends_with(&format!("\\{user}"));
             assert!(
-                aces[0].to_lowercase().contains(&user.to_lowercase()),
-                "{what}: the only access entry must be the current user:\n{listing}"
+                aces.iter()
+                    .any(|(principal, rights)| is_user(principal) && rights.starts_with("F)")),
+                "{what}: the current user must hold full control:\n{listing}"
             );
-            assert!(
-                !listing.contains("BUILTIN\\") && !listing.contains("NT AUTHORITY\\"),
-                "{what}: inherited entries must be gone:\n{listing}"
-            );
+            for (principal, rights) in &aces {
+                assert!(
+                    !rights.contains("(I)") && !rights.starts_with("I)"),
+                    "{what}: no entry may be inherited from the parent:\n{listing}"
+                );
+                assert!(
+                    is_user(principal)
+                        || principal == "nt authority\\system"
+                        || principal == "builtin\\administrators",
+                    "{what}: {principal} must not have access:\n{listing}"
+                );
+            }
         }
         #[cfg(not(any(unix, windows)))]
         let _ = (path, what);
