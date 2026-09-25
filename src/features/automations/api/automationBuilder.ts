@@ -27,7 +27,7 @@ export const USER_RESPONSE_REVISE_AUTOMATION_PREFIX =
 const SUMMARY_TILE_TYPE = 4;
 const DATABRICKS_MODEL_PROVIDER = 1;
 const AUTOMATION_BUILDER_MODEL = {
-  name: "goose-claude-opus-5-5",
+  name: "databricks-claude-opus-5-5",
   provider: DATABRICKS_MODEL_PROVIDER,
 };
 

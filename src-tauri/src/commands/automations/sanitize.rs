@@ -314,7 +314,7 @@ fn sanitize_metadata(metadata: Metadata) -> Result<Value, String> {
 
 fn sanitize_builder_profile_config(profile_config: BuilderProfileConfig) -> Result<Value, String> {
     let preferred_model = profile_config.user_profile.preferred_model;
-    if preferred_model.name != "goose-claude-opus-5-5" {
+    if preferred_model.name != "databricks-claude-opus-5-5" {
         return Err("automation builder preferredModel name is not supported".to_string());
     }
     if preferred_model.provider != 1 {
@@ -617,7 +617,7 @@ mod tests {
             "profileConfig": {
                 "userProfile": {
                     "preferredModel": {
-                        "name": "goose-claude-opus-5-5",
+                        "name": "databricks-claude-opus-5-5",
                         "provider": 1
                     }
                 }
@@ -660,7 +660,7 @@ mod tests {
         assert_eq!(request["metadata"]["client"], AUTOMATION_METADATA_CLIENT);
         assert_eq!(
             request["profileConfig"]["userProfile"]["preferredModel"]["name"],
-            "goose-claude-opus-5-5"
+            "databricks-claude-opus-5-5"
         );
         assert_eq!(
             request["profileConfig"]["userProfile"]["preferredModel"]["provider"],
@@ -743,7 +743,7 @@ mod tests {
             "profileConfig": {
                 "userProfile": {
                     "preferredModel": {
-                        "name": "goose-claude-opus-5-5",
+                        "name": "databricks-claude-opus-5-5",
                         "provider": 1
                     },
                     "clientTools": []
