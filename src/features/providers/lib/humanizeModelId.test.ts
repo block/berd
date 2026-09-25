@@ -41,6 +41,12 @@ describe("humanizeRawModelId", () => {
     expect(humanizeRawModelId("gpt-4o-mini")).toBe("GPT 4o Mini");
   });
 
+  it("names the GPT-6 model tiers", () => {
+    expect(humanizeRawModelId("gpt-6-astra")).toBe("GPT-6 Astra");
+    expect(humanizeRawModelId("gpt-6-sol")).toBe("GPT-6 Sol");
+    expect(humanizeRawModelId("gpt-6-luna")).toBe("GPT-6 Luna");
+  });
+
   it("preserves AWS casing", () => {
     expect(humanizeRawModelId("aws-bedrock-titan")).toBe("AWS Bedrock Titan");
   });

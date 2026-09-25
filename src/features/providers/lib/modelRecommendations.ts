@@ -16,6 +16,23 @@ const KNOWN_CASINGS: Record<string, string> = {
 };
 
 const FALLBACK_GOOSE_MODEL_PROVIDER_IDS = new Set(["databricks_v2"]);
+const GPT_6_TIER_ORDER: Record<string, number> = {
+  "gpt-astra": 0,
+  "gpt-sol": 1,
+  "gpt-luna": 2,
+};
+
+function gpt6TierOrder(parsed: ParsedGooseModelId | null): number | null {
+  if (
+    !parsed ||
+    parsed.version.length !== 1 ||
+    parsed.version[0] !== 6 ||
+    !Object.hasOwn(GPT_6_TIER_ORDER, parsed.familyKey)
+  ) {
+    return null;
+  }
+  return GPT_6_TIER_ORDER[parsed.familyKey];
+}
 
 function formatFamilyToken(token: string): string {
   const lower = token.toLowerCase();
@@ -70,6 +87,13 @@ export function normalizedGooseModelDisplayName(id: string): string | null {
     return null;
   }
 
+  if (parsed.familyTokens[0] === "gpt") {
+    return [
+      `GPT-${parsed.version.join(".")}`,
+      ...parsed.familyTokens.slice(1).map(formatFamilyToken),
+    ].join(" ");
+  }
+
   return [
     ...parsed.familyTokens.map(formatFamilyToken),
     parsed.version.join("."),
@@ -82,7 +106,7 @@ export function gooseModelSortRank(id: string): number {
 
   // These are product-positioning preferences for recommended Goose models.
   // Unknown future families intentionally land in the middle.
-  if (familyKey === "gpt") return 0;
+  if (familyKey === "gpt" || gpt6TierOrder(parsed) !== null) return 0;
   if (familyKey.includes("opus")) return 1;
   if (familyKey.includes("haiku")) return 3;
   return 2;
@@ -129,6 +153,27 @@ function compareGooseModels(left: ModelOption, right: ModelOption): number {
   const rightRank = gooseModelSortRank(right.id);
   if (leftRank !== rightRank) {
     return leftRank - rightRank;
+  }
+
+  const leftParsed = parseGooseModelId(left.id);
+  const rightParsed = parseGooseModelId(right.id);
+  if (
+    leftRank === 0 &&
+    leftParsed?.familyTokens[0] === "gpt" &&
+    rightParsed?.familyTokens[0] === "gpt"
+  ) {
+    const versionOrder = compareVersion(
+      rightParsed.version,
+      leftParsed.version,
+    );
+    if (versionOrder !== 0) {
+      return versionOrder;
+    }
+    const leftTierOrder = gpt6TierOrder(leftParsed);
+    const rightTierOrder = gpt6TierOrder(rightParsed);
+    if (leftTierOrder !== null && rightTierOrder !== null) {
+      return leftTierOrder - rightTierOrder;
+    }
   }
 
   return compareModelLabels(left, right);
