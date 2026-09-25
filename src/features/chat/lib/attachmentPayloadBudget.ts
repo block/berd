@@ -7,7 +7,7 @@ import type { ChatAttachmentDraft } from "@/shared/types/messages";
  * every open chat — when a message overflows its frame limit (16MiB
  * tungstenite default, BOT-1463). The budget stays comfortably under that
  * so prompt text and JSON envelope overhead can never push a send over the
- * edge. Normalized images (2048px cap) are a few hundred KB each, so normal
+ * edge. Normalized images (2000px cap) are a few hundred KB each, so normal
  * use never approaches this.
  */
 export const MAX_PROMPT_ATTACHMENT_BYTES = 12 * 1024 * 1024;
