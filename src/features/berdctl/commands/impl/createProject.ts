@@ -33,35 +33,40 @@ export const createProjectCommand = defineCommand({
     --working-dir /Users/me/src/api --working-dir /Users/me/src/web
 
 Result:
-  {"project_id": "...", "warning": "..."?} — the project appears
-  immediately in the app's project list with both directories attached.`,
+  {"project_id": "...", "warning": "..."?, "duplicate_working_dirs": [
+    {"working_dir": "...", "project_id": "...", "project_name": "..."}
+  ]?} — the project appears immediately in the app's project list with both
+  directories attached.`,
   schema: createProjectSchema,
-  execute: async (args) => {
+  execute: async (args, ctx) => {
     const [
       { DEFAULT_PROJECT_COLOR },
       { DEFAULT_PROJECT_ICON },
       { useProjectStore },
-      { findProjectByWorkingDirectory },
+      { findProjectByWorkingDirectory, listProjects },
       { getHomeDir },
-      { loadProjectsForBerdctl },
+      { refusePastDeadline },
     ] = await Promise.all([
       import("@/features/projects/lib/projectDefaults"),
       import("@/features/projects/lib/projectIcons"),
       import("@/features/projects/stores/projectStore"),
       import("@/features/projects/api/projects"),
       import("@/shared/api/system"),
-      import("../runtime/projects"),
+      import("../runtime/deadline"),
     ]);
     const workingDirs = args.working_dir ?? [];
-    let duplicate: { id: string; name: string } | null = null;
+    const duplicateWorkingDirs: Array<{
+      working_dir: string;
+      project_id: string;
+      project_name: string;
+    }> = [];
     if (workingDirs.length > 0) {
-      const [, homeDir] = await Promise.all([
-        loadProjectsForBerdctl(),
+      const [existingProjects, homeDir] = await Promise.all([
+        listProjects(),
         // The duplicate warning is best effort; a failed Home lookup must not
         // prevent creation after project data was successfully loaded.
         getHomeDir().catch(() => null),
       ]);
-      const existingProjects = useProjectStore.getState().projects;
       for (const dir of workingDirs) {
         const match = findProjectByWorkingDirectory(
           existingProjects,
@@ -69,8 +74,11 @@ Result:
           homeDir ?? undefined,
         );
         if (match) {
-          duplicate = match;
-          break;
+          duplicateWorkingDirs.push({
+            working_dir: dir,
+            project_id: match.id,
+            project_name: match.name,
+          });
         }
       }
     }
@@ -89,12 +97,15 @@ Result:
         DEFAULT_PROJECT_COLOR,
         workingDirs,
         false,
+        undefined,
+        () => refusePastDeadline(ctx, "the project was not created"),
       );
     return {
       project_id: project.id,
-      ...(duplicate
+      ...(duplicateWorkingDirs.length > 0
         ? {
-            warning: `A working directory is already attached to project "${duplicate.name}" (${duplicate.id}); the new project was created anyway.`,
+            warning: `A working directory is already attached to project "${duplicateWorkingDirs[0].project_name}" (${duplicateWorkingDirs[0].project_id}); the new project was created anyway.`,
+            duplicate_working_dirs: duplicateWorkingDirs,
           }
         : {}),
     };

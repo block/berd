@@ -445,6 +445,7 @@ export async function createProject(
     useWorktrees,
   ),
   environment?: ProjectEnvironment | null,
+  beforeCreateRpc?: () => void,
 ): Promise<ProjectInfo> {
   const client = await getClient();
   const existing = await listAllProjects();
@@ -463,6 +464,7 @@ export async function createProject(
     color,
     workingDirs: normalizedWorkingDirs,
   });
+  beforeCreateRpc?.();
   const raw = await client.goose.GooseUnstableSourcesCreate({
     type: "project",
     name: id,
