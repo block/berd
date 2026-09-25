@@ -258,7 +258,7 @@ _tauri-test-windows:
     just _tauri-test-skill-marketplace
 
 # Run the local CI gate.
-ci: release-version-check check tauri-fmt-check tauri-check tauri-test clippy test release-scripts-test build
+ci: release-version-check check tauri-fmt-check tauri-check tauri-test builderbot-auth-test clippy test release-scripts-test build
 
 # Native x64 MSVC CI gate for the managed Node runtime + ACP bridge.
 # Runs the managed_node / managed_acp_tools module tests (including the
@@ -335,6 +335,12 @@ bb-cli-lint:
 # Run BuilderBot CLI tests.
 bb-cli-test:
     cargo test --manifest-path bb-cli/Cargo.toml --locked
+
+# Run the builderbot-auth crate tests. The crate is a path dependency of both
+# bb-cli and src-tauri but a member of neither workspace, so nothing else
+# exercises its file-storage, locking, and permission tests.
+builderbot-auth-test:
+    cargo test --manifest-path crates/builderbot-auth/Cargo.toml
 
 # Build and run the isolated, deterministic Docker acceptance harness for bb skills.
 bb-cli-docker-acceptance:
