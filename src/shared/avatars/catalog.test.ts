@@ -4,7 +4,9 @@ import {
   isAppAvatarRef,
   parseAvatarCatalog,
   parseAvatarRef,
+  resolveAvatarId,
 } from "./catalog";
+import retiredAvatars from "../../../resources/retired-avatars.json";
 
 const validCatalog = {
   schemaVersion: 1,
@@ -170,6 +172,23 @@ describe("avatar catalog", () => {
         ],
       }),
     ).toThrow(/contents/);
+  });
+
+  it("resolves retired avatars without invalidating saved references", () => {
+    expect(parseAvatarRef(" app-avatar:pollies-22 ")).toBe("pollies-22");
+    expect(resolveAvatarId("pollies-22")).toBe("gloopies-14");
+    expect(resolveAvatarId("pollies-21")).toBe("pollies-21");
+    expect(resolveAvatarId("unknown-but-safe")).toBe("unknown-but-safe");
+    expect(resolveAvatarId("constructor")).toBe("constructor");
+  });
+
+  it("keeps retirement replacements valid and non-retired", () => {
+    for (const [id, replacement] of Object.entries(retiredAvatars)) {
+      expect(parseAvatarRef(avatarRef(id))).toBe(id);
+      expect(parseAvatarRef(avatarRef(replacement))).toBe(replacement);
+      expect(resolveAvatarId(replacement)).toBe(replacement);
+      expect(replacement).not.toBe(id);
+    }
   });
 
   it("normalizes app-avatar references by syntax", () => {

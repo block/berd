@@ -1,4 +1,5 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { resolveAvatarId } from "@/shared/avatars/catalog";
 
 export const ARTIFACTS_QUERY_KEY = ["artifacts"] as const;
 
@@ -50,6 +51,14 @@ export function selectCollectionImageUrl(
   imageId: string,
 ): string | undefined {
   if (!artifacts) return undefined;
+  // A retired avatar may move to a different collection. Never return its
+  // old cached image, even while the artifacts catalog is stale/offline.
+  if (
+    resolveAvatarId(imageId) !== imageId &&
+    collectionId === imageId.split("-")[0]
+  ) {
+    return selectAvatarImageUrl(artifacts, imageId);
+  }
   const match = artifacts.assets.find(
     (asset) =>
       asset.kind === "collectionImage" &&
@@ -64,10 +73,11 @@ export function selectAvatarImageUrl(
   avatarId: string,
 ): string | undefined {
   if (!artifacts) return undefined;
+  const resolvedId = resolveAvatarId(avatarId);
   const match = artifacts.assets.find(
     (asset) =>
       asset.kind === "collectionImage" &&
-      avatarIdFromArtifactPath(asset.path) === avatarId,
+      avatarIdFromArtifactPath(asset.path) === resolvedId,
   );
   return match ? convertFileSrc(match.path, "asset") : undefined;
 }

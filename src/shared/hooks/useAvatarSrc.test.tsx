@@ -425,6 +425,40 @@ describe("useAvatarSrc", () => {
     );
   });
 
+  it.each([
+    true,
+    false,
+  ])("never shows a retired static image from stale query data (replacement cached: %s)", (hasReplacement) => {
+    const artifacts = createArtifacts();
+    const cachedImage = artifacts.assets[2];
+    artifacts.assets.push({
+      ...cachedImage,
+      path: "/cache/images/pollies/pollies-22.png",
+      collectionId: "pollies",
+    });
+    if (hasReplacement) {
+      artifacts.assets.push({
+        ...cachedImage,
+        path: "/cache/images/gloopies/gloopies-14.png",
+        collectionId: "gloopies",
+      });
+    }
+    const queryClient = createQueryClient();
+    queryClient.setQueryData(ARTIFACTS_QUERY_KEY, artifacts);
+
+    const { result } = renderHook(
+      () => useAvatarImage(" app-avatar:pollies-22 "),
+      { wrapper: createWrapper(queryClient) },
+    );
+
+    expect(result.current).toBe(
+      hasReplacement
+        ? "asset:///cache/images/gloopies/gloopies-14.png"
+        : undefined,
+    );
+    expect(queryClient.getQueryData(ARTIFACTS_QUERY_KEY)).toBe(artifacts);
+  });
+
   it("reads avatar images from the raw shared artifacts query cache", async () => {
     const artifacts = createArtifacts();
     const queryClient = createQueryClient();

@@ -114,6 +114,18 @@ describe("PersonaCard", () => {
     );
   });
 
+  it("keeps a local fallback when a retired avatar's replacement is not cached", () => {
+    const persona = makePersona({ avatar: "app-avatar:pollies-22" });
+    const { container } = render(<PersonaCard persona={persona} />);
+
+    expect(container.querySelector("img")).toHaveAttribute(
+      "src",
+      expect.stringContaining("goose-"),
+    );
+    expect(container.querySelector("video")).not.toBeInTheDocument();
+    expect(persona.avatar).toBe("app-avatar:pollies-22");
+  });
+
   it("does not show source tags", () => {
     render(
       <>

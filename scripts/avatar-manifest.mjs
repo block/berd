@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { access, readdir, readFile, writeFile } from "node:fs/promises";
 import { basename, extname, join, relative } from "node:path";
-import { pathToFileURL } from "node:url";
+import { pathToFileURL, URL as NodeURL } from "node:url";
 import process from "node:process";
 import {
   fetchRemoteManifest,
@@ -21,6 +22,16 @@ export { generateCatalogVersion };
 export const ARTIFACTORY_BASE =
   "https://global.block-artifacts.com/artifactory/goose-internal/avatars";
 
+const RETIRED_AVATAR_IDS = new Set(
+  Object.keys(
+    JSON.parse(
+      readFileSync(
+        new NodeURL("../resources/retired-avatars.json", import.meta.url),
+        "utf8",
+      ),
+    ),
+  ),
+);
 const FORMATS = ["webm", "hevc"];
 const EXPECTED_EXTENSION_BY_FORMAT = {
   webm: ".webm",
@@ -137,6 +148,9 @@ function parseSourceAssetPath(source, file) {
 
 async function variantForFile(source, file) {
   const { id, collectionId, format, rel } = parseSourceAssetPath(source, file);
+  if (RETIRED_AVATAR_IDS.has(id)) {
+    return null;
+  }
   const bytes = await readFile(file);
   return {
     id,
@@ -171,7 +185,10 @@ export async function buildManifest({ source, version }) {
   const variants = [];
 
   for (const file of await listFiles(source)) {
-    variants.push(await variantForFile(source, file));
+    const variant = await variantForFile(source, file);
+    if (variant) {
+      variants.push(variant);
+    }
   }
 
   const seenByFormat = new Set();
@@ -256,6 +273,9 @@ export function validateManifest(manifest) {
   const assetIds = new Set();
   const assetsById = new Map();
   for (const asset of manifest.assets) {
+    if (RETIRED_AVATAR_IDS.has(asset.id)) {
+      throw new Error(`Avatar manifest contains retired avatar: ${asset.id}`);
+    }
     if (assetIds.has(asset.id)) {
       throw new Error(`Duplicate avatar id: ${asset.id}`);
     }
