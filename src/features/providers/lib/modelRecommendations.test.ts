@@ -41,6 +41,7 @@ describe("modelRecommendations", () => {
   it("puts GPT first, Opus second, unknowns in the middle, and Haiku last", () => {
     expect(gooseModelSortRank("goose-gpt-5-5")).toBe(0);
     expect(gooseModelSortRank("goose-gpt-6-astra")).toBe(0);
+    expect(gooseModelSortRank("goose-gpt-experimental-7")).toBe(2);
     expect(gooseModelSortRank("goose-claude-opus-4-8")).toBe(1);
     expect(gooseModelSortRank("goose-new-family-1")).toBe(2);
     expect(gooseModelSortRank("goose-claude-haiku-4-8")).toBe(3);
@@ -77,26 +78,37 @@ describe("modelRecommendations", () => {
       "goose-gpt-6-luna",
       "goose-gpt-6-sol",
       "goose-gpt-6-astra",
+      "goose-gpt-experimental-7",
     ]);
 
     expect(options.map((option) => option.id)).toEqual([
       "goose-gpt-6-astra",
-      "goose-gpt-6-luna",
       "goose-gpt-6-sol",
+      "goose-gpt-6-luna",
       "goose-gpt-5-6-sol",
+      "goose-gpt-experimental-7",
     ]);
     expect(options.map((option) => option.displayName)).toEqual([
       "GPT-6 Astra",
-      "GPT-6 Luna",
       "GPT-6 Sol",
+      "GPT-6 Luna",
       "GPT-5.6 Sol",
+      "GPT-7 Experimental",
     ]);
     expect(
       options.filter((option) => option.featured).map((option) => option.id),
     ).toEqual(["goose-gpt-6-astra"]);
     expect(
       options.filter((option) => option.recommended).map((option) => option.id),
-    ).toEqual(["goose-gpt-6-astra", "goose-gpt-6-luna", "goose-gpt-6-sol"]);
+    ).toEqual([
+      "goose-gpt-6-astra",
+      "goose-gpt-6-sol",
+      "goose-gpt-6-luna",
+      "goose-gpt-experimental-7",
+    ]);
+    expect(
+      options.find((option) => option.id === "goose-gpt-experimental-7"),
+    ).toEqual(expect.objectContaining({ featured: false, sortOrder: 4 }));
   });
 
   it("shows only the model name for Unity Catalog model ids", () => {
