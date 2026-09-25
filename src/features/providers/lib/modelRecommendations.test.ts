@@ -14,6 +14,15 @@ describe("modelRecommendations", () => {
     expect(normalizedGooseModelDisplayName("goose-gemini-3-5-flash")).toBe(
       "Gemini Flash 3.5",
     );
+    expect(normalizedGooseModelDisplayName("goose-gpt-6-astra")).toBe(
+      "GPT-6 Astra",
+    );
+    expect(normalizedGooseModelDisplayName("goose-gpt-6-sol")).toBe(
+      "GPT-6 Sol",
+    );
+    expect(normalizedGooseModelDisplayName("goose-gpt-6-luna")).toBe(
+      "GPT-6 Luna",
+    );
   });
 
   it("recommends the latest numeric version per discovered family", () => {
@@ -31,6 +40,7 @@ describe("modelRecommendations", () => {
 
   it("puts GPT first, Opus second, unknowns in the middle, and Haiku last", () => {
     expect(gooseModelSortRank("goose-gpt-5-5")).toBe(0);
+    expect(gooseModelSortRank("goose-gpt-6-astra")).toBe(0);
     expect(gooseModelSortRank("goose-claude-opus-4-8")).toBe(1);
     expect(gooseModelSortRank("goose-new-family-1")).toBe(2);
     expect(gooseModelSortRank("goose-claude-haiku-4-8")).toBe(3);
@@ -59,6 +69,34 @@ describe("modelRecommendations", () => {
     expect(options.find((option) => option.id === "claude-opus-4-8")).toEqual(
       expect.objectContaining({ recommended: false, featured: false }),
     );
+  });
+
+  it("recommends discovered GPT-6 tiers and features the newest Astra", () => {
+    const options = providerModelOptionsFromIds("databricks_v2", [
+      "goose-gpt-5-6-sol",
+      "goose-gpt-6-luna",
+      "goose-gpt-6-sol",
+      "goose-gpt-6-astra",
+    ]);
+
+    expect(options.map((option) => option.id)).toEqual([
+      "goose-gpt-6-astra",
+      "goose-gpt-6-luna",
+      "goose-gpt-6-sol",
+      "goose-gpt-5-6-sol",
+    ]);
+    expect(options.map((option) => option.displayName)).toEqual([
+      "GPT-6 Astra",
+      "GPT-6 Luna",
+      "GPT-6 Sol",
+      "GPT-5.6 Sol",
+    ]);
+    expect(
+      options.filter((option) => option.featured).map((option) => option.id),
+    ).toEqual(["goose-gpt-6-astra"]);
+    expect(
+      options.filter((option) => option.recommended).map((option) => option.id),
+    ).toEqual(["goose-gpt-6-astra", "goose-gpt-6-luna", "goose-gpt-6-sol"]);
   });
 
   it("shows only the model name for Unity Catalog model ids", () => {

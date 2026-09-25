@@ -70,6 +70,13 @@ export function normalizedGooseModelDisplayName(id: string): string | null {
     return null;
   }
 
+  if (parsed.familyTokens[0] === "gpt") {
+    return [
+      `GPT-${parsed.version.join(".")}`,
+      ...parsed.familyTokens.slice(1).map(formatFamilyToken),
+    ].join(" ");
+  }
+
   return [
     ...parsed.familyTokens.map(formatFamilyToken),
     parsed.version.join("."),
@@ -82,7 +89,11 @@ export function gooseModelSortRank(id: string): number {
 
   // These are product-positioning preferences for recommended Goose models.
   // Unknown future families intentionally land in the middle.
-  if (familyKey === "gpt") return 0;
+  if (
+    familyKey === "gpt" ||
+    (familyKey.startsWith("gpt-") && (parsed?.version[0] ?? 0) >= 6)
+  )
+    return 0;
   if (familyKey.includes("opus")) return 1;
   if (familyKey.includes("haiku")) return 3;
   return 2;
@@ -129,6 +140,22 @@ function compareGooseModels(left: ModelOption, right: ModelOption): number {
   const rightRank = gooseModelSortRank(right.id);
   if (leftRank !== rightRank) {
     return leftRank - rightRank;
+  }
+
+  const leftParsed = parseGooseModelId(left.id);
+  const rightParsed = parseGooseModelId(right.id);
+  if (
+    leftRank === 0 &&
+    leftParsed?.familyTokens[0] === "gpt" &&
+    rightParsed?.familyTokens[0] === "gpt"
+  ) {
+    const versionOrder = compareVersion(
+      rightParsed.version,
+      leftParsed.version,
+    );
+    if (versionOrder !== 0) {
+      return versionOrder;
+    }
   }
 
   return compareModelLabels(left, right);
