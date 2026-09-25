@@ -111,6 +111,39 @@ describe("modelRecommendations", () => {
     ).toEqual(expect.objectContaining({ featured: false, sortOrder: 4 }));
   });
 
+  it("recommends Opus 5.5 and orders it above older Opus versions", () => {
+    expect(normalizedGooseModelDisplayName("goose-claude-opus-5-5")).toBe(
+      "Claude Opus 5.5",
+    );
+    expect(gooseModelSortRank("goose-claude-opus-5-5")).toBe(1);
+
+    const options = providerModelOptionsFromIds("databricks_v2", [
+      "goose-claude-4-6-opus",
+      "goose-claude-opus-4-8",
+      "goose-claude-opus-5-5",
+      "goose-claude-haiku-4-5",
+    ]);
+
+    expect(options.map((option) => option.id)).toEqual([
+      "goose-claude-opus-5-5",
+      "goose-claude-opus-4-8",
+      "goose-claude-4-6-opus",
+      "goose-claude-haiku-4-5",
+    ]);
+    expect(options.map((option) => option.displayName)).toEqual([
+      "Claude Opus 5.5",
+      "Claude Opus 4.8",
+      "Claude Opus 4.6",
+      "Claude Haiku 4.5",
+    ]);
+    expect(
+      options.filter((option) => option.recommended).map((option) => option.id),
+    ).toEqual(["goose-claude-opus-5-5", "goose-claude-haiku-4-5"]);
+    expect(
+      options.filter((option) => option.featured).map((option) => option.id),
+    ).toEqual(["goose-claude-opus-5-5"]);
+  });
+
   it("shows only the model name for Unity Catalog model ids", () => {
     const [option] = providerModelOptionsFromIds("databricks_v2", [
       "data_workflow_tools.production.fraud_detection_model",

@@ -20,6 +20,13 @@ describe("humanizeRawModelId", () => {
     );
   });
 
+  it("names raw Opus 5.5 ids", () => {
+    expect(humanizeRawModelId("claude-opus-5-5")).toBe("Claude Opus 5.5");
+    expect(humanizeRawModelId("databricks-claude-opus-5-5")).toBe(
+      "Databricks Claude Opus 5.5",
+    );
+  });
+
   it("title-cases a single word token", () => {
     expect(humanizeRawModelId("goose-haiku")).toBe("Haiku");
   });

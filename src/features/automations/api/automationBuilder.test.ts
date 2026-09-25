@@ -29,7 +29,7 @@ describe("automation builder api helpers", () => {
     expect(request.profileConfig).toEqual({
       userProfile: {
         preferredModel: {
-          name: "goose-claude-4-6-opus",
+          name: "databricks-claude-opus-5-5",
           provider: 1,
         },
       },
