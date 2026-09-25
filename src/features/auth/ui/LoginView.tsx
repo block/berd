@@ -48,7 +48,7 @@ const LOGIN_UI_TRANSITION_MS = 200;
 
 const LOGIN_AVATARS: LoginAvatarSlot[] = [
   {
-    id: "pollies-22",
+    id: "pollies-15",
     left: 7.5,
     top: 22.4,
     size: 19.6,

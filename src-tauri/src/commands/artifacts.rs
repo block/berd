@@ -1,3 +1,4 @@
+use super::avatars::is_retired_avatar;
 use futures_util::{stream, StreamExt};
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
@@ -187,9 +188,24 @@ fn read_cached_assets_for_catalog(
     })
 }
 
+fn filter_retired_avatar_images(catalog: &mut ArtifactCatalog) {
+    catalog.assets.retain(|entry| {
+        entry.kind != ArtifactKind::CollectionImage
+            || !Path::new(&entry.path)
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .is_some_and(|id| {
+                    is_retired_avatar(id) && entry.collection_id.as_deref() == id.split('-').next()
+                })
+    });
+}
+
 async fn refresh_cached_catalog(paths: &ArtifactCachePaths) -> Result<ArtifactCatalog, String> {
-    let (latest, catalog) = fetch_current_catalog().await?;
+    let (latest, mut catalog) = fetch_current_catalog().await?;
+    // Persist the validated source manifest before filtering: a source containing
+    // only retired images is valid, even though its usable catalog will be empty.
     write_cached_catalog(paths, &latest, &catalog)?;
+    filter_retired_avatar_images(&mut catalog);
     Ok(catalog)
 }
 
@@ -266,7 +282,7 @@ fn read_cached_catalog(paths: &ArtifactCachePaths) -> Result<Option<ArtifactCata
         return Ok(None);
     }
 
-    let catalog = match read_json_file::<ArtifactCatalog>(&catalog_path) {
+    let mut catalog = match read_json_file::<ArtifactCatalog>(&catalog_path) {
         Ok(catalog) => catalog,
         Err(error) => {
             delete_file_if_exists(&catalog_path)?;
@@ -284,6 +300,7 @@ fn read_cached_catalog(paths: &ArtifactCachePaths) -> Result<Option<ArtifactCata
         return Ok(None);
     }
 
+    filter_retired_avatar_images(&mut catalog);
     Ok(Some(catalog))
 }
 
@@ -954,6 +971,113 @@ mod tests {
             manifest_path: Some(format!("{}/manifest.json", catalog.catalog_version)),
         };
         write_cached_catalog(paths, &latest, catalog).unwrap();
+    }
+
+    #[test]
+    fn retirement_filter_only_removes_matching_collection_images() {
+        let mut catalog = valid_catalog(b"asset-bytes");
+        catalog.assets.extend([
+            entry(
+                ArtifactKind::CollectionImage,
+                "assets/images/pollies/pollies-22.png",
+                b"retired",
+            ),
+            entry(
+                ArtifactKind::CollectionImage,
+                "assets/images/pollies/pollies-21.png",
+                b"kept",
+            ),
+            entry(
+                ArtifactKind::CollectionImage,
+                "assets/images/pollies/pollies-220.png",
+                b"kept",
+            ),
+            entry(
+                ArtifactKind::CollectionImage,
+                "assets/images/fuzzies/pollies-22.png",
+                b"kept",
+            ),
+            entry(
+                ArtifactKind::ProjectImage,
+                "assets/project-images/pollies-22.webp",
+                b"kept",
+            ),
+            entry(
+                ArtifactKind::Environment,
+                "assets/hdri/pollies-22.exr",
+                b"kept",
+            ),
+        ]);
+        catalog.assets.sort_by(|a, b| a.path.cmp(&b.path));
+        validate_catalog(&catalog).unwrap();
+        let original_count = catalog.assets.len();
+        filter_retired_avatar_images(&mut catalog);
+        validate_catalog(&catalog).unwrap();
+        assert_eq!(catalog.assets.len(), original_count - 1);
+        assert!(catalog
+            .assets
+            .iter()
+            .all(|entry| entry.path != "assets/images/pollies/pollies-22.png"));
+        assert!(catalog
+            .assets
+            .iter()
+            .any(|entry| entry.path == "assets/project-images/pollies-22.webp"));
+        assert!(catalog
+            .assets
+            .iter()
+            .any(|entry| entry.path == "assets/hdri/pollies-22.exr"));
+    }
+
+    #[tokio::test]
+    async fn old_cached_artifacts_exclude_retired_images_offline() {
+        let bytes = b"asset-bytes";
+        let mut catalog = valid_catalog(bytes);
+        catalog.assets.push(entry(
+            ArtifactKind::CollectionImage,
+            "assets/images/pollies/pollies-22.png",
+            bytes,
+        ));
+        catalog.assets.sort_by(|a, b| a.path.cmp(&b.path));
+        let (_dir, paths) = temp_paths();
+        write_valid_catalog(&paths, &catalog);
+        for entry in &catalog.assets {
+            let target = media_cache_path(&paths, &catalog.catalog_version, &entry.path).unwrap();
+            fs::create_dir_all(target.parent().unwrap()).unwrap();
+            fs::write(target, bytes).unwrap();
+            write_checksum_marker(&paths, &catalog.catalog_version, entry).unwrap();
+        }
+
+        let (filtered, cached) = read_complete_cached_assets(&paths).await.unwrap().unwrap();
+        assert_eq!(filtered.assets.len(), catalog.assets.len() - 1);
+        assert_eq!(cached.assets.len(), filtered.assets.len());
+        assert!(cached
+            .assets
+            .iter()
+            .all(|entry| !entry.path.ends_with("pollies-22.png")));
+        let retired_path = media_cache_path(
+            &paths,
+            &catalog.catalog_version,
+            "assets/images/pollies/pollies-22.png",
+        )
+        .unwrap();
+        assert!(retired_path.exists(), "filtering must not clear caches");
+        fs::remove_file(retired_path).unwrap();
+        assert!(read_complete_cached_assets(&paths).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn artifact_cache_with_only_retired_images_returns_an_empty_library() {
+        let (_dir, paths) = temp_paths();
+        let mut catalog = valid_catalog(b"asset-bytes");
+        catalog.assets = vec![entry(
+            ArtifactKind::CollectionImage,
+            "assets/images/pollies/pollies-22.png",
+            b"retired",
+        )];
+        write_valid_catalog(&paths, &catalog);
+        let (filtered, cached) = read_complete_cached_assets(&paths).await.unwrap().unwrap();
+        assert!(filtered.assets.is_empty());
+        assert!(cached.assets.is_empty());
     }
 
     #[test]

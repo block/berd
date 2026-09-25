@@ -1,7 +1,8 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
 import { access, readdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, relative } from "node:path";
-import { pathToFileURL } from "node:url";
+import { pathToFileURL, URL as NodeURL } from "node:url";
 import process from "node:process";
 import {
   assetMetadata,
@@ -20,6 +21,22 @@ import {
 
 export const ARTIFACTORY_BASE =
   "https://global.block-artifacts.com/artifactory/goose-internal/artifacts";
+
+const RETIRED_AVATAR_IDS = new Set(
+  Object.keys(
+    JSON.parse(
+      readFileSync(
+        new NodeURL("../resources/retired-avatars.json", import.meta.url),
+        "utf8",
+      ),
+    ),
+  ),
+);
+
+function isRetiredCollectionImage(collectionId, path) {
+  const id = basename(path, extname(path));
+  return RETIRED_AVATAR_IDS.has(id) && collectionId === id.split("-")[0];
+}
 
 function optionValue(args, name) {
   const prefix = `${name}=`;
@@ -151,6 +168,12 @@ function parseArtifactPath(source, file) {
 
 async function manifestEntryForFile(source, file) {
   const parsed = parseArtifactPath(source, file);
+  if (
+    parsed.kind === "collectionImage" &&
+    isRetiredCollectionImage(parsed.collectionId, parsed.rel)
+  ) {
+    return null;
+  }
   return {
     ...parsed,
     ...(await assetMetadata(file, parsed.mimeType)),
@@ -167,7 +190,10 @@ export async function buildArtifactManifest({ source, version }) {
     if (isDotfilePath(rel)) {
       continue;
     }
-    entries.push(await manifestEntryForFile(manifestRoot, file));
+    const entry = await manifestEntryForFile(manifestRoot, file);
+    if (entry) {
+      entries.push(entry);
+    }
   }
 
   const assets = entries.sort((left, right) =>
@@ -226,6 +252,11 @@ function validateArtifactEntry(entry) {
     );
   } else if (entry.kind === "collectionImage") {
     validateArtifactPath(entry, "assets/images/", ".png", "image/png");
+    if (isRetiredCollectionImage(entry.collectionId, entry.path)) {
+      throw new Error(
+        `Artifact manifest contains retired avatar image: ${entry.path}`,
+      );
+    }
     if (
       typeof entry.collectionId !== "string" ||
       entry.collectionId.length === 0

@@ -1,3 +1,11 @@
+import retiredAvatars from "../../../resources/retired-avatars.json";
+
+/** Shared with the backend and publishers; saved refs remain valid. */
+export function resolveAvatarId(id: string): string {
+  const replacements: Readonly<Record<string, string>> = retiredAvatars;
+  return Object.hasOwn(replacements, id) ? replacements[id] : id;
+}
+
 export const APP_AVATAR_REF_PREFIX = "app-avatar:" as const;
 export const USER_AVATAR_REF_PREFIX = "user-avatar:" as const;
 

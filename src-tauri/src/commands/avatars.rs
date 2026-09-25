@@ -45,6 +45,53 @@ const MP4_FILE_TYPE_BOX: &[u8; 4] = b"ftyp";
 // still actively writing.
 const PART_FILE_STALE_AGE: Duration = Duration::from_secs(5 * 60);
 
+// Keep retirement policy shared with artifact images and the renderer. Saved
+// agent references remain untouched; resolution aliases them at the cache boundary.
+fn retired_avatars() -> &'static HashMap<String, String> {
+    static RETIRED: OnceLock<HashMap<String, String>> = OnceLock::new();
+    RETIRED.get_or_init(|| {
+        serde_json::from_str(include_str!("../../../resources/retired-avatars.json"))
+            .expect("Bundled avatar retirement policy must be valid JSON")
+    })
+}
+
+pub(super) fn is_retired_avatar(avatar_id: &str) -> bool {
+    retired_avatars().contains_key(avatar_id)
+}
+
+fn replacement_avatar_id(avatar_id: &str) -> &str {
+    retired_avatars()
+        .get(avatar_id)
+        .map(String::as_str)
+        .unwrap_or(avatar_id)
+}
+
+// Called only after validating the original manifest, including retired entries.
+fn filter_retired_avatars(catalog: &mut AvatarCatalog) {
+    catalog.assets.retain(|entry| !is_retired_avatar(&entry.id));
+    for collection in &mut catalog.collections {
+        collection.avatar_ids.retain(|id| !is_retired_avatar(id));
+        if is_retired_avatar(&collection.cover_avatar_id) {
+            if let Some(cover) = collection.avatar_ids.first() {
+                collection.cover_avatar_id = cover.clone();
+            }
+        }
+    }
+    catalog
+        .collections
+        .retain(|collection| !collection.avatar_ids.is_empty());
+}
+
+fn include_retired_avatar_refs(avatar_refs: &mut Vec<String>) {
+    avatar_refs.extend(
+        retired_avatars()
+            .keys()
+            .map(|id| format!("{APP_AVATAR_REF_PREFIX}{id}")),
+    );
+    avatar_refs.sort();
+    avatar_refs.dedup();
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AvatarLatest {
@@ -694,6 +741,7 @@ fn cached_avatar_for_id_with_format(
     avatar_id: &str,
     format: &str,
 ) -> Result<Option<CachedAvatar>, String> {
+    let avatar_id = replacement_avatar_id(avatar_id);
     let Some(entry) = catalog.assets.iter().find(|entry| entry.id == avatar_id) else {
         return Ok(None);
     };
@@ -819,10 +867,13 @@ async fn tracked_avatar_cache_refresh(app: AppHandle) -> AvatarCommandResult<Ava
         avatar_refresh_status().lock().unwrap().complete(&result);
     }
 
-    let avatar_refs = result
+    let mut avatar_refs = result
         .as_ref()
         .map(|result| result.avatar_refs.clone())
         .unwrap_or_default();
+    // Invalidate old refs even when refresh fails offline. They must resolve the
+    // replacement (or None), never keep a previously cached retired result.
+    include_retired_avatar_refs(&mut avatar_refs);
     if let Err(error) = app.emit(
         AVATAR_CACHE_WARMED_EVENT,
         AvatarCacheWarmedPayload { avatar_refs },
@@ -925,7 +976,7 @@ async fn fetch_current_catalog() -> AvatarCommandResult<(AvatarLatest, AvatarCat
         fetch_metadata_json(&client, LATEST_PATH, "avatar latest pointer").await?;
 
     let manifest_path = manifest_path_for_latest(&latest)?;
-    let catalog: AvatarCatalog =
+    let mut catalog: AvatarCatalog =
         fetch_metadata_json(&client, &manifest_path, "avatar catalog").await?;
 
     validate_catalog(&catalog)?;
@@ -935,6 +986,7 @@ async fn fetch_current_catalog() -> AvatarCommandResult<(AvatarLatest, AvatarCat
             .into());
     }
 
+    filter_retired_avatars(&mut catalog);
     Ok((latest, catalog))
 }
 
@@ -1265,7 +1317,7 @@ fn read_cached_catalog(paths: &AvatarCachePaths) -> Result<Option<AvatarCatalog>
         return Ok(None);
     }
 
-    let catalog = match read_json_file::<AvatarCatalog>(&catalog_path) {
+    let mut catalog = match read_json_file::<AvatarCatalog>(&catalog_path) {
         Ok(catalog) => catalog,
         Err(error) => {
             delete_file_if_exists(&catalog_path)?;
@@ -1283,6 +1335,7 @@ fn read_cached_catalog(paths: &AvatarCachePaths) -> Result<Option<AvatarCatalog>
         return Ok(None);
     }
 
+    filter_retired_avatars(&mut catalog);
     Ok(Some(catalog))
 }
 
@@ -2248,7 +2301,11 @@ fn migrate_legacy_media(
         }
         let catalog = read_json_file::<AvatarCatalog>(&manifest)?;
         validate_catalog(&catalog)?;
-        for entry in &catalog.assets {
+        for entry in catalog
+            .assets
+            .iter()
+            .filter(|entry| !is_retired_avatar(&entry.id))
+        {
             for variant in [
                 entry.variants.webm.as_ref(),
                 entry.variants.hevc.as_ref(),
@@ -2387,7 +2444,11 @@ fn prune_media_blobs(
         }
         let catalog = read_json_file::<AvatarCatalog>(&manifest)?;
         validate_catalog(&catalog)?;
-        for entry in &catalog.assets {
+        for entry in catalog
+            .assets
+            .iter()
+            .filter(|entry| !is_retired_avatar(&entry.id))
+        {
             for variant in [
                 entry.variants.webm.as_ref(),
                 entry.variants.hevc.as_ref(),
@@ -3000,6 +3061,298 @@ mod tests {
                 poster: None,
             },
         });
+    }
+
+    fn retirement_entry(collection: &str, id: &str) -> AvatarCatalogEntry {
+        AvatarCatalogEntry {
+            id: id.to_string(),
+            label: id.to_string(),
+            collection_id: collection.to_string(),
+            variants: AvatarVariants {
+                webm: Some(variant(
+                    &format!("webm/{collection}/{id}.webm"),
+                    format!("{id}-webm").as_bytes(),
+                )),
+                hevc: Some(variant(
+                    &format!("hevc/{collection}/{id}.mp4"),
+                    format!("{id}-hevc").as_bytes(),
+                )),
+                poster: Some(variant(
+                    &format!("poster/{collection}/{id}.png"),
+                    format!("{id}-poster").as_bytes(),
+                )),
+            },
+        }
+    }
+
+    fn retirement_catalog() -> AvatarCatalog {
+        AvatarCatalog {
+            schema_version: 1,
+            catalog_version: "v1".to_string(),
+            collections: vec![
+                AvatarCollection {
+                    id: "pollies".to_string(),
+                    label: "Pollies".to_string(),
+                    cover_avatar_id: "pollies-22".to_string(),
+                    avatar_ids: vec!["pollies-22".to_string(), "pollies-21".to_string()],
+                },
+                AvatarCollection {
+                    id: "gloopies".to_string(),
+                    label: "Gloopies".to_string(),
+                    cover_avatar_id: "gloopies-14".to_string(),
+                    avatar_ids: vec!["gloopies-14".to_string()],
+                },
+            ],
+            assets: vec![
+                retirement_entry("pollies", "pollies-22"),
+                retirement_entry("pollies", "pollies-21"),
+                retirement_entry("gloopies", "gloopies-14"),
+            ],
+        }
+    }
+
+    fn seed_retirement_media(paths: &AvatarCachePaths, entry: &AvatarCatalogEntry) {
+        for (format, variant) in [
+            ("webm", entry.variants.webm.as_ref().unwrap()),
+            ("hevc", entry.variants.hevc.as_ref().unwrap()),
+            ("poster", entry.variants.poster.as_ref().unwrap()),
+        ] {
+            let target = media_blob_path(paths, variant).unwrap();
+            fs::create_dir_all(target.parent().unwrap()).unwrap();
+            fs::write(target, format!("{}-{format}", entry.id)).unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn retired_avatars_are_hidden_from_old_disk_catalogs_and_cached_library() {
+        let (_dir, paths) = temp_paths();
+        let source = retirement_catalog();
+        write_valid_catalog(&paths, &source);
+        for entry in &source.assets {
+            seed_retirement_media(&paths, entry);
+        }
+
+        let catalog = read_cached_catalog(&paths).unwrap().unwrap();
+        validate_catalog(&catalog).unwrap();
+        assert_eq!(catalog.assets.len(), 2);
+        assert!(catalog
+            .assets
+            .iter()
+            .all(|entry| !is_retired_avatar(&entry.id)));
+        assert_eq!(catalog.collections[0].avatar_ids, vec!["pollies-21"]);
+        assert_eq!(catalog.collections[0].cover_avatar_id, "pollies-21");
+        assert_eq!(catalog.collections[1].cover_avatar_id, "gloopies-14");
+        for format in ["webm", "hevc"] {
+            let collections =
+                cached_collections_for_catalog_with_format(&paths, &catalog, format).unwrap();
+            assert_eq!(collections.len(), 2);
+            for collection in collections {
+                assert_eq!(collection.assets.len(), 1);
+                assert!(collection.failed_asset_ids.is_empty());
+                assert!(!is_retired_avatar(&collection.assets[0].id));
+            }
+            // Warming uses this same filtered catalog and only reuses live media.
+            for collection in &catalog.collections {
+                let (assets, failed, error) =
+                    ensure_collection_assets(&paths, &catalog, collection, format)
+                        .await
+                        .unwrap();
+                assert_eq!(assets.len(), 1);
+                assert!(!is_retired_avatar(&assets[0].id));
+                assert!(failed.is_empty());
+                assert!(error.is_none());
+            }
+        }
+        // Offline reads filter without rewriting the old manifest or deleting media.
+        let disk: AvatarCatalog = read_json_file(&paths.meta.join("v1/manifest.json")).unwrap();
+        assert_eq!(disk.assets.len(), 3);
+        assert!(
+            media_blob_path(&paths, source.assets[0].variants.webm.as_ref().unwrap())
+                .unwrap()
+                .exists()
+        );
+    }
+
+    #[test]
+    fn retirement_removes_empty_collections_and_repairs_nonmember_covers() {
+        let (_dir, paths) = temp_paths();
+        let mut source = retirement_catalog();
+        source.collections[0].avatar_ids = vec!["pollies-22".to_string()];
+        write_valid_catalog(&paths, &source);
+        let catalog = read_cached_catalog(&paths).unwrap().unwrap();
+        validate_catalog(&catalog).unwrap();
+        assert_eq!(catalog.collections.len(), 1);
+        assert_eq!(catalog.collections[0].id, "gloopies");
+
+        // A valid source cover need not be a member under the original schema.
+        source.collections[0].avatar_ids = vec!["pollies-21".to_string()];
+        filter_retired_avatars(&mut source);
+        validate_catalog(&source).unwrap();
+        assert_eq!(source.collections[0].cover_avatar_id, "pollies-21");
+    }
+
+    #[test]
+    fn retired_refs_resolve_replacement_video_and_poster_in_single_and_batch_reads() {
+        let (_dir, paths) = temp_paths();
+        let source = retirement_catalog();
+        write_valid_catalog(&paths, &source);
+        for entry in &source.assets {
+            seed_retirement_media(&paths, entry);
+        }
+        let catalog = read_cached_catalog(&paths).unwrap().unwrap();
+        let retired_ref = "app-avatar:pollies-22";
+        let retired_id = parse_app_avatar_ref(retired_ref).unwrap();
+        assert_eq!(retired_id, "pollies-22", "parsing remains syntax-only");
+        let replacement = &source.assets[2];
+        let poster_path =
+            media_blob_path(&paths, replacement.variants.poster.as_ref().unwrap()).unwrap();
+
+        for format in ["webm", "hevc"] {
+            let target =
+                media_blob_path(&paths, variant_for_format(replacement, format).unwrap()).unwrap();
+            let single = cached_avatar_for_id_with_format(&paths, &catalog, &retired_id, format)
+                .unwrap()
+                .unwrap();
+            let batch = cached_avatars_for_parsed_refs_with_format(
+                &paths,
+                &catalog,
+                vec![
+                    (retired_ref.to_string(), Some(retired_id.clone())),
+                    (
+                        "app-avatar:gloopies-14".to_string(),
+                        Some("gloopies-14".to_string()),
+                    ),
+                ],
+                format,
+            )
+            .unwrap();
+            for avatar in [
+                &single,
+                batch[retired_ref].as_ref().unwrap(),
+                batch["app-avatar:gloopies-14"].as_ref().unwrap(),
+            ] {
+                assert_eq!(avatar.asset.id, "gloopies-14");
+                assert_eq!(avatar.collection_id, "gloopies");
+                assert_eq!(avatar.asset.path, target.to_string_lossy());
+                assert_eq!(avatar.asset.poster_path.as_deref(), poster_path.to_str());
+            }
+            fs::remove_file(target).unwrap();
+        }
+
+        for poster_available in [true, false] {
+            if !poster_available {
+                fs::remove_file(&poster_path).unwrap();
+            }
+            for format in ["webm", "hevc"] {
+                let single =
+                    cached_avatar_for_id_with_format(&paths, &catalog, &retired_id, format)
+                        .unwrap();
+                let batch = cached_avatars_for_parsed_refs_with_format(
+                    &paths,
+                    &catalog,
+                    vec![(retired_ref.to_string(), Some(retired_id.clone()))],
+                    format,
+                )
+                .unwrap();
+                for avatar in [single.as_ref(), batch[retired_ref].as_ref()] {
+                    if poster_available {
+                        let avatar = avatar.unwrap();
+                        assert_eq!(avatar.asset.id, "gloopies-14");
+                        assert_eq!(avatar.asset.mime_type, "image/png");
+                        assert_eq!(avatar.asset.path, poster_path.to_string_lossy());
+                    } else {
+                        assert!(avatar.is_none());
+                    }
+                }
+            }
+        }
+        for variant in [
+            source.assets[0].variants.webm.as_ref().unwrap(),
+            source.assets[0].variants.hevc.as_ref().unwrap(),
+            source.assets[0].variants.poster.as_ref().unwrap(),
+        ] {
+            assert!(media_blob_path(&paths, variant).unwrap().exists());
+        }
+    }
+
+    #[test]
+    fn retired_refs_never_use_old_media_when_replacement_is_absent_from_catalog() {
+        let (_dir, paths) = temp_paths();
+        let mut source = retirement_catalog();
+        source
+            .assets
+            .retain(|entry| entry.collection_id != "gloopies");
+        source
+            .collections
+            .retain(|collection| collection.id != "gloopies");
+        write_valid_catalog(&paths, &source);
+        seed_retirement_media(&paths, &source.assets[0]);
+        let catalog = read_cached_catalog(&paths).unwrap().unwrap();
+        for format in ["webm", "hevc"] {
+            assert!(
+                cached_avatar_for_id_with_format(&paths, &catalog, "pollies-22", format)
+                    .unwrap()
+                    .is_none()
+            );
+            let batch = cached_avatars_for_parsed_refs_with_format(
+                &paths,
+                &catalog,
+                vec![(
+                    "app-avatar:pollies-22".to_string(),
+                    Some("pollies-22".to_string()),
+                )],
+                format,
+            )
+            .unwrap();
+            assert!(batch["app-avatar:pollies-22"].is_none());
+        }
+    }
+
+    #[test]
+    fn retirement_refresh_events_invalidate_saved_aliases_even_without_a_catalog() {
+        let mut refs = vec![];
+        include_retired_avatar_refs(&mut refs);
+        assert!(refs.contains(&"app-avatar:pollies-22".to_string()));
+        refs.push("app-avatar:gloopies-14".to_string());
+        include_retired_avatar_refs(&mut refs);
+        assert_eq!(
+            refs.iter()
+                .filter(|value| value.as_str() == "app-avatar:pollies-22")
+                .count(),
+            1
+        );
+        assert!(refs.contains(&"app-avatar:gloopies-14".to_string()));
+    }
+
+    #[test]
+    fn legacy_migration_and_pruning_do_not_retain_retired_media() {
+        let (_dir, paths) = temp_paths();
+        let source = retirement_catalog();
+        write_valid_catalog(&paths, &source);
+        let retired = source.assets[0].variants.webm.as_ref().unwrap();
+        let legacy = paths
+            .media
+            .join(&source.catalog_version)
+            .join(&retired.path);
+        fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        fs::write(&legacy, b"pollies-22-webm").unwrap();
+        prepare_legacy_media(&paths, &source.catalog_version).unwrap();
+        assert!(!media_blob_path(&paths, retired).unwrap().exists());
+
+        for entry in &source.assets {
+            seed_retirement_media(&paths, entry);
+        }
+        prune_media_blobs(&paths, &source.catalog_version, None).unwrap();
+        assert!(!media_blob_path(&paths, retired).unwrap().exists());
+        for entry in &source.assets[1..] {
+            for variant in [
+                entry.variants.webm.as_ref().unwrap(),
+                entry.variants.hevc.as_ref().unwrap(),
+                entry.variants.poster.as_ref().unwrap(),
+            ] {
+                assert!(media_blob_path(&paths, variant).unwrap().exists());
+            }
+        }
     }
 
     #[test]

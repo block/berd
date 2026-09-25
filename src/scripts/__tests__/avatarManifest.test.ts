@@ -292,6 +292,32 @@ describe("avatar manifest script", () => {
     );
   });
 
+  it("omits retired avatars without changing surviving ids, order, or covers", async () => {
+    const { buildManifest } = await loadAvatarManifestModule();
+    const source = makeTempDir();
+    for (const id of ["gloopies-14", "pollies-1", "pollies-21", "pollies-23"]) {
+      const collectionId = id.split("-")[0];
+      writeAsset(source, `webm/${collectionId}/${id}.webm`);
+      writeAsset(source, `hevc/${collectionId}/${id}.mp4`);
+    }
+    const expected = await buildManifest({
+      source,
+      version: CATALOG_VERSION,
+    });
+    writeAsset(source, "webm/pollies/pollies-22.webm");
+    writeAsset(source, "hevc/pollies/pollies-22.mp4");
+
+    const manifest = await buildManifest({ source, version: CATALOG_VERSION });
+
+    expect(manifest).toEqual(expected);
+    expect(manifest.assets.map((asset) => asset.id)).toEqual([
+      "gloopies-14",
+      "pollies-1",
+      "pollies-21",
+      "pollies-23",
+    ]);
+  });
+
   it("allows collection ids and avatar ids to use different naming shapes", async () => {
     const { buildManifest } = await loadAvatarManifestModule();
     const source = makeTempDir();
@@ -381,8 +407,8 @@ describe("avatar manifest script", () => {
   it("publishes manifest-referenced assets and manifest without latest.json", async () => {
     const { publishAvatars } = await loadAvatarManifestModule();
     const source = writeCompleteSource();
-    writeAsset(source, "webm/gloopies/ignored.txt");
-    rmSync(resolve(source, "webm/gloopies/ignored.txt"));
+    writeAsset(source, "webm/pollies/pollies-22.webm");
+    writeAsset(source, "hevc/pollies/pollies-22.mp4");
     const remote = makeArtifactFetch();
     const progress: Array<{ type: string }> = [];
 
@@ -415,6 +441,35 @@ describe("avatar manifest script", () => {
     expect(JSON.parse(remote.puts[2].body).catalogVersion).toBe(
       CATALOG_VERSION,
     );
+    expect(remote.puts[2].body).not.toContain("pollies-22");
+    expect(remote.calls.some((call) => call.path.includes("pollies-22"))).toBe(
+      false,
+    );
+  });
+
+  it("rejects promotion of historical manifests containing retired avatars", async () => {
+    const { buildManifest, promoteAvatars } = await loadAvatarManifestModule();
+    const source = makeTempDir();
+    writeAsset(source, "webm/pollies/pollies-21.webm");
+    writeAsset(source, "hevc/pollies/pollies-21.mp4");
+    const manifest = await buildManifest({ source, version: CATALOG_VERSION });
+    const remote = makeArtifactFetch({
+      [`${CATALOG_VERSION}/manifest.json`]: storedJsonArtifact(
+        JSON.stringify(manifest).replaceAll("pollies-21", "pollies-22"),
+      ),
+    });
+
+    await expect(
+      promoteAvatars({
+        version: CATALOG_VERSION,
+        fetchImpl: remote.fetchImpl,
+        baseUrl: BASE_URL,
+      }),
+    ).rejects.toThrow(/retired avatar: pollies-22/);
+    expect(remote.puts).toEqual([]);
+    expect(remote.calls).toEqual([
+      { method: "GET", path: `${CATALOG_VERSION}/manifest.json` },
+    ]);
   });
 
   it("rejects invalid promotion versions", async () => {
@@ -706,6 +761,37 @@ describe("artifact manifest script", () => {
     });
   });
 
+  it("omits retired collection images only from their own collection", async () => {
+    const { buildArtifactManifest } = await loadArtifactManifestModule();
+    const source = writeCompleteArtifactSource();
+    writeAsset(source, "images/pollies/pollies-21.png");
+    writeAsset(source, "images/pollies/pollies-23.png");
+    writeAsset(source, "images/gloopies/gloopies-14.png");
+    writeAsset(source, "images/fuzzies/pollies-22.png");
+    writeAsset(source, "project-images/pollies-22.webp");
+    const expected = await buildArtifactManifest({
+      source,
+      version: CATALOG_VERSION,
+    });
+    writeAsset(source, "images/pollies/pollies-22.png");
+
+    const manifest = await buildArtifactManifest({
+      source,
+      version: CATALOG_VERSION,
+    });
+
+    expect(manifest).toEqual(expected);
+    expect(manifest.assets.map((asset) => asset.path)).toEqual(
+      expect.arrayContaining([
+        "assets/images/pollies/pollies-21.png",
+        "assets/images/pollies/pollies-23.png",
+        "assets/images/gloopies/gloopies-14.png",
+        "assets/images/fuzzies/pollies-22.png",
+        "assets/project-images/pollies-22.webp",
+      ]),
+    );
+  });
+
   it("rejects empty asset lists", async () => {
     const { buildArtifactManifest } = await loadArtifactManifestModule();
     const root = makeTempDir();
@@ -742,6 +828,7 @@ describe("artifact manifest script", () => {
   it("publishes artifacts and manifest without latest.json", async () => {
     const { publishArtifacts } = await loadArtifactManifestModule();
     const source = writeCompleteArtifactSource();
+    writeAsset(source, "images/pollies/pollies-22.png");
     const remote = makeArtifactFetch();
 
     const result = await publishArtifacts({
@@ -762,6 +849,10 @@ describe("artifact manifest script", () => {
     );
     expect(remote.puts.map((put) => put.path)).not.toContain("latest.json");
     expect(remote.puts.every((put) => put.ifNoneMatch === "*")).toBe(true);
+    expect(remote.puts.at(-1)?.body).not.toContain("pollies-22");
+    expect(remote.calls.some((call) => call.path.includes("pollies-22"))).toBe(
+      false,
+    );
   });
 
   it("publishes artifacts with an explicit version", async () => {
@@ -929,6 +1020,36 @@ describe("artifact manifest script", () => {
         now: new Date("2026-05-21T12:15:30.123Z"),
       }),
     ).rejects.toThrow(/permission denied by repository policy/);
+  });
+
+  it("rejects promotion of historical manifests containing retired collection images", async () => {
+    const { buildArtifactManifest, promoteArtifacts } =
+      await loadArtifactManifestModule();
+    const source = writeCompleteArtifactSource();
+    writeAsset(source, "images/pollies/pollies-21.png");
+    const manifest = await buildArtifactManifest({
+      source,
+      version: CATALOG_VERSION,
+    });
+    const remote = makeArtifactFetch({
+      [`${CATALOG_VERSION}/manifest.json`]: storedJsonArtifact(
+        JSON.stringify(manifest).replaceAll("pollies-21", "pollies-22"),
+      ),
+    });
+
+    await expect(
+      promoteArtifacts({
+        version: CATALOG_VERSION,
+        fetchImpl: remote.fetchImpl,
+        baseUrl: BASE_URL,
+      }),
+    ).rejects.toThrow(
+      /retired avatar image: assets\/images\/pollies\/pollies-22/,
+    );
+    expect(remote.puts).toEqual([]);
+    expect(remote.calls).toEqual([
+      { method: "GET", path: `${CATALOG_VERSION}/manifest.json` },
+    ]);
   });
 
   it("promote validates remote artifacts before writing latest.json", async () => {

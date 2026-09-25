@@ -177,7 +177,10 @@ describe("App", () => {
     expect(
       container.querySelectorAll('[data-login-avatar-mobile="true"]'),
     ).toHaveLength(6);
-    expect(mocks.useAvatarMedia).toHaveBeenCalledWith("app-avatar:pollies-22");
+    expect(mocks.useAvatarMedia).toHaveBeenCalledWith("app-avatar:pollies-15");
+    expect(mocks.useAvatarMedia).not.toHaveBeenCalledWith(
+      "app-avatar:pollies-22",
+    );
     expect(mocks.useAvatarMedia).toHaveBeenCalledWith("app-avatar:gloopies-14");
     expect(
       container.querySelectorAll("[data-login-avatar] video"),
