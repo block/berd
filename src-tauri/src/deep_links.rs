@@ -1,7 +1,6 @@
 use percent_encoding::percent_decode_str;
 #[cfg(feature = "berdctl")]
 use serde::Serialize;
-#[cfg(feature = "berdctl")]
 use tauri::Emitter;
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_deep_link::DeepLinkExt;
@@ -30,15 +29,33 @@ pub(crate) fn install<R: Runtime>(app: &tauri::App<R>) {
 
 fn handle_urls<R: Runtime>(app: AppHandle<R>, urls: Vec<Url>) {
     let mut opened_session = false;
+    let mut requested_update = false;
     for url in urls {
         log::info!("Received deep link: {url}");
+        if is_update_check_link(&url) {
+            requested_update = true;
+            if let Err(error) = app.emit("berd:check-update", ()) {
+                log::warn!("Failed to request a background update check: {error}");
+            }
+            continue;
+        }
         if !opened_session {
             if let Some(session_id) = parse_session_deep_link(&url) {
                 opened_session = open_session(app.clone(), session_id);
             }
         }
     }
-    focus_main_window(&app, opened_session);
+    if !requested_update || opened_session {
+        focus_main_window(&app, opened_session);
+    }
+}
+
+fn is_update_check_link(url: &Url) -> bool {
+    url.scheme() == "berd"
+        && url.host_str() == Some("update-check")
+        && matches!(url.path(), "" | "/")
+        && url.query().is_none()
+        && url.fragment().is_none()
 }
 
 fn focus_main_window<R: Runtime>(app: &AppHandle<R>, reveal: bool) {
@@ -161,6 +178,19 @@ mod tests {
 
     fn parse(raw: &str) -> Option<String> {
         parse_session_deep_link(&Url::parse(raw).unwrap())
+    }
+
+    #[test]
+    fn only_the_update_check_route_requests_an_update() {
+        assert!(is_update_check_link(
+            &Url::parse("berd://update-check").unwrap()
+        ));
+        assert!(!is_update_check_link(
+            &Url::parse("berd://update-check/other").unwrap()
+        ));
+        assert!(!is_update_check_link(
+            &Url::parse("https://update-check").unwrap()
+        ));
     }
 
     #[test]

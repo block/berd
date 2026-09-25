@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build and stage the berdctl and berd-monitor CLIs for Tauri externalBin bundling.
+# Build and stage Berd's CLIs for Tauri externalBin bundling.
 #
 # Tauri expects external binaries to be present at build time with the target
 # triple appended to the configured stem. For config
@@ -13,14 +13,17 @@ usage() {
   cat <<'USAGE'
 Usage: scripts/prepare-berdctl-sidecar.sh [target-triple]
 
-Builds the berdctl and berd-monitor workspace crates in release mode and
-copies both binaries into src-tauri/binaries with the target triple suffix
+Builds the berdctl and berd-monitor workspace crates in release mode, plus
+berd-call for macOS targets, and copies their binaries with the triple suffix
 required by Tauri.
 
 The triple defaults to the rustc host. Pass it explicitly (or set
 BERDCTL_TRIPLE) when the Tauri build itself uses an explicit --target, so
 the staged name matches the triple Tauri resolves (e.g. aarch64-apple-darwin
 in release CI).
+
+Set BERD_CALL_BUNDLE=0 only for the dev profile, which has no externalBin,
+to skip linking the standalone berd-call binary during routine app startup.
 USAGE
 }
 
@@ -43,6 +46,11 @@ else
     echo "Could not determine rust host target." >&2
     exit 1
   fi
+fi
+BUNDLE_BERD_CALL=0
+if [[ "$TRIPLE" == *apple-darwin && "${BERD_CALL_BUNDLE:-1}" == "1" ]]; then
+  BUNDLE_BERD_CALL=1
+  CARGO_ARGS+=(-p berd-call)
 fi
 
 (cd src-tauri && cargo "${CARGO_ARGS[@]}")
@@ -76,6 +84,22 @@ mkdir -p "$OUT_DIR"
 cp "$BUILT" "$OUT"
 chmod +x "$OUT"
 echo "Staged berdctl sidecar: $OUT"
+
+if [[ "$BUNDLE_BERD_CALL" == "1" ]]; then
+  if [[ -n "$EXPLICIT_TRIPLE" ]]; then
+    CALL_BUILT="$TARGET_DIR/$TRIPLE/release/berd-call"
+  else
+    CALL_BUILT="$TARGET_DIR/release/berd-call"
+  fi
+  if [[ ! -x "$CALL_BUILT" ]]; then
+    echo "Built berd-call binary not found at: $CALL_BUILT" >&2
+    exit 1
+  fi
+  CALL_OUT="$OUT_DIR/berd-call-$TRIPLE"
+  cp "$CALL_BUILT" "$CALL_OUT"
+  chmod +x "$CALL_OUT"
+  echo "Staged berd-call sidecar: $CALL_OUT"
+fi
 
 if [[ -n "$EXPLICIT_TRIPLE" ]]; then
   MONITOR_BUILT="$TARGET_DIR/$TRIPLE/release/berd-monitor"

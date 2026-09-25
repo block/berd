@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import type { Update as TauriUpdate } from "@tauri-apps/plugin-updater";
 import { Update as TauriUpdateResource } from "@tauri-apps/plugin-updater";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { probeKgooseConnectivity } from "@/shared/api/connectivity";
 
 export type UpdateStatus =
@@ -593,6 +594,28 @@ export function UpdaterProvider({
     }, checkIntervalMs);
     return () => window.clearInterval(interval);
   }, [checkForUpdate, checkIntervalMs, nativeUpdaterEnabled, runStartupCheck]);
+
+  useEffect(() => {
+    if (!nativeUpdaterEnabled) return;
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    void listen("berd:check-update", () => {
+      void checkForUpdate({ background: true, quiet: true });
+    })
+      .then((nextUnlisten) => {
+        if (cancelled) nextUnlisten();
+        else unlisten = nextUnlisten;
+      })
+      .catch((error) => {
+        console.warn(
+          `[updater] could not listen for CLI update requests: ${getErrorMessage(error)}`,
+        );
+      });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [checkForUpdate, nativeUpdaterEnabled]);
 
   const value = useMemo<UpdaterContextValue>(
     () => ({

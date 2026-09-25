@@ -949,6 +949,15 @@ pub async fn download_and_install_release<R: Runtime>(
             "The downloaded update does not match its signed compatibility descriptor".to_string(),
         );
     }
+    // The bundled CLI may have requested this download when its call began.
+    // Installation replaces that same app bundle, so wait until every call
+    // finishes before touching it. Keep the lock through `install`.
+    #[cfg(target_os = "macos")]
+    let _call_guard =
+        tauri::async_runtime::spawn_blocking(berd_call::update_guard::wait_until_no_call)
+            .await
+            .map_err(|error| format!("Could not wait for the voice call: {error}"))?
+            .map_err(|error| format!("Could not guard the app update: {error}"))?;
     #[cfg(target_os = "windows")]
     {
         let mut persisted = state.0.persisted.lock().await;
