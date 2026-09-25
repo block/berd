@@ -3851,6 +3851,8 @@ describe("projects", () => {
       ["/work", "/docs"],
       false,
       undefined,
+      undefined,
+      expect.any(Function),
     );
     expect(result).toEqual({ project_id: "p-new" });
   });
@@ -3876,7 +3878,59 @@ describe("projects", () => {
 
     expect(result).toEqual({
       project_id: "p-new",
-      warning: expect.stringContaining('"Existing Project" (existing)'),
+      warning:
+        'A working directory is already attached to project "Existing Project" (existing); the new project was created anyway.',
+      duplicate_working_dirs: [
+        {
+          working_dir: "/work",
+          project_id: "existing",
+          project_name: "Existing Project",
+        },
+      ],
+    });
+  });
+
+  it("create reports every conflicting working directory", async () => {
+    mocks.listProjects.mockResolvedValue([
+      makeProject({
+        id: "existing-work",
+        name: "Work Project",
+        workingDirs: ["/work"],
+      }),
+      makeProject({
+        id: "existing-docs",
+        name: "Docs Project",
+        workingDirs: ["/docs"],
+      }),
+    ]);
+    mocks.createProject.mockResolvedValue(makeProject({ id: "p-new" }));
+
+    const result = await dispatchCommand(
+      "projects",
+      {
+        action: "create",
+        name: "Combined Project",
+        working_dir: ["/work", "/docs"],
+      },
+      ctx,
+    );
+
+    expect(result).toEqual({
+      project_id: "p-new",
+      warning:
+        'A working directory is already attached to project "Work Project" (existing-work); the new project was created anyway.',
+      duplicate_working_dirs: [
+        {
+          working_dir: "/work",
+          project_id: "existing-work",
+          project_name: "Work Project",
+        },
+        {
+          working_dir: "/docs",
+          project_id: "existing-docs",
+          project_name: "Docs Project",
+        },
+      ],
     });
   });
 

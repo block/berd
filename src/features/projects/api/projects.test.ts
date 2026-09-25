@@ -105,6 +105,31 @@ describe("projects API artifact metadata", () => {
     ).not.toHaveProperty("environment");
   });
 
+  it("runs the pre-create callback immediately before the create RPC", async () => {
+    mocks.sourcesList.mockResolvedValue({ sources: [] });
+    const callOrder: string[] = [];
+    mocks.sourcesCreate.mockImplementation(async (request) => {
+      callOrder.push("rpc");
+      return { source: source(request.properties) };
+    });
+    const { createProject } = await import("./projects");
+
+    await createProject(
+      "Launch",
+      "",
+      "",
+      "",
+      "olive",
+      [],
+      false,
+      [],
+      null,
+      () => callOrder.push("before-rpc"),
+    );
+
+    expect(callOrder).toEqual(["before-rpc", "rpc"]);
+  });
+
   it("ignores incomplete or malformed saved environments", async () => {
     const { parseProjectEnvironment } = await import("./projects");
     for (const value of [
