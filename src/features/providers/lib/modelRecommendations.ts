@@ -176,6 +176,18 @@ function compareGooseModels(left: ModelOption, right: ModelOption): number {
     }
   }
 
+  // Within one family (e.g. Claude Opus), newest version first so Opus 5.5
+  // lands above Opus 4.8 instead of sorting by label.
+  if (leftParsed && leftParsed.familyKey === rightParsed?.familyKey) {
+    const versionOrder = compareVersion(
+      rightParsed.version,
+      leftParsed.version,
+    );
+    if (versionOrder !== 0) {
+      return versionOrder;
+    }
+  }
+
   return compareModelLabels(left, right);
 }
 
