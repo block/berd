@@ -98,6 +98,10 @@ const openAiStatusState = vi.hoisted(() => ({
   },
 }));
 const openAiApiMocks = vi.hoisted(() => ({
+  getEndpoints: vi.fn(() =>
+    Promise.resolve({ realtime: null, stt: null, tts: null }),
+  ),
+  setEndpoint: vi.fn(() => Promise.resolve()),
   setSttApiKey: vi.fn(() => Promise.resolve()),
   clearSttApiKey: vi.fn(() => Promise.resolve()),
   setTtsApiKey: vi.fn(() => Promise.resolve()),
@@ -109,6 +113,10 @@ const openAiApiMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../api/openAiVoice", () => ({
+  setOpenAiRealtimeApiKey: vi.fn(() => Promise.resolve()),
+  clearOpenAiRealtimeApiKey: vi.fn(() => Promise.resolve()),
+  getOpenAiVoiceEndpoints: openAiApiMocks.getEndpoints,
+  setOpenAiVoiceEndpoint: openAiApiMocks.setEndpoint,
   setOpenAiPlaybackSpeed: vi.fn(() => Promise.resolve()),
   setOpenAiSpeechVoice: openAiApiMocks.setSpeechVoice,
   setOpenAiSttApiKey: openAiApiMocks.setSttApiKey,

@@ -184,6 +184,14 @@ struct SessionConfig {
     tts: TtsBackendConfig,
     stt: SttBackendConfig,
     mode: SessionMode,
+    endpoints: SessionEndpointOverrides,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+struct SessionEndpointOverrides {
+    realtime: Option<String>,
+    tts: Option<String>,
+    stt: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -800,7 +808,16 @@ fn parse_saved_start_args_at(args: &[String], path: PathBuf) -> Result<StartOpti
             }
         }
     }
-    saved.arguments = options.session_arguments[1..].to_vec();
+    saved.arguments = options.session_arguments[1..]
+        .chunks_exact(2)
+        .filter(|pair| {
+            !matches!(
+                pair[0].as_str(),
+                "--realtime-url" | "--stt-url" | "--tts-url"
+            )
+        })
+        .flat_map(|pair| pair.iter().cloned())
+        .collect();
     options.saved = Some((path, saved));
     Ok(options)
 }
@@ -2048,7 +2065,7 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                     abort_active(&active);
                     return Ok(());
                 }
-                let slot = match create_tts_slot(&config.tts) {
+                let slot = match create_tts_slot(&config.tts, config.endpoints.tts.as_deref()) {
                     Ok(slot) => Arc::new(slot),
                     Err(message) => {
                         write_protocol_fatal(
@@ -2059,17 +2076,18 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                         return Ok(());
                     }
                 };
-                let (runtime, mut events) = match create_input_runtime(&config.stt) {
-                    Ok(runtime) => runtime,
-                    Err(message) => {
-                        write_protocol_fatal(
-                            &mut writer,
-                            &public_stt_startup_error(&config.stt),
-                            &format!("STT startup failed: {message}"),
-                        )?;
-                        return Ok(());
-                    }
-                };
+                let (runtime, mut events) =
+                    match create_input_runtime(&config.stt, config.endpoints.stt.as_deref()) {
+                        Ok(runtime) => runtime,
+                        Err(message) => {
+                            write_protocol_fatal(
+                                &mut writer,
+                                &public_stt_startup_error(&config.stt),
+                                &format!("STT startup failed: {message}"),
+                            )?;
+                            return Ok(());
+                        }
+                    };
                 let readiness = wait_for_input_ready(&mut events, INPUT_STARTUP_TIMEOUT);
                 if let Err(message) = readiness {
                     runtime.cancel();
@@ -4005,6 +4023,9 @@ fn run_expert_spokesperson_session(
                     break;
                 }
                 let mut spokesperson_config = OpenAiSpokespersonConfig::from_environment()?;
+                if let Some(url) = &config.endpoints.realtime {
+                    spokesperson_config.endpoint.clone_from(url);
+                }
                 apply_spokesperson_startup_settings(&config, &mut spokesperson_config)?;
                 let tts = berd_call::TtsConfigurationSnapshot {
                     revision: 1,
@@ -5229,6 +5250,7 @@ fn parse_args(args: &[String]) -> Result<SessionConfig, ParseFailure> {
     let mut stt_backend = "macos";
     let mut stt_model_dir = None;
     let mut mode = SessionMode::Conventional;
+    let mut endpoints = SessionEndpointOverrides::default();
     let mut index = 2;
     while index < args.len() {
         let flag = args[index].as_str();
@@ -5252,6 +5274,11 @@ fn parse_args(args: &[String]) -> Result<SessionConfig, ParseFailure> {
             }
             "--stt-backend" => stt_backend = value,
             "--stt-model-dir" => stt_model_dir = Some(PathBuf::from(value)),
+            "--realtime-url" => {
+                endpoints.realtime = Some(parse_endpoint_url(value, "--realtime-url", true)?)
+            }
+            "--stt-url" => endpoints.stt = Some(parse_endpoint_url(value, "--stt-url", true)?),
+            "--tts-url" => endpoints.tts = Some(parse_endpoint_url(value, "--tts-url", false)?),
             "--mode" => {
                 mode = match value.as_str() {
                     "conventional" => SessionMode::Conventional,
@@ -5266,7 +5293,44 @@ fn parse_args(args: &[String]) -> Result<SessionConfig, ParseFailure> {
     }
     let tts = build_tts_backend_config(backend, voice, language, model_dir, rate)?;
     let stt = build_stt_backend_config(stt_backend, stt_model_dir)?;
-    Ok(SessionConfig { tts, stt, mode })
+    if endpoints.realtime.is_some() && mode != SessionMode::ExpertSpokesperson {
+        return Err("--realtime-url requires --mode expert-spokesperson".into());
+    }
+    if mode == SessionMode::ExpertSpokesperson
+        && (endpoints.tts.is_some() || endpoints.stt.is_some())
+    {
+        return Err("--tts-url and --stt-url apply only to conventional mode; Expert-Spokesperson uses --realtime-url".into());
+    }
+    if endpoints.tts.is_some() && !matches!(tts, TtsBackendConfig::OpenAi { .. }) {
+        return Err("--tts-url requires --tts-backend openai".into());
+    }
+    if endpoints.stt.is_some() && !matches!(stt, SttBackendConfig::OpenAi) {
+        return Err("--stt-url requires --stt-backend openai".into());
+    }
+    Ok(SessionConfig {
+        tts,
+        stt,
+        mode,
+        endpoints,
+    })
+}
+
+fn parse_endpoint_url(value: &str, flag: &str, websocket: bool) -> Result<String, String> {
+    let url = reqwest::Url::parse(value).map_err(|error| format!("{flag} is invalid: {error}"))?;
+    let valid_scheme = if websocket {
+        matches!(url.scheme(), "ws" | "wss")
+    } else {
+        matches!(url.scheme(), "http" | "https")
+    };
+    if !valid_scheme
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(format!("{flag} requires a full URL with the correct protocol and no embedded credentials or fragment"));
+    }
+    Ok(url.to_string())
 }
 
 fn parse_pcm_output_fd(args: &[String]) -> Result<RawFd, String> {
@@ -5868,7 +5932,7 @@ fn create_stt_benchmark_report(
         &pack,
         config.runs,
         config.mode,
-        || create_input_runtime(&config.stt),
+        || create_input_runtime(&config.stt, None),
     )))
 }
 
@@ -5937,12 +6001,16 @@ fn stt_benchmark_target(config: &SttBackendConfig) -> Result<SttBenchmarkTarget,
     }
 }
 
-fn create_tts_configuration(config: &TtsBackendConfig) -> Result<TtsConfiguration, String> {
+fn create_tts_configuration(
+    config: &TtsBackendConfig,
+    endpoint: Option<&str>,
+) -> Result<TtsConfiguration, String> {
     match config {
         TtsBackendConfig::OpenAi { rate } => create_openai_tts_configuration(
             *rate,
             std::env::var("OPENAI_TTS_MODEL").unwrap_or_else(|_| "gpt-4o-mini-tts".into()),
             std::env::var("OPENAI_TTS_VOICE").unwrap_or_else(|_| "marin".into()),
+            endpoint,
         ),
         TtsBackendConfig::Siri {
             voice,
@@ -5970,6 +6038,7 @@ fn create_openai_tts_configuration(
     rate: f32,
     model: String,
     voice: String,
+    endpoint: Option<&str>,
 ) -> Result<TtsConfiguration, String> {
     let api_key = std::env::var("OPENAI_API_KEY")
         .ok()
@@ -5978,7 +6047,9 @@ fn create_openai_tts_configuration(
     let base =
         std::env::var("OPENAI_BASE_URL").unwrap_or_else(|_| "https://api.openai.com/v1".into());
     Ok(TtsConfiguration::openai(
-        format!("{}/audio/speech", base.trim_end_matches('/')),
+        endpoint
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("{}/audio/speech", base.trim_end_matches('/'))),
         api_key,
         model,
         voice,
@@ -5986,7 +6057,10 @@ fn create_openai_tts_configuration(
     ))
 }
 
-fn create_tts_slot(config: &TtsBackendConfig) -> Result<ConfiguredTtsSlot, String> {
+fn create_tts_slot(
+    config: &TtsBackendConfig,
+    endpoint: Option<&str>,
+) -> Result<ConfiguredTtsSlot, String> {
     #[cfg(not(target_os = "macos"))]
     if matches!(config, TtsBackendConfig::Siri { .. }) {
         return Err(
@@ -5994,7 +6068,7 @@ fn create_tts_slot(config: &TtsBackendConfig) -> Result<ConfiguredTtsSlot, Strin
                 .into(),
         );
     }
-    ConfiguredTtsSlot::new(create_tts_configuration(config)?).map_err(|error| match config {
+    ConfiguredTtsSlot::new(create_tts_configuration(config, endpoint)?).map_err(|error| match config {
         TtsBackendConfig::Siri {
             voice, language, ..
         } => format!(
@@ -6005,7 +6079,7 @@ fn create_tts_slot(config: &TtsBackendConfig) -> Result<ConfiguredTtsSlot, Strin
 }
 
 fn create_tts_backend(config: &TtsBackendConfig) -> Result<Arc<dyn TtsBackend>, String> {
-    let slot = create_tts_slot(config)?;
+    let slot = create_tts_slot(config, None)?;
     Ok(Arc::clone(slot.lease()?.backend()))
 }
 
@@ -6016,6 +6090,7 @@ fn create_synthesis_backend(config: &SynthesisTtsConfig) -> Result<Arc<dyn TtsBa
                 *rate,
                 model.clone(),
                 voice.clone(),
+                None,
             )?)?;
             Ok(Arc::clone(slot.lease()?.backend()))
         }
@@ -6194,6 +6269,7 @@ fn run_synthesis_command(config: SynthesisConfig) -> Result<(), SynthesisFailure
 
 fn create_input_runtime(
     config: &SttBackendConfig,
+    endpoint_override: Option<&str>,
 ) -> Result<
     (
         VoiceInputRuntime,
@@ -6229,9 +6305,13 @@ fn create_input_runtime(
                 .ok()
                 .filter(|key| !key.trim().is_empty())
                 .ok_or_else(|| "OPENAI_API_KEY is required for OpenAI STT".to_string())?;
-            let endpoint = std::env::var("OPENAI_REALTIME_ENDPOINT")
-                .ok()
-                .filter(|value| !value.trim().is_empty())
+            let endpoint = endpoint_override
+                .map(str::to_string)
+                .or_else(|| {
+                    std::env::var("OPENAI_REALTIME_ENDPOINT")
+                        .ok()
+                        .filter(|value| !value.trim().is_empty())
+                })
                 .unwrap_or_else(|| {
                     "wss://api.openai.com/v1/realtime?intent=transcription".to_string()
                 });
@@ -9358,6 +9438,7 @@ mod tests {
                 },
                 stt: SttBackendConfig::Macos,
                 mode: SessionMode::Conventional,
+                endpoints: SessionEndpointOverrides::default(),
             }
         );
 
@@ -9367,6 +9448,7 @@ mod tests {
                 tts: TtsBackendConfig::OpenAi { rate: 1.0 },
                 stt: SttBackendConfig::Macos,
                 mode: SessionMode::Conventional,
+                endpoints: SessionEndpointOverrides::default(),
             }
         );
     }
@@ -9442,6 +9524,7 @@ mod tests {
                 },
                 stt: SttBackendConfig::Macos,
                 mode: SessionMode::Conventional,
+                endpoints: SessionEndpointOverrides::default(),
             }
         );
         assert!(parse_args(&args(&[
@@ -9496,6 +9579,7 @@ mod tests {
             },
             stt: SttBackendConfig::Macos,
             mode: SessionMode::ExpertSpokesperson,
+            endpoints: SessionEndpointOverrides::default(),
         };
         let mut realtime = OpenAiSpokespersonConfig {
             endpoint: "ws://localhost".into(),
@@ -9514,6 +9598,88 @@ mod tests {
 
         assert_eq!(realtime.speed(), 1.5);
         assert_eq!(realtime.voice(), "marin");
+    }
+
+    #[test]
+    fn session_endpoint_overrides_are_independent_and_require_matching_modes() {
+        let realtime = parse_args(&args(&[
+            "berd-call",
+            "session",
+            "--tts-backend",
+            "openai",
+            "--mode",
+            "expert-spokesperson",
+            "--realtime-url",
+            "ws://127.0.0.1:18870/v1/realtime",
+        ]))
+        .unwrap();
+        assert_eq!(
+            realtime.endpoints.realtime.as_deref(),
+            Some("ws://127.0.0.1:18870/v1/realtime")
+        );
+        assert_eq!(realtime.endpoints.stt, None);
+        assert_eq!(realtime.endpoints.tts, None);
+
+        let chained = parse_args(&args(&[
+            "berd-call",
+            "session",
+            "--tts-backend",
+            "openai",
+            "--stt-backend",
+            "openai",
+            "--tts-url",
+            "https://proxy.example/v1/audio/speech?api-version=1",
+            "--stt-url",
+            "wss://proxy.example/v1/realtime?intent=transcription",
+        ]))
+        .unwrap();
+        assert_eq!(
+            chained.endpoints.tts.as_deref(),
+            Some("https://proxy.example/v1/audio/speech?api-version=1")
+        );
+        assert_eq!(
+            chained.endpoints.stt.as_deref(),
+            Some("wss://proxy.example/v1/realtime?intent=transcription")
+        );
+        assert!(parse_args(&args(&[
+            "berd-call",
+            "session",
+            "--tts-backend",
+            "openai",
+            "--realtime-url",
+            "ws://localhost/realtime"
+        ]))
+        .unwrap_err()
+        .contains("expert-spokesperson"));
+        assert!(parse_args(&args(&[
+            "berd-call",
+            "session",
+            "--tts-url",
+            "wss://localhost/audio/speech"
+        ]))
+        .is_err());
+        assert!(parse_args(&args(&[
+            "berd-call",
+            "session",
+            "--tts-backend",
+            "openai",
+            "--stt-url",
+            "wss://localhost/realtime"
+        ]))
+        .unwrap_err()
+        .contains("--stt-backend openai"));
+        assert!(parse_args(&args(&[
+            "berd-call",
+            "session",
+            "--tts-backend",
+            "openai",
+            "--mode",
+            "expert-spokesperson",
+            "--tts-url",
+            "https://localhost/audio/speech"
+        ]))
+        .unwrap_err()
+        .contains("only to conventional mode"));
     }
 
     #[test]
@@ -9538,6 +9704,7 @@ mod tests {
                 },
                 stt: SttBackendConfig::Macos,
                 mode: SessionMode::Conventional,
+                endpoints: SessionEndpointOverrides::default(),
             }
         );
         assert!(parse_args(&args(&[
@@ -9598,6 +9765,7 @@ mod tests {
                     model_dir: PathBuf::from("/models/parakeet")
                 },
                 mode: SessionMode::Conventional,
+                endpoints: SessionEndpointOverrides::default(),
             }
         );
         assert!(parse_args(&args(&[
@@ -10041,6 +10209,7 @@ mod tests {
                 },
                 stt: SttBackendConfig::OpenAi,
                 mode: SessionMode::Conventional,
+                endpoints: SessionEndpointOverrides::default(),
             }
         );
     }
@@ -11123,6 +11292,27 @@ mod tests {
         let saved = changed.saved.unwrap().1;
         assert_eq!(saved.tts.unwrap().rate(), 1.2);
         assert!(!saved.arguments.contains(&"--codex".into()));
+        let with_endpoint = parse_saved_start_args_at(
+            &args(&[
+                "berd-call",
+                "start",
+                "--stt-backend",
+                "openai",
+                "--stt-url",
+                "wss://proxy.example/v1/realtime?intent=transcription",
+            ]),
+            directory.path().join("settings.json"),
+        )
+        .unwrap();
+        assert!(with_endpoint
+            .session_arguments
+            .contains(&"--stt-url".into()));
+        assert!(!with_endpoint
+            .saved
+            .unwrap()
+            .1
+            .arguments
+            .contains(&"--stt-url".into()));
     }
 
     #[test]

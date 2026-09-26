@@ -1,5 +1,9 @@
 //! Berd-owned credentials for OpenAI voice services.
 
+use sha2::{Digest, Sha256};
+
+use super::openai_voice_endpoints::{self, VoiceEndpointKind};
+
 const KEYCHAIN_SERVICE: &str = "berd-openai-voice";
 const KEYCHAIN_ACCOUNT: &str = "api-key";
 
@@ -11,9 +15,11 @@ pub(crate) enum OpenAiVoiceCredential {
 }
 
 impl OpenAiVoiceCredential {
-    const fn account(self) -> &'static str {
+    const fn kind(self) -> VoiceEndpointKind {
         match self {
-            Self::SpeechToText | Self::TextToSpeech | Self::Realtime => KEYCHAIN_ACCOUNT,
+            Self::SpeechToText => VoiceEndpointKind::Stt,
+            Self::TextToSpeech => VoiceEndpointKind::Tts,
+            Self::Realtime => VoiceEndpointKind::Realtime,
         }
     }
 
@@ -30,6 +36,19 @@ impl OpenAiVoiceCredential {
             }
         }
     }
+}
+
+fn account(credential: OpenAiVoiceCredential) -> Result<String, String> {
+    let kind = credential.kind();
+    let url = openai_voice_endpoints::effective_url(kind)?;
+    Ok(account_for_url(kind, &url))
+}
+
+fn account_for_url(kind: VoiceEndpointKind, url: &str) -> String {
+    if url == kind.default_url() {
+        return KEYCHAIN_ACCOUNT.to_string();
+    }
+    format!("endpoint-{}", hex::encode(Sha256::digest(url.as_bytes())))
 }
 
 fn entry(account: &str) -> Result<keyring::Entry, String> {
@@ -59,18 +78,43 @@ fn clear_account(account: &str) -> Result<(), String> {
 }
 
 pub(crate) fn read(credential: OpenAiVoiceCredential) -> Result<Option<String>, String> {
-    read_account(credential.account())
+    read_account(&account(credential)?)
+}
+
+/// Check only Keychain item metadata; status polling must never request secret access.
+pub(crate) fn is_present(credential: OpenAiVoiceCredential) -> Result<bool, String> {
+    let account = account(credential)?;
+    #[cfg(target_os = "macos")]
+    {
+        use security_framework::item::{ItemClass, ItemSearchOptions};
+        match ItemSearchOptions::new()
+            .class(ItemClass::generic_password())
+            .service(KEYCHAIN_SERVICE)
+            .account(&account)
+            .load_attributes(true)
+            .skip_authenticated_items(true)
+            .search()
+        {
+            Ok(items) => Ok(!items.is_empty()),
+            Err(error) if error.code() == -25300 => Ok(false),
+            Err(error) => Err(format!("Could not check Berd's voice credential: {error}")),
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(read_account(&account)?.is_some())
+    }
 }
 
 pub(crate) fn store(credential: OpenAiVoiceCredential, api_key: &str) -> Result<(), String> {
-    let entry = entry(credential.account())?;
+    let entry = entry(&account(credential)?)?;
     entry
         .set_password(api_key)
         .map_err(|error| format!("Could not save Berd's OpenAI voice credential: {error}"))
 }
 
 pub(crate) fn clear(credential: OpenAiVoiceCredential) -> Result<(), String> {
-    clear_account(credential.account())
+    clear_account(&account(credential)?)
 }
 
 pub(crate) fn require(credential: OpenAiVoiceCredential) -> Result<String, String> {
@@ -81,9 +125,47 @@ pub(crate) fn require(credential: OpenAiVoiceCredential) -> Result<String, Strin
 mod tests {
     use super::*;
     #[test]
-    fn speech_services_use_the_shared_voice_keychain_account() {
-        assert_eq!(OpenAiVoiceCredential::SpeechToText.account(), "api-key");
-        assert_eq!(OpenAiVoiceCredential::TextToSpeech.account(), "api-key");
-        assert_eq!(OpenAiVoiceCredential::Realtime.account(), "api-key");
+    fn speech_services_use_independent_endpoints() {
+        assert!(matches!(
+            OpenAiVoiceCredential::SpeechToText.kind(),
+            VoiceEndpointKind::Stt
+        ));
+        assert!(matches!(
+            OpenAiVoiceCredential::TextToSpeech.kind(),
+            VoiceEndpointKind::Tts
+        ));
+        assert!(matches!(
+            OpenAiVoiceCredential::Realtime.kind(),
+            VoiceEndpointKind::Realtime
+        ));
+    }
+
+    #[test]
+    fn custom_endpoint_keys_never_alias_the_default_or_other_urls() {
+        assert_eq!(
+            account_for_url(
+                VoiceEndpointKind::Realtime,
+                VoiceEndpointKind::Realtime.default_url()
+            ),
+            "api-key"
+        );
+        assert_eq!(
+            account_for_url(VoiceEndpointKind::Stt, VoiceEndpointKind::Stt.default_url()),
+            "api-key"
+        );
+        assert_ne!(
+            account_for_url(
+                VoiceEndpointKind::Realtime,
+                "wss://frankie.test/v1/realtime"
+            ),
+            "api-key"
+        );
+        assert_ne!(
+            account_for_url(
+                VoiceEndpointKind::Realtime,
+                "wss://frankie.test/v1/realtime"
+            ),
+            account_for_url(VoiceEndpointKind::Realtime, "wss://other.test/v1/realtime")
+        );
     }
 }

@@ -20,6 +20,7 @@ use std::{
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 
 use super::openai_voice_credentials::{self, OpenAiVoiceCredential};
+use super::openai_voice_endpoints::{self, VoiceEndpointKind};
 use super::voice_capture::VoiceCaptureState;
 
 const OPENAI_REALTIME_CLIENT_SECRETS_URL: &str =
@@ -75,19 +76,37 @@ pub struct OpenAiRealtimeSession {
     client_secret: String,
 }
 
-fn stored_openai_api_key() -> Result<Option<String>, String> {
-    openai_voice_credentials::read(OpenAiVoiceCredential::Realtime)
-}
-
 #[tauri::command]
 pub async fn get_openai_realtime_status() -> Result<OpenAiRealtimeStatus, String> {
-    let configured = stored_openai_api_key()?.is_some();
+    let configured = openai_voice_credentials::is_present(OpenAiVoiceCredential::Realtime)?;
 
     Ok(OpenAiRealtimeStatus { configured })
 }
 
 #[tauri::command]
+pub fn set_openai_realtime_api_key(app: AppHandle, api_key: String) -> Result<(), String> {
+    let api_key = api_key.trim();
+    if api_key.is_empty() {
+        return Err("Realtime API key cannot be empty".into());
+    }
+    openai_voice_credentials::store(OpenAiVoiceCredential::Realtime, api_key)?;
+    app.emit("openai-voice:settings-changed", ())
+        .map_err(|error| format!("Could not refresh Realtime settings: {error}"))
+}
+
+#[tauri::command]
+pub fn clear_openai_realtime_api_key(app: AppHandle) -> Result<(), String> {
+    openai_voice_credentials::clear(OpenAiVoiceCredential::Realtime)?;
+    app.emit("openai-voice:settings-changed", ())
+        .map_err(|error| format!("Could not refresh Realtime settings: {error}"))
+}
+
+#[tauri::command]
 pub async fn create_openai_realtime_session() -> Result<OpenAiRealtimeSession, String> {
+    let endpoint = openai_voice_endpoints::effective_url(VoiceEndpointKind::Realtime)?;
+    if endpoint != VoiceEndpointKind::Realtime.default_url() {
+        return Err("Realtime dictation requires the default OpenAI endpoint; custom Realtime URLs are supported for Expert-Spokesperson conversations".into());
+    }
     let api_key = openai_voice_credentials::require(OpenAiVoiceCredential::Realtime)?;
     let response = realtime_transcription_client_secret_request(&reqwest::Client::new(), &api_key)
         .send()
@@ -125,7 +144,8 @@ pub fn start_openai_realtime_spokesperson_runtime(
     }
 
     let api_key = openai_voice_credentials::require(OpenAiVoiceCredential::Realtime)?;
-    let config = OpenAiSpokespersonConfig::new(api_key, options, Vec::new());
+    let mut config = OpenAiSpokespersonConfig::new(api_key, options, Vec::new());
+    config.endpoint = openai_voice_endpoints::effective_url(VoiceEndpointKind::Realtime)?;
     let semantic_revision = Arc::new(AtomicU64::new(0));
     let event_window = webview_window.clone();
     let event_session_id = session_id.clone();

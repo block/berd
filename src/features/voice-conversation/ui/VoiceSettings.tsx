@@ -63,6 +63,7 @@ import { PlaybackSpeedRow } from "./PlaybackSpeedRow";
 import { SimpleVoicePickerDialog } from "./SimpleVoicePickerDialog";
 import { useOpenAiVoiceSetup } from "../hooks/useOpenAiVoiceSetup";
 import { OpenAiApiKeyField } from "./OpenAiApiKeyField";
+import { OpenAiEndpointField } from "./OpenAiEndpointField";
 import { RealtimeVoiceSettings } from "./RealtimeVoiceSettings";
 import {
   getDefaultRealtimeVoicePreference,
@@ -392,6 +393,10 @@ export function VoiceSettings() {
               details={
                 input.backend === "openai" ? (
                   <div className="space-y-2">
+                    <OpenAiEndpointField
+                      kind="stt"
+                      label={t("voice.openAiSttEndpoint")}
+                    />
                     <OpenAiApiKeyField
                       label={t("voice.openAiSttApiKey")}
                       configured={openAiStatus?.sttConfigured ?? false}
@@ -483,6 +488,10 @@ export function VoiceSettings() {
               details={
                 output.backend === "openai" ? (
                   <div className="space-y-2">
+                    <OpenAiEndpointField
+                      kind="tts"
+                      label={t("voice.openAiTtsEndpoint")}
+                    />
                     <OpenAiApiKeyField
                       label={t("voice.openAiTtsApiKey")}
                       configured={openAiStatus?.ttsConfigured ?? false}
