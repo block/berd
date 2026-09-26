@@ -72,6 +72,7 @@ export interface ProjectStore {
     workingDirs: string[],
     useWorktrees: boolean,
     projectWorkspaces?: ProjectWorkspace[],
+    beforeCreateRpc?: () => void,
   ) => Promise<ProjectInfo>;
   editProject: (
     id: string,
@@ -124,6 +125,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     workingDirs,
     useWorktrees,
     projectWorkspaces,
+    beforeCreateRpc,
   ) => {
     const project = await createProject(
       name,
@@ -134,6 +136,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       workingDirs,
       useWorktrees,
       projectWorkspaces,
+      undefined,
+      beforeCreateRpc,
     );
     set((state) => ({ projects: [...state.projects, project] }));
     persistProjects(get().projects);

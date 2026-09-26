@@ -105,6 +105,31 @@ describe("projects API artifact metadata", () => {
     ).not.toHaveProperty("environment");
   });
 
+  it("runs the pre-create callback immediately before the create RPC", async () => {
+    mocks.sourcesList.mockResolvedValue({ sources: [] });
+    const callOrder: string[] = [];
+    mocks.sourcesCreate.mockImplementation(async (request) => {
+      callOrder.push("rpc");
+      return { source: source(request.properties) };
+    });
+    const { createProject } = await import("./projects");
+
+    await createProject(
+      "Launch",
+      "",
+      "",
+      "",
+      "olive",
+      [],
+      false,
+      [],
+      null,
+      () => callOrder.push("before-rpc"),
+    );
+
+    expect(callOrder).toEqual(["before-rpc", "rpc"]);
+  });
+
   it("ignores incomplete or malformed saved environments", async () => {
     const { parseProjectEnvironment } = await import("./projects");
     for (const value of [
@@ -289,6 +314,8 @@ describe("projects API artifact metadata", () => {
     });
 
     const updateRequest = mocks.sourcesUpdate.mock.calls[0]?.[0];
+    // The source name (the project's stable id) must not change on rename.
+    expect(updateRequest.name).toBe("launch");
     expect(updateRequest.properties.artifact).toEqual(
       createProjectArtifactMetadata({
         projectId: "launch",
@@ -340,6 +367,48 @@ describe("projects API artifact metadata", () => {
     const updateRequest = mocks.sourcesUpdate.mock.calls[0]?.[0];
     expect(updateRequest.properties.chatGroups).toEqual(chatGroups);
     expect(project.chatGroups).toEqual(chatGroups);
+  });
+});
+
+describe("findProjectByWorkingDirectory", () => {
+  it("finds an active project via a path-equivalent working directory", async () => {
+    const { findProjectByWorkingDirectory } = await import("./projects");
+    const existing = projectInfo({
+      id: "existing",
+      workingDirs: ["/tmp/launch/"],
+    });
+
+    expect(findProjectByWorkingDirectory([existing], "/tmp/launch")).toEqual(
+      existing,
+    );
+    expect(findProjectByWorkingDirectory([existing], "/tmp/other")).toBeNull();
+  });
+
+  it("matches home-relative and absolute working directories", async () => {
+    const { findProjectByWorkingDirectory } = await import("./projects");
+    const existing = projectInfo({
+      id: "existing",
+      workingDirs: ["~/src/berd"],
+    });
+
+    expect(
+      findProjectByWorkingDirectory(
+        [existing],
+        "/Users/me/src/berd",
+        "/Users/me",
+      ),
+    ).toEqual(existing);
+  });
+
+  it("ignores archived projects", async () => {
+    const { findProjectByWorkingDirectory } = await import("./projects");
+    const archived = projectInfo({
+      id: "archived",
+      workingDirs: ["/tmp/launch"],
+      archivedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    expect(findProjectByWorkingDirectory([archived], "/tmp/launch")).toBeNull();
   });
 });
 
