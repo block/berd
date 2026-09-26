@@ -1,10 +1,5 @@
-import {
-  createTextFile,
-  getHomeDir,
-  pathExists,
-  readTextFile,
-  writeTextFile,
-} from "@/shared/api/system";
+import { getHomeDir, pathExists, readTextFile } from "@/shared/api/system";
+import { saveMemoryDocument } from "./saveMemoryDocument";
 
 /**
  * Canonical home for the user's me.md, relative to the home directory.
@@ -116,7 +111,11 @@ export async function createMeFile(): Promise<MeFileState> {
   if (existing.status === "present") {
     return existing;
   }
-  await createTextFile(existing.path, ME_FILE_TEMPLATE);
+  await saveMemoryDocument({
+    path: existing.path,
+    contents: ME_FILE_TEMPLATE,
+    topic: null,
+  });
   const payload = await readTextFile(existing.path);
   return {
     status: "present",
@@ -131,5 +130,5 @@ export async function saveMeFile(
   path: string,
   contents: string,
 ): Promise<void> {
-  await writeTextFile(path, contents);
+  await saveMemoryDocument({ path, contents, topic: null });
 }
