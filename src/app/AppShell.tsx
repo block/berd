@@ -4056,12 +4056,16 @@ export function AppShell({
           }
           let archiveClearedActiveSession = false;
           try {
-            // The store may forget a session the remote host already dropped,
-            // clearing activeSessionId before the check below can read it.
+            // Only an explicit user archive may forget a session the remote
+            // host already dropped; automatic and agent archives keep its
+            // history visible. Forgetting clears activeSessionId before the
+            // check below can read it.
             ({ clearedActiveSession: archiveClearedActiveSession } =
               await useChatSessionStore
                 .getState()
-                .archiveSession(sessionId, fallbackSession));
+                .archiveSession(sessionId, fallbackSession, {
+                  forgetMissingRemote: cleanupPolicy === "confirm",
+                }));
             const homeWidgetState = useHomeWidgetStore.getState();
             const pinnedWidget = homeWidgetState.instances.find(
               (instance) =>

@@ -659,7 +659,7 @@ describe("AppShell berdctl integration", () => {
     });
 
     const outcome = await runCommand(() =>
-      getAppNavigationController().archiveSession("session-1", "reject"),
+      getAppNavigationController().archiveSession("session-1", "confirm"),
     );
 
     expect(outcome).toEqual({ ok: true });
@@ -691,7 +691,7 @@ describe("AppShell berdctl integration", () => {
       expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
     });
     const outcome = startCommand(() =>
-      getAppNavigationController().archiveSession("session-1", "reject"),
+      getAppNavigationController().archiveSession("session-1", "confirm"),
     );
     await waitFor(() => {
       expect(mockAcpArchiveSession).toHaveBeenCalledWith("session-1");
@@ -735,7 +735,7 @@ describe("AppShell berdctl integration", () => {
     });
 
     const outcome = await runCommand(() =>
-      getAppNavigationController().archiveSession("session-2", "reject"),
+      getAppNavigationController().archiveSession("session-2", "confirm"),
     );
 
     expect(outcome).toEqual({ ok: true });
@@ -744,6 +744,32 @@ describe("AppShell berdctl integration", () => {
     ).toBeUndefined();
     expect(useChatSessionStore.getState().activeSessionId).toBe("session-1");
     expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+  });
+
+  it("archiveSession keeps a dropped remote session for automatic and agent archives", async () => {
+    useChatSessionStore.setState({
+      sessions: [makeSession({ remoteHost: "devbox" })],
+    });
+    mockAcpArchiveSession.mockRejectedValue(
+      new Error("Session not found: session-1"),
+    );
+    render(<AppShell />);
+
+    for (const policy of ["reject", "discard"] as const) {
+      const outcome = await runCommand(() =>
+        getAppNavigationController().archiveSession("session-1", policy),
+      );
+
+      expect(outcome).toEqual(
+        expect.objectContaining({
+          ok: false,
+          reason: "backend_archive_failed",
+        }),
+      );
+      expect(useChatSessionStore.getState().getSession("session-1")).toEqual(
+        expect.objectContaining({ archivedAt: undefined }),
+      );
+    }
   });
 
   it("openSession resolves blocked_unsaved_changes when the automation guard is cancelled", async () => {

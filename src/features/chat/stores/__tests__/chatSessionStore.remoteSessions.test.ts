@@ -238,12 +238,37 @@ describe("chatSessionStore remote sessions", () => {
       new Error("Session not found: backend-gone"),
     );
 
-    await useChatSessionStore.getState().archiveSession("backend-gone");
+    await useChatSessionStore
+      .getState()
+      .archiveSession("backend-gone", undefined, { forgetMissingRemote: true });
 
     expect(
       useChatSessionStore.getState().getSession("backend-gone"),
     ).toBeUndefined();
     expect(readRemoteSessionRecords()).toEqual([]);
+  });
+
+  it("keeps a dropped remote session unless asked to forget it", async () => {
+    const store = useChatSessionStore.getState();
+    const draft = store.createDraftSession({
+      workingDir: "/remote/dir",
+      remoteHost: "devbox",
+    });
+    store.promoteDraftSession(draft.id, "backend-kept");
+    vi.mocked(acpArchiveSession).mockRejectedValueOnce(
+      new Error("Session not found: backend-kept"),
+    );
+
+    await expect(
+      useChatSessionStore.getState().archiveSession("backend-kept"),
+    ).rejects.toThrow("Session not found");
+
+    expect(useChatSessionStore.getState().getSession("backend-kept")).toEqual(
+      expect.objectContaining({ archivedAt: undefined }),
+    );
+    expect(readRemoteSessionRecords()).toEqual([
+      expect.objectContaining({ sessionId: "backend-kept" }),
+    ]);
   });
 
   it("rolls back a remote archive that fails for other reasons", async () => {

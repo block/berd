@@ -249,11 +249,13 @@ interface ChatSessionStoreActions {
    * backend call. On backend failure `archivedAt` rolls back and the error is
    * rethrown. App-owned cleanup/navigation belongs in AppShell.
    * Throws {@link SessionNotFoundError} when the id matches no session.
-   * A remote session the host already dropped is removed locally instead.
+   * With `forgetMissingRemote`, a remote session the host already dropped is
+   * removed locally instead; otherwise it stays and the error is rethrown.
    */
   archiveSession: (
     id: string,
     fallbackSession?: ChatSession,
+    options?: { forgetMissingRemote?: boolean },
   ) => Promise<ArchiveSessionResult>;
   /**
    * Unarchive a session optimistically (clears `archivedAt`), then awaits the
@@ -1067,7 +1069,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     releaseWindowedSession(id);
   },
 
-  archiveSession: async (id, fallbackSession) => {
+  archiveSession: async (id, fallbackSession, options) => {
     const storedSession = get().sessions.find(
       (candidate) => candidate.id === id,
     );
@@ -1109,7 +1111,11 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       }
       return { clearedActiveSession: false };
     } catch (error) {
-      if (session.remoteHost && isAcpSessionNotFoundError(error)) {
+      if (
+        options?.forgetMissingRemote &&
+        session.remoteHost &&
+        isAcpSessionNotFoundError(error)
+      ) {
         // The remote host already dropped this session, so there is nothing
         // left to archive. Forget the local record instead of rolling back,
         // which would otherwise strand an undeletable sidebar row.
