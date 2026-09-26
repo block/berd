@@ -4054,6 +4054,10 @@ export function AppShell({
           if (preMutationInterruption) {
             return { ok: false as const, reason: preMutationInterruption };
           }
+          // The store may forget a session the remote host already dropped,
+          // which clears activeSessionId before we can read it below.
+          const wasActiveBeforeArchive =
+            useChatSessionStore.getState().activeSessionId === sessionId;
           try {
             await useChatSessionStore
               .getState()
@@ -4121,8 +4125,11 @@ export function AppShell({
             }
           }
 
+          const activeAfterArchive =
+            useChatSessionStore.getState().activeSessionId;
           const wasActiveSession =
-            useChatSessionStore.getState().activeSessionId === sessionId;
+            activeAfterArchive === sessionId ||
+            (wasActiveBeforeArchive && activeAfterArchive === null);
           cleanupChatSession(sessionId);
           if (useSessionWindowStore.getState().isOpenInWindow(sessionId)) {
             releaseSession(sessionId).catch((error: unknown) =>

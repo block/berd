@@ -642,6 +642,66 @@ describe("AppShell berdctl integration", () => {
     });
   });
 
+  it("archiveSession navigates home after forgetting an active remote session the host dropped", async () => {
+    useChatSessionStore.setState({
+      sessions: [makeSession({ remoteHost: "devbox" })],
+    });
+    mockAcpArchiveSession.mockRejectedValueOnce(
+      new Error("Session not found: session-1"),
+    );
+    render(<AppShell />);
+
+    await runCommand(() =>
+      getAppNavigationController().openSession("session-1"),
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+
+    const outcome = await runCommand(() =>
+      getAppNavigationController().archiveSession("session-1", "reject"),
+    );
+
+    expect(outcome).toEqual({ ok: true });
+    expect(
+      useChatSessionStore.getState().getSession("session-1"),
+    ).toBeUndefined();
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("home");
+    });
+  });
+
+  it("archiveSession stays put after forgetting an inactive remote session the host dropped", async () => {
+    useChatSessionStore.setState({
+      sessions: [
+        makeSession(),
+        makeSession({ id: "session-2", remoteHost: "devbox" }),
+      ],
+    });
+    mockAcpArchiveSession.mockRejectedValueOnce(
+      new Error("Session not found: session-2"),
+    );
+    render(<AppShell />);
+
+    await runCommand(() =>
+      getAppNavigationController().openSession("session-1"),
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+
+    const outcome = await runCommand(() =>
+      getAppNavigationController().archiveSession("session-2", "reject"),
+    );
+
+    expect(outcome).toEqual({ ok: true });
+    expect(
+      useChatSessionStore.getState().getSession("session-2"),
+    ).toBeUndefined();
+    expect(useChatSessionStore.getState().activeSessionId).toBe("session-1");
+    expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+  });
+
   it("openSession resolves blocked_unsaved_changes when the automation guard is cancelled", async () => {
     const user = userEvent.setup();
     useChatSessionStore.setState({ sessions: [makeSession()] });
