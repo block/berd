@@ -1114,7 +1114,9 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       if (
         options?.forgetMissingRemote &&
         session.remoteHost &&
-        isAcpSessionNotFoundError(error)
+        isAcpSessionNotFoundError(error) &&
+        // A newer archive/unarchive owns the session; leave its state intact.
+        get().archiveMutationBySessionId[id]?.operationId === operationId
       ) {
         // The remote host already dropped this session, so there is nothing
         // left to archive. Forget the local record instead of rolling back,

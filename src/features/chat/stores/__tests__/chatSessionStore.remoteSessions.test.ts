@@ -248,6 +248,37 @@ describe("chatSessionStore remote sessions", () => {
     expect(readRemoteSessionRecords()).toEqual([]);
   });
 
+  it("keeps a session restored while a dropped-remote archive was pending", async () => {
+    const store = useChatSessionStore.getState();
+    const draft = store.createDraftSession({
+      workingDir: "/remote/dir",
+      remoteHost: "devbox",
+    });
+    store.promoteDraftSession(draft.id, "backend-restored");
+    let rejectArchive!: (error: Error) => void;
+    vi.mocked(acpArchiveSession).mockReturnValueOnce(
+      new Promise<void>((_resolve, reject) => {
+        rejectArchive = reject;
+      }),
+    );
+
+    const archive = useChatSessionStore
+      .getState()
+      .archiveSession("backend-restored", undefined, {
+        forgetMissingRemote: true,
+      });
+    await useChatSessionStore.getState().unarchiveSession("backend-restored");
+    rejectArchive(new Error("Session not found: backend-restored"));
+
+    await expect(archive).rejects.toThrow("Session not found");
+    expect(
+      useChatSessionStore.getState().getSession("backend-restored"),
+    ).toEqual(expect.objectContaining({ archivedAt: undefined }));
+    expect(readRemoteSessionRecords()).toEqual([
+      expect.objectContaining({ sessionId: "backend-restored" }),
+    ]);
+  });
+
   it("keeps a dropped remote session unless asked to forget it", async () => {
     const store = useChatSessionStore.getState();
     const draft = store.createDraftSession({
