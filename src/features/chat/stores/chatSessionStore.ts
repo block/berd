@@ -38,6 +38,7 @@ import {
   removeRemoteSessionRecord,
 } from "./remoteSessionPersistence";
 import { backendIdForSession } from "@/shared/api/acpBackendId";
+import { isAcpSessionNotFoundError } from "@/shared/api/acpErrors";
 import {
   registerSessionBackend,
   transferSessionBackend,
@@ -1098,6 +1099,14 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
         persistRemoteSessionRecordForSession(archived);
       }
     } catch (error) {
+      if (session.remoteHost && isAcpSessionNotFoundError(error)) {
+        // The remote host already dropped this session, so there is nothing
+        // left to archive. Forget the local record instead of rolling back,
+        // which would otherwise strand an undeletable sidebar row.
+        settleArchiveMutationAndCancelIfArchived(get(), id, operationId);
+        get().removeSession(id);
+        return;
+      }
       // Roll back only the archive flag; navigation/window cleanup is owned by
       // AppShell's archive transaction.
       set((state) => rollbackFailedArchiveMutation(state, id, operationId));

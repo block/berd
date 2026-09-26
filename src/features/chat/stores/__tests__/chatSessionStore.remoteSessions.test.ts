@@ -5,6 +5,7 @@ import {
   rehydrateRemoteSessions,
 } from "../remoteSessionPersistence";
 import { useChatSessionStore } from "../chatSessionStore";
+import { archiveSession as acpArchiveSession } from "@/shared/api/acpApi";
 
 const mocks = vi.hoisted(() => ({
   acpCreateSession: vi.fn(),
@@ -224,6 +225,45 @@ describe("chatSessionStore remote sessions", () => {
 
     await useChatSessionStore.getState().unarchiveSession("backend-4");
     expect(readRemoteSessionRecords()[0]?.archivedAt).toBeUndefined();
+  });
+
+  it("forgets a remote session the host no longer has when archiving", async () => {
+    const store = useChatSessionStore.getState();
+    const draft = store.createDraftSession({
+      workingDir: "/remote/dir",
+      remoteHost: "devbox",
+    });
+    store.promoteDraftSession(draft.id, "backend-gone");
+    vi.mocked(acpArchiveSession).mockRejectedValueOnce(
+      new Error("Session not found: backend-gone"),
+    );
+
+    await useChatSessionStore.getState().archiveSession("backend-gone");
+
+    expect(
+      useChatSessionStore.getState().getSession("backend-gone"),
+    ).toBeUndefined();
+    expect(readRemoteSessionRecords()).toEqual([]);
+  });
+
+  it("rolls back a remote archive that fails for other reasons", async () => {
+    const store = useChatSessionStore.getState();
+    const draft = store.createDraftSession({
+      workingDir: "/remote/dir",
+      remoteHost: "devbox",
+    });
+    store.promoteDraftSession(draft.id, "backend-flaky");
+    vi.mocked(acpArchiveSession).mockRejectedValueOnce(
+      new Error("connection reset"),
+    );
+
+    await expect(
+      useChatSessionStore.getState().archiveSession("backend-flaky"),
+    ).rejects.toThrow("connection reset");
+
+    expect(
+      useChatSessionStore.getState().getSession("backend-flaky")?.archivedAt,
+    ).toBeUndefined();
   });
 
   it("rehydrates archived remote sessions into history after restart", async () => {
