@@ -671,6 +671,50 @@ describe("AppShell berdctl integration", () => {
     });
   });
 
+  it("archiveSession keeps a newer destination when a dropped remote session resolves late", async () => {
+    const user = userEvent.setup();
+    let rejectArchive!: (error: Error) => void;
+    mockAcpArchiveSession.mockReturnValue(
+      new Promise<void>((_resolve, reject) => {
+        rejectArchive = reject;
+      }),
+    );
+    useChatSessionStore.setState({
+      sessions: [makeSession({ remoteHost: "devbox" })],
+    });
+    render(<AppShell />);
+
+    await runCommand(() =>
+      getAppNavigationController().openSession("session-1"),
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    const outcome = startCommand(() =>
+      getAppNavigationController().archiveSession("session-1", "reject"),
+    );
+    await waitFor(() => {
+      expect(mockAcpArchiveSession).toHaveBeenCalledWith("session-1");
+    });
+
+    await user.click(screen.getByRole("button", { name: "Sidebar skills" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("skills");
+    });
+    expect(useChatSessionStore.getState().activeSessionId).toBeNull();
+
+    await act(async () => {
+      rejectArchive(new Error("Session not found: session-1"));
+      await outcome;
+    });
+
+    await expect(outcome).resolves.toEqual({ ok: true });
+    expect(
+      useChatSessionStore.getState().getSession("session-1"),
+    ).toBeUndefined();
+    expect(screen.getByTestId("active-view")).toHaveTextContent("skills");
+  });
+
   it("archiveSession stays put after forgetting an inactive remote session the host dropped", async () => {
     useChatSessionStore.setState({
       sessions: [

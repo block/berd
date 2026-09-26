@@ -4054,14 +4054,14 @@ export function AppShell({
           if (preMutationInterruption) {
             return { ok: false as const, reason: preMutationInterruption };
           }
-          // The store may forget a session the remote host already dropped,
-          // which clears activeSessionId before we can read it below.
-          const wasActiveBeforeArchive =
-            useChatSessionStore.getState().activeSessionId === sessionId;
+          let archiveClearedActiveSession = false;
           try {
-            await useChatSessionStore
-              .getState()
-              .archiveSession(sessionId, fallbackSession);
+            // The store may forget a session the remote host already dropped,
+            // clearing activeSessionId before the check below can read it.
+            ({ clearedActiveSession: archiveClearedActiveSession } =
+              await useChatSessionStore
+                .getState()
+                .archiveSession(sessionId, fallbackSession));
             const homeWidgetState = useHomeWidgetStore.getState();
             const pinnedWidget = homeWidgetState.instances.find(
               (instance) =>
@@ -4125,11 +4125,9 @@ export function AppShell({
             }
           }
 
-          const activeAfterArchive =
-            useChatSessionStore.getState().activeSessionId;
           const wasActiveSession =
-            activeAfterArchive === sessionId ||
-            (wasActiveBeforeArchive && activeAfterArchive === null);
+            archiveClearedActiveSession ||
+            useChatSessionStore.getState().activeSessionId === sessionId;
           cleanupChatSession(sessionId);
           if (useSessionWindowStore.getState().isOpenInWindow(sessionId)) {
             releaseSession(sessionId).catch((error: unknown) =>

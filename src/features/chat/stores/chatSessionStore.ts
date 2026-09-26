@@ -67,6 +67,11 @@ export class SessionNotFoundError extends Error {
   }
 }
 
+export interface ArchiveSessionResult {
+  /** True when this archive removed the session while it was active. */
+  clearedActiveSession: boolean;
+}
+
 export interface ChatSession {
   id: string;
   title: string;
@@ -244,8 +249,12 @@ interface ChatSessionStoreActions {
    * backend call. On backend failure `archivedAt` rolls back and the error is
    * rethrown. App-owned cleanup/navigation belongs in AppShell.
    * Throws {@link SessionNotFoundError} when the id matches no session.
+   * A remote session the host already dropped is removed locally instead.
    */
-  archiveSession: (id: string, fallbackSession?: ChatSession) => Promise<void>;
+  archiveSession: (
+    id: string,
+    fallbackSession?: ChatSession,
+  ) => Promise<ArchiveSessionResult>;
   /**
    * Unarchive a session optimistically (clears `archivedAt`), then awaits the
    * backend call. On backend failure `archivedAt` rolls back and the error is
@@ -1098,14 +1107,16 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       if (archived?.remoteHost) {
         persistRemoteSessionRecordForSession(archived);
       }
+      return { clearedActiveSession: false };
     } catch (error) {
       if (session.remoteHost && isAcpSessionNotFoundError(error)) {
         // The remote host already dropped this session, so there is nothing
         // left to archive. Forget the local record instead of rolling back,
         // which would otherwise strand an undeletable sidebar row.
         settleArchiveMutationAndCancelIfArchived(get(), id, operationId);
+        const clearedActiveSession = get().activeSessionId === id;
         get().removeSession(id);
-        return;
+        return { clearedActiveSession };
       }
       // Roll back only the archive flag; navigation/window cleanup is owned by
       // AppShell's archive transaction.
