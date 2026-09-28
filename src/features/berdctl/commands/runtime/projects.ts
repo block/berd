@@ -1,4 +1,5 @@
 import {
+  listAllProjects,
   listProjects,
   type ProjectInfo,
 } from "@/features/projects/api/projects";
@@ -10,6 +11,20 @@ export async function loadProjectsForBerdctl(): Promise<void> {
   try {
     const projects = await listProjects();
     useProjectStore.getState().replaceProjectsFromBackend(projects);
+  } catch (error) {
+    throw new CommandError(
+      "backend_read_failed",
+      `Failed to read projects from the app backend: ${berdctlErrorDetail(error)}`,
+    );
+  }
+}
+
+export async function findCurrentProjectForBerdctl(
+  projectId: string,
+): Promise<ProjectInfo | null> {
+  try {
+    const projects = await listAllProjects();
+    return projects.find((project) => project.id === projectId) ?? null;
   } catch (error) {
     throw new CommandError(
       "backend_read_failed",

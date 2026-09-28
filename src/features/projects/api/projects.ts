@@ -13,6 +13,7 @@ import {
   normalizeWorkspacePath,
   workspaceAttachmentIdForPath,
 } from "@/features/chat/lib/workspaceAttachments";
+import { expandHomePath } from "@/shared/lib/homePath";
 import { toIdentityKey } from "@/shared/lib/pathIdentity";
 import type { ProjectArtifactMetadata } from "../artifact/types";
 
@@ -354,7 +355,10 @@ function slugify(name: string): string {
 /** Pick a slug for `name` that does not collide with any existing project ID
  *  (active or archived). Two display names that normalize to the same slug
  *  (e.g. "My App" and "my-app", or both collapsing to "project" because they
- *  contain no ASCII alphanumerics) are disambiguated with a numeric suffix. */
+ *  contain no ASCII alphanumerics) are disambiguated with a numeric suffix.
+ *
+ *  This becomes `ProjectInfo.id` and is computed once, at creation; renaming
+ *  a project must never recompute it (see AGENTS.md). */
 function uniqueProjectSlug(name: string, existingIds: Set<string>): string {
   const base = slugify(name);
   if (!existingIds.has(base)) {
@@ -390,6 +394,33 @@ export async function listProjects(): Promise<ProjectInfo[]> {
     .sort((a, b) => a.order - b.order);
 }
 
+/** Returns the first active project that already has `workingDir` among its
+ *  working directories, or null. Does not block creation of a duplicate;
+ *  callers use this to warn instead. */
+export function findProjectByWorkingDirectory(
+  projects: ProjectInfo[],
+  workingDir: string,
+  homeDir?: string,
+): ProjectInfo | null {
+  const normalized = normalizeWorkspacePath(
+    homeDir ? expandHomePath(workingDir, homeDir) : workingDir,
+  );
+  if (!normalized) return null;
+  const key = toIdentityKey(normalized);
+  for (const project of projects) {
+    if (project.archivedAt !== null) continue;
+    for (const dir of project.workingDirs) {
+      const candidate = normalizeWorkspacePath(
+        homeDir ? expandHomePath(dir, homeDir) : dir,
+      );
+      if (candidate && toIdentityKey(candidate) === key) {
+        return project;
+      }
+    }
+  }
+  return null;
+}
+
 export async function scanProjectIcons(
   workingDirs: string[],
 ): Promise<ProjectIconCandidate[]> {
@@ -414,6 +445,7 @@ export async function createProject(
     useWorktrees,
   ),
   environment?: ProjectEnvironment | null,
+  beforeCreateRpc?: () => void,
 ): Promise<ProjectInfo> {
   const client = await getClient();
   const existing = await listAllProjects();
@@ -432,6 +464,7 @@ export async function createProject(
     color,
     workingDirs: normalizedWorkingDirs,
   });
+  beforeCreateRpc?.();
   const raw = await client.goose.GooseUnstableSourcesCreate({
     type: "project",
     name: id,
@@ -549,8 +582,8 @@ export async function getProject(id: string): Promise<ProjectInfo> {
   return match;
 }
 
-/** List both archived and active projects. */
-async function listAllProjects(): Promise<ProjectInfo[]> {
+/** List both archived and active projects from one backend snapshot. */
+export async function listAllProjects(): Promise<ProjectInfo[]> {
   const client = await getClient();
   const raw = await client.goose.GooseUnstableSourcesList({
     type: "project",
