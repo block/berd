@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { gunzipSync } from "node:zlib";
 import { parse as parseYaml } from "yaml";
 
 const repo = resolve(import.meta.dirname, "../../..");
@@ -1107,7 +1108,7 @@ printf 'fake-signature\r\n' > "$payload.sig"
 });
 
 describe("package-signed-updater", () => {
-  it("uses the version/platform-qualified filename and keeps Berd.app at archive root", async () => {
+  it("keeps Berd.app at the archive root without AppleDouble entries", async () => {
     const dir = await tempDir();
     const app = join(dir, "Berd.app");
     const zip = join(dir, "Berd.app.zip");
@@ -1161,6 +1162,26 @@ set -euo pipefail
     const listing = run("tar", ["-tzf", archive]);
     expect(listing.status, listing.stderr).toBe(0);
     expect(listing.stdout.split("\n")[0]).toBe("Berd.app/");
+    // macOS tar hides AppleDouble entries when listing, but Tauri's Rust
+    // extractor sees them and cannot unpack the root-level ._Berd.app.
+    const tar = gunzipSync(await readFile(archive));
+    const entries = [];
+    for (let offset = 0; offset + 512 <= tar.length; ) {
+      const header = tar.subarray(offset, offset + 512);
+      const name = header.subarray(0, 100).toString().replace(/\0.*$/, "");
+      if (!name) break;
+      entries.push(name);
+      const size = Number.parseInt(
+        header.subarray(124, 136).toString().replace(/\0.*$/, "").trim() || "0",
+        8,
+      );
+      offset += 512 + Math.ceil(size / 512) * 512;
+    }
+    expect(
+      entries.filter((name) =>
+        name.split("/").some((part) => part.startsWith("._")),
+      ),
+    ).toEqual([]);
     expect(await readFile(`${archive}.sig`, "utf8")).toBe("fake-signature");
     expect(await readFile(`${archive}.sha256`, "utf8")).toContain(
       "Berd_1.2.3_darwin-aarch64.app.tar.gz",
