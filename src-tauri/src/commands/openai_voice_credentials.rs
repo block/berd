@@ -26,13 +26,13 @@ impl OpenAiVoiceCredential {
     const fn missing_message(self) -> &'static str {
         match self {
             Self::SpeechToText => {
-                "OpenAI speech-to-text is not configured. Add the shared OpenAI voice API key in Voice settings, then try again."
+                "OpenAI speech-to-text is not configured. Add an API key for the selected transcription URL in Voice settings, then try again."
             }
             Self::TextToSpeech => {
-                "OpenAI text-to-speech is not configured. Add the shared OpenAI voice API key in Voice settings, then try again."
+                "OpenAI text-to-speech is not configured. Add an API key for the selected playback URL in Voice settings, then try again."
             }
             Self::Realtime => {
-                "OpenAI Realtime voice is not configured. Add the shared OpenAI voice API key in Voice settings, then try again."
+                "OpenAI Realtime voice is not configured. Add an API key for the selected Realtime URL in Voice settings, then try again."
             }
         }
     }
@@ -167,5 +167,18 @@ mod tests {
             ),
             account_for_url(VoiceEndpointKind::Realtime, "wss://other.test/v1/realtime")
         );
+    }
+
+    #[test]
+    fn missing_key_guidance_applies_to_the_selected_endpoint() {
+        for credential in [
+            OpenAiVoiceCredential::SpeechToText,
+            OpenAiVoiceCredential::TextToSpeech,
+            OpenAiVoiceCredential::Realtime,
+        ] {
+            let message = credential.missing_message();
+            assert!(message.contains("selected"));
+            assert!(!message.contains("shared"));
+        }
     }
 }

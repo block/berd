@@ -99,7 +99,11 @@ const openAiStatusState = vi.hoisted(() => ({
 }));
 const openAiApiMocks = vi.hoisted(() => ({
   getEndpoints: vi.fn(() =>
-    Promise.resolve({ realtime: null, stt: null, tts: null }),
+    Promise.resolve({
+      realtime: null as string | null,
+      stt: null as string | null,
+      tts: null as string | null,
+    }),
   ),
   setEndpoint: vi.fn(() => Promise.resolve()),
   setSttApiKey: vi.fn(() => Promise.resolve()),
@@ -336,6 +340,11 @@ describe("VoiceSettings", () => {
     openAiApiMocks.setSttApiKey.mockClear();
     openAiApiMocks.clearSttApiKey.mockClear();
     openAiApiMocks.setSpeechVoice.mockClear();
+    openAiApiMocks.getEndpoints.mockReset().mockResolvedValue({
+      realtime: null,
+      stt: null,
+      tts: null,
+    });
     openAiApiMocks.resetAll.mockReset().mockResolvedValue(undefined);
     openAiApiMocks.resetPocket.mockClear();
     openAiApiMocks.resetSiri.mockClear();
@@ -628,9 +637,7 @@ describe("VoiceSettings", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Playback speed")).toBeInTheDocument();
     expect(
-      screen.getAllByText(
-        "Saved securely and shared by OpenAI transcription and voice playback.",
-      ),
+      screen.getAllByText("Saved securely for this endpoint URL."),
     ).toHaveLength(2);
   });
 
@@ -708,12 +715,39 @@ describe("VoiceSettings", () => {
 
     expect(
       await screen.findByText(
-        "OpenAI transcription is not ready. Add the shared OpenAI voice API key below, then try again.",
+        "OpenAI transcription is not ready. Add an API key for the selected transcription URL below, then try again.",
       ),
     ).toBeInTheDocument();
     expect(
       screen.queryByText(/Parakeet STT is not installed/),
     ).not.toBeInTheDocument();
+  });
+
+  it("does not call a custom endpoint key shared", async () => {
+    inputState.backend = "openai";
+    outputState.backend = "openai";
+    openAiStatusState.current = {
+      ...openAiStatusState.current,
+      sttConfigured: false,
+      ttsConfigured: false,
+      unavailableReason: "missingApiKey",
+    };
+    openAiApiMocks.getEndpoints.mockResolvedValue({
+      realtime: null,
+      stt: "ws://127.0.0.1:18870/v1/realtime?intent=transcription",
+      tts: "http://127.0.0.1:18870/v1/audio/speech",
+    });
+    setupState.current = setup(pocketStatus());
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      await screen.findByDisplayValue(
+        "ws://127.0.0.1:18870/v1/realtime?intent=transcription",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryAllByText(/shared OpenAI|shared by OpenAI|their shared/i),
+    ).toHaveLength(0);
   });
 
   it("reports missing OpenAI input and Pocket output together", async () => {
@@ -729,7 +763,7 @@ describe("VoiceSettings", () => {
 
     expect(
       await screen.findByText(
-        "The shared OpenAI voice API key is missing, and Pocket TTS is not installed. Complete both steps below to use Voice Conversation.",
+        "The API key for the selected transcription URL is missing, and Pocket TTS is not installed. Complete both steps below to use Voice Conversation.",
       ),
     ).toBeInTheDocument();
   });
@@ -757,7 +791,7 @@ describe("VoiceSettings", () => {
 
     expect(
       await screen.findByText(
-        "The shared OpenAI voice API key is missing, and no installed Siri voice is selected. Complete both steps below to use Voice Conversation.",
+        "The API key for the selected transcription URL is missing, and no installed Siri voice is selected. Complete both steps below to use Voice Conversation.",
       ),
     ).toBeInTheDocument();
   });
@@ -792,7 +826,7 @@ describe("VoiceSettings", () => {
 
     expect(
       await screen.findByText(
-        "OpenAI voice playback is not ready. Add the shared OpenAI voice API key below, then try again.",
+        "OpenAI voice playback is not ready. Add an API key for the selected playback URL below, then try again.",
       ),
     ).toBeInTheDocument();
     expect(
