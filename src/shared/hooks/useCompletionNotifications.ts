@@ -271,6 +271,7 @@ export function useCompletionNotifications(
                         requestOpenSettings("notifications");
                       }
                     : undefined,
+                  durationSeconds: currentPrefs.toastDurationSeconds,
                 });
               },
             );

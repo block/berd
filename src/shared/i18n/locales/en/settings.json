@@ -469,7 +469,16 @@
       "silent": "Silent",
       "youHaveGotGoose": "Twinkle"
     },
-    "title": "Notifications"
+    "title": "Notifications",
+    "toastDuration": {
+      "autoDismiss": "Auto-dismiss after a delay",
+      "description": "How long an in-app notification stays on screen before it disappears.",
+      "label": "Notification duration",
+      "never": "Stays until dismissed",
+      "neverDismiss": "Keep on screen until dismissed",
+      "seconds_one": "{{count}} second",
+      "seconds_other": "{{count}} seconds"
+    }
   },
   "privacy": {
     "telemetry": {

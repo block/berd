@@ -1,9 +1,11 @@
 import { toast } from "sonner";
 import { ToastActionButton, ToastActionGroup } from "@/shared/ui/sonner";
+import {
+  DEFAULT_TOAST_DURATION_SECONDS,
+  toastDurationSecondsToMs,
+} from "@/shared/notifications/toastDuration";
 
 export type CompletionNotificationOutcome = "completed" | "error" | "stopped";
-
-const TOAST_DURATION_MS = 8000;
 
 export function getCompletionToastDescription(
   outcome: CompletionNotificationOutcome,
@@ -18,11 +20,13 @@ export function showCompletionNotificationToast({
   outcome,
   onView,
   onChangeSound,
+  durationSeconds = DEFAULT_TOAST_DURATION_SECONDS,
 }: {
   title: string;
   outcome: CompletionNotificationOutcome;
   onView: () => void;
   onChangeSound?: () => void;
+  durationSeconds?: number;
 }): void {
   let toastId: string | number | undefined;
   const handleView = () => {
@@ -58,7 +62,7 @@ export function showCompletionNotificationToast({
   const options = {
     action,
     description: getCompletionToastDescription(outcome),
-    duration: TOAST_DURATION_MS,
+    duration: toastDurationSecondsToMs(durationSeconds),
   };
 
   if (outcome === "error") {
