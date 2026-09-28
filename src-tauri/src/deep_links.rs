@@ -45,7 +45,9 @@ fn handle_urls<R: Runtime>(app: AppHandle<R>, urls: Vec<Url>) {
             }
         }
     }
-    if !requested_update || opened_session {
+    // A background update request alone must not bring Berd to the foreground.
+    let update_check_only = requested_update && !opened_session;
+    if !update_check_only {
         focus_main_window(&app, opened_session);
     }
 }
