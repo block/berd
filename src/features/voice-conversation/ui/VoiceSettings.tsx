@@ -158,6 +158,7 @@ export function VoiceSettings() {
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
+  const [endpointResetRevision, setEndpointResetRevision] = useState(0);
   const input = useVoiceInputPreference(
     isMacSpeechAvailable(macSpeechSetup.status, macSpeechSetup.loading),
   );
@@ -238,6 +239,7 @@ export function VoiceSettings() {
     setResetError(null);
     try {
       await resetAllVoiceBackendSettings();
+      setEndpointResetRevision((revision) => revision + 1);
       await setup.refreshSettings();
       await siriSetup.refreshSettings();
       setRealtimeVoicePreference(getDefaultRealtimeVoicePreference());
@@ -393,6 +395,7 @@ export function VoiceSettings() {
                 input.backend === "openai" ? (
                   <div className="space-y-2">
                     <OpenAiEndpointField
+                      key={`stt-${endpointResetRevision}`}
                       kind="stt"
                       label={t("voice.openAiSttEndpoint")}
                       keyLabel={t("voice.openAiSttApiKey")}
@@ -486,6 +489,7 @@ export function VoiceSettings() {
                 output.backend === "openai" ? (
                   <div className="space-y-2">
                     <OpenAiEndpointField
+                      key={`tts-${endpointResetRevision}`}
                       kind="tts"
                       label={t("voice.openAiTtsEndpoint")}
                       keyLabel={t("voice.openAiTtsApiKey")}

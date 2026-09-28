@@ -39,6 +39,7 @@ export function OpenAiEndpointField({
   const [localKeyStatus, setLocalKeyStatus] = useState<{
     url: string;
     configured: boolean;
+    observedConfigured: boolean;
   } | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [loaded, setLoaded] = useState(false);
@@ -69,7 +70,8 @@ export function OpenAiEndpointField({
   const changed = url.trim() !== savedUrl;
   const keyConfigured =
     !changed &&
-    (localKeyStatus?.url === savedUrl
+    (localKeyStatus?.url === savedUrl &&
+    localKeyStatus.observedConfigured === configured
       ? localKeyStatus.configured
       : statusUrl === savedUrl && configured);
 
@@ -87,18 +89,28 @@ export function OpenAiEndpointField({
         targetUrl = (await getOpenAiVoiceEndpoints())[kind] ?? "";
         setUrl(targetUrl);
         setSavedUrl(targetUrl);
-        setLocalKeyStatus({ url: targetUrl, configured: false });
+        setStatusUrl(targetUrl);
+        setLocalKeyStatus({
+          url: targetUrl,
+          configured: false,
+          observedConfigured: configured,
+        });
       }
       if (savingKey) {
         await onSaveKey(apiKey);
         setApiKey("");
-        setLocalKeyStatus({ url: targetUrl, configured: true });
+        setLocalKeyStatus({
+          url: targetUrl,
+          configured: true,
+          observedConfigured: configured,
+        });
       } else if (changed) {
         // Metadata-only lookup; never request the Keychain secret to render settings.
         const status = await getOpenAiVoiceStatus();
         setLocalKeyStatus({
           url: targetUrl,
           configured: status[`${kind}Configured`],
+          observedConfigured: configured,
         });
       }
     } catch (cause) {
@@ -124,7 +136,11 @@ export function OpenAiEndpointField({
     try {
       await onClearKey();
       setApiKey("");
-      setLocalKeyStatus({ url: savedUrl, configured: false });
+      setLocalKeyStatus({
+        url: savedUrl,
+        configured: false,
+        observedConfigured: configured,
+      });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
