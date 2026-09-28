@@ -19,10 +19,25 @@ pub const BB_SKILLS_PROFILE_ENV_VAR: &str = "BB_SKILLS_PROFILE";
 pub const DEFAULT_PROFILE_NAME: &str = "default";
 pub const PREFERENCES_FILE_NAME: &str = "config.yaml";
 
+/// `<home>/.bb`, where home is `HOME`, or `USERPROFILE` on Windows when a
+/// native process has no `HOME` (Git Bash exports one; cmd, PowerShell, and
+/// the desktop app do not). Only when neither exists does this fall back to a
+/// working-directory-relative `.bb`, so bb state and the file-backed browser
+/// auth store normally live in an absolute per-user location.
 pub fn default_bb_home() -> PathBuf {
-    env::var("HOME")
-        .map(|home| PathBuf::from(home).join(".bb"))
-        .unwrap_or_else(|_| PathBuf::from(".bb"))
+    let home = env::var_os("HOME")
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            if cfg!(windows) {
+                env::var_os("USERPROFILE").filter(|value| !value.is_empty())
+            } else {
+                None
+            }
+        });
+    match home {
+        Some(home) => PathBuf::from(home).join(".bb"),
+        None => PathBuf::from(".bb"),
+    }
 }
 
 pub fn default_preferences_path(bb_home: &Path) -> PathBuf {
