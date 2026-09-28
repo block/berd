@@ -98,7 +98,7 @@ fn is_present_account(account: &str) -> Result<bool, String> {
         match ItemSearchOptions::new()
             .class(ItemClass::generic_password())
             .service(KEYCHAIN_SERVICE)
-            .account(&account)
+            .account(account)
             .load_attributes(true)
             .skip_authenticated_items(true)
             .search()
@@ -110,7 +110,7 @@ fn is_present_account(account: &str) -> Result<bool, String> {
     }
     #[cfg(not(target_os = "macos"))]
     {
-        Ok(read_account(&account)?.is_some())
+        Ok(read_account(account)?.is_some())
     }
 }
 
