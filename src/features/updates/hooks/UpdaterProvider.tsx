@@ -16,6 +16,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { probeKgooseConnectivity } from "@/shared/api/connectivity";
 
+const CHECK_UPDATE_EVENT = "berd:check-update";
+
 export type UpdateStatus =
   | "unavailable"
   | "idle"
@@ -599,7 +601,7 @@ export function UpdaterProvider({
     if (!nativeUpdaterEnabled) return;
     let cancelled = false;
     let unlisten: (() => void) | undefined;
-    void listen("berd:check-update", () => {
+    void listen(CHECK_UPDATE_EVENT, () => {
       void checkForUpdate({ background: true, quiet: true });
     })
       .then((nextUnlisten) => {

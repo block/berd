@@ -6,6 +6,8 @@ use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_deep_link::DeepLinkExt;
 use url::Url;
 
+const CHECK_UPDATE_EVENT: &str = "berd:check-update";
+
 #[cfg(feature = "berdctl")]
 const SESSION_DEEP_LINK_ERROR_EVENT: &str = "berd:session-deep-link-error";
 
@@ -34,7 +36,7 @@ fn handle_urls<R: Runtime>(app: AppHandle<R>, urls: Vec<Url>) {
         log::info!("Received deep link: {url}");
         if is_update_check_link(&url) {
             requested_update = true;
-            if let Err(error) = app.emit("berd:check-update", ()) {
+            if let Err(error) = app.emit(CHECK_UPDATE_EVENT, ()) {
                 log::warn!("Failed to request a background update check: {error}");
             }
             continue;
