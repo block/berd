@@ -85,6 +85,7 @@ export default defineConfig({
       name: "voice-conversation",
       testMatch: [
         "**/voice-conversation.spec.ts",
+        "**/voice-endpoints.spec.ts",
         "**/voice-settings-visual.spec.ts",
       ],
       use: {
