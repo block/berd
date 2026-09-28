@@ -17,6 +17,7 @@ dependencies = [
  "dirs",
  "doctor",
  "dunce",
+ "errno",
  "etcetera 0.11.0",
  "fern",
  "flate2",
