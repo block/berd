@@ -84,6 +84,14 @@ pub(crate) fn read(credential: OpenAiVoiceCredential) -> Result<Option<String>, 
 /// Check only Keychain item metadata; status polling must never request secret access.
 pub(crate) fn is_present(credential: OpenAiVoiceCredential) -> Result<bool, String> {
     let account = account(credential)?;
+    is_present_account(&account)
+}
+
+pub(crate) fn is_default_present() -> Result<bool, String> {
+    is_present_account(KEYCHAIN_ACCOUNT)
+}
+
+fn is_present_account(account: &str) -> Result<bool, String> {
     #[cfg(target_os = "macos")]
     {
         use security_framework::item::{ItemClass, ItemSearchOptions};
@@ -119,6 +127,12 @@ pub(crate) fn clear(credential: OpenAiVoiceCredential) -> Result<(), String> {
 
 pub(crate) fn require(credential: OpenAiVoiceCredential) -> Result<String, String> {
     read(credential)?.ok_or_else(|| credential.missing_message().to_string())
+}
+
+pub(crate) fn require_default_realtime() -> Result<String, String> {
+    read_account(KEYCHAIN_ACCOUNT)?.ok_or_else(|| {
+        "OpenAI Realtime dictation needs an API key for the default OpenAI endpoint".to_string()
+    })
 }
 
 #[cfg(test)]

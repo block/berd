@@ -78,7 +78,7 @@ pub struct OpenAiRealtimeSession {
 
 #[tauri::command]
 pub async fn get_openai_realtime_status() -> Result<OpenAiRealtimeStatus, String> {
-    let configured = openai_voice_credentials::is_present(OpenAiVoiceCredential::Realtime)?;
+    let configured = openai_voice_credentials::is_default_present()?;
 
     Ok(OpenAiRealtimeStatus { configured })
 }
@@ -103,11 +103,7 @@ pub fn clear_openai_realtime_api_key(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn create_openai_realtime_session() -> Result<OpenAiRealtimeSession, String> {
-    let endpoint = openai_voice_endpoints::effective_url(VoiceEndpointKind::Realtime)?;
-    if endpoint != VoiceEndpointKind::Realtime.default_url() {
-        return Err("Realtime dictation requires the default OpenAI endpoint; custom Realtime URLs are supported for Expert-Spokesperson conversations".into());
-    }
-    let api_key = openai_voice_credentials::require(OpenAiVoiceCredential::Realtime)?;
+    let api_key = openai_voice_credentials::require_default_realtime()?;
     let response = realtime_transcription_client_secret_request(&reqwest::Client::new(), &api_key)
         .send()
         .await
