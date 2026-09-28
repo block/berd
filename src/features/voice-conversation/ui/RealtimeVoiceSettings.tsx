@@ -31,7 +31,6 @@ import {
   setOpenAiRealtimeApiKey,
 } from "../api/openAiVoice";
 import { useOpenAiVoiceSetup } from "../hooks/useOpenAiVoiceSetup";
-import { OpenAiApiKeyField } from "./OpenAiApiKeyField";
 import { OpenAiEndpointField } from "./OpenAiEndpointField";
 import { PlaybackSpeedRow } from "./PlaybackSpeedRow";
 import { SimpleVoicePickerDialog } from "./SimpleVoicePickerDialog";
@@ -132,13 +131,10 @@ export function RealtimeVoiceSettings() {
         <OpenAiEndpointField
           kind="realtime"
           label={t("voice.realtimeEndpoint")}
-        />
-        <OpenAiApiKeyField
-          label={t("voice.realtimeApiKey")}
+          keyLabel={t("voice.realtimeApiKey")}
           configured={openAiStatus?.realtimeConfigured ?? false}
-          onSave={setOpenAiRealtimeApiKey}
-          onClear={clearOpenAiRealtimeApiKey}
-          description={t("voice.realtimeApiKeyDescription")}
+          onSaveKey={setOpenAiRealtimeApiKey}
+          onClearKey={clearOpenAiRealtimeApiKey}
         />
       </div>
 

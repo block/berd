@@ -27,7 +27,7 @@ test.use({ screenshot: "off", trace: "off", video: "off" });
 async function saveEndpoint(page: Page, label: string, url: string) {
   const input = page.getByLabel(label);
   await input.fill(url);
-  await input.locator("..").getByRole("button", { name: "Save URL" }).click();
+  await input.locator("..").getByRole("button", { name: "Save" }).click();
   await expect(input).toHaveValue(url);
 }
 

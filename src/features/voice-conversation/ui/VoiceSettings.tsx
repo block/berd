@@ -62,7 +62,6 @@ import { SiriVoiceSettings } from "./SiriVoiceSettings";
 import { PlaybackSpeedRow } from "./PlaybackSpeedRow";
 import { SimpleVoicePickerDialog } from "./SimpleVoicePickerDialog";
 import { useOpenAiVoiceSetup } from "../hooks/useOpenAiVoiceSetup";
-import { OpenAiApiKeyField } from "./OpenAiApiKeyField";
 import { OpenAiEndpointField } from "./OpenAiEndpointField";
 import { RealtimeVoiceSettings } from "./RealtimeVoiceSettings";
 import {
@@ -396,12 +395,10 @@ export function VoiceSettings() {
                     <OpenAiEndpointField
                       kind="stt"
                       label={t("voice.openAiSttEndpoint")}
-                    />
-                    <OpenAiApiKeyField
-                      label={t("voice.openAiSttApiKey")}
+                      keyLabel={t("voice.openAiSttApiKey")}
                       configured={openAiStatus?.sttConfigured ?? false}
-                      onSave={setOpenAiSttApiKey}
-                      onClear={clearOpenAiSttApiKey}
+                      onSaveKey={setOpenAiSttApiKey}
+                      onClearKey={clearOpenAiSttApiKey}
                     />
                     <p className="text-xs text-muted-foreground">
                       {openAiError ??
@@ -491,12 +488,10 @@ export function VoiceSettings() {
                     <OpenAiEndpointField
                       kind="tts"
                       label={t("voice.openAiTtsEndpoint")}
-                    />
-                    <OpenAiApiKeyField
-                      label={t("voice.openAiTtsApiKey")}
+                      keyLabel={t("voice.openAiTtsApiKey")}
                       configured={openAiStatus?.ttsConfigured ?? false}
-                      onSave={setOpenAiTtsApiKey}
-                      onClear={clearOpenAiTtsApiKey}
+                      onSaveKey={setOpenAiTtsApiKey}
+                      onClearKey={clearOpenAiTtsApiKey}
                     />
                     <p className="text-xs text-muted-foreground">
                       {openAiError ??

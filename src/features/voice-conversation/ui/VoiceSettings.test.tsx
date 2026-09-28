@@ -98,6 +98,9 @@ const openAiStatusState = vi.hoisted(() => ({
   },
 }));
 const openAiApiMocks = vi.hoisted(() => ({
+  getStatus: vi.fn(() =>
+    Promise.resolve({ sttKeySaved: false, ttsKeySaved: false }),
+  ),
   getEndpoints: vi.fn(() =>
     Promise.resolve({
       realtime: null as string | null,
@@ -120,6 +123,7 @@ vi.mock("../api/openAiVoice", () => ({
   setOpenAiRealtimeApiKey: vi.fn(() => Promise.resolve()),
   clearOpenAiRealtimeApiKey: vi.fn(() => Promise.resolve()),
   getOpenAiVoiceEndpoints: openAiApiMocks.getEndpoints,
+  getOpenAiVoiceStatus: openAiApiMocks.getStatus,
   setOpenAiVoiceEndpoint: openAiApiMocks.setEndpoint,
   setOpenAiPlaybackSpeed: vi.fn(() => Promise.resolve()),
   setOpenAiSpeechVoice: openAiApiMocks.setSpeechVoice,
@@ -637,7 +641,7 @@ describe("VoiceSettings", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Playback speed")).toBeInTheDocument();
     expect(
-      screen.getAllByText("Saved securely for this endpoint URL."),
+      screen.getAllByText("Key saved for this URL in macOS Keychain."),
     ).toHaveLength(2);
   });
 
@@ -651,9 +655,37 @@ describe("VoiceSettings", () => {
       screen.getByLabelText("OpenAI speech-to-text API key"),
       "stt-secret",
     );
-    await user.click(screen.getAllByRole("button", { name: "Save key" })[0]);
+    await user.click(screen.getAllByRole("button", { name: "Save" })[0]);
 
     expect(openAiApiMocks.setSttApiKey).toHaveBeenCalledWith("stt-secret");
+  });
+
+  it.each([
+    ["stt", "Speech-to-text endpoint URL", "OpenAI speech-to-text API key"],
+    ["tts", "Text-to-speech endpoint URL", "OpenAI text-to-speech API key"],
+  ] as const)("saves a custom %s URL before its key with one click", async (kind, urlLabel, keyLabel) => {
+    inputState.backend = kind === "stt" ? "openai" : "parakeet";
+    outputState.backend = kind === "tts" ? "openai" : "pocket";
+    setupState.current = setup(pocketStatus());
+    renderWithProviders(<VoiceSettings />);
+    const user = userEvent.setup();
+    const url =
+      kind === "stt"
+        ? "ws://127.0.0.1:18870/v1/realtime?intent=transcription"
+        : "http://127.0.0.1:18870/v1/audio/speech";
+    await user.type(screen.getByLabelText(urlLabel), url);
+    await user.type(screen.getByLabelText(keyLabel), "local-test");
+    expect(screen.getAllByRole("button", { name: "Save" })).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    const saveKey =
+      kind === "stt"
+        ? openAiApiMocks.setSttApiKey
+        : openAiApiMocks.setTtsApiKey;
+    expect(openAiApiMocks.setEndpoint).toHaveBeenCalledWith(kind, url);
+    expect(saveKey).toHaveBeenCalledWith("local-test");
+    expect(openAiApiMocks.setEndpoint.mock.invocationCallOrder[0]).toBeLessThan(
+      saveKey.mock.invocationCallOrder[0],
+    );
   });
 
   it("labels purpose-specific environment overrides", async () => {
@@ -698,7 +730,7 @@ describe("VoiceSettings", () => {
       screen.getByLabelText("OpenAI text-to-speech API key"),
       "tts-secret",
     );
-    await user.click(screen.getByRole("button", { name: "Save key" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(openAiApiMocks.setTtsApiKey).toHaveBeenCalledWith("tts-secret");
   });
