@@ -157,7 +157,7 @@ export function OpenAiEndpointField({
         type="password"
         value={apiKey}
         onChange={(event) => setApiKey(event.target.value)}
-        placeholder={keyConfigured ? "••••••••" : "sk-…"}
+        placeholder={keyConfigured ? "••••••••••••••••••••" : "sk-…"}
         autoComplete="off"
         spellCheck={false}
       />

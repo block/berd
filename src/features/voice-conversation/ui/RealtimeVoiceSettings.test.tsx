@@ -115,7 +115,7 @@ describe("RealtimeVoiceSettings", () => {
     ).toBeInTheDocument();
     const input = screen.getByLabelText("OpenAI API key");
     expect(input).toHaveValue("");
-    expect(input).toHaveAttribute("placeholder", "••••••••");
+    expect(input).toHaveAttribute("placeholder", "••••••••••••••••••••");
   });
 
   it("saves a URL without a key but shows that it cannot be used yet", async () => {
@@ -131,6 +131,10 @@ describe("RealtimeVoiceSettings", () => {
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(openAiVoiceMocks.setApiKey).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("OpenAI API key")).toHaveAttribute(
+      "placeholder",
+      "sk-…",
+    );
     expect(
       await screen.findByText(
         "No key set. Enter a key for this URL before using it. Default OpenAI endpoints share one key.",
