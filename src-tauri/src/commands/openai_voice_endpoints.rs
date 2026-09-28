@@ -9,6 +9,8 @@ pub(crate) const REALTIME_DEFAULT: &str = "wss://api.openai.com/v1/realtime";
 pub(crate) const STT_DEFAULT: &str = "wss://api.openai.com/v1/realtime?intent=transcription";
 pub(crate) const TTS_DEFAULT: &str = "https://api.openai.com/v1/audio/speech";
 const SETTINGS_CHANGED_EVENT: &str = "openai-voice:settings-changed";
+const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
+const BASE_URL_ENV: &str = "BERD_OPENAI_VOICE_BASE_URL";
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -99,14 +101,58 @@ fn validate(kind: VoiceEndpointKind, raw: &str) -> Result<Option<String>, String
     };
     if !allowed.contains(&url.scheme())
         || url.host_str().is_none()
+        || (matches!(url.scheme(), "http" | "ws") && !is_loopback(&url))
         || !url.username().is_empty()
         || url.password().is_some()
         || url.fragment().is_some()
     {
-        return Err("Endpoint must be an absolute URL with the correct protocol and no embedded credentials or fragment".into());
+        return Err("Endpoint must be a full URL with the correct protocol, HTTPS/WSS outside loopback, and no embedded credentials or fragment".into());
     }
     url.set_fragment(None);
     Ok(Some(url.to_string()))
+}
+
+fn is_loopback(url: &url::Url) -> bool {
+    match url.host() {
+        Some(url::Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(address)) => address.is_loopback(),
+        Some(url::Host::Ipv6(address)) => address.is_loopback(),
+        None => false,
+    }
+}
+
+fn normalize_base_url(raw_url: String) -> Result<String, String> {
+    let mut url = url::Url::parse(&raw_url)
+        .map_err(|error| format!("OpenAI voice endpoint is invalid: {error}"))?;
+    if url.scheme() != "https" {
+        return Err("OpenAI voice endpoint must use HTTPS".to_string());
+    }
+    let path = url.path().trim_end_matches('/').to_string();
+    if path.is_empty() {
+        url.set_path("/v1");
+    } else {
+        url.set_path(&path);
+    }
+    url.set_fragment(None);
+    Ok(url.to_string().trim_end_matches('/').to_string())
+}
+
+fn base_url() -> Result<String, String> {
+    let base = std::env::var(BASE_URL_ENV)
+        .ok()
+        .map(|value| value.trim().to_string());
+    match base.filter(|value| !value.is_empty()) {
+        Some(base) => normalize_base_url(base),
+        None => Ok(DEFAULT_BASE_URL.to_string()),
+    }
+}
+
+fn endpoint_for_base_url(base_url: &str, path: &str) -> Result<String, String> {
+    let mut url = url::Url::parse(base_url)
+        .map_err(|error| format!("OpenAI voice endpoint is invalid: {error}"))?;
+    let base_path = url.path().trim_end_matches('/');
+    url.set_path(&format!("{base_path}/{}", path.trim_start_matches('/')));
+    Ok(url.to_string())
 }
 
 pub(crate) fn effective_url(kind: VoiceEndpointKind) -> Result<String, String> {
@@ -116,13 +162,13 @@ pub(crate) fn effective_url(kind: VoiceEndpointKind) -> Result<String, String> {
     if !matches!(kind, VoiceEndpointKind::Realtime)
         && std::env::var_os("BERD_OPENAI_VOICE_BASE_URL").is_some()
     {
-        let base = super::openai_audio::base_url()?;
+        let base = base_url()?;
         let path = match kind {
             VoiceEndpointKind::Stt => "realtime",
             VoiceEndpointKind::Tts => "audio/speech",
             VoiceEndpointKind::Realtime => unreachable!(),
         };
-        let mut url = url::Url::parse(&super::openai_audio::endpoint_for_base_url(&base, path)?)
+        let mut url = url::Url::parse(&endpoint_for_base_url(&base, path)?)
             .map_err(|error| format!("Invalid OpenAI voice endpoint: {error}"))?;
         if matches!(kind, VoiceEndpointKind::Stt) {
             url.set_scheme("wss").expect("https can become wss");
@@ -156,9 +202,35 @@ pub(crate) fn reset() -> Result<(), String> {
     persist(&VoiceEndpointSettings::default())
 }
 
+pub(crate) fn restore(settings: &VoiceEndpointSettings) -> Result<(), String> {
+    persist(settings)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_base_url_keeps_the_v1_root_and_custom_path() {
+        assert_eq!(
+            normalize_base_url("https://proxy.example".into()).unwrap(),
+            "https://proxy.example/v1"
+        );
+        assert_eq!(
+            normalize_base_url("https://proxy.example/v1/".into()).unwrap(),
+            "https://proxy.example/v1"
+        );
+        assert_eq!(
+            normalize_base_url("http://proxy.example".into()).unwrap_err(),
+            "OpenAI voice endpoint must use HTTPS"
+        );
+        let base = normalize_base_url("https://proxy.example/openai?api-version=2026-01-01".into())
+            .unwrap();
+        assert_eq!(
+            endpoint_for_base_url(&base, "audio/speech").unwrap(),
+            "https://proxy.example/openai/audio/speech?api-version=2026-01-01"
+        );
+    }
 
     #[test]
     fn endpoints_are_full_urls_with_independent_openai_defaults() {
@@ -172,6 +244,14 @@ mod tests {
         )
         .is_ok());
         assert!(validate(VoiceEndpointKind::Tts, "wss://example.test/audio/speech").is_err());
+        assert!(validate(VoiceEndpointKind::Tts, "http://example.test/audio/speech").is_err());
+        assert!(validate(VoiceEndpointKind::Stt, "ws://example.test/realtime").is_err());
+        assert!(validate(
+            VoiceEndpointKind::Tts,
+            "http://localhost:18870/v1/audio/speech"
+        )
+        .is_ok());
+        assert!(validate(VoiceEndpointKind::Stt, "ws://[::1]:18870/v1/realtime").is_ok());
         assert!(validate(
             VoiceEndpointKind::Realtime,
             "wss://key@example.test/realtime"

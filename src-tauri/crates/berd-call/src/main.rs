@@ -5324,11 +5324,18 @@ fn parse_endpoint_url(value: &str, flag: &str, websocket: bool) -> Result<String
     };
     if !valid_scheme
         || url.host_str().is_none()
+        || (matches!(url.scheme(), "http" | "ws") && !url.host_str().is_some_and(|host| {
+            host.eq_ignore_ascii_case("localhost")
+                || host
+                    .trim_matches(['[', ']'])
+                    .parse::<std::net::IpAddr>()
+                    .is_ok_and(|address| address.is_loopback())
+        }))
         || !url.username().is_empty()
         || url.password().is_some()
         || url.fragment().is_some()
     {
-        return Err(format!("{flag} requires a full URL with the correct protocol and no embedded credentials or fragment"));
+        return Err(format!("{flag} requires a full URL with the correct protocol, HTTPS/WSS outside loopback, and no embedded credentials or fragment"));
     }
     Ok(url.to_string())
 }
@@ -9641,6 +9648,9 @@ mod tests {
             chained.endpoints.stt.as_deref(),
             Some("wss://proxy.example/v1/realtime?intent=transcription")
         );
+        assert!(parse_endpoint_url("http://example.test/speech", "--tts-url", false).is_err());
+        assert!(parse_endpoint_url("ws://example.test/realtime", "--stt-url", true).is_err());
+        assert!(parse_endpoint_url("http://127.0.0.1:18870/speech", "--tts-url", false).is_ok());
         assert!(parse_args(&args(&[
             "berd-call",
             "session",

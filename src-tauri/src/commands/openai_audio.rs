@@ -38,7 +38,6 @@ use berd_call::input::InputDuringTtsPolicy;
 #[cfg(any(test, target_os = "macos"))]
 use std::time::Instant;
 
-const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 const DEFAULT_TRANSCRIPTION_MODEL: &str = "gpt-live-transcribe";
 const DEFAULT_TTS_MODEL: &str = "gpt-4o-mini-tts";
 const DEFAULT_TTS_VOICE: &str = "marin";
@@ -186,34 +185,6 @@ pub(crate) fn stt_api_key() -> Result<String, String> {
     openai_voice_credentials::require(OpenAiVoiceCredential::SpeechToText)
 }
 
-fn normalize_openai_base_url(raw_url: String) -> Result<String, String> {
-    let mut url = reqwest::Url::parse(&raw_url)
-        .map_err(|error| format!("OpenAI voice endpoint is invalid: {error}"))?;
-    if url.scheme() != "https" {
-        return Err("OpenAI voice endpoint must use HTTPS".to_string());
-    }
-    let path = url.path().trim_end_matches('/').to_string();
-    if path.is_empty() {
-        let path = if path.ends_with("/v1") {
-            path
-        } else {
-            format!("{path}/v1")
-        };
-        url.set_path(&path);
-    } else {
-        url.set_path(&path);
-    }
-    url.set_fragment(None);
-    Ok(url.to_string().trim_end_matches('/').to_string())
-}
-
-pub(crate) fn base_url() -> Result<String, String> {
-    if let Some(base_url) = env_trimmed(BASE_URL_ENV) {
-        return normalize_openai_base_url(base_url);
-    }
-    Ok(DEFAULT_BASE_URL.to_string())
-}
-
 pub(crate) fn realtime_endpoint() -> Result<String, String> {
     openai_voice_endpoints::effective_url(VoiceEndpointKind::Stt)
 }
@@ -250,14 +221,6 @@ fn stt_configuration_source() -> OpenAiVoiceConfigurationSource {
     } else {
         OpenAiVoiceConfigurationSource::Default
     }
-}
-
-pub(crate) fn endpoint_for_base_url(base_url: &str, path: &str) -> Result<String, String> {
-    let mut url = reqwest::Url::parse(base_url)
-        .map_err(|error| format!("OpenAI voice endpoint is invalid: {error}"))?;
-    let base_path = url.path().trim_end_matches('/');
-    url.set_path(&format!("{base_path}/{}", path.trim_start_matches('/')));
-    Ok(url.to_string())
 }
 
 fn voice_settings_path() -> Result<std::path::PathBuf, String> {
@@ -1161,43 +1124,6 @@ mod tests {
         assert!(active.load(Ordering::SeqCst));
         assert!(state.stop_for_window_destroyed("session-window"));
         assert!(!active.load(Ordering::SeqCst));
-    }
-
-    #[test]
-    fn voice_base_url_configuration_resolves_to_the_v1_api_root() {
-        assert_eq!(
-            normalize_openai_base_url("https://proxy.example".to_string()).unwrap(),
-            "https://proxy.example/v1"
-        );
-        assert_eq!(
-            normalize_openai_base_url("https://proxy.example/v1/".to_string()).unwrap(),
-            "https://proxy.example/v1"
-        );
-    }
-
-    #[test]
-    fn openai_voice_endpoints_require_https() {
-        assert_eq!(
-            normalize_openai_base_url("http://proxy.example".to_string())
-                .expect_err("plaintext endpoint must be rejected"),
-            "OpenAI voice endpoint must use HTTPS"
-        );
-    }
-
-    #[test]
-    fn openai_base_url_preserves_custom_paths_and_query_parameters() {
-        assert_eq!(
-            normalize_openai_base_url("https://proxy.example".to_string()).unwrap(),
-            "https://proxy.example/v1"
-        );
-        let base = normalize_openai_base_url(
-            "https://proxy.example/openai?api-version=2026-01-01".to_string(),
-        )
-        .unwrap();
-        assert_eq!(
-            endpoint_for_base_url(&base, "audio/speech").unwrap(),
-            "https://proxy.example/openai/audio/speech?api-version=2026-01-01"
-        );
     }
 
     #[test]
