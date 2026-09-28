@@ -27,7 +27,7 @@
     "format": "biome format --write .",
     "preview": "vite preview",
     "tauri": "tauri",
-    "test": "vitest run",
+    "test": "vitest run && node --test scripts/dco-signoff.test.mjs",
     "test:release-scripts": "vitest run --config vitest.release-scripts.config.ts",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
