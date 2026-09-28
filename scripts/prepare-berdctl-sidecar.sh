@@ -66,53 +66,29 @@ if [[ -z "$TARGET_DIR" ]]; then
   TARGET_DIR="${CARGO_TARGET_DIR:-src-tauri/target}"
 fi
 
-# Cargo nests output under the triple only when --target is passed.
-if [[ -n "$EXPLICIT_TRIPLE" ]]; then
-  BUILT="$TARGET_DIR/$TRIPLE/release/berdctl"
-else
-  BUILT="$TARGET_DIR/release/berdctl"
-fi
-
-if [[ ! -x "$BUILT" ]]; then
-  echo "Built berdctl binary not found at: $BUILT" >&2
-  exit 1
-fi
-
 OUT_DIR="src-tauri/binaries"
-OUT="$OUT_DIR/berdctl-$TRIPLE"
 mkdir -p "$OUT_DIR"
-cp "$BUILT" "$OUT"
-chmod +x "$OUT"
-echo "Staged berdctl sidecar: $OUT"
 
-if [[ "$BUNDLE_BERD_CALL" == "1" ]]; then
+stage_cli() {
+  local name="$1" built out
+  # Cargo nests output under the triple only when --target is passed.
   if [[ -n "$EXPLICIT_TRIPLE" ]]; then
-    CALL_BUILT="$TARGET_DIR/$TRIPLE/release/berd-call"
+    built="$TARGET_DIR/$TRIPLE/release/$name"
   else
-    CALL_BUILT="$TARGET_DIR/release/berd-call"
+    built="$TARGET_DIR/release/$name"
   fi
-  if [[ ! -x "$CALL_BUILT" ]]; then
-    echo "Built berd-call binary not found at: $CALL_BUILT" >&2
+  if [[ ! -x "$built" ]]; then
+    echo "Built $name binary not found at: $built" >&2
     exit 1
   fi
-  CALL_OUT="$OUT_DIR/berd-call-$TRIPLE"
-  cp "$CALL_BUILT" "$CALL_OUT"
-  chmod +x "$CALL_OUT"
-  echo "Staged berd-call sidecar: $CALL_OUT"
-fi
+  out="$OUT_DIR/$name-$TRIPLE"
+  cp "$built" "$out"
+  chmod +x "$out"
+  echo "Staged $name sidecar: $out"
+}
 
-if [[ -n "$EXPLICIT_TRIPLE" ]]; then
-  MONITOR_BUILT="$TARGET_DIR/$TRIPLE/release/berd-monitor"
-else
-  MONITOR_BUILT="$TARGET_DIR/release/berd-monitor"
+stage_cli berdctl
+if [[ "$BUNDLE_BERD_CALL" == "1" ]]; then
+  stage_cli berd-call
 fi
-
-if [[ ! -x "$MONITOR_BUILT" ]]; then
-  echo "Built berd-monitor binary not found at: $MONITOR_BUILT" >&2
-  exit 1
-fi
-
-MONITOR_OUT="$OUT_DIR/berd-monitor-$TRIPLE"
-cp "$MONITOR_BUILT" "$MONITOR_OUT"
-chmod +x "$MONITOR_OUT"
-echo "Staged berd-monitor sidecar: $MONITOR_OUT"
+stage_cli berd-monitor

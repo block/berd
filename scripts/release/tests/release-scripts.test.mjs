@@ -577,7 +577,8 @@ describe("build-macos Block-service feature seam", () => {
     );
     expect(config.bundle.externalBin).toContain("binaries/berd-call");
     expect(stage).toContain("CARGO_ARGS+=(-p berd-call)");
-    expect(stage).toContain('CALL_OUT="$OUT_DIR/berd-call-$TRIPLE"');
+    expect(stage).toContain("stage_cli berd-call");
+    expect(stage).toContain('out="$OUT_DIR/$name-$TRIPLE"');
     expect(release).toContain(
       './scripts/prepare-berdctl-sidecar.sh "$TARGET_TRIPLE"',
     );
