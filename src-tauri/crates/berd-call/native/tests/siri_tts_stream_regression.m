@@ -3,6 +3,28 @@
 
 #import "../siri_tts_bridge.m"
 
+@interface BerdRateRecordingRequest : NSObject
+@property(nonatomic, assign) float rate;
+@property(nonatomic, assign) NSUInteger rateAssignments;
+@end
+
+@implementation BerdRateRecordingRequest
+- (void)setRate:(float)rate {
+    _rate = rate;
+    _rateAssignments += 1;
+}
+@end
+
+static BOOL BerdTestExplicitUnitRate(NSError **error) {
+    BerdRateRecordingRequest *request = [BerdRateRecordingRequest new];
+    BerdSetSiriRequestRate(request, 1.0f);
+    if (request.rateAssignments != 1 || request.rate != 1.0f) {
+        if (error) *error = BerdError(106, @"Siri rate 1.0 was not set explicitly.");
+        return NO;
+    }
+    return YES;
+}
+
 @interface BerdCapturedSiriPacket : NSObject
 @property(nonatomic, strong) NSData *data;
 @property(nonatomic, assign) AudioStreamBasicDescription format;
@@ -211,6 +233,10 @@ static BerdAudioComparison BerdCompareAudio(NSData *actualData, NSData *expected
 int main(void) {
     @autoreleasepool {
         NSError *error = nil;
+        if (!BerdTestExplicitUnitRate(&error)) {
+            fprintf(stderr, "set Siri rate: %s\n", error.localizedDescription.UTF8String);
+            return 1;
+        }
         if (!BerdTestPCMNormalization(&error)) {
             fprintf(stderr, "normalize PCM: %s\n", error.localizedDescription.UTF8String);
             return 1;

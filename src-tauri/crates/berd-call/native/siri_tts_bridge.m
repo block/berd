@@ -201,6 +201,11 @@ typedef void (^BerdAudioHandler)(
     }
     if (completion) completion(error);
 }
+static void BerdSetSiriRequestRate(id request, float rate) {
+    if ([request respondsToSelector:@selector(setRate:)]) {
+        ((void (*)(id, SEL, float))objc_msgSend)(request, @selector(setRate:), rate);
+    }
+}
 - (void)synthesizeText:(NSString *)text language:(NSString *)language
              voiceName:(NSString *)voiceName rate:(float)rate
             completion:(void (^)(NSError *))completion {
@@ -218,9 +223,7 @@ typedef void (^BerdAudioHandler)(
     }
     typedef id (*InitializeRequest)(id, SEL, id, id);
     id request = ((InitializeRequest)objc_msgSend)([requestClass alloc], selector, text, voice);
-    if (rate != 1.0f && [request respondsToSelector:@selector(setRate:)]) {
-        ((void (*)(id, SEL, float))objc_msgSend)(request, @selector(setRate:), rate);
-    }
+    BerdSetSiriRequestRate(request, rate);
 
     NSXPCConnection *connection = [[NSXPCConnection alloc]
         initWithMachServiceName:@"com.apple.sirittsd" options:0];
