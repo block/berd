@@ -1,11 +1,4 @@
-import {
-  deleteSession,
-  newSession,
-  promptForText,
-  setModel,
-  setSessionSystemPrompt,
-} from "@/shared/api/acpApi";
-import { getClient } from "@/shared/api/acpConnection";
+import { runZeroToolOneShot } from "@/shared/api/zeroToolOneShot";
 
 const INFERENCE_TIMEOUT_MS = 20000;
 
@@ -54,63 +47,12 @@ async function runInference(
   userPrompt: string,
   provider: { providerId: string; modelId?: string },
 ): Promise<string | null> {
-  // Create a temporary session for the one-shot inference, hidden so it never
-  // surfaces in the session list.
-  const session = await newSession("/tmp", {
-    hidden: true,
-    providerId: provider.providerId,
+  return runZeroToolOneShot({
+    userPrompt,
+    systemPrompt: EXPLANATION_SYSTEM_PROMPT,
+    target: provider,
+    timeoutMs: INFERENCE_TIMEOUT_MS,
   });
-
-  try {
-    if (provider.modelId) {
-      await setModel(session.sessionId, provider.modelId);
-    }
-
-    // Remove ALL extensions from this session so the model has zero tools.
-    // Even if the adversarial command contains prompt injection that
-    // manipulates the model, it cannot take any action without tools.
-    await removeAllSessionExtensions(session.sessionId);
-
-    // Set the system prompt on the session so it's treated as trusted
-    // instructions rather than user-supplied content. This establishes the
-    // security boundary: the model knows the command is untrusted input.
-    await setSessionSystemPrompt(session.sessionId, EXPLANATION_SYSTEM_PROMPT);
-
-    return await promptForText(
-      session.sessionId,
-      [{ type: "text", text: userPrompt }],
-      INFERENCE_TIMEOUT_MS,
-    );
-  } finally {
-    try {
-      // ACP does not support ephemeral sessions, so remove this Hidden
-      // one-shot chat after inference to keep security explanations out of
-      // session history and avoid accumulating invisible backend sessions.
-      await deleteSession(session.sessionId);
-    } catch {
-      // The explanation is best-effort; cleanup failure should not hide it.
-    }
-  }
-}
-
-/**
- * Removes all extensions from a session, leaving it with zero tools.
- * This is a security measure: even if the adversarial command manipulates
- * the explanation model via prompt injection, it has no tools to act with.
- */
-async function removeAllSessionExtensions(sessionId: string): Promise<void> {
-  const client = await getClient();
-  const { extensions } = await client.goose.GooseUnstableSessionExtensionsList({
-    sessionId,
-  });
-  await Promise.all(
-    extensions.map(({ extensionKey }) =>
-      client.goose.GooseUnstableSessionExtensionsRemove({
-        sessionId,
-        extensionKey,
-      }),
-    ),
-  );
 }
 
 /**
