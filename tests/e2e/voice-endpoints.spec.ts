@@ -24,10 +24,18 @@ const test = base.extend<{ settings: Page }>({
 
 test.use({ screenshot: "off", trace: "off", video: "off" });
 
-async function saveEndpoint(page: Page, label: string, url: string) {
+async function saveEndpoint(
+  page: Page,
+  kind: "realtime" | "stt" | "tts",
+  label: string,
+  url: string,
+) {
   const input = page.getByLabel(label);
   await input.fill(url);
-  await input.locator("..").getByRole("button", { name: "Save" }).click();
+  await page
+    .getByTestId(`openai-${kind}-endpoint-settings`)
+    .getByRole("button", { name: "Save" })
+    .click();
   await expect(input).toHaveValue(url);
 }
 
@@ -50,11 +58,13 @@ test("keeps Realtime, STT, and TTS URLs independent across settings reloads", as
   );
   await saveEndpoint(
     page,
+    "stt",
     "Speech-to-text endpoint URL",
     "ws://127.0.0.1:18870/v1/realtime?intent=transcription",
   );
   await saveEndpoint(
     page,
+    "tts",
     "Text-to-speech endpoint URL",
     "http://127.0.0.1:18870/v1/audio/speech",
   );
@@ -69,6 +79,7 @@ test("keeps Realtime, STT, and TTS URLs independent across settings reloads", as
   );
   await saveEndpoint(
     page,
+    "realtime",
     "Realtime endpoint URL",
     "ws://127.0.0.1:18870/v1/realtime",
   );
@@ -87,7 +98,7 @@ test("keeps Realtime, STT, and TTS URLs independent across settings reloads", as
     "http://127.0.0.1:18870/v1/audio/speech",
   );
 
-  await saveEndpoint(page, "Speech-to-text endpoint URL", "");
+  await saveEndpoint(page, "stt", "Speech-to-text endpoint URL", "");
   await page.goto("/");
   await page.locator("[data-sidebar-nav-id=settings]").click();
   await page.locator("[data-sidebar-nav-id=settings-voice]").click();

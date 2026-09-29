@@ -35,7 +35,6 @@ export function OpenAiEndpointField({
   const keyId = useId();
   const [url, setUrl] = useState("");
   const [savedUrl, setSavedUrl] = useState("");
-  const [statusUrl, setStatusUrl] = useState("");
   const [localKeyStatus, setLocalKeyStatus] = useState<{
     url: string;
     configured: boolean;
@@ -54,7 +53,6 @@ export function OpenAiEndpointField({
           const value = settings[kind] ?? "";
           setUrl(value);
           setSavedUrl(value);
-          setStatusUrl(value);
           setLoaded(true);
         }
       },
@@ -73,7 +71,7 @@ export function OpenAiEndpointField({
     (localKeyStatus?.url === savedUrl &&
     localKeyStatus.observedConfigured === configured
       ? localKeyStatus.configured
-      : statusUrl === savedUrl && configured);
+      : configured);
 
   const save = async () => {
     setSaving(true);
@@ -89,7 +87,6 @@ export function OpenAiEndpointField({
         targetUrl = (await getOpenAiVoiceEndpoints())[kind] ?? "";
         setUrl(targetUrl);
         setSavedUrl(targetUrl);
-        setStatusUrl(targetUrl);
         setLocalKeyStatus({
           url: targetUrl,
           configured: false,
@@ -149,7 +146,7 @@ export function OpenAiEndpointField({
   };
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2" data-testid={`openai-${kind}-endpoint-settings`}>
       <label htmlFor={id} className="text-xs font-medium">
         {label}
       </label>
