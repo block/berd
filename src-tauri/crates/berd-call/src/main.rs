@@ -3615,7 +3615,7 @@ fn run_expert_spokesperson_session(
                         call_id,
                         message,
                     } => {
-                        let handoff_id = record_and_emit_live_event(
+                        let handoff_id = match record_and_emit_live_event(
                             &mut core,
                             &mut emitted_live_token,
                             LiveSideEvent::Handoff {
@@ -3623,8 +3623,10 @@ fn run_expert_spokesperson_session(
                                 message,
                             },
                             &mut writer,
-                        )?
-                        .ok_or("live handoff did not produce a handoff ID")?;
+                        )? {
+                            LiveSideEvent::Handoff { call_id, .. } => call_id,
+                            _ => return Err("live handoff did not produce a handoff ID".into()),
+                        };
                         runtime.as_ref().expect("initialized runtime").send(
                             SpokespersonCommand::Provider(accepted_handoff_tool_output(
                                 &call_id,
@@ -5016,12 +5018,8 @@ fn record_and_emit_live_event(
     emitted_live_token: &mut u64,
     event: LiveSideEvent,
     writer: &mut impl Write,
-) -> Result<Option<String>, String> {
+) -> Result<LiveSideEvent, String> {
     let (recorded, expert_delivery) = core.record_live_event_with_delivery(event)?;
-    let handoff_id = match recorded.payload {
-        LiveSideEvent::Handoff { call_id, .. } => Some(call_id),
-        _ => None,
-    };
     emit_live_events(core, emitted_live_token, writer)?;
     if let Some(delivery) = expert_delivery {
         write_message(
@@ -5034,7 +5032,7 @@ fn record_and_emit_live_event(
             },
         )?;
     }
-    Ok(handoff_id)
+    Ok(recorded.payload)
 }
 
 fn publish_live_response_if_complete(
@@ -7593,7 +7591,7 @@ mod tests {
         let mut core = RealtimeExpertSpokespersonSession::new(0, "external-test");
         let mut emitted_token = 0;
         let mut output = Vec::new();
-        let handoff_id = record_and_emit_live_event(
+        let handoff_id = match record_and_emit_live_event(
             &mut core,
             &mut emitted_token,
             LiveSideEvent::Handoff {
@@ -7603,7 +7601,10 @@ mod tests {
             &mut output,
         )
         .unwrap()
-        .expect("a live handoff must expose its generated ID");
+        {
+            LiveSideEvent::Handoff { call_id, .. } => call_id,
+            _ => panic!("a live handoff must expose its generated ID"),
+        };
         assert_eq!(handoff_id, "handoff-external-test-1");
         let tool_output = berd_call::openai_realtime_protocol::accepted_handoff_tool_output(
             "provider-call-1",
