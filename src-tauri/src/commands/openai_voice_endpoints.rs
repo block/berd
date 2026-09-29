@@ -11,6 +11,7 @@ pub(crate) const TTS_DEFAULT: &str = "https://api.openai.com/v1/audio/speech";
 const SETTINGS_CHANGED_EVENT: &str = "openai-voice:settings-changed";
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 const BASE_URL_ENV: &str = "BERD_OPENAI_VOICE_BASE_URL";
+static SETTINGS_UPDATE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -68,7 +69,11 @@ fn settings_path() -> Result<std::path::PathBuf, String> {
 
 fn read_settings() -> Result<VoiceEndpointSettings, String> {
     let path = settings_path()?;
-    match std::fs::read(&path) {
+    read_settings_from(&path)
+}
+
+fn read_settings_from(path: &std::path::Path) -> Result<VoiceEndpointSettings, String> {
+    match std::fs::read(path) {
         Ok(bytes) => serde_json::from_slice(&bytes)
             .map_err(|error| format!("Could not read OpenAI voice endpoints: {error}")),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Default::default()),
@@ -77,7 +82,14 @@ fn read_settings() -> Result<VoiceEndpointSettings, String> {
 }
 
 fn persist(settings: &VoiceEndpointSettings) -> Result<(), String> {
+    let _guard = SETTINGS_UPDATE_LOCK
+        .lock()
+        .map_err(|_| "OpenAI voice settings lock is poisoned".to_string())?;
     let path = settings_path()?;
+    persist_to(&path, settings)
+}
+
+fn persist_to(path: &std::path::Path, settings: &VoiceEndpointSettings) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| {
             format!("Could not create OpenAI voice settings directory: {error}")
@@ -85,8 +97,20 @@ fn persist(settings: &VoiceEndpointSettings) -> Result<(), String> {
     }
     let bytes = serde_json::to_vec_pretty(settings)
         .map_err(|error| format!("Could not encode OpenAI voice endpoints: {error}"))?;
-    write_bytes_atomically(&path, &bytes)
+    write_bytes_atomically(path, &bytes)
         .map_err(|error| format!("Could not save OpenAI voice endpoints: {error}"))
+}
+
+fn update_settings_file(
+    path: &std::path::Path,
+    update: impl FnOnce(&mut VoiceEndpointSettings),
+) -> Result<(), String> {
+    let _guard = SETTINGS_UPDATE_LOCK
+        .lock()
+        .map_err(|_| "OpenAI voice settings lock is poisoned".to_string())?;
+    let mut settings = read_settings_from(path)?;
+    update(&mut settings);
+    persist_to(path, &settings)
 }
 
 fn validate(kind: VoiceEndpointKind, raw: &str) -> Result<Option<String>, String> {
@@ -190,10 +214,10 @@ pub(crate) fn set_openai_voice_endpoint(
     kind: VoiceEndpointKind,
     url: String,
 ) -> Result<(), String> {
-    let mut settings = read_settings()?;
     let selected = validate(kind, &url)?;
-    settings.set(kind, selected.filter(|url| url != kind.default_url()));
-    persist(&settings)?;
+    update_settings_file(&settings_path()?, |settings| {
+        settings.set(kind, selected.filter(|url| url != kind.default_url()));
+    })?;
     app.emit(SETTINGS_CHANGED_EVENT, ())
         .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))
 }
@@ -209,6 +233,42 @@ pub(crate) fn restore(settings: &VoiceEndpointSettings) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    #[test]
+    fn concurrent_endpoint_updates_preserve_both_services() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("endpoints.json");
+        let first_path = path.clone();
+        let second_path = path.clone();
+        let (first_started_tx, first_started_rx) = mpsc::channel();
+        let (second_finished_tx, second_finished_rx) = mpsc::channel();
+
+        let first = std::thread::spawn(move || {
+            update_settings_file(&first_path, |settings| {
+                settings.set(VoiceEndpointKind::Stt, Some("wss://stt.example".into()));
+                first_started_tx.send(()).unwrap();
+                // An unlocked update lets the second save complete against stale settings.
+                let _ = second_finished_rx.recv_timeout(Duration::from_millis(300));
+            })
+            .unwrap();
+        });
+        first_started_rx.recv().unwrap();
+        let second = std::thread::spawn(move || {
+            update_settings_file(&second_path, |settings| {
+                settings.set(VoiceEndpointKind::Tts, Some("https://tts.example".into()));
+            })
+            .unwrap();
+            let _ = second_finished_tx.send(());
+        });
+        first.join().unwrap();
+        second.join().unwrap();
+
+        let saved = read_settings_from(&path).unwrap();
+        assert_eq!(saved.stt.as_deref(), Some("wss://stt.example"));
+        assert_eq!(saved.tts.as_deref(), Some("https://tts.example"));
+    }
 
     #[test]
     fn legacy_base_url_keeps_the_v1_root_and_custom_path() {
