@@ -91,14 +91,14 @@ pub fn set_openai_realtime_api_key(app: AppHandle, api_key: String) -> Result<()
         return Err("Realtime API key cannot be empty".into());
     }
     openai_voice_credentials::store(OpenAiVoiceCredential::Realtime, api_key)?;
-    app.emit("openai-voice:settings-changed", ())
+    app.emit(openai_voice_endpoints::SETTINGS_CHANGED_EVENT, ())
         .map_err(|error| format!("Could not refresh Realtime settings: {error}"))
 }
 
 #[tauri::command]
 pub fn clear_openai_realtime_api_key(app: AppHandle) -> Result<(), String> {
     openai_voice_credentials::clear(OpenAiVoiceCredential::Realtime)?;
-    app.emit("openai-voice:settings-changed", ())
+    app.emit(openai_voice_endpoints::SETTINGS_CHANGED_EVENT, ())
         .map_err(|error| format!("Could not refresh Realtime settings: {error}"))
 }
 
