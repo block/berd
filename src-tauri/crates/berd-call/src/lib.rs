@@ -7,6 +7,7 @@ mod asset_verification;
 mod audio_output;
 pub mod benchmark;
 pub mod causal_inbox;
+pub mod endpoint_url;
 mod configured_tts;
 pub mod expert_spokesperson;
 pub mod input;

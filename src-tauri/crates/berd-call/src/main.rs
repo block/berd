@@ -16,6 +16,7 @@ use berd_call::benchmark::{
     SttBenchmarkTarget, TtsBenchmarkMode, TtsBenchmarkPromptManifest, TtsBenchmarkTarget,
 };
 use berd_call::expert_spokesperson::{ExpertDirectiveOutcome, LiveSideEvent};
+use berd_call::endpoint_url::{is_allowed_endpoint_url, EndpointProtocol};
 use berd_call::input::{
     AssistantActivityGuard, InputDuringTtsSlot, InputDuringTtsSnapshot, VoiceInputConfig,
     VoiceInputControls, VoiceInputEngineConfig, VoiceInputEvent, VoiceInputFrame,
@@ -5332,25 +5333,12 @@ fn parse_args(args: &[String]) -> Result<SessionConfig, ParseFailure> {
 
 fn parse_endpoint_url(value: &str, flag: &str, websocket: bool) -> Result<String, String> {
     let url = reqwest::Url::parse(value).map_err(|error| format!("{flag} is invalid: {error}"))?;
-    let valid_scheme = if websocket {
-        matches!(url.scheme(), "ws" | "wss")
+    let protocol = if websocket {
+        EndpointProtocol::WebSocket
     } else {
-        matches!(url.scheme(), "http" | "https")
+        EndpointProtocol::Http
     };
-    let loopback_host = url.host_str().is_some_and(|host| {
-        host.eq_ignore_ascii_case("localhost")
-            || host
-                .trim_matches(['[', ']'])
-                .parse::<std::net::IpAddr>()
-                .is_ok_and(|address| address.is_loopback())
-    });
-    if !valid_scheme
-        || url.host_str().is_none()
-        || (matches!(url.scheme(), "http" | "ws") && !loopback_host)
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.fragment().is_some()
-    {
+    if !is_allowed_endpoint_url(&url, protocol) {
         return Err(format!("{flag} requires a full URL with the correct protocol, HTTPS/WSS outside loopback, and no embedded credentials or fragment"));
     }
     Ok(url.to_string())

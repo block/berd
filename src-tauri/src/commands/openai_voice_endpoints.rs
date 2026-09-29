@@ -1,5 +1,6 @@
 //! Independent, user-selected OpenAI-compatible voice endpoints.
 
+use berd_call::endpoint_url::{is_allowed_endpoint_url, EndpointProtocol};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
@@ -8,7 +9,7 @@ use crate::services::atomic_file::write_bytes_atomically;
 pub(crate) const REALTIME_DEFAULT: &str = "wss://api.openai.com/v1/realtime";
 pub(crate) const STT_DEFAULT: &str = "wss://api.openai.com/v1/realtime?intent=transcription";
 pub(crate) const TTS_DEFAULT: &str = "https://api.openai.com/v1/audio/speech";
-const SETTINGS_CHANGED_EVENT: &str = "openai-voice:settings-changed";
+pub(crate) const SETTINGS_CHANGED_EVENT: &str = "openai-voice:settings-changed";
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 const BASE_URL_ENV: &str = "BERD_OPENAI_VOICE_BASE_URL";
 static SETTINGS_UPDATE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -119,30 +120,15 @@ fn validate(kind: VoiceEndpointKind, raw: &str) -> Result<Option<String>, String
         return Ok(None);
     }
     let mut url = url::Url::parse(raw).map_err(|error| format!("Invalid endpoint URL: {error}"))?;
-    let allowed = match kind {
-        VoiceEndpointKind::Realtime | VoiceEndpointKind::Stt => ["ws", "wss"].as_slice(),
-        VoiceEndpointKind::Tts => ["http", "https"].as_slice(),
+    let protocol = match kind {
+        VoiceEndpointKind::Realtime | VoiceEndpointKind::Stt => EndpointProtocol::WebSocket,
+        VoiceEndpointKind::Tts => EndpointProtocol::Http,
     };
-    if !allowed.contains(&url.scheme())
-        || url.host_str().is_none()
-        || (matches!(url.scheme(), "http" | "ws") && !is_loopback(&url))
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.fragment().is_some()
-    {
+    if !is_allowed_endpoint_url(&url, protocol) {
         return Err("Endpoint must be a full URL with the correct protocol, HTTPS/WSS outside loopback, and no embedded credentials or fragment".into());
     }
     url.set_fragment(None);
     Ok(Some(url.to_string()))
-}
-
-fn is_loopback(url: &url::Url) -> bool {
-    match url.host() {
-        Some(url::Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
-        Some(url::Host::Ipv4(address)) => address.is_loopback(),
-        Some(url::Host::Ipv6(address)) => address.is_loopback(),
-        None => false,
-    }
 }
 
 fn normalize_base_url(raw_url: String) -> Result<String, String> {
