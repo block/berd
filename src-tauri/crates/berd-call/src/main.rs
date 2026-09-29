@@ -21,11 +21,14 @@ use berd_call::input::{
     VoiceInputControls, VoiceInputEngineConfig, VoiceInputEvent, VoiceInputFrame,
     VoiceInputRuntime, INPUT_FRAME_SAMPLES,
 };
-use berd_call::openai_realtime_protocol::{
-    accepted_handoff_tool_output, expert_handoff_message, expert_transcript_message, RealtimeExpertMessage,
-    RealtimeExpertMessageMode, RealtimeExpertSpokespersonSession, RealtimeHandoffReminder,
-    RealtimeTranscriptSpeaker,
-};
+use berd_call::openai_realtime_protocol::accepted_handoff_tool_output;
+use berd_call::openai_realtime_protocol::expert_handoff_message;
+use berd_call::openai_realtime_protocol::expert_transcript_message;
+use berd_call::openai_realtime_protocol::RealtimeExpertMessage;
+use berd_call::openai_realtime_protocol::RealtimeExpertMessageMode;
+use berd_call::openai_realtime_protocol::RealtimeExpertSpokespersonSession;
+use berd_call::openai_realtime_protocol::RealtimeHandoffReminder;
+use berd_call::openai_realtime_protocol::RealtimeTranscriptSpeaker;
 use berd_call::openai_spokesperson::{
     OpenAiSpokespersonConfig, OpenAiSpokespersonRuntime, SpokespersonCommand, SpokespersonEvent,
     SpokespersonResponseStatus,
@@ -5334,15 +5337,16 @@ fn parse_endpoint_url(value: &str, flag: &str, websocket: bool) -> Result<String
     } else {
         matches!(url.scheme(), "http" | "https")
     };
+    let loopback_host = url.host_str().is_some_and(|host| {
+        host.eq_ignore_ascii_case("localhost")
+            || host
+                .trim_matches(['[', ']'])
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|address| address.is_loopback())
+    });
     if !valid_scheme
         || url.host_str().is_none()
-        || (matches!(url.scheme(), "http" | "ws") && !url.host_str().is_some_and(|host| {
-            host.eq_ignore_ascii_case("localhost")
-                || host
-                    .trim_matches(['[', ']'])
-                    .parse::<std::net::IpAddr>()
-                    .is_ok_and(|address| address.is_loopback())
-        }))
+        || (matches!(url.scheme(), "http" | "ws") && !loopback_host)
         || !url.username().is_empty()
         || url.password().is_some()
         || url.fragment().is_some()
