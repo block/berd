@@ -235,7 +235,7 @@ mod tests {
             update_settings_file(&first_path, |settings| {
                 settings.set(VoiceEndpointKind::Stt, Some("wss://stt.example".into()));
                 first_started_tx.send(()).unwrap();
-                // An unlocked update lets the second save complete against stale settings.
+                // Hold the first update while a concurrent save attempts to run; both must survive.
                 let _ = second_finished_rx.recv_timeout(Duration::from_millis(300));
             })
             .unwrap();
