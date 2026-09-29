@@ -22,7 +22,7 @@ use berd_call::input::{
     VoiceInputRuntime, INPUT_FRAME_SAMPLES,
 };
 use berd_call::openai_realtime_protocol::{
-    expert_handoff_message, expert_transcript_message, RealtimeExpertMessage,
+    accepted_handoff_tool_output, expert_handoff_message, expert_transcript_message, RealtimeExpertMessage,
     RealtimeExpertMessageMode, RealtimeExpertSpokespersonSession, RealtimeHandoffReminder,
     RealtimeTranscriptSpeaker,
 };
@@ -3615,11 +3615,21 @@ fn run_expert_spokesperson_session(
                         call_id,
                         message,
                     } => {
-                        record_and_emit_live_event(
+                        let handoff_id = record_and_emit_live_event(
                             &mut core,
                             &mut emitted_live_token,
-                            LiveSideEvent::Handoff { call_id, message },
+                            LiveSideEvent::Handoff {
+                                call_id: call_id.clone(),
+                                message,
+                            },
                             &mut writer,
+                        )?
+                        .ok_or("live handoff did not produce a handoff ID")?;
+                        runtime.as_ref().expect("initialized runtime").send(
+                            SpokespersonCommand::Provider(accepted_handoff_tool_output(
+                                &call_id,
+                                &handoff_id,
+                            )?),
                         )?;
                     }
                     event @ (SpokespersonEvent::Expired(_) | SpokespersonEvent::SessionLost(_)) => {
@@ -5006,8 +5016,12 @@ fn record_and_emit_live_event(
     emitted_live_token: &mut u64,
     event: LiveSideEvent,
     writer: &mut impl Write,
-) -> Result<(), String> {
-    let (_, expert_delivery) = core.record_live_event_with_delivery(event)?;
+) -> Result<Option<String>, String> {
+    let (recorded, expert_delivery) = core.record_live_event_with_delivery(event)?;
+    let handoff_id = match recorded.payload {
+        LiveSideEvent::Handoff { call_id, .. } => Some(call_id),
+        _ => None,
+    };
     emit_live_events(core, emitted_live_token, writer)?;
     if let Some(delivery) = expert_delivery {
         write_message(
@@ -5020,7 +5034,7 @@ fn record_and_emit_live_event(
             },
         )?;
     }
-    Ok(())
+    Ok(handoff_id)
 }
 
 fn publish_live_response_if_complete(
@@ -7572,6 +7586,32 @@ mod tests {
         assert_eq!(messages[0]["origin"], "user");
         assert_eq!(messages[1]["type"], "state");
         assert_eq!(messages[1]["confirmed_token"], 1);
+    }
+
+    #[test]
+    fn live_handoff_exposes_its_id_for_provider_tool_output() {
+        let mut core = RealtimeExpertSpokespersonSession::new(0, "external-test");
+        let mut emitted_token = 0;
+        let mut output = Vec::new();
+        let handoff_id = record_and_emit_live_event(
+            &mut core,
+            &mut emitted_token,
+            LiveSideEvent::Handoff {
+                call_id: "provider-call-1".into(),
+                message: "Look something up".into(),
+            },
+            &mut output,
+        )
+        .unwrap()
+        .expect("a live handoff must expose its generated ID");
+        assert_eq!(handoff_id, "handoff-external-test-1");
+        let tool_output = berd_call::openai_realtime_protocol::accepted_handoff_tool_output(
+            "provider-call-1",
+            &handoff_id,
+        )
+        .unwrap();
+        assert_eq!(tool_output["type"], "conversation.item.create");
+        assert_eq!(tool_output["item"]["call_id"], "provider-call-1");
     }
 
     #[test]
