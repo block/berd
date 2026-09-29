@@ -426,6 +426,8 @@
     "experiments": "Experimentos",
     "extensions": "Extensiones",
     "general": "General",
+    "me": "Memoria",
+    "memoryProposalsPending": "{{count}} propuestas de memoria por revisar",
     "notifications": "Notificaciones",
     "providers": "Proveedores de IA",
     "providersUpdateAvailable": "Actualización disponible",
