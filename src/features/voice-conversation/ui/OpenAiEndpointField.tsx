@@ -38,7 +38,7 @@ export function OpenAiEndpointField({
   const [localKeyStatus, setLocalKeyStatus] = useState<{
     url: string;
     configured: boolean;
-    observedConfigured: boolean;
+    parentConfiguredAtObservation: boolean;
   } | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [loaded, setLoaded] = useState(false);
@@ -66,12 +66,13 @@ export function OpenAiEndpointField({
   }, [kind]);
 
   const changed = url.trim() !== savedUrl;
-  const keyConfigured =
-    !changed &&
-    (localKeyStatus?.url === savedUrl &&
-    localKeyStatus.observedConfigured === configured
+  // A parent status change supersedes a local save or clear observation.
+  const observedKeyConfigured =
+    localKeyStatus?.url === savedUrl &&
+    localKeyStatus.parentConfiguredAtObservation === configured
       ? localKeyStatus.configured
-      : configured);
+      : configured;
+  const keyConfigured = !changed && observedKeyConfigured;
 
   const save = async () => {
     setSaving(true);
@@ -90,7 +91,7 @@ export function OpenAiEndpointField({
         setLocalKeyStatus({
           url: targetUrl,
           configured: false,
-          observedConfigured: configured,
+          parentConfiguredAtObservation: configured,
         });
       }
       if (savingKey) {
@@ -99,7 +100,7 @@ export function OpenAiEndpointField({
         setLocalKeyStatus({
           url: targetUrl,
           configured: true,
-          observedConfigured: configured,
+          parentConfiguredAtObservation: configured,
         });
       } else if (changed) {
         // Metadata-only lookup; never request the Keychain secret to render settings.
@@ -107,7 +108,7 @@ export function OpenAiEndpointField({
         setLocalKeyStatus({
           url: targetUrl,
           configured: status[`${kind}Configured`],
-          observedConfigured: configured,
+          parentConfiguredAtObservation: configured,
         });
       }
     } catch (cause) {
@@ -136,7 +137,7 @@ export function OpenAiEndpointField({
       setLocalKeyStatus({
         url: savedUrl,
         configured: false,
-        observedConfigured: configured,
+        parentConfiguredAtObservation: configured,
       });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));

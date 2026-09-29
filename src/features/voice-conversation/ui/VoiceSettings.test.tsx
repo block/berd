@@ -99,7 +99,11 @@ const openAiStatusState = vi.hoisted(() => ({
 }));
 const openAiApiMocks = vi.hoisted(() => ({
   getStatus: vi.fn(() =>
-    Promise.resolve({ sttKeySaved: false, ttsKeySaved: false }),
+    Promise.resolve({
+      sttConfigured: false,
+      ttsConfigured: false,
+      realtimeConfigured: false,
+    }),
   ),
   getEndpoints: vi.fn(() =>
     Promise.resolve({
