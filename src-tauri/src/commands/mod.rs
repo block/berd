@@ -30,6 +30,7 @@ pub mod installation;
 pub mod layout;
 pub mod local_mcp_inventory;
 pub mod mac_speech;
+pub mod memory_store;
 pub mod message_queues;
 pub mod microphone_permission;
 pub mod migration;
