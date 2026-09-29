@@ -11,8 +11,8 @@ const KEYCHAIN_ACCOUNT: &str = "api-key";
 pub(crate) enum OpenAiVoiceCredential {
     SpeechToText,
     TextToSpeech,
-    Realtime,
-    RealtimeDictation,
+    SelectedRealtimeAssistant,
+    DefaultRealtimeDictation,
 }
 
 impl OpenAiVoiceCredential {
@@ -20,8 +20,8 @@ impl OpenAiVoiceCredential {
         match self {
             Self::SpeechToText => Some(VoiceEndpointKind::Stt),
             Self::TextToSpeech => Some(VoiceEndpointKind::Tts),
-            Self::Realtime => Some(VoiceEndpointKind::Realtime),
-            Self::RealtimeDictation => None,
+            Self::SelectedRealtimeAssistant => Some(VoiceEndpointKind::Realtime),
+            Self::DefaultRealtimeDictation => None,
         }
     }
 
@@ -33,10 +33,10 @@ impl OpenAiVoiceCredential {
             Self::TextToSpeech => {
                 "OpenAI text-to-speech is not configured. Add an API key for the selected playback URL in Voice settings, then try again."
             }
-            Self::Realtime => {
+            Self::SelectedRealtimeAssistant => {
                 "OpenAI Realtime voice is not configured. Add an API key for the selected Realtime URL in Voice settings, then try again."
             }
-            Self::RealtimeDictation => {
+            Self::DefaultRealtimeDictation => {
                 "OpenAI Realtime dictation needs an API key for the default OpenAI endpoint"
             }
         }
@@ -146,11 +146,11 @@ mod tests {
             Some(VoiceEndpointKind::Tts)
         ));
         assert!(matches!(
-            OpenAiVoiceCredential::Realtime.selected_kind(),
+            OpenAiVoiceCredential::SelectedRealtimeAssistant.selected_kind(),
             Some(VoiceEndpointKind::Realtime)
         ));
         assert_eq!(
-            account(OpenAiVoiceCredential::RealtimeDictation).unwrap(),
+            account(OpenAiVoiceCredential::DefaultRealtimeDictation).unwrap(),
             KEYCHAIN_ACCOUNT
         );
     }
@@ -189,7 +189,7 @@ mod tests {
         for credential in [
             OpenAiVoiceCredential::SpeechToText,
             OpenAiVoiceCredential::TextToSpeech,
-            OpenAiVoiceCredential::Realtime,
+            OpenAiVoiceCredential::SelectedRealtimeAssistant,
         ] {
             let message = credential.missing_message();
             assert!(message.contains("selected"));

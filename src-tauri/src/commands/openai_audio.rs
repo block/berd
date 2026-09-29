@@ -28,7 +28,7 @@ use super::pocket_voice::{
 use super::{
     native_voice::{InterruptionSensitivity, NativeVoiceState},
     openai_voice_credentials::{self, OpenAiVoiceCredential},
-    openai_voice_endpoints::{self, VoiceEndpointKind},
+    openai_voice_endpoints::{self, VoiceEndpointKind, BASE_URL_ENV, SETTINGS_CHANGED_EVENT},
     pocket_voice::VoiceInterruptionMode,
     voice_capture::VoiceCaptureState,
 };
@@ -45,11 +45,9 @@ const TTS_VOICES: &[&str] = &[
     "alloy", "ash", "ballad", "cedar", "coral", "echo", "fable", "marin", "nova", "onyx", "sage",
     "shimmer", "verse",
 ];
-const BASE_URL_ENV: &str = "BERD_OPENAI_VOICE_BASE_URL";
 const STT_MODEL_ENV: &str = "BERD_OPENAI_STT_MODEL";
 const TTS_MODEL_ENV: &str = "BERD_OPENAI_TTS_MODEL";
 const TTS_VOICE_ENV: &str = "BERD_OPENAI_TTS_VOICE";
-const SETTINGS_CHANGED_EVENT: &str = "openai-voice:settings-changed";
 #[cfg(target_os = "macos")]
 const TTS_SAMPLE_RATE: u32 = 24_000;
 // Avoid starting the audio device from a tiny first network chunk that can drain
@@ -328,7 +326,7 @@ pub async fn get_openai_voice_status(
         (
             openai_voice_credentials::is_present(OpenAiVoiceCredential::SpeechToText),
             openai_voice_credentials::is_present(OpenAiVoiceCredential::TextToSpeech),
-            openai_voice_credentials::is_present(OpenAiVoiceCredential::Realtime),
+            openai_voice_credentials::is_present(OpenAiVoiceCredential::SelectedRealtimeAssistant),
         )
     })
     .await

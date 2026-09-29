@@ -11,7 +11,7 @@ pub(crate) const STT_DEFAULT: &str = "wss://api.openai.com/v1/realtime?intent=tr
 pub(crate) const TTS_DEFAULT: &str = "https://api.openai.com/v1/audio/speech";
 pub(crate) const SETTINGS_CHANGED_EVENT: &str = "openai-voice:settings-changed";
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
-const BASE_URL_ENV: &str = "BERD_OPENAI_VOICE_BASE_URL";
+pub(crate) const BASE_URL_ENV: &str = "BERD_OPENAI_VOICE_BASE_URL";
 static SETTINGS_UPDATE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
@@ -257,7 +257,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_base_url_keeps_the_v1_root_and_custom_path() {
+    fn base_url_environment_override_keeps_the_v1_root_and_custom_path() {
         assert_eq!(
             normalize_base_url("https://proxy.example".into()).unwrap(),
             "https://proxy.example/v1"
