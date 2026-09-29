@@ -12,14 +12,16 @@ pub(crate) enum OpenAiVoiceCredential {
     SpeechToText,
     TextToSpeech,
     Realtime,
+    RealtimeDictation,
 }
 
 impl OpenAiVoiceCredential {
-    const fn kind(self) -> VoiceEndpointKind {
+    const fn selected_kind(self) -> Option<VoiceEndpointKind> {
         match self {
-            Self::SpeechToText => VoiceEndpointKind::Stt,
-            Self::TextToSpeech => VoiceEndpointKind::Tts,
-            Self::Realtime => VoiceEndpointKind::Realtime,
+            Self::SpeechToText => Some(VoiceEndpointKind::Stt),
+            Self::TextToSpeech => Some(VoiceEndpointKind::Tts),
+            Self::Realtime => Some(VoiceEndpointKind::Realtime),
+            Self::RealtimeDictation => None,
         }
     }
 
@@ -34,12 +36,17 @@ impl OpenAiVoiceCredential {
             Self::Realtime => {
                 "OpenAI Realtime voice is not configured. Add an API key for the selected Realtime URL in Voice settings, then try again."
             }
+            Self::RealtimeDictation => {
+                "OpenAI Realtime dictation needs an API key for the default OpenAI endpoint"
+            }
         }
     }
 }
 
 fn account(credential: OpenAiVoiceCredential) -> Result<String, String> {
-    let kind = credential.kind();
+    let Some(kind) = credential.selected_kind() else {
+        return Ok(KEYCHAIN_ACCOUNT.to_string());
+    };
     let url = openai_voice_endpoints::effective_url(kind)?;
     Ok(account_for_url(kind, &url))
 }
@@ -87,10 +94,6 @@ pub(crate) fn is_present(credential: OpenAiVoiceCredential) -> Result<bool, Stri
     is_present_account(&account)
 }
 
-pub(crate) fn is_default_present() -> Result<bool, String> {
-    is_present_account(KEYCHAIN_ACCOUNT)
-}
-
 fn is_present_account(account: &str) -> Result<bool, String> {
     #[cfg(target_os = "macos")]
     {
@@ -129,29 +132,27 @@ pub(crate) fn require(credential: OpenAiVoiceCredential) -> Result<String, Strin
     read(credential)?.ok_or_else(|| credential.missing_message().to_string())
 }
 
-pub(crate) fn require_default_realtime() -> Result<String, String> {
-    read_account(KEYCHAIN_ACCOUNT)?.ok_or_else(|| {
-        "OpenAI Realtime dictation needs an API key for the default OpenAI endpoint".to_string()
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
     fn speech_services_use_independent_endpoints() {
         assert!(matches!(
-            OpenAiVoiceCredential::SpeechToText.kind(),
-            VoiceEndpointKind::Stt
+            OpenAiVoiceCredential::SpeechToText.selected_kind(),
+            Some(VoiceEndpointKind::Stt)
         ));
         assert!(matches!(
-            OpenAiVoiceCredential::TextToSpeech.kind(),
-            VoiceEndpointKind::Tts
+            OpenAiVoiceCredential::TextToSpeech.selected_kind(),
+            Some(VoiceEndpointKind::Tts)
         ));
         assert!(matches!(
-            OpenAiVoiceCredential::Realtime.kind(),
-            VoiceEndpointKind::Realtime
+            OpenAiVoiceCredential::Realtime.selected_kind(),
+            Some(VoiceEndpointKind::Realtime)
         ));
+        assert_eq!(
+            account(OpenAiVoiceCredential::RealtimeDictation).unwrap(),
+            KEYCHAIN_ACCOUNT
+        );
     }
 
     #[test]
