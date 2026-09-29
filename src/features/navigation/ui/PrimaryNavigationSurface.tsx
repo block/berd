@@ -16,6 +16,7 @@ import {
   type SETTINGS_SECTIONS,
   type SectionId,
 } from "@/features/settings/ui/settingsSections";
+import { useMemoryProposalsPending } from "@/features/me/hooks/useMemoryProposalsPending";
 import { cn } from "@/shared/lib/cn";
 import {
   SIDEBAR_PANEL_ELEVATED_SHADOW_CLASS,
@@ -100,6 +101,7 @@ export const PrimaryNavigationSurface = forwardRef<
   ref,
 ) {
   const { t } = useTranslation(["sidebar", "settings"]);
+  const memoryProposalsPending = useMemoryProposalsPending();
   const mainNavItems: readonly {
     id: AppView;
     label: string;
@@ -258,6 +260,11 @@ export const PrimaryNavigationSurface = forwardRef<
               {settingsSections.map((item) => {
                 const showUpdate =
                   item.id === "providers" && agentUpdatesAvailable;
+                // Pending memory proposals badge the Memory row only —
+                // deliberately not the top-level Settings nav item, which
+                // would be noisy for a quiet, non-urgent queue.
+                const showProposals =
+                  item.id === "me" && memoryProposalsPending > 0;
                 return (
                   <SidebarNavItem
                     key={item.id}
@@ -275,12 +282,23 @@ export const PrimaryNavigationSurface = forwardRef<
                           aria-hidden="true"
                           className="size-3.5 text-warning"
                         />
+                      ) : showProposals ? (
+                        <span
+                          aria-hidden="true"
+                          className="flex min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-medium leading-4 text-accent-foreground"
+                        >
+                          {memoryProposalsPending}
+                        </span>
                       ) : undefined
                     }
                     trailingLabel={
                       showUpdate
                         ? t("settings:nav.providersUpdateAvailable")
-                        : undefined
+                        : showProposals
+                          ? t("settings:nav.memoryProposalsPending", {
+                              count: memoryProposalsPending,
+                            })
+                          : undefined
                     }
                   />
                 );
