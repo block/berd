@@ -9,10 +9,9 @@
  *
  * Instead we treat *entering an agent* as a handoff -- mirroring the backend
  * conversation-history handoff (`build_handoff_context_memo`). On the first
- * prompt sent under a given (session, provider, persona) we inject the persona
- * instructions once as an assistant-audience content block. Switching the
- * session to a different agent (or a different persona) is a new handoff and
- * re-injects.
+ * prompt for a session/provider, and whenever its latest delivered context
+ * changes, we inject the instructions as an assistant-audience content block.
+ * This includes returning to an earlier memory state or persona.
  */
 
 import { getDefaultGooseModelProviderId } from "@/features/runtime-config/defaults";
@@ -39,23 +38,19 @@ export function toWireProviderId(providerId: string): string {
 }
 
 /**
- * Tracks which persona handoffs have already been delivered, keyed by
- * session + provider + a fingerprint of the persona/system prompt. Re-keying
- * on the provider means switching agents mid-session re-triggers the handoff.
+ * Tracks the latest delivered handoff for each session/provider. A prior
+ * context becoming current again (such as memory on → off → on → off) still
+ * needs a new handoff, even though it was delivered earlier in the session.
  */
-const deliveredHandoffs = new Set<string>();
+const deliveredHandoffs = new Map<string, string>();
 
-function handoffKey(
-  sessionId: string,
-  providerId: string,
-  systemPrompt: string,
-): string {
-  return `${sessionId}\u0000${providerId}\u0000${fingerprint(systemPrompt)}`;
+function handoffKey(sessionId: string, providerId: string): string {
+  return `${sessionId}\u0000${providerId}`;
 }
 
 /**
- * Cheap, stable fingerprint of the persona text so editing a persona's prompt
- * counts as a new handoff without storing the full prompt in the key.
+ * Cheap, stable fingerprint of the combined context so a change in memory or
+ * persona triggers a new handoff without storing the full text in the map.
  */
 function fingerprint(text: string): string {
   let hash = 0;
@@ -114,8 +109,8 @@ export function buildPersonaHandoffPreamble(systemPrompt: string): string {
  * as an assistant-audience block, or `null` when no handoff is needed (goose
  * provider, nothing to deliver, or already delivered for this handoff).
  *
- * Marks the handoff as delivered as a side effect, so callers must only invoke
- * this once per send when they intend to inject.
+ * Preparing does not change delivered state. Call markDelivered only after
+ * dispatch ownership checks succeed; abandoned claims remain retryable.
  */
 export interface PersonaHandoffClaim {
   preamble: string;
@@ -139,13 +134,14 @@ export function preparePersonaHandoff(
     return null;
   }
 
-  const key = handoffKey(sessionId, providerId as string, combined);
-  if (deliveredHandoffs.has(key)) {
+  const key = handoffKey(sessionId, providerId as string);
+  const nextFingerprint = fingerprint(combined);
+  if (deliveredHandoffs.get(key) === nextFingerprint) {
     return null;
   }
   return {
     preamble: buildPersonaHandoffPreamble(combined),
-    markDelivered: () => deliveredHandoffs.add(key),
+    markDelivered: () => deliveredHandoffs.set(key, nextFingerprint),
   };
 }
 
@@ -171,7 +167,7 @@ export function claimPersonaHandoff(
  */
 export function resetPersonaHandoff(sessionId: string): void {
   const prefix = `${sessionId}\u0000`;
-  for (const key of deliveredHandoffs) {
+  for (const key of deliveredHandoffs.keys()) {
     if (key.startsWith(prefix)) {
       deliveredHandoffs.delete(key);
     }

@@ -1,3 +1,4 @@
+import { isMemorySupported } from "@/features/me/lib/memoryAvailability";
 import { projectEnvironment } from "@/features/projects/lib/projectEnvironment";
 import {
   useCallback,
@@ -5419,7 +5420,7 @@ export function AppShell({
 
   return (
     <FocusRegionProvider>
-      <MemoryProposalToasts sessionlessOnly />
+      {isMemorySupported() && <MemoryProposalToasts sessionlessOnly />}
       <AppShellLayout
         topBar={{
           breadcrumbs: topBarBreadcrumbs,

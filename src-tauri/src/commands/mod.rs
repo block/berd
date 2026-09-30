@@ -30,7 +30,9 @@ pub mod installation;
 pub mod layout;
 pub mod local_mcp_inventory;
 pub mod mac_speech;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 pub mod memory_queue;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 pub mod memory_store;
 pub mod message_queues;
 pub mod microphone_permission;

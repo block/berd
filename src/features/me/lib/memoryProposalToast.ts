@@ -1,3 +1,4 @@
+import { isMemorySupported } from "./memoryAvailability";
 import { toast } from "sonner";
 import type { MemoryProposal } from "./meProposals";
 
@@ -32,7 +33,7 @@ export function showMemoryProposalToast({
     onDecline: () => void;
   }) => React.ReactNode;
 }): void {
-  if (shown.has(proposal.id)) return;
+  if (!isMemorySupported() || shown.has(proposal.id)) return;
   shown.add(proposal.id);
   let toastId: string | number | undefined;
   const dismiss = () => toastId !== undefined && toast.dismiss(toastId);

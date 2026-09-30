@@ -413,6 +413,7 @@ describe("acpSendMessage", () => {
   });
 
   it("hands the me.md preamble off in-band for external agents, before the persona", async () => {
+    vi.stubEnv("VITE_MEMORY_SUPPORTED", "1");
     mockGetMePreamble.mockReturnValue(
       "[The user's file]\n- Keep answers brief.",
     );

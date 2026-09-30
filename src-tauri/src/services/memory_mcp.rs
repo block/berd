@@ -12,6 +12,8 @@
 //! sessions that are already running.
 
 use std::fs;
+use std::io::Write;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
 use tauri::Manager;
@@ -22,14 +24,11 @@ const FRAGMENT_FILE: &str = "memory-mcp.goose.yaml";
 /// crate isn't built by `tauri dev` and externalBin is blanked in dev config).
 /// Release builds deliberately ignore it so a production process cannot be
 /// redirected to an attacker-controlled binary through the environment.
+#[cfg(any(debug_assertions, test))]
 const BIN_ENV: &str = "BERD_MEMORY_MCP_BIN";
 
 fn binary_name() -> &'static str {
-    if cfg!(windows) {
-        "berd-memory-mcp.exe"
-    } else {
-        "berd-memory-mcp"
-    }
+    "berd-memory-mcp"
 }
 
 #[cfg(any(debug_assertions, test))]
@@ -63,6 +62,10 @@ fn resolve_bundled_sibling_from_exe(exe: &Path, binary_name: &str) -> Result<Pat
         .ok_or_else(|| "current executable has no parent".to_string())?
         .canonicalize()
         .map_err(|error| format!("couldn't canonicalize executable directory: {error}"))?;
+    // This constrains resolution; goosed later launches by pathname. It cannot
+    // prevent substitution by an actor able to modify the app bundle after
+    // this check. Signed-bundle launch acceptance remains a separate requirement.
+    reject_shared_writes(&fs::metadata(&trusted_dir).map_err(|e| e.to_string())?)?;
     let candidate = trusted_dir.join(binary_name);
     let canonical = validated_regular_non_symlink(&candidate)?;
     let parent = canonical
@@ -89,18 +92,44 @@ fn validated_regular_non_symlink(path: &Path) -> Result<PathBuf, String> {
             path.display()
         ));
     }
+    // Open without following the final symlink and compare identities across
+    // canonicalization. No candidate is executed while validating it.
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+        .map_err(|error| format!("couldn't open memory sidecar: {error}"))?;
+    let opened = file.metadata().map_err(|error| error.to_string())?;
+    if !opened.is_file() || !same_file(&link_metadata, &opened) {
+        return Err("memory sidecar changed during resolution".into());
+    }
+    reject_shared_writes(&opened)?;
+    if opened.mode() & 0o111 == 0 {
+        return Err("memory sidecar must be executable".into());
+    }
     let canonical = path
         .canonicalize()
         .map_err(|error| format!("couldn't canonicalize memory sidecar: {error}"))?;
     let metadata = fs::metadata(&canonical)
         .map_err(|error| format!("couldn't inspect memory sidecar: {error}"))?;
-    if !metadata.is_file() {
+    if !metadata.is_file() || !same_file(&opened, &metadata) {
         return Err(format!(
             "memory sidecar must resolve to a regular file: {}",
             canonical.display()
         ));
     }
     Ok(canonical)
+}
+
+fn same_file(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    left.dev() == right.dev() && left.ino() == right.ino()
+}
+
+fn reject_shared_writes(metadata: &fs::Metadata) -> Result<(), String> {
+    if metadata.mode() & 0o022 != 0 {
+        return Err("memory sidecar and its directory must not be group/world writable".into());
+    }
+    Ok(())
 }
 
 fn render_fragment(binary: &Path) -> String {
@@ -123,7 +152,7 @@ fn render_fragment(binary: &Path) -> String {
 }
 
 /// Write (or refresh) the config fragment and return its path, or `None`
-/// when memory is toggled off or the binary can't be found. Best-effort:
+/// when the trusted binary can't be found. Best-effort:
 /// any failure returns `None` and goosed spawns without memory tools —
 /// never a blocked session.
 pub(crate) fn ensure_fragment(app_handle: &tauri::AppHandle) -> Option<PathBuf> {
@@ -147,8 +176,10 @@ pub(crate) fn ensure_fragment(app_handle: &tauri::AppHandle) -> Option<PathBuf> 
         return None;
     }
     // Skip the write when current — goosed spawns shouldn't churn mtimes.
-    if fs::read_to_string(&path).ok().as_deref() != Some(fragment.as_str()) {
-        if let Err(error) = fs::write(&path, &fragment) {
+    let is_regular =
+        fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.file_type().is_file());
+    if !is_regular || fs::read_to_string(&path).ok().as_deref() != Some(fragment.as_str()) {
+        if let Err(error) = publish_fragment(&path, &fragment) {
             log::warn!("memory-mcp: couldn't write config fragment: {error}");
             return None;
         }
@@ -156,9 +187,25 @@ pub(crate) fn ensure_fragment(app_handle: &tauri::AppHandle) -> Option<PathBuf> 
     Some(path)
 }
 
+// Publish by rename so a stale/symlinked fragment cannot redirect a write into
+// another config. This does not secure app data against the same OS user.
+fn publish_fragment(path: &Path, fragment: &str) -> Result<(), String> {
+    let parent = path.parent().ok_or("memory fragment has no parent")?;
+    let mut file = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
+    file.write_all(fragment.as_bytes())
+        .map_err(|e| e.to_string())?;
+    file.persist(path).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn executable(path: &Path) {
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
 
     fn exe_path(temp: &tempfile::TempDir, exe_name: &str) -> PathBuf {
         let exe = temp.path().join(exe_name);
@@ -191,6 +238,7 @@ mod tests {
         let exe = exe_path(&temp, "Berd");
         let sidecar = temp.path().join("berd-memory-mcp");
         fs::write(&sidecar, b"sidecar").unwrap();
+        executable(&sidecar);
 
         assert_eq!(
             resolve_bundled_sibling_from_exe(&exe, "berd-memory-mcp").unwrap(),
@@ -225,17 +273,50 @@ mod tests {
     }
 
     #[test]
-    fn windows_bundled_resolution_requires_exe_sibling_name() {
+    fn bundled_resolution_requires_the_exact_sibling_name() {
         let temp = tempfile::tempdir().unwrap();
-        let exe = exe_path(&temp, "Berd.exe");
-        fs::write(temp.path().join("berd-memory-mcp"), b"wrong name").unwrap();
-        assert!(resolve_bundled_sibling_from_exe(&exe, "berd-memory-mcp.exe").is_err());
-
-        let sidecar = temp.path().join("berd-memory-mcp.exe");
+        let exe = exe_path(&temp, "Berd");
+        fs::write(temp.path().join("other-memory-server"), b"wrong name").unwrap();
+        assert!(resolve_bundled_sibling_from_exe(&exe, "berd-memory-mcp").is_err());
+        let sidecar = temp.path().join("berd-memory-mcp");
         fs::write(&sidecar, b"sidecar").unwrap();
+        executable(&sidecar);
         assert_eq!(
-            resolve_bundled_sibling_from_exe(&exe, "berd-memory-mcp.exe").unwrap(),
+            resolve_bundled_sibling_from_exe(&exe, "berd-memory-mcp").unwrap(),
             sidecar.canonicalize().unwrap()
         );
+    }
+
+    #[test]
+    fn fragment_publication_does_not_follow_old_symlink() {
+        let temp = tempfile::tempdir().unwrap();
+        let user = temp.path().join("user.yaml");
+        fs::write(&user, "user configuration").unwrap();
+        let managed = temp.path().join(FRAGMENT_FILE);
+        std::os::unix::fs::symlink(&user, &managed).unwrap();
+        publish_fragment(&managed, "managed configuration").unwrap();
+        assert_eq!(fs::read_to_string(&user).unwrap(), "user configuration");
+        assert!(!fs::symlink_metadata(&managed)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(
+            fs::read_to_string(&managed).unwrap(),
+            "managed configuration"
+        );
+    }
+
+    #[test]
+    fn resolution_rejects_non_executable_and_shared_writable_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let exe = exe_path(&temp, "Berd");
+        let sidecar = temp.path().join("berd-memory-mcp");
+        fs::write(&sidecar, b"never executed").unwrap();
+        assert!(resolve_bundled_sibling_from_exe(&exe, "berd-memory-mcp").is_err());
+        fs::set_permissions(&sidecar, fs::Permissions::from_mode(0o777)).unwrap();
+        assert!(resolve_bundled_sibling_from_exe(&exe, "berd-memory-mcp").is_err());
+        executable(&sidecar);
+        fs::set_permissions(temp.path(), fs::Permissions::from_mode(0o777)).unwrap();
+        assert!(resolve_bundled_sibling_from_exe(&exe, "berd-memory-mcp").is_err());
     }
 }

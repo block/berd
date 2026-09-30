@@ -1,3 +1,4 @@
+import { isMemorySupported } from "@/features/me/lib/memoryAvailability";
 import type { ContentBlock } from "@agentclientprotocol/sdk";
 import * as directAcp from "./acpApi";
 import type {
@@ -190,7 +191,8 @@ async function acpSendMessageNow(
   // in-band on the first prompt under that agent instead. See acpPersonaHandoff.
   const isGooseManaged = !providerId || isGooseManagedProvider(providerId);
   const berdctlPreamble = await getBerdctlPreamble();
-  const mePreamble = isGooseManaged ? null : await getMePreamble();
+  const mePreamble =
+    isGooseManaged || !isMemorySupported() ? null : await getMePreamble();
   let personaHandoffClaim: PersonaHandoffClaim | null = null;
   if (isGooseManaged) {
     await appendBerdStyleGuidelinesPrompt(

@@ -1,6 +1,8 @@
 # Memory laws
 
-- Memory **MUST** be stored in user-readable files owned by the person. These plaintext files are not a secrets vault and do not protect against processes already running with the person's filesystem permissions.
+- Memory **MUST** remain readable and editable by the person in Berd and portable through explicit Markdown import and export.
+- Active memory documents, proposals, suppression records, and approval metadata **MUST** be encrypted at rest. Plaintext exports, agent transcripts, and historical backups are outside this store's encryption boundary.
+- An unavailable or missing encryption key **MUST NOT** cause plaintext fallback, silent key replacement, or deletion of existing memory.
 - Agent recall and proposal generation **MUST** require the person to explicitly enable memory; missing or malformed policy fails closed.
 - Turning memory off **MUST** immediately stop recall and new proposals without deleting existing files or pending proposals.
 - Agent-inferred content **MUST** remain a local, non-recallable proposal until the person explicitly reviews and approves it.

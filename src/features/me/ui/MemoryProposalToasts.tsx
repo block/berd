@@ -1,3 +1,4 @@
+import { isMemorySupported } from "@/features/me/lib/memoryAvailability";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -20,6 +21,7 @@ export function MemoryProposalToasts({
   });
 
   useEffect(() => {
+    if (!isMemorySupported()) return;
     if (!sessionlessOnly && !sessionId) return;
     for (const proposal of proposals) {
       showMemoryProposalToast({
