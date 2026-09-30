@@ -1,3 +1,4 @@
+import { isMemorySupported } from "@/features/me/lib/memoryAvailability";
 import {
   forwardRef,
   type CSSProperties,
@@ -257,52 +258,56 @@ export const PrimaryNavigationSurface = forwardRef<
             aria-label={t("settings:navigationLabel")}
           >
             <div className="space-y-0">
-              {settingsSections.map((item) => {
-                const showUpdate =
-                  item.id === "providers" && agentUpdatesAvailable;
-                // Pending memory proposals badge the Memory row only —
-                // deliberately not the top-level Settings nav item, which
-                // would be noisy for a quiet, non-urgent queue.
-                const showProposals =
-                  item.id === "me" && memoryProposalsPending > 0;
-                return (
-                  <SidebarNavItem
-                    key={item.id}
-                    navId={`settings-${item.id}`}
-                    icon={item.icon}
-                    label={t(`settings:${item.labelKey}`)}
-                    collapsed={navCollapsed}
-                    labelTransition={labelTransition}
-                    labelVisible={navLabelVisible}
-                    isActive={activeSettingsSection === item.id}
-                    onClick={() => onSettingsSectionChange?.(item.id)}
-                    trailingIcon={
-                      showUpdate ? (
-                        <ArrowUpCircle
-                          aria-hidden="true"
-                          className="size-3.5 text-warning"
-                        />
-                      ) : showProposals ? (
-                        <span
-                          aria-hidden="true"
-                          className="flex min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-medium leading-4 text-accent-foreground"
-                        >
-                          {memoryProposalsPending}
-                        </span>
-                      ) : undefined
-                    }
-                    trailingLabel={
-                      showUpdate
-                        ? t("settings:nav.providersUpdateAvailable")
-                        : showProposals
-                          ? t("settings:nav.memoryProposalsPending", {
-                              count: memoryProposalsPending,
-                            })
-                          : undefined
-                    }
-                  />
-                );
-              })}
+              {settingsSections
+                .filter((item) => item.id !== "me" || isMemorySupported())
+                .map((item) => {
+                  const showUpdate =
+                    item.id === "providers" && agentUpdatesAvailable;
+                  // Pending memory proposals badge the Memory row only —
+                  // deliberately not the top-level Settings nav item, which
+                  // would be noisy for a quiet, non-urgent queue.
+                  const showProposals =
+                    isMemorySupported() &&
+                    item.id === "me" &&
+                    memoryProposalsPending > 0;
+                  return (
+                    <SidebarNavItem
+                      key={item.id}
+                      navId={`settings-${item.id}`}
+                      icon={item.icon}
+                      label={t(`settings:${item.labelKey}`)}
+                      collapsed={navCollapsed}
+                      labelTransition={labelTransition}
+                      labelVisible={navLabelVisible}
+                      isActive={activeSettingsSection === item.id}
+                      onClick={() => onSettingsSectionChange?.(item.id)}
+                      trailingIcon={
+                        showUpdate ? (
+                          <ArrowUpCircle
+                            aria-hidden="true"
+                            className="size-3.5 text-warning"
+                          />
+                        ) : showProposals ? (
+                          <span
+                            aria-hidden="true"
+                            className="flex min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-medium leading-4 text-accent-foreground"
+                          >
+                            {memoryProposalsPending}
+                          </span>
+                        ) : undefined
+                      }
+                      trailingLabel={
+                        showUpdate
+                          ? t("settings:nav.providersUpdateAvailable")
+                          : showProposals
+                            ? t("settings:nav.memoryProposalsPending", {
+                                count: memoryProposalsPending,
+                              })
+                            : undefined
+                      }
+                    />
+                  );
+                })}
             </div>
           </nav>
         </div>

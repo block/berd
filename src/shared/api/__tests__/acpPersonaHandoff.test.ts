@@ -5,6 +5,7 @@ import {
   claimPersonaHandoff,
   isExternalAgentProvider,
   isGooseManagedProvider,
+  preparePersonaHandoff,
   resetPersonaHandoff,
   toWireProviderId,
 } from "../acpPersonaHandoff";
@@ -160,17 +161,53 @@ describe("claimPersonaHandoff", () => {
       claimPersonaHandoff("s2", "claude-acp", "You are Starfriend."),
     ).toContain("You are Starfriend.");
   });
+
+  it("re-delivers the memory-off context after memory turns on and off again", () => {
+    const off = "[Memory is off] Don't offer to remember things.";
+    const on = "[Approved memory] Keep answers brief.";
+    const send = (sessionId: string, providerId: string, memory: string) =>
+      claimPersonaHandoff(sessionId, providerId, "You are Starfriend.", memory);
+
+    expect(send("s1", "claude-acp", on)).toContain(on);
+    expect(send("s1", "claude-acp", off)).toContain(off);
+    expect(send("s1", "claude-acp", off)).toBeNull();
+    expect(send("s1", "claude-acp", on)).toContain(on);
+    expect(send("s1", "claude-acp", off)).toContain(off);
+    expect(send("s1", "claude-acp", off)).toBeNull();
+
+    // Neither a different provider nor a different session inherits that state.
+    expect(send("s1", "codex-acp", off)).toContain(off);
+    expect(send("s2", "claude-acp", off)).toContain(off);
+    expect(send("s1", "codex-acp", off)).toBeNull();
+    expect(send("s2", "claude-acp", off)).toBeNull();
+  });
+
+  it("does not change the latest state until a prepared handoff is delivered", () => {
+    claimPersonaHandoff("s1", "claude-acp", "Persona A");
+    const pending = preparePersonaHandoff("s1", "claude-acp", "Persona B");
+    expect(pending?.preamble).toContain("Persona B");
+    expect(preparePersonaHandoff("s1", "claude-acp", "Persona A")).toBeNull();
+    pending?.markDelivered();
+    expect(preparePersonaHandoff("s1", "claude-acp", "Persona B")).toBeNull();
+    expect(
+      preparePersonaHandoff("s1", "claude-acp", "Persona A"),
+    ).not.toBeNull();
+  });
 });
 
 describe("resetPersonaHandoff", () => {
   it("forces re-injection on the next send for that session only", () => {
     claimPersonaHandoff("s1", "claude-acp", "You are Starfriend.");
+    claimPersonaHandoff("s1", "codex-acp", "You are Starfriend.");
     claimPersonaHandoff("s2", "claude-acp", "You are Starfriend.");
 
     resetPersonaHandoff("s1");
 
     expect(
       claimPersonaHandoff("s1", "claude-acp", "You are Starfriend."),
+    ).toContain("You are Starfriend.");
+    expect(
+      claimPersonaHandoff("s1", "codex-acp", "You are Starfriend."),
     ).toContain("You are Starfriend.");
     expect(
       claimPersonaHandoff("s2", "claude-acp", "You are Starfriend."),

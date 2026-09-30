@@ -122,7 +122,7 @@ set_vite_env() {
   local value="$2"
 
   case "$key" in
-    VITE_APP_VERSION|VITE_ENVIRONMENT|VITE_UPDATER_ENABLED|VITE_BETA_LINEAR_LABEL_ID)
+    VITE_APP_VERSION|VITE_ENVIRONMENT|VITE_UPDATER_ENABLED|VITE_BETA_LINEAR_LABEL_ID|VITE_MEMORY_SUPPORTED)
       echo "custom_vite_env cannot override release-owned key: $key" >&2
       return 1
       ;;
@@ -464,7 +464,7 @@ GOOSE_BUILD_PROFILE=release ./scripts/prepare-goose-sidecar.sh
 # ACP bridges are installed into the managed Node runtime on demand; they are
 # no longer staged as build resources.
 VITE_FEEDBACK="$VITE_FEEDBACK_VALUE" ./scripts/prepare-berdctl-sidecar.sh "$TARGET_TRIPLE"
-./scripts/prepare-memory-sidecar.sh "$TARGET_TRIPLE"
+# pnpm tauri stages memory only for the shared --target below.
 if [[ "$VITE_AGENT_TOOLS_VALUE" == "1" ]]; then
   ./scripts/prepare-bb-cli-resource.sh "$TARGET_TRIPLE"
   tmp="$(mktemp)"

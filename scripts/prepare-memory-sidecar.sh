@@ -1,11 +1,7 @@
 #!/usr/bin/env bash
-# Build and stage the berd-memory MCP server for Tauri's externalBin bundling.
-#
-# Tauri expects external binaries to be present at build time with the target
-# triple appended to the configured stem. For config
-#   "externalBin": ["binaries/berd-memory-mcp"]
-# this script creates:
-#   src-tauri/binaries/berd-memory-mcp-<triple>
+# Stage the memory MCP server only for the aarch64-apple-darwin build target.
+# Tauri resolves externalBin "binaries/berd-memory-mcp" to a file with the
+# triple suffix. Unsupported targets remove any stale staged memory binaries.
 
 set -euo pipefail
 
@@ -13,13 +9,10 @@ usage() {
   cat <<'USAGE'
 Usage: scripts/prepare-memory-sidecar.sh [target-triple]
 
-Builds the berd-memory workspace crate in release mode and copies the binary
-into src-tauri/binaries with the target triple suffix required by Tauri.
-
-The triple defaults to the rustc host. Pass it explicitly (or set
-BERD_MEMORY_TRIPLE) when the Tauri build itself uses an explicit --target, so
-the staged name matches the triple Tauri resolves (e.g. aarch64-apple-darwin
-in release CI).
+Stages the memory MCP binary only for aarch64-apple-darwin. For any other
+compile target, skips Cargo and removes stale staged memory binaries. The
+triple defaults to the Rust host for standalone staging; Tauri builds pass
+their compile target explicitly.
 USAGE
 }
 
@@ -29,18 +22,26 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
 fi
 
 EXPLICIT_TRIPLE="${1:-${BERD_MEMORY_TRIPLE:-}}"
-CARGO_ARGS=(build -p berd-memory --release)
-if [[ -n "$EXPLICIT_TRIPLE" ]]; then
-  TRIPLE="$EXPLICIT_TRIPLE"
-  CARGO_ARGS+=(--target "$TRIPLE")
-else
-  TRIPLE="$(rustc -vV | sed -n 's|host: ||p')"
-  if [[ -z "$TRIPLE" ]]; then
-    echo "Could not determine rust host target." >&2
-    exit 1
-  fi
+TRIPLE="${EXPLICIT_TRIPLE:-$(rustc -vV | sed -n 's|host: ||p')}"
+if [[ -z "$TRIPLE" ]]; then
+  echo "Could not determine the Rust compile target." >&2
+  exit 1
 fi
 
+OUT_DIR="src-tauri/binaries"
+if [[ "$TRIPLE" != "aarch64-apple-darwin" ]]; then
+  # A previous supported build in this checkout must not leak into this one.
+  if [[ -d "$OUT_DIR" ]]; then
+    find "$OUT_DIR" -maxdepth 1 -type f -name 'berd-memory-mcp*' -delete
+  fi
+  echo "Skipping unsupported memory target: $TRIPLE"
+  exit 0
+fi
+
+CARGO_ARGS=(build -p berd-memory --release)
+if [[ -n "$EXPLICIT_TRIPLE" ]]; then
+  CARGO_ARGS+=(--target "$TRIPLE")
+fi
 (cd src-tauri && cargo "${CARGO_ARGS[@]}")
 
 # Ask cargo where it actually writes the binary (it honours CARGO_TARGET_DIR
@@ -66,7 +67,6 @@ if [[ ! -x "$BUILT" ]]; then
   exit 1
 fi
 
-OUT_DIR="src-tauri/binaries"
 OUT="$OUT_DIR/berd-memory-mcp-$TRIPLE"
 mkdir -p "$OUT_DIR"
 cp "$BUILT" "$OUT"

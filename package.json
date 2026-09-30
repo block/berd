@@ -26,7 +26,7 @@
     "check": "biome check . && pnpm check:i18n",
     "format": "biome format --write .",
     "preview": "vite preview",
-    "tauri": "tauri",
+    "tauri": "node scripts/tauri-memory.mjs",
     "test": "vitest run",
     "test:release-scripts": "vitest run --config vitest.release-scripts.config.ts",
     "test:watch": "vitest",
