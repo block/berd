@@ -86,6 +86,17 @@ setup: _setup-dev-deps
     just _install-lefthook
     GOOSE_DEV_MODE=required ./scripts/ensure-local-goose.sh
 
+# Build and install a stable user-local Berd Call development command.
+[unix]
+install-berd-call-dev:
+    just _tauri-cargo-unix build -p berd-call --bin berd-call
+    bash ./scripts/install-berd-call-dev.sh install "$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)/debug/berd-call"
+
+# Remove the development command, restoring the installed app CLI if present.
+[unix]
+uninstall-berd-call-dev:
+    bash ./scripts/install-berd-call-dev.sh uninstall
+
 # ── Build & Check ────────────────────────────────────────────
 
 # Run the frontend non-test checks: design-system guardrails, berdctl contract freshness, formatting, lint, i18n, and TypeScript.

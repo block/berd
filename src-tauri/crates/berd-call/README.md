@@ -27,6 +27,14 @@ When started from Berd's bundle, the CLI asks Berd to check for an update in
 the background. Download can continue during the call; installation waits
 until the call ends. An unavailable update service does not prevent the call.
 
+For a local development binary, run `just install-berd-call-dev` from the Berd
+checkout. This builds the debug CLI, installs a copy at
+`~/.local/libexec/berd-call-dev`, and links `~/.local/bin/berd-call` to it. The
+installer refuses to overwrite an unrelated command. Run
+`just uninstall-berd-call-dev` to remove that copy and link; if a released Berd
+app with a bundled CLI is installed in `/Applications`, it restores the link
+to that app. Ensure `~/.local/bin` is on your `PATH`.
+
 The standalone command exposes the host-facing runtime protocol plus speech,
 model-management, synthesis, and diagnostic tools. `berd-call start` runs a
 foreground call on macOS using the default input and output devices. Its
