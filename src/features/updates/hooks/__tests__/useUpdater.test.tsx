@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Update as TauriUpdate } from "@tauri-apps/plugin-updater";
 import { relaunch as tauriRelaunch } from "@tauri-apps/plugin-process";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 import { probeKgooseConnectivity } from "@/shared/api/connectivity";
 import { I18nProvider } from "@/shared/i18n";
@@ -39,6 +40,9 @@ vi.mock("@tauri-apps/plugin-updater", () => ({
 
 vi.mock("@tauri-apps/plugin-process", () => ({ relaunch: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn().mockResolvedValue(() => {}),
+}));
 vi.mock("@/shared/api/connectivity", () => ({
   probeKgooseConnectivity: vi.fn(),
 }));
@@ -103,6 +107,7 @@ function wrapper({
 describe("UpdaterProvider", () => {
   beforeEach(() => {
     mockUpdateInstances.length = 0;
+    vi.mocked(listen).mockResolvedValue(() => {});
     vi.mocked(invoke).mockImplementation((command) => {
       if (command === "get_release_runtime") return Promise.resolve(runtime);
       return Promise.reject(new Error(`unexpected invoke: ${command}`));
@@ -144,6 +149,32 @@ describe("UpdaterProvider", () => {
 
     expect(invoke).toHaveBeenCalledWith("check_release_update");
     expect(result.current.status).toBe("up-to-date");
+  });
+
+  it("checks quietly when the bundled CLI requests an update", async () => {
+    enableUpdaterRuntime();
+    vi.mocked(invoke).mockImplementation((command) => {
+      if (command === "get_release_runtime") return Promise.resolve(runtime);
+      if (command === "check_release_update") return Promise.resolve(null);
+      return Promise.reject(new Error(`unexpected invoke: ${command}`));
+    });
+    renderHook(() => useUpdaterContext(), { wrapper });
+    await waitFor(() =>
+      expect(listen).toHaveBeenCalledWith(
+        "berd:check-update",
+        expect.any(Function),
+      ),
+    );
+    const onRequest = vi
+      .mocked(listen)
+      .mock.calls.find(([event]) => event === "berd:check-update")?.[1];
+    expect(onRequest).toBeDefined();
+    act(() =>
+      onRequest?.({ event: "berd:check-update", id: 1, payload: null }),
+    );
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("check_release_update"),
+    );
   });
 
   it("downloads an available same-channel update", async () => {

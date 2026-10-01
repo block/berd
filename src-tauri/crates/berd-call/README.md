@@ -11,12 +11,36 @@ small macOS host for default-device capture, playback, and transcript delivery.
 
 ## Command-line interface
 
+On macOS, install [Berd](https://github.com/block/berd/releases) first. Its
+application bundle includes `berd-call`; link that binary into a directory on
+your `PATH` so Berd app updates also update the CLI:
+
+```sh
+mkdir -p "$HOME/.local/bin"
+ln -s "/Applications/Berd.app/Contents/MacOS/berd-call" "$HOME/.local/bin/berd-call"
+```
+
+Make sure `$HOME/.local/bin` is on your `PATH`. If Berd is installed somewhere
+other than `/Applications`, replace the app path above. A standalone binary
+built with Cargo is for development and does not receive Berd app updates.
+When started from Berd's bundle, the CLI asks Berd to check for an update in
+the background. Download can continue during the call; installation waits
+until the call ends. An unavailable update service does not prevent the call.
+
+For a local development binary, run `just install-berd-call-dev` from the Berd
+checkout. This builds the debug CLI, installs a copy at
+`~/.local/libexec/berd-call-dev`, and links `~/.local/bin/berd-call` to it. The
+installer refuses to overwrite an unrelated command. Run
+`just uninstall-berd-call-dev` to remove that copy and link; if a released Berd
+app with a bundled CLI is installed in `/Applications`, it restores the link
+to that app. Ensure `~/.local/bin` is on your `PATH`.
+
 The standalone command exposes the host-facing runtime protocol plus speech,
 model-management, synthesis, and diagnostic tools. `berd-call start` runs a
 foreground call on macOS using the default input and output devices. Its
-loopback-only control endpoint supports `speak`, `status`, and `stop`; it does
-not add persisted host settings, a menu-bar process, an updater, or a second
-implementation of the shared call runtime.
+loopback-only control endpoint supports `speak`, `status`, and `stop`. The CLI
+uses Berd's updater when it runs from the app bundle; it does not implement a
+second updater or call runtime.
 
 ```text
 berd-call --help

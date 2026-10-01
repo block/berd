@@ -498,6 +498,8 @@ fn main() {
         Some("start") => {
             let options = parse_or_exit(parse_saved_start_args(&args), &args);
             #[cfg(target_os = "macos")]
+            let _update_guard = guard_and_request_bundled_app_update();
+            #[cfg(target_os = "macos")]
             if let Err(error) = host_session::route_stop_signals(options.port) {
                 eprintln!("berd-call start failed: {error}");
                 std::process::exit(1);
@@ -640,6 +642,77 @@ fn main() {
         },
         Some(command) => usage_error(&format!("unrecognized command: {command}"), &args),
         None => usage_error("a command is required", &args),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn resolved_executable_path(executable: &Path) -> PathBuf {
+    // Replacement may briefly remove the executable after this process has
+    // started. The symlink target or original path still identifies its bundle.
+    if let Ok(path) = executable.canonicalize() {
+        return path;
+    }
+    match std::fs::read_link(executable) {
+        Ok(target) if target.is_absolute() => target,
+        Ok(target) => executable
+            .parent()
+            .map(|parent| parent.join(target))
+            .unwrap_or_else(|| executable.to_path_buf()),
+        Err(_) => executable.to_path_buf(),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn bundled_app_path(executable: &Path) -> Option<PathBuf> {
+    let executable = resolved_executable_path(executable);
+    if executable.file_name()?.to_str()? != "berd-call" {
+        return None;
+    }
+    let macos = executable.parent()?;
+    if macos.file_name()?.to_str()? != "MacOS" {
+        return None;
+    }
+    let contents = macos.parent()?;
+    if contents.file_name()?.to_str()? != "Contents" {
+        return None;
+    }
+    let app = contents.parent()?;
+    (app.file_name()?.to_str()? == "Berd.app").then(|| app.to_path_buf())
+}
+
+#[cfg(target_os = "macos")]
+fn guard_and_request_bundled_app_update() -> Option<std::fs::File> {
+    let app_path = std::env::current_exe()
+        .ok()
+        .and_then(|executable| bundled_app_path(&executable))?;
+    let guard = match berd_call::update_guard::hold_call() {
+        Ok(guard) => guard,
+        Err(error) => {
+            eprintln!("berd-call could not guard app updates during this call: {error}");
+            return None;
+        }
+    };
+    request_bundled_app_update(&app_path);
+    Some(guard)
+}
+
+#[cfg(target_os = "macos")]
+fn request_bundled_app_update(app_path: &Path) {
+    // `open -g` returns promptly and routes the URL to an already-running app,
+    // or starts this same bundle in the background. Berd owns update trust.
+    match std::process::Command::new("/usr/bin/open")
+        .arg("-g")
+        .arg("-a")
+        .arg(app_path)
+        .arg("berd://update-check")
+        .spawn()
+    {
+        Ok(mut child) => {
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+        }
+        Err(error) => eprintln!("berd-call could not request a background app update: {error}"),
     }
 }
 
@@ -7384,6 +7457,55 @@ mod tests {
     use std::os::fd::IntoRawFd;
     use std::os::unix::net::UnixStream;
     use std::sync::Mutex;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn update_check_only_targets_the_owning_app_bundle() {
+        let directory = tempfile::tempdir().unwrap();
+        let app = directory.path().join("Berd.app");
+        let bundle = app.join("Contents/MacOS/berd-call");
+        std::fs::create_dir_all(bundle.parent().unwrap()).unwrap();
+        std::fs::write(&bundle, []).unwrap();
+        assert_eq!(bundled_app_path(&bundle), Some(app.canonicalize().unwrap()));
+        assert!(bundled_app_path(Path::new("/tmp/berd-call")).is_none());
+        let other = bundle.with_file_name("other");
+        std::fs::write(&other, []).unwrap();
+        assert!(bundled_app_path(&other).is_none());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn update_check_recognizes_a_path_symlink_to_the_bundled_cli() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let app = directory.path().join("Berd.app");
+        let executable = app.join("Contents/MacOS/berd-call");
+        std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        std::fs::write(&executable, []).unwrap();
+        let link = directory.path().join("berd-call");
+        symlink(&executable, &link).unwrap();
+
+        assert_eq!(bundled_app_path(&link), Some(app.canonicalize().unwrap()));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn update_lock_still_recognizes_a_bundle_during_replacement() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let app = directory.path().join("Berd.app");
+        let executable = app.join("Contents/MacOS/berd-call");
+        std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        std::fs::write(&executable, []).unwrap();
+        let link = directory.path().join("berd-call");
+        symlink(&executable, &link).unwrap();
+
+        std::fs::remove_file(&executable).unwrap();
+        assert_eq!(bundled_app_path(&link), Some(app.clone()));
+        assert_eq!(bundled_app_path(&executable), Some(app));
+    }
 
     #[test]
     fn status_cues_ignore_pending_recognition_but_suppress_actual_audio() {
