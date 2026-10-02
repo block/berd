@@ -93,14 +93,23 @@
   "compaction": {
     "goose": {
       "autoCompact": {
-        "helper": "Set to 100% to turn off auto-compaction.",
+        "helper": "Compact when context usage exceeds this percentage of Max context. Default: 90%. Set to 100% to turn off auto-compaction.",
         "label": "Threshold",
         "loading": "Loading...",
         "off": "Off",
         "saveError": "Couldn't save your auto-compact setting. Try again."
       },
       "description": "Automatically compact older context and reset your token count during sessions. This only applies to chats using the Goose harness.",
-      "label": "Auto-compact (Goose harness only)"
+      "label": "Auto-compact (Goose harness only)",
+      "contextLimit": {
+        "label": "Max context",
+        "exactLabel": "Max context tokens",
+        "helper": "Overrides the Goose context budget on the next turn. Choose a value within your model’s supported context window; this does not increase the model’s capacity. Environment variables take precedence over saved settings. Enter an exact token count for values outside the slider range.",
+        "invalid": "Enter a positive whole number of tokens.",
+        "save": "Save",
+        "saveError": "Couldn’t save your context limit. Try again.",
+        "tokens": "{{displayCount}} tokens"
+      }
     },
     "title": "Compaction"
   },

@@ -23,6 +23,7 @@ import {
 import { useAtMentionDefaultCategoryPreference } from "@/features/chat/lib/mentionPreference";
 import { useProfileCapability } from "@/shared/profile/capabilities";
 import { useStyleGuidelinesPreference } from "@/shared/preferences/styleGuidelinesPreference";
+import { GooseContextLimitSettings } from "./GooseContextLimitSettings";
 import { useMultiWorkspacePreference } from "@/features/workspaces/multiWorkspacePreference";
 
 // Behavior (rev 3): split out of the old GeneralSettings.tsx. Named
@@ -276,14 +277,18 @@ export function BehaviorSettings() {
             the Goose provider icon + "Built in" badge) -- that pushed the
             label/description text to the right and threw off alignment with
             the threshold slider below. Layout is "stacked" so the details
-            slot renders full-width under the label/description, matching
-            the requested layout: label+description, then a Threshold row
-            (label + value), then the slider, then the helper text. */}
+            slot renders full-width under the label/description, with the
+            context budget and its auto-compaction threshold together. */}
           <SettingsRow
             layout="stacked"
             label={t("compaction.goose.label")}
             description={t("compaction.goose.description")}
-            details={<GooseAutoCompactSettings />}
+            details={
+              <div className="space-y-6">
+                <GooseContextLimitSettings />
+                <GooseAutoCompactSettings />
+              </div>
+            }
           />
         </SettingsSection>
       </SettingsSections>

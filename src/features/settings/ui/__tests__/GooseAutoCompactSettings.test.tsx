@@ -29,7 +29,7 @@ describe("GooseAutoCompactSettings", () => {
     mockSetAutoCompactThreshold.mockResolvedValue(undefined);
     mockUseAutoCompactPreferences.mockReset();
     mockUseAutoCompactPreferences.mockReturnValue({
-      autoCompactThreshold: 0.8,
+      autoCompactThreshold: 0.9,
       isHydrated: true,
       setAutoCompactThreshold: mockSetAutoCompactThreshold,
     });
@@ -47,7 +47,7 @@ describe("GooseAutoCompactSettings", () => {
     await user.keyboard("{ArrowRight}");
 
     await waitFor(() =>
-      expect(mockSetAutoCompactThreshold).toHaveBeenCalledWith(0.81),
+      expect(mockSetAutoCompactThreshold).toHaveBeenCalledWith(0.91),
     );
   });
 
