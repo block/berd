@@ -26,9 +26,12 @@ import {
   type RealtimeTurnDetection,
   useRealtimeVoicePreference,
 } from "../lib/realtimeVoicePreference";
-import { clearOpenAiSttApiKey, setOpenAiSttApiKey } from "../api/openAiVoice";
+import {
+  clearOpenAiRealtimeApiKey,
+  setOpenAiRealtimeApiKey,
+} from "../api/openAiVoice";
 import { useOpenAiVoiceSetup } from "../hooks/useOpenAiVoiceSetup";
-import { OpenAiApiKeyField } from "./OpenAiApiKeyField";
+import { OpenAiEndpointField } from "./OpenAiEndpointField";
 import { PlaybackSpeedRow } from "./PlaybackSpeedRow";
 import { SimpleVoicePickerDialog } from "./SimpleVoicePickerDialog";
 import {
@@ -125,12 +128,13 @@ export function RealtimeVoiceSettings() {
   return (
     <section className="space-y-5 py-2 pr-4">
       <div className="space-y-2">
-        <OpenAiApiKeyField
-          label={t("voice.realtimeApiKey")}
-          configured={openAiStatus?.sttConfigured ?? false}
-          onSave={setOpenAiSttApiKey}
-          onClear={clearOpenAiSttApiKey}
-          description={t("voice.realtimeApiKeyDescription")}
+        <OpenAiEndpointField
+          kind="realtime"
+          label={t("voice.realtimeEndpoint")}
+          keyLabel={t("voice.realtimeApiKey")}
+          configured={openAiStatus?.realtimeConfigured ?? false}
+          onSaveKey={setOpenAiRealtimeApiKey}
+          onClearKey={clearOpenAiRealtimeApiKey}
         />
       </div>
 

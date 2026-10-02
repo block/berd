@@ -160,6 +160,10 @@ export function buildInitScript(options?: {
       const CALLBACKS = new Map();
       const EVENT_LISTENERS = new Map();
       const ACP_SOCKETS = new Set();
+      const VOICE_ENDPOINTS = JSON.parse(
+        localStorage.getItem("goose:e2e:voice-endpoints") ??
+          '{"realtime":null,"stt":null,"tts":null}',
+      );
       const LAYOUT_CONSTRAINTS = {
         minCenter: -1000000,
         maxCenter: 1000000,
@@ -754,6 +758,16 @@ export function buildInitScript(options?: {
                 ttsAvailable: true,
                 unavailableReason: null,
               });
+            case "get_openai_voice_endpoints":
+              return Promise.resolve(clone(VOICE_ENDPOINTS));
+            case "set_openai_voice_endpoint":
+              VOICE_ENDPOINTS[args.kind] = args.url.trim() || null;
+              localStorage.setItem(
+                "goose:e2e:voice-endpoints",
+                JSON.stringify(VOICE_ENDPOINTS),
+              );
+              emitTauriEvent("openai-voice:settings-changed", null);
+              return Promise.resolve(null);
             case "speak_pocket_voice":
               POCKET_VOICE_SPOKEN_TEXTS.push(args?.text);
               return new Promise((resolve) =>

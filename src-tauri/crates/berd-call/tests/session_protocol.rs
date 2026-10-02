@@ -64,9 +64,16 @@ impl ExpertSpokespersonTestSession {
         }
         let mut child = ChildGuard(Some(
             command
-                .args(["--mode", "expert-spokesperson", "--tts-backend", "openai"])
+                .args([
+                    "--mode",
+                    "expert-spokesperson",
+                    "--tts-backend",
+                    "openai",
+                    "--realtime-url",
+                    &endpoint,
+                ])
                 .env("OPENAI_API_KEY", "test-key")
-                .env("OPENAI_REALTIME_ENDPOINT", endpoint)
+                .env("OPENAI_REALTIME_ENDPOINT", "ws://127.0.0.1:1/unused")
                 .env("OPENAI_REALTIME_MODEL", "test-model")
                 .env("OPENAI_REALTIME_VOICE", "old-voice")
                 .stdin(Stdio::piped())

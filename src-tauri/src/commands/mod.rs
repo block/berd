@@ -40,6 +40,7 @@ pub mod notifications;
 pub mod openai_audio;
 pub mod openai_realtime;
 mod openai_voice_credentials;
+pub(crate) mod openai_voice_endpoints;
 pub mod path_resolver;
 pub mod pocket_voice;
 pub mod pr_tracker;

@@ -1297,6 +1297,11 @@ function canProjectAssistantTextFragments(
   if (visibleContent.length !== 1 || visibleContent[0]?.type !== "text") {
     return false;
   }
+  // Speech belongs to the whole assistant reply. Fragmenting its text would
+  // duplicate the playback status and draw each paragraph as a separate card.
+  if (visibleContent[0].speech) {
+    return false;
+  }
   if (
     message.metadata?.attachments?.length ||
     message.metadata?.chips?.length

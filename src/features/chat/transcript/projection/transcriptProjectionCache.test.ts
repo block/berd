@@ -123,6 +123,33 @@ describe("transcript projection cache", () => {
     );
   });
 
+  it("keeps a spoken multi-paragraph reply in one assistant card", () => {
+    const assistant = messageWithContent(
+      "assistant-voice-story",
+      "assistant",
+      [
+        {
+          type: "text",
+          text: multiParagraphText("story paragraph", 3, 20),
+          speech: { status: "speaking" },
+        },
+      ],
+      utc(2026, 6, 4, 10),
+      { completionStatus: "completed" },
+    );
+
+    const snapshot = update(createTranscriptProjectionCache(), [assistant]);
+
+    expect(
+      snapshot.rows.filter((row) => row.messageId === assistant.id),
+    ).toHaveLength(1);
+    expect(messageRow(snapshot, assistant.id)).toMatchObject({
+      kind: "message",
+      rowId: "message:assistant-voice-story",
+    });
+    expect(snapshot.fragmentRowCount).toBe(0);
+  });
+
   it("keeps long markdown tables on whole-message rows", () => {
     const cache = createTranscriptProjectionCache();
     const assistant = message(
