@@ -174,17 +174,8 @@ fn env_trimmed(name: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-#[cfg(target_os = "macos")]
-fn tts_api_key() -> Result<String, String> {
-    openai_voice_credentials::require(OpenAiVoiceCredential::TextToSpeech)
-}
-
-pub(crate) fn stt_api_key() -> Result<String, String> {
-    openai_voice_credentials::require(OpenAiVoiceCredential::SpeechToText)
-}
-
-pub(crate) fn realtime_endpoint() -> Result<String, String> {
-    openai_voice_endpoints::effective_url(VoiceEndpointKind::Stt)
+pub(crate) fn stt_endpoint_and_key() -> Result<(String, String), String> {
+    openai_voice_credentials::require_endpoint(OpenAiVoiceCredential::SpeechToText)
 }
 
 pub(crate) fn transcription_model() -> String {
@@ -531,7 +522,8 @@ pub fn start_openai_voice_stream(
         else {
             return Ok(false);
         };
-        let key = tts_api_key()?;
+        let (endpoint, key) =
+            openai_voice_credentials::require_endpoint(OpenAiVoiceCredential::TextToSpeech)?;
         {
             let mut playback = state
                 .playback
@@ -564,6 +556,7 @@ pub fn start_openai_voice_stream(
             let result = run_openai_voice_stream(
                 &app,
                 &stream_id,
+                endpoint,
                 key,
                 active.clone(),
                 receiver,
@@ -779,6 +772,7 @@ impl From<String> for StreamFailure {
 fn run_openai_voice_stream(
     app: &AppHandle,
     stream_id: &str,
+    endpoint: String,
     key: String,
     active: Arc<AtomicBool>,
     receiver: mpsc::Receiver<OpenAiStreamCommand>,
@@ -791,7 +785,7 @@ fn run_openai_voice_stream(
     voice: String,
 ) -> Result<StreamOutcome, StreamFailure> {
     let tts = ConfiguredTtsSlot::new(TtsConfiguration::openai(
-        openai_voice_endpoints::effective_url(VoiceEndpointKind::Tts)?,
+        endpoint,
         key,
         speech_model(),
         voice,

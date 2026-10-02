@@ -169,10 +169,11 @@ pub fn start_openai_realtime_spokesperson_runtime(
         return Err("This window already owns an OpenAI Realtime runtime session".into());
     }
 
-    let api_key =
-        openai_voice_credentials::require(OpenAiVoiceCredential::SelectedRealtimeAssistant)?;
+    let (endpoint, api_key) = openai_voice_credentials::require_endpoint(
+        OpenAiVoiceCredential::SelectedRealtimeAssistant,
+    )?;
     let mut config = OpenAiSpokespersonConfig::new(api_key, options, Vec::new());
-    config.endpoint = openai_voice_endpoints::effective_url(VoiceEndpointKind::Realtime)?;
+    config.endpoint = endpoint;
     let semantic_revision = Arc::new(AtomicU64::new(0));
     let event_window = webview_window.clone();
     let event_session_id = session_id.clone();

@@ -1465,12 +1465,12 @@ pub async fn start_native_voice_conversation(
             "Download the macOS speech recognition model before starting a call.".to_string(),
         );
     }
-    let openai_api_key = if input_backend == VoiceInputBackend::Openai {
-        Some(super::openai_audio::stt_api_key()?)
+    let openai_endpoint_and_key = if input_backend == VoiceInputBackend::Openai {
+        Some(super::openai_audio::stt_endpoint_and_key()?)
     } else {
         None
     };
-    if openai_api_key.is_some() {
+    if openai_endpoint_and_key.is_some() {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
         while !webview_window.is_focused().unwrap_or(false)
             && tokio::time::Instant::now() < deadline
@@ -1525,13 +1525,15 @@ pub async fn start_native_voice_conversation(
                 return Err("macOS speech recognition requires macOS 26 or later.".to_string());
             }
         }
-        VoiceInputBackend::Openai => super::openai_audio::realtime_endpoint().map(|endpoint| {
-            berd_call::input::VoiceInputEngineConfig::OpenAi {
+        VoiceInputBackend::Openai => {
+            let (endpoint, api_key) =
+                openai_endpoint_and_key.expect("OpenAI endpoint and key resolved for OpenAI input");
+            Ok(berd_call::input::VoiceInputEngineConfig::OpenAi {
                 endpoint,
-                api_key: openai_api_key.expect("OpenAI key resolved for OpenAI input"),
+                api_key,
                 model: super::openai_audio::transcription_model(),
-            }
-        }),
+            })
+        }
     };
     let engine = match engine {
         Ok(engine) => engine,

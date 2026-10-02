@@ -132,6 +132,18 @@ pub(crate) fn require(credential: OpenAiVoiceCredential) -> Result<String, Strin
     read(credential)?.ok_or_else(|| credential.missing_message().to_string())
 }
 
+pub(crate) fn require_endpoint(
+    credential: OpenAiVoiceCredential,
+) -> Result<(String, String), String> {
+    let kind = credential
+        .selected_kind()
+        .ok_or_else(|| "Dictation uses the fixed default endpoint".to_string())?;
+    openai_voice_endpoints::resolve_with_url(kind, |url| {
+        read_account(&account_for_url(kind, url))?
+            .ok_or_else(|| credential.missing_message().to_string())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -166,7 +166,14 @@ fn endpoint_for_base_url(base_url: &str, path: &str) -> Result<String, String> {
 }
 
 pub(crate) fn effective_url(kind: VoiceEndpointKind) -> Result<String, String> {
-    if let Some(saved) = read_settings()?.get(kind) {
+    effective_url_from(&read_settings()?, kind)
+}
+
+fn effective_url_from(
+    settings: &VoiceEndpointSettings,
+    kind: VoiceEndpointKind,
+) -> Result<String, String> {
+    if let Some(saved) = settings.get(kind) {
         return Ok(saved.to_string());
     }
     if !matches!(kind, VoiceEndpointKind::Realtime)
@@ -187,6 +194,27 @@ pub(crate) fn effective_url(kind: VoiceEndpointKind) -> Result<String, String> {
         return Ok(url.to_string());
     }
     Ok(kind.default_url().to_string())
+}
+
+/// Resolve an endpoint and its credential without allowing a concurrent selection change.
+pub(crate) fn resolve_with_url<T>(
+    kind: VoiceEndpointKind,
+    resolve: impl FnOnce(&str) -> Result<T, String>,
+) -> Result<(String, T), String> {
+    resolve_with_url_at(&settings_path()?, kind, resolve)
+}
+
+fn resolve_with_url_at<T>(
+    path: &std::path::Path,
+    kind: VoiceEndpointKind,
+    resolve: impl FnOnce(&str) -> Result<T, String>,
+) -> Result<(String, T), String> {
+    let _guard = SETTINGS_UPDATE_LOCK
+        .lock()
+        .map_err(|_| "OpenAI voice settings lock is poisoned".to_string())?;
+    let destination = effective_url_from(&read_settings_from(path)?, kind)?;
+    let credential = resolve(&destination)?;
+    Ok((destination, credential))
 }
 
 #[tauri::command]
@@ -247,6 +275,50 @@ mod tests {
     use super::*;
     use std::sync::mpsc;
     use std::time::Duration;
+
+    #[test]
+    fn startup_keeps_the_credential_and_destination_paired_during_endpoint_changes() {
+        for kind in [
+            VoiceEndpointKind::Stt,
+            VoiceEndpointKind::Tts,
+            VoiceEndpointKind::Realtime,
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("endpoints.json");
+            let (first, second) = if matches!(kind, VoiceEndpointKind::Tts) {
+                ("https://first.test/speech", "https://second.test/speech")
+            } else {
+                ("wss://first.test/realtime", "wss://second.test/realtime")
+            };
+            update_settings_file(&path, |settings| settings.set(kind, Some(first.into()))).unwrap();
+            let update_path = path.clone();
+            let (started_tx, started_rx) = mpsc::channel();
+            let (finished_tx, finished_rx) = mpsc::channel();
+            let mut update = None;
+            let (destination, credential_url) = resolve_with_url_at(&path, kind, |url| {
+                update = Some(std::thread::spawn(move || {
+                    started_tx.send(()).unwrap();
+                    update_settings_file(&update_path, |settings| {
+                        settings.set(kind, Some(second.into()))
+                    })
+                    .unwrap();
+                    finished_tx.send(()).unwrap();
+                }));
+                started_rx.recv().unwrap();
+                // A concurrent save must not change the destination while its key is being read.
+                let _ = finished_rx.recv_timeout(Duration::from_millis(100));
+                Ok(url.to_string())
+            })
+            .unwrap();
+            update.unwrap().join().unwrap();
+            assert_eq!(
+                destination, credential_url,
+                "a key must only be sent to its own endpoint"
+            );
+            assert_eq!(destination, first);
+            assert_eq!(read_settings_from(&path).unwrap().get(kind), Some(second));
+        }
+    }
 
     #[test]
     fn credential_mutations_reject_a_stale_displayed_endpoint() {
