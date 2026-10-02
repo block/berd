@@ -85,19 +85,47 @@ pub async fn get_openai_realtime_status() -> Result<OpenAiRealtimeStatus, String
 }
 
 #[tauri::command]
-pub fn set_openai_realtime_api_key(app: AppHandle, api_key: String) -> Result<(), String> {
-    let api_key = api_key.trim();
+pub async fn set_openai_realtime_api_key(
+    app: AppHandle,
+    api_key: String,
+    expected_url: String,
+) -> Result<(), String> {
+    let api_key = api_key.trim().to_string();
     if api_key.is_empty() {
         return Err("Realtime API key cannot be empty".into());
     }
-    openai_voice_credentials::store(OpenAiVoiceCredential::SelectedRealtimeAssistant, api_key)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        openai_voice_endpoints::with_selected_endpoint(
+            VoiceEndpointKind::Realtime,
+            &expected_url,
+            || {
+                openai_voice_credentials::store(
+                    OpenAiVoiceCredential::SelectedRealtimeAssistant,
+                    &api_key,
+                )
+            },
+        )
+    })
+    .await
+    .map_err(|error| format!("Could not save Realtime key: {error}"))??;
     app.emit(openai_voice_endpoints::SETTINGS_CHANGED_EVENT, ())
         .map_err(|error| format!("Could not refresh Realtime settings: {error}"))
 }
 
 #[tauri::command]
-pub fn clear_openai_realtime_api_key(app: AppHandle) -> Result<(), String> {
-    openai_voice_credentials::clear(OpenAiVoiceCredential::SelectedRealtimeAssistant)?;
+pub async fn clear_openai_realtime_api_key(
+    app: AppHandle,
+    expected_url: String,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        openai_voice_endpoints::with_selected_endpoint(
+            VoiceEndpointKind::Realtime,
+            &expected_url,
+            || openai_voice_credentials::clear(OpenAiVoiceCredential::SelectedRealtimeAssistant),
+        )
+    })
+    .await
+    .map_err(|error| format!("Could not clear Realtime key: {error}"))??;
     app.emit(openai_voice_endpoints::SETTINGS_CHANGED_EVENT, ())
         .map_err(|error| format!("Could not refresh Realtime settings: {error}"))
 }

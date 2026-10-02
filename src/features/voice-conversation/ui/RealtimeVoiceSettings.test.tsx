@@ -88,7 +88,10 @@ describe("RealtimeVoiceSettings", () => {
       "realtime",
       "ws://127.0.0.1:18870/v1/realtime",
     );
-    expect(openAiVoiceMocks.setApiKey).toHaveBeenCalledWith(" sk-shared ");
+    expect(openAiVoiceMocks.setApiKey).toHaveBeenCalledWith(
+      " sk-shared ",
+      "ws://127.0.0.1:18870/v1/realtime",
+    );
     expect(
       openAiVoiceMocks.setEndpoint.mock.invocationCallOrder[0],
     ).toBeLessThan(openAiVoiceMocks.setApiKey.mock.invocationCallOrder[0]);

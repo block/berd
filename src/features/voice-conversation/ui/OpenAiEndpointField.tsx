@@ -27,8 +27,8 @@ export function OpenAiEndpointField({
   label: string;
   keyLabel: string;
   configured: boolean;
-  onSaveKey: (apiKey: string) => Promise<void>;
-  onClearKey: () => Promise<void>;
+  onSaveKey: (apiKey: string, expectedUrl: string) => Promise<void>;
+  onClearKey: (expectedUrl: string) => Promise<void>;
 }) {
   const { t } = useTranslation("settings");
   const id = useId();
@@ -81,11 +81,11 @@ export function OpenAiEndpointField({
     let urlSaved = false;
     const savingKey = Boolean(apiKey.trim());
     try {
-      // The key command uses the persisted endpoint; commit the displayed URL first.
+      // Commit the draft URL first, then bind the key mutation to that same URL.
       if (changed) {
         await setOpenAiVoiceEndpoint(kind, url);
         urlSaved = true;
-        targetUrl = (await getOpenAiVoiceEndpoints())[kind] ?? "";
+        targetUrl = url.trim();
         setUrl(targetUrl);
         setSavedUrl(targetUrl);
         setLocalKeyStatus({
@@ -95,7 +95,7 @@ export function OpenAiEndpointField({
         });
       }
       if (savingKey) {
-        await onSaveKey(apiKey);
+        await onSaveKey(apiKey, targetUrl);
         setApiKey("");
         setLocalKeyStatus({
           url: targetUrl,
@@ -132,7 +132,7 @@ export function OpenAiEndpointField({
     setSaving(true);
     setError(null);
     try {
-      await onClearKey();
+      await onClearKey(savedUrl);
       setApiKey("");
       setLocalKeyStatus({
         url: savedUrl,

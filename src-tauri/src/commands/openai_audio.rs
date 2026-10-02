@@ -372,6 +372,7 @@ pub async fn set_openai_stt_api_key(
     state: State<'_, OpenAiVoiceState>,
     native_voice: State<'_, NativeVoiceState>,
     capture: State<'_, VoiceCaptureState>,
+    expected_url: String,
     api_key: String,
 ) -> Result<(), String> {
     let api_key = api_key.trim();
@@ -381,7 +382,11 @@ pub async fn set_openai_stt_api_key(
     native_voice
         .stop_active_then(&app, &capture, || {
             stop_openai_voice_inner(&state)?;
-            openai_voice_credentials::store(OpenAiVoiceCredential::SpeechToText, api_key)?;
+            openai_voice_endpoints::with_selected_endpoint(
+                VoiceEndpointKind::Stt,
+                &expected_url,
+                || openai_voice_credentials::store(OpenAiVoiceCredential::SpeechToText, api_key),
+            )?;
             state.credential_revision.fetch_add(1, Ordering::AcqRel);
             state.configured.store(true, Ordering::Release);
             app.emit(SETTINGS_CHANGED_EVENT, ())
@@ -396,11 +401,16 @@ pub async fn clear_openai_stt_api_key(
     state: State<'_, OpenAiVoiceState>,
     native_voice: State<'_, NativeVoiceState>,
     capture: State<'_, VoiceCaptureState>,
+    expected_url: String,
 ) -> Result<(), String> {
     native_voice
         .stop_active_then(&app, &capture, || {
             stop_openai_voice_inner(&state)?;
-            openai_voice_credentials::clear(OpenAiVoiceCredential::SpeechToText)?;
+            openai_voice_endpoints::with_selected_endpoint(
+                VoiceEndpointKind::Stt,
+                &expected_url,
+                || openai_voice_credentials::clear(OpenAiVoiceCredential::SpeechToText),
+            )?;
             state.credential_revision.fetch_add(1, Ordering::AcqRel);
             state.configured.store(false, Ordering::Release);
             app.emit(SETTINGS_CHANGED_EVENT, ())
@@ -415,6 +425,7 @@ pub async fn set_openai_tts_api_key(
     state: State<'_, OpenAiVoiceState>,
     native_voice: State<'_, NativeVoiceState>,
     capture: State<'_, VoiceCaptureState>,
+    expected_url: String,
     api_key: String,
 ) -> Result<(), String> {
     let api_key = api_key.trim();
@@ -424,7 +435,11 @@ pub async fn set_openai_tts_api_key(
     native_voice
         .stop_active_then(&app, &capture, || {
             stop_openai_voice_inner(&state)?;
-            openai_voice_credentials::store(OpenAiVoiceCredential::TextToSpeech, api_key)?;
+            openai_voice_endpoints::with_selected_endpoint(
+                VoiceEndpointKind::Tts,
+                &expected_url,
+                || openai_voice_credentials::store(OpenAiVoiceCredential::TextToSpeech, api_key),
+            )?;
             state.credential_revision.fetch_add(1, Ordering::AcqRel);
             state.configured.store(
                 openai_voice_credentials::is_present(OpenAiVoiceCredential::SpeechToText)?,
@@ -442,11 +457,16 @@ pub async fn clear_openai_tts_api_key(
     state: State<'_, OpenAiVoiceState>,
     native_voice: State<'_, NativeVoiceState>,
     capture: State<'_, VoiceCaptureState>,
+    expected_url: String,
 ) -> Result<(), String> {
     native_voice
         .stop_active_then(&app, &capture, || {
             stop_openai_voice_inner(&state)?;
-            openai_voice_credentials::clear(OpenAiVoiceCredential::TextToSpeech)?;
+            openai_voice_endpoints::with_selected_endpoint(
+                VoiceEndpointKind::Tts,
+                &expected_url,
+                || openai_voice_credentials::clear(OpenAiVoiceCredential::TextToSpeech),
+            )?;
             state.credential_revision.fetch_add(1, Ordering::AcqRel);
             state.configured.store(
                 openai_voice_credentials::is_present(OpenAiVoiceCredential::SpeechToText)?,

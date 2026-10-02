@@ -661,7 +661,7 @@ describe("VoiceSettings", () => {
     );
     await user.click(screen.getAllByRole("button", { name: "Save" })[0]);
 
-    expect(openAiApiMocks.setSttApiKey).toHaveBeenCalledWith("stt-secret");
+    expect(openAiApiMocks.setSttApiKey).toHaveBeenCalledWith("stt-secret", "");
   });
 
   it.each([
@@ -686,7 +686,7 @@ describe("VoiceSettings", () => {
         ? openAiApiMocks.setSttApiKey
         : openAiApiMocks.setTtsApiKey;
     expect(openAiApiMocks.setEndpoint).toHaveBeenCalledWith(kind, url);
-    expect(saveKey).toHaveBeenCalledWith("local-test");
+    expect(saveKey).toHaveBeenCalledWith("local-test", url);
     expect(openAiApiMocks.setEndpoint.mock.invocationCallOrder[0]).toBeLessThan(
       saveKey.mock.invocationCallOrder[0],
     );
@@ -736,7 +736,7 @@ describe("VoiceSettings", () => {
     );
     await user.click(screen.getByRole("button", { name: "Save" }));
 
-    expect(openAiApiMocks.setTtsApiKey).toHaveBeenCalledWith("tts-secret");
+    expect(openAiApiMocks.setTtsApiKey).toHaveBeenCalledWith("tts-secret", "");
   });
 
   it("uses OpenAI guidance when only the selected OpenAI input is not ready", async () => {

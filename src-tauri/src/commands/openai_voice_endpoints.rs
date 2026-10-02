@@ -208,6 +208,32 @@ pub(crate) fn set_openai_voice_endpoint(
         .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))
 }
 
+/// Keep endpoint selection stable while a credential mutation uses it.
+pub(crate) fn with_selected_endpoint<T>(
+    kind: VoiceEndpointKind,
+    expected_url: &str,
+    mutate: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    with_selected_endpoint_at(&settings_path()?, kind, expected_url, mutate)
+}
+
+fn with_selected_endpoint_at<T>(
+    path: &std::path::Path,
+    kind: VoiceEndpointKind,
+    expected_url: &str,
+    mutate: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let expected = validate(kind, expected_url)?.filter(|url| url != kind.default_url());
+    let _guard = SETTINGS_UPDATE_LOCK
+        .lock()
+        .map_err(|_| "OpenAI voice settings lock is poisoned".to_string())?;
+    let settings = read_settings_from(path)?;
+    if settings.get(kind) != expected.as_deref() {
+        return Err("The endpoint changed in another window. Reopen Voice settings before changing its key.".into());
+    }
+    mutate()
+}
+
 pub(crate) fn reset() -> Result<(), String> {
     persist(&VoiceEndpointSettings::default())
 }
@@ -221,6 +247,41 @@ mod tests {
     use super::*;
     use std::sync::mpsc;
     use std::time::Duration;
+
+    #[test]
+    fn credential_mutations_reject_a_stale_displayed_endpoint() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("endpoints.json");
+        let mut settings = VoiceEndpointSettings::default();
+        settings.set(
+            VoiceEndpointKind::Stt,
+            Some("wss://second.test/realtime".into()),
+        );
+        persist_to(&path, &settings).unwrap();
+        let mut mutated = false;
+        let result = with_selected_endpoint_at(
+            &path,
+            VoiceEndpointKind::Stt,
+            "wss://first.test/realtime",
+            || {
+                mutated = true;
+                Ok(())
+            },
+        );
+        assert!(result.unwrap_err().contains("another window"));
+        assert!(!mutated);
+        with_selected_endpoint_at(
+            &path,
+            VoiceEndpointKind::Stt,
+            " wss://second.test/realtime ",
+            || {
+                mutated = true;
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(mutated);
+    }
 
     #[test]
     fn concurrent_endpoint_updates_preserve_both_services() {
