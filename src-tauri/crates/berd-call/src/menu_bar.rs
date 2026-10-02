@@ -1040,7 +1040,10 @@ mod tests {
         finished.store(true, Ordering::SeqCst);
         drop(commands);
         server.join().unwrap();
-        assert!(observed.is_some(), "external mute did not reach menu state within 300 ms");
+        assert!(
+            observed.is_some(),
+            "external mute did not reach menu state within 300 ms"
+        );
     }
 
     #[test]
