@@ -787,5 +787,6 @@
     "filesUnavailable": "Files live on {{host}} and can't be browsed from this machine yet.",
     "openUnavailable": "This file is on {{host}} and can't be opened from this machine.",
     "viewerUnavailable": "This file lives on {{host}}. Viewing remote files isn't supported yet."
-  }
+  },
+  "archivedReadOnlyStatus": "This session is archived and read-only."
 }

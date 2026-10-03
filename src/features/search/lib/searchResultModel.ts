@@ -5,6 +5,7 @@ import { SETTINGS_SEARCH_ITEMS } from "@/features/settings/ui/settingsSearchItem
 export type SearchCategory =
   | "all"
   | "chat"
+  | "messages"
   | "extensions"
   | "agents"
   | "skills"
@@ -21,6 +22,14 @@ export type TranslateSettingsLabel = (key: string) => string;
 
 export function searchResultId(kind: string, key: string): string {
   return `search-result-${kind}-${key.replace(/[^A-Za-z0-9_-]/g, "_")}`;
+}
+
+/** Tuple encoding keeps punctuation-distinct message identities separate. */
+export function messageSearchResultId(
+  sessionId: string,
+  messageId: string,
+): string {
+  return `search-result-message-${encodeURIComponent(JSON.stringify([sessionId, messageId]))}`;
 }
 
 export function buildSettingsSearchResults({

@@ -148,7 +148,9 @@ export function ChatView({
     assertedReadOnlyStatus ??
     (remoteSessionUnavailable
       ? t("remoteSessionUnavailable.description")
-      : undefined);
+      : selectedSession?.archivedAt
+        ? t("archivedReadOnlyStatus")
+        : undefined);
   useRegisterSecurityConfirmationSurface(selectedSessionId);
   const mountStart = useRef(performance.now());
   const terminalRootRef = useRef<HTMLDivElement | null>(null);

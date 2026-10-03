@@ -98,6 +98,19 @@ const mockAcpPrepareSession = vi.hoisted(() => vi.fn());
 const mockAcpSetSessionConfigOption = vi.hoisted(() => vi.fn());
 const mockAcpListSessionsPage = vi.hoisted(() => vi.fn());
 const mockAcpSearchSessions = vi.hoisted(() => vi.fn());
+const mockMessageSearchState = vi.hoisted(() => ({
+  results: [] as import("@/shared/api/messageSearch").MessageSearchResult[],
+  isLoading: false,
+  error: null,
+  status: "complete",
+  hasMore: false,
+  loadMore: vi.fn(),
+  retry: vi.fn(),
+  cancel: vi.fn(),
+}));
+vi.mock("@/features/search/hooks/useMessageSearch", () => ({
+  useMessageSearch: () => mockMessageSearchState,
+}));
 const mockBuildFeatures = vi.hoisted(() => ({
   byoKeyProviders: false,
   voiceConversation: false,
@@ -1038,6 +1051,7 @@ describe("AppShell global navigation", () => {
     mockAcpGetSessionInfo.mockResolvedValue(null);
     mockAcpLoadSession.mockReset();
     mockAcpLoadSession.mockResolvedValue(undefined);
+    mockMessageSearchState.results = [];
     mockAcpSearchSessions.mockReset();
     // Default: the server matches nothing; tests that exercise discovery
     // override with their own match set.
@@ -5409,48 +5423,45 @@ describe("AppShell global navigation", () => {
     );
   });
 
-  it("hydrates a server-discovered session into the store when selected from search", async () => {
-    // The store starts EMPTY: the discovered session is known only to the
-    // server. Clicking its result must insert it synchronously — activation
-    // renders the chat only for store sessions.
+  it.each([
+    null,
+    "2026-07-29T12:00:00.000Z",
+  ])("hydrates an unloaded message result preserving archive %s and exact target", async (archivedAt) => {
     useChatSessionStore.setState({ sessions: [] });
-    mockAcpSearchSessions.mockImplementation(async () => ({
-      results: [],
-      searchedIds: [],
-      failedIds: [],
-      matchedInfos: [
-        {
-          sessionId: "server-1",
-          title: "Server match",
-          updatedAt: "2026-07-28T12:00:00.000Z",
-          createdAt: "2026-07-28T11:00:00.000Z",
-          lastMessageAt: null,
-          archivedAt: null,
-          userSetName: false,
-          messageCount: 2,
-          subtitle: null,
-          workingDir: "/tmp/project",
-          projectId: null,
-          providerId: null,
-          modelId: null,
-          personaId: null,
-        },
-      ],
-    }));
+    mockMessageSearchState.results = [
+      {
+        sessionId: "server-1",
+        title: "Server match",
+        updatedAt: "2026-07-28T12:00:00.000Z",
+        archivedAt,
+        workingDir: "",
+        messageCreatedAt: "2026-07-28T11:00:00.000Z",
+        messageId: "server-message-2",
+        messageIndex: 1,
+        role: "user",
+        snippet: "server match text",
+        matchCount: 1,
+      },
+    ];
     const user = userEvent.setup();
     renderAppShell();
-
     await user.click(screen.getByRole("button", { name: "Search" }));
-    const search = screen.getByRole("textbox", { name: "Universal search" });
-    await user.type(search, "server match");
-
-    await user.click(
-      await screen.findByRole("button", { name: /Open chat Server match/ }),
+    await user.type(
+      screen.getByRole("textbox", { name: "Universal search" }),
+      "server match",
     );
-
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Open message 2 in Server match",
+      }),
+    );
     const stored = useChatSessionStore.getState().getSession("server-1");
     expect(stored).toBeDefined();
+    expect(stored?.archivedAt).toBe(archivedAt ?? undefined);
     expect(useChatSessionStore.getState().activeSessionId).toBe("server-1");
+    expect(
+      useChatStore.getState().scrollTargetMessageBySession["server-1"],
+    ).toEqual({ messageId: "server-message-2", query: "server match" });
     expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
   });
 

@@ -57,6 +57,7 @@ pub struct GooseServeProcess {
     port: u16,
     secret_key: String,
     process_record_dir: PathBuf,
+    message_search_source: Option<PathBuf>,
     _child: Child,
 }
 
@@ -85,6 +86,12 @@ impl GooseServeProcess {
         GOOSE_SERVE
             .get_or_try_init(|| async { Self::spawn(app_handle).await })
             .await
+    }
+
+    pub(crate) fn message_search_source() -> Option<PathBuf> {
+        GOOSE_SERVE
+            .get()
+            .and_then(|process| process.message_search_source.clone())
     }
 
     /// Kill the child process. Called from the app exit handler to ensure
@@ -262,6 +269,14 @@ impl GooseServeProcess {
         );
 
         crate::services::process::apply_no_window_async(&mut command);
+        let message_search_source =
+            storage_environment_matches_parent(&command, |name| std::env::var_os(name))
+                .then(|| {
+                    goose_config::data_dir()
+                        .ok()
+                        .map(|dir| dir.join("sessions").join("sessions.db"))
+                })
+                .flatten();
         let mut child = command.spawn().map_err(|error| {
             diagnostic_log::record_event(
                 DiagnosticLevel::Error,
@@ -355,6 +370,7 @@ impl GooseServeProcess {
             port,
             secret_key,
             process_record_dir,
+            message_search_source,
             _child: child,
         })
     }
@@ -373,6 +389,34 @@ fn add_release_webview_origin_arg(command: &mut Command) {
     }
 
     command.arg("--allowed-origin").arg(TAURI_WEBVIEW_ORIGIN);
+}
+
+fn storage_environment_matches_parent(
+    command: &Command,
+    parent_value: impl Fn(&str) -> Option<std::ffi::OsString>,
+) -> bool {
+    [
+        "GOOSE_PATH_ROOT",
+        "HOME",
+        "XDG_DATA_HOME",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "USERPROFILE",
+        "HOMEDRIVE",
+        "HOMEPATH",
+    ]
+    .iter()
+    .all(|key| {
+        let parent = parent_value(key);
+        let child = command
+            .as_std()
+            .get_envs()
+            .find(|(name, _)| env_key::matches(&name.to_string_lossy(), key));
+        match child {
+            Some((_, value)) => value.map(std::ffi::OsStr::to_os_string) == parent,
+            None => true,
+        }
+    })
 }
 
 fn spawn_log_reader<R>(stream: Option<R>, stream_name: &'static str)
@@ -1222,7 +1266,8 @@ mod tests {
     use super::{
         acp_websocket_url, add_release_webview_origin_arg, apply_goose_search_paths_env,
         apply_runtime_goose_provider_env, apply_shell_env_with_extended_path,
-        apply_shell_env_with_extended_path_inner, DATABRICKS_HOST_ENV, TAURI_WEBVIEW_ORIGIN,
+        apply_shell_env_with_extended_path_inner, storage_environment_matches_parent,
+        DATABRICKS_HOST_ENV, TAURI_WEBVIEW_ORIGIN,
     };
     use crate::commands::runtime_config::default_runtime_config;
     use std::collections::HashMap;
@@ -1238,6 +1283,42 @@ mod tests {
                 None
             }
         })
+    }
+
+    #[test]
+    fn storage_identity_guard_rejects_child_only_roots_and_platform_directory_changes() {
+        for key in [
+            "GOOSE_PATH_ROOT",
+            "HOME",
+            "XDG_DATA_HOME",
+            "APPDATA",
+            "LOCALAPPDATA",
+            "USERPROFILE",
+            "HOMEDRIVE",
+            "HOMEPATH",
+        ] {
+            let mut command = Command::new("unused-synthetic-program");
+            command.env(key, "synthetic-child-directory");
+            assert!(
+                !storage_environment_matches_parent(&command, |_| None),
+                "{key}"
+            );
+            assert!(
+                storage_environment_matches_parent(&command, |name| (name == key)
+                    .then(|| OsString::from("synthetic-child-directory"))),
+                "{key}"
+            );
+            command.env_remove(key);
+            assert!(
+                !storage_environment_matches_parent(&command, |name| (name == key)
+                    .then(|| OsString::from("synthetic-parent-directory"))),
+                "{key} removal"
+            );
+        }
+        assert!(storage_environment_matches_parent(
+            &Command::new("unused-synthetic-program"),
+            |_| None
+        ));
     }
 
     #[test]

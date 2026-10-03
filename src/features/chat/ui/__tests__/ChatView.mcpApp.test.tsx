@@ -831,6 +831,31 @@ describe("ChatView MCP app messaging", () => {
     );
   });
 
+  it("opens an archived session read-only using the current store metadata", () => {
+    const session = {
+      ...chatSessionWithWorkingDir("/tmp/project"),
+      archivedAt: "2026-07-29T12:00:00Z",
+    };
+    mocks.sessions = [session];
+    render(
+      <ChatView
+        sessionId={session.id}
+        activeSession={{ ...session, archivedAt: undefined }}
+        onForkChat={vi.fn()}
+      />,
+    );
+    expect(mocks.useChatSessionController).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sessionId: session.id, readOnly: true }),
+    );
+    expect(mocks.t).toHaveBeenCalledWith("archivedReadOnlyStatus");
+    const timelineProps = mocks.messageTimelineSpy.mock.calls.at(-1)?.[0] as {
+      onForkFromMessage?: unknown;
+      onChangeFolder?: unknown;
+    };
+    expect(timelineProps.onForkFromMessage).toBeUndefined();
+    expect(timelineProps.onChangeFolder).toBeUndefined();
+  });
+
   it("does not pass fork-from-message in read-only mode", () => {
     render(
       <ChatView

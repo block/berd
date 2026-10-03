@@ -325,11 +325,12 @@ function resolveScrollTargetMessageId(
   scrollTargetMessageId: string | null | undefined,
   scrollTargetQuery: string | null | undefined,
 ) {
-  if (
-    scrollTargetMessageId &&
-    snapshot.rowByMessageId.has(scrollTargetMessageId)
-  ) {
-    return scrollTargetMessageId;
+  // A durable message target may arrive before replay. Wait for that ID;
+  // matching text in another turn must never replace the requested message.
+  if (scrollTargetMessageId) {
+    return snapshot.rowByMessageId.has(scrollTargetMessageId)
+      ? scrollTargetMessageId
+      : null;
   }
 
   const trimmedQuery = scrollTargetQuery?.trim().toLocaleLowerCase();

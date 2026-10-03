@@ -4339,6 +4339,16 @@ export function AppShell({
               persisted?.activeWorkspaceId ?? session.activeWorkspaceId,
           });
         }
+        // Search metadata can be newer than the loaded sidebar. Preserve any
+        // in-flight local archive intent; otherwise refresh read-only state.
+        if (
+          session &&
+          !useChatSessionStore.getState().archiveMutationBySessionId[sessionId]
+        ) {
+          useChatSessionStore
+            .getState()
+            .patchSession(sessionId, { archivedAt: session.archivedAt });
+        }
         selectSessionDirect(sessionId);
       });
     },

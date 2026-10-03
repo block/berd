@@ -241,6 +241,9 @@ _tauri-test-unix:
     if [ "$(uname -s)" = "Linux" ]; then rm -rf src-tauri/target/sherpa-onnx-prebuilt; fi
     just _tauri-cargo-unix test -p tauri-plugin-berdctl --features server
     just _tauri-cargo-unix test -p berdctl
+    just _tauri-cargo-unix test --lib services::acp::goose_serve::tests::storage_identity_guard
+    just _tauri-cargo-unix test --lib services::goose_config::tests
+    just _tauri-cargo-unix test --lib commands::message_search::tests
     just _tauri-cargo-unix test --lib telemetry
     just _tauri-cargo-unix test --lib --features block-telemetry-enforced telemetry
     just _tauri-test-skill-marketplace
@@ -253,6 +256,9 @@ _tauri-test-skill-marketplace:
 _tauri-test-windows:
     just _tauri-cargo-windows test -p tauri-plugin-berdctl --features server
     just _tauri-cargo-windows test -p berdctl
+    just _tauri-cargo-windows test --lib services::acp::goose_serve::tests::storage_identity_guard
+    just _tauri-cargo-windows test --lib services::goose_config::tests
+    just _tauri-cargo-windows test --lib commands::message_search::tests
     just _tauri-cargo-windows test --lib telemetry
     just _tauri-cargo-windows test --lib --features block-telemetry-enforced telemetry
     just _tauri-test-skill-marketplace
