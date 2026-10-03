@@ -8,7 +8,8 @@
     "openExtension": "Open extension {{name}}",
     "openSession": "Open chat {{name}}",
     "openSettings": "Open {{name}} settings",
-    "openSkill": "Start chat with {{name}}"
+    "openSkill": "Start chat with {{name}}",
+    "openMessage": "Open message {{index}} in {{name}}"
   },
   "heading": {
     "ariaLabel": "Universal search",
@@ -22,12 +23,13 @@
   "sections": {
     "agents": "Agents",
     "automations": "Automations",
-    "chat": "Chats",
+    "chat": "Session Titles",
     "extensions": "Extensions",
     "recents": "Recents",
     "results": "Results",
     "settings": "Settings",
-    "skills": "Skills"
+    "skills": "Skills",
+    "messages": "Messages"
   },
   "states": {
     "available": "Available",
@@ -35,5 +37,19 @@
   },
   "fallbackTitles": {
     "automation": "Untitled automation"
-  }
+  },
+  "messageSearch": {
+    "scope": "Message scope",
+    "active": "Active sessions",
+    "all": "All sessions",
+    "archived": "Archived sessions",
+    "loading": "Searching messages…",
+    "error": "Message search failed. Results may be incomplete.",
+    "partial": "Some sessions could not be searched. Results are incomplete.",
+    "timeout": "Message search timed out. Results are incomplete.",
+    "retry": "Retry",
+    "loadMore": "Load more messages",
+    "prompt": "Enter keywords to search messages."
+  },
+  "noTitleMatches": "No session titles match \"{{query}}\""
 }

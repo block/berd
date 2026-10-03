@@ -1,6 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
-  act,
   fireEvent,
   render as renderWithoutQueryClient,
   screen,
@@ -14,7 +13,6 @@ import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
-import { sessionSearchStamp } from "@/shared/api/sessionSearch";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import { DEFAULT_RUNTIME_CONFIG } from "@/shared/runtime-config/schema";
 import { SearchView } from "../SearchView";
@@ -22,15 +20,26 @@ import { SearchView } from "../SearchView";
 const mockListSkills = vi.hoisted(() => vi.fn());
 const mockListExtensions = vi.hoisted(() => vi.fn());
 const mockGetAutomationTiles = vi.hoisted(() => vi.fn());
-const mockAcpSearchSessions = vi.hoisted(() => vi.fn());
+const mockMessageSearch = vi.hoisted(() => ({
+  results: [] as import("@/shared/api/messageSearch").MessageSearchResult[],
+  isLoading: false,
+  error: null as string | null,
+  status: "complete",
+  hasMore: false,
+  loadMore: vi.fn(),
+  retry: vi.fn(),
+  cancel: vi.fn(),
+}));
+const mockUseMessageSearch = vi.hoisted(() => vi.fn());
+vi.mock("../../hooks/useMessageSearch", () => ({
+  useMessageSearch: (options: unknown) => {
+    mockUseMessageSearch(options);
+    return mockMessageSearch;
+  },
+}));
 
 vi.mock("@/features/extensions/api/extensions", () => ({
   listExtensions: (...args: unknown[]) => mockListExtensions(...args),
-}));
-
-vi.mock("@/shared/api/acp", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/shared/api/acp")>()),
-  acpSearchSessions: (...args: unknown[]) => mockAcpSearchSessions(...args),
 }));
 
 // With a QueryClient in the tree (see `render` below), useSkillSearch fetches
@@ -61,25 +70,6 @@ function render(ui: ReactElement) {
   );
 }
 
-function matchedInfo(sessionId: string) {
-  return {
-    sessionId,
-    title: "Server match",
-    updatedAt: "2026-04-12T12:00:00Z",
-    createdAt: "2026-04-12T12:00:00Z",
-    lastMessageAt: null,
-    archivedAt: null,
-    userSetName: false,
-    messageCount: 3,
-    subtitle: null,
-    workingDir: null,
-    projectId: null,
-    providerId: null,
-    modelId: null,
-    personaId: null,
-  };
-}
-
 describe("SearchView", () => {
   beforeEach(() => {
     vi.stubEnv("VITE_AUTOMATIONS", "1");
@@ -87,17 +77,16 @@ describe("SearchView", () => {
     mockListExtensions.mockResolvedValue([]);
     mockGetAutomationTiles.mockReset();
     mockGetAutomationTiles.mockResolvedValue({ tiles: [] });
-    mockAcpSearchSessions.mockReset();
-    // Production shape: the server matches every target handed to it here, and
-    // searchedIds ⊆ matchedInfos (only matched targets are export-enriched).
-    mockAcpSearchSessions.mockImplementation(
-      async (_query: string, targets: { id: string }[]) => ({
-        results: [],
-        searchedIds: targets.map((target) => target.id),
-        failedIds: [],
-        matchedInfos: targets.map((target) => matchedInfo(target.id)),
-      }),
-    );
+    Object.assign(mockMessageSearch, {
+      results: [],
+      isLoading: false,
+      error: null,
+      status: "complete",
+      hasMore: false,
+    });
+    mockMessageSearch.loadMore.mockReset();
+    mockMessageSearch.retry.mockReset();
+    mockUseMessageSearch.mockReset();
     mockListSkills.mockReset();
     mockListSkills.mockResolvedValue([
       {
@@ -465,177 +454,90 @@ describe("SearchView", () => {
     ).toBeInTheDocument();
   });
 
-  it("sweeps chat search once per query and re-sweeps only on membership or stamp changes", async () => {
-    const baseSession = {
-      id: "session-1",
-      title: "Needle notes",
-      createdAt: "2026-04-10T12:00:00Z",
+  it("keeps title matches separate from each matching message and highlights literal OR keywords", async () => {
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "title",
+          title: "Needle notes",
+          createdAt: "2026-04-10T12:00:00Z",
+          updatedAt: "2026-04-10T12:00:00Z",
+          messageCount: 2,
+        },
+      ],
+    });
+    mockMessageSearch.results = [0, 1].map((index) => ({
+      sessionId: "unloaded",
+      title: "Unloaded session",
+      archivedAt: null,
+      workingDir: "",
       updatedAt: "2026-04-10T12:00:00Z",
-      messageCount: 1,
-    };
-    const otherSession = {
-      id: "session-2",
-      title: "Second needle",
-      createdAt: "2026-04-09T12:00:00Z",
-      updatedAt: "2026-04-09T12:00:00Z",
-      messageCount: 1,
-    };
-    useChatSessionStore.setState({ sessions: [baseSession, otherSession] });
-
+      messageCreatedAt: "2026-04-10T12:00:00Z",
+      messageId: `message-${index}`,
+      messageIndex: index,
+      role: "user",
+      snippet: "Needle matches needle or C++",
+      matchCount: 3,
+    }));
+    const onSelect = vi.fn();
     render(
       <SearchView
         variant="dialog"
         onExit={vi.fn()}
-        onSelectSearchResult={vi.fn()}
+        onSelectSearchResult={onSelect}
         onOpenExtension={vi.fn()}
         onOpenAgent={vi.fn()}
         onOpenAutomation={vi.fn()}
         onOpenSkill={vi.fn()}
       />,
     );
-
     const input = screen.getByRole("textbox", { name: "Universal search" });
-    fireEvent.change(input, { target: { value: "needle" } });
-
-    await waitFor(() => {
-      expect(mockAcpSearchSessions).toHaveBeenCalledTimes(1);
-    });
-    // Let the render/effect chain settle: an unstable search callback used to
-    // re-fire a second, discarded sweep from the query state update.
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 150));
-    });
-    expect(mockAcpSearchSessions).toHaveBeenCalledTimes(1);
-
-    // Same membership and stamps, new session objects (subtitle stream, unread
-    // flip, meta-only `session_info_update`): no re-sweep.
-    const subtitledSession = { ...baseSession, subtitle: "streaming snippet" };
-    act(() => {
-      useChatSessionStore.setState({
-        sessions: [subtitledSession, { ...otherSession }],
-      });
-    });
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 150));
-    });
-    expect(mockAcpSearchSessions).toHaveBeenCalledTimes(1);
-
-    // Same membership and stamps, reordered: every session-list merge re-sorts
-    // by activity, so a background session bubbling up must not count as a
-    // membership change.
-    act(() => {
-      useChatSessionStore.setState({
-        sessions: [{ ...otherSession }, subtitledSession],
-      });
-    });
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 150));
-    });
-    expect(mockAcpSearchSessions).toHaveBeenCalledTimes(1);
-
-    // Persona refresh (60s timer / window focus) replaces the store array with
-    // fresh objects, changing the resolvers the search hook was handed: still
-    // no re-sweep.
-    act(() => {
-      useAgentStore.setState({
-        personas: useAgentStore
-          .getState()
-          .personas.map((persona) => ({ ...persona })),
-      });
-    });
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 150));
-    });
-    expect(mockAcpSearchSessions).toHaveBeenCalledTimes(1);
-
-    // New content in a session already on screen (the periodic list refresh
-    // picking up a backend change): one re-sweep, carrying the new stamp so the
-    // changed session re-exports while the other one stays a cache hit.
-    const bumpedSession = {
-      ...subtitledSession,
-      updatedAt: "2026-04-10T13:00:00Z",
-      messageCount: 3,
-    };
-    act(() => {
-      useChatSessionStore.setState({
-        sessions: [bumpedSession, { ...otherSession }],
-      });
-    });
-    await waitFor(() => {
-      expect(mockAcpSearchSessions).toHaveBeenCalledTimes(2);
-    });
-    expect(mockAcpSearchSessions).toHaveBeenLastCalledWith(
-      "needle",
-      expect.arrayContaining([
-        {
-          id: "session-1",
-          stamp: sessionSearchStamp(bumpedSession),
-        },
-      ]),
-      expect.anything(),
+    fireEvent.change(input, { target: { value: "needle C++" } });
+    await screen.findByRole("tab", { name: "Messages (2)" });
+    await userEvent.click(
+      screen.getByRole("tab", { name: "Session Titles (0)" }),
     );
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 150));
-    });
-    expect(mockAcpSearchSessions).toHaveBeenCalledTimes(2);
-
-    // Membership change: full re-sweep (unchanged sessions are corpus-cache
-    // hits inside searchSessionsViaExports).
-    act(() => {
-      useChatSessionStore.setState({
-        sessions: [
-          bumpedSession,
-          otherSession,
-          {
-            id: "session-3",
-            title: "Third needle",
-            createdAt: "2026-04-12T12:00:00Z",
-            updatedAt: "2026-04-12T12:00:00Z",
-            messageCount: 1,
-          },
-        ],
-      });
-    });
-    await waitFor(() => {
-      expect(mockAcpSearchSessions).toHaveBeenCalledTimes(3);
-    });
-    expect(mockAcpSearchSessions).toHaveBeenLastCalledWith(
-      "needle",
-      [
-        expect.objectContaining({ id: "session-1" }),
-        expect.objectContaining({ id: "session-2" }),
-        expect.objectContaining({ id: "session-3" }),
-      ],
-      expect.anything(),
+    expect(
+      screen.queryByRole("button", { name: /Open message/ }),
+    ).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: "Messages (2)" }));
+    const rows = screen.getAllByRole("button", { name: /Open message/ });
+    expect(rows).toHaveLength(2);
+    expect(
+      Array.from(rows[0].querySelectorAll("mark")).map(
+        (mark) => mark.textContent,
+      ),
+    ).toEqual(["Needle", "needle", "C++"]);
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSelect).toHaveBeenCalledWith(
+      "unloaded",
+      "message-1",
+      "needle C++",
+      expect.objectContaining({ id: "unloaded" }),
     );
+    expect(
+      useChatSessionStore.getState().getSession("unloaded"),
+    ).toBeUndefined();
   });
 
-  it("keeps a content-only chat result rendered across a membership change", async () => {
-    // Matches "needle" only inside its messages, so it survives a re-sweep
-    // only if the results are not rebuilt from metadata alone.
-    const contentSession = {
-      id: "session-1",
-      title: "Wandering thoughts",
-      createdAt: "2026-04-10T12:00:00Z",
-      updatedAt: "2026-04-10T12:00:00Z",
-      messageCount: 1,
-    };
-    const messageMatch = {
-      sessionId: "session-1",
-      snippet: "needle in message",
-      messageId: "message-1",
-      matchCount: 1,
-    };
-    useChatSessionStore.setState({ sessions: [contentSession] });
-    mockAcpSearchSessions.mockImplementation(
-      async (_query: string, targets: { id: string }[]) => ({
-        results: [messageMatch],
-        searchedIds: targets.map((target) => target.id),
-        failedIds: [],
-        matchedInfos: targets.map((target) => matchedInfo(target.id)),
-      }),
-    );
-
+  it("hides earlier-query matches during debounce without showing an authoritative zero", async () => {
+    mockMessageSearch.results = [
+      {
+        sessionId: "session",
+        title: "Prior query",
+        archivedAt: null,
+        workingDir: "",
+        updatedAt: "2026-04-10T12:00:00Z",
+        messageCreatedAt: "2026-04-10T12:00:00Z",
+        messageId: "message",
+        messageIndex: 0,
+        role: "user",
+        snippet: "needle",
+        matchCount: 1,
+      },
+    ];
     render(
       <SearchView
         variant="dialog"
@@ -647,67 +549,190 @@ describe("SearchView", () => {
         onOpenSkill={vi.fn()}
       />,
     );
-
     const input = screen.getByRole("textbox", { name: "Universal search" });
     fireEvent.change(input, { target: { value: "needle" } });
-
-    // Once the debounced query has reached the sweep, the recents list is no
-    // longer what is on screen, so the row can only come from the sweep's
-    // message match.
-    await waitFor(() => {
-      expect(mockAcpSearchSessions).toHaveBeenCalledTimes(1);
+    await screen.findByRole("button", {
+      name: "Open message 1 in Prior query",
     });
-    await waitFor(() => {
-      expect(
-        screen.getByRole("button", { name: /Wandering thoughts/ }),
-      ).toBeVisible();
-    });
+    fireEvent.change(input, { target: { value: "different" } });
+    expect(
+      screen.queryByRole("button", { name: "Open message 1 in Prior query" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/No matches/)).not.toBeInTheDocument();
+  });
 
-    // A session joining the list re-sweeps the same query. The row must not
-    // blink out while the sweep is in flight.
-    type Sweep = {
-      results: (typeof messageMatch)[];
-      searchedIds: string[];
-      failedIds: string[];
-      matchedInfos: ReturnType<typeof matchedInfo>[];
-    };
-    let resolveSweep: (sweep: Sweep) => void = () => {};
-    mockAcpSearchSessions.mockReturnValueOnce(
-      new Promise<Sweep>((resolve) => {
-        resolveSweep = resolve;
-      }),
+  it("shows Session Titles and Messages before a query is entered", async () => {
+    render(
+      <SearchView
+        variant="dialog"
+        onExit={vi.fn()}
+        onSelectSearchResult={vi.fn()}
+        onOpenExtension={vi.fn()}
+        onOpenAgent={vi.fn()}
+        onOpenAutomation={vi.fn()}
+        onOpenSkill={vi.fn()}
+      />,
     );
-    act(() => {
-      useChatSessionStore.setState({
-        sessions: [
-          contentSession,
-          {
-            id: "session-2",
-            title: "Second chat",
-            createdAt: "2026-04-11T12:00:00Z",
-            updatedAt: "2026-04-11T12:00:00Z",
-            messageCount: 1,
-          },
-        ],
-      });
-    });
-
     expect(
-      screen.getByRole("button", { name: /Wandering thoughts/ }),
-    ).toBeVisible();
-
-    await act(async () => {
-      resolveSweep({
-        results: [messageMatch],
-        searchedIds: ["session-1", "session-2"],
-        failedIds: [],
-        matchedInfos: [matchedInfo("session-1"), matchedInfo("session-2")],
-      });
-    });
-
+      screen.getByRole("tab", { name: "Session Titles (0)" }),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: "Messages (0)" }));
     expect(
-      screen.getByRole("button", { name: /Wandering thoughts/ }),
-    ).toBeVisible();
+      screen.getByText("Enter keywords to search messages."),
+    ).toBeInTheDocument();
+  });
+
+  it.each([
+    "loading",
+    "error",
+  ])("reports scoped title zero independently of message search %s", async (state) => {
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "known-session",
+          title: "Unrelated title",
+          createdAt: "2026-04-10T12:00:00Z",
+          updatedAt: "2026-04-10T12:00:00Z",
+          messageCount: 2,
+        },
+      ],
+    });
+    mockMessageSearch.isLoading = state === "loading";
+    mockMessageSearch.status = state === "error" ? "error" : "idle";
+    mockMessageSearch.error = state === "error" ? "unavailable" : null;
+    render(
+      <SearchView
+        variant="dialog"
+        onExit={vi.fn()}
+        onSelectSearchResult={vi.fn()}
+        onOpenExtension={vi.fn()}
+        onOpenAgent={vi.fn()}
+        onOpenAutomation={vi.fn()}
+        onOpenSkill={vi.fn()}
+      />,
+    );
+    const input = screen.getByRole("textbox", { name: "Universal search" });
+    fireEvent.change(input, { target: { value: "absent" } });
+    await waitFor(() =>
+      expect(mockUseMessageSearch).toHaveBeenLastCalledWith(
+        expect.objectContaining({ query: "absent" }),
+      ),
+    );
+    await userEvent.click(
+      screen.getByRole("tab", { name: "Session Titles (0)" }),
+    );
+    expect(
+      screen.getByText('No session titles match "absent"'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText('No matches for "absent"'),
+    ).not.toBeInTheDocument();
+    fireEvent.change(input, { target: { value: "Unrelated" } });
+    expect(
+      screen.queryByText('No session titles match "absent"'),
+    ).not.toBeInTheDocument();
+    await screen.findByRole("button", { name: "Open chat Unrelated title" });
+    expect(
+      screen.queryByText('No session titles match "Unrelated"'),
+    ).not.toBeInTheDocument();
+  });
+
+  it("reports authoritative zero only when the message search finishes without a cursor", async () => {
+    render(
+      <SearchView
+        variant="dialog"
+        onExit={vi.fn()}
+        onSelectSearchResult={vi.fn()}
+        onOpenExtension={vi.fn()}
+        onOpenAgent={vi.fn()}
+        onOpenAutomation={vi.fn()}
+        onOpenSkill={vi.fn()}
+      />,
+    );
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Universal search" }),
+      { target: { value: "absent" } },
+    );
+    await waitFor(() =>
+      expect(mockUseMessageSearch).toHaveBeenLastCalledWith(
+        expect.objectContaining({ query: "absent" }),
+      ),
+    );
+    await userEvent.click(screen.getByRole("tab", { name: "Messages (0)" }));
+    expect(screen.getByText('No matches for "absent"')).toBeInTheDocument();
+  });
+
+  it("keeps Messages available with zero results, chooses archive scope and pages results", async () => {
+    mockMessageSearch.hasMore = true;
+    render(
+      <SearchView
+        variant="dialog"
+        onExit={vi.fn()}
+        onSelectSearchResult={vi.fn()}
+        onOpenExtension={vi.fn()}
+        onOpenAgent={vi.fn()}
+        onOpenAutomation={vi.fn()}
+        onOpenSkill={vi.fn()}
+      />,
+    );
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Universal search" }),
+      { target: { value: "absent" } },
+    );
+    await waitFor(() =>
+      expect(mockUseMessageSearch).toHaveBeenLastCalledWith(
+        expect.objectContaining({ query: "absent" }),
+      ),
+    );
+    await userEvent.click(screen.getByRole("tab", { name: "Messages (0)" }));
+    expect(
+      screen.queryByText('No matches for "absent"'),
+    ).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Message scope"), {
+      target: { value: "archived" },
+    });
+    expect(mockUseMessageSearch).toHaveBeenLastCalledWith(
+      expect.objectContaining({ scope: "archived" }),
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Load more messages" }),
+    );
+    expect(mockMessageSearch.loadMore).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    "partial",
+    "timeout",
+    "error",
+  ])("shows %s as incomplete instead of authoritative no matches", async (status) => {
+    mockMessageSearch.status = status;
+    render(
+      <SearchView
+        variant="dialog"
+        onExit={vi.fn()}
+        onSelectSearchResult={vi.fn()}
+        onOpenExtension={vi.fn()}
+        onOpenAgent={vi.fn()}
+        onOpenAutomation={vi.fn()}
+        onOpenSkill={vi.fn()}
+      />,
+    );
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Universal search" }),
+      { target: { value: "absent" } },
+    );
+    await waitFor(() =>
+      expect(mockUseMessageSearch).toHaveBeenLastCalledWith(
+        expect.objectContaining({ query: "absent" }),
+      ),
+    );
+    await userEvent.click(screen.getByRole("tab", { name: "Messages (0)" }));
+    expect(
+      screen.queryByText('No matches for "absent"'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText(/incomplete/i)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(mockMessageSearch.retry).toHaveBeenCalledOnce();
   });
 
   it("clears the query before Escape exits search", async () => {

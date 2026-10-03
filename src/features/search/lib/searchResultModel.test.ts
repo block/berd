@@ -5,6 +5,7 @@ import {
   buildResultNavigationModel,
   buildSettingsSearchResults,
   type SearchCategory,
+  messageSearchResultId,
 } from "./searchResultModel";
 
 describe("searchResultModel", () => {
@@ -12,6 +13,17 @@ describe("searchResultModel", () => {
     { id: "appearance" as const, labelKey: "nav.appearance" },
     { id: "providers" as const, labelKey: "nav.providers" },
   ];
+
+  it("keeps punctuation-distinct message and session identities unique", () => {
+    expect(
+      new Set([
+        messageSearchResultId("session", "message:a"),
+        messageSearchResultId("session", "message_a"),
+        messageSearchResultId("session:a", "message"),
+        messageSearchResultId("session_a", "message"),
+      ]).size,
+    ).toBe(4);
+  });
 
   it("builds settings results only from translated visible labels", () => {
     const labels: Record<string, string> = {
@@ -93,6 +105,7 @@ describe("searchResultModel", () => {
   it("limits navigation ids to the active category", () => {
     const columnsByCategory: Record<SearchCategory, string[]> = {
       all: [],
+      messages: [],
       chat: ["chat-1", "chat-2"],
       extensions: [],
       agents: ["agent-1"],

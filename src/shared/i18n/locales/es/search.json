@@ -8,7 +8,8 @@
     "openSession": "Abrir chat {{name}}",
     "openSettings": "Abrir la configuración de {{name}}",
     "openSkill": "Iniciar chat con {{name}}",
-    "clear": "Borrar búsqueda"
+    "clear": "Borrar búsqueda",
+    "openMessage": "Abrir mensaje {{index}} en {{name}}"
   },
   "heading": {
     "ariaLabel": "Búsqueda universal",
@@ -22,12 +23,13 @@
   "sections": {
     "agents": "Agentes",
     "automations": "Automatizaciones",
-    "chat": "Chat",
+    "chat": "Títulos de sesiones",
     "extensions": "Extensiones",
     "skills": "Skills",
     "recents": "Recientes",
     "results": "Resultados",
-    "settings": "Configuración"
+    "settings": "Configuración",
+    "messages": "Mensajes"
   },
   "states": {
     "available": "Disponible",
@@ -35,5 +37,19 @@
   },
   "fallbackTitles": {
     "automation": "Automatización sin título"
-  }
+  },
+  "messageSearch": {
+    "scope": "Alcance de mensajes",
+    "active": "Sesiones activas",
+    "all": "Todas las sesiones",
+    "archived": "Sesiones archivadas",
+    "loading": "Buscando mensajes…",
+    "error": "Error en la búsqueda de mensajes. Los resultados pueden estar incompletos.",
+    "partial": "No se pudieron buscar algunas sesiones. Los resultados están incompletos.",
+    "timeout": "La búsqueda agotó el tiempo. Los resultados están incompletos.",
+    "retry": "Reintentar",
+    "loadMore": "Cargar más mensajes",
+    "prompt": "Introduce palabras clave para buscar mensajes."
+  },
+  "noTitleMatches": "Ningún título de sesión coincide con \"{{query}}\""
 }

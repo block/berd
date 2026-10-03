@@ -50,6 +50,24 @@ pub(crate) fn state_dir() -> Result<PathBuf, String> {
     Ok(strategy.state_dir().unwrap_or_else(|| strategy.data_dir()))
 }
 
+/// Resolve the upstream Goose data directory containing session storage.
+pub(crate) fn data_dir() -> Result<PathBuf, String> {
+    data_dir_for_path_root(env::var_os(GOOSE_PATH_ROOT_ENV))
+}
+
+fn data_dir_for_path_root(root: Option<OsString>) -> Result<PathBuf, String> {
+    if let Some(root) = validated_path_root(root) {
+        return Ok(root.join("data"));
+    }
+    let strategy = choose_app_strategy(AppStrategyArgs {
+        top_level_domain: "Block".to_string(),
+        author: "Block".to_string(),
+        app_name: "goose".to_string(),
+    })
+    .map_err(|error| format!("Failed to resolve goose data directory: {error}"))?;
+    Ok(strategy.data_dir())
+}
+
 fn validated_path_root(value: Option<OsString>) -> Option<PathBuf> {
     value.map(PathBuf::from).filter(|path| path.is_absolute())
 }
@@ -110,6 +128,15 @@ fn push_unique_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn session_data_path_root_uses_data_instead_of_state() {
+        let root = std::env::current_dir().unwrap().join("synthetic-root");
+        assert_eq!(
+            data_dir_for_path_root(Some(root.clone().into_os_string())).unwrap(),
+            root.join("data")
+        );
+    }
 
     #[test]
     fn path_root_requires_an_absolute_path() {
