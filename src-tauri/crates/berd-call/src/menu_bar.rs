@@ -28,6 +28,7 @@ use crate::host_control::{self, ControlRequest};
 use crate::StartOptions;
 
 const RATES: [f32; 7] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
+const REFRESH_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Runs the call on a worker thread while the main thread owns the menu bar.
 /// The process exits when the call ends.
@@ -264,8 +265,13 @@ impl MenuBar {
         });
         // SAFETY: the timer is scheduled on the main run loop, which is the
         // only thread that runs the block.
-        let timer =
-            unsafe { NSTimer::scheduledTimerWithTimeInterval_repeats_block(1.0, true, &tick) };
+        let timer = unsafe {
+            NSTimer::scheduledTimerWithTimeInterval_repeats_block(
+                REFRESH_INTERVAL.as_secs_f64(),
+                true,
+                &tick,
+            )
+        };
         Self {
             _item: item,
             _target: target,
@@ -279,6 +285,7 @@ struct MenuTargetIvars {
     /// Server status and local menu state, refreshed by the coordinator.
     state: Arc<Mutex<MenuState>>,
     actions: RefCell<Vec<MenuAction>>,
+    last_symbol: RefCell<Option<&'static str>>,
 }
 
 define_class!(
@@ -327,6 +334,7 @@ impl MenuTarget {
             commands,
             state,
             actions: RefCell::new(Vec::new()),
+            last_symbol: RefCell::new(None),
         });
         // SAFETY: `this` is an allocated NSObject subclass with initialized ivars.
         unsafe { msg_send![super(this), init] }
@@ -341,13 +349,22 @@ impl MenuTarget {
     }
 
     fn refresh(&self, item: &NSStatusItem, mtm: MainThreadMarker) {
-        let symbol = icon_symbol(self.state().status.as_ref());
+        let symbol = self
+            .ivars()
+            .state
+            .lock()
+            .map(|state| icon_symbol(state.status.as_ref()))
+            .unwrap_or("waveform");
+        if self.ivars().last_symbol.borrow().as_ref() == Some(&symbol) {
+            return;
+        }
         let image = NSImage::imageWithSystemSymbolName_accessibilityDescription(
             &NSString::from_str(symbol),
             Some(&NSString::from_str("Berd Call")),
         );
         if let Some(button) = item.button(mtm) {
             button.setImage(image.as_deref());
+            *self.ivars().last_symbol.borrow_mut() = Some(symbol);
         }
     }
 
@@ -493,7 +510,7 @@ fn spawn_coordinator(port: u16, state: Arc<Mutex<MenuState>>) -> mpsc::SyncSende
                     continue;
                 }
             }
-            match incoming.recv_timeout(Duration::from_secs(1)) {
+            match incoming.recv_timeout(REFRESH_INTERVAL) {
                 Ok(request) => {
                     let is_tts = revisioned_tts_action(&request);
                     if is_tts && tts_in_flight {
@@ -789,6 +806,7 @@ mod tests {
                     thread::sleep(Duration::from_millis(1));
                     continue;
                 };
+                stream.set_nonblocking(false).unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(2)))
                     .unwrap();
@@ -866,6 +884,7 @@ mod tests {
                     thread::sleep(Duration::from_millis(1));
                     continue;
                 };
+                stream.set_nonblocking(false).unwrap();
                 let mut line = String::new();
                 BufReader::new(&stream).read_line(&mut line).unwrap();
                 let request: Value = serde_json::from_str(&line).unwrap();
@@ -961,6 +980,73 @@ mod tests {
     }
 
     #[test]
+    fn external_mute_change_reaches_menu_state_promptly() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        listener.set_nonblocking(true).unwrap();
+        let muted = Arc::new(AtomicBool::new(false));
+        let finished = Arc::new(AtomicBool::new(false));
+        let server = thread::spawn({
+            let muted = muted.clone();
+            let finished = finished.clone();
+            move || {
+                while !finished.load(Ordering::SeqCst) {
+                    let Ok((mut stream, _)) = listener.accept() else {
+                        thread::sleep(Duration::from_millis(1));
+                        continue;
+                    };
+                    stream.set_nonblocking(false).unwrap();
+                    let mut line = String::new();
+                    BufReader::new(&stream).read_line(&mut line).unwrap();
+                    assert!(line.contains("\"status\""));
+                    writeln!(
+                        stream,
+                        "{}",
+                        json!({"ok": true, "value": {"muted": muted.load(Ordering::SeqCst), "session": {"tts": {"backend": "openai"}}}})
+                    )
+                    .unwrap();
+                }
+            }
+        });
+        let state = Arc::new(Mutex::new(MenuState::default()));
+        let commands = spawn_coordinator(port, state.clone());
+        let ready_deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while state.lock().unwrap().status.is_none() {
+            assert!(std::time::Instant::now() < ready_deadline);
+            thread::sleep(Duration::from_millis(1));
+        }
+        let changed_at = std::time::Instant::now();
+        muted.store(true, Ordering::SeqCst);
+        let deadline = changed_at + Duration::from_millis(300);
+        let observed = loop {
+            if state
+                .lock()
+                .unwrap()
+                .status
+                .as_ref()
+                .and_then(|status| status["muted"].as_bool())
+                == Some(true)
+            {
+                break Some(changed_at.elapsed());
+            }
+            if std::time::Instant::now() >= deadline {
+                break None;
+            }
+            thread::sleep(Duration::from_millis(1));
+        };
+        finished.store(true, Ordering::SeqCst);
+        drop(commands);
+        server.join().unwrap();
+        assert!(
+            observed.is_some(),
+            "external mute did not reach menu state within 300 ms"
+        );
+    }
+
+    #[test]
     fn stalled_action_does_not_block_later_menu_controls() {
         use std::io::{BufRead, BufReader, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -978,6 +1064,7 @@ mod tests {
                     thread::sleep(Duration::from_millis(1));
                     continue;
                 };
+                stream.set_nonblocking(false).unwrap();
                 let mut line = String::new();
                 BufReader::new(&stream).read_line(&mut line).unwrap();
                 let request: Value = serde_json::from_str(&line).unwrap();
@@ -1052,6 +1139,7 @@ mod tests {
                     thread::sleep(Duration::from_millis(1));
                     continue;
                 };
+                stream.set_nonblocking(false).unwrap();
                 let mut line = String::new();
                 BufReader::new(&stream).read_line(&mut line).unwrap();
                 let request: Value = serde_json::from_str(&line).unwrap();
@@ -1137,6 +1225,7 @@ mod tests {
                     thread::sleep(Duration::from_millis(1));
                     continue;
                 };
+                stream.set_nonblocking(false).unwrap();
                 let mut line = String::new();
                 BufReader::new(&stream).read_line(&mut line).unwrap();
                 let request: Value = serde_json::from_str(&line).unwrap();
