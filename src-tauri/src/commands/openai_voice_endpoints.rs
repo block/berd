@@ -165,6 +165,12 @@ fn endpoint_for_base_url(base_url: &str, path: &str) -> Result<String, String> {
     Ok(url.to_string())
 }
 
+pub(crate) fn uses_legacy_environment_credential(kind: VoiceEndpointKind) -> Result<bool, String> {
+    Ok(!matches!(kind, VoiceEndpointKind::Realtime)
+        && std::env::var_os(BASE_URL_ENV).is_some()
+        && read_settings()?.get(kind).is_none())
+}
+
 pub(crate) fn effective_url(kind: VoiceEndpointKind) -> Result<String, String> {
     effective_url_from(&read_settings()?, kind)
 }

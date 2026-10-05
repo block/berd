@@ -48,7 +48,16 @@ fn account(credential: OpenAiVoiceCredential) -> Result<String, String> {
         return Ok(KEYCHAIN_ACCOUNT.to_string());
     };
     let url = openai_voice_endpoints::effective_url(kind)?;
-    Ok(account_for_url(kind, &url))
+    account_for_selected_url(kind, &url)
+}
+
+fn account_for_selected_url(kind: VoiceEndpointKind, url: &str) -> Result<String, String> {
+    // Environment routing predates URL-scoped keys and retains its existing shared credential.
+    // Saved URLs never inherit this account, even while the environment override is present.
+    if openai_voice_endpoints::uses_legacy_environment_credential(kind)? {
+        return Ok(KEYCHAIN_ACCOUNT.to_string());
+    }
+    Ok(account_for_url(kind, url))
 }
 
 fn account_for_url(kind: VoiceEndpointKind, url: &str) -> String {
@@ -135,11 +144,18 @@ pub(crate) fn require(credential: OpenAiVoiceCredential) -> Result<String, Strin
 pub(crate) fn require_endpoint(
     credential: OpenAiVoiceCredential,
 ) -> Result<(String, String), String> {
+    require_endpoint_with(credential, read_account)
+}
+
+fn require_endpoint_with(
+    credential: OpenAiVoiceCredential,
+    read: impl FnOnce(&str) -> Result<Option<String>, String>,
+) -> Result<(String, String), String> {
     let kind = credential
         .selected_kind()
         .ok_or_else(|| "Dictation uses the fixed default endpoint".to_string())?;
     openai_voice_endpoints::resolve_with_url(kind, |url| {
-        read_account(&account_for_url(kind, url))?
+        read(&account_for_selected_url(kind, url)?)?
             .ok_or_else(|| credential.missing_message().to_string())
     })
 }
@@ -147,6 +163,63 @@ pub(crate) fn require_endpoint(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn environment_endpoint_upgrade_preserves_the_legacy_shared_credential() {
+        const CHILD: &str = "BERD_TEST_ENVIRONMENT_CREDENTIAL_UPGRADE";
+        if std::env::var_os(CHILD).is_none() {
+            let root = tempfile::tempdir().unwrap();
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "commands::openai_voice_credentials::tests::environment_endpoint_upgrade_preserves_the_legacy_shared_credential", "--nocapture"])
+                .env(CHILD, "1")
+                .env("GOOSE_PATH_ROOT", root.path())
+                .env(openai_voice_endpoints::BASE_URL_ENV, "https://legacy.test/openai")
+                .output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+        for (credential, destination) in [
+            (
+                OpenAiVoiceCredential::SpeechToText,
+                "wss://legacy.test/openai/realtime?intent=transcription",
+            ),
+            (
+                OpenAiVoiceCredential::TextToSpeech,
+                "https://legacy.test/openai/audio/speech",
+            ),
+        ] {
+            let (url, key) = require_endpoint_with(credential, |account| {
+                Ok((account == KEYCHAIN_ACCOUNT).then(|| "legacy-disposable-key".to_string()))
+            })
+            .unwrap();
+            assert_eq!(url, destination);
+            assert_eq!(key, "legacy-disposable-key");
+        }
+        let custom = openai_voice_endpoints::VoiceEndpointSettings {
+            stt: Some("wss://custom.test/realtime".into()),
+            tts: Some("https://custom.test/speech".into()),
+            realtime: Some("wss://custom.test/assistant".into()),
+        };
+        openai_voice_endpoints::restore(&custom).unwrap();
+        for credential in [
+            OpenAiVoiceCredential::SpeechToText,
+            OpenAiVoiceCredential::TextToSpeech,
+            OpenAiVoiceCredential::SelectedRealtimeAssistant,
+        ] {
+            assert!(
+                require_endpoint_with(credential, |account| {
+                    Ok((account == KEYCHAIN_ACCOUNT).then(|| "legacy-disposable-key".to_string()))
+                })
+                .is_err(),
+                "a saved custom endpoint must not inherit the legacy shared key"
+            );
+        }
+    }
+
     #[test]
     fn speech_services_use_independent_endpoints() {
         assert!(matches!(
