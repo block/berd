@@ -347,6 +347,35 @@ describe("acpLoadSession working directory at the transport boundary", () => {
     });
   });
 
+  it("does not dispatch metadata after a timed-out client lookup settles", async () => {
+    vi.useFakeTimers();
+    const { acpLoadSession } = await import("../acp");
+    let resolveClient!: (value: unknown) => void;
+    mocks.getBackendClient.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveClient = resolve;
+      }),
+    );
+    const recovery = acpLoadSession("session-1");
+    const rejection = expect(recovery).rejects.toThrow(
+      "ACP operation timed out",
+    );
+    await vi.advanceTimersByTimeAsync(60_000);
+    await rejection;
+    await acpLoadSession("session-1", "/new/project");
+
+    resolveClient({ goose: { GooseUnstableSessionInfo: mocks.sessionInfo } });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(mocks.sessionInfo).not.toHaveBeenCalled();
+    expect(mocks.loadSession).toHaveBeenCalledOnce();
+    expect(mocks.loadSession).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      cwd: "/new/project",
+      mcpServers: [],
+    });
+  });
+
   it("serializes directory recovery with later loads and retains the latest cwd", async () => {
     const { acpLoadSession } = await import("../acp");
     let resolveInfo!: (value: unknown) => void;

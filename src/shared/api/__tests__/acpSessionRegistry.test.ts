@@ -10,10 +10,14 @@ const mockSetSessionConfigOption = vi.fn();
 const mockUpdateWorkingDir = vi.fn();
 const mockLoadSession = vi.fn();
 const mockInvalidateClientConnection = vi.fn();
-const noRequestProviderContext = { requestId: undefined };
+const noRequestProviderContext = {
+  requestId: undefined,
+  assertActive: expect.any(Function),
+};
 const noRequestModelContext = (providerId: string) => ({
   providerId,
   requestId: undefined,
+  assertActive: expect.any(Function),
 });
 
 vi.mock("../acpConnection", () => ({

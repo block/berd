@@ -75,7 +75,10 @@ export function setPermissionHandler(handler: PermissionRequestHandler): void {
 // connection rewrites inbound payloads to the composite renderer-side id
 // before they reach the shared handlers; the local backend stays a
 // byte-identical passthrough.
-function createClientCallbacks(backendId: AcpBackendId): () => Client {
+function createClientCallbacks(
+  backendId: AcpBackendId,
+  isCurrent: () => boolean,
+): () => Client {
   const toRendererSessionId = <T extends { sessionId: string }>(
     payload: T,
   ): T =>
@@ -106,6 +109,9 @@ function createClientCallbacks(backendId: AcpBackendId): () => Client {
     sessionUpdate: async (
       wireNotification: SessionNotification,
     ): Promise<void> => {
+      // Detaching a timed-out transport does not wait for its cleanup. Ignore
+      // late notifications before they can publish stale chat/config state.
+      if (!isCurrent()) return;
       const notification = toRendererSessionId(wireNotification);
       for (const interceptor of sessionNotificationInterceptors) {
         if (interceptor(notification)) {
@@ -282,7 +288,13 @@ export function createAcpConnection(
     activeStream = stream;
     activeEndpointCleanup = cleanupEndpoint;
 
-    const client = new GooseClient(createClientCallbacks(backendId), stream);
+    const client = new GooseClient(
+      createClientCallbacks(
+        backendId,
+        () => invalidationGeneration === expectedGeneration,
+      ),
+      stream,
+    );
     perfLog(
       `[perf:conn] ws stream + client created in ${(performance.now() - tStream).toFixed(1)}ms`,
     );

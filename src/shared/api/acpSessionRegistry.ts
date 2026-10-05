@@ -64,16 +64,25 @@ function replaceExecutionSelection(
 
 async function runBoundedSessionMutation<T>(
   sessionId: string,
-  mutation: () => Promise<T>,
+  mutation: (assertActive: () => void) => Promise<T>,
 ): Promise<T> {
   const generation = captureBackendConnectionGeneration(
     getSessionBackend(sessionId),
   );
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   let didTimeOut = false;
+  // Promise.race does not cancel the underlying work. Fence both subsequent
+  // wire calls and local commits once this entry or its transport is abandoned.
+  const assertActive = () => {
+    if (didTimeOut || !generation.isCurrent()) {
+      throw new Error(
+        "ACP session mutation was abandoned. Reconnect and retry.",
+      );
+    }
+  };
   try {
     return await Promise.race([
-      mutation(),
+      mutation(assertActive),
       new Promise<never>((_, reject) => {
         timeoutId = setTimeout(() => {
           didTimeOut = true;
@@ -86,8 +95,10 @@ async function runBoundedSessionMutation<T>(
       }),
     ]);
   } catch (error) {
-    if (didTimeOut) {
+    if (didTimeOut || !generation.isCurrent()) {
       prepared.delete(sessionId);
+    }
+    if (didTimeOut) {
       // Invalidation detaches the client synchronously. Its generation-scoped
       // transport cleanup is best-effort and must not hold the session queue.
       void generation.invalidate().catch((invalidationError) => {
@@ -107,7 +118,7 @@ async function runBoundedSessionMutation<T>(
 
 function serializeSessionMutation<T>(
   sessionId: string,
-  mutation: (isLatest: () => boolean) => Promise<T>,
+  mutation: (isLatest: () => boolean, assertActive: () => void) => Promise<T>,
   bounded = true,
 ): Promise<T> {
   let queue = mutationQueues.get(sessionId);
@@ -118,7 +129,8 @@ function serializeSessionMutation<T>(
 
   const sequence = nextMutationSequence++;
   queue.latestSequence = sequence;
-  const execute = () => mutation(() => queue?.latestSequence === sequence);
+  const execute = (assertActive = () => {}) =>
+    mutation(() => queue?.latestSequence === sequence, assertActive);
   const result = queue.tail.then(() =>
     bounded ? runBoundedSessionMutation(sessionId, execute) : execute(),
   );
@@ -141,8 +153,8 @@ export async function prepareSession(
   workingDir: string,
   options: SessionConfigMutationOptions = {},
 ): Promise<AcpSessionConfigSnapshots | undefined> {
-  return serializeSessionMutation(sessionId, () =>
-    prepareSessionNow(sessionId, providerId, workingDir, options),
+  return serializeSessionMutation(sessionId, (_, assertActive) =>
+    prepareSessionNow(sessionId, providerId, workingDir, options, assertActive),
   );
 }
 
@@ -151,7 +163,9 @@ async function prepareSessionNow(
   providerId: string,
   workingDir: string,
   options: SessionConfigMutationOptions,
+  assertActive: () => void,
 ): Promise<AcpSessionConfigSnapshots | undefined> {
+  assertActive();
   const sid = sessionId.slice(0, 8);
   const existing = prepared.get(sessionId);
   if (existing) {
@@ -168,7 +182,8 @@ async function prepareSessionNow(
       cachedModelId: existing.executionSelection?.modelId ?? null,
     });
     if (existing.workingDir !== workingDir) {
-      await acpApi.updateWorkingDir(sessionId, workingDir);
+      await acpApi.updateWorkingDir(sessionId, workingDir, assertActive);
+      assertActive();
       existing.workingDir = workingDir;
       changed = true;
     }
@@ -177,8 +192,11 @@ async function prepareSessionNow(
       try {
         snapshots = await acpApi.setProvider(sessionId, providerId, {
           requestId: options.requestId,
+          assertActive,
         });
+        assertActive();
       } catch (error) {
+        assertActive();
         // Goose can apply the provider and then fail while building the
         // response snapshot. The complete backend pair is unknown until the
         // UI selection is prepared again.
@@ -206,7 +224,8 @@ async function prepareSessionNow(
     sessionId: shortLogId(sessionId),
     providerId,
   });
-  await acpApi.loadSession(sessionId, workingDir);
+  await acpApi.loadSession(sessionId, workingDir, assertActive);
+  assertActive();
   perfLog(
     `[perf:prepare] ${sid} registry loadSession ok in ${(performance.now() - tLoad).toFixed(1)}ms`,
   );
@@ -214,7 +233,9 @@ async function prepareSessionNow(
   const tProv = performance.now();
   const snapshots = await acpApi.setProvider(sessionId, providerId, {
     requestId: options.requestId,
+    assertActive,
   });
+  assertActive();
   perfLog(
     `[perf:prepare] ${sid} registry setProvider(${providerId}) in ${(performance.now() - tProv).toFixed(1)}ms`,
   );
@@ -247,8 +268,8 @@ export async function applySessionModel(
   if (!concreteModelId) {
     throw new Error(`Invalid model id: ${modelId}`);
   }
-  return serializeSessionMutation(sessionId, () =>
-    applySessionModelNow(sessionId, concreteModelId, options),
+  return serializeSessionMutation(sessionId, (_, assertActive) =>
+    applySessionModelNow(sessionId, concreteModelId, options, assertActive),
   );
 }
 
@@ -256,7 +277,9 @@ async function applySessionModelNow(
   sessionId: string,
   modelId: string,
   options: SessionConfigMutationOptions,
+  assertActive: () => void,
 ): Promise<AcpSessionConfigSnapshots | undefined> {
+  assertActive();
   const sid = sessionId.slice(0, 8);
   const entry = prepared.get(sessionId);
   const executionSelection = entry?.executionSelection;
@@ -285,8 +308,11 @@ async function applySessionModelNow(
     snapshots = await acpApi.setModel(sessionId, modelId, {
       providerId: executionSelection.providerId,
       requestId: options.requestId,
+      assertActive,
     });
+    assertActive();
   } catch (error) {
+    assertActive();
     // Drop the cached value so the next attempt retries over the wire.
     replaceExecutionSelection(entry, executionSelection.providerId);
     throw error;
@@ -325,17 +351,23 @@ export async function configureSession(
   if (modelId && !concreteModelId) {
     throw new Error(`Invalid model id: ${modelId}`);
   }
-  return serializeSessionMutation(sessionId, async () => {
+  return serializeSessionMutation(sessionId, async (_, assertActive) => {
     let snapshots = await prepareSessionNow(
       sessionId,
       providerId,
       workingDir,
       concreteModelId ? {} : options,
+      assertActive,
     );
+    assertActive();
     if (concreteModelId) {
       snapshots =
-        (await applySessionModelNow(sessionId, concreteModelId, options)) ??
-        snapshots;
+        (await applySessionModelNow(
+          sessionId,
+          concreteModelId,
+          options,
+          assertActive,
+        )) ?? snapshots;
     }
     return snapshots;
   });
@@ -347,8 +379,11 @@ export function applySessionConfigOption(
   value: string,
   context: Omit<AcpSessionConfigSnapshotContext, "origin"> = {},
 ): Promise<AcpSessionConfigSnapshots> {
-  return serializeSessionMutation(sessionId, () =>
-    acpApi.setSessionConfigOption(sessionId, configId, value, context),
+  return serializeSessionMutation(sessionId, (_, assertActive) =>
+    acpApi.setSessionConfigOption(sessionId, configId, value, {
+      ...context,
+      assertActive,
+    }),
   );
 }
 
@@ -413,8 +448,9 @@ export async function loadSession(
       if (!effectiveWorkingDir) {
         // Bound only metadata recovery, not the potentially long replay.
         // Await outside the race so a late response cannot load stale cwd.
-        const info = await runBoundedSessionMutation(sessionId, () =>
-          acpApi.getSessionInfo(sessionId),
+        const info = await runBoundedSessionMutation(
+          sessionId,
+          (assertActive) => acpApi.getSessionInfo(sessionId, assertActive),
         );
         effectiveWorkingDir = nonBlankWorkingDir(info.workingDir);
       }
