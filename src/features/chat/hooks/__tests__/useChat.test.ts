@@ -14,7 +14,11 @@ import {
   enqueueStreamingTextUpdate,
   flushAllBufferedStreamingUpdates,
 } from "../../acp/liveStreamingUpdates";
-import { claimSessionPrompt } from "../../lib/sessionPromptOwnership";
+import {
+  claimSessionPrompt,
+  getSessionPromptOwner,
+  releaseSessionPrompt,
+} from "../../lib/sessionPromptOwnership";
 
 const mockAcpSendMessage = vi.fn();
 const mockAcpSteerMessage = vi.fn();
@@ -98,6 +102,12 @@ function seedChatSession(overrides: Partial<ChatSession> = {}) {
 
 describe("useChat", () => {
   beforeEach(() => {
+    // sendMessage resolves on dispatch acceptance. An earlier test's delayed
+    // completion must lose ownership before these session IDs are reused.
+    for (const sessionId of ["session-1", "session-2"]) {
+      const owner = getSessionPromptOwner(sessionId);
+      if (owner) releaseSessionPrompt(sessionId, owner);
+    }
     mockAcpSendMessage.mockReset();
     mockAcpSteerMessage.mockReset();
     mockAcpCancelSession.mockReset();

@@ -5,6 +5,7 @@ interface ResultRowProps {
   id?: string;
   title: string;
   meta: ReactNode;
+  excerpt?: ReactNode;
   query?: string;
   icon?: ReactNode;
   ariaLabel: string;
@@ -46,6 +47,7 @@ export function ResultRow({
   id,
   title,
   meta,
+  excerpt,
   query,
   icon,
   ariaLabel,
@@ -77,6 +79,11 @@ export function ResultRow({
         <span className="line-clamp-2 block w-full break-words text-sm leading-5 text-foreground group-hover:text-foreground group-active:opacity-70">
           {highlightQuery(title, query)}
         </span>
+        {excerpt ? (
+          <span className="line-clamp-2 block text-sm leading-5 text-foreground/80">
+            {excerpt}
+          </span>
+        ) : null}
         <span className="block w-full truncate text-sm leading-5 text-muted-foreground">
           {typeof meta === "string"
             ? highlightQuery(matchingContext(meta, query), query)

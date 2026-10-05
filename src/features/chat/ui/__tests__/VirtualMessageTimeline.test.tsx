@@ -1229,6 +1229,50 @@ describe("VirtualMessageTimeline", () => {
     expect(collapsibleContent).toHaveAttribute("data-state", "closed");
   });
 
+  it("waits for the exact requested message instead of jumping to an earlier keyword occurrence", async () => {
+    mockTranscriptElementMeasurements();
+    const animationFrame = mockRequestAnimationFrame();
+    const onScrollTargetHandled = vi.fn();
+    const earlier = textMessage("earlier", "user", "Repeated keyword");
+    const selected = textMessage("selected", "assistant", "Repeated keyword");
+    const { rerender } = renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={[earlier]}
+        scrollTargetMessageId="selected"
+        scrollTargetQuery="keyword"
+        onScrollTargetHandled={onScrollTargetHandled}
+      />,
+    );
+    await screen.findByTestId("virtual-transcript-row-message:earlier");
+    const scroller = screen.getByTestId("message-timeline-scroll");
+    setScrollMetrics(scroller, {
+      scrollTop: 0,
+      scrollHeight: 500,
+      clientHeight: 300,
+    });
+    Object.defineProperty(scroller, "getBoundingClientRect", {
+      configurable: true,
+      value: () => createDomRect(300),
+    });
+    animationFrame.runAll(100);
+    expect(onScrollTargetHandled).not.toHaveBeenCalled();
+    rerender(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={[earlier, selected]}
+        scrollTargetMessageId="selected"
+        scrollTargetQuery="keyword"
+        onScrollTargetHandled={onScrollTargetHandled}
+      />,
+    );
+    await waitFor(() => {
+      animationFrame.runAll(200);
+      expect(onScrollTargetHandled).toHaveBeenCalledWith("selected");
+    });
+    expect(onScrollTargetHandled).not.toHaveBeenCalledWith("earlier");
+  });
+
   it("handles scroll targets for agent-work-led assistant turns", async () => {
     mockTranscriptElementMeasurements();
     const onScrollTargetHandled = vi.fn();

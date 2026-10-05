@@ -229,6 +229,7 @@ pub fn run() {
             app.manage(commands::automations::AutomationStreamState::default());
             app.manage(commands::terminal::TerminalState::default());
             app.manage(commands::window_session::WindowSessionRegistry::default());
+            app.manage(commands::message_search::MessageSearchState::default());
             app.manage(commands::agent_setup::AgentSetupRegistry::default());
             app.manage(services::remote_backend::RemoteBackendRegistry::default());
             app.manage(commands::model_setup::ModelSetupRegistry::default());
@@ -468,6 +469,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::message_search::search_session_messages,
             commands::pr_tracker::open_pr_tracker_url,
             commands::pr_tracker::resolve_pr_tracker_projects,
             commands::pr_tracker::list_pr_tracker_pull_requests,

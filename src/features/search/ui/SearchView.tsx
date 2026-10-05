@@ -38,11 +38,13 @@ import {
 } from "@/features/chat/stores/chatSessionStore";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
-import { useSessionSearch } from "@/features/sessions/hooks/useSessionSearch";
+import { filterSessions } from "@/features/sessions/lib/filterSessions";
+import { useMessageSearch } from "../hooks/useMessageSearch";
+import { MessageResultRow } from "./MessageResultRow";
+import { messageResultSession } from "../lib/messageResultSession";
 import type { SessionSearchDisplayResult } from "@/features/sessions/lib/buildSessionSearchResults";
 import { useDebouncedValue } from "@/shared/hooks/useDebouncedValue";
 import { useLocaleFormatting } from "@/shared/i18n";
-import { sessionSearchStamp } from "@/shared/api/sessionSearch";
 import {
   extensionSearchIdentity,
   useExtensionSearch,
@@ -55,6 +57,7 @@ import {
   buildSettingsSearchResults,
   findResultPosition,
   type SearchCategory,
+  messageSearchResultId,
   searchResultId,
 } from "../lib/searchResultModel";
 import { AgentResultRow } from "./AgentResultRow";
@@ -127,6 +130,9 @@ export function SearchView({
   const [query, setQuery] = useState("");
   const [activeResultId, setActiveResultId] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState<SearchCategory>("all");
+  const [messageScope, setMessageScope] = useState<
+    "active" | "all" | "archived"
+  >("active");
   const [dialogResultsEl, setDialogResultsEl] = useState<HTMLDivElement | null>(
     null,
   );
@@ -135,6 +141,7 @@ export function SearchView({
   const debouncedQuery = useDebouncedValue(query, DEBOUNCE_MS);
   const trimmedQuery = query.trim();
   const trimmedDebouncedQuery = debouncedQuery.trim();
+  const isQueryCurrent = trimmedQuery === trimmedDebouncedQuery;
 
   const sessions = useChatSessionStore((state) => state.sessions);
   const localMessageCountsBySession = useChatStore(
@@ -168,24 +175,28 @@ export function SearchView({
       getDisplaySessionTitle(session.title, defaultTitle),
     [defaultTitle],
   );
-  const chatSearch = useSessionSearch({
-    sessions: visibleSessions,
-    resolvers,
-    locale: i18n.resolvedLanguage,
-    getDisplayTitle,
-    visibleMetadataOnly: true,
-    // Cmd-K's loaded slice excludes archived sessions; server-discovered
-    // matches must follow the same policy.
-    includeDiscoveredSession: (session) => !session.archivedAt,
+  const chatResults = useMemo<SessionSearchDisplayResult[]>(
+    () =>
+      filterSessions(visibleSessions, trimmedDebouncedQuery, resolvers, {
+        locale: i18n.resolvedLanguage,
+        getDisplayTitle,
+        visibleMetadataOnly: true,
+      })
+        .sort(compareSessionsByActivityDesc)
+        .map((session) => ({ session, matchType: "metadata" })),
+    [
+      visibleSessions,
+      trimmedDebouncedQuery,
+      resolvers,
+      i18n.resolvedLanguage,
+      getDisplayTitle,
+    ],
+  );
+  const messageSearch = useMessageSearch({
+    query: trimmedDebouncedQuery,
+    scope: messageScope,
   });
-  const {
-    clear: clearChatSearch,
-    isSearching: isChatSearching,
-    results: chatResults,
-    search: runChatSearch,
-    setQuery: setChatQuery,
-    submittedQuery,
-  } = chatSearch;
+  const messageResults = isQueryCurrent ? messageSearch.results : [];
   const extensionResults = useExtensionSearch(debouncedQuery);
   const agentResults = useAgentSearch(debouncedQuery);
   const automationResults = useAutomationSearch(debouncedQuery);
@@ -223,40 +234,6 @@ export function SearchView({
       visibleSettingsSections,
     ],
   );
-
-  // Sweeps are keyed on who is in the list and what version of them we hold,
-  // not on session object identity: store churn (title streams, unread flips,
-  // `activeRunId` notifications, the persona/project refresh) must not re-fire
-  // a full export sweep, while sessions arriving after mount (initial load,
-  // background pagination) and content changes in sessions already on screen
-  // still get swept.
-  //
-  // The keys are sorted because list order is not membership: every
-  // `loadSessions()` merge re-sorts by activity, so a background session
-  // receiving a message reshuffles the list without changing who is in it.
-  // Sorting `id:stamp` is equivalent to sorting by id, since ids are unique.
-  //
-  // Stamps are safe triggers: nothing on the frontend patches them per token or
-  // per message. `session_info_update` for meta changes leaves them alone, so
-  // they only move on the 60s/window-focus list refresh (all changed sessions
-  // batch into one store update, hence one sweep) and on the once-per-run name
-  // generation notification. Each such sweep re-exports only the sessions whose
-  // stamp actually moved — the rest are corpus-cache hits — and the hook treats
-  // a re-sent query as additive, so rendered rows stay put until it resolves.
-  const sessionSweepKey = useMemo(
-    () =>
-      visibleSessions
-        .map((session) => `${session.id}:${sessionSearchStamp(session)}`)
-        .sort()
-        .join("\n"),
-    [visibleSessions],
-  );
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: sessionSweepKey is an intentional trigger; runChatSearch reads the sessions through a ref.
-  useEffect(() => {
-    setChatQuery(debouncedQuery);
-    void runChatSearch(debouncedQuery);
-  }, [debouncedQuery, sessionSweepKey, runChatSearch, setChatQuery]);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -320,6 +297,7 @@ export function SearchView({
   }, [
     updateFades,
     chatResults.length,
+    messageResults.length,
     extensionResults.length,
     agentResults.length,
     skillResults.length,
@@ -334,20 +312,40 @@ export function SearchView({
         .map((session) => ({ session, matchType: "metadata" as const })),
     [visibleSessions],
   );
-  const displayedChatResults = trimmedDebouncedQuery.length
-    ? chatResults
-    : recentChatResults;
+  const displayedChatResults = !isQueryCurrent
+    ? []
+    : trimmedDebouncedQuery.length
+      ? chatResults
+      : recentChatResults;
 
   const hasAnyResults =
     displayedChatResults.length > 0 ||
+    messageResults.length > 0 ||
     extensionResults.length > 0 ||
     agentResults.length > 0 ||
     automationResults.length > 0 ||
     skillResults.length > 0 ||
     settingsResults.length > 0;
-  const showResults = hasAnyResults;
+  const showResults =
+    variant === "dialog" || hasAnyResults || Boolean(trimmedDebouncedQuery);
   const showNoMatches =
-    trimmedDebouncedQuery.length > 0 && !hasAnyResults && !isChatSearching;
+    isQueryCurrent &&
+    trimmedDebouncedQuery.length > 0 &&
+    (activeCategory === "messages"
+      ? messageResults.length === 0
+      : activeCategory === "all"
+        ? !hasAnyResults
+        : false) &&
+    !messageSearch.hasMore &&
+    !messageSearch.isLoading &&
+    messageSearch.status === "complete" &&
+    !messageSearch.error;
+
+  const showNoTitleMatches =
+    isQueryCurrent &&
+    trimmedDebouncedQuery.length > 0 &&
+    activeCategory === "chat" &&
+    displayedChatResults.length === 0;
 
   const resultColumnsByCategory = useMemo<Record<SearchCategory, string[]>>(
     () => ({
@@ -357,6 +355,9 @@ export function SearchView({
           "chat",
           `${result.session.id}:${result.messageId ?? "session"}`,
         ),
+      ),
+      messages: messageResults.map((result) =>
+        messageSearchResultId(result.sessionId, result.messageId),
       ),
       extensions: extensionResults.map(({ entry }) =>
         searchResultId("extension", extensionSearchIdentity(entry)),
@@ -374,6 +375,7 @@ export function SearchView({
       agentResults,
       automationResults,
       displayedChatResults,
+      messageResults,
       extensionResults,
       settingsResults,
       skillResults,
@@ -417,12 +419,11 @@ export function SearchView({
   const handleEscape = useCallback(() => {
     if (query.trim()) {
       setQuery("");
-      clearChatSearch();
       inputRef.current?.focus();
     } else {
       onExit();
     }
-  }, [clearChatSearch, onExit, query]);
+  }, [onExit, query]);
 
   const handledEscapeRequestRef = useRef(escapeRequest);
   useEffect(() => {
@@ -553,13 +554,62 @@ export function SearchView({
               onSelectSearchResult(
                 sessionId,
                 messageId,
-                submittedQuery || trimmedDebouncedQuery,
+                undefined,
                 result.session,
               )
             }
           />
         );
       }),
+    });
+  }
+
+  resultSections.push({
+    key: "messages",
+    label: t("sections.messages"),
+    tone: "file",
+    children: messageResults.map((result) => {
+      const resultId = messageSearchResultId(
+        result.sessionId,
+        result.messageId,
+      );
+      return (
+        <MessageResultRow
+          key={resultId}
+          id={resultId}
+          result={result}
+          defaultTitle={defaultTitle}
+          query={trimmedDebouncedQuery}
+          ariaLabel={t("actions.openMessage", {
+            name: getDisplaySessionTitle(result.title, defaultTitle),
+            index: result.messageIndex + 1,
+          })}
+          archivedLabel={t("messageSearch.archived")}
+          formatRelativeTimeToNow={formatRelativeTimeToNow}
+          isActive={activeResultId === resultId}
+          onActive={() => setActiveResultId(resultId)}
+          onSelect={() =>
+            onSelectSearchResult(
+              result.sessionId,
+              result.messageId,
+              trimmedDebouncedQuery,
+              messageResultSession(
+                result,
+                sessions,
+                useChatSessionStore.getState().archiveMutationBySessionId,
+              ),
+            )
+          }
+        />
+      );
+    }),
+  });
+  if (!resultSections.some((section) => section.key === "chat")) {
+    resultSections.unshift({
+      key: "chat",
+      label: t("sections.chat"),
+      tone: "file",
+      children: [],
     });
   }
 
@@ -687,25 +737,76 @@ export function SearchView({
 
   const categorySections = trimmedDebouncedQuery
     ? resultSections
-    : resultSections.filter((section) => section.key === "chat");
+    : resultSections.filter(
+        (section) => section.key === "chat" || section.key === "messages",
+      );
   const visibleSections =
     activeCategory === "all"
       ? categorySections
       : categorySections.filter((section) => section.key === activeCategory);
-  const visibleResultsContent = visibleSections.flatMap(
+  const visibleResultsContent = (isQueryCurrent ? visibleSections : []).flatMap(
     (section) => section.children,
   );
-  useEffect(() => {
-    if (
-      activeCategory !== "all" &&
-      !categorySections.some((section) => section.key === activeCategory)
-    ) {
-      setActiveCategory("all");
-    }
-  }, [activeCategory, categorySections]);
   const recentContent = resultSections.find(
     (section) => section.key === "chat",
   )?.children;
+
+  const messageSearchControls =
+    isQueryCurrent &&
+    trimmedDebouncedQuery &&
+    (activeCategory === "messages" || activeCategory === "all") ? (
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+        <label htmlFor={`${resultsId}-scope`}>{t("messageSearch.scope")}</label>
+        <select
+          id={`${resultsId}-scope`}
+          value={messageScope}
+          onChange={(event) =>
+            setMessageScope(event.target.value as typeof messageScope)
+          }
+          className="rounded border bg-popover px-2 py-1"
+        >
+          <option value="active">{t("messageSearch.active")}</option>
+          <option value="all">{t("messageSearch.all")}</option>
+          <option value="archived">{t("messageSearch.archived")}</option>
+        </select>
+        {messageSearch.isLoading ? (
+          <span role="status">{t("messageSearch.loading")}</span>
+        ) : null}
+        {messageSearch.error || messageSearch.status === "error" ? (
+          <span role="alert">{t("messageSearch.error")}</span>
+        ) : null}
+        {messageSearch.status === "partial" ||
+        messageSearch.status === "timeout" ? (
+          <span role="status">
+            {t(`messageSearch.${messageSearch.status}`)}
+          </span>
+        ) : null}
+        {messageSearch.error ||
+        messageSearch.status === "error" ||
+        messageSearch.status === "partial" ||
+        messageSearch.status === "timeout" ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={messageSearch.retry}
+          >
+            {t("messageSearch.retry")}
+          </Button>
+        ) : null}
+        {messageSearch.hasMore ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={messageSearch.isLoading}
+            onClick={() => void messageSearch.loadMore()}
+          >
+            {t("messageSearch.loadMore")}
+          </Button>
+        ) : null}
+      </div>
+    ) : null;
 
   return (
     <section
@@ -730,7 +831,9 @@ export function SearchView({
           ref={inputRef}
           value={query}
           onChange={setQuery}
-          activeDescendant={showResults ? activeResultId : null}
+          activeDescendant={
+            showResults && isQueryCurrent ? activeResultId : null
+          }
           controlsId={resultsId}
           isRaised={trimmedQuery.length > 0}
           variant={variant}
@@ -747,7 +850,6 @@ export function SearchView({
             tooltip={t("actions.clear")}
             onClick={() => {
               setQuery("");
-              clearChatSearch();
               inputRef.current?.focus();
             }}
             className="absolute right-0 top-1/2 z-10 -translate-y-1/2"
@@ -771,7 +873,7 @@ export function SearchView({
                 showDialogTopFade ? "after:opacity-100" : "after:opacity-0",
               )}
             >
-              {trimmedDebouncedQuery.length ? (
+              {
                 <Tabs
                   value={activeCategory}
                   onValueChange={(value) =>
@@ -793,22 +895,22 @@ export function SearchView({
                         variant="weight"
                         value={section.key}
                       >
-                        {section.label} ({section.children.length})
+                        {section.key === "chat"
+                          ? t("sections.chat")
+                          : section.label}{" "}
+                        ({section.children.length})
                       </TabsTrigger>
                     ))}
                   </TabsList>
                 </Tabs>
-              ) : (
-                <h2 className="text-sm font-normal text-muted-foreground/75">
-                  {t("sections.recents")}
-                </h2>
-              )}
+              }
             </div>
+            {messageSearchControls}
             <div
               key={`${trimmedQuery}:${activeCategory}`}
               className="space-y-0.5"
             >
-              {trimmedDebouncedQuery.length
+              {trimmedDebouncedQuery.length || activeCategory === "messages"
                 ? visibleResultsContent
                 : recentContent}
             </div>
@@ -822,6 +924,8 @@ export function SearchView({
           />
         </div>
       ) : null}
+
+      {variant === "page" ? messageSearchControls : null}
 
       {variant === "page" && showResults && (
         <div
@@ -843,20 +947,28 @@ export function SearchView({
               WebkitMaskImage: `linear-gradient(to right, transparent 0%, black ${80 * leftFadeAmount}px, black calc(100% - ${80 * rightFadeAmount}px), transparent 100%)`,
             }}
           >
-            {resultSections.map((section) => (
-              <SearchResultsCard
-                key={section.key}
-                label={section.label}
-                tone={section.tone}
-              >
-                {section.children}
-              </SearchResultsCard>
-            ))}
+            {(isQueryCurrent ? resultSections : [])
+              .filter((section) => section.children.length > 0)
+              .map((section) => (
+                <SearchResultsCard
+                  key={section.key}
+                  label={section.label}
+                  tone={section.tone}
+                >
+                  {section.children}
+                </SearchResultsCard>
+              ))}
           </div>
         </div>
       )}
 
-      {showNoMatches && (
+      {activeCategory === "messages" && !trimmedQuery ? (
+        <p className="py-8 text-center text-sm text-muted-foreground">
+          {t("messageSearch.prompt")}
+        </p>
+      ) : null}
+
+      {(showNoMatches || showNoTitleMatches) && (
         <p
           className={cn(
             "animate-fade-in text-center text-sm italic text-muted-foreground motion-reduce:animate-none",
@@ -865,7 +977,9 @@ export function SearchView({
             variant === "dialog" && "py-8",
           )}
         >
-          {t("noMatches", { query: trimmedDebouncedQuery })}
+          {t(showNoTitleMatches ? "noTitleMatches" : "noMatches", {
+            query: trimmedDebouncedQuery,
+          })}
         </p>
       )}
     </section>

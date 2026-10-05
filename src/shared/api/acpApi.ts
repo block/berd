@@ -163,12 +163,18 @@ export async function listSessionsPage({
   cursor,
   query,
   backendId,
+  workingDir,
+  types,
+  includeLastMessageSnippet = true,
 }: {
   cursor?: string | null;
   /** Keyword filter for goose's server-side message-content search
    *  (`_meta.query`). Only set when searching; omit for plain listing. */
   query?: string | null;
   backendId?: AcpBackendId;
+  workingDir?: string;
+  types?: ("user" | "scheduled" | "acp")[];
+  includeLastMessageSnippet?: boolean;
 } = {}): Promise<AcpSessionsPage> {
   const resolvedBackendId = backendId ?? LOCAL_BACKEND_ID;
   const client = await getBackendClient(resolvedBackendId);
@@ -178,10 +184,15 @@ export async function listSessionsPage({
   // membership lives in _meta.projectId, so callers must paginate globally and
   // group by projectId client-side instead of using cwd as a proxy.
   const params: ListSessionsRequest = {
-    _meta: normalizedQuery
-      ? listSessionsMeta(normalizedQuery)
-      : LIST_SESSIONS_META,
+    _meta: {
+      ...(normalizedQuery
+        ? listSessionsMeta(normalizedQuery)
+        : LIST_SESSIONS_META),
+      goose: { includeLastMessageSnippet },
+      ...(types?.length ? { types } : {}),
+    },
   };
+  if (workingDir) params.cwd = workingDir;
   if (normalizedCursor != null) {
     params.cursor = normalizedCursor;
   }

@@ -771,5 +771,6 @@
     "filesUnavailable": "Los archivos están en {{host}} y todavía no se pueden explorar desde esta máquina.",
     "openUnavailable": "Este archivo está en {{host}} y no se puede abrir desde esta máquina.",
     "viewerUnavailable": "Este archivo está en {{host}}. Ver archivos remotos todavía no es compatible."
-  }
+  },
+  "archivedReadOnlyStatus": "Esta sesión está archivada y es de solo lectura."
 }
