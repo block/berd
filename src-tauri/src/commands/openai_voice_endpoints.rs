@@ -234,12 +234,20 @@ pub(crate) fn set_openai_voice_endpoint(
     kind: VoiceEndpointKind,
     url: String,
 ) -> Result<(), String> {
-    let selected = validate(kind, &url)?;
-    update_settings_file(&settings_path()?, |settings| {
-        settings.set(kind, selected.filter(|url| url != kind.default_url()));
-    })?;
+    set_endpoint_at(&settings_path()?, kind, &url)?;
     app.emit(SETTINGS_CHANGED_EVENT, ())
         .map_err(|error| format!("Could not refresh OpenAI voice settings: {error}"))
+}
+
+fn set_endpoint_at(
+    path: &std::path::Path,
+    kind: VoiceEndpointKind,
+    url: &str,
+) -> Result<(), String> {
+    let selected = validate(kind, url)?;
+    update_settings_file(path, |settings| {
+        settings.set(kind, selected);
+    })
 }
 
 /// Keep endpoint selection stable while a credential mutation uses it.
@@ -257,7 +265,7 @@ fn with_selected_endpoint_at<T>(
     expected_url: &str,
     mutate: impl FnOnce() -> Result<T, String>,
 ) -> Result<T, String> {
-    let expected = validate(kind, expected_url)?.filter(|url| url != kind.default_url());
+    let expected = validate(kind, expected_url)?;
     let _guard = SETTINGS_UPDATE_LOCK
         .lock()
         .map_err(|_| "OpenAI voice settings lock is poisoned".to_string())?;
@@ -359,6 +367,52 @@ mod tests {
         )
         .unwrap();
         assert!(mutated);
+    }
+
+    #[test]
+    fn explicit_default_url_overrides_legacy_environment_routing() {
+        const CHILD: &str = "BERD_TEST_EXPLICIT_OPENAI_URL";
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "commands::openai_voice_endpoints::tests::explicit_default_url_overrides_legacy_environment_routing", "--nocapture"])
+                .env(CHILD, "1")
+                .env(BASE_URL_ENV, "https://legacy.test/openai")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("endpoints.json");
+        for kind in [VoiceEndpointKind::Stt, VoiceEndpointKind::Tts] {
+            assert_ne!(
+                effective_url_from(&read_settings_from(&path).unwrap(), kind).unwrap(),
+                kind.default_url()
+            );
+            set_endpoint_at(&path, kind, kind.default_url()).unwrap();
+            let settings = read_settings_from(&path).unwrap();
+            assert_eq!(settings.get(kind), Some(kind.default_url()));
+            assert_eq!(
+                effective_url_from(&settings, kind).unwrap(),
+                kind.default_url()
+            );
+            with_selected_endpoint_at(&path, kind, kind.default_url(), || Ok(())).unwrap();
+        }
+        set_endpoint_at(&path, VoiceEndpointKind::Stt, "").unwrap();
+        assert_ne!(
+            effective_url_from(&read_settings_from(&path).unwrap(), VoiceEndpointKind::Stt)
+                .unwrap(),
+            STT_DEFAULT
+        );
+        assert_eq!(
+            effective_url_from(&read_settings_from(&path).unwrap(), VoiceEndpointKind::Tts)
+                .unwrap(),
+            TTS_DEFAULT
+        );
     }
 
     #[test]
