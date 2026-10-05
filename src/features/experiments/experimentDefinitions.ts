@@ -69,6 +69,11 @@ export const PROMPT_PINS_EXPERIMENT_ID = "prompt-pins";
 
 export const REMOTE_SSH_SESSIONS_EXPERIMENT_ID = "remote-ssh-sessions";
 
+/** Agent selector in the Desktop Agent's right-click menu. The Desktop Agent
+ *  itself is a General setting (desktopAgentPreferences.ts). */
+export const DESKTOP_AGENT_AGENT_SELECTOR_EXPERIMENT_ID =
+  "desktop-agent-agent-selector";
+
 export const EXPERIMENT_DEFINITIONS = [
   {
     id: BUILDERBOT_SURFACE_EXPERIMENT_ID,
@@ -136,5 +141,13 @@ export const EXPERIMENT_DEFINITIONS = [
     // must never turn on via the dev auto-enable default.
     manualEnableOnly: true,
     settingsVisibility: "all",
+  },
+  {
+    id: DESKTOP_AGENT_AGENT_SELECTOR_EXPERIMENT_ID,
+    titleKey: "experiments.desktopAgentAgentSelector.title",
+    descriptionKey: "experiments.desktopAgentAgentSelector.description",
+    // Only changes the Desktop Agent's right-click menu (no effect while the
+    // agent is off). No explicit default, so it follows the global auto-enable
+    // preference: on in dev builds, off in production.
   },
 ] as const satisfies readonly ExperimentDefinition[];

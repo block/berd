@@ -5,7 +5,7 @@ const SECRET_VALUE_PATTERN =
   /\b(authorization|refresh_token|access_token|secret_key|api_key|apikey|password|secret|token)\b\s*[:=]\s*(['"]?)[^,\s;&'"]+/gi;
 
 interface RendererDiagnosticsContext {
-  windowKind: "main" | "session" | "voice-buddy";
+  windowKind: "main" | "session" | "voice-buddy" | "desktop-agent";
 }
 
 let installed = false;

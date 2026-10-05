@@ -13,6 +13,10 @@ import { Switch } from "@/shared/ui/switch";
 import { Textarea } from "@/shared/ui/textarea";
 import { GooseAutoCompactSettings } from "./GooseAutoCompactSettings";
 import { useAgentToolsTipsPreference } from "@/features/chat/lib/agentToolsTipPreferences";
+import {
+  setDesktopAgentVisible,
+  useDesktopAgentEnabledPreference,
+} from "@/features/desktop-agent/lib/desktopAgentPreferences";
 import { useSessionCostPreference } from "@/features/chat/lib/sessionCostPreference";
 import { useResponseStartGutterPreference } from "@/features/chat/lib/responseStartGutterPreference";
 import { useArtifactAutoOpenPreference } from "@/features/chat/lib/artifactAutoOpenPreference";
@@ -24,6 +28,7 @@ import { useAtMentionDefaultCategoryPreference } from "@/features/chat/lib/menti
 import { useProfileCapability } from "@/shared/profile/capabilities";
 import { useStyleGuidelinesPreference } from "@/shared/preferences/styleGuidelinesPreference";
 import { useMultiWorkspacePreference } from "@/features/workspaces/multiWorkspacePreference";
+import { getPlatform } from "@/shared/lib/platform";
 
 // Behavior (rev 3): split out of the old GeneralSettings.tsx. Named
 // "Behavior" rather than "Chat" because most of what's left here affects
@@ -44,6 +49,7 @@ export function BehaviorSettings() {
   const agentToolsTipsPreference = useAgentToolsTipsPreference();
   const sessionCostPreference = useSessionCostPreference();
   const responseStartGutterPreference = useResponseStartGutterPreference();
+  const desktopAgentPreference = useDesktopAgentEnabledPreference();
   const multiWorkspacePreference = useMultiWorkspacePreference();
   const streamingShortcutPreference = useStreamingShortcutPreference();
   const {
@@ -62,6 +68,7 @@ export function BehaviorSettings() {
   // here since the global shortcut toggle that needed it moved to
   // KeyboardShortcutsSettings.tsx (see the comment above).
   const showAgentToolsTipsSetting = useProfileCapability("agentTools");
+  const isMac = getPlatform() === "mac";
 
   useEffect(() => {
     setStyleGuidelinesPromptDraft(styleGuidelinesPreference.prompt);
@@ -195,6 +202,22 @@ export function BehaviorSettings() {
               aria-label={t("general.responseStartGutter.label")}
             />
           </SettingsRow>
+
+          {isMac ? (
+            <SettingsRow
+              label={t("general.desktopAgent.label")}
+              description={t("general.desktopAgent.description")}
+            >
+              <Switch
+                checked={desktopAgentPreference.enabled}
+                onCheckedChange={(enabled) => {
+                  if (enabled) setDesktopAgentVisible(true);
+                  desktopAgentPreference.setEnabled(enabled);
+                }}
+                aria-label={t("general.desktopAgent.label")}
+              />
+            </SettingsRow>
+          ) : null}
 
           <SettingsRow
             label={t("general.artifactAutoOpen.label")}

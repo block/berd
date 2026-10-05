@@ -1,0 +1,49 @@
+{
+  "avatar": {
+    "title": "Berd Desktop Agent"
+  },
+  "composer": {
+    "placeholder": "Message Berd",
+    "placeholderAgent": "Message {{name}}",
+    "send": "Send",
+    "stop": "Stop"
+  },
+  "empty": {
+    "prompt": "Ask the agent anything.",
+    "waiting": "Waiting for connection…",
+    "newChat": "New chat with {{name}} — your first message starts it."
+  },
+  "hint": {
+    "agentStarting": "{{name}} is starting up…",
+    "connecting": "Connecting to the agent server…",
+    "reconnecting": "Connection lost — reconnecting…",
+    "reconnectExhausted": "Can't reach the agent server. Click ↻ to retry.",
+    "retry": "Retry connection",
+    "sendFailed": "Couldn't send: {{message}}",
+    "stalled": "Still working — the agent server may be unreachable.",
+    "thinking": "Thinking…",
+    "agentStartingGeneric": "The agent is starting up…",
+    "perchError": "Perch problem: {{message}}",
+    "perchAccessibility": "Berd needs Accessibility permission to perch — grant it in System Settings, then try again.",
+    "perched": "Perched on {{app}} — {{title}}",
+    "perchedApp": "Perched on {{app}}"
+  },
+  "menu": {
+    "header": "New chat with…",
+    "fresh": "Berd",
+    "empty": "No agents yet — create them in the main window",
+    "settings": "Desktop Agent settings…",
+    "dismiss": "Hide Desktop Agent"
+  },
+  "tools": {
+    "working_one": "Working… ({{count}} tool call)",
+    "working_other": "Working… ({{count}} tool calls)",
+    "summary_one": "{{count}} tool call",
+    "summary_other": "{{count}} tool calls",
+    "failed_one": "{{count}} failed",
+    "failed_other": "{{count}} failed",
+    "expand": "Expand tool calls",
+    "collapse": "Collapse tool calls",
+    "failureDetail": "full error below"
+  }
+}

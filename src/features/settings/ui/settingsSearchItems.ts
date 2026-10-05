@@ -68,6 +68,11 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     labelKey: "general.responseStartGutter.label",
   },
   {
+    id: "desktop-agent",
+    sectionId: "behavior",
+    labelKey: "general.desktopAgent.label",
+  },
+  {
     id: "artifact-auto-open",
     sectionId: "behavior",
     labelKey: "general.artifactAutoOpen.label",

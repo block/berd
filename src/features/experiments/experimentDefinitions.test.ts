@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DESKTOP_AGENT_AGENT_SELECTOR_EXPERIMENT_ID,
   EXPERIMENT_DEFINITIONS,
   REMOTE_SSH_SESSIONS_EXPERIMENT_ID,
   VOICE_CONVERSATION_EXPERIMENT_ID,
@@ -20,5 +21,12 @@ describe("experiment definitions", () => {
     );
     expect(definition?.manualEnableOnly).toBe(true);
     expect(definition?.settingsVisibility).toBe("all");
+  });
+
+  it("keeps only the agent selector behind a Desktop Agent experiment", () => {
+    const ids = EXPERIMENT_DEFINITIONS.map(({ id }) => id);
+    expect(ids).toContain(DESKTOP_AGENT_AGENT_SELECTOR_EXPERIMENT_ID);
+    // The Desktop Agent itself is a General setting now.
+    expect(ids).not.toContain("desktop-agent");
   });
 });

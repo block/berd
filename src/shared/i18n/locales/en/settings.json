@@ -264,6 +264,10 @@
     "chatOnCanvas": {
       "title": "Chat on canvas",
       "description": "Expand pinned chats into live conversation cards on Home where you can read and respond."
+    },
+    "desktopAgentAgentSelector": {
+      "title": "Desktop Agent agent selector",
+      "description": "Choose which agent the Desktop Agent's next chat uses from its right-click menu."
     }
   },
   "extensions": {
@@ -414,7 +418,11 @@
       "saveError": "Couldn't update the terminal fallback folder. Try again.",
       "saveSuccess": "Terminal fallback folder updated."
     },
-    "title": "General"
+    "title": "General",
+    "desktopAgent": {
+      "label": "Berd Desktop Agent",
+      "description": "An always-on-top agent avatar that lives on your screen and expands into a chat popover."
+    }
   },
   "nav": {
     "appearance": "Appearance",

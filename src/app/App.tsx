@@ -5,6 +5,7 @@ import { TopBarActionsProvider } from "@/app/contexts/TopBarActionsContext";
 import { SelectedTextContextMenu } from "@/app/ui/SelectedTextContextMenu";
 import { StartupLoadingView } from "@/app/ui/StartupLoadingView";
 import { useAuthGate } from "@/features/auth/hooks/useAuthGate";
+import { DesktopAgentBridge } from "@/features/desktop-agent/DesktopAgentBridge";
 import { GlobalShortcutBridge } from "@/features/global-shortcut/GlobalShortcutBridge";
 import { LoginView } from "@/features/auth/ui/LoginView";
 import { getBuildFeatureState } from "@/shared/profile/buildProfile";
@@ -48,6 +49,7 @@ export function App() {
     content = (
       <TopBarActionsProvider>
         <GlobalShortcutBridge />
+        <DesktopAgentBridge />
         <AppShell
           authStatus={authGate.authStatus}
           onLoggedOut={authGate.completeLogin}

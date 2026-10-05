@@ -1,0 +1,444 @@
+/* Desktop-agent transparent shell: only the avatar, popover, and menus paint. */
+
+/* The panel is hardcoded-dark with NO ThemeProvider, but the webview
+   loads globals.css — its semantic tokens resolve to LIGHT values here.
+   The global focus-visible ring reads ring-offset-background, i.e.
+   --background = WHITE: any keyboard-focused control would wear a white
+   box. Re-point the offset to the popover glass so rings
+   read dark. (--ring itself is gray-400 in BOTH themes — correct as-is.
+   The composer input opts out of the ring entirely via focus-override;
+   this override covers the buttons.) */
+#root {
+  --background: #18181b;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.expanded-root {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.panel-popover {
+  border-radius: 14px;
+  background: rgba(24, 24, 27, 0.96);
+  color: #e4e4e7;
+  box-sizing: border-box;
+  padding: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+}
+
+/* Chat popover */
+.chat-popover {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.transcript {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 8px;
+}
+
+.empty-hint {
+  color: rgba(255, 255, 255, 0.4);
+  text-align: center;
+  margin-top: 40%;
+  font-size: 13px;
+}
+
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.row.user {
+  align-items: flex-end;
+}
+
+.row.assistant {
+  align-items: flex-start;
+}
+
+/* Text metrics shared by both roles. The bubble CHROME (fill, radius,
+   inset, width cap) is USER-ONLY — matching the main app, which bubbles
+   user sends and renders assistant replies plain on the surface
+   (MessageBubble: user = rounded bg-message-user-bg, assistant =
+   w-full). */
+.bubble {
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Berd's dark scheme paints user messages DARK GREY, not accent blue —
+   this is the main app's dark --message-user-bg (gray-700), inlined
+   because the panel is hardcoded-dark (no ThemeProvider: a semantic
+   token here would resolve to the LIGHT value, near-white). */
+.row.user .bubble {
+  max-width: 85%;
+  padding: 8px 11px;
+  border-radius: 12px;
+  background: #333333;
+  color: #ffffff;
+}
+
+/* Assistant replies render PLAIN on the popover surface — no fill, no
+   inset, full width (the main app's treatment). */
+.row.assistant .bubble {
+  width: 100%;
+  color: #e4e4e7;
+}
+
+/* Markdown in assistant bubbles. The bubble itself keeps pre-wrap for
+   plain user text; rendered markdown resets it — block elements already
+   own the line breaks, and pre-wrap would double-space them. */
+.markdown-body {
+  white-space: normal;
+}
+
+.markdown-body p {
+  margin: 0.35em 0;
+}
+
+.markdown-body p:first-child {
+  margin-top: 0;
+}
+
+.markdown-body p:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  margin: 0.35em 0;
+  padding-left: 1.3em;
+}
+
+.markdown-body li {
+  margin: 0.15em 0;
+}
+
+.markdown-body code {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.92em;
+}
+
+.markdown-body pre {
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 0.4em 0;
+  overflow-x: auto;
+}
+
+.markdown-body pre code {
+  background: none;
+  padding: 0;
+  font-size: 0.9em;
+  white-space: pre;
+}
+
+.markdown-body blockquote {
+  margin: 0.35em 0;
+  padding-left: 0.8em;
+  border-left: 3px solid rgba(255, 255, 255, 0.25);
+  color: rgba(228, 228, 231, 0.8);
+}
+
+.markdown-body a {
+  color: #7cb3ff;
+}
+
+.cursor {
+  opacity: 0.6;
+  animation: blink 1s steps(1) infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.tool-row {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  padding: 2px 4px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  max-width: 100%;
+}
+
+.tool-row.failed {
+  color: rgba(248, 113, 113, 0.9);
+}
+
+.tool-row-header {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tool-row-glyph {
+  flex: 0 0 auto;
+}
+
+.tool-row-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-row-hint {
+  flex: 0 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 10px;
+  color: rgba(248, 113, 113, 0.65);
+}
+
+.tool-result {
+  margin: 3px 0 4px 17px;
+  padding: 8px 9px;
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  user-select: text;
+  -webkit-user-select: text;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.055);
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.tool-result.failed {
+  background: rgba(127, 29, 29, 0.28);
+  color: rgba(254, 202, 202, 0.95);
+}
+
+/* Collapsed tool-run summary: one quiet line per
+   burst of tool activity, click to expand. Button-reset styling — it
+   should read as transcript metadata, not chrome. */
+.tool-run-summary {
+  border: none;
+  background: none;
+  text-align: left;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  padding: 2px 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tool-run-summary:hover {
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.tool-run-summary.has-failures {
+  color: rgba(248, 113, 113, 0.7);
+}
+
+.tool-run-summary .disclosure {
+  display: inline-block;
+  transition: transform 0.12s ease;
+  font-size: 12px;
+}
+
+.tool-run-summary .disclosure.open {
+  transform: rotate(90deg);
+}
+
+.tool-run-detail {
+  padding: 2px 0 4px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-width: 100%;
+}
+
+.attached-image {
+  max-width: 70%;
+  border-radius: 10px;
+}
+
+.hint {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  padding: 4px 2px;
+}
+
+.hint.error {
+  color: #f87171;
+}
+
+/* Composer — matches the main Berd app's visual language: one rounded
+   grey box containing a borderless input with the send pill inside it. */
+.composer-box {
+  /* Single row: input and send pill share the line — a stacked two-row
+     layout reads as two lines tall no matter how tight the input is. */
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  /* Tight vertical inset matching Berd's composer: the pill nearly
+     fills the box height. */
+  padding: 5px 5px 5px 12px;
+  border-radius: 19px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.composer-box:focus-within {
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.composer-box input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  height: 17px;
+  line-height: 17px;
+  /* The empty-input caret draws at x=0 of the input, where a curved
+     clip boundary slices it into a rounded stub that reads as "too
+     small" (it is full height all along). Kill any intrinsic input
+     rounding and give the caret 2px of clearance so it never hugs the
+     clip edge. */
+  border-radius: 0;
+  padding: 0 0 0 2px;
+  margin: 0;
+}
+
+.composer-box input::placeholder {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.composer-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.icon-button {
+  width: 26px;
+  height: 26px;
+  border-radius: 13px;
+  border: none;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.icon-button:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.icon-button.active {
+  color: #eab308;
+  background: rgba(234, 179, 8, 0.15);
+}
+
+.icon-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* The send pill: slightly horizontally oblong, lives inside the grey box
+   (Berd's composer pattern — wider than tall, nearly filling the box
+   height). Colors are the main app's composer-action recipe in dark mode
+   (--surface-composer-action gray-600, foreground white), inlined because
+   the panel is hardcoded-dark (no ThemeProvider — semantic tokens would
+   resolve light). The old near-white fill read as a stray white box in
+   the dark composer. */
+.send-pill {
+  width: 34px;
+  height: 26px;
+  border-radius: 13px;
+  border: none;
+  background: #666666;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.send-pill:hover {
+  background: #999999; /* --surface-composer-action-hover (gray-500) */
+}
+
+.send-pill:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* Stop variant: send-pill mid-response. Smaller glyph — the ◼ reads
+   heavier than the ↑ at equal font size. */
+.send-pill.stop {
+  font-size: 10px;
+}
+
+/* Manual reconnect affordance in the hint row — the affordance the
+   exhausted copy points at. */
+.hint-retry {
+  margin-left: 6px;
+  border: none;
+  background: rgba(255, 255, 255, 0.12);
+  color: inherit;
+  border-radius: 8px;
+  padding: 1px 7px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.hint-retry:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+/* Avatar chip */
+.avatar-hit {
+  width: 94px;
+  height: 94px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+}

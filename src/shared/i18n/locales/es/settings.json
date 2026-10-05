@@ -264,6 +264,10 @@
     "chatOnCanvas": {
       "title": "Chat en el lienzo",
       "description": "Expande los chats fijados en tarjetas de conversación en vivo en Inicio, donde puedes leer y responder."
+    },
+    "desktopAgentAgentSelector": {
+      "title": "Selector de agentes del Agente de escritorio",
+      "description": "Elige desde el menú contextual qué agente usará el próximo chat del Agente de escritorio."
     }
   },
   "extensions": {
@@ -414,7 +418,11 @@
       "saveError": "No se pudo actualizar la carpeta de reserva del terminal. Inténtalo de nuevo.",
       "saveSuccess": "Carpeta de reserva del terminal actualizada."
     },
-    "title": "General"
+    "title": "General",
+    "desktopAgent": {
+      "label": "Agente de escritorio de Berd",
+      "description": "Un avatar de agente siempre visible que vive en tu pantalla y se expande en un chat."
+    }
   },
   "nav": {
     "appearance": "Apariencia",
