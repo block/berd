@@ -58,9 +58,11 @@ export function interceptSessionNotifications(
  * Handles ACP permission requests. When set, `requestPermission` delegates to
  * it; otherwise the connection falls back to auto-approving (preserving the
  * default behavior for environments where no handler is registered).
+ * The signal retires pending UI when the requesting transport is detached.
  */
 export type PermissionRequestHandler = (
   request: RequestPermissionRequest,
+  signal?: AbortSignal,
 ) => Promise<RequestPermissionResponse>;
 
 let permissionHandler: PermissionRequestHandler | null = null;
@@ -78,6 +80,7 @@ export function setPermissionHandler(handler: PermissionRequestHandler): void {
 function createClientCallbacks(
   backendId: AcpBackendId,
   isCurrent: () => boolean,
+  signal: AbortSignal,
 ): () => Client {
   const toRendererSessionId = <T extends { sessionId: string }>(
     payload: T,
@@ -93,9 +96,30 @@ function createClientCallbacks(
     requestPermission: async (
       args: RequestPermissionRequest,
     ): Promise<RequestPermissionResponse> => {
+      const cancelled: RequestPermissionResponse = {
+        outcome: { outcome: "cancelled" },
+      };
+      if (!isCurrent()) return cancelled;
       const request = toRendererSessionId(args);
       if (permissionHandler) {
-        return permissionHandler(request);
+        // Cancel immediately on detachment even if a handler never settles.
+        // The signal also retires this generation's pending confirmation UI.
+        let onAbort!: () => void;
+        const cancellation = new Promise<RequestPermissionResponse>(
+          (resolve) => {
+            onAbort = () => resolve(cancelled);
+            signal.addEventListener("abort", onAbort, { once: true });
+          },
+        );
+        try {
+          const response = await Promise.race([
+            permissionHandler(request, signal),
+            cancellation,
+          ]);
+          return isCurrent() ? response : cancelled;
+        } finally {
+          signal.removeEventListener("abort", onAbort);
+        }
       }
       const optionId = request.options?.[0]?.optionId ?? "approve";
       return {
@@ -172,8 +196,20 @@ export function createAcpConnection(
   let activeStream: ReturnType<typeof createWebSocketStream> | null = null;
   let activeEndpointCleanup: (() => Promise<void>) | null = null;
   let invalidationGeneration = 0;
+  let permissionLifetime = new AbortController();
   const closedListeners = new Set<() => void>();
   const cleanedStreams = new WeakSet<object>();
+
+  function advanceGeneration(): void {
+    invalidationGeneration += 1;
+    resolvedClient = null;
+    clientPromise = null;
+    activeStream = null;
+    activeEndpointCleanup = null;
+    const previousLifetime = permissionLifetime;
+    permissionLifetime = new AbortController();
+    previousLifetime.abort();
+  }
 
   function assertInitializationCurrent(expectedGeneration: number): void {
     assertAvailable?.();
@@ -221,11 +257,7 @@ export function createAcpConnection(
       if (activeStream !== stream) {
         return;
       }
-      invalidationGeneration += 1;
-      resolvedClient = null;
-      clientPromise = null;
-      activeStream = null;
-      activeEndpointCleanup = null;
+      advanceGeneration();
       for (const listener of closedListeners) {
         listener();
       }
@@ -252,13 +284,9 @@ export function createAcpConnection(
     ) {
       return;
     }
-    invalidationGeneration += 1;
     const stream = activeStream;
     const cleanupEndpoint = activeEndpointCleanup;
-    activeStream = null;
-    activeEndpointCleanup = null;
-    resolvedClient = null;
-    clientPromise = null;
+    advanceGeneration();
     await cleanupOwnedTransport(stream, cleanupEndpoint);
   }
 
@@ -292,6 +320,7 @@ export function createAcpConnection(
       createClientCallbacks(
         backendId,
         () => invalidationGeneration === expectedGeneration,
+        permissionLifetime.signal,
       ),
       stream,
     );
@@ -318,6 +347,9 @@ export function createAcpConnection(
       } satisfies GooseInitializeRequest);
       assertInitializationCurrent(expectedGeneration);
     } catch (error) {
+      if (invalidationGeneration === expectedGeneration) {
+        advanceGeneration();
+      }
       await cleanupOwnedTransport(stream, cleanupEndpoint);
       throw error;
     }
@@ -347,8 +379,7 @@ export function createAcpConnection(
         })
         .catch((error) => {
           if (clientPromise === initialization) {
-            invalidationGeneration += 1;
-            clientPromise = null;
+            advanceGeneration();
           }
           throw error;
         });

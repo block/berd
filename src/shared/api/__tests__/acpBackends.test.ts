@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Client, SessionNotification } from "@agentclientprotocol/sdk";
+import type {
+  Client,
+  RequestPermissionRequest,
+  RequestPermissionResponse,
+  SessionNotification,
+} from "@agentclientprotocol/sdk";
 import {
   LOCAL_BACKEND_ID,
   backendIdForSession,
@@ -746,6 +751,16 @@ describe("session backend routing", () => {
 });
 
 describe("inbound session id translation", () => {
+  const permissionRequest = {
+    sessionId: "session-1",
+    toolCall: { toolCallId: "tool-1", title: "Test tool" },
+    options: [{ optionId: "approve", kind: "allow_once", name: "Allow" }],
+  } satisfies RequestPermissionRequest;
+  const approval: RequestPermissionResponse = {
+    outcome: { outcome: "selected", optionId: "approve" },
+  };
+  const cancellation = { outcome: { outcome: "cancelled" } };
+
   function sessionUpdatePayload(sessionId: string): SessionNotification {
     return {
       sessionId,
@@ -763,6 +778,119 @@ describe("inbound session id translation", () => {
     }
     return factory();
   }
+
+  it.each([
+    "local",
+    "ssh:dev-box",
+  ] as const)("does not auto-approve or surface permissions from a detached %s transport", async (backendId) => {
+    const conn = await importConnection();
+    const connection = conn.getBackendConnection(backendId);
+    await connection.getClient();
+    const oldCallbacks = await latestCallbacks();
+    await connection.invalidate();
+    await connection.getClient();
+    const replacementCallbacks = await latestCallbacks();
+
+    await expect(
+      oldCallbacks.requestPermission(permissionRequest),
+    ).resolves.toEqual(cancellation);
+    await expect(
+      replacementCallbacks.requestPermission(permissionRequest),
+    ).resolves.toEqual(approval);
+    const handler = vi.fn().mockResolvedValue(approval);
+    conn.setPermissionHandler(handler);
+    await expect(
+      oldCallbacks.requestPermission(permissionRequest),
+    ).resolves.toEqual(cancellation);
+    expect(handler).not.toHaveBeenCalled();
+    await expect(
+      replacementCallbacks.requestPermission(permissionRequest),
+    ).resolves.toEqual(approval);
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { backendId: "local", close: false },
+    { backendId: "ssh:dev-box", close: false },
+    { backendId: "local", close: true },
+    { backendId: "ssh:dev-box", close: true },
+  ] as const)("cancels pending $backendId permissions on detachment (close: $close)", async ({
+    backendId,
+    close,
+  }) => {
+    const conn = await importConnection();
+    const connection = conn.getBackendConnection(backendId);
+    const first = (await connection.getClient()) as unknown as FakeClient;
+    const oldCallbacks = await latestCallbacks();
+    let resolveDecision!: (response: RequestPermissionResponse) => void;
+    let lifetime!: AbortSignal;
+    conn.setPermissionHandler((_request, signal) => {
+      lifetime = signal!;
+      return new Promise((resolve) => {
+        resolveDecision = resolve;
+      });
+    });
+    const pending = oldCallbacks.requestPermission(permissionRequest);
+    if (close) {
+      first.resolveClosed();
+      await flushClosedMonitor();
+    } else {
+      const stream = mocks.createWebSocketStream.mock.results.at(-1)?.value;
+      stream.writable.abort.mockReturnValue(new Promise(() => {}));
+      void connection.invalidate();
+    }
+    expect(lifetime.aborted).toBe(true);
+    // Cancellation must not wait for transport cleanup or a user's decision.
+    await expect(pending).resolves.toEqual(cancellation);
+    await connection.getClient();
+    resolveDecision(approval);
+    await expect(pending).resolves.toEqual(cancellation);
+    conn.setPermissionHandler(async () => approval);
+    const replacementCallbacks = await latestCallbacks();
+    await expect(
+      replacementCallbacks.requestPermission(permissionRequest),
+    ).resolves.toEqual(approval);
+  });
+
+  it("does not return approval when detachment races a resolved decision", async () => {
+    const conn = await importConnection();
+    const connection = conn.getBackendConnection("local");
+    await connection.getClient();
+    const callbacks = await latestCallbacks();
+    conn.setPermissionHandler(async () => {
+      void connection.invalidate();
+      return approval;
+    });
+    await expect(
+      callbacks.requestPermission(permissionRequest),
+    ).resolves.toEqual(cancellation);
+  });
+
+  it("retires permissions when initialization fails even if cleanup never settles", async () => {
+    const conn = await importConnection();
+    const connection = conn.getBackendConnection("local");
+    let rejectInitialization!: (error: Error) => void;
+    mocks.initialize.mockReturnValueOnce(
+      new Promise((_, reject) => {
+        rejectInitialization = reject;
+      }),
+    );
+    const initialization = connection.getClient();
+    void initialization.catch(() => {});
+    await vi.waitFor(() => expect(mocks.initialize).toHaveBeenCalledOnce());
+    const callbacks = await latestCallbacks();
+    conn.setPermissionHandler(() => new Promise(() => {}));
+    const pending = callbacks.requestPermission(permissionRequest);
+    const stream = mocks.createWebSocketStream.mock.results.at(-1)?.value;
+    stream.writable.abort.mockReturnValue(new Promise(() => {}));
+    rejectInitialization(new Error("handshake failed"));
+    await expect(pending).resolves.toEqual(cancellation);
+    const replacement = await connection.getClient();
+    expect(connection.getClientSync()).toBe(replacement);
+    await expect(
+      callbacks.requestPermission(permissionRequest),
+    ).resolves.toEqual(cancellation);
+  });
 
   it.each([
     LOCAL_BACKEND_ID,
