@@ -32,7 +32,14 @@ export function App() {
         import("@tauri-apps/api/window"),
         import("@tauri-apps/plugin-deep-link"),
       ]).then(async ([{ getCurrentWindow }, { getCurrent }]) => {
-        const urls = await getCurrent().catch(() => null);
+        let timeout: ReturnType<typeof setTimeout> | undefined;
+        const urls = await Promise.race([
+          getCurrent().catch(() => null),
+          new Promise<null>((resolve) => {
+            timeout = setTimeout(() => resolve(null), 1000);
+          }),
+        ]);
+        clearTimeout(timeout);
         const updateOnly =
           urls?.length &&
           urls.every(

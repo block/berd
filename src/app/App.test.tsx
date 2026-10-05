@@ -116,6 +116,7 @@ describe("App", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     mediaPlayMock.mockRestore();
     vi.unstubAllGlobals();
   });
@@ -149,6 +150,30 @@ describe("App", () => {
     vi.stubGlobal("__TAURI_INTERNALS__", {});
     renderApp({ authGate: false });
     await waitFor(() => expect(mocks.showWindow).toHaveBeenCalled());
+  });
+
+  it("reveals an ordinary launch when startup URL discovery never settles", async () => {
+    vi.stubGlobal("__TAURI_INTERNALS__", {});
+    mocks.startupUrls.mockReturnValue(new Promise(() => {}));
+    vi.useFakeTimers();
+    renderApp({ authGate: false });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(mocks.startupUrls).toHaveBeenCalled();
+    expect(mocks.showWindow).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not reveal a confirmed update-only launch after the fallback", async () => {
+    vi.stubGlobal("__TAURI_INTERNALS__", {});
+    mocks.startupUrls.mockResolvedValue(["berd://update-check"]);
+    vi.useFakeTimers();
+    renderApp({ authGate: false });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(mocks.startupUrls).toHaveBeenCalled();
+    expect(mocks.showWindow).not.toHaveBeenCalled();
   });
 
   it("prevents default window navigation when files are dragged into the app", async () => {
