@@ -14,6 +14,7 @@ import type { Update as TauriUpdate } from "@tauri-apps/plugin-updater";
 import { Update as TauriUpdateResource } from "@tauri-apps/plugin-updater";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrent } from "@tauri-apps/plugin-deep-link";
 import { probeKgooseConnectivity } from "@/shared/api/connectivity";
 
 const CHECK_UPDATE_EVENT = "berd:check-update";
@@ -228,6 +229,7 @@ export function UpdaterProvider({
   const switchUpdateRef = useRef<TauriUpdate | null>(null);
   const switchUpdateRidRef = useRef<number | null>(null);
   const checkPromiseRef = useRef<Promise<void> | null>(null);
+  const startupUpdateHandledRef = useRef(false);
   const installPromiseRef = useRef<Promise<void> | null>(null);
 
   const setStatusValue = useCallback((nextStatus: UpdateStatus) => {
@@ -602,11 +604,28 @@ export function UpdaterProvider({
     let cancelled = false;
     let unlisten: (() => void) | undefined;
     void listen(CHECK_UPDATE_EVENT, () => {
+      if (cancelled) return;
+      startupUpdateHandledRef.current = true;
       void checkForUpdate({ background: true, quiet: true });
     })
-      .then((nextUnlisten) => {
-        if (cancelled) nextUnlisten();
-        else unlisten = nextUnlisten;
+      .then(async (nextUnlisten) => {
+        if (cancelled) {
+          nextUnlisten();
+          return;
+        }
+        unlisten = nextUnlisten;
+        // Register first so a warm event racing the startup drain is not lost.
+        const urls = await getCurrent();
+        if (cancelled || startupUpdateHandledRef.current) return;
+        if (
+          urls?.some(
+            (raw) =>
+              raw === "berd://update-check" || raw === "berd://update-check/",
+          )
+        ) {
+          startupUpdateHandledRef.current = true;
+          void checkForUpdate({ background: true, quiet: true });
+        }
       })
       .catch((error) => {
         console.warn(
