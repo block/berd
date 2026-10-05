@@ -404,10 +404,18 @@ export async function loadSession(
       // A replay refresh may have no renderer workspace path. Reuse the
       // prepared cwd or ask the owning backend; ACP
       // requires an absolute path and does not expand a literal "~".
-      const effectiveWorkingDir =
+      let effectiveWorkingDir =
         nonBlankWorkingDir(workingDir) ??
-        nonBlankWorkingDir(prepared.get(sessionId)?.workingDir) ??
-        nonBlankWorkingDir((await acpApi.getSessionInfo(sessionId)).workingDir);
+        nonBlankWorkingDir(prepared.get(sessionId)?.workingDir);
+      if (!effectiveWorkingDir) {
+        // Bound only metadata recovery, not the potentially long replay.
+        // Await outside the race so a late response cannot load stale cwd.
+        const info = await runBoundedSessionMutation(
+          sessionId,
+          acpApi.getSessionInfo(sessionId),
+        );
+        effectiveWorkingDir = nonBlankWorkingDir(info.workingDir);
+      }
       if (!effectiveWorkingDir) {
         throw new Error("Session working directory is unavailable.");
       }

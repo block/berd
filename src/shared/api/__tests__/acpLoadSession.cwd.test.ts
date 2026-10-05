@@ -1,15 +1,16 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getBackendClient: vi.fn(),
   sessionInfo: vi.fn(),
   loadSession: vi.fn(),
+  invalidateBackendConnection: vi.fn(),
 }));
 
 vi.mock("../acpConnection", () => ({
   getClient: mocks.getBackendClient,
   getBackendClient: mocks.getBackendClient,
-  invalidateBackendConnection: vi.fn(),
+  invalidateBackendConnection: mocks.invalidateBackendConnection,
   interceptSessionNotifications: vi.fn(),
 }));
 
@@ -19,6 +20,7 @@ describe("acpLoadSession working directory at the transport boundary", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.resetAllMocks();
+    mocks.invalidateBackendConnection.mockResolvedValue(undefined);
     mocks.getBackendClient.mockResolvedValue({
       goose: { GooseUnstableSessionInfo: mocks.sessionInfo },
       loadSession: mocks.loadSession,
@@ -32,6 +34,10 @@ describe("acpLoadSession working directory at the transport boundary", () => {
       }
       return { configOptions: [] };
     });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("recovers the saved directory when the renderer has no workspace path", async () => {
@@ -193,6 +199,123 @@ describe("acpLoadSession working directory at the transport boundary", () => {
     );
 
     expect(mocks.loadSession).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["session-1", "local"],
+    ["ssh:devbox#session-1", "ssh:devbox"],
+  ])("times out stuck metadata for %s and admits an explicit queued load", async (sessionId, backendId) => {
+    vi.useFakeTimers();
+    const { acpLoadSession } = await import("../acp");
+    mocks.sessionInfo.mockReturnValueOnce(new Promise(() => {}));
+
+    const recovery = acpLoadSession(sessionId);
+    const recoveryRejection = expect(recovery).rejects.toThrow(
+      "ACP operation timed out",
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.sessionInfo).toHaveBeenCalledOnce();
+    const newerLoad = acpLoadSession(sessionId, "/new/project");
+
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(mocks.invalidateBackendConnection).not.toHaveBeenCalled();
+    expect(mocks.loadSession).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(mocks.invalidateBackendConnection).toHaveBeenCalledOnce();
+    expect(mocks.invalidateBackendConnection).toHaveBeenCalledWith(backendId);
+    await recoveryRejection;
+    await newerLoad;
+
+    expect(mocks.getBackendClient).toHaveBeenLastCalledWith(backendId);
+    expect(mocks.loadSession).toHaveBeenCalledOnce();
+    expect(mocks.loadSession).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      cwd: "/new/project",
+      mcpServers: [],
+    });
+    expect(
+      mocks.invalidateBackendConnection.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.loadSession.mock.invocationCallOrder[0]);
+
+    await acpLoadSession(sessionId);
+    expect(mocks.sessionInfo).toHaveBeenCalledOnce();
+    expect(mocks.loadSession).toHaveBeenLastCalledWith({
+      sessionId: "session-1",
+      cwd: "/new/project",
+      mcpServers: [],
+    });
+  });
+
+  it.each([
+    "resolve",
+    "reject",
+  ])("ignores metadata that %ss after a timeout and a newer explicit load", async (settlement) => {
+    vi.useFakeTimers();
+    const { acpLoadSession } = await import("../acp");
+    let resolveInfo!: (value: unknown) => void;
+    let rejectInfo!: (reason: unknown) => void;
+    mocks.sessionInfo.mockReturnValueOnce(
+      new Promise((resolve, reject) => {
+        resolveInfo = resolve;
+        rejectInfo = reject;
+      }),
+    );
+    const recovery = acpLoadSession("ssh:devbox#session-1");
+    const recoveryRejection = expect(recovery).rejects.toThrow(
+      "ACP operation timed out",
+    );
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(mocks.invalidateBackendConnection).toHaveBeenCalledOnce();
+    await recoveryRejection;
+    await acpLoadSession("ssh:devbox#session-1", "/new/project");
+
+    if (settlement === "resolve") {
+      resolveInfo({
+        session: { sessionId: "session-1", cwd: "/stale/project" },
+      });
+    } else {
+      rejectInfo(new Error("late metadata failure"));
+    }
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.loadSession).toHaveBeenCalledOnce();
+    expect(mocks.invalidateBackendConnection).toHaveBeenCalledOnce();
+
+    await acpLoadSession("ssh:devbox#session-1");
+    expect(mocks.sessionInfo).toHaveBeenCalledOnce();
+    expect(mocks.loadSession).toHaveBeenLastCalledWith({
+      sessionId: "session-1",
+      cwd: "/new/project",
+      mcpServers: [],
+    });
+  });
+
+  it("does not apply the metadata timeout to a long history replay", async () => {
+    vi.useFakeTimers();
+    const { acpLoadSession } = await import("../acp");
+    let resolveLoad!: (value: unknown) => void;
+    mocks.loadSession.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveLoad = resolve;
+      }),
+    );
+    const load = acpLoadSession("session-1");
+
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(mocks.sessionInfo).toHaveBeenCalledOnce();
+    expect(mocks.loadSession).toHaveBeenCalledOnce();
+    expect(mocks.invalidateBackendConnection).not.toHaveBeenCalled();
+
+    resolveLoad({ configOptions: [] });
+    await load;
+    await acpLoadSession("session-1");
+    expect(mocks.sessionInfo).toHaveBeenCalledOnce();
+    expect(mocks.loadSession).toHaveBeenLastCalledWith({
+      sessionId: "session-1",
+      cwd: "/saved/project",
+      mcpServers: [],
+    });
   });
 
   it("serializes directory recovery with later loads and retains the latest cwd", async () => {
