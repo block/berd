@@ -385,7 +385,7 @@ export function runPreparedSessionPrompt<T>(
 
 export async function loadSession(
   sessionId: string,
-  workingDir: string,
+  workingDir?: string,
 ): Promise<{
   response: Awaited<ReturnType<typeof acpApi.loadSession>>;
   isCurrent: boolean;
@@ -394,11 +394,21 @@ export async function loadSession(
   return serializeSessionMutation(
     sessionId,
     async (isLatest) => {
-      const response = await acpApi.loadSession(sessionId, workingDir);
+      // A replay refresh may have no renderer workspace path. Reuse the
+      // prepared cwd or ask the owning backend; ACP
+      // requires an absolute path and does not expand a literal "~".
+      const effectiveWorkingDir =
+        workingDir ??
+        prepared.get(sessionId)?.workingDir ??
+        (await acpApi.getSessionInfo(sessionId)).workingDir;
+      if (!effectiveWorkingDir) {
+        throw new Error("Session working directory is unavailable.");
+      }
+      const response = await acpApi.loadSession(sessionId, effectiveWorkingDir);
       const isCurrentResult = isLatest();
       const executionSnapshot = readSessionExecutionConfigSnapshot(response);
       prepared.set(sessionId, {
-        workingDir,
+        workingDir: effectiveWorkingDir,
         executionSelection: executionSnapshot ?? undefined,
       });
       return {
