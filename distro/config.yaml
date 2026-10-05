@@ -1,0 +1,4 @@
+# Packaged fallbacks only: Goose loads user config after this file, and
+# environment variables take precedence over both layers.
+GOOSE_CONTEXT_LIMIT: 272000
+GOOSE_AUTO_COMPACT_THRESHOLD: 0.9

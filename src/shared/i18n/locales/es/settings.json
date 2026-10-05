@@ -93,16 +93,26 @@
   "compaction": {
     "goose": {
       "autoCompact": {
-        "helper": "Ajústalo al 100% para desactivar la compactación automática.",
+        "helper": "Compacta cuando el uso del contexto supera este porcentaje del contexto máximo. Valor predeterminado: 90%. Ajústalo al 100% para desactivar la compactación automática.",
         "label": "Umbral",
         "loading": "Cargando...",
         "off": "Desactivado",
         "saveError": "No se pudo guardar la configuración de compactación automática."
       },
-      "description": "Compacta automáticamente el contexto anterior y reinicia el recuento de tokens durante las sesiones. Esto solo se aplica a los chats que usan el harness Goose.",
-      "label": "Compactación automática (solo harness Goose)"
+      "description": "Configura el límite de contexto y cuándo se compacta el contexto anterior. Estos ajustes solo se aplican a los chats que usan el harness Goose.",
+      "label": "Contexto y compactación automática (solo harness Goose)",
+      "contextLimit": {
+        "label": "Contexto máximo",
+        "exactLabel": "Tokens de contexto máximo",
+        "helper": "Cambia el límite de contexto de Goose en el siguiente turno. Elige un valor dentro de la ventana de contexto admitida por tu modelo; esto no aumenta su capacidad. Las variables de entorno tienen prioridad sobre los ajustes guardados. Introduce un número exacto de tokens para valores fuera del rango del control deslizante.",
+        "invalid": "Introduce un número entero positivo de tokens.",
+        "save": "Guardar",
+        "saveError": "No se pudo guardar el límite de contexto. Inténtalo de nuevo.",
+        "readbackPending": "Se guardó el límite de contexto, pero no se pudo confirmar el valor efectivo. Se volverá a intentar; una variable de entorno puede seguir teniendo prioridad.",
+        "tokens": "{{displayCount}} tokens"
+      }
     },
-    "title": "Compactación"
+    "title": "Contexto y compactación"
   },
   "connections": {
     "configure": "Configurar",

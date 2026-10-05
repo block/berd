@@ -53,6 +53,13 @@ For local testing, a manifest can supply generic `http`/`https` values:
 
 ## Runtime effects
 
+`config.yaml` supplies the Goose context defaults: `GOOSE_CONTEXT_LIMIT: 272000`
+and `GOOSE_AUTO_COMPACT_THRESHOLD: 0.9`. These are fallback values, not enforced
+policy: Goose loads the user's config after the bundled file and environment
+variables take precedence over both. Behavior settings save changes through
+ACP to the user's config, never to this bundled file. The context limit is an
+override, not an increase in the selected model's supported context window.
+
 When bundled defaults are present, the Tauri shell:
 
 - prepends `distro/bin` to `PATH` when present
