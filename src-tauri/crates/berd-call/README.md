@@ -30,10 +30,7 @@ until the call ends. An unavailable update service does not prevent the call.
 For a local development binary, run `just install-berd-call-dev` from the Berd
 checkout. This builds the debug CLI, installs a copy at
 `~/.local/libexec/berd-call-dev`, and links `~/.local/bin/berd-call` to it. The
-installer refuses to overwrite an unrelated command. Run
-`just uninstall-berd-call-dev` to remove that copy and link; if a released Berd
-app with a bundled CLI is installed in `/Applications`, it restores the link
-to that app. Ensure `~/.local/bin` is on your `PATH`.
+installer accepts an existing link to Berd's bundled CLI and remembers its exact target, but refuses to overwrite an unrelated command. Run `just uninstall-berd-call-dev` to remove the development copy and restore the original app link, including a custom app location. If there was no original link, it links to a released bundled CLI in `/Applications` when available. Ensure `~/.local/bin` is on your `PATH`.
 
 The standalone command exposes the host-facing runtime protocol plus speech,
 model-management, synthesis, and diagnostic tools. `berd-call start` runs a
