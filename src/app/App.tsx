@@ -28,10 +28,28 @@ export function App() {
 
     // Dynamic import to avoid crash in non-Tauri environments (e.g., Playwright E2E)
     if (window.__TAURI_INTERNALS__) {
-      import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
-        getCurrentWindow()
-          .show()
-          .catch(() => {});
+      void Promise.all([
+        import("@tauri-apps/api/window"),
+        import("@tauri-apps/plugin-deep-link"),
+      ]).then(async ([{ getCurrentWindow }, { getCurrent }]) => {
+        let timeout: ReturnType<typeof setTimeout> | undefined;
+        const urls = await Promise.race([
+          getCurrent().catch(() => null),
+          new Promise<null>((resolve) => {
+            timeout = setTimeout(() => resolve(null), 1000);
+          }),
+        ]);
+        clearTimeout(timeout);
+        const updateOnly =
+          urls?.length &&
+          urls.every(
+            (url) =>
+              url === "berd://update-check" || url === "berd://update-check/",
+          );
+        if (!updateOnly)
+          await getCurrentWindow()
+            .show()
+            .catch(() => {});
       });
     }
 

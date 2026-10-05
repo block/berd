@@ -93,7 +93,9 @@ ARCHIVE="$OUTPUT_DIR/$ARCHIVE_NAME"
 rm -f "$ARCHIVE" "$ARCHIVE.sig" "$ARCHIVE.sha256"
 # Keep Berd.app at the archive root; that is the bundle shape tauri-plugin-updater
 # atomically installs on macOS.
-tar -C "$WORK_DIR" -czf "$ARCHIVE" "${APP_BUNDLE_NAME}.app"
+# macOS tar otherwise injects AppleDouble `._*` entries for extended
+# attributes; Tauri's raw tar extractor cannot unpack the root-level entry.
+COPYFILE_DISABLE=1 tar -C "$WORK_DIR" -czf "$ARCHIVE" "${APP_BUNDLE_NAME}.app"
 ARCHIVE_LIST="$WORK_DIR/archive-contents.txt"
 tar -tzf "$ARCHIVE" > "$ARCHIVE_LIST"
 grep -Fxq "${APP_BUNDLE_NAME}.app/" "$ARCHIVE_LIST"

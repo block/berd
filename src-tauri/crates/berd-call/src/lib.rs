@@ -38,6 +38,8 @@ pub mod spokesperson_voice_update;
 mod status_sounds;
 mod synthesis;
 mod tts;
+#[cfg(target_os = "macos")]
+pub mod update_guard;
 
 pub use audio_output::{wait_until_drained, PcmAudioOutput};
 pub use configured_tts::{
