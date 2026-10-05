@@ -125,6 +125,20 @@ pub(crate) fn merge_arguments(saved: &[String], explicit: &[String]) -> Vec<Stri
     result
 }
 
+pub(crate) fn persistable_arguments(arguments: &[String]) -> Vec<String> {
+    arguments
+        .chunks_exact(2)
+        .filter(|pair| {
+            !matches!(
+                pair[0].as_str(),
+                "--realtime-url" | "--stt-url" | "--tts-url"
+            )
+        })
+        .flatten()
+        .cloned()
+        .collect()
+}
+
 pub(crate) fn without_tts(arguments: &[String]) -> Vec<String> {
     arguments
         .chunks_exact(2)

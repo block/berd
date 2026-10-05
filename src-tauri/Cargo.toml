@@ -97,6 +97,7 @@ windows-sys = { version = "0.59", features = [
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3.7"
 block2 = "0.6"
 coreaudio-rs = "0.14.2"
 keyring = { version = "3.6.3", default-features = false, features = ["apple-native"] }

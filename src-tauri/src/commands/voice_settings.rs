@@ -1,6 +1,6 @@
 use tauri::{AppHandle, Emitter, State};
 
-use super::{openai_audio, pocket_voice, siri_voice};
+use super::{openai_audio, openai_voice_endpoints, pocket_voice, siri_voice};
 
 const OPENAI_SETTINGS_CHANGED_EVENT: &str = "openai-voice:settings-changed";
 
@@ -58,6 +58,24 @@ fn reset_transaction<P, S>(
     Ok(())
 }
 
+fn reset_openai_with_endpoints<E>(
+    previous_endpoints: &E,
+    mut reset_endpoints: impl FnMut() -> Result<(), String>,
+    mut reset_playback: impl FnMut() -> Result<(), String>,
+    mut restore_endpoints: impl FnMut(&E) -> Result<(), String>,
+) -> Result<(), String> {
+    reset_endpoints()?;
+    if let Err(error) = reset_playback() {
+        let rollback = restore_endpoints(previous_endpoints)
+            .err()
+            .map(|cause| format!("endpoints: {cause}"))
+            .into_iter()
+            .collect();
+        return Err(transaction_error(error, rollback));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn reset_all_voice_backend_settings(
     app: AppHandle,
@@ -74,12 +92,20 @@ pub fn reset_all_voice_backend_settings(
 
     let previous_pocket = pocket_voice::settings(&pocket_base);
     let previous_siri = siri_voice::read_settings(&siri_path);
+    let previous_endpoints = openai_voice_endpoints::get_openai_voice_endpoints()?;
     reset_transaction(
         &previous_pocket,
         &previous_siri,
         || pocket_voice::write_settings(&pocket_base, &Default::default()),
         || siri_voice::write_settings(&siri_path, &Default::default()),
-        || openai_audio::replace_voice_settings(&openai_state, &Default::default()),
+        || {
+            reset_openai_with_endpoints(
+                &previous_endpoints,
+                openai_voice_endpoints::reset,
+                || openai_audio::replace_voice_settings(&openai_state, &Default::default()),
+                openai_voice_endpoints::restore,
+            )
+        },
         |settings| pocket_voice::write_settings(&pocket_base, settings),
         |settings| siri_voice::write_settings(&siri_path, settings),
     )?;
@@ -94,7 +120,7 @@ pub fn reset_all_voice_backend_settings(
 mod tests {
     use std::cell::Cell;
 
-    use super::reset_transaction;
+    use super::{reset_openai_with_endpoints, reset_transaction};
 
     #[test]
     fn restores_completed_resets_when_a_later_backend_fails() {
@@ -126,5 +152,24 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(pocket.get(), 7);
         assert_eq!(siri.get(), 8);
+    }
+
+    #[test]
+    fn restores_endpoint_urls_when_playback_reset_fails() {
+        let endpoints = Cell::new(7);
+        let result = reset_openai_with_endpoints(
+            &7,
+            || {
+                endpoints.set(0);
+                Ok(())
+            },
+            || Err("playback unavailable".to_string()),
+            |previous| {
+                endpoints.set(*previous);
+                Ok(())
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(endpoints.get(), 7);
     }
 }

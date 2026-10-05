@@ -8,6 +8,7 @@ mod audio_output;
 pub mod benchmark;
 pub mod causal_inbox;
 mod configured_tts;
+pub mod endpoint_url;
 pub mod expert_spokesperson;
 pub mod input;
 pub mod local_assets;

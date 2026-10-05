@@ -10,6 +10,7 @@ import type {
 export interface OpenAiVoiceStatus {
   sttConfigured: boolean;
   ttsConfigured: boolean;
+  realtimeConfigured: boolean;
   sttConfigurationSource: "default" | "environment";
   ttsConfigurationSource: "default" | "environment";
   sttUnavailableReason: string | null;
@@ -34,20 +35,56 @@ export const getOpenAiVoiceStatus = shareInFlight(
   (): Promise<OpenAiVoiceStatus> => invoke("get_openai_voice_status"),
 );
 
-export function setOpenAiTtsApiKey(apiKey: string): Promise<void> {
-  return invoke("set_openai_tts_api_key", { apiKey });
+export function setOpenAiTtsApiKey(
+  apiKey: string,
+  expectedUrl = "",
+): Promise<void> {
+  return invoke("set_openai_tts_api_key", { apiKey, expectedUrl });
 }
 
-export function setOpenAiSttApiKey(apiKey: string): Promise<void> {
-  return invoke("set_openai_stt_api_key", { apiKey });
+export type OpenAiVoiceEndpointKind = "realtime" | "stt" | "tts";
+
+export interface OpenAiVoiceEndpoints {
+  realtime: string | null;
+  stt: string | null;
+  tts: string | null;
 }
 
-export function clearOpenAiSttApiKey(): Promise<void> {
-  return invoke("clear_openai_stt_api_key");
+export function getOpenAiVoiceEndpoints(): Promise<OpenAiVoiceEndpoints> {
+  return invoke("get_openai_voice_endpoints");
 }
 
-export function clearOpenAiTtsApiKey(): Promise<void> {
-  return invoke("clear_openai_tts_api_key");
+export function setOpenAiVoiceEndpoint(
+  kind: OpenAiVoiceEndpointKind,
+  url: string,
+): Promise<void> {
+  return invoke("set_openai_voice_endpoint", { kind, url });
+}
+
+export function setOpenAiRealtimeApiKey(
+  apiKey: string,
+  expectedUrl = "",
+): Promise<void> {
+  return invoke("set_openai_realtime_api_key", { apiKey, expectedUrl });
+}
+
+export function clearOpenAiRealtimeApiKey(expectedUrl = ""): Promise<void> {
+  return invoke("clear_openai_realtime_api_key", { expectedUrl });
+}
+
+export function setOpenAiSttApiKey(
+  apiKey: string,
+  expectedUrl = "",
+): Promise<void> {
+  return invoke("set_openai_stt_api_key", { apiKey, expectedUrl });
+}
+
+export function clearOpenAiSttApiKey(expectedUrl = ""): Promise<void> {
+  return invoke("clear_openai_stt_api_key", { expectedUrl });
+}
+
+export function clearOpenAiTtsApiKey(expectedUrl = ""): Promise<void> {
+  return invoke("clear_openai_tts_api_key", { expectedUrl });
 }
 
 export function listenToOpenAiVoiceSettings(

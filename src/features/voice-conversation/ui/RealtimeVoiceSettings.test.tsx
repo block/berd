@@ -7,22 +7,29 @@ import { RealtimeVoiceSettings } from "./RealtimeVoiceSettings";
 
 const openAiVoiceMocks = vi.hoisted(() => ({
   clearApiKey: vi.fn(() => Promise.resolve()),
-  getStatus: vi.fn(() => Promise.resolve({ sttConfigured: true })),
+  getStatus: vi.fn(() => Promise.resolve({ realtimeConfigured: true })),
+  getEndpoints: vi.fn(() =>
+    Promise.resolve({ realtime: null, stt: null, tts: null }),
+  ),
+  setEndpoint: vi.fn(() => Promise.resolve()),
   listenToSettings: vi.fn(() => Promise.resolve(() => undefined)),
   setApiKey: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock("../api/openAiVoice", () => ({
-  clearOpenAiSttApiKey: openAiVoiceMocks.clearApiKey,
+  clearOpenAiRealtimeApiKey: openAiVoiceMocks.clearApiKey,
+  getOpenAiVoiceEndpoints: openAiVoiceMocks.getEndpoints,
+  setOpenAiVoiceEndpoint: openAiVoiceMocks.setEndpoint,
   getOpenAiVoiceStatus: openAiVoiceMocks.getStatus,
   listenToOpenAiVoiceSettings: openAiVoiceMocks.listenToSettings,
-  setOpenAiSttApiKey: openAiVoiceMocks.setApiKey,
+  setOpenAiRealtimeApiKey: openAiVoiceMocks.setApiKey,
 }));
 
 describe("RealtimeVoiceSettings", () => {
   beforeEach(async () => {
     window.localStorage.clear();
     vi.clearAllMocks();
+    openAiVoiceMocks.getStatus.mockResolvedValue({ realtimeConfigured: true });
     await i18n.changeLanguage("en");
   });
 
@@ -61,14 +68,81 @@ describe("RealtimeVoiceSettings", () => {
     ).toHaveTextContent("Debug — show agent routing");
   });
 
-  it("stores the Realtime key through the shared OpenAI voice credential path", async () => {
+  it("saves the displayed realtime URL before its URL-scoped key with one action", async () => {
     const user = userEvent.setup();
     renderWithProviders(<RealtimeVoiceSettings />);
 
+    expect(screen.getByLabelText("Realtime endpoint URL")).toHaveAttribute(
+      "placeholder",
+      "wss://api.openai.com/v1/realtime",
+    );
+    await user.type(
+      screen.getByLabelText("Realtime endpoint URL"),
+      "ws://127.0.0.1:18870/v1/realtime",
+    );
     await user.type(screen.getByLabelText("OpenAI API key"), " sk-shared ");
-    await user.click(screen.getByRole("button", { name: "Save key" }));
+    expect(screen.getAllByRole("button", { name: "Save" })).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
-    expect(openAiVoiceMocks.setApiKey).toHaveBeenCalledWith(" sk-shared ");
+    expect(openAiVoiceMocks.setEndpoint).toHaveBeenCalledWith(
+      "realtime",
+      "ws://127.0.0.1:18870/v1/realtime",
+    );
+    expect(openAiVoiceMocks.setApiKey).toHaveBeenCalledWith(
+      " sk-shared ",
+      "ws://127.0.0.1:18870/v1/realtime",
+    );
+    expect(
+      openAiVoiceMocks.setEndpoint.mock.invocationCallOrder[0],
+    ).toBeLessThan(openAiVoiceMocks.setApiKey.mock.invocationCallOrder[0]);
+  });
+
+  it("does not save a key if the endpoint URL is rejected", async () => {
+    openAiVoiceMocks.setEndpoint.mockRejectedValueOnce(
+      new Error("Invalid URL"),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<RealtimeVoiceSettings />);
+    await user.type(screen.getByLabelText("Realtime endpoint URL"), "invalid");
+    await user.type(screen.getByLabelText("OpenAI API key"), "new-key");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Invalid URL");
+    expect(openAiVoiceMocks.setApiKey).not.toHaveBeenCalled();
+  });
+
+  it("shows masked placeholder text for a saved key without filling the input", async () => {
+    renderWithProviders(<RealtimeVoiceSettings />);
+    expect(
+      await screen.findByText("Key saved for this URL in macOS Keychain."),
+    ).toBeInTheDocument();
+    const input = screen.getByLabelText("OpenAI API key");
+    expect(input).toHaveValue("");
+    expect(input).toHaveAttribute("placeholder", "••••••••••••••••••••");
+  });
+
+  it("saves a URL without a key but shows that it cannot be used yet", async () => {
+    openAiVoiceMocks.getStatus.mockResolvedValue({
+      realtimeConfigured: false,
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<RealtimeVoiceSettings />);
+    await user.type(
+      screen.getByLabelText("Realtime endpoint URL"),
+      "ws://127.0.0.1:18870/v1/realtime",
+    );
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(openAiVoiceMocks.setApiKey).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("OpenAI API key")).toHaveAttribute(
+      "placeholder",
+      "sk-…",
+    );
+    expect(
+      await screen.findByText(
+        "No key set. Enter a key for this URL before using it. Default OpenAI endpoints share one key.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("reveals the supported advanced session controls", async () => {

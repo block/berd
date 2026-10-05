@@ -62,7 +62,7 @@ import { SiriVoiceSettings } from "./SiriVoiceSettings";
 import { PlaybackSpeedRow } from "./PlaybackSpeedRow";
 import { SimpleVoicePickerDialog } from "./SimpleVoicePickerDialog";
 import { useOpenAiVoiceSetup } from "../hooks/useOpenAiVoiceSetup";
-import { OpenAiApiKeyField } from "./OpenAiApiKeyField";
+import { OpenAiEndpointField } from "./OpenAiEndpointField";
 import { RealtimeVoiceSettings } from "./RealtimeVoiceSettings";
 import {
   getDefaultRealtimeVoicePreference,
@@ -158,6 +158,7 @@ export function VoiceSettings() {
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
+  const [endpointResetRevision, setEndpointResetRevision] = useState(0);
   const input = useVoiceInputPreference(
     isMacSpeechAvailable(macSpeechSetup.status, macSpeechSetup.loading),
   );
@@ -238,6 +239,7 @@ export function VoiceSettings() {
     setResetError(null);
     try {
       await resetAllVoiceBackendSettings();
+      setEndpointResetRevision((revision) => revision + 1);
       await setup.refreshSettings();
       await siriSetup.refreshSettings();
       setRealtimeVoicePreference(getDefaultRealtimeVoicePreference());
@@ -392,11 +394,14 @@ export function VoiceSettings() {
               details={
                 input.backend === "openai" ? (
                   <div className="space-y-2">
-                    <OpenAiApiKeyField
-                      label={t("voice.openAiSttApiKey")}
+                    <OpenAiEndpointField
+                      key={`stt-${endpointResetRevision}`}
+                      kind="stt"
+                      label={t("voice.openAiSttEndpoint")}
+                      keyLabel={t("voice.openAiSttApiKey")}
                       configured={openAiStatus?.sttConfigured ?? false}
-                      onSave={setOpenAiSttApiKey}
-                      onClear={clearOpenAiSttApiKey}
+                      onSaveKey={setOpenAiSttApiKey}
+                      onClearKey={clearOpenAiSttApiKey}
                     />
                     <p className="text-xs text-muted-foreground">
                       {openAiError ??
@@ -483,11 +488,14 @@ export function VoiceSettings() {
               details={
                 output.backend === "openai" ? (
                   <div className="space-y-2">
-                    <OpenAiApiKeyField
-                      label={t("voice.openAiTtsApiKey")}
+                    <OpenAiEndpointField
+                      key={`tts-${endpointResetRevision}`}
+                      kind="tts"
+                      label={t("voice.openAiTtsEndpoint")}
+                      keyLabel={t("voice.openAiTtsApiKey")}
                       configured={openAiStatus?.ttsConfigured ?? false}
-                      onSave={setOpenAiTtsApiKey}
-                      onClear={clearOpenAiTtsApiKey}
+                      onSaveKey={setOpenAiTtsApiKey}
+                      onClearKey={clearOpenAiTtsApiKey}
                     />
                     <p className="text-xs text-muted-foreground">
                       {openAiError ??
@@ -606,7 +614,7 @@ export function VoiceSettings() {
           </section>
         </>
       ) : (
-        <RealtimeVoiceSettings />
+        <RealtimeVoiceSettings key={`realtime-${endpointResetRevision}`} />
       )}
       <section className="space-y-2 overflow-hidden">
         <SettingsRow
