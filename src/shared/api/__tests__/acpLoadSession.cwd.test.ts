@@ -11,6 +11,10 @@ vi.mock("../acpConnection", () => ({
   getClient: mocks.getBackendClient,
   getBackendClient: mocks.getBackendClient,
   invalidateBackendConnection: mocks.invalidateBackendConnection,
+  captureBackendConnectionGeneration: (backendId: string) => ({
+    isCurrent: () => true,
+    invalidate: () => mocks.invalidateBackendConnection(backendId),
+  }),
   interceptSessionNotifications: vi.fn(),
 }));
 

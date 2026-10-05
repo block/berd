@@ -18,6 +18,10 @@ const noRequestModelContext = (providerId: string) => ({
 
 vi.mock("../acpConnection", () => ({
   getBackendClient: vi.fn(),
+  captureBackendConnectionGeneration: (backendId: string) => ({
+    isCurrent: () => true,
+    invalidate: () => mockInvalidateClientConnection(backendId),
+  }),
   invalidateBackendConnection: (...args: unknown[]) =>
     mockInvalidateClientConnection(...args),
 }));

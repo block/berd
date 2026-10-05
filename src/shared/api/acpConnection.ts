@@ -119,10 +119,17 @@ function createClientCallbacks(backendId: AcpBackendId): () => Client {
   });
 }
 
+export interface AcpConnectionGeneration {
+  isCurrent(): boolean;
+  /** Detach only this generation; late cleanup must not touch a replacement. */
+  invalidate(): Promise<void>;
+}
+
 export interface AcpConnection {
   getClient(): Promise<GooseClient>;
   getClientSync(): GooseClient | null;
   isReady(): boolean;
+  captureGeneration(): AcpConnectionGeneration;
   /**
    * Abort the current transport after an ACP request exceeds its liveness
    * bound. A timed-out request leaves the connection state unknowable;
@@ -208,6 +215,7 @@ export function createAcpConnection(
       if (activeStream !== stream) {
         return;
       }
+      invalidationGeneration += 1;
       resolvedClient = null;
       clientPromise = null;
       activeStream = null;
@@ -231,7 +239,13 @@ export function createAcpConnection(
       });
   }
 
-  async function invalidate(): Promise<void> {
+  async function invalidate(expectedGeneration?: number): Promise<void> {
+    if (
+      expectedGeneration !== undefined &&
+      expectedGeneration !== invalidationGeneration
+    ) {
+      return;
+    }
     invalidationGeneration += 1;
     const stream = activeStream;
     const cleanupEndpoint = activeEndpointCleanup;
@@ -315,11 +329,13 @@ export function createAcpConnection(
       const expectedGeneration = invalidationGeneration;
       const initialization = initializeConnection(expectedGeneration)
         .then((client) => {
+          assertInitializationCurrent(expectedGeneration);
           resolvedClient = client;
           return client;
         })
         .catch((error) => {
           if (clientPromise === initialization) {
+            invalidationGeneration += 1;
             clientPromise = null;
           }
           throw error;
@@ -338,6 +354,13 @@ export function createAcpConnection(
     getClient,
     getClientSync: () => resolvedClient,
     isReady: () => resolvedClient !== null,
+    captureGeneration: () => {
+      const generation = invalidationGeneration;
+      return {
+        isCurrent: () => generation === invalidationGeneration,
+        invalidate: () => invalidate(generation),
+      };
+    },
     invalidate,
     onClosed: (cb: () => void) => {
       closedListeners.add(cb);
@@ -428,6 +451,13 @@ export function getBackendClient(
   backendId: AcpBackendId,
 ): Promise<GooseClient> {
   return getBackendConnection(backendId).getClient();
+}
+
+/** Capture before starting a request, including while its client initializes. */
+export function captureBackendConnectionGeneration(
+  backendId: AcpBackendId,
+): AcpConnectionGeneration {
+  return getBackendConnection(backendId).captureGeneration();
 }
 
 /**

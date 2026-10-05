@@ -15,6 +15,10 @@ vi.mock("@/shared/api/acpApi", () => ({
 vi.mock("@/shared/api/acpConnection", () => ({
   getClient: () => mockGetClient(),
   getBackendClient: () => mockGetClient(),
+  captureBackendConnectionGeneration: () => ({
+    isCurrent: () => true,
+    invalidate: async () => {},
+  }),
 }));
 
 const managedRuntimeConfig: RuntimeConfig = {

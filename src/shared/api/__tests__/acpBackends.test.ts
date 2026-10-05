@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Client, SessionNotification } from "@agentclientprotocol/sdk";
 import {
   LOCAL_BACKEND_ID,
@@ -21,6 +21,9 @@ const mocks = vi.hoisted(() => ({
   connectRemoteHost: vi.fn(),
   disconnectRemoteHost: vi.fn(),
   createWebSocketStream: vi.fn(),
+  initialize: vi.fn(),
+  sessionInfo: vi.fn(),
+  loadSession: vi.fn(),
   clientCallbackFactories: [] as Array<() => Client>,
 }));
 
@@ -46,7 +49,9 @@ vi.mock("@agentclientprotocol/sdk", () => ({
 vi.mock("@aaif/goose-sdk", () => ({
   DEFAULT_GOOSE_MCP_HOST_CAPABILITIES: {},
   GooseClient: class {
-    initialize = vi.fn(async () => {});
+    initialize = vi.fn((...args: unknown[]) => mocks.initialize(...args));
+    goose = { GooseUnstableSessionInfo: mocks.sessionInfo };
+    loadSession = mocks.loadSession;
     closed: Promise<void>;
     resolveClosed!: () => void;
     constructor(callbacks: () => Client, _stream: unknown) {
@@ -82,6 +87,9 @@ beforeEach(() => {
     }),
   );
   mocks.clientCallbackFactories.length = 0;
+  mocks.initialize.mockReset().mockResolvedValue(undefined);
+  mocks.sessionInfo.mockReset();
+  mocks.loadSession.mockReset().mockResolvedValue({ configOptions: [] });
   mocks.invoke.mockResolvedValue("ws://local");
   mocks.connectRemoteHost.mockResolvedValue({
     wsUrl: "ws://remote",
@@ -94,6 +102,10 @@ beforeEach(() => {
   mocks.createWebSocketStream.mockImplementation(() => ({
     writable: { abort: vi.fn().mockResolvedValue(undefined) },
   }));
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("acpBackendId", () => {
@@ -406,6 +418,74 @@ describe("backend connection registry", () => {
       expect(mocks.invoke).toHaveBeenCalledTimes(2);
       expect(mocks.disconnectRemoteHost).not.toHaveBeenCalled();
     }
+  });
+
+  it.each([
+    "local",
+    "ssh:dev-box",
+  ] as const)("does not let a second old-session timeout invalidate the %s replacement", async (backendId) => {
+    vi.useFakeTimers();
+    const conn = await importConnection();
+    const { loadSession } = await import("../acpSessionRegistry");
+    const firstId = compositeSessionId(backendId, "session-1");
+    const secondId = compositeSessionId(backendId, "session-2");
+    mocks.sessionInfo.mockReturnValue(new Promise(() => {}));
+
+    const first = loadSession(firstId);
+    const firstRejection = expect(first).rejects.toThrow(
+      "ACP operation timed out",
+    );
+    await vi.advanceTimersByTimeAsync(10_000);
+    const second = loadSession(secondId);
+    const secondRejection = expect(second).rejects.toThrow(
+      "ACP operation timed out",
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.sessionInfo).toHaveBeenCalledTimes(2);
+    expect(mocks.createWebSocketStream).toHaveBeenCalledOnce();
+    const oldStream = mocks.createWebSocketStream.mock.results[0].value;
+
+    await vi.advanceTimersByTimeAsync(50_000);
+    await firstRejection;
+    expect(oldStream.writable.abort).toHaveBeenCalledOnce();
+    await loadSession(firstId, "/new/project");
+    const connection = conn.getBackendConnection(backendId);
+    const replacement = connection.getClientSync();
+    const newStream = mocks.createWebSocketStream.mock.results[1].value;
+    expect(replacement).not.toBeNull();
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    await secondRejection;
+    expect(newStream.writable.abort).not.toHaveBeenCalled();
+    expect(connection.getClientSync()).toBe(replacement);
+    expect(await connection.getClient()).toBe(replacement);
+    expect(mocks.createWebSocketStream).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    "close",
+    "initialize failure",
+  ])("retires the captured generation after %s without invalidating its replacement", async (failure) => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const conn = await importConnection();
+    const connection = conn.getBackendConnection("local");
+    const generation = connection.captureGeneration();
+    if (failure === "close") {
+      const first = (await connection.getClient()) as unknown as FakeClient;
+      first.resolveClosed();
+      await flushClosedMonitor();
+    } else {
+      mocks.initialize.mockRejectedValueOnce(new Error("failed initialize"));
+      await expect(connection.getClient()).rejects.toThrow("failed initialize");
+    }
+    expect(generation.isCurrent()).toBe(false);
+    const replacement = await connection.getClient();
+    const stream = mocks.createWebSocketStream.mock.results.at(-1)?.value;
+
+    await generation.invalidate();
+
+    expect(connection.getClientSync()).toBe(replacement);
+    expect(stream.writable.abort).not.toHaveBeenCalled();
   });
 
   it("delegates invalidateClientConnection to the local backend only", async () => {

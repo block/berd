@@ -1,5 +1,5 @@
 import * as acpApi from "./acpApi";
-import { invalidateBackendConnection } from "./acpConnection";
+import { captureBackendConnectionGeneration } from "./acpConnection";
 import { getSessionBackend } from "./acpSessionBackends";
 import {
   readSessionExecutionConfigSnapshot,
@@ -64,13 +64,16 @@ function replaceExecutionSelection(
 
 async function runBoundedSessionMutation<T>(
   sessionId: string,
-  mutation: Promise<T>,
+  mutation: () => Promise<T>,
 ): Promise<T> {
+  const generation = captureBackendConnectionGeneration(
+    getSessionBackend(sessionId),
+  );
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   let didTimeOut = false;
   try {
     return await Promise.race([
-      mutation,
+      mutation(),
       new Promise<never>((_, reject) => {
         timeoutId = setTimeout(() => {
           didTimeOut = true;
@@ -87,14 +90,12 @@ async function runBoundedSessionMutation<T>(
       prepared.delete(sessionId);
       // Invalidation detaches the client synchronously. Its generation-scoped
       // transport cleanup is best-effort and must not hold the session queue.
-      void invalidateBackendConnection(getSessionBackend(sessionId)).catch(
-        (invalidationError) => {
-          console.error(
-            "Failed to invalidate timed-out ACP connection:",
-            invalidationError,
-          );
-        },
-      );
+      void generation.invalidate().catch((invalidationError) => {
+        console.error(
+          "Failed to invalidate timed-out ACP connection:",
+          invalidationError,
+        );
+      });
     }
     throw error;
   } finally {
@@ -119,7 +120,7 @@ function serializeSessionMutation<T>(
   queue.latestSequence = sequence;
   const execute = () => mutation(() => queue?.latestSequence === sequence);
   const result = queue.tail.then(() =>
-    bounded ? runBoundedSessionMutation(sessionId, execute()) : execute(),
+    bounded ? runBoundedSessionMutation(sessionId, execute) : execute(),
   );
   const tail = result.then(
     () => undefined,
@@ -412,8 +413,7 @@ export async function loadSession(
       if (!effectiveWorkingDir) {
         // Bound only metadata recovery, not the potentially long replay.
         // Await outside the race so a late response cannot load stale cwd.
-        const info = await runBoundedSessionMutation(
-          sessionId,
+        const info = await runBoundedSessionMutation(sessionId, () =>
           acpApi.getSessionInfo(sessionId),
         );
         effectiveWorkingDir = nonBlankWorkingDir(info.workingDir);
