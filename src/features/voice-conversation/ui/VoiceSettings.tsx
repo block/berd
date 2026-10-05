@@ -614,7 +614,7 @@ export function VoiceSettings() {
           </section>
         </>
       ) : (
-        <RealtimeVoiceSettings />
+        <RealtimeVoiceSettings key={`realtime-${endpointResetRevision}`} />
       )}
       <section className="space-y-2 overflow-hidden">
         <SettingsRow

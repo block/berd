@@ -112,6 +112,7 @@ const openAiApiMocks = vi.hoisted(() => ({
       tts: null as string | null,
     }),
   ),
+  setRealtimeApiKey: vi.fn(() => Promise.resolve()),
   setEndpoint: vi.fn(() => Promise.resolve()),
   setSttApiKey: vi.fn(() => Promise.resolve()),
   clearSttApiKey: vi.fn(() => Promise.resolve()),
@@ -124,7 +125,7 @@ const openAiApiMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../api/openAiVoice", () => ({
-  setOpenAiRealtimeApiKey: vi.fn(() => Promise.resolve()),
+  setOpenAiRealtimeApiKey: openAiApiMocks.setRealtimeApiKey,
   clearOpenAiRealtimeApiKey: vi.fn(() => Promise.resolve()),
   getOpenAiVoiceEndpoints: openAiApiMocks.getEndpoints,
   getOpenAiVoiceStatus: openAiApiMocks.getStatus,
@@ -439,6 +440,40 @@ describe("VoiceSettings", () => {
     );
     expect(preferenceMocks.setMode).toHaveBeenCalledWith("chained");
     expect(preferenceMocks.setRealtimePreference).toHaveBeenCalledOnce();
+  });
+
+  it("refreshes the mounted Realtime endpoint after resetting all voice settings", async () => {
+    modeState.mode = "openai-realtime";
+    openAiApiMocks.getEndpoints.mockResolvedValue({
+      realtime: "wss://previous.test/realtime",
+      stt: null,
+      tts: null,
+    });
+    openAiApiMocks.resetAll.mockImplementationOnce(async () => {
+      openAiApiMocks.getEndpoints.mockResolvedValue({
+        realtime: null,
+        stt: null,
+        tts: null,
+      });
+    });
+    renderWithProviders(<VoiceSettings />);
+    const user = userEvent.setup();
+    expect(
+      await screen.findByDisplayValue("wss://previous.test/realtime"),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Reset to defaults" }));
+    await user.click(
+      within(
+        screen.getByRole("dialog", { name: "Reset all voice settings?" }),
+      ).getByRole("button", { name: "Reset to defaults" }),
+    );
+    expect(screen.getByLabelText("Realtime endpoint URL")).toHaveValue("");
+    await user.type(screen.getByLabelText("OpenAI API key"), "disposable-key");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(openAiApiMocks.setRealtimeApiKey).toHaveBeenCalledWith(
+      "disposable-key",
+      "",
+    );
   });
 
   it("waits for Apple capability detection before offering reset", () => {
