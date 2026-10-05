@@ -1,0 +1,10 @@
+{
+  "identifier": "xyz.block.berd.e2e.bundled-updater",
+  "bundle": { "createUpdaterArtifacts": false },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEEwQzlDNjI5RDQ0MDFBN0MKUldSOEdrRFVLY2JKb09tZ3dONHBUN1RTc2VWdjFqNURXdFZ4TzFrek4wMTFZd2EwK3pkVytRdHIK",
+      "endpoints": ["https://localhost:14443/latest.json"]
+    }
+  }
+}
