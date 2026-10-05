@@ -812,16 +812,7 @@ fn parse_saved_start_args_at(args: &[String], path: PathBuf) -> Result<StartOpti
             }
         }
     }
-    saved.arguments = options.session_arguments[1..]
-        .chunks_exact(2)
-        .filter(|pair| {
-            !matches!(
-                pair[0].as_str(),
-                "--realtime-url" | "--stt-url" | "--tts-url"
-            )
-        })
-        .flat_map(|pair| pair.iter().cloned())
-        .collect();
+    saved.arguments = saved_settings::persistable_arguments(&options.session_arguments[1..]);
     options.saved = Some((path, saved));
     Ok(options)
 }

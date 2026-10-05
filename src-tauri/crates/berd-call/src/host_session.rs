@@ -27,6 +27,7 @@ use berd_call::PocketAudioPlayer;
 
 use crate::codex::{self, CodexRecord, CodexRelay, CodexTarget};
 use crate::host_control::{ControlServer, HostControl};
+use crate::saved_settings;
 use crate::session_audio::{
     AUDIO_BEGIN_KIND, AUDIO_CANCEL_KIND, AUDIO_CHUNK_KIND, AUDIO_END_KIND,
     AUDIO_FRAME_HEADER_BYTES, AUDIO_FRAME_MAGIC, AUDIO_FRAME_MARKER,
@@ -340,7 +341,7 @@ impl SessionActor {
     ) -> SessionStart {
         SessionStart {
             saved: self.saved.take().map(|(path, mut saved)| {
-                saved.arguments = restart.arguments[1..].to_vec();
+                saved.arguments = saved_settings::persistable_arguments(&restart.arguments[1..]);
                 saved.tts = None;
                 (path, saved)
             }),
@@ -2685,6 +2686,69 @@ mod tests {
             start.muted.load(Ordering::SeqCst),
             "restart discarded a later native mute gesture"
         );
+    }
+
+    #[test]
+    fn restart_keeps_endpoint_overrides_out_of_saved_preferences() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let (_events_tx, events) = mpsc::sync_channel(1);
+        let (_commands_tx, commands) = mpsc::sync_channel(1);
+        let (audio, _audio_rx) = mpsc::sync_channel(1);
+        let mut actor = test_actor(writer, events, commands, audio);
+        actor.saved = Some((
+            path.clone(),
+            crate::saved_settings::SavedSettings::default(),
+        ));
+        let arguments = [
+            "session",
+            "--mode",
+            "chained",
+            "--realtime-url",
+            "ws://127.0.0.1:18870/realtime",
+            "--stt-backend",
+            "openai",
+            "--stt-url",
+            "ws://127.0.0.1:18870/stt",
+            "--tts-backend",
+            "openai",
+            "--tts-url",
+            "http://127.0.0.1:18870/tts",
+        ]
+        .map(str::to_string)
+        .to_vec();
+        let (response, _reply) = mpsc::sync_channel(1);
+        let start = actor.restart_start(
+            PendingRestart {
+                arguments: arguments.clone(),
+                expert_spokesperson: false,
+                response,
+            },
+            InputDuringTtsPolicy::AllowBargeIn,
+        );
+        assert_eq!(start.arguments, arguments);
+        let (_, saved) = start.saved.unwrap();
+        crate::saved_settings::save(&path, &saved).unwrap();
+        assert_eq!(
+            crate::saved_settings::load(&path).unwrap().arguments,
+            [
+                "--mode",
+                "chained",
+                "--stt-backend",
+                "openai",
+                "--tts-backend",
+                "openai",
+            ]
+            .map(str::to_string)
+        );
+        drop(actor);
+        assert!(child.wait().unwrap().success());
     }
 
     #[test]
