@@ -248,6 +248,9 @@ importers:
       input-otp:
         specifier: ^1.5.0
         version: 1.5.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      katex:
+        specifier: ^0.16.47
+        version: 0.16.47
       lucide-react:
         specifier: ^1.34.0
         version: 1.34.0(react@19.2.8)
@@ -293,6 +296,9 @@ importers:
       shiki:
         specifier: ^3.23.0
         version: 3.23.0
+      remark-parse:
+        specifier: ^11.0.0
+        version: 11.0.0
       sonner:
         specifier: ^2.0.8
         version: 2.0.8(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -311,6 +317,9 @@ importers:
       tw-animate-css:
         specifier: ^1.4.0
         version: 1.4.0
+      unified:
+        specifier: ^11.0.5
+        version: 11.0.5
       use-stick-to-bottom:
         specifier: ^1.1.6
         version: 1.1.6(react@19.2.8)

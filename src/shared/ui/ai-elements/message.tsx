@@ -13,9 +13,11 @@ import { LinkSafetyModal } from "@/shared/ui/ai-elements/link-safety-modal";
 import { cn } from "@/shared/lib/cn";
 import { useVirtualLayoutPendingForStreamdown } from "@/features/chat/transcript/measurement";
 import { useStreamdownTableScrollbarSizing } from "@/shared/ui/ai-elements/streamdown-table-scrollbar";
+import { prepareMessageMath } from "@/shared/ui/ai-elements/message-math";
 import { cjk } from "@streamdown/cjk";
 import { code } from "@streamdown/code";
 import { math } from "@streamdown/math";
+import "katex/dist/katex.min.css";
 import { mermaid } from "@streamdown/mermaid";
 import type { UIMessage } from "ai";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
@@ -974,6 +976,10 @@ export const MessageResponse = memo(
   }: MessageResponseProps) => {
     const { t } = useTranslation("common");
     const [modalUrl, setModalUrl] = useState<string | null>(null);
+    const normalized = useMemo(
+      () => prepareMessageMath(children ?? ""),
+      [children],
+    );
     const streamdownComponents = useMemo(
       () => buildStreamdownComponents(imageRenderer, strikethroughLabel),
       [imageRenderer, strikethroughLabel],
@@ -988,12 +994,12 @@ export const MessageResponse = memo(
               ...berdRehypePlugins,
               [
                 strikethroughFromPlugin,
-                strikethroughFrom,
+                normalized.remapCutoff(strikethroughFrom),
                 strikethroughLabel,
-                children,
+                normalized.content,
               ],
             ],
-      [children, strikethroughFrom, strikethroughLabel],
+      [normalized, strikethroughFrom, strikethroughLabel],
     );
     const streamdownRootRef = useRef<HTMLDivElement>(null);
     const streamdownLayoutPending = useVirtualLayoutPendingForStreamdown({
@@ -1075,7 +1081,7 @@ export const MessageResponse = memo(
             }
             {...props}
           >
-            {children}
+            {normalized.content}
           </Streamdown>
         </div>
         <LinkSafetyModal
