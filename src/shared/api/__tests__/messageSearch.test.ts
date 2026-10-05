@@ -172,6 +172,29 @@ describe("visible exported message matching", () => {
 });
 
 describe("message search transport", () => {
+  it("matches the native Unicode regression corpus through export fallback", async () => {
+    nativeUnavailable();
+    mocks.list.mockResolvedValue({ sessions: [info()], nextCursor: null });
+    mocks.export.mockResolvedValue(
+      exportMessages(message("message-1", "XXİstanbul travel")),
+    );
+    for (const query of [
+      "İstanbul",
+      "i\u0307stanbul",
+      "İs",
+      "xxi",
+      "TRAVEL İstanbul",
+    ]) {
+      const page = await searchMessagesPage({ query });
+      expect(page.complete).toBe(true);
+      expect(page.matches).toHaveLength(1);
+      expect(page.matches[0]).toMatchObject({
+        messageId: "message-1",
+        snippet: "XXİstanbul travel",
+      });
+    }
+  });
+
   it("uses only Berd's native command for local indexed search, passing filters and page cursor", async () => {
     mocks.invoke.mockResolvedValue({
       matches: [match],

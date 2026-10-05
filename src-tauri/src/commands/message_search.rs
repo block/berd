@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode};
-use sqlx::{Connection, Row, SqliteConnection};
+use sqlx::{Connection, QueryBuilder, Row, Sqlite, SqliteConnection};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 use tauri::Manager;
@@ -186,7 +186,7 @@ impl SearchIndex {
             .fetch_one(&mut derived)
             .await
             .map_err(error_string)?;
-        if schema_version > 1 {
+        if schema_version > 2 {
             return Err("Search index was created by a newer app version".into());
         }
         let mut tx = derived.begin().await.map_err(error_string)?;
@@ -195,14 +195,34 @@ impl SearchIndex {
             "CREATE TABLE IF NOT EXISTS search_messages (id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, message_id TEXT NOT NULL, message_index INTEGER NOT NULL, role TEXT NOT NULL, created_at INTEGER NOT NULL, searchable_text TEXT NOT NULL, generation INTEGER NOT NULL)",
             "CREATE INDEX IF NOT EXISTS search_messages_session ON search_messages(session_id, id DESC)",
             "CREATE INDEX IF NOT EXISTS search_sessions_recency ON search_sessions(sort_at DESC, id DESC)",
-            "CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(searchable_text, tokenize='trigram case_sensitive 0', content='search_messages', content_rowid='id')",
-            "CREATE TRIGGER IF NOT EXISTS search_messages_insert AFTER INSERT ON search_messages BEGIN INSERT INTO search_fts(rowid, searchable_text) VALUES(NEW.id, NEW.searchable_text); END",
-            "CREATE TRIGGER IF NOT EXISTS search_messages_delete AFTER DELETE ON search_messages BEGIN INSERT INTO search_fts(search_fts, rowid, searchable_text) VALUES('delete', OLD.id, OLD.searchable_text); END",
-            "CREATE TRIGGER IF NOT EXISTS search_messages_update AFTER UPDATE OF searchable_text ON search_messages WHEN OLD.searchable_text != NEW.searchable_text BEGIN INSERT INTO search_fts(search_fts, rowid, searchable_text) VALUES('delete', OLD.id, OLD.searchable_text); INSERT INTO search_fts(rowid, searchable_text) VALUES(NEW.id, NEW.searchable_text); END",
         ] {
             sqlx::query(statement).execute(&mut *tx).await.map_err(error_string)?;
         }
-        sqlx::query("PRAGMA user_version = 1")
+        if schema_version < 2 {
+            // Queries and indexed text must use the same Unicode lowercase mapping.
+            // Keep the original text separately for excerpts; upgrade only Berd's cache.
+            for statement in [
+                "DROP TRIGGER IF EXISTS search_messages_insert",
+                "DROP TRIGGER IF EXISTS search_messages_delete",
+                "DROP TRIGGER IF EXISTS search_messages_update",
+                "DROP TABLE IF EXISTS search_fts",
+                "ALTER TABLE search_messages ADD COLUMN folded_text TEXT NOT NULL DEFAULT ''",
+            ] {
+                sqlx::query(statement)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(error_string)?;
+            }
+        }
+        for statement in [
+            "CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(folded_text, tokenize='trigram case_sensitive 1', content='search_messages', content_rowid='id')",
+            "CREATE TRIGGER IF NOT EXISTS search_messages_insert AFTER INSERT ON search_messages BEGIN INSERT INTO search_fts(rowid, folded_text) VALUES(NEW.id, NEW.folded_text); END",
+            "CREATE TRIGGER IF NOT EXISTS search_messages_delete AFTER DELETE ON search_messages BEGIN INSERT INTO search_fts(search_fts, rowid, folded_text) VALUES('delete', OLD.id, OLD.folded_text); END",
+            "CREATE TRIGGER IF NOT EXISTS search_messages_update AFTER UPDATE OF folded_text ON search_messages WHEN OLD.folded_text != NEW.folded_text BEGIN INSERT INTO search_fts(search_fts, rowid, folded_text) VALUES('delete', OLD.id, OLD.folded_text); INSERT INTO search_fts(rowid, folded_text) VALUES(NEW.id, NEW.folded_text); END",
+        ] {
+            sqlx::query(statement).execute(&mut *tx).await.map_err(error_string)?;
+        }
+        sqlx::query("PRAGMA user_version = 2")
             .execute(&mut *tx)
             .await
             .map_err(error_string)?;
@@ -257,7 +277,7 @@ impl SearchIndex {
             .await
             .map_err(error_string)?;
         sqlx::query(r#"
-            INSERT INTO message_search_snapshot
+            INSERT INTO message_search_snapshot (id, session_id, message_id, message_index, role, created_at, searchable_text, generation)
             WITH visible AS (
                 SELECT m.*, ROW_NUMBER() OVER (PARTITION BY m.session_id ORDER BY m.id) - 1 AS message_index
                 FROM canonical.messages m JOIN canonical.sessions s ON s.id=m.session_id
@@ -283,7 +303,44 @@ impl SearchIndex {
         .fetch_one(&mut *tx)
         .await
         .map_err(error_string)?;
-        sqlx::query("INSERT INTO search_messages SELECT * FROM message_search_snapshot WHERE message_id != '' ON CONFLICT(id) DO UPDATE SET session_id=excluded.session_id, message_id=excluded.message_id, message_index=excluded.message_index, role=excluded.role, created_at=excluded.created_at, searchable_text=excluded.searchable_text, generation=excluded.generation")
+        // Reuse unchanged folds. SQLite lower() handles ASCII, while Rust supplies the
+        // exact same Unicode mapping used by literal matching and query terms.
+        sqlx::query("CREATE UNIQUE INDEX IF NOT EXISTS message_search_snapshot_id ON message_search_snapshot(id)")
+            .execute(&mut *tx).await.map_err(error_string)?;
+        sqlx::query("UPDATE message_search_snapshot SET folded_text = CASE WHEN length(CAST(searchable_text AS BLOB))=length(searchable_text) THEN lower(searchable_text) ELSE (SELECT folded_text FROM search_messages old WHERE old.id=message_search_snapshot.id AND old.searchable_text=message_search_snapshot.searchable_text AND old.folded_text!='') END")
+            .execute(&mut *tx).await.map_err(error_string)?;
+        let unfolded = sqlx::query(
+            "SELECT id, searchable_text FROM message_search_snapshot WHERE folded_text IS NULL",
+        )
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(error_string)?;
+        for chunk in unfolded.chunks(256) {
+            let mut update = QueryBuilder::<Sqlite>::new(
+                "UPDATE message_search_snapshot SET folded_text = CASE id",
+            );
+            for row in chunk {
+                let id: i64 = row.try_get("id").map_err(error_string)?;
+                let text: String = row.try_get("searchable_text").map_err(error_string)?;
+                update
+                    .push(" WHEN ")
+                    .push_bind(id)
+                    .push(" THEN ")
+                    .push_bind(text.to_lowercase());
+            }
+            update.push(" END WHERE id IN (");
+            let mut ids = update.separated(",");
+            for row in chunk {
+                ids.push_bind(row.try_get::<i64, _>("id").map_err(error_string)?);
+            }
+            update
+                .push(")")
+                .build()
+                .execute(&mut *tx)
+                .await
+                .map_err(error_string)?;
+        }
+        sqlx::query("INSERT INTO search_messages (id, session_id, message_id, message_index, role, created_at, searchable_text, generation, folded_text) SELECT * FROM message_search_snapshot WHERE message_id != '' ON CONFLICT(id) DO UPDATE SET session_id=excluded.session_id, message_id=excluded.message_id, message_index=excluded.message_index, role=excluded.role, created_at=excluded.created_at, searchable_text=excluded.searchable_text, generation=excluded.generation, folded_text=excluded.folded_text")
             .execute(&mut *tx).await.map_err(error_string)?;
         sqlx::query("DELETE FROM search_messages WHERE generation != ?")
             .bind(generation as i64)
@@ -636,6 +693,126 @@ mod tests {
             query: query.into(),
             ..Default::default()
         }
+    }
+
+    #[tokio::test]
+    async fn unicode_lowercase_matches_survive_index_candidate_selection() {
+        let (_temp, mut source, mut index) = fixture().await;
+        message(&mut source, 1, "active", "XXİstanbul travel").await;
+        for query in [
+            "İstanbul",
+            "i\u{307}stanbul",
+            "İs",
+            "xxi",
+            "TRAVEL İstanbul",
+        ] {
+            let page = index.search(request(query)).await.unwrap();
+            assert!(page.complete, "{query}");
+            assert_eq!(page.matches.len(), 1, "{query}");
+            assert_eq!(page.matches[0].message_id, "message-1");
+            assert_eq!(page.matches[0].snippet, "XXİstanbul travel");
+        }
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT count(*) FROM search_fts WHERE search_fts MATCH '\"i̇stanbul\"'"
+            )
+            .fetch_one(&mut index.derived)
+            .await
+            .unwrap(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn upgrades_original_text_index_and_preserves_unicode_lifecycle() {
+        let (temp, mut source, mut index) = fixture().await;
+        message(&mut source, 1, "active", "XXİstanbul travel").await;
+        message(&mut source, 2, "active", "İstanbul second visit").await;
+        index.search(request("travel")).await.unwrap();
+        drop(index);
+        // Reconstruct the populated v1 cache from the original PR implementation.
+        let destination = temp.path().join("derived.sqlite");
+        let mut legacy =
+            SqliteConnection::connect_with(&SqliteConnectOptions::new().filename(&destination))
+                .await
+                .unwrap();
+        for statement in [
+            "DROP TRIGGER search_messages_insert",
+            "DROP TRIGGER search_messages_delete",
+            "DROP TRIGGER search_messages_update",
+            "DROP TABLE search_fts",
+            "ALTER TABLE search_messages DROP COLUMN folded_text",
+            "CREATE VIRTUAL TABLE search_fts USING fts5(searchable_text, tokenize='trigram case_sensitive 0', content='search_messages', content_rowid='id')",
+            "CREATE TRIGGER search_messages_insert AFTER INSERT ON search_messages BEGIN INSERT INTO search_fts(rowid, searchable_text) VALUES(NEW.id, NEW.searchable_text); END",
+            "CREATE TRIGGER search_messages_delete AFTER DELETE ON search_messages BEGIN INSERT INTO search_fts(search_fts, rowid, searchable_text) VALUES('delete', OLD.id, OLD.searchable_text); END",
+            "CREATE TRIGGER search_messages_update AFTER UPDATE OF searchable_text ON search_messages WHEN OLD.searchable_text != NEW.searchable_text BEGIN INSERT INTO search_fts(search_fts, rowid, searchable_text) VALUES('delete', OLD.id, OLD.searchable_text); INSERT INTO search_fts(rowid, searchable_text) VALUES(NEW.id, NEW.searchable_text); END",
+            "INSERT INTO search_fts(search_fts) VALUES('rebuild')",
+            "PRAGMA user_version=1",
+        ] {
+            sqlx::query(statement).execute(&mut legacy).await.unwrap();
+        }
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT count(*) FROM search_fts WHERE search_fts MATCH '\"i̇stanbul\"'"
+            )
+            .fetch_one(&mut legacy)
+            .await
+            .unwrap(),
+            0
+        );
+        drop(legacy);
+        let mut index = SearchIndex::open(&temp.path().join("source.sqlite"), &destination)
+            .await
+            .unwrap();
+        let first = index
+            .search(SearchRequest {
+                limit: Some(1),
+                ..request("İstanbul")
+            })
+            .await
+            .unwrap();
+        assert!(first.complete);
+        assert_eq!(first.matches[0].message_id, "message-2");
+        let second = index
+            .search(SearchRequest {
+                limit: Some(1),
+                cursor: first.next_cursor,
+                ..request("İstanbul")
+            })
+            .await
+            .unwrap();
+        assert!(second.complete && second.next_cursor.is_none());
+        assert_eq!(second.matches[0].message_id, "message-1");
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("PRAGMA user_version")
+                .fetch_one(&mut index.derived)
+                .await
+                .unwrap(),
+            2
+        );
+        sqlx::query("UPDATE messages SET content_json='[{\"type\":\"text\",\"text\":\"İzmir\"}]' WHERE id=1").execute(&mut source).await.unwrap();
+        sqlx::query("DELETE FROM messages WHERE id=2")
+            .execute(&mut source)
+            .await
+            .unwrap();
+        assert!(index
+            .search(request("İstanbul"))
+            .await
+            .unwrap()
+            .matches
+            .is_empty());
+        assert_eq!(
+            index.search(request("İzmir")).await.unwrap().matches[0].snippet,
+            "İzmir"
+        );
+        drop(index);
+        let mut reopened = SearchIndex::open(&temp.path().join("source.sqlite"), &destination)
+            .await
+            .unwrap();
+        assert_eq!(
+            reopened.search(request("İzmir")).await.unwrap().matches[0].message_id,
+            "message-1"
+        );
     }
 
     #[tokio::test]
@@ -992,12 +1169,25 @@ mod tests {
 
     #[tokio::test]
     async fn cancelled_reconcile_rolls_back_and_restarts_without_stale_or_duplicate_matches() {
-        let (_temp, mut source, mut index) = fixture().await;
+        let (temp, mut source, mut index) = fixture().await;
         message(&mut source, 1, "active", "old sentinel").await;
         index.search(request("old")).await.unwrap();
         sqlx::query("UPDATE messages SET content_json='[{\"type\":\"text\",\"text\":\"new sentinel\"}]' WHERE id=1").execute(&mut source).await.unwrap();
-        let cancelled = tokio::time::timeout(Duration::ZERO, index.reconcile()).await;
+        // A ready future may finish even with a zero-duration timeout. Hold a
+        // cache write lock so cancellation actually interrupts reconciliation.
+        let mut writer = SqliteConnection::connect_with(
+            &SqliteConnectOptions::new().filename(temp.path().join("derived.sqlite")),
+        )
+        .await
+        .unwrap();
+        let mut lock = writer.begin().await.unwrap();
+        sqlx::query("UPDATE search_sessions SET generation=generation")
+            .execute(&mut *lock)
+            .await
+            .unwrap();
+        let cancelled = tokio::time::timeout(Duration::from_millis(10), index.reconcile()).await;
         assert!(cancelled.is_err());
+        lock.rollback().await.unwrap();
         assert!(index
             .search(request("old"))
             .await
@@ -1141,6 +1331,16 @@ mod performance_tests {
     #[tokio::test]
     #[ignore = "large synthetic corpus performance measurement"]
     async fn benchmark_200k_message_index() {
+        benchmark_corpus(false).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "large synthetic Unicode corpus performance measurement"]
+    async fn benchmark_200k_message_unicode_index() {
+        benchmark_corpus(true).await;
+    }
+
+    async fn benchmark_corpus(unicode: bool) {
         let temp = TempDir::new().unwrap();
         let source_path = temp.path().join("source.sqlite");
         let mut source = SqliteConnection::connect_with(
@@ -1155,6 +1355,10 @@ mod performance_tests {
         sqlx::query("CREATE TABLE messages(id INTEGER PRIMARY KEY, session_id TEXT, message_id TEXT, role TEXT, content_json TEXT, metadata_json TEXT, created_timestamp INTEGER)").execute(&mut source).await.unwrap();
         sqlx::query("WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<2000) INSERT INTO sessions SELECT printf('session-%05d',x),printf('Synthetic session %d',x),'/synthetic','2026-10-01 00:00:00',CASE WHEN x%10=0 THEN '2026-09-01 00:00:00' ELSE NULL END,'user' FROM n").execute(&mut source).await.unwrap();
         sqlx::query("WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<200000) INSERT INTO messages SELECT x,printf('session-%05d',1+(x-1)/100),printf('message-%07d',x),'user',json_array(json_object('type','text','text','Synthetic representative conversation with searchneedle and an ordinary narrative about implementation verification and review. Synthetic representative conversation with searchneedle and an ordinary narrative about implementation verification and review.')),CASE WHEN x%5=0 THEN '{\"userVisible\":false}' ELSE '{}' END,1700000000+x FROM n").execute(&mut source).await.unwrap();
+        if unicode {
+            sqlx::query("UPDATE messages SET content_json=json_set(content_json, '$[0].text', json_extract(content_json, '$[0].text') || ' İstanbul') WHERE id%4=0")
+                .execute(&mut source).await.unwrap();
+        }
         let start = Instant::now();
         let mut index = SearchIndex::open(&source_path, &temp.path().join("derived.sqlite"))
             .await
@@ -1207,7 +1411,7 @@ mod performance_tests {
             .len();
         println!(
             "BENCHMARK {}",
-            serde_json::json!({"messages":200000,"sessions":2000,"visible_messages":159999,"cold_build_and_first_page_ms":cold_ms,"twenty_warm_pages_ms":warm_twenty_ms,"pages":pages,"absent_ms":absent_ms,"metadata_mutation_refresh_ms":refresh_ms,"source_main_bytes":source_size,"index_main_bytes":index_size})
+            serde_json::json!({"unicode_message_fraction":if unicode {0.25} else {0.0},"messages":200000,"sessions":2000,"visible_messages":159999,"cold_build_and_first_page_ms":cold_ms,"twenty_warm_pages_ms":warm_twenty_ms,"pages":pages,"absent_ms":absent_ms,"metadata_mutation_refresh_ms":refresh_ms,"source_main_bytes":source_size,"index_main_bytes":index_size})
         );
         assert!(cold_ms < 20000.0, "cold build exceeded deadline");
         assert!(refresh_ms < 8000.0, "refresh too slow");

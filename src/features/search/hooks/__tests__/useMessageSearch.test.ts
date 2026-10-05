@@ -84,11 +84,13 @@ describe("useMessageSearch", () => {
     await waitFor(() => expect(result.current.hasMore).toBe(true));
     expect(result.current.status).toBe("complete");
     act(() => result.current.loadMore());
-    await waitFor(() => expect(result.current.status).toBe("complete"));
-    expect(result.current.results.map((m) => m.messageId)).toEqual([
-      "m1",
-      "m2",
-    ]);
+    await waitFor(() =>
+      expect(result.current.results.map((m) => m.messageId)).toEqual([
+        "m1",
+        "m2",
+      ]),
+    );
+    expect(result.current.status).toBe("complete");
   });
   it("preserves omitted-content partial coverage across later successful pages", async () => {
     search
