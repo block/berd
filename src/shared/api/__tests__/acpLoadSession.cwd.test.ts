@@ -202,17 +202,39 @@ describe("acpLoadSession working directory at the transport boundary", () => {
   });
 
   it.each([
-    ["session-1", "local"],
-    ["ssh:devbox#session-1", "ssh:devbox"],
-  ])("times out stuck metadata for %s and admits an explicit queued load", async (sessionId, backendId) => {
+    { sessionId: "session-1", backendId: "local", stalledCleanup: false },
+    {
+      sessionId: "ssh:devbox#session-1",
+      backendId: "ssh:devbox",
+      stalledCleanup: false,
+    },
+    { sessionId: "session-1", backendId: "local", stalledCleanup: true },
+    {
+      sessionId: "ssh:devbox#session-1",
+      backendId: "ssh:devbox",
+      stalledCleanup: true,
+    },
+  ])("times out stuck metadata for $sessionId and admits an explicit queued load (stalled cleanup: $stalledCleanup)", async ({
+    sessionId,
+    backendId,
+    stalledCleanup,
+  }) => {
     vi.useFakeTimers();
     const { acpLoadSession } = await import("../acp");
     mocks.sessionInfo.mockReturnValueOnce(new Promise(() => {}));
+    if (stalledCleanup) {
+      mocks.invalidateBackendConnection.mockReturnValueOnce(
+        new Promise(() => {}),
+      );
+    }
 
+    let recoveryRejected = false;
     const recovery = acpLoadSession(sessionId);
-    const recoveryRejection = expect(recovery).rejects.toThrow(
-      "ACP operation timed out",
-    );
+    const recoveryRejection = expect(recovery)
+      .rejects.toThrow("ACP operation timed out")
+      .then(() => {
+        recoveryRejected = true;
+      });
     await vi.advanceTimersByTimeAsync(0);
     expect(mocks.sessionInfo).toHaveBeenCalledOnce();
     const newerLoad = acpLoadSession(sessionId, "/new/project");
@@ -224,6 +246,9 @@ describe("acpLoadSession working directory at the transport boundary", () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(mocks.invalidateBackendConnection).toHaveBeenCalledOnce();
     expect(mocks.invalidateBackendConnection).toHaveBeenCalledWith(backendId);
+    // Check settlement before awaiting, so stalled cleanup fails at the
+    // liveness bound instead of hanging the test itself.
+    expect(recoveryRejected).toBe(true);
     await recoveryRejection;
     await newerLoad;
 

@@ -324,6 +324,90 @@ describe("backend connection registry", () => {
     expect(mocks.connectRemoteHost).toHaveBeenCalledTimes(2);
   });
 
+  it.each([
+    "local",
+    "ssh:dev-box",
+  ] as const)("detaches %s synchronously and preserves its replacement during late cleanup", async (backendId) => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const conn = await importConnection();
+    const connection = conn.getBackendConnection(backendId);
+    let resolveAbort!: () => void;
+    let resolveDisconnect!: () => void;
+    const oldStream = {
+      writable: {
+        abort: vi.fn().mockReturnValue(
+          new Promise<void>((resolve) => {
+            resolveAbort = resolve;
+          }),
+        ),
+      },
+    };
+    mocks.createWebSocketStream.mockReturnValueOnce(oldStream);
+    const first = (await connection.getClient()) as unknown as FakeClient;
+    const onClosed = vi.fn();
+    connection.onClosed(onClosed);
+    if (backendId !== "local") {
+      mocks.disconnectRemoteHost.mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          resolveDisconnect = resolve;
+        }),
+      );
+      mocks.connectRemoteHost.mockResolvedValueOnce({
+        wsUrl: "ws://replacement",
+        generation: 2,
+      });
+    }
+
+    let cleanupSettled = false;
+    const cleanup = conn.invalidateBackendConnection(backendId).then(() => {
+      cleanupSettled = true;
+    });
+    // These assertions deliberately precede any await: timeout callers
+    // depend on detachment happening before invalidation returns.
+    expect(connection.getClientSync()).toBeNull();
+    expect(connection.isReady()).toBe(false);
+    expect(oldStream.writable.abort).toHaveBeenCalledOnce();
+    if (backendId !== "local") {
+      expect(mocks.disconnectRemoteHost).toHaveBeenCalledExactlyOnceWith(
+        "dev-box",
+        1,
+      );
+    }
+
+    const second = await conn.getBackendClient(backendId);
+    const newStream = mocks.createWebSocketStream.mock.results.at(-1)
+      ?.value as { writable: { abort: ReturnType<typeof vi.fn> } };
+    expect(second).not.toBe(first);
+    expect(cleanupSettled).toBe(false);
+    expect(connection.getClientSync()).toBe(second);
+
+    first.resolveClosed();
+    await flushClosedMonitor();
+    expect(onClosed).not.toHaveBeenCalled();
+    expect(connection.getClientSync()).toBe(second);
+
+    resolveAbort();
+    resolveDisconnect?.();
+    await cleanup;
+    expect(await connection.getClient()).toBe(second);
+    expect(connection.isReady()).toBe(true);
+    expect(newStream.writable.abort).not.toHaveBeenCalled();
+    expect(oldStream.writable.abort).toHaveBeenCalledOnce();
+    if (backendId !== "local") {
+      expect(mocks.connectRemoteHost).toHaveBeenCalledTimes(2);
+      expect(mocks.createWebSocketStream).toHaveBeenLastCalledWith(
+        "ws://replacement",
+      );
+      expect(mocks.disconnectRemoteHost).toHaveBeenCalledExactlyOnceWith(
+        "dev-box",
+        1,
+      );
+    } else {
+      expect(mocks.invoke).toHaveBeenCalledTimes(2);
+      expect(mocks.disconnectRemoteHost).not.toHaveBeenCalled();
+    }
+  });
+
   it("delegates invalidateClientConnection to the local backend only", async () => {
     const conn = await importConnection();
     const localClient = await conn.getClient();

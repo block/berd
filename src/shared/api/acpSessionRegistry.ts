@@ -85,7 +85,9 @@ async function runBoundedSessionMutation<T>(
   } catch (error) {
     if (didTimeOut) {
       prepared.delete(sessionId);
-      await invalidateBackendConnection(getSessionBackend(sessionId)).catch(
+      // Invalidation detaches the client synchronously. Its generation-scoped
+      // transport cleanup is best-effort and must not hold the session queue.
+      void invalidateBackendConnection(getSessionBackend(sessionId)).catch(
         (invalidationError) => {
           console.error(
             "Failed to invalidate timed-out ACP connection:",

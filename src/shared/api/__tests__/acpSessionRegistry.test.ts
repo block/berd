@@ -335,12 +335,20 @@ describe("applySessionModel", () => {
     }
   });
 
-  it("times out a stuck mutation, invalidates ACP, and admits queued work", async () => {
+  it.each([
+    false,
+    true,
+  ])("times out a stuck mutation and admits queued work (stalled cleanup: %s)", async (stalledCleanup) => {
     vi.useFakeTimers();
     try {
       const registry = await importPreparedRegistry("openai", "gpt-5.5");
       const stuck = deferred<AcpSessionConfigSnapshots>();
       mockSetSessionConfigOption.mockReturnValueOnce(stuck.promise);
+      if (stalledCleanup) {
+        mockInvalidateClientConnection.mockReturnValueOnce(
+          new Promise(() => {}),
+        );
+      }
       mockLoadSession.mockResolvedValueOnce(
         executionConfigResponse("openai", "gpt-5.5"),
       );
@@ -350,11 +358,18 @@ describe("applySessionModel", () => {
         "thinking_effort",
         "high",
       );
+      let reasoningRejected = false;
+      const rejection = expect(reasoning)
+        .rejects.toThrow("ACP operation timed out")
+        .then(() => {
+          reasoningRejected = true;
+        });
       const load = registry.loadSession("session-1", "/project");
 
       await vi.advanceTimersByTimeAsync(60_000);
 
-      await expect(reasoning).rejects.toThrow("ACP operation timed out");
+      expect(reasoningRejected).toBe(true);
+      await rejection;
       await expect(load).resolves.toMatchObject({ isCurrent: true });
       expect(mockInvalidateClientConnection).toHaveBeenCalledOnce();
       expect(mockInvalidateClientConnection).toHaveBeenCalledWith("local");

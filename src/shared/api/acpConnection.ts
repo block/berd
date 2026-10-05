@@ -128,6 +128,9 @@ export interface AcpConnection {
    * bound. A timed-out request leaves the connection state unknowable;
    * reconnecting is safer than allowing later mutations to race work still
    * running remotely.
+   * Detaches cached and initializing clients synchronously, before returning.
+   * The promise waits for cleanup of only the detached transport generation;
+   * callers enforcing a liveness bound must not wait for that cleanup.
    */
   invalidate(): Promise<void>;
   /** Notifies when the active transport closes. Returns an unsubscribe. */
@@ -427,6 +430,10 @@ export function getBackendClient(
   return getBackendConnection(backendId).getClient();
 }
 
+/**
+ * Synchronously detach this backend's client; the returned promise waits for
+ * generation-scoped transport cleanup, which may not settle on a stuck peer.
+ */
 export async function invalidateBackendConnection(
   backendId: AcpBackendId,
 ): Promise<void> {
