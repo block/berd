@@ -383,6 +383,13 @@ export function runPreparedSessionPrompt<T>(
   );
 }
 
+function nonBlankWorkingDir(
+  workingDir: string | null | undefined,
+): string | undefined {
+  // Detect missing paths without changing spaces in a real directory name.
+  return workingDir?.trim() ? workingDir : undefined;
+}
+
 export async function loadSession(
   sessionId: string,
   workingDir?: string,
@@ -398,9 +405,9 @@ export async function loadSession(
       // prepared cwd or ask the owning backend; ACP
       // requires an absolute path and does not expand a literal "~".
       const effectiveWorkingDir =
-        workingDir ??
-        prepared.get(sessionId)?.workingDir ??
-        (await acpApi.getSessionInfo(sessionId)).workingDir;
+        nonBlankWorkingDir(workingDir) ??
+        nonBlankWorkingDir(prepared.get(sessionId)?.workingDir) ??
+        nonBlankWorkingDir((await acpApi.getSessionInfo(sessionId)).workingDir);
       if (!effectiveWorkingDir) {
         throw new Error("Session working directory is unavailable.");
       }

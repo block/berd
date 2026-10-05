@@ -71,6 +71,7 @@ describe("acpLoadSession working directory at the transport boundary", () => {
 
   it.each([
     "/chosen/project",
+    "/chosen/project with trailing space ",
     "C:\\Users\\dev\\project",
     "\\\\server\\share\\project",
   ])("preserves the explicit directory %s", async (workingDir) => {
@@ -108,8 +109,68 @@ describe("acpLoadSession working directory at the transport boundary", () => {
   });
 
   it.each([
+    "",
+    " \t\n",
+  ])("recovers a remote directory when the renderer path is blank (%j)", async (workingDir) => {
+    const { acpLoadSession } = await import("../acp");
+    mocks.sessionInfo.mockResolvedValue({
+      session: { sessionId: "session-1", cwd: "/remote/project" },
+    });
+
+    await acpLoadSession("ssh:devbox#session-1", workingDir);
+
+    expect(mocks.getBackendClient).toHaveBeenCalledTimes(2);
+    expect(mocks.getBackendClient).toHaveBeenNthCalledWith(1, "ssh:devbox");
+    expect(mocks.getBackendClient).toHaveBeenNthCalledWith(2, "ssh:devbox");
+    expect(mocks.sessionInfo).toHaveBeenCalledWith({ sessionId: "session-1" });
+    expect(mocks.loadSession).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      cwd: "/remote/project",
+      mcpServers: [],
+    });
+  });
+
+  it("reuses a prepared directory when the renderer path is blank", async () => {
+    const registry = await import("../acpSessionRegistry");
+    const { acpLoadSession } = await import("../acp");
+    registry.registerPreparedSession(
+      "session-1",
+      "openai",
+      "/prepared/project",
+    );
+
+    await acpLoadSession("session-1", "");
+
+    expect(mocks.sessionInfo).not.toHaveBeenCalled();
+    expect(mocks.loadSession).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      cwd: "/prepared/project",
+      mcpServers: [],
+    });
+  });
+
+  it.each([
+    "",
+    " \t\n",
+  ])("recovers the saved directory when the prepared path is blank (%j)", async (workingDir) => {
+    const registry = await import("../acpSessionRegistry");
+    const { acpLoadSession } = await import("../acp");
+    registry.registerPreparedSession("session-1", "openai", workingDir);
+
+    await acpLoadSession("session-1");
+
+    expect(mocks.sessionInfo).toHaveBeenCalledWith({ sessionId: "session-1" });
+    expect(mocks.loadSession).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      cwd: "/saved/project",
+      mcpServers: [],
+    });
+  });
+
+  it.each([
     null,
     "",
+    " \t\n",
   ])("does not invent a directory when backend metadata returns %s", async (cwd) => {
     const { acpLoadSession } = await import("../acp");
     mocks.sessionInfo.mockResolvedValue({
