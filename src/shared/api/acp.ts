@@ -585,7 +585,7 @@ export async function acpLoadSession(
     sessionId: shortLogId(sessionId),
   });
   perfLog(`[perf:load] ${sid} acpLoadSession → client.loadSession`);
-  const { response, isCurrent, executionSelection } =
+  const { response, isCurrent, executionSelection, assertActive } =
     await sessionRegistry.loadSession(sessionId, workingDir);
   if (!isCurrent) {
     perfLog(
@@ -593,6 +593,7 @@ export async function acpLoadSession(
     );
     return undefined;
   }
+  assertActive();
   const snapshots = readSessionConfigOptionsSnapshots(response);
   logReasoningEffortInfo("acpLoadSession response", {
     sessionId: shortLogId(sessionId),

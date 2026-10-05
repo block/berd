@@ -434,11 +434,27 @@ export async function loadSession(
 ): Promise<{
   response: Awaited<ReturnType<typeof acpApi.loadSession>>;
   isCurrent: boolean;
+  /** Recheck the replay's transport immediately before publishing snapshots. */
+  assertActive: () => void;
   executionSelection?: AcpSessionExecutionSelection;
 }> {
   return serializeSessionMutation(
     sessionId,
     async (isLatest) => {
+      // Replay can legitimately take longer than a config mutation, but it
+      // still belongs to one transport. Capture after entering the queue so
+      // a prior timed-out mutation can reconnect before this load starts.
+      const generation = captureBackendConnectionGeneration(
+        getSessionBackend(sessionId),
+      );
+      const assertActive = () => {
+        if (!generation.isCurrent()) {
+          throw new Error(
+            "ACP history replay was abandoned. Reconnect and retry.",
+          );
+        }
+      };
+      assertActive();
       // A replay refresh may have no renderer workspace path. Reuse the
       // prepared cwd or ask the owning backend; ACP
       // requires an absolute path and does not expand a literal "~".
@@ -452,12 +468,18 @@ export async function loadSession(
           sessionId,
           (assertActive) => acpApi.getSessionInfo(sessionId, assertActive),
         );
+        assertActive();
         effectiveWorkingDir = nonBlankWorkingDir(info.workingDir);
       }
       if (!effectiveWorkingDir) {
         throw new Error("Session working directory is unavailable.");
       }
-      const response = await acpApi.loadSession(sessionId, effectiveWorkingDir);
+      const response = await acpApi.loadSession(
+        sessionId,
+        effectiveWorkingDir,
+        assertActive,
+      );
+      assertActive();
       const isCurrentResult = isLatest();
       const executionSnapshot = readSessionExecutionConfigSnapshot(response);
       prepared.set(sessionId, {
@@ -467,6 +489,7 @@ export async function loadSession(
       return {
         response,
         isCurrent: isCurrentResult,
+        assertActive,
         executionSelection: executionSnapshot ?? undefined,
       };
     },
