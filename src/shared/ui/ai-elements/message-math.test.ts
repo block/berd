@@ -186,6 +186,22 @@ describe("message math normalization", () => {
     );
   });
 
+  it.each([
+    "- First \\[x\n- Second y\\]",
+    "1. First \\[x\n2. Second y\\]",
+    "> - First \\[x\n> - Second y\\]",
+    "- Parent\n  - First \\[x\n  - Second y\\]",
+    "- First \\[x\n+ Second y\\]",
+    "\\[root\n> quote\\]",
+  ])("preserves delimiters crossing Markdown containers: %s", (source) => {
+    const prepared = prepareMessageMath(source);
+    expect(prepared.content).toBe(source);
+    expect(prepared.remapCutoff(source.indexOf("\\]"))).toBe(
+      source.indexOf("\\]"),
+    );
+    expect(prepared.remapCutoff(source.length)).toBe(source.length);
+  });
+
   it("maps boundaries across inserted display lines and shortened symbols", () => {
     const source = String.raw`$\alpha$ before \[x^2\] after $\rightarrow$ tail`;
     const prepared = prepareMessageMath(source);

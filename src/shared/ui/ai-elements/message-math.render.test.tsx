@@ -23,6 +23,8 @@ describe("MessageResponse math with the real renderer", () => {
     "- Formula \\[a\n  + b\\] afterwards",
     "> - Formula \\[a\n>   + b\\] afterwards",
     "- Outer\n  - Inner \\[a\n    + b\\] afterwards",
+    "1. Formula \\[a\n   + b\\] afterwards\n2. Unrelated prose",
+    "- Formula \\[a\n  + b\\] afterwards\n- Unrelated prose",
   ])("renders a display equation in its Markdown container: %s", (content) => {
     const { container } = render(
       <MessageResponse mode="static">{content}</MessageResponse>,
@@ -35,6 +37,44 @@ describe("MessageResponse math with the real renderer", () => {
       ).not.toBeNull();
     if (content.includes("- "))
       expect(container.querySelector("li .katex-display")).not.toBeNull();
+  });
+
+  it.each([
+    "- First \\[x\n- Second y\\]",
+    "1. First \\[x\n2. Second y\\]",
+    "> - First \\[x\n> - Second y\\]",
+    "- First \\[x\n+ Second y\\]",
+  ])("preserves both list items when a delimiter pair spans them: %s", (content) => {
+    const { container } = render(
+      <MessageResponse mode="static">{content}</MessageResponse>,
+    );
+    const items = container.querySelectorAll("li");
+    expect(items).toHaveLength(2);
+    expect(items[0].textContent).toContain(
+      content.includes("Parent") ? "Parent" : "First",
+    );
+    expect(items[1].textContent).toContain(
+      content.includes("Child") ? "Child" : "Second",
+    );
+    expect(container.querySelector(".katex-display")).toBeNull();
+    expect(container.querySelector(".katex-error")).toBeNull();
+  });
+
+  it("preserves sibling list items as a cross-item delimiter pair streams in", () => {
+    const content = "- First \\[x\n- Second y";
+    const { container, rerender } = render(
+      <MessageResponse>{content}</MessageResponse>,
+    );
+    expect(container.querySelectorAll("li")).toHaveLength(2);
+    rerender(<MessageResponse>{content + "\\]"}</MessageResponse>);
+    expect(container.querySelectorAll("li")).toHaveLength(2);
+    expect(container.querySelector(".katex-display")).toBeNull();
+    expect(container.querySelectorAll("li")[1].textContent).toContain("Second");
+    rerender(
+      <MessageResponse>{"- First \\[x\\]\n- Second y"}</MessageResponse>,
+    );
+    expect(container.querySelectorAll("li")).toHaveLength(2);
+    expect(container.querySelectorAll(".katex-display")).toHaveLength(1);
   });
 
   it("preserves raw HTML code and GFM autolink destinations", () => {

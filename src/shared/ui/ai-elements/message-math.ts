@@ -108,7 +108,11 @@ type SourceNode = {
 };
 type Edit = { start: number; end: number; replacement: string };
 type Range = { start: number; end: number };
-type Paragraph = Range & { prefix: string; container: number };
+type Paragraph = Range & {
+  prefix: string;
+  container: number;
+  containerEnd: number;
+};
 
 function paragraphAt(paragraphs: Paragraph[], offset: number) {
   let low = 0;
@@ -191,10 +195,16 @@ function segmentEdits(
       const body = source.slice(opening + 2, index);
       // Block displays cannot be inserted into inline formatting, table cells,
       // or across unrelated list/quote containers without changing their markup.
-      // Preserve that source rather than manufacture an invalid block.
+      // A math continuation such as "+ b" can parse as a nested list. Stay
+      // within the opening item's/quote's source span even without blank lines,
+      // rather than requiring the closing paragraph to have the same AST parent.
+      // Preserve unrelated source rather than manufacture an invalid block.
       if (
         !paragraph ||
         !closingParagraph ||
+        end > paragraph.containerEnd ||
+        (paragraph.prefix.match(/>/g)?.length ?? 0) !==
+          (closingParagraph.prefix.match(/>/g)?.length ?? 0) ||
         (/\r?\n[ \t]*\r?\n/.test(body) &&
           paragraph.container !== closingParagraph.container) ||
         overlapsRange(nonDisplayRanges, start, end)
@@ -249,11 +259,20 @@ export function prepareMessageMath(content: string): PreparedMessageMath {
   const nonDisplayRanges: Range[] = [];
   const inlineFormatting = new Set(["emphasis", "strong", "delete"]);
   let nextContainer = 0;
-  const visit = (node: SourceNode, container = 0) => {
+  const visit = (
+    node: SourceNode,
+    container = 0,
+    containerEnd = content.length,
+  ) => {
     if (node.type === "blockquote" || node.type === "listItem")
       container = ++nextContainer;
     const start = node.position?.start.offset;
     const end = node.position?.end.offset;
+    if (
+      (node.type === "blockquote" || node.type === "listItem") &&
+      end !== undefined
+    )
+      containerEnd = end;
     if (node.type === "paragraph" && start !== undefined && end !== undefined) {
       const lineStart = content.lastIndexOf("\n", start - 1) + 1;
       // A paragraph's source position begins after its container markers.
@@ -263,7 +282,7 @@ export function prepareMessageMath(content: string): PreparedMessageMath {
         .replace(/(?:[-+*]|\d+[.)])([ \t]+)/g, (marker) =>
           " ".repeat(marker.length),
         );
-      paragraphs.push({ start, end, prefix, container });
+      paragraphs.push({ start, end, prefix, container, containerEnd });
     }
     if (
       inlineFormatting.has(node.type) &&
@@ -278,7 +297,8 @@ export function prepareMessageMath(content: string): PreparedMessageMath {
         protectedRanges.push({ start, end });
       return;
     }
-    for (const child of node.children ?? []) visit(child, container);
+    for (const child of node.children ?? [])
+      visit(child, container, containerEnd);
   };
   visit(parser.parse(content));
   // Inline HTML tags are separate AST nodes from their bodies. Preserve code
