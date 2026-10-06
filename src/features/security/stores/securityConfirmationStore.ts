@@ -39,6 +39,7 @@ interface SecurityConfirmationState {
     optionId: string,
   ) => void;
   cancel: (sessionId: string) => void;
+  cancelRequest: (request: RequestPermissionRequest) => void;
   cancelAll: (sessionId: string) => void;
   blockAll: (sessionId: string) => void;
   mountSurface: (sessionId: string) => void;
@@ -117,6 +118,20 @@ export const useSecurityConfirmationStore = create<SecurityConfirmationState>(
           state.pendingBySessionId,
           sessionId,
         ),
+      }));
+      pending.resolve({ outcome: { outcome: "cancelled" } });
+    },
+
+    cancelRequest: (request) => {
+      const sessionId = request.sessionId;
+      const queue = get().pendingBySessionId[sessionId];
+      const pending = queue?.find((entry) => entry.request === request);
+      if (!pending) return;
+      const remaining = queue?.filter((entry) => entry !== pending) ?? [];
+      set((state) => ({
+        pendingBySessionId: remaining.length
+          ? { ...state.pendingBySessionId, [sessionId]: remaining }
+          : removeSessionPending(state.pendingBySessionId, sessionId),
       }));
       pending.resolve({ outcome: { outcome: "cancelled" } });
     },

@@ -15,6 +15,10 @@ vi.mock("@/shared/api/acpApi", () => ({
 vi.mock("@/shared/api/acpConnection", () => ({
   getClient: () => mockGetClient(),
   getBackendClient: () => mockGetClient(),
+  captureBackendConnectionGeneration: () => ({
+    isCurrent: () => true,
+    invalidate: async () => {},
+  }),
 }));
 
 const managedRuntimeConfig: RuntimeConfig = {
@@ -118,12 +122,16 @@ describe("transitionSessionTarget with managed Goose models", () => {
     expect(mockSetProvider).toHaveBeenCalledWith(
       "legacy-session",
       "databricks_v2",
-      { requestId: undefined },
+      { requestId: undefined, assertActive: expect.any(Function) },
     );
     expect(mockSetModel).toHaveBeenCalledWith(
       "legacy-session",
       "goose-gpt-5-5",
-      { providerId: "databricks_v2", requestId: undefined },
+      {
+        providerId: "databricks_v2",
+        requestId: undefined,
+        assertActive: expect.any(Function),
+      },
     );
     expect(mockSetModel).not.toHaveBeenCalledWith("legacy-session", "goose");
   });
@@ -297,13 +305,17 @@ describe("transitionSessionTarget with managed Goose models", () => {
     expect(mockSetProvider).toHaveBeenCalledWith(
       "managed-opus-session",
       "databricks_v2",
-      { requestId: undefined },
+      { requestId: undefined, assertActive: expect.any(Function) },
     );
     expect(mockSetModel).toHaveBeenCalledOnce();
     expect(mockSetModel).toHaveBeenCalledWith(
       "managed-opus-session",
       "goose-claude-opus-4-8",
-      { providerId: "databricks_v2", requestId: undefined },
+      {
+        providerId: "databricks_v2",
+        requestId: undefined,
+        assertActive: expect.any(Function),
+      },
     );
   });
 });

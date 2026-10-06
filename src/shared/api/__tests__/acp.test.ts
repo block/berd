@@ -20,10 +20,14 @@ const mockAppendSessionSystemPrompt = vi.fn();
 const mockForkSession = vi.fn();
 const mockRenameSession = vi.fn();
 const mockArchiveSession = vi.fn();
-const noRequestProviderContext = { requestId: undefined };
+const noRequestProviderContext = {
+  requestId: undefined,
+  assertActive: expect.any(Function),
+};
 const noRequestModelContext = (providerId: string) => ({
   providerId,
   requestId: undefined,
+  assertActive: expect.any(Function),
 });
 
 const managedRuntimeConfig: RuntimeConfig = {
@@ -955,6 +959,7 @@ describe("acpCreateSession", () => {
     expect(mockLoadSession).toHaveBeenCalledWith(
       "acp-session-1",
       "/tmp/project",
+      expect.any(Function),
     );
     expect(mockSetProvider).toHaveBeenCalledWith(
       "acp-session-1",
@@ -1223,6 +1228,7 @@ describe("acpPrepareSession", () => {
     expect(mockLoadSession).toHaveBeenCalledWith(
       "acp-session-1",
       "/tmp/project",
+      expect.any(Function),
     );
     expect(mockNewSession).not.toHaveBeenCalled();
     expect(mockSetProvider).toHaveBeenCalledWith(

@@ -80,7 +80,11 @@ function isSecurityRequest(alertText: string): boolean {
  */
 export function handleSecurityPermissionRequest(
   request: RequestPermissionRequest,
+  signal?: AbortSignal,
 ): Promise<RequestPermissionResponse> {
+  if (signal?.aborted) {
+    return Promise.resolve({ outcome: { outcome: "cancelled" } });
+  }
   const alertText = collectContentText(request.toolCall.content);
 
   if (!isSecurityRequest(alertText)) {
@@ -95,17 +99,25 @@ export function handleSecurityPermissionRequest(
   // decision while inference runs in the background; other sessions remain
   // interactive.
   const promise = new Promise<RequestPermissionResponse>((resolve) => {
+    const cancel = () =>
+      useSecurityConfirmationStore.getState().cancelRequest(request);
+    signal?.addEventListener("abort", cancel, { once: true });
     useSecurityConfirmationStore.getState().enqueue({
       request,
       title: request.toolCall.title ?? "Tool call",
       command,
       alertText,
-      resolve,
+      resolve: (response) => {
+        signal?.removeEventListener("abort", cancel);
+        resolve(response);
+      },
     });
+    // Store subscribers may synchronously detach the requesting transport.
+    if (signal?.aborted) cancel();
   });
 
   // If the alert only has confidence (no explanation), infer one
-  if (command && alertLacksExplanation(alertText)) {
+  if (!signal?.aborted && command && alertLacksExplanation(alertText)) {
     const store = useSecurityConfirmationStore.getState();
     store.setInferredExplanation(request.sessionId, request, {
       status: "loading",
@@ -114,6 +126,7 @@ export function handleSecurityPermissionRequest(
     const confidence = extractConfidence(alertText);
     readDefaultProviderReadiness()
       .then(async (readiness) => {
+        if (signal?.aborted) return { status: "failed" as const };
         if (readiness.status === "needs_setup") {
           return { status: "needs_setup" as const };
         }

@@ -1,5 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Client, SessionNotification } from "@agentclientprotocol/sdk";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type {
+  Client,
+  RequestPermissionRequest,
+  RequestPermissionResponse,
+  SessionNotification,
+} from "@agentclientprotocol/sdk";
 import {
   LOCAL_BACKEND_ID,
   backendIdForSession,
@@ -21,6 +26,11 @@ const mocks = vi.hoisted(() => ({
   connectRemoteHost: vi.fn(),
   disconnectRemoteHost: vi.fn(),
   createWebSocketStream: vi.fn(),
+  initialize: vi.fn(),
+  sessionInfo: vi.fn(),
+  loadSession: vi.fn(),
+  setSessionConfigOption: vi.fn(),
+  updateWorkingDir: vi.fn(),
   clientCallbackFactories: [] as Array<() => Client>,
 }));
 
@@ -46,7 +56,13 @@ vi.mock("@agentclientprotocol/sdk", () => ({
 vi.mock("@aaif/goose-sdk", () => ({
   DEFAULT_GOOSE_MCP_HOST_CAPABILITIES: {},
   GooseClient: class {
-    initialize = vi.fn(async () => {});
+    initialize = vi.fn((...args: unknown[]) => mocks.initialize(...args));
+    goose = {
+      GooseUnstableSessionInfo: mocks.sessionInfo,
+      GooseUnstableSessionWorkingDirUpdate: mocks.updateWorkingDir,
+    };
+    loadSession = mocks.loadSession;
+    setSessionConfigOption = mocks.setSessionConfigOption;
     closed: Promise<void>;
     resolveClosed!: () => void;
     constructor(callbacks: () => Client, _stream: unknown) {
@@ -82,6 +98,13 @@ beforeEach(() => {
     }),
   );
   mocks.clientCallbackFactories.length = 0;
+  mocks.initialize.mockReset().mockResolvedValue(undefined);
+  mocks.sessionInfo.mockReset();
+  mocks.loadSession.mockReset().mockResolvedValue({ configOptions: [] });
+  mocks.setSessionConfigOption
+    .mockReset()
+    .mockResolvedValue({ configOptions: [] });
+  mocks.updateWorkingDir.mockReset().mockResolvedValue(undefined);
   mocks.invoke.mockResolvedValue("ws://local");
   mocks.connectRemoteHost.mockResolvedValue({
     wsUrl: "ws://remote",
@@ -94,6 +117,10 @@ beforeEach(() => {
   mocks.createWebSocketStream.mockImplementation(() => ({
     writable: { abort: vi.fn().mockResolvedValue(undefined) },
   }));
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("acpBackendId", () => {
@@ -324,6 +351,274 @@ describe("backend connection registry", () => {
     expect(mocks.connectRemoteHost).toHaveBeenCalledTimes(2);
   });
 
+  it.each([
+    "local",
+    "ssh:dev-box",
+  ] as const)("detaches %s synchronously and preserves its replacement during late cleanup", async (backendId) => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const conn = await importConnection();
+    const connection = conn.getBackendConnection(backendId);
+    let resolveAbort!: () => void;
+    let resolveDisconnect!: () => void;
+    const oldStream = {
+      writable: {
+        abort: vi.fn().mockReturnValue(
+          new Promise<void>((resolve) => {
+            resolveAbort = resolve;
+          }),
+        ),
+      },
+    };
+    mocks.createWebSocketStream.mockReturnValueOnce(oldStream);
+    const first = (await connection.getClient()) as unknown as FakeClient;
+    const onClosed = vi.fn();
+    connection.onClosed(onClosed);
+    if (backendId !== "local") {
+      mocks.disconnectRemoteHost.mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          resolveDisconnect = resolve;
+        }),
+      );
+      mocks.connectRemoteHost.mockResolvedValueOnce({
+        wsUrl: "ws://replacement",
+        generation: 2,
+      });
+    }
+
+    let cleanupSettled = false;
+    const cleanup = conn.invalidateBackendConnection(backendId).then(() => {
+      cleanupSettled = true;
+    });
+    // These assertions deliberately precede any await: timeout callers
+    // depend on detachment happening before invalidation returns.
+    expect(connection.getClientSync()).toBeNull();
+    expect(connection.isReady()).toBe(false);
+    expect(oldStream.writable.abort).toHaveBeenCalledOnce();
+    if (backendId !== "local") {
+      expect(mocks.disconnectRemoteHost).toHaveBeenCalledExactlyOnceWith(
+        "dev-box",
+        1,
+      );
+    }
+
+    const second = await conn.getBackendClient(backendId);
+    const newStream = mocks.createWebSocketStream.mock.results.at(-1)
+      ?.value as { writable: { abort: ReturnType<typeof vi.fn> } };
+    expect(second).not.toBe(first);
+    expect(cleanupSettled).toBe(false);
+    expect(connection.getClientSync()).toBe(second);
+
+    first.resolveClosed();
+    await flushClosedMonitor();
+    expect(onClosed).not.toHaveBeenCalled();
+    expect(connection.getClientSync()).toBe(second);
+
+    resolveAbort();
+    resolveDisconnect?.();
+    await cleanup;
+    expect(await connection.getClient()).toBe(second);
+    expect(connection.isReady()).toBe(true);
+    expect(newStream.writable.abort).not.toHaveBeenCalled();
+    expect(oldStream.writable.abort).toHaveBeenCalledOnce();
+    if (backendId !== "local") {
+      expect(mocks.connectRemoteHost).toHaveBeenCalledTimes(2);
+      expect(mocks.createWebSocketStream).toHaveBeenLastCalledWith(
+        "ws://replacement",
+      );
+      expect(mocks.disconnectRemoteHost).toHaveBeenCalledExactlyOnceWith(
+        "dev-box",
+        1,
+      );
+    } else {
+      expect(mocks.invoke).toHaveBeenCalledTimes(2);
+      expect(mocks.disconnectRemoteHost).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each([
+    "local",
+    "ssh:dev-box",
+  ] as const)("does not let a second old-session timeout invalidate the %s replacement", async (backendId) => {
+    vi.useFakeTimers();
+    const conn = await importConnection();
+    const { loadSession } = await import("../acpSessionRegistry");
+    const firstId = compositeSessionId(backendId, "session-1");
+    const secondId = compositeSessionId(backendId, "session-2");
+    mocks.sessionInfo.mockReturnValue(new Promise(() => {}));
+
+    const first = loadSession(firstId);
+    const firstRejection = expect(first).rejects.toThrow(
+      "ACP operation timed out",
+    );
+    await vi.advanceTimersByTimeAsync(10_000);
+    const second = loadSession(secondId);
+    const secondRejection = expect(second).rejects.toThrow(
+      "ACP operation timed out",
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.sessionInfo).toHaveBeenCalledTimes(2);
+    expect(mocks.createWebSocketStream).toHaveBeenCalledOnce();
+    const oldStream = mocks.createWebSocketStream.mock.results[0].value;
+
+    await vi.advanceTimersByTimeAsync(50_000);
+    await firstRejection;
+    expect(oldStream.writable.abort).toHaveBeenCalledOnce();
+    await loadSession(firstId, "/new/project");
+    const connection = conn.getBackendConnection(backendId);
+    const replacement = connection.getClientSync();
+    const newStream = mocks.createWebSocketStream.mock.results[1].value;
+    expect(replacement).not.toBeNull();
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    await secondRejection;
+    expect(newStream.writable.abort).not.toHaveBeenCalled();
+    expect(connection.getClientSync()).toBe(replacement);
+    expect(await connection.getClient()).toBe(replacement);
+    expect(mocks.createWebSocketStream).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    "close",
+    "initialize failure",
+  ])("retires the captured generation after %s without invalidating its replacement", async (failure) => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const conn = await importConnection();
+    const connection = conn.getBackendConnection("local");
+    const generation = connection.captureGeneration();
+    if (failure === "close") {
+      const first = (await connection.getClient()) as unknown as FakeClient;
+      first.resolveClosed();
+      await flushClosedMonitor();
+    } else {
+      mocks.initialize.mockRejectedValueOnce(new Error("failed initialize"));
+      await expect(connection.getClient()).rejects.toThrow("failed initialize");
+    }
+    expect(generation.isCurrent()).toBe(false);
+    const replacement = await connection.getClient();
+    const stream = mocks.createWebSocketStream.mock.results.at(-1)?.value;
+
+    await generation.invalidate();
+
+    expect(connection.getClientSync()).toBe(replacement);
+    expect(stream.writable.abort).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "cold provider",
+    "cold load",
+    "model",
+    "configuration",
+    "working directory",
+  ])("does not let a late %s mutation overwrite or publish newer session state", async (operation) => {
+    vi.useFakeTimers();
+    const registry = await import("../acpSessionRegistry");
+    const { setSessionConfigSnapshotHandlers } = await import(
+      "../acpSessionConfigSnapshots"
+    );
+    const configResponse = (
+      providerId: string,
+      modelId: string,
+      effort: string,
+    ) => ({
+      configOptions: [
+        {
+          id: "provider",
+          kind: { type: "select", currentValue: providerId, options: [] },
+        },
+        {
+          id: "model",
+          category: "model",
+          kind: { type: "select", currentValue: modelId, options: [] },
+        },
+        {
+          id: "thinking_effort",
+          category: "thought_level",
+          kind: { type: "select", currentValue: effort, options: [] },
+        },
+      ],
+    });
+    const published = vi.fn();
+    setSessionConfigSnapshotHandlers({ applyConfigSnapshots: published });
+    mocks.setSessionConfigOption.mockResolvedValue(
+      configResponse("openai", "new-model", "high"),
+    );
+    let resolveOld!: (value: unknown) => void;
+    const oldResponse = new Promise((resolve) => {
+      resolveOld = resolve;
+    });
+    let old: Promise<unknown>;
+    if (operation.startsWith("cold")) {
+      if (operation === "cold load") {
+        mocks.loadSession.mockReturnValueOnce(oldResponse);
+      } else {
+        mocks.setSessionConfigOption.mockReturnValueOnce(oldResponse);
+      }
+      old = registry.configureSession(
+        "session-1",
+        "anthropic",
+        "/stale/project",
+        "stale-model",
+      );
+    } else {
+      registry.registerPreparedSession(
+        "session-1",
+        "openai",
+        "/initial/project",
+        "initial-model",
+      );
+      if (operation === "working directory") {
+        mocks.updateWorkingDir.mockReturnValueOnce(oldResponse);
+        old = registry.prepareSession(
+          "session-1",
+          "anthropic",
+          "/stale/project",
+        );
+      } else {
+        mocks.setSessionConfigOption.mockReturnValueOnce(oldResponse);
+        old =
+          operation === "model"
+            ? registry.applySessionModel("session-1", "stale-model")
+            : registry.applySessionConfigOption(
+                "session-1",
+                "thinking_effort",
+                "low",
+              );
+      }
+    }
+    const rejection = expect(old).rejects.toThrow("ACP operation timed out");
+    await vi.advanceTimersByTimeAsync(60_000);
+    await rejection;
+    await registry.configureSession(
+      "session-1",
+      "openai",
+      "/new/project",
+      "new-model",
+    );
+    const newPublications = [...published.mock.calls];
+    const newRequests = [...mocks.setSessionConfigOption.mock.calls];
+    expect(newPublications.length).toBeGreaterThan(0);
+    expect(registry.requireSessionInvocationSelection("session-1")).toEqual({
+      providerId: "openai",
+      modelId: "new-model",
+    });
+
+    resolveOld(configResponse("anthropic", "stale-model", "low"));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(registry.requireSessionInvocationSelection("session-1")).toEqual({
+      providerId: "openai",
+      modelId: "new-model",
+    });
+    expect(published.mock.calls).toEqual(newPublications);
+    expect(mocks.setSessionConfigOption.mock.calls).toEqual(newRequests);
+    await registry.loadSession("session-1");
+    expect(mocks.loadSession).toHaveBeenLastCalledWith({
+      sessionId: "session-1",
+      cwd: "/new/project",
+      mcpServers: [],
+    });
+  });
+
   it("delegates invalidateClientConnection to the local backend only", async () => {
     const conn = await importConnection();
     const localClient = await conn.getClient();
@@ -456,6 +751,16 @@ describe("session backend routing", () => {
 });
 
 describe("inbound session id translation", () => {
+  const permissionRequest = {
+    sessionId: "session-1",
+    toolCall: { toolCallId: "tool-1", title: "Test tool" },
+    options: [{ optionId: "approve", kind: "allow_once", name: "Allow" }],
+  } satisfies RequestPermissionRequest;
+  const approval: RequestPermissionResponse = {
+    outcome: { outcome: "selected", optionId: "approve" },
+  };
+  const cancellation = { outcome: { outcome: "cancelled" } };
+
   function sessionUpdatePayload(sessionId: string): SessionNotification {
     return {
       sessionId,
@@ -473,6 +778,151 @@ describe("inbound session id translation", () => {
     }
     return factory();
   }
+
+  it.each([
+    "local",
+    "ssh:dev-box",
+  ] as const)("does not auto-approve or surface permissions from a detached %s transport", async (backendId) => {
+    const conn = await importConnection();
+    const connection = conn.getBackendConnection(backendId);
+    await connection.getClient();
+    const oldCallbacks = await latestCallbacks();
+    await connection.invalidate();
+    await connection.getClient();
+    const replacementCallbacks = await latestCallbacks();
+
+    await expect(
+      oldCallbacks.requestPermission(permissionRequest),
+    ).resolves.toEqual(cancellation);
+    await expect(
+      replacementCallbacks.requestPermission(permissionRequest),
+    ).resolves.toEqual(approval);
+    const handler = vi.fn().mockResolvedValue(approval);
+    conn.setPermissionHandler(handler);
+    await expect(
+      oldCallbacks.requestPermission(permissionRequest),
+    ).resolves.toEqual(cancellation);
+    expect(handler).not.toHaveBeenCalled();
+    await expect(
+      replacementCallbacks.requestPermission(permissionRequest),
+    ).resolves.toEqual(approval);
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { backendId: "local", close: false },
+    { backendId: "ssh:dev-box", close: false },
+    { backendId: "local", close: true },
+    { backendId: "ssh:dev-box", close: true },
+  ] as const)("cancels pending $backendId permissions on detachment (close: $close)", async ({
+    backendId,
+    close,
+  }) => {
+    const conn = await importConnection();
+    const connection = conn.getBackendConnection(backendId);
+    const first = (await connection.getClient()) as unknown as FakeClient;
+    const oldCallbacks = await latestCallbacks();
+    let resolveDecision!: (response: RequestPermissionResponse) => void;
+    let lifetime!: AbortSignal;
+    conn.setPermissionHandler((_request, signal) => {
+      lifetime = signal!;
+      return new Promise((resolve) => {
+        resolveDecision = resolve;
+      });
+    });
+    const pending = oldCallbacks.requestPermission(permissionRequest);
+    if (close) {
+      first.resolveClosed();
+      await flushClosedMonitor();
+    } else {
+      const stream = mocks.createWebSocketStream.mock.results.at(-1)?.value;
+      stream.writable.abort.mockReturnValue(new Promise(() => {}));
+      void connection.invalidate();
+    }
+    expect(lifetime.aborted).toBe(true);
+    // Cancellation must not wait for transport cleanup or a user's decision.
+    await expect(pending).resolves.toEqual(cancellation);
+    await connection.getClient();
+    resolveDecision(approval);
+    await expect(pending).resolves.toEqual(cancellation);
+    conn.setPermissionHandler(async () => approval);
+    const replacementCallbacks = await latestCallbacks();
+    await expect(
+      replacementCallbacks.requestPermission(permissionRequest),
+    ).resolves.toEqual(approval);
+  });
+
+  it("does not return approval when detachment races a resolved decision", async () => {
+    const conn = await importConnection();
+    const connection = conn.getBackendConnection("local");
+    await connection.getClient();
+    const callbacks = await latestCallbacks();
+    conn.setPermissionHandler(async () => {
+      void connection.invalidate();
+      return approval;
+    });
+    await expect(
+      callbacks.requestPermission(permissionRequest),
+    ).resolves.toEqual(cancellation);
+  });
+
+  it("retires permissions when initialization fails even if cleanup never settles", async () => {
+    const conn = await importConnection();
+    const connection = conn.getBackendConnection("local");
+    let rejectInitialization!: (error: Error) => void;
+    mocks.initialize.mockReturnValueOnce(
+      new Promise((_, reject) => {
+        rejectInitialization = reject;
+      }),
+    );
+    const initialization = connection.getClient();
+    void initialization.catch(() => {});
+    await vi.waitFor(() => expect(mocks.initialize).toHaveBeenCalledOnce());
+    const callbacks = await latestCallbacks();
+    conn.setPermissionHandler(() => new Promise(() => {}));
+    const pending = callbacks.requestPermission(permissionRequest);
+    const stream = mocks.createWebSocketStream.mock.results.at(-1)?.value;
+    stream.writable.abort.mockReturnValue(new Promise(() => {}));
+    rejectInitialization(new Error("handshake failed"));
+    await expect(pending).resolves.toEqual(cancellation);
+    const replacement = await connection.getClient();
+    expect(connection.getClientSync()).toBe(replacement);
+    await expect(
+      callbacks.requestPermission(permissionRequest),
+    ).resolves.toEqual(cancellation);
+  });
+
+  it.each([
+    LOCAL_BACKEND_ID,
+    sshBackendId("dev-box"),
+  ])("ignores notifications from a detached %s generation even while cleanup hangs", async (backendId) => {
+    const conn = await importConnection();
+    const received = vi.fn();
+    const intercepted = vi.fn(() => false);
+    conn.setNotificationHandler({ handleSessionNotification: received });
+    const stop = conn.interceptSessionNotifications(intercepted);
+    const connection = conn.getBackendConnection(backendId);
+    await connection.getClient();
+    const oldCallbacks = await latestCallbacks();
+    const oldStream = mocks.createWebSocketStream.mock.results.at(-1)?.value;
+    oldStream.writable.abort.mockReturnValue(new Promise(() => {}));
+
+    void connection.captureGeneration().invalidate();
+    await connection.getClient();
+    const replacementCallbacks = await latestCallbacks();
+    const payload = sessionUpdatePayload("session-1");
+    await oldCallbacks.sessionUpdate?.(payload);
+    expect(received).not.toHaveBeenCalled();
+    expect(intercepted).not.toHaveBeenCalled();
+
+    await replacementCallbacks.sessionUpdate?.(payload);
+    expect(received).toHaveBeenCalledOnce();
+    expect(intercepted).toHaveBeenCalledOnce();
+    expect(received.mock.calls[0]?.[0].sessionId).toBe(
+      compositeSessionId(backendId, "session-1"),
+    );
+    stop();
+  });
 
   it("rewrites remote notification session ids to composite ids", async () => {
     const conn = await importConnection();
