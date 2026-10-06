@@ -187,6 +187,47 @@ describe("message math normalization", () => {
   });
 
   it.each([
+    "\\[unfinished\n\n## Next section\n\nHere is the closing marker \\]",
+    "- \\[unfinished\n\n  ## Next section\n\n  Here is the closing marker \\]",
+    "> \\[unfinished\n>\n> ## Next section\n>\n> Here is the closing marker \\]",
+    "\\[unfinished\n\nNext section\n============\n\nClosing \\]",
+    "\\[unfinished\n\n***\n\nClosing \\]",
+    "\\[unfinished\n\n| Value |\n| --- |\n| prose |\n\nClosing \\]",
+    "\\[unfinished\n\n>\n\nClosing \\]",
+    "\\[unfinished\n\n-\n\nClosing \\]",
+  ])("preserves intervening block structure: %s", (source) => {
+    const prepared = prepareMessageMath(source);
+    expect(prepared.content).toBe(source);
+    for (let cutoff = 0; cutoff <= source.length; cutoff += 1)
+      expect(prepared.remapCutoff(cutoff)).toBe(cutoff);
+    expect(normalize(`${source}\n\n\\[live\\]`)).toContain(display("live"));
+  });
+
+  it.each([
+    ["-\t", "    "],
+    ["1.\t", "    "],
+    ["12.\t", "    "],
+    ["123.\t", "        "],
+    ["> -\t", ">   "],
+  ])("uses tab-expanded source columns for a list prefix: %s", (marker, prefix) => {
+    const source = `${marker}Formula \\[x\\] afterwards`;
+    const prepared = prepareMessageMath(source);
+    expect(prepared.content).toContain(
+      `\n${prefix}$$\n${prefix}x\n${prefix}$$\n`,
+    );
+    expect(prepared.content.endsWith(`${prefix} afterwards`)).toBe(true);
+    expect(prepared.remapCutoff(source.indexOf("afterwards"))).toBe(
+      prepared.content.indexOf("afterwards"),
+    );
+  });
+
+  it("renders a multiline equation with tabbed list continuation", () => {
+    expect(normalize("-\tFormula \\[a\n\t+ b\\] afterwards")).toContain(
+      "\n    $$\n    a\n    + b\n    $$\n",
+    );
+  });
+
+  it.each([
     "- First \\[x\n- Second y\\]",
     "1. First \\[x\n2. Second y\\]",
     "> - First \\[x\n> - Second y\\]",

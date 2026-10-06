@@ -159,6 +159,21 @@ function isEscaped(source: string, index: number): boolean {
   return backslashes % 2 === 1;
 }
 
+function continuationPrefix(source: string): string {
+  // CommonMark indentation uses four-column tab stops, not character counts.
+  // Expand before replacing markers so nested list/quote columns stay aligned.
+  let column = 0;
+  let expanded = "";
+  for (const character of source) {
+    const width = character === "\t" ? 4 - (column % 4) : 1;
+    expanded += character === "\t" ? " ".repeat(width) : character;
+    column += width;
+  }
+  return expanded.replace(/(?:[-+*]|\d+[.)]) +/g, (marker) =>
+    " ".repeat(marker.length),
+  );
+}
+
 function displayReplacement(body: string, prefix: string): string {
   const lines = body.split(/\r?\n/);
   const continuation = new RegExp(
@@ -283,7 +298,16 @@ export function prepareMessageMath(content: string): PreparedMessageMath {
   const paragraphs: Paragraph[] = [];
   const htmlRanges: Range[] = [];
   const nonDisplayRanges: Range[] = [];
-  const inlineFormatting = new Set(["emphasis", "strong", "delete"]);
+  // Leaf blocks and empty containers are barriers even when the equation's
+  // opening and closing paragraphs share the same parent.
+  const nonDisplayTypes = new Set([
+    "emphasis",
+    "strong",
+    "delete",
+    "heading",
+    "thematicBreak",
+    "table",
+  ]);
   let nextContainer = 0;
   const visit = (
     node: SourceNode,
@@ -303,11 +327,7 @@ export function prepareMessageMath(content: string): PreparedMessageMath {
       const lineStart = content.lastIndexOf("\n", start - 1) + 1;
       // A paragraph's source position begins after its container markers.
       // Keep quote markers and turn list markers into continuation indentation.
-      const prefix = content
-        .slice(lineStart, start)
-        .replace(/(?:[-+*]|\d+[.)])([ \t]+)/g, (marker) =>
-          " ".repeat(marker.length),
-        );
+      const prefix = continuationPrefix(content.slice(lineStart, start));
       paragraphs.push({
         index: paragraphs.length,
         start,
@@ -318,7 +338,9 @@ export function prepareMessageMath(content: string): PreparedMessageMath {
       });
     }
     if (
-      inlineFormatting.has(node.type) &&
+      (nonDisplayTypes.has(node.type) ||
+        ((node.type === "blockquote" || node.type === "listItem") &&
+          !node.children?.length)) &&
       start !== undefined &&
       end !== undefined
     )

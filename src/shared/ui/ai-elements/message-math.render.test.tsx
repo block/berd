@@ -99,6 +99,84 @@ describe("MessageResponse math with the real renderer", () => {
     }
   });
 
+  it.each([
+    [
+      "\\[unfinished\n\n## Next section\n\nHere is the closing marker \\]",
+      "h2",
+    ],
+    [
+      "- \\[unfinished\n\n  ## Next section\n\n  Here is the closing marker \\]",
+      "li h2",
+    ],
+    [
+      "> \\[unfinished\n>\n> ## Next section\n>\n> Here is the closing marker \\]",
+      "blockquote h2",
+    ],
+    ["\\[unfinished\n\nNext section\n============\n\nClosing \\]", "h1"],
+    ["\\[unfinished\n\n***\n\nClosing \\]", "hr"],
+    ["\\[unfinished\n\n| Value |\n| --- |\n| prose |\n\nClosing \\]", "table"],
+    ["\\[unfinished\n\n>\n\nClosing \\]", "blockquote"],
+    ["\\[unfinished\n\n-\n\nClosing \\]", "li"],
+  ])("preserves intervening blocks through the actual renderer: %s", (source, selector) => {
+    const { container, rerender } = render(
+      <MessageResponse mode="static">{source}</MessageResponse>,
+    );
+    expect(container.querySelector(selector)).not.toBeNull();
+    expect(container.querySelector(".katex-display")).toBeNull();
+    rerender(
+      <MessageResponse mode="static">
+        {source + "\n\n\\[live\\]"}
+      </MessageResponse>,
+    );
+    expect(container.querySelector(selector)).not.toBeNull();
+    expect(container.querySelectorAll(".katex-display")).toHaveLength(1);
+  });
+
+  it("preserves a heading as the closing delimiter streams in", () => {
+    const source = "\\[unfinished\n\n## Next section\n\nClosing ";
+    const { container, rerender } = render(
+      <MessageResponse>{source}</MessageResponse>,
+    );
+    for (const suffix of ["", "\\", "\\]"]) {
+      rerender(<MessageResponse>{source + suffix}</MessageResponse>);
+      expect(container.querySelector("h2")?.textContent).toBe("Next section");
+      expect(container.querySelector(".katex-display")).toBeNull();
+    }
+  });
+
+  it.each([
+    "-\tFormula \\[x\\] afterwards\n- Next item",
+    "1.\tFormula \\[x\\] afterwards\n2. Next item",
+    "12.\tFormula \\[x\\] afterwards\n13. Next item",
+    "123.\tFormula \\[x\\] afterwards\n124. Next item",
+    "> -\tFormula \\[x\\] afterwards\n> - Next item",
+    "- Outer\n  -\tFormula \\[x\\] afterwards\n  - Next item",
+    "-\tFormula \\[a\n\t+ b\\] afterwards\n- Next item",
+  ])("keeps tab-indented math and tail inside their list item: %s", (source) => {
+    const { container, rerender } = render(
+      <MessageResponse mode="static">{source}</MessageResponse>,
+    );
+    const items = container.querySelectorAll("li");
+    const formula = container.querySelector(".katex-display")?.closest("li");
+    expect(items).toHaveLength(source.includes("Outer") ? 3 : 2);
+    expect(formula).toBeTruthy();
+    expect(formula?.textContent).toContain("Formula");
+    expect(formula?.textContent).toContain("afterwards");
+    expect(items[items.length - 1].textContent?.trim()).toBe("Next item");
+    expect(container.querySelector("pre")).toBeNull();
+    expect(container.querySelector(".katex-error")).toBeNull();
+    const cutoff = source.indexOf("afterwards");
+    rerender(
+      <MessageResponse mode="static" strikethroughFrom={cutoff}>
+        {source}
+      </MessageResponse>,
+    );
+    expect(
+      container.querySelector('[data-voice-unspoken="true"]')?.textContent,
+    ).toContain("afterwards");
+    expect(container.querySelector("li .katex-display")).not.toBeNull();
+  });
+
   it("preserves raw HTML code and GFM autolink destinations", () => {
     const { container } = render(
       <MessageResponse mode="static">
