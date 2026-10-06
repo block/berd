@@ -177,6 +177,168 @@ describe("MessageResponse math with the real renderer", () => {
     expect(container.querySelector("li .katex-display")).not.toBeNull();
   });
 
+  it.each([
+    "  - \\[x\\] after\n  - Next",
+    "   - \\[x\\] after\n   - Next",
+    "-    \\[x\\] after\n- Next",
+    "> > - \\[x\\] after\n> > - Next",
+    "-\n  \\[x\\] after\n- Next",
+    "- \\[x\\] after\n- Next",
+    "+ \\[x\\] after\n+ Next",
+    "* \\[x\\] after\n* Next",
+    "1. \\[x\\] after\n2. Next",
+    "12. \\[x\\] after\n13. Next",
+    "123) \\[x\\] after\n124) Next",
+    "-\t\\[x\\] after\n- Next",
+    "1.\t\\[x\\] after\n2. Next",
+    "123.\t\\[x\\] after\n124. Next",
+    "> - \\[x\\] after\n> - Next",
+    "> 1. \\[x\\] after\n> 2. Next",
+    "- Outer\n  - \\[x\\] after\n  - Next",
+    "- Outer\n  -\t\\[x\\] after\n  - Next",
+    "> - Outer\n>   - \\[x\\] after\n>   - Next",
+    "- > \\[x\\] after\n- Next",
+    "- \\[a\n  + b\\] after\n- Next",
+    "- \\[x\\] after\r\n- Next",
+    "- \\[x\\] after and \\[y\\] also\n- Next",
+    "- Intro\n\n  \\[x\\] after\n- Next",
+  ])("keeps item-start equations, tail and following item in the same list: %s", (source) => {
+    const { container, rerender } = render(
+      <MessageResponse mode="static">{source}</MessageResponse>,
+    );
+    const verify = () => {
+      const items = container.querySelectorAll("li");
+      const next = items[items.length - 1];
+      const owner = items[items.length - 2];
+      expect(items).toHaveLength(source.includes("Outer") ? 3 : 2);
+      const displays = container.querySelectorAll(".katex-display");
+      expect(displays).toHaveLength(source.includes("also") ? 2 : 1);
+      for (const display of displays) expect(display.closest("li")).toBe(owner);
+      expect(owner.textContent).toContain("after");
+      expect(next.textContent?.trim()).toBe("Next");
+      expect(owner.parentElement).toBe(next.parentElement);
+      expect(container.querySelector("pre")).toBeNull();
+      expect(container.querySelector(".katex-error")).toBeNull();
+      if (source.includes("[ ]") || source.includes("[x]"))
+        expect(
+          container.querySelectorAll('input[type="checkbox"]'),
+        ).toHaveLength(2);
+    };
+    verify();
+    rerender(
+      <MessageResponse
+        mode="static"
+        strikethroughFrom={source.indexOf("after")}
+      >
+        {source}
+      </MessageResponse>,
+    );
+    verify();
+    expect(
+      container.querySelector('[data-voice-unspoken="true"]')?.textContent,
+    ).toContain("after");
+  });
+
+  it.each([
+    ["- ", "\n- Next"],
+    ["1. ", "\n2. Next"],
+    ["-\t", "\n- Next"],
+    ["> - ", "\n> - Next"],
+    ["- Outer\n  - ", "\n  - Next"],
+  ])("retains item-start equation ownership when the close streams in: %s", (prefix, following) => {
+    const { container, rerender } = render(
+      <MessageResponse>{prefix}</MessageResponse>,
+    );
+    for (const equation of ["\\[x", "\\[x\\", "\\[x\\]"]) {
+      rerender(
+        <MessageResponse>
+          {prefix + equation + " after" + following}
+        </MessageResponse>,
+      );
+      const items = container.querySelectorAll("li");
+      const owner = items[items.length - 2];
+      const next = items[items.length - 1];
+      expect(items).toHaveLength(prefix.includes("Outer") ? 3 : 2);
+      expect(owner.textContent).toContain("after");
+      expect(owner.parentElement).toBe(next.parentElement);
+      if (equation.endsWith("\\]"))
+        expect(next.textContent?.trim()).toBe("Next");
+      else expect(next.textContent).toContain("Next");
+      if (equation.endsWith("\\]"))
+        expect(container.querySelector(".katex-display")?.closest("li")).toBe(
+          owner,
+        );
+      else expect(container.querySelector(".katex-display")).toBeNull();
+    }
+  });
+
+  it.each([
+    " ",
+    "x",
+    "X",
+  ])("preserves checkbox semantics and source for task math: %s", (state) => {
+    const source = `- [${state}] \\[x\\] after\n- [ ] Next`;
+    const { container } = render(
+      <MessageResponse mode="static">{source}</MessageResponse>,
+    );
+    const items = container.querySelectorAll("li");
+    expect(items).toHaveLength(2);
+    expect(items[0].textContent).toContain("[x] after");
+    expect(items[1].textContent?.trim()).toBe("Next");
+    const checkboxes = container.querySelectorAll<HTMLInputElement>(
+      'input[type="checkbox"]',
+    );
+    expect(checkboxes).toHaveLength(2);
+    expect(checkboxes[0].checked).toBe(state !== " ");
+    expect(checkboxes[1].checked).toBe(false);
+    expect(container.querySelector(".katex-display")).toBeNull();
+    expect(container.querySelector("pre")).toBeNull();
+  });
+
+  it("retains a later child under an equation-first parent", () => {
+    const { container } = render(
+      <MessageResponse mode="static">
+        {"- \\[x\\] after\n  - Child\n- Next"}
+      </MessageResponse>,
+    );
+    const rootList = container.querySelector("ul");
+    const items = rootList?.children;
+    expect(items).toHaveLength(2);
+    expect(container.querySelector(".katex-display")?.closest("li")).toBe(
+      items?.[0],
+    );
+    expect(items?.[0].querySelector("li")?.textContent?.trim()).toBe("Child");
+    expect(items?.[1].textContent?.trim()).toBe("Next");
+  });
+
+  it("renders an equation-only item at end of source", () => {
+    const { container } = render(
+      <MessageResponse mode="static">{"- \\[x\\]"}</MessageResponse>,
+    );
+    const item = container.querySelector("li");
+    expect(container.querySelectorAll("ul")).toHaveLength(1);
+    expect(container.querySelectorAll("li")).toHaveLength(1);
+    expect(container.querySelector(".katex-display")?.closest("li")).toBe(item);
+    expect(container.querySelector(".katex-error")).toBeNull();
+  });
+
+  it("allows a later task-item paragraph and a plain child to render math", () => {
+    const source =
+      "- [ ] Task\n\n  \\[x\\] after\n\n  - \\[y\\] child\n- [ ] Next";
+    const { container } = render(
+      <MessageResponse mode="static">{source}</MessageResponse>,
+    );
+    const items = container.querySelectorAll("li");
+    const math = container.querySelectorAll(".katex-display");
+    expect(items).toHaveLength(3);
+    expect(math).toHaveLength(2);
+    expect(math[0].closest("li")).toBe(items[0]);
+    expect(math[1].closest("li")).toBe(items[1]);
+    expect(container.querySelectorAll('input[type="checkbox"]')).toHaveLength(
+      2,
+    );
+  });
+
   it("preserves raw HTML code and GFM autolink destinations", () => {
     const { container } = render(
       <MessageResponse mode="static">

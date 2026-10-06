@@ -105,6 +105,7 @@ type SourceNode = {
   type: string;
   position?: { start: { offset?: number }; end: { offset?: number } };
   children?: SourceNode[];
+  checked?: boolean | null;
 };
 type Edit = { start: number; end: number; replacement: string };
 type Range = { start: number; end: number };
@@ -174,7 +175,11 @@ function continuationPrefix(source: string): string {
   );
 }
 
-function displayReplacement(body: string, prefix: string): string {
+function displayReplacement(
+  body: string,
+  prefix: string,
+  atContainerParagraphStart: boolean,
+): string {
   const lines = body.split(/\r?\n/);
   const continuation = new RegExp(
     "^" + prefix.replace(/[ \t]+/g, (spaces) => `[ \\t]{0,${spaces.length}}`),
@@ -187,7 +192,10 @@ function displayReplacement(body: string, prefix: string): string {
   while (lines.length && !lines[0].trim()) lines.shift();
   while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
   const blank = prefix.trimEnd();
-  return `\n${blank}\n${prefix}$$\n${lines.map((line) => prefix + line).join("\n")}\n${prefix}$$\n${blank}\n${prefix}`;
+  // A list marker with no preceding prose cannot survive a blank line before
+  // its first block. Start the display on that retained marker/quote line.
+  const opening = atContainerParagraphStart ? "$$" : `\n${blank}\n${prefix}$$`;
+  return `${opening}\n${lines.map((line) => prefix + line).join("\n")}\n${prefix}$$\n${blank}\n${prefix}`;
 }
 
 function isOperatorContinuation(body: string, prefix: string): boolean {
@@ -256,7 +264,11 @@ function segmentEdits(
       edits.push({
         start,
         end,
-        replacement: displayReplacement(body, paragraph.prefix),
+        replacement: displayReplacement(
+          body,
+          paragraph.prefix,
+          start === paragraph.start && paragraph.prefix.length > 0,
+        ),
       });
       opening = undefined;
     }
@@ -345,6 +357,20 @@ export function prepareMessageMath(content: string): PreparedMessageMath {
       end !== undefined
     )
       nonDisplayRanges.push({ start, end });
+    // GFM task markers belong to their first paragraph. Replacing that
+    // paragraph with a display block loses checkbox semantics, so preserve
+    // bracket source there just as in other non-display Markdown contexts.
+    if (node.type === "listItem" && typeof node.checked === "boolean") {
+      const first = node.children?.[0];
+      const taskStart = first?.position?.start.offset;
+      const taskEnd = first?.position?.end.offset;
+      if (
+        first?.type === "paragraph" &&
+        taskStart !== undefined &&
+        taskEnd !== undefined
+      )
+        nonDisplayRanges.push({ start: taskStart, end: taskEnd });
+    }
     if (node.type === "html" && start !== undefined && end !== undefined)
       htmlRanges.push({ start, end });
     if (protectedTypes.has(node.type)) {

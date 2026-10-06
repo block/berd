@@ -154,17 +154,50 @@ describe("message math normalization", () => {
   it.each([
     [String.raw`\[x\]`, display("x")],
     ["\\[a\n\nb\\]", display("a\n\nb")],
-    [String.raw`> \[x\]`, "> \n>\n> $$\n> x\n> $$\n>\n> "],
-    ["> \\[a\n> + b\\]", "> \n>\n> $$\n> a\n> + b\n> $$\n>\n> "],
-    ["> \\[a\n>+ b\\]", "> \n>\n> $$\n> a\n> + b\n> $$\n>\n> "],
-    [String.raw`- \[x\]`, "- \n\n  $$\n  x\n  $$\n\n  "],
-    ["- \\[a\n  + b\\]", "- \n\n  $$\n  a\n  + b\n  $$\n\n  "],
-    [String.raw`> - \[x\]`, "> - \n>\n>   $$\n>   x\n>   $$\n>\n>   "],
-    ["- outer\n  - \\[x\\]", "- outer\n  - \n\n    $$\n    x\n    $$\n\n    "],
-    [String.raw`1. \[x\]`, "1. \n\n   $$\n   x\n   $$\n\n   "],
+    [String.raw`> \[x\]`, "> $$\n> x\n> $$\n>\n> "],
+    ["> \\[a\n> + b\\]", "> $$\n> a\n> + b\n> $$\n>\n> "],
+    ["> \\[a\n>+ b\\]", "> $$\n> a\n> + b\n> $$\n>\n> "],
+    [String.raw`- \[x\]`, "- $$\n  x\n  $$\n\n  "],
+    ["- \\[a\n  + b\\]", "- $$\n  a\n  + b\n  $$\n\n  "],
+    [String.raw`> - \[x\]`, "> - $$\n>   x\n>   $$\n>\n>   "],
+    ["- outer\n  - \\[x\\]", "- outer\n  - $$\n    x\n    $$\n\n    "],
+    [String.raw`1. \[x\]`, "1. $$\n   x\n   $$\n\n   "],
   ])("emits display blocks with the source container: %s", (source, expected) => {
     expect(normalize(source)).toBe(expected);
     expect(normalize(expected)).toBe(expected);
+  });
+
+  it.each([
+    "- ",
+    "1.\t",
+    "> - ",
+    "- Outer\n  - ",
+  ])("maps voice positions for an item-start equation: %s", (prefix) => {
+    const source = prefix + "\\[x\\] after\n";
+    const prepared = prepareMessageMath(source);
+    const start = source.indexOf("\\[");
+    const end = source.indexOf("\\]") + 2;
+    expect(prepared.content.slice(0, start)).toBe(source.slice(0, start));
+    for (let cutoff = start; cutoff < end; cutoff += 1)
+      expect(prepared.remapCutoff(cutoff)).toBe(start);
+    expect(prepared.remapCutoff(end)).toBe(prepared.content.indexOf(" after"));
+    expect(prepared.remapCutoff(source.indexOf("after"))).toBe(
+      prepared.content.indexOf("after"),
+    );
+    expect(prepared.remapCutoff(source.length)).toBe(prepared.content.length);
+    expect(normalize(prepared.content)).toBe(prepared.content);
+  });
+
+  it.each([
+    " ",
+    "x",
+    "X",
+  ])("preserves source and all offsets in a task paragraph: %s", (state) => {
+    const source = `- [${state}] \\[x\\] after\n- [ ] Next`;
+    const prepared = prepareMessageMath(source);
+    expect(prepared.content).toBe(source);
+    for (let cutoff = 0; cutoff <= source.length; cutoff += 1)
+      expect(prepared.remapCutoff(cutoff)).toBe(cutoff);
   });
 
   it.each([
