@@ -9,6 +9,7 @@
     "ignoreUnknown": false,
     "includes": [
       "**",
+      "!src-tauri/target*",
       "!.pnpm-store",
       "!sdk/src/generated",
       "!src-tauri/gen",
