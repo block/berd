@@ -1,6 +1,8 @@
 import * as acpApi from "./acpApi";
 import { captureBackendConnectionGeneration } from "./acpConnection";
 import { getSessionBackend } from "./acpSessionBackends";
+import { LOCAL_BACKEND_ID } from "@/shared/api/acpBackendId";
+import { resolvePath } from "@/shared/api/pathResolver";
 import {
   readSessionExecutionConfigSnapshot,
   type AcpSessionConfigSnapshotContext,
@@ -473,6 +475,19 @@ export async function loadSession(
       }
       if (!effectiveWorkingDir) {
         throw new Error("Session working directory is unavailable.");
+      }
+      if (
+        getSessionBackend(sessionId) === LOCAL_BACKEND_ID &&
+        /^(?:~$|~[/\\])/.test(effectiveWorkingDir)
+      ) {
+        // Attached local workspaces can retain a home-relative path. Resolve
+        // only the home prefix so directory-name spaces remain untouched.
+        // Never expand a remote cwd against this machine's home directory.
+        const { path: home } = await runBoundedSessionMutation(sessionId, () =>
+          resolvePath({ parts: ["~"] }),
+        );
+        assertActive();
+        effectiveWorkingDir = home + effectiveWorkingDir.slice(1);
       }
       const response = await acpApi.loadSession(
         sessionId,

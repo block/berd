@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getBackendClient: vi.fn(),
   sessionInfo: vi.fn(),
+  resolvePath: vi.fn(),
   loadSession: vi.fn(),
   invalidateBackendConnection: vi.fn(),
   generations: new Map<string, number>(),
@@ -22,6 +23,10 @@ vi.mock("../acpConnection", () => ({
   interceptSessionNotifications: vi.fn(),
 }));
 
+vi.mock("@/shared/api/pathResolver", () => ({
+  resolvePath: mocks.resolvePath,
+}));
+
 // Keep acpLoadSession, the mutation registry, and acpApi real. A mock at the
 // acpLoadSession boundary would hide the literal "~" sent to the backend.
 describe("acpLoadSession working directory at the transport boundary", () => {
@@ -29,6 +34,7 @@ describe("acpLoadSession working directory at the transport boundary", () => {
     vi.resetModules();
     vi.resetAllMocks();
     mocks.generations.clear();
+    mocks.resolvePath.mockResolvedValue({ path: "/Users/dev" });
     mocks.invalidateBackendConnection.mockImplementation(
       async (backendId: string) => {
         mocks.generations.set(
@@ -109,6 +115,165 @@ describe("acpLoadSession working directory at the transport boundary", () => {
       cwd: workingDir,
       mcpServers: [],
     });
+  });
+
+  it.each([
+    ["~/goose artifacts", "/Users/dev", "/Users/dev/goose artifacts"],
+    ["~", "/Users/dev", "/Users/dev"],
+    ["~\\project", "C:\\Users\\dev", "C:\\Users\\dev\\project"],
+    [
+      "~/ project with trailing space ",
+      "/Users/dev",
+      "/Users/dev/ project with trailing space ",
+    ],
+  ])("expands the local home prefix in %s before transport", async (cwd, home, expected) => {
+    const { acpLoadSession } = await import("../acp");
+    mocks.resolvePath.mockResolvedValue({ path: home });
+
+    await acpLoadSession("session-1", cwd);
+
+    expect(mocks.resolvePath).toHaveBeenCalledExactlyOnceWith({ parts: ["~"] });
+    expect(mocks.sessionInfo).not.toHaveBeenCalled();
+    expect(mocks.loadSession).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      cwd: expected,
+      mcpServers: [],
+    });
+    // The prepared cwd is absolute too, so a later reload needs no resolution.
+    await acpLoadSession("session-1");
+    expect(mocks.resolvePath).toHaveBeenCalledOnce();
+    expect(mocks.loadSession).toHaveBeenLastCalledWith({
+      sessionId: "session-1",
+      cwd: expected,
+      mcpServers: [],
+    });
+  });
+
+  it.each([
+    "prepared",
+    "metadata",
+  ])("expands a local home prefix from %s", async (source) => {
+    const registry = await import("../acpSessionRegistry");
+    const { acpLoadSession } = await import("../acp");
+    if (source === "prepared") {
+      registry.registerPreparedSession(
+        "session-1",
+        "openai",
+        "~/goose artifacts",
+      );
+    } else {
+      mocks.sessionInfo.mockResolvedValue({
+        session: { sessionId: "session-1", cwd: "~/goose artifacts" },
+      });
+    }
+
+    await acpLoadSession("session-1");
+
+    expect(mocks.loadSession).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      cwd: "/Users/dev/goose artifacts",
+      mcpServers: [],
+    });
+  });
+
+  it.each([
+    "ssh:devbox#session-1",
+    "registered-remote",
+  ])("preserves remote home paths for %s", async (sessionId) => {
+    const { registerSessionBackend } = await import("../acpSessionBackends");
+    const { acpLoadSession } = await import("../acp");
+    if (sessionId === "registered-remote") {
+      registerSessionBackend(sessionId, "ssh:devbox", "session-1");
+    }
+    mocks.loadSession.mockResolvedValue({ configOptions: [] });
+
+    await acpLoadSession(sessionId, "~/goose artifacts");
+
+    expect(mocks.resolvePath).not.toHaveBeenCalled();
+    expect(mocks.getBackendClient).toHaveBeenLastCalledWith("ssh:devbox");
+    expect(mocks.loadSession).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      cwd: "~/goose artifacts",
+      mcpServers: [],
+    });
+  });
+
+  it("does not expand named-user home paths", async () => {
+    const { acpLoadSession } = await import("../acp");
+
+    await expect(
+      acpLoadSession("session-1", "~someone/project"),
+    ).rejects.toThrow("cwd must be an absolute path");
+
+    expect(mocks.resolvePath).not.toHaveBeenCalled();
+  });
+
+  it("does not dispatch history when home resolution fails", async () => {
+    const { acpLoadSession } = await import("../acp");
+    mocks.resolvePath.mockRejectedValue(new Error("home unavailable"));
+
+    await expect(
+      acpLoadSession("session-1", "~/goose artifacts"),
+    ).rejects.toThrow("home unavailable");
+
+    expect(mocks.loadSession).not.toHaveBeenCalled();
+  });
+
+  it("times out home resolution and admits a queued absolute load", async () => {
+    vi.useFakeTimers();
+    const { acpLoadSession } = await import("../acp");
+    let resolveHome!: (value: { path: string }) => void;
+    mocks.resolvePath.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveHome = resolve;
+      }),
+    );
+    const rejection = expect(
+      acpLoadSession("session-1", "~/goose artifacts"),
+    ).rejects.toThrow("ACP operation timed out");
+    await vi.advanceTimersByTimeAsync(0);
+    const newerLoad = acpLoadSession("session-1", "/new/project");
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    await rejection;
+    await newerLoad;
+    resolveHome({ path: "/stale/home" });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(mocks.invalidateBackendConnection).toHaveBeenCalledExactlyOnceWith(
+      "local",
+    );
+    expect(mocks.loadSession).toHaveBeenCalledExactlyOnceWith({
+      sessionId: "session-1",
+      cwd: "/new/project",
+      mcpServers: [],
+    });
+    await acpLoadSession("session-1");
+    expect(mocks.loadSession).toHaveBeenLastCalledWith({
+      sessionId: "session-1",
+      cwd: "/new/project",
+      mcpServers: [],
+    });
+  });
+
+  it("does not dispatch replay when the connection detaches during home resolution", async () => {
+    const { acpLoadSession } = await import("../acp");
+    let resolveHome!: (value: { path: string }) => void;
+    mocks.resolvePath.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveHome = resolve;
+      }),
+    );
+    const rejection = expect(
+      acpLoadSession("session-1", "~/goose artifacts"),
+    ).rejects.toThrow("ACP history replay was abandoned");
+    await vi.waitFor(() => expect(mocks.resolvePath).toHaveBeenCalledOnce());
+
+    await mocks.invalidateBackendConnection("local");
+    resolveHome({ path: "/Users/dev" });
+    await rejection;
+
+    expect(mocks.loadSession).not.toHaveBeenCalled();
   });
 
   it("recovers a remote directory from its owning backend, not the local home", async () => {
