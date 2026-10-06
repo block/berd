@@ -21,6 +21,9 @@ describe("MessageResponse math with the real renderer", () => {
     "Before \\[a\n+ b\\] after",
     "> \\[a\n> + b\\]",
     "- Formula \\[a\n  + b\\] afterwards",
+    "- Formula \\[a\n  - b\\] afterwards",
+    "- Formula \\[a\n  + \\beta\\] afterwards",
+    "- Formula \\[a\n  + b^2\\] afterwards",
     "> - Formula \\[a\n>   + b\\] afterwards",
     "- Outer\n  - Inner \\[a\n    + b\\] afterwards",
     "1. Formula \\[a\n   + b\\] afterwards\n2. Unrelated prose",
@@ -41,6 +44,12 @@ describe("MessageResponse math with the real renderer", () => {
 
   it.each([
     "- First \\[x\n- Second y\\]",
+    "- Parent \\[x\n  - Child y\\]",
+    "1. Parent \\[x\n   1. Child y\\]",
+    "> - Parent \\[x\n>   - Child y\\]",
+    "- Parent \\[x\n  + Child y\\]",
+    "- Parent \\[x\n  * Child b\\]",
+    "- Parent \\[x\n  - Child y\n  z\\]",
     "1. First \\[x\n2. Second y\\]",
     "> - First \\[x\n> - Second y\\]",
     "- First \\[x\n+ Second y\\]",
@@ -75,6 +84,19 @@ describe("MessageResponse math with the real renderer", () => {
     );
     expect(container.querySelectorAll("li")).toHaveLength(2);
     expect(container.querySelectorAll(".katex-display")).toHaveLength(1);
+  });
+
+  it("preserves parent and child as the closing delimiter streams in", () => {
+    const source = "- Parent \\[x\n  - Child y";
+    const { container, rerender } = render(
+      <MessageResponse>{source}</MessageResponse>,
+    );
+    for (const suffix of ["", "\\", "\\]"]) {
+      rerender(<MessageResponse>{source + suffix}</MessageResponse>);
+      expect(container.querySelectorAll("li")).toHaveLength(2);
+      expect(container.querySelector("li li")?.textContent).toContain("Child");
+      expect(container.querySelector(".katex-display")).toBeNull();
+    }
   });
 
   it("preserves raw HTML code and GFM autolink destinations", () => {

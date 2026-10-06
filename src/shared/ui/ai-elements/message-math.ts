@@ -109,6 +109,7 @@ type SourceNode = {
 type Edit = { start: number; end: number; replacement: string };
 type Range = { start: number; end: number };
 type Paragraph = Range & {
+  index: number;
   prefix: string;
   container: number;
   containerEnd: number;
@@ -174,6 +175,24 @@ function displayReplacement(body: string, prefix: string): string {
   return `\n${blank}\n${prefix}$$\n${lines.map((line) => prefix + line).join("\n")}\n${prefix}$$\n${blank}\n${prefix}`;
 }
 
+function isOperatorContinuation(body: string, prefix: string): boolean {
+  // CommonMark can mistake a simple algebra continuation for a child bullet.
+  // Admit only an operator followed by one explicit math atom. Ambiguous prose
+  // and more complex cross-item source retain their original Markdown instead.
+  const continuation = new RegExp(
+    "^" + prefix.replace(/[ \t]+/g, (spaces) => `[ \\t]{0,${spaces.length}}`),
+  );
+  return body
+    .split(/\r?\n/)
+    .slice(1)
+    .every((line) => {
+      const source = (prefix ? line.replace(continuation, "") : line).trim();
+      return /^[+-][ \t]+(?:[A-Za-z]|\d+(?:\.\d+)?|\\[A-Za-z]+)(?:[_^](?:[A-Za-z0-9]|\{[A-Za-z0-9]+\}))?$/.test(
+        source,
+      );
+    });
+}
+
 function segmentEdits(
   source: string,
   offset: number,
@@ -195,9 +214,9 @@ function segmentEdits(
       const body = source.slice(opening + 2, index);
       // Block displays cannot be inserted into inline formatting, table cells,
       // or across unrelated list/quote containers without changing their markup.
-      // A math continuation such as "+ b" can parse as a nested list. Stay
-      // within the opening item's/quote's source span even without blank lines,
-      // rather than requiring the closing paragraph to have the same AST parent.
+      // A math continuation such as "+ b" can parse as a nested list. Only
+      // admit that narrow algebra case across containers; a parent's source
+      // span also contains real child items and cannot alone protect them.
       // Preserve unrelated source rather than manufacture an invalid block.
       if (
         !paragraph ||
@@ -205,8 +224,15 @@ function segmentEdits(
         end > paragraph.containerEnd ||
         (paragraph.prefix.match(/>/g)?.length ?? 0) !==
           (closingParagraph.prefix.match(/>/g)?.length ?? 0) ||
-        (/\r?\n[ \t]*\r?\n/.test(body) &&
-          paragraph.container !== closingParagraph.container) ||
+        (paragraphs
+          .slice(paragraph.index, closingParagraph.index + 1)
+          .some(
+            (candidate) =>
+              candidate.start < end &&
+              candidate.end > start &&
+              candidate.container !== paragraph.container,
+          ) &&
+          !isOperatorContinuation(body, paragraph.prefix)) ||
         overlapsRange(nonDisplayRanges, start, end)
       ) {
         opening = undefined;
@@ -282,7 +308,14 @@ export function prepareMessageMath(content: string): PreparedMessageMath {
         .replace(/(?:[-+*]|\d+[.)])([ \t]+)/g, (marker) =>
           " ".repeat(marker.length),
         );
-      paragraphs.push({ start, end, prefix, container, containerEnd });
+      paragraphs.push({
+        index: paragraphs.length,
+        start,
+        end,
+        prefix,
+        container,
+        containerEnd,
+      });
     }
     if (
       inlineFormatting.has(node.type) &&

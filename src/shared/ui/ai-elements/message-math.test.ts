@@ -202,6 +202,20 @@ describe("message math normalization", () => {
     expect(prepared.remapCutoff(source.length)).toBe(source.length);
   });
 
+  it.each([
+    "- Parent \\[x\n  - Child y\\]",
+    "1. Parent \\[x\n   1. Child y\\]",
+    "> - Parent \\[x\n>   - Child y\\]",
+    "- Parent \\[x\n  + Child y\\]",
+    "- Parent \\[x\n  * b\\]",
+    "- Parent \\[x\n  - Child y\n  z\\]",
+  ])("preserves equations crossing into a child item: %s", (source) => {
+    const prepared = prepareMessageMath(source);
+    expect(prepared.content).toBe(source);
+    for (let cutoff = 0; cutoff <= source.length; cutoff += 1)
+      expect(prepared.remapCutoff(cutoff)).toBe(cutoff);
+  });
+
   it("maps boundaries across inserted display lines and shortened symbols", () => {
     const source = String.raw`$\alpha$ before \[x^2\] after $\rightarrow$ tail`;
     const prepared = prepareMessageMath(source);
@@ -218,6 +232,19 @@ describe("message math normalization", () => {
     );
     expect(prepared.remapCutoff(source.length)).toBe(prepared.content.length);
     expect(prepared.remapCutoff()).toBeUndefined();
+  });
+
+  it.each([
+    "+ b",
+    "- b",
+    "+ 2.5",
+    "+ \\beta",
+    "+ b^2",
+    "- x_{12}",
+  ])("keeps a simple algebra continuation: %s", (term) => {
+    const source = `- Formula \\[a\n  ${term}\\] afterwards`;
+    expect(normalize(source)).toContain(`  a\n  ${term}\n  $$`);
+    expect(normalize(source)).not.toContain("\\[");
   });
   it("normalizes equations through the source-size boundary", () => {
     const source = "a".repeat(127_993) + String.raw`\[x^2\]`;
