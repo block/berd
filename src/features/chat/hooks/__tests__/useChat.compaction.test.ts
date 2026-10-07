@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Message } from "@/shared/types/messages";
+import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { useChatStore } from "../../stores/chatStore";
 import {
   clearBufferedStreamingUpdatesForSession,
@@ -47,6 +48,10 @@ function createTextMessage(
 
 describe("useChat compaction", () => {
   beforeEach(() => {
+    useChatSessionStore.setState({
+      sessions: [],
+      activeWorkspaceBySession: {},
+    });
     mockAcpSendMessage.mockReset();
     mockAcpLoadSession.mockReset();
     clearBufferedStreamingUpdatesForSession("session-1");
@@ -120,6 +125,61 @@ describe("useChat compaction", () => {
     expect(useChatStore.getState().loadingSessionIds.has("session-1")).toBe(
       false,
     );
+  });
+
+  it("reloads compaction using the attached home-relative artifacts workspace", async () => {
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Artifacts",
+          createdAt: "2026-10-06T00:00:00Z",
+          updatedAt: "2026-10-06T00:00:00Z",
+          messageCount: 1,
+          workingDir: "/Users/dev/goose artifacts",
+          activeWorkspaceId: "artifacts",
+          workspaceAttachments: [
+            {
+              id: "artifacts",
+              path: "~/goose artifacts",
+              kind: "directory",
+              source: "selected",
+              usedByAgent: true,
+            },
+          ],
+        },
+      ],
+    });
+    mockAcpLoadSession.mockImplementation(async (sessionId: string) => {
+      ensureReplayBuffer(sessionId).push(
+        createTextMessage("replayed", "assistant", "Compacted history"),
+      );
+    });
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        createTextMessage("stale", "assistant", "Previous history"),
+      ]);
+    const { result } = renderHook(() => useChat("session-1"));
+
+    await act(async () => {
+      await result.current.compactConversation();
+    });
+
+    // The shared load boundary resolves this local path, not the hook.
+    expect(mockAcpLoadSession).toHaveBeenCalledWith(
+      "session-1",
+      "~/goose artifacts",
+    );
+    const messages = useChatStore.getState().messagesBySession["session-1"];
+    expect(messages.map((message) => message.id)).toEqual([
+      "replayed",
+      expect.any(String),
+    ]);
+    expect(messages[1].content[0]).toMatchObject({
+      type: "systemNotification",
+      notificationType: "compaction",
+    });
   });
 
   it("drops buffered compact command output before replacing the transcript", async () => {
