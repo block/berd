@@ -219,6 +219,16 @@ body,
   padding-left: 1.3em;
 }
 
+/* Tailwind preflight (globals.css) strips list markers; restore them for
+   rendered agent markdown. */
+.markdown-body ul {
+  list-style: disc;
+}
+
+.markdown-body ol {
+  list-style: decimal;
+}
+
 .markdown-body li {
   margin: 0.15em 0;
 }
@@ -571,6 +581,9 @@ body,
 }
 
 .menu-row {
+  /* The .highlighted fill is the focus affordance (roving focus follows
+     it); suppress WebKit's native outline, which focus-override doesn't. */
+  outline: none;
   display: flex;
   align-items: center;
   gap: 8px;
