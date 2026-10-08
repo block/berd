@@ -41,6 +41,8 @@ export interface ExpandedLayout {
   popoverRect: Rect;
   /** Whether the popover opens above the avatar. */
   popoverAbove: boolean;
+  /** Side placement used for the popover, or null for vertical placement. */
+  popoverSide: "left" | "right" | null;
 }
 
 export const rect = (
@@ -165,19 +167,50 @@ function clampPopoverOrigin(args: {
  * side has room. Horizontally it centers on the avatar, clamped fully
  * on-screen. The avatar's global rect never changes.
  */
-export function computeExpandedLayout(args: {
+export type ExpandedPlacement = "vertical" | "side";
+
+function expandedLayoutFromGlobals(args: {
+  avatarGlobal: Rect;
+  popoverGlobal: Rect;
+  popoverAbove: boolean;
+  popoverSide: "left" | "right" | null;
+}): ExpandedLayout {
+  const { avatarGlobal, popoverGlobal } = args;
+  // The window grows past the popover by the shadow margin so the card's
+  // box-shadow has room to paint. Only the WINDOW inflates — the popover
+  // and avatar keep their global rects, so nothing moves on screen.
+  const windowGlobal = expandToInclude(
+    avatarGlobal,
+    inflate(popoverGlobal, POPOVER_SHADOW_MARGIN),
+  );
+
+  return {
+    windowFrame: windowGlobal,
+    avatarRect: rect(
+      avatarGlobal.x - windowGlobal.x,
+      avatarGlobal.y - windowGlobal.y,
+      avatarGlobal.width,
+      avatarGlobal.height,
+    ),
+    popoverRect: rect(
+      popoverGlobal.x - windowGlobal.x,
+      popoverGlobal.y - windowGlobal.y,
+      popoverGlobal.width,
+      popoverGlobal.height,
+    ),
+    popoverAbove: args.popoverAbove,
+    popoverSide: args.popoverSide,
+  };
+}
+
+function computeVerticalExpandedLayout(args: {
   avatarGlobal: Rect;
   popoverSize: Size;
-  screens: ScreenInfo[];
-  gap?: number;
-  margin?: number;
+  visible: Rect;
+  gap: number;
+  margin: number;
 }): ExpandedLayout {
-  const { avatarGlobal, popoverSize, screens } = args;
-  const gap = args.gap ?? 8;
-  const margin = args.margin ?? 12;
-
-  const screen = screenContaining(rectCenter(avatarGlobal), screens);
-  const visible = screen.visibleFrame;
+  const { avatarGlobal, popoverSize, visible, gap, margin } = args;
 
   // Vertical: "lower half" means center.y past the visible midpoint.
   const preferAbove = rectCenter(avatarGlobal).y > rectCenter(visible).y;
@@ -215,6 +248,7 @@ export function computeExpandedLayout(args: {
     popoverSize.width,
     popoverSize.height,
   );
+  let popoverSide: "left" | "right" | null = null;
 
   // No-occlusion invariant: near screen corners the
   // vertical clamp can slide the popover back over the avatar, hiding the
@@ -257,31 +291,88 @@ export function computeExpandedLayout(args: {
       );
     } else {
       popoverGlobal = sideCandidate;
+      popoverSide = placeRight ? "right" : "left";
     }
   }
 
-  // The window grows past the popover by the shadow margin so the card's
-  // box-shadow has room to paint. Only the WINDOW inflates — the popover
-  // and avatar keep their global rects, so nothing moves on screen.
-  const windowGlobal = expandToInclude(
+  return expandedLayoutFromGlobals({
     avatarGlobal,
-    inflate(popoverGlobal, POPOVER_SHADOW_MARGIN),
-  );
-
-  return {
-    windowFrame: windowGlobal,
-    avatarRect: rect(
-      avatarGlobal.x - windowGlobal.x,
-      avatarGlobal.y - windowGlobal.y,
-      avatarGlobal.width,
-      avatarGlobal.height,
-    ),
-    popoverRect: rect(
-      popoverGlobal.x - windowGlobal.x,
-      popoverGlobal.y - windowGlobal.y,
-      popoverGlobal.width,
-      popoverGlobal.height,
-    ),
+    popoverGlobal,
     popoverAbove: above,
-  };
+    popoverSide,
+  });
+}
+
+/**
+ * Computes the expanded panel layout for an avatar at avatarGlobal.
+ *
+ * The popover opens above the avatar when the avatar sits in the lower half
+ * of its screen's visible frame (and below otherwise), preferring whichever
+ * side has room. Horizontally it centers on the avatar, clamped fully
+ * on-screen. The avatar's global rect never changes. Composer-only callers
+ * may request side placement so the pill sits like a speech bubble beside
+ * the avatar.
+ */
+export function computeExpandedLayout(args: {
+  avatarGlobal: Rect;
+  popoverSize: Size;
+  screens: ScreenInfo[];
+  gap?: number;
+  margin?: number;
+  placement?: ExpandedPlacement;
+}): ExpandedLayout {
+  const { avatarGlobal, popoverSize, screens } = args;
+  const gap = args.gap ?? 8;
+  const margin = args.margin ?? 12;
+
+  const screen = screenContaining(rectCenter(avatarGlobal), screens);
+  const visible = screen.visibleFrame;
+
+  if (args.placement === "side") {
+    const clampedTop = clampPopoverOrigin({
+      requested: rectCenter(avatarGlobal).y - popoverSize.height / 2,
+      visibleStart: visible.y,
+      visibleEnd: rectBottom(visible),
+      popoverExtent: popoverSize.height,
+      margin,
+    });
+    const roomLeft = avatarGlobal.x - gap - (visible.x + margin);
+    const roomRight =
+      rectRight(visible) - margin - rectRight(avatarGlobal) - gap;
+    const preferred: "left" | "right" =
+      rectCenter(avatarGlobal).x > rectCenter(visible).x ? "left" : "right";
+    const sides: Array<"left" | "right"> =
+      preferred === "left" ? ["left", "right"] : ["right", "left"];
+    const side = sides.find((candidate) =>
+      candidate === "left"
+        ? roomLeft >= popoverSize.width
+        : roomRight >= popoverSize.width,
+    );
+
+    if (side !== undefined) {
+      const left =
+        side === "left"
+          ? avatarGlobal.x - gap - popoverSize.width
+          : rectRight(avatarGlobal) + gap;
+      return expandedLayoutFromGlobals({
+        avatarGlobal,
+        popoverGlobal: rect(
+          left,
+          clampedTop,
+          popoverSize.width,
+          popoverSize.height,
+        ),
+        popoverAbove: false,
+        popoverSide: side,
+      });
+    }
+  }
+
+  return computeVerticalExpandedLayout({
+    avatarGlobal,
+    popoverSize,
+    visible,
+    gap,
+    margin,
+  });
 }

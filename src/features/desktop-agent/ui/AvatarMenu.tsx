@@ -39,7 +39,7 @@ const clamp = (value: number, min: number, max: number) =>
   Math.min(Math.max(value, min), Math.max(min, max));
 
 function rootHeight(agentSelector: boolean): number {
-  const rows = agentSelector ? 3 : 2;
+  const rows = agentSelector ? 4 : 3;
   return (
     MENU_PADDING * 2 +
     rows * ROW_HEIGHT +
@@ -167,6 +167,7 @@ export function AvatarMenu({
   layout,
   agentSelector,
   model,
+  onNewChat,
   onSelectAgent,
   onSelectFresh,
   onSettings,
@@ -175,6 +176,7 @@ export function AvatarMenu({
   layout: ExpandedLayout;
   agentSelector: boolean;
   model: AvatarMenuModel;
+  onNewChat(): void;
   onSelectAgent(agent: AgentInfo): void;
   onSelectFresh(): void;
   onSettings(): void;
@@ -186,11 +188,11 @@ export function AvatarMenu({
   const [subHighlight, setSubHighlight] = useState<number | null>(null);
   const closeTimer = useRef<number | null>(null);
 
-  const rootItems = useMemo(
+  const rootItems = useMemo<Array<"newChat" | "switch" | "settings" | "hide">>(
     () =>
       agentSelector
-        ? (["switch", "settings", "hide"] as const)
-        : (["settings", "hide"] as const),
+        ? ["newChat", "switch", "settings", "hide"]
+        : ["newChat", "settings", "hide"],
     [agentSelector],
   );
   const subItems = useMemo<("fresh" | AgentInfo)[]>(
@@ -234,6 +236,10 @@ export function AvatarMenu({
 
   const activateRoot = useCallback(
     (item: (typeof rootItems)[number]) => {
+      if (item === "newChat") {
+        onNewChat();
+        return;
+      }
       if (item === "switch") {
         openSubmenu();
         setSubHighlight(0);
@@ -242,7 +248,7 @@ export function AvatarMenu({
       if (item === "settings") onSettings();
       else onHide();
     },
-    [onHide, onSettings, openSubmenu],
+    [onHide, onNewChat, onSettings, openSubmenu],
   );
 
   useEffect(() => {
@@ -344,13 +350,23 @@ export function AvatarMenu({
         role="menu"
         onPointerEnter={clearCloseTimer}
       >
+        {row({
+          key: "newChat",
+          highlighted: highlight === rootItems.indexOf("newChat"),
+          onHover: () => {
+            setHighlight(rootItems.indexOf("newChat"));
+            scheduleSubmenuClose();
+          },
+          onClick: onNewChat,
+          children: <span className="menu-label">{t("menu.newChat")}</span>,
+        })}
         {agentSelector && (
           <>
             {row({
               key: "switch",
-              highlighted: highlight === 0,
+              highlighted: highlight === rootItems.indexOf("switch"),
               onHover: () => {
-                setHighlight(0);
+                setHighlight(rootItems.indexOf("switch"));
                 openSubmenu();
               },
               onClick: () => {

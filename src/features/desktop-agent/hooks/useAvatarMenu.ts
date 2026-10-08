@@ -41,6 +41,7 @@ export function useAvatarMenu(args: {
   prepareMenu(): Promise<AvatarMenuModel>;
   selectAgent(agentId: string): void;
   selectFresh(): void;
+  newChat(messageCount: number): void;
 } {
   // Callbacks capture refs so a menu opened against one render can still
   // act on the live values at click time.
@@ -101,5 +102,18 @@ export function useAvatarMenu(args: {
     select.current({ kind: "fresh" });
   }, []);
 
-  return { prepareMenu, selectAgent, selectFresh };
+  const newChat = useCallback((messageCount: number) => {
+    if (pending.current !== null) return; // already armed: empty new chat
+    if (messageCount === 0) return; // current chat is already empty
+    const activeAgent = agents.current.find(
+      (agent) => agent.agentId === active.current,
+    );
+    if (activeAgent !== undefined) {
+      select.current({ kind: "agent", agent: activeAgent });
+      return;
+    }
+    select.current({ kind: "fresh" });
+  }, []);
+
+  return { prepareMenu, selectAgent, selectFresh, newChat };
 }

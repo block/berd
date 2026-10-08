@@ -16,6 +16,7 @@ import {
   computeExpandedLayout,
   rect,
   type ExpandedLayout,
+  type ExpandedPlacement,
   type Rect,
   type ScreenInfo,
   type Size,
@@ -108,7 +109,10 @@ export class PanelStateMachine {
    * default popover size (the composer-only first-run popover is
    * smaller; growing to the full chat re-runs this same path).
    */
-  async computeExpanded(size?: Size): Promise<ExpandedLayout> {
+  async computeExpanded(
+    size?: Size,
+    placement?: ExpandedPlacement,
+  ): Promise<ExpandedLayout> {
     if (this.modeInternal === "avatar") {
       await this.syncFromPanel();
     }
@@ -117,6 +121,7 @@ export class PanelStateMachine {
       avatarGlobal: this.avatarGlobal,
       popoverSize: size ?? this.popoverSize,
       screens,
+      placement,
     });
   }
 

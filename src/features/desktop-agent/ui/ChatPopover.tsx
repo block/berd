@@ -158,7 +158,7 @@ export function ChatPopover({
   variant?: "full" | "composer";
   /** Which edge of the overlay region faces the avatar — the composer-
    *  only pill hugs it. */
-  anchor?: "top" | "bottom";
+  anchor?: "top" | "bottom" | "center";
 }) {
   const { t } = useTranslation("desktop-agent");
   const [draft, setDraft] = useState("");

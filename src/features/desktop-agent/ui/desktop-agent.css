@@ -85,6 +85,10 @@ body,
   justify-content: flex-start;
 }
 
+.chat-popover.composer-only.anchor-center {
+  justify-content: center;
+}
+
 .empty-hint {
   color: rgba(255, 255, 255, 0.4);
   text-align: center;

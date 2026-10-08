@@ -34,7 +34,9 @@ const mocks = vi.hoisted(() => ({
     collapse: vi.fn(),
   },
   agentId: null as string | null,
+  sessionMessages: [] as Array<unknown>,
   openMenu: vi.fn(),
+  newChat: vi.fn(),
   invoke: vi.fn(async () => undefined),
   avatarProps: {} as Record<string, unknown>,
 }));
@@ -63,7 +65,7 @@ vi.mock("@/features/desktop-agent/hooks/usePerch", () => ({
 }));
 vi.mock("@/features/desktop-agent/hooks/useSession", () => ({
   useSession: () => ({
-    messages: [],
+    messages: mocks.sessionMessages,
     pendingSelection: null,
     activeAgentId: mocks.agentId,
     attached: true,
@@ -75,6 +77,7 @@ vi.mock("@/features/desktop-agent/hooks/useAvatarMenu", () => ({
     prepareMenu: mocks.openMenu,
     selectAgent: vi.fn(),
     selectFresh: vi.fn(),
+    newChat: mocks.newChat,
   }),
 }));
 vi.mock("@/features/desktop-agent/ui/AgentAvatar", () => ({
@@ -84,7 +87,13 @@ vi.mock("@/features/desktop-agent/ui/AgentAvatar", () => ({
   },
 }));
 vi.mock("@/features/desktop-agent/ui/ChatPopover", () => ({
-  ChatPopover: () => null,
+  ChatPopover: (props: Record<string, unknown>) => (
+    <div
+      data-testid="chat-popover"
+      data-variant={props.variant as string}
+      data-anchor={props.anchor as string}
+    />
+  ),
 }));
 vi.mock("@/features/experiments/experimentPreferences", () => ({
   useExperiment: () => ({ enabled: true, config: {} }),
@@ -102,6 +111,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.stubGlobal("PointerEvent", MouseEvent);
   mocks.agentId = null;
+  mocks.sessionMessages = [];
   mocks.port.mode = "avatar";
   mocks.port.computeExpanded.mockResolvedValue({
     avatarRect: { x: 0, y: 0, width: 94, height: 94 },
@@ -496,4 +506,30 @@ it("cancelling a pending drop prevents stale placement and keeps a new hold inta
   expect(mocks.avatarProps.target).toBe("idle");
   expect(mocks.port.computeExpanded).not.toHaveBeenCalled();
   unmount();
+});
+
+it("choosing New chat closes the menu and expands composer-only on the side", async () => {
+  mocks.sessionMessages = [{ id: "m1" }];
+  mocks.newChat.mockImplementation(() => {
+    mocks.sessionMessages = [];
+  });
+  const { findByTestId, findByText } = render(<DesktopAgentApp />);
+  const hit = (await findByTestId("avatar")).parentElement;
+  if (!hit) throw new Error("missing hit target");
+
+  await act(async () => fireEvent.contextMenu(hit));
+  const newChat = await findByText("New chat");
+  await act(async () => fireEvent.click(newChat));
+
+  expect(mocks.newChat).toHaveBeenCalledWith(1);
+  expect(mocks.port.collapse).toHaveBeenCalledOnce();
+  expect(mocks.port.computeExpanded).toHaveBeenCalledWith(
+    { width: 380, height: 96 },
+    "side",
+  );
+  expect(mocks.port.applyExpanded).toHaveBeenCalledOnce();
+  expect(await findByTestId("chat-popover")).toHaveAttribute(
+    "data-variant",
+    "composer",
+  );
 });

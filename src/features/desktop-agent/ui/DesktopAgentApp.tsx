@@ -142,16 +142,19 @@ export function DesktopAgentApp() {
     }
   }, []);
 
-  const expand = useCallback(async () => {
+  const expand = useCallback(async (options?: { composerOnly?: boolean }) => {
     if (openingMenu.current || machine.mode !== "avatar") return;
     const generation = ++gestureGeneration.current;
     // Composer-first: an empty chat (nothing to show, including reopen
     // of a still-empty chat) opens as just the composer pill; a chat
-    // with messages opens as the full window.
-    const composerOnly = sessionMessageCount.current === 0;
+    // with messages opens as the full window. New Chat forces the
+    // composer-only view before React lands the cleared transcript.
+    const composerOnly =
+      options?.composerOnly ?? sessionMessageCount.current === 0;
     // Anti-blink: compute first, commit to the tree, THEN resize native.
     const next = await machine.computeExpanded(
       composerOnly ? COMPOSER_ONLY_SIZE : undefined,
+      composerOnly ? "side" : undefined,
     );
     if (generation !== gestureGeneration.current || machine.mode !== "avatar") {
       return;
@@ -560,7 +563,13 @@ export function DesktopAgentApp() {
             session={session}
             perch={perch}
             variant={popoverVariant}
-            anchor={layout.popoverAbove ? "bottom" : "top"}
+            anchor={
+              layout.popoverSide === null
+                ? layout.popoverAbove
+                  ? "bottom"
+                  : "top"
+                : "center"
+            }
           />
         </div>
       )}
@@ -578,6 +587,14 @@ export function DesktopAgentApp() {
             layout={menu.layout}
             agentSelector={agentSelector}
             model={menu.model}
+            onNewChat={() => {
+              void (async () => {
+                avatarMenu.newChat(session.messages.length);
+                await closeMenu();
+                if (machine.mode === "expanded") await collapse();
+                await expand({ composerOnly: true });
+              })();
+            }}
             onSelectAgent={(agent) => {
               avatarMenu.selectAgent(agent.agentId);
               void closeMenu();

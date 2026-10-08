@@ -14,6 +14,7 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string) =>
       ({
+        "menu.newChat": "New chat",
         "menu.switchAgent": "Switch agent",
         "menu.settings": "Settings",
         "menu.dismiss": "Hide",
@@ -39,6 +40,7 @@ const layout: ExpandedLayout = {
   avatarRect: { x: 0, y: 100, width: 94, height: 94 },
   popoverRect: { x: 94, y: 0, width: 438, height: 124 },
   popoverAbove: false,
+  popoverSide: null,
 };
 
 function renderMenu(overrides?: Partial<Parameters<typeof AvatarMenu>[0]>) {
@@ -58,6 +60,7 @@ function renderMenu(overrides?: Partial<Parameters<typeof AvatarMenu>[0]>) {
       checkedAgentId: null,
       checkedFresh: true,
     },
+    onNewChat: vi.fn(),
     onSelectAgent: vi.fn(),
     onSelectFresh: vi.fn(),
     onSettings: vi.fn(),
@@ -73,6 +76,7 @@ describe("AvatarMenu keyboard and activation", () => {
     const props = renderMenu();
     fireEvent.keyDown(window, { key: "ArrowDown" });
     fireEvent.keyDown(window, { key: "ArrowDown" });
+    fireEvent.keyDown(window, { key: "ArrowDown" });
     fireEvent.keyDown(window, { key: "Enter" });
     expect(props.onSettings).toHaveBeenCalledOnce();
     fireEvent.keyDown(window, { key: "ArrowDown" });
@@ -83,6 +87,7 @@ describe("AvatarMenu keyboard and activation", () => {
   it("opens, navigates, activates, and closes the submenu with arrows", () => {
     const props = renderMenu();
     fireEvent.keyDown(window, { key: "ArrowDown" });
+    fireEvent.keyDown(window, { key: "ArrowDown" });
     fireEvent.keyDown(window, { key: "ArrowRight" });
     expect(screen.getByText("Berd")).toBeInTheDocument();
     fireEvent.keyDown(window, { key: "ArrowDown" });
@@ -91,6 +96,15 @@ describe("AvatarMenu keyboard and activation", () => {
 
     fireEvent.keyDown(window, { key: "ArrowLeft" });
     expect(screen.queryByText("Scout")).not.toBeInTheDocument();
+  });
+
+  it("renders New chat first and activates it by keyboard", () => {
+    const props = renderMenu();
+    const rows = screen.getAllByRole("button");
+    expect(rows[0]).toHaveTextContent("New chat");
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(props.onNewChat).toHaveBeenCalledOnce();
   });
 
   it("supports hover + click submenu activation", () => {
@@ -106,6 +120,7 @@ describe("AvatarMenu keyboard and activation", () => {
         layout={layout}
         agentSelector={true}
         model={{ agents: [], checkedAgentId: null, checkedFresh: true }}
+        onNewChat={vi.fn()}
         onSelectAgent={vi.fn()}
         onSelectFresh={vi.fn()}
         onSettings={vi.fn()}
@@ -121,6 +136,7 @@ describe("AvatarMenu keyboard and activation", () => {
         layout={layout}
         agentSelector={false}
         model={{ agents: [], checkedAgentId: null, checkedFresh: false }}
+        onNewChat={vi.fn()}
         onSelectAgent={vi.fn()}
         onSelectFresh={vi.fn()}
         onSettings={vi.fn()}
@@ -128,6 +144,7 @@ describe("AvatarMenu keyboard and activation", () => {
       />,
     );
     expect(screen.queryByText("Switch agent")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button")[0]).toHaveTextContent("New chat");
     expect(screen.getByText("Settings")).toBeInTheDocument();
     expect(screen.getByText("Hide")).toBeInTheDocument();
   });

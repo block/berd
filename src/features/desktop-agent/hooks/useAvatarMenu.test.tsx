@@ -125,3 +125,60 @@ it("arms fresh on select and no-ops when fresh is already armed", async () => {
   act(() => result.current.selectFresh());
   expect(select).not.toHaveBeenCalled();
 });
+
+it("newChat no-ops when a pending selection is already armed or the chat is empty", async () => {
+  const select = vi.fn();
+  const { result, rerender } = renderHook(
+    ({
+      pending,
+      active,
+    }: {
+      pending: PendingSelection | null;
+      active: string | null;
+    }) =>
+      useAvatarMenu({
+        pendingSelection: pending,
+        activeAgentId: active,
+        select,
+        agentSelector: true,
+      }),
+    {
+      initialProps: {
+        pending: { kind: "fresh" } as PendingSelection | null,
+        active: null,
+      },
+    },
+  );
+  await act(() => result.current.prepareMenu());
+  act(() => result.current.newChat(3));
+  expect(select).not.toHaveBeenCalled();
+
+  rerender({ pending: null, active: null });
+  act(() => result.current.newChat(0));
+  expect(select).not.toHaveBeenCalled();
+});
+
+it("newChat keeps the active agent when the fetched list contains it", async () => {
+  const select = vi.fn();
+  const { result } = renderMenu({ activeAgentId: "a1", select });
+  await act(() => result.current.prepareMenu());
+  act(() => result.current.newChat(2));
+  expect(select).toHaveBeenCalledWith({
+    kind: "agent",
+    agent: {
+      agentId: "a1",
+      name: "Scout",
+      systemPrompt: "",
+      provider: null,
+      model: null,
+    },
+  });
+});
+
+it("newChat falls back to fresh when the active agent is unavailable", async () => {
+  const select = vi.fn();
+  const { result } = renderMenu({ activeAgentId: "missing", select });
+  await act(() => result.current.prepareMenu());
+  act(() => result.current.newChat(2));
+  expect(select).toHaveBeenCalledWith({ kind: "fresh" });
+});

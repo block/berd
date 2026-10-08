@@ -274,6 +274,129 @@ describe("computeExpandedLayout", () => {
   });
 });
 
+describe("computeExpandedLayout side placement", () => {
+  const popoverSize = { width: 380, height: 96 };
+
+  function globalPopover(layout: ReturnType<typeof computeExpandedLayout>) {
+    return rect(
+      layout.popoverRect.x + layout.windowFrame.x,
+      layout.popoverRect.y + layout.windowFrame.y,
+      layout.popoverRect.width,
+      layout.popoverRect.height,
+    );
+  }
+
+  test("right-half avatar places the popover on the left", () => {
+    const avatar = rect(1200, 400, 90, 90);
+    const layout = computeExpandedLayout({
+      avatarGlobal: avatar,
+      popoverSize,
+      screens,
+      placement: "side",
+    });
+    const popover = globalPopover(layout);
+    expect(layout.popoverSide).toBe("left");
+    expect(rectRight(popover)).toBeLessThanOrEqual(avatar.x - 8);
+  });
+
+  test("left-half avatar places the popover on the right", () => {
+    const avatar = rect(120, 400, 90, 90);
+    const layout = computeExpandedLayout({
+      avatarGlobal: avatar,
+      popoverSize,
+      screens,
+      placement: "side",
+    });
+    const popover = globalPopover(layout);
+    expect(layout.popoverSide).toBe("right");
+    expect(popover.x).toBeGreaterThanOrEqual(rectRight(avatar) + 8);
+  });
+
+  test("side placement vertically centers on the avatar, clamped to visible frame", () => {
+    const avatar = rect(120, 400, 90, 90);
+    const layout = computeExpandedLayout({
+      avatarGlobal: avatar,
+      popoverSize,
+      screens,
+      placement: "side",
+    });
+    const popover = globalPopover(layout);
+    expect(popover.y + popover.height / 2).toBe(avatar.y + avatar.height / 2);
+
+    const edgeAvatar = rect(120, 25, 90, 90);
+    const edgeLayout = computeExpandedLayout({
+      avatarGlobal: edgeAvatar,
+      popoverSize,
+      screens,
+      placement: "side",
+    });
+    expect(globalPopover(edgeLayout).y).toBeGreaterThanOrEqual(
+      mainScreen.visibleFrame.y + 12,
+    );
+  });
+
+  test("falls back to the other side when the preferred side lacks room", () => {
+    const avatar = rect(1050, 400, 90, 90);
+    const narrow: ScreenInfo = {
+      frame: rect(0, 0, 1200, 900),
+      visibleFrame: rect(0, 25, 1200, 875),
+      isMain: true,
+    };
+    const layout = computeExpandedLayout({
+      avatarGlobal: avatar,
+      popoverSize,
+      screens: [narrow],
+      placement: "side",
+    });
+    expect(layout.popoverSide).toBe("left");
+  });
+
+  test("falls back to vertical when neither side has room", () => {
+    const tiny: ScreenInfo = {
+      frame: rect(0, 0, 300, 700),
+      visibleFrame: rect(0, 25, 300, 675),
+      isMain: true,
+    };
+    const avatar = rect(100, 100, 90, 90);
+    const layout = computeExpandedLayout({
+      avatarGlobal: avatar,
+      popoverSize,
+      screens: [tiny],
+      placement: "side",
+    });
+    expect(layout.popoverSide).toBeNull();
+    expect(layout.popoverRect.y).toBeGreaterThanOrEqual(
+      rectBottom(layout.avatarRect),
+    );
+  });
+
+  test("avatar rect stays unchanged and window contains inflated popover", () => {
+    const avatar = rect(120, 400, 90, 90);
+    const layout = computeExpandedLayout({
+      avatarGlobal: avatar,
+      popoverSize,
+      screens,
+      placement: "side",
+    });
+    expect({
+      x: layout.avatarRect.x + layout.windowFrame.x,
+      y: layout.avatarRect.y + layout.windowFrame.y,
+      width: layout.avatarRect.width,
+      height: layout.avatarRect.height,
+    }).toEqual(avatar);
+
+    const inflatedPopover = inflate(layout.popoverRect, POPOVER_SHADOW_MARGIN);
+    expect(inflatedPopover.x).toBeGreaterThanOrEqual(0);
+    expect(inflatedPopover.y).toBeGreaterThanOrEqual(0);
+    expect(rectRight(inflatedPopover)).toBeLessThanOrEqual(
+      layout.windowFrame.width,
+    );
+    expect(rectBottom(inflatedPopover)).toBeLessThanOrEqual(
+      layout.windowFrame.height,
+    );
+  });
+});
+
 describe("popover shadow margin", () => {
   test("window contains the inflated popover while avatar global rect is unchanged", () => {
     const avatar = rect(600, 700, 90, 90);
