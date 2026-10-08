@@ -164,6 +164,8 @@ export function ChatPopover({
 }) {
   const { t } = useTranslation("desktop-agent");
   const [draft, setDraft] = useState("");
+  const [capturePending, setCapturePending] = useState(false);
+  const capturePendingRef = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   // Follow streaming output only while the user is already near the
@@ -221,7 +223,12 @@ export function ChatPopover({
     // view of the internal guards — checked before the draft clears, so
     // a bounced Enter never eats the message: the draft stays put and
     // the hint row already shows the streaming state.
-    if (session.agentSendInFlight || session.sendBusy()) return;
+    if (
+      session.agentSendInFlight ||
+      session.sendBusy() ||
+      capturePendingRef.current
+    )
+      return;
     const text = draft;
     if (text.trim().length === 0) return;
     // House rule: the composer clears immediately after snapshotting.
@@ -230,6 +237,10 @@ export function ChatPopover({
     // perch that changed mid-flight (the capture/URL fetches below are
     // async and the user can dismount meanwhile).
     const source = chooseComposerSendSource({ perchPhase: perch.phase });
+    if (source === "perchedWindow") {
+      capturePendingRef.current = true;
+      setCapturePending(true);
+    }
     const perchPhase = perch.phase;
     const perchApp = perch.appName;
     const perchTitle = perch.title;
@@ -251,11 +262,19 @@ export function ChatPopover({
       // Fresh capture per send; failure degrades to a text-only send.
       const image =
         source === "perchedWindow" ? await perch.captureNow() : null;
-      const dispatched = await session.send(
-        text,
-        image ? [{ type: "image", ...image }] : undefined,
-        makePreamble,
-      );
+      let dispatched = false;
+      try {
+        dispatched = await session.send(
+          text,
+          image ? [{ type: "image", ...image }] : undefined,
+          makePreamble,
+        );
+      } finally {
+        if (source === "perchedWindow") {
+          capturePendingRef.current = false;
+          setCapturePending(false);
+        }
+      }
       // The gate check at the top of submit() ran BEFORE the async
       // capture/URL awaits above — a competing send that dispatched
       // during that gap closes the gate, and THIS send bounces off it
@@ -290,6 +309,7 @@ export function ChatPopover({
     reconnectExhausted: session.reconnectExhausted,
     sendStalled: session.sendStalled,
     agentSendInFlight: session.agentSendInFlight,
+    capturePending,
     pendingName,
     thinking: session.activity === "thinking",
   });
@@ -351,7 +371,11 @@ export function ChatPopover({
             className="send-pill"
             title={t("composer.send")}
             onClick={submit}
-            disabled={draft.trim().length === 0 || session.agentSendInFlight}
+            disabled={
+              draft.trim().length === 0 ||
+              session.agentSendInFlight ||
+              capturePending
+            }
           >
             ↑
           </button>

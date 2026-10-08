@@ -16,6 +16,7 @@ const quiet: ComposerHintInputs = {
   reconnectExhausted: false,
   sendStalled: false,
   agentSendInFlight: false,
+  capturePending: false,
   pendingName: null,
   thinking: false,
 };
@@ -37,6 +38,7 @@ describe("deriveComposerHint", () => {
       reconnectExhausted: true,
       sendStalled: true,
       agentSendInFlight: true,
+      capturePending: true,
       pendingName: "Panda",
       thinking: true,
     };
@@ -57,15 +59,24 @@ describe("deriveComposerHint", () => {
     expect(deriveComposerHint(off)?.key).toBe("hint.connecting");
   });
 
-  test("attached ladder: stalled > agent starting > thinking", () => {
+  test("attached ladder: stalled > capturing > agent starting > thinking", () => {
     expect(
       deriveComposerHint({
         ...quiet,
         sendStalled: true,
+        capturePending: true,
         agentSendInFlight: true,
         thinking: true,
       })?.key,
     ).toBe("hint.stalled");
+    expect(
+      deriveComposerHint({
+        ...quiet,
+        capturePending: true,
+        agentSendInFlight: true,
+        thinking: true,
+      })?.key,
+    ).toBe("hint.capturing");
     expect(
       deriveComposerHint({
         ...quiet,

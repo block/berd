@@ -23,6 +23,7 @@
     "retry": "Reintentar conexión",
     "sendFailed": "No se pudo enviar: {{message}}",
     "stalled": "Sigue trabajando — puede que el servidor del agente no esté disponible.",
+    "capturing": "Capturando ventana…",
     "thinking": "Pensando…",
     "agentStartingGeneric": "El agente se está iniciando…",
     "perchError": "Problema al posarse: {{message}}",

@@ -23,6 +23,7 @@
     "retry": "Retry connection",
     "sendFailed": "Couldn't send: {{message}}",
     "stalled": "Still working — the agent server may be unreachable.",
+    "capturing": "Capturing window…",
     "thinking": "Thinking…",
     "agentStartingGeneric": "The agent is starting up…",
     "perchError": "Perch problem: {{message}}",

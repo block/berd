@@ -12,10 +12,11 @@
 //   2. perch error       — AX/capture problems from the perch layer
 //   3. disconnected      — exhausted > reconnecting > connecting
 //   4. stalled           — thinking with zero traffic for 25s
-//   5. agent starting    — deferred create in flight
-//   6. perch hint        — ambient perched-on identity
-//   7. thinking          — plain activity indicator
-//   8. null              — no hint row
+//   5. capture pending   — perched-window snapshot before dispatch
+//   6. agent starting    — deferred create in flight
+//   7. perch hint        — ambient perched-on identity
+//   8. thinking          — plain activity indicator
+//   9. null              — no hint row
 //
 // (The prototype's "notice" rung — delivered-but-status for the
 // out-of-process dispatch path — was dead plumbing in the in-process
@@ -40,6 +41,7 @@ export interface ComposerHintInputs {
   reconnectExhausted: boolean;
   sendStalled: boolean;
   agentSendInFlight: boolean;
+  capturePending: boolean;
   pendingName: string | null;
   thinking: boolean;
 }
@@ -96,6 +98,7 @@ export function deriveComposerHint(
     return { key: "hint.connecting" };
   }
   if (inputs.sendStalled) return { key: "hint.stalled" };
+  if (inputs.capturePending) return { key: "hint.capturing" };
   if (inputs.agentSendInFlight) {
     return inputs.pendingName !== null
       ? { key: "hint.agentStarting", params: { name: inputs.pendingName } }
