@@ -39,7 +39,7 @@ export interface ExpandedLayout {
   avatarRect: Rect;
   /** Popover card position within the window (local coordinates). */
   popoverRect: Rect;
-  /** Whether the popover opens above the avatar. */
+  /** Whether the popover opens above the avatar; ignored for side placement. */
   popoverAbove: boolean;
   /** Side placement used for the popover, or null for vertical placement. */
   popoverSide: "left" | "right" | null;
@@ -203,6 +203,37 @@ function expandedLayoutFromGlobals(args: {
   };
 }
 
+function computeSideRoom(args: {
+  avatarGlobal: Rect;
+  visible: Rect;
+  gap: number;
+  margin: number;
+  popoverWidth: number;
+  preferRight: boolean;
+}): { side: "left" | "right"; left: number; fits: boolean } {
+  const { avatarGlobal, visible, gap, margin, popoverWidth, preferRight } =
+    args;
+  const roomRight = rectRight(visible) - margin - rectRight(avatarGlobal) - gap;
+  const roomLeft = avatarGlobal.x - gap - (visible.x + margin);
+  const preferred: "left" | "right" = preferRight ? "right" : "left";
+  const fallback: "left" | "right" = preferRight ? "left" : "right";
+  const preferredRoom = preferRight ? roomRight : roomLeft;
+  const fallbackRoom = preferRight ? roomLeft : roomRight;
+  const side =
+    preferredRoom >= popoverWidth || preferredRoom >= fallbackRoom
+      ? preferred
+      : fallback;
+
+  return {
+    side,
+    left:
+      side === "left"
+        ? avatarGlobal.x - gap - popoverWidth
+        : rectRight(avatarGlobal) + gap,
+    fits: (side === "left" ? roomLeft : roomRight) >= popoverWidth,
+  };
+}
+
 function computeVerticalExpandedLayout(args: {
   avatarGlobal: Rect;
   popoverSize: Size;
@@ -256,15 +287,16 @@ function computeVerticalExpandedLayout(args: {
   // SIDE placement — beside the avatar on whichever side has more room —
   // keeping the clamped vertical position.
   if (rectsIntersect(popoverGlobal, avatarGlobal)) {
-    const roomRight =
-      rectRight(visible) - margin - rectRight(avatarGlobal) - gap;
-    const roomLeft = avatarGlobal.x - gap - (visible.x + margin);
-    const placeRight = roomRight >= popoverSize.width || roomRight >= roomLeft;
-    const sideLeft = placeRight
-      ? rectRight(avatarGlobal) + gap
-      : avatarGlobal.x - gap - popoverSize.width;
+    const sideRoom = computeSideRoom({
+      avatarGlobal,
+      visible,
+      gap,
+      margin,
+      popoverWidth: popoverSize.width,
+      preferRight: true,
+    });
     const clampedSideLeft = clampPopoverOrigin({
-      requested: sideLeft,
+      requested: sideRoom.left,
       visibleStart: visible.x,
       visibleEnd: rectRight(visible),
       popoverExtent: popoverSize.width,
@@ -291,7 +323,7 @@ function computeVerticalExpandedLayout(args: {
       );
     } else {
       popoverGlobal = sideCandidate;
-      popoverSide = placeRight ? "right" : "left";
+      popoverSide = sideRoom.side;
     }
   }
 
@@ -336,34 +368,26 @@ export function computeExpandedLayout(args: {
       popoverExtent: popoverSize.height,
       margin,
     });
-    const roomLeft = avatarGlobal.x - gap - (visible.x + margin);
-    const roomRight =
-      rectRight(visible) - margin - rectRight(avatarGlobal) - gap;
-    const preferred: "left" | "right" =
-      rectCenter(avatarGlobal).x > rectCenter(visible).x ? "left" : "right";
-    const sides: Array<"left" | "right"> =
-      preferred === "left" ? ["left", "right"] : ["right", "left"];
-    const side = sides.find((candidate) =>
-      candidate === "left"
-        ? roomLeft >= popoverSize.width
-        : roomRight >= popoverSize.width,
-    );
+    const sideRoom = computeSideRoom({
+      avatarGlobal,
+      visible,
+      gap,
+      margin,
+      popoverWidth: popoverSize.width,
+      preferRight: rectCenter(avatarGlobal).x <= rectCenter(visible).x,
+    });
 
-    if (side !== undefined) {
-      const left =
-        side === "left"
-          ? avatarGlobal.x - gap - popoverSize.width
-          : rectRight(avatarGlobal) + gap;
+    if (sideRoom.fits) {
       return expandedLayoutFromGlobals({
         avatarGlobal,
         popoverGlobal: rect(
-          left,
+          sideRoom.left,
           clampedTop,
           popoverSize.width,
           popoverSize.height,
         ),
         popoverAbove: false,
-        popoverSide: side,
+        popoverSide: sideRoom.side,
       });
     }
   }

@@ -36,7 +36,7 @@ const mocks = vi.hoisted(() => ({
   agentId: null as string | null,
   sessionMessages: [] as Array<unknown>,
   openMenu: vi.fn(),
-  newChat: vi.fn(),
+  newChat: vi.fn(async () => true),
   invoke: vi.fn(async () => undefined),
   avatarProps: {} as Record<string, unknown>,
 }));
@@ -129,6 +129,7 @@ beforeEach(() => {
     checkedAgentId: null,
     checkedFresh: true,
   });
+  mocks.newChat.mockResolvedValue(true);
   mocks.port.computeMenu.mockResolvedValue({
     avatarRect: { x: 42, y: 17, width: 94, height: 94 },
     popoverRect: { x: 136, y: 17, width: 438, height: 96 },
@@ -510,8 +511,9 @@ it("cancelling a pending drop prevents stale placement and keeps a new hold inta
 
 it("choosing New chat closes the menu and expands composer-only on the side", async () => {
   mocks.sessionMessages = [{ id: "m1" }];
-  mocks.newChat.mockImplementation(() => {
+  mocks.newChat.mockImplementation(async () => {
     mocks.sessionMessages = [];
+    return true;
   });
   const { findByTestId, findByText } = render(<DesktopAgentApp />);
   const hit = (await findByTestId("avatar")).parentElement;

@@ -150,19 +150,19 @@ it("newChat no-ops when a pending selection is already armed or the chat is empt
     },
   );
   await act(() => result.current.prepareMenu());
-  act(() => result.current.newChat(3));
+  await act(() => result.current.newChat(3));
   expect(select).not.toHaveBeenCalled();
 
   rerender({ pending: null, active: null });
-  act(() => result.current.newChat(0));
+  await act(() => result.current.newChat(0));
   expect(select).not.toHaveBeenCalled();
 });
 
-it("newChat keeps the active agent when the fetched list contains it", async () => {
+it("newChat keeps the active agent when the cached list contains it", async () => {
   const select = vi.fn();
   const { result } = renderMenu({ activeAgentId: "a1", select });
   await act(() => result.current.prepareMenu());
-  act(() => result.current.newChat(2));
+  await act(() => result.current.newChat(2));
   expect(select).toHaveBeenCalledWith({
     kind: "agent",
     agent: {
@@ -175,10 +175,56 @@ it("newChat keeps the active agent when the fetched list contains it", async () 
   });
 });
 
-it("newChat falls back to fresh when the active agent is unavailable", async () => {
+it("newChat fetches and keeps the active agent when the selector is off", async () => {
   const select = vi.fn();
-  const { result } = renderMenu({ activeAgentId: "missing", select });
+  const { result } = renderMenu({
+    agentSelector: false,
+    activeAgentId: "a1",
+    select,
+  });
   await act(() => result.current.prepareMenu());
-  act(() => result.current.newChat(2));
+  mocks.listPersonas.mockClear();
+
+  await act(() => result.current.newChat(2));
+
+  expect(mocks.listPersonas).toHaveBeenCalledOnce();
+  expect(select).toHaveBeenCalledWith({
+    kind: "agent",
+    agent: {
+      agentId: "a1",
+      name: "Scout",
+      systemPrompt: "",
+      provider: null,
+      model: null,
+    },
+  });
+});
+
+it("newChat aborts without selecting when the active-agent fetch fails", async () => {
+  const select = vi.fn();
+  const { result } = renderMenu({
+    agentSelector: false,
+    activeAgentId: "a1",
+    select,
+  });
+  await act(() => result.current.prepareMenu());
+  mocks.listPersonas.mockRejectedValue(new Error("boom"));
+
+  await act(() => result.current.newChat(2));
+
+  expect(select).not.toHaveBeenCalled();
+});
+
+it("newChat falls back to fresh when the active persona was deleted", async () => {
+  const select = vi.fn();
+  const { result } = renderMenu({
+    agentSelector: false,
+    activeAgentId: "missing",
+    select,
+  });
+  await act(() => result.current.prepareMenu());
+
+  await act(() => result.current.newChat(2));
+
   expect(select).toHaveBeenCalledWith({ kind: "fresh" });
 });

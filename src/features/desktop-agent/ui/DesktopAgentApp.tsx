@@ -589,9 +589,9 @@ export function DesktopAgentApp() {
             model={menu.model}
             onNewChat={() => {
               void (async () => {
-                avatarMenu.newChat(session.messages.length);
+                const armed = await avatarMenu.newChat(session.messages.length);
+                if (!armed) return;
                 await closeMenu();
-                if (machine.mode === "expanded") await collapse();
                 await expand({ composerOnly: true });
               })();
             }}

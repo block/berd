@@ -18,7 +18,17 @@ import { useCallback, useRef } from "react";
 
 import { listPersonas } from "@/shared/api/agents";
 
+import type { Persona } from "@/shared/types/agents";
+
 import type { AgentInfo, PendingSelection } from "./useSession";
+
+const personaToAgent = (persona: Persona): AgentInfo => ({
+  agentId: persona.id,
+  name: persona.displayName,
+  systemPrompt: persona.systemPrompt,
+  provider: persona.provider ?? null,
+  model: persona.model ?? null,
+});
 
 export interface AvatarMenuModel {
   agents: AgentInfo[];
@@ -41,7 +51,7 @@ export function useAvatarMenu(args: {
   prepareMenu(): Promise<AvatarMenuModel>;
   selectAgent(agentId: string): void;
   selectFresh(): void;
-  newChat(messageCount: number): void;
+  newChat(messageCount: number): Promise<boolean>;
 } {
   // Callbacks capture refs so a menu opened against one render can still
   // act on the live values at click time.
@@ -64,13 +74,7 @@ export function useAvatarMenu(args: {
     // failed fetch must not kill the menu — the fresh entry still works
     // with zero agents.
     const personas = await listPersonas().catch(() => []);
-    const list: AgentInfo[] = personas.map((persona) => ({
-      agentId: persona.id,
-      name: persona.displayName,
-      systemPrompt: persona.systemPrompt,
-      provider: persona.provider ?? null,
-      model: persona.model ?? null,
-    }));
+    const list = personas.map(personaToAgent);
     agents.current = list;
     const current = pending.current;
     const checkedAgentId =
@@ -102,18 +106,48 @@ export function useAvatarMenu(args: {
     select.current({ kind: "fresh" });
   }, []);
 
-  const newChat = useCallback((messageCount: number) => {
-    if (pending.current !== null) return; // already armed: empty new chat
-    if (messageCount === 0) return; // current chat is already empty
-    const activeAgent = agents.current.find(
-      (agent) => agent.agentId === active.current,
-    );
-    if (activeAgent !== undefined) {
-      select.current({ kind: "agent", agent: activeAgent });
-      return;
-    }
-    select.current({ kind: "fresh" });
-  }, []);
+  const newChat = useCallback(
+    async (messageCount: number): Promise<boolean> => {
+      if (pending.current !== null) return true; // already armed: empty new chat
+      if (messageCount === 0) return true; // current chat is already empty
+      const activeAgentId = active.current;
+      if (activeAgentId === null) {
+        select.current({ kind: "fresh" });
+        return true;
+      }
+
+      const cachedAgent = agents.current.find(
+        (agent) => agent.agentId === activeAgentId,
+      );
+      if (cachedAgent !== undefined) {
+        select.current({ kind: "agent", agent: cachedAgent });
+        return true;
+      }
+
+      // The menu may not have an agent list (selector disabled or a prior
+      // fetch failed). Preserve the committed identity by refetching it here;
+      // if the network fails, abort New chat rather than silently switching
+      // the user to fresh/Berd.
+      let fetched: AgentInfo[];
+      try {
+        fetched = (await listPersonas()).map(personaToAgent);
+      } catch {
+        return false;
+      }
+      agents.current = fetched;
+      const fetchedAgent = fetched.find(
+        (agent) => agent.agentId === activeAgentId,
+      );
+      if (fetchedAgent !== undefined) {
+        select.current({ kind: "agent", agent: fetchedAgent });
+        return true;
+      }
+
+      select.current({ kind: "fresh" });
+      return true;
+    },
+    [],
+  );
 
   return { prepareMenu, selectAgent, selectFresh, newChat };
 }
