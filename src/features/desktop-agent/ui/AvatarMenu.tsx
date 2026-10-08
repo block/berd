@@ -176,6 +176,7 @@ export function AvatarMenu({
   onSelectFresh,
   onSettings,
   onHide,
+  onClose,
 }: {
   layout: ExpandedLayout;
   agentSelector: boolean;
@@ -185,12 +186,15 @@ export function AvatarMenu({
   onSelectFresh(): void;
   onSettings(): void;
   onHide(): void;
+  onClose?(): void;
 }) {
   const { t } = useTranslation("desktop-agent");
   const [submenuOpen, setSubmenuOpen] = useState(false);
-  const [highlight, setHighlight] = useState<number | null>(null);
+  const [highlight, setHighlight] = useState<number | null>(0);
   const [subHighlight, setSubHighlight] = useState<number | null>(null);
   const closeTimer = useRef<number | null>(null);
+  const rootRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const subRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const rootItems = useMemo<Array<"newChat" | "switch" | "settings" | "hide">>(
     () =>
@@ -237,6 +241,14 @@ export function AvatarMenu({
   }, [clearCloseTimer]);
 
   useEffect(() => clearCloseTimer, [clearCloseTimer]);
+
+  useEffect(() => {
+    if (highlight !== null) rootRefs.current[highlight]?.focus();
+  }, [highlight]);
+
+  useEffect(() => {
+    if (subHighlight !== null) subRefs.current[subHighlight]?.focus();
+  }, [subHighlight]);
 
   const activateRoot = useCallback(
     (item: (typeof rootItems)[number]) => {
@@ -287,6 +299,10 @@ export function AvatarMenu({
             e.preventDefault();
           }
           break;
+        case "Escape":
+          onClose?.();
+          e.preventDefault();
+          break;
         case "Enter":
           if (e.repeat) break;
           if (submenuOpen) {
@@ -315,6 +331,7 @@ export function AvatarMenu({
     activateRoot,
     onSelectAgent,
     onSelectFresh,
+    onClose,
     openSubmenu,
     rootItems,
     subHighlight,
@@ -326,12 +343,18 @@ export function AvatarMenu({
     key: string;
     className?: string;
     highlighted: boolean;
+    menu: "root" | "sub";
+    index: number;
     onHover(): void;
     onClick(): void;
     children: React.ReactNode;
   }) => (
     <button
       key={args.key}
+      ref={(node) => {
+        const refs = args.menu === "root" ? rootRefs.current : subRefs.current;
+        refs[args.index] = node;
+      }}
       type="button"
       className={`menu-row focus-override ${args.className ?? ""} ${
         args.highlighted ? "highlighted" : ""
@@ -339,6 +362,7 @@ export function AvatarMenu({
       onPointerEnter={args.onHover}
       onClick={args.onClick}
       role="menuitem"
+      tabIndex={args.highlighted ? 0 : -1}
     >
       {args.children}
     </button>
@@ -358,6 +382,8 @@ export function AvatarMenu({
       >
         {row({
           key: "newChat",
+          menu: "root",
+          index: rootItems.indexOf("newChat"),
           highlighted: highlight === rootItems.indexOf("newChat"),
           onHover: () => {
             setHighlight(rootItems.indexOf("newChat"));
@@ -370,6 +396,8 @@ export function AvatarMenu({
           <>
             {row({
               key: "switch",
+              menu: "root",
+              index: rootItems.indexOf("switch"),
               highlighted: highlight === rootItems.indexOf("switch"),
               onHover: () => {
                 setHighlight(rootItems.indexOf("switch"));
@@ -391,6 +419,8 @@ export function AvatarMenu({
         )}
         {row({
           key: "settings",
+          menu: "root",
+          index: rootItems.indexOf("settings"),
           highlighted: highlight === rootItems.indexOf("settings"),
           onHover: () => {
             setHighlight(rootItems.indexOf("settings"));
@@ -401,6 +431,8 @@ export function AvatarMenu({
         })}
         {row({
           key: "hide",
+          menu: "root",
+          index: rootItems.indexOf("hide"),
           highlighted: highlight === rootItems.indexOf("hide"),
           onHover: () => {
             setHighlight(rootItems.indexOf("hide"));
@@ -425,6 +457,8 @@ export function AvatarMenu({
         >
           {row({
             key: "fresh",
+            menu: "sub",
+            index: 0,
             highlighted: subHighlight === 0,
             onHover: () => setSubHighlight(0),
             onClick: onSelectFresh,
@@ -439,6 +473,8 @@ export function AvatarMenu({
           {model.agents.map((agent, i) =>
             row({
               key: agent.agentId,
+              menu: "sub",
+              index: i + 1,
               highlighted: subHighlight === i + 1,
               onHover: () => setSubHighlight(i + 1),
               onClick: () => onSelectAgent(agent),

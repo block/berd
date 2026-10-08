@@ -1,4 +1,10 @@
-import { act, fireEvent, render, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { DesktopAgentApp } from "@/features/desktop-agent/ui/DesktopAgentApp";
@@ -240,6 +246,44 @@ it("cancels an in-flight menu open when Escape changes generation", async () => 
 
   expect(mocks.port.computeMenu).not.toHaveBeenCalled();
   expect(mocks.port.applyMenu).not.toHaveBeenCalled();
+});
+
+it("keyboard opens and closes the avatar menu while preserving focus reachability", async () => {
+  const { findByTestId } = render(<DesktopAgentApp />);
+  const hit = (await findByTestId("avatar")).parentElement;
+  if (!hit) throw new Error("missing hit target");
+
+  expect(hit).toHaveAttribute("role", "button");
+  expect(hit).toHaveAttribute("tabindex", "0");
+  hit.focus();
+  expect(document.activeElement).toBe(hit);
+
+  await act(async () => fireEvent.keyDown(hit, { key: "F10", shiftKey: true }));
+  expect(mocks.port.applyMenu).toHaveBeenCalledOnce();
+  expect(hit).toHaveAttribute("aria-haspopup", "menu");
+  expect(hit).toHaveAttribute("aria-expanded", "true");
+  const first = screen.getByRole("menuitem", { name: "Start new chat" });
+  expect(document.activeElement).toBe(first);
+
+  fireEvent.keyDown(window, { key: "ArrowDown" });
+  expect(
+    screen.getByRole("menuitem", { name: "Switch agent ›" }),
+  ).toHaveFocus();
+
+  fireEvent.keyDown(window, { key: "Escape" });
+  await waitFor(() => expect(mocks.port.collapse).toHaveBeenCalledOnce());
+  expect(hit).toHaveFocus();
+});
+
+it("avatar keyboard Enter and Space toggle chat like primary click", async () => {
+  const { findByTestId } = render(<DesktopAgentApp />);
+  const hit = (await findByTestId("avatar")).parentElement;
+  if (!hit) throw new Error("missing hit target");
+
+  await act(async () => fireEvent.keyDown(hit, { key: "Enter" }));
+  expect(mocks.port.applyExpanded).toHaveBeenCalledOnce();
+  await act(async () => fireEvent.keyDown(hit, { key: " " }));
+  expect(mocks.port.collapse).toHaveBeenCalledOnce();
 });
 
 it("native drag slop changes target, not DOM position, and drop returns to idle", async () => {

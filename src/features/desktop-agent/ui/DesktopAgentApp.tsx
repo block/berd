@@ -128,6 +128,7 @@ export function DesktopAgentApp() {
   const openingMenu = useRef(false);
   const dragging = useRef(false);
   const ignoreNextClick = useRef(false);
+  const avatarTriggerRef = useRef<HTMLDivElement>(null);
   const pointerDownAt = useRef<{
     x: number;
     y: number;
@@ -281,6 +282,7 @@ export function DesktopAgentApp() {
       setMenu(null);
       await machine.collapse();
       setLastAvatarRect(null);
+      avatarTriggerRef.current?.focus();
     } finally {
       closingMenu.current = false;
     }
@@ -607,8 +609,9 @@ export function DesktopAgentApp() {
         void closeMenu();
       }}
     >
-      {/* biome-ignore lint/a11y/noStaticElementInteractions lint/a11y/useKeyWithClickEvents: the avatar is a pointer-driven native-drag surface (performWindowDrag), not a semantic control — keyboard access is the global toggle shortcut */}
+      {/* biome-ignore lint/a11y/useSemanticElements: the avatar remains a div so pointer drag/capture stays on the native drag surface. */}
       <div
+        ref={avatarTriggerRef}
         className="avatar-hit"
         style={{
           position: "absolute",
@@ -642,6 +645,25 @@ export function DesktopAgentApp() {
         onPointerEnter={() => setHovering(true)}
         onPointerLeave={() => setHovering(false)}
         title={t("avatar.title")}
+        tabIndex={0}
+        role="button"
+        aria-label={t("avatar.title")}
+        aria-haspopup="menu"
+        aria-expanded={menu !== null}
+        onKeyDown={(e) => {
+          if (dismissed || e.repeat) return;
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            if (menu) void closeMenu();
+            else if (layout) void collapse();
+            else void expand();
+            return;
+          }
+          if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) {
+            e.preventDefault();
+            void openMenu();
+          }
+        }}
         onContextMenu={(e) => {
           if (dismissed) return;
           e.preventDefault();
@@ -712,6 +734,9 @@ export function DesktopAgentApp() {
               void closeMenu();
             }}
             onHide={dismiss}
+            onClose={() => {
+              void closeMenu();
+            }}
           />
         </div>
       )}

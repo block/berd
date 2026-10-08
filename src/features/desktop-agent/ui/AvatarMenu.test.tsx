@@ -76,7 +76,6 @@ describe("AvatarMenu keyboard and activation", () => {
     const props = renderMenu();
     fireEvent.keyDown(window, { key: "ArrowDown" });
     fireEvent.keyDown(window, { key: "ArrowDown" });
-    fireEvent.keyDown(window, { key: "ArrowDown" });
     fireEvent.keyDown(window, { key: "Enter" });
     expect(props.onSettings).toHaveBeenCalledOnce();
     fireEvent.keyDown(window, { key: "ArrowDown" });
@@ -86,7 +85,6 @@ describe("AvatarMenu keyboard and activation", () => {
 
   it("opens, navigates, activates, and closes the submenu with arrows", () => {
     const props = renderMenu();
-    fireEvent.keyDown(window, { key: "ArrowDown" });
     fireEvent.keyDown(window, { key: "ArrowDown" });
     fireEvent.keyDown(window, { key: "ArrowRight" });
     expect(screen.getByText("Berd")).toBeInTheDocument();
@@ -102,7 +100,6 @@ describe("AvatarMenu keyboard and activation", () => {
     const props = renderMenu();
     const rows = screen.getAllByRole("menuitem");
     expect(rows[0]).toHaveTextContent("Start new chat");
-    fireEvent.keyDown(window, { key: "ArrowDown" });
     fireEvent.keyDown(window, { key: "Enter" });
     expect(props.onNewChat).toHaveBeenCalledOnce();
   });
