@@ -633,12 +633,71 @@ it("opening an existing chat places the full window beside the avatar, composer 
     { width: 380, height: 96 },
     "side",
   );
-  // Bubble center line = 20 + 24 + 48 = 92; full composer bottom = 92 + 19.
+  // Bubble center line = 20 + 24 + 48 = 92; composer-only pill bottom = 92 + 23.
   expect(mocks.port.computeGrown).toHaveBeenCalledWith({
     fromPopoverGlobal: { x: 128, y: 44, width: 380, height: 96 },
-    composerBottomGlobal: 111,
+    composerBottomGlobal: 115,
     bottomInset: 16,
     fromPopoverSide: "right",
   });
   expect(mocks.port.applyExpanded).toHaveBeenLastCalledWith(fullLayout);
+});
+
+it("reopen and grow use the same composer bottom for the same no-hint bubble layout", async () => {
+  const bubbleLayout = {
+    avatarRect: { x: 0, y: 0, width: 94, height: 94 },
+    popoverRect: { x: 118, y: 24, width: 380, height: 96 },
+    windowFrame: { x: 10, y: 20, width: 512, height: 144 },
+    popoverAbove: false,
+    popoverSide: "right" as const,
+  };
+  const fullLayout = {
+    avatarRect: { x: 0, y: 420, width: 94, height: 94 },
+    popoverRect: { x: 118, y: 0, width: 380, height: 520 },
+    windowFrame: { x: 10, y: -380, width: 512, height: 544 },
+    popoverAbove: false,
+    popoverSide: "right" as const,
+  };
+  mocks.port.computeExpanded.mockResolvedValue(bubbleLayout);
+  mocks.port.computeGrown.mockResolvedValue(fullLayout);
+  mocks.sessionMessages = [];
+
+  const { findByTestId, rerender, unmount } = render(<DesktopAgentApp />);
+  const hit = (await findByTestId("avatar")).parentElement;
+  if (!hit) throw new Error("missing hit target");
+  await act(async () => {
+    fireEvent.pointerDown(hit, { button: 0, screenX: 10, screenY: 10 });
+    fireEvent.pointerUp(hit, { button: 0 });
+  });
+  const popover = await findByTestId("chat-popover");
+  Object.defineProperty(popover, "getBoundingClientRect", {
+    configurable: true,
+    value: () => ({ bottom: 95 }),
+  });
+  popover.style.setProperty("--desktop-agent-panel-padding", "16px");
+  mocks.sessionMessages = [{ id: "m1" }];
+
+  await act(async () => rerender(<DesktopAgentApp />));
+  const growBottom =
+    mocks.port.computeGrown.mock.calls.at(-1)?.[0].composerBottomGlobal;
+
+  unmount();
+  vi.clearAllMocks();
+  mocks.port.mode = "avatar";
+  mocks.sessionMessages = [{ id: "m1" }];
+  mocks.port.computeExpanded.mockResolvedValue(bubbleLayout);
+  mocks.port.computeGrown.mockResolvedValue(fullLayout);
+
+  const { findByTestId: findReopened } = render(<DesktopAgentApp />);
+  const reopenHit = (await findReopened("avatar")).parentElement;
+  if (!reopenHit) throw new Error("missing hit target");
+  await act(async () => {
+    fireEvent.pointerDown(reopenHit, { button: 0, screenX: 10, screenY: 10 });
+    fireEvent.pointerUp(reopenHit, { button: 0 });
+  });
+  const reopenBottom =
+    mocks.port.computeGrown.mock.calls.at(-1)?.[0].composerBottomGlobal;
+
+  expect(reopenBottom).toBe(growBottom);
+  expect(reopenBottom).toBe(115);
 });

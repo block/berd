@@ -16,6 +16,7 @@
 
 import { createBooleanLocalStoragePreference } from "@/shared/preferences/createBooleanLocalStoragePreference";
 
+// Safe to delete after 2027-01.
 localStorage.removeItem("goose:desktop-agent-visible");
 
 export const DESKTOP_AGENT_ENABLED_STORAGE_KEY = "goose:desktop-agent-enabled";
@@ -27,6 +28,5 @@ const enabledPreference = createBooleanLocalStoragePreference({
   defaultValue: false,
 });
 
-export const getDesktopAgentEnabled = enabledPreference.get;
 export const setDesktopAgentEnabled = enabledPreference.set;
 export const useDesktopAgentEnabledPreference = enabledPreference.useValue;

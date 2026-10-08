@@ -672,6 +672,7 @@ fn attach_to_target(
     overlap: f64,
 ) -> Result<PerchResultDto, String> {
     let panel_ptr = panel_ns_window(app).ok_or("desktop-agent window missing")?;
+    let app_for_presentation = app.clone();
 
     let result = on_main(app, move || unsafe {
         let Some(element) = resolve_ax_window(&target) else {
@@ -720,6 +721,7 @@ fn attach_to_target(
             })
         });
         apply_perched_presentation(
+            &app_for_presentation,
             panel_ptr,
             window_frame,
             offset_ratio,
@@ -777,6 +779,7 @@ pub fn desktop_agent_perch_on(
 /// everything it needs arrives as parameters. Adding a PERCHED.with(...)
 /// here is a guaranteed RefCell panic on the main thread mid-follow.
 unsafe fn apply_perched_presentation(
+    app: &AppHandle,
     panel_ptr: usize,
     window_frame: cs::Rect,
     offset_ratio: f64,
@@ -785,6 +788,10 @@ unsafe fn apply_perched_presentation(
 ) {
     let panel = panel_ptr as *mut AnyObject;
     show_outline(window_frame, window_id);
+    if super::panel::is_expanded() {
+        let _ = app.emit_to(super::WINDOW_LABEL, "desktop-agent:perch-moved", ());
+        return;
+    }
     let seat = cs::perch_frame(
         window_frame,
         (AVATAR_SIZE, AVATAR_SIZE),
@@ -934,6 +941,7 @@ fn start_follow_loop(app: AppHandle) {
                                         *LAST_WINDOW_FRAME.lock().unwrap() = Some(window_frame);
                                         if let Some(panel_ptr) = panel_ptr {
                                             apply_perched_presentation(
+                                                &app_for_tick,
                                                 panel_ptr,
                                                 window_frame,
                                                 state.offset_ratio,
@@ -1054,6 +1062,7 @@ pub fn desktop_agent_perch_status(
     character_seat: Option<bool>,
 ) -> Result<PerchStatusDto, String> {
     let panel_ptr = panel_ns_window(&app);
+    let app_for_presentation = app.clone();
     on_main(&app, move || {
         if let Some(character) = character_seat {
             PERCHED.with(|p| {
@@ -1068,6 +1077,7 @@ pub fn desktop_agent_perch_status(
                     {
                         unsafe {
                             apply_perched_presentation(
+                                &app_for_presentation,
                                 panel,
                                 frame,
                                 state.offset_ratio,

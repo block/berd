@@ -100,7 +100,7 @@ describe("AvatarMenu keyboard and activation", () => {
 
   it("renders Start new chat first and activates it by keyboard", () => {
     const props = renderMenu();
-    const rows = screen.getAllByRole("button");
+    const rows = screen.getAllByRole("menuitem");
     expect(rows[0]).toHaveTextContent("Start new chat");
     fireEvent.keyDown(window, { key: "ArrowDown" });
     fireEvent.keyDown(window, { key: "Enter" });
@@ -144,7 +144,7 @@ describe("AvatarMenu keyboard and activation", () => {
       />,
     );
     expect(screen.queryByText("Switch agent")).not.toBeInTheDocument();
-    expect(screen.getAllByRole("button")[0]).toHaveTextContent(
+    expect(screen.getAllByRole("menuitem")[0]).toHaveTextContent(
       "Start new chat",
     );
     expect(screen.getByText("Settings")).toBeInTheDocument();
@@ -154,14 +154,14 @@ describe("AvatarMenu keyboard and activation", () => {
 
 describe("AvatarMenu placement", () => {
   it.each([
-    ["centre", "right"],
-    ["left screen edge", "right"],
-    ["right screen edge", "left"],
-  ] as const)("keeps root/submenu non-overlapping and on-screen at %s", (_name, side) => {
+    ["centre", MENU_WIDTH / 2, "right"],
+    ["left screen edge", 0, "right"],
+    ["right screen edge", MENU_WIDTH + SUBMENU_GAP + SUBMENU_WIDTH, "left"],
+  ] as const)("keeps root/submenu non-overlapping and on-screen at %s", (_name, avatarCenterX, side) => {
     const placement = computeAvatarMenuPlacement({
       agentSelector: true,
       agentCount: 3,
-      preferSubmenuSide: side,
+      avatarCenterX,
     });
     const root = placement.root;
     const sub = placement.submenu;
@@ -176,5 +176,6 @@ describe("AvatarMenu placement", () => {
     expect(placement.regionSize.width).toBe(
       MENU_WIDTH + SUBMENU_GAP + SUBMENU_WIDTH,
     );
+    expect(placement.submenuSide).toBe(side);
   });
 });

@@ -13,7 +13,11 @@ import { useTranslation } from "react-i18next";
 import { DESKTOP_AGENT_AGENT_SELECTOR_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { useExperiment } from "@/features/experiments/experimentPreferences";
 
-import type { ExpandedLayout, Size } from "../lib/anchorGeometry";
+import {
+  popoverGlobal,
+  type ExpandedLayout,
+  type Size,
+} from "../lib/anchorGeometry";
 import { deriveAvatarState } from "../lib/avatarState";
 import { setDesktopAgentEnabled } from "../lib/desktopAgentPreferences";
 import { PanelStateMachine } from "../lib/panelState";
@@ -36,12 +40,20 @@ const HOLD_DELAY_MS = 180;
 // Composer-first: a chat with no messages opens as just the composer
 // pill — room for the pill plus the hint row when one is relevant.
 const COMPOSER_ONLY_SIZE: Size = { width: 380, height: 96 };
-// Full-chat composer pill height and popover padding (desktop-agent.css:
-// .composer-box 26px send pill + 5px padding ×2 + 1px border ×2, and
-// --desktop-agent-panel-padding). Used to line a reopened full chat's
-// composer up with the bubble position before any DOM exists to measure.
-const FULL_COMPOSER_HEIGHT = 38;
+// Composer-only bubble pill height (desktop-agent.css:
+// .composer-only .composer-box padding 9px around the 26px send pill,
+// plus 1px border ×2). Used before the DOM exists to measure the pill.
+export const BUBBLE_PILL_HEIGHT = 46;
 const FULL_PANEL_PADDING = 16;
+
+export function bubbleComposerBottomGlobal(layout: ExpandedLayout): number {
+  return (
+    layout.windowFrame.y +
+    layout.popoverRect.y +
+    layout.popoverRect.height / 2 +
+    BUBBLE_PILL_HEIGHT / 2
+  );
+}
 
 function readComposerBottomInset(popover: HTMLElement, composer: HTMLElement) {
   // Measured while still in composer mode, where .panel-popover's padding
@@ -97,6 +109,10 @@ export function DesktopAgentApp() {
     }
   }, character);
   const [layout, setLayout] = useState<ExpandedLayout | null>(null);
+  const [lastAvatarRect, setLastAvatarRect] = useState<
+    ExpandedLayout["avatarRect"] | null
+  >(null);
+  const [expandedApplied, setExpandedApplied] = useState(0);
   // Composer-first: "composer" until the chat has messages, then "full".
   const [popoverVariant, setPopoverVariant] = useState<"composer" | "full">(
     "full",
@@ -155,12 +171,14 @@ export function DesktopAgentApp() {
     try {
       // Anti-blink: drop the popover from the tree BEFORE the native
       // shrink, so the resize repaint never shows a stale popover.
+      if (layout) setLastAvatarRect(layout.avatarRect);
       setLayout(null);
       await machine.collapse();
+      setLastAvatarRect(null);
     } finally {
       collapsing.current = false;
     }
-  }, []);
+  }, [layout]);
 
   const expand = useCallback(async (options?: { composerOnly?: boolean }) => {
     if (openingMenu.current || machine.mode !== "avatar") return;
@@ -183,19 +201,11 @@ export function DesktopAgentApp() {
         bubble.popoverSide === null
           ? await machine.computeExpanded() // no side room: above/below
           : await machine.computeGrown({
-              fromPopoverGlobal: {
-                x: bubble.windowFrame.x + bubble.popoverRect.x,
-                y: bubble.windowFrame.y + bubble.popoverRect.y,
-                width: bubble.popoverRect.width,
-                height: bubble.popoverRect.height,
-              },
+              fromPopoverGlobal: popoverGlobal(bubble),
               // The bubble's pill is vertically centered in its region
-              // (anchor-center); the full composer centers on that line.
-              composerBottomGlobal:
-                bubble.windowFrame.y +
-                bubble.popoverRect.y +
-                bubble.popoverRect.height / 2 +
-                FULL_COMPOSER_HEIGHT / 2,
+              // (anchor-center); align the full composer bottom to that
+              // measured composer-only pill bottom, ignoring the hint row.
+              composerBottomGlobal: bubbleComposerBottomGlobal(bubble),
               bottomInset: FULL_PANEL_PADDING,
               fromPopoverSide: bubble.popoverSide,
             });
@@ -206,6 +216,7 @@ export function DesktopAgentApp() {
     setPopoverVariant(composerOnly ? "composer" : "full");
     setLayout(next);
     await machine.applyExpanded(next);
+    setExpandedApplied((count) => count + 1);
   }, []);
 
   // First message sent while composer-only: grow to the full chat window
@@ -214,6 +225,7 @@ export function DesktopAgentApp() {
   const popoverElement = useRef<HTMLDivElement>(null);
   const composerElement = useRef<HTMLDivElement>(null);
   const growing = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: expandedApplied retries when the first message arrives before applyExpanded flips native mode.
   useEffect(() => {
     if (
       layout === null ||
@@ -234,10 +246,7 @@ export function DesktopAgentApp() {
           fromPopoverSide !== null && popover && composer
             ? await machine.computeGrown({
                 fromPopoverGlobal: {
-                  x: layout.windowFrame.x + layout.popoverRect.x,
-                  y: layout.windowFrame.y + layout.popoverRect.y,
-                  width: layout.popoverRect.width,
-                  height: layout.popoverRect.height,
+                  ...popoverGlobal(layout),
                 },
                 composerBottomGlobal:
                   layout.windowFrame.y +
@@ -255,11 +264,12 @@ export function DesktopAgentApp() {
         setPopoverVariant("full");
         setLayout(next);
         await machine.applyExpanded(next);
+        setExpandedApplied((count) => count + 1);
       } finally {
         growing.current = false;
       }
     })();
-  }, [layout, popoverVariant, session.messages.length]);
+  }, [layout, popoverVariant, session.messages.length, expandedApplied]);
 
   const closeMenu = useCallback(async () => {
     gestureGeneration.current++;
@@ -267,12 +277,14 @@ export function DesktopAgentApp() {
     closingMenu.current = true;
     try {
       // Anti-blink, in reverse: drop the menu from the tree first.
+      if (menu) setLastAvatarRect(menu.layout.avatarRect);
       setMenu(null);
       await machine.collapse();
+      setLastAvatarRect(null);
     } finally {
       closingMenu.current = false;
     }
-  }, []);
+  }, [menu]);
 
   // "Hide agent" = the Desktop Agent setting goes OFF (one on/off state;
   // the old separate hide-without-disabling preference is gone). The
@@ -334,6 +346,19 @@ export function DesktopAgentApp() {
       openingMenu.current = false;
     }
   }, [agentSelector, avatarMenu, collapse]);
+
+  // Native perch follow refuses to resize an expanded/menu panel down to
+  // avatar size; collapse first so the next tick can reseat safely.
+  useEffect(() => {
+    const unlisten = listen("desktop-agent:perch-moved", () => {
+      gestureGeneration.current++;
+      void closeMenu();
+      void collapse();
+    });
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }, [collapse, closeMenu]);
 
   // Key-loss while expanded = click outside -> collapse (menu included).
   useEffect(() => {
@@ -527,7 +552,22 @@ export function DesktopAgentApp() {
   // to null); otherwise the committed session binding; otherwise the
   // default avatar.
 
+  const newChatBusy = useRef(false);
+  const handleNewChat = useCallback(async () => {
+    if (newChatBusy.current) return;
+    newChatBusy.current = true;
+    try {
+      const armed = await avatarMenu.newChat(session.messages.length);
+      if (!armed) return;
+      await closeMenu();
+      await expand({ composerOnly: true });
+    } finally {
+      newChatBusy.current = false;
+    }
+  }, [avatarMenu, closeMenu, expand, session.messages.length]);
+
   const activeLayout = layout ?? menu?.layout ?? null;
+  const avatarRect = activeLayout?.avatarRect ?? lastAvatarRect;
 
   const avatarState = deriveAvatarState({
     hovering,
@@ -572,10 +612,10 @@ export function DesktopAgentApp() {
         className="avatar-hit"
         style={{
           position: "absolute",
-          left: activeLayout?.avatarRect.x ?? 0,
-          top: activeLayout?.avatarRect.y ?? 0,
-          width: activeLayout?.avatarRect.width ?? 94,
-          height: activeLayout?.avatarRect.height ?? 94,
+          left: avatarRect?.x ?? 0,
+          top: avatarRect?.y ?? 0,
+          width: avatarRect?.width ?? 94,
+          height: avatarRect?.height ?? 94,
         }}
         onPointerDown={onAvatarPointerDown}
         onPointerMove={activeLayout ? undefined : onAvatarPointerMove}
@@ -654,12 +694,7 @@ export function DesktopAgentApp() {
             agentSelector={agentSelector}
             model={menu.model}
             onNewChat={() => {
-              void (async () => {
-                const armed = await avatarMenu.newChat(session.messages.length);
-                if (!armed) return;
-                await closeMenu();
-                await expand({ composerOnly: true });
-              })();
+              void handleNewChat();
             }}
             onSelectAgent={(agent) => {
               avatarMenu.selectAgent(agent.agentId);

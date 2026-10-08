@@ -268,6 +268,10 @@ pub fn note_expanded(expanded: bool) {
     EXPANDED.store(expanded, Ordering::Relaxed);
 }
 
+pub fn is_expanded() -> bool {
+    EXPANDED.load(Ordering::Relaxed)
+}
+
 /// Native performDrag handoff (returns immediately; the run loop stays
 /// live). Invoked from a webview mousedown that has already
 /// preventDefault-ed.

@@ -26,6 +26,7 @@ export const SUBMENU_GAP = 8;
 const PREVIEW_SIZE = 18;
 const SUBMENU_MAX_ROWS = 8;
 const SUBMENU_CLOSE_DELAY_MS = 150;
+const MENU_BORDER_WIDTH = 1;
 
 export interface AvatarMenuPlacement {
   regionSize: Size;
@@ -43,12 +44,17 @@ function rootHeight(agentSelector: boolean): number {
   return (
     MENU_PADDING * 2 +
     rows * ROW_HEIGHT +
-    (agentSelector ? SEPARATOR_HEIGHT : 0)
+    (agentSelector ? SEPARATOR_HEIGHT : 0) +
+    MENU_BORDER_WIDTH * 2
   );
 }
 
 function submenuNaturalHeight(agentCount: number): number {
-  return MENU_PADDING * 2 + (1 + Math.max(agentCount, 1)) * ROW_HEIGHT;
+  return (
+    MENU_PADDING * 2 +
+    (1 + Math.max(agentCount, 1)) * ROW_HEIGHT +
+    MENU_BORDER_WIDTH * 2
+  );
 }
 
 /**
@@ -63,7 +69,6 @@ export function computeAvatarMenuPlacement(args: {
   agentCount: number;
   visibleHeight?: number;
   openSubmenu?: boolean;
-  preferSubmenuSide?: "left" | "right";
   regionWidth?: number;
   regionHeight?: number;
   avatarCenterX?: number;
@@ -72,10 +77,10 @@ export function computeAvatarMenuPlacement(args: {
   const mainHeight = rootHeight(args.agentSelector);
   const rawSubHeight = submenuNaturalHeight(args.agentCount);
   const maxScrollableSubHeight =
-    MENU_PADDING * 2 + SUBMENU_MAX_ROWS * ROW_HEIGHT;
+    MENU_PADDING * 2 + SUBMENU_MAX_ROWS * ROW_HEIGHT + MENU_BORDER_WIDTH * 2;
   const visibleHeight = args.visibleHeight ?? Number.POSITIVE_INFINITY;
   const submenuMaxHeight = Math.max(
-    MENU_PADDING * 2 + ROW_HEIGHT,
+    MENU_PADDING * 2 + ROW_HEIGHT + MENU_BORDER_WIDTH * 2,
     Math.min(rawSubHeight, maxScrollableSubHeight, visibleHeight),
   );
   const subHeight = args.agentSelector ? submenuMaxHeight : 0;
@@ -87,10 +92,9 @@ export function computeAvatarMenuPlacement(args: {
   const regionWidth = args.regionWidth ?? width;
   const regionHeight = args.regionHeight ?? height;
   const submenuSide =
-    args.preferSubmenuSide ??
-    (args.avatarCenterX !== undefined && args.avatarCenterX < regionWidth / 2
+    args.avatarCenterX !== undefined && args.avatarCenterX < regionWidth / 2
       ? "right"
-      : "left");
+      : "left";
   const rootX = clamp(
     args.agentSelector && submenuSide === "left" ? regionWidth - MENU_WIDTH : 0,
     0,
@@ -284,6 +288,7 @@ export function AvatarMenu({
           }
           break;
         case "Enter":
+          if (e.repeat) break;
           if (submenuOpen) {
             const item = subItems[subHighlight ?? -1];
             if (item !== undefined) {
@@ -333,6 +338,7 @@ export function AvatarMenu({
       }`}
       onPointerEnter={args.onHover}
       onClick={args.onClick}
+      role="menuitem"
     >
       {args.children}
     </button>

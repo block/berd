@@ -175,7 +175,7 @@ pub fn run() {
     let builder = builder.plugin(tauri_plugin_berdctl::init());
 
     // Desktop-agent experiment (macOS only): the global-shortcut plugin is
-    // inert until the experiment bridge opens the panel and registers a
+    // inert until the settings bridge opens the panel and registers a
     // chord; the menu handler ignores every id outside the desktop-agent:
     // namespace (there is no other on_menu_event consumer in the app).
     #[cfg(target_os = "macos")]

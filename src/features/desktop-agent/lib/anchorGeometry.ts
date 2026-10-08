@@ -64,6 +64,15 @@ export const rectCenter = (r: Rect): { x: number; y: number } => ({
   y: r.y + r.height / 2,
 });
 
+export function popoverGlobal(layout: ExpandedLayout): Rect {
+  return rect(
+    layout.windowFrame.x + layout.popoverRect.x,
+    layout.windowFrame.y + layout.popoverRect.y,
+    layout.popoverRect.width,
+    layout.popoverRect.height,
+  );
+}
+
 export function rectContains(r: Rect, p: { x: number; y: number }): boolean {
   return p.x >= r.x && p.x < rectRight(r) && p.y >= r.y && p.y < rectBottom(r);
 }
@@ -216,14 +225,6 @@ export function computeGrownLayout(args: {
   });
 }
 
-/**
- * Computes the expanded panel layout for an avatar at avatarGlobal.
- *
- * The popover opens above the avatar when the avatar sits in the lower half
- * of its screen's visible frame (and below otherwise), preferring whichever
- * side has room. Horizontally it centers on the avatar, clamped fully
- * on-screen. The avatar's global rect never changes.
- */
 export type ExpandedPlacement = "vertical" | "side";
 
 function expandedLayoutFromGlobals(args: {

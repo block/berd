@@ -2,7 +2,7 @@
 //!
 //! Owns the lifecycle of the `desktop-agent` window: a small always-on-top,
 //! non-activating NSPanel hosting the desktop-agent webview route
-//! (`index.html?window=desktop-agent`). The experiment bridge in the main
+//! (`index.html?window=desktop-agent`). The settings bridge in the main
 //! webview drives it:
 //!
 //! - setting enabled -> `desktop_agent_open`

@@ -4,7 +4,12 @@
 
 import { beforeEach, describe, expect, test } from "vitest";
 
-import { rect, type Rect, type ScreenInfo } from "./anchorGeometry";
+import {
+  popoverGlobal,
+  rect,
+  type Rect,
+  type ScreenInfo,
+} from "./anchorGeometry";
 import {
   AVATAR_PANEL_SIZE,
   PanelStateMachine,
@@ -177,12 +182,7 @@ describe("PanelStateMachine", () => {
     window_.calls = [];
 
     const grown = await machine.computeGrown({
-      fromPopoverGlobal: rect(
-        composer.windowFrame.x + composer.popoverRect.x,
-        composer.windowFrame.y + composer.popoverRect.y,
-        composer.popoverRect.width,
-        composer.popoverRect.height,
-      ),
+      fromPopoverGlobal: popoverGlobal(composer),
       composerBottomGlobal:
         composer.windowFrame.y +
         composer.popoverRect.y +
