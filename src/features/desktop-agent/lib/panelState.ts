@@ -109,7 +109,9 @@ export class PanelStateMachine {
    * smaller; growing to the full chat re-runs this same path).
    */
   async computeExpanded(size?: Size): Promise<ExpandedLayout> {
-    await this.syncFromPanel();
+    if (this.modeInternal === "avatar") {
+      await this.syncFromPanel();
+    }
     const screens = await this.window.getScreens();
     return computeExpandedLayout({
       avatarGlobal: this.avatarGlobal,

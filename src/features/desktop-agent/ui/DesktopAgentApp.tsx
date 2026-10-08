@@ -88,6 +88,8 @@ export function DesktopAgentApp() {
   const [hovering, setHovering] = useState(false);
   const [restored, setRestored] = useState(false);
   const collapsing = useRef(false);
+  const closingMenu = useRef(false);
+  const openingMenu = useRef(false);
   const dragging = useRef(false);
   const ignoreNextClick = useRef(false);
   const pointerDownAt = useRef<{
@@ -102,6 +104,8 @@ export function DesktopAgentApp() {
   // may still hold immediately; its next move can drag once the drop settles.
   const dropPending = useRef(false);
   const gestureGeneration = useRef(0);
+  const sessionMessageCount = useRef(session.messages.length);
+  sessionMessageCount.current = session.messages.length;
 
   const clearHoldTimer = useCallback(() => {
     if (holdTimer.current !== null) window.clearTimeout(holdTimer.current);
@@ -125,6 +129,7 @@ export function DesktopAgentApp() {
   }, []);
 
   const collapse = useCallback(async () => {
+    gestureGeneration.current++;
     if (collapsing.current || machine.mode !== "expanded") return;
     collapsing.current = true;
     try {
@@ -138,19 +143,23 @@ export function DesktopAgentApp() {
   }, []);
 
   const expand = useCallback(async () => {
-    if (machine.mode !== "avatar") return;
+    if (openingMenu.current || machine.mode !== "avatar") return;
+    const generation = ++gestureGeneration.current;
     // Composer-first: an empty chat (nothing to show, including reopen
     // of a still-empty chat) opens as just the composer pill; a chat
     // with messages opens as the full window.
-    const composerOnly = session.messages.length === 0;
+    const composerOnly = sessionMessageCount.current === 0;
     // Anti-blink: compute first, commit to the tree, THEN resize native.
     const next = await machine.computeExpanded(
       composerOnly ? COMPOSER_ONLY_SIZE : undefined,
     );
+    if (generation !== gestureGeneration.current || machine.mode !== "avatar") {
+      return;
+    }
     setPopoverVariant(composerOnly ? "composer" : "full");
     setLayout(next);
     await machine.applyExpanded(next);
-  }, [session.messages.length]);
+  }, []);
 
   // First message sent while composer-only: grow to the full chat window
   // through the same anti-blink path (compute, commit to tree, THEN
@@ -168,7 +177,14 @@ export function DesktopAgentApp() {
     void (async () => {
       try {
         if (machine.mode !== "expanded") return;
+        const generation = gestureGeneration.current;
         const next = await machine.computeExpanded();
+        if (
+          generation !== gestureGeneration.current ||
+          machine.mode !== "expanded"
+        ) {
+          return;
+        }
         setPopoverVariant("full");
         setLayout(next);
         await machine.applyExpanded(next);
@@ -179,10 +195,16 @@ export function DesktopAgentApp() {
   }, [layout, popoverVariant, session.messages.length]);
 
   const closeMenu = useCallback(async () => {
-    if (machine.mode !== "menu") return;
-    // Anti-blink, in reverse: drop the menu from the tree first.
-    setMenu(null);
-    await machine.collapse();
+    gestureGeneration.current++;
+    if (closingMenu.current || machine.mode !== "menu") return;
+    closingMenu.current = true;
+    try {
+      // Anti-blink, in reverse: drop the menu from the tree first.
+      setMenu(null);
+      await machine.collapse();
+    } finally {
+      closingMenu.current = false;
+    }
   }, []);
 
   // "Hide agent" = the Desktop Agent setting goes OFF (one on/off state;
@@ -191,11 +213,14 @@ export function DesktopAgentApp() {
   // event and the bridge destroys the panel. The local dismissed state
   // hides the avatar immediately while that close is in flight.
   const dismiss = useCallback(() => {
+    gestureGeneration.current++;
+    clearPress();
     if (machine.mode === "expanded") void collapse();
     if (machine.mode === "menu") void closeMenu();
     setDismissed(true);
     setDesktopAgentEnabled(false);
-  }, [collapse, closeMenu]);
+    void invoke("desktop_agent_close").catch(() => undefined);
+  }, [clearPress, collapse, closeMenu]);
 
   // Right-click menu data/selection semantics (geometry is handled here
   // in openMenu/closeMenu): pick an agent for the NEXT chat (selection
@@ -215,23 +240,39 @@ export function DesktopAgentApp() {
   // simplest robust option (one grown-window layout at a time; no
   // menu-inside-chat z-order or geometry union to reason about).
   const openMenu = useCallback(async () => {
-    if (machine.mode === "menu") return;
+    if (openingMenu.current || machine.mode === "menu") return;
     if (machine.mode === "expanded") await collapse();
     if (machine.mode !== "avatar") return;
-    const model = await avatarMenu.prepareMenu();
-    const size = menuOverlaySize({
-      agentSelector,
-      agentCount: model.agents.length,
-    });
-    const next = await machine.computeMenu(size);
-    setMenu({ layout: next, model });
-    await machine.applyMenu(next);
+    const generation = ++gestureGeneration.current;
+    openingMenu.current = true;
+    try {
+      const valid = () =>
+        machine.mode === "avatar" &&
+        generation === gestureGeneration.current &&
+        !dropPending.current &&
+        !dragging.current &&
+        pointerDownAt.current === null;
+      if (!valid()) return;
+      const model = await avatarMenu.prepareMenu();
+      if (!valid()) return;
+      const size = menuOverlaySize({
+        agentSelector,
+        agentCount: model.agents.length,
+      });
+      const next = await machine.computeMenu(size);
+      if (!valid()) return;
+      setMenu({ layout: next, model });
+      await machine.applyMenu(next);
+    } finally {
+      openingMenu.current = false;
+    }
   }, [agentSelector, avatarMenu, collapse]);
 
   // Key-loss while expanded = click outside -> collapse (menu included).
   useEffect(() => {
     const unlisten = listen<boolean>("desktop-agent:key-status", (event) => {
       if (!event.payload) {
+        gestureGeneration.current++;
         void closeMenu();
         void collapse();
       }
@@ -245,6 +286,7 @@ export function DesktopAgentApp() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      gestureGeneration.current++;
       void closeMenu();
       void collapse();
     };
@@ -257,6 +299,7 @@ export function DesktopAgentApp() {
   // disabling now, so there is no hidden-but-running panel.
   useEffect(() => {
     const unlisten = listen("desktop-agent:toggle-panel", () => {
+      gestureGeneration.current++;
       if (machine.mode === "menu") void closeMenu();
       else if (machine.mode === "expanded") void collapse();
       else void expand();
@@ -314,7 +357,8 @@ export function DesktopAgentApp() {
 
   const onAvatarPointerDown = useCallback(
     (e: React.PointerEvent) => {
-      if (e.button !== 0 || e.isPrimary === false) return;
+      if (dismissed || e.button !== 0 || e.isPrimary === false || e.ctrlKey)
+        return;
       ignoreNextClick.current = false;
       if (machine.mode !== "avatar" || pointerDownAt.current) return;
       // preventDefault before any native drag, or the webview turns the
@@ -344,7 +388,7 @@ export function DesktopAgentApp() {
         }, HOLD_DELAY_MS);
       }
     },
-    [character],
+    [character, dismissed],
   );
 
   // Start native drag only on a fresh pointer-MOVE past slop. Queuing an old
@@ -379,7 +423,8 @@ export function DesktopAgentApp() {
   const onAvatarPointerUp = useCallback(
     async (e: React.PointerEvent) => {
       const press = pointerDownAt.current;
-      if (!press || e.pointerId !== press.id || e.button !== 0) return;
+      if (dismissed || !press || e.pointerId !== press.id || e.button !== 0)
+        return;
       const wasDragging = dragging.current;
       dragging.current = false;
       clearPress();
@@ -400,17 +445,19 @@ export function DesktopAgentApp() {
           dropPending.current = false;
           setDragActive(false);
         }
-      } else if (!press.held && !dropPending.current) {
+      } else if (!press.held && !dropPending.current && !dismissed) {
         await expand();
       }
     },
-    [clearPress, expand, perch],
+    [clearPress, dismissed, expand, perch],
   );
 
   // Avatar follows the agent: pending selection previews the next chat's
   // identity (a pending fresh chat previews the default avatar by mapping
   // to null); otherwise the committed session binding; otherwise the
   // default avatar.
+
+  const activeLayout = layout ?? menu?.layout ?? null;
 
   const avatarState = deriveAvatarState({
     hovering,
@@ -444,14 +491,14 @@ export function DesktopAgentApp() {
         className="avatar-hit"
         style={{
           position: "absolute",
-          left: layout?.avatarRect.x ?? 0,
-          top: layout?.avatarRect.y ?? 0,
-          width: layout?.avatarRect.width ?? 94,
-          height: layout?.avatarRect.height ?? 94,
+          left: activeLayout?.avatarRect.x ?? 0,
+          top: activeLayout?.avatarRect.y ?? 0,
+          width: activeLayout?.avatarRect.width ?? 94,
+          height: activeLayout?.avatarRect.height ?? 94,
         }}
         onPointerDown={onAvatarPointerDown}
-        onPointerMove={layout ? undefined : onAvatarPointerMove}
-        onPointerUp={layout ? undefined : onAvatarPointerUp}
+        onPointerMove={activeLayout ? undefined : onAvatarPointerMove}
+        onPointerUp={activeLayout ? undefined : onAvatarPointerUp}
         onPointerCancel={(e) => {
           if (e.pointerId === pointerDownAt.current?.id) cancelPress();
         }}
@@ -467,7 +514,7 @@ export function DesktopAgentApp() {
             ignoreNextClick.current = false;
             return;
           }
-          if (e.button !== 0) return;
+          if (dismissed || e.button !== 0) return;
           if (menu) void closeMenu();
           else if (layout) void collapse();
         }}
@@ -475,6 +522,7 @@ export function DesktopAgentApp() {
         onPointerLeave={() => setHovering(false)}
         title={t("avatar.title")}
         onContextMenu={(e) => {
+          if (dismissed) return;
           e.preventDefault();
           void openMenu();
         }}
@@ -504,6 +552,12 @@ export function DesktopAgentApp() {
       )}
       {menu && (
         <div
+          onPointerDown={(e) => {
+            const target = e.target as Element;
+            if (target.closest(".menu-card") || target.closest(".avatar-hit"))
+              return;
+            void closeMenu();
+          }}
           style={{
             position: "absolute",
             left: menu.layout.popoverRect.x,

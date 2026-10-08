@@ -10,11 +10,13 @@
 //
 // There used to be a second `goose:desktop-agent-visible` preference
 // (hide WITHOUT disabling). It collapsed into this single switch: hiding
-// IS disabling now. Migration: the stale `visible` key is simply ignored —
+// IS disabling now. Migration: the stale `visible` key is removed once —
 // a user who had visible=false and enabled=true comes back enabled (and
 // can hide again with one click).
 
 import { createBooleanLocalStoragePreference } from "@/shared/preferences/createBooleanLocalStoragePreference";
+
+localStorage.removeItem("goose:desktop-agent-visible");
 
 export const DESKTOP_AGENT_ENABLED_STORAGE_KEY = "goose:desktop-agent-enabled";
 

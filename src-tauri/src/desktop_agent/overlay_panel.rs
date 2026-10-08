@@ -103,14 +103,16 @@ pub(super) unsafe fn create_overlay_panel(appearance: &OverlayAppearance) -> *mu
             let clear: *mut AnyObject = msg_send![color_cls, clearColor];
             let _: () = msg_send![&mut *panel, setBackgroundColor: &*clear];
             let content: *mut AnyObject = msg_send![&*panel, contentView];
-            let _: () = msg_send![&mut *content, setWantsLayer: Bool::YES];
-            let layer: *mut AnyObject = msg_send![&*content, layer];
-            if !layer.is_null() {
-                let _: () = msg_send![&mut *layer, setBorderWidth: *width];
-                let _: () = msg_send![&mut *layer, setCornerRadius: *radius];
-                let stroke = ns_color(color_cls, color, *alpha);
-                let cg: *mut AnyObject = msg_send![&*stroke, CGColor];
-                let _: () = msg_send![&mut *layer, setBorderColor: &*cg];
+            if !content.is_null() {
+                let _: () = msg_send![&mut *content, setWantsLayer: Bool::YES];
+                let layer: *mut AnyObject = msg_send![&*content, layer];
+                if !layer.is_null() {
+                    let _: () = msg_send![&mut *layer, setBorderWidth: *width];
+                    let _: () = msg_send![&mut *layer, setCornerRadius: *radius];
+                    let stroke = ns_color(color_cls, color, *alpha);
+                    let cg: *mut AnyObject = msg_send![&*stroke, CGColor];
+                    let _: () = msg_send![&mut *layer, setBorderColor: &*cg];
+                }
             }
         }
         OverlayAppearance::Fill {
@@ -125,19 +127,21 @@ pub(super) unsafe fn create_overlay_panel(appearance: &OverlayAppearance) -> *mu
             let clear: *mut AnyObject = msg_send![color_cls, clearColor];
             let _: () = msg_send![&mut *panel, setBackgroundColor: &*clear];
             let content: *mut AnyObject = msg_send![&*panel, contentView];
-            let _: () = msg_send![&mut *content, setWantsLayer: Bool::YES];
-            let layer: *mut AnyObject = msg_send![&*content, layer];
-            if !layer.is_null() {
-                let fill = ns_color(color_cls, color, *alpha);
-                let cg: *mut AnyObject = msg_send![&*fill, CGColor];
-                let _: () = msg_send![&mut *layer, setBackgroundColor: &*cg];
-                let _: () = msg_send![&mut *layer, setCornerRadius: *top_radius];
-                let _: () = msg_send![&mut *layer, setMasksToBounds: Bool::YES];
-                // Top corners only. The content view is NOT flipped, so
-                // the layer's MaxY edge is the visual top:
-                // kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner.
-                let corners: usize = (1 << 2) | (1 << 3);
-                let _: () = msg_send![&mut *layer, setMaskedCorners: corners];
+            if !content.is_null() {
+                let _: () = msg_send![&mut *content, setWantsLayer: Bool::YES];
+                let layer: *mut AnyObject = msg_send![&*content, layer];
+                if !layer.is_null() {
+                    let fill = ns_color(color_cls, color, *alpha);
+                    let cg: *mut AnyObject = msg_send![&*fill, CGColor];
+                    let _: () = msg_send![&mut *layer, setBackgroundColor: &*cg];
+                    let _: () = msg_send![&mut *layer, setCornerRadius: *top_radius];
+                    let _: () = msg_send![&mut *layer, setMasksToBounds: Bool::YES];
+                    // Top corners only. The content view is NOT flipped, so
+                    // the layer's MaxY edge is the visual top:
+                    // kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner.
+                    let corners: usize = (1 << 2) | (1 << 3);
+                    let _: () = msg_send![&mut *layer, setMaskedCorners: corners];
+                }
             }
         }
     }

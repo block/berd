@@ -5,12 +5,8 @@
 // anti-blink path as the chat popover) and renders this component inside
 // the computed overlay region; this component only positions the menu
 // card (and the "Switch agent" submenu) WITHIN that region.
-//
-// Keyboard: ArrowUp/Down move, ArrowRight/Enter open the submenu on the
-// switch row, ArrowLeft closes it, Enter activates, Esc closes (handled
-// by DesktopAgentApp's window-level listener alongside click-outside).
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { ExpandedLayout, Size } from "../lib/anchorGeometry";
@@ -26,41 +22,113 @@ export const SUBMENU_WIDTH = 240;
 const ROW_HEIGHT = 28;
 const MENU_PADDING = 6;
 const SEPARATOR_HEIGHT = 9; // 1px rule + margins
-const SUBMENU_GAP = 4;
+export const SUBMENU_GAP = 8;
 const PREVIEW_SIZE = 18;
+const SUBMENU_MAX_ROWS = 8;
+const SUBMENU_CLOSE_DELAY_MS = 150;
 
-/**
- * Overlay region the menu needs: wide enough for the root menu PLUS the
- * submenu beside it (the window frame is fixed while the menu is open;
- * the submenu must already fit). anchorGeometry adds the shadow margin.
- */
-export function menuOverlaySize(args: {
-  agentSelector: boolean;
-  agentCount: number;
-}): Size {
-  const mainRows = args.agentSelector ? 3 : 2;
-  const mainHeight =
-    MENU_PADDING * 2 +
-    mainRows * ROW_HEIGHT +
-    (args.agentSelector ? SEPARATOR_HEIGHT : 0);
-  if (!args.agentSelector) {
-    return { width: MENU_WIDTH, height: mainHeight };
-  }
-  // Berd row + agent rows (or the one empty-state row).
-  const subRows = 1 + Math.max(args.agentCount, 1);
-  const subHeight = MENU_PADDING * 2 + subRows * ROW_HEIGHT;
-  return {
-    width: MENU_WIDTH + SUBMENU_GAP + SUBMENU_WIDTH,
-    height: Math.max(mainHeight, subHeight),
-  };
+export interface AvatarMenuPlacement {
+  regionSize: Size;
+  root: { x: number; y: number; width: number; height: number };
+  submenu: { x: number; y: number; width: number; height: number };
+  submenuMaxHeight: number;
+  submenuSide: "left" | "right";
 }
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(Math.max(value, min), Math.max(min, max));
 
-/** Berd's submenu preview: a static first frame of the Berdy character
- *  (paused idle clip — no poster asset exists, and a tiny paused video
- *  renders its first frame). */
+function rootHeight(agentSelector: boolean): number {
+  const rows = agentSelector ? 3 : 2;
+  return (
+    MENU_PADDING * 2 +
+    rows * ROW_HEIGHT +
+    (agentSelector ? SEPARATOR_HEIGHT : 0)
+  );
+}
+
+function submenuNaturalHeight(agentCount: number): number {
+  return MENU_PADDING * 2 + (1 + Math.max(agentCount, 1)) * ROW_HEIGHT;
+}
+
+/**
+ * Single source of truth for the menu overlay geometry. The native window
+ * must be sized before render, so this pure function is shared by
+ * menuOverlaySize() and AvatarMenu. The region is wide enough for root +
+ * submenu, but the root hugs the avatar edge while the submenu opens away
+ * from the avatar/toward available screen space.
+ */
+export function computeAvatarMenuPlacement(args: {
+  agentSelector: boolean;
+  agentCount: number;
+  visibleHeight?: number;
+  openSubmenu?: boolean;
+  preferSubmenuSide?: "left" | "right";
+  regionWidth?: number;
+  regionHeight?: number;
+  avatarCenterX?: number;
+  popoverAbove?: boolean;
+}): AvatarMenuPlacement {
+  const mainHeight = rootHeight(args.agentSelector);
+  const rawSubHeight = submenuNaturalHeight(args.agentCount);
+  const maxScrollableSubHeight =
+    MENU_PADDING * 2 + SUBMENU_MAX_ROWS * ROW_HEIGHT;
+  const visibleHeight = args.visibleHeight ?? Number.POSITIVE_INFINITY;
+  const submenuMaxHeight = Math.max(
+    MENU_PADDING * 2 + ROW_HEIGHT,
+    Math.min(rawSubHeight, maxScrollableSubHeight, visibleHeight),
+  );
+  const subHeight = args.agentSelector ? submenuMaxHeight : 0;
+  const openSubmenu = args.agentSelector && args.openSubmenu !== false;
+  const width = args.agentSelector
+    ? MENU_WIDTH + SUBMENU_GAP + SUBMENU_WIDTH
+    : MENU_WIDTH;
+  const height = Math.max(mainHeight, openSubmenu ? subHeight : 0);
+  const regionWidth = args.regionWidth ?? width;
+  const regionHeight = args.regionHeight ?? height;
+  const submenuSide =
+    args.preferSubmenuSide ??
+    (args.avatarCenterX !== undefined && args.avatarCenterX < regionWidth / 2
+      ? "right"
+      : "left");
+  const rootX = clamp(
+    args.agentSelector && submenuSide === "left" ? regionWidth - MENU_WIDTH : 0,
+    0,
+    regionWidth - MENU_WIDTH,
+  );
+  const rootY = clamp(
+    args.popoverAbove ? regionHeight - mainHeight : 0,
+    0,
+    regionHeight - mainHeight,
+  );
+  const subX =
+    submenuSide === "right"
+      ? rootX + MENU_WIDTH + SUBMENU_GAP
+      : rootX - SUBMENU_GAP - SUBMENU_WIDTH;
+  const subY = clamp(rootY, 0, regionHeight - subHeight);
+  return {
+    regionSize: { width, height },
+    root: { x: rootX, y: rootY, width: MENU_WIDTH, height: mainHeight },
+    submenu: { x: subX, y: subY, width: SUBMENU_WIDTH, height: subHeight },
+    submenuMaxHeight,
+    submenuSide,
+  };
+}
+
+/** Overlay region the menu needs before it is rendered. */
+export function menuOverlaySize(args: {
+  agentSelector: boolean;
+  agentCount: number;
+  visibleHeight?: number;
+}): Size {
+  return computeAvatarMenuPlacement({
+    agentSelector: args.agentSelector,
+    agentCount: args.agentCount,
+    visibleHeight: args.visibleHeight,
+  }).regionSize;
+}
+
+/** Berd's submenu preview: a static first frame of the Berdy character. */
 function BerdPreview() {
   return (
     <video
@@ -114,10 +182,9 @@ export function AvatarMenu({
 }) {
   const { t } = useTranslation("desktop-agent");
   const [submenuOpen, setSubmenuOpen] = useState(false);
-  // Highlight index over the ROOT rows (switch?, settings, hide) or the
-  // SUBMENU rows (Berd, agents...) depending on which menu is focused.
   const [highlight, setHighlight] = useState<number | null>(null);
   const [subHighlight, setSubHighlight] = useState<number | null>(null);
+  const closeTimer = useRef<number | null>(null);
 
   const rootItems = useMemo(
     () =>
@@ -126,119 +193,123 @@ export function AvatarMenu({
         : (["settings", "hide"] as const),
     [agentSelector],
   );
-
-  // Submenu interactive rows: Berd first, then the agents. The empty-
-  // state row is non-interactive and excluded.
   const subItems = useMemo<("fresh" | AgentInfo)[]>(
     () => ["fresh" as const, ...model.agents],
     [model.agents],
   );
 
-  const activateRoot = (item: (typeof rootItems)[number]) => {
-    if (item === "switch") {
-      setSubmenuOpen(true);
-      setSubHighlight(0);
-      return;
-    }
-    if (item === "settings") onSettings();
-    else onHide();
-  };
-
-  const activateSub = (item: "fresh" | AgentInfo) => {
-    if (item === "fresh") onSelectFresh();
-    else onSelectAgent(item);
-  };
-
-  const activateRef = useRef({ activateRoot, activateSub });
-  activateRef.current = { activateRoot, activateSub };
-
-  const stateRef = useRef({
-    rootItems,
-    subItems,
-    submenuOpen,
-    highlight,
-    subHighlight,
+  const regionW = layout.popoverRect.width;
+  const regionH = layout.popoverRect.height;
+  const avatarCenterX =
+    layout.avatarRect.x + layout.avatarRect.width / 2 - layout.popoverRect.x;
+  const placement = computeAvatarMenuPlacement({
+    agentSelector,
+    agentCount: model.agents.length,
+    visibleHeight: regionH,
+    openSubmenu: submenuOpen,
+    regionWidth: regionW,
+    regionHeight: regionH,
+    avatarCenterX,
+    popoverAbove: layout.popoverAbove,
   });
-  stateRef.current = {
-    rootItems,
-    subItems,
-    submenuOpen,
-    highlight,
-    subHighlight,
-  };
+
+  const clearCloseTimer = useCallback(() => {
+    if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
+    closeTimer.current = null;
+  }, []);
+  const openSubmenu = useCallback(() => {
+    clearCloseTimer();
+    setSubmenuOpen(true);
+  }, [clearCloseTimer]);
+  const scheduleSubmenuClose = useCallback(() => {
+    clearCloseTimer();
+    closeTimer.current = window.setTimeout(() => {
+      closeTimer.current = null;
+      setSubmenuOpen(false);
+      setSubHighlight(null);
+    }, SUBMENU_CLOSE_DELAY_MS);
+  }, [clearCloseTimer]);
+
+  useEffect(() => clearCloseTimer, [clearCloseTimer]);
+
+  const activateRoot = useCallback(
+    (item: (typeof rootItems)[number]) => {
+      if (item === "switch") {
+        openSubmenu();
+        setSubHighlight(0);
+        return;
+      }
+      if (item === "settings") onSettings();
+      else onHide();
+    },
+    [onHide, onSettings, openSubmenu],
+  );
 
   useEffect(() => {
+    const move = (index: number | null, delta: number, length: number) =>
+      index === null
+        ? delta > 0
+          ? 0
+          : length - 1
+        : (index + delta + length) % length;
     const onKey = (e: KeyboardEvent) => {
-      const s = stateRef.current;
-      const move = (index: number | null, delta: number, length: number) =>
-        index === null
-          ? delta > 0
-            ? 0
-            : length - 1
-          : (index + delta + length) % length;
       switch (e.key) {
         case "ArrowDown":
         case "ArrowUp": {
           const delta = e.key === "ArrowDown" ? 1 : -1;
-          if (s.submenuOpen) {
-            setSubHighlight(move(s.subHighlight, delta, s.subItems.length));
-          } else {
-            setHighlight(move(s.highlight, delta, s.rootItems.length));
-          }
+          if (submenuOpen)
+            setSubHighlight((i) => move(i, delta, subItems.length));
+          else setHighlight((i) => move(i, delta, rootItems.length));
+          e.preventDefault();
           break;
         }
         case "ArrowRight":
-          if (!s.submenuOpen && s.rootItems[s.highlight ?? -1] === "switch") {
-            setSubmenuOpen(true);
+          if (!submenuOpen && rootItems[highlight ?? -1] === "switch") {
+            openSubmenu();
             setSubHighlight(0);
+            e.preventDefault();
           }
           break;
         case "ArrowLeft":
-          if (s.submenuOpen) {
+          if (submenuOpen) {
             setSubmenuOpen(false);
             setSubHighlight(null);
+            e.preventDefault();
           }
           break;
-        case "Enter": {
-          if (s.submenuOpen) {
-            const item = s.subItems[s.subHighlight ?? -1];
-            if (item !== undefined) activateRef.current.activateSub(item);
+        case "Enter":
+          if (submenuOpen) {
+            const item = subItems[subHighlight ?? -1];
+            if (item !== undefined) {
+              if (item === "fresh") onSelectFresh();
+              else onSelectAgent(item);
+              e.preventDefault();
+            }
           } else {
-            const item = s.rootItems[s.highlight ?? -1];
-            if (item !== undefined) activateRef.current.activateRoot(item);
+            const item = rootItems[highlight ?? -1];
+            if (item !== undefined) {
+              activateRoot(item);
+              e.preventDefault();
+            }
           }
           break;
-        }
         default:
-          return;
+          break;
       }
-      e.preventDefault();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
-  // Geometry within the overlay region (origin = popoverRect top-left).
-  const regionW = layout.popoverRect.width;
-  const regionH = layout.popoverRect.height;
-  const mainHeight =
-    MENU_PADDING * 2 +
-    rootItems.length * ROW_HEIGHT +
-    (agentSelector ? SEPARATOR_HEIGHT : 0);
-  const avatarCenterX =
-    layout.avatarRect.x + layout.avatarRect.width / 2 - layout.popoverRect.x;
-  const rootX = clamp(avatarCenterX - MENU_WIDTH / 2, 0, regionW - MENU_WIDTH);
-  // Hug the avatar edge: bottom-aligned when the menu opens above it.
-  const rootY = layout.popoverAbove ? regionH - mainHeight : 0;
-  const switchRowTop = rootY + MENU_PADDING;
-  const subHeight =
-    MENU_PADDING * 2 + Math.max(subItems.length, 2) * ROW_HEIGHT;
-  const subFitsRight =
-    rootX + MENU_WIDTH + SUBMENU_GAP + SUBMENU_WIDTH <= regionW;
-  const subX = subFitsRight
-    ? rootX + MENU_WIDTH + SUBMENU_GAP
-    : Math.max(0, rootX - SUBMENU_GAP - SUBMENU_WIDTH);
-  const subY = clamp(switchRowTop - MENU_PADDING, 0, regionH - subHeight);
+  }, [
+    highlight,
+    activateRoot,
+    onSelectAgent,
+    onSelectFresh,
+    openSubmenu,
+    rootItems,
+    subHighlight,
+    subItems,
+    submenuOpen,
+  ]);
 
   const row = (args: {
     key: string;
@@ -265,8 +336,13 @@ export function AvatarMenu({
     <div className="avatar-menu-region">
       <div
         className="menu-card avatar-menu"
-        style={{ left: rootX, top: rootY, width: MENU_WIDTH }}
+        style={{
+          left: placement.root.x,
+          top: placement.root.y,
+          width: MENU_WIDTH,
+        }}
         role="menu"
+        onPointerEnter={clearCloseTimer}
       >
         {agentSelector && (
           <>
@@ -275,10 +351,10 @@ export function AvatarMenu({
               highlighted: highlight === 0,
               onHover: () => {
                 setHighlight(0);
-                setSubmenuOpen(true);
+                openSubmenu();
               },
               onClick: () => {
-                setSubmenuOpen(true);
+                openSubmenu();
                 setSubHighlight(0);
               },
               children: (
@@ -296,7 +372,7 @@ export function AvatarMenu({
           highlighted: highlight === rootItems.indexOf("settings"),
           onHover: () => {
             setHighlight(rootItems.indexOf("settings"));
-            setSubmenuOpen(false);
+            scheduleSubmenuClose();
           },
           onClick: onSettings,
           children: <span className="menu-label">{t("menu.settings")}</span>,
@@ -306,7 +382,7 @@ export function AvatarMenu({
           highlighted: highlight === rootItems.indexOf("hide"),
           onHover: () => {
             setHighlight(rootItems.indexOf("hide"));
-            setSubmenuOpen(false);
+            scheduleSubmenuClose();
           },
           onClick: onHide,
           children: <span className="menu-label">{t("menu.dismiss")}</span>,
@@ -315,8 +391,15 @@ export function AvatarMenu({
       {agentSelector && submenuOpen && (
         <div
           className="menu-card avatar-submenu"
-          style={{ left: subX, top: subY, width: SUBMENU_WIDTH }}
+          style={{
+            left: placement.submenu.x,
+            top: placement.submenu.y,
+            width: SUBMENU_WIDTH,
+            maxHeight: placement.submenuMaxHeight,
+          }}
           role="menu"
+          onPointerEnter={clearCloseTimer}
+          onPointerLeave={scheduleSubmenuClose}
         >
           {row({
             key: "fresh",

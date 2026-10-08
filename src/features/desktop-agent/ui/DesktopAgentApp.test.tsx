@@ -35,6 +35,7 @@ const mocks = vi.hoisted(() => ({
   },
   agentId: null as string | null,
   openMenu: vi.fn(),
+  invoke: vi.fn(async () => undefined),
   avatarProps: {} as Record<string, unknown>,
 }));
 vi.mock("@/features/desktop-agent/lib/panelState", () => ({
@@ -91,6 +92,9 @@ vi.mock("@/features/experiments/experimentPreferences", () => ({
 vi.mock("@/features/desktop-agent/lib/desktopAgentPreferences", () => ({
   setDesktopAgentEnabled: vi.fn(),
 }));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: mocks.invoke,
+}));
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(async () => vi.fn()),
 }));
@@ -116,9 +120,9 @@ beforeEach(() => {
     checkedFresh: true,
   });
   mocks.port.computeMenu.mockResolvedValue({
-    avatarRect: { x: 0, y: 0, width: 94, height: 94 },
-    popoverRect: { x: 94, y: 0, width: 190, height: 68 },
-    windowFrame: { x: 0, y: 0, width: 284, height: 94 },
+    avatarRect: { x: 42, y: 17, width: 94, height: 94 },
+    popoverRect: { x: 136, y: 17, width: 438, height: 96 },
+    windowFrame: { x: 0, y: 0, width: 574, height: 130 },
     popoverAbove: false,
   });
   mocks.port.applyMenu.mockImplementation(async () => {
@@ -152,6 +156,69 @@ it("animates only a positively identified Berdy, and forwards hide and perch sta
   rerender(<DesktopAgentApp />);
   expect(mocks.avatarProps.target).toBe("idle");
 });
+
+it("positions the avatar from menu layout while the menu is open", async () => {
+  const { findByTestId } = render(<DesktopAgentApp />);
+  const hit = (await findByTestId("avatar")).parentElement;
+  if (!hit) throw new Error("missing hit target");
+
+  await act(async () => fireEvent.contextMenu(hit));
+
+  expect(mocks.port.applyMenu).toHaveBeenCalledOnce();
+  expect(hit.style.left).toBe("42px");
+  expect(hit.style.top).toBe("17px");
+});
+
+it("ignores a second right-click while menu preparation is in flight", async () => {
+  let resolve!: (value: {
+    agents: [];
+    checkedAgentId: null;
+    checkedFresh: true;
+  }) => void;
+  mocks.openMenu.mockReturnValue(
+    new Promise((r) => {
+      resolve = r;
+    }),
+  );
+  const { findByTestId } = render(<DesktopAgentApp />);
+  const hit = (await findByTestId("avatar")).parentElement;
+  if (!hit) throw new Error("missing hit target");
+
+  fireEvent.contextMenu(hit);
+  fireEvent.contextMenu(hit);
+  expect(mocks.openMenu).toHaveBeenCalledOnce();
+
+  await act(async () =>
+    resolve({ agents: [], checkedAgentId: null, checkedFresh: true }),
+  );
+  expect(mocks.port.applyMenu).toHaveBeenCalledOnce();
+});
+
+it("cancels an in-flight menu open when Escape changes generation", async () => {
+  let resolve!: (value: {
+    agents: [];
+    checkedAgentId: null;
+    checkedFresh: true;
+  }) => void;
+  mocks.openMenu.mockReturnValue(
+    new Promise((r) => {
+      resolve = r;
+    }),
+  );
+  const { findByTestId } = render(<DesktopAgentApp />);
+  const hit = (await findByTestId("avatar")).parentElement;
+  if (!hit) throw new Error("missing hit target");
+
+  fireEvent.contextMenu(hit);
+  fireEvent.keyDown(window, { key: "Escape" });
+  await act(async () =>
+    resolve({ agents: [], checkedAgentId: null, checkedFresh: true }),
+  );
+
+  expect(mocks.port.computeMenu).not.toHaveBeenCalled();
+  expect(mocks.port.applyMenu).not.toHaveBeenCalled();
+});
+
 it("native drag slop changes target, not DOM position, and drop returns to idle", async () => {
   // jsdom has no PointerEvent; MouseEvent supplies the coordinates React reads.
   vi.stubGlobal("PointerEvent", MouseEvent);

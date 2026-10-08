@@ -129,7 +129,7 @@ pub fn desktop_agent_open(app: AppHandle, shortcut: String) -> Result<(), String
     Ok(())
 }
 
-/// Destroys the panel window and releases the toggle chord (experiment
+/// Destroys the panel window and releases the toggle chord (setting
 /// disable). Chat state is server-side: a later open re-adopts it.
 #[tauri::command]
 pub fn desktop_agent_close(app: AppHandle) -> Result<(), String> {

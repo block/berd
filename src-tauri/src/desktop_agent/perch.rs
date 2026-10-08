@@ -1011,7 +1011,7 @@ fn end_perch_internal(app: &AppHandle) {
     });
 }
 
-/// Full perch teardown for `desktop_agent_close` (experiment disable):
+/// Full perch teardown for `desktop_agent_close` (setting disable):
 /// stops BOTH loops, hides BOTH overlays, releases the AX element. Must
 /// run BEFORE the panel window is destroyed — the follow loop's next tick
 /// re-checks FOLLOWING inside the hop and exits without touching the

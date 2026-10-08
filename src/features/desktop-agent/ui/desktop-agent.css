@@ -10,6 +10,10 @@
    this override covers the buttons.) */
 #root {
   --background: #18181b;
+  /* Dark glass shared by chat popover and avatar menu. Keep
+     POPOVER_SHADOW_MARGIN in anchorGeometry.ts large enough for this shadow. */
+  --panel-glass-bg: rgba(24, 24, 27, 0.96);
+  --panel-glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
 }
 
 html,
@@ -34,11 +38,11 @@ body,
 
 .panel-popover {
   border-radius: 18px;
-  background: rgba(24, 24, 27, 0.96);
+  background: var(--panel-glass-bg);
   color: #e4e4e7;
   box-sizing: border-box;
   padding: 16px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--panel-glass-shadow);
 }
 
 /* Composer-first mode: the overlay region paints NOTHING itself — only
@@ -368,9 +372,9 @@ body,
 .composer-only .composer-box {
   margin-top: 0;
   border-radius: 24px;
-  background: rgba(24, 24, 27, 0.96);
+  background: var(--panel-glass-bg);
   border-color: rgba(255, 255, 255, 0.08);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--panel-glass-shadow);
   padding: 9px 9px 9px 16px;
 }
 
@@ -500,11 +504,15 @@ body,
   box-sizing: border-box;
   padding: 6px 4px;
   border-radius: 12px;
-  background: rgba(24, 24, 27, 0.96);
+  background: var(--panel-glass-bg);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--panel-glass-shadow);
   display: flex;
   flex-direction: column;
+}
+
+.avatar-submenu {
+  overflow-y: auto;
 }
 
 .menu-row {

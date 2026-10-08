@@ -6,6 +6,8 @@ import { describe, expect, test } from "vitest";
 import {
   clampAvatarToScreens,
   computeExpandedLayout,
+  inflate,
+  POPOVER_SHADOW_MARGIN,
   rect,
   rectBottom,
   rectContains,
@@ -269,5 +271,32 @@ describe("computeExpandedLayout", () => {
     expect(rectBottom(layout.popoverRect)).toBeLessThanOrEqual(
       layout.windowFrame.height,
     );
+  });
+});
+
+describe("popover shadow margin", () => {
+  test("window contains the inflated popover while avatar global rect is unchanged", () => {
+    const avatar = rect(600, 700, 90, 90);
+    const layout = computeExpandedLayout({
+      avatarGlobal: avatar,
+      popoverSize: { width: 380, height: 520 },
+      screens,
+    });
+    const inflatedPopover = inflate(layout.popoverRect, POPOVER_SHADOW_MARGIN);
+
+    expect(inflatedPopover.x).toBeGreaterThanOrEqual(0);
+    expect(inflatedPopover.y).toBeGreaterThanOrEqual(0);
+    expect(rectRight(inflatedPopover)).toBeLessThanOrEqual(
+      layout.windowFrame.width,
+    );
+    expect(rectBottom(inflatedPopover)).toBeLessThanOrEqual(
+      layout.windowFrame.height,
+    );
+    expect({
+      x: layout.avatarRect.x + layout.windowFrame.x,
+      y: layout.avatarRect.y + layout.windowFrame.y,
+      width: layout.avatarRect.width,
+      height: layout.avatarRect.height,
+    }).toEqual(avatar);
   });
 });

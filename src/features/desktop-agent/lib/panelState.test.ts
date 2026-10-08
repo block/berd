@@ -139,6 +139,54 @@ describe("PanelStateMachine", () => {
     );
   });
 
+  test("recomputing while expanded does not adopt the expanded window as the avatar frame", async () => {
+    window_.panelFrame = rect(600, 700, AVATAR_PANEL_SIZE, AVATAR_PANEL_SIZE);
+    await machine.syncFromPanel();
+
+    const layout = await machine.computeExpanded({ width: 380, height: 96 });
+    await machine.applyExpanded(layout);
+    expect(window_.panelFrame).toEqual(layout.windowFrame);
+
+    const grown = await machine.computeExpanded({ width: 500, height: 520 });
+
+    expect({
+      x: grown.avatarRect.x + grown.windowFrame.x,
+      y: grown.avatarRect.y + grown.windowFrame.y,
+      width: grown.avatarRect.width,
+      height: grown.avatarRect.height,
+    }).toEqual(rect(600, 700, AVATAR_PANEL_SIZE, AVATAR_PANEL_SIZE));
+
+    await machine.applyExpanded(grown);
+    await machine.collapse();
+
+    expect(lastSetState(window_)).toEqual({
+      expanded: false,
+      frame: rect(600, 700, AVATAR_PANEL_SIZE, AVATAR_PANEL_SIZE),
+    });
+  });
+
+  test("computeMenu/applyMenu grows the window but returns to the saved avatar frame", async () => {
+    window_.panelFrame = rect(420, 500, AVATAR_PANEL_SIZE, AVATAR_PANEL_SIZE);
+    await machine.syncFromPanel();
+
+    const layout = await machine.computeMenu({ width: 438, height: 124 });
+    await machine.applyMenu(layout);
+
+    expect(machine.mode).toBe("menu");
+    expect(lastSetState(window_)).toEqual({
+      expanded: true,
+      frame: layout.windowFrame,
+    });
+
+    await machine.collapse();
+
+    expect(machine.mode).toBe("avatar");
+    expect(lastSetState(window_)).toEqual({
+      expanded: false,
+      frame: rect(420, 500, AVATAR_PANEL_SIZE, AVATAR_PANEL_SIZE),
+    });
+  });
+
   test("onDragEnded clamps and persists the new position", async () => {
     await machine.restore();
     // Simulate the OS drag leaving the panel hanging off the bottom edge.
@@ -197,6 +245,18 @@ describe("PanelStateMachine", () => {
     expect(applied.frame).toEqual(
       rect(333, 444, AVATAR_PANEL_SIZE, AVATAR_PANEL_SIZE),
     );
+  });
+
+  test("returnToSavedPosition is ignored while menu is open", async () => {
+    await machine.syncFromPanel();
+    const layout = await machine.computeMenu({ width: 438, height: 124 });
+    await machine.applyMenu(layout);
+    const statesBefore = window_.setStates.length;
+
+    await machine.returnToSavedPosition();
+
+    expect(machine.mode).toBe("menu");
+    expect(window_.setStates.length).toBe(statesBefore);
   });
 
   test("returnToSavedPosition is ignored while expanded", async () => {
