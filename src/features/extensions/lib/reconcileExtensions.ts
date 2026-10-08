@@ -47,6 +47,15 @@ export async function reconcileExtensions(): Promise<void> {
   if (retired.length === 0) return;
   await backupGooseConfig();
   for (const extension of retired) {
-    await removeExtension(extension.config_key);
+    const current = (await listExtensions()).find(
+      (entry) => entry.config_key === extension.config_key,
+    );
+    if (
+      current &&
+      isLegacySalesforceMcp(current) &&
+      JSON.stringify(current) === JSON.stringify(extension)
+    ) {
+      await removeExtension(current.config_key);
+    }
   }
 }

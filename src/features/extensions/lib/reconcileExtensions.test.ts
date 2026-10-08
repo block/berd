@@ -46,8 +46,9 @@ describe("startup extension reconciliation", () => {
     await reconcileExtensions();
     expect(backupGooseConfig).toHaveBeenCalledOnce();
     expect(removeExtension).toHaveBeenCalledWith("salesforce-sq");
+    expect(listExtensions).toHaveBeenCalledTimes(2);
     expect(backupGooseConfig.mock.invocationCallOrder[0]).toBeLessThan(
-      removeExtension.mock.invocationCallOrder[0],
+      listExtensions.mock.invocationCallOrder[1],
     );
   });
 
@@ -76,6 +77,34 @@ describe("startup extension reconciliation", () => {
     expect(removeExtension).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { current: [{ ...legacy, envs: { SALESFORCE_TOKEN: "configured" } }] },
+    { current: [{ ...legacy, env_keys: ["SALESFORCE_TOKEN"] }] },
+    { current: [{ ...legacy, args: ["mcp_salesforce_sq", "--custom"] }] },
+    { current: [{ ...legacy, name: "My Salesforce" }] },
+    { current: [{ ...legacy, config_key: "another-salesforce" }] },
+    { current: [] },
+  ])("preserves an entry customized or removed during backup: $current", async ({
+    current,
+  }) => {
+    listExtensions.mockResolvedValueOnce([legacy]).mockResolvedValue(current);
+    await reconcileExtensions();
+    expect(backupGooseConfig).toHaveBeenCalledOnce();
+    expect(removeExtension).not.toHaveBeenCalled();
+  });
+
+  it("revalidates each candidate after the preceding removal", async () => {
+    const second = { ...legacy, config_key: "other-salesforce" };
+    listExtensions
+      .mockResolvedValueOnce([legacy, second])
+      .mockResolvedValueOnce([legacy, second])
+      .mockResolvedValueOnce([
+        { ...second, envs: { SALESFORCE_TOKEN: "configured" } },
+      ]);
+    await reconcileExtensions();
+    expect(removeExtension).toHaveBeenCalledExactlyOnceWith("salesforce-sq");
+  });
+
   it("enables core tools while retiring Salesforce and becomes a no-op on the next boot", async () => {
     listExtensions
       .mockResolvedValueOnce([
@@ -95,6 +124,7 @@ describe("startup extension reconciliation", () => {
           enabled: true,
         },
       ])
+      .mockResolvedValueOnce([legacy])
       .mockResolvedValueOnce([]);
     await reconcileExtensions();
     await reconcileExtensions();
