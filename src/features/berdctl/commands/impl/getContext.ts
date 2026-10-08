@@ -8,6 +8,8 @@ interface GetContextResult {
   view: string;
   active_session_id: string | null;
   active_project_id: string | null;
+  /** Current display name of the active project, or null. */
+  active_project_name: string | null;
   voice_session_active: boolean;
   app_version: string;
 }
@@ -41,8 +43,12 @@ export const getContextCommand = defineCommand({
 
 Result:
   {"view": "...", "active_session_id": "..."|null,
-   "active_project_id": "..."|null, "voice_session_active": true|false,
-   "app_version": "..."}`,
+   "active_project_id": "..."|null, "active_project_name": "..."|null,
+   "voice_session_active": true|false, "app_version": "..."}
+
+"active_project_id" is a stable identifier that does not change when the
+project is renamed; "active_project_name" is the project's current display
+name and may not match the id (e.g. "goose-internal" / "Berd").`,
   schema: getContextSchema,
   execute: async (): Promise<GetContextResult> => {
     const [
@@ -50,20 +56,32 @@ Result:
       { getAppNavigationController },
       { getVoiceConversationStatus },
       { useVoiceConversationStore },
+      { findCurrentProjectForBerdctl },
     ] = await Promise.all([
       import("../../../../../package.json"),
       import("../../navigation"),
       import("@/features/voice-conversation/api/voiceConversation"),
       import("@/features/voice-conversation/stores/voiceConversationStore"),
+      import("../runtime/projects"),
     ]);
     const context = getAppNavigationController().getAppContext();
+    // Capture the ID before refreshing projects so the ID and name describe the
+    // same project even if app navigation changes while the backend request runs.
+    const activeProjectId = context.activeProjectId;
     const voiceBeforeRefresh = useVoiceConversationStore.getState();
-    const nativeVoiceStatus = await getVoiceConversationStatus();
+    const [nativeVoiceStatus, activeProject] = await Promise.all([
+      getVoiceConversationStatus(),
+      activeProjectId
+        ? findCurrentProjectForBerdctl(activeProjectId).catch(() => null)
+        : Promise.resolve(null),
+    ]);
     const voiceAfterRefresh = useVoiceConversationStore.getState();
+    const activeProjectName = activeProject?.name ?? null;
     return {
       view: context.view,
       active_session_id: context.activeSessionId,
-      active_project_id: context.activeProjectId,
+      active_project_id: activeProjectId,
+      active_project_name: activeProjectName,
       voice_session_active:
         nativeVoiceStatus.sessionId !== null ||
         rendererVoiceSessionActive(
