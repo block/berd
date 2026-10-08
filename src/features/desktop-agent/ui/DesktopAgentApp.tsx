@@ -38,14 +38,16 @@ const HOLD_DELAY_MS = 180;
 const COMPOSER_ONLY_SIZE: Size = { width: 380, height: 96 };
 
 function readComposerBottomInset(popover: HTMLElement, composer: HTMLElement) {
-  const popoverStyle = getComputedStyle(popover);
-  const composerStyle = getComputedStyle(composer);
-  // Tie the grow geometry to desktop-agent.css instead of duplicating its
-  // spacing numbers: .panel-popover padding-bottom plus .composer-box
-  // margin-bottom determine where the full-layout composer bottom sits.
+  // Measured while still in composer mode, where .panel-popover's padding
+  // is 0 — so read the FULL layout's padding from the shared custom
+  // property (desktop-agent.css #root), not the current computed padding.
+  const padding = Number.parseFloat(
+    getComputedStyle(popover).getPropertyValue("--desktop-agent-panel-padding"),
+  );
+  const margin = Number.parseFloat(getComputedStyle(composer).marginBottom);
   return (
-    Number.parseFloat(popoverStyle.paddingBottom || "0") +
-    Number.parseFloat(composerStyle.marginBottom || "0")
+    (Number.isFinite(padding) ? padding : 16) +
+    (Number.isFinite(margin) ? margin : 0)
   );
 }
 

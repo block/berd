@@ -136,14 +136,13 @@ export class PanelStateMachine {
     composerBottomGlobal: number;
     bottomInset: number;
     fromPopoverSide: "left" | "right" | null;
-    size?: Size;
   }): Promise<ExpandedLayout> {
     const screens = await this.window.getScreens();
     return computeGrownLayout({
       avatarGlobal: this.avatarGlobal,
       fromPopoverGlobal: args.fromPopoverGlobal,
       composerBottomGlobal: args.composerBottomGlobal,
-      popoverSize: args.size ?? this.popoverSize,
+      popoverSize: this.popoverSize,
       screens,
       bottomInset: args.bottomInset,
       fromPopoverSide: args.fromPopoverSide,

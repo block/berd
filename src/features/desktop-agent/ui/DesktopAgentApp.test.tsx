@@ -561,6 +561,7 @@ it("growing after first send uses the grown path for a side-placed composer", as
     configurable: true,
     value: () => ({ bottom: 96 }),
   });
+  popover.style.setProperty("--desktop-agent-panel-padding", "16px");
   mocks.sessionMessages = [{ id: "m1" }];
 
   await act(async () => rerender(<DesktopAgentApp />));
@@ -568,7 +569,7 @@ it("growing after first send uses the grown path for a side-placed composer", as
   expect(mocks.port.computeGrown).toHaveBeenCalledWith({
     fromPopoverGlobal: { x: 128, y: 44, width: 380, height: 96 },
     composerBottomGlobal: 116,
-    bottomInset: 0,
+    bottomInset: 16,
     fromPopoverSide: "right",
   });
   expect(mocks.port.applyExpanded).toHaveBeenLastCalledWith(grownLayout);

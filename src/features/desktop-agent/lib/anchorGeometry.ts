@@ -160,6 +160,63 @@ function clampPopoverOrigin(args: {
 }
 
 /**
+ * Grows a side-placed composer-only popover into the full chat in place:
+ * same x, and the full layout's composer pill bottom lands where the
+ * composer-only pill's bottom was (the transcript appears above it).
+ * Only clamps vertically when the full height won't fit on-screen.
+ * Vertical (non-side) composer layouts fall back to computeExpandedLayout.
+ */
+export function computeGrownLayout(args: {
+  avatarGlobal: Rect;
+  fromPopoverGlobal: Rect;
+  composerBottomGlobal: number;
+  popoverSize: Size;
+  screens: ScreenInfo[];
+  /** Bottom distance from the full popover border box to the composer pill. */
+  bottomInset: number;
+  /** Side placement of the composer-only layout; null keeps legacy vertical growth. */
+  fromPopoverSide: "left" | "right" | null;
+}): ExpandedLayout {
+  const {
+    avatarGlobal,
+    fromPopoverGlobal,
+    composerBottomGlobal,
+    popoverSize,
+    screens,
+    bottomInset,
+    fromPopoverSide,
+  } = args;
+  const margin = 12;
+
+  if (fromPopoverSide === null) {
+    return computeExpandedLayout({ avatarGlobal, popoverSize, screens });
+  }
+
+  const screen = screenContaining(rectCenter(avatarGlobal), screens);
+  const visible = screen.visibleFrame;
+  const requestedTop = composerBottomGlobal + bottomInset - popoverSize.height;
+  const clampedTop = clampPopoverOrigin({
+    requested: requestedTop,
+    visibleStart: visible.y,
+    visibleEnd: rectBottom(visible),
+    popoverExtent: popoverSize.height,
+    margin,
+  });
+
+  return expandedLayoutFromGlobals({
+    avatarGlobal,
+    popoverGlobal: rect(
+      fromPopoverGlobal.x,
+      clampedTop,
+      popoverSize.width,
+      popoverSize.height,
+    ),
+    popoverAbove: false,
+    popoverSide: fromPopoverSide,
+  });
+}
+
+/**
  * Computes the expanded panel layout for an avatar at avatarGlobal.
  *
  * The popover opens above the avatar when the avatar sits in the lower half
@@ -345,64 +402,6 @@ function computeVerticalExpandedLayout(args: {
  * may request side placement so the pill sits like a speech bubble beside
  * the avatar.
  */
-
-export function computeGrownLayout(args: {
-  avatarGlobal: Rect;
-  fromPopoverGlobal: Rect;
-  composerBottomGlobal: number;
-  popoverSize: Size;
-  screens: ScreenInfo[];
-  /** Bottom distance from the full popover border box to the composer pill. */
-  bottomInset: number;
-  /** Side placement of the composer-only layout; null keeps legacy vertical growth. */
-  fromPopoverSide: "left" | "right" | null;
-  gap?: number;
-  margin?: number;
-}): ExpandedLayout {
-  const {
-    avatarGlobal,
-    fromPopoverGlobal,
-    composerBottomGlobal,
-    popoverSize,
-    screens,
-    bottomInset,
-    fromPopoverSide,
-  } = args;
-  const margin = args.margin ?? 12;
-
-  if (fromPopoverSide === null) {
-    return computeExpandedLayout({
-      avatarGlobal,
-      popoverSize,
-      screens,
-      gap: args.gap,
-      margin,
-    });
-  }
-
-  const screen = screenContaining(rectCenter(avatarGlobal), screens);
-  const visible = screen.visibleFrame;
-  const requestedTop = composerBottomGlobal + bottomInset - popoverSize.height;
-  const clampedTop = clampPopoverOrigin({
-    requested: requestedTop,
-    visibleStart: visible.y,
-    visibleEnd: rectBottom(visible),
-    popoverExtent: popoverSize.height,
-    margin,
-  });
-
-  return expandedLayoutFromGlobals({
-    avatarGlobal,
-    popoverGlobal: rect(
-      fromPopoverGlobal.x,
-      clampedTop,
-      popoverSize.width,
-      popoverSize.height,
-    ),
-    popoverAbove: false,
-    popoverSide: fromPopoverSide,
-  });
-}
 
 export function computeExpandedLayout(args: {
   avatarGlobal: Rect;

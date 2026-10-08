@@ -10,8 +10,9 @@
    this override covers the buttons.) */
 #root {
   --background: #18181b;
-  /* Shared with DesktopAgentApp.readComposerBottomInset: full chat grow
-     geometry uses this as the full popover's bottom padding. */
+  /* Full chat popover padding. Also read by
+     DesktopAgentApp.readComposerBottomInset (grow-in-place geometry needs
+     the FULL layout's bottom padding while still in composer mode). */
   --desktop-agent-panel-padding: 16px;
   /* Dark glass shared by chat popover and avatar menu. Keep
      POPOVER_SHADOW_MARGIN in anchorGeometry.ts large enough for this shadow. */
