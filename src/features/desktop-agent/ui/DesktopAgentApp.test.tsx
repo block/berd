@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
     mode: "avatar",
     computeExpanded: vi.fn(),
     applyExpanded: vi.fn(),
+    computeGrown: vi.fn(),
     computeMenu: vi.fn(),
     applyMenu: vi.fn(),
     collapse: vi.fn(),
@@ -89,6 +90,7 @@ vi.mock("@/features/desktop-agent/ui/AgentAvatar", () => ({
 vi.mock("@/features/desktop-agent/ui/ChatPopover", () => ({
   ChatPopover: (props: Record<string, unknown>) => (
     <div
+      ref={props.composerRef as React.Ref<HTMLDivElement>}
       data-testid="chat-popover"
       data-variant={props.variant as string}
       data-anchor={props.anchor as string}
@@ -116,6 +118,16 @@ beforeEach(() => {
   mocks.port.computeExpanded.mockResolvedValue({
     avatarRect: { x: 0, y: 0, width: 94, height: 94 },
     popoverRect: { x: 94, y: 0, width: 300, height: 400 },
+    windowFrame: { x: 0, y: 0, width: 394, height: 424 },
+    popoverAbove: false,
+    popoverSide: null,
+  });
+  mocks.port.computeGrown.mockResolvedValue({
+    avatarRect: { x: 0, y: 0, width: 94, height: 94 },
+    popoverRect: { x: 94, y: 0, width: 380, height: 520 },
+    windowFrame: { x: 0, y: 0, width: 498, height: 544 },
+    popoverAbove: false,
+    popoverSide: "right",
   });
   mocks.port.applyExpanded.mockImplementation(async () => {
     mocks.port.mode = "expanded";
@@ -254,6 +266,16 @@ it("a clean pointer-up expands once without the subsequent click collapsing the 
   mocks.port.computeExpanded.mockResolvedValue({
     avatarRect: { x: 0, y: 0, width: 94, height: 94 },
     popoverRect: { x: 94, y: 0, width: 300, height: 400 },
+    windowFrame: { x: 0, y: 0, width: 394, height: 424 },
+    popoverAbove: false,
+    popoverSide: null,
+  });
+  mocks.port.computeGrown.mockResolvedValue({
+    avatarRect: { x: 0, y: 0, width: 94, height: 94 },
+    popoverRect: { x: 94, y: 0, width: 380, height: 520 },
+    windowFrame: { x: 0, y: 0, width: 498, height: 544 },
+    popoverAbove: false,
+    popoverSide: "right",
   });
   vi.stubGlobal("PointerEvent", MouseEvent);
   const { findByTestId } = render(<DesktopAgentApp />);
@@ -509,7 +531,50 @@ it("cancelling a pending drop prevents stale placement and keeps a new hold inta
   unmount();
 });
 
-it("choosing New chat closes the menu and expands composer-only on the side", async () => {
+it("growing after first send uses the grown path for a side-placed composer", async () => {
+  const composerLayout = {
+    avatarRect: { x: 0, y: 0, width: 94, height: 94 },
+    popoverRect: { x: 118, y: 24, width: 380, height: 96 },
+    windowFrame: { x: 10, y: 20, width: 512, height: 144 },
+    popoverAbove: false,
+    popoverSide: "right" as const,
+  };
+  const grownLayout = {
+    avatarRect: { x: 0, y: 420, width: 94, height: 94 },
+    popoverRect: { x: 118, y: 0, width: 380, height: 520 },
+    windowFrame: { x: 10, y: -380, width: 512, height: 544 },
+    popoverAbove: false,
+    popoverSide: "right" as const,
+  };
+  mocks.port.computeExpanded.mockResolvedValue(composerLayout);
+  mocks.port.computeGrown.mockResolvedValue(grownLayout);
+
+  const { findByTestId, rerender } = render(<DesktopAgentApp />);
+  const hit = (await findByTestId("avatar")).parentElement;
+  if (!hit) throw new Error("missing hit target");
+  await act(async () => {
+    fireEvent.pointerDown(hit, { button: 0, screenX: 10, screenY: 10 });
+    fireEvent.pointerUp(hit, { button: 0 });
+  });
+  const popover = await findByTestId("chat-popover");
+  Object.defineProperty(popover, "getBoundingClientRect", {
+    configurable: true,
+    value: () => ({ bottom: 96 }),
+  });
+  mocks.sessionMessages = [{ id: "m1" }];
+
+  await act(async () => rerender(<DesktopAgentApp />));
+
+  expect(mocks.port.computeGrown).toHaveBeenCalledWith({
+    fromPopoverGlobal: { x: 128, y: 44, width: 380, height: 96 },
+    composerBottomGlobal: 116,
+    bottomInset: 0,
+    fromPopoverSide: "right",
+  });
+  expect(mocks.port.applyExpanded).toHaveBeenLastCalledWith(grownLayout);
+});
+
+it("choosing Start new chat closes the menu and expands composer-only on the side", async () => {
   mocks.sessionMessages = [{ id: "m1" }];
   mocks.newChat.mockImplementation(async () => {
     mocks.sessionMessages = [];
@@ -520,7 +585,7 @@ it("choosing New chat closes the menu and expands composer-only on the side", as
   if (!hit) throw new Error("missing hit target");
 
   await act(async () => fireEvent.contextMenu(hit));
-  const newChat = await findByText("New chat");
+  const newChat = await findByText("Start new chat");
   await act(async () => fireEvent.click(newChat));
 
   expect(mocks.newChat).toHaveBeenCalledWith(1);

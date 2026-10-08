@@ -14,6 +14,7 @@
 import {
   clampAvatarToScreens,
   computeExpandedLayout,
+  computeGrownLayout,
   rect,
   type ExpandedLayout,
   type ExpandedPlacement,
@@ -122,6 +123,30 @@ export class PanelStateMachine {
       popoverSize: size ?? this.popoverSize,
       screens,
       placement,
+    });
+  }
+
+  /**
+   * Computes the full-chat layout while growing from an existing composer-only
+   * popover. Reuses the cached avatar anchor: in expanded mode the native
+   * panel frame is the grown window, not the avatar frame.
+   */
+  async computeGrown(args: {
+    fromPopoverGlobal: Rect;
+    composerBottomGlobal: number;
+    bottomInset: number;
+    fromPopoverSide: "left" | "right" | null;
+    size?: Size;
+  }): Promise<ExpandedLayout> {
+    const screens = await this.window.getScreens();
+    return computeGrownLayout({
+      avatarGlobal: this.avatarGlobal,
+      fromPopoverGlobal: args.fromPopoverGlobal,
+      composerBottomGlobal: args.composerBottomGlobal,
+      popoverSize: args.size ?? this.popoverSize,
+      screens,
+      bottomInset: args.bottomInset,
+      fromPopoverSide: args.fromPopoverSide,
     });
   }
 

@@ -31,7 +31,7 @@
     "perchedApp": "Posado en {{app}}"
   },
   "menu": {
-    "newChat": "Nuevo chat",
+    "newChat": "Iniciar nuevo chat",
     "switchAgent": "Cambiar de agente",
     "fresh": "Berd",
     "empty": "Aún no hay agentes — créalos en la ventana principal",

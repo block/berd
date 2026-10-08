@@ -4,7 +4,7 @@
 // replay by transcriptDisplay. All user-facing strings live in the
 // `desktop-agent` i18n namespace.
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type Ref } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -149,6 +149,7 @@ export function ChatPopover({
   perch,
   variant = "full",
   anchor = "bottom",
+  composerRef,
 }: {
   session: SessionView;
   perch: PerchView;
@@ -159,6 +160,7 @@ export function ChatPopover({
   /** Which edge of the overlay region faces the avatar — the composer-
    *  only pill hugs it. */
   anchor?: "top" | "bottom" | "center";
+  composerRef?: Ref<HTMLDivElement>;
 }) {
   const { t } = useTranslation("desktop-agent");
   const [draft, setDraft] = useState("");
@@ -288,7 +290,7 @@ export function ChatPopover({
   );
 
   const composerBox = (
-    <div className="composer-box">
+    <div className="composer-box" ref={composerRef}>
       <input
         ref={inputRef}
         // focus-override: opts out of globals.css's global focus-visible

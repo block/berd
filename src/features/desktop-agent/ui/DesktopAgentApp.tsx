@@ -37,6 +37,18 @@ const HOLD_DELAY_MS = 180;
 // pill — room for the pill plus the hint row when one is relevant.
 const COMPOSER_ONLY_SIZE: Size = { width: 380, height: 96 };
 
+function readComposerBottomInset(popover: HTMLElement, composer: HTMLElement) {
+  const popoverStyle = getComputedStyle(popover);
+  const composerStyle = getComputedStyle(composer);
+  // Tie the grow geometry to desktop-agent.css instead of duplicating its
+  // spacing numbers: .panel-popover padding-bottom plus .composer-box
+  // margin-bottom determine where the full-layout composer bottom sits.
+  return (
+    Number.parseFloat(popoverStyle.paddingBottom || "0") +
+    Number.parseFloat(composerStyle.marginBottom || "0")
+  );
+}
+
 const machine = new PanelStateMachine({
   window: new TauriWindowPort(),
   positionStore: new LocalStoragePositionStore(),
@@ -167,6 +179,8 @@ export function DesktopAgentApp() {
   // First message sent while composer-only: grow to the full chat window
   // through the same anti-blink path (compute, commit to tree, THEN
   // native resize — the avatar stays put).
+  const popoverElement = useRef<HTMLDivElement>(null);
+  const composerElement = useRef<HTMLDivElement>(null);
   const growing = useRef(false);
   useEffect(() => {
     if (
@@ -181,7 +195,25 @@ export function DesktopAgentApp() {
       try {
         if (machine.mode !== "expanded") return;
         const generation = gestureGeneration.current;
-        const next = await machine.computeExpanded();
+        const fromPopoverSide = layout.popoverSide;
+        const popover = popoverElement.current;
+        const composer = composerElement.current;
+        const next =
+          fromPopoverSide !== null && popover && composer
+            ? await machine.computeGrown({
+                fromPopoverGlobal: {
+                  x: layout.windowFrame.x + layout.popoverRect.x,
+                  y: layout.windowFrame.y + layout.popoverRect.y,
+                  width: layout.popoverRect.width,
+                  height: layout.popoverRect.height,
+                },
+                composerBottomGlobal:
+                  layout.windowFrame.y +
+                  composer.getBoundingClientRect().bottom,
+                bottomInset: readComposerBottomInset(popover, composer),
+                fromPopoverSide,
+              })
+            : await machine.computeExpanded();
         if (
           generation !== gestureGeneration.current ||
           machine.mode !== "expanded"
@@ -551,6 +583,7 @@ export function DesktopAgentApp() {
           className={`popover panel-popover${
             popoverVariant === "composer" ? " composer-mode" : ""
           }`}
+          ref={popoverElement}
           style={{
             position: "absolute",
             left: layout.popoverRect.x,
@@ -570,6 +603,7 @@ export function DesktopAgentApp() {
                   : "top"
                 : "center"
             }
+            composerRef={composerElement}
           />
         </div>
       )}

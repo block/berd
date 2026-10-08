@@ -345,6 +345,65 @@ function computeVerticalExpandedLayout(args: {
  * may request side placement so the pill sits like a speech bubble beside
  * the avatar.
  */
+
+export function computeGrownLayout(args: {
+  avatarGlobal: Rect;
+  fromPopoverGlobal: Rect;
+  composerBottomGlobal: number;
+  popoverSize: Size;
+  screens: ScreenInfo[];
+  /** Bottom distance from the full popover border box to the composer pill. */
+  bottomInset: number;
+  /** Side placement of the composer-only layout; null keeps legacy vertical growth. */
+  fromPopoverSide: "left" | "right" | null;
+  gap?: number;
+  margin?: number;
+}): ExpandedLayout {
+  const {
+    avatarGlobal,
+    fromPopoverGlobal,
+    composerBottomGlobal,
+    popoverSize,
+    screens,
+    bottomInset,
+    fromPopoverSide,
+  } = args;
+  const margin = args.margin ?? 12;
+
+  if (fromPopoverSide === null) {
+    return computeExpandedLayout({
+      avatarGlobal,
+      popoverSize,
+      screens,
+      gap: args.gap,
+      margin,
+    });
+  }
+
+  const screen = screenContaining(rectCenter(avatarGlobal), screens);
+  const visible = screen.visibleFrame;
+  const requestedTop = composerBottomGlobal + bottomInset - popoverSize.height;
+  const clampedTop = clampPopoverOrigin({
+    requested: requestedTop,
+    visibleStart: visible.y,
+    visibleEnd: rectBottom(visible),
+    popoverExtent: popoverSize.height,
+    margin,
+  });
+
+  return expandedLayoutFromGlobals({
+    avatarGlobal,
+    popoverGlobal: rect(
+      fromPopoverGlobal.x,
+      clampedTop,
+      popoverSize.width,
+      popoverSize.height,
+    ),
+    popoverAbove: false,
+    popoverSide: fromPopoverSide,
+  });
+}
+
 export function computeExpandedLayout(args: {
   avatarGlobal: Rect;
   popoverSize: Size;

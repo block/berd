@@ -165,6 +165,41 @@ describe("PanelStateMachine", () => {
     });
   });
 
+  test("computeGrown reuses cached avatar without syncing from the expanded panel", async () => {
+    window_.panelFrame = rect(600, 700, AVATAR_PANEL_SIZE, AVATAR_PANEL_SIZE);
+    await machine.syncFromPanel();
+
+    const composer = await machine.computeExpanded(
+      { width: 380, height: 96 },
+      "side",
+    );
+    await machine.applyExpanded(composer);
+    window_.calls = [];
+
+    const grown = await machine.computeGrown({
+      fromPopoverGlobal: rect(
+        composer.windowFrame.x + composer.popoverRect.x,
+        composer.windowFrame.y + composer.popoverRect.y,
+        composer.popoverRect.width,
+        composer.popoverRect.height,
+      ),
+      composerBottomGlobal:
+        composer.windowFrame.y +
+        composer.popoverRect.y +
+        composer.popoverRect.height,
+      bottomInset: 16,
+      fromPopoverSide: composer.popoverSide,
+    });
+
+    expect(window_.calls).toEqual(["getScreens"]);
+    expect({
+      x: grown.avatarRect.x + grown.windowFrame.x,
+      y: grown.avatarRect.y + grown.windowFrame.y,
+      width: grown.avatarRect.width,
+      height: grown.avatarRect.height,
+    }).toEqual(rect(600, 700, AVATAR_PANEL_SIZE, AVATAR_PANEL_SIZE));
+  });
+
   test("computeMenu/applyMenu grows the window but returns to the saved avatar frame", async () => {
     window_.panelFrame = rect(420, 500, AVATAR_PANEL_SIZE, AVATAR_PANEL_SIZE);
     await machine.syncFromPanel();

@@ -14,7 +14,7 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string) =>
       ({
-        "menu.newChat": "New chat",
+        "menu.newChat": "Start new chat",
         "menu.switchAgent": "Switch agent",
         "menu.settings": "Settings",
         "menu.dismiss": "Hide",
@@ -98,10 +98,10 @@ describe("AvatarMenu keyboard and activation", () => {
     expect(screen.queryByText("Scout")).not.toBeInTheDocument();
   });
 
-  it("renders New chat first and activates it by keyboard", () => {
+  it("renders Start new chat first and activates it by keyboard", () => {
     const props = renderMenu();
     const rows = screen.getAllByRole("button");
-    expect(rows[0]).toHaveTextContent("New chat");
+    expect(rows[0]).toHaveTextContent("Start new chat");
     fireEvent.keyDown(window, { key: "ArrowDown" });
     fireEvent.keyDown(window, { key: "Enter" });
     expect(props.onNewChat).toHaveBeenCalledOnce();
@@ -144,7 +144,9 @@ describe("AvatarMenu keyboard and activation", () => {
       />,
     );
     expect(screen.queryByText("Switch agent")).not.toBeInTheDocument();
-    expect(screen.getAllByRole("button")[0]).toHaveTextContent("New chat");
+    expect(screen.getAllByRole("button")[0]).toHaveTextContent(
+      "Start new chat",
+    );
     expect(screen.getByText("Settings")).toBeInTheDocument();
     expect(screen.getByText("Hide")).toBeInTheDocument();
   });

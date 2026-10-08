@@ -6,6 +6,7 @@ import { describe, expect, test } from "vitest";
 import {
   clampAvatarToScreens,
   computeExpandedLayout,
+  computeGrownLayout,
   inflate,
   POPOVER_SHADOW_MARGIN,
   rect,
@@ -394,6 +395,118 @@ describe("computeExpandedLayout side placement", () => {
     expect(rectBottom(inflatedPopover)).toBeLessThanOrEqual(
       layout.windowFrame.height,
     );
+  });
+});
+
+describe("computeGrownLayout", () => {
+  const composerSize = { width: 380, height: 96 };
+  const fullSize = { width: 380, height: 520 };
+
+  function globalPopover(layout: ReturnType<typeof computeExpandedLayout>) {
+    return rect(
+      layout.popoverRect.x + layout.windowFrame.x,
+      layout.popoverRect.y + layout.windowFrame.y,
+      layout.popoverRect.width,
+      layout.popoverRect.height,
+    );
+  }
+
+  test("keeps x and composer bottom fixed while preserving avatar and shadow containment", () => {
+    const avatar = rect(120, 500, 90, 90);
+    const composer = computeExpandedLayout({
+      avatarGlobal: avatar,
+      popoverSize: composerSize,
+      screens,
+      placement: "side",
+    });
+    const fromPopover = globalPopover(composer);
+    const composerBottom = rectBottom(fromPopover) - 20;
+    const grown = computeGrownLayout({
+      avatarGlobal: avatar,
+      fromPopoverGlobal: fromPopover,
+      composerBottomGlobal: composerBottom,
+      popoverSize: fullSize,
+      screens,
+      bottomInset: 16,
+      fromPopoverSide: composer.popoverSide,
+    });
+    const popover = globalPopover(grown);
+
+    expect(popover.x).toBe(fromPopover.x);
+    expect(rectBottom(popover) - 16).toBe(composerBottom);
+    expect({
+      x: grown.avatarRect.x + grown.windowFrame.x,
+      y: grown.avatarRect.y + grown.windowFrame.y,
+      width: grown.avatarRect.width,
+      height: grown.avatarRect.height,
+    }).toEqual(avatar);
+
+    const inflatedPopover = inflate(grown.popoverRect, POPOVER_SHADOW_MARGIN);
+    expect(inflatedPopover.x).toBeGreaterThanOrEqual(0);
+    expect(inflatedPopover.y).toBeGreaterThanOrEqual(0);
+    expect(rectRight(inflatedPopover)).toBeLessThanOrEqual(
+      grown.windowFrame.width,
+    );
+    expect(rectBottom(inflatedPopover)).toBeLessThanOrEqual(
+      grown.windowFrame.height,
+    );
+  });
+
+  test("clamps down by the minimum needed when growing near the top of the screen", () => {
+    const avatar = rect(120, 40, 90, 90);
+    const composer = computeExpandedLayout({
+      avatarGlobal: avatar,
+      popoverSize: composerSize,
+      screens,
+      placement: "side",
+    });
+    const fromPopover = globalPopover(composer);
+    const grown = computeGrownLayout({
+      avatarGlobal: avatar,
+      fromPopoverGlobal: fromPopover,
+      composerBottomGlobal: rectBottom(fromPopover) - 20,
+      popoverSize: fullSize,
+      screens,
+      bottomInset: 16,
+      fromPopoverSide: composer.popoverSide,
+    });
+    const popover = globalPopover(grown);
+
+    expect(popover.x).toBe(fromPopover.x);
+    expect(popover.y).toBe(mainScreen.visibleFrame.y + 12);
+  });
+
+  test("vertical-fallback composer keeps old expanded behavior", () => {
+    const tiny: ScreenInfo = {
+      frame: rect(0, 0, 300, 700),
+      visibleFrame: rect(0, 25, 300, 675),
+      isMain: true,
+    };
+    const avatar = rect(100, 100, 90, 90);
+    const composer = computeExpandedLayout({
+      avatarGlobal: avatar,
+      popoverSize: composerSize,
+      screens: [tiny],
+      placement: "side",
+    });
+    expect(composer.popoverSide).toBeNull();
+
+    const grown = computeGrownLayout({
+      avatarGlobal: avatar,
+      fromPopoverGlobal: globalPopover(composer),
+      composerBottomGlobal: 250,
+      popoverSize: fullSize,
+      screens: [tiny],
+      bottomInset: 16,
+      fromPopoverSide: composer.popoverSide,
+    });
+    const old = computeExpandedLayout({
+      avatarGlobal: avatar,
+      popoverSize: fullSize,
+      screens: [tiny],
+    });
+
+    expect(grown).toEqual(old);
   });
 });
 
