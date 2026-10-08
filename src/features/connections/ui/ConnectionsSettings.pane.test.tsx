@@ -137,6 +137,9 @@ describe("ConnectionsSettings", () => {
     renderConnectionsSettings();
     expect(await screen.findByText("GitHub")).toBeInTheDocument();
     expect(
+      screen.queryByText("connections.skillsHint"),
+    ).not.toBeInTheDocument();
+    expect(
       screen.getByText("connections.worksWith:Goose, Codex"),
     ).toBeInTheDocument();
     expect(
@@ -165,6 +168,7 @@ describe("ConnectionsSettings", () => {
       await screen.findByText("connections.sections.managed"),
     ).toBeInTheDocument();
     expect(screen.getByText("connections.sections.local")).toBeInTheDocument();
+    expect(screen.getByText("connections.skillsHint")).toBeInTheDocument();
     expect(
       screen.queryByText("connections.sections.installed"),
     ).not.toBeInTheDocument();

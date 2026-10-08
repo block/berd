@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { reconcileAlwaysOnExtensions } from "@/features/extensions/lib/reconcileAlwaysOn";
+import { reconcileExtensions } from "@/features/extensions/lib/reconcileExtensions";
 import { cleanupLegacyBundledExtensions } from "../cleanupLegacyBundledExtensions";
 import {
   getMigrationStatus,
@@ -81,16 +81,12 @@ export function useMigrationGate(startupReady: boolean): MigrationGate {
             }
           }
 
-          // Heal extensions whose desired state has changed since the user's
-          // migration ran (e.g. a newly-added always-on entry). Best-effort —
-          // failures don't block startup.
+          // Apply current extension policy even after onboarding has completed.
+          // Best-effort: failures do not block startup.
           try {
-            await reconcileAlwaysOnExtensions();
+            await reconcileExtensions();
           } catch (reconcileError) {
-            console.warn(
-              "Failed to reconcile always-on extensions:",
-              reconcileError,
-            );
+            console.warn("Failed to reconcile extensions:", reconcileError);
           }
           if (cancelled) return;
           setStoreStatus(latestStatus);
@@ -129,10 +125,10 @@ export function useMigrationGate(startupReady: boolean): MigrationGate {
         if (cancelled) return;
 
         try {
-          await reconcileAlwaysOnExtensions();
+          await reconcileExtensions();
         } catch (reconcileError) {
           console.warn(
-            "Failed to reconcile always-on extensions after migration:",
+            "Failed to reconcile extensions after migration:",
             reconcileError,
           );
         }

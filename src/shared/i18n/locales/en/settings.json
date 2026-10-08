@@ -131,6 +131,7 @@
     "extendAccess": "Extend access",
     "noResults": "No connections match your search.",
     "reconnect": "Reconnect",
+    "skillsHint": "Connect an app here to authorize access. Find and install its skill in the skill marketplace so agents know how to use it.",
     "search": "Search connections",
     "sections": {
       "managed": "Company managed",
