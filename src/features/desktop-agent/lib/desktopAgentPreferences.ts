@@ -1,4 +1,4 @@
-// Desktop Agent setting (General settings, macOS only): ONE on/off
+// Desktop Agent setting (Behavior settings, macOS only): ONE on/off
 // switch; the agent shows the animated Berdy character whenever Berdy is
 // the agent. The right-click agent selector stays behind its own
 // experiment (DESKTOP_AGENT_AGENT_SELECTOR_EXPERIMENT_ID).

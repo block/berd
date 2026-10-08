@@ -706,7 +706,7 @@ export function DesktopAgentApp() {
             }}
             onSettings={() => {
               // Rust reveals + focuses the main window and tells its
-              // webview to open the General settings section (where the
+              // webview to open the Behavior settings section (where the
               // Desktop Agent settings live).
               void invoke("desktop_agent_open_settings").catch(() => undefined);
               void closeMenu();

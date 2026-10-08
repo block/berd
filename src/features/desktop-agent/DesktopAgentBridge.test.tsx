@@ -164,7 +164,7 @@ describe("DesktopAgentBridge", () => {
     expect(callsTo("desktop_agent_open")).toHaveLength(1);
   });
 
-  it("routes the panel's settings deep-link to the General settings section", async () => {
+  it("routes the panel's settings deep-link to the Behavior settings section", async () => {
     const details: unknown[] = [];
     const onOpenSettings = (event: Event) => {
       details.push((event as CustomEvent).detail);
@@ -179,7 +179,7 @@ describe("DesktopAgentBridge", () => {
       act(() => {
         fireTauriEvent("desktop-agent:open-settings");
       });
-      expect(details).toEqual([{ section: "general" }]);
+      expect(details).toEqual([{ section: "behavior" }]);
     } finally {
       window.removeEventListener(OPEN_SETTINGS_EVENT, onOpenSettings);
     }

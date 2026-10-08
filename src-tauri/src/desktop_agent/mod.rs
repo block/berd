@@ -74,7 +74,7 @@ pub fn global_shortcut_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin
 /// Settings deep-link from the panel's custom webview menu. Settings live
 /// in the MAIN window: reveal + focus it first (it may be hidden or buried — the
 /// panel is always-on-top, the main window is not), then tell its webview
-/// to open the General settings section. The bridge listens (it is the
+/// to open the Behavior settings section. The bridge listens (it is the
 /// desktop-agent presence in the main webview).
 #[tauri::command]
 pub fn desktop_agent_open_settings(app: AppHandle) -> Result<(), String> {

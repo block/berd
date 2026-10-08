@@ -68,7 +68,7 @@ export function DesktopAgentBridge() {
   // Settings deep-link from the panel's avatar menu: Rust has already
   // revealed + focused the main window (the panel is always-on-top, this
   // window may be hidden); the remaining hop is in-webview navigation to
-  // the General section, which owns the Desktop Agent settings. The
+  // the Behavior section, which owns the Desktop Agent settings. The
   // bridge hosts the listener because it IS the desktop-agent presence
   // in the main webview. Not gated on `enabled`: the event can only
   // originate from a live panel, and an unconditional listener avoids
@@ -78,7 +78,7 @@ export function DesktopAgentBridge() {
       return;
     }
     const unlisten = listen("desktop-agent:open-settings", () => {
-      requestOpenSettings("general");
+      requestOpenSettings("behavior");
     });
     return () => {
       void unlisten.then((fn) => fn());
