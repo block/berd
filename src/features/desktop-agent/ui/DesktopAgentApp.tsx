@@ -36,6 +36,12 @@ const HOLD_DELAY_MS = 180;
 // Composer-first: a chat with no messages opens as just the composer
 // pill — room for the pill plus the hint row when one is relevant.
 const COMPOSER_ONLY_SIZE: Size = { width: 380, height: 96 };
+// Full-chat composer pill height and popover padding (desktop-agent.css:
+// .composer-box 26px send pill + 5px padding ×2 + 1px border ×2, and
+// --desktop-agent-panel-padding). Used to line a reopened full chat's
+// composer up with the bubble position before any DOM exists to measure.
+const FULL_COMPOSER_HEIGHT = 38;
+const FULL_PANEL_PADDING = 16;
 
 function readComposerBottomInset(popover: HTMLElement, composer: HTMLElement) {
   // Measured while still in composer mode, where .panel-popover's padding
@@ -166,10 +172,34 @@ export function DesktopAgentApp() {
     const composerOnly =
       options?.composerOnly ?? sessionMessageCount.current === 0;
     // Anti-blink: compute first, commit to the tree, THEN resize native.
-    const next = await machine.computeExpanded(
-      composerOnly ? COMPOSER_ONLY_SIZE : undefined,
-      composerOnly ? "side" : undefined,
-    );
+    // Both variants sit BESIDE the avatar like a speech bubble. The full
+    // chat is laid out as if grown from the composer bubble: its composer
+    // is level with where the bubble's pill would be, transcript above —
+    // so reopening an existing chat matches the grow-in-place geometry.
+    const bubble = await machine.computeExpanded(COMPOSER_ONLY_SIZE, "side");
+    let next = bubble;
+    if (!composerOnly) {
+      next =
+        bubble.popoverSide === null
+          ? await machine.computeExpanded() // no side room: above/below
+          : await machine.computeGrown({
+              fromPopoverGlobal: {
+                x: bubble.windowFrame.x + bubble.popoverRect.x,
+                y: bubble.windowFrame.y + bubble.popoverRect.y,
+                width: bubble.popoverRect.width,
+                height: bubble.popoverRect.height,
+              },
+              // The bubble's pill is vertically centered in its region
+              // (anchor-center); the full composer centers on that line.
+              composerBottomGlobal:
+                bubble.windowFrame.y +
+                bubble.popoverRect.y +
+                bubble.popoverRect.height / 2 +
+                FULL_COMPOSER_HEIGHT / 2,
+              bottomInset: FULL_PANEL_PADDING,
+              fromPopoverSide: bubble.popoverSide,
+            });
+    }
     if (generation !== gestureGeneration.current || machine.mode !== "avatar") {
       return;
     }
