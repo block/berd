@@ -1,15 +1,17 @@
 /* Desktop-agent transparent shell: only the avatar, popover, and menus paint. */
 
-/* The panel is hardcoded-dark with NO ThemeProvider, but the webview
-   loads globals.css — its semantic tokens resolve to LIGHT values here.
-   The global focus-visible ring reads ring-offset-background, i.e.
-   --background = WHITE: any keyboard-focused control would wear a white
-   box. Re-point the offset to the popover glass so rings
-   read dark. (--ring itself is gray-400 in BOTH themes — correct as-is.
-   The composer input opts out of the ring entirely via focus-override;
-   this override covers the buttons.) */
+/* The desktop-agent panel is intentionally always-dark: it floats over
+   arbitrary apps and wallpaper instead of living inside Berd's themed
+   window. Keep this scoped semantic token set here so the panel does not
+   depend on a ThemeProvider, while still aliasing shared primitives when
+   they are exact dark-theme matches.
+
+   The webview loads globals.css, but without a ThemeProvider its semantic
+   tokens resolve to LIGHT values. Re-point --background so the global
+   focus-visible ring's offset reads dark on this panel. */
 #root {
-  --background: #18181b;
+  --desktop-agent-surface-base: #18181b;
+  --background: var(--desktop-agent-surface-base);
   /* Full chat popover padding. Also read by
      DesktopAgentApp.readComposerBottomInset (grow-in-place geometry needs
      the FULL layout's bottom padding while still in composer mode). */
@@ -18,6 +20,53 @@
      POPOVER_SHADOW_MARGIN in anchorGeometry.ts large enough for this shadow. */
   --panel-glass-bg: rgba(24, 24, 27, 0.96);
   --panel-glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+
+  --desktop-agent-surface: var(--panel-glass-bg);
+  --desktop-agent-surface-strong: rgba(24, 24, 27, 0.92);
+  --desktop-agent-surface-border: rgba(255, 255, 255, 0.08);
+  --desktop-agent-shadow: var(--panel-glass-shadow);
+  --desktop-agent-shadow-soft: 0 4px 16px rgba(0, 0, 0, 0.35);
+
+  --desktop-agent-foreground: #e4e4e7;
+  --desktop-agent-foreground-inverse: var(--color-white);
+  --desktop-agent-foreground-muted: rgba(255, 255, 255, 0.5);
+  --desktop-agent-foreground-subtle: rgba(255, 255, 255, 0.45);
+  --desktop-agent-foreground-faint: rgba(255, 255, 255, 0.4);
+  --desktop-agent-foreground-soft: rgba(255, 255, 255, 0.65);
+  --desktop-agent-foreground-placeholder: rgba(255, 255, 255, 0.35);
+  --desktop-agent-foreground-readable: rgba(255, 255, 255, 0.72);
+  --desktop-agent-quote-foreground: rgba(228, 228, 231, 0.8);
+
+  --desktop-agent-control: rgba(255, 255, 255, 0.08);
+  --desktop-agent-control-hover: rgba(255, 255, 255, 0.14);
+  --desktop-agent-control-subtle: rgba(255, 255, 255, 0.07);
+  --desktop-agent-control-border: rgba(255, 255, 255, 0.06);
+  --desktop-agent-control-border-hover: rgba(255, 255, 255, 0.14);
+  --desktop-agent-control-muted: rgba(255, 255, 255, 0.1);
+  --desktop-agent-control-muted-strong: rgba(255, 255, 255, 0.12);
+  --desktop-agent-control-strong: rgba(255, 255, 255, 0.22);
+  --desktop-agent-code-surface: rgba(0, 0, 0, 0.35);
+  --desktop-agent-tool-result-surface: rgba(255, 255, 255, 0.055);
+
+  --desktop-agent-primary-action: var(--color-zinc-100);
+  --desktop-agent-primary-action-fg: var(--desktop-agent-surface-base);
+  --desktop-agent-primary-action-hover: var(--color-white);
+  --desktop-agent-primary-action-disabled: rgba(255, 255, 255, 0.14);
+  --desktop-agent-primary-action-disabled-fg: var(
+    --desktop-agent-foreground-subtle
+  );
+
+  --desktop-agent-user-bubble: var(--color-gray-700);
+  --desktop-agent-danger: rgba(248, 113, 113, 0.9);
+  --desktop-agent-danger-fg: rgba(254, 202, 202, 0.95);
+  --desktop-agent-danger-muted: rgba(248, 113, 113, 0.7);
+  --desktop-agent-danger-subtle: rgba(248, 113, 113, 0.65);
+  --desktop-agent-danger-surface: rgba(127, 29, 29, 0.28);
+  --desktop-agent-danger-solid: var(--color-red-400);
+  --desktop-agent-link: #7cb3ff;
+  --desktop-agent-highlight: var(--desktop-agent-control-muted-strong);
+  --desktop-agent-warning: var(--color-yellow-500);
+  --desktop-agent-warning-surface: rgba(234, 179, 8, 0.15);
 }
 
 html,
@@ -42,11 +91,11 @@ body,
 
 .panel-popover {
   border-radius: 18px;
-  background: var(--panel-glass-bg);
-  color: #e4e4e7;
+  background: var(--desktop-agent-surface);
+  color: var(--desktop-agent-foreground);
   box-sizing: border-box;
   padding: var(--desktop-agent-panel-padding);
-  box-shadow: var(--panel-glass-shadow);
+  box-shadow: var(--desktop-agent-shadow);
 }
 
 /* Composer-first mode: the overlay region paints NOTHING itself — only
@@ -94,7 +143,7 @@ body,
 }
 
 .empty-hint {
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--desktop-agent-foreground-faint);
   text-align: center;
   margin-top: 40%;
   font-size: 13px;
@@ -128,21 +177,21 @@ body,
 
 /* Berd's dark scheme paints user messages DARK GREY, not accent blue —
    this is the main app's dark --message-user-bg (gray-700), inlined
-   because the panel is hardcoded-dark (no ThemeProvider: a semantic
-   token here would resolve to the LIGHT value, near-white). */
+   through the panel-scoped tokens above so the always-dark surface keeps
+   the same treatment without depending on app theme state. */
 .row.user .bubble {
   max-width: 85%;
   padding: 8px 11px;
   border-radius: 12px;
-  background: #333333;
-  color: #ffffff;
+  background: var(--desktop-agent-user-bubble);
+  color: var(--desktop-agent-foreground-inverse);
 }
 
 /* Assistant replies render PLAIN on the popover surface — no fill, no
    inset, full width (the main app's treatment). */
 .row.assistant .bubble {
   width: 100%;
-  color: #e4e4e7;
+  color: var(--desktop-agent-foreground);
 }
 
 /* Markdown in assistant bubbles. The bubble itself keeps pre-wrap for
@@ -175,7 +224,7 @@ body,
 }
 
 .markdown-body code {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--desktop-agent-control-muted);
   border-radius: 4px;
   padding: 0.1em 0.35em;
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
@@ -183,7 +232,7 @@ body,
 }
 
 .markdown-body pre {
-  background: rgba(0, 0, 0, 0.35);
+  background: var(--desktop-agent-code-surface);
   border-radius: 8px;
   padding: 8px 10px;
   margin: 0.4em 0;
@@ -200,12 +249,12 @@ body,
 .markdown-body blockquote {
   margin: 0.35em 0;
   padding-left: 0.8em;
-  border-left: 3px solid rgba(255, 255, 255, 0.25);
-  color: rgba(228, 228, 231, 0.8);
+  border-left: 3px solid var(--desktop-agent-surface-border);
+  color: var(--desktop-agent-quote-foreground);
 }
 
 .markdown-body a {
-  color: #7cb3ff;
+  color: var(--desktop-agent-link);
 }
 
 .cursor {
@@ -221,14 +270,14 @@ body,
 
 .tool-row {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--desktop-agent-foreground-muted);
   padding: 2px 4px;
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   max-width: 100%;
 }
 
 .tool-row.failed {
-  color: rgba(248, 113, 113, 0.9);
+  color: var(--desktop-agent-danger);
 }
 
 .tool-row-header {
@@ -253,7 +302,7 @@ body,
   flex: 0 0 auto;
   font-family: -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 10px;
-  color: rgba(248, 113, 113, 0.65);
+  color: var(--desktop-agent-danger-subtle);
 }
 
 .tool-result {
@@ -265,13 +314,13 @@ body,
   user-select: text;
   -webkit-user-select: text;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.055);
-  color: rgba(255, 255, 255, 0.72);
+  background: var(--desktop-agent-tool-result-surface);
+  color: var(--desktop-agent-foreground-readable);
 }
 
 .tool-result.failed {
-  background: rgba(127, 29, 29, 0.28);
-  color: rgba(254, 202, 202, 0.95);
+  background: var(--desktop-agent-danger-surface);
+  color: var(--desktop-agent-danger-fg);
 }
 
 /* Collapsed tool-run summary: one quiet line per
@@ -282,7 +331,7 @@ body,
   background: none;
   text-align: left;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--desktop-agent-foreground-faint);
   padding: 2px 4px;
   cursor: pointer;
   display: flex;
@@ -291,11 +340,11 @@ body,
 }
 
 .tool-run-summary:hover {
-  color: rgba(255, 255, 255, 0.65);
+  color: var(--desktop-agent-foreground-soft);
 }
 
 .tool-run-summary.has-failures {
-  color: rgba(248, 113, 113, 0.7);
+  color: var(--desktop-agent-danger-muted);
 }
 
 .tool-run-summary .disclosure {
@@ -323,12 +372,12 @@ body,
 
 .hint {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--desktop-agent-foreground-subtle);
   padding: 4px 2px;
 }
 
 .hint.error {
-  color: #f87171;
+  color: var(--desktop-agent-danger-solid);
 }
 
 /* Composer — matches the main Berd app's visual language: one rounded
@@ -345,12 +394,12 @@ body,
      fills the box height. */
   padding: 5px 5px 5px 12px;
   border-radius: 19px;
-  background: rgba(255, 255, 255, 0.07);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--desktop-agent-control-subtle);
+  border: 1px solid var(--desktop-agent-control-border);
 }
 
 .composer-box:focus-within {
-  border-color: rgba(255, 255, 255, 0.14);
+  border-color: var(--desktop-agent-control-border-hover);
 }
 
 .composer-box input {
@@ -374,24 +423,24 @@ body,
 }
 
 .composer-box input::placeholder {
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--desktop-agent-foreground-placeholder);
 }
 
 .composer-only .composer-box {
   margin-top: 0;
   border-radius: 24px;
-  background: var(--panel-glass-bg);
-  border-color: rgba(255, 255, 255, 0.08);
-  box-shadow: var(--panel-glass-shadow);
+  background: var(--desktop-agent-surface);
+  border-color: var(--desktop-agent-surface-border);
+  box-shadow: var(--desktop-agent-shadow);
   padding: 9px 9px 9px 16px;
 }
 
 .composer-only .hint {
   align-self: center;
-  background: rgba(24, 24, 27, 0.92);
+  background: var(--desktop-agent-surface-strong);
   border-radius: 10px;
   padding: 4px 10px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--desktop-agent-shadow-soft);
 }
 
 .composer-controls {
@@ -406,8 +455,8 @@ body,
   height: 26px;
   border-radius: 13px;
   border: none;
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.7);
+  background: var(--desktop-agent-control);
+  color: var(--desktop-agent-foreground-readable);
   font-size: 12px;
   line-height: 1;
   cursor: pointer;
@@ -417,12 +466,12 @@ body,
 }
 
 .icon-button:hover {
-  background: rgba(255, 255, 255, 0.14);
+  background: var(--desktop-agent-control-hover);
 }
 
 .icon-button.active {
-  color: #eab308;
-  background: rgba(234, 179, 8, 0.15);
+  color: var(--desktop-agent-warning);
+  background: var(--desktop-agent-warning-surface);
 }
 
 .icon-button:disabled {
@@ -434,16 +483,14 @@ body,
    (Berd's composer pattern — wider than tall, nearly filling the box
    height). Enabled = near-white fill with a dark glyph, matching the
    main composer's primary action (the grey-on-grey version lacked
-   contrast); the stop variant wears the same chrome. Colors inlined —
-   the panel is hardcoded-dark (no ThemeProvider: semantic tokens would
-   resolve light). */
+   contrast); the stop variant wears the same chrome. */
 .send-pill {
   width: 34px;
   height: 26px;
   border-radius: 13px;
   border: none;
-  background: #f4f4f5;
-  color: #18181b;
+  background: var(--desktop-agent-primary-action);
+  color: var(--desktop-agent-primary-action-fg);
   font-size: 14px;
   font-weight: 700;
   line-height: 1;
@@ -454,14 +501,14 @@ body,
 }
 
 .send-pill:hover {
-  background: #ffffff;
+  background: var(--desktop-agent-primary-action-hover);
 }
 
 /* Disabled must read clearly distinct from enabled: a quiet grey wash,
    not a dimmed white (opacity on near-white still reads "lit"). */
 .send-pill:disabled {
-  background: rgba(255, 255, 255, 0.14);
-  color: rgba(255, 255, 255, 0.45);
+  background: var(--desktop-agent-control-hover);
+  color: var(--desktop-agent-foreground-subtle);
   cursor: default;
 }
 
@@ -476,7 +523,7 @@ body,
 .hint-retry {
   margin-left: 6px;
   border: none;
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--desktop-agent-control-muted-strong);
   color: inherit;
   border-radius: 8px;
   padding: 1px 7px;
@@ -485,7 +532,7 @@ body,
 }
 
 .hint-retry:hover {
-  background: rgba(255, 255, 255, 0.22);
+  background: var(--desktop-agent-control-strong);
 }
 
 /* Avatar chip */
@@ -512,9 +559,9 @@ body,
   box-sizing: border-box;
   padding: 6px 4px;
   border-radius: 12px;
-  background: var(--panel-glass-bg);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: var(--panel-glass-shadow);
+  background: var(--desktop-agent-surface);
+  border: 1px solid var(--desktop-agent-surface-border);
+  box-shadow: var(--desktop-agent-shadow);
   display: flex;
   flex-direction: column;
 }
@@ -532,7 +579,7 @@ body,
   border: none;
   border-radius: 7px;
   background: none;
-  color: #e4e4e7;
+  color: var(--desktop-agent-foreground);
   font-size: 13px;
   font-family: inherit;
   text-align: left;
@@ -541,7 +588,7 @@ body,
 
 .menu-row.highlighted,
 .menu-row:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--desktop-agent-control-muted-strong);
 }
 
 .menu-label {
@@ -554,7 +601,7 @@ body,
 
 .menu-chevron {
   flex: 0 0 auto;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--desktop-agent-foreground-muted);
 }
 
 .menu-check {
@@ -565,7 +612,7 @@ body,
 .menu-separator {
   height: 1px;
   margin: 4px 8px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--desktop-agent-control-muted);
 }
 
 .menu-preview {
@@ -587,5 +634,5 @@ body,
   align-items: center;
   padding: 0 10px;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--desktop-agent-foreground-subtle);
 }
