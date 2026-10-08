@@ -271,7 +271,10 @@ export function DesktopAgentApp() {
   // Key-loss while expanded = click outside -> collapse (menu included).
   useEffect(() => {
     const unlisten = listen<boolean>("desktop-agent:key-status", (event) => {
+      // A late key-loss from openMenu's own collapse (or one landing while
+      // already collapsed) must not cancel the menu that is opening.
       if (!event.payload) {
+        if (machine.mode === "avatar" || openingMenu.current) return;
         gestureGeneration.current++;
         void closeMenu();
         void collapse();
@@ -485,7 +488,18 @@ export function DesktopAgentApp() {
   if (!restored) return null;
 
   return (
-    <div className="expanded-root">
+    <div
+      className="expanded-root"
+      onPointerDown={(e) => {
+        // Any press in the grown menu window outside the menu cards and
+        // the avatar (shadow margin, empty corners) closes the menu.
+        if (!menu) return;
+        const target = e.target as Element;
+        if (target.closest(".menu-card") || target.closest(".avatar-hit"))
+          return;
+        void closeMenu();
+      }}
+    >
       {/* biome-ignore lint/a11y/noStaticElementInteractions lint/a11y/useKeyWithClickEvents: the avatar is a pointer-driven native-drag surface (performWindowDrag), not a semantic control — keyboard access is the global toggle shortcut */}
       <div
         className="avatar-hit"
@@ -552,12 +566,6 @@ export function DesktopAgentApp() {
       )}
       {menu && (
         <div
-          onPointerDown={(e) => {
-            const target = e.target as Element;
-            if (target.closest(".menu-card") || target.closest(".avatar-hit"))
-              return;
-            void closeMenu();
-          }}
           style={{
             position: "absolute",
             left: menu.layout.popoverRect.x,
