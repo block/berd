@@ -91,11 +91,14 @@ belongs in error messages, not generic help text.
 
 v1 requires a fresh 256-bit bearer capability for every broker start. The
 plugin writes it beside the port and generation in the discovery file, with
-owner-only directory/file permissions on Unix, and the CLI presents it on
-both `/v1/ping` and `/v1/call`. Missing, malformed, wrong, stale, symlinked,
-or non-private capability records fail closed. This authenticates possession
-of the app-issued session endpoint; it does not replace renderer command
-policy or add interactive confirmation dialogs.
+owner-only directory/file permissions on Unix and no extended ACLs on macOS,
+and the CLI presents it on both `/v1/ping` and `/v1/call`. macOS discovery
+publication clears inherited ACLs on the opened directory and file before
+writing the capability; the CLI rejects extended ACLs because mode bits alone
+do not establish privacy on that platform. Missing, malformed, wrong, stale,
+symlinked, or non-private capability records fail closed. This authenticates
+possession of the app-issued session endpoint; it does not replace renderer
+command policy or add interactive confirmation dialogs.
 
 Required command properties:
 

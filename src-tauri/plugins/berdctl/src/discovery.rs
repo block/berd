@@ -427,6 +427,38 @@ mod windows_discovery_security {
     }
 }
 
+/// macOS ACL grants are independent of mode bits and can be inherited even by
+/// a file created with mode 0600. Clear them on the checked handle before any
+/// capability bytes are written. The directory is cleared before creating files
+/// beneath it so its inheritable grants cannot reach future discovery records.
+#[cfg(all(feature = "server", target_os = "macos"))]
+fn clear_extended_acl(file: &std::fs::File) -> std::io::Result<()> {
+    use std::os::fd::AsRawFd;
+
+    // Darwin's sys/acl.h API is not exposed by libc. acl_t is opaque; we never
+    // dereference it, and every successful allocation is freed below.
+    unsafe extern "C" {
+        fn acl_init(count: libc::c_int) -> *mut libc::c_void;
+        fn acl_set_fd(fd: libc::c_int, acl: *mut libc::c_void) -> libc::c_int;
+        fn acl_free(acl: *mut libc::c_void) -> libc::c_int;
+    }
+    // SAFETY: zero requests an empty ACL, with no caller-owned memory.
+    let acl = unsafe { acl_init(0) };
+    if acl.is_null() {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: file is live and acl is the valid allocation above. On Darwin,
+    // acl_set_fd replaces the extended ACL; it does not alter POSIX mode bits.
+    let result = if unsafe { acl_set_fd(file.as_raw_fd(), acl) } == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    };
+    // SAFETY: acl is owned here and no longer used.
+    unsafe { acl_free(acl) };
+    result
+}
+
 #[cfg(all(feature = "server", not(windows)))]
 fn private_discovery_directory(dir: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
@@ -452,6 +484,8 @@ fn private_discovery_directory(dir: &Path) -> std::io::Result<()> {
             ));
         }
         handle.set_permissions(unix_permissions(0o700))?;
+        #[cfg(target_os = "macos")]
+        clear_extended_acl(&handle)?;
         Ok(())
     }
     #[cfg(not(unix))]
@@ -551,6 +585,8 @@ pub(crate) fn write_discovery_file(
         )?;
         #[cfg(unix)]
         file.set_permissions(unix_permissions(0o600))?;
+        #[cfg(target_os = "macos")]
+        clear_extended_acl(&file)?;
         file.write_all(payload.to_string().as_bytes())?;
         file.sync_all()?;
         drop(file);
@@ -706,6 +742,64 @@ mod tests {
         assert_ne!(error.kind(), std::io::ErrorKind::NotFound);
 
         std::fs::remove_dir_all(base).ok();
+    }
+
+    #[cfg(all(feature = "server", target_os = "macos"))]
+    #[test]
+    fn write_removes_inherited_macos_acls_before_publishing() {
+        use std::process::Command;
+
+        let base = std::env::temp_dir().join(format!(
+            "berdctl-discovery-macos-acl-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir(&base).unwrap();
+        // A sharing ACL on the app-data parent reaches a newly created
+        // discovery directory even when DirBuilder requests mode 0700.
+        let status = Command::new("/bin/chmod")
+            .args(["+a", "everyone allow list,search,readattr,readextattr,readsecurity,file_inherit,directory_inherit"])
+            .arg(&base).status().unwrap();
+        assert!(status.success());
+        let path = discovery_file_path(&base, 4242);
+        let dir = path.parent().unwrap();
+        std::fs::create_dir(dir).unwrap();
+        let acl_listing = |path: &Path| {
+            let output = Command::new("/bin/ls")
+                .arg("-lde")
+                .arg(path)
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            String::from_utf8(output.stdout).unwrap()
+        };
+        assert!(acl_listing(dir).contains("everyone inherited allow"));
+        write_discovery_file(&path, 8080, 4242, 7, &"1".repeat(64)).unwrap();
+        for object in [dir, path.as_path()] {
+            assert!(
+                !acl_listing(object).contains("allow"),
+                "{}",
+                acl_listing(object)
+            );
+        }
+        // Existing permissions can drift between starts. Repair them again,
+        // and do not carry the destination's old ACL onto the new inode.
+        for object in [dir, path.as_path()] {
+            assert!(Command::new("/bin/chmod")
+                .args(["+a", "everyone allow read"])
+                .arg(object)
+                .status()
+                .unwrap()
+                .success());
+        }
+        write_discovery_file(&path, 9090, 4242, 8, &"2".repeat(64)).unwrap();
+        for object in [dir, path.as_path()] {
+            assert!(
+                !acl_listing(object).contains("allow"),
+                "{}",
+                acl_listing(object)
+            );
+        }
+        std::fs::remove_dir_all(base).unwrap();
     }
 
     #[cfg(all(feature = "server", windows))]

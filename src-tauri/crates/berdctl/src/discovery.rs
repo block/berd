@@ -93,10 +93,19 @@ fn read_private_discovery_file(path: &Path) -> Result<String, String> {
 
     // Check the containing directory first. Once it is owner-private, another
     // user cannot replace the final path while it is opened below.
+    // A basename has an empty parent in Rust; it still names a file in the
+    // current directory and must receive the same privacy checks as ./name.
     let parent = path
         .parent()
-        .ok_or_else(|| format!("{} has no parent directory", path.display()))?;
-    let parent_metadata = std::fs::symlink_metadata(parent)
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let directory = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_DIRECTORY)
+        .open(parent)
+        .map_err(|err| format!("cannot open {}: {err}", parent.display()))?;
+    let parent_metadata = directory
+        .metadata()
         .map_err(|err| format!("cannot inspect {}: {err}", parent.display()))?;
     // SAFETY: `geteuid` takes no arguments and has no preconditions.
     let current_uid = unsafe { libc::geteuid() };
@@ -109,6 +118,10 @@ fn read_private_discovery_file(path: &Path) -> Result<String, String> {
             parent.display()
         ));
     }
+
+    #[cfg(target_os = "macos")]
+    require_no_extended_acl(&directory)
+        .map_err(|err| format!("{} is not owner-private: {err}", parent.display()))?;
 
     // O_NOFOLLOW makes the final symlink check atomic with opening the file.
     // O_NONBLOCK keeps a malicious FIFO from blocking before metadata reveals
@@ -136,6 +149,9 @@ fn read_private_discovery_file(path: &Path) -> Result<String, String> {
             path.display()
         ));
     }
+    #[cfg(target_os = "macos")]
+    require_no_extended_acl(&file)
+        .map_err(|err| format!("{} is not owner-private: {err}", path.display()))?;
     if metadata.len() > MAX_DISCOVERY_BYTES {
         return Err(format!("{} is unexpectedly large", path.display()));
     }
@@ -150,6 +166,38 @@ fn read_private_discovery_file(path: &Path) -> Result<String, String> {
         return Err(format!("{} is unexpectedly large", path.display()));
     }
     Ok(contents)
+}
+
+/// The app publishes ACL-free discovery objects on macOS. Mode bits alone
+/// cannot prove privacy there: an extended allow ACE can still expose a 0600
+/// file. Reject extended ACLs rather than implement a second ACL policy engine.
+#[cfg(target_os = "macos")]
+fn require_no_extended_acl(file: &std::fs::File) -> std::io::Result<()> {
+    use std::os::fd::AsRawFd;
+
+    // Darwin sys/acl.h: acl_t is opaque and ACL_TYPE_EXTENDED is 0x100.
+    unsafe extern "C" {
+        fn acl_get_fd_np(fd: libc::c_int, acl_type: libc::c_int) -> *mut libc::c_void;
+        fn acl_free(acl: *mut libc::c_void) -> libc::c_int;
+    }
+    // SAFETY: file owns a live fd; the constant selects the extended ACL.
+    let acl = unsafe { acl_get_fd_np(file.as_raw_fd(), 0x100) };
+    if acl.is_null() {
+        let error = std::io::Error::last_os_error();
+        // Darwin returns ENOENT for a valid fd with no extended ACL. Other
+        // failures (including unsupported filesystems) cannot prove privacy.
+        return if error.raw_os_error() == Some(libc::ENOENT) {
+            Ok(())
+        } else {
+            Err(error)
+        };
+    }
+    // SAFETY: acl_get_fd_np allocated this copy; it is not used after freeing.
+    unsafe { acl_free(acl) };
+    Err(std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        "extended ACL present on discovery object",
+    ))
 }
 
 #[cfg(windows)]
