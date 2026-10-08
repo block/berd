@@ -3,9 +3,9 @@
 # Runs the Rust checks that only a real Windows host can exercise: the
 # `managed_node` / `managed_acp_tools` module tests (including the native gate
 # that downloads and executes the real pinned Node ZIP), security-sensitive
-# Windows process-launch tests, plus Windows clippy in the default and
-# app-feature configurations. Invoked through `just ci-windows` for local and
-# release validation.
+# Windows process-launch and berdctl discovery tests, plus Windows clippy in the
+# default and app-feature configurations. Invoked through `just ci-windows` for
+# local and release validation.
 $ErrorActionPreference = "Stop"
 trap {
     Write-Host $_.Exception.Message -ForegroundColor Red
@@ -57,6 +57,11 @@ Invoke-CargoCheck -ArgumentList @(
 Invoke-CargoCheck -ArgumentList @(
     "test", "--lib", "commands::system::tests::windows_chrome_launch_"
 ) -Label "cargo test Windows Chrome launch"
+
+# Exercise the DACL and atomic-publication paths on a native Windows filesystem.
+Invoke-CargoCheck -ArgumentList @(
+    "test", "-p", "tauri-plugin-berdctl", "--features", "server", "discovery::tests::"
+) -Label "cargo test berdctl discovery"
 
 # Clippy compiles both configurations, so separate `cargo check` calls only
 # repeat the same compile coverage.

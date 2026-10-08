@@ -3,7 +3,8 @@
 //! Each app instance's berdctl broker writes a discovery file at
 //! `<app_data_dir>/berdctl/control-<app_pid>.json` and deletes it on
 //! stop/exit. A crashed instance leaves its file behind (possibly as a
-//! `control-<pid>.json.tmp` orphan from a crash mid-write); this sweep
+//! legacy `control-<pid>.json.tmp` or current
+//! `control-<pid>.json.<nonce>.tmp` orphan from a crash mid-write); this sweep
 //! removes files whose owning app process is no longer alive. The directory
 //! and filename formats are owned by the plugin's discovery module. Compiled
 //! unconditionally — stale files must be cleaned even by builds where the
@@ -96,6 +97,10 @@ mod tests {
         let dead = write_discovery_file(app_data_dir.path(), &format!("control-{gone}.json"));
         let dead_tmp =
             write_discovery_file(app_data_dir.path(), &format!("control-{gone}.json.tmp"));
+        let dead_random_tmp = write_discovery_file(
+            app_data_dir.path(),
+            &format!("control-{gone}.json.0123456789abcdef0123456789abcdef.tmp"),
+        );
         let own = write_discovery_file(
             app_data_dir.path(),
             &format!("control-{}.json", std::process::id()),
@@ -108,6 +113,7 @@ mod tests {
 
         assert!(!dead.exists());
         assert!(!dead_tmp.exists());
+        assert!(!dead_random_tmp.exists());
         assert!(own.exists());
         assert!(live.exists());
         assert!(unrelated.exists());
