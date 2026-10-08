@@ -131,6 +131,7 @@
     "extendAccess": "Ampliar acceso",
     "noResults": "Ninguna conexión coincide con tu búsqueda.",
     "reconnect": "Reconectar",
+    "skillsHint": "Conecta una aplicación aquí para autorizar el acceso. Busca e instala su habilidad en el catálogo de habilidades para que los agentes sepan cómo usarla.",
     "search": "Buscar conexiones",
     "sections": {
       "managed": "Administradas por la empresa",

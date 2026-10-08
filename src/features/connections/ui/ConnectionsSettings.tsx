@@ -149,6 +149,12 @@ export function ConnectionsSettings({
         }
       />
 
+      {showManagedConnections ? (
+        <p className="text-xs text-muted-foreground">
+          {t("connections.skillsHint")}
+        </p>
+      ) : null}
+
       <SearchBar
         size="pill"
         value={searchTerm}
