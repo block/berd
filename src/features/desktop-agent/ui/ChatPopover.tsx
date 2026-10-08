@@ -178,12 +178,33 @@ export function ChatPopover({
     followBottom.current = distanceFromBottom < 48;
   };
 
+  const transcriptFollowKey = session.messages
+    .map((message) =>
+      message.content
+        .map((content) =>
+          content.type === "text"
+            ? content.text.length
+            : content.type === "tool"
+              ? [
+                  content.tool.id,
+                  content.tool.status,
+                  content.tool.result?.length ?? 0,
+                ].join(":")
+              : content.type === "image"
+                ? ["image", content.data.length].join(":")
+                : ["system", content.text.length].join(":"),
+        )
+        .join("|"),
+    )
+    .join("||");
+
   // Pin to bottom only when we're following. useLayoutEffect avoids a
   // visible two-frame jump when a new chunk extends the transcript.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: transcriptFollowKey is the rendered-content signal; refs are intentionally stable.
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (el && followBottom.current) el.scrollTop = el.scrollHeight;
-  }, []);
+  }, [transcriptFollowKey]);
 
   // Focus the composer when the popover opens.
   useEffect(() => {
