@@ -6,7 +6,9 @@
     "placeholder": "Escribe a Berd",
     "placeholderAgent": "Escribe a {{name}}",
     "send": "Enviar",
-    "stop": "Detener"
+    "stop": "Detener",
+    "start": "Iniciar nuevo chat",
+    "startAgent": "Iniciar nuevo chat con {{name}}"
   },
   "empty": {
     "prompt": "Pregúntale lo que quieras al agente.",
@@ -29,11 +31,11 @@
     "perchedApp": "Posado en {{app}}"
   },
   "menu": {
-    "header": "Nuevo chat con…",
+    "switchAgent": "Cambiar de agente",
     "fresh": "Berd",
     "empty": "Aún no hay agentes — créalos en la ventana principal",
-    "settings": "Configuración del Agente de escritorio…",
-    "dismiss": "Ocultar el Agente de escritorio"
+    "settings": "Configuración…",
+    "dismiss": "Ocultar agente"
   },
   "tools": {
     "working_one": "Trabajando… ({{count}} llamada de herramienta)",

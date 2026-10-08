@@ -1,75 +1,127 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 
+import type { PendingSelection } from "./useSession";
 import { useAvatarMenu } from "./useAvatarMenu";
 
 const mocks = vi.hoisted(() => ({
-  invoke: vi.fn(),
   listPersonas: vi.fn(),
-  listeners: new Map<string, () => void>(),
 }));
 
-vi.mock("@tauri-apps/api/core", () => ({
-  invoke: (...args: unknown[]) => mocks.invoke(...args),
-}));
-vi.mock("@tauri-apps/api/event", () => ({
-  listen: async (name: string, handler: () => void) => {
-    mocks.listeners.set(name, handler);
-    return () => mocks.listeners.delete(name);
-  },
-}));
 vi.mock("@/shared/api/agents", () => ({
   listPersonas: () => mocks.listPersonas(),
 }));
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.listeners.clear();
-  mocks.invoke.mockResolvedValue(undefined);
   mocks.listPersonas.mockResolvedValue([
     { id: "a1", displayName: "Scout", systemPrompt: "" },
   ]);
 });
 
-function renderMenu(agentSelector: boolean, dismiss = vi.fn()) {
+function renderMenu(args?: {
+  agentSelector?: boolean;
+  pendingSelection?: PendingSelection | null;
+  activeAgentId?: string | null;
+  select?: (selection: PendingSelection | null) => void;
+}) {
   return renderHook(() =>
     useAvatarMenu({
-      pendingSelection: null,
-      activeAgentId: null,
-      select: vi.fn(),
-      agentSelector,
-      dismiss,
+      pendingSelection: args?.pendingSelection ?? null,
+      activeAgentId: args?.activeAgentId ?? null,
+      select: args?.select ?? vi.fn(),
+      agentSelector: args?.agentSelector ?? true,
     }),
   );
 }
 
-it("shows only settings and hide while the agent selector experiment is off", async () => {
-  const { result } = renderMenu(false);
-  await act(() => result.current.openMenu());
+it("skips the persona fetch while the agent selector experiment is off", async () => {
+  const { result } = renderMenu({ agentSelector: false });
+  const model = await act(() => result.current.prepareMenu());
   expect(mocks.listPersonas).not.toHaveBeenCalled();
-  expect(mocks.invoke).toHaveBeenCalledWith(
-    "desktop_agent_avatar_menu_popup",
-    expect.objectContaining({ agentSelector: false, agents: [] }),
-  );
+  expect(model.agents).toEqual([]);
 });
 
-it("lists agents when the agent selector experiment is on", async () => {
-  const { result } = renderMenu(true);
-  await act(() => result.current.openMenu());
-  expect(mocks.invoke).toHaveBeenCalledWith(
-    "desktop_agent_avatar_menu_popup",
-    expect.objectContaining({
-      agentSelector: true,
-      agents: [{ agentId: "a1", name: "Scout" }],
-      pendingFresh: true,
-    }),
-  );
+it("lists agents and checks the fresh entry when nothing is armed or committed", async () => {
+  const { result } = renderMenu();
+  const model = await act(() => result.current.prepareMenu());
+  expect(model.agents).toEqual([
+    {
+      agentId: "a1",
+      name: "Scout",
+      systemPrompt: "",
+      provider: null,
+      model: null,
+    },
+  ]);
+  expect(model.checkedFresh).toBe(true);
+  expect(model.checkedAgentId).toBeNull();
 });
 
-it("routes the hide item to dismiss", async () => {
-  const dismiss = vi.fn();
-  renderMenu(false, dismiss);
-  await act(async () => {});
-  mocks.listeners.get("desktop-agent:menu-dismiss")?.();
-  expect(dismiss).toHaveBeenCalledOnce();
+it("falls back to the committed agent for the checkmark when nothing is armed", async () => {
+  const { result } = renderMenu({ activeAgentId: "a1" });
+  const model = await act(() => result.current.prepareMenu());
+  expect(model.checkedAgentId).toBe("a1");
+  expect(model.checkedFresh).toBe(false);
+});
+
+it("survives a failed persona fetch with an empty list", async () => {
+  mocks.listPersonas.mockRejectedValue(new Error("boom"));
+  const { result } = renderMenu();
+  const model = await act(() => result.current.prepareMenu());
+  expect(model.agents).toEqual([]);
+  expect(model.checkedFresh).toBe(true);
+});
+
+it("arms an agent on select and no-ops when it is already armed", async () => {
+  const select = vi.fn();
+  const armed: PendingSelection = {
+    kind: "agent",
+    agent: {
+      agentId: "a1",
+      name: "Scout",
+      systemPrompt: "",
+      provider: null,
+      model: null,
+    },
+  };
+  const { result, rerender } = renderHook(
+    ({ pending }: { pending: PendingSelection | null }) =>
+      useAvatarMenu({
+        pendingSelection: pending,
+        activeAgentId: null,
+        select,
+        agentSelector: true,
+      }),
+    { initialProps: { pending: null as PendingSelection | null } },
+  );
+  await act(() => result.current.prepareMenu());
+  act(() => result.current.selectAgent("a1"));
+  expect(select).toHaveBeenCalledWith({ kind: "agent", agent: armed.agent });
+
+  select.mockClear();
+  rerender({ pending: armed });
+  act(() => result.current.selectAgent("a1"));
+  expect(select).not.toHaveBeenCalled();
+});
+
+it("arms fresh on select and no-ops when fresh is already armed", async () => {
+  const select = vi.fn();
+  const { result, rerender } = renderHook(
+    ({ pending }: { pending: PendingSelection | null }) =>
+      useAvatarMenu({
+        pendingSelection: pending,
+        activeAgentId: "a1",
+        select,
+        agentSelector: true,
+      }),
+    { initialProps: { pending: null as PendingSelection | null } },
+  );
+  act(() => result.current.selectFresh());
+  expect(select).toHaveBeenCalledWith({ kind: "fresh" });
+
+  select.mockClear();
+  rerender({ pending: { kind: "fresh" } });
+  act(() => result.current.selectFresh());
+  expect(select).not.toHaveBeenCalled();
 });

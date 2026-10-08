@@ -4,7 +4,6 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { DesktopAgentApp } from "@/features/desktop-agent/ui/DesktopAgentApp";
 
 const mocks = vi.hoisted(() => ({
-  config: { config: { showAgent: true } },
   avatar: {
     isBerdy: true,
     choice: {
@@ -30,6 +29,8 @@ const mocks = vi.hoisted(() => ({
     mode: "avatar",
     computeExpanded: vi.fn(),
     applyExpanded: vi.fn(),
+    computeMenu: vi.fn(),
+    applyMenu: vi.fn(),
     collapse: vi.fn(),
   },
   agentId: null as string | null,
@@ -61,6 +62,7 @@ vi.mock("@/features/desktop-agent/hooks/usePerch", () => ({
 }));
 vi.mock("@/features/desktop-agent/hooks/useSession", () => ({
   useSession: () => ({
+    messages: [],
     pendingSelection: null,
     activeAgentId: mocks.agentId,
     attached: true,
@@ -68,7 +70,11 @@ vi.mock("@/features/desktop-agent/hooks/useSession", () => ({
   }),
 }));
 vi.mock("@/features/desktop-agent/hooks/useAvatarMenu", () => ({
-  useAvatarMenu: () => ({ openMenu: mocks.openMenu }),
+  useAvatarMenu: () => ({
+    prepareMenu: mocks.openMenu,
+    selectAgent: vi.fn(),
+    selectFresh: vi.fn(),
+  }),
 }));
 vi.mock("@/features/desktop-agent/ui/AgentAvatar", () => ({
   AgentAvatar: (props: Record<string, unknown>) => {
@@ -83,11 +89,7 @@ vi.mock("@/features/experiments/experimentPreferences", () => ({
   useExperiment: () => ({ enabled: true, config: {} }),
 }));
 vi.mock("@/features/desktop-agent/lib/desktopAgentPreferences", () => ({
-  useDesktopAgentVisiblePreference: () => ({
-    enabled: mocks.config.config.showAgent,
-  }),
-  getDesktopAgentVisible: () => mocks.config.config.showAgent,
-  setDesktopAgentVisible: vi.fn(),
+  setDesktopAgentEnabled: vi.fn(),
 }));
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(async () => vi.fn()),
@@ -107,8 +109,21 @@ beforeEach(() => {
   mocks.port.collapse.mockImplementation(async () => {
     mocks.port.mode = "avatar";
   });
-  mocks.config.config.showAgent = true;
   mocks.avatar.isBerdy = true;
+  mocks.openMenu.mockResolvedValue({
+    agents: [],
+    checkedAgentId: null,
+    checkedFresh: true,
+  });
+  mocks.port.computeMenu.mockResolvedValue({
+    avatarRect: { x: 0, y: 0, width: 94, height: 94 },
+    popoverRect: { x: 94, y: 0, width: 190, height: 68 },
+    windowFrame: { x: 0, y: 0, width: 284, height: 94 },
+    popoverAbove: false,
+  });
+  mocks.port.applyMenu.mockImplementation(async () => {
+    mocks.port.mode = "menu";
+  });
   mocks.perch.phase = "unperched";
   mocks.perch.endTargetingAndMaybePerch.mockResolvedValue(true);
 });
@@ -128,10 +143,11 @@ it("animates only a positively identified Berdy, and forwards hide and perch sta
   rerender(<DesktopAgentApp />);
   expect(mocks.avatarProps.target).toBe("dangle");
   mocks.perch.phase = "perched";
-  mocks.config.config.showAgent = false;
   rerender(<DesktopAgentApp />);
   expect(mocks.avatarProps.target).toBe("sit");
-  expect(mocks.avatarProps.hidden).toBe(true);
+  // Hidden only flips via the menu's "Hide agent" dismiss path now (the
+  // separate visible preference is gone).
+  expect(mocks.avatarProps.hidden).toBe(false);
   mocks.perch.phase = "unperched";
   rerender(<DesktopAgentApp />);
   expect(mocks.avatarProps.target).toBe("idle");
@@ -189,7 +205,6 @@ it("expanded avatar collapses only on a primary click, not pointer-up or context
     fireEvent.pointerUp(hit, { button });
     fireEvent.click(hit, { button });
   }
-  fireEvent.contextMenu(hit, { button: 2 });
   fireEvent.pointerDown(document.body, { button: 0 });
   fireEvent.pointerUp(hit, { button: 0 });
   expect(mocks.port.collapse).not.toHaveBeenCalled();
@@ -292,7 +307,6 @@ it("quick clicks clear their hold timer, and expanded presses never hold", async
 it.each([
   "cancel",
   "lostcapture",
-  "hide",
   "identity",
   "unmount",
   "visibility",
@@ -302,10 +316,6 @@ it.each([
   act(() => vi.advanceTimersByTime(90));
   if (reason === "cancel") fireEvent.pointerCancel(hit);
   if (reason === "lostcapture") fireEvent.lostPointerCapture(hit);
-  if (reason === "hide") {
-    mocks.config.config.showAgent = false;
-    rerender(<DesktopAgentApp />);
-  }
   if (reason === "identity") {
     mocks.agentId = "other";
     rerender(<DesktopAgentApp />);
@@ -334,7 +344,9 @@ it("ignores auxiliary holds and preserves the context menu", async () => {
     act(() => vi.advanceTimersByTime(500));
     fireEvent.pointerUp(hit, { button });
   }
-  fireEvent.contextMenu(hit);
+  await act(async () => {
+    fireEvent.contextMenu(hit);
+  });
   expect(mocks.openMenu).toHaveBeenCalledOnce();
   expect(mocks.avatarProps.target).toBe("idle");
   expect(mocks.port.computeExpanded).not.toHaveBeenCalled();

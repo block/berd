@@ -42,8 +42,14 @@ pub(super) enum OverlayAppearance {
         color: OverlayColor,
         alpha: f64,
     },
-    /// Translucent fill (the targeting highlight band).
-    Fill { color: OverlayColor, alpha: f64 },
+    /// Translucent fill (the targeting highlight band). The band sits on
+    /// the TOP region of the target window, so only its top corners are
+    /// rounded (`top_radius`) to match the window's own corners.
+    Fill {
+        color: OverlayColor,
+        alpha: f64,
+        top_radius: f64,
+    },
 }
 
 unsafe fn ns_color(cls: &AnyClass, color: &OverlayColor, alpha: f64) -> *mut AnyObject {
@@ -107,9 +113,32 @@ pub(super) unsafe fn create_overlay_panel(appearance: &OverlayAppearance) -> *mu
                 let _: () = msg_send![&mut *layer, setBorderColor: &*cg];
             }
         }
-        OverlayAppearance::Fill { color, alpha } => {
-            let fill = ns_color(color_cls, color, *alpha);
-            let _: () = msg_send![&mut *panel, setBackgroundColor: &*fill];
+        OverlayAppearance::Fill {
+            color,
+            alpha,
+            top_radius,
+        } => {
+            // Layer-backed fill with rounded TOP corners: the window
+            // background stays clear and the content-view layer paints
+            // the band, because an NSWindow background cannot be
+            // corner-masked.
+            let clear: *mut AnyObject = msg_send![color_cls, clearColor];
+            let _: () = msg_send![&mut *panel, setBackgroundColor: &*clear];
+            let content: *mut AnyObject = msg_send![&*panel, contentView];
+            let _: () = msg_send![&mut *content, setWantsLayer: Bool::YES];
+            let layer: *mut AnyObject = msg_send![&*content, layer];
+            if !layer.is_null() {
+                let fill = ns_color(color_cls, color, *alpha);
+                let cg: *mut AnyObject = msg_send![&*fill, CGColor];
+                let _: () = msg_send![&mut *layer, setBackgroundColor: &*cg];
+                let _: () = msg_send![&mut *layer, setCornerRadius: *top_radius];
+                let _: () = msg_send![&mut *layer, setMasksToBounds: Bool::YES];
+                // Top corners only. The content view is NOT flipped, so
+                // the layer's MaxY edge is the visual top:
+                // kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner.
+                let corners: usize = (1 << 2) | (1 << 3);
+                let _: () = msg_send![&mut *layer, setMaskedCorners: corners];
+            }
         }
     }
     panel

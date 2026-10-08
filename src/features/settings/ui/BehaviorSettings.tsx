@@ -13,10 +13,7 @@ import { Switch } from "@/shared/ui/switch";
 import { Textarea } from "@/shared/ui/textarea";
 import { GooseAutoCompactSettings } from "./GooseAutoCompactSettings";
 import { useAgentToolsTipsPreference } from "@/features/chat/lib/agentToolsTipPreferences";
-import {
-  setDesktopAgentVisible,
-  useDesktopAgentEnabledPreference,
-} from "@/features/desktop-agent/lib/desktopAgentPreferences";
+import { useDesktopAgentEnabledPreference } from "@/features/desktop-agent/lib/desktopAgentPreferences";
 import { useSessionCostPreference } from "@/features/chat/lib/sessionCostPreference";
 import { useResponseStartGutterPreference } from "@/features/chat/lib/responseStartGutterPreference";
 import { useArtifactAutoOpenPreference } from "@/features/chat/lib/artifactAutoOpenPreference";
@@ -210,10 +207,7 @@ export function BehaviorSettings() {
             >
               <Switch
                 checked={desktopAgentPreference.enabled}
-                onCheckedChange={(enabled) => {
-                  if (enabled) setDesktopAgentVisible(true);
-                  desktopAgentPreference.setEnabled(enabled);
-                }}
+                onCheckedChange={desktopAgentPreference.setEnabled}
                 aria-label={t("general.desktopAgent.label")}
               />
             </SettingsRow>

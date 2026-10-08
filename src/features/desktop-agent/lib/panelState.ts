@@ -23,7 +23,7 @@ import {
 
 export const AVATAR_PANEL_SIZE = 94;
 
-export type PanelMode = "avatar" | "expanded";
+export type PanelMode = "avatar" | "expanded" | "menu";
 
 /**
  * Platform seam — implemented over Tauri invoke in production, faked in
@@ -104,14 +104,16 @@ export class PanelStateMachine {
   /**
    * Computes the expanded layout WITHOUT touching the native panel, so
    * callers can commit it to the UI tree before the native resize
-   * (anti-blink sequencing — see module comment).
+   * (anti-blink sequencing — see module comment). `size` overrides the
+   * default popover size (the composer-only first-run popover is
+   * smaller; growing to the full chat re-runs this same path).
    */
-  async computeExpanded(): Promise<ExpandedLayout> {
+  async computeExpanded(size?: Size): Promise<ExpandedLayout> {
     await this.syncFromPanel();
     const screens = await this.window.getScreens();
     return computeExpandedLayout({
       avatarGlobal: this.avatarGlobal,
-      popoverSize: this.popoverSize,
+      popoverSize: size ?? this.popoverSize,
       screens,
     });
   }
@@ -120,6 +122,22 @@ export class PanelStateMachine {
   async applyExpanded(layout: ExpandedLayout): Promise<void> {
     await this.window.setState({ expanded: true, frame: layout.windowFrame });
     this.modeInternal = "expanded";
+  }
+
+  /**
+   * Computes the layout for the avatar context menu — the same grown-
+   * window geometry as the chat popover (the collapsed window is
+   * avatar-sized; a menu needs room), just a different overlay size and a
+   * distinct mode so gesture guards can tell menu from chat.
+   */
+  async computeMenu(size: Size): Promise<ExpandedLayout> {
+    return this.computeExpanded(size);
+  }
+
+  /** Applies a layout from computeMenu() to the native panel. */
+  async applyMenu(layout: ExpandedLayout): Promise<void> {
+    await this.window.setState({ expanded: true, frame: layout.windowFrame });
+    this.modeInternal = "menu";
   }
 
   /**
@@ -136,7 +154,7 @@ export class PanelStateMachine {
    * native perch relationship ends without a drag dismount.
    */
   async returnToSavedPosition(): Promise<void> {
-    if (this.modeInternal === "expanded") return;
+    if (this.modeInternal !== "avatar") return;
     const screens = await this.window.getScreens();
     const saved = await this.positionStore.load();
     const requested = saved

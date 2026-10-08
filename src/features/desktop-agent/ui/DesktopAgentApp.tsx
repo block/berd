@@ -13,28 +13,29 @@ import { useTranslation } from "react-i18next";
 import { DESKTOP_AGENT_AGENT_SELECTOR_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { useExperiment } from "@/features/experiments/experimentPreferences";
 
-import type { ExpandedLayout } from "../lib/anchorGeometry";
+import type { ExpandedLayout, Size } from "../lib/anchorGeometry";
 import { deriveAvatarState } from "../lib/avatarState";
-import {
-  getDesktopAgentVisible,
-  setDesktopAgentVisible,
-  useDesktopAgentVisiblePreference,
-} from "../lib/desktopAgentPreferences";
+import { setDesktopAgentEnabled } from "../lib/desktopAgentPreferences";
 import { PanelStateMachine } from "../lib/panelState";
 import {
   LocalStoragePositionStore,
   TauriWindowPort,
 } from "../lib/tauriWindowPort";
 import { useAgentAvatar } from "../hooks/useAgentAvatar";
-import { useAvatarMenu } from "../hooks/useAvatarMenu";
+import { useAvatarMenu, type AvatarMenuModel } from "../hooks/useAvatarMenu";
 import { usePerch } from "../hooks/usePerch";
 import { useSession } from "../hooks/useSession";
 import { AgentAvatar } from "./AgentAvatar";
+import { AvatarMenu, menuOverlaySize } from "./AvatarMenu";
 import { ChatPopover } from "./ChatPopover";
 import "./desktop-agent.css";
 
 // Distinguish an intentional stationary hold from an ordinary chat click.
 const HOLD_DELAY_MS = 180;
+
+// Composer-first: a chat with no messages opens as just the composer
+// pill — room for the pill plus the hint row when one is relevant.
+const COMPOSER_ONLY_SIZE: Size = { width: 380, height: 96 };
 
 const machine = new PanelStateMachine({
   window: new TauriWindowPort(),
@@ -46,7 +47,10 @@ export function DesktopAgentApp() {
   const session = useSession();
   const agentSelector =
     useExperiment(DESKTOP_AGENT_AGENT_SELECTOR_EXPERIMENT_ID)?.enabled === true;
-  const visible = useDesktopAgentVisiblePreference().enabled;
+  // Set when "Hide agent" has fired: the enabled-pref write is in flight
+  // to the main webview's bridge (which closes the panel); meanwhile the
+  // panel must already look gone.
+  const [dismissed, setDismissed] = useState(false);
   const avatarAgentId =
     session.pendingSelection !== null
       ? session.pendingSelection.kind === "agent"
@@ -73,6 +77,14 @@ export function DesktopAgentApp() {
     }
   }, character);
   const [layout, setLayout] = useState<ExpandedLayout | null>(null);
+  // Composer-first: "composer" until the chat has messages, then "full".
+  const [popoverVariant, setPopoverVariant] = useState<"composer" | "full">(
+    "full",
+  );
+  const [menu, setMenu] = useState<{
+    layout: ExpandedLayout;
+    model: AvatarMenuModel;
+  } | null>(null);
   const [hovering, setHovering] = useState(false);
   const [restored, setRestored] = useState(false);
   const collapsing = useRef(false);
@@ -127,79 +139,132 @@ export function DesktopAgentApp() {
 
   const expand = useCallback(async () => {
     if (machine.mode !== "avatar") return;
+    // Composer-first: an empty chat (nothing to show, including reopen
+    // of a still-empty chat) opens as just the composer pill; a chat
+    // with messages opens as the full window.
+    const composerOnly = session.messages.length === 0;
     // Anti-blink: compute first, commit to the tree, THEN resize native.
-    const next = await machine.computeExpanded();
+    const next = await machine.computeExpanded(
+      composerOnly ? COMPOSER_ONLY_SIZE : undefined,
+    );
+    setPopoverVariant(composerOnly ? "composer" : "full");
     setLayout(next);
     await machine.applyExpanded(next);
+  }, [session.messages.length]);
+
+  // First message sent while composer-only: grow to the full chat window
+  // through the same anti-blink path (compute, commit to tree, THEN
+  // native resize — the avatar stays put).
+  const growing = useRef(false);
+  useEffect(() => {
+    if (
+      layout === null ||
+      popoverVariant !== "composer" ||
+      session.messages.length === 0 ||
+      growing.current
+    )
+      return;
+    growing.current = true;
+    void (async () => {
+      try {
+        if (machine.mode !== "expanded") return;
+        const next = await machine.computeExpanded();
+        setPopoverVariant("full");
+        setLayout(next);
+        await machine.applyExpanded(next);
+      } finally {
+        growing.current = false;
+      }
+    })();
+  }, [layout, popoverVariant, session.messages.length]);
+
+  const closeMenu = useCallback(async () => {
+    if (machine.mode !== "menu") return;
+    // Anti-blink, in reverse: drop the menu from the tree first.
+    setMenu(null);
+    await machine.collapse();
   }, []);
 
-  // Right-click "Hide Desktop Agent": same as turning off the "Show the
-  // agent" setting (chat kept; the toggle chord resurrects it — see the
-  // toggle-panel listener). The localStorage write reaches the main
-  // webview's bridge via the storage event; the direct set_visible hides
-  // immediately even if that webview is reloading (idempotent with the
-  // bridge's own call).
-  // Any in-flight press is cancelled by the showAgent-keyed gesture
-  // cleanup effect below.
+  // "Hide agent" = the Desktop Agent setting goes OFF (one on/off state;
+  // the old separate hide-without-disabling preference is gone). The
+  // localStorage write reaches the main webview's bridge via the storage
+  // event and the bridge destroys the panel. The local dismissed state
+  // hides the avatar immediately while that close is in flight.
   const dismiss = useCallback(() => {
     if (machine.mode === "expanded") void collapse();
-    setDesktopAgentVisible(false);
-    void invoke("desktop_agent_set_visible", { visible: false }).catch(
-      () => undefined,
-    );
-  }, [collapse]);
+    if (machine.mode === "menu") void closeMenu();
+    setDismissed(true);
+    setDesktopAgentEnabled(false);
+  }, [collapse, closeMenu]);
 
-  // Right-click menu: pick an agent for the NEXT chat (selection creates
-  // nothing — deferred create on first send). Selection only swaps the
-  // avatar; the popover stays closed until the user opens it.
+  // Right-click menu data/selection semantics (geometry is handled here
+  // in openMenu/closeMenu): pick an agent for the NEXT chat (selection
+  // creates nothing — deferred create on first send). Selection only
+  // swaps the avatar; the popover stays closed until the user opens it.
   const avatarMenu = useAvatarMenu({
     pendingSelection: session.pendingSelection,
     activeAgentId: session.activeAgentId,
     select: session.select,
     agentSelector,
-    dismiss,
   });
 
-  // Key-loss while expanded = click outside -> collapse.
+  // Opens the custom webview menu: the collapsed window is avatar-sized,
+  // so the panel grows first ("menu" mode — same anti-blink sequencing
+  // as expand). Right-clicking while the chat is expanded CLOSES THE
+  // CHAT FIRST and opens the menu from the collapsed state — the
+  // simplest robust option (one grown-window layout at a time; no
+  // menu-inside-chat z-order or geometry union to reason about).
+  const openMenu = useCallback(async () => {
+    if (machine.mode === "menu") return;
+    if (machine.mode === "expanded") await collapse();
+    if (machine.mode !== "avatar") return;
+    const model = await avatarMenu.prepareMenu();
+    const size = menuOverlaySize({
+      agentSelector,
+      agentCount: model.agents.length,
+    });
+    const next = await machine.computeMenu(size);
+    setMenu({ layout: next, model });
+    await machine.applyMenu(next);
+  }, [agentSelector, avatarMenu, collapse]);
+
+  // Key-loss while expanded = click outside -> collapse (menu included).
   useEffect(() => {
     const unlisten = listen<boolean>("desktop-agent:key-status", (event) => {
-      if (!event.payload) void collapse();
+      if (!event.payload) {
+        void closeMenu();
+        void collapse();
+      }
     });
     return () => {
       void unlisten.then((fn) => fn());
     };
-  }, [collapse]);
+  }, [collapse, closeMenu]);
 
-  // Esc collapses the popover.
+  // Esc closes the menu or collapses the popover.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      void closeMenu();
       void collapse();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [collapse]);
+  }, [collapse, closeMenu]);
 
   // Global-shortcut toggle event from Rust (the registry-bound chord).
+  // Only live while the panel exists (= setting enabled): hiding IS
+  // disabling now, so there is no hidden-but-running panel.
   useEffect(() => {
     const unlisten = listen("desktop-agent:toggle-panel", () => {
-      // The chord resurrects a hidden panel (a dead shortcut while hidden
-      // would feel broken). showAgent lives in localStorage, which is
-      // shared across same-origin webviews: writing it true here fires
-      // the storage event in the MAIN webview, whose bridge orders the
-      // panel front — and the settings toggle reflects reality. Skip the
-      // popover toggle on resurrect; the next press toggles normally.
-      if (!getDesktopAgentVisible()) {
-        setDesktopAgentVisible(true);
-        return;
-      }
-      if (machine.mode === "expanded") void collapse();
+      if (machine.mode === "menu") void closeMenu();
+      else if (machine.mode === "expanded") void collapse();
       else void expand();
     });
     return () => {
       void unlisten.then((fn) => fn());
     };
-  }, [collapse, expand]);
+  }, [collapse, closeMenu, expand]);
 
   // Display connect/disconnect/rearrange: re-clamp the avatar onto a
   // visible screen (a disconnected display must not strand the panel).
@@ -245,7 +310,7 @@ export function DesktopAgentApp() {
       document.removeEventListener("visibilitychange", onVisibility);
       cancelPress();
     };
-  }, [cancelPress, avatarAgentId, character, visible]);
+  }, [cancelPress, avatarAgentId, character, dismissed]);
 
   const onAvatarPointerDown = useCallback(
     (e: React.PointerEvent) => {
@@ -366,7 +431,7 @@ export function DesktopAgentApp() {
             ? "sit"
             : "idle"
       }
-      hidden={!visible}
+      hidden={dismissed}
     />
   );
 
@@ -402,21 +467,25 @@ export function DesktopAgentApp() {
             ignoreNextClick.current = false;
             return;
           }
-          if (layout && e.button === 0) void collapse();
+          if (e.button !== 0) return;
+          if (menu) void closeMenu();
+          else if (layout) void collapse();
         }}
         onPointerEnter={() => setHovering(true)}
         onPointerLeave={() => setHovering(false)}
         title={t("avatar.title")}
         onContextMenu={(e) => {
           e.preventDefault();
-          void avatarMenu.openMenu();
+          void openMenu();
         }}
       >
         {avatarView}
       </div>
       {layout && (
         <div
-          className="popover panel-popover"
+          className={`popover panel-popover${
+            popoverVariant === "composer" ? " composer-mode" : ""
+          }`}
           style={{
             position: "absolute",
             left: layout.popoverRect.x,
@@ -425,7 +494,45 @@ export function DesktopAgentApp() {
             height: layout.popoverRect.height,
           }}
         >
-          <ChatPopover session={session} perch={perch} />
+          <ChatPopover
+            session={session}
+            perch={perch}
+            variant={popoverVariant}
+            anchor={layout.popoverAbove ? "bottom" : "top"}
+          />
+        </div>
+      )}
+      {menu && (
+        <div
+          style={{
+            position: "absolute",
+            left: menu.layout.popoverRect.x,
+            top: menu.layout.popoverRect.y,
+            width: menu.layout.popoverRect.width,
+            height: menu.layout.popoverRect.height,
+          }}
+        >
+          <AvatarMenu
+            layout={menu.layout}
+            agentSelector={agentSelector}
+            model={menu.model}
+            onSelectAgent={(agent) => {
+              avatarMenu.selectAgent(agent.agentId);
+              void closeMenu();
+            }}
+            onSelectFresh={() => {
+              avatarMenu.selectFresh();
+              void closeMenu();
+            }}
+            onSettings={() => {
+              // Rust reveals + focuses the main window and tells its
+              // webview to open the General settings section (where the
+              // Desktop Agent settings live).
+              void invoke("desktop_agent_open_settings").catch(() => undefined);
+              void closeMenu();
+            }}
+            onHide={dismiss}
+          />
         </div>
       )}
     </div>

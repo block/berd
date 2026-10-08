@@ -40,24 +40,6 @@ const FULLSCREEN_AUXILIARY: usize = 1 << 8;
 /// process-global is acceptable: there is exactly one avatar panel.
 static EXPANDED: AtomicBool = AtomicBool::new(false);
 
-/// The panel's INTENDED visibility — the `showAgent` config as last told
-/// to us (open arg / set_visible). set_state's order-front is gated on
-/// this: the window is built hidden and frame updates arrive
-/// while hidden (position restore, screen re-clamp), so an ungated
-/// order-front would both flash the pre-paint white webview at launch
-/// and resurrect a deliberately hidden panel.
-static INTENDED_VISIBLE: AtomicBool = AtomicBool::new(false);
-
-/// Records intent WITHOUT touching the panel (desktop_agent_open, and
-/// set_visible before it orders the window).
-pub fn set_intended_visible(visible: bool) {
-    INTENDED_VISIBLE.store(visible, Ordering::Relaxed);
-}
-
-pub fn intended_visible() -> bool {
-    INTENDED_VISIBLE.load(Ordering::Relaxed)
-}
-
 /// tao's original NSWindow class, captured in install() BEFORE any
 /// swizzle so prepare_destroy() can restore it (see that function for
 /// the teardown-crash story). Class pointers are 'static; usize keeps
@@ -284,28 +266,6 @@ unsafe fn configure(panel: *mut AnyObject) {
 /// itself in one main-thread hop (anti-blink ordering).
 pub fn note_expanded(expanded: bool) {
     EXPANDED.store(expanded, Ordering::Relaxed);
-}
-
-/// Orders the panel out/front WITHOUT teardown — the `showAgent` config
-/// toggle. The webview (and its chat session) keeps running while hidden.
-/// Native orderOut/orderFrontRegardless: tauri's show/hide paths can
-/// involve key-window changes that must stay gated by the subclass.
-pub fn set_visible(app: &AppHandle, visible: bool) -> Result<(), String> {
-    // Intent first: set_state's gated order-front consults it,
-    // so a frame update racing this toggle acts on the NEW intent.
-    set_intended_visible(visible);
-    let window = app
-        .get_webview_window(super::WINDOW_LABEL)
-        .ok_or("desktop-agent window missing")?;
-    let ptr = window.ns_window().map_err(|e| e.to_string())? as usize;
-    super::main_thread::on_main(app, move || unsafe {
-        let panel = ptr as *mut AnyObject;
-        if visible {
-            let _: () = msg_send![&mut *panel, orderFrontRegardless];
-        } else {
-            let _: () = msg_send![&mut *panel, orderOut: std::ptr::null::<AnyObject>()];
-        }
-    })
 }
 
 /// Native performDrag handoff (returns immediately; the run loop stays

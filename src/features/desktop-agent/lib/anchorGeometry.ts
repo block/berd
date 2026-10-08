@@ -75,6 +75,24 @@ export function rectsIntersect(a: Rect, b: Rect): boolean {
   );
 }
 
+/**
+ * Breathing room the window frame reserves around the popover card so its
+ * CSS box-shadow isn't clipped at the window edge (the card used to fill
+ * the window region exactly, cropping the shadow). Covers the largest
+ * shadow in desktop-agent.css (0 8px 32px).
+ */
+export const POPOVER_SHADOW_MARGIN = 24;
+
+/** Rect grown by `amount` on every side. */
+export function inflate(r: Rect, amount: number): Rect {
+  return rect(
+    r.x - amount,
+    r.y - amount,
+    r.width + 2 * amount,
+    r.height + 2 * amount,
+  );
+}
+
 /** Bounding box of two rects. */
 export function expandToInclude(a: Rect, b: Rect): Rect {
   const x = Math.min(a.x, b.x);
@@ -242,7 +260,13 @@ export function computeExpandedLayout(args: {
     }
   }
 
-  const windowGlobal = expandToInclude(avatarGlobal, popoverGlobal);
+  // The window grows past the popover by the shadow margin so the card's
+  // box-shadow has room to paint. Only the WINDOW inflates — the popover
+  // and avatar keep their global rects, so nothing moves on screen.
+  const windowGlobal = expandToInclude(
+    avatarGlobal,
+    inflate(popoverGlobal, POPOVER_SHADOW_MARGIN),
+  );
 
   return {
     windowFrame: windowGlobal,

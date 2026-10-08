@@ -5,6 +5,8 @@
   "composer": {
     "placeholder": "Message Berd",
     "placeholderAgent": "Message {{name}}",
+    "start": "Start new chat",
+    "startAgent": "Start new chat with {{name}}",
     "send": "Send",
     "stop": "Stop"
   },
@@ -29,11 +31,11 @@
     "perchedApp": "Perched on {{app}}"
   },
   "menu": {
-    "header": "New chat with…",
+    "switchAgent": "Switch agent",
     "fresh": "Berd",
     "empty": "No agents yet — create them in the main window",
-    "settings": "Desktop Agent settings…",
-    "dismiss": "Hide Desktop Agent"
+    "settings": "Settings…",
+    "dismiss": "Hide agent"
   },
   "tools": {
     "working_one": "Working… ({{count}} tool call)",

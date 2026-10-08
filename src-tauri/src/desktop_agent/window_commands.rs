@@ -125,14 +125,12 @@ pub fn desktop_agent_set_state(
                     let _: () = msg_send![&mut *p, resignKeyWindow];
                 }
             }
-            // Gated order-front: set_state doubles as the REVEAL
-            // for the built-hidden window — the webview's post-restore
-            // setState is the first moment the panel has both a correct
-            // frame and a painted (transparent) webview. While showAgent
-            // intends hidden, frame updates must not resurrect the panel.
-            if panel::intended_visible() {
-                let _: () = msg_send![&mut *p, orderFrontRegardless];
-            }
+            // set_state doubles as the REVEAL for the built-hidden window:
+            // the webview's post-restore setState is the first moment the
+            // panel has both a correct frame and a painted transparent
+            // webview. "Hide agent" destroys the panel now, so there is no
+            // hidden-but-running state for frame updates.
+            let _: () = msg_send![&mut *p, orderFrontRegardless];
         }
     })
 }

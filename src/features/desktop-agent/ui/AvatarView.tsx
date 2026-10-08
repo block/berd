@@ -82,8 +82,8 @@ export function AvatarView({
   }, [treatment.playbackRate, treatment.paused, ready, active]);
 
   // Frozen-avatar fix: WKWebView pauses <video> EXTERNALLY when the
-  // panel hides or is occluded (the showAgent hide, occlusion). The
-  // treatment effect above only re-runs when its deps change — and the
+  // panel hides or is occluded. The treatment effect above only re-runs
+  // when its deps change — and the
   // common transitions (hover↔idle, expanded↔collapsed) all keep
   // playbackRate=1.0/paused=false, so an external pause stuck forever
   // (only incidentally cured when a send flipped thinking's 1.6 rate).

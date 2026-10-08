@@ -181,8 +181,7 @@ pub fn run() {
     #[cfg(target_os = "macos")]
     let builder = builder
         .plugin(tauri_nspanel::init())
-        .plugin(desktop_agent::global_shortcut_plugin())
-        .on_menu_event(|app, event| desktop_agent::handle_menu_event(app, &event));
+        .plugin(desktop_agent::global_shortcut_plugin());
 
     if let Some(mode) = &e2e_mode {
         mode.log_enabled();
@@ -784,11 +783,9 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             desktop_agent::desktop_agent_close,
             #[cfg(target_os = "macos")]
-            desktop_agent::desktop_agent_set_visible,
-            #[cfg(target_os = "macos")]
             desktop_agent::desktop_agent_start_drag,
             #[cfg(target_os = "macos")]
-            desktop_agent::avatar_menu::desktop_agent_avatar_menu_popup,
+            desktop_agent::desktop_agent_open_settings,
             #[cfg(target_os = "macos")]
             desktop_agent::window_commands::desktop_agent_get_screens,
             #[cfg(target_os = "macos")]

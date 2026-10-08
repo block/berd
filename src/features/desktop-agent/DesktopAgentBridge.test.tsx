@@ -1,5 +1,5 @@
 // Bridge tests: Desktop Agent settings -> panel lifecycle commands. Pins the
-// mapping (enable→open, showAgent→set_visible without teardown,
+// mapping (enable→open,
 // disable→close, chord rebind→re-open) plus the platform/StrictMode
 // guards. Pattern: GlobalShortcutBridge.test.tsx (hoisted invoke mock,
 // real settings/shortcut stores backed by localStorage).
@@ -11,9 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DesktopAgentBridge } from "./DesktopAgentBridge";
 import {
   DESKTOP_AGENT_ENABLED_STORAGE_KEY,
-  DESKTOP_AGENT_VISIBLE_STORAGE_KEY,
   setDesktopAgentEnabled,
-  setDesktopAgentVisible,
 } from "./lib/desktopAgentPreferences";
 import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
 import {
@@ -69,7 +67,6 @@ beforeEach(() => {
   mocks.invoke.mockImplementation(() => Promise.resolve());
   window.__TAURI_INTERNALS__ = {};
   localStorage.removeItem(DESKTOP_AGENT_ENABLED_STORAGE_KEY);
-  localStorage.removeItem(DESKTOP_AGENT_VISIBLE_STORAGE_KEY);
   localStorage.removeItem(SHORTCUT_PREFERENCES_STORAGE_KEY);
 });
 
@@ -101,45 +98,8 @@ describe("DesktopAgentBridge", () => {
     });
     await flushAsync();
     expect(callsTo("desktop_agent_open")).toEqual([
-      ["desktop_agent_open", { shortcut: "meta+alt+b", visible: true }],
+      ["desktop_agent_open", { shortcut: "meta+alt+b" }],
     ]);
-  });
-
-  it("opens hidden when showAgent was already off at enable time", async () => {
-    act(() => {
-      setDesktopAgentVisible(false);
-    });
-    render(<DesktopAgentBridge />);
-    await flushAsync();
-    act(() => {
-      setDesktopAgentEnabled(true);
-    });
-    await flushAsync();
-    expect(callsTo("desktop_agent_open")).toEqual([
-      ["desktop_agent_open", { shortcut: "meta+alt+b", visible: false }],
-    ]);
-  });
-
-  it("maps showAgent to set_visible without reopening or closing", async () => {
-    render(<DesktopAgentBridge />);
-    act(() => {
-      setDesktopAgentEnabled(true);
-    });
-    await flushAsync();
-    act(() => {
-      setDesktopAgentVisible(false);
-    });
-    await flushAsync();
-    act(() => {
-      setDesktopAgentVisible(true);
-    });
-    await flushAsync();
-    expect(callsTo("desktop_agent_set_visible")).toEqual([
-      ["desktop_agent_set_visible", { visible: false }],
-      ["desktop_agent_set_visible", { visible: true }],
-    ]);
-    expect(callsTo("desktop_agent_open")).toHaveLength(1);
-    expect(callsTo("desktop_agent_close")).toHaveLength(0);
   });
 
   it("closes the panel when the setting turns off", async () => {
@@ -166,8 +126,8 @@ describe("DesktopAgentBridge", () => {
     });
     await flushAsync();
     expect(callsTo("desktop_agent_open")).toEqual([
-      ["desktop_agent_open", { shortcut: "meta+alt+b", visible: true }],
-      ["desktop_agent_open", { shortcut: "ctrl+alt+d", visible: true }],
+      ["desktop_agent_open", { shortcut: "meta+alt+b" }],
+      ["desktop_agent_open", { shortcut: "ctrl+alt+d" }],
     ]);
   });
 
@@ -189,27 +149,6 @@ describe("DesktopAgentBridge", () => {
     render(<DesktopAgentBridge />);
     await flushAsync();
     expect(mocks.invoke).not.toHaveBeenCalled();
-  });
-
-  it("reload with showAgent off: one open(visible:false), ZERO set_visible", async () => {
-    // The main-webview-reload shape (review Check 6): Desktop Agent enabled
-    // AND showAgent=false already persisted, bridge remounts with a
-    // fresh appliedRef ({enabled:false, showAgent:true}). Must re-open
-    // passing the LIVE showAgent (window exists, Rust ignores visible —
-    // but a wrong value here would flash the panel on first-ever open
-    // after a settings import), and branch 2 must stay dead: a spurious
-    // set_visible(true) would resurrect a deliberately hidden panel.
-    act(() => {
-      setDesktopAgentEnabled(true);
-      setDesktopAgentVisible(false);
-    });
-    render(<DesktopAgentBridge />);
-    await flushAsync();
-    expect(callsTo("desktop_agent_open")).toEqual([
-      ["desktop_agent_open", { shortcut: "meta+alt+b", visible: false }],
-    ]);
-    expect(callsTo("desktop_agent_set_visible")).toHaveLength(0);
-    expect(callsTo("desktop_agent_close")).toHaveLength(0);
   });
 
   it("opens exactly once under StrictMode double-mount with the setting pre-enabled", async () => {

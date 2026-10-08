@@ -5,10 +5,9 @@
 //! (`index.html?window=desktop-agent`). The experiment bridge in the main
 //! webview drives it:
 //!
-//! - experiment enabled (+ `showAgent` true) -> `desktop_agent_open`
-//! - `showAgent` toggled off/on -> `desktop_agent_set_visible` (hide
-//!   WITHOUT teardown — the panel webview and its chat session keep going)
-//! - experiment disabled -> `desktop_agent_close` (destroy)
+//! - setting enabled -> `desktop_agent_open`
+//! - setting disabled -> `desktop_agent_close` (destroy; "Hide agent" in
+//!   the panel's context menu turns the setting off, so hide == disable)
 //!
 //! The panel-toggle chord arrives as an ARGUMENT from the bridge (read
 //! from the shortcuts-registry entry `desktopAgent.togglePanel`) — never
@@ -20,7 +19,6 @@
 //! style mask (panel.rs) alone keeps focus with the app the user is
 //! working in.
 
-pub mod avatar_menu;
 pub mod capture;
 pub mod coordinate_space;
 mod main_thread;
@@ -73,35 +71,19 @@ pub fn global_shortcut_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin
         .build()
 }
 
-/// Routes avatar-menu clicks to the panel webview. Registered app-level
-/// (lib.rs `on_menu_event`) because popup menus report through the app
-/// handler, not per-window. Id-prefix routing: only `desktop-agent:`
-/// namespaced ids are ours; everything else (Berd's app menu, predefined
-/// items) passes by untouched.
-pub fn handle_menu_event(app: &AppHandle, event: &tauri::menu::MenuEvent) {
-    let id = event.id().as_ref();
-    if let Some(agent_id) = id.strip_prefix(avatar_menu::AGENT_ID_PREFIX) {
-        let _ = app.emit_to(
-            WINDOW_LABEL,
-            "desktop-agent:menu-agent",
-            agent_id.to_string(),
-        );
-    } else if id == avatar_menu::FRESH_ITEM_ID {
-        let _ = app.emit_to(WINDOW_LABEL, "desktop-agent:menu-fresh", ());
-    } else if id == avatar_menu::DISMISS_ITEM_ID {
-        let _ = app.emit_to(WINDOW_LABEL, "desktop-agent:menu-dismiss", ());
-    } else if id == avatar_menu::SETTINGS_ITEM_ID {
-        // Settings live in the MAIN window: reveal + focus it first (it
-        // may be hidden or buried — the panel is always-on-top, the main
-        // window is not), then tell its webview to open the General
-        // settings section. The bridge listens (it is the desktop-agent presence
-        // in the main webview).
-        if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
-            let _ = window.show();
-            let _ = window.set_focus();
-        }
-        let _ = app.emit_to(MAIN_WINDOW_LABEL, "desktop-agent:open-settings", ());
+/// Settings deep-link from the panel's custom webview menu. Settings live
+/// in the MAIN window: reveal + focus it first (it may be hidden or buried — the
+/// panel is always-on-top, the main window is not), then tell its webview
+/// to open the General settings section. The bridge listens (it is the
+/// desktop-agent presence in the main webview).
+#[tauri::command]
+pub fn desktop_agent_open_settings(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        let _ = window.show();
+        let _ = window.set_focus();
     }
+    app.emit_to(MAIN_WINDOW_LABEL, "desktop-agent:open-settings", ())
+        .map_err(|e| e.to_string())
 }
 
 /// Opens the panel window (idempotent) and keeps the toggle chord
@@ -112,14 +94,10 @@ pub fn handle_menu_event(app: &AppHandle, event: &tauri::menu::MenuEvent) {
 /// flashes as a white square at the OS default position — the webview
 /// paints white until its first transparent paint, and the persisted
 /// avatar position only lands after the webview restores it. The webview
-/// itself reveals the panel (desktop_agent_set_visible) once restore has
-/// painted; `visible` is the showAgent config at open time, applied by
-/// that reveal (an enabled-but-hidden panel simply never reveals).
+/// itself reveals the panel via its first set_state once restore has
+/// painted.
 #[tauri::command]
-pub fn desktop_agent_open(app: AppHandle, shortcut: String, visible: bool) -> Result<(), String> {
-    // Intent recorded on EVERY open (chord-rebind re-opens included):
-    // the gated order-front in set_state consults it.
-    panel::set_intended_visible(visible);
+pub fn desktop_agent_open(app: AppHandle, shortcut: String) -> Result<(), String> {
     if app.get_webview_window(WINDOW_LABEL).is_none() {
         let window =
             WebviewWindowBuilder::new(&app, WINDOW_LABEL, WebviewUrl::App(WINDOW_URL.into()))
@@ -168,12 +146,6 @@ pub fn desktop_agent_close(app: AppHandle) -> Result<(), String> {
         window.destroy().map_err(|e| e.to_string())?;
     }
     Ok(())
-}
-
-/// Hides/shows the panel WITHOUT teardown (`showAgent` config).
-#[tauri::command]
-pub fn desktop_agent_set_visible(app: AppHandle, visible: bool) -> Result<(), String> {
-    panel::set_visible(&app, visible)
 }
 
 /// Native performWindowDrag handoff for the avatar (the webview mousedown

@@ -491,6 +491,11 @@ static LAST_WINDOW_FRAME: Mutex<Option<cs::Rect>> = Mutex::new(None);
 
 const TITLE_BAR_HEIGHT: f64 = 40.0;
 
+/// Corner radius for the targeting highlight band's TOP corners, matching
+/// the top corners of the macOS window it sits on. Hardcoded: AppKit does
+/// not expose a window's corner radius — ~16pt matches macOS 26 windows.
+const HIGHLIGHT_TOP_CORNER_RADIUS: f64 = 16.0;
+
 /// Matches the panel's inner_size (mod.rs) — the seat math needs the
 /// avatar footprint, not the live NSWindow frame (which the webview may
 /// have expanded into the popover).
@@ -513,6 +518,7 @@ unsafe fn ensure_highlight_panel() -> *mut AnyObject {
         &super::overlay_panel::OverlayAppearance::Fill {
             color: super::overlay_panel::OverlayColor::Yellow,
             alpha: 0.35,
+            top_radius: HIGHLIGHT_TOP_CORNER_RADIUS,
         },
     );
     HIGHLIGHT_PANEL.with(|p| *p.borrow_mut() = Some(panel as usize));

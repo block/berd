@@ -5,21 +5,17 @@
 //
 //   setting off -> on             desktop_agent_open (registers the
 //                                 toggle chord from the shortcuts
-//                                 registry; window built hidden when
-//                                 showAgent is off)
-//   showAgent toggled             desktop_agent_set_visible — hide/show
-//                                 WITHOUT teardown; the panel webview and
-//                                 its chat session keep running
+//                                 registry)
 //   toggle chord rebound          desktop_agent_open again (idempotent
 //                                 for the window; re-registers the chord)
 //   setting on -> off             desktop_agent_close (destroy; chat
 //                                 state is server-side and re-adopts on
 //                                 re-enable)
 //
-// Cross-webview coherence: the settings live in localStorage,
+// Cross-webview coherence: the setting lives in localStorage,
 // which is shared across same-origin webviews — the panel webview writes
-// showAgent back on shortcut-resurrect, the storage event lands here, and
-// this bridge orders the panel front. The preference hooks/useShortcutBindings
+// `enabled` false on "Hide agent", the storage event lands here, and
+// this bridge closes the panel. The preference hooks/useShortcutBindings
 // are storage-event-driven, so no extra wiring is needed.
 //
 // Deliberately NO unmount cleanup: a main-webview reload must not destroy
@@ -30,24 +26,19 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef } from "react";
 
-import {
-  useDesktopAgentEnabledPreference,
-  useDesktopAgentVisiblePreference,
-} from "@/features/desktop-agent/lib/desktopAgentPreferences";
+import { useDesktopAgentEnabledPreference } from "@/features/desktop-agent/lib/desktopAgentPreferences";
 import { requestOpenSettings } from "@/features/settings/lib/settingsEvents";
 import { useShortcutBindings } from "@/features/shortcuts/lib/shortcutRegistry";
 import { getPlatform } from "@/shared/lib/platform";
 
 interface BridgeState {
   enabled: boolean;
-  showAgent: boolean;
   chord: string;
 }
 
 export function DesktopAgentBridge() {
   const isMac = getPlatform() === "mac";
   const enabled = useDesktopAgentEnabledPreference().enabled;
-  const showAgent = useDesktopAgentVisiblePreference().enabled;
   const bindings = useShortcutBindings("desktopAgent.togglePanel");
 
   // A cleared keybinding must not read as "disabled": open with an empty
@@ -71,7 +62,6 @@ export function DesktopAgentBridge() {
   // idempotent anyway.
   const appliedRef = useRef<BridgeState>({
     enabled: false,
-    showAgent: true,
     chord: "",
   });
 
@@ -100,28 +90,19 @@ export function DesktopAgentBridge() {
       return;
     }
     const before = appliedRef.current;
-    const next: BridgeState = { enabled, showAgent, chord };
+    const next: BridgeState = { enabled, chord };
     appliedRef.current = next;
 
     if (enabled) {
       if (!before.enabled || before.chord !== chord) {
-        // Window built hidden when showAgent is off at open time — an
-        // enabled-but-hidden panel must never flash visible.
-        enqueue(() =>
-          invoke("desktop_agent_open", { shortcut: chord, visible: showAgent }),
-        );
-      }
-      if (before.enabled && before.showAgent !== showAgent) {
-        enqueue(() =>
-          invoke("desktop_agent_set_visible", { visible: showAgent }),
-        );
+        enqueue(() => invoke("desktop_agent_open", { shortcut: chord }));
       }
       return;
     }
     if (before.enabled) {
       enqueue(() => invoke("desktop_agent_close"));
     }
-  }, [enabled, showAgent, chord, isMac, enqueue]);
+  }, [enabled, chord, isMac, enqueue]);
 
   return null;
 }

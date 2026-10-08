@@ -147,9 +147,18 @@ function MessageRow({ message }: { message: ChatMessage }) {
 export function ChatPopover({
   session,
   perch,
+  variant = "full",
+  anchor = "bottom",
 }: {
   session: SessionView;
   perch: PerchView;
+  /** "composer": no transcript yet — the popover is just the composer
+   *  pill (plus the hint row when relevant). The parent sizes the window
+   *  accordingly and upgrades to "full" when the first message lands. */
+  variant?: "full" | "composer";
+  /** Which edge of the overlay region faces the avatar — the composer-
+   *  only pill hugs it. */
+  anchor?: "top" | "bottom";
 }) {
   const { t } = useTranslation("desktop-agent");
   const [draft, setDraft] = useState("");
@@ -262,6 +271,84 @@ export function ChatPopover({
     thinking: session.activity === "thinking",
   });
 
+  const hintRow = hint && (
+    <div className={`hint ${session.lastSendError ? "error" : ""}`}>
+      {t(hint.key, hint.params)}
+      {session.reconnectExhausted && !session.attached && (
+        <button
+          type="button"
+          className="hint-retry"
+          title={t("hint.retry")}
+          onClick={() => session.retry()}
+        >
+          ↻
+        </button>
+      )}
+    </div>
+  );
+
+  const composerBox = (
+    <div className="composer-box">
+      <input
+        ref={inputRef}
+        // focus-override: opts out of globals.css's global focus-visible
+        // ring (the main-app composer convention — GlobalComposerPill
+        // does the same). Without it, clicking into the input paints a
+        // ring/offset box-shadow around it; the composer-box
+        // :focus-within border is this composer's focus affordance.
+        className="focus-override"
+        value={draft}
+        placeholder={
+          variant === "composer"
+            ? pendingName
+              ? t("composer.startAgent", { name: pendingName })
+              : t("composer.start")
+            : pendingName
+              ? t("composer.placeholderAgent", { name: pendingName })
+              : t("composer.placeholder")
+        }
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.nativeEvent.isComposing) submit();
+        }}
+      />
+      <div className="composer-controls">
+        {session.activity !== "none" ? (
+          <button
+            type="button"
+            className="send-pill stop"
+            title={t("composer.stop")}
+            onClick={() => void session.stop()}
+          >
+            ◼
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="send-pill"
+            title={t("composer.send")}
+            onClick={submit}
+            disabled={draft.trim().length === 0 || session.agentSendInFlight}
+          >
+            ↑
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
+  // Composer-first: no transcript (and no empty hint) until a
+  // conversation exists — just the pill, hugging the avatar edge. The
+  // hint row (connection/perch problems) stays visible above it.
+  if (variant === "composer") {
+    return (
+      <div className={`chat-popover composer-only anchor-${anchor}`}>
+        {hintRow}
+        {composerBox}
+      </div>
+    );
+  }
+
   return (
     <div className="chat-popover">
       <div className="transcript" ref={scrollRef} onScroll={noteScrollPosition}>
@@ -282,64 +369,8 @@ export function ChatPopover({
           ),
         )}
       </div>
-      {hint && (
-        <div className={`hint ${session.lastSendError ? "error" : ""}`}>
-          {t(hint.key, hint.params)}
-          {session.reconnectExhausted && !session.attached && (
-            <button
-              type="button"
-              className="hint-retry"
-              title={t("hint.retry")}
-              onClick={() => session.retry()}
-            >
-              ↻
-            </button>
-          )}
-        </div>
-      )}
-      <div className="composer-box">
-        <input
-          ref={inputRef}
-          // focus-override: opts out of globals.css's global focus-visible
-          // ring (the main-app composer convention — GlobalComposerPill
-          // does the same). Without it, clicking into the input paints a
-          // ring/offset box-shadow around it; the composer-box
-          // :focus-within border is this composer's focus affordance.
-          className="focus-override"
-          value={draft}
-          placeholder={
-            pendingName
-              ? t("composer.placeholderAgent", { name: pendingName })
-              : t("composer.placeholder")
-          }
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.nativeEvent.isComposing) submit();
-          }}
-        />
-        <div className="composer-controls">
-          {session.activity !== "none" ? (
-            <button
-              type="button"
-              className="send-pill stop"
-              title={t("composer.stop")}
-              onClick={() => void session.stop()}
-            >
-              ◼
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="send-pill"
-              title={t("composer.send")}
-              onClick={submit}
-              disabled={draft.trim().length === 0 || session.agentSendInFlight}
-            >
-              ↑
-            </button>
-          )}
-        </div>
-      </div>
+      {hintRow}
+      {composerBox}
     </div>
   );
 }
