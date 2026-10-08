@@ -79,10 +79,10 @@ export function DesktopAgentApp() {
   const session = useSession();
   const agentSelector =
     useExperiment(DESKTOP_AGENT_AGENT_SELECTOR_EXPERIMENT_ID)?.enabled === true;
-  // Set when "Hide agent" has fired: the enabled-pref write is in flight
+  // Set when "Turn off agent" has fired: the enabled-pref write is in flight
   // to the main webview's bridge (which closes the panel); meanwhile the
   // panel must already look gone.
-  const [dismissed, setDismissed] = useState(false);
+  const [turnedOff, setTurnedOff] = useState(false);
   const avatarAgentId =
     session.pendingSelection !== null
       ? session.pendingSelection.kind === "agent"
@@ -288,17 +288,17 @@ export function DesktopAgentApp() {
     }
   }, [menu]);
 
-  // "Hide agent" = the Desktop Agent setting goes OFF (one on/off state;
-  // the old separate hide-without-disabling preference is gone). The
+  // "Turn off agent" = the Desktop Agent setting goes OFF (one on/off state;
+  // the old separate turn-off-without-disabling preference is gone). The
   // localStorage write reaches the main webview's bridge via the storage
-  // event and the bridge destroys the panel. The local dismissed state
+  // event and the bridge destroys the panel. The local turnedOff state
   // hides the avatar immediately while that close is in flight.
-  const dismiss = useCallback(() => {
+  const turnOff = useCallback(() => {
     gestureGeneration.current++;
     clearPress();
     if (machine.mode === "expanded") void collapse();
     if (machine.mode === "menu") void closeMenu();
-    setDismissed(true);
+    setTurnedOff(true);
     setDesktopAgentEnabled(false);
     void invoke("desktop_agent_close").catch(() => undefined);
   }, [clearPress, collapse, closeMenu]);
@@ -450,11 +450,11 @@ export function DesktopAgentApp() {
       document.removeEventListener("visibilitychange", onVisibility);
       cancelPress();
     };
-  }, [cancelPress, avatarAgentId, character, dismissed]);
+  }, [cancelPress, avatarAgentId, character, turnedOff]);
 
   const onAvatarPointerDown = useCallback(
     (e: React.PointerEvent) => {
-      if (dismissed || e.button !== 0 || e.isPrimary === false || e.ctrlKey)
+      if (turnedOff || e.button !== 0 || e.isPrimary === false || e.ctrlKey)
         return;
       ignoreNextClick.current = false;
       if (machine.mode !== "avatar" || pointerDownAt.current) return;
@@ -485,7 +485,7 @@ export function DesktopAgentApp() {
         }, HOLD_DELAY_MS);
       }
     },
-    [character, dismissed],
+    [character, turnedOff],
   );
 
   // Start native drag only on a fresh pointer-MOVE past slop. Queuing an old
@@ -520,7 +520,7 @@ export function DesktopAgentApp() {
   const onAvatarPointerUp = useCallback(
     async (e: React.PointerEvent) => {
       const press = pointerDownAt.current;
-      if (dismissed || !press || e.pointerId !== press.id || e.button !== 0)
+      if (turnedOff || !press || e.pointerId !== press.id || e.button !== 0)
         return;
       const wasDragging = dragging.current;
       dragging.current = false;
@@ -542,11 +542,11 @@ export function DesktopAgentApp() {
           dropPending.current = false;
           setDragActive(false);
         }
-      } else if (!press.held && !dropPending.current && !dismissed) {
+      } else if (!press.held && !dropPending.current && !turnedOff) {
         await expand();
       }
     },
-    [clearPress, dismissed, expand, perch],
+    [clearPress, turnedOff, expand, perch],
   );
 
   // Avatar follows the agent: pending selection previews the next chat's
@@ -590,7 +590,7 @@ export function DesktopAgentApp() {
             ? "sit"
             : "idle"
       }
-      hidden={dismissed}
+      hidden={turnedOff}
     />
   );
 
@@ -638,7 +638,7 @@ export function DesktopAgentApp() {
             ignoreNextClick.current = false;
             return;
           }
-          if (dismissed || e.button !== 0) return;
+          if (turnedOff || e.button !== 0) return;
           if (menu) void closeMenu();
           else if (layout) void collapse();
         }}
@@ -651,7 +651,7 @@ export function DesktopAgentApp() {
         aria-haspopup="menu"
         aria-expanded={menu !== null}
         onKeyDown={(e) => {
-          if (dismissed || e.repeat) return;
+          if (turnedOff || e.repeat) return;
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
             if (menu) void closeMenu();
@@ -665,7 +665,7 @@ export function DesktopAgentApp() {
           }
         }}
         onContextMenu={(e) => {
-          if (dismissed) return;
+          if (turnedOff) return;
           e.preventDefault();
           void openMenu();
         }}
@@ -733,7 +733,7 @@ export function DesktopAgentApp() {
               void invoke("desktop_agent_open_settings").catch(() => undefined);
               void closeMenu();
             }}
-            onHide={dismiss}
+            onTurnOff={turnOff}
             onClose={() => {
               void closeMenu();
             }}

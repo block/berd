@@ -4,7 +4,7 @@
 // experiment (DESKTOP_AGENT_AGENT_SELECTOR_EXPERIMENT_ID).
 //
 // localStorage is shared by the main and panel webviews, so every write
-// reaches the other webview as a storage event: the panel's "Hide agent"
+// reaches the other webview as a storage event: the panel's "Turn off agent"
 // menu item writes `enabled` false and the main-webview bridge closes the
 // panel in response.
 //

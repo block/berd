@@ -45,7 +45,7 @@ export function useAvatarMenu(args: {
   activeAgentId: string | null;
   select(selection: PendingSelection | null): void;
   /** Agent selector experiment: when false the menu only has the
-   *  settings and hide items (no "Switch agent" submenu). */
+   *  settings and turn off items (no "Switch agent" submenu). */
   agentSelector: boolean;
 }): {
   prepareMenu(): Promise<AvatarMenuModel>;

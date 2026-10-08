@@ -37,7 +37,7 @@
     "fresh": "Berd",
     "empty": "Aún no hay agentes — créalos en la ventana principal",
     "settings": "Configuración…",
-    "dismiss": "Ocultar agente"
+    "turnOff": "Desactivar agente"
   },
   "tools": {
     "working_one": "Trabajando… ({{count}} llamada de herramienta)",

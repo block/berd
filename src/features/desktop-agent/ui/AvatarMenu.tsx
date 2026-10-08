@@ -175,7 +175,7 @@ export function AvatarMenu({
   onSelectAgent,
   onSelectFresh,
   onSettings,
-  onHide,
+  onTurnOff,
   onClose,
 }: {
   layout: ExpandedLayout;
@@ -185,7 +185,7 @@ export function AvatarMenu({
   onSelectAgent(agent: AgentInfo): void;
   onSelectFresh(): void;
   onSettings(): void;
-  onHide(): void;
+  onTurnOff(): void;
   onClose?(): void;
 }) {
   const { t } = useTranslation("desktop-agent");
@@ -196,11 +196,13 @@ export function AvatarMenu({
   const rootRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const subRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
-  const rootItems = useMemo<Array<"newChat" | "switch" | "settings" | "hide">>(
+  const rootItems = useMemo<
+    Array<"newChat" | "switch" | "settings" | "turnOff">
+  >(
     () =>
       agentSelector
-        ? ["newChat", "switch", "settings", "hide"]
-        : ["newChat", "settings", "hide"],
+        ? ["newChat", "switch", "settings", "turnOff"]
+        : ["newChat", "settings", "turnOff"],
     [agentSelector],
   );
   const subItems = useMemo<("fresh" | AgentInfo)[]>(
@@ -262,9 +264,9 @@ export function AvatarMenu({
         return;
       }
       if (item === "settings") onSettings();
-      else onHide();
+      else onTurnOff();
     },
-    [onHide, onNewChat, onSettings, openSubmenu],
+    [onTurnOff, onNewChat, onSettings, openSubmenu],
   );
 
   useEffect(() => {
@@ -430,16 +432,16 @@ export function AvatarMenu({
           children: <span className="menu-label">{t("menu.settings")}</span>,
         })}
         {row({
-          key: "hide",
+          key: "turnOff",
           menu: "root",
-          index: rootItems.indexOf("hide"),
-          highlighted: highlight === rootItems.indexOf("hide"),
+          index: rootItems.indexOf("turnOff"),
+          highlighted: highlight === rootItems.indexOf("turnOff"),
           onHover: () => {
-            setHighlight(rootItems.indexOf("hide"));
+            setHighlight(rootItems.indexOf("turnOff"));
             scheduleSubmenuClose();
           },
-          onClick: onHide,
-          children: <span className="menu-label">{t("menu.dismiss")}</span>,
+          onClick: onTurnOff,
+          children: <span className="menu-label">{t("menu.turnOff")}</span>,
         })}
       </div>
       {agentSelector && submenuOpen && (

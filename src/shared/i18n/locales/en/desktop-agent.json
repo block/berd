@@ -37,7 +37,7 @@
     "fresh": "Berd",
     "empty": "No agents yet — create them in the main window",
     "settings": "Settings…",
-    "dismiss": "Hide agent"
+    "turnOff": "Turn off agent"
   },
   "tools": {
     "working_one": "Working… ({{count}} tool call)",

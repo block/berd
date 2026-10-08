@@ -7,6 +7,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
+import { setDesktopAgentEnabled } from "@/features/desktop-agent/lib/desktopAgentPreferences";
 import { DesktopAgentApp } from "@/features/desktop-agent/ui/DesktopAgentApp";
 
 const mocks = vi.hoisted(() => ({
@@ -178,7 +179,7 @@ it("animates only a positively identified Berdy, and forwards hide and perch sta
   mocks.perch.phase = "perched";
   rerender(<DesktopAgentApp />);
   expect(mocks.avatarProps.target).toBe("sit");
-  // Hidden only flips via the menu's "Hide agent" dismiss path now (the
+  // Hidden only flips via the menu's "Turn off agent" turn-off path now (the
   // separate visible preference is gone).
   expect(mocks.avatarProps.hidden).toBe(false);
   mocks.perch.phase = "unperched";
@@ -617,6 +618,21 @@ it("growing after first send uses the grown path for a side-placed composer", as
     fromPopoverSide: "right",
   });
   expect(mocks.port.applyExpanded).toHaveBeenLastCalledWith(grownLayout);
+});
+
+it("activating Turn off agent disables the setting and closes the panel", async () => {
+  const { findByTestId, findByRole } = render(<DesktopAgentApp />);
+  const hit = (await findByTestId("avatar")).parentElement;
+  if (!hit) throw new Error("missing hit target");
+
+  await act(async () => fireEvent.contextMenu(hit));
+  const turnOff = await findByRole("menuitem", { name: "Turn off agent" });
+  await act(async () => fireEvent.click(turnOff));
+
+  expect(turnOff).toHaveTextContent("Turn off agent");
+  expect(setDesktopAgentEnabled).toHaveBeenCalledWith(false);
+  expect(mocks.invoke).toHaveBeenCalledWith("desktop_agent_close");
+  expect(mocks.avatarProps.hidden).toBe(true);
 });
 
 it("choosing Start new chat closes the menu and expands composer-only on the side", async () => {

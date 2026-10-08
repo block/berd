@@ -14,7 +14,7 @@
 //
 // Cross-webview coherence: the setting lives in localStorage,
 // which is shared across same-origin webviews — the panel webview writes
-// `enabled` false on "Hide agent", the storage event lands here, and
+// `enabled` false on "Turn off agent", the storage event lands here, and
 // this bridge closes the panel. The preference hooks/useShortcutBindings
 // are storage-event-driven, so no extra wiring is needed.
 //

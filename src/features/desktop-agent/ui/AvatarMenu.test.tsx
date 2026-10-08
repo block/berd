@@ -17,7 +17,7 @@ vi.mock("react-i18next", () => ({
         "menu.newChat": "Start new chat",
         "menu.switchAgent": "Switch agent",
         "menu.settings": "Settings",
-        "menu.dismiss": "Hide",
+        "menu.turnOff": "Turn off agent",
         "menu.fresh": "Berd",
         "menu.empty": "No agents yet",
       })[key] ?? key,
@@ -64,7 +64,7 @@ function renderMenu(overrides?: Partial<Parameters<typeof AvatarMenu>[0]>) {
     onSelectAgent: vi.fn(),
     onSelectFresh: vi.fn(),
     onSettings: vi.fn(),
-    onHide: vi.fn(),
+    onTurnOff: vi.fn(),
     ...overrides,
   };
   render(<AvatarMenu {...props} />);
@@ -80,7 +80,7 @@ describe("AvatarMenu keyboard and activation", () => {
     expect(props.onSettings).toHaveBeenCalledOnce();
     fireEvent.keyDown(window, { key: "ArrowDown" });
     fireEvent.keyDown(window, { key: "Enter" });
-    expect(props.onHide).toHaveBeenCalledOnce();
+    expect(props.onTurnOff).toHaveBeenCalledOnce();
   });
 
   it("opens, navigates, activates, and closes the submenu with arrows", () => {
@@ -121,7 +121,7 @@ describe("AvatarMenu keyboard and activation", () => {
         onSelectAgent={vi.fn()}
         onSelectFresh={vi.fn()}
         onSettings={vi.fn()}
-        onHide={vi.fn()}
+        onTurnOff={vi.fn()}
       />,
     );
     fireEvent.pointerEnter(screen.getByText("Switch agent"));
@@ -137,7 +137,7 @@ describe("AvatarMenu keyboard and activation", () => {
         onSelectAgent={vi.fn()}
         onSelectFresh={vi.fn()}
         onSettings={vi.fn()}
-        onHide={vi.fn()}
+        onTurnOff={vi.fn()}
       />,
     );
     expect(screen.queryByText("Switch agent")).not.toBeInTheDocument();
@@ -145,7 +145,7 @@ describe("AvatarMenu keyboard and activation", () => {
       "Start new chat",
     );
     expect(screen.getByText("Settings")).toBeInTheDocument();
-    expect(screen.getByText("Hide")).toBeInTheDocument();
+    expect(screen.getByText("Turn off agent")).toBeInTheDocument();
   });
 });
 
