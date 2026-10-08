@@ -41,6 +41,7 @@ export class PanelConnection {
   private disposed = false;
   /** Orphans stale closed-watchers after re-attach/dispose. */
   private generation = 0;
+  private everAttached = false;
   /** An attach bounced off the single-flight guard while the in-flight
    *  dial belonged to a DISPOSED generation (StrictMode: mount 1 dials,
    *  cleanup disposes, mount 2 revives and attaches into the guard). The
@@ -68,12 +69,19 @@ export class PanelConnection {
     try {
       const client = await this.ports.connect();
       if (this.disposed || generation !== this.generation) return false;
+      this.everAttached = true;
       this.events.onAttached();
       this.watchClosed(client, generation);
       return true;
     } catch (error) {
       if (!this.disposed && generation === this.generation) {
         this.events.onFailed(String(error), auto);
+        if (!auto && !this.everAttached) {
+          // A first attach failure is equivalent to a dropped connection:
+          // one bounded recovery dial follows, then exhaustion makes the
+          // manual Retry affordance truthful and visible.
+          queueMicrotask(() => void this.attach(true));
+        }
       }
       return false;
     } finally {

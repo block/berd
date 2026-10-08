@@ -89,12 +89,25 @@ describe("PanelConnection", () => {
     ]);
   });
 
-  test("manual attach failure is not exhaustion", async () => {
-    const h = harness(["fail"]);
+  test("initial attach failure gets one automatic retry, then reports exhaustion", async () => {
+    const h = harness(["fail", "fail"]);
     expect(await h.connection.attach()).toBe(false);
+    await tick();
+    expect(h.calls()).toBe(2);
     expect(h.log.failures).toEqual([
       { error: "Error: dial-1", exhausted: false },
+      { error: "Error: dial-2", exhausted: true },
     ]);
+  });
+
+  test("manual retry after initial exhaustion redials and can recover", async () => {
+    const h = harness(["fail", "fail", "ok"]);
+    expect(await h.connection.attach()).toBe(false);
+    await tick();
+    expect(h.log.failures.at(-1)?.exhausted).toBe(true);
+    expect(await h.connection.attach()).toBe(true);
+    expect(h.calls()).toBe(3);
+    expect(h.log.attached).toBe(1);
   });
 
   test("StrictMode remount: attach bounced off an in-flight disposed dial redials", async () => {
