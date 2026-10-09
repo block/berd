@@ -21,52 +21,178 @@
   --panel-glass-bg: rgba(24, 24, 27, 0.96);
   --panel-glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
 
-  --desktop-agent-surface: var(--panel-glass-bg);
-  --desktop-agent-surface-strong: rgba(24, 24, 27, 0.92);
-  --desktop-agent-surface-border: rgba(255, 255, 255, 0.08);
-  --desktop-agent-shadow: var(--panel-glass-shadow);
-  --desktop-agent-shadow-soft: 0 4px 16px rgba(0, 0, 0, 0.35);
+  --desktop-agent-surface: var(--panel-glass-bg); /* panel/menu glass */
+  --desktop-agent-surface-strong: rgba(
+    24,
+    24,
+    27,
+    0.92
+  ); /* composer-only hint */
+  --desktop-agent-surface-border: rgba(
+    255,
+    255,
+    255,
+    0.08
+  ); /* composer-only/menu borders */
+  --desktop-agent-quote-border: rgba(
+    255,
+    255,
+    255,
+    0.25
+  ); /* markdown blockquote border */
+  --desktop-agent-shadow: var(--panel-glass-shadow); /* panel/menu shadows */
+  --desktop-agent-shadow-soft: 0 4px 16px rgba(0, 0, 0, 0.35); /* composer-only hint shadow */
 
-  --desktop-agent-foreground: #e4e4e7;
-  --desktop-agent-foreground-inverse: var(--color-white);
-  --desktop-agent-foreground-muted: rgba(255, 255, 255, 0.5);
-  --desktop-agent-foreground-subtle: rgba(255, 255, 255, 0.45);
-  --desktop-agent-foreground-faint: rgba(255, 255, 255, 0.4);
-  --desktop-agent-foreground-soft: rgba(255, 255, 255, 0.65);
-  --desktop-agent-foreground-placeholder: rgba(255, 255, 255, 0.35);
-  --desktop-agent-foreground-readable: rgba(255, 255, 255, 0.72);
-  --desktop-agent-quote-foreground: rgba(228, 228, 231, 0.8);
+  --desktop-agent-foreground: #e4e4e7; /* panel, assistant, and menu text */
+  --desktop-agent-foreground-inverse: var(--color-white); /* user bubble text */
+  --desktop-agent-foreground-muted: rgba(
+    255,
+    255,
+    255,
+    0.5
+  ); /* tool rows and chevrons */
+  --desktop-agent-foreground-subtle: rgba(
+    255,
+    255,
+    255,
+    0.45
+  ); /* hints, disabled send, empty menu */
+  --desktop-agent-foreground-faint: rgba(
+    255,
+    255,
+    255,
+    0.4
+  ); /* empty hint and tool summaries */
+  --desktop-agent-foreground-soft: rgba(
+    255,
+    255,
+    255,
+    0.65
+  ); /* hovered tool summary */
+  --desktop-agent-foreground-placeholder: rgba(
+    255,
+    255,
+    255,
+    0.35
+  ); /* composer placeholder */
+  --desktop-agent-foreground-control: rgba(
+    255,
+    255,
+    255,
+    0.7
+  ); /* icon buttons */
+  --desktop-agent-foreground-readable: rgba(
+    255,
+    255,
+    255,
+    0.72
+  ); /* tool result text */
+  --desktop-agent-quote-foreground: rgba(
+    228,
+    228,
+    231,
+    0.8
+  ); /* markdown blockquote text */
 
-  --desktop-agent-control: rgba(255, 255, 255, 0.08);
-  --desktop-agent-control-hover: rgba(255, 255, 255, 0.14);
-  --desktop-agent-control-subtle: rgba(255, 255, 255, 0.07);
-  --desktop-agent-control-border: rgba(255, 255, 255, 0.06);
-  --desktop-agent-control-border-hover: rgba(255, 255, 255, 0.14);
-  --desktop-agent-control-muted: rgba(255, 255, 255, 0.1);
-  --desktop-agent-control-muted-strong: rgba(255, 255, 255, 0.12);
-  --desktop-agent-control-strong: rgba(255, 255, 255, 0.22);
-  --desktop-agent-code-surface: rgba(0, 0, 0, 0.35);
-  --desktop-agent-tool-result-surface: rgba(255, 255, 255, 0.055);
+  --desktop-agent-control: rgba(
+    255,
+    255,
+    255,
+    0.08
+  ); /* icon button background */
+  --desktop-agent-control-hover: rgba(
+    255,
+    255,
+    255,
+    0.14
+  ); /* icon hover and disabled send background */
+  --desktop-agent-control-subtle: rgba(
+    255,
+    255,
+    255,
+    0.07
+  ); /* composer background */
+  --desktop-agent-control-border: rgba(
+    255,
+    255,
+    255,
+    0.06
+  ); /* composer border */
+  --desktop-agent-control-border-hover: rgba(
+    255,
+    255,
+    255,
+    0.14
+  ); /* composer focus border */
+  --desktop-agent-control-muted: rgba(
+    255,
+    255,
+    255,
+    0.1
+  ); /* inline code and separators */
+  --desktop-agent-control-muted-strong: rgba(
+    255,
+    255,
+    255,
+    0.12
+  ); /* retry button and menu highlight */
+  --desktop-agent-control-strong: rgba(
+    255,
+    255,
+    255,
+    0.22
+  ); /* retry button hover */
+  --desktop-agent-code-surface: rgba(0, 0, 0, 0.35); /* markdown code blocks */
+  --desktop-agent-tool-result-surface: rgba(
+    255,
+    255,
+    255,
+    0.055
+  ); /* tool result background */
 
-  --desktop-agent-primary-action: var(--color-zinc-100);
-  --desktop-agent-primary-action-fg: var(--desktop-agent-surface-base);
-  --desktop-agent-primary-action-hover: var(--color-white);
-  --desktop-agent-primary-action-disabled: rgba(255, 255, 255, 0.14);
-  --desktop-agent-primary-action-disabled-fg: var(
-    --desktop-agent-foreground-subtle
-  );
+  --desktop-agent-primary-action: var(--color-zinc-100); /* enabled send pill */
+  --desktop-agent-primary-action-fg: var(
+    --desktop-agent-surface-base
+  ); /* enabled send glyph */
+  --desktop-agent-primary-action-hover: var(
+    --color-white
+  ); /* enabled send hover */
 
-  --desktop-agent-user-bubble: var(--color-gray-700);
-  --desktop-agent-danger: rgba(248, 113, 113, 0.9);
-  --desktop-agent-danger-fg: rgba(254, 202, 202, 0.95);
-  --desktop-agent-danger-muted: rgba(248, 113, 113, 0.7);
-  --desktop-agent-danger-subtle: rgba(248, 113, 113, 0.65);
-  --desktop-agent-danger-surface: rgba(127, 29, 29, 0.28);
-  --desktop-agent-danger-solid: var(--color-red-400);
-  --desktop-agent-link: #7cb3ff;
-  --desktop-agent-highlight: var(--desktop-agent-control-muted-strong);
-  --desktop-agent-warning: var(--color-yellow-500);
-  --desktop-agent-warning-surface: rgba(234, 179, 8, 0.15);
+  --desktop-agent-user-bubble: var(--color-gray-700); /* user message bubble */
+  --desktop-agent-danger: rgba(248, 113, 113, 0.9); /* failed tool row */
+  --desktop-agent-danger-fg: rgba(
+    254,
+    202,
+    202,
+    0.95
+  ); /* failed tool result text */
+  --desktop-agent-danger-muted: rgba(
+    248,
+    113,
+    113,
+    0.7
+  ); /* failed tool summary */
+  --desktop-agent-danger-subtle: rgba(
+    248,
+    113,
+    113,
+    0.65
+  ); /* failed tool detail hint */
+  --desktop-agent-danger-surface: rgba(
+    127,
+    29,
+    29,
+    0.28
+  ); /* failed tool result background */
+  --desktop-agent-danger-solid: var(--color-red-400); /* error hint */
+  --desktop-agent-link: #7cb3ff; /* markdown links */
+  --desktop-agent-warning: var(--color-yellow-500); /* active capture button */
+  --desktop-agent-warning-surface: rgba(
+    234,
+    179,
+    8,
+    0.15
+  ); /* active capture background */
 }
 
 html,
@@ -259,7 +385,7 @@ body,
 .markdown-body blockquote {
   margin: 0.35em 0;
   padding-left: 0.8em;
-  border-left: 3px solid var(--desktop-agent-surface-border);
+  border-left: 3px solid var(--desktop-agent-quote-border);
   color: var(--desktop-agent-quote-foreground);
 }
 
@@ -466,7 +592,7 @@ body,
   border-radius: 13px;
   border: none;
   background: var(--desktop-agent-control);
-  color: var(--desktop-agent-foreground-readable);
+  color: var(--desktop-agent-foreground-control);
   font-size: 12px;
   line-height: 1;
   cursor: pointer;

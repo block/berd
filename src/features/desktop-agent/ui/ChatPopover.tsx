@@ -180,25 +180,26 @@ export function ChatPopover({
     followBottom.current = distanceFromBottom < 48;
   };
 
-  const transcriptFollowKey = session.messages
-    .map((message) =>
-      message.content
-        .map((content) =>
-          content.type === "text"
-            ? content.text.length
-            : content.type === "tool"
-              ? [
-                  content.tool.id,
-                  content.tool.status,
-                  content.tool.result?.length ?? 0,
-                ].join(":")
-              : content.type === "image"
-                ? ["image", content.data.length].join(":")
-                : ["system", content.text.length].join(":"),
-        )
-        .join("|"),
-    )
-    .join("||");
+  const lastMessage = session.messages.at(-1);
+  const lastTool = lastMessage?.content.findLast(
+    (content) => content.type === "tool",
+  );
+  const lastMessageContentLength =
+    lastMessage?.content.reduce(
+      (total, content) =>
+        total +
+        (content.type === "text" || content.type === "system"
+          ? content.text.length
+          : content.type === "image"
+            ? content.data.length
+            : (content.tool.result?.length ?? 0)),
+      0,
+    ) ?? 0;
+  const transcriptFollowKey = [
+    session.messages.length,
+    lastMessageContentLength,
+    lastTool?.tool.status ?? "",
+  ].join(":");
 
   // Pin to bottom only when we're following. useLayoutEffect avoids a
   // visible two-frame jump when a new chunk extends the transcript.
@@ -245,25 +246,26 @@ export function ChatPopover({
     const perchApp = perch.appName;
     const perchTitle = perch.title;
     void (async () => {
-      // Fresh per send: tabs change. Failures are null — never blocking.
-      const artifactUrl =
-        source === "perchedWindow" ? await perch.artifactUrlNow() : null;
-      const makePreamble =
-        source === "perchedWindow"
-          ? (fullGuidance: boolean) =>
-              perchSendPreamble({
-                phase: perchPhase,
-                appName: perchApp,
-                title: perchTitle,
-                artifactUrl,
-                fullGuidance,
-              })
-          : null;
-      // Fresh capture per send; failure degrades to a text-only send.
-      const image =
-        source === "perchedWindow" ? await perch.captureNow() : null;
       let dispatched = false;
       try {
+        // Fresh per send: tabs change. Failures are null — never blocking.
+        const artifactUrl =
+          source === "perchedWindow" ? await perch.artifactUrlNow() : null;
+        const makePreamble =
+          source === "perchedWindow"
+            ? (fullGuidance: boolean) =>
+                perchSendPreamble({
+                  phase: perchPhase,
+                  appName: perchApp,
+                  title: perchTitle,
+                  artifactUrl,
+                  fullGuidance,
+                })
+            : null;
+        // Fresh capture per send; failure degrades to a text-only send.
+        const image =
+          source === "perchedWindow" ? await perch.captureNow() : null;
+        if (source === "perchedWindow") setCapturePending(false);
         dispatched = await session.send(
           text,
           image ? [{ type: "image", ...image }] : undefined,

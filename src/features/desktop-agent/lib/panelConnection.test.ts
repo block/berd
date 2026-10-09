@@ -2,7 +2,7 @@
 // attach, the one automatic re-attach after a close, exhaustion on the
 // second consecutive failure, and dispose/revive (StrictMode) semantics.
 
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { PanelConnection, type PanelClientLike } from "./panelConnection";
 
@@ -49,6 +49,11 @@ function harness(script: Array<"ok" | "fail">) {
 }
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+const flushMicrotasks = () => Promise.resolve();
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("PanelConnection", () => {
   test("attach succeeds and reports attached once", async () => {
@@ -89,10 +94,20 @@ describe("PanelConnection", () => {
     ]);
   });
 
-  test("initial attach failure gets one automatic retry, then reports exhaustion", async () => {
+  test("initial attach failure waits briefly before one automatic retry", async () => {
+    vi.useFakeTimers();
     const h = harness(["fail", "fail"]);
     expect(await h.connection.attach()).toBe(false);
-    await tick();
+    expect(h.calls()).toBe(1);
+    expect(h.log.failures).toEqual([
+      { error: "Error: dial-1", exhausted: false },
+    ]);
+
+    await vi.advanceTimersByTimeAsync(749);
+    expect(h.calls()).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await flushMicrotasks();
     expect(h.calls()).toBe(2);
     expect(h.log.failures).toEqual([
       { error: "Error: dial-1", exhausted: false },
@@ -100,10 +115,30 @@ describe("PanelConnection", () => {
     ]);
   });
 
+  test("manual retry before delayed initial recovery prevents an extra automatic dial", async () => {
+    vi.useFakeTimers();
+    const h = harness(["fail", "ok", "fail"]);
+    expect(await h.connection.attach()).toBe(false);
+    expect(h.calls()).toBe(1);
+
+    expect(await h.connection.attach()).toBe(true);
+    expect(h.calls()).toBe(2);
+    expect(h.log.attached).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(750);
+    await flushMicrotasks();
+    expect(h.calls()).toBe(2);
+    expect(h.log.failures).toEqual([
+      { error: "Error: dial-1", exhausted: false },
+    ]);
+  });
+
   test("manual retry after initial exhaustion redials and can recover", async () => {
+    vi.useFakeTimers();
     const h = harness(["fail", "fail", "ok"]);
     expect(await h.connection.attach()).toBe(false);
-    await tick();
+    await vi.advanceTimersByTimeAsync(750);
+    await flushMicrotasks();
     expect(h.log.failures.at(-1)?.exhausted).toBe(true);
     expect(await h.connection.attach()).toBe(true);
     expect(h.calls()).toBe(3);

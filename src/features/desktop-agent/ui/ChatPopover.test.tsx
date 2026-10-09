@@ -181,6 +181,42 @@ describe("ChatPopover perched capture send state", () => {
     expect(send).toHaveBeenCalledOnce();
   });
 
+  it("clears the capturing hint after capture resolves while send stays gated", async () => {
+    const capture = deferred<{ data: string; mimeType: string } | null>();
+    const dispatch = deferred<boolean>();
+    const send = vi.fn(() => dispatch.promise);
+    render(
+      <ChatPopover
+        session={session([], { send })}
+        perch={perch({
+          phase: "perched",
+          appName: "Safari",
+          artifactUrlNow: vi.fn(async () => null),
+          captureNow: vi.fn(() => capture.promise),
+        })}
+        variant="composer"
+      />,
+    );
+
+    const input = screen.getByRole("textbox");
+    fireEvent.change(input, { target: { value: "summarize" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByText("hint.capturing")).toBeInTheDocument();
+
+    await act(async () => {
+      capture.resolve({ data: "abc", mimeType: "image/png" });
+      await Promise.resolve();
+    });
+    expect(screen.queryByText("hint.capturing")).not.toBeInTheDocument();
+    expect(send).toHaveBeenCalledOnce();
+
+    fireEvent.change(input, { target: { value: "second" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(send).toHaveBeenCalledOnce();
+
+    await act(async () => dispatch.resolve(true));
+  });
+
   it("sends text-only and releases capture state when capture fails", async () => {
     const send = vi.fn(async () => true);
     render(

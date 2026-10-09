@@ -94,6 +94,7 @@ describe("AvatarMenu keyboard and activation", () => {
 
     fireEvent.keyDown(window, { key: "ArrowLeft" });
     expect(screen.queryByText("Scout")).not.toBeInTheDocument();
+    expect(screen.getByText("Switch agent").closest("button")).toHaveFocus();
   });
 
   it("renders Start new chat first and activates it by keyboard", () => {

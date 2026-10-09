@@ -26,6 +26,8 @@ export interface PanelConnectionPorts {
   connect(): Promise<PanelClientLike>;
 }
 
+const INITIAL_ATTACH_RECOVERY_DELAY_MS = 750;
+
 export interface PanelConnectionEvents {
   /** Connected (or re-connected). Fires once per successful attach. */
   onAttached(): void;
@@ -49,6 +51,8 @@ export class PanelConnection {
    *  generation — without it the panel would sit unattached until a
    *  manual retry. */
   private reattachRequested = false;
+  private initialRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
+  private initialRecoveryScheduled = false;
 
   constructor(
     private readonly ports: PanelConnectionPorts,
@@ -64,11 +68,15 @@ export class PanelConnection {
       this.reattachRequested = true;
       return false;
     }
+    if (!auto && !this.everAttached && this.initialRecoveryScheduled) {
+      this.clearInitialRecovery();
+    }
     this.attaching = true;
     const generation = ++this.generation;
     try {
       const client = await this.ports.connect();
       if (this.disposed || generation !== this.generation) return false;
+      this.clearInitialRecovery();
       this.everAttached = true;
       this.events.onAttached();
       this.watchClosed(client, generation);
@@ -77,10 +85,7 @@ export class PanelConnection {
       if (!this.disposed && generation === this.generation) {
         this.events.onFailed(String(error), auto);
         if (!auto && !this.everAttached) {
-          // A first attach failure is equivalent to a dropped connection:
-          // one bounded recovery dial follows, then exhaustion makes the
-          // manual Retry affordance truthful and visible.
-          queueMicrotask(() => void this.attach(true));
+          this.scheduleInitialRecovery();
         }
       }
       return false;
@@ -96,6 +101,25 @@ export class PanelConnection {
       this.reattachRequested = false;
       if (orphanedRequest) void this.attach(auto);
     }
+  }
+
+  private scheduleInitialRecovery(): void {
+    if (this.initialRecoveryScheduled) return;
+    this.initialRecoveryScheduled = true;
+    // A first attach failure is equivalent to a dropped connection, but give
+    // goosed a short beat before the bounded recovery dial. Manual Retry after
+    // the first failure owns the next dial and must not queue an extra auto one.
+    this.initialRecoveryTimer = setTimeout(() => {
+      this.initialRecoveryTimer = null;
+      if (this.disposed || this.everAttached) return;
+      void this.attach(true);
+    }, INITIAL_ATTACH_RECOVERY_DELAY_MS);
+  }
+
+  private clearInitialRecovery(): void {
+    if (this.initialRecoveryTimer === null) return;
+    clearTimeout(this.initialRecoveryTimer);
+    this.initialRecoveryTimer = null;
   }
 
   private watchClosed(client: PanelClientLike, generation: number): void {
@@ -117,6 +141,7 @@ export class PanelConnection {
 
   dispose(): void {
     this.disposed = true;
+    this.clearInitialRecovery();
     this.generation += 1;
   }
 }

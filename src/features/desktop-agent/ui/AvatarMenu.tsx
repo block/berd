@@ -296,8 +296,11 @@ export function AvatarMenu({
           break;
         case "ArrowLeft":
           if (submenuOpen) {
+            const switchIndex = rootItems.indexOf("switch");
             setSubmenuOpen(false);
             setSubHighlight(null);
+            setHighlight(switchIndex);
+            rootRefs.current[switchIndex]?.focus();
             e.preventDefault();
           }
           break;
@@ -382,67 +385,79 @@ export function AvatarMenu({
         role="menu"
         onPointerEnter={clearCloseTimer}
       >
-        {row({
-          key: "newChat",
-          menu: "root",
-          index: rootItems.indexOf("newChat"),
-          highlighted: highlight === rootItems.indexOf("newChat"),
-          onHover: () => {
-            setHighlight(rootItems.indexOf("newChat"));
-            scheduleSubmenuClose();
-          },
-          onClick: onNewChat,
-          children: <span className="menu-label">{t("menu.newChat")}</span>,
-        })}
+        {(() => {
+          const index = rootItems.indexOf("newChat");
+          return row({
+            key: "newChat",
+            menu: "root",
+            index,
+            highlighted: highlight === index,
+            onHover: () => {
+              setHighlight(index);
+              scheduleSubmenuClose();
+            },
+            onClick: onNewChat,
+            children: <span className="menu-label">{t("menu.newChat")}</span>,
+          });
+        })()}
         {agentSelector && (
           <>
-            {row({
-              key: "switch",
-              menu: "root",
-              index: rootItems.indexOf("switch"),
-              highlighted: highlight === rootItems.indexOf("switch"),
-              onHover: () => {
-                setHighlight(rootItems.indexOf("switch"));
-                openSubmenu();
-              },
-              onClick: () => {
-                openSubmenu();
-                setSubHighlight(0);
-              },
-              children: (
-                <>
-                  <span className="menu-label">{t("menu.switchAgent")}</span>
-                  <span className="menu-chevron">›</span>
-                </>
-              ),
-            })}
+            {(() => {
+              const index = rootItems.indexOf("switch");
+              return row({
+                key: "switch",
+                menu: "root",
+                index,
+                highlighted: highlight === index,
+                onHover: () => {
+                  setHighlight(index);
+                  openSubmenu();
+                },
+                onClick: () => {
+                  openSubmenu();
+                  setSubHighlight(0);
+                },
+                children: (
+                  <>
+                    <span className="menu-label">{t("menu.switchAgent")}</span>
+                    <span className="menu-chevron">›</span>
+                  </>
+                ),
+              });
+            })()}
             <div className="menu-separator" />
           </>
         )}
-        {row({
-          key: "settings",
-          menu: "root",
-          index: rootItems.indexOf("settings"),
-          highlighted: highlight === rootItems.indexOf("settings"),
-          onHover: () => {
-            setHighlight(rootItems.indexOf("settings"));
-            scheduleSubmenuClose();
-          },
-          onClick: onSettings,
-          children: <span className="menu-label">{t("menu.settings")}</span>,
-        })}
-        {row({
-          key: "turnOff",
-          menu: "root",
-          index: rootItems.indexOf("turnOff"),
-          highlighted: highlight === rootItems.indexOf("turnOff"),
-          onHover: () => {
-            setHighlight(rootItems.indexOf("turnOff"));
-            scheduleSubmenuClose();
-          },
-          onClick: onTurnOff,
-          children: <span className="menu-label">{t("menu.turnOff")}</span>,
-        })}
+        {(() => {
+          const index = rootItems.indexOf("settings");
+          return row({
+            key: "settings",
+            menu: "root",
+            index,
+            highlighted: highlight === index,
+            onHover: () => {
+              setHighlight(index);
+              scheduleSubmenuClose();
+            },
+            onClick: onSettings,
+            children: <span className="menu-label">{t("menu.settings")}</span>,
+          });
+        })()}
+        {(() => {
+          const index = rootItems.indexOf("turnOff");
+          return row({
+            key: "turnOff",
+            menu: "root",
+            index,
+            highlighted: highlight === index,
+            onHover: () => {
+              setHighlight(index);
+              scheduleSubmenuClose();
+            },
+            onClick: onTurnOff,
+            children: <span className="menu-label">{t("menu.turnOff")}</span>,
+          });
+        })()}
       </div>
       {agentSelector && submenuOpen && (
         <div

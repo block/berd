@@ -272,24 +272,30 @@ export function DesktopAgentApp() {
     })();
   }, [layout, popoverVariant, session.messages.length, expandedApplied]);
 
-  const closeMenu = useCallback(async () => {
-    gestureGeneration.current++;
-    if (closingMenu.current || machine.mode !== "menu") return;
-    closingMenu.current = true;
-    try {
-      // Anti-blink, in reverse: drop the menu from the tree first.
-      if (menu) setLastAvatarRect(menu.layout.avatarRect);
-      setMenu(null);
-      await machine.collapse();
-      setLastAvatarRect(null);
-      avatarTriggerRef.current?.focus();
-    } finally {
-      closingMenu.current = false;
-    }
-  }, [menu]);
+  const closeMenu = useCallback(
+    async (options?: { restoreAvatarFocus?: boolean }) => {
+      gestureGeneration.current++;
+      if (closingMenu.current || machine.mode !== "menu") {
+        if (options?.restoreAvatarFocus) avatarTriggerRef.current?.focus();
+        return;
+      }
+      closingMenu.current = true;
+      try {
+        // Anti-blink, in reverse: drop the menu from the tree first.
+        if (menu) setLastAvatarRect(menu.layout.avatarRect);
+        setMenu(null);
+        await machine.collapse();
+        setLastAvatarRect(null);
+        if (options?.restoreAvatarFocus) avatarTriggerRef.current?.focus();
+      } finally {
+        closingMenu.current = false;
+      }
+    },
+    [menu],
+  );
 
   // "Turn off agent" = the Desktop Agent setting goes OFF (one on/off state;
-  // the old separate turn-off-without-disabling preference is gone). The
+  // the old separate hide-without-disabling preference is gone). The
   // localStorage write reaches the main webview's bridge via the storage
   // event and the bridge destroys the panel. The local turnedOff state
   // hides the avatar immediately while that close is in flight.
@@ -639,7 +645,7 @@ export function DesktopAgentApp() {
             return;
           }
           if (turnedOff || e.button !== 0) return;
-          if (menu) void closeMenu();
+          if (menu) void closeMenu({ restoreAvatarFocus: true });
           else if (layout) void collapse();
         }}
         onPointerEnter={() => setHovering(true)}
@@ -654,7 +660,7 @@ export function DesktopAgentApp() {
           if (turnedOff || e.repeat) return;
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            if (menu) void closeMenu();
+            if (menu) void closeMenu({ restoreAvatarFocus: true });
             else if (layout) void collapse();
             else void expand();
             return;
@@ -720,11 +726,11 @@ export function DesktopAgentApp() {
             }}
             onSelectAgent={(agent) => {
               avatarMenu.selectAgent(agent.agentId);
-              void closeMenu();
+              void closeMenu({ restoreAvatarFocus: true });
             }}
             onSelectFresh={() => {
               avatarMenu.selectFresh();
-              void closeMenu();
+              void closeMenu({ restoreAvatarFocus: true });
             }}
             onSettings={() => {
               // Rust reveals + focuses the main window and tells its
@@ -735,7 +741,7 @@ export function DesktopAgentApp() {
             }}
             onTurnOff={turnOff}
             onClose={() => {
-              void closeMenu();
+              void closeMenu({ restoreAvatarFocus: true });
             }}
           />
         </div>
