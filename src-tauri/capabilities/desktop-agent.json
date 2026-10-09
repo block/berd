@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "desktop-agent",
+  "description": "Capability for the Berd Desktop Agent panel window",
+  "platforms": ["macOS"],
+  "windows": ["desktop-agent"],
+  "permissions": ["core:default"]
+}

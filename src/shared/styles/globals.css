@@ -1953,10 +1953,8 @@ html[data-window-kind="voice-buddy"] #root {
     outline: none !important;
   }
 
-  *:not(body):not(.focus-override) {
-    &:focus-visible {
-      @apply ring-ring ring-offset-background ring-2 ring-offset-1 outline-hidden;
-    }
+  *:not(body):not(.focus-override):focus-visible {
+    @apply ring-ring ring-offset-background ring-2 ring-offset-1 outline-hidden;
   }
 
   /* Menu surfaces and items paint their own focus highlight (focus:bg-*),
@@ -1977,20 +1975,16 @@ html[data-window-kind="voice-buddy"] #root {
       [data-slot="menubar-checkbox-item"],
       [data-slot="menubar-radio-item"],
       [data-slot="menubar-sub-trigger"]
-    ) {
-    &:focus-visible {
-      @apply ring-0 ring-offset-0;
-    }
+    ):focus-visible {
+    @apply ring-0 ring-offset-0;
   }
 
   .link {
     @apply hover:text-foreground/80 inline-flex items-center gap-1 rounded-xs font-medium underline underline-offset-4;
   }
 
-  *:not(body):not(.focus-override).link {
-    &:focus-visible {
-      @apply ring-ring ring-offset-background ring-2 ring-offset-2 outline-hidden;
-    }
+  *:not(body):not(.focus-override).link:focus-visible {
+    @apply ring-ring ring-offset-background ring-2 ring-offset-2 outline-hidden;
   }
 }
 

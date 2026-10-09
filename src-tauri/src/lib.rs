@@ -1,5 +1,7 @@
 mod commands;
 mod deep_links;
+#[cfg(target_os = "macos")]
+pub mod desktop_agent;
 mod services;
 mod types;
 
@@ -153,6 +155,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(
             tauri_plugin_window_state::Builder::default()
+                .with_denylist(&["desktop-agent"])
                 .with_state_flags(StateFlags::all() & !StateFlags::VISIBLE)
                 .build(),
         );
@@ -170,6 +173,15 @@ pub fn run() {
 
     #[cfg(feature = "berdctl")]
     let builder = builder.plugin(tauri_plugin_berdctl::init());
+
+    // Desktop-agent experiment (macOS only): the global-shortcut plugin is
+    // inert until the settings bridge opens the panel and registers a
+    // chord; the menu handler ignores every id outside the desktop-agent:
+    // namespace (there is no other on_menu_event consumer in the app).
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .plugin(tauri_nspanel::init())
+        .plugin(desktop_agent::global_shortcut_plugin());
 
     if let Some(mode) = &e2e_mode {
         mode.log_enabled();
@@ -772,6 +784,36 @@ pub fn run() {
             #[cfg(feature = "block-skill-discovery")]
             commands::skill_marketplace::install_remote_skill,
             commands::workspace_context::load_workspace_context,
+            #[cfg(target_os = "macos")]
+            desktop_agent::desktop_agent_open,
+            #[cfg(target_os = "macos")]
+            desktop_agent::desktop_agent_close,
+            #[cfg(target_os = "macos")]
+            desktop_agent::desktop_agent_start_drag,
+            #[cfg(target_os = "macos")]
+            desktop_agent::desktop_agent_open_settings,
+            #[cfg(target_os = "macos")]
+            desktop_agent::window_commands::desktop_agent_get_screens,
+            #[cfg(target_os = "macos")]
+            desktop_agent::window_commands::desktop_agent_get_panel_frame,
+            #[cfg(target_os = "macos")]
+            desktop_agent::window_commands::desktop_agent_set_state,
+            #[cfg(target_os = "macos")]
+            desktop_agent::permissions::desktop_agent_request_permission,
+            #[cfg(target_os = "macos")]
+            desktop_agent::perch::desktop_agent_perch_begin_targeting,
+            #[cfg(target_os = "macos")]
+            desktop_agent::perch::desktop_agent_perch_end_targeting,
+            #[cfg(target_os = "macos")]
+            desktop_agent::perch::desktop_agent_perch_on,
+            #[cfg(target_os = "macos")]
+            desktop_agent::perch::desktop_agent_perch_dismount,
+            #[cfg(target_os = "macos")]
+            desktop_agent::perch::desktop_agent_perch_status,
+            #[cfg(target_os = "macos")]
+            desktop_agent::perch::desktop_agent_perch_capture,
+            #[cfg(target_os = "macos")]
+            desktop_agent::perch::desktop_agent_perch_artifact_url,
         ])
         .build(context)
         .expect("error while building tauri application")

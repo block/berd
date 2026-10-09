@@ -3,6 +3,7 @@ import {
   QueryClient,
   QueryClientProvider,
 } from "@tanstack/react-query";
+import { invoke } from "@tauri-apps/api/core";
 import React from "react";
 import ReactDOM from "react-dom/client";
 
@@ -118,12 +119,17 @@ function OptionalBerdctlBridge() {
 }
 
 const entrypointParams = new URLSearchParams(window.location.search);
+const isDesktopAgentWindow = entrypointParams.get("window") === "desktop-agent";
 const sessionKey = entrypointParams.get("sessionKey");
 const voiceBuddy = entrypointParams.has("voiceBuddy");
-if (voiceBuddy) document.documentElement.dataset.windowKind = "voice-buddy";
+if (isDesktopAgentWindow) {
+  document.documentElement.dataset.windowKind = "desktop-agent";
+} else if (voiceBuddy) {
+  document.documentElement.dataset.windowKind = "voice-buddy";
+}
 let sessionId: string | null = null;
 let bootError: string | null = null;
-if (sessionKey) {
+if (!isDesktopAgentWindow && sessionKey) {
   try {
     sessionId = decodeSessionKey(sessionKey);
   } catch (error) {
@@ -134,10 +140,60 @@ if (sessionKey) {
 }
 
 installRendererDiagnostics({
-  windowKind: voiceBuddy ? "voice-buddy" : sessionId ? "session" : "main",
+  windowKind: isDesktopAgentWindow
+    ? "desktop-agent"
+    : voiceBuddy
+      ? "voice-buddy"
+      : sessionId
+        ? "session"
+        : "main",
 });
 
-if (voiceBuddy) {
+if (isDesktopAgentWindow) {
+  // Desktop Agent panel webview (macOS only): a minimal tree — I18nProvider
+  // + the panel app. Deliberately no ThemeProvider / QueryClient / telemetry:
+  // the window is a transparent always-on-top panel, and the feature resolves
+  // its own data over its own ACP connection.
+  import("@/features/desktop-agent/ui/DesktopAgentApp")
+    .then(({ DesktopAgentApp }) => {
+      reactRoot.render(
+        <React.StrictMode>
+          <RendererErrorBoundary>
+            <I18nProvider>
+              <DesktopAgentApp />
+            </I18nProvider>
+          </RendererErrorBoundary>
+        </React.StrictMode>,
+      );
+    })
+    .catch((error) => {
+      console.error("Failed to load desktop-agent bundle:", error);
+      reportRendererError("desktop_agent_bundle_load_failed", error);
+      // Never leave an invisible always-on-top window squatting over the
+      // desktop eating clicks: ask Rust to destroy the panel, and render a
+      // small visible marker in case that fails. Hardcoded English matches
+      // renderBootError's precedent — this renders before I18nProvider exists.
+      void invoke("desktop_agent_close").catch(() => {});
+      reactRoot.render(
+        <div
+          title="Berd Desktop Agent failed to load — disable and re-enable the setting"
+          style={{
+            width: 94,
+            height: 94,
+            borderRadius: 20,
+            background: "rgba(24, 24, 27, 0.9)",
+            color: "#f87171",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 32,
+          }}
+        >
+          !
+        </div>,
+      );
+    });
+} else if (voiceBuddy) {
   import("@/features/voice-conversation/ui/VoiceBuddyApp")
     .then(({ VoiceBuddyApp }) => {
       reactRoot.render(

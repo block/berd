@@ -34,7 +34,8 @@
     "toggleTerminal": "Mostrar u ocultar terminal",
     "zoomIn": "Acercar",
     "zoomOut": "Alejar",
-    "zoomReset": "Restablecer zoom"
+    "zoomReset": "Restablecer zoom",
+    "desktopAgentTogglePanel": "Mostrar u ocultar el agente de escritorio"
   },
   "categories": {
     "chat": "Chat",

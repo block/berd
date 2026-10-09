@@ -1,0 +1,777 @@
+/* Desktop-agent transparent shell: only the avatar, popover, and menus paint. */
+
+/* The desktop-agent panel is intentionally always-dark: it floats over
+   arbitrary apps and wallpaper instead of living inside Berd's themed
+   window. Keep this scoped semantic token set here so the panel does not
+   depend on a ThemeProvider, while still aliasing shared primitives when
+   they are exact dark-theme matches.
+
+   The webview loads globals.css, but without a ThemeProvider its semantic
+   tokens resolve to LIGHT values. Re-point --background so the global
+   focus-visible ring's offset reads dark on this panel. */
+#root {
+  --desktop-agent-surface-base: #18181b;
+  --background: var(--desktop-agent-surface-base);
+  /* Full chat popover padding. Also read by
+     DesktopAgentApp.readComposerBottomInset (grow-in-place geometry needs
+     the FULL layout's bottom padding while still in composer mode). */
+  --desktop-agent-panel-padding: 16px;
+  /* Dark glass shared by chat popover and avatar menu. Keep
+     POPOVER_SHADOW_MARGIN in anchorGeometry.ts large enough for this shadow. */
+  --panel-glass-bg: rgba(24, 24, 27, 0.96);
+  --panel-glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+
+  --desktop-agent-surface: var(--panel-glass-bg); /* panel/menu glass */
+  --desktop-agent-surface-strong: rgba(
+    24,
+    24,
+    27,
+    0.92
+  ); /* composer-only hint */
+  --desktop-agent-surface-border: rgba(
+    255,
+    255,
+    255,
+    0.08
+  ); /* composer-only/menu borders */
+  --desktop-agent-quote-border: rgba(
+    255,
+    255,
+    255,
+    0.25
+  ); /* markdown blockquote border */
+  --desktop-agent-shadow: var(--panel-glass-shadow); /* panel/menu shadows */
+  --desktop-agent-shadow-soft: 0 4px 16px rgba(0, 0, 0, 0.35); /* composer-only hint shadow */
+
+  --desktop-agent-foreground: #e4e4e7; /* panel, assistant, and menu text */
+  --desktop-agent-foreground-inverse: var(--color-white); /* user bubble text */
+  --desktop-agent-foreground-muted: rgba(
+    255,
+    255,
+    255,
+    0.5
+  ); /* tool rows and chevrons */
+  --desktop-agent-foreground-subtle: rgba(
+    255,
+    255,
+    255,
+    0.45
+  ); /* hints, disabled send, empty menu */
+  --desktop-agent-foreground-faint: rgba(
+    255,
+    255,
+    255,
+    0.4
+  ); /* empty hint and tool summaries */
+  --desktop-agent-foreground-soft: rgba(
+    255,
+    255,
+    255,
+    0.65
+  ); /* hovered tool summary */
+  --desktop-agent-foreground-placeholder: rgba(
+    255,
+    255,
+    255,
+    0.35
+  ); /* composer placeholder */
+  --desktop-agent-foreground-control: rgba(
+    255,
+    255,
+    255,
+    0.7
+  ); /* icon buttons */
+  --desktop-agent-foreground-readable: rgba(
+    255,
+    255,
+    255,
+    0.72
+  ); /* tool result text */
+  --desktop-agent-quote-foreground: rgba(
+    228,
+    228,
+    231,
+    0.8
+  ); /* markdown blockquote text */
+
+  --desktop-agent-control: rgba(
+    255,
+    255,
+    255,
+    0.08
+  ); /* icon button background */
+  --desktop-agent-control-hover: rgba(
+    255,
+    255,
+    255,
+    0.14
+  ); /* icon hover and disabled send background */
+  --desktop-agent-control-subtle: rgba(
+    255,
+    255,
+    255,
+    0.07
+  ); /* composer background */
+  --desktop-agent-control-border: rgba(
+    255,
+    255,
+    255,
+    0.06
+  ); /* composer border */
+  --desktop-agent-control-border-hover: rgba(
+    255,
+    255,
+    255,
+    0.14
+  ); /* composer focus border */
+  --desktop-agent-control-muted: rgba(
+    255,
+    255,
+    255,
+    0.1
+  ); /* inline code and separators */
+  --desktop-agent-control-muted-strong: rgba(
+    255,
+    255,
+    255,
+    0.12
+  ); /* retry button and menu highlight */
+  --desktop-agent-control-strong: rgba(
+    255,
+    255,
+    255,
+    0.22
+  ); /* retry button hover */
+  --desktop-agent-code-surface: rgba(0, 0, 0, 0.35); /* markdown code blocks */
+  --desktop-agent-tool-result-surface: rgba(
+    255,
+    255,
+    255,
+    0.055
+  ); /* tool result background */
+
+  --desktop-agent-primary-action: var(--color-zinc-100); /* enabled send pill */
+  --desktop-agent-primary-action-fg: var(
+    --desktop-agent-surface-base
+  ); /* enabled send glyph */
+  --desktop-agent-primary-action-hover: var(
+    --color-white
+  ); /* enabled send hover */
+
+  --desktop-agent-user-bubble: var(--color-gray-700); /* user message bubble */
+  --desktop-agent-danger: rgba(248, 113, 113, 0.9); /* failed tool row */
+  --desktop-agent-danger-fg: rgba(
+    254,
+    202,
+    202,
+    0.95
+  ); /* failed tool result text */
+  --desktop-agent-danger-muted: rgba(
+    248,
+    113,
+    113,
+    0.7
+  ); /* failed tool summary */
+  --desktop-agent-danger-subtle: rgba(
+    248,
+    113,
+    113,
+    0.65
+  ); /* failed tool detail hint */
+  --desktop-agent-danger-surface: rgba(
+    127,
+    29,
+    29,
+    0.28
+  ); /* failed tool result background */
+  --desktop-agent-danger-solid: var(--color-red-400); /* error hint */
+  --desktop-agent-link: #7cb3ff; /* markdown links */
+  --desktop-agent-warning: var(--color-yellow-500); /* active capture button */
+  --desktop-agent-warning-surface: rgba(
+    234,
+    179,
+    8,
+    0.15
+  ); /* active capture background */
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.expanded-root {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.panel-popover {
+  border-radius: 18px;
+  background: var(--desktop-agent-surface);
+  color: var(--desktop-agent-foreground);
+  box-sizing: border-box;
+  padding: var(--desktop-agent-panel-padding);
+  box-shadow: var(--desktop-agent-shadow);
+}
+
+/* Composer-first mode: the overlay region paints NOTHING itself — only
+   the hint and composer pills paint, so the "popover" reads as a lone
+   pill next to the avatar until a conversation exists. */
+.panel-popover.composer-mode {
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  border-radius: 0;
+}
+
+/* Chat popover */
+.chat-popover {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.transcript {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 8px;
+}
+
+.chat-popover.composer-only {
+  gap: 6px;
+}
+
+/* The composer pill hugs whichever region edge faces the avatar. */
+.chat-popover.composer-only.anchor-bottom {
+  justify-content: flex-end;
+}
+
+.chat-popover.composer-only.anchor-top {
+  justify-content: flex-start;
+}
+
+.chat-popover.composer-only.anchor-center {
+  justify-content: center;
+}
+
+.empty-hint {
+  color: var(--desktop-agent-foreground-faint);
+  text-align: center;
+  margin-top: 40%;
+  font-size: 13px;
+}
+
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.row.user {
+  align-items: flex-end;
+}
+
+.row.assistant {
+  align-items: flex-start;
+}
+
+/* Text metrics shared by both roles. The bubble CHROME (fill, radius,
+   inset, width cap) is USER-ONLY — matching the main app, which bubbles
+   user sends and renders assistant replies plain on the surface
+   (MessageBubble: user = rounded bg-message-user-bg, assistant =
+   w-full). */
+.bubble {
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Berd's dark scheme paints user messages DARK GREY, not accent blue —
+   this is the main app's dark --message-user-bg (gray-700), inlined
+   through the panel-scoped tokens above so the always-dark surface keeps
+   the same treatment without depending on app theme state. */
+.row.user .bubble {
+  max-width: 85%;
+  padding: 8px 11px;
+  border-radius: 12px;
+  background: var(--desktop-agent-user-bubble);
+  color: var(--desktop-agent-foreground-inverse);
+}
+
+/* Assistant replies render PLAIN on the popover surface — no fill, no
+   inset, full width (the main app's treatment). */
+.row.assistant .bubble {
+  width: 100%;
+  color: var(--desktop-agent-foreground);
+}
+
+/* Markdown in assistant bubbles. The bubble itself keeps pre-wrap for
+   plain user text; rendered markdown resets it — block elements already
+   own the line breaks, and pre-wrap would double-space them. */
+.markdown-body {
+  white-space: normal;
+}
+
+.markdown-body p {
+  margin: 0.35em 0;
+}
+
+.markdown-body p:first-child {
+  margin-top: 0;
+}
+
+.markdown-body p:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  margin: 0.35em 0;
+  padding-left: 1.3em;
+}
+
+/* Tailwind preflight (globals.css) strips list markers; restore them for
+   rendered agent markdown. */
+.markdown-body ul {
+  list-style: disc;
+}
+
+.markdown-body ol {
+  list-style: decimal;
+}
+
+.markdown-body li {
+  margin: 0.15em 0;
+}
+
+.markdown-body code {
+  background: var(--desktop-agent-control-muted);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.92em;
+}
+
+.markdown-body pre {
+  background: var(--desktop-agent-code-surface);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 0.4em 0;
+  overflow-x: auto;
+}
+
+.markdown-body pre code {
+  background: none;
+  padding: 0;
+  font-size: 0.9em;
+  white-space: pre;
+}
+
+.markdown-body blockquote {
+  margin: 0.35em 0;
+  padding-left: 0.8em;
+  border-left: 3px solid var(--desktop-agent-quote-border);
+  color: var(--desktop-agent-quote-foreground);
+}
+
+.markdown-body a {
+  color: var(--desktop-agent-link);
+}
+
+.cursor {
+  opacity: 0.6;
+  animation: blink 1s steps(1) infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.tool-row {
+  font-size: 11px;
+  color: var(--desktop-agent-foreground-muted);
+  padding: 2px 4px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  max-width: 100%;
+}
+
+.tool-row.failed {
+  color: var(--desktop-agent-danger);
+}
+
+.tool-row-header {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tool-row-glyph {
+  flex: 0 0 auto;
+}
+
+.tool-row-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-row-hint {
+  flex: 0 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 10px;
+  color: var(--desktop-agent-danger-subtle);
+}
+
+.tool-result {
+  margin: 3px 0 4px 17px;
+  padding: 8px 9px;
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  user-select: text;
+  -webkit-user-select: text;
+  border-radius: 8px;
+  background: var(--desktop-agent-tool-result-surface);
+  color: var(--desktop-agent-foreground-readable);
+}
+
+.tool-result.failed {
+  background: var(--desktop-agent-danger-surface);
+  color: var(--desktop-agent-danger-fg);
+}
+
+/* Collapsed tool-run summary: one quiet line per
+   burst of tool activity, click to expand. Button-reset styling — it
+   should read as transcript metadata, not chrome. */
+.tool-run-summary {
+  border: none;
+  background: none;
+  text-align: left;
+  font-size: 11px;
+  color: var(--desktop-agent-foreground-faint);
+  padding: 2px 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tool-run-summary:hover {
+  color: var(--desktop-agent-foreground-soft);
+}
+
+.tool-run-summary.has-failures {
+  color: var(--desktop-agent-danger-muted);
+}
+
+.tool-run-summary .disclosure {
+  display: inline-block;
+  transition: transform 0.12s ease;
+  font-size: 12px;
+}
+
+.tool-run-summary .disclosure.open {
+  transform: rotate(90deg);
+}
+
+.tool-run-detail {
+  padding: 2px 0 4px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-width: 100%;
+}
+
+.attached-image {
+  max-width: 70%;
+  border-radius: 10px;
+}
+
+.hint {
+  font-size: 11px;
+  color: var(--desktop-agent-foreground-subtle);
+  padding: 4px 2px;
+}
+
+.hint.error {
+  color: var(--desktop-agent-danger-solid);
+}
+
+/* Composer — matches the main Berd app's visual language: one rounded
+   grey box containing a borderless input with the send pill inside it. */
+.composer-box {
+  /* Single row: input and send pill share the line — a stacked two-row
+     layout reads as two lines tall no matter how tight the input is. */
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  /* Tight vertical inset matching Berd's composer: the pill nearly
+     fills the box height. */
+  padding: 5px 5px 5px 12px;
+  border-radius: 19px;
+  background: var(--desktop-agent-control-subtle);
+  border: 1px solid var(--desktop-agent-control-border);
+}
+
+.composer-box:focus-within {
+  border-color: var(--desktop-agent-control-border-hover);
+}
+
+.composer-box input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  height: 17px;
+  line-height: 17px;
+  /* The empty-input caret draws at x=0 of the input, where a curved
+     clip boundary slices it into a rounded stub that reads as "too
+     small" (it is full height all along). Kill any intrinsic input
+     rounding and give the caret 2px of clearance so it never hugs the
+     clip edge. */
+  border-radius: 0;
+  padding: 0 0 0 2px;
+  margin: 0;
+}
+
+.composer-box input::placeholder {
+  color: var(--desktop-agent-foreground-placeholder);
+}
+
+.composer-only .composer-box {
+  margin-top: 0;
+  border-radius: 24px;
+  background: var(--desktop-agent-surface);
+  border-color: var(--desktop-agent-surface-border);
+  box-shadow: var(--desktop-agent-shadow);
+  padding: 9px 9px 9px 16px;
+}
+
+.composer-only .hint {
+  align-self: center;
+  background: var(--desktop-agent-surface-strong);
+  border-radius: 10px;
+  padding: 4px 10px;
+  box-shadow: var(--desktop-agent-shadow-soft);
+}
+
+.composer-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.icon-button {
+  width: 26px;
+  height: 26px;
+  border-radius: 13px;
+  border: none;
+  background: var(--desktop-agent-control);
+  color: var(--desktop-agent-foreground-control);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.icon-button:hover {
+  background: var(--desktop-agent-control-hover);
+}
+
+.icon-button.active {
+  color: var(--desktop-agent-warning);
+  background: var(--desktop-agent-warning-surface);
+}
+
+.icon-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* The send pill: slightly horizontally oblong, lives inside the grey box
+   (Berd's composer pattern — wider than tall, nearly filling the box
+   height). Enabled = near-white fill with a dark glyph, matching the
+   main composer's primary action (the grey-on-grey version lacked
+   contrast); the stop variant wears the same chrome. */
+.send-pill {
+  width: 34px;
+  height: 26px;
+  border-radius: 13px;
+  border: none;
+  background: var(--desktop-agent-primary-action);
+  color: var(--desktop-agent-primary-action-fg);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.send-pill:hover {
+  background: var(--desktop-agent-primary-action-hover);
+}
+
+/* Disabled must read clearly distinct from enabled: a quiet grey wash,
+   not a dimmed white (opacity on near-white still reads "lit"). */
+.send-pill:disabled {
+  background: var(--desktop-agent-control-hover);
+  color: var(--desktop-agent-foreground-subtle);
+  cursor: default;
+}
+
+/* Stop variant: send-pill mid-response. Smaller glyph — the ◼ reads
+   heavier than the ↑ at equal font size. */
+.send-pill.stop {
+  font-size: 10px;
+}
+
+/* Manual reconnect affordance in the hint row — the affordance the
+   exhausted copy points at. */
+.hint-retry {
+  margin-left: 6px;
+  border: none;
+  background: var(--desktop-agent-control-muted-strong);
+  color: inherit;
+  border-radius: 8px;
+  padding: 1px 7px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.hint-retry:hover {
+  background: var(--desktop-agent-control-strong);
+}
+
+/* Avatar chip */
+.avatar-hit {
+  width: 94px;
+  height: 94px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+}
+
+/* Avatar context menu — dark glass matching the popover, native-menu
+   metrics (13px text, 28px rows). The region wrapper fills the computed
+   overlay rect; the cards position inside it. */
+.avatar-menu-region {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.menu-card {
+  position: absolute;
+  box-sizing: border-box;
+  padding: 6px 4px;
+  border-radius: 12px;
+  background: var(--desktop-agent-surface);
+  border: 1px solid var(--desktop-agent-surface-border);
+  box-shadow: var(--desktop-agent-shadow);
+  display: flex;
+  flex-direction: column;
+}
+
+.avatar-submenu {
+  overflow-y: auto;
+}
+
+.menu-row {
+  /* The .highlighted fill is the focus affordance (roving focus follows
+     it); suppress WebKit's native outline, which focus-override doesn't. */
+  outline: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: var(--desktop-agent-foreground);
+  font-size: 13px;
+  font-family: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+.menu-row.highlighted,
+.menu-row:hover {
+  background: var(--desktop-agent-control-muted-strong);
+}
+
+.menu-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-chevron {
+  flex: 0 0 auto;
+  color: var(--desktop-agent-foreground-muted);
+}
+
+.menu-check {
+  flex: 0 0 auto;
+  font-size: 12px;
+}
+
+.menu-separator {
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--desktop-agent-control-muted);
+}
+
+.menu-preview {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  overflow: hidden;
+  object-fit: cover;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Zero agents: secondary explainer text, NOT a disabled menu item. */
+.menu-empty {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  font-size: 12px;
+  color: var(--desktop-agent-foreground-subtle);
+}
