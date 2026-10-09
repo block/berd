@@ -13,10 +13,17 @@ const getPrefs = vi.fn();
 const setPrefs = vi.fn();
 const audioPlay = vi.fn();
 
-vi.mock("@/features/settings/lib/notificationPrefs", () => ({
-  getNotificationPrefs: (...args: unknown[]) => getPrefs(...args),
-  setNotificationPrefs: (...args: unknown[]) => setPrefs(...args),
-}));
+vi.mock("@/features/settings/lib/notificationPrefs", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("@/features/settings/lib/notificationPrefs")
+    >();
+  return {
+    ...actual,
+    getNotificationPrefs: (...args: unknown[]) => getPrefs(...args),
+    setNotificationPrefs: (...args: unknown[]) => setPrefs(...args),
+  };
+});
 
 describe("NotificationSettings", () => {
   beforeEach(() => {
@@ -37,6 +44,7 @@ describe("NotificationSettings", () => {
       desktop: true,
       inAppSound: "berd-sounds-4.mp3",
       desktopSound: "berd-sounds-4.mp3",
+      toastDurationSeconds: 8,
     });
     setPrefs.mockClear();
     window.localStorage.removeItem(ASSISTIVE_UX_STORAGE_KEY);
@@ -69,6 +77,7 @@ describe("NotificationSettings", () => {
       desktop: true,
       inAppSound: "berd-sounds-4.mp3",
       desktopSound: "berd-sounds-4.mp3",
+      toastDurationSeconds: 8,
     });
     renderWithProviders(<NotificationSettings />);
     expect(
@@ -125,6 +134,113 @@ describe("NotificationSettings", () => {
       }),
     );
     expect(setPrefs).toHaveBeenCalledWith({ inAppSound: "silent" });
+  });
+
+  it("renders the notification duration control when enabled", () => {
+    renderWithProviders(<NotificationSettings />);
+    expect(
+      screen.getByText(enSettings.notifications.toastDuration.label),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("slider", {
+        name: enSettings.notifications.toastDuration.label,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("announces the time unit on the duration slider's accessible value", () => {
+    renderWithProviders(<NotificationSettings />);
+    const slider = screen.getByRole("slider", {
+      name: enSettings.notifications.toastDuration.label,
+    });
+    expect(slider).toHaveAttribute(
+      "aria-valuetext",
+      enSettings.notifications.toastDuration.seconds_other.replace(
+        "{{count}}",
+        "8",
+      ),
+    );
+    expect(slider).toHaveAttribute("aria-describedby");
+  });
+
+  it("hides the duration control (scoped to in-app) when in-app notifications are disabled", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<NotificationSettings />);
+
+    expect(
+      screen.getByText(enSettings.notifications.toastDuration.label),
+    ).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("switch", {
+        name: enSettings.notifications.inApp.label,
+      }),
+    );
+
+    expect(
+      screen.queryByText(enSettings.notifications.toastDuration.label),
+    ).not.toBeInTheDocument();
+  });
+
+  it("restores the last timed duration (not the slider minimum) when leaving never-dismiss", async () => {
+    const user = userEvent.setup();
+    getPrefs.mockReturnValue({
+      enabled: true,
+      inApp: true,
+      desktop: true,
+      inAppSound: "berd-sounds-4.mp3",
+      desktopSound: "berd-sounds-4.mp3",
+      toastDurationSeconds: 25,
+    });
+    renderWithProviders(<NotificationSettings />);
+
+    await user.click(
+      screen.getByRole("button", {
+        name: enSettings.notifications.toastDuration.neverDismiss,
+      }),
+    );
+    expect(setPrefs).toHaveBeenCalledWith({ toastDurationSeconds: 0 });
+
+    await user.click(
+      screen.getByRole("button", {
+        name: enSettings.notifications.toastDuration.autoDismiss,
+      }),
+    );
+    expect(setPrefs).toHaveBeenLastCalledWith({ toastDurationSeconds: 25 });
+    expect(
+      screen.getByText(
+        enSettings.notifications.toastDuration.seconds_other.replace(
+          "{{count}}",
+          "25",
+        ),
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("hides the timed slider while never-dismiss is active", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<NotificationSettings />);
+
+    expect(
+      screen.getByRole("slider", {
+        name: enSettings.notifications.toastDuration.label,
+      }),
+    ).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", {
+        name: enSettings.notifications.toastDuration.neverDismiss,
+      }),
+    );
+
+    expect(
+      screen.queryByRole("slider", {
+        name: enSettings.notifications.toastDuration.label,
+      }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(enSettings.notifications.toastDuration.never),
+    ).toBeInTheDocument();
   });
 
   it("plays a sound preview without selecting that sound", async () => {

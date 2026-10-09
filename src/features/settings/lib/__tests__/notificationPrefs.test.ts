@@ -16,6 +16,7 @@ describe("getNotificationPrefs", () => {
       desktop: true,
       inAppSound: "berd-sounds-4.mp3",
       desktopSound: "berd-sounds-4.mp3",
+      toastDurationSeconds: 8,
     });
   });
 
@@ -30,6 +31,7 @@ describe("getNotificationPrefs", () => {
       desktop: true,
       inAppSound: "berd-sounds-4.mp3",
       desktopSound: "berd-sounds-4.mp3",
+      toastDurationSeconds: 8,
     });
   });
 
@@ -44,6 +46,7 @@ describe("getNotificationPrefs", () => {
       desktop: false,
       inAppSound: "berd-sounds-4.mp3",
       desktopSound: "berd-sounds-4.mp3",
+      toastDurationSeconds: 8,
     });
   });
 
@@ -58,7 +61,32 @@ describe("getNotificationPrefs", () => {
       desktop: true,
       inAppSound: "berd-sounds-4.mp3",
       desktopSound: "silent",
+      toastDurationSeconds: 8,
     });
+  });
+
+  it("clamps an out-of-range stored toast duration to the maximum", () => {
+    localStorage.setItem(
+      "goose:notifications",
+      JSON.stringify({ toastDurationSeconds: 999 }),
+    );
+    expect(getNotificationPrefs().toastDurationSeconds).toBe(60);
+  });
+
+  it("preserves a stored never-dismiss toast duration", () => {
+    localStorage.setItem(
+      "goose:notifications",
+      JSON.stringify({ toastDurationSeconds: 0 }),
+    );
+    expect(getNotificationPrefs().toastDurationSeconds).toBe(0);
+  });
+
+  it("recovers a corrupted negative stored toast duration to the default instead of never-dismiss", () => {
+    localStorage.setItem(
+      "goose:notifications",
+      JSON.stringify({ toastDurationSeconds: -5 }),
+    );
+    expect(getNotificationPrefs().toastDurationSeconds).toBe(8);
   });
 
   it("returns defaults when stored value is invalid JSON", () => {
@@ -69,6 +97,7 @@ describe("getNotificationPrefs", () => {
       desktop: true,
       inAppSound: "berd-sounds-4.mp3",
       desktopSound: "berd-sounds-4.mp3",
+      toastDurationSeconds: 8,
     });
   });
 
@@ -82,6 +111,7 @@ describe("getNotificationPrefs", () => {
       desktop: true,
       inAppSound: "berd-sounds-4.mp3",
       desktopSound: "berd-sounds-4.mp3",
+      toastDurationSeconds: 8,
     });
   });
 });
@@ -99,6 +129,7 @@ describe("setNotificationPrefs", () => {
       desktop: true,
       inAppSound: "berd-sounds-4.mp3",
       desktopSound: "berd-sounds-4.mp3",
+      toastDurationSeconds: 8,
     });
   });
 
@@ -111,6 +142,7 @@ describe("setNotificationPrefs", () => {
       desktop: false,
       inAppSound: "berd-sounds-4.mp3",
       desktopSound: "berd-sounds-4.mp3",
+      toastDurationSeconds: 8,
     });
   });
 

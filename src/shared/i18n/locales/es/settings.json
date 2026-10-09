@@ -483,7 +483,16 @@
       "silent": "Silencio",
       "youHaveGotGoose": "Twinkle"
     },
-    "title": "Notificaciones"
+    "title": "Notificaciones",
+    "toastDuration": {
+      "autoDismiss": "Cerrar automáticamente tras un tiempo",
+      "description": "Cuánto tiempo permanece en pantalla una notificación en la app antes de desaparecer.",
+      "label": "Duración de la notificación",
+      "never": "Permanece hasta cerrarla",
+      "neverDismiss": "Mantener en pantalla hasta cerrarla",
+      "seconds_one": "{{count}} segundo",
+      "seconds_other": "{{count}} segundos"
+    }
   },
   "privacy": {
     "telemetry": {
