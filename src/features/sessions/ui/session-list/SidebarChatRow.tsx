@@ -63,8 +63,7 @@ import {
   Shimmer,
 } from "@/shared/ui/ai-elements/shimmer";
 import { SidebarLeadingIcon } from "./SidebarLeadingIcon";
-import { SidebarUnreadDot } from "./SidebarUnreadDot";
-import { ActiveChatPulseDot } from "@/shared/ui/SessionActivityIndicator";
+import { SessionActivityIndicator } from "@/shared/ui/SessionActivityIndicator";
 import { useWorkingIndicatorAnimationPreference } from "@/shared/preferences/workingIndicatorAnimationPreference";
 import { useSidebarChatDrag } from "./SidebarChatDragContext";
 import { toast } from "sonner";
@@ -896,39 +895,26 @@ export function SidebarChatRow({
             rowButton
           )}
 
-          {isRunning ? (
-            <span
-              data-sidebar-chat-status
-              role="status"
-              aria-label={t("status.chatActive")}
-              className={cn(
-                "pointer-events-none absolute flex size-5 items-center justify-center transition-opacity duration-75",
-                hasBranchName ? "top-1" : "top-1/2 -translate-y-1/2",
-                densityClasses.menuInset,
-                selectionEnabled || menuOpen || contextMenuOpen || dragging
-                  ? "opacity-0"
-                  : "opacity-100 group-hover/chat-row:opacity-0 group-focus-within/chat-row:opacity-0",
-              )}
-            >
-              <ActiveChatPulseDot />
-            </span>
-          ) : hasUnread ? (
-            <span
-              data-sidebar-chat-ready-status
-              role="status"
-              aria-label={t("status.unreadMessages")}
-              className={cn(
-                "pointer-events-none absolute flex size-5 items-center justify-center transition-opacity duration-75",
-                hasBranchName ? "top-1" : "top-1/2 -translate-y-1/2",
-                densityClasses.menuInset,
-                selectionEnabled || menuOpen || contextMenuOpen || dragging
-                  ? "opacity-0"
-                  : "opacity-100 group-hover/chat-row:opacity-0 group-focus-within/chat-row:opacity-0",
-              )}
-            >
-              <SidebarUnreadDot />
-            </span>
-          ) : activityTimestamp ? (
+          <span
+            data-sidebar-chat-status={isRunning ? "" : undefined}
+            data-sidebar-chat-ready-status={
+              !isRunning && hasUnread ? "" : undefined
+            }
+            className={cn(
+              "pointer-events-none absolute flex size-5 items-center justify-center transition-opacity duration-75",
+              hasBranchName ? "top-1" : "top-1/2 -translate-y-1/2",
+              densityClasses.menuInset,
+              selectionEnabled || menuOpen || contextMenuOpen || dragging
+                ? "opacity-0"
+                : "opacity-100 group-hover/chat-row:opacity-0 group-focus-within/chat-row:opacity-0",
+            )}
+          >
+            <SessionActivityIndicator
+              isRunning={isRunning}
+              hasUnread={hasUnread}
+            />
+          </span>
+          {!isRunning && !hasUnread && activityTimestamp ? (
             <span
               data-sidebar-chat-timestamp
               className={cn(

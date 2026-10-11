@@ -230,13 +230,12 @@ export function SidebarRecentsSection({
               )}
             >
               <SidebarChatMenuIcon />
-              {session.isRunning ? (
-                <SessionActivityIndicator isRunning variant="overlay" />
-              ) : session.hasUnread ? (
-                <span className="absolute -right-0.5 -top-0.5">
-                  <SessionActivityIndicator hasUnread variant="overlay" />
-                </span>
-              ) : null}
+              <SessionActivityIndicator
+                isRunning={session.isRunning}
+                hasUnread={session.hasUnread}
+                variant="overlay"
+                size="sm"
+              />
             </Button>
           ))}
         </div>

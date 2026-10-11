@@ -2889,17 +2889,14 @@ export const designSystemComponentManifest = [
   {
     name: "Session Activity Indicator",
     source: "src/shared/ui/SessionActivityIndicator.tsx",
-    description: "",
-    exports: [
-      "ActiveChatBerdIndicator",
-      "ActiveChatPulseDot",
-      "SessionActivityIndicator",
-    ],
-    slots: ["active-chat-pulse-dot"],
+    description:
+      "Keep mounted across state changes: the same four dots gather from their current\npositions into one unread dot. Idle is hidden and never implies unread/success.\nColor follows the app's primary token; shape carries meaning without color/motion.",
+    exports: ["ActiveChatBerdIndicator", "SessionActivityIndicator"],
+    slots: ["session-activity-indicator"],
     cva: [],
-    tokenClasses: ["bg-info", "bg-success"],
+    tokenClasses: ["text-primary"],
     stateClasses: [],
-    sourceTokenClasses: [],
+    sourceTokenClasses: ["text-primary"],
   },
   {
     name: "Settings Row",

@@ -122,10 +122,6 @@ export const SIDEBAR_CHAT_ROW_DENSITY_CLASSES = {
   }
 >;
 
-/** Bare unread dot; the parent owns positioning (e.g. a row's icon slot). */
-export const SIDEBAR_UNREAD_DOT_CLASS =
-  "pointer-events-none h-[7px] w-[7px] rounded-full bg-success transition-opacity duration-200 ease-out animate-in fade-in-0";
-
 /** Vertical offset above sidebar section divider lines (24px). */
 export const SIDEBAR_SECTION_DIVIDER_TOP_CLASS = "mt-6";
 

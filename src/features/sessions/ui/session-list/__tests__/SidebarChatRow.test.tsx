@@ -222,12 +222,11 @@ describe("SidebarChatRow", () => {
     );
 
     expect(screen.getByLabelText(/chat active/i)).toBeInTheDocument();
-    const pulseDot = container.querySelector(
-      '[data-slot="active-chat-pulse-dot"]',
+    const indicator = container.querySelector(
+      '[data-slot="session-activity-indicator"][data-state="working"]',
     );
-    expect(pulseDot).toHaveClass("bg-info");
-    expect(pulseDot).toHaveStyle({ animationDuration: "2.2s" });
-    expect((pulseDot as HTMLElement).style.animationDelay).toBe("");
+    expect(indicator).toHaveClass("text-primary");
+    expect(indicator?.querySelectorAll("circle")).toHaveLength(4);
     expect(
       container.querySelector('[data-slot="berd-loader-inline"]'),
     ).not.toBeInTheDocument();
@@ -261,11 +260,15 @@ describe("SidebarChatRow", () => {
     expect(screen.getByText("Busy Chat").closest(".shimmer-text")).toBeNull();
     expect(screen.getByLabelText(/chat active/i)).toBeInTheDocument();
     expect(
-      container.querySelector('[data-slot="active-chat-pulse-dot"]'),
+      container.querySelector(
+        '[data-slot="session-activity-indicator"][data-state="working"]',
+      ),
     ).toBeInTheDocument();
     expect(
-      container.querySelector('[data-slot="active-chat-pulse-dot"]'),
-    ).not.toHaveClass("animate-[active-chat-dot-pulse_ease-in-out_infinite]");
+      container.querySelector(
+        '[data-slot="session-activity-indicator"][data-state="working"]',
+      ),
+    ).toHaveAttribute("data-animated", "false");
   });
 
   it("replaces the timestamp with trailing status while running", () => {
@@ -399,7 +402,9 @@ describe("SidebarChatRow", () => {
 
     expect(screen.getByLabelText(/chat active/i)).toBeInTheDocument();
     expect(
-      container.querySelector('[data-slot="active-chat-pulse-dot"]'),
+      container.querySelector(
+        '[data-slot="session-activity-indicator"][data-state="working"]',
+      ),
     ).toBeInTheDocument();
     expect(
       container.querySelector('[data-project-color-swatch="project-1"]'),
@@ -554,9 +559,9 @@ describe("SidebarChatRow", () => {
       />,
     );
 
-    expect(
-      screen.getByLabelText(/unread messages/i).firstElementChild,
-    ).toHaveClass("bg-success");
+    expect(screen.getByLabelText(/unread messages/i)).toHaveClass(
+      "text-primary",
+    );
   });
 
   it("hides the unread dot while the chat is running", () => {

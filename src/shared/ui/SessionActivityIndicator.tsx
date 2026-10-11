@@ -1,41 +1,33 @@
-import { useReducedMotion } from "motion/react";
+import { useLayoutEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 
 import { cn } from "@/shared/lib/cn";
-import { RESPONDING_SHIMMER_PROPS } from "@/shared/ui/ai-elements/shimmer";
+import { usePrefersReducedMotion } from "@/shared/hooks/usePrefersReducedMotion";
 import { useWorkingIndicatorAnimationPreference } from "@/shared/preferences/workingIndicatorAnimationPreference";
 import { BerdLoaderInline } from "@/shared/ui/berd-loader-inline";
+import {
+  SessionActivityMotion,
+  type SessionActivityState,
+} from "@/shared/ui/session-activity-motion";
 
-const ACTIVE_CHAT_BERD_SIZE_PX = 14;
-const WORKING_INDICATOR_ENTRANCE_CLASSES =
-  "transition-opacity duration-200 ease-out animate-in fade-in-0";
-
-interface SessionActivityIndicatorProps {
-  isRunning?: boolean;
-  hasUnread?: boolean;
-  variant?: "inline" | "overlay";
-  className?: string;
-}
-
+/** Branded responding treatment inside the conversation, not compact session status. */
 export function ActiveChatBerdIndicator({
   className,
   respectAnimationPreference = false,
-  size = ACTIVE_CHAT_BERD_SIZE_PX,
+  size = 14,
 }: {
   className?: string;
   respectAnimationPreference?: boolean;
   size?: number;
 }) {
-  const shouldReduceMotion = useReducedMotion();
-  const workingIndicatorAnimationPreference =
-    useWorkingIndicatorAnimationPreference();
-  const motionEnabled =
-    !shouldReduceMotion &&
-    (!respectAnimationPreference ||
-      workingIndicatorAnimationPreference.enabled);
-
+  const shouldReduceMotion = usePrefersReducedMotion();
+  const preference = useWorkingIndicatorAnimationPreference();
   return (
     <BerdLoaderInline
-      animated={motionEnabled}
+      animated={
+        !shouldReduceMotion &&
+        (!respectAnimationPreference || preference.enabled)
+      }
       className={className}
       decorative
       size={size}
@@ -43,110 +35,156 @@ export function ActiveChatBerdIndicator({
   );
 }
 
-export function ActiveChatPulseDot({ className }: { className?: string }) {
-  const shouldReduceMotion = useReducedMotion();
-  const workingIndicatorAnimationPreference =
-    useWorkingIndicatorAnimationPreference();
-  const motionEnabled =
-    workingIndicatorAnimationPreference.enabled && !shouldReduceMotion;
-
-  return (
-    <span
-      aria-hidden="true"
-      data-slot="active-chat-pulse-dot"
-      className={cn(
-        "size-[7px] rounded-full bg-info",
-        motionEnabled && "animate-[active-chat-dot-pulse_ease-in-out_infinite]",
-        className,
-      )}
-      style={
-        motionEnabled
-          ? {
-              animationDuration: `${RESPONDING_SHIMMER_PROPS.duration}s`,
-            }
-          : undefined
-      }
-    />
-  );
+interface SessionActivityIndicatorProps {
+  isRunning?: boolean;
+  hasUnread?: boolean;
+  variant?: "inline" | "overlay";
+  size?: "default" | "sm";
+  /** Allow a static preview, never override the OS or user animation preference. */
+  animated?: boolean;
+  activeLabel?: string;
+  unreadLabel?: string;
+  className?: string;
 }
 
+/**
+ * Keep mounted across state changes: the same four dots gather from their current
+ * positions into one unread dot. Idle is hidden and never implies unread/success.
+ * Color follows the app's primary token; shape carries meaning without color/motion.
+ */
 export function SessionActivityIndicator({
   isRunning = false,
   hasUnread = false,
   variant = "inline",
+  size = "default",
+  animated = true,
+  activeLabel,
+  unreadLabel,
   className,
 }: SessionActivityIndicatorProps) {
-  const shouldReduceMotion = useReducedMotion();
-  const workingIndicatorAnimationPreference =
-    useWorkingIndicatorAnimationPreference();
-  const motionEnabled =
-    workingIndicatorAnimationPreference.enabled && !shouldReduceMotion;
+  const { t } = useTranslation("sidebar");
+  const reducedMotion = usePrefersReducedMotion();
+  const preference = useWorkingIndicatorAnimationPreference();
+  const motionEnabled = animated && preference.enabled && !reducedMotion;
+  const state: SessionActivityState = isRunning
+    ? "working"
+    : hasUnread
+      ? "unread"
+      : "idle";
+  const svgRef = useRef<SVGSVGElement>(null);
+  const modelRef = useRef<SessionActivityMotion | null>(null);
+  if (!modelRef.current)
+    modelRef.current = new SessionActivityMotion(state, motionEnabled);
+  const model = modelRef.current;
+  const updateRef = useRef<
+    ((state: SessionActivityState, animated: boolean) => void) | null
+  >(null);
 
-  if (isRunning) {
-    if (variant === "overlay") {
-      return (
-        <span
-          role="status"
-          aria-label="Chat active"
-          className={cn(
-            "absolute -right-1 -top-1 flex items-center justify-center",
-            motionEnabled && WORKING_INDICATOR_ENTRANCE_CLASSES,
-            className,
-          )}
-        >
-          <BerdLoaderInline
-            animated={motionEnabled}
-            decorative
-            size={ACTIVE_CHAT_BERD_SIZE_PX}
-          />
-        </span>
-      );
+  useLayoutEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const circles = Array.from(svg.querySelectorAll("circle"));
+    let frame = 0;
+    let idleFrame = 0;
+    let lastTime: number | null = null;
+    let visible = typeof IntersectionObserver === "undefined";
+
+    function paint() {
+      model.pose.forEach((dot, index) => {
+        circles[index].setAttribute("cx", String(10 + dot.x));
+        circles[index].setAttribute("cy", String(10 + dot.y));
+        circles[index].setAttribute("r", String(dot.radius));
+      });
     }
+    function tick(now: number) {
+      frame = 0;
+      if (!visible || document.hidden) return;
+      model.step(lastTime === null ? 0 : Math.min(50, now - lastTime));
+      lastTime = now;
+      paint();
+      if (model.moving) frame = requestAnimationFrame(tick);
+    }
+    function resume() {
+      cancelAnimationFrame(frame);
+      frame = 0;
+      lastTime = null;
+      if (visible && !document.hidden && model.moving)
+        frame = requestAnimationFrame(tick);
+    }
+    updateRef.current = (nextState, nextAnimated) => {
+      cancelAnimationFrame(idleFrame);
+      idleFrame = 0;
+      const apply = () => {
+        idleFrame = 0;
+        model.setState(nextState, nextAnimated);
+        paint();
+        resume();
+      };
+      // The wrapper hides idle immediately. Keep the last pose for one frame
+      // in case stopped/unread arrive separately; never synthesize unread.
+      if (nextState === "idle" && nextAnimated && model.moving) {
+        cancelAnimationFrame(frame);
+        frame = 0;
+        idleFrame = requestAnimationFrame(apply);
+      } else apply();
+    };
+    const observer =
+      typeof IntersectionObserver === "undefined"
+        ? null
+        : new IntersectionObserver(([entry]) => {
+            visible = entry.isIntersecting;
+            resume();
+          });
+    observer?.observe(svg);
+    document.addEventListener("visibilitychange", resume);
+    paint();
+    resume();
+    return () => {
+      cancelAnimationFrame(frame);
+      cancelAnimationFrame(idleFrame);
+      observer?.disconnect();
+      document.removeEventListener("visibilitychange", resume);
+      updateRef.current = null;
+    };
+  }, [model]);
 
-    return (
-      <span
-        role="status"
-        aria-label="Chat active"
-        className={cn(
-          "inline-flex shrink-0 items-center justify-center",
-          motionEnabled && WORKING_INDICATOR_ENTRANCE_CLASSES,
-          className,
-        )}
-      >
-        <BerdLoaderInline
-          animated={motionEnabled}
-          decorative
-          size={ACTIVE_CHAT_BERD_SIZE_PX}
-        />
-      </span>
-    );
-  }
+  useLayoutEffect(() => {
+    updateRef.current?.(state, motionEnabled);
+  }, [state, motionEnabled]);
 
-  if (!hasUnread) {
-    return null;
-  }
-
-  if (variant === "overlay") {
-    return (
-      <span
-        role="status"
-        aria-label="Unread messages"
-        className={cn(
-          "absolute -right-0.5 -top-0.5 h-2 w-2 shrink-0 rounded-full bg-success transition-opacity duration-200 ease-out animate-in fade-in-0",
-          className,
-        )}
-      />
-    );
-  }
-
+  const label =
+    state === "working"
+      ? (activeLabel ?? t("status.chatActive"))
+      : state === "unread"
+        ? (unreadLabel ?? t("status.unreadMessages"))
+        : undefined;
   return (
     <span
       role="status"
-      aria-label="Unread messages"
+      aria-label={label}
+      aria-hidden={state === "idle" ? true : undefined}
+      data-slot="session-activity-indicator"
+      data-state={state}
+      data-animated={motionEnabled}
       className={cn(
-        "h-2 w-2 shrink-0 rounded-full bg-success transition-opacity duration-200 ease-out animate-in fade-in-0",
+        "pointer-events-none inline-flex shrink-0 items-center justify-center text-primary",
+        variant === "overlay" && "absolute -right-2 -top-2",
         className,
       )}
-    />
+      style={{ display: state === "idle" ? "none" : undefined }}
+    >
+      <svg
+        ref={svgRef}
+        aria-hidden="true"
+        viewBox="0 0 20 20"
+        fill="currentColor"
+        className={cn("text-primary", size === "sm" ? "size-4" : "size-5")}
+      >
+        {model.pose.map((dot, index) => (
+          <circle key={index} cx={10 + dot.x} cy={10 + dot.y} r={dot.radius} />
+        ))}
+      </svg>
+      <span className="sr-only">{label}</span>
+    </span>
   );
 }

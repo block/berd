@@ -4,7 +4,7 @@ import {
   IconChevronDown,
   IconSparkles,
 } from "@tabler/icons-react";
-import { Mic, Plus, RefreshCw, Search, X } from "lucide-react";
+import { MessageCircle, Mic, Plus, RefreshCw, Search, X } from "lucide-react";
 
 import { cn } from "@/shared/lib/cn";
 import { useTheme } from "@/shared/theme/ThemeProvider";
@@ -4978,7 +4978,87 @@ function SeparatorPage() {
 }
 
 function SessionActivityIndicatorPage() {
-  return <GenericComponentPage name="Session Activity Indicator" />;
+  const [state, setState] = useState("working");
+  const [variant, setVariant] = useState<"inline" | "overlay">("inline");
+  const [animated, setAnimated] = useState(true);
+  return (
+    <>
+      <PageIntro
+        title="Session Activity Indicator"
+        description="Four dots shuffle while a chat works, then gather into one dot when it has unread output. Shape—not color—distinguishes the states."
+      />
+      <ComponentSpec name="Session Activity Indicator" />
+      <ComponentPlayground
+        description="Change state mid-motion to inspect the gathering transition. Animation also respects the app preference and the operating system’s reduced-motion setting. Idle shows nothing; it does not imply success."
+        preview={
+          <div className="relative flex size-10 items-center justify-center">
+            {variant === "overlay" ? (
+              <MessageCircle aria-hidden="true" />
+            ) : null}
+            <SessionActivityIndicator
+              isRunning={state === "working"}
+              hasUnread={state === "unread"}
+              variant={variant}
+              animated={animated}
+            />
+          </div>
+        }
+        controls={[
+          {
+            id: "session-activity-state",
+            label: "State",
+            type: "select",
+            value: state,
+            options: [
+              { label: "Working", value: "working" },
+              { label: "Unread", value: "unread" },
+              { label: "Idle / read", value: "idle" },
+            ],
+            onChange: setState,
+          },
+          {
+            id: "session-activity-variant",
+            label: "Placement",
+            type: "select",
+            value: variant,
+            options: [
+              { label: "Inline", value: "inline" },
+              { label: "Overlay", value: "overlay" },
+            ],
+            onChange: (value) => setVariant(value as "inline" | "overlay"),
+          },
+          {
+            id: "session-activity-animation",
+            label: "Allow animation",
+            type: "switch",
+            checked: animated,
+            onChange: setAnimated,
+          },
+        ]}
+        details={
+          <ComponentTokenDetails
+            colorRows={
+              state === "idle"
+                ? []
+                : [
+                    {
+                      anatomy:
+                        state === "working"
+                          ? "Four working dots"
+                          : "Unread dot",
+                      state: state === "working" ? "Working" : "Unread",
+                      background: "transparent",
+                      textIcon: "primary",
+                      border: "none",
+                    },
+                  ]
+            }
+            textRows={[]}
+          />
+        }
+      />
+    </>
+  );
 }
 
 function SettingsPagePage() {

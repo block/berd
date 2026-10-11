@@ -1541,18 +1541,6 @@
   --toast-mobile-bottom-offset: 132px;
 }
 
-@keyframes active-chat-dot-pulse {
-  0%,
-  100% {
-    opacity: 0.55;
-    transform: scale(0.88);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
 @keyframes voice-waveform {
   0%,
   100% {

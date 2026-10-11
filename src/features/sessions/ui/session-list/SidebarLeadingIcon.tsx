@@ -1,9 +1,8 @@
 import type { MouseEventHandler, ReactNode } from "react";
 import { IconPin } from "@tabler/icons-react";
-import { ActiveChatBerdIndicator } from "@/shared/ui/SessionActivityIndicator";
+import { SessionActivityIndicator } from "@/shared/ui/SessionActivityIndicator";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
-import { SidebarUnreadDot } from "./SidebarUnreadDot";
 
 interface SidebarLeadingIconQuickPin {
   pinned: boolean;
@@ -51,23 +50,14 @@ export function SidebarLeadingIcon({
       )}
       data-testid={testId}
     >
-      {isRunning ? (
-        <span
-          role="status"
-          aria-label={activeLabel}
-          className="flex size-full items-center justify-center text-sidebar-foreground"
-        >
-          <ActiveChatBerdIndicator respectAnimationPreference size={16} />
-        </span>
-      ) : hasUnread ? (
-        <span
-          role="status"
-          aria-label={unreadLabel}
-          className="flex size-full items-center justify-center"
-        >
-          <SidebarUnreadDot />
-        </span>
-      ) : (
+      <SessionActivityIndicator
+        size="sm"
+        isRunning={isRunning}
+        hasUnread={hasUnread}
+        activeLabel={activeLabel}
+        unreadLabel={unreadLabel}
+      />
+      {!isRunning && !hasUnread ? (
         <>
           {children != null ? (
             <span
@@ -117,7 +107,7 @@ export function SidebarLeadingIcon({
             </span>
           ) : null}
         </>
-      )}
+      ) : null}
     </span>
   );
 }
