@@ -12,7 +12,6 @@ import {
 import { copyImage } from "@/shared/ui/copyImage";
 import { revealInFileManager } from "@/shared/lib/fileManager";
 import { pathExists } from "@/shared/api/system";
-import { getPlatform } from "@/shared/lib/platform";
 import { downloadImage } from "@/shared/ui/downloadImage";
 import { GlassButton } from "@/shared/ui/glass-button";
 import { openDownloadsFolder } from "@/shared/ui/openDownloadsFolder";
@@ -74,7 +73,7 @@ export function ImageLightbox({
       cancelled = true;
     };
   }, [open, localFilePath]);
-  const revealLabel = t(`common:labels.revealInFileManager_${getPlatform()}`);
+  const folderLabel = t("image.openInFolder");
 
   const handleCopy = () => {
     if (copyController.current) return;
@@ -166,6 +165,17 @@ export function ImageLightbox({
             <GlassButton
               type="button"
               size="icon"
+              title={t("image.copy")}
+              aria-label={t("image.copy")}
+              feedbackState={copying ? "loading" : "idle"}
+              loadingVisual="spinner"
+              onClick={handleCopy}
+            >
+              <Copy />
+            </GlassButton>
+            <GlassButton
+              type="button"
+              size="icon"
               title={t("image.download")}
               aria-label={t("image.download")}
               onClick={handleDownload}
@@ -176,8 +186,8 @@ export function ImageLightbox({
               <GlassButton
                 type="button"
                 size="icon"
-                title={revealLabel}
-                aria-label={revealLabel}
+                title={folderLabel}
+                aria-label={folderLabel}
                 onClick={handleReveal}
               >
                 <FolderOpen />
@@ -221,6 +231,16 @@ export function ImageLightbox({
               <Copy aria-hidden="true" />
               {t("image.copy")}
             </ContextMenuItem>
+            <ContextMenuItem onSelect={handleDownload}>
+              <Download aria-hidden="true" />
+              {t("image.download")}
+            </ContextMenuItem>
+            {existingLocalPath && existingLocalPath === localFilePath && (
+              <ContextMenuItem onSelect={handleReveal}>
+                <FolderOpen aria-hidden="true" />
+                {folderLabel}
+              </ContextMenuItem>
+            )}
           </ContextMenuContent>
         </ContextMenu>
       </DialogContent>

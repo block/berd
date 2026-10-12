@@ -2322,7 +2322,7 @@ describe("MessageBubble", () => {
         }),
       );
       expect(
-        await screen.findByRole("button", { name: /Reveal in/ }),
+        await screen.findByRole("button", { name: "Open in folder" }),
       ).toBeVisible();
       expect(mockPathExists).toHaveBeenCalledWith("/tmp/original.png");
       local.unmount();
@@ -2338,7 +2338,9 @@ describe("MessageBubble", () => {
       );
       expect(screen.getByRole("dialog")).toBeVisible();
       await act(async () => {});
-      expect(screen.queryByRole("button", { name: /Reveal in/ })).toBeNull();
+      expect(
+        screen.queryByRole("button", { name: "Open in folder" }),
+      ).toBeNull();
       expect(mockPathExists).not.toHaveBeenCalled();
     } finally {
       delete window.__TAURI_INTERNALS__;

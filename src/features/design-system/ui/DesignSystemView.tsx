@@ -4771,11 +4771,11 @@ function ImageLightboxPage() {
     <>
       <PageIntro
         title="Image Lightbox"
-        description="Full-size image previews with copy, download, and reveal-original-file actions when a local original exists."
+        description="Full-size image previews with copy, download, and open-in-folder actions when a local original exists."
       />
       <ComponentSpec name="Image Lightbox" />
       <ComponentPlayground
-        description="Open the actual lightbox and right-click the image to copy it. Tiny imagery checks that actions stay accessible without covering the image. This browser asset has no original local file, so Reveal is not offered."
+        description="Open the actual lightbox. Copy and Download share matching top-right controls; right-click repeats the actions. Tiny imagery checks that actions stay accessible without covering the image. This browser asset has no original local file, so Open in folder is not offered."
         preview={
           <>
             <Button variant="outline" onClick={() => setOpen(true)}>

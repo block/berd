@@ -179,7 +179,9 @@ describe("ImageLightbox download button", () => {
         onOpenChange={() => {}}
       />,
     );
-    const reveal = await screen.findByRole("button", { name: /Reveal in/ });
+    const reveal = await screen.findByRole("button", {
+      name: "Open in folder",
+    });
     await user.click(reveal);
     expect(revealInFileManager).toHaveBeenCalledWith("/tmp/original.png");
   });
@@ -193,7 +195,7 @@ describe("ImageLightbox download button", () => {
         onOpenChange={() => {}}
       />,
     );
-    expect(screen.queryByRole("button", { name: /Reveal in/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open in folder" })).toBeNull();
     expect(pathExists).not.toHaveBeenCalled();
   });
 
@@ -211,7 +213,7 @@ describe("ImageLightbox download button", () => {
     await waitFor(() =>
       expect(pathExists).toHaveBeenCalledWith("/tmp/missing.png"),
     );
-    expect(screen.queryByRole("button", { name: /Reveal in/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open in folder" })).toBeNull();
   });
 
   it("does not leave the previous original's folder action when navigating", async () => {
@@ -224,7 +226,7 @@ describe("ImageLightbox download button", () => {
         onOpenChange={() => {}}
       />,
     );
-    await screen.findByRole("button", { name: /Reveal in/ });
+    await screen.findByRole("button", { name: "Open in folder" });
     vi.mocked(pathExists).mockReturnValue(new Promise(() => {}));
     rerender(
       <ImageLightbox
@@ -234,9 +236,9 @@ describe("ImageLightbox download button", () => {
         onOpenChange={() => {}}
       />,
     );
-    expect(screen.queryByRole("button", { name: /Reveal in/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open in folder" })).toBeNull();
   });
-  it("offers Copy only in the image context menu, with ordinary action-group semantics", async () => {
+  it("offers matching Copy and Download buttons, repeated in the context menu", async () => {
     render(
       <ImageLightbox
         src="data:image/png;base64,abc"
@@ -244,11 +246,20 @@ describe("ImageLightbox download button", () => {
         onOpenChange={() => {}}
       />,
     );
-    expect(screen.queryByRole("button", { name: "Copy image" })).toBeNull();
-    expect(screen.getByRole("group", { name: "Image actions" })).toBeVisible();
+    const actions = screen.getByRole("group", { name: "Image actions" });
+    const buttons = Array.from(actions.querySelectorAll("button"));
+    expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual([
+      "Copy image",
+      "Download image",
+    ]);
+    expect(buttons[0]).toHaveClass(...buttons[1].classList);
+    expect(actions).toBeVisible();
     fireEvent.contextMenu(screen.getByRole("img"));
     expect(
       await screen.findByRole("menuitem", { name: "Copy image" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("menuitem", { name: "Download image" }),
     ).toBeVisible();
     expect(screen.queryByRole("toolbar")).toBeNull();
   });
@@ -338,5 +349,68 @@ describe("ImageLightbox download button", () => {
     expect(
       await screen.findByRole("menuitem", { name: "Copy image" }),
     ).toBeVisible();
+  });
+  it("copies from the first top-right button and keeps the preview open", async () => {
+    const user = userEvent.setup();
+    const onOpenChange = vi.fn();
+    render(
+      <ImageLightbox
+        src="data:image/png;base64,abc"
+        open
+        onOpenChange={onOpenChange}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Copy image" }));
+    expect(copyImage).toHaveBeenCalledWith("data:image/png;base64,abc", {
+      image: screen.getByRole("img"),
+      signal: expect.any(AbortSignal),
+    });
+    await waitFor(() =>
+      expect(toast.message).toHaveBeenCalledWith("Image copied"),
+    );
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it("disables both copy entry points during the same operation", async () => {
+    vi.mocked(copyImage).mockReturnValue(new Promise(() => {}));
+    const user = userEvent.setup();
+    render(
+      <ImageLightbox
+        src="data:image/png;base64,abc"
+        open
+        onOpenChange={() => {}}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Copy image" }));
+    expect(screen.getByRole("button", { name: "Copy image" })).toBeDisabled();
+    fireEvent.contextMenu(screen.getByRole("img"));
+    expect(
+      await screen.findByRole("menuitem", { name: "Copy image" }),
+    ).toHaveAttribute("data-disabled");
+    expect(copyImage).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the action order and folder label identical in the row and shortcut menu", async () => {
+    window.__TAURI_INTERNALS__ = {};
+    render(
+      <ImageLightbox
+        src="data:image/png;base64,abc"
+        localFilePath="/tmp/original.png"
+        open
+        onOpenChange={() => {}}
+      />,
+    );
+    await screen.findByRole("button", { name: "Open in folder" });
+    const actions = screen.getByRole("group", { name: "Image actions" });
+    expect(
+      Array.from(actions.querySelectorAll("button")).map((button) =>
+        button.getAttribute("aria-label"),
+      ),
+    ).toEqual(["Copy image", "Download image", "Open in folder"]);
+    fireEvent.contextMenu(screen.getByRole("img"));
+    await screen.findByRole("menuitem", { name: "Open in folder" });
+    expect(
+      screen.getAllByRole("menuitem").map((item) => item.textContent),
+    ).toEqual(["Copy image", "Download image", "Open in folder"]);
   });
 });

@@ -324,6 +324,7 @@
     "rootLoadError": "Couldn't load this folder. Try again."
   },
   "image": {
+    "openInFolder": "Open in folder",
     "actions": "Image actions",
     "copy": "Copy image",
     "copied": "Image copied",

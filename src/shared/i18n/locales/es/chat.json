@@ -323,6 +323,7 @@
     "rootLoadError": "No se pudo cargar esta carpeta. Inténtalo de nuevo."
   },
   "image": {
+    "openInFolder": "Abrir en carpeta",
     "actions": "Acciones de imagen",
     "copy": "Copiar imagen",
     "copied": "Imagen copiada",
