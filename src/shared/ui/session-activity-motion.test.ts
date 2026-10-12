@@ -1,11 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { SessionActivityMotion, shufflePose } from "./session-activity-motion";
+import {
+  activityPose,
+  SESSION_ACTIVITY_LOOP_MS,
+  SESSION_ACTIVITY_STYLES,
+  SessionActivityMotion,
+} from "./session-activity-motion";
 
 describe("session activity motion", () => {
-  it("keeps four separate dots in the slot, with a pair always moving", () => {
-    for (let time = 0; time < 2400; time += 10) {
-      const dots = shufflePose(time);
-      const next = shufflePose(time + 10);
+  it.each(
+    SESSION_ACTIVITY_STYLES,
+  )("%s keeps four separate dots in the slot and never pauses", (style) => {
+    const loop = SESSION_ACTIVITY_LOOP_MS[style];
+    const pose = (time: number) => activityPose(style, time);
+    for (let time = 0; time < loop; time += 10) {
+      const dots = pose(time);
+      const next = pose(time + 10);
       expect(dots).toHaveLength(4);
       expect(
         Math.max(
@@ -13,7 +22,7 @@ describe("session activity motion", () => {
             Math.hypot(next[i].x - dot.x, next[i].y - dot.y),
           ),
         ),
-      ).toBeGreaterThan(0.06);
+      ).toBeGreaterThan(0.01);
       dots.forEach((dot, i) => {
         expect(Math.abs(dot.x) + dot.radius).toBeLessThan(10);
         expect(Math.abs(dot.y) + dot.radius).toBeLessThan(10);
@@ -24,14 +33,14 @@ describe("session activity motion", () => {
         });
       });
     }
-    shufflePose(2400).forEach((dot, i) => {
-      expect(dot.x).toBeCloseTo(shufflePose(0)[i].x);
-      expect(dot.y).toBeCloseTo(shufflePose(0)[i].y);
+    pose(loop).forEach((dot, i) => {
+      expect(dot.x).toBeCloseTo(pose(0)[i].x);
+      expect(dot.y).toBeCloseTo(pose(0)[i].y);
     });
   });
 
   it.each([
-    0, 113, 790, 1200, 1890, 2300,
+    0, 113, 790, 3000, 4890, 5900,
   ])("gathers from the current pose at phase %i, including interrupted restarts", (phase) => {
     const model = new SessionActivityMotion("working", true);
     model.step(phase);
@@ -74,6 +83,33 @@ describe("session activity motion", () => {
     model.setState("idle", true);
     expect(model.pose.every((dot) => dot.radius === 0)).toBe(true);
     expect(model.moving).toBe(false);
+  });
+
+  it("defaults to the distant bird, evenly spaced", () => {
+    const model = new SessionActivityMotion("working", true);
+    expect(model.pose).toEqual(activityPose("bird", 0));
+    const xs = activityPose("bird", 0).map((dot) => dot.x);
+    expect(xs[2] - xs[1]).toBeCloseTo(5);
+  });
+
+  it("moves from the current pose into a newly chosen style", () => {
+    const model = new SessionActivityMotion("working", true, "bird");
+    model.step(700);
+    const painted = structuredClone(model.pose);
+    model.setStyle("beak");
+    expect(model.pose).toEqual(painted);
+    model.step(400);
+    expect(model.moving).toBe(true);
+    model.step(100);
+    const beakDots = model.pose;
+    expect(beakDots.every((dot) => dot.radius === 1.4)).toBe(true);
+  });
+
+  it.each(
+    SESSION_ACTIVITY_STYLES,
+  )("%s still shows four distinct dots with motion off", (style) => {
+    const model = new SessionActivityMotion("working", false, style);
+    expect(new Set(model.pose.map((dot) => `${dot.x},${dot.y}`)).size).toBe(4);
   });
 
   it("switches instantly between four static dots and one dot when motion is off", () => {

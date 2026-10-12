@@ -62,6 +62,13 @@
     "workingIndicatorAnimation": {
       "description": "Anima el indicador de actividad de los chats que están trabajando actualmente en la barra lateral.",
       "label": "Animar indicadores de trabajo de la barra lateral"
+    },
+    "activityStyle": {
+      "label": "Indicador de actividad",
+      "description": "Elige cómo se mueven los puntos mientras Berd trabaja. Cuando hay una respuesta lista, se juntan en un solo punto.",
+      "bird": "Pájaro lejano",
+      "shuffle": "Barajar",
+      "beak": "Pico de Berd"
     }
   },
   "archive": {

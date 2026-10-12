@@ -62,6 +62,13 @@
     "workingIndicatorAnimation": {
       "description": "Animate the activity indicator for chats that are currently working in the sidebar.",
       "label": "Animate sidebar working indicators"
+    },
+    "activityStyle": {
+      "label": "Activity indicator",
+      "description": "Choose how the working dots move. When a reply is ready, they gather into one dot.",
+      "bird": "Distant bird",
+      "shuffle": "Shuffle",
+      "beak": "Berd beak"
     }
   },
   "archive": {

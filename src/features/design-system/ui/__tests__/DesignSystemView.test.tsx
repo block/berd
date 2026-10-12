@@ -23,14 +23,16 @@ describe("DesignSystemView surfaces", () => {
     expect(source).not.toContain("overflow-hidden bg-background");
   });
 
-  it("documents radio cards with state-aware controls and token rows", () => {
+  it("documents radio cards and visual-only tiles with state-aware controls and token rows", () => {
     expect(source).toContain('id: "radio-group-presentation"');
     expect(source).toContain('id: "radio-group-selected"');
     expect(source).toContain(
       'onValueChange={(value) => setSelected(value === "option")}',
     );
     expect(source).toContain('id: "radio-group-disabled"');
-    expect(source).toContain('anatomy: "Card surface"');
+    expect(source).toContain('"Card surface"');
+    expect(source).toContain('"Tile surface"');
+    expect(source).toContain("<RadioGroupTile");
     expect(source).toContain('state: "Focus visible"');
     expect(source).toContain("...(!disabled");
     expect(source).toContain('"muted-foreground / 50% opacity"');

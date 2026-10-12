@@ -103,4 +103,39 @@ function RadioGroupCard({
   );
 }
 
-export { RadioGroup, RadioGroupCard, RadioGroupItem };
+type RadioGroupTileProps = Omit<
+  React.ComponentProps<typeof RadioGroupPrimitive.Item>,
+  "aria-label" | "title"
+> & {
+  /** Accessible name and native hover hint; the tile itself shows only its visual. */
+  label: string;
+};
+
+/**
+ * A visual-only choice: the whole tile is the radio, with no radio dot or
+ * text. Use when the option is best recognized by seeing it (an animation,
+ * swatch, or illustration). Shares RadioGroupCard's selected/focus states.
+ */
+function RadioGroupTile({
+  label,
+  className,
+  children,
+  ...props
+}: RadioGroupTileProps) {
+  return (
+    <RadioGroupPrimitive.Item
+      data-slot="radio-group-tile"
+      aria-label={label}
+      title={label}
+      className={cn(
+        "data-[state=checked]:border-primary data-[state=checked]:bg-muted focus-visible:border-ring focus-visible:ring-ring/50 flex min-h-20 cursor-pointer items-center justify-center rounded-md border border-border p-3 transition-[color,box-shadow] outline-none hover:bg-muted/50 focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:hover:bg-muted",
+        className,
+      )}
+      {...props}
+    >
+      {children}
+    </RadioGroupPrimitive.Item>
+  );
+}
+
+export { RadioGroup, RadioGroupCard, RadioGroupItem, RadioGroupTile };

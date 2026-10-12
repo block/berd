@@ -3,11 +3,13 @@ import { useTranslation } from "react-i18next";
 
 import { cn } from "@/shared/lib/cn";
 import { usePrefersReducedMotion } from "@/shared/hooks/usePrefersReducedMotion";
+import { useSessionActivityStylePreference } from "@/shared/preferences/sessionActivityStylePreference";
 import { useWorkingIndicatorAnimationPreference } from "@/shared/preferences/workingIndicatorAnimationPreference";
 import { BerdLoaderInline } from "@/shared/ui/berd-loader-inline";
 import {
   SessionActivityMotion,
   type SessionActivityState,
+  type SessionActivityStyle,
 } from "@/shared/ui/session-activity-motion";
 
 /** Branded responding treatment inside the conversation, not compact session status. */
@@ -39,16 +41,19 @@ interface SessionActivityIndicatorProps {
   isRunning?: boolean;
   hasUnread?: boolean;
   variant?: "inline" | "overlay";
-  size?: "default" | "sm";
+  size?: "default" | "sm" | "lg";
   /** Allow a static preview, never override the OS or user animation preference. */
   animated?: boolean;
+  /** Preview a specific motion; defaults to the user's Appearance setting. */
+  motionStyle?: SessionActivityStyle;
   activeLabel?: string;
   unreadLabel?: string;
   className?: string;
 }
 
 /**
- * Keep mounted across state changes: the same four dots gather from their current
+ * Keep mounted across state changes: the same four dots (bird, shuffle, or
+ * beak motion, per the Appearance setting) gather from their current
  * positions into one unread dot. Idle is hidden and never implies unread/success.
  * Color follows the app's primary token; shape carries meaning without color/motion.
  */
@@ -58,6 +63,7 @@ export function SessionActivityIndicator({
   variant = "inline",
   size = "default",
   animated = true,
+  motionStyle,
   activeLabel,
   unreadLabel,
   className,
@@ -65,6 +71,8 @@ export function SessionActivityIndicator({
   const { t } = useTranslation("sidebar");
   const reducedMotion = usePrefersReducedMotion();
   const preference = useWorkingIndicatorAnimationPreference();
+  const stylePreference = useSessionActivityStylePreference();
+  const style = motionStyle ?? stylePreference.style;
   const motionEnabled = animated && preference.enabled && !reducedMotion;
   const state: SessionActivityState = isRunning
     ? "working"
@@ -74,11 +82,14 @@ export function SessionActivityIndicator({
   const svgRef = useRef<SVGSVGElement>(null);
   const modelRef = useRef<SessionActivityMotion | null>(null);
   if (!modelRef.current)
-    modelRef.current = new SessionActivityMotion(state, motionEnabled);
+    modelRef.current = new SessionActivityMotion(state, motionEnabled, style);
   const model = modelRef.current;
   const updateRef = useRef<
     ((state: SessionActivityState, animated: boolean) => void) | null
   >(null);
+  const restyleRef = useRef<((style: SessionActivityStyle) => void) | null>(
+    null,
+  );
 
   useLayoutEffect(() => {
     const svg = svgRef.current;
@@ -128,6 +139,11 @@ export function SessionActivityIndicator({
         idleFrame = requestAnimationFrame(apply);
       } else apply();
     };
+    restyleRef.current = (nextStyle) => {
+      model.setStyle(nextStyle);
+      paint();
+      resume();
+    };
     const observer =
       typeof IntersectionObserver === "undefined"
         ? null
@@ -145,12 +161,17 @@ export function SessionActivityIndicator({
       observer?.disconnect();
       document.removeEventListener("visibilitychange", resume);
       updateRef.current = null;
+      restyleRef.current = null;
     };
   }, [model]);
 
   useLayoutEffect(() => {
     updateRef.current?.(state, motionEnabled);
   }, [state, motionEnabled]);
+
+  useLayoutEffect(() => {
+    restyleRef.current?.(style);
+  }, [style]);
 
   const label =
     state === "working"
@@ -166,6 +187,7 @@ export function SessionActivityIndicator({
       data-slot="session-activity-indicator"
       data-state={state}
       data-animated={motionEnabled}
+      data-motion-style={style}
       className={cn(
         "pointer-events-none inline-flex shrink-0 items-center justify-center text-primary",
         variant === "overlay" && "absolute -right-2 -top-2",
@@ -178,7 +200,10 @@ export function SessionActivityIndicator({
         aria-hidden="true"
         viewBox="0 0 20 20"
         fill="currentColor"
-        className={cn("text-primary", size === "sm" ? "size-4" : "size-5")}
+        className={cn(
+          "text-primary",
+          size === "sm" ? "size-4" : size === "lg" ? "size-10" : "size-5",
+        )}
       >
         {model.pose.map((dot, index) => (
           <circle key={index} cx={10 + dot.x} cy={10 + dot.y} r={dot.radius} />

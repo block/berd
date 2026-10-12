@@ -38,6 +38,11 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     labelKey: "appearance.workingIndicatorAnimation.label",
   },
   {
+    id: "activity-style",
+    sectionId: "appearance",
+    labelKey: "appearance.activityStyle.label",
+  },
+  {
     id: "pin-labels",
     sectionId: "appearance",
     labelKey: "appearance.homePinLabels.label",

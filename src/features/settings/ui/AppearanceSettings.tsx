@@ -8,9 +8,16 @@ import {
   SettingsSection,
   SettingsSections,
 } from "@/shared/ui/settings-section";
+import { RadioGroup, RadioGroupTile } from "@/shared/ui/radio-group";
+import { SessionActivityIndicator } from "@/shared/ui/SessionActivityIndicator";
+import {
+  SESSION_ACTIVITY_STYLES,
+  type SessionActivityStyle,
+} from "@/shared/ui/session-activity-motion";
 import { Switch } from "@/shared/ui/switch";
 import { useTheme } from "@/shared/theme/ThemeProvider";
 import { useAnimatedAvatarsPreference } from "@/shared/avatars/avatarPlaybackPreferences";
+import { useSessionActivityStylePreference } from "@/shared/preferences/sessionActivityStylePreference";
 import { useWorkingIndicatorAnimationPreference } from "@/shared/preferences/workingIndicatorAnimationPreference";
 import { useHomePinLabelsPreference } from "@/features/home/lib/homePinLabelPreference";
 
@@ -30,6 +37,7 @@ export function AppearanceSettings() {
   const workingIndicatorAnimationPreference =
     useWorkingIndicatorAnimationPreference();
   const homePinLabelsPreference = useHomePinLabelsPreference();
+  const activityStylePreference = useSessionActivityStylePreference();
 
   const THEME_PRIMARY_PRESET_ID = "theme";
   const primaryColorPresets = [
@@ -153,6 +161,40 @@ export function AppearanceSettings() {
               aria-label={t("appearance.workingIndicatorAnimation.label")}
             />
           </SettingsRow>
+
+          <SettingsRow
+            layout="stacked"
+            label={t("appearance.activityStyle.label")}
+            description={t("appearance.activityStyle.description")}
+            action={
+              <RadioGroup
+                value={activityStylePreference.style}
+                onValueChange={(value) =>
+                  activityStylePreference.setStyle(
+                    value as SessionActivityStyle,
+                  )
+                }
+                aria-label={t("appearance.activityStyle.label")}
+                className="sm:grid-cols-3"
+              >
+                {SESSION_ACTIVITY_STYLES.map((style) => (
+                  <RadioGroupTile
+                    key={style}
+                    value={style}
+                    label={t(`appearance.activityStyle.${style}`)}
+                  >
+                    <span aria-hidden="true" className="inline-flex">
+                      <SessionActivityIndicator
+                        isRunning
+                        motionStyle={style}
+                        size="lg"
+                      />
+                    </span>
+                  </RadioGroupTile>
+                ))}
+              </RadioGroup>
+            }
+          />
 
           <SettingsRow
             label={t("appearance.homePinLabels.label")}

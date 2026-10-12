@@ -147,6 +147,7 @@ import {
   RadioGroup,
   RadioGroupCard,
   RadioGroupItem,
+  RadioGroupTile,
 } from "@/shared/ui/radio-group";
 import {
   ResizableHandle,
@@ -158,6 +159,7 @@ import { SearchableSelect } from "@/shared/ui/searchable-select";
 import { SearchBar } from "@/shared/ui/SearchBar";
 import { Separator } from "@/shared/ui/separator";
 import { SessionActivityIndicator } from "@/shared/ui/SessionActivityIndicator";
+import type { SessionActivityStyle } from "@/shared/ui/session-activity-motion";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
 import {
   SettingsSection,
@@ -4812,7 +4814,9 @@ function ProgressPage() {
 }
 
 function RadioGroupPage() {
-  const [presentation, setPresentation] = useState<"item" | "card">("card");
+  const [presentation, setPresentation] = useState<"item" | "card" | "tile">(
+    "card",
+  );
   const [selected, setSelected] = useState(true);
   const [disabled, setDisabled] = useState(false);
   const value = selected ? "option" : "";
@@ -4820,10 +4824,10 @@ function RadioGroupPage() {
     disabled ? ", disabled" : ""
   }`;
   const colorRows: TokenColorRow[] =
-    presentation === "card"
+    presentation !== "item"
       ? [
           {
-            anatomy: "Card surface",
+            anatomy: presentation === "tile" ? "Tile surface" : "Card surface",
             state: stateLabel,
             background: selected ? "muted" : "transparent",
             textIcon: disabled ? "foreground / 50% opacity" : "foreground",
@@ -4832,7 +4836,8 @@ function RadioGroupPage() {
           ...(!disabled
             ? [
                 {
-                  anatomy: "Card surface",
+                  anatomy:
+                    presentation === "tile" ? "Tile surface" : "Card surface",
                   state: "Focus visible",
                   background: selected ? "muted" : "transparent",
                   textIcon: "foreground",
@@ -4840,13 +4845,17 @@ function RadioGroupPage() {
                 } satisfies TokenColorRow,
               ]
             : []),
-          {
-            anatomy: "Description",
-            state: stateLabel,
-            textIcon: disabled
-              ? "muted-foreground / 50% opacity"
-              : "muted-foreground",
-          },
+          ...(presentation === "tile"
+            ? []
+            : [
+                {
+                  anatomy: "Description",
+                  state: stateLabel,
+                  textIcon: disabled
+                    ? "muted-foreground / 50% opacity"
+                    : "muted-foreground",
+                } satisfies TokenColorRow,
+              ]),
         ]
       : [
           {
@@ -4873,7 +4882,7 @@ function RadioGroupPage() {
     <>
       <PageIntro
         title="Radio Group"
-        description="Choose between compact radio items and full-row selectable cards with shared selected, hover, focus-visible, and disabled semantics."
+        description="Choose between compact radio items, full-row selectable cards, and visual-only tiles (no radio dot or text; the visual is the choice) with shared selected, hover, focus-visible, and disabled semantics."
       />
       <ComponentSpec name="Radio Group" />
       <ComponentPlayground
@@ -4884,7 +4893,18 @@ function RadioGroupPage() {
             onValueChange={(value) => setSelected(value === "option")}
             className="w-full max-w-sm"
           >
-            {presentation === "card" ? (
+            {presentation === "tile" ? (
+              <RadioGroupTile
+                value="option"
+                label="Distant bird"
+                disabled={disabled}
+                className="w-32"
+              >
+                <span aria-hidden="true" className="inline-flex">
+                  <SessionActivityIndicator isRunning size="lg" />
+                </span>
+              </RadioGroupTile>
+            ) : presentation === "card" ? (
               <RadioGroupCard
                 id="radio-group-playground-option"
                 value="option"
@@ -4912,9 +4932,11 @@ function RadioGroupPage() {
             value: presentation,
             options: [
               { label: "Card", value: "card" },
+              { label: "Tile", value: "tile" },
               { label: "Item", value: "item" },
             ],
-            onChange: (value) => setPresentation(value as "item" | "card"),
+            onChange: (value) =>
+              setPresentation(value as "item" | "card" | "tile"),
           },
           {
             id: "radio-group-selected",
@@ -4934,22 +4956,28 @@ function RadioGroupPage() {
         details={
           <ComponentTokenDetails
             colorRows={colorRows}
-            textRows={[
-              {
-                anatomy: presentation === "card" ? "Card label" : "Item label",
-                size: "text-sm",
-                weight: presentation === "card" ? "font-medium" : "font-normal",
-              },
-              ...(presentation === "card"
-                ? [
+            textRows={
+              presentation === "tile"
+                ? []
+                : [
                     {
-                      anatomy: "Card description",
-                      size: "text-xs",
-                      weight: "font-normal",
-                    } satisfies TokenTextRow,
+                      anatomy:
+                        presentation === "card" ? "Card label" : "Item label",
+                      size: "text-sm",
+                      weight:
+                        presentation === "card" ? "font-medium" : "font-normal",
+                    },
+                    ...(presentation === "card"
+                      ? [
+                          {
+                            anatomy: "Card description",
+                            size: "text-xs",
+                            weight: "font-normal",
+                          } satisfies TokenTextRow,
+                        ]
+                      : []),
                   ]
-                : []),
-            ]}
+            }
           />
         }
       />
@@ -4981,11 +5009,13 @@ function SessionActivityIndicatorPage() {
   const [state, setState] = useState("working");
   const [variant, setVariant] = useState<"inline" | "overlay">("inline");
   const [animated, setAnimated] = useState(true);
+  const [motionStyle, setMotionStyle] = useState<SessionActivityStyle>("bird");
+  const [size, setSize] = useState<"sm" | "default" | "lg">("default");
   return (
     <>
       <PageIntro
         title="Session Activity Indicator"
-        description="Four dots shuffle while a chat works, then gather into one dot when it has unread output. Shape—not color—distinguishes the states."
+        description="Four dots move while a chat works (distant bird by default; shuffle and Berd beak are Appearance options), then gather into one dot when it has unread output. Shape—not color—distinguishes the states."
       />
       <ComponentSpec name="Session Activity Indicator" />
       <ComponentPlayground
@@ -5000,6 +5030,8 @@ function SessionActivityIndicatorPage() {
               hasUnread={state === "unread"}
               variant={variant}
               animated={animated}
+              motionStyle={motionStyle}
+              size={variant === "overlay" ? "sm" : size}
             />
           </div>
         }
@@ -5016,6 +5048,35 @@ function SessionActivityIndicatorPage() {
             ],
             onChange: setState,
           },
+          {
+            id: "session-activity-style",
+            label: "Motion",
+            type: "select",
+            value: motionStyle,
+            options: [
+              { label: "Distant bird", value: "bird" },
+              { label: "Shuffle", value: "shuffle" },
+              { label: "Berd beak", value: "beak" },
+            ],
+            onChange: (value) => setMotionStyle(value as SessionActivityStyle),
+          },
+          ...(variant === "inline"
+            ? [
+                {
+                  id: "session-activity-size",
+                  label: "Size",
+                  type: "select" as const,
+                  value: size,
+                  options: [
+                    { label: "Small (sidebar icon)", value: "sm" },
+                    { label: "Default (sidebar row)", value: "default" },
+                    { label: "Large (settings preview)", value: "lg" },
+                  ],
+                  onChange: (value: string) =>
+                    setSize(value as "sm" | "default" | "lg"),
+                },
+              ]
+            : []),
           {
             id: "session-activity-variant",
             label: "Placement",
