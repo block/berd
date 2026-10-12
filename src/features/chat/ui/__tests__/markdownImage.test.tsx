@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MarkdownImage } from "../MarkdownImage";
@@ -23,12 +23,6 @@ vi.mock("@/features/chat/hooks/ArtifactPolicyContext", () => ({
   }),
 }));
 
-vi.mock("@/features/chat/ui/ClickableImage", () => ({
-  ClickableImage: ({ src, alt }: { src: string; alt: string }) => (
-    <img data-testid="clickable-image" src={src} alt={alt} />
-  ),
-}));
-
 describe("MarkdownImage", () => {
   beforeEach(() => {
     mocks.resolveMarkdownHref.mockReset();
@@ -47,7 +41,7 @@ describe("MarkdownImage", () => {
 
     render(<MarkdownImage src="./puppy.jpg" alt="puppy" />);
 
-    const img = await screen.findByTestId("clickable-image");
+    const img = await screen.findByAltText("puppy");
     expect(img.getAttribute("src")).toBe("asset:///work/puppy.jpg");
     expect(img.getAttribute("alt")).toBe("puppy");
     expect(mocks.pathExists).toHaveBeenCalledWith("/work/puppy.jpg");
@@ -59,7 +53,7 @@ describe("MarkdownImage", () => {
     expect(screen.getByAltText("remote").getAttribute("src")).toBe(
       "https://example.com/p.jpg",
     );
-    expect(screen.queryByTestId("clickable-image")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^View / })).toBeNull();
     // Remote sources short-circuit before touching the policy context.
     expect(mocks.resolveMarkdownHref).not.toHaveBeenCalled();
   });
@@ -71,11 +65,11 @@ describe("MarkdownImage", () => {
     render(<MarkdownImage src={src} alt={alt} />);
 
     expect(screen.getByAltText(alt).getAttribute("src")).toBe(src);
-    expect(screen.queryByTestId("clickable-image")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^View / })).toBeNull();
     expect(mocks.resolveMarkdownHref).not.toHaveBeenCalled();
   });
 
-  it("falls back to a plain <img> when the local file does not exist", async () => {
+  it("shows an unavailable state when the local file does not exist", async () => {
     mocks.resolveMarkdownHref.mockReturnValue({
       rawPath: "./missing.jpg",
       resolvedPath: "/work/missing.jpg",
@@ -88,10 +82,9 @@ describe("MarkdownImage", () => {
     await waitFor(() => {
       expect(mocks.pathExists).toHaveBeenCalledWith("/work/missing.jpg");
     });
-    expect(screen.queryByTestId("clickable-image")).toBeNull();
-    expect(screen.getByAltText("missing").getAttribute("src")).toBe(
-      "./missing.jpg",
-    );
+    expect(screen.queryByRole("button", { name: /^View / })).toBeNull();
+    expect(await screen.findByText("Image unavailable")).toBeVisible();
+    expect(screen.queryByRole("img")).toBeNull();
   });
 
   it("does not rescue a resolved path that is not an image extension", () => {
@@ -106,10 +99,9 @@ describe("MarkdownImage", () => {
 
     // Non-image extension is rejected before any existence check.
     expect(mocks.pathExists).not.toHaveBeenCalled();
-    expect(screen.queryByTestId("clickable-image")).toBeNull();
-    expect(screen.getByAltText("notes").getAttribute("src")).toBe(
-      "./notes.txt",
-    );
+    expect(screen.queryByRole("button", { name: /^View / })).toBeNull();
+    expect(screen.getByText("Image unavailable")).toBeVisible();
+    expect(screen.queryByRole("img")).toBeNull();
   });
 
   it("does not rescue when the policy context blocks the scheme", () => {
@@ -118,10 +110,9 @@ describe("MarkdownImage", () => {
     render(<MarkdownImage src="weird:thing" alt="blocked" />);
 
     expect(mocks.pathExists).not.toHaveBeenCalled();
-    expect(screen.queryByTestId("clickable-image")).toBeNull();
-    expect(screen.getByAltText("blocked").getAttribute("src")).toBe(
-      "weird:thing",
-    );
+    expect(screen.queryByRole("button", { name: /^View / })).toBeNull();
+    expect(screen.getByText("Image unavailable")).toBeVisible();
+    expect(screen.queryByRole("img")).toBeNull();
   });
 
   it("renders a compact host placeholder for local paths in a remote session", () => {
@@ -138,7 +129,7 @@ describe("MarkdownImage", () => {
     // The file lives on the SSH host: no local existence check, no asset:
     // load (which would 404) — a name + host chip stands in for the image.
     expect(mocks.pathExists).not.toHaveBeenCalled();
-    expect(screen.queryByTestId("clickable-image")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^View / })).toBeNull();
     const placeholder = screen.getByTestId("remote-image-placeholder");
     expect(placeholder.textContent).toContain("remote artifact");
     expect(placeholder.textContent).toContain("devbox");
@@ -156,23 +147,23 @@ describe("MarkdownImage", () => {
     );
   });
 
-  it("does not rescue a path resolved outside the session cwd", () => {
+  it.each([
+    ["/tmp/preview.png", "/tmp/preview.png"],
+    ["../../secret.png", "/secret.png"],
+  ])("automatically loads %s outside the session cwd", async (src, resolvedPath) => {
     mocks.resolveMarkdownHref.mockReturnValue({
-      rawPath: "../../secret.png",
-      resolvedPath: "/secret.png",
+      rawPath: src,
+      resolvedPath,
       isWithinSessionCwd: false,
     });
     mocks.pathExists.mockResolvedValue(true);
-
-    render(<MarkdownImage src="../../secret.png" alt="escape" />);
-
-    // Out-of-cwd paths are rejected before any existence check, including
-    // absolute paths and paths that escape with `..`.
-    expect(mocks.pathExists).not.toHaveBeenCalled();
-    expect(screen.queryByTestId("clickable-image")).toBeNull();
-    expect(screen.getByAltText("escape").getAttribute("src")).toBe(
-      "../../secret.png",
+    render(<MarkdownImage src={src} alt="Outside image" />);
+    expect(await screen.findByAltText("Outside image")).toHaveAttribute(
+      "src",
+      `asset://${resolvedPath}`,
     );
+    expect(mocks.pathExists).toHaveBeenCalledWith(resolvedPath);
+    expect(screen.queryByRole("button", { name: /Show image/ })).toBeNull();
   });
 
   it("clears the stale image when src switches to a new local image", async () => {
@@ -192,21 +183,21 @@ describe("MarkdownImage", () => {
     );
 
     const { rerender } = render(<MarkdownImage src="a.png" alt="first" />);
-    const first = await screen.findByTestId("clickable-image");
+    const first = await screen.findByAltText("first");
     expect(first.getAttribute("src")).toBe("asset:///work/a.png");
 
     rerender(<MarkdownImage src="b.png" alt="second" />);
 
     await waitFor(() => {
-      expect(screen.queryByTestId("clickable-image")).toBeNull();
+      expect(screen.queryByRole("button", { name: /^View / })).toBeNull();
     });
 
     resolveSecond?.(true);
-    const second = await screen.findByTestId("clickable-image");
+    const second = await screen.findByAltText("second");
     expect(second.getAttribute("src")).toBe("asset:///work/b.png");
   });
 
-  it("falls back to a plain <img> when the existence check rejects", async () => {
+  it("shows an unavailable state when the existence check rejects", async () => {
     mocks.resolveMarkdownHref.mockReturnValue({
       rawPath: "./boom.png",
       resolvedPath: "/work/boom.png",
@@ -220,7 +211,85 @@ describe("MarkdownImage", () => {
       expect(mocks.pathExists).toHaveBeenCalledWith("/work/boom.png");
     });
     // A rejection must not leave a stale image or surface as unhandled.
-    expect(screen.queryByTestId("clickable-image")).toBeNull();
-    expect(screen.getByAltText("boom").getAttribute("src")).toBe("./boom.png");
+    expect(screen.queryByRole("button", { name: /^View / })).toBeNull();
+    expect(await screen.findByText("Image unavailable")).toBeVisible();
+    expect(screen.queryByRole("img")).toBeNull();
+  });
+  it("never emits a broken local image before the existence check settles", () => {
+    mocks.resolveMarkdownHref.mockReturnValue({
+      rawPath: "preview.png",
+      resolvedPath: "/work/preview.png",
+      isWithinSessionCwd: true,
+    });
+    mocks.pathExists.mockReturnValue(new Promise(() => {}));
+
+    render(<MarkdownImage src="preview.png" alt="Preview" />);
+
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(screen.getByText("Loading image…")).toBeVisible();
+  });
+
+  it("shows an unavailable state when the browser cannot load an existing image", async () => {
+    mocks.resolveMarkdownHref.mockReturnValue({
+      rawPath: "preview.png",
+      resolvedPath: "/work/preview.png",
+      isWithinSessionCwd: true,
+    });
+    mocks.pathExists.mockResolvedValue(true);
+    render(<MarkdownImage src="preview.png" alt="Preview" />);
+
+    fireEvent.error(await screen.findByAltText("Preview"));
+
+    expect(screen.getByText("Image unavailable")).toBeVisible();
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(screen.getByRole("status")).toBeVisible();
+  });
+
+  it("shows an unavailable state when an outside-folder image is missing", async () => {
+    mocks.resolveMarkdownHref.mockReturnValue({
+      rawPath: "/tmp/missing.png",
+      resolvedPath: "/tmp/missing.png",
+      isWithinSessionCwd: false,
+    });
+    mocks.pathExists.mockResolvedValue(false);
+    render(<MarkdownImage src="/tmp/missing.png" alt="Preview" />);
+
+    expect(await screen.findByText("Image unavailable")).toBeVisible();
+    expect(screen.queryByRole("img")).toBeNull();
+  });
+
+  it("uses the filename when there is no image description", () => {
+    mocks.resolveMarkdownHref.mockReturnValue({
+      rawPath: "/tmp/preview.png",
+      resolvedPath: "/tmp/preview.png",
+      isWithinSessionCwd: false,
+    });
+    mocks.pathExists.mockReturnValue(new Promise(() => {}));
+    render(<MarkdownImage src="/tmp/preview.png" />);
+    expect(screen.getByText("preview.png")).toBeVisible();
+  });
+
+  it("ignores a stale existence check after the image source changes", async () => {
+    mocks.resolveMarkdownHref.mockImplementation((href: string) => ({
+      rawPath: href,
+      resolvedPath: `/work/${href}`,
+      isWithinSessionCwd: true,
+    }));
+    let resolveFirst: ((exists: boolean) => void) | undefined;
+    mocks.pathExists
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockResolvedValueOnce(false);
+    const { rerender } = render(<MarkdownImage src="a.png" alt="First" />);
+    rerender(<MarkdownImage src="b.png" alt="Second" />);
+    await screen.findByText("Image unavailable");
+    resolveFirst?.(true);
+
+    await waitFor(() => expect(screen.queryByRole("img")).toBeNull());
+    expect(screen.getByText("Second")).toBeVisible();
   });
 });

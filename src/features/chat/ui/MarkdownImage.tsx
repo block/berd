@@ -2,30 +2,82 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { ImageIcon } from "lucide-react";
 import { type ComponentProps, memo, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useArtifactActionsContext } from "@/features/chat/hooks/ArtifactPolicyContext";
+import {
+  type ArtifactLinkCandidate,
+  useArtifactActionsContext,
+} from "@/features/chat/hooks/ArtifactPolicyContext";
+import { artifactBasename } from "@/features/chat/lib/artifactViewerTypes";
+import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import { ClickableImage } from "./ClickableImage";
 
 const IMAGE_EXTENSION_RE = /\.(png|jpe?g|gif|webp|bmp|svg|avif|ico)$/i;
 
 function isRemoteOrDataSrc(src: string): boolean {
-  // Remote (http/https) and inline (data:/blob:) sources are handled by the
-  // browser/CSP directly — this override only rescues LOCAL file paths.
+  // Browser/CSP-owned sources are not local-file grants.
   return /^(https?:|data:|blob:)/i.test(src.trim());
 }
 
-/**
- * Renders a Markdown image whose `src` points at a local file in the session
- * working directory by routing it through the Tauri `asset:` scheme (the same
- * mechanism avatars/artifacts use), so `![alt](./photo.jpg)` renders inline
- * instead of a broken image. Scoped to the session working directory via
- * `ArtifactPolicyContext`; remote http(s) images are left to the
- * (CSP-blocking) default renderer.
- *
- * Lives in `features/chat` (not `shared/ui`) because it depends on the chat
- * artifact-policy machinery; it is injected into the shared `MessageResponse`
- * via the `imageRenderer` prop so `shared/ui` stays free of chat-feature
- * imports.
- */
+function LocalMarkdownImage({
+  candidate,
+  rawSrc,
+  alt,
+  pathExists,
+}: {
+  candidate: ArtifactLinkCandidate | null;
+  rawSrc: string;
+  alt: string;
+  pathExists: (path: string) => Promise<boolean>;
+}) {
+  const { t } = useTranslation("chat");
+  const path = candidate?.resolvedPath ?? rawSrc;
+  const supported = Boolean(candidate && IMAGE_EXTENSION_RE.test(path));
+  const [result, setResult] = useState<"loading" | "ready" | "unavailable">(
+    "loading",
+  );
+  const label = alt.trim() || artifactBasename(path) || t("image.label");
+
+  useEffect(() => {
+    if (!supported) return;
+    let cancelled = false;
+    setResult("loading");
+    void pathExists(path)
+      .then((exists) => {
+        if (!cancelled) setResult(exists ? "ready" : "unavailable");
+      })
+      .catch(() => {
+        if (!cancelled) setResult("unavailable");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [supported, path, pathExists]);
+
+  if (supported && result === "ready") {
+    return (
+      <ClickableImage
+        src={convertFileSrc(path, "asset")}
+        alt={alt}
+        localFilePath={path}
+        onError={() => setResult("unavailable")}
+      />
+    );
+  }
+
+  return (
+    <Alert role="status" title={path}>
+      <ImageIcon aria-hidden="true" />
+      <AlertTitle wrap>{label}</AlertTitle>
+      <AlertDescription>
+        {supported && result === "loading"
+          ? t("image.loading")
+          : t("image.unavailable")}
+      </AlertDescription>
+    </Alert>
+  );
+}
+
+/** Resolve local image paths against the chat cwd, then let the existing
+ * Tauri asset scope decide access. Never probe local disk for SSH paths. */
 export const MarkdownImage = memo(
   ({
     src,
@@ -36,63 +88,14 @@ export const MarkdownImage = memo(
     const { t } = useTranslation("chat");
     const { resolveMarkdownHref, pathExists, filesAreRemote, remoteHost } =
       useArtifactActionsContext();
-    const [assetSrc, setAssetSrc] = useState<string | null>(null);
-
     const rawSrc = typeof src === "string" ? src : "";
     const isLocalCandidate = rawSrc.length > 0 && !isRemoteOrDataSrc(rawSrc);
+    const candidate = isLocalCandidate ? resolveMarkdownHref(rawSrc) : null;
 
-    useEffect(() => {
-      if (!isLocalCandidate || filesAreRemote) {
-        setAssetSrc(null);
-        return;
-      }
-      let cancelled = false;
-      // Clear any previously resolved image immediately so switching between
-      // two valid local images never shows the stale one while the new
-      // existence check is in flight.
-      setAssetSrc(null);
-      const candidate = resolveMarkdownHref(rawSrc);
-      // resolveMarkdownHref returns null for blocked schemes (e.g. remote) and
-      // resolves relative paths against the session cwd. Require the resolved
-      // path to actually be contained within the session cwd, so absolute
-      // paths (`/abs/private.png`) and `..`-escapes (`../../private.png`) are
-      // rejected rather than rendered from outside the working directory.
-      if (
-        !candidate?.isWithinSessionCwd ||
-        !IMAGE_EXTENSION_RE.test(candidate.resolvedPath)
-      ) {
-        return;
-      }
-      void pathExists(candidate.resolvedPath)
-        .then((exists) => {
-          if (cancelled) return;
-          setAssetSrc(
-            exists ? convertFileSrc(candidate.resolvedPath, "asset") : null,
-          );
-        })
-        .catch(() => {
-          // A failed existence check must not leave a stale image rendered or
-          // surface as an unhandled rejection — fall back to the default <img>.
-          if (!cancelled) setAssetSrc(null);
-        });
-      return () => {
-        cancelled = true;
-      };
-    }, [
-      filesAreRemote,
-      isLocalCandidate,
-      rawSrc,
-      resolveMarkdownHref,
-      pathExists,
-    ]);
-
-    // A local-looking path in a remote session names a file on the SSH host:
-    // the asset: scheme would 404 against the local disk. Render a compact
-    // placeholder (file name + host chip) instead of a broken image.
+    // Local-looking remote paths belong to the SSH host, never local disk.
     if (isLocalCandidate && filesAreRemote) {
-      const resolvedPath = resolveMarkdownHref(rawSrc)?.resolvedPath ?? rawSrc;
-      const displayName =
-        resolvedPath.split("/").filter(Boolean).pop() ?? resolvedPath;
+      const resolvedPath = candidate?.resolvedPath ?? rawSrc;
+      const displayName = artifactBasename(resolvedPath);
       return (
         <span
           data-testid="remote-image-placeholder"
@@ -108,12 +111,19 @@ export const MarkdownImage = memo(
       );
     }
 
-    if (assetSrc) {
-      return <ClickableImage src={assetSrc} alt={alt ?? ""} />;
+    if (isLocalCandidate) {
+      return (
+        <LocalMarkdownImage
+          key={JSON.stringify([rawSrc, candidate?.resolvedPath])}
+          candidate={candidate}
+          rawSrc={rawSrc}
+          alt={alt ?? ""}
+          pathExists={pathExists}
+        />
+      );
     }
 
-    // Fall back to the default rendering for remote images and local files
-    // that are missing, unsupported, or outside the session working directory.
+    // Remote URLs and inline data keep their existing browser/CSP behavior.
     return <img src={src} alt={alt ?? ""} {...rest} />;
   },
 );

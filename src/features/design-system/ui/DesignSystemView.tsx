@@ -52,6 +52,7 @@ import {
 } from "@/shared/ui/button";
 import { AgentTileButton } from "@/shared/ui/agent-tile-button";
 import { ComposerActionButton } from "@/shared/ui/composer-action-button";
+import { ImageLightbox } from "@/shared/ui/ImageLightbox";
 import { GlassButton } from "@/shared/ui/glass-button";
 import { JumpToLatestButton } from "@/shared/ui/jump-to-latest-button";
 import { PageHeaderButton } from "@/shared/ui/page-header-button";
@@ -4760,7 +4761,79 @@ function HoverCardPage() {
 }
 
 function ImageLightboxPage() {
-  return <GenericComponentPage name="Image Lightbox" />;
+  const [open, setOpen] = useState(false);
+  const [source, setSource] = useState("standard");
+  const src =
+    source === "tiny"
+      ? "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/ax6pTQAAAAASUVORK5CYII="
+      : "/berd-icon.png";
+  return (
+    <>
+      <PageIntro
+        title="Image Lightbox"
+        description="Full-size image previews with copy, download, and reveal-original-file actions when a local original exists."
+      />
+      <ComponentSpec name="Image Lightbox" />
+      <ComponentPlayground
+        description="Open the actual lightbox. Tiny imagery checks that actions stay accessible without covering the image. This browser asset has no original local file, so Reveal is not offered."
+        preview={
+          <>
+            <Button variant="outline" onClick={() => setOpen(true)}>
+              Open image preview
+            </Button>
+            <ImageLightbox
+              src={src}
+              alt="Berd image preview"
+              downloadFilename="berd-preview"
+              open={open}
+              onOpenChange={setOpen}
+            />
+          </>
+        }
+        controls={[
+          {
+            id: "image-source",
+            label: "Image size",
+            type: "select",
+            value: source,
+            options: [
+              { label: "Standard", value: "standard" },
+              { label: "Tiny", value: "tiny" },
+            ],
+            onChange: setSource,
+          },
+        ]}
+        details={
+          <ComponentTokenDetails
+            colorRows={[
+              {
+                anatomy: "Action buttons",
+                state: "Default",
+                background: "--surface-glass-strong",
+                textIcon: "--surface-glass-strong-fg",
+                border: "none",
+              },
+              {
+                anatomy: "Action buttons",
+                state: "Hover",
+                background: "--surface-glass-strong-hover",
+                textIcon: "--surface-glass-strong-fg",
+                border: "none",
+              },
+            ]}
+            textRows={[
+              {
+                anatomy: "Actions",
+
+                size: "text-sm",
+                weight: "font-normal",
+              },
+            ]}
+          />
+        }
+      />
+    </>
+  );
 }
 
 function InputGroupPage() {
