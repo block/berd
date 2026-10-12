@@ -1,4 +1,10 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -125,21 +131,37 @@ describe("ImageLightbox download button", () => {
   });
   it("copies image pixels and leaves the preview open", async () => {
     const user = userEvent.setup();
-    render(<ImageLightbox src="blob:preview" open onOpenChange={() => {}} />);
-    await user.click(screen.getByRole("button", { name: "Copy image" }));
-    expect(copyImage).toHaveBeenCalledWith("blob:preview");
+    const onOpenChange = vi.fn();
+    render(
+      <ImageLightbox src="blob:preview" open onOpenChange={onOpenChange} />,
+    );
+    fireEvent.contextMenu(screen.getByRole("img"));
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Copy image" }),
+    );
+    expect(copyImage).toHaveBeenCalledWith("blob:preview", {
+      image: screen.getByRole("img"),
+      signal: expect.any(AbortSignal),
+    });
     await waitFor(() =>
       expect(toast.message).toHaveBeenCalledWith("Image copied"),
     );
     expect(screen.getByRole("dialog")).toBeVisible();
+    expect(onOpenChange).not.toHaveBeenCalled();
   });
 
   it("reports a copy failure instead of claiming success", async () => {
     vi.mocked(copyImage).mockRejectedValue(new Error("denied"));
     vi.spyOn(console, "error").mockImplementation(() => {});
     const user = userEvent.setup();
-    render(<ImageLightbox src="blob:preview" open onOpenChange={() => {}} />);
-    await user.click(screen.getByRole("button", { name: "Copy image" }));
+    const onOpenChange = vi.fn();
+    render(
+      <ImageLightbox src="blob:preview" open onOpenChange={onOpenChange} />,
+    );
+    fireEvent.contextMenu(screen.getByRole("img"));
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Copy image" }),
+    );
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith("Couldn't copy image."),
     );
@@ -213,5 +235,108 @@ describe("ImageLightbox download button", () => {
       />,
     );
     expect(screen.queryByRole("button", { name: /Reveal in/ })).toBeNull();
+  });
+  it("offers Copy only in the image context menu, with ordinary action-group semantics", async () => {
+    render(
+      <ImageLightbox
+        src="data:image/png;base64,abc"
+        open
+        onOpenChange={() => {}}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Copy image" })).toBeNull();
+    expect(screen.getByRole("group", { name: "Image actions" })).toBeVisible();
+    fireEvent.contextMenu(screen.getByRole("img"));
+    expect(
+      await screen.findByRole("menuitem", { name: "Copy image" }),
+    ).toBeVisible();
+    expect(screen.queryByRole("toolbar")).toBeNull();
+  });
+
+  it("cancels pending copying on source changes and ignores a stale completion", async () => {
+    let resolveFirst: (() => void) | undefined;
+    vi.mocked(copyImage).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFirst = resolve;
+        }),
+    );
+    const { rerender } = render(
+      <ImageLightbox src="data:first" open onOpenChange={() => {}} />,
+    );
+    fireEvent.contextMenu(screen.getByRole("img"));
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Copy image" }),
+    );
+    const firstSignal = vi.mocked(copyImage).mock.calls[0][1]?.signal;
+    rerender(<ImageLightbox src="data:second" open onOpenChange={() => {}} />);
+    expect(firstSignal?.aborted).toBe(true);
+    fireEvent.contextMenu(screen.getByRole("img"));
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Copy image" }),
+    );
+    await waitFor(() => expect(toast.message).toHaveBeenCalledOnce());
+    await act(async () => {
+      resolveFirst?.();
+    });
+    expect(toast.message).toHaveBeenCalledOnce();
+    expect(copyImage).toHaveBeenCalledTimes(2);
+  });
+
+  it("cancels a pending copy when the preview closes and permits retry when reopened", async () => {
+    vi.mocked(copyImage).mockImplementationOnce(() => new Promise(() => {}));
+    const { rerender } = render(
+      <ImageLightbox src="data:first" open onOpenChange={() => {}} />,
+    );
+    fireEvent.contextMenu(screen.getByRole("img"));
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Copy image" }),
+    );
+    const signal = vi.mocked(copyImage).mock.calls[0][1]?.signal;
+    rerender(
+      <ImageLightbox src="data:first" open={false} onOpenChange={() => {}} />,
+    );
+    expect(signal?.aborted).toBe(true);
+    rerender(<ImageLightbox src="data:first" open onOpenChange={() => {}} />);
+    fireEvent.contextMenu(screen.getByRole("img"));
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Copy image" }),
+    );
+    await waitFor(() =>
+      expect(toast.message).toHaveBeenCalledWith("Image copied"),
+    );
+  });
+
+  it("does not navigate the gallery when arrow keys are used inside the context menu", async () => {
+    const next = vi.fn();
+    render(
+      <ImageLightbox
+        src="data:first"
+        open
+        onNext={next}
+        onOpenChange={() => {}}
+      />,
+    );
+    fireEvent.contextMenu(screen.getByRole("img"));
+    const item = await screen.findByRole("menuitem", { name: "Copy image" });
+    fireEvent.keyDown(item, { key: "ArrowRight" });
+    expect(next).not.toHaveBeenCalled();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "ArrowRight" });
+    expect(next).toHaveBeenCalledOnce();
+  });
+  it("opens the image copy menu from the keyboard", async () => {
+    render(
+      <ImageLightbox
+        src="data:image/png;base64,abc"
+        open
+        onOpenChange={() => {}}
+      />,
+    );
+    const image = screen.getByRole("img");
+    image.focus();
+    fireEvent.keyDown(image, { key: "F10", shiftKey: true });
+    expect(
+      await screen.findByRole("menuitem", { name: "Copy image" }),
+    ).toBeVisible();
   });
 });

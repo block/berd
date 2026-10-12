@@ -1,8 +1,14 @@
 import { Copy, Download, FolderOpen } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogTitle } from "@/shared/ui/dialog";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/shared/ui/context-menu";
 import { copyImage } from "@/shared/ui/copyImage";
 import { revealInFileManager } from "@/shared/lib/fileManager";
 import { pathExists } from "@/shared/api/system";
@@ -40,6 +46,18 @@ export function ImageLightbox({
 }: ImageLightboxProps) {
   const { t } = useTranslation("chat");
   const [copying, setCopying] = useState(false);
+  const imageRef = useRef<HTMLImageElement>(null);
+  const copyController = useRef<AbortController | null>(null);
+  const [menuContainer, setMenuContainer] = useState<HTMLDivElement | null>(
+    null,
+  );
+  useEffect(() => {
+    setCopying(false);
+    return () => {
+      copyController.current?.abort();
+      copyController.current = null;
+    };
+  }, [open, src]);
   const [existingLocalPath, setExistingLocalPath] = useState<string | null>(
     null,
   );
@@ -59,15 +77,27 @@ export function ImageLightbox({
   const revealLabel = t(`common:labels.revealInFileManager_${getPlatform()}`);
 
   const handleCopy = () => {
-    if (copying) return;
+    if (copyController.current) return;
+    const controller = new AbortController();
+    copyController.current = controller;
     setCopying(true);
-    void copyImage(src)
-      .then(() => toast.message(t("image.copied")))
+    void copyImage(src, {
+      image: imageRef.current ?? undefined,
+      signal: controller.signal,
+    })
+      .then(() => {
+        if (!controller.signal.aborted) toast.message(t("image.copied"));
+      })
       .catch((error) => {
+        if (controller.signal.aborted) return;
         console.error("Failed to copy image:", error);
         toast.error(t("image.copyError"));
       })
-      .finally(() => setCopying(false));
+      .finally(() => {
+        if (copyController.current !== controller) return;
+        copyController.current = null;
+        setCopying(false);
+      });
   };
 
   const handleReveal = () => {
@@ -105,10 +135,16 @@ export function ImageLightbox({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
+        ref={setMenuContainer}
         className="focus-override w-auto origin-center flex flex-col gap-2 items-center justify-center border-none bg-transparent p-0 shadow-none outline-none motion-safe:data-[state=closed]:zoom-out-95 motion-safe:data-[state=open]:zoom-in-95 motion-safe:duration-200 motion-safe:ease-out motion-reduce:animate-none focus:outline-none focus-visible:outline-none sm:max-w-[90vw]"
         showCloseButton={false}
         aria-describedby={undefined}
         onKeyDown={(event) => {
+          if (
+            event.target instanceof Element &&
+            event.target.closest('[role="menu"]')
+          )
+            return;
           if (event.key === "ArrowLeft" && onPrevious) {
             event.preventDefault();
             onPrevious();
@@ -123,21 +159,10 @@ export function ImageLightbox({
         <DialogTitle className="sr-only">{alt}</DialogTitle>
         {src && (
           <div
-            role="toolbar"
+            role="group"
             aria-label={t("image.actions")}
             className="flex w-full justify-end gap-2"
           >
-            <GlassButton
-              type="button"
-              size="icon"
-              title={t("image.copy")}
-              aria-label={t("image.copy")}
-              feedbackState={copying ? "loading" : "idle"}
-              loadingVisual="spinner"
-              onClick={handleCopy}
-            >
-              <Copy />
-            </GlassButton>
             <GlassButton
               type="button"
               size="icon"
@@ -160,12 +185,44 @@ export function ImageLightbox({
             )}
           </div>
         )}
-        <img
-          src={src || undefined}
-          alt={alt}
-          className="max-h-[calc(85vh-3rem)] max-w-[90vw] rounded-md object-contain motion-safe:data-[state=open]:animate-in motion-safe:data-[state=open]:fade-in-0 motion-safe:data-[state=open]:zoom-in-95 motion-safe:data-[state=open]:duration-200 motion-safe:data-[state=open]:ease-out motion-reduce:animate-none"
-          data-state={open ? "open" : "closed"}
-        />
+        <ContextMenu>
+          <ContextMenuTrigger asChild disabled={!src}>
+            {/* Keyboard focus exposes the same image menu as right-click. */}
+            <img
+              ref={imageRef}
+              // biome-ignore lint/a11y/noNoninteractiveTabindex: focus exposes the keyboard context menu
+              tabIndex={0}
+              aria-haspopup="menu"
+              onKeyDown={(event) => {
+                if (
+                  event.key !== "ContextMenu" &&
+                  !(event.shiftKey && event.key === "F10")
+                )
+                  return;
+                event.preventDefault();
+                const bounds = event.currentTarget.getBoundingClientRect();
+                event.currentTarget.dispatchEvent(
+                  new MouseEvent("contextmenu", {
+                    bubbles: true,
+                    cancelable: true,
+                    clientX: bounds.left + bounds.width / 2,
+                    clientY: bounds.top + bounds.height / 2,
+                  }),
+                );
+              }}
+              src={src || undefined}
+              alt={alt}
+              className="max-h-[calc(85vh-3rem)] max-w-[90vw] rounded-md object-contain motion-safe:data-[state=open]:animate-in motion-safe:data-[state=open]:fade-in-0 motion-safe:data-[state=open]:zoom-in-95 motion-safe:data-[state=open]:duration-200 motion-safe:data-[state=open]:ease-out motion-reduce:animate-none"
+              data-state={open ? "open" : "closed"}
+            />
+          </ContextMenuTrigger>
+          <ContextMenuContent container={menuContainer}>
+            <ContextMenuItem disabled={copying} onSelect={handleCopy}>
+              <Copy aria-hidden="true" />
+              {t("image.copy")}
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
       </DialogContent>
     </Dialog>
   );

@@ -4775,7 +4775,7 @@ function ImageLightboxPage() {
       />
       <ComponentSpec name="Image Lightbox" />
       <ComponentPlayground
-        description="Open the actual lightbox. Tiny imagery checks that actions stay accessible without covering the image. This browser asset has no original local file, so Reveal is not offered."
+        description="Open the actual lightbox and right-click the image to copy it. Tiny imagery checks that actions stay accessible without covering the image. This browser asset has no original local file, so Reveal is not offered."
         preview={
           <>
             <Button variant="outline" onClick={() => setOpen(true)}>
@@ -4824,7 +4824,6 @@ function ImageLightboxPage() {
             textRows={[
               {
                 anatomy: "Actions",
-
                 size: "text-sm",
                 weight: "font-normal",
               },

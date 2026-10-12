@@ -18,6 +18,7 @@ import type {
   SystemNotificationContent,
 } from "@/shared/types/messages";
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
+import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { ArtifactPolicyProvider } from "@/features/chat/hooks/ArtifactPolicyContext";
 import {
   TranscriptRowStateProvider,
@@ -2248,5 +2249,100 @@ describe("MessageBubble", () => {
       ". Unheard suffix.",
     );
     expect(block?.querySelector(".sr-only")).toHaveTextContent("Not spoken:");
+  });
+  it.each([
+    "attachment",
+    "content",
+  ])("reveals %s image originals only in local sessions", async (kind) => {
+    window.__TAURI_INTERNALS__ = {};
+    mockPathExists.mockResolvedValue(true);
+    const message =
+      kind === "attachment"
+        ? userMessage("", {
+            metadata: {
+              attachments: [
+                {
+                  type: "file",
+                  name: "original.png",
+                  path: "/tmp/original.png",
+                  mimeType: "image/png",
+                },
+              ],
+            },
+            content: [
+              {
+                type: "image",
+                data: "AAAA",
+                mimeType: "image/png",
+                uri: "file:///tmp/original.png",
+              },
+            ],
+          })
+        : assistantMessage([
+            {
+              type: "image",
+              data: "AAAA",
+              mimeType: "image/png",
+              uri: "file:///tmp/original.png",
+            },
+          ]);
+    const previousSessions = useChatSessionStore.getState().sessions;
+    const renderSession = (remote: boolean) => {
+      useChatSessionStore.setState({
+        sessions: [
+          {
+            id: "image-session",
+            title: "Image",
+            workingDir: "/tmp",
+            remoteHost: remote ? "devbox" : undefined,
+            createdAt: "2026-10-11",
+            updatedAt: "2026-10-11",
+            messageCount: 1,
+          },
+        ],
+      });
+      return render(
+        <ArtifactPolicyProvider
+          messages={[message]}
+          sessionCwd="/tmp"
+          sessionId="image-session"
+        >
+          <MessageBubble message={message} animateEntry={false} />
+        </ArtifactPolicyProvider>,
+      );
+    };
+    try {
+      const local = renderSession(false);
+      fireEvent.click(
+        screen.getByRole("button", {
+          name:
+            kind === "attachment"
+              ? "View full-size attachment original.png"
+              : "View Attached",
+        }),
+      );
+      expect(
+        await screen.findByRole("button", { name: /Reveal in/ }),
+      ).toBeVisible();
+      expect(mockPathExists).toHaveBeenCalledWith("/tmp/original.png");
+      local.unmount();
+      mockPathExists.mockClear();
+      renderSession(true);
+      fireEvent.click(
+        screen.getByRole("button", {
+          name:
+            kind === "attachment"
+              ? "View full-size attachment original.png"
+              : "View Attached",
+        }),
+      );
+      expect(screen.getByRole("dialog")).toBeVisible();
+      await act(async () => {});
+      expect(screen.queryByRole("button", { name: /Reveal in/ })).toBeNull();
+      expect(mockPathExists).not.toHaveBeenCalled();
+    } finally {
+      delete window.__TAURI_INTERNALS__;
+      useChatSessionStore.setState({ sessions: previousSessions });
+    }
   });
 });
