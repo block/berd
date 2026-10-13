@@ -22,6 +22,9 @@ import { getPlatform } from "@/shared/lib/platform";
 import type { Message } from "@/shared/types/messages";
 
 const COMPLETION_NOTIFICATION_CLICKED_EVENT = "completion-notification-clicked";
+// Upper bound on how long completion delivery may wait for the initial
+// window-focus query before proceeding with the best-known focus state.
+export const FOCUS_STATE_SEED_TIMEOUT_MS = 1000;
 
 async function shouldSuppressCompletionNotification(
   sessionId: string,
@@ -82,6 +85,11 @@ export function useCompletionNotifications(
   onNavigateToSession: (sessionId: string) => void,
 ): void {
   const windowFocusedRef = useRef(true);
+  // Resolves once the focus state has been seeded (initial isFocused() query
+  // settled, a real focus event arrived, or the bounded fallback elapsed).
+  // Completion delivery waits on this so a session finishing before the
+  // mount-time query settles is not misclassified by the default value.
+  const focusStateReadyRef = useRef<Promise<void>>(Promise.resolve());
   // Keep a stable ref so the Zustand subscriber never has a stale callback.
   const navigateRef = useRef(onNavigateToSession);
   useEffect(() => {
@@ -93,22 +101,51 @@ export function useCompletionNotifications(
     if (!window.__TAURI_INTERNALS__) return;
     let unlisten: (() => void) | null = null;
     let cancelled = false;
+    let markFocusStateReady!: () => void;
+    focusStateReadyRef.current = new Promise<void>((resolve) => {
+      markFocusStateReady = resolve;
+    });
+    // Bounded fallback: never hold completion delivery hostage to a focus
+    // query that fails to settle.
+    const fallbackTimer = setTimeout(
+      markFocusStateReady,
+      FOCUS_STATE_SEED_TIMEOUT_MS,
+    );
+    // A real focus-change event is always fresher than the mount-time query,
+    // so once one arrives the query result must not clobber it.
+    let focusEventSeen = false;
     import("@tauri-apps/api/window")
       .then(({ getCurrentWindow }) => {
         const appWindow = getCurrentWindow();
-        // Seed from the real focus state: the ref defaults to true, so a
-        // completion that lands before any focus-change event would otherwise
-        // be delivered as an in-app toast in a backgrounded window instead of
-        // a desktop notification.
-        void appWindow
-          .isFocused()
-          .then((focused) => {
+        // Register the focus listener before sampling focus so a change that
+        // happens while the sample is in flight is observed (and wins).
+        return appWindow
+          .onFocusChanged(({ payload: focused }) => {
+            // A cleaned-up effect generation must not write into state now
+            // owned by a newer generation (StrictMode remounts).
+            if (cancelled) return;
+            focusEventSeen = true;
             windowFocusedRef.current = focused;
+            markFocusStateReady();
           })
-          .catch(() => {});
-        return appWindow.onFocusChanged(({ payload: focused }) => {
-          windowFocusedRef.current = focused;
-        });
+          .then((unlistenFocus) => {
+            // Seed from the real focus state: the ref defaults to true, so a
+            // completion that lands before any focus-change event would
+            // otherwise be delivered as an in-app toast in a backgrounded
+            // window instead of a desktop notification.
+            void appWindow
+              .isFocused()
+              .then((focused) => {
+                if (!cancelled && !focusEventSeen) {
+                  windowFocusedRef.current = focused;
+                }
+                markFocusStateReady();
+              })
+              .catch(() => {
+                markFocusStateReady();
+              });
+            return unlistenFocus;
+          });
       })
       .then((fn) => {
         if (cancelled) fn();
@@ -116,6 +153,9 @@ export function useCompletionNotifications(
       });
     return () => {
       cancelled = true;
+      clearTimeout(fallbackTimer);
+      // Don't leave buffered completions waiting on a torn-down listener.
+      markFocusStateReady();
       unlisten?.();
     };
   }, []);
@@ -233,8 +273,12 @@ export function useCompletionNotifications(
                 ? session.title
                 : "";
             const body = getNotificationBody(outcome, title);
-            void shouldSuppressCompletionNotification(sessionId).then(
-              (suppress) => {
+            // Wait for the seeded focus state before evaluating suppression
+            // so neither the focus routing below reads the placeholder
+            // default nor the suppression result goes stale while buffered.
+            void focusStateReadyRef.current
+              .then(() => shouldSuppressCompletionNotification(sessionId))
+              .then((suppress) => {
                 if (suppress) return;
                 const currentPrefs = getNotificationPrefs();
                 if (!currentPrefs.enabled) return;
@@ -283,8 +327,7 @@ export function useCompletionNotifications(
                       }
                     : undefined,
                 });
-              },
-            );
+              });
           }
         }
       },
