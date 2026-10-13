@@ -161,6 +161,16 @@ describe("NotificationSettings", () => {
       ),
     );
     expect(slider).toHaveAttribute("aria-describedby");
+    const descriptionId = slider.getAttribute("aria-describedby") ?? "";
+    const description = document.getElementById(descriptionId);
+    // The description must be the explanatory help text, not a repeat of the
+    // slider's accessible value.
+    expect(description).toHaveTextContent(
+      enSettings.notifications.toastDuration.description,
+    );
+    expect(description?.textContent).not.toBe(
+      slider.getAttribute("aria-valuetext"),
+    );
   });
 
   it("hides the duration control (scoped to in-app) when in-app notifications are disabled", async () => {

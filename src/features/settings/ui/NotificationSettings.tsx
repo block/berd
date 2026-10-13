@@ -226,11 +226,14 @@ function ToastDurationControl({
   durationLabelId: string;
 }) {
   const { t } = useTranslation("settings");
+  const descriptionId = useId();
 
   return (
     <div className="space-y-2 border-t border-border pt-4">
       <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="text-[11px] text-muted-foreground">{description}</p>
+      <p id={descriptionId} className="text-[11px] text-muted-foreground">
+        {description}
+      </p>
       <p id={durationLabelId} className="text-xs text-muted-foreground">
         {durationLabel}
       </p>
@@ -244,18 +247,20 @@ function ToastDurationControl({
           onValueCommit={(values) => onSliderCommit(values[0])}
           aria-label={label}
           aria-valuetext={durationLabel}
-          aria-describedby={durationLabelId}
+          aria-describedby={descriptionId}
         />
       )}
-      <button
+      <Button
         type="button"
-        className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+        variant="ghost"
+        size="xs"
+        className="-ml-2.5"
         onClick={onToggle}
       >
         {isNeverDismiss
           ? t("notifications.toastDuration.autoDismiss")
           : t("notifications.toastDuration.neverDismiss")}
-      </button>
+      </Button>
     </div>
   );
 }

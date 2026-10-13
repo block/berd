@@ -10,18 +10,6 @@ import {
 
 const STORAGE_KEY = "goose:notifications";
 
-// Re-exported so existing settings-feature imports keep working; the
-// canonical contract (bounds, sentinel, clamp) lives in the shared
-// notifications domain since CompletionNotificationToast (shared) also
-// depends on it and shouldn't depend on a feature module.
-export {
-  DEFAULT_TOAST_DURATION_SECONDS,
-  MIN_TOAST_DURATION_SECONDS,
-  MAX_TOAST_DURATION_SECONDS,
-  NEVER_DISMISS_TOAST_DURATION_SECONDS,
-  clampToastDurationSeconds,
-} from "@/shared/notifications/toastDuration";
-
 export interface NotificationPrefs {
   enabled: boolean;
   inApp: boolean;

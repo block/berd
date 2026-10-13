@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import {
   isSessionActivelyViewed,
   useChatStore,
@@ -87,6 +88,14 @@ export function useCompletionNotifications(
   useEffect(() => {
     navigateRef.current = onNavigateToSession;
   }, [onNavigateToSession]);
+
+  // Localized labels for toast actions; kept in a ref so the Zustand
+  // subscriber (registered once) always reads the current locale's copy.
+  const { t } = useTranslation("common");
+  const tRef = useRef(t);
+  useEffect(() => {
+    tRef.current = t;
+  }, [t]);
 
   // Track window focus via Tauri's native API.
   useEffect(() => {
@@ -272,6 +281,7 @@ export function useCompletionNotifications(
                       }
                     : undefined,
                   durationSeconds: currentPrefs.toastDurationSeconds,
+                  dismissLabel: tRef.current("actions.dismiss"),
                 });
               },
             );

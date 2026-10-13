@@ -206,4 +206,54 @@ describe("CompletionNotificationToast", () => {
     expect(onChangeSound).toHaveBeenCalledOnce();
     expect(onView).not.toHaveBeenCalled();
   });
+
+  it("adds an explicit dismiss action to persistent toasts that closes without navigating", () => {
+    const onView = vi.fn();
+    mocks.toast.mockReturnValue("completion-toast-id");
+
+    showCompletionNotificationToast({
+      title: "Review fixes finished",
+      outcome: "completed",
+      onView,
+      durationSeconds: 0,
+      dismissLabel: "Dismiss",
+    });
+
+    const options = mocks.toast.mock.calls[0]?.[1] as { action?: unknown };
+    expect(isValidElement(options.action)).toBe(true);
+    if (!isValidElement(options.action)) return;
+
+    const action = options.action as React.ReactElement<{
+      children: React.ReactElement<{
+        onClick?: () => void;
+        children: React.ReactNode;
+      }>[];
+    }>;
+    expect(action.type).toBe(ToastActionGroup);
+    const [dismissAction, viewAction] = action.props.children;
+
+    expect(dismissAction.type).toBe(ToastActionButton);
+    expect(dismissAction.props.children).toBe("Dismiss");
+    expect(viewAction.props.children).toBe("View");
+
+    dismissAction.props.onClick?.();
+
+    expect(mocks.toastDismiss).toHaveBeenCalledWith("completion-toast-id");
+    expect(onView).not.toHaveBeenCalled();
+  });
+
+  it("does not add a dismiss action to timed toasts", () => {
+    mocks.toast.mockReturnValue("completion-toast-id");
+
+    showCompletionNotificationToast({
+      title: "Review fixes finished",
+      outcome: "completed",
+      onView: vi.fn(),
+      durationSeconds: 30,
+      dismissLabel: "Dismiss",
+    });
+
+    const options = mocks.toast.mock.calls[0]?.[1] as { action?: unknown };
+    expectDesignSystemToastAction(options.action);
+  });
 });
