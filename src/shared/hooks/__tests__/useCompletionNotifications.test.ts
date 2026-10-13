@@ -186,6 +186,7 @@ describe("useCompletionNotifications", () => {
       }),
     );
     mocks.getCurrentWindow.mockReturnValue({
+      isFocused: vi.fn().mockResolvedValue(true),
       onFocusChanged: vi.fn().mockResolvedValue(vi.fn()),
       unminimize: vi.fn().mockResolvedValue(undefined),
       show: vi.fn().mockResolvedValue(undefined),
@@ -214,6 +215,7 @@ describe("useCompletionNotifications", () => {
       | null = null;
 
     const appWindow = {
+      isFocused: vi.fn().mockResolvedValue(true),
       onFocusChanged: vi.fn((handler) => {
         focusChanged = handler;
         return Promise.resolve(vi.fn());
@@ -278,6 +280,7 @@ describe("useCompletionNotifications", () => {
     let focusChanged: ((event: { payload: boolean }) => void) | null = null;
 
     mocks.getCurrentWindow.mockReturnValue({
+      isFocused: vi.fn().mockResolvedValue(true),
       onFocusChanged: vi.fn((handler) => {
         focusChanged = handler;
         return Promise.resolve(vi.fn());
@@ -357,6 +360,7 @@ describe("useCompletionNotifications", () => {
       ),
     );
     mocks.getCurrentWindow.mockReturnValue({
+      isFocused: vi.fn().mockResolvedValue(true),
       onFocusChanged: vi.fn((handler) => {
         focusChanged = handler;
         return Promise.resolve(vi.fn());
@@ -401,6 +405,7 @@ describe("useCompletionNotifications", () => {
         : Promise.resolve(undefined),
     );
     mocks.getCurrentWindow.mockReturnValue({
+      isFocused: vi.fn().mockResolvedValue(true),
       onFocusChanged: vi.fn((handler) => {
         focusChanged = handler;
         return Promise.resolve(vi.fn());
@@ -453,6 +458,7 @@ describe("useCompletionNotifications", () => {
         : Promise.resolve(undefined),
     );
     mocks.getCurrentWindow.mockReturnValue({
+      isFocused: vi.fn().mockResolvedValue(true),
       onFocusChanged: vi.fn((handler) => {
         focusChanged = handler;
         return Promise.resolve(vi.fn());
@@ -502,6 +508,7 @@ describe("useCompletionNotifications", () => {
     window.addEventListener("goose:open-settings", onOpenSettings);
 
     mocks.getCurrentWindow.mockReturnValue({
+      isFocused: vi.fn().mockResolvedValue(true),
       onFocusChanged: vi.fn((handler) => {
         focusChanged = handler;
         return Promise.resolve(vi.fn());
@@ -614,6 +621,7 @@ describe("useCompletionNotifications", () => {
     );
 
     mocks.getCurrentWindow.mockReturnValue({
+      isFocused: vi.fn().mockResolvedValue(true),
       onFocusChanged: vi.fn((handler) => {
         focusChanged = handler;
         return Promise.resolve(vi.fn());
@@ -649,6 +657,48 @@ describe("useCompletionNotifications", () => {
           body: "Quiet mode finished",
           sessionId: "session-3",
           sound: null,
+        },
+      ),
+    );
+  });
+
+  it("routes to desktop delivery when the window starts unfocused before any focus event", async () => {
+    const onFocusChanged = vi.fn().mockResolvedValue(vi.fn());
+    mocks.getCurrentWindow.mockReturnValue({
+      isFocused: vi.fn().mockResolvedValue(false),
+      onFocusChanged,
+      unminimize: vi.fn().mockResolvedValue(undefined),
+      show: vi.fn().mockResolvedValue(undefined),
+      setFocus: vi.fn().mockResolvedValue(undefined),
+    });
+
+    renderHook(() => useCompletionNotifications(vi.fn()));
+
+    // Wait for the focus listener registration so the isFocused seed has
+    // resolved too; no focus-change event is ever delivered in this test.
+    await waitFor(() => expect(onFocusChanged).toHaveBeenCalled());
+
+    useChatSessionStore.getState().addSession({
+      id: "session-4",
+      title: "Background start",
+      createdAt: "2026-06-05T00:00:00.000Z",
+      updatedAt: "2026-06-05T00:00:00.000Z",
+      messageCount: 1,
+    });
+    useChatStore.getState().setMessages("session-4", [makeMsg("completed")]);
+
+    act(() => {
+      useChatStore.getState().setChatState("session-4", "streaming");
+      useChatStore.getState().setChatState("session-4", "idle");
+    });
+
+    await waitFor(() =>
+      expect(mocks.invoke).toHaveBeenCalledWith(
+        "show_completion_notification",
+        {
+          body: "Background start finished",
+          sessionId: "session-4",
+          sound: "berd-sounds-4.mp3",
         },
       ),
     );

@@ -94,11 +94,22 @@ export function useCompletionNotifications(
     let unlisten: (() => void) | null = null;
     let cancelled = false;
     import("@tauri-apps/api/window")
-      .then(({ getCurrentWindow }) =>
-        getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+      .then(({ getCurrentWindow }) => {
+        const appWindow = getCurrentWindow();
+        // Seed from the real focus state: the ref defaults to true, so a
+        // completion that lands before any focus-change event would otherwise
+        // be delivered as an in-app toast in a backgrounded window instead of
+        // a desktop notification.
+        void appWindow
+          .isFocused()
+          .then((focused) => {
+            windowFocusedRef.current = focused;
+          })
+          .catch(() => {});
+        return appWindow.onFocusChanged(({ payload: focused }) => {
           windowFocusedRef.current = focused;
-        }),
-      )
+        });
+      })
       .then((fn) => {
         if (cancelled) fn();
         else unlisten = fn;
