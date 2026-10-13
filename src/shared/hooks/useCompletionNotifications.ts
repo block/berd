@@ -22,6 +22,9 @@ import { getPlatform } from "@/shared/lib/platform";
 import type { Message } from "@/shared/types/messages";
 
 const COMPLETION_NOTIFICATION_CLICKED_EVENT = "completion-notification-clicked";
+// Upper bound on how long completion delivery may wait for the initial
+// window-focus query before proceeding with the best-known focus state.
+export const FOCUS_STATE_SEED_TIMEOUT_MS = 1000;
 
 async function shouldSuppressCompletionNotification(
   sessionId: string,
@@ -82,6 +85,11 @@ export function useCompletionNotifications(
   onNavigateToSession: (sessionId: string) => void,
 ): void {
   const windowFocusedRef = useRef(true);
+  // Resolves once the focus state has been seeded (initial isFocused() query
+  // settled, a real focus event arrived, or the bounded fallback elapsed).
+  // Completion delivery waits on this so a session finishing before the
+  // mount-time query settles is not misclassified by the default value.
+  const focusStateReadyRef = useRef<Promise<void>>(Promise.resolve());
   // Keep a stable ref so the Zustand subscriber never has a stale callback.
   const navigateRef = useRef(onNavigateToSession);
   useEffect(() => {
@@ -93,6 +101,19 @@ export function useCompletionNotifications(
     if (!window.__TAURI_INTERNALS__) return;
     let unlisten: (() => void) | null = null;
     let cancelled = false;
+    let markFocusStateReady!: () => void;
+    focusStateReadyRef.current = new Promise<void>((resolve) => {
+      markFocusStateReady = resolve;
+    });
+    // Bounded fallback: never hold completion delivery hostage to a focus
+    // query that fails to settle.
+    const fallbackTimer = setTimeout(
+      markFocusStateReady,
+      FOCUS_STATE_SEED_TIMEOUT_MS,
+    );
+    // A real focus-change event is always fresher than the mount-time query,
+    // so once one arrives the query result must not clobber it.
+    let focusEventSeen = false;
     import("@tauri-apps/api/window")
       .then(({ getCurrentWindow }) => {
         const appWindow = getCurrentWindow();
@@ -103,11 +124,18 @@ export function useCompletionNotifications(
         void appWindow
           .isFocused()
           .then((focused) => {
-            windowFocusedRef.current = focused;
+            if (!focusEventSeen) {
+              windowFocusedRef.current = focused;
+            }
+            markFocusStateReady();
           })
-          .catch(() => {});
+          .catch(() => {
+            markFocusStateReady();
+          });
         return appWindow.onFocusChanged(({ payload: focused }) => {
+          focusEventSeen = true;
           windowFocusedRef.current = focused;
+          markFocusStateReady();
         });
       })
       .then((fn) => {
@@ -116,6 +144,9 @@ export function useCompletionNotifications(
       });
     return () => {
       cancelled = true;
+      clearTimeout(fallbackTimer);
+      // Don't leave buffered completions waiting on a torn-down listener.
+      markFocusStateReady();
       unlisten?.();
     };
   }, []);
@@ -233,58 +264,61 @@ export function useCompletionNotifications(
                 ? session.title
                 : "";
             const body = getNotificationBody(outcome, title);
-            void shouldSuppressCompletionNotification(sessionId).then(
-              (suppress) => {
-                if (suppress) return;
-                const currentPrefs = getNotificationPrefs();
-                if (!currentPrefs.enabled) return;
-                const windowFocused = windowFocusedRef.current;
-                if (
-                  windowFocused &&
-                  isSessionActivelyViewed(useChatStore.getState(), sessionId)
-                ) {
-                  return;
-                }
-                if (!windowFocused) {
-                  if (!currentPrefs.desktop) return;
-                  import("@tauri-apps/api/core").then(({ invoke }) => {
-                    void invoke("show_completion_notification", {
-                      body,
-                      sessionId,
-                      sound:
-                        getNotificationSoundResource(
-                          currentPrefs.desktopSound,
-                        ) ?? null,
-                    });
+            // Wait for both the suppression check and the seeded focus state
+            // so the focused/unfocused routing below never reads the
+            // placeholder default while the initial query is in flight.
+            void Promise.all([
+              shouldSuppressCompletionNotification(sessionId),
+              focusStateReadyRef.current,
+            ]).then(([suppress]) => {
+              if (suppress) return;
+              const currentPrefs = getNotificationPrefs();
+              if (!currentPrefs.enabled) return;
+              const windowFocused = windowFocusedRef.current;
+              if (
+                windowFocused &&
+                isSessionActivelyViewed(useChatStore.getState(), sessionId)
+              ) {
+                return;
+              }
+              if (!windowFocused) {
+                if (!currentPrefs.desktop) return;
+                import("@tauri-apps/api/core").then(({ invoke }) => {
+                  void invoke("show_completion_notification", {
+                    body,
+                    sessionId,
+                    sound:
+                      getNotificationSoundResource(currentPrefs.desktopSound) ??
+                      null,
                   });
-                  return;
-                }
+                });
+                return;
+              }
 
-                if (!currentPrefs.inApp) return;
-                playNotificationSound(currentPrefs.inAppSound);
-                const shouldShowChangeSound = shouldShowAssistiveMoment(
+              if (!currentPrefs.inApp) return;
+              playNotificationSound(currentPrefs.inAppSound);
+              const shouldShowChangeSound = shouldShowAssistiveMoment(
+                ASSISTIVE_UX_RULES.notificationsChangeSound.id,
+              );
+              if (shouldShowChangeSound) {
+                recordAssistiveMomentShown(
                   ASSISTIVE_UX_RULES.notificationsChangeSound.id,
                 );
-                if (shouldShowChangeSound) {
-                  recordAssistiveMomentShown(
-                    ASSISTIVE_UX_RULES.notificationsChangeSound.id,
-                  );
-                }
-                showCompletionNotificationToast({
-                  title: body,
-                  outcome,
-                  onView: () => navigateRef.current(sessionId),
-                  onChangeSound: shouldShowChangeSound
-                    ? () => {
-                        recordAssistiveMomentAccepted(
-                          ASSISTIVE_UX_RULES.notificationsChangeSound.id,
-                        );
-                        requestOpenSettings("notifications");
-                      }
-                    : undefined,
-                });
-              },
-            );
+              }
+              showCompletionNotificationToast({
+                title: body,
+                outcome,
+                onView: () => navigateRef.current(sessionId),
+                onChangeSound: shouldShowChangeSound
+                  ? () => {
+                      recordAssistiveMomentAccepted(
+                        ASSISTIVE_UX_RULES.notificationsChangeSound.id,
+                      );
+                      requestOpenSettings("notifications");
+                    }
+                  : undefined,
+              });
+            });
           }
         }
       },
