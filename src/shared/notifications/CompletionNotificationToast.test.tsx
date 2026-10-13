@@ -207,6 +207,32 @@ describe("CompletionNotificationToast", () => {
     expect(onView).not.toHaveBeenCalled();
   });
 
+  it("renders every action with the provided localized labels", () => {
+    mocks.toast.mockReturnValue("completion-toast-id");
+
+    showCompletionNotificationToast({
+      title: "Correcciones terminadas",
+      outcome: "completed",
+      onView: vi.fn(),
+      onChangeSound: vi.fn(),
+      durationSeconds: 0,
+      viewLabel: "Ver",
+      changeSoundLabel: "Cambiar sonido",
+      dismissLabel: "Descartar",
+    });
+
+    const options = mocks.toast.mock.calls[0]?.[1] as { action?: unknown };
+    expect(isValidElement(options.action)).toBe(true);
+    if (!isValidElement(options.action)) return;
+    const action = options.action as React.ReactElement<{
+      children: React.ReactElement<{ children: React.ReactNode }>[];
+    }>;
+    const labels = action.props.children.map((child) => child.props.children);
+    // The whole visible action group follows the active locale — no action
+    // may remain hardcoded English.
+    expect(labels).toEqual(["Descartar", "Cambiar sonido", "Ver"]);
+  });
+
   it("adds an explicit dismiss action to persistent toasts that closes without navigating", () => {
     const onView = vi.fn();
     mocks.toast.mockReturnValue("completion-toast-id");

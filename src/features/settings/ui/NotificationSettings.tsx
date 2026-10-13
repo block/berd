@@ -17,7 +17,6 @@ import {
 } from "@/features/settings/lib/notificationPrefs";
 import {
   clampToastDurationSeconds,
-  DEFAULT_TOAST_DURATION_SECONDS,
   MIN_TOAST_DURATION_SECONDS,
   MAX_TOAST_DURATION_SECONDS,
   NEVER_DISMISS_TOAST_DURATION_SECONDS,
@@ -272,14 +271,10 @@ export function NotificationSettings() {
   const [draftToastDurationSeconds, setDraftToastDurationSeconds] = useState(
     prefs.toastDurationSeconds,
   );
-  // The most recent *timed* duration the user chose, so that leaving
-  // never-dismiss restores it instead of resetting to the slider minimum.
-  const [lastTimedToastDurationSeconds, setLastTimedToastDurationSeconds] =
-    useState(
-      prefs.toastDurationSeconds === NEVER_DISMISS_TOAST_DURATION_SECONDS
-        ? DEFAULT_TOAST_DURATION_SECONDS
-        : prefs.toastDurationSeconds,
-    );
+  // The most recent *timed* duration the user chose lives in the persisted
+  // prefs (not component state) so that leaving never-dismiss restores it
+  // even after navigating away from settings and back.
+  const lastTimedToastDurationSeconds = prefs.lastTimedToastDurationSeconds;
 
   function update(patch: Partial<NotificationPrefs>) {
     setNotificationPrefs(patch);
@@ -292,18 +287,19 @@ export function NotificationSettings() {
 
   useEffect(() => {
     setDraftToastDurationSeconds(prefs.toastDurationSeconds);
-    if (prefs.toastDurationSeconds !== NEVER_DISMISS_TOAST_DURATION_SECONDS) {
-      setLastTimedToastDurationSeconds(prefs.toastDurationSeconds);
-    }
   }, [prefs.toastDurationSeconds]);
 
   function commitToastDurationSeconds(value: number) {
     const clamped = clampToastDurationSeconds(value);
     setDraftToastDurationSeconds(clamped);
-    if (clamped !== NEVER_DISMISS_TOAST_DURATION_SECONDS) {
-      setLastTimedToastDurationSeconds(clamped);
-    }
-    update({ toastDurationSeconds: clamped });
+    update(
+      clamped === NEVER_DISMISS_TOAST_DURATION_SECONDS
+        ? { toastDurationSeconds: clamped }
+        : {
+            toastDurationSeconds: clamped,
+            lastTimedToastDurationSeconds: clamped,
+          },
+    );
   }
 
   const isNeverDismiss =

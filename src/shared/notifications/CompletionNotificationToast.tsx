@@ -23,6 +23,8 @@ export function showCompletionNotificationToast({
   onChangeSound,
   durationSeconds = DEFAULT_TOAST_DURATION_SECONDS,
   dismissLabel = "Dismiss",
+  viewLabel = "View",
+  changeSoundLabel = "Change sound",
 }: {
   title: string;
   outcome: CompletionNotificationOutcome;
@@ -31,6 +33,10 @@ export function showCompletionNotificationToast({
   durationSeconds?: number;
   /** Localized label for the explicit dismiss action on persistent toasts. */
   dismissLabel?: string;
+  /** Localized label for the primary view/navigate action. */
+  viewLabel?: string;
+  /** Localized label for the secondary change-sound action. */
+  changeSoundLabel?: string;
 }): void {
   let toastId: string | number | undefined;
   const handleView = () => {
@@ -73,7 +79,7 @@ export function showCompletionNotificationToast({
         emphasis="secondary"
         onClick={handleChangeSound}
       >
-        Change sound
+        {changeSoundLabel}
       </ToastActionButton>
     ) : null,
   ].filter((element) => element !== null);
@@ -83,11 +89,11 @@ export function showCompletionNotificationToast({
       <ToastActionGroup>
         {...secondaryActions}
         <ToastActionButton key="view" className="ml-0" onClick={handleView}>
-          View
+          {viewLabel}
         </ToastActionButton>
       </ToastActionGroup>
     ) : (
-      <ToastActionButton onClick={handleView}>View</ToastActionButton>
+      <ToastActionButton onClick={handleView}>{viewLabel}</ToastActionButton>
     );
 
   const options = {

@@ -4,9 +4,35 @@ import {
   MAX_TOAST_DURATION_SECONDS,
   MIN_TOAST_DURATION_SECONDS,
   NEVER_DISMISS_TOAST_DURATION_SECONDS,
+  clampTimedToastDurationSeconds,
   clampToastDurationSeconds,
   toastDurationSecondsToMs,
 } from "../toastDuration";
+
+describe("clampTimedToastDurationSeconds", () => {
+  it("never returns the never-dismiss sentinel", () => {
+    expect(
+      clampTimedToastDurationSeconds(NEVER_DISMISS_TOAST_DURATION_SECONDS),
+    ).toBe(DEFAULT_TOAST_DURATION_SECONDS);
+  });
+
+  it("falls back to the default for undefined and corrupted input", () => {
+    expect(clampTimedToastDurationSeconds(undefined)).toBe(
+      DEFAULT_TOAST_DURATION_SECONDS,
+    );
+    expect(clampTimedToastDurationSeconds(-5)).toBe(
+      DEFAULT_TOAST_DURATION_SECONDS,
+    );
+  });
+
+  it("clamps timed values to the supported range", () => {
+    expect(clampTimedToastDurationSeconds(25)).toBe(25);
+    expect(clampTimedToastDurationSeconds(1)).toBe(MIN_TOAST_DURATION_SECONDS);
+    expect(clampTimedToastDurationSeconds(999)).toBe(
+      MAX_TOAST_DURATION_SECONDS,
+    );
+  });
+});
 
 describe("clampToastDurationSeconds", () => {
   it("falls back to the default for undefined input", () => {

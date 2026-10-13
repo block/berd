@@ -282,6 +282,8 @@ export function useCompletionNotifications(
                     : undefined,
                   durationSeconds: currentPrefs.toastDurationSeconds,
                   dismissLabel: tRef.current("actions.dismiss"),
+                  viewLabel: tRef.current("actions.view"),
+                  changeSoundLabel: tRef.current("actions.changeSound"),
                 });
               },
             );

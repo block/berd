@@ -33,6 +33,21 @@ export function clampToastDurationSeconds(value: number | undefined): number {
   );
 }
 
+/**
+ * Normalizes a stored "last timed duration" (the value restored when the user
+ * leaves never-dismiss mode). Unlike {@link clampToastDurationSeconds}, the
+ * never-dismiss sentinel is not a valid result here, so it also recovers to
+ * the timed default.
+ */
+export function clampTimedToastDurationSeconds(
+  value: number | undefined,
+): number {
+  const clamped = clampToastDurationSeconds(value);
+  return clamped === NEVER_DISMISS_TOAST_DURATION_SECONDS
+    ? DEFAULT_TOAST_DURATION_SECONDS
+    : clamped;
+}
+
 /** Converts a normalized toast duration (seconds) to the value sonner expects. */
 export function toastDurationSecondsToMs(durationSeconds: number): number {
   return durationSeconds === NEVER_DISMISS_TOAST_DURATION_SECONDS

@@ -9,12 +9,14 @@ function Slider({
   value,
   min = 0,
   max = 100,
+  // Value/description semantics belong on the thumb (role="slider"), not the
+  // Radix root wrapper, so destructure them out of the root spread.
+  "aria-label": thumbAriaLabel,
+  "aria-labelledby": thumbAriaLabelledBy,
+  "aria-valuetext": thumbAriaValueText,
+  "aria-describedby": thumbAriaDescribedBy,
   ...props
 }: React.ComponentProps<typeof SliderPrimitive.Root>) {
-  const thumbAriaLabel = props["aria-label"];
-  const thumbAriaLabelledBy = props["aria-labelledby"];
-  const thumbAriaValueText = props["aria-valuetext"];
-  const thumbAriaDescribedBy = props["aria-describedby"];
   const isDisabled = props.disabled === true;
   const _values = React.useMemo(
     () =>

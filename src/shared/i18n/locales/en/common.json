@@ -2,6 +2,7 @@
   "actions": {
     "archive": "Archive",
     "cancel": "Cancel",
+    "changeSound": "Change sound",
     "clear": "Clear",
     "close": "Close",
     "copy": "Copy",
