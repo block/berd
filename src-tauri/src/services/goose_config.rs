@@ -201,7 +201,7 @@ mod tests {
             "https://example.databricks.com",
             "https://example.databricks.com/",
             "https://example.databricks.com:8443",
-            "https://litellm-proxy.sqprod.co/pass-through/databricks/",
+            "https://proxy.example.com/pass-through/databricks/",
         ] {
             let (_dir, path) = write_config(&format!(
                 "GOOSE_PROVIDER: databricks\nDATABRICKS_HOST: {host}\n"
