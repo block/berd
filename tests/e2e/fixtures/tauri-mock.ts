@@ -293,7 +293,23 @@ export function buildInitScript(options?: {
       const SKILL_SOURCES = SKILLS.map(skillToSourceEntry);
       const POCKET_VOICE_SPOKEN_TEXTS = [];
 
+      // sessionId -> { promise, resolve } used to keep a session/prompt turn
+      // open until a test explicitly releases it.
+      const PROMPT_HOLDS = new Map();
+
       window.__GOOSE_E2E__ = {
+        holdPrompt: (sessionId) => {
+          let resolve;
+          const promise = new Promise((r) => {
+            resolve = r;
+          });
+          PROMPT_HOLDS.set(sessionId, { promise, resolve });
+        },
+        releasePrompt: (sessionId) => {
+          const hold = PROMPT_HOLDS.get(sessionId);
+          PROMPT_HOLDS.delete(sessionId);
+          hold?.resolve();
+        },
         listAgentSources: () => clone(AGENT_SOURCES),
         clearAgentSources: () => {
           AGENT_SOURCES = PERSONAS.map(personaToSourceEntry);
@@ -479,6 +495,15 @@ export function buildInitScript(options?: {
               };
               persistAgentSources();
             }
+            const holdRelease =
+              PROMPT_HOLDS.get(message.params?.sessionId) ??
+              PROMPT_HOLDS.get("*");
+            if (holdRelease) {
+              // A test asked to hold this turn open; resolve when released.
+              return holdRelease.promise.then(() =>
+                jsonRpcResult(message.id, { stopReason: "end_turn" }),
+              );
+            }
             return jsonRpcResult(message.id, { stopReason: "end_turn" });
           }
           case "_goose/providers/list":
@@ -649,10 +674,13 @@ export function buildInitScript(options?: {
           if (!response) {
             return;
           }
-          queueMicrotask(() => {
+          // Responses may be promises (e.g. a held session/prompt) so tests
+          // can control when an agent turn finishes.
+          Promise.resolve(response).then((resolved) => {
+            if (!resolved) return;
             this.dispatchEvent(
               new MessageEvent("message", {
-                data: JSON.stringify(response),
+                data: JSON.stringify(resolved),
               }),
             );
           });

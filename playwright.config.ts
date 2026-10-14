@@ -82,6 +82,13 @@ export default defineConfig({
       },
     },
     {
+      name: "notifications",
+      testMatch: ["**/notifications.spec.ts"],
+      use: {
+        ...devices["Desktop Chrome"],
+      },
+    },
+    {
       name: "voice-conversation",
       testMatch: [
         "**/voice-conversation.spec.ts",
