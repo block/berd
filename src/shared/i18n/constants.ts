@@ -7,6 +7,7 @@ export const TRANSLATION_NAMESPACES = [
   "builderbot",
   "common",
   "chat",
+  "desktop-agent",
   "feedback",
   "home",
   "onboarding",

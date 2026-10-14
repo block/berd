@@ -1,0 +1,53 @@
+{
+  "avatar": {
+    "title": "Agente de escritorio de Berd"
+  },
+  "composer": {
+    "placeholder": "Escribe a Berd",
+    "placeholderAgent": "Escribe a {{name}}",
+    "send": "Enviar",
+    "stop": "Detener",
+    "start": "Iniciar nuevo chat",
+    "startAgent": "Iniciar nuevo chat con {{name}}"
+  },
+  "empty": {
+    "prompt": "Pregúntale lo que quieras al agente.",
+    "waiting": "Esperando la conexión…",
+    "newChat": "Nuevo chat con {{name}} — tu primer mensaje lo inicia."
+  },
+  "hint": {
+    "agentStarting": "{{name}} se está iniciando…",
+    "connecting": "Conectando con el servidor del agente…",
+    "reconnecting": "Conexión perdida — reconectando…",
+    "reconnectExhausted": "No se puede conectar con el servidor del agente. Haz clic en ↻ para reintentar.",
+    "retry": "Reintentar conexión",
+    "sendFailed": "No se pudo enviar: {{message}}",
+    "stalled": "Sigue trabajando — puede que el servidor del agente no esté disponible.",
+    "capturing": "Capturando ventana…",
+    "thinking": "Pensando…",
+    "agentStartingGeneric": "El agente se está iniciando…",
+    "perchError": "Problema al posarse: {{message}}",
+    "perchAccessibility": "Berd necesita el permiso de Accesibilidad para posarse — concédelo en Configuración del Sistema y vuelve a intentarlo.",
+    "perched": "Posado en {{app}} — {{title}}",
+    "perchedApp": "Posado en {{app}}"
+  },
+  "menu": {
+    "newChat": "Iniciar nuevo chat",
+    "switchAgent": "Cambiar de agente",
+    "fresh": "Berd",
+    "empty": "Aún no hay agentes — créalos en la ventana principal",
+    "settings": "Configuración…",
+    "turnOff": "Desactivar agente"
+  },
+  "tools": {
+    "working_one": "Trabajando… ({{count}} llamada de herramienta)",
+    "working_other": "Trabajando… ({{count}} llamadas de herramientas)",
+    "summary_one": "{{count}} llamada de herramienta",
+    "summary_other": "{{count}} llamadas de herramientas",
+    "failed_one": "{{count}} con error",
+    "failed_other": "{{count}} con error",
+    "expand": "Mostrar llamadas de herramientas",
+    "collapse": "Ocultar llamadas de herramientas",
+    "failureDetail": "error completo abajo"
+  }
+}

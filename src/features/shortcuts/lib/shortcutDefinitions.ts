@@ -20,6 +20,7 @@ export type KnownShortcutCommandId =
   | "navigation.openSettings"
   | "navigation.paneJump"
   | "navigation.globalShortcut"
+  | "desktopAgent.togglePanel"
   | "session.quickSwitch"
   | "session.next"
   | "session.previous"
@@ -215,6 +216,16 @@ export const SHORTCUT_COMMANDS: readonly ShortcutCommandDefinition[] = [
     scope: "global",
     defaultBindings: [{ shortcut: DEFAULT_GLOBAL_SHORTCUT }],
     descriptionKey: "actions.globalShortcut",
+    configurable: true,
+    discoverable: true,
+    when: () => getPlatform() === "mac",
+  },
+  {
+    id: "desktopAgent.togglePanel",
+    category: "navigation",
+    scope: "global",
+    defaultBindings: [{ shortcut: "alt+meta+b" }],
+    descriptionKey: "actions.desktopAgentTogglePanel",
     configurable: true,
     discoverable: true,
     when: () => getPlatform() === "mac",
