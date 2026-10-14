@@ -324,6 +324,15 @@
     "rootLoadError": "Couldn't load this folder. Try again."
   },
   "image": {
+    "openInFolder": "Open in folder",
+    "actions": "Image actions",
+    "copy": "Copy image",
+    "copied": "Image copied",
+    "copyError": "Couldn't copy image.",
+    "revealError": "Couldn't show this image in its folder.",
+    "label": "Image",
+    "loading": "Loading image…",
+    "unavailable": "Image unavailable",
     "view": "View {{label}}",
     "download": "Download image",
     "downloadStarted": "Download started: {{filename}}",

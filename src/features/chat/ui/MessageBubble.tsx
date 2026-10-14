@@ -48,6 +48,8 @@ import { ClickableImage } from "./ClickableImage";
 import { MarkdownImage } from "./MarkdownImage";
 import { resolveImageContentSrc } from "./resolveImageContentSrc";
 import { McpAppView } from "./McpAppView";
+import { fileUrlToPath } from "@/shared/lib/pathIdentity";
+import { useArtifactActionsContext } from "@/features/chat/hooks/ArtifactPolicyContext";
 import { useArtifactLinkHandler } from "@/features/chat/hooks/useArtifactLinkHandler";
 import { detectProviderErrorNotice } from "@/features/chat/lib/providerErrorNotice";
 import type { CustomRenderer } from "streamdown";
@@ -276,6 +278,7 @@ function MessageAttachmentGrid({
   const [lightboxImageIndex, setLightboxImageIndex] = useState<number | null>(
     null,
   );
+  const { filesAreRemote } = useArtifactActionsContext();
   const imageItems = items.filter((item) => item.imageSrc);
   const currentLightboxItem =
     lightboxImageIndex == null
@@ -326,6 +329,9 @@ function MessageAttachmentGrid({
       <ImageLightbox
         src={currentLightboxItem?.imageSrc ?? ""}
         downloadFilename={currentLightboxItem?.attachment.name}
+        localFilePath={
+          filesAreRemote ? undefined : currentLightboxItem?.attachment.path
+        }
         alt={
           currentLightboxItem
             ? t("attachments.previewAlt", {
@@ -526,6 +532,27 @@ function resolveNotificationAction(
   return null;
 }
 
+function ContentImage({
+  content,
+  alt,
+}: {
+  content: ImageContent;
+  alt: string;
+}) {
+  const { filesAreRemote } = useArtifactActionsContext();
+  const src = resolveImageContentSrc(content);
+  if (!src) return null;
+  return (
+    <ClickableImage
+      src={src}
+      alt={alt}
+      localFilePath={
+        filesAreRemote ? undefined : (fileUrlToPath(content.uri) ?? undefined)
+      }
+    />
+  );
+}
+
 function renderContentBlock(
   content: MessageContent,
   index: number,
@@ -611,17 +638,10 @@ function renderContentBlock(
       );
     }
     case "image": {
-      const ic = content as ImageContent;
-      // Prefer inline base64 `data` over a `file://` `uri` (which the webview
-      // cannot load); convert local file URIs through the asset scheme.
-      const src = resolveImageContentSrc(ic);
-      if (!src) {
-        return null;
-      }
       return (
-        <ClickableImage
+        <ContentImage
           key={`image-${index}`}
-          src={src}
+          content={content as ImageContent}
           alt={options.defaultImageAlt}
         />
       );

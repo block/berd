@@ -99,14 +99,19 @@ function ContextMenuSubContent({
 function ContextMenuContent({
   className,
   variant = "default",
+  container,
   ...props
 }: React.ComponentProps<typeof ContextMenuPrimitive.Content> & {
   variant?: ContextMenuVariant;
+  /** Portal into an owning dialog so its focus/stacking boundary is preserved. */
+  container?: React.ComponentProps<
+    typeof ContextMenuPrimitive.Portal
+  >["container"];
 }) {
   const isRaised = variant === "raised";
   return (
     <ContextMenuVariantContext.Provider value={variant}>
-      <ContextMenuPrimitive.Portal>
+      <ContextMenuPrimitive.Portal container={container}>
         <ContextMenuPrimitive.Content
           data-slot="context-menu-content"
           data-variant={variant}

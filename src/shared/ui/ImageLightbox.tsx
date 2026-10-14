@@ -1,7 +1,17 @@
-import { Download } from "lucide-react";
+import { Copy, Download, FolderOpen } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogTitle } from "@/shared/ui/dialog";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/shared/ui/context-menu";
+import { copyImage } from "@/shared/ui/copyImage";
+import { revealInFileManager } from "@/shared/lib/fileManager";
+import { pathExists } from "@/shared/api/system";
 import { downloadImage } from "@/shared/ui/downloadImage";
 import { GlassButton } from "@/shared/ui/glass-button";
 import { openDownloadsFolder } from "@/shared/ui/openDownloadsFolder";
@@ -19,6 +29,8 @@ interface ImageLightboxProps {
    * `image-<timestamp>.<ext>`.
    */
   downloadFilename?: string;
+  /** Original local file provenance, never inferred from asset/data URLs. */
+  localFilePath?: string;
 }
 
 export function ImageLightbox({
@@ -29,8 +41,71 @@ export function ImageLightbox({
   onPrevious,
   onNext,
   downloadFilename,
+  localFilePath,
 }: ImageLightboxProps) {
   const { t } = useTranslation("chat");
+  const [copying, setCopying] = useState(false);
+  const imageRef = useRef<HTMLImageElement>(null);
+  const copyController = useRef<AbortController | null>(null);
+  const [menuContainer, setMenuContainer] = useState<HTMLDivElement | null>(
+    null,
+  );
+  useEffect(() => {
+    setCopying(false);
+    return () => {
+      copyController.current?.abort();
+      copyController.current = null;
+    };
+  }, [open, src]);
+  const [existingLocalPath, setExistingLocalPath] = useState<string | null>(
+    null,
+  );
+  useEffect(() => {
+    setExistingLocalPath(null);
+    if (!open || !localFilePath || !window.__TAURI_INTERNALS__) return;
+    let cancelled = false;
+    void pathExists(localFilePath)
+      .then((exists) => {
+        if (!cancelled) setExistingLocalPath(exists ? localFilePath : null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [open, localFilePath]);
+  const folderLabel = t("image.openInFolder");
+
+  const handleCopy = () => {
+    if (copyController.current) return;
+    const controller = new AbortController();
+    copyController.current = controller;
+    setCopying(true);
+    void copyImage(src, {
+      image: imageRef.current ?? undefined,
+      signal: controller.signal,
+    })
+      .then(() => {
+        if (!controller.signal.aborted) toast.message(t("image.copied"));
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        console.error("Failed to copy image:", error);
+        toast.error(t("image.copyError"));
+      })
+      .finally(() => {
+        if (copyController.current !== controller) return;
+        copyController.current = null;
+        setCopying(false);
+      });
+  };
+
+  const handleReveal = () => {
+    if (!existingLocalPath || existingLocalPath !== localFilePath) return;
+    void revealInFileManager(existingLocalPath).catch((error) => {
+      console.error("Failed to reveal image:", error);
+      toast.error(t("image.revealError"));
+    });
+  };
 
   const handleDownload = () => {
     void downloadImage(src, downloadFilename)
@@ -59,10 +134,16 @@ export function ImageLightbox({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="focus-override w-auto origin-center flex items-center justify-center border-none bg-transparent p-0 shadow-none outline-none motion-safe:data-[state=closed]:zoom-out-95 motion-safe:data-[state=open]:zoom-in-95 motion-safe:duration-200 motion-safe:ease-out motion-reduce:animate-none focus:outline-none focus-visible:outline-none sm:max-w-[90vw]"
+        ref={setMenuContainer}
+        className="focus-override w-auto origin-center flex flex-col gap-2 items-center justify-center border-none bg-transparent p-0 shadow-none outline-none motion-safe:data-[state=closed]:zoom-out-95 motion-safe:data-[state=open]:zoom-in-95 motion-safe:duration-200 motion-safe:ease-out motion-reduce:animate-none focus:outline-none focus-visible:outline-none sm:max-w-[90vw]"
         showCloseButton={false}
         aria-describedby={undefined}
         onKeyDown={(event) => {
+          if (
+            event.target instanceof Element &&
+            event.target.closest('[role="menu"]')
+          )
+            return;
           if (event.key === "ArrowLeft" && onPrevious) {
             event.preventDefault();
             onPrevious();
@@ -75,23 +156,93 @@ export function ImageLightbox({
       >
         {/* Visually hidden title for accessibility */}
         <DialogTitle className="sr-only">{alt}</DialogTitle>
-        <img
-          src={src}
-          alt={alt}
-          className="max-h-[85vh] max-w-[90vw] rounded-md object-contain motion-safe:data-[state=open]:animate-in motion-safe:data-[state=open]:fade-in-0 motion-safe:data-[state=open]:zoom-in-95 motion-safe:data-[state=open]:duration-200 motion-safe:data-[state=open]:ease-out motion-reduce:animate-none"
-          data-state={open ? "open" : "closed"}
-        />
         {src && (
-          <GlassButton
-            type="button"
-            size="icon"
-            aria-label={t("image.download")}
-            className="absolute top-4 right-4"
-            onClick={handleDownload}
+          <div
+            role="group"
+            aria-label={t("image.actions")}
+            className="flex w-full justify-end gap-2"
           >
-            <Download />
-          </GlassButton>
+            <GlassButton
+              type="button"
+              size="icon"
+              title={t("image.copy")}
+              aria-label={t("image.copy")}
+              feedbackState={copying ? "loading" : "idle"}
+              loadingVisual="spinner"
+              onClick={handleCopy}
+            >
+              <Copy />
+            </GlassButton>
+            <GlassButton
+              type="button"
+              size="icon"
+              title={t("image.download")}
+              aria-label={t("image.download")}
+              onClick={handleDownload}
+            >
+              <Download />
+            </GlassButton>
+            {existingLocalPath && existingLocalPath === localFilePath && (
+              <GlassButton
+                type="button"
+                size="icon"
+                title={folderLabel}
+                aria-label={folderLabel}
+                onClick={handleReveal}
+              >
+                <FolderOpen />
+              </GlassButton>
+            )}
+          </div>
         )}
+        <ContextMenu>
+          <ContextMenuTrigger asChild disabled={!src}>
+            {/* Keyboard focus exposes the same image menu as right-click. */}
+            <img
+              ref={imageRef}
+              // biome-ignore lint/a11y/noNoninteractiveTabindex: focus exposes the keyboard context menu
+              tabIndex={0}
+              aria-haspopup="menu"
+              onKeyDown={(event) => {
+                if (
+                  event.key !== "ContextMenu" &&
+                  !(event.shiftKey && event.key === "F10")
+                )
+                  return;
+                event.preventDefault();
+                const bounds = event.currentTarget.getBoundingClientRect();
+                event.currentTarget.dispatchEvent(
+                  new MouseEvent("contextmenu", {
+                    bubbles: true,
+                    cancelable: true,
+                    clientX: bounds.left + bounds.width / 2,
+                    clientY: bounds.top + bounds.height / 2,
+                  }),
+                );
+              }}
+              src={src || undefined}
+              alt={alt}
+              className="max-h-[calc(85vh-3rem)] max-w-[90vw] rounded-md object-contain motion-safe:data-[state=open]:animate-in motion-safe:data-[state=open]:fade-in-0 motion-safe:data-[state=open]:zoom-in-95 motion-safe:data-[state=open]:duration-200 motion-safe:data-[state=open]:ease-out motion-reduce:animate-none"
+              data-state={open ? "open" : "closed"}
+            />
+          </ContextMenuTrigger>
+          <ContextMenuContent container={menuContainer}>
+            <ContextMenuItem disabled={copying} onSelect={handleCopy}>
+              <Copy aria-hidden="true" />
+              {t("image.copy")}
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={handleDownload}>
+              <Download aria-hidden="true" />
+              {t("image.download")}
+            </ContextMenuItem>
+            {existingLocalPath && existingLocalPath === localFilePath && (
+              <ContextMenuItem onSelect={handleReveal}>
+                <FolderOpen aria-hidden="true" />
+                {folderLabel}
+              </ContextMenuItem>
+            )}
+          </ContextMenuContent>
+        </ContextMenu>
       </DialogContent>
     </Dialog>
   );
