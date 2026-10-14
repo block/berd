@@ -228,6 +228,19 @@ impl GooseServeProcess {
             Ok(runtime_config) => apply_runtime_goose_provider_env(&mut command, &runtime_config),
             Err(error) => log::warn!("failed to load runtime config for goose serve env: {error}"),
         }
+        // A valid DATABRICKS_HOST in the user's goose config overrides the
+        // shell and runtime config values. E2E runs use an isolated goose root,
+        // so the real user config must not leak in.
+        if app_handle
+            .try_state::<crate::services::e2e_mode::E2eMode>()
+            .is_none()
+        {
+            apply_databricks_host_config_override(
+                &mut command,
+                goose_config::databricks_host_from_config(),
+                local_byo_key_providers_enabled(),
+            );
+        }
         // This must be the final environment layer. Captured shell and runtime
         // provider values are intentionally unable to redirect an E2E child
         // back into a normal Goose root or keyring.
@@ -1252,6 +1265,30 @@ fn apply_runtime_goose_provider_env(command: &mut Command, runtime_config: &Runt
     }
 }
 
+/// Goose itself reads DATABRICKS_HOST from its config file, but only when the
+/// env var is unset, so Berd's shell and runtime config layers would otherwise
+/// shadow it. On a missing or invalid value the existing env is left as-is.
+/// BYO-key dev keeps its stripped host.
+fn apply_databricks_host_config_override(
+    command: &mut Command,
+    config_host: Result<Option<String>, String>,
+    byo_key_providers_enabled: bool,
+) {
+    if byo_key_providers_enabled {
+        return;
+    }
+    match config_host {
+        Ok(Some(host)) => {
+            log::info!("setting goose {DATABRICKS_HOST_ENV} from goose config");
+            command.env(DATABRICKS_HOST_ENV, host);
+        }
+        Ok(None) => {}
+        Err(error) => log::warn!(
+            "ignoring goose config {DATABRICKS_HOST_ENV}; keeping existing value: {error}"
+        ),
+    }
+}
+
 pub(crate) fn reserve_free_port() -> Result<u16, String> {
     let listener = std::net::TcpListener::bind((LOCALHOST, 0))
         .map_err(|error| format!("Failed to reserve Goose serve port: {error}"))?;
@@ -1264,10 +1301,10 @@ pub(crate) fn reserve_free_port() -> Result<u16, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        acp_websocket_url, add_release_webview_origin_arg, apply_goose_search_paths_env,
-        apply_runtime_goose_provider_env, apply_shell_env_with_extended_path,
-        apply_shell_env_with_extended_path_inner, storage_environment_matches_parent,
-        DATABRICKS_HOST_ENV, TAURI_WEBVIEW_ORIGIN,
+        acp_websocket_url, add_release_webview_origin_arg, apply_databricks_host_config_override,
+        apply_goose_search_paths_env, apply_runtime_goose_provider_env,
+        apply_shell_env_with_extended_path, apply_shell_env_with_extended_path_inner,
+        storage_environment_matches_parent, DATABRICKS_HOST_ENV, TAURI_WEBVIEW_ORIGIN,
     };
     use crate::commands::runtime_config::default_runtime_config;
     use std::collections::HashMap;
@@ -1526,6 +1563,55 @@ mod tests {
             env_value(&command, DATABRICKS_HOST_ENV),
             Some(OsString::from("https://example.databricks.com"))
         );
+    }
+
+    fn command_with_runtime_host() -> Command {
+        let mut command = Command::new("goose");
+        command.env(DATABRICKS_HOST_ENV, "https://runtime.databricks.com");
+        command
+    }
+
+    #[test]
+    fn databricks_host_config_override_replaces_runtime_host() {
+        let mut command = command_with_runtime_host();
+
+        apply_databricks_host_config_override(
+            &mut command,
+            Ok(Some("https://local.databricks.com".to_string())),
+            false,
+        );
+
+        assert_eq!(
+            env_value(&command, DATABRICKS_HOST_ENV),
+            Some(OsString::from("https://local.databricks.com"))
+        );
+    }
+
+    #[test]
+    fn databricks_host_config_override_keeps_runtime_host_when_missing_or_invalid() {
+        for config_host in [Ok(None), Err("invalid".to_string())] {
+            let mut command = command_with_runtime_host();
+
+            apply_databricks_host_config_override(&mut command, config_host, false);
+
+            assert_eq!(
+                env_value(&command, DATABRICKS_HOST_ENV),
+                Some(OsString::from("https://runtime.databricks.com"))
+            );
+        }
+    }
+
+    #[test]
+    fn databricks_host_config_override_is_skipped_for_byo_dev() {
+        let mut command = Command::new("goose");
+
+        apply_databricks_host_config_override(
+            &mut command,
+            Ok(Some("https://local.databricks.com".to_string())),
+            true,
+        );
+
+        assert_eq!(env_value(&command, DATABRICKS_HOST_ENV), None);
     }
 
     // Stock berd defaults declare no fastModelId (the release-time distribution

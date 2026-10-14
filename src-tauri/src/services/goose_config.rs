@@ -9,6 +9,7 @@ use etcetera::{choose_app_strategy, AppStrategy, AppStrategyArgs};
 pub(crate) const ADDITIONAL_CONFIG_FILES_ENV: &str = "GOOSE_ADDITIONAL_CONFIG_FILES";
 const GOOSE_PATH_ROOT_ENV: &str = "GOOSE_PATH_ROOT";
 pub(crate) const CONFIG_FILE_NAME: &str = "config.yaml";
+const DATABRICKS_HOST_KEY: &str = "DATABRICKS_HOST";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AdditionalConfigFiles {
@@ -66,6 +67,55 @@ fn data_dir_for_path_root(root: Option<OsString>) -> Result<PathBuf, String> {
     })
     .map_err(|error| format!("Failed to resolve goose data directory: {error}"))?;
     Ok(strategy.data_dir())
+}
+
+/// Read `DATABRICKS_HOST` from the user's goose config file.
+///
+/// Returns `Ok(None)` when the file or key is absent, and `Err` when the file
+/// is unreadable or the value is not a canonical HTTPS origin, so the caller
+/// can fall back to its existing host source.
+pub(crate) fn databricks_host_from_config() -> Result<Option<String>, String> {
+    databricks_host_from_config_path(&config_path()?)
+}
+
+fn databricks_host_from_config_path(path: &Path) -> Result<Option<String>, String> {
+    let contents = match std::fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("Failed to read {}: {error}", path.display())),
+    };
+    let value = yaml_serde::from_str::<yaml_serde::Value>(&contents)
+        .map_err(|error| format!("Failed to parse {}: {error}", path.display()))?;
+    let Some(host) = value.get(DATABRICKS_HOST_KEY) else {
+        return Ok(None);
+    };
+    let host = host.as_str().ok_or_else(|| {
+        format!(
+            "{DATABRICKS_HOST_KEY} in {} is not a string",
+            path.display()
+        )
+    })?;
+    validate_databricks_host(host)
+        .map(|()| Some(host.to_string()))
+        .map_err(|error| format!("{DATABRICKS_HOST_KEY} in {}: {error}", path.display()))
+}
+
+/// An HTTPS base URL without credentials, query, or fragment. Unlike the
+/// release-time `normalizeDatabricksHost` origin rule, a path prefix is
+/// allowed: goose's ApiClient joins request paths beneath it, so proxies such
+/// as `https://proxy.example.com/pass-through/databricks/` work.
+fn validate_databricks_host(host: &str) -> Result<(), String> {
+    let url = url::Url::parse(host).map_err(|_| "must be a valid URL".to_string())?;
+    if url.scheme() != "https"
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err("must be an HTTPS URL without credentials, query, or fragment".to_string());
+    }
+    Ok(())
 }
 
 fn validated_path_root(value: Option<OsString>) -> Option<PathBuf> {
@@ -136,6 +186,63 @@ mod tests {
             data_dir_for_path_root(Some(root.clone().into_os_string())).unwrap(),
             root.join("data")
         );
+    }
+
+    fn write_config(contents: &str) -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&path, contents).expect("write config");
+        (dir, path)
+    }
+
+    #[test]
+    fn databricks_host_from_config_reads_valid_host() {
+        for host in [
+            "https://example.databricks.com",
+            "https://example.databricks.com/",
+            "https://example.databricks.com:8443",
+            "https://litellm-proxy.sqprod.co/pass-through/databricks/",
+        ] {
+            let (_dir, path) = write_config(&format!(
+                "GOOSE_PROVIDER: databricks\nDATABRICKS_HOST: {host}\n"
+            ));
+            assert_eq!(
+                databricks_host_from_config_path(&path),
+                Ok(Some(host.to_string()))
+            );
+        }
+    }
+
+    #[test]
+    fn databricks_host_from_config_is_none_when_file_or_key_missing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert_eq!(
+            databricks_host_from_config_path(&dir.path().join("missing.yaml")),
+            Ok(None)
+        );
+
+        let (_dir, path) = write_config("GOOSE_PROVIDER: databricks\n");
+        assert_eq!(databricks_host_from_config_path(&path), Ok(None));
+    }
+
+    #[test]
+    fn databricks_host_from_config_rejects_invalid_values() {
+        for contents in [
+            "DATABRICKS_HOST: 42\n",
+            "DATABRICKS_HOST: not a url\n",
+            "DATABRICKS_HOST: http://example.databricks.com\n",
+            "DATABRICKS_HOST: https://user:pw@example.databricks.com\n",
+            "DATABRICKS_HOST: https://example.databricks.com?q=1\n",
+            "DATABRICKS_HOST: https://example.databricks.com/#frag\n",
+            "DATABRICKS_HOST: file:///etc/hosts\n",
+            "DATABRICKS_HOST: [unterminated\n",
+        ] {
+            let (_dir, path) = write_config(contents);
+            assert!(
+                databricks_host_from_config_path(&path).is_err(),
+                "expected error for {contents:?}"
+            );
+        }
     }
 
     #[test]
