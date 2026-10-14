@@ -261,6 +261,26 @@ fn snapshot_agent_target(path: &Path) -> (bool, bool, Option<Vec<u8>>) {
     (file_type.is_dir(), file_type.is_symlink(), bytes)
 }
 
+/// Entry names in `path`, sorted, or empty when the directory does not exist.
+/// A failed install must leave nothing behind, including the staging and backup
+/// entries an `exists()` check on the final path would miss.
+fn sorted_dir_entries(path: &Path) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(path) else {
+        return Vec::new();
+    };
+    let mut names = entries
+        .map(|entry| {
+            entry
+                .expect("read directory entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect::<Vec<_>>();
+    names.sort();
+    names
+}
+
 fn assert_agent_pair_unchanged(
     target: &Path,
     state: &Path,
@@ -1049,6 +1069,101 @@ fn bb_agents_preserve_managed_pairs_for_failure_envelopes() {
     assert!(requests.is_empty(), "filesystem failure must stay local");
 
     fs::remove_dir_all(sandbox).expect("remove failure sandbox");
+}
+
+/// The download URL is marketplace-supplied, so a plan can name a scheme that
+/// would take the request somewhere the marketplace client cannot reach safely.
+/// `bb agents install` must refuse it before opening a connection, surface the
+/// refusal, and leave no half-installed agent behind.
+#[test]
+fn bb_agents_install_refuses_non_http_artifact_url_before_requesting_it() {
+    let sandbox = temp_test_dir("bb-agents-artifact-url");
+    let bb_home = sandbox.join("bb-home");
+    let home = sandbox.join("home");
+    write_bb_org_config(&bb_home, "test");
+
+    let server = MockServer::start(vec![
+        MockResponse::json(marketplace_agent_detail(
+            "release-notes",
+            "agent-v1",
+            "content-v1",
+        )),
+        agent_install_plan(
+            "release-notes",
+            "agent-v1",
+            "content-v1",
+            "install",
+            Some(json!({
+                "id": "art_agent-v1",
+                "download_url": "data:text/plain,secret",
+                "sha256": "unused",
+                "size_bytes": 0,
+                "media_type": "application/zip"
+            })),
+        ),
+        MockResponse::json(marketplace_agent_version(
+            "release-notes",
+            "agent-v1",
+            "content-v1",
+        )),
+    ]);
+    let output = bb_command()
+        .env("BB_HOME", &bb_home)
+        .env("HOME", &home)
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args(["agents", "install", "release-notes", "--json"])
+        .output()
+        .expect("run bb agents install");
+    let requests = server.finish();
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(stdout.is_empty(), "stdout was: {stdout}");
+    assert_eq!(output.status.code(), Some(1), "stderr was: {stderr}");
+    let error = parse_stderr_error(&stderr);
+    assert_eq!(error["error"]["code"], "cli_error");
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .expect("error message string")
+            .contains("artifact URL must be an absolute HTTP(S) URL"),
+        "install must name the refused URL; stderr was: {stderr}"
+    );
+    assert_eq!(
+        requests
+            .iter()
+            .map(|request| request.path.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "/api/goose/v1/marketplace/agents/release-notes",
+            "/api/goose/v1/marketplace/install-plan",
+            "/api/goose/v1/marketplace/agents/release-notes/versions/agent-v1"
+        ],
+        "install must stop at the refused artifact URL"
+    );
+
+    let target = agent_target(&home, "release-notes");
+    assert!(
+        !target.exists(),
+        "refused install wrote {}",
+        target.display()
+    );
+    assert_eq!(
+        sorted_dir_entries(target.parent().expect("agents dir")),
+        Vec::<String>::new(),
+        "refused install left staged files beside the agent document"
+    );
+    assert_eq!(
+        sorted_dir_entries(&bb_home.join("agents").join("installed")),
+        Vec::<String>::new(),
+        "refused install left an install record"
+    );
+    assert_eq!(
+        sorted_dir_entries(&bb_home.join("agents").join("locks")),
+        Vec::<String>::new(),
+        "refused install held its lock"
+    );
+
+    fs::remove_dir_all(sandbox).expect("remove artifact URL sandbox");
 }
 
 /// Server capabilities pointing the `agents` target at a directory we control,
@@ -3074,6 +3189,87 @@ fn bb_skills_install_surfaces_artifact_error_envelope() {
     assert_eq!(output.status.code(), Some(4));
     assert_eq!(requests.len(), 4);
     assert!(!temp.join("skills-home/packages/builderbot-tools").exists());
+    fs::remove_dir_all(temp).expect("remove temp dir");
+}
+
+/// Skill counterpart to
+/// `bb_agents_install_refuses_non_http_artifact_url_before_requesting_it`: the
+/// plan names the download URL, so `bb skills install` must refuse a non-HTTP(S)
+/// one before opening a connection and leave no package or staging directory.
+#[test]
+fn bb_skills_install_refuses_non_http_artifact_url_before_requesting_it() {
+    let zip_bytes = skill_zip(&[("SKILL.md", "# BuilderBot Tools\n")]);
+    let artifact_sha = sha256_hex(&zip_bytes);
+    let temp = temp_test_dir("bb-skills-artifact-url");
+    let bb_home = temp.join("bb-home");
+    write_bb_org_config(&bb_home, "test");
+    let agents_dir = temp.join("agents-skills");
+    let packages_dir = temp.join("skills-home/packages");
+    let mut plan = marketplace_install_plan(&zip_bytes, &artifact_sha, zip_bytes.len());
+    plan["operations"][0]["artifact"]["download_url"] = json!("ftp://example.com/artifact.zip");
+    let server = MockServer::start(vec![
+        capabilities_response(&agents_dir),
+        MockResponse::json(plan),
+        skill_detail_response(),
+    ]);
+
+    let output = bb_command()
+        .env("BB_HOME", &bb_home)
+        .env("BB_SKILLS_HOME", temp.join("skills-home"))
+        .env("BB_SKILLS_PACKAGES_DIR", &packages_dir)
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args([
+            "skills",
+            "install",
+            "builderbot-tools",
+            "--target",
+            "agents",
+            "--yes",
+            "--json",
+        ])
+        .output()
+        .expect("run bb skills install");
+    let requests = server.finish();
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(stdout.is_empty(), "stdout was: {stdout}");
+    assert_eq!(output.status.code(), Some(1), "stderr was: {stderr}");
+    let payload = parse_stderr_error(&stderr);
+    assert_eq!(payload["error"]["code"], json!("cli_error"));
+    assert!(
+        payload["error"]["message"]
+            .as_str()
+            .expect("error message string")
+            .contains("artifact URL must be an absolute HTTP(S) URL"),
+        "install must name the refused URL; stderr was: {stderr}"
+    );
+    assert_eq!(
+        requests
+            .iter()
+            .map(|request| request.path.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "/api/goose/v1/marketplace/capabilities",
+            "/api/goose/v1/marketplace/install-plan",
+            "/api/goose/v1/marketplace/skills/builderbot-tools"
+        ],
+        "install must stop at the refused artifact URL"
+    );
+    assert_eq!(
+        sorted_dir_entries(&packages_dir),
+        Vec::<String>::new(),
+        "refused install left a package or staging directory"
+    );
+    assert_eq!(
+        sorted_dir_entries(&agents_dir),
+        Vec::<String>::new(),
+        "refused install linked into the target"
+    );
+    assert_eq!(
+        sorted_dir_entries(&temp.join("skills-home/downloads")),
+        Vec::<String>::new(),
+        "refused install persisted an artifact"
+    );
     fs::remove_dir_all(temp).expect("remove temp dir");
 }
 
