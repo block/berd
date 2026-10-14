@@ -229,16 +229,17 @@ impl GooseServeProcess {
             Err(error) => log::warn!("failed to load runtime config for goose serve env: {error}"),
         }
         // A valid DATABRICKS_HOST in the user's goose config overrides the
-        // shell and runtime config values. E2E runs use an isolated goose root,
-        // so the real user config must not leak in.
+        // shell and runtime config values. Only check when the child resolves
+        // the same config file as this process. E2E runs use an isolated goose
+        // root, so the real user config must not leak in.
         if app_handle
             .try_state::<crate::services::e2e_mode::E2eMode>()
             .is_none()
+            && config_environment_matches_parent(&command, |name| std::env::var_os(name))
         {
             apply_databricks_host_config_override(
                 &mut command,
                 goose_config::databricks_host_from_config(),
-                local_byo_key_providers_enabled(),
             );
         }
         // This must be the final environment layer. Captured shell and runtime
@@ -408,18 +409,46 @@ fn storage_environment_matches_parent(
     command: &Command,
     parent_value: impl Fn(&str) -> Option<std::ffi::OsString>,
 ) -> bool {
-    [
-        "GOOSE_PATH_ROOT",
-        "HOME",
-        "XDG_DATA_HOME",
-        "APPDATA",
-        "LOCALAPPDATA",
-        "USERPROFILE",
-        "HOMEDRIVE",
-        "HOMEPATH",
-    ]
-    .iter()
-    .all(|key| {
+    environment_matches_parent(
+        command,
+        &[
+            "GOOSE_PATH_ROOT",
+            "HOME",
+            "XDG_DATA_HOME",
+            "APPDATA",
+            "LOCALAPPDATA",
+            "USERPROFILE",
+            "HOMEDRIVE",
+            "HOMEPATH",
+        ],
+        parent_value,
+    )
+}
+
+/// Whether the child resolves the same goose config file as this process.
+fn config_environment_matches_parent(
+    command: &Command,
+    parent_value: impl Fn(&str) -> Option<std::ffi::OsString>,
+) -> bool {
+    environment_matches_parent(
+        command,
+        &[
+            "GOOSE_PATH_ROOT",
+            "HOME",
+            "XDG_CONFIG_HOME",
+            "APPDATA",
+            "USERPROFILE",
+        ],
+        parent_value,
+    )
+}
+
+fn environment_matches_parent(
+    command: &Command,
+    keys: &[&str],
+    parent_value: impl Fn(&str) -> Option<std::ffi::OsString>,
+) -> bool {
+    keys.iter().all(|key| {
         let parent = parent_value(key);
         let child = command
             .as_std()
@@ -1265,22 +1294,19 @@ fn apply_runtime_goose_provider_env(command: &mut Command, runtime_config: &Runt
     }
 }
 
-/// Goose itself reads DATABRICKS_HOST from its config file, but only when the
-/// env var is unset, so Berd's shell and runtime config layers would otherwise
-/// shadow it. On a missing or invalid value the existing env is left as-is.
-/// BYO-key dev keeps its stripped host.
+/// Goose reads DATABRICKS_HOST from its config file only when the env var is
+/// unset, so Berd's shell and runtime config layers would otherwise shadow it.
+/// Removing the env var (rather than pinning the file's value) lets goose keep
+/// re-reading the file, so settings edits apply live and stay paired with the
+/// file-backed token. On a missing or invalid value the existing env is kept.
 fn apply_databricks_host_config_override(
     command: &mut Command,
     config_host: Result<Option<String>, String>,
-    byo_key_providers_enabled: bool,
 ) {
-    if byo_key_providers_enabled {
-        return;
-    }
     match config_host {
-        Ok(Some(host)) => {
-            log::info!("setting goose {DATABRICKS_HOST_ENV} from goose config");
-            command.env(DATABRICKS_HOST_ENV, host);
+        Ok(Some(_)) => {
+            log::info!("using goose config {DATABRICKS_HOST_ENV} instead of env value");
+            command.env_remove(DATABRICKS_HOST_ENV);
         }
         Ok(None) => {}
         Err(error) => log::warn!(
@@ -1304,7 +1330,8 @@ mod tests {
         acp_websocket_url, add_release_webview_origin_arg, apply_databricks_host_config_override,
         apply_goose_search_paths_env, apply_runtime_goose_provider_env,
         apply_shell_env_with_extended_path, apply_shell_env_with_extended_path_inner,
-        storage_environment_matches_parent, DATABRICKS_HOST_ENV, TAURI_WEBVIEW_ORIGIN,
+        config_environment_matches_parent, storage_environment_matches_parent, DATABRICKS_HOST_ENV,
+        TAURI_WEBVIEW_ORIGIN,
     };
     use crate::commands::runtime_config::default_runtime_config;
     use std::collections::HashMap;
@@ -1572,19 +1599,19 @@ mod tests {
     }
 
     #[test]
-    fn databricks_host_config_override_replaces_runtime_host() {
+    fn databricks_host_config_override_defers_to_goose_config_file() {
         let mut command = command_with_runtime_host();
 
         apply_databricks_host_config_override(
             &mut command,
             Ok(Some("https://local.databricks.com".to_string())),
-            false,
         );
 
-        assert_eq!(
-            env_value(&command, DATABRICKS_HOST_ENV),
-            Some(OsString::from("https://local.databricks.com"))
-        );
+        assert_eq!(env_value(&command, DATABRICKS_HOST_ENV), None);
+        assert!(command
+            .as_std()
+            .get_envs()
+            .any(|(key, value)| key == DATABRICKS_HOST_ENV && value.is_none()));
     }
 
     #[test]
@@ -1592,7 +1619,7 @@ mod tests {
         for config_host in [Ok(None), Err("invalid".to_string())] {
             let mut command = command_with_runtime_host();
 
-            apply_databricks_host_config_override(&mut command, config_host, false);
+            apply_databricks_host_config_override(&mut command, config_host);
 
             assert_eq!(
                 env_value(&command, DATABRICKS_HOST_ENV),
@@ -1602,16 +1629,20 @@ mod tests {
     }
 
     #[test]
-    fn databricks_host_config_override_is_skipped_for_byo_dev() {
-        let mut command = Command::new("goose");
+    fn config_environment_guard_rejects_child_only_config_roots() {
+        for key in ["GOOSE_PATH_ROOT", "XDG_CONFIG_HOME"] {
+            let mut command = Command::new("goose");
+            command.env(key, "/synthetic/child-root");
+            assert!(!config_environment_matches_parent(&command, |_| None));
+            assert!(config_environment_matches_parent(&command, |name| {
+                (name == key).then(|| OsString::from("/synthetic/child-root"))
+            }));
+        }
 
-        apply_databricks_host_config_override(
-            &mut command,
-            Ok(Some("https://local.databricks.com".to_string())),
-            true,
-        );
-
-        assert_eq!(env_value(&command, DATABRICKS_HOST_ENV), None);
+        assert!(config_environment_matches_parent(
+            &Command::new("goose"),
+            |_| None
+        ));
     }
 
     // Stock berd defaults declare no fastModelId (the release-time distribution
