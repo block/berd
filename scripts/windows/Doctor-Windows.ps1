@@ -200,7 +200,7 @@ try {
     Fail "Managed Goose" "$($_.Exception.Message). Run: just setup-windows"
 }
 
-Warn "Native sign-in" "Berd native provider sign-in is not supported on Windows yet. Sign in on macOS or use explicit local credential/file storage for Windows verification."
+Warn "Native sign-in" "Berd native provider sign-in is not supported on Windows yet. Browser auth sessions (bb, Connections) are stored in a file under bb home on Windows; no BB_AUTH_STORAGE setup is needed."
 
 Write-Host ""
 if ($script:Failures -gt 0) {
