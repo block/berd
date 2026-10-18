@@ -58,7 +58,7 @@ export async function prepareAutoRoutedPrompt(
     remote: Boolean(session.remoteHost),
   });
   assertCurrent();
-  let decision = await routeAutoModel({ modeId, prompt });
+  let decision = await routeAutoModel({ modeId, prompt, signal: input.signal });
   assertCurrent();
   let fallbackAttempted = decision.modelId === mode.fallback.modelId;
   let outcome: Extract<SessionTargetOutcome, { applied: true }>;

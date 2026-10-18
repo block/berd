@@ -183,6 +183,57 @@ describe("auto routing invocation", () => {
       prompt: "context",
     });
   });
+  it("rejects immediately on cancellation while native routing is pending", async () => {
+    let finish!: (response: unknown) => void;
+    vi.mocked(invokeWithStartupRetry).mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const controller = new AbortController();
+    const pending = routeAutoModel({
+      modeId: "auto",
+      prompt: "context",
+      signal: controller.signal,
+    });
+    const rejection = expect(pending).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    controller.abort();
+    await rejection;
+    // Settling the native request afterwards must remain harmless.
+    finish(response("gpt-6-1-sol"));
+    await Promise.resolve();
+  });
+  it("does not invoke native routing for an already cancelled turn", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      routeAutoModel({
+        modeId: "auto",
+        prompt: "context",
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(invokeWithStartupRetry).not.toHaveBeenCalled();
+  });
+  it("removes the cancellation listener after a normal response", async () => {
+    vi.mocked(invokeWithStartupRetry).mockResolvedValue(
+      response("gpt-6-1-sol"),
+    );
+    const controller = new AbortController();
+    const remove = vi.spyOn(controller.signal, "removeEventListener");
+    expect(
+      (
+        await routeAutoModel({
+          modeId: "auto",
+          prompt: "context",
+          signal: controller.signal,
+        })
+      ).source,
+    ).toBe("router");
+    expect(remove).toHaveBeenCalledWith("abort", expect.any(Function));
+  });
   it("falls back on rejected network and timeout requests without retaining sensitive errors", async () => {
     vi.mocked(invokeWithStartupRetry).mockRejectedValue(
       new Error("secret endpoint error"),

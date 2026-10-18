@@ -112,24 +112,58 @@ export function selectAutoRoutingResponse(
   };
 }
 
+function abortableResponse(
+  request: Promise<unknown>,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  if (!signal) return request;
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      signal.removeEventListener("abort", onAbort);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+    // The native request may finish later. Observe both outcomes without
+    // allowing a cancelled turn to select or apply a model from its result.
+    request.then(
+      (response) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(response);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
 export async function routeAutoModel({
   modeId,
   prompt,
+  signal,
 }: {
   modeId: string;
   prompt: string;
+  signal?: AbortSignal;
 }): Promise<AutoRoutingResult> {
   const config = useRuntimeConfigStore.getState().config.goose.autoRouting;
   const mode = config?.modes.find((entry) => entry.id === modeId);
   if (!mode) throw new Error("Auto routing mode is not configured");
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
   try {
     // The backend resolves URL, selector and candidate list from trusted runtime config.
-    const response = await invokeWithStartupRetry<unknown>("route_auto_model", {
-      modeId,
-      prompt,
-    });
+    const response = await abortableResponse(
+      invokeWithStartupRetry<unknown>("route_auto_model", {
+        modeId,
+        prompt,
+      }),
+      signal,
+    );
     return selectAutoRoutingResponse(mode, response);
   } catch {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     // Error messages may contain endpoint details; diagnostics use stable local codes.
     return autoRoutingFallback(mode, "request_failed");
   }

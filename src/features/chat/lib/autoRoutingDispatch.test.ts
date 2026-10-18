@@ -6,6 +6,7 @@ import {
   acpSetSessionConfigOption,
 } from "@/shared/api/acp";
 import { repairManagedGooseModelSelection } from "@/features/providers/lib/managedModelSelectionRepair";
+import { invokeWithStartupRetry } from "@/shared/api/invokeWithStartupRetry";
 import { routeAutoModel } from "@/shared/api/autoRouting";
 import { DEFAULT_RUNTIME_CONFIG } from "@/shared/runtime-config/schema";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
@@ -16,6 +17,10 @@ import {
   acquireSessionDispatchTarget,
   resetSessionTargetCoordinatorsForTests,
 } from "./sessionTargetCoordinator";
+
+vi.mock("@/shared/api/invokeWithStartupRetry", () => ({
+  invokeWithStartupRetry: vi.fn(),
+}));
 
 vi.mock("@/shared/api/acp", () => ({
   acpGetPreparedWorkingDir: vi.fn(),
@@ -304,6 +309,48 @@ describe("auto routing dispatch", () => {
       prepareAutoRoutedPrompt("s", { text: "Task" }),
     ).rejects.toThrow(PreCommitSendRejectedError);
     expect(acpPrepareSession).not.toHaveBeenCalled();
+  });
+
+  it("releases the owning dispatch lease on Stop while native routing stays pending", async () => {
+    const actual = await vi.importActual<
+      typeof import("@/shared/api/autoRouting")
+    >("@/shared/api/autoRouting");
+    vi.mocked(routeAutoModel).mockImplementation(actual.routeAutoModel);
+    let finish!: (value: unknown) => void;
+    vi.mocked(invokeWithStartupRetry).mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const controller = new AbortController();
+    const lease = acquireSessionDispatchTarget("s");
+    if (lease.status !== "acquired") throw new Error("Expected lease");
+    const pending = prepareAutoRoutedPrompt("s", {
+      text: "Task",
+      signal: controller.signal,
+      dispatchToken: lease.token,
+    }).finally(lease.release);
+    await vi.waitFor(() =>
+      expect(invokeWithStartupRetry).toHaveBeenCalledTimes(1),
+    );
+    const rejection = expect(pending).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    controller.abort();
+    await rejection;
+    const next = acquireSessionDispatchTarget("s");
+    expect(next.status).toBe("acquired");
+    if (next.status === "acquired") next.release();
+    finish({
+      route_selection: [
+        { route_option: { model: "chosen", harness: "codex" } },
+      ],
+    });
+    await Promise.resolve();
+    expect(acpPrepareSession).not.toHaveBeenCalled();
+    expect(
+      useChatSessionStore.getState().getSession("s")?.autoRoutingDecision,
+    ).toBeUndefined();
   });
 
   it("does not switch models when the prompt is cancelled during routing", async () => {
