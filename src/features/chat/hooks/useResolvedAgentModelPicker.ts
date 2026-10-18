@@ -14,7 +14,10 @@ import { useProviderCatalogStore } from "@/features/providers/stores/providerCat
 import { useDefaultProviderReadinessStore } from "@/features/providers/stores/defaultProviderReadinessStore";
 import { resolveModelProviderId } from "@/features/providers/lib/modelProviderResolution";
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
-import type { ChatSession } from "../stores/chatSessionStore";
+import {
+  type ChatSession,
+  useChatSessionStore,
+} from "../stores/chatSessionStore";
 import { recoverStrandedProviderSession } from "../model-selection/strandedProviderRecovery";
 import { useAgentModelPickerState } from "./useAgentModelPickerState";
 import {
@@ -230,6 +233,17 @@ export function useResolvedAgentModelPicker({
   const catalogLoaded = useProviderCatalogStore((state) => state.loaded);
   // A provider or model choice supersedes work started by either callback.
   const selectionVersionRef = useRef(0);
+  const autoActivationRef = useRef<
+    | {
+        modeId: string;
+        previousModeId: ChatSession["autoModeId"];
+        previousDecision: ChatSession["autoRoutingDecision"];
+      }
+    | undefined
+  >(undefined);
+  const autoActivationByRequestRef = useRef(
+    new Map<string, NonNullable<typeof autoActivationRef.current>>(),
+  );
   const [gooseDefaultSelection, setGooseDefaultSelection] =
     useState<PreferredModelSelection | null>(null);
 
@@ -524,6 +538,7 @@ export function useResolvedAgentModelPicker({
         });
     },
     onModelSelected: (model, requestedAgentId) => {
+      const autoActivation = autoActivationRef.current;
       selectAutoMode(sessionId, null);
       const targetAgentId = requestedAgentId ?? selectedAgentId;
       const modelId = model.id;
@@ -596,6 +611,20 @@ export function useResolvedAgentModelPicker({
       selectionVersionRef.current += 1;
       const versionAtSelection = selectionVersionRef.current;
       const requestId = createModelSelectionRequestId();
+      const restoreAutoActivation = () => {
+        const activation =
+          autoActivationByRequestRef.current.get(requestId) ?? autoActivation;
+        autoActivationByRequestRef.current.delete(requestId);
+        if (!activation || selectionVersionRef.current !== versionAtSelection)
+          return;
+        const store = useChatSessionStore.getState();
+        if (store.getSession(sessionId)?.autoModeId !== activation.modeId)
+          return;
+        store.patchSession(sessionId, {
+          autoModeId: activation.previousModeId,
+          autoRoutingDecision: activation.previousDecision,
+        });
+      };
 
       const previousStoredModelPreference =
         getStoredModelPreference(targetAgentId);
@@ -639,8 +668,10 @@ export function useResolvedAgentModelPicker({
             requestId,
           );
           if (!applied || !intentStillMatches) {
+            restoreAutoActivation();
             return;
           }
+          autoActivationByRequestRef.current.delete(requestId);
           if (selectionVersionRef.current !== versionAtSelection) {
             return;
           }
@@ -656,6 +687,7 @@ export function useResolvedAgentModelPicker({
             !intentStillMatches ||
             selectionVersionRef.current !== versionAtSelection
           ) {
+            autoActivationByRequestRef.current.delete(requestId);
             return;
           }
           if (
@@ -673,11 +705,14 @@ export function useResolvedAgentModelPicker({
                     ),
             )
           ) {
+            autoActivationByRequestRef.current.delete(requestId);
             return;
           }
           if (selectionVersionRef.current !== versionAtSelection) {
+            autoActivationByRequestRef.current.delete(requestId);
             return;
           }
+          restoreAutoActivation();
           console.error("Failed to set model:", error);
           if (!sessionHasStarted) {
             if (previousStoredModelPreference) {
@@ -855,20 +890,53 @@ export function useResolvedAgentModelPicker({
       onModeChange: (modeId: string) => {
         const target = getAutoModeExecutionTarget(modeId);
         if (!target) return;
-        const accepted = handleModelChange(
-          target.modelId,
-          {
-            id: target.modelId,
-            name: target.modelName,
-            providerId: target.modelProviderId,
-          },
-          "goose",
-        );
+        const activation = {
+          modeId,
+          previousModeId: sessionId
+            ? useChatSessionStore.getState().getSession(sessionId)?.autoModeId
+            : selectedAutoModeId,
+          previousDecision: sessionId
+            ? useChatSessionStore.getState().getSession(sessionId)
+                ?.autoRoutingDecision
+            : undefined,
+        };
+        autoActivationRef.current = activation;
+        let accepted: ReturnType<typeof handleModelChange>;
+        try {
+          accepted = handleModelChange(
+            target.modelId,
+            {
+              id: target.modelId,
+              name: target.modelName,
+              providerId: target.modelProviderId,
+            },
+            "goose",
+          );
+        } finally {
+          autoActivationRef.current = undefined;
+        }
+        const fallbackAlreadySelected = sessionId
+          ? sameSessionExecutionTarget(session?.executionTarget, target)
+          : selectedAgentId === target.harnessId &&
+            effectiveModelSelection?.id === target.modelId &&
+            effectiveModelSelection.modelProviderId === target.modelProviderId;
+        if (accepted === false && !fallbackAlreadySelected) return;
+        const pendingIntent = sessionId
+          ? getModelSelectionIntent(sessionId)
+          : undefined;
         if (
-          accepted === false &&
-          !sameSessionExecutionTarget(session?.executionTarget, target)
-        )
-          return;
+          pendingIntent &&
+          session?.creationState !== "pending" &&
+          sameSessionExecutionTarget(pendingIntent.target, target)
+        ) {
+          const previousActivation = autoActivationByRequestRef.current.get(
+            pendingIntent.requestId,
+          );
+          autoActivationByRequestRef.current.set(pendingIntent.requestId, {
+            ...(previousActivation ?? activation),
+            modeId,
+          });
+        }
         selectAutoMode(sessionId, modeId);
       },
     },

@@ -325,6 +325,184 @@ describe("useResolvedAgentModelPicker", () => {
     if (lease.status === "acquired") lease.release();
   });
 
+  it.each([
+    undefined,
+    "balanced",
+  ])("enables Auto from home when its fallback is already selected (default: %s)", async (defaultModeId) => {
+    useRuntimeConfigStore.setState({
+      config: {
+        ...DEFAULT_RUNTIME_CONFIG,
+        goose: {
+          ...DEFAULT_RUNTIME_CONFIG.goose,
+          autoRouting: {
+            url: "https://router.example",
+            defaultModeId,
+            modes: [
+              {
+                id: "balanced",
+                displayName: "Auto Balanced",
+                modelProviderId: "openai",
+                fallback: { modelId: "gpt-5", effort: "medium" },
+                models: [{ modelId: "gpt-5", routerModel: "gpt-5" }],
+              },
+            ],
+          },
+        },
+      },
+    });
+    const { useAgentModelPickerState } = await vi.importActual<
+      typeof import("../useAgentModelPickerState")
+    >("../useAgentModelPickerState");
+    mockUseAgentModelPickerState.mockImplementation(useAgentModelPickerState);
+    mockAgentStatus.mockReturnValue({
+      readyAgentIds: new Set(["goose"]),
+      agentReadiness: new Map(),
+      refresh: vi.fn(),
+    });
+    const { result } = renderModelPicker({
+      sessionId: null,
+      session: undefined,
+      pendingModelSelection: {
+        id: "gpt-5",
+        name: "GPT-5",
+        modelProviderId: "openai",
+        source: "explicit",
+      },
+    });
+    act(() => result.current.autoRouting.onModeChange("balanced"));
+    expect(getSelectedAutoModeId()).toBe("balanced");
+  });
+
+  it.each([
+    undefined,
+    "previous-auto",
+  ])("restores prior Auto intent after fallback activation fails (previous: %s)", async (previousModeId) => {
+    useRuntimeConfigStore.setState({
+      config: {
+        ...DEFAULT_RUNTIME_CONFIG,
+        goose: {
+          ...DEFAULT_RUNTIME_CONFIG.goose,
+          autoRouting: {
+            url: "https://router.example",
+            modes: [
+              {
+                id: "balanced",
+                displayName: "Auto Balanced",
+                modelProviderId: "openai",
+                fallback: { modelId: "gpt-5", effort: "medium" },
+                models: [{ modelId: "gpt-5", routerModel: "gpt-5" }],
+              },
+            ],
+          },
+        },
+      },
+    });
+    const { useAgentModelPickerState } = await vi.importActual<
+      typeof import("../useAgentModelPickerState")
+    >("../useAgentModelPickerState");
+    mockUseAgentModelPickerState.mockImplementation(useAgentModelPickerState);
+    mockAgentStatus.mockReturnValue({
+      readyAgentIds: new Set(["goose", "codex-acp"]),
+      agentReadiness: new Map(),
+      refresh: vi.fn(),
+    });
+    const session = makeSession(
+      { harnessId: "codex-acp" },
+      { autoModeId: previousModeId },
+    );
+    useChatSessionStore.setState({ sessions: [session] });
+    const applySessionModelSelection = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("activation failed"))
+      .mockResolvedValue(true);
+    const { result } = renderModelPicker({
+      session,
+      selectedProvider: "codex-acp",
+      applySessionModelSelection,
+    });
+    act(() => result.current.autoRouting.onModeChange("balanced"));
+    expect(
+      useChatSessionStore.getState().getSession(session.id)?.autoModeId,
+    ).toBe("balanced");
+    await waitFor(() =>
+      expect(
+        useChatSessionStore.getState().getSession(session.id)?.autoModeId,
+      ).toBe(previousModeId),
+    );
+    expect(
+      useChatSessionStore.getState().getSession(session.id)?.executionTarget
+        ?.harnessId,
+    ).toBe("codex-acp");
+  });
+
+  it("keeps a newer explicit choice when older Auto activation fails", async () => {
+    useRuntimeConfigStore.setState({
+      config: {
+        ...DEFAULT_RUNTIME_CONFIG,
+        goose: {
+          ...DEFAULT_RUNTIME_CONFIG.goose,
+          autoRouting: {
+            url: "https://router.example",
+            modes: [
+              {
+                id: "balanced",
+                displayName: "Auto Balanced",
+                modelProviderId: "openai",
+                fallback: { modelId: "gpt-5", effort: "medium" },
+                models: [{ modelId: "gpt-5", routerModel: "gpt-5" }],
+              },
+            ],
+          },
+        },
+      },
+    });
+    const { useAgentModelPickerState } = await vi.importActual<
+      typeof import("../useAgentModelPickerState")
+    >("../useAgentModelPickerState");
+    mockUseAgentModelPickerState.mockImplementation(useAgentModelPickerState);
+    mockAgentStatus.mockReturnValue({
+      readyAgentIds: new Set(["goose", "codex-acp"]),
+      agentReadiness: new Map(),
+      refresh: vi.fn(),
+    });
+    const session = makeSession(
+      { harnessId: "codex-acp" },
+      { autoModeId: "previous-auto" },
+    );
+    useChatSessionStore.setState({ sessions: [session] });
+    let rejectActivation!: (reason: Error) => void;
+    const applySessionModelSelection = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<boolean>((_resolve, reject) => {
+            rejectActivation = reject;
+          }),
+      )
+      .mockResolvedValue(true);
+    const { result } = renderModelPicker({
+      session,
+      selectedProvider: "codex-acp",
+      applySessionModelSelection,
+    });
+    act(() => result.current.autoRouting.onModeChange("balanced"));
+    act(() =>
+      result.current.handleModelChange(
+        "manual",
+        { id: "manual", name: "Manual", providerId: "openai" },
+        "goose",
+      ),
+    );
+    await act(async () => rejectActivation(new Error("activation failed")));
+    expect(
+      useChatSessionStore.getState().getSession(session.id)?.autoModeId,
+    ).toBeNull();
+    expect(
+      useChatSessionStore.getState().getSession(session.id)?.executionTarget
+        ?.modelId,
+    ).toBe("manual");
+  });
+
   it("uses configured auto defaults only for new chats and preserves explicit opt-out", () => {
     expect(getSelectedAutoModeId()).toBeUndefined();
     useRuntimeConfigStore.setState({
