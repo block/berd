@@ -748,6 +748,11 @@ export async function transitionSessionDispatchTarget(
   }
   const previousTarget = dispatch.target;
   const previousReasoning = dispatch.reasoningEffort;
+  const discardDeferredObservation = () => {
+    if (actor.deferredTargetMutation?.source === "acp") {
+      actor.deferredTargetMutation = undefined;
+    }
+  };
   const publish = (target: SessionExecutionTarget) => {
     dispatch.target = target;
     restoringLeasedTarget = true;
@@ -767,6 +772,9 @@ export async function transitionSessionDispatchTarget(
   try {
     const outcome = await transitionSessionTarget(request);
     if (outcome.applied) {
+      // The owned acknowledgement supersedes observations of the previous
+      // model that arrived while preparation was in flight.
+      discardDeferredObservation();
       dispatch.target = outcome.target;
       dispatch.reasoningEffort = useChatSessionStore
         .getState()

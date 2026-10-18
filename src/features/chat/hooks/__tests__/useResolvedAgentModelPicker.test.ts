@@ -1,3 +1,4 @@
+import { beginModelSelectionIntent } from "../../model-selection/modelSelectionIntent";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import { DEFAULT_RUNTIME_CONFIG } from "@/shared/runtime-config/schema";
 import {
@@ -260,6 +261,68 @@ describe("useResolvedAgentModelPicker", () => {
       useChatSessionStore.getState().getSession(session.id)?.autoModeId,
     ).toBeNull();
     expect(applySessionModelSelection).not.toHaveBeenCalled();
+  });
+
+  it("supersedes a deferred foreign-harness choice when auto uses the active concrete model", async () => {
+    useRuntimeConfigStore.setState({
+      config: {
+        ...DEFAULT_RUNTIME_CONFIG,
+        goose: {
+          ...DEFAULT_RUNTIME_CONFIG.goose,
+          autoRouting: {
+            url: "https://router.example",
+            modes: [
+              {
+                id: "balanced",
+                displayName: "Auto Balanced",
+                modelProviderId: "openai",
+                fallback: { modelId: "gpt-5", effort: "medium" },
+                models: [{ modelId: "gpt-5", routerModel: "gpt-5" }],
+              },
+            ],
+          },
+        },
+      },
+    });
+    const { useAgentModelPickerState } = await vi.importActual<
+      typeof import("../useAgentModelPickerState")
+    >("../useAgentModelPickerState");
+    mockUseAgentModelPickerState.mockImplementation(useAgentModelPickerState);
+    mockAgentStatus.mockReturnValue({
+      readyAgentIds: new Set(["goose", "claude-acp"]),
+      agentReadiness: new Map(),
+      refresh: vi.fn(),
+    });
+    const session = makeSession({
+      harnessId: "goose",
+      modelProviderId: "openai",
+      modelId: "gpt-5",
+      modelName: "GPT-5",
+    });
+    useChatSessionStore.setState({ sessions: [session] });
+    const lease = acquireSessionDispatchTarget(session.id);
+    beginModelSelectionIntent(session.id, {
+      requestId: "foreign-choice",
+      target: {
+        harnessId: "claude-acp",
+        modelProviderId: "anthropic",
+        modelId: "opus",
+        modelName: "Opus",
+      },
+    });
+    const { result } = renderModelPicker({
+      session,
+      applySessionModelSelection: vi.fn(() => new Promise<boolean>(() => {})),
+    });
+    act(() => result.current.autoRouting.onModeChange("balanced"));
+    expect(getSessionTargetSelection(session.id)?.target).toMatchObject({
+      harnessId: "goose",
+      modelId: "gpt-5",
+    });
+    expect(
+      useChatSessionStore.getState().getSession(session.id)?.autoModeId,
+    ).toBe("balanced");
+    if (lease.status === "acquired") lease.release();
   });
 
   it("uses configured auto defaults only for new chats and preserves explicit opt-out", () => {

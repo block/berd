@@ -24,6 +24,7 @@ import {
 } from "../lib/modelPreferences";
 import {
   beginModelSelectionIntent,
+  getModelSelectionIntent,
   clearCurrentModelSelectionIntent,
   createModelSelectionRequestId,
   rollbackToPreviousModel,
@@ -582,7 +583,12 @@ export function useResolvedAgentModelPicker({
       // original selection that is still correctly configuring the backend.
       if (
         !session ||
-        sameSessionExecutionTarget(session.executionTarget, nextTarget)
+        (sameSessionExecutionTarget(session.executionTarget, nextTarget) &&
+          (!getModelSelectionIntent(sessionId) ||
+            sameSessionExecutionTarget(
+              getModelSelectionIntent(sessionId)?.target,
+              nextTarget,
+            )))
       ) {
         return false;
       }

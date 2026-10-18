@@ -65,9 +65,16 @@ describe("session target coordinator", () => {
   });
 
   it("allows the dispatch owner to route to a new model without releasing its lease", async () => {
-    mockPrepare.mockResolvedValue({
-      model: { modelId: "b", modelName: "b" },
-      reasoningEffort,
+    mockPrepare.mockImplementation(async () => {
+      observeSessionTargetModelSnapshot({
+        sessionId: "s",
+        snapshot: { modelId: "a", modelName: "a" },
+        context: { origin: "notification", providerId: "openai" },
+      });
+      return {
+        model: { modelId: "b", modelName: "b" },
+        reasoningEffort,
+      };
     });
     const lease = acquireSessionDispatchTarget("s");
     if (lease.status !== "acquired") throw new Error("Expected lease");
