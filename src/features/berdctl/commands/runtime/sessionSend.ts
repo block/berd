@@ -158,6 +158,7 @@ export async function sendPromptToExistingSessionInBackground(
         persona,
         {
           ...(options.sendOptions ?? berdctlCrossSessionSendOptions()),
+          sessionSelectionToken: targetLease.token,
           systemPrompt: session
             ? formatIncludedWorkspacesPrompt(session)
             : undefined,
