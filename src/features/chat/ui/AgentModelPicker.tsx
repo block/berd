@@ -10,6 +10,7 @@ import {
 import {
   IconAiAgents,
   IconArrowsExchange,
+  IconArrowsSplit2,
   IconCheck,
   IconChevronDown,
 } from "@tabler/icons-react";
@@ -317,9 +318,12 @@ export function AgentModelPicker({
   const triggerTitle =
     triggerLabel ?? (loading ? t("toolbar.loading") : undefined);
   const triggerButtonSize = triggerIconOnly ? "icon-pill-sm" : "sm";
-  const triggerProviderIcon =
-    getProviderIcon(selectedAgentId, "size-4") ??
-    (triggerIconOnly ? <IconAiAgents className="size-4" /> : null);
+  const triggerProviderIcon = autoRouting?.selectedModeId ? (
+    <IconArrowsSplit2 className="size-4" aria-hidden="true" />
+  ) : (
+    (getProviderIcon(selectedAgentId, "size-4") ??
+    (triggerIconOnly ? <IconAiAgents className="size-4" /> : null))
+  );
   const reasoningEffortConfig = autoRouting?.selectedModeId
     ? undefined
     : reasoningEffort?.config;
@@ -728,6 +732,10 @@ export function AgentModelPicker({
                       }}
                       className="justify-between"
                     >
+                      <IconArrowsSplit2
+                        className="size-4 shrink-0"
+                        aria-hidden="true"
+                      />
                       <span className="min-w-0 flex-1 truncate">
                         {mode.displayName}
                       </span>
