@@ -101,10 +101,11 @@ arbitrary authentication headers are not supported.
 
 ## Router protocol and diagnostics
 
-Each fresh prompt includes its text, loaded skill instructions (up to 24,000
-characters), and metadata plus text previews for up to four explicitly attached
-local files (6,000 characters each). Recent conversation context helps classify
-follow-ups. The complete routing context is capped at 64,000 characters. Images
+Each fresh prompt includes task text, loaded skill instructions, and recent
+conversation context, with up to 24,000 characters for each source. Metadata
+and text previews for up to four explicitly attached local files contribute
+up to 24,000 characters per file. The complete routing context is capped at
+176,000 characters, leaving room for all seven sections and their metadata. Images
 and directories contribute metadata; remote paths are not read locally. Steering
 an in-progress turn keeps its current model and does not call the router.
 

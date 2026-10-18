@@ -1,13 +1,15 @@
 import { readTextFile } from "@/shared/api/system";
 import type { ChatAttachmentDraft, Message } from "@/shared/types/messages";
 
-// Keep classification bounded independently of the inference prompt. Selected
-// skills get more room than file previews because they define the actual task.
-const MAX_PROMPT_CHARS = 16_000;
+// Keep classification bounded independently of the inference prompt. Give each
+// context source enough room for complex tasks, skills, and attached files.
+const MAX_PROMPT_CHARS = 24_000;
 const MAX_SKILL_CHARS = 24_000;
-const MAX_FILE_CHARS = 6_000;
-const MAX_HISTORY_CHARS = 8_000;
+const MAX_FILE_CHARS = 24_000;
+const MAX_HISTORY_CHARS = 24_000;
 const MAX_FILES = 4;
+// Seven 24k sections (task, skills, four files, history), plus metadata.
+const MAX_CONTEXT_CHARS = 176_000;
 
 function bounded(text: string, limit: number): string {
   return text.length <= limit
@@ -77,5 +79,5 @@ export async function buildAutoRoutingPrompt(input: {
     // Preserve the most recent context for follow-ups such as "fix that".
     sections.push(`Recent conversation:\n${history.slice(-MAX_HISTORY_CHARS)}`);
   }
-  return sections.join("\n\n").slice(0, 64_000);
+  return sections.join("\n\n").slice(0, MAX_CONTEXT_CHARS);
 }

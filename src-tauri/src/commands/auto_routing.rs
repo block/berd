@@ -33,7 +33,8 @@ pub async fn route_auto_model(
     runtime_config: State<'_, RuntimeConfigState>,
     distro_bundle: State<'_, DistroBundleState>,
 ) -> Result<Value, String> {
-    if prompt.len() > 256_000 {
+    // Allow four UTF-8 bytes per character in the 176k renderer context budget.
+    if prompt.len() > 704_000 {
         return Err("Routing context exceeds limit".to_string());
     }
     let runtime = runtime_config.ready_config(&distro_bundle).await?;
