@@ -560,6 +560,7 @@ export function GlobalComposerPill({
       return;
     }
 
+    selectAutoMode(null, null);
     setProviderOverride(personaTarget.harnessId);
     setModelOverride(
       personaTarget.modelId

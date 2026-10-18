@@ -770,6 +770,7 @@ describe("GlobalComposerPill", () => {
   });
 
   it("applies the suggested persona's provider and model to the send payload", async () => {
+    usePendingAutoModeStore.getState().setModeId("balanced");
     const user = userEvent.setup();
     useAgentStore.setState({
       personas: [
@@ -801,6 +802,7 @@ describe("GlobalComposerPill", () => {
     });
 
     expect(screen.getByText("Research Scout")).toBeInTheDocument();
+    expect(usePendingAutoModeStore.getState().modeId).toBeNull();
 
     await user.type(screen.getByRole("textbox"), "Hello");
     await user.click(screen.getByRole("button", { name: /send message/i }));

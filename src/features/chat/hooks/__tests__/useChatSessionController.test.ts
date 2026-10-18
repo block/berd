@@ -4877,6 +4877,23 @@ describe("useChatSessionController", () => {
     expect(result.current.currentModelName).toBe("Claude Sonnet 4");
   });
 
+  it.each([
+    { provider: "goose", modelProviderId: "openai", model: "gpt-4o" },
+    { provider: "codex-acp", model: undefined },
+  ])("exits Auto when a persona pins its execution target: %j", (target) => {
+    useChatSessionStore
+      .getState()
+      .patchSession("session-1", { autoModeId: "balanced" });
+    useAgentStore.setState({ personas: [personaFixture(target)] });
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+    act(() => result.current.handlePersonaChange("persona-1"));
+    expect(
+      useChatSessionStore.getState().getSession("session-1")?.autoModeId,
+    ).toBeNull();
+  });
+
   it("applies a persona's provider-only target exactly", async () => {
     useProviderCatalogStore.getState().mergeEntries([
       {
@@ -5297,6 +5314,9 @@ describe("useChatSessionController", () => {
   });
 
   it("leaves the current target alone when a legacy persona model cannot resolve", async () => {
+    useChatSessionStore
+      .getState()
+      .patchSession("session-1", { autoModeId: "balanced" });
     useAgentStore.setState({
       personas: [
         personaFixture({
@@ -5328,6 +5348,7 @@ describe("useChatSessionController", () => {
       useChatSessionStore.getState().getSession("session-1"),
     ).toMatchObject({
       personaId: "persona-1",
+      autoModeId: "balanced",
       executionTarget: {
         harnessId: "goose",
         modelProviderId: "openai",

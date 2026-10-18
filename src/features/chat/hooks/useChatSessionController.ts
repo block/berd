@@ -1,4 +1,7 @@
-import { getSelectedAutoModeId } from "../lib/autoModelSelection";
+import {
+  getSelectedAutoModeId,
+  selectAutoMode,
+} from "../lib/autoModelSelection";
 import { projectEnvironment } from "@/features/projects/lib/projectEnvironment";
 import {
   useCallback,
@@ -1553,6 +1556,7 @@ export function useChatSessionController({
       const personaTarget = persona ? resolvePersonaTarget(persona) : undefined;
 
       if (personaTarget) {
+        selectAutoMode(sessionId, null);
         const harnessId = personaTarget.harnessId;
         if (!personaTarget.modelId) {
           if (!sessionId) {
