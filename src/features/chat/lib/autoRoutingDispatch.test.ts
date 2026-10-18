@@ -5,6 +5,7 @@ import {
   acpPrepareSession,
   acpSetSessionConfigOption,
 } from "@/shared/api/acp";
+import { repairManagedGooseModelSelection } from "@/features/providers/lib/managedModelSelectionRepair";
 import { routeAutoModel } from "@/shared/api/autoRouting";
 import { DEFAULT_RUNTIME_CONFIG } from "@/shared/runtime-config/schema";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
@@ -21,7 +22,13 @@ vi.mock("@/shared/api/acp", () => ({
   acpPrepareSession: vi.fn(),
   acpSetSessionConfigOption: vi.fn(),
 }));
-vi.mock("@/shared/api/autoRouting", () => ({ routeAutoModel: vi.fn() }));
+vi.mock("@/shared/api/autoRouting", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/shared/api/autoRouting")>()),
+  routeAutoModel: vi.fn(),
+}));
+vi.mock("@/features/providers/lib/managedModelSelectionRepair", () => ({
+  repairManagedGooseModelSelection: vi.fn(),
+}));
 
 const decision = {
   modeId: "balanced",
@@ -35,6 +42,7 @@ const decision = {
 describe("auto routing dispatch", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(repairManagedGooseModelSelection).mockResolvedValue(null);
     vi.mocked(acpGetPreparedWorkingDir).mockReturnValue("/work");
     resetSessionTargetCoordinatorsForTests();
     useRuntimeConfigStore.setState({
@@ -175,6 +183,109 @@ describe("auto routing dispatch", () => {
     } finally {
       lease.release();
     }
+  });
+
+  function configureDistinctFallback() {
+    const config = useRuntimeConfigStore.getState().config;
+    const mode = config.goose.autoRouting?.modes[0];
+    if (!mode) throw new Error("Expected mode");
+    const autoRouting = config.goose.autoRouting;
+    if (!autoRouting) throw new Error("Expected routing config");
+    useRuntimeConfigStore.setState({
+      config: {
+        ...config,
+        goose: {
+          ...config.goose,
+          autoRouting: {
+            ...autoRouting,
+            modes: [
+              {
+                ...mode,
+                fallback: { modelId: "fallback", effort: "high" },
+                models: [
+                  ...mode.models,
+                  {
+                    modelId: "fallback",
+                    routerModel: "router-fallback",
+                    minEffort: "high",
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    });
+    vi.mocked(acpPrepareSession).mockImplementation(
+      async (_id, _provider, _cwd, options) => ({
+        model: {
+          modelId: options?.modelId ?? "",
+          modelName: options?.modelId ?? "",
+        },
+        reasoningEffort: null,
+      }),
+    );
+  }
+  it("retries the configured fallback once after inventory substitutes the routed model", async () => {
+    configureDistinctFallback();
+    vi.mocked(repairManagedGooseModelSelection).mockImplementation(
+      async (selection) =>
+        selection.modelId === "chosen"
+          ? {
+              providerId: selection.providerId ?? "openai",
+              modelId: "substitute",
+            }
+          : null,
+    );
+    const lease = acquireSessionDispatchTarget("s");
+    if (lease.status !== "acquired") throw new Error("Expected lease");
+    try {
+      const result = await prepareAutoRoutedPrompt("s", {
+        text: "Task",
+        dispatchToken: lease.token,
+      });
+      expect(result).toMatchObject({
+        modelId: "fallback",
+        source: "fallback",
+        fallbackReason: "model_unavailable",
+        response: decision.response,
+      });
+      expect(acpPrepareSession).toHaveBeenCalledTimes(1);
+      expect(
+        useChatSessionStore.getState().getSession("s")?.executionTarget
+          ?.modelId,
+      ).toBe("fallback");
+    } finally {
+      lease.release();
+    }
+  });
+  it("retries the configured fallback after routed model activation fails", async () => {
+    configureDistinctFallback();
+    vi.mocked(acpPrepareSession).mockRejectedValueOnce(
+      new Error("Model no longer served"),
+    );
+    const result = await prepareAutoRoutedPrompt("s", { text: "Task" });
+    expect(result).toMatchObject({ modelId: "fallback", source: "fallback" });
+    expect(acpPrepareSession).toHaveBeenCalledTimes(2);
+  });
+  it("stops after the configured fallback is also unavailable without recording a substitute", async () => {
+    configureDistinctFallback();
+    vi.mocked(repairManagedGooseModelSelection).mockImplementation(
+      async (selection) => ({
+        providerId: selection.providerId ?? "openai",
+        modelId: "substitute",
+      }),
+    );
+    await expect(
+      prepareAutoRoutedPrompt("s", { text: "Task" }),
+    ).rejects.toThrow();
+    expect(acpPrepareSession).not.toHaveBeenCalled();
+    expect(
+      useChatSessionStore.getState().getSession("s")?.executionTarget?.modelId,
+    ).toBe("previous");
+    expect(
+      useChatSessionStore.getState().getSession("s")?.autoRoutingDecision,
+    ).toBeUndefined();
   });
 
   it("skips the router after an explicit model choice", async () => {

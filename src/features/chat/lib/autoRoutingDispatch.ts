@@ -4,6 +4,7 @@ import {
   acpSetSessionConfigOption,
 } from "@/shared/api/acp";
 import {
+  autoRoutingFallback,
   routeAutoModel,
   type AutoRoutingDecision,
 } from "@/shared/api/autoRouting";
@@ -17,6 +18,7 @@ import { PreCommitSendRejectedError } from "./preCommitSendRejection";
 import {
   transitionSessionDispatchTarget,
   transitionSessionTarget,
+  type SessionTargetOutcome,
 } from "./sessionTargetCoordinator";
 
 const EFFORTS: readonly string[] = autoRoutingEfforts;
@@ -56,41 +58,72 @@ export async function prepareAutoRoutedPrompt(
     remote: Boolean(session.remoteHost),
   });
   assertCurrent();
-  const decision = await routeAutoModel({ modeId, prompt });
+  let decision = await routeAutoModel({ modeId, prompt });
   assertCurrent();
-  const request = {
-    sessionId,
-    target: {
-      harnessId: "goose" as const,
-      modelProviderId: decision.modelProviderId,
-      modelId: decision.modelId,
-      modelName: decision.modelId,
-    },
-    // Normal send preparation already resolved workspace/project/default CWD.
-    // Routing changes only the model; raw session metadata can omit that CWD.
-    workingDir: acpGetPreparedWorkingDir(sessionId),
-  };
-  const outcome = input.dispatchToken
-    ? await transitionSessionDispatchTarget({
-        ...request,
-        dispatchToken: input.dispatchToken,
-      })
-    : await transitionSessionTarget(request);
-  if (!outcome.applied) {
-    throw new PreCommitSendRejectedError(
-      i18n.t("chat:errors.sessionPreparationSuperseded"),
+  let fallbackAttempted = decision.modelId === mode.fallback.modelId;
+  let outcome: Extract<SessionTargetOutcome, { applied: true }>;
+  for (;;) {
+    const request = {
+      sessionId,
+      requireExactTarget: true,
+      target: {
+        harnessId: "goose" as const,
+        modelProviderId: decision.modelProviderId,
+        modelId: decision.modelId,
+        modelName: decision.modelId,
+      },
+      // Routing changes only the model; preserve the send's resolved CWD.
+      workingDir: acpGetPreparedWorkingDir(sessionId),
+    };
+    let attempt: SessionTargetOutcome;
+    try {
+      attempt = input.dispatchToken
+        ? await transitionSessionDispatchTarget({
+            ...request,
+            dispatchToken: input.dispatchToken,
+          })
+        : await transitionSessionTarget(request);
+    } catch (error) {
+      assertCurrent();
+      if (
+        error instanceof PreCommitSendRejectedError ||
+        (error instanceof Error && error.name === "AbortError") ||
+        fallbackAttempted
+      )
+        throw error;
+      decision = autoRoutingFallback(
+        mode,
+        "model_unavailable",
+        decision.response,
+      );
+      fallbackAttempted = true;
+      continue;
+    }
+    if (!attempt.applied) {
+      throw new PreCommitSendRejectedError(
+        i18n.t("chat:errors.sessionPreparationSuperseded"),
+      );
+    }
+    assertCurrent();
+    if (
+      attempt.target.modelId === decision.modelId &&
+      attempt.target.modelProviderId === decision.modelProviderId &&
+      attempt.target.harnessId === "goose"
+    ) {
+      outcome = attempt;
+      break;
+    }
+    // Inventory repair can substitute a model. Use only the configured
+    // fallback, once, rather than sending on an unrequested substitute.
+    if (fallbackAttempted)
+      throw new Error(i18n.t("chat:errors.autoModelUnavailable"));
+    decision = autoRoutingFallback(
+      mode,
+      "model_unavailable",
+      decision.response,
     );
+    fallbackAttempted = true;
   }
-  // Provider inventory repair may substitute a different model. Never send
-  // the task (or stamp a misleading routing decision) on that substitute.
-  if (
-    outcome.target.modelId !== decision.modelId ||
-    outcome.target.modelProviderId !== decision.modelProviderId ||
-    outcome.target.harnessId !== "goose"
-  ) {
-    throw new Error(i18n.t("chat:errors.autoModelUnavailable"));
-  }
-  assertCurrent();
   const reasoning =
     outcome.configOptionsSnapshot?.reasoningEffort ??
     useChatSessionStore.getState().getSession(sessionId)?.reasoningEffort;

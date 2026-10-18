@@ -35,6 +35,8 @@ export interface SessionTargetTransition {
   dispatchToken?: symbol;
   /** Ensure target-qualified reasoning metadata as part of this operation. */
   requireReasoningEffort?: boolean;
+  /** Reject inventory substitutions before changing the live backend target. */
+  requireExactTarget?: boolean;
 }
 
 export type SessionTargetOutcome =
@@ -284,6 +286,14 @@ async function execute(
     ) {
       resolveSuperseded(actor, operation);
       return;
+    }
+    if (
+      request.requireExactTarget &&
+      !sameSessionExecutionTarget(effective, request.target)
+    ) {
+      throw new Error(
+        "The requested model is unavailable from its configured provider.",
+      );
     }
     transition(actor, { type: "RESOLVED", operationId, effective });
     const sessionBeforePrepare = useChatSessionStore
