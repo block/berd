@@ -1889,7 +1889,7 @@ impl RealtimeExpertSpokespersonSession {
                     && (handoff.reminder_attempts == 0 || retrying.contains(handoff_id))
             })
             .collect::<Vec<_>>();
-        pending.sort_by(|(left, _), (right, _)| left.cmp(right));
+        pending.sort_by_key(|(handoff_id, _)| *handoff_id);
         if pending.is_empty() {
             return RealtimeHandoffReminder::None;
         }
