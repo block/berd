@@ -129,7 +129,6 @@ pub fn run() {
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Info)
                 .level_for("perf", log::LevelFilter::Debug)
-                .level_for("auto_routing", log::LevelFilter::Debug)
                 .max_file_size(APP_LOG_MAX_FILE_SIZE_BYTES)
                 .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(
                     APP_LOG_ARCHIVES_KEPT,

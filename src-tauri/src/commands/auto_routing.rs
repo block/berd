@@ -1,5 +1,5 @@
 //! Runtime-configured routing transport. Requests and credentials are never logged.
-//! Bounded responses are retained in the local debug log for inspection.
+//! Full responses stay in session memory; logs contain transport metadata only.
 use crate::commands::runtime_config::{
     RuntimeAutoRoutingConfig, RuntimeAutoRoutingMode, RuntimeConfigState,
 };
@@ -95,7 +95,7 @@ async fn request_route(
         }
         bytes.extend_from_slice(&chunk);
     }
-    log::debug!(target: "auto_routing", "Router response for mode {}: {}", mode.id, String::from_utf8_lossy(&bytes));
+    log::info!(target: "auto_routing", "Routing response received ({} bytes)", bytes.len());
     serde_json::from_slice(&bytes).map_err(|_| "Routing response is not JSON".to_string())
 }
 

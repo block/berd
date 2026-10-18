@@ -137,10 +137,10 @@ limited to 1 MiB and redirects are disabled. Requests cannot override the
 configured URL, selector, candidate allowlist, or credentials.
 
 The complete accepted response remains in the current session's in-memory Auto
-details and is written to the local `berd.log` under the `auto_routing` debug
-target, including responses whose selection fails validation. Router evidence
-and rationale can quote task context, so these local logs may contain that
-context. Request prompts and authentication headers are never logged by the
-routing transport. Routing responses are not sent as telemetry and are not
-persisted into session history. Invalid JSON responses are available in the
-bounded local log, while transport failures have stable fallback reason codes.
+details. Rationale and evidence can quote task context, so the response is never
+written to the app log, persisted into session history, or sent as telemetry.
+Transport logs record only the response byte count. Request prompts and
+authentication headers are never logged by the routing transport. Feedback
+exports exclude entire older app log files that contain raw router-response
+records, including multiline bodies and files whose exported tail starts inside
+a response. Transport failures have stable fallback reason codes.
