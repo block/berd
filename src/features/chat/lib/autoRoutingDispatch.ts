@@ -1,5 +1,8 @@
 import { i18n } from "@/shared/i18n";
-import { acpSetSessionConfigOption } from "@/shared/api/acp";
+import {
+  acpGetPreparedWorkingDir,
+  acpSetSessionConfigOption,
+} from "@/shared/api/acp";
 import {
   routeAutoModel,
   type AutoRoutingDecision,
@@ -63,11 +66,9 @@ export async function prepareAutoRoutedPrompt(
       modelId: decision.modelId,
       modelName: decision.modelId,
     },
-    workingDir:
-      useChatSessionStore.getState().activeWorkspaceBySession[sessionId]
-        ?.path ??
-      session.workingDir ??
-      "",
+    // Normal send preparation already resolved workspace/project/default CWD.
+    // Routing changes only the model; raw session metadata can omit that CWD.
+    workingDir: acpGetPreparedWorkingDir(sessionId),
   };
   const outcome = input.dispatchToken
     ? await transitionSessionDispatchTarget({

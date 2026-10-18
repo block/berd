@@ -1,6 +1,10 @@
 import { PreCommitSendRejectedError } from "./preCommitSendRejection";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { acpPrepareSession, acpSetSessionConfigOption } from "@/shared/api/acp";
+import {
+  acpGetPreparedWorkingDir,
+  acpPrepareSession,
+  acpSetSessionConfigOption,
+} from "@/shared/api/acp";
 import { routeAutoModel } from "@/shared/api/autoRouting";
 import { DEFAULT_RUNTIME_CONFIG } from "@/shared/runtime-config/schema";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
@@ -13,6 +17,7 @@ import {
 } from "./sessionTargetCoordinator";
 
 vi.mock("@/shared/api/acp", () => ({
+  acpGetPreparedWorkingDir: vi.fn(),
   acpPrepareSession: vi.fn(),
   acpSetSessionConfigOption: vi.fn(),
 }));
@@ -30,6 +35,7 @@ const decision = {
 describe("auto routing dispatch", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(acpGetPreparedWorkingDir).mockReturnValue("/work");
     resetSessionTargetCoordinatorsForTests();
     useRuntimeConfigStore.setState({
       config: {
@@ -129,6 +135,46 @@ describe("auto routing dispatch", () => {
       executionTarget: { modelId: "chosen" },
       autoRoutingDecision: { effortApplied: "high" },
     });
+  });
+
+  it("retains the prepared artifact CWD when routing a workspace-free chat", async () => {
+    useChatSessionStore.getState().patchSession("s", { workingDir: undefined });
+    useChatSessionStore.setState({ activeWorkspaceBySession: {} });
+    const preparedCwd = "/Users/example/.berd/artifacts/session";
+    vi.mocked(acpGetPreparedWorkingDir).mockReturnValue(preparedCwd);
+    vi.mocked(acpPrepareSession).mockImplementation(
+      async (_id, _provider, cwd) => {
+        // Goose rejects the empty raw draft CWD. Model routing must preserve
+        // the absolute directory resolved by the send's initial preparation.
+        if (cwd !== preparedCwd)
+          throw new Error("cwd must be an absolute path");
+        return {
+          model: { modelId: "chosen", modelName: "Chosen" },
+          reasoningEffort: null,
+        };
+      },
+    );
+    const lease = acquireSessionDispatchTarget("s");
+    if (lease.status !== "acquired") throw new Error("Expected lease");
+    try {
+      const result = await prepareAutoRoutedPrompt("s", {
+        text: "Task",
+        dispatchToken: lease.token,
+      });
+      expect(result?.modelId).toBe("chosen");
+      expect(acpPrepareSession).toHaveBeenCalledWith(
+        "s",
+        "openai",
+        preparedCwd,
+        expect.objectContaining({ modelId: "chosen" }),
+      );
+      expect(
+        useChatSessionStore.getState().getSession("s")?.autoRoutingDecision
+          ?.modelId,
+      ).toBe("chosen");
+    } finally {
+      lease.release();
+    }
   });
 
   it("skips the router after an explicit model choice", async () => {
