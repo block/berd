@@ -1,3 +1,9 @@
+import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
+import {
+  usePendingAutoModeStore,
+  selectAutoMode,
+  getAutoModeExecutionTarget,
+} from "../lib/autoModelSelection";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AcpProvider } from "@/shared/api/acp";
 import {
@@ -210,6 +216,15 @@ export function useResolvedAgentModelPicker({
   applySessionModelSelection,
   recreateSessionForProvider,
 }: UseResolvedAgentModelPickerOptions) {
+  const autoConfig = useRuntimeConfigStore(
+    (state) => state.config.goose.autoRouting,
+  );
+  const pendingAutoModeId = usePendingAutoModeStore((state) => state.modeId);
+  const selectedAutoModeId = sessionId
+    ? session?.autoModeId
+    : pendingAutoModeId === undefined
+      ? autoConfig?.defaultModeId
+      : pendingAutoModeId;
   const catalogEntries = useProviderCatalogStore((state) => state.entries);
   const catalogLoaded = useProviderCatalogStore((state) => state.loaded);
   // A provider or model choice supersedes work started by either callback.
@@ -348,6 +363,7 @@ export function useResolvedAgentModelPicker({
     providers,
     selectedProvider,
     onProviderSelected: (providerId) => {
+      selectAutoMode(sessionId, null);
       selectionVersionRef.current += 1;
       const versionAtSelection = selectionVersionRef.current;
       const requestedAgentId = resolveAgentProviderCatalogIdStrictFromEntries(
@@ -507,6 +523,7 @@ export function useResolvedAgentModelPicker({
         });
     },
     onModelSelected: (model, requestedAgentId) => {
+      selectAutoMode(sessionId, null);
       const targetAgentId = requestedAgentId ?? selectedAgentId;
       const modelId = model.id;
       const modelName = model.displayName ?? model.name ?? model.id;
@@ -825,6 +842,30 @@ export function useResolvedAgentModelPicker({
       : (sessionModelSelection ?? fallbackModelSelection);
 
   return {
+    autoRouting: {
+      modes: autoConfig?.modes ?? [],
+      selectedModeId: selectedAutoModeId,
+      decision: session?.autoRoutingDecision,
+      onModeChange: (modeId: string) => {
+        const target = getAutoModeExecutionTarget(modeId);
+        if (!target) return;
+        const accepted = handleModelChange(
+          target.modelId,
+          {
+            id: target.modelId,
+            name: target.modelName,
+            providerId: target.modelProviderId,
+          },
+          "goose",
+        );
+        if (
+          accepted === false &&
+          !sameSessionExecutionTarget(session?.executionTarget, target)
+        )
+          return;
+        selectAutoMode(sessionId, modeId);
+      },
+    },
     selectedAgentId,
     pickerAgents,
     availableModels,

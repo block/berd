@@ -348,6 +348,7 @@ export function ChatInput({
     onModelChange,
     onPickerOpen,
     providerColumnMode,
+    autoRouting,
   } = agentModelPicker ?? {};
   const {
     selectedProjectId = null,
@@ -1959,6 +1960,7 @@ export function ChatInput({
 
               <ChatInputToolbar
                 agentModelPicker={{
+                  autoRouting,
                   enabled: scopedControls.agentModelPicker,
                   providers,
                   providersLoading,

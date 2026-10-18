@@ -1,3 +1,4 @@
+import { loadAutoMode } from "../stores/autoModePersistence";
 import type { AcpSessionInfo, AcpSessionsPage } from "@/shared/api/acp";
 import type {
   ArchiveMutationBySessionId,
@@ -35,6 +36,7 @@ export function acpSessionToChatSession(
   );
   return withWorkspaceBackfill({
     ...chatSessionFromAcpInfo(session, context),
+    autoModeId: loadAutoMode(session.sessionId),
     workspaceAttachments: persistedWorkspaceMetadata?.workspaceAttachments,
     activeWorkspaceId: persistedWorkspaceMetadata?.activeWorkspaceId,
   });
@@ -131,6 +133,10 @@ function mergeSessionMetadata(
         executionTarget,
         executionTargetSource,
         personaId,
+        autoModeId:
+          existing?.autoModeId !== undefined
+            ? existing.autoModeId
+            : session.autoModeId,
         remoteHost,
         workspaceAttachments:
           existing?.workspaceAttachments ?? session.workspaceAttachments,

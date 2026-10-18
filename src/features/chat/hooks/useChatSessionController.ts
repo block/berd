@@ -1,3 +1,4 @@
+import { getSelectedAutoModeId } from "../lib/autoModelSelection";
 import { projectEnvironment } from "@/features/projects/lib/projectEnvironment";
 import {
   useCallback,
@@ -1064,6 +1065,7 @@ export function useChatSessionController({
         ? useChatStore.getState().draftAttachmentsBySession[strandedSessionId]
         : undefined;
       const created = await store.createSession({
+        autoModeId: current?.autoModeId,
         title: current?.title,
         projectId: current?.projectId ?? undefined,
         personaId: current?.personaId,
@@ -1171,6 +1173,7 @@ export function useChatSessionController({
     handleModelChange,
     handlePickerOpen,
     effectiveModelSelection,
+    autoRouting,
   } = useResolvedAgentModelPicker({
     providers,
     selectedProvider,
@@ -2656,6 +2659,7 @@ export function useChatSessionController({
             await ensureRemoteHostConnected(remoteHost);
             const created = await useChatSessionStore.getState().createSession({
               executionTarget: remoteExecutionTarget,
+              autoModeId: getSelectedAutoModeId(sessionId),
               personaId:
                 payload.persona.kind === "persona"
                   ? payload.persona.id
@@ -3558,6 +3562,7 @@ export function useChatSessionController({
     selectedPersona,
     handlePersonaChange,
     handleCreatePersona,
+    autoRouting,
     pickerAgents,
     providersLoading,
     selectedProvider: selectedAgentId,

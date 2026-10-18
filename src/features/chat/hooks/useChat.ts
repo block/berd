@@ -215,6 +215,7 @@ export function useChat(
           systemPrompt,
           beforeUserMessageCommitted: sendOptions?.beforeUserMessageCommitted,
           signal: abort.signal,
+          dispatchToken: sendOptions?.sessionSelectionToken,
           prepare: () =>
             ensurePreparedForPrompt(
               options?.ensurePrepared,

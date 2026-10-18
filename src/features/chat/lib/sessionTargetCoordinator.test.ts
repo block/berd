@@ -13,6 +13,7 @@ import {
   replaceSessionTargetAfterDispatch,
   resetSessionTargetCoordinatorsForTests,
   transitionSessionTarget,
+  transitionSessionDispatchTarget,
 } from "./sessionTargetCoordinator";
 
 const mockPrepare = vi.fn();
@@ -61,6 +62,70 @@ describe("session target coordinator", () => {
         },
       ],
     });
+  });
+
+  it("allows the dispatch owner to route to a new model without releasing its lease", async () => {
+    mockPrepare.mockResolvedValue({
+      model: { modelId: "b", modelName: "b" },
+      reasoningEffort,
+    });
+    const lease = acquireSessionDispatchTarget("s");
+    if (lease.status !== "acquired") throw new Error("Expected lease");
+    await expect(
+      transitionSessionDispatchTarget({
+        sessionId: "s",
+        target: target("b"),
+        workingDir: "/w",
+        dispatchToken: lease.token,
+      }),
+    ).resolves.toMatchObject({ applied: true, target: target("b") });
+    expect(acquireSessionDispatchTarget("s").status).toBe("contended");
+    expect(
+      useChatSessionStore.getState().getSession("s")?.executionTarget,
+    ).toEqual(target("b"));
+    lease.release();
+    expect(
+      useChatSessionStore.getState().getSession("s")?.executionTarget,
+    ).toEqual(target("b"));
+  });
+
+  it("does not let a router overwrite an explicit selection waiting behind dispatch", async () => {
+    const lease = acquireSessionDispatchTarget("s");
+    if (lease.status !== "acquired") throw new Error("Expected lease");
+    recordSessionTargetSelection({
+      sessionId: "s",
+      operationId: "manual",
+      target: target("manual"),
+    });
+    await expect(
+      transitionSessionDispatchTarget({
+        sessionId: "s",
+        target: target("b"),
+        workingDir: "/w",
+        dispatchToken: lease.token,
+      }),
+    ).resolves.toMatchObject({ status: "superseded" });
+    expect(mockPrepare).not.toHaveBeenCalled();
+    lease.release();
+    expect(getSessionTargetSelection("s")?.target).toEqual(target("manual"));
+  });
+
+  it("restores the dispatch target after a routing model preparation failure", async () => {
+    mockPrepare.mockRejectedValue(new Error("unavailable"));
+    const lease = acquireSessionDispatchTarget("s");
+    if (lease.status !== "acquired") throw new Error("Expected lease");
+    await expect(
+      transitionSessionDispatchTarget({
+        sessionId: "s",
+        target: target("b"),
+        workingDir: "/w",
+        dispatchToken: lease.token,
+      }),
+    ).rejects.toThrow("unavailable");
+    expect(
+      useChatSessionStore.getState().getSession("s")?.executionTarget,
+    ).toEqual(target("a"));
+    lease.release();
   });
 
   it("commits the concrete model acknowledged by a provider-only transition", async () => {

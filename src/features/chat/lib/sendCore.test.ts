@@ -13,6 +13,12 @@ const mocks = vi.hoisted(() => ({
   acpSendMessage: vi.fn(),
   archiveSession: vi.fn(),
   unarchiveSession: vi.fn(),
+  prepareAutoRoutedPrompt: vi.fn(),
+}));
+
+vi.mock("./autoRoutingDispatch", () => ({
+  prepareAutoRoutedPrompt: (...args: unknown[]) =>
+    mocks.prepareAutoRoutedPrompt(...args),
 }));
 
 vi.mock("@/shared/api/acp", () => ({
@@ -739,6 +745,32 @@ describe("dispatchPrompt archived session restore", () => {
     expect(mocks.unarchiveSession.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.acpSendMessage.mock.invocationCallOrder[0],
     );
+  });
+
+  it("finishes auto routing before dispatching or committing the user turn", async () => {
+    seedSession({ autoModeId: "balanced" });
+    const routing = deferred<void>();
+    mocks.prepareAutoRoutedPrompt.mockReturnValueOnce(routing.promise);
+    const dispatchToken = Symbol("dispatch");
+    const send = dispatchPrompt("session-1", "Use the loaded skill", {
+      assistantPrompt: "Full SKILL.md contents",
+      dispatchToken,
+    });
+    await vi.waitFor(() =>
+      expect(mocks.prepareAutoRoutedPrompt).toHaveBeenCalledTimes(1),
+    );
+    expect(mocks.acpSendMessage).not.toHaveBeenCalled();
+    expect(mocks.prepareAutoRoutedPrompt).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        text: "Use the loaded skill",
+        assistantPrompt: "Full SKILL.md contents",
+        dispatchToken,
+      }),
+    );
+    routing.resolve();
+    await send;
+    expect(mocks.acpSendMessage).toHaveBeenCalledTimes(1);
   });
 
   it("waits for a shared durable restore before dispatching", async () => {

@@ -84,7 +84,10 @@
     "voiceInputPermissionDescription": "Allow microphone access for Berd in System Settings, then try voice dictation again.",
     "voiceInputPermissionTitle": "Microphone access is blocked",
     "voiceInputUnavailableDescription": "Another app may be using your microphone, or macOS could not start recording. Close other recording apps and try again.",
-    "voiceInputUnavailableTitle": "Microphone is unavailable"
+    "voiceInputUnavailableTitle": "Microphone is unavailable",
+    "autoModeMissing": "The selected auto mode is no longer configured.",
+    "autoModelUnavailable": "The selected model is unavailable from its configured provider.",
+    "autoEffortUnavailable": "This model has no supported reasoning effort within the auto mode's limits."
   },
   "contextPanel": {
     "actions": {
@@ -662,7 +665,14 @@
     "starAgentModel": "Star {{model}}, {{agent}}",
     "unstarAgentModel": "Unstar {{model}}, {{agent}}",
     "starModel": "Star {{model}}",
-    "unstarModel": "Unstar {{model}}"
+    "unstarModel": "Unstar {{model}}",
+    "autoRouting": {
+      "selected": "Using {{model}}",
+      "details": "Why this model?",
+      "fallback": "The router was unavailable. Using the configured fallback.",
+      "routed": "Selected for this prompt. A new prompt chooses again.",
+      "pending": "Chooses a model and effort for each new prompt."
+    }
   },
   "tools": {
     "content": "Content",

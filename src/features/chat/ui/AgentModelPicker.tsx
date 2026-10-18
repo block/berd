@@ -1,3 +1,4 @@
+import { modelDisplayNameFromId } from "@/features/providers/lib/modelRecommendations";
 import {
   useCallback,
   useEffect,
@@ -35,6 +36,7 @@ import {
 import type {
   AgentPickerOption,
   ChatInputReasoningEffort,
+  ChatInputAutoRouting,
   ModelOption,
 } from "../types";
 import {
@@ -44,6 +46,7 @@ import {
 import { PickerItem } from "./AgentModelPickerItem";
 
 interface AgentModelPickerProps {
+  autoRouting?: ChatInputAutoRouting;
   agents: AgentPickerOption[];
   selectedAgentId: string;
   onAgentChange: (agentId: string) => void;
@@ -168,6 +171,7 @@ function ReasoningEffortList({
 }
 
 export function AgentModelPicker({
+  autoRouting,
   agents,
   selectedAgentId,
   onAgentChange,
@@ -285,22 +289,40 @@ export function AgentModelPicker({
     displayModelLabel,
     selectedAgentId,
   ]);
-  const triggerLabel = showSelectedModelInTrigger
-    ? resolvePickerTriggerLabel({
-        currentModelId,
-        currentModelName,
-        currentModelProviderId,
-        availableModels: displayedModels,
-        selectedAgentLabel,
-      })
-    : selectedAgentLabel;
+  const autoDecisionModelLabel = autoRouting?.decision
+    ? (resolveDisplayModelLabel({
+        currentModelId: autoRouting.decision.modelId,
+        currentModelProviderId: autoRouting.decision.modelProviderId,
+        availableModels,
+      }) ??
+      modelDisplayNameFromId(
+        autoRouting.decision.modelProviderId,
+        autoRouting.decision.modelId,
+      ))
+    : null;
+  const selectedAutoMode = autoRouting?.modes.find(
+    (mode) => mode.id === autoRouting.selectedModeId,
+  );
+  const triggerLabel = autoRouting?.selectedModeId
+    ? (selectedAutoMode?.displayName ?? autoRouting.selectedModeId)
+    : showSelectedModelInTrigger
+      ? resolvePickerTriggerLabel({
+          currentModelId,
+          currentModelName,
+          currentModelProviderId,
+          availableModels: displayedModels,
+          selectedAgentLabel,
+        })
+      : selectedAgentLabel;
   const triggerTitle =
     triggerLabel ?? (loading ? t("toolbar.loading") : undefined);
   const triggerButtonSize = triggerIconOnly ? "icon-pill-sm" : "sm";
   const triggerProviderIcon =
     getProviderIcon(selectedAgentId, "size-4") ??
     (triggerIconOnly ? <IconAiAgents className="size-4" /> : null);
-  const reasoningEffortConfig = reasoningEffort?.config;
+  const reasoningEffortConfig = autoRouting?.selectedModeId
+    ? undefined
+    : reasoningEffort?.config;
   const hasLiveReasoningEffort =
     Boolean(reasoningEffortConfig?.configId) &&
     (reasoningEffortConfig?.options.length ?? 0) > 1;
@@ -478,6 +500,16 @@ export function AgentModelPicker({
                   <span className="min-w-0 truncate">
                     {triggerLabel ?? (loading ? t("toolbar.loading") : null)}
                   </span>
+                  {autoRouting?.selectedModeId && autoRouting.decision ? (
+                    <span className="min-w-0 truncate text-muted-foreground/70">
+                      {[
+                        autoDecisionModelLabel,
+                        autoRouting.decision.effortApplied,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                  ) : null}
                   {showReasoningEffort && selectedReasoningEffortLabel ? (
                     <span className="shrink-0 text-muted-foreground/70 dark:group-hover:text-foreground dark:group-data-[state=open]:text-foreground dark:group-aria-expanded:text-foreground">
                       {selectedReasoningEffortLabel}
@@ -676,7 +708,7 @@ export function AgentModelPicker({
             <div
               data-col="model"
               className={cn(
-                "flex min-h-0 min-w-0 overflow-hidden p-1",
+                "flex min-h-0 min-w-0 flex-col overflow-hidden p-1",
                 showAgentColumn
                   ? widenForHarnessAgent
                     ? "ml-1 flex-1"
@@ -684,6 +716,69 @@ export function AgentModelPicker({
                   : "flex-1",
               )}
             >
+              {autoRouting && autoRouting.modes.length > 0 ? (
+                <div className="mb-1 max-h-56 shrink-0 space-y-0.5 overflow-auto border-b border-border/50 pb-1">
+                  {autoRouting.modes.map((mode) => (
+                    <PickerItem
+                      key={mode.id}
+                      selected={autoRouting.selectedModeId === mode.id}
+                      onClick={() => {
+                        autoRouting.onModeChange(mode.id);
+                        setOpen(false);
+                      }}
+                      className="justify-between"
+                    >
+                      <span className="min-w-0 flex-1 truncate">
+                        {mode.displayName}
+                      </span>
+                      {autoRouting.selectedModeId === mode.id ? (
+                        <IconCheck className="size-4 shrink-0 text-muted-foreground" />
+                      ) : null}
+                    </PickerItem>
+                  ))}
+                  {autoRouting.selectedModeId ? (
+                    <div className="px-2 py-1 text-xs text-muted-foreground">
+                      {autoRouting.decision ? (
+                        <>
+                          <div>
+                            {t("toolbar.autoRouting.selected", {
+                              model: [
+                                autoDecisionModelLabel,
+                                autoRouting.decision.effortApplied,
+                              ]
+                                .filter(Boolean)
+                                .join(" · "),
+                            })}
+                          </div>
+                          <details className="mt-1">
+                            <summary className="cursor-pointer rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                              {t("toolbar.autoRouting.details")}
+                            </summary>
+                            <p className="mt-1 break-words">
+                              {autoRouting.decision.rationale}
+                            </p>
+                            <div className="mt-1">
+                              {autoRouting.decision.source === "fallback"
+                                ? t("toolbar.autoRouting.fallback")
+                                : t("toolbar.autoRouting.routed")}
+                            </div>
+                            {autoRouting.decision.fallbackReason ? (
+                              <p className="mt-1 break-words">
+                                {autoRouting.decision.fallbackReason}
+                              </p>
+                            ) : null}
+                            <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words text-xs">
+                              {JSON.stringify(autoRouting.decision, null, 2)}
+                            </pre>
+                          </details>
+                        </>
+                      ) : (
+                        t("toolbar.autoRouting.pending")
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
               {modelsLoading ? (
                 <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                   <div className="shrink-0 px-2 py-1.5 text-sm font-semibold">
@@ -712,7 +807,9 @@ export function AgentModelPicker({
                   models={displayedModels}
                   favoriteModels={favoriteModels}
                   catalogModels={availableModels}
-                  currentModelId={currentModelId}
+                  currentModelId={
+                    autoRouting?.selectedModeId ? null : currentModelId
+                  }
                   currentModelProviderId={currentModelProviderId}
                   selectedAgentId={selectedAgentId}
                   agentLabels={

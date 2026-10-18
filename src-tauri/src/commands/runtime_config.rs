@@ -76,6 +76,57 @@ pub struct RuntimeGooseConfig {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub default_model_id: Option<String>,
     pub model_providers: Vec<RuntimeGooseModelProvider>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub auto_routing: Option<RuntimeAutoRoutingConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RuntimeAutoRoutingConfig {
+    pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub bearer_token_env: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub timeout_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub route_selector: Option<RuntimeRouteSelector>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub default_mode_id: Option<String>,
+    pub modes: Vec<RuntimeAutoRoutingMode>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeRouteSelector {
+    pub router_name: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub config: Option<serde_json::Map<String, serde_json::Value>>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RuntimeAutoRoutingMode {
+    pub id: String,
+    pub display_name: String,
+    pub model_provider_id: String,
+    pub fallback: RuntimeAutoRoutingFallback,
+    pub models: Vec<RuntimeAutoRoutingModel>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RuntimeAutoRoutingFallback {
+    pub model_id: String,
+    pub effort: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RuntimeAutoRoutingModel {
+    pub model_id: String,
+    pub router_model: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub harness: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub min_effort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub max_effort: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -717,6 +768,7 @@ pub(crate) fn default_goose_config() -> RuntimeGooseConfig {
     RuntimeGooseConfig {
         default_model_provider_id: None,
         default_model_id: None,
+        auto_routing: None,
         model_providers: vec![],
     }
 }
@@ -790,6 +842,9 @@ fn validate_runtime_config(config: &RuntimeConfig) -> Result<(), String> {
 }
 
 fn validate_goose_config(goose: &RuntimeGooseConfig) -> Result<(), String> {
+    if let Some(config) = &goose.auto_routing {
+        validate_auto_routing(config, &goose.model_providers)?;
+    }
     validate_optional_runtime_id(
         goose.default_model_provider_id.as_deref(),
         "goose.defaultModelProviderId",
@@ -904,6 +959,183 @@ fn validate_goose_config(goose: &RuntimeGooseConfig) -> Result<(), String> {
     }
     if !provider_ids.contains(default_provider_id) {
         return Err("goose.defaultModelProviderId must reference goose.modelProviders".to_string());
+    }
+    Ok(())
+}
+
+fn normalized_router_model(value: &str) -> String {
+    let chars: Vec<char> = value
+        .strip_prefix("system.ai.")
+        .unwrap_or(value)
+        .chars()
+        .collect();
+    chars
+        .iter()
+        .enumerate()
+        .map(|(index, c)| {
+            if *c == '.'
+                && index > 0
+                && chars[index - 1].is_ascii_digit()
+                && chars.get(index + 1).is_some_and(char::is_ascii_digit)
+            {
+                '-'
+            } else {
+                *c
+            }
+        })
+        .collect()
+}
+
+fn effort_rank(value: &str) -> Result<usize, String> {
+    ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+        .iter()
+        .position(|item| *item == value)
+        .ok_or_else(|| "autoRouting effort has unsupported value".to_string())
+}
+fn validate_router_json(value: &serde_json::Value) -> Result<(), String> {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, item) in map {
+                if [
+                    "secret",
+                    "token",
+                    "apikey",
+                    "api-key",
+                    "api_key",
+                    "password",
+                    "authorization",
+                    "bearer",
+                ]
+                .iter()
+                .any(|word| key.to_lowercase().contains(word))
+                {
+                    return Err("autoRouting routeSelector must not contain secrets".to_string());
+                }
+                validate_router_json(item)?;
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                validate_router_json(item)?;
+            }
+        }
+        serde_json::Value::String(item)
+            if item.to_lowercase().contains("bearer ")
+                || (item.contains("-----BEGIN") && item.contains("PRIVATE KEY")) =>
+        {
+            return Err("autoRouting routeSelector must not contain secrets".to_string())
+        }
+        _ => (),
+    }
+    Ok(())
+}
+fn validate_auto_routing(
+    config: &RuntimeAutoRoutingConfig,
+    providers: &[RuntimeGooseModelProvider],
+) -> Result<(), String> {
+    validate_runtime_id(&config.url, "autoRouting.url")?;
+    let url = reqwest::Url::parse(&config.url)
+        .map_err(|_| "autoRouting url must be valid".to_string())?;
+    if !matches!(url.scheme(), "http" | "https")
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(
+            "autoRouting url must be http or https without credentials, query or fragment"
+                .to_string(),
+        );
+    }
+    if let Some(name) = &config.bearer_token_env {
+        let mut chars = name.chars();
+        if !chars
+            .next()
+            .is_some_and(|c| c.is_ascii_uppercase() || c == '_')
+            || !chars.all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        {
+            return Err(
+                "autoRouting bearerTokenEnv must be an environment variable name".to_string(),
+            );
+        }
+    }
+    if matches!(config.timeout_ms, Some(0 | 120001..)) {
+        return Err("autoRouting timeoutMs must be between 1 and 120000".to_string());
+    }
+    if let Some(selector) = &config.route_selector {
+        validate_runtime_id(
+            &selector.router_name,
+            "autoRouting.routeSelector.router_name",
+        )?;
+        validate_router_json(
+            &serde_json::to_value(selector).map_err(|_| "Invalid routeSelector".to_string())?,
+        )?;
+    }
+    if config.modes.is_empty() {
+        return Err("autoRouting modes must not be empty".to_string());
+    }
+    let mut ids = HashSet::new();
+    for mode in &config.modes {
+        validate_runtime_id(&mode.id, "autoRouting.mode.id")?;
+        validate_non_empty(&mode.display_name, "autoRouting.mode.displayName")?;
+        validate_runtime_id(&mode.model_provider_id, "autoRouting.mode.modelProviderId")?;
+        if !ids.insert(&mode.id) {
+            return Err("autoRouting modes must have unique ids".to_string());
+        }
+        if !providers
+            .iter()
+            .any(|provider| provider.id == mode.model_provider_id)
+        {
+            return Err("autoRouting modelProviderId must reference modelProviders".to_string());
+        }
+        if mode.models.is_empty() {
+            return Err("autoRouting models must not be empty".to_string());
+        }
+        let mut models = HashSet::new();
+        let mut routes = HashSet::new();
+        for model in &mode.models {
+            validate_runtime_id(&model.model_id, "autoRouting.modelId")?;
+            validate_runtime_id(&model.router_model, "autoRouting.routerModel")?;
+            validate_optional_runtime_id(model.harness.as_deref(), "autoRouting.harness")?;
+            if !models.insert(&model.model_id)
+                || !routes.insert((
+                    normalized_router_model(&model.router_model),
+                    model.harness.as_deref().unwrap_or("codex"),
+                ))
+            {
+                return Err(
+                    "autoRouting models must have unique modelIds and router model/harness pairs"
+                        .to_string(),
+                );
+            }
+            if effort_rank(model.min_effort.as_deref().unwrap_or("none"))?
+                > effort_rank(model.max_effort.as_deref().unwrap_or("max"))?
+            {
+                return Err("autoRouting minEffort must not exceed maxEffort".to_string());
+            }
+        }
+        let fallback = mode
+            .models
+            .iter()
+            .find(|model| model.model_id == mode.fallback.model_id)
+            .ok_or("autoRouting fallback must reference a candidate model")?;
+        let effort = effort_rank(&mode.fallback.effort)?;
+        if effort < effort_rank(fallback.min_effort.as_deref().unwrap_or("none"))?
+            || effort > effort_rank(fallback.max_effort.as_deref().unwrap_or("max"))?
+        {
+            return Err("autoRouting fallback effort must be within candidate bounds".to_string());
+        }
+    }
+    validate_optional_runtime_id(
+        config.default_mode_id.as_deref(),
+        "autoRouting.defaultModeId",
+    )?;
+    if config
+        .default_mode_id
+        .as_ref()
+        .is_some_and(|id| !ids.contains(id))
+    {
+        return Err("autoRouting defaultModeId must reference a mode".to_string());
     }
     Ok(())
 }
@@ -1157,6 +1389,7 @@ mod tests {
 
     fn managed_goose_config() -> RuntimeGooseConfig {
         RuntimeGooseConfig {
+            auto_routing: None,
             default_model_provider_id: Some(TEST_RUNTIME_PROVIDER_ID.to_string()),
             default_model_id: Some(TEST_RUNTIME_MODEL_ID.to_string()),
             model_providers: vec![RuntimeGooseModelProvider {
@@ -1671,6 +1904,71 @@ mod tests {
             expect_ready(state.get(&distro_state).await.expect("get default config"));
         assert_eq!(source, RuntimeConfigSource::AppDefault);
         assert_eq!(config, default_runtime_config());
+    }
+
+    #[test]
+    fn auto_routing_validation_matches_frontend_contract() {
+        let valid = serde_json::json!({
+            "url":"https://gateway.example.com/route", "bearerTokenEnv":"DATABRICKS_TOKEN",
+            "modes":[{"id":"auto","displayName":"Auto","modelProviderId":TEST_RUNTIME_PROVIDER_ID,
+            "fallback":{"modelId":"served","effort":"high"},
+            "models":[{"modelId":"served","routerModel":"system.ai.sol","minEffort":"high","maxEffort":"max"}]}]
+        });
+        let providers = managed_goose_config().model_providers;
+        let parse = |value: serde_json::Value| {
+            serde_json::from_value::<RuntimeAutoRoutingConfig>(value).unwrap()
+        };
+        validate_auto_routing(&parse(valid.clone()), &providers).unwrap();
+        let mut invalid = Vec::new();
+        for url in [
+            "file:///tmp/route",
+            "https://user:secret@example.com/route",
+            "https://example.com/route?token=value",
+            "https://example.com/route#fragment",
+        ] {
+            let mut value = valid.clone();
+            value["url"] = serde_json::json!(url);
+            invalid.push(value);
+        }
+        for env in ["", "token-value", "lowercase", "1TOKEN"] {
+            let mut value = valid.clone();
+            value["bearerTokenEnv"] = serde_json::json!(env);
+            invalid.push(value);
+        }
+        let mut value = valid.clone();
+        value["timeoutMs"] = serde_json::json!(0);
+        invalid.push(value);
+        let mut value = valid.clone();
+        value["defaultModeId"] = serde_json::json!("missing");
+        invalid.push(value);
+        let mut value = valid.clone();
+        value["modes"][0]["modelProviderId"] = serde_json::json!("missing");
+        invalid.push(value);
+        let mut value = valid.clone();
+        value["modes"][0]["fallback"]["modelId"] = serde_json::json!("missing");
+        invalid.push(value);
+        let mut value = valid.clone();
+        value["modes"][0]["fallback"]["effort"] = serde_json::json!("low");
+        invalid.push(value);
+        let mut value = valid.clone();
+        value["modes"][0]["models"][0]["minEffort"] = serde_json::json!("invented");
+        invalid.push(value);
+        let mut value = valid.clone();
+        value["modes"][0]["models"][0]["maxEffort"] = serde_json::json!("low");
+        invalid.push(value);
+        let mut value = valid.clone();
+        value["routeSelector"] =
+            serde_json::json!({"router_name":"task_v3","config":{"nested":{"api_key":"secret"}}});
+        invalid.push(value);
+        let mut value = valid.clone();
+        value["modes"] = serde_json::json!([valid["modes"][0], valid["modes"][0]]);
+        invalid.push(value);
+        for value in invalid {
+            assert!(
+                validate_auto_routing(&parse(value.clone()), &providers).is_err(),
+                "unexpected valid config: {value}"
+            );
+        }
     }
 
     #[test]

@@ -83,7 +83,10 @@
     "voiceInputPermissionDescription": "Permite el acceso al micrófono para Berd en Configuración del Sistema y vuelve a intentar el dictado por voz.",
     "voiceInputPermissionTitle": "El acceso al micrófono está bloqueado",
     "voiceInputUnavailableDescription": "Otra app puede estar usando tu micrófono, o macOS no pudo iniciar la grabación. Cierra otras apps de grabación y vuelve a intentarlo.",
-    "voiceInputUnavailableTitle": "El micrófono no está disponible"
+    "voiceInputUnavailableTitle": "El micrófono no está disponible",
+    "autoModeMissing": "El modo automático seleccionado ya no está configurado.",
+    "autoModelUnavailable": "El modelo seleccionado no está disponible en el proveedor configurado.",
+    "autoEffortUnavailable": "Este modelo no admite ningún nivel de esfuerzo dentro de los límites del modo automático."
   },
   "contextPanel": {
     "actions": {
@@ -647,7 +650,14 @@
     "starAgentModel": "Destacar {{model}}, {{agent}}",
     "unstarAgentModel": "Quitar {{model}}, {{agent}} de destacados",
     "starModel": "Destacar {{model}}",
-    "unstarModel": "Quitar {{model}} de destacados"
+    "unstarModel": "Quitar {{model}} de destacados",
+    "autoRouting": {
+      "selected": "Usando {{model}}",
+      "details": "¿Por qué este modelo?",
+      "fallback": "El enrutador no está disponible. Se usa la alternativa configurada.",
+      "routed": "Seleccionado para este mensaje. Cada nuevo mensaje vuelve a elegir.",
+      "pending": "Elige un modelo y esfuerzo para cada mensaje nuevo."
+    }
   },
   "tools": {
     "content": "Contenido",

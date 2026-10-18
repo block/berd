@@ -5,6 +5,7 @@ pub mod agents;
 pub mod artifacts;
 #[cfg_attr(not(feature = "block-builderbot"), allow(dead_code))]
 pub mod auth;
+pub mod auto_routing;
 #[cfg(feature = "block-automations")]
 pub mod automations;
 pub mod avatars;

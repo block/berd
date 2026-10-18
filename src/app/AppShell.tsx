@@ -1,3 +1,7 @@
+import {
+  getSelectedAutoModeId,
+  getAutoModeExecutionTarget,
+} from "@/features/chat/lib/autoModelSelection";
 import { projectEnvironment } from "@/features/projects/lib/projectEnvironment";
 import {
   useCallback,
@@ -319,6 +323,7 @@ type DraftSessionCreationReady = {
   >["configOptionsSnapshot"];
 };
 type ProjectChatDraftOptions = {
+  autoModeId?: string | null;
   remoteHost?: string;
   remoteWorkingDir?: string;
   executionTarget?: SessionExecutionTarget;
@@ -2272,6 +2277,7 @@ export function AppShell({
       options: {
         activate?: boolean;
         reuseExistingDraft?: boolean;
+        autoModeId?: string | null;
         executionTarget?: SessionExecutionTarget;
         reasoningEffort?: GlobalComposeOptions["reasoningEffort"];
         /** SSH host to run the session's backend on. */
@@ -2300,8 +2306,17 @@ export function AppShell({
       perfLog(
         `[perf:newtab] createNewTab start (project=${sessionProject?.id ?? "none"})`,
       );
-      const sessionExecutionTarget =
-        await resolveSessionCreationTarget(options);
+      const autoModeId =
+        options.autoModeId !== undefined
+          ? options.autoModeId
+          : options.executionTarget
+            ? null
+            : getSelectedAutoModeId();
+      const sessionExecutionTarget = await resolveSessionCreationTarget({
+        ...options,
+        executionTarget:
+          getAutoModeExecutionTarget(autoModeId) ?? options.executionTarget,
+      });
       if (!sessionExecutionTarget) return undefined;
       const sessionState = useChatSessionStore.getState();
       const chatState = useChatStore.getState();
@@ -2317,6 +2332,7 @@ export function AppShell({
           title,
           projectId: sessionProject?.id,
           executionTarget: sessionExecutionTarget,
+          autoModeId,
           reasoningEffortValue: options.reasoningEffort?.value,
           remoteHost,
         },
@@ -2358,6 +2374,7 @@ export function AppShell({
           title,
           projectId: sessionProject?.id,
           executionTarget: sessionExecutionTarget,
+          autoModeId,
           workingDir,
           remoteHost,
         });
@@ -2377,6 +2394,7 @@ export function AppShell({
         title,
         projectId: sessionProject?.id,
         executionTarget: sessionExecutionTarget,
+        autoModeId,
         workingDir: optimisticWorkingDir,
         remoteHost,
       });
@@ -2519,8 +2537,17 @@ export function AppShell({
       perfLog(
         `[perf:newtab] createNewProjectDraft start (project=${project.id})`,
       );
-      const sessionExecutionTarget =
-        await resolveSessionCreationTarget(options);
+      const autoModeId =
+        options.autoModeId !== undefined
+          ? options.autoModeId
+          : options.executionTarget
+            ? null
+            : getSelectedAutoModeId();
+      const sessionExecutionTarget = await resolveSessionCreationTarget({
+        ...options,
+        executionTarget:
+          getAutoModeExecutionTarget(autoModeId) ?? options.executionTarget,
+      });
       if (!sessionExecutionTarget) return undefined;
       const sessionState = useChatSessionStore.getState();
       const chatState = useChatStore.getState();
@@ -2539,6 +2566,7 @@ export function AppShell({
           title,
           projectId: project.id,
           executionTarget: sessionExecutionTarget,
+          autoModeId,
           reasoningEffortValue: options.reasoningEffort?.value,
         },
         allowDraftReuse: options.reuseExistingDraft !== false && !needsStartup,
@@ -2561,6 +2589,7 @@ export function AppShell({
         title,
         projectId: project.id,
         executionTarget: sessionExecutionTarget,
+        autoModeId,
         workingDir: getOptimisticSessionCwd(project),
         workspaceAttachments: needsStartup
           ? asIs?.workspaceAttachments.filter(
@@ -2603,6 +2632,7 @@ export function AppShell({
       title = DEFAULT_CHAT_TITLE,
       project?: ProjectInfo,
       options: {
+        autoModeId?: string | null;
         executionTarget?: SessionExecutionTarget;
         reasoningEffort?: GlobalComposeOptions["reasoningEffort"];
         remoteHost?: string;
@@ -2626,8 +2656,17 @@ export function AppShell({
       perfLog(
         `[perf:newtab] createBackgroundDraftChat start (project=${sessionProject?.id ?? "none"})`,
       );
-      const sessionExecutionTarget =
-        await resolveSessionCreationTarget(options);
+      const autoModeId =
+        options.autoModeId !== undefined
+          ? options.autoModeId
+          : options.executionTarget
+            ? null
+            : getSelectedAutoModeId();
+      const sessionExecutionTarget = await resolveSessionCreationTarget({
+        ...options,
+        executionTarget:
+          getAutoModeExecutionTarget(autoModeId) ?? options.executionTarget,
+      });
       if (!sessionExecutionTarget) return undefined;
       const sessionState = useChatSessionStore.getState();
       const chatState = useChatStore.getState();
@@ -2641,6 +2680,7 @@ export function AppShell({
           title,
           projectId: sessionProject?.id,
           executionTarget: sessionExecutionTarget,
+          autoModeId,
           reasoningEffortValue: options.reasoningEffort?.value,
           remoteHost,
         },
@@ -2669,6 +2709,7 @@ export function AppShell({
         title,
         projectId: sessionProject?.id,
         executionTarget: sessionExecutionTarget,
+        autoModeId,
         workingDir: optimisticWorkingDir,
         remoteHost,
       });
@@ -3078,6 +3119,7 @@ export function AppShell({
       }
 
       const chatOptions = {
+        autoModeId: options?.autoModeId,
         executionTarget: options?.executionTarget,
         reasoningEffort: options?.reasoningEffort,
         remoteHost: options?.remoteHost,
@@ -3319,6 +3361,7 @@ export function AppShell({
         ? projects.find((candidate) => candidate.id === options.projectId)
         : undefined;
       const chatOptions = {
+        autoModeId: options?.autoModeId,
         executionTarget: options?.executionTarget,
         reasoningEffort: options?.reasoningEffort,
         remoteHost: options?.remoteHost,
@@ -3432,6 +3475,7 @@ export function AppShell({
         // The realtime runtime follows the draft id through promotion.
         activate: realtimeMode,
         reuseExistingDraft: false,
+        autoModeId: options?.autoModeId,
         executionTarget: options?.executionTarget,
         reasoningEffort: options?.reasoningEffort,
         remoteHost: options?.remoteHost,

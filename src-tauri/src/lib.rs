@@ -129,6 +129,7 @@ pub fn run() {
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Info)
                 .level_for("perf", log::LevelFilter::Debug)
+                .level_for("auto_routing", log::LevelFilter::Debug)
                 .max_file_size(APP_LOG_MAX_FILE_SIZE_BYTES)
                 .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(
                     APP_LOG_ARCHIVES_KEPT,
@@ -637,6 +638,7 @@ pub fn run() {
             commands::diagnostics::probe_kgoose_connectivity,
             commands::diagnostics::write_diagnostic_event,
             commands::distro::get_distro_bundle,
+            commands::auto_routing::route_auto_model,
             commands::runtime_config::get_runtime_config,
             commands::runtime_config::set_fake_runtime_config,
             commands::runtime_config::clear_fake_runtime_config,

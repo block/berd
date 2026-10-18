@@ -1,3 +1,4 @@
+import type { AutoRoutingDecision } from "@/shared/api/autoRouting";
 import type { ReactNode, RefObject } from "react";
 import type { AcpProvider } from "@/shared/api/acp";
 import type { AgentProviderReadiness } from "@/features/providers/hooks/useAgentProviderStatus";
@@ -144,7 +145,15 @@ export interface AgentPickerOption extends AcpProvider {
   setupAction?: AgentPickerSetupAction;
 }
 
+export interface ChatInputAutoRouting {
+  modes: Array<{ id: string; displayName: string }>;
+  selectedModeId?: string | null;
+  decision?: AutoRoutingDecision;
+  onModeChange: (modeId: string) => void;
+}
+
 export interface ChatInputAgentModelPicker {
+  autoRouting?: ChatInputAutoRouting;
   providers?: AgentPickerOption[];
   providersLoading?: boolean;
   selectedProvider?: string;

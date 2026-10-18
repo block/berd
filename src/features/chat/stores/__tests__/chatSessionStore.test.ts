@@ -1,3 +1,5 @@
+import { loadAutoMode } from "../autoModePersistence";
+import { acpSessionToChatSession } from "../../lib/acpSessionMapping";
 import { getModelSelectionIntent } from "@/features/chat/model-selection/modelSelectionIntent";
 import { beginModelSelectionIntent } from "@/features/chat/model-selection/modelSelectionIntent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -153,6 +155,7 @@ describe("chatSessionStore", () => {
     window.localStorage.removeItem("goose:right-rail-open");
     window.localStorage.removeItem("goose:context-panel-open");
     window.localStorage.removeItem(CHAT_WORKSPACE_METADATA_STORAGE_KEY);
+    localStorage.removeItem("goose:chat-auto-modes");
     resetStore();
     useSecurityConfirmationStore.setState({
       pendingBySessionId: {},
@@ -164,6 +167,49 @@ describe("chatSessionStore", () => {
     mocks.checkAllProviderStatus.mockResolvedValue([]);
     mocks.releaseSession.mockResolvedValue(undefined);
     mocks.unarchiveSession.mockResolvedValue(undefined);
+  });
+
+  it("preserves auto intent through draft promotion and reload without persisting router responses", () => {
+    const store = useChatSessionStore.getState();
+    const draft = store.createDraftSession({
+      workingDir: "/tmp/auto-mode",
+      autoModeId: "balanced",
+    });
+    store.patchSession(draft.id, {
+      autoRoutingDecision: {
+        modeId: "balanced",
+        modelId: "concrete",
+        modelProviderId: "provider",
+        effort: "high",
+        source: "router",
+        response: { privatePrompt: "never persist this" },
+      },
+    });
+    store.promoteDraftSession(draft.id, "backend-auto");
+    expect(loadAutoMode(draft.id)).toBeUndefined();
+    expect(loadAutoMode("backend-auto")).toBe("balanced");
+    expect(store.getSession("backend-auto")?.autoRoutingDecision?.modelId).toBe(
+      "concrete",
+    );
+    expect(localStorage.getItem("goose:chat-auto-modes")).not.toContain(
+      "privatePrompt",
+    );
+    expect(
+      acpSessionToChatSession({
+        sessionId: "backend-auto",
+        messageCount: 1,
+      } as AcpSessionInfo).autoModeId,
+    ).toBe("balanced");
+    store.patchSession("backend-auto", {
+      autoModeId: null,
+      autoRoutingDecision: undefined,
+    });
+    expect(
+      acpSessionToChatSession({
+        sessionId: "backend-auto",
+        messageCount: 1,
+      } as AcpSessionInfo).autoModeId,
+    ).toBeNull();
   });
 
   it("releases a windowed session when removing it locally", () => {

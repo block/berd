@@ -1,3 +1,5 @@
+import type { AutoRoutingDecision } from "@/shared/api/autoRouting";
+import { loadAutoMode, persistAutoMode } from "./autoModePersistence";
 import { create } from "zustand";
 import { acpCreateSession, acpListSessionsPage } from "@/shared/api/acp";
 import type {
@@ -78,6 +80,10 @@ export interface ChatSession {
   projectId?: string | null;
   executionTarget?: SessionExecutionTarget;
   executionTargetSource?: "ui" | "acp";
+  /** Auto selection intent, separate from the concrete ACP execution target. */
+  autoModeId?: string | null;
+  /** Transient routing explanation; never persisted. */
+  autoRoutingDecision?: AutoRoutingDecision;
   personaId?: string;
   reasoningEffort?: ChatSessionReasoningEffortConfig;
   workingDir?: string | null;
@@ -194,6 +200,7 @@ interface ChatSessionStoreState {
 }
 
 interface CreateSessionOpts {
+  autoModeId?: string | null;
   title?: string;
   projectId?: string;
   executionTarget?: SessionExecutionTarget;
@@ -591,6 +598,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       projectId: opts.projectId,
       executionTarget,
       executionTargetSource: "ui",
+      autoModeId: opts.autoModeId,
       personaId: opts.personaId,
       reasoningEffort: configOptionsSnapshot?.reasoningEffort ?? undefined,
       workingDir: opts.workingDir,
@@ -608,6 +616,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       targetAgentDraftSaved: false,
     });
     set((state) => ({ sessions: [chatSession, ...state.sessions] }));
+    persistAutoMode(chatSession.id, chatSession.autoModeId);
     logReasoningEffortInfo("createSession inserted", {
       sessionId: shortLogId(sessionId),
       providerId,
@@ -634,6 +643,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       projectId: opts.projectId,
       executionTarget,
       executionTargetSource: "ui",
+      autoModeId: opts.autoModeId,
       personaId: opts.personaId,
       workingDir: opts.workingDir,
       ...(opts.remoteHost ? { remoteHost: opts.remoteHost } : {}),
@@ -657,6 +667,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       registerSessionBackend(id, backendIdForSession(opts));
     }
     set((state) => ({ sessions: [chatSession, ...state.sessions] }));
+    persistAutoMode(chatSession.id, chatSession.autoModeId);
     return chatSession;
   },
 
@@ -776,6 +787,8 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       // No-op for local sessions: the draft id is only registered when the
       // draft was created with a remote host.
       transferSessionBackend(draftSessionId, backendSessionId);
+      persistAutoMode(draftSessionId, undefined);
+      persistAutoMode(backendSessionId, promoted.autoModeId);
       migratePersistedChatWorkspaceMetadata(draftSessionId, backendSessionId);
       persistWorkspaceMetadataForSession(promoted);
       if (promoted.remoteHost) {
@@ -889,6 +902,8 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
         "Use replaceSessionExecutionTarget to change session execution state.",
       );
     }
+    if (Object.hasOwn(patch, "autoModeId"))
+      persistAutoMode(id, patch.autoModeId);
     const includesReasoningEffort = patchIncludesReasoningEffort(patch);
     let sessionForWorkspacePersistence: ChatSession | null = null;
     let sessionForRemotePersistence: ChatSession | null = null;
@@ -1011,7 +1026,13 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       const existing = state.sessions.findIndex(
         (candidate) => candidate.id === session.id,
       );
-      const backfilledSession = withWorkspaceBackfill(session);
+      const backfilledSession = withWorkspaceBackfill({
+        ...session,
+        autoModeId:
+          session.autoModeId === undefined
+            ? loadAutoMode(session.id)
+            : session.autoModeId,
+      });
       if (existing >= 0) {
         const updated = [...state.sessions];
         const merged = withWorkspaceBackfill({
@@ -1064,6 +1085,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       };
     });
     removePersistedChatWorkspaceMetadata(id);
+    persistAutoMode(id, undefined);
     removeRemoteSessionRecord(id);
     useSecurityConfirmationStore.getState().cancelAll(id);
     releaseWindowedSession(id);

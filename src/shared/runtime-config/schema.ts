@@ -171,6 +171,155 @@ export const runtimeGooseModelProviderSchema = z
   })
   .strict();
 
+export const autoRoutingEfforts = [
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
+export const autoRoutingEffortSchema = z.enum(autoRoutingEfforts);
+const routerJsonSchema = z.json();
+function hasNoRouterSecrets(value: unknown): boolean {
+  if (Array.isArray(value)) return value.every(hasNoRouterSecrets);
+  if (value && typeof value === "object") {
+    return Object.entries(value).every(
+      ([key, item]) =>
+        !/secret|token|apikey|api-key|api_key|password|authorization|bearer/i.test(
+          key,
+        ) && hasNoRouterSecrets(item),
+    );
+  }
+  return (
+    typeof value !== "string" ||
+    !/bearer\s|-----BEGIN.*PRIVATE KEY/i.test(value)
+  );
+}
+export const runtimeAutoRoutingModelSchema = z
+  .object({
+    modelId: runtimeIdString("autoRouting modelId"),
+    routerModel: runtimeIdString("autoRouting routerModel"),
+    harness: runtimeIdString("autoRouting harness").optional(),
+    minEffort: autoRoutingEffortSchema.optional(),
+    maxEffort: autoRoutingEffortSchema.optional(),
+  })
+  .strict()
+  .refine(
+    (model) =>
+      autoRoutingEfforts.indexOf(model.minEffort ?? "none") <=
+      autoRoutingEfforts.indexOf(model.maxEffort ?? "max"),
+    "autoRouting minEffort must not exceed maxEffort",
+  );
+export const runtimeAutoRoutingModeSchema = z
+  .object({
+    id: runtimeIdString("autoRouting mode id"),
+    displayName: nonEmptyString("autoRouting mode displayName"),
+    modelProviderId: runtimeIdString("autoRouting modelProviderId"),
+    fallback: z
+      .object({
+        modelId: runtimeIdString("autoRouting fallback modelId"),
+        effort: autoRoutingEffortSchema,
+      })
+      .strict(),
+    models: z.array(runtimeAutoRoutingModelSchema).min(1),
+  })
+  .strict()
+  .superRefine((mode, ctx) => {
+    const identities = mode.models.map(
+      (model) =>
+        `${model.routerModel.replace(/^system\.ai\./, "").replace(/(\d)\.(?=\d)/g, "$1-")}\0${model.harness ?? "codex"}`,
+    );
+    if (
+      new Set(identities).size !== identities.length ||
+      new Set(mode.models.map((model) => model.modelId)).size !==
+        mode.models.length
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          "autoRouting models must have unique modelIds and router model/harness pairs",
+      });
+    }
+    const fallback = mode.models.find(
+      (model) => model.modelId === mode.fallback.modelId,
+    );
+    if (!fallback)
+      ctx.addIssue({
+        code: "custom",
+        message: "autoRouting fallback must reference a candidate model",
+      });
+    else if (
+      autoRoutingEfforts.indexOf(mode.fallback.effort) <
+        autoRoutingEfforts.indexOf(fallback.minEffort ?? "none") ||
+      autoRoutingEfforts.indexOf(mode.fallback.effort) >
+        autoRoutingEfforts.indexOf(fallback.maxEffort ?? "max")
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: "autoRouting fallback effort must be within candidate bounds",
+      });
+    }
+  });
+export const runtimeAutoRoutingConfigSchema = z
+  .object({
+    url: runtimeIdString("autoRouting url").refine((value) => {
+      if (!isHttpUrl(value)) return false;
+      const url = new URL(value);
+      return !url.username && !url.password && !url.search && !url.hash;
+    }, "autoRouting url must be an http or https URL without credentials, query or fragment"),
+    timeoutMs: z.number().int().min(1).max(120_000).optional(),
+    bearerTokenEnv: z
+      .string()
+      .regex(
+        /^[A-Z_][A-Z0-9_]*$/,
+        "autoRouting bearerTokenEnv must be an environment variable name",
+      )
+      .optional(),
+    routeSelector: z
+      .object({
+        router_name: runtimeIdString("autoRouting routeSelector router_name"),
+        config: z.record(z.string(), routerJsonSchema).optional(),
+      })
+      .strict()
+      .refine(
+        hasNoRouterSecrets,
+        "autoRouting routeSelector must not contain secrets",
+      )
+      .optional(),
+    defaultModeId: runtimeIdString("autoRouting defaultModeId").optional(),
+    modes: z.array(runtimeAutoRoutingModeSchema).min(1),
+  })
+  .strict()
+  .superRefine((config, ctx) => {
+    if (
+      new Set(config.modes.map((mode) => mode.id)).size !== config.modes.length
+    )
+      ctx.addIssue({
+        code: "custom",
+        message: "autoRouting modes must have unique ids",
+      });
+    if (
+      config.defaultModeId &&
+      !config.modes.some((mode) => mode.id === config.defaultModeId)
+    )
+      ctx.addIssue({
+        code: "custom",
+        message: "autoRouting defaultModeId must reference a mode",
+      });
+  });
+export type AutoRoutingEffort = z.infer<typeof autoRoutingEffortSchema>;
+export type RuntimeAutoRoutingModel = z.infer<
+  typeof runtimeAutoRoutingModelSchema
+>;
+export type RuntimeAutoRoutingMode = z.infer<
+  typeof runtimeAutoRoutingModeSchema
+>;
+export type RuntimeAutoRoutingConfig = z.infer<
+  typeof runtimeAutoRoutingConfigSchema
+>;
+
 export const runtimeGooseConfigSchema = z
   .object({
     defaultModelProviderId: runtimeIdString(
@@ -178,6 +327,7 @@ export const runtimeGooseConfigSchema = z
     ).optional(),
     defaultModelId: runtimeIdString("goose defaultModelId").optional(),
     modelProviders: z.array(runtimeGooseModelProviderSchema),
+    autoRouting: runtimeAutoRoutingConfigSchema.optional(),
   })
   .strict()
   .superRefine((goose, ctx) => {
@@ -232,6 +382,15 @@ export const runtimeGooseConfigSchema = z
         }
         modelIds.add(modelId);
       }
+    }
+
+    for (const [index, mode] of (goose.autoRouting?.modes ?? []).entries()) {
+      if (!providerIds.has(mode.modelProviderId))
+        ctx.addIssue({
+          code: "custom",
+          path: ["autoRouting", "modes", index, "modelProviderId"],
+          message: "autoRouting modelProviderId must reference modelProviders",
+        });
     }
 
     if (goose.modelProviders.length === 0) {

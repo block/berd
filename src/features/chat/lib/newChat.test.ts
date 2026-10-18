@@ -18,6 +18,24 @@ function makeSession(
 }
 
 describe("findExistingDraft", () => {
+  it("does not reuse a draft with different auto selection intent", () => {
+    const draft = makeSession("draft", { autoModeId: "balanced" });
+    const args = {
+      sessions: [draft],
+      activeSessionId: draft.id,
+      draftsBySession: {},
+      messagesBySession: {},
+      request: { title: "New chat", autoModeId: "fast" },
+    };
+    expect(findExistingDraft(args)).toBeUndefined();
+    expect(
+      findExistingDraft({
+        ...args,
+        request: { title: "New chat", autoModeId: "balanced" },
+      }),
+    ).toBe(draft);
+  });
+
   it("does not reuse an unavailable remote project chat", () => {
     const missing = makeSession("remote-missing", {
       projectId: "alpha",

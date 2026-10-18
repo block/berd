@@ -375,6 +375,7 @@ export function ConversationComposerCapability({
         onPersonaChange: controller.handlePersonaChange,
       }}
       agentModelPicker={{
+        autoRouting: controller.autoRouting,
         providers: controller.pickerAgents,
         providersLoading: controller.providersLoading,
         selectedProvider: controller.selectedProvider,

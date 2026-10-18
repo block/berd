@@ -1,3 +1,6 @@
+import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
+import { DEFAULT_RUNTIME_CONFIG } from "@/shared/runtime-config/schema";
+import { usePendingAutoModeStore } from "@/features/chat/lib/autoModelSelection";
 import {
   act,
   createEvent,
@@ -241,6 +244,8 @@ describe("GlobalComposerPill", () => {
   });
 
   beforeEach(() => {
+    useRuntimeConfigStore.setState({ config: DEFAULT_RUNTIME_CONFIG });
+    usePendingAutoModeStore.setState({ modeId: undefined });
     resetVoiceDictationShortcutControllerForTests();
     mockOpenDialog.mockReset();
     mockInspectAttachmentPaths.mockReset();
@@ -1347,6 +1352,50 @@ describe("GlobalComposerPill", () => {
     // its next use.
     rerender(<GlobalComposerPill onSend={onSend} placement="docked" />);
     expect(screen.queryByText("Project One")).not.toBeInTheDocument();
+  });
+
+  it("sends the selected auto mode with its concrete Goose fallback", async () => {
+    const user = userEvent.setup();
+    useRuntimeConfigStore.setState({
+      config: {
+        ...DEFAULT_RUNTIME_CONFIG,
+        goose: {
+          ...DEFAULT_RUNTIME_CONFIG.goose,
+          autoRouting: {
+            url: "https://router.example",
+            modes: [
+              {
+                id: "balanced",
+                displayName: "Auto Balanced",
+                modelProviderId: "openai",
+                fallback: { modelId: "gpt-5", effort: "medium" },
+                models: [{ modelId: "gpt-5", routerModel: "gpt-5" }],
+              },
+            ],
+          },
+        },
+      },
+    });
+    const onSend = renderGlobalComposer();
+    await user.click(screen.getByRole("textbox"));
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    await user.click(screen.getByRole("button", { name: "Auto Balanced" }));
+    await user.type(screen.getByRole("textbox"), "Route this task");
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+    expect(onSend).toHaveBeenCalledWith(
+      "Route this task",
+      expect.objectContaining({
+        autoModeId: "balanced",
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "openai",
+          modelId: "gpt-5",
+          modelName: "gpt-5",
+        },
+      }),
+    );
   });
 
   it("disables send until there is sendable content", async () => {

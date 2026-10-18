@@ -441,6 +441,7 @@ export async function sendQueuedPromptToExistingSessionInBackground(
       {
         ...sendOptions,
         executionSystemPrompt,
+        sessionSelectionToken: targetLease.token,
       },
       payload.attachments,
       () => {

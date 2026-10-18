@@ -1,4 +1,5 @@
 import { PreCommitSendRejectedError } from "@/features/chat/lib/preCommitSendRejection";
+import { prepareAutoRoutedPrompt } from "./autoRoutingDispatch";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import {
   appendAttachmentPaths,
@@ -90,6 +91,8 @@ export interface SendCoreOptions {
    */
   prepare?: () => void | Promise<void>;
   signal?: AbortSignal;
+  /** Queue lease retained while auto routing chooses this turn's model. */
+  dispatchToken?: symbol;
   /** Fires immediately before the user message is committed to local stores. */
   beforeUserMessageCommitted?: () => void;
   /**
@@ -459,6 +462,17 @@ export async function dispatchPrompt(
     await restoreArchivedSessionBeforeSend(sessionId);
     throwIfAborted(signal);
     useChatSessionStore.getState().assertSessionActive(sessionId);
+
+    if (useChatSessionStore.getState().getSession(sessionId)?.autoModeId) {
+      await prepareAutoRoutedPrompt(sessionId, {
+        text,
+        assistantPrompt,
+        attachments: dispatchAttachments,
+        dispatchToken: opts.dispatchToken,
+        signal,
+      });
+      throwIfAborted(signal);
+    }
 
     const commitUserMessage = () => {
       throwIfAborted(signal);

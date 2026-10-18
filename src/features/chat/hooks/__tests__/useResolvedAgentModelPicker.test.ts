@@ -1,3 +1,10 @@
+import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
+import { DEFAULT_RUNTIME_CONFIG } from "@/shared/runtime-config/schema";
+import {
+  getAutoModeExecutionTarget,
+  getSelectedAutoModeId,
+  usePendingAutoModeStore,
+} from "../../lib/autoModelSelection";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
@@ -93,6 +100,8 @@ vi.mock("sonner", () => ({
 describe("useResolvedAgentModelPicker", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useRuntimeConfigStore.setState({ config: DEFAULT_RUNTIME_CONFIG });
+    usePendingAutoModeStore.setState({ modeId: undefined });
     mockPrepareSession.mockResolvedValue(undefined);
     resetSessionTargetCoordinatorsForTests();
     window.localStorage.clear();
@@ -161,6 +170,133 @@ describe("useResolvedAgentModelPicker", () => {
         handleModelChange: vi.fn(),
       }),
     );
+  });
+
+  it("switches an auto choice from a foreign harness to the mode's concrete Goose fallback", async () => {
+    useRuntimeConfigStore.setState({
+      config: {
+        ...DEFAULT_RUNTIME_CONFIG,
+        goose: {
+          ...DEFAULT_RUNTIME_CONFIG.goose,
+          autoRouting: {
+            url: "https://router.example",
+            modes: [
+              {
+                id: "balanced",
+                displayName: "Auto Balanced",
+                modelProviderId: "openai",
+                fallback: { modelId: "gpt-5", effort: "medium" },
+                models: [{ modelId: "gpt-5", routerModel: "gpt-5" }],
+              },
+            ],
+          },
+        },
+      },
+    });
+    const { useAgentModelPickerState } = await vi.importActual<
+      typeof import("../useAgentModelPickerState")
+    >("../useAgentModelPickerState");
+    mockUseAgentModelPickerState.mockImplementation(useAgentModelPickerState);
+    mockAgentStatus.mockReturnValue({
+      readyAgentIds: new Set(["goose", "codex-acp"]),
+      agentReadiness: new Map(),
+      refresh: vi.fn(),
+    });
+    const session = makeSession(
+      { harnessId: "codex-acp" },
+      { creationState: "pending" },
+    );
+    useChatSessionStore.setState({ sessions: [session] });
+    const { result } = renderModelPicker({
+      session,
+      selectedProvider: "codex-acp",
+    });
+    act(() => result.current.autoRouting.onModeChange("balanced"));
+    expect(useChatSessionStore.getState().getSession(session.id)).toMatchObject(
+      {
+        autoModeId: "balanced",
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "openai",
+          modelId: "gpt-5",
+        },
+      },
+    );
+  });
+
+  it("exits auto when the user explicitly picks the concrete model already in use", async () => {
+    const { useAgentModelPickerState } = await vi.importActual<
+      typeof import("../useAgentModelPickerState")
+    >("../useAgentModelPickerState");
+    mockUseAgentModelPickerState.mockImplementation(useAgentModelPickerState);
+    mockAgentStatus.mockReturnValue({
+      readyAgentIds: new Set(["goose"]),
+      agentReadiness: new Map(),
+      refresh: vi.fn(),
+    });
+    const session = makeSession(
+      {
+        harnessId: "goose",
+        modelProviderId: "openai",
+        modelId: "gpt-5",
+        modelName: "GPT-5",
+      },
+      { autoModeId: "balanced" },
+    );
+    useChatSessionStore.setState({ sessions: [session] });
+    const applySessionModelSelection = vi.fn();
+    const { result } = renderModelPicker({
+      session,
+      applySessionModelSelection,
+    });
+    act(() =>
+      result.current.handleModelChange("gpt-5", {
+        id: "gpt-5",
+        name: "GPT-5",
+        providerId: "openai",
+      }),
+    );
+    expect(
+      useChatSessionStore.getState().getSession(session.id)?.autoModeId,
+    ).toBeNull();
+    expect(applySessionModelSelection).not.toHaveBeenCalled();
+  });
+
+  it("uses configured auto defaults only for new chats and preserves explicit opt-out", () => {
+    expect(getSelectedAutoModeId()).toBeUndefined();
+    useRuntimeConfigStore.setState({
+      config: {
+        ...DEFAULT_RUNTIME_CONFIG,
+        goose: {
+          ...DEFAULT_RUNTIME_CONFIG.goose,
+          autoRouting: {
+            url: "https://router.example",
+            defaultModeId: "balanced",
+            modes: [
+              {
+                id: "balanced",
+                displayName: "Auto Balanced",
+                modelProviderId: "openai",
+                fallback: { modelId: "gpt-5", effort: "medium" },
+                models: [{ modelId: "gpt-5", routerModel: "gpt-5" }],
+              },
+            ],
+          },
+        },
+      },
+    });
+    expect(getSelectedAutoModeId()).toBe("balanced");
+    expect(getAutoModeExecutionTarget(getSelectedAutoModeId())).toMatchObject({
+      harnessId: "goose",
+      modelProviderId: "openai",
+      modelId: "gpt-5",
+    });
+    useChatSessionStore.setState({
+      sessions: [makeSession({ harnessId: "codex-acp" })],
+    });
+    expect(getSelectedAutoModeId("session-1")).toBeUndefined();
+    act(() => usePendingAutoModeStore.getState().setModeId(null));
+    expect(getSelectedAutoModeId()).toBeNull();
   });
 
   it.each([
