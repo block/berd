@@ -43,9 +43,9 @@ export async function prepareAutoRoutedPrompt(
     (candidate) => candidate.id === modeId,
   );
   if (!mode) {
-    // Startup's temporary default config is not authoritative. Retain intent
-    // until loading settles; a distribution may then remove or rename modes.
-    if (!runtime.loaded) {
+    // Startup and failed loads expose defaults, not an authoritative config.
+    // Retain intent until a successful load confirms the mode was removed.
+    if (!runtime.loaded || runtime.result.status !== "ready") {
       throw new PreCommitSendRejectedError(
         i18n.t("chat:errors.sessionPreparationSuperseded"),
       );

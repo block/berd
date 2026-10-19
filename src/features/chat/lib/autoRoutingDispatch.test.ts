@@ -62,8 +62,9 @@ describe("auto routing dispatch", () => {
     vi.mocked(repairManagedGooseModelSelection).mockResolvedValue(null);
     vi.mocked(acpGetPreparedWorkingDir).mockReturnValue("/work");
     resetSessionTargetCoordinatorsForTests();
-    useRuntimeConfigStore.setState({
-      loaded: true,
+    useRuntimeConfigStore.getState().setResult({
+      status: "ready",
+      source: "appDefault",
       config: {
         ...DEFAULT_RUNTIME_CONFIG,
         goose: {
@@ -398,6 +399,54 @@ describe("auto routing dispatch", () => {
       "balanced",
     );
     expect(routeAutoModel).not.toHaveBeenCalled();
+  });
+
+  it("preserves persisted Auto through a failed config load and routes after recovery", async () => {
+    const readyConfig = useRuntimeConfigStore.getState().config;
+    persistAutoMode("s", "balanced");
+    const sessionBefore = useChatSessionStore.getState().getSession("s");
+    useRuntimeConfigStore.getState().setResult({
+      status: "unavailable",
+      source: "endpoint",
+      reason: "missing",
+      message: "Temporarily unavailable",
+    });
+    expect(useRuntimeConfigStore.getState().loaded).toBe(true);
+    const dispatch = async () => {
+      const lease = acquireSessionDispatchTarget("s");
+      if (lease.status !== "acquired") throw new Error("Expected lease");
+      try {
+        return await dispatchPrompt("s", "Continue my chat", {
+          providerId: "openai",
+          dispatchToken: lease.token,
+        });
+      } finally {
+        lease.release();
+      }
+    };
+    await expect(dispatch()).rejects.toThrow(PreCommitSendRejectedError);
+    expect(useChatSessionStore.getState().getSession("s")).toEqual(
+      sessionBefore,
+    );
+    expect(loadAutoMode("s")).toBe("balanced");
+    expect(routeAutoModel).not.toHaveBeenCalled();
+    expect(acpSendMessage).not.toHaveBeenCalled();
+    expect(useChatStore.getState().messagesBySession.s ?? []).toHaveLength(0);
+
+    useRuntimeConfigStore.getState().setResult({
+      status: "ready",
+      source: "endpoint",
+      config: readyConfig,
+    });
+    await dispatch();
+    expect(routeAutoModel).toHaveBeenCalledOnce();
+    expect(acpSendMessage).toHaveBeenCalledOnce();
+    expect(loadAutoMode("s")).toBe("balanced");
+    expect(useChatSessionStore.getState().getSession("s")).toMatchObject({
+      autoModeId: "balanced",
+      executionTarget: { modelId: "chosen" },
+      autoRoutingDecision: { modeId: "balanced", modelId: "chosen" },
+    });
   });
 
   it("skips the router after an explicit model choice", async () => {
