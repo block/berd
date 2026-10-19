@@ -545,7 +545,23 @@ impl RuntimeConfigState {
         }
         let result =
             if retain_last_valid && matches!(result, RuntimeConfigLoadResult::Unavailable { .. }) {
-                cached.last_valid.clone().unwrap_or(result)
+                cached
+                    .last_valid
+                    .clone()
+                    .or_else(|| {
+                        // Defaults still support unrelated native operations. Their
+                        // AppDefault source remains non-authoritative for Auto intent.
+                        cached.current.clone().filter(|current| {
+                            matches!(
+                                current,
+                                RuntimeConfigLoadResult::Ready {
+                                    source: RuntimeConfigSource::AppDefault,
+                                    ..
+                                }
+                            )
+                        })
+                    })
+                    .unwrap_or(result)
             } else {
                 result
             };
@@ -1936,20 +1952,51 @@ mod tests {
 
     #[cfg(not(feature = "admin-runtime-config"))]
     #[tokio::test]
-    async fn new_chat_initial_source_failure_does_not_prove_auto_was_removed() {
+    async fn new_chat_source_failure_preserves_operational_app_default() {
         let (_dir, state) = temp_state();
         let distro = empty_distro_state();
+        let initial = state.get(&distro).await.unwrap();
         assert_eq!(
-            expect_ready(state.get(&distro).await.unwrap()).0,
+            expect_ready(initial.clone()).0,
             RuntimeConfigSource::AppDefault
         );
         let result = state.refresh_for_new_chat(&distro).await.unwrap();
+        assert_eq!(result, initial);
+        assert_eq!(state.get(&distro).await.unwrap(), result);
+        assert_eq!(
+            state.ready_config(&distro).await.unwrap(),
+            default_runtime_config()
+        );
+        // Ready defaults keep native operations usable without claiming that
+        // the source successfully removed any previously configured Auto mode.
         assert!(matches!(
             result,
-            RuntimeConfigLoadResult::Unavailable { .. }
+            RuntimeConfigLoadResult::Ready {
+                source: RuntimeConfigSource::AppDefault,
+                ..
+            }
         ));
-        assert_eq!(state.get(&distro).await.unwrap(), result);
-        assert!(state.ready_config(&distro).await.is_err());
+    }
+
+    #[cfg(not(feature = "admin-runtime-config"))]
+    #[tokio::test]
+    async fn new_chat_timeout_preserves_operational_app_default() {
+        let (_dir, state) = temp_state();
+        let distro = empty_distro_state();
+        let initial = state.get(&distro).await.unwrap();
+        assert_eq!(
+            expect_ready(initial.clone()).0,
+            RuntimeConfigSource::AppDefault
+        );
+        let result = state
+            .refresh_for_new_chat_with(std::future::pending(), Duration::from_millis(1))
+            .await
+            .unwrap();
+        assert_eq!(result, initial);
+        assert_eq!(
+            state.ready_config(&distro).await.unwrap(),
+            default_runtime_config()
+        );
     }
 
     #[tokio::test]
@@ -1972,10 +2019,32 @@ mod tests {
         let distro = empty_distro_state();
         state.set_fake_config(valid_config()).unwrap();
         state.clear_fake_config(&distro).await.unwrap();
-        assert!(matches!(
-            state.refresh_for_new_chat(&distro).await.unwrap(),
-            RuntimeConfigLoadResult::Unavailable { .. }
+        let result = state.refresh_for_new_chat(&distro).await.unwrap();
+        let (source, config) = expect_ready(result);
+        assert_eq!(source, RuntimeConfigSource::AppDefault);
+        assert_eq!(config, default_runtime_config());
+        assert_eq!(state.ready_config(&distro).await.unwrap(), config);
+    }
+
+    #[cfg(not(feature = "admin-runtime-config"))]
+    #[tokio::test]
+    async fn concurrent_new_chat_failure_does_not_restore_cleared_fake_override() {
+        let (_dir, state) = temp_state();
+        let distro = empty_distro_state();
+        state.set_fake_config(valid_config()).unwrap();
+        let (_, refreshed) = tokio::join!(
+            state.clear_fake_config(&distro),
+            state.refresh_for_new_chat(&distro),
+        );
+        let result = refreshed.unwrap();
+        assert!(!matches!(
+            result,
+            RuntimeConfigLoadResult::Ready {
+                source: RuntimeConfigSource::FakeEndpoint,
+                ..
+            }
         ));
+        assert_eq!(state.get(&distro).await.unwrap(), result);
     }
 
     #[tokio::test]

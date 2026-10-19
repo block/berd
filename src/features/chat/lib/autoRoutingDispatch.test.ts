@@ -479,16 +479,27 @@ describe("auto routing dispatch", () => {
     expect(routeAutoModel).not.toHaveBeenCalled();
   });
 
-  it("preserves persisted Auto through a failed config load and routes after recovery", async () => {
+  it.each([
+    "unavailable",
+    "appDefault",
+  ] as const)("preserves persisted Auto through %s config and routes after recovery", async (state) => {
     const readyConfig = useRuntimeConfigStore.getState().config;
     persistAutoMode("s", "balanced");
     const sessionBefore = useChatSessionStore.getState().getSession("s");
-    useRuntimeConfigStore.getState().setResult({
-      status: "unavailable",
-      source: "endpoint",
-      reason: "missing",
-      message: "Temporarily unavailable",
-    });
+    useRuntimeConfigStore.getState().setResult(
+      state === "appDefault"
+        ? {
+            status: "ready",
+            source: "appDefault",
+            config: DEFAULT_RUNTIME_CONFIG,
+          }
+        : {
+            status: "unavailable",
+            source: "endpoint",
+            reason: "missing",
+            message: "Temporarily unavailable",
+          },
+    );
     expect(useRuntimeConfigStore.getState().loaded).toBe(true);
     const dispatch = async () => {
       const lease = acquireSessionDispatchTarget("s");

@@ -155,7 +155,7 @@ describe("runtimeConfigStore", () => {
     expect(useRuntimeConfigStore.getState().result.status).toBe("unavailable");
     expect(useRuntimeConfigStore.getState().loaded).toBe(true);
   });
-  it("does not preserve compiled-default fallback as an authoritative source", async () => {
+  it("preserves loaded compiled defaults and their non-authoritative source", async () => {
     useRuntimeConfigStore.getState().setResult({
       status: "ready",
       source: "appDefault",
@@ -166,6 +166,10 @@ describe("runtimeConfigStore", () => {
     );
     await expect(
       useRuntimeConfigStore.getState().refreshForNewChat(),
-    ).resolves.toMatchObject({ status: "unavailable" });
+    ).resolves.toEqual({
+      status: "ready",
+      source: "appDefault",
+      config: DEFAULT_RUNTIME_CONFIG,
+    });
   });
 });

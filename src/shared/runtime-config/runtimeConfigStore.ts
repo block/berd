@@ -79,11 +79,7 @@ export const useRuntimeConfigStore = create<RuntimeConfigState>((set, get) => {
           // with defaults or erase saved Auto intent. Native owns source timeout
           // and last-good fallback for a successfully delivered command.
           const current = get();
-          if (
-            current.loaded &&
-            current.result.status === "ready" &&
-            current.result.source !== "appDefault"
-          ) {
+          if (current.loaded && current.result.status === "ready") {
             return current.result;
           }
           return {

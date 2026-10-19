@@ -45,7 +45,11 @@ export async function prepareAutoRoutedPrompt(
   if (!mode) {
     // Startup and failed loads expose defaults, not an authoritative config.
     // Retain intent until a successful load confirms the mode was removed.
-    if (!runtime.loaded || runtime.result.status !== "ready") {
+    if (
+      !runtime.loaded ||
+      runtime.result.status !== "ready" ||
+      runtime.result.source === "appDefault"
+    ) {
       throw new PreCommitSendRejectedError(
         i18n.t("chat:errors.sessionPreparationSuperseded"),
       );
