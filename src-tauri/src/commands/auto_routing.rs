@@ -1,7 +1,7 @@
 //! Runtime-configured routing transport. Requests and credentials are never logged.
 //! Full responses stay in session memory; logs contain transport metadata only.
 use crate::commands::runtime_config::{
-    RuntimeAutoRoutingConfig, RuntimeAutoRoutingMode, RuntimeConfigState,
+    auto_routing_revision, RuntimeAutoRoutingConfig, RuntimeAutoRoutingMode, RuntimeConfigState,
 };
 use crate::services::distro_bundle::DistroBundleState;
 use serde_json::{json, Value};
@@ -12,11 +12,15 @@ const AUTO_ROUTING_CONFIG_CHANGED: &str = "AUTO_ROUTING_CONFIG_CHANGED";
 
 fn checked_routing_config<'a>(
     current: Option<&'a RuntimeAutoRoutingConfig>,
-    expected: &RuntimeAutoRoutingConfig,
+    expected_revision: Option<&str>,
 ) -> Result<&'a RuntimeAutoRoutingConfig, String> {
-    current
-        .filter(|current| *current == expected)
-        .ok_or_else(|| AUTO_ROUTING_CONFIG_CHANGED.to_string())
+    let current = current.ok_or_else(|| AUTO_ROUTING_CONFIG_CHANGED.to_string())?;
+    let revision =
+        auto_routing_revision(current).map_err(|_| AUTO_ROUTING_CONFIG_CHANGED.to_string())?;
+    if Some(revision.as_str()) != expected_revision {
+        return Err(AUTO_ROUTING_CONFIG_CHANGED.to_string());
+    }
+    Ok(current)
 }
 
 fn build_request(
@@ -41,7 +45,7 @@ fn build_request(
 pub async fn route_auto_model(
     mode_id: String,
     prompt: String,
-    expected_auto_routing: RuntimeAutoRoutingConfig,
+    expected_auto_routing_revision: Option<String>,
     runtime_config: State<'_, RuntimeConfigState>,
     distro_bundle: State<'_, DistroBundleState>,
 ) -> Result<Value, String> {
@@ -50,10 +54,12 @@ pub async fn route_auto_model(
         return Err("Routing context exceeds limit".to_string());
     }
     let runtime = runtime_config.ready_config(&distro_bundle).await?;
-    // Never execute caller-supplied configuration. It only ensures the
-    // renderer will interpret this response against the snapshot we use.
-    let config =
-        checked_routing_config(runtime.goose.auto_routing.as_ref(), &expected_auto_routing)?;
+    // Echo the native-issued revision, never re-encoded renderer config.
+    // Native JSON numbers retain their original precision and representation.
+    let config = checked_routing_config(
+        runtime.goose.auto_routing.as_ref(),
+        expected_auto_routing_revision.as_deref(),
+    )?;
     let mode = config
         .modes
         .iter()
@@ -125,21 +131,64 @@ mod tests {
         .unwrap()
     }
     #[test]
-    fn renderer_snapshot_must_match_native_before_routing() {
+    fn renderer_revision_must_match_native_before_routing() {
         let current = config("https://trusted.example.com/route".to_string());
+        let revision = auto_routing_revision(&current).unwrap();
         assert!(std::ptr::eq(
-            checked_routing_config(Some(&current), &current.clone()).unwrap(),
+            checked_routing_config(Some(&current), Some(&revision)).unwrap(),
             &current,
         ));
         let mut changed = current.clone();
         changed.modes[0].fallback.model_id = "changed".to_string();
         assert_eq!(
-            checked_routing_config(Some(&current), &changed).unwrap_err(),
+            checked_routing_config(Some(&changed), Some(&revision)).unwrap_err(),
             AUTO_ROUTING_CONFIG_CHANGED,
         );
         assert_eq!(
-            checked_routing_config(None, &current).unwrap_err(),
+            checked_routing_config(None, Some(&revision)).unwrap_err(),
             AUTO_ROUTING_CONFIG_CHANGED,
+        );
+        assert_eq!(
+            checked_routing_config(Some(&current), None).unwrap_err(),
+            AUTO_ROUTING_CONFIG_CHANGED,
+        );
+        assert_eq!(
+            checked_routing_config(Some(&current), Some("forged")).unwrap_err(),
+            AUTO_ROUTING_CONFIG_CHANGED,
+        );
+    }
+
+    #[test]
+    fn native_revision_survives_renderer_numeric_round_trip() {
+        let mut native = config("https://trusted.example.com/route".to_string());
+        native.route_selector = Some(
+            serde_json::from_str(
+                r#"{
+            "router_name":"task_v3",
+            "config":{"float":1.0,"large":9007199254740993}
+        }"#,
+            )
+            .unwrap(),
+        );
+        let revision = auto_routing_revision(&native).unwrap();
+        // Emulate JSON.parse -> JSON.stringify in JavaScript: integral floats
+        // become integers and values beyond MAX_SAFE_INTEGER lose precision.
+        let mut renderer = serde_json::to_value(&native).unwrap();
+        renderer["routeSelector"]["config"]["float"] = json!(1);
+        renderer["routeSelector"]["config"]["large"] = json!(9007199254740992u64);
+        let renderer: RuntimeAutoRoutingConfig = serde_json::from_value(renderer).unwrap();
+        assert_ne!(native, renderer);
+        assert_ne!(auto_routing_revision(&renderer).unwrap(), revision);
+
+        let checked = checked_routing_config(Some(&native), Some(&revision)).unwrap();
+        let request = build_request(checked, &checked.modes[0], "context");
+        let selector = &request["route_selector"]["config"];
+        assert!(selector["float"].is_f64());
+        assert_eq!(selector["large"].as_u64(), Some(9007199254740993));
+        // A real native number change still invalidates the captured revision.
+        assert_eq!(
+            checked_routing_config(Some(&renderer), Some(&revision)).unwrap_err(),
+            AUTO_ROUTING_CONFIG_CHANGED
         );
     }
     async fn server(

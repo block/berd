@@ -176,6 +176,7 @@ describe("auto routing invocation", () => {
     vi.mocked(getRuntimeConfig).mockResolvedValue({
       status: "ready",
       source: "bundledFile",
+      autoRoutingRevision: "native-revision-new",
       config: {
         schemaVersion: 1,
         goose: {
@@ -184,14 +185,17 @@ describe("auto routing invocation", () => {
         },
       },
     });
-    useRuntimeConfigStore.setState({
+    useRuntimeConfigStore.getState().setResult({
+      status: "ready",
+      source: "bundledFile",
+      autoRoutingRevision: "native-revision-old",
       config: {
         schemaVersion: 1,
         goose: { modelProviders: [], autoRouting: config },
       },
     });
   });
-  it("sends mode ID, context and the expected config snapshot to the backend", async () => {
+  it("sends the native revision instead of roundtripping routing config to the backend", async () => {
     vi.mocked(invokeWithStartupRetry).mockResolvedValue(
       response("gpt-6-1-sol"),
     );
@@ -201,7 +205,25 @@ describe("auto routing invocation", () => {
     expect(invokeWithStartupRetry).toHaveBeenCalledWith("route_auto_model", {
       modeId: "auto",
       prompt: "context",
-      expectedAutoRouting: config,
+      expectedAutoRoutingRevision: "native-revision-old",
+    });
+  });
+  it("sends a missing revision as null so native can request resync", async () => {
+    const result = useRuntimeConfigStore.getState().result;
+    if (result.status !== "ready") throw new Error("Expected ready config");
+    useRuntimeConfigStore
+      .getState()
+      .setResult({ ...result, autoRoutingRevision: undefined });
+    vi.mocked(invokeWithStartupRetry).mockRejectedValue(
+      "AUTO_ROUTING_CONFIG_CHANGED",
+    );
+    await expect(
+      routeAutoModel({ modeId: "auto", prompt: "context" }),
+    ).rejects.toBeInstanceOf(PreCommitSendRejectedError);
+    expect(invokeWithStartupRetry).toHaveBeenCalledWith("route_auto_model", {
+      modeId: "auto",
+      prompt: "context",
+      expectedAutoRoutingRevision: null,
     });
   });
   it.each([
@@ -230,10 +252,7 @@ describe("auto routing invocation", () => {
       {
         modeId: "auto",
         prompt: "context",
-        expectedAutoRouting: {
-          ...config,
-          url: "https://changed.example.com/route",
-        },
+        expectedAutoRoutingRevision: "native-revision-new",
       },
     );
     expect(getRuntimeConfig).toHaveBeenCalledOnce();
@@ -261,6 +280,7 @@ describe("auto routing invocation", () => {
       vi.mocked(getRuntimeConfig).mockResolvedValueOnce({
         status: "ready",
         source: "bundledFile",
+        autoRoutingRevision: "native-revision-old",
         config: {
           schemaVersion: 1,
           goose: { modelProviders: [], autoRouting: config },

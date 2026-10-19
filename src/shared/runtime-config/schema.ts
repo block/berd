@@ -499,6 +499,10 @@ export const runtimeConfigLoadResultSchema = z.discriminatedUnion("status", [
       status: z.literal("ready"),
       source: runtimeConfigSourceSchema,
       config: runtimeConfigSchema,
+      autoRoutingRevision: z
+        .string()
+        .regex(/^[a-f0-9]{64}$/)
+        .optional(),
     })
     .strict(),
   z

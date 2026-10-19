@@ -28,6 +28,7 @@ describe("runtime config api", () => {
     const result = {
       status: "ready",
       source: "fakeEndpoint",
+      autoRoutingRevision: "a".repeat(64),
       config: validConfig,
     };
     mockInvoke.mockResolvedValueOnce(result);

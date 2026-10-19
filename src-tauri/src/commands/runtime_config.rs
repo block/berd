@@ -4,6 +4,7 @@ use crate::services::kgoose;
 #[cfg(any(feature = "admin-runtime-config", test))]
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -271,12 +272,51 @@ pub enum RuntimeConfigLoadResult {
     Ready {
         source: RuntimeConfigSource,
         config: Box<RuntimeConfig>,
+        /// Opaque native fingerprint. Callers echo it without re-encoding the
+        /// configuration, whose free JSON numbers can change in JavaScript.
+        #[serde(
+            rename = "autoRoutingRevision",
+            skip_serializing_if = "Option::is_none",
+            default
+        )]
+        auto_routing_revision: Option<String>,
     },
     Unavailable {
         source: RuntimeConfigSource,
         reason: RuntimeConfigUnavailableReason,
         message: String,
     },
+}
+
+impl RuntimeConfigLoadResult {
+    fn ready(source: RuntimeConfigSource, config: RuntimeConfig) -> Self {
+        let revision = config
+            .goose
+            .auto_routing
+            .as_ref()
+            .map(auto_routing_revision)
+            .transpose();
+        match revision {
+            Ok(auto_routing_revision) => Self::Ready {
+                source,
+                config: Box::new(config),
+                auto_routing_revision,
+            },
+            Err(message) => Self::Unavailable {
+                source,
+                reason: RuntimeConfigUnavailableReason::Invalid,
+                message,
+            },
+        }
+    }
+}
+
+/// Hash only native-owned data. In particular, never recreate this revision
+/// from renderer JSON: JavaScript rounds integers and normalizes float types.
+pub(crate) fn auto_routing_revision(config: &RuntimeAutoRoutingConfig) -> Result<String, String> {
+    let encoded = serde_json::to_vec(config)
+        .map_err(|_| "Failed to encode Auto routing revision".to_string())?;
+    Ok(hex::encode(Sha256::digest(encoded)))
 }
 
 pub struct RuntimeConfigState {
@@ -378,10 +418,7 @@ impl RuntimeConfigState {
         };
         self.finish_load(
             generation,
-            RuntimeConfigLoadResult::Ready {
-                source: RuntimeConfigSource::FakeEndpoint,
-                config: Box::new(config),
-            },
+            RuntimeConfigLoadResult::ready(RuntimeConfigSource::FakeEndpoint, config),
             false,
         )
     }
@@ -571,10 +608,7 @@ async fn load_runtime_config_from_source(
                     Ok(Ok(())) => {}
                     error => log::warn!("failed to write admin runtime config cache: {error:?}"),
                 }
-                return RuntimeConfigLoadResult::Ready {
-                    source: RuntimeConfigSource::Endpoint,
-                    config: Box::new(config),
-                };
+                return RuntimeConfigLoadResult::ready(RuntimeConfigSource::Endpoint, config);
             }
             Err(error) => {
                 log::warn!("failed to fetch admin runtime config: {error}");
@@ -587,10 +621,10 @@ async fn load_runtime_config_from_source(
         match read_admin_cache_from_path(cache_path) {
             Ok(cache) => {
                 log::info!("using cached admin runtime config");
-                return RuntimeConfigLoadResult::Ready {
-                    source: RuntimeConfigSource::CachedEndpoint,
-                    config: Box::new(cache.config),
-                };
+                return RuntimeConfigLoadResult::ready(
+                    RuntimeConfigSource::CachedEndpoint,
+                    cache.config,
+                );
             }
             Err(error) => log::warn!("failed to read cached admin runtime config: {error}"),
         }
@@ -658,10 +692,7 @@ fn load_bundled_runtime_config_from_source(
         Some(path) if path.exists() => match read_bundled_runtime_config_from_path(path) {
             Ok(config) => {
                 log::info!("using bundled runtime config '{}'", path.display());
-                RuntimeConfigLoadResult::Ready {
-                    source: RuntimeConfigSource::BundledFile,
-                    config: Box::new(config),
-                }
+                RuntimeConfigLoadResult::ready(RuntimeConfigSource::BundledFile, config)
             }
             Err((reason, message)) => bundled_runtime_config_unavailable_or_default(
                 reason,
@@ -774,10 +805,7 @@ fn read_fake_runtime_config_from_path(path: &Path) -> RuntimeConfigLoadResult {
             path.display()
         ));
     }
-    RuntimeConfigLoadResult::Ready {
-        source: RuntimeConfigSource::FakeEndpoint,
-        config: Box::new(config),
-    }
+    RuntimeConfigLoadResult::ready(RuntimeConfigSource::FakeEndpoint, config)
 }
 
 #[cfg(any(feature = "admin-runtime-config", test))]
@@ -840,7 +868,7 @@ fn runtime_config_load_result_for_local_byo_dev(
     #[cfg(debug_assertions)]
     if local_byo_key_providers_enabled() {
         return match result {
-            RuntimeConfigLoadResult::Ready { source, config }
+            RuntimeConfigLoadResult::Ready { source, config, .. }
                 if matches!(
                     source,
                     RuntimeConfigSource::AppDefault | RuntimeConfigSource::BundledFile
@@ -848,10 +876,7 @@ fn runtime_config_load_result_for_local_byo_dev(
             {
                 let mut config = *config;
                 clear_default_databricks_distribution_config(&mut config);
-                RuntimeConfigLoadResult::Ready {
-                    source,
-                    config: Box::new(config),
-                }
+                RuntimeConfigLoadResult::ready(source, config)
             }
             other => other,
         };
@@ -898,10 +923,7 @@ fn default_runtime_config_result(source: RuntimeConfigSource) -> RuntimeConfigLo
             message: format!("Default runtime config failed validation: {error}"),
         };
     }
-    RuntimeConfigLoadResult::Ready {
-        source,
-        config: Box::new(config),
-    }
+    RuntimeConfigLoadResult::ready(source, config)
 }
 
 pub(crate) fn default_runtime_config() -> RuntimeConfig {
@@ -1679,7 +1701,7 @@ mod tests {
 
     fn expect_ready(result: RuntimeConfigLoadResult) -> (RuntimeConfigSource, RuntimeConfig) {
         match result {
-            RuntimeConfigLoadResult::Ready { source, config } => (source, *config),
+            RuntimeConfigLoadResult::Ready { source, config, .. } => (source, *config),
             other => panic!("expected ready result, got {other:?}"),
         }
     }
@@ -1839,6 +1861,53 @@ mod tests {
         assert!(message.contains("Failed to read fake runtime config"));
     }
 
+    #[test]
+    fn ready_wire_result_exposes_native_auto_revision_without_renderer_reencoding() {
+        let mut config = valid_config();
+        let absent = serde_json::to_value(RuntimeConfigLoadResult::ready(
+            RuntimeConfigSource::BundledFile,
+            config.clone(),
+        ))
+        .unwrap();
+        assert!(absent.get("autoRoutingRevision").is_none());
+        config.goose = managed_goose_config();
+        config.goose.auto_routing = Some(serde_json::from_value(serde_json::json!({
+            "url":"https://gateway.example.com/route",
+            "routeSelector":{"router_name":"task_v3","config":{"float":1.0,"large":9007199254740993u64}},
+            "modes":[{"id":"auto","displayName":"Auto","modelProviderId":TEST_RUNTIME_PROVIDER_ID,
+            "fallback":{"modelId":TEST_RUNTIME_MODEL_ID,"effort":"high"},
+            "models":[{"modelId":TEST_RUNTIME_MODEL_ID,"routerModel":"system.ai.sol"}]}]
+        })).unwrap());
+        validate_runtime_config(&config).unwrap();
+        let revision = auto_routing_revision(config.goose.auto_routing.as_ref().unwrap()).unwrap();
+        let mut wire = serde_json::to_value(RuntimeConfigLoadResult::ready(
+            RuntimeConfigSource::BundledFile,
+            config,
+        ))
+        .unwrap();
+        assert_eq!(wire["autoRoutingRevision"], revision);
+        assert_eq!(revision.len(), 64);
+        wire["config"]["goose"]["autoRouting"]["routeSelector"]["config"]["float"] =
+            serde_json::json!(1);
+        wire["config"]["goose"]["autoRouting"]["routeSelector"]["config"]["large"] =
+            serde_json::json!(9007199254740992u64);
+        let echoed: RuntimeConfigLoadResult = serde_json::from_value(wire).unwrap();
+        match echoed {
+            RuntimeConfigLoadResult::Ready {
+                config,
+                auto_routing_revision: Some(echoed_revision),
+                ..
+            } => {
+                assert_eq!(echoed_revision, revision);
+                assert_ne!(
+                    auto_routing_revision(config.goose.auto_routing.as_ref().unwrap()).unwrap(),
+                    revision
+                );
+            }
+            other => panic!("Expected Ready with native revision, got {other:?}"),
+        }
+    }
+
     #[tokio::test]
     async fn new_chat_refresh_retains_last_valid_config_on_source_failure() {
         let (_dir, state) = temp_state();
@@ -1928,10 +1997,10 @@ mod tests {
         let (_dir, state) = temp_state();
         let (started_tx, started_rx) = tokio::sync::oneshot::channel();
         let (finish_tx, finish_rx) = tokio::sync::oneshot::channel();
-        let stale = RuntimeConfigLoadResult::Ready {
-            source: RuntimeConfigSource::BundledFile,
-            config: Box::new(default_runtime_config()),
-        };
+        let stale = RuntimeConfigLoadResult::ready(
+            RuntimeConfigSource::BundledFile,
+            default_runtime_config(),
+        );
         let (result, expected) = tokio::join!(
             state.refresh_for_new_chat_with(
                 async {
@@ -1961,10 +2030,7 @@ mod tests {
         let expected = state
             .refresh_for_new_chat_with(
                 async {
-                    RuntimeConfigLoadResult::Ready {
-                        source: RuntimeConfigSource::BundledFile,
-                        config: Box::new(valid_config()),
-                    }
+                    RuntimeConfigLoadResult::ready(RuntimeConfigSource::BundledFile, valid_config())
                 },
                 Duration::from_secs(5),
             )

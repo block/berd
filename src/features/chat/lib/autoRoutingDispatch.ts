@@ -54,10 +54,18 @@ export async function prepareAutoRoutedPrompt(
     return;
   }
   if (session.executionTarget?.harnessId !== "goose") return;
+  const autoRoutingRevision =
+    runtime.result.status === "ready"
+      ? runtime.result.autoRoutingRevision
+      : undefined;
   const routingSnapshot = JSON.stringify(runtime.config.goose.autoRouting);
   const assertCurrent = () => {
     if (input.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    const currentResult = useRuntimeConfigStore.getState().result;
     if (
+      (currentResult.status === "ready"
+        ? currentResult.autoRoutingRevision
+        : undefined) !== autoRoutingRevision ||
       JSON.stringify(
         useRuntimeConfigStore.getState().config.goose.autoRouting,
       ) !== routingSnapshot ||
@@ -81,6 +89,7 @@ export async function prepareAutoRoutedPrompt(
     prompt,
     signal: input.signal,
     config: runtime.config.goose.autoRouting,
+    autoRoutingRevision,
   });
   assertCurrent();
   let fallbackAttempted = decision.modelId === mode.fallback.modelId;

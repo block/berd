@@ -64,7 +64,8 @@ describe("auto routing dispatch", () => {
     resetSessionTargetCoordinatorsForTests();
     useRuntimeConfigStore.getState().setResult({
       status: "ready",
-      source: "appDefault",
+      source: "bundledFile",
+      autoRoutingRevision: "a".repeat(64),
       config: {
         ...DEFAULT_RUNTIME_CONFIG,
         goose: {
@@ -129,6 +130,19 @@ describe("auto routing dispatch", () => {
     });
   });
 
+  it("rejects a native revision change even when JS config numbers look unchanged", async () => {
+    const pending = prepareAutoRoutedPrompt("s", { text: "Task" });
+    const current = useRuntimeConfigStore.getState().result;
+    if (current.status !== "ready") throw new Error("Expected ready config");
+    useRuntimeConfigStore.getState().setResult({
+      ...current,
+      autoRoutingRevision: "b".repeat(64),
+    });
+    await expect(pending).rejects.toBeInstanceOf(PreCommitSendRejectedError);
+    expect(routeAutoModel).not.toHaveBeenCalled();
+    expect(acpSendMessage).not.toHaveBeenCalled();
+  });
+
   it("rejects a runtime refresh during context preparation before invoking routing", async () => {
     const pending = prepareAutoRoutedPrompt("s", { text: "Task" });
     const current = useRuntimeConfigStore.getState();
@@ -181,6 +195,7 @@ describe("auto routing dispatch", () => {
       current.setResult({
         status: "ready",
         source: "bundledFile",
+        autoRoutingRevision: "a".repeat(64),
         config: JSON.parse(JSON.stringify(current.config)),
       });
       return { ...decision };
@@ -211,6 +226,7 @@ describe("auto routing dispatch", () => {
     expect(routeAutoModel).toHaveBeenCalledWith(
       expect.objectContaining({
         prompt: expect.stringContaining("Loaded SKILL.md instructions"),
+        autoRoutingRevision: "a".repeat(64),
       }),
     );
     expect(acpSetSessionConfigOption).toHaveBeenCalledWith(

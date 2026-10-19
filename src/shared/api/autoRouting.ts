@@ -143,28 +143,35 @@ function abortableResponse<T>(
   });
 }
 
+function currentAutoRoutingRevision(): string | undefined {
+  const result = useRuntimeConfigStore.getState().result;
+  return result.status === "ready" ? result.autoRoutingRevision : undefined;
+}
+
 export async function routeAutoModel({
   modeId,
   prompt,
   signal,
   config = useRuntimeConfigStore.getState().config.goose.autoRouting,
+  autoRoutingRevision = currentAutoRoutingRevision(),
 }: {
   modeId: string;
   prompt: string;
   signal?: AbortSignal;
   config?: RuntimeAutoRoutingConfig;
+  autoRoutingRevision?: string;
 }): Promise<AutoRoutingResult> {
   const mode = config?.modes.find((entry) => entry.id === modeId);
   if (!mode) throw new Error("Auto routing mode is not configured");
   if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
   try {
-    // The caller's snapshot is only an equality guard. Native still resolves
-    // URL, credentials and candidates from its trusted runtime configuration.
+    // Native issues the opaque revision and resolves URL, credentials and
+    // candidates from its trusted runtime configuration.
     const response = await abortableResponse(
       invokeWithStartupRetry<unknown>("route_auto_model", {
         modeId,
         prompt,
-        expectedAutoRouting: config,
+        expectedAutoRoutingRevision: autoRoutingRevision ?? null,
       }),
       signal,
     );
@@ -185,8 +192,7 @@ export async function routeAutoModel({
         );
         if (
           result.status !== "ready" ||
-          JSON.stringify(result.config.goose.autoRouting) ===
-            JSON.stringify(config)
+          result.autoRoutingRevision === autoRoutingRevision
         ) {
           throw new Error("Runtime configuration resync unavailable");
         }
