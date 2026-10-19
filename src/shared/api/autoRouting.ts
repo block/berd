@@ -8,6 +8,7 @@ import {
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import { PreCommitSendRejectedError } from "@/features/chat/lib/preCommitSendRejection";
 import { i18n } from "@/shared/i18n";
+import { reconcileRuntimeConfigProviders } from "@/shared/runtime-config/newChatRuntimeConfig";
 import { invokeWithStartupRetry } from "./invokeWithStartupRetry";
 
 const AUTO_ROUTING_CONFIG_CHANGED = "AUTO_ROUTING_CONFIG_CHANGED";
@@ -195,6 +196,16 @@ export async function routeAutoModel({
           result.autoRoutingRevision === autoRoutingRevision
         ) {
           throw new Error("Runtime configuration resync unavailable");
+        }
+        const reconciled = await abortableResponse(
+          reconcileRuntimeConfigProviders(),
+          signal,
+        );
+        if (
+          reconciled.status !== "ready" ||
+          reconciled.autoRoutingRevision === autoRoutingRevision
+        ) {
+          throw new Error("Runtime configuration resync superseded");
         }
       } catch {
         if (signal?.aborted) throw new DOMException("Aborted", "AbortError");

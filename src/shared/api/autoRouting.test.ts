@@ -5,6 +5,7 @@ import {
   type RuntimeAutoRoutingMode,
 } from "@/shared/runtime-config/schema";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
+import { reconcileRuntimeConfigProviders } from "@/shared/runtime-config/newChatRuntimeConfig";
 import {
   getRuntimeConfig,
   refreshRuntimeConfigForNewChat,
@@ -22,6 +23,9 @@ vi.mock("./invokeWithStartupRetry", () => ({
 vi.mock("./runtimeConfig", () => ({
   getRuntimeConfig: vi.fn(),
   refreshRuntimeConfigForNewChat: vi.fn(),
+}));
+vi.mock("@/shared/runtime-config/newChatRuntimeConfig", () => ({
+  reconcileRuntimeConfigProviders: vi.fn(),
 }));
 import { invokeWithStartupRetry } from "./invokeWithStartupRetry";
 
@@ -173,6 +177,9 @@ describe("auto routing runtime configuration", () => {
 describe("auto routing invocation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(reconcileRuntimeConfigProviders).mockImplementation(
+      async () => useRuntimeConfigStore.getState().result,
+    );
     vi.mocked(getRuntimeConfig).mockResolvedValue({
       status: "ready",
       source: "bundledFile",
@@ -236,6 +243,89 @@ describe("auto routing invocation", () => {
     ).rejects.toBeInstanceOf(PreCommitSendRejectedError);
     expect(getRuntimeConfig).toHaveBeenCalledOnce();
     expect(refreshRuntimeConfigForNewChat).not.toHaveBeenCalled();
+    expect(reconcileRuntimeConfigProviders).toHaveBeenCalledOnce();
+  });
+  it("waits for provider reconciliation before allowing a stale-window retry", async () => {
+    vi.mocked(invokeWithStartupRetry).mockRejectedValue(
+      "AUTO_ROUTING_CONFIG_CHANGED",
+    );
+    let finish!: () => void;
+    vi.mocked(reconcileRuntimeConfigProviders).mockImplementationOnce(
+      async () => {
+        await new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+        return useRuntimeConfigStore.getState().result;
+      },
+    );
+    const settled = vi.fn();
+    const pending = routeAutoModel({ modeId: "auto", prompt: "context" });
+    void pending.then(settled, settled);
+    await vi.waitFor(() =>
+      expect(reconcileRuntimeConfigProviders).toHaveBeenCalledOnce(),
+    );
+    expect(settled).not.toHaveBeenCalled();
+    const rejection = expect(pending).rejects.toBeInstanceOf(
+      PreCommitSendRejectedError,
+    );
+    finish();
+    await rejection;
+  });
+  it.each([
+    "failed",
+    "superseded",
+  ])("uses an ordinary failure if stale-window provider reconciliation is %s", async (outcome) => {
+    vi.mocked(invokeWithStartupRetry).mockRejectedValue(
+      "AUTO_ROUTING_CONFIG_CHANGED",
+    );
+    if (outcome === "failed") {
+      vi.mocked(reconcileRuntimeConfigProviders).mockRejectedValueOnce(
+        new Error("secret provider failure"),
+      );
+    } else {
+      vi.mocked(reconcileRuntimeConfigProviders).mockResolvedValueOnce({
+        status: "unavailable",
+        source: "bundledFile",
+        reason: "endpointUnavailable",
+        message: "unavailable",
+      });
+    }
+    const error = await routeAutoModel({
+      modeId: "auto",
+      prompt: "context",
+    }).catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(PreCommitSendRejectedError);
+    expect(String(error)).not.toContain("secret");
+  });
+  it("preserves cancellation while stale-window provider reconciliation is pending", async () => {
+    vi.mocked(invokeWithStartupRetry).mockRejectedValue(
+      "AUTO_ROUTING_CONFIG_CHANGED",
+    );
+    let finish!: () => void;
+    vi.mocked(reconcileRuntimeConfigProviders).mockImplementationOnce(
+      async () => {
+        await new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+        return useRuntimeConfigStore.getState().result;
+      },
+    );
+    const controller = new AbortController();
+    const pending = routeAutoModel({
+      modeId: "auto",
+      prompt: "context",
+      signal: controller.signal,
+    });
+    await vi.waitFor(() =>
+      expect(reconcileRuntimeConfigProviders).toHaveBeenCalledOnce(),
+    );
+    const rejection = expect(pending).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    controller.abort();
+    await rejection;
+    finish();
   });
   it("resyncs a stale window so its next attempt uses the effective native config", async () => {
     vi.mocked(invokeWithStartupRetry)

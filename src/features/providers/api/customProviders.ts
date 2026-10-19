@@ -147,12 +147,14 @@ function isNotFoundError(error: unknown): boolean {
 
 export async function syncRuntimeCustomProvider(
   provider: RuntimeGooseModelProvider,
+  options: { isCurrent?: () => boolean } = {},
 ): Promise<void> {
   if (!provider.customProvider) {
     return;
   }
 
   const client = await getClient();
+  if (options.isCurrent?.() === false) return;
   const desired = provider.customProvider;
   const updateRequest = toCustomProviderUpdateRequest(desired);
 
@@ -160,11 +162,13 @@ export async function syncRuntimeCustomProvider(
     const existing = await client.goose.GooseUnstableProvidersCustomRead({
       providerId: desired.providerId,
     });
+    if (options.isCurrent?.() === false) return;
     if (!providerNeedsUpdate(existing.provider, desired)) {
       return;
     }
     await client.goose.GooseUnstableProvidersCustomUpdate(updateRequest);
   } catch (error) {
+    if (options.isCurrent?.() === false) return;
     if (!isNotFoundError(error)) {
       throw error;
     }
@@ -181,9 +185,11 @@ export async function syncRuntimeCustomProvider(
 
 export async function syncRuntimeCustomProviders(
   config: RuntimeConfig,
+  options: { isCurrent?: () => boolean } = {},
 ): Promise<void> {
   for (const provider of config.goose.modelProviders) {
-    await syncRuntimeCustomProvider(provider);
+    if (options.isCurrent?.() === false) return;
+    await syncRuntimeCustomProvider(provider, options);
   }
 }
 
