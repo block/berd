@@ -14,6 +14,7 @@ import type { ChatAttachmentDraft } from "@/shared/types/messages";
 import { useChatSessionStore } from "../stores/chatSessionStore";
 import { useChatStore } from "../stores/chatStore";
 import { buildAutoRoutingPrompt } from "./autoRoutingPrompt";
+import { selectAutoMode } from "./autoModelSelection";
 import { PreCommitSendRejectedError } from "./preCommitSendRejection";
 import {
   transitionSessionDispatchTarget,
@@ -36,10 +37,23 @@ export async function prepareAutoRoutedPrompt(
 ): Promise<AutoRoutingDecision | undefined> {
   const session = useChatSessionStore.getState().getSession(sessionId);
   const modeId = session?.autoModeId;
-  if (!modeId || session.executionTarget?.harnessId !== "goose") return;
-  const config = useRuntimeConfigStore.getState().config?.goose.autoRouting;
-  const mode = config?.modes.find((candidate) => candidate.id === modeId);
-  if (!mode) throw new Error(i18n.t("chat:errors.autoModeMissing"));
+  if (!modeId) return;
+  const runtime = useRuntimeConfigStore.getState();
+  const mode = runtime.config.goose.autoRouting?.modes.find(
+    (candidate) => candidate.id === modeId,
+  );
+  if (!mode) {
+    // Startup's temporary default config is not authoritative. Retain intent
+    // until loading settles; a distribution may then remove or rename modes.
+    if (!runtime.loaded) {
+      throw new PreCommitSendRejectedError(
+        i18n.t("chat:errors.sessionPreparationSuperseded"),
+      );
+    }
+    selectAutoMode(sessionId, null);
+    return;
+  }
+  if (session.executionTarget?.harnessId !== "goose") return;
   const assertCurrent = () => {
     if (input.signal?.aborted) throw new DOMException("Aborted", "AbortError");
     if (

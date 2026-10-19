@@ -2,6 +2,7 @@ import { PreCommitSendRejectedError } from "./preCommitSendRejection";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   acpGetPreparedWorkingDir,
+  acpSendMessage,
   acpPrepareSession,
   acpSetSessionConfigOption,
 } from "@/shared/api/acp";
@@ -13,6 +14,9 @@ import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStor
 import { useChatSessionStore } from "../stores/chatSessionStore";
 import { useChatStore } from "../stores/chatStore";
 import { prepareAutoRoutedPrompt } from "./autoRoutingDispatch";
+import { dispatchPrompt } from "./sendCore";
+import { acpSessionToChatSession } from "./acpSessionMapping";
+import { loadAutoMode, persistAutoMode } from "../stores/autoModePersistence";
 import {
   acquireSessionDispatchTarget,
   resetSessionTargetCoordinatorsForTests,
@@ -24,6 +28,8 @@ vi.mock("@/shared/api/invokeWithStartupRetry", () => ({
 
 vi.mock("@/shared/api/acp", () => ({
   acpGetPreparedWorkingDir: vi.fn(),
+  acpSendMessage: vi.fn(),
+  acpExportSession: vi.fn(),
   acpPrepareSession: vi.fn(),
   acpSetSessionConfigOption: vi.fn(),
 }));
@@ -47,10 +53,17 @@ const decision = {
 describe("auto routing dispatch", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.removeItem("goose:chat-auto-modes");
+    vi.mocked(acpSendMessage).mockImplementation(
+      async (_sessionId, _prompt, options) => {
+        options?.onPromptDispatching?.();
+      },
+    );
     vi.mocked(repairManagedGooseModelSelection).mockResolvedValue(null);
     vi.mocked(acpGetPreparedWorkingDir).mockReturnValue("/work");
     resetSessionTargetCoordinatorsForTests();
     useRuntimeConfigStore.setState({
+      loaded: true,
       config: {
         ...DEFAULT_RUNTIME_CONFIG,
         goose: {
@@ -291,6 +304,100 @@ describe("auto routing dispatch", () => {
     expect(
       useChatSessionStore.getState().getSession("s")?.autoRoutingDecision,
     ).toBeUndefined();
+  });
+
+  it.each([
+    "renamed",
+    "disabled",
+  ])("sends a restored chat on its concrete target when Auto is %s", async (change) => {
+    persistAutoMode("s", "balanced");
+    const backendSession = {
+      sessionId: "s",
+      title: "Restored chat",
+      providerId: "openai",
+      modelId: "previous",
+      workingDir: "/work",
+      messageCount: 0,
+      createdAt: "2026-01-01",
+      updatedAt: "2026-01-01",
+      lastMessageAt: null,
+      archivedAt: null,
+      userSetName: false,
+      subtitle: null,
+      personaId: null,
+    };
+    const restored = acpSessionToChatSession(backendSession);
+    expect(restored.autoModeId).toBe("balanced");
+    useChatSessionStore.setState({
+      sessions: [{ ...restored, autoRoutingDecision: { ...decision } }],
+    });
+    const config = useRuntimeConfigStore.getState().config;
+    useRuntimeConfigStore.setState({
+      config: {
+        ...config,
+        goose: {
+          ...config.goose,
+          autoRouting:
+            change === "disabled"
+              ? undefined
+              : {
+                  ...config.goose.autoRouting!,
+                  modes: config.goose.autoRouting!.modes.map((mode) => ({
+                    ...mode,
+                    id: "replacement",
+                  })),
+                },
+        },
+      },
+    });
+    const target = useChatSessionStore
+      .getState()
+      .getSession("s")?.executionTarget;
+    const lease = acquireSessionDispatchTarget("s");
+    if (lease.status !== "acquired") throw new Error("Expected lease");
+    try {
+      await dispatchPrompt("s", "Continue my chat", {
+        providerId: "openai",
+        dispatchToken: lease.token,
+      });
+    } finally {
+      lease.release();
+    }
+    expect(routeAutoModel).not.toHaveBeenCalled();
+    expect(acpPrepareSession).not.toHaveBeenCalled();
+    expect(acpSetSessionConfigOption).not.toHaveBeenCalled();
+    expect(acpSendMessage).toHaveBeenCalledOnce();
+    expect(useChatSessionStore.getState().getSession("s")).toMatchObject({
+      executionTarget: target,
+      autoModeId: null,
+    });
+    expect(
+      useChatSessionStore.getState().getSession("s")?.autoRoutingDecision,
+    ).toBeUndefined();
+    expect(loadAutoMode("s")).toBeNull();
+    expect(
+      useChatStore
+        .getState()
+        .messagesBySession.s.filter((message) => message.role === "user"),
+    ).toHaveLength(1);
+    expect(
+      acpSessionToChatSession({ ...backendSession, messageCount: 1 })
+        .autoModeId,
+    ).toBeNull();
+  });
+
+  it("retains Auto intent while runtime configuration is still loading", async () => {
+    useRuntimeConfigStore.setState({
+      loaded: false,
+      config: DEFAULT_RUNTIME_CONFIG,
+    });
+    await expect(
+      prepareAutoRoutedPrompt("s", { text: "Task" }),
+    ).rejects.toThrow(PreCommitSendRejectedError);
+    expect(useChatSessionStore.getState().getSession("s")?.autoModeId).toBe(
+      "balanced",
+    );
+    expect(routeAutoModel).not.toHaveBeenCalled();
   });
 
   it("skips the router after an explicit model choice", async () => {
