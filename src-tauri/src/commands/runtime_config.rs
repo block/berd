@@ -537,11 +537,9 @@ impl RuntimeConfigState {
             .lock()
             .map_err(|_| "Runtime config cache lock poisoned".to_string())?;
         if generation != cached.generation {
-            return Ok(cached.current.clone().unwrap_or_else(|| {
-                runtime_config_refresh_unavailable(
-                    "A newer runtime config refresh is pending".to_string(),
-                )
-            }));
+            // The newer load owns the cache, but it may not have committed yet.
+            // An older successful read remains usable by its caller in that gap.
+            return Ok(cached.current.clone().unwrap_or(result));
         }
         let result =
             if retain_last_valid && matches!(result, RuntimeConfigLoadResult::Unavailable { .. }) {
@@ -2088,6 +2086,57 @@ mod tests {
         );
         assert_eq!(result.unwrap(), expected);
         assert_eq!(state.get(&empty_distro_state()).await.unwrap(), expected);
+    }
+
+    #[tokio::test]
+    async fn older_success_remains_usable_while_newer_initial_load_is_pending() {
+        let (_dir, state) = temp_state();
+        let older =
+            RuntimeConfigLoadResult::ready(RuntimeConfigSource::BundledFile, valid_config());
+        let mut newer_config = valid_config();
+        newer_config.feature_toggles = Some(HashMap::from([("newer".to_string(), true)]));
+        let newer = RuntimeConfigLoadResult::ready(RuntimeConfigSource::BundledFile, newer_config);
+        let (newer_started_tx, newer_started_rx) = tokio::sync::oneshot::channel();
+        let (older_finished_tx, older_finished_rx) = tokio::sync::oneshot::channel();
+        let (older_result, newer_result) = tokio::join!(
+            biased;
+            async {
+                let result = state
+                    .refresh_for_new_chat_with(
+                        async {
+                            newer_started_rx.await.unwrap();
+                            older.clone()
+                        },
+                        Duration::from_secs(5),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(result, older);
+                {
+                    let cached = state.cached.lock().unwrap();
+                    assert_eq!(cached.generation, 2);
+                    assert!(cached.current.is_none());
+                    assert!(cached.last_valid.is_none());
+                }
+                older_finished_tx.send(()).unwrap();
+                result
+            },
+            state.refresh_for_new_chat_with(
+                async {
+                    newer_started_tx.send(()).unwrap();
+                    older_finished_rx.await.unwrap();
+                    newer.clone()
+                },
+                Duration::from_secs(5),
+            ),
+        );
+        assert_eq!(older_result, older);
+        assert_eq!(newer_result.unwrap(), newer);
+        assert_eq!(state.get(&empty_distro_state()).await.unwrap(), newer);
+        assert_eq!(
+            state.cached.lock().unwrap().last_valid.as_ref(),
+            Some(&newer)
+        );
     }
 
     #[tokio::test]
