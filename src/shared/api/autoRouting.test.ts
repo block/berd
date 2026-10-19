@@ -5,6 +5,10 @@ import {
   type RuntimeAutoRoutingMode,
 } from "@/shared/runtime-config/schema";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
+import {
+  getRuntimeConfig,
+  refreshRuntimeConfigForNewChat,
+} from "./runtimeConfig";
 import { PreCommitSendRejectedError } from "@/features/chat/lib/preCommitSendRejection";
 import {
   autoRoutingFallback,
@@ -14,6 +18,10 @@ import {
 } from "./autoRouting";
 vi.mock("./invokeWithStartupRetry", () => ({
   invokeWithStartupRetry: vi.fn(),
+}));
+vi.mock("./runtimeConfig", () => ({
+  getRuntimeConfig: vi.fn(),
+  refreshRuntimeConfigForNewChat: vi.fn(),
 }));
 import { invokeWithStartupRetry } from "./invokeWithStartupRetry";
 
@@ -165,6 +173,17 @@ describe("auto routing runtime configuration", () => {
 describe("auto routing invocation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(getRuntimeConfig).mockResolvedValue({
+      status: "ready",
+      source: "bundledFile",
+      config: {
+        schemaVersion: 1,
+        goose: {
+          modelProviders: [],
+          autoRouting: { ...config, url: "https://changed.example.com/route" },
+        },
+      },
+    });
     useRuntimeConfigStore.setState({
       config: {
         schemaVersion: 1,
@@ -193,6 +212,100 @@ describe("auto routing invocation", () => {
     await expect(
       routeAutoModel({ modeId: "auto", prompt: "context" }),
     ).rejects.toBeInstanceOf(PreCommitSendRejectedError);
+    expect(getRuntimeConfig).toHaveBeenCalledOnce();
+    expect(refreshRuntimeConfigForNewChat).not.toHaveBeenCalled();
+  });
+  it("resyncs a stale window so its next attempt uses the effective native config", async () => {
+    vi.mocked(invokeWithStartupRetry)
+      .mockRejectedValueOnce("AUTO_ROUTING_CONFIG_CHANGED")
+      .mockResolvedValueOnce(response("gpt-6-1-sol"));
+    await expect(
+      routeAutoModel({ modeId: "auto", prompt: "context" }),
+    ).rejects.toBeInstanceOf(PreCommitSendRejectedError);
+    await expect(
+      routeAutoModel({ modeId: "auto", prompt: "context" }),
+    ).resolves.toMatchObject({ source: "router" });
+    expect(invokeWithStartupRetry).toHaveBeenLastCalledWith(
+      "route_auto_model",
+      {
+        modeId: "auto",
+        prompt: "context",
+        expectedAutoRouting: {
+          ...config,
+          url: "https://changed.example.com/route",
+        },
+      },
+    );
+    expect(getRuntimeConfig).toHaveBeenCalledOnce();
+  });
+  it.each([
+    "rejected",
+    "unavailable",
+    "unchanged",
+  ])("uses an ordinary failure when resync is %s instead of retrying forever", async (outcome) => {
+    vi.mocked(invokeWithStartupRetry).mockRejectedValue(
+      "AUTO_ROUTING_CONFIG_CHANGED",
+    );
+    if (outcome === "rejected") {
+      vi.mocked(getRuntimeConfig).mockRejectedValueOnce(
+        new Error("secret sync failure"),
+      );
+    } else if (outcome === "unavailable") {
+      vi.mocked(getRuntimeConfig).mockResolvedValueOnce({
+        status: "unavailable",
+        source: "bundledFile",
+        reason: "endpointUnavailable",
+        message: "unavailable",
+      });
+    } else {
+      vi.mocked(getRuntimeConfig).mockResolvedValueOnce({
+        status: "ready",
+        source: "bundledFile",
+        config: {
+          schemaVersion: 1,
+          goose: { modelProviders: [], autoRouting: config },
+        },
+      });
+    }
+    const error = await routeAutoModel({
+      modeId: "auto",
+      prompt: "context",
+    }).catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(PreCommitSendRejectedError);
+    expect(String(error)).not.toContain("secret");
+    expect(invokeWithStartupRetry).toHaveBeenCalledOnce();
+  });
+  it("preserves cancellation while the stale-window resync is pending", async () => {
+    vi.mocked(invokeWithStartupRetry).mockRejectedValue(
+      "AUTO_ROUTING_CONFIG_CHANGED",
+    );
+    let finish!: (result: Awaited<ReturnType<typeof getRuntimeConfig>>) => void;
+    vi.mocked(getRuntimeConfig).mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const controller = new AbortController();
+    const pending = routeAutoModel({
+      modeId: "auto",
+      prompt: "context",
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(getRuntimeConfig).toHaveBeenCalledOnce());
+    const rejection = expect(pending).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    controller.abort();
+    await rejection;
+    finish({
+      status: "ready",
+      source: "bundledFile",
+      config: {
+        schemaVersion: 1,
+        goose: { modelProviders: [], autoRouting: config },
+      },
+    });
   });
   it("rejects immediately on cancellation while native routing is pending", async () => {
     let finish!: (response: unknown) => void;

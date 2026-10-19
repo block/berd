@@ -116,10 +116,10 @@ export function selectAutoRoutingResponse(
   };
 }
 
-function abortableResponse(
-  request: Promise<unknown>,
+function abortableResponse<T>(
+  request: Promise<T>,
   signal?: AbortSignal,
-): Promise<unknown> {
+): Promise<T> {
   if (!signal) return request;
   return new Promise((resolve, reject) => {
     const onAbort = () => {
@@ -175,6 +175,27 @@ export async function routeAutoModel({
       (error instanceof Error ? error.message : error) ===
       AUTO_ROUTING_CONFIG_CHANGED
     ) {
+      // Other windows refresh the shared native cache independently of this
+      // renderer. Read that effective cache before the queue retries; this
+      // does not refresh the source or create a new-chat config boundary.
+      try {
+        const result = await abortableResponse(
+          useRuntimeConfigStore.getState().load(),
+          signal,
+        );
+        if (
+          result.status !== "ready" ||
+          JSON.stringify(result.config.goose.autoRouting) ===
+            JSON.stringify(config)
+        ) {
+          throw new Error("Runtime configuration resync unavailable");
+        }
+      } catch {
+        if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+        // A persistent sync failure must use the ordinary failure path. The
+        // background queue immediately retries pre-commit rejections.
+        throw new Error(i18n.t("chat:errors.autoModelUnavailable"));
+      }
       throw new PreCommitSendRejectedError(
         i18n.t("chat:errors.sessionPreparationSuperseded"),
       );
