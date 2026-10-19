@@ -22,6 +22,13 @@ export async function refreshRuntimeConfig(): Promise<RuntimeConfigLoadResult> {
   );
 }
 
+/** Refresh source config for a new chat, retaining native last-good state on failure. */
+export async function refreshRuntimeConfigForNewChat(): Promise<RuntimeConfigLoadResult> {
+  return parseRuntimeConfigLoadResult(
+    await invokeWithStartupRetry("refresh_runtime_config_for_new_chat"),
+  );
+}
+
 export async function setFakeRuntimeConfig(
   config: RuntimeConfig,
 ): Promise<RuntimeConfigLoadResult> {

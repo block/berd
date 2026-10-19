@@ -54,11 +54,15 @@ export async function prepareAutoRoutedPrompt(
     return;
   }
   if (session.executionTarget?.harnessId !== "goose") return;
+  const routingSnapshot = JSON.stringify(runtime.config.goose.autoRouting);
   const assertCurrent = () => {
     if (input.signal?.aborted) throw new DOMException("Aborted", "AbortError");
     if (
+      JSON.stringify(
+        useRuntimeConfigStore.getState().config.goose.autoRouting,
+      ) !== routingSnapshot ||
       useChatSessionStore.getState().getSession(sessionId)?.autoModeId !==
-      modeId
+        modeId
     ) {
       throw new PreCommitSendRejectedError(
         i18n.t("chat:errors.sessionPreparationSuperseded"),
@@ -72,7 +76,12 @@ export async function prepareAutoRoutedPrompt(
     remote: Boolean(session.remoteHost),
   });
   assertCurrent();
-  let decision = await routeAutoModel({ modeId, prompt, signal: input.signal });
+  let decision = await routeAutoModel({
+    modeId,
+    prompt,
+    signal: input.signal,
+    config: runtime.config.goose.autoRouting,
+  });
   assertCurrent();
   let fallbackAttempted = decision.modelId === mode.fallback.modelId;
   let outcome: Extract<SessionTargetOutcome, { applied: true }>;

@@ -30,6 +30,33 @@ pairs must be unique within their containing lists. A provider can discover
 candidate model IDs dynamically; candidate IDs need not appear in its optional
 runtime model metadata.
 
+## Refreshing config for new chats
+
+Before resolving a new chat's Auto mode and initial model, Berd refreshes runtime
+config through `refresh_runtime_config_for_new_chat`. UI and CLI creation paths
+share this boundary, including reuse of an empty draft. Opening an existing
+conversation does not refresh config. The first prompt waits for creation to
+finish, so it cannot dispatch using defaults captured before the refresh.
+
+The native resolver reads the distribution's existing config source and bounds
+that read to five seconds. Failed, invalid, or timed-out reads retain the last
+valid source config. Without a valid source result, config remains unavailable;
+a transient failure is never evidence that a saved Auto mode was removed.
+Concurrent new-chat requests share a refresh, and older responses cannot replace
+newer config. An explicit model or persona selection remains authoritative.
+Routing uses one effective config snapshot per attempt. If routing settings
+change during preparation, the prompt stays uncommitted for retry; a refresh
+with unchanged routing settings does not interrupt it.
+
+`autoRouting` remains in `runtime-config.json`. No LaunchDarkly flag is enabled
+by this change. A future distribution integration can evaluate a JSON flag for
+selected sections, merge it over the bundled config, validate the effective
+config, and return it through this same native resolution boundary. The picker
+and native router must receive the same effective config; updating only the
+renderer store is not sufficient. Flag identity, keys, and targeting belong to
+the distribution. Refresh evaluates the current source value for each new chat;
+a retained streaming flag client need not make a new network request each time.
+
 ## Gateway example
 
 The following configuration illustrates a deployment-owned Databricks gateway.

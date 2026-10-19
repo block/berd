@@ -6,7 +6,11 @@ import {
   type RuntimeAutoRoutingModel,
 } from "@/shared/runtime-config/schema";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
+import { PreCommitSendRejectedError } from "@/features/chat/lib/preCommitSendRejection";
+import { i18n } from "@/shared/i18n";
 import { invokeWithStartupRetry } from "./invokeWithStartupRetry";
+
+const AUTO_ROUTING_CONFIG_CHANGED = "AUTO_ROUTING_CONFIG_CHANGED";
 
 export interface AutoRoutingResult {
   modeId: string;
@@ -143,27 +147,38 @@ export async function routeAutoModel({
   modeId,
   prompt,
   signal,
+  config = useRuntimeConfigStore.getState().config.goose.autoRouting,
 }: {
   modeId: string;
   prompt: string;
   signal?: AbortSignal;
+  config?: RuntimeAutoRoutingConfig;
 }): Promise<AutoRoutingResult> {
-  const config = useRuntimeConfigStore.getState().config.goose.autoRouting;
   const mode = config?.modes.find((entry) => entry.id === modeId);
   if (!mode) throw new Error("Auto routing mode is not configured");
   if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
   try {
-    // The backend resolves URL, selector and candidate list from trusted runtime config.
+    // The caller's snapshot is only an equality guard. Native still resolves
+    // URL, credentials and candidates from its trusted runtime configuration.
     const response = await abortableResponse(
       invokeWithStartupRetry<unknown>("route_auto_model", {
         modeId,
         prompt,
+        expectedAutoRouting: config,
       }),
       signal,
     );
     return selectAutoRoutingResponse(mode, response);
-  } catch {
+  } catch (error) {
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    if (
+      (error instanceof Error ? error.message : error) ===
+      AUTO_ROUTING_CONFIG_CHANGED
+    ) {
+      throw new PreCommitSendRejectedError(
+        i18n.t("chat:errors.sessionPreparationSuperseded"),
+      );
+    }
     // Error messages may contain endpoint details; diagnostics use stable local codes.
     return autoRoutingFallback(mode, "request_failed");
   }

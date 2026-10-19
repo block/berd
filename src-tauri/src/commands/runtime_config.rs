@@ -5,11 +5,13 @@ use crate::services::kgoose;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-#[cfg(feature = "admin-runtime-config")]
 use std::time::Duration;
 use tauri::State;
+
+const NEW_CHAT_RUNTIME_CONFIG_TIMEOUT: Duration = Duration::from_secs(5);
 
 const RUNTIME_CONFIG_DIR_NAME: &str = "runtime-config";
 const FAKE_RUNTIME_CONFIG_FILE_NAME: &str = "fake-endpoint.json";
@@ -281,7 +283,16 @@ pub struct RuntimeConfigState {
     fake_config_path: PathBuf,
     admin_cache_path: PathBuf,
     bundled_config_path: Option<PathBuf>,
-    cached: Mutex<Option<RuntimeConfigLoadResult>>,
+    cached: Mutex<RuntimeConfigCache>,
+}
+
+#[derive(Default)]
+struct RuntimeConfigCache {
+    generation: u64,
+    current: Option<RuntimeConfigLoadResult>,
+    // Compiled defaults are a development fallback, not evidence that a
+    // configured routing mode was deliberately removed from the source.
+    last_valid: Option<RuntimeConfigLoadResult>,
 }
 
 impl RuntimeConfigState {
@@ -290,7 +301,7 @@ impl RuntimeConfigState {
             fake_config_path: fake_runtime_config_path(&app_data_dir),
             admin_cache_path: admin_cache_path(&app_data_dir),
             bundled_config_path,
-            cached: Mutex::new(None),
+            cached: Mutex::new(RuntimeConfigCache::default()),
         }
     }
 
@@ -298,22 +309,26 @@ impl RuntimeConfigState {
         &self,
         distro_state: &DistroBundleState,
     ) -> Result<RuntimeConfigLoadResult, String> {
-        if let Some(result) = self
-            .cached
-            .lock()
-            .map_err(|_| "Runtime config cache lock poisoned".to_string())?
-            .clone()
-        {
-            return Ok(result);
-        }
+        let generation = {
+            let mut cached = self
+                .cached
+                .lock()
+                .map_err(|_| "Runtime config cache lock poisoned".to_string())?;
+            if let Some(result) = &cached.current {
+                return Ok(result.clone());
+            }
+            cached.generation += 1;
+            cached.generation
+        };
         let result = load_runtime_config_from_source(
             &self.fake_config_path,
             &self.admin_cache_path,
             self.bundled_config_path.as_deref(),
             distro_state,
+            true,
         )
         .await;
-        self.replace_cache(result)
+        self.finish_load(generation, result, false)
     }
 
     pub async fn ready_config(
@@ -334,14 +349,16 @@ impl RuntimeConfigState {
         &self,
         distro_state: &DistroBundleState,
     ) -> Result<RuntimeConfigLoadResult, String> {
+        let generation = self.begin_load()?;
         let result = load_runtime_config_from_source(
             &self.fake_config_path,
             &self.admin_cache_path,
             self.bundled_config_path.as_deref(),
             distro_state,
+            true,
         )
         .await;
-        self.replace_cache(result)
+        self.finish_load(generation, result, false)
     }
 
     #[cfg(debug_assertions)]
@@ -350,11 +367,23 @@ impl RuntimeConfigState {
         config: RuntimeConfig,
     ) -> Result<RuntimeConfigLoadResult, String> {
         validate_runtime_config(&config)?;
-        write_fake_runtime_config_to_path(&self.fake_config_path, &config)?;
-        self.replace_cache(RuntimeConfigLoadResult::Ready {
-            source: RuntimeConfigSource::FakeEndpoint,
-            config: Box::new(config),
-        })
+        let generation = {
+            let mut cached = self
+                .cached
+                .lock()
+                .map_err(|_| "Runtime config cache lock poisoned".to_string())?;
+            write_fake_runtime_config_to_path(&self.fake_config_path, &config)?;
+            cached.generation += 1;
+            cached.generation
+        };
+        self.finish_load(
+            generation,
+            RuntimeConfigLoadResult::Ready {
+                source: RuntimeConfigSource::FakeEndpoint,
+                config: Box::new(config),
+            },
+            false,
+        )
     }
 
     #[cfg(not(debug_assertions))]
@@ -370,24 +399,42 @@ impl RuntimeConfigState {
         &self,
         distro_state: &DistroBundleState,
     ) -> Result<RuntimeConfigLoadResult, String> {
-        match std::fs::remove_file(&self.fake_config_path) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => {
-                return Err(format!(
-                    "Failed to remove fake runtime config '{}': {error}",
-                    self.fake_config_path.display()
-                ))
+        let generation = {
+            let mut cached = self
+                .cached
+                .lock()
+                .map_err(|_| "Runtime config cache lock poisoned".to_string())?;
+            match std::fs::remove_file(&self.fake_config_path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(format!(
+                        "Failed to remove fake runtime config '{}': {error}",
+                        self.fake_config_path.display()
+                    ))
+                }
             }
-        }
+            if matches!(
+                &cached.last_valid,
+                Some(RuntimeConfigLoadResult::Ready {
+                    source: RuntimeConfigSource::FakeEndpoint,
+                    ..
+                })
+            ) {
+                cached.last_valid = None;
+            }
+            cached.generation += 1;
+            cached.generation
+        };
         let result = load_runtime_config_from_source(
             &self.fake_config_path,
             &self.admin_cache_path,
             self.bundled_config_path.as_deref(),
             distro_state,
+            true,
         )
         .await;
-        self.replace_cache(result)
+        self.finish_load(generation, result, false)
     }
 
     #[cfg(not(debug_assertions))]
@@ -398,16 +445,78 @@ impl RuntimeConfigState {
         Ok(unsupported_fake_runtime_config())
     }
 
-    fn replace_cache(
+    /// Refresh the source for a new chat without discarding a working config
+    /// when the source is temporarily unavailable. The returned value is also
+    /// the effective config read by native routing commands.
+    pub async fn refresh_for_new_chat(
         &self,
+        distro_state: &DistroBundleState,
+    ) -> Result<RuntimeConfigLoadResult, String> {
+        self.refresh_for_new_chat_with(
+            load_runtime_config_from_source(
+                &self.fake_config_path,
+                &self.admin_cache_path,
+                self.bundled_config_path.as_deref(),
+                distro_state,
+                false,
+            ),
+            NEW_CHAT_RUNTIME_CONFIG_TIMEOUT,
+        )
+        .await
+    }
+
+    async fn refresh_for_new_chat_with(
+        &self,
+        load: impl Future<Output = RuntimeConfigLoadResult>,
+        timeout: Duration,
+    ) -> Result<RuntimeConfigLoadResult, String> {
+        let generation = self.begin_load()?;
+        let result = tokio::time::timeout(timeout, load)
+            .await
+            .unwrap_or_else(|_| {
+                runtime_config_refresh_unavailable("Runtime config refresh timed out".to_string())
+            });
+        self.finish_load(generation, result, true)
+    }
+
+    fn begin_load(&self) -> Result<u64, String> {
+        let mut cached = self
+            .cached
+            .lock()
+            .map_err(|_| "Runtime config cache lock poisoned".to_string())?;
+        cached.generation += 1;
+        Ok(cached.generation)
+    }
+
+    fn finish_load(
+        &self,
+        generation: u64,
         result: RuntimeConfigLoadResult,
+        retain_last_valid: bool,
     ) -> Result<RuntimeConfigLoadResult, String> {
         let result = runtime_config_load_result_for_local_byo_dev(result);
         let mut cached = self
             .cached
             .lock()
             .map_err(|_| "Runtime config cache lock poisoned".to_string())?;
-        *cached = Some(result.clone());
+        if generation != cached.generation {
+            return Ok(cached.current.clone().unwrap_or_else(|| {
+                runtime_config_refresh_unavailable(
+                    "A newer runtime config refresh is pending".to_string(),
+                )
+            }));
+        }
+        let result =
+            if retain_last_valid && matches!(result, RuntimeConfigLoadResult::Unavailable { .. }) {
+                cached.last_valid.clone().unwrap_or(result)
+            } else {
+                result
+            };
+        if matches!(&result, RuntimeConfigLoadResult::Ready { source, .. } if *source != RuntimeConfigSource::AppDefault)
+        {
+            cached.last_valid = Some(result.clone());
+        }
+        cached.current = Some(result.clone());
         Ok(result)
     }
 }
@@ -428,10 +537,21 @@ async fn load_runtime_config_from_source(
     cache_path: &Path,
     bundled_config_path: Option<&Path>,
     distro_state: &DistroBundleState,
+    allow_default_fallback: bool,
 ) -> RuntimeConfigLoadResult {
     #[cfg(debug_assertions)]
-    if fake_config_path.exists() {
-        return read_fake_runtime_config_from_path(fake_config_path);
+    {
+        let path = fake_config_path.to_owned();
+        match tokio::task::spawn_blocking(move || {
+            path.exists()
+                .then(|| read_fake_runtime_config_from_path(&path))
+        })
+        .await
+        {
+            Ok(Some(result)) => return result,
+            Ok(None) => {}
+            Err(error) => return runtime_config_refresh_unavailable(error.to_string()),
+        }
     }
     #[cfg(not(debug_assertions))]
     let _ = fake_config_path;
@@ -441,15 +561,27 @@ async fn load_runtime_config_from_source(
         let _ = bundled_config_path;
         match fetch_admin_runtime_config(distro_state).await {
             Ok((config, source_url)) => {
-                if let Err(error) = write_admin_cache_to_path(cache_path, &config, &source_url) {
-                    log::warn!("failed to write admin runtime config cache: {error}");
+                let path = cache_path.to_owned();
+                let cache_config = config.clone();
+                match tokio::task::spawn_blocking(move || {
+                    write_admin_cache_to_path(&path, &cache_config, &source_url)
+                })
+                .await
+                {
+                    Ok(Ok(())) => {}
+                    error => log::warn!("failed to write admin runtime config cache: {error:?}"),
                 }
                 return RuntimeConfigLoadResult::Ready {
                     source: RuntimeConfigSource::Endpoint,
                     config: Box::new(config),
                 };
             }
-            Err(error) => log::warn!("failed to fetch admin runtime config: {error}"),
+            Err(error) => {
+                log::warn!("failed to fetch admin runtime config: {error}");
+                if !allow_default_fallback {
+                    return runtime_config_refresh_unavailable(error);
+                }
+            }
         }
 
         match read_admin_cache_from_path(cache_path) {
@@ -472,10 +604,31 @@ async fn load_runtime_config_from_source(
         // runtime-config.json is the source of truth. A stale admin cache must
         // not shadow it, so the cache is intentionally ignored in this mode.
         let _ = (cache_path, distro_state);
-        load_bundled_runtime_config_from_source(
-            bundled_config_path,
-            allow_bundled_runtime_config_default_fallback(),
-        )
+        let path = bundled_config_path.map(Path::to_owned);
+        tokio::task::spawn_blocking(move || {
+            load_bundled_runtime_config_from_source(
+                path.as_deref(),
+                allow_default_fallback && allow_bundled_runtime_config_default_fallback(),
+            )
+        })
+        .await
+        .unwrap_or_else(|error| runtime_config_refresh_unavailable(error.to_string()))
+    }
+}
+
+fn runtime_config_refresh_unavailable(message: String) -> RuntimeConfigLoadResult {
+    RuntimeConfigLoadResult::Unavailable {
+        source: if cfg!(feature = "admin-runtime-config") {
+            RuntimeConfigSource::Endpoint
+        } else {
+            RuntimeConfigSource::BundledFile
+        },
+        reason: if cfg!(feature = "admin-runtime-config") {
+            RuntimeConfigUnavailableReason::EndpointUnavailable
+        } else {
+            RuntimeConfigUnavailableReason::ReadFailed
+        },
+        message,
     }
 }
 
@@ -1363,6 +1516,14 @@ pub async fn refresh_runtime_config(
 }
 
 #[tauri::command]
+pub async fn refresh_runtime_config_for_new_chat(
+    state: State<'_, RuntimeConfigState>,
+    distro_state: State<'_, DistroBundleState>,
+) -> Result<RuntimeConfigLoadResult, String> {
+    state.refresh_for_new_chat(distro_state.inner()).await
+}
+
+#[tauri::command]
 pub fn set_fake_runtime_config(
     state: State<'_, RuntimeConfigState>,
     config: RuntimeConfig,
@@ -1676,6 +1837,148 @@ mod tests {
         assert_eq!(source, RuntimeConfigSource::FakeEndpoint);
         assert_eq!(reason, RuntimeConfigUnavailableReason::Missing);
         assert!(message.contains("Failed to read fake runtime config"));
+    }
+
+    #[tokio::test]
+    async fn new_chat_refresh_retains_last_valid_config_on_source_failure() {
+        let (_dir, state) = temp_state();
+        let distro = empty_distro_state();
+        let expected = state.set_fake_config(valid_config()).unwrap();
+        std::fs::write(&state.fake_config_path, "invalid JSON").unwrap();
+        assert_eq!(state.refresh_for_new_chat(&distro).await.unwrap(), expected);
+        assert_eq!(state.get(&distro).await.unwrap(), expected);
+    }
+
+    #[cfg(not(feature = "admin-runtime-config"))]
+    #[tokio::test]
+    async fn new_chat_refresh_reloads_bundled_source_and_retains_it_when_deleted() {
+        let (_dir, state) = temp_state_with_bundled(Some(&valid_config()));
+        let distro = empty_distro_state();
+        state.get(&distro).await.unwrap();
+        let mut updated = valid_config();
+        updated.feature_toggles = Some(HashMap::from([("updated".to_string(), true)]));
+        let path = state.bundled_config_path.as_ref().unwrap();
+        std::fs::write(path, serde_json::to_vec(&updated).unwrap()).unwrap();
+        let expected = state.refresh_for_new_chat(&distro).await.unwrap();
+        assert_eq!(expect_ready(expected.clone()).1, updated);
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(state.refresh_for_new_chat(&distro).await.unwrap(), expected);
+    }
+
+    #[cfg(not(feature = "admin-runtime-config"))]
+    #[tokio::test]
+    async fn new_chat_initial_source_failure_does_not_prove_auto_was_removed() {
+        let (_dir, state) = temp_state();
+        let distro = empty_distro_state();
+        assert_eq!(
+            expect_ready(state.get(&distro).await.unwrap()).0,
+            RuntimeConfigSource::AppDefault
+        );
+        let result = state.refresh_for_new_chat(&distro).await.unwrap();
+        assert!(matches!(
+            result,
+            RuntimeConfigLoadResult::Unavailable { .. }
+        ));
+        assert_eq!(state.get(&distro).await.unwrap(), result);
+        assert!(state.ready_config(&distro).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn new_chat_refresh_timeout_keeps_native_and_returned_config_equal() {
+        let (_dir, state) = temp_state();
+        let distro = empty_distro_state();
+        let expected = state.set_fake_config(valid_config()).unwrap();
+        let result = state
+            .refresh_for_new_chat_with(std::future::pending(), Duration::from_millis(1))
+            .await
+            .unwrap();
+        assert_eq!(result, expected);
+        assert_eq!(state.get(&distro).await.unwrap(), result);
+    }
+
+    #[cfg(not(feature = "admin-runtime-config"))]
+    #[tokio::test]
+    async fn new_chat_source_failure_does_not_restore_cleared_fake_override() {
+        let (_dir, state) = temp_state();
+        let distro = empty_distro_state();
+        state.set_fake_config(valid_config()).unwrap();
+        state.clear_fake_config(&distro).await.unwrap();
+        assert!(matches!(
+            state.refresh_for_new_chat(&distro).await.unwrap(),
+            RuntimeConfigLoadResult::Unavailable { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn new_chat_initial_timeout_stays_unavailable() {
+        let (_dir, state) = temp_state();
+        let result = state
+            .refresh_for_new_chat_with(std::future::pending(), Duration::from_millis(1))
+            .await
+            .unwrap();
+        assert!(matches!(
+            result,
+            RuntimeConfigLoadResult::Unavailable { .. }
+        ));
+        assert_eq!(state.get(&empty_distro_state()).await.unwrap(), result);
+    }
+
+    #[tokio::test]
+    async fn older_refresh_cannot_overwrite_new_fake_override() {
+        let (_dir, state) = temp_state();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (finish_tx, finish_rx) = tokio::sync::oneshot::channel();
+        let stale = RuntimeConfigLoadResult::Ready {
+            source: RuntimeConfigSource::BundledFile,
+            config: Box::new(default_runtime_config()),
+        };
+        let (result, expected) = tokio::join!(
+            state.refresh_for_new_chat_with(
+                async {
+                    started_tx.send(()).unwrap();
+                    finish_rx.await.unwrap();
+                    stale
+                },
+                Duration::from_secs(5)
+            ),
+            async {
+                started_rx.await.unwrap();
+                let expected = state.set_fake_config(valid_config()).unwrap();
+                finish_tx.send(()).unwrap();
+                expected
+            },
+        );
+        assert_eq!(result.unwrap(), expected);
+        assert_eq!(state.get(&empty_distro_state()).await.unwrap(), expected);
+    }
+
+    #[tokio::test]
+    async fn older_startup_load_cannot_replace_new_chat_refresh() {
+        let (_dir, state) = temp_state();
+        // The startup get/explicit refresh use this same reservation/commit
+        // pair around their source await.
+        let startup_generation = state.begin_load().unwrap();
+        let expected = state
+            .refresh_for_new_chat_with(
+                async {
+                    RuntimeConfigLoadResult::Ready {
+                        source: RuntimeConfigSource::BundledFile,
+                        config: Box::new(valid_config()),
+                    }
+                },
+                Duration::from_secs(5),
+            )
+            .await
+            .unwrap();
+        let result = state
+            .finish_load(
+                startup_generation,
+                default_runtime_config_result(RuntimeConfigSource::AppDefault),
+                false,
+            )
+            .unwrap();
+        assert_eq!(result, expected);
+        assert_eq!(state.get(&empty_distro_state()).await.unwrap(), expected);
     }
 
     #[tokio::test]

@@ -1,3 +1,5 @@
+import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
+import { refreshRuntimeConfigForNewChat } from "@/shared/runtime-config/newChatRuntimeConfig";
 import {
   getSelectedAutoModeId,
   getAutoModeExecutionTarget,
@@ -324,6 +326,7 @@ type DraftSessionCreationReady = {
 };
 type ProjectChatDraftOptions = {
   autoModeId?: string | null;
+  useDefaultAutoMode?: boolean;
   remoteHost?: string;
   remoteWorkingDir?: string;
   executionTarget?: SessionExecutionTarget;
@@ -2278,6 +2281,7 @@ export function AppShell({
         activate?: boolean;
         reuseExistingDraft?: boolean;
         autoModeId?: string | null;
+        useDefaultAutoMode?: boolean;
         executionTarget?: SessionExecutionTarget;
         reasoningEffort?: GlobalComposeOptions["reasoningEffort"];
         /** SSH host to run the session's backend on. */
@@ -2306,8 +2310,11 @@ export function AppShell({
       perfLog(
         `[perf:newtab] createNewTab start (project=${sessionProject?.id ?? "none"})`,
       );
-      const autoModeId =
-        options.autoModeId !== undefined
+      await refreshRuntimeConfigForNewChat();
+      const autoModeId = options.useDefaultAutoMode
+        ? useRuntimeConfigStore.getState().config.goose.autoRouting
+            ?.defaultModeId
+        : options.autoModeId !== undefined
           ? options.autoModeId
           : options.executionTarget
             ? null
@@ -2537,8 +2544,11 @@ export function AppShell({
       perfLog(
         `[perf:newtab] createNewProjectDraft start (project=${project.id})`,
       );
-      const autoModeId =
-        options.autoModeId !== undefined
+      await refreshRuntimeConfigForNewChat();
+      const autoModeId = options.useDefaultAutoMode
+        ? useRuntimeConfigStore.getState().config.goose.autoRouting
+            ?.defaultModeId
+        : options.autoModeId !== undefined
           ? options.autoModeId
           : options.executionTarget
             ? null
@@ -2633,6 +2643,7 @@ export function AppShell({
       project?: ProjectInfo,
       options: {
         autoModeId?: string | null;
+        useDefaultAutoMode?: boolean;
         executionTarget?: SessionExecutionTarget;
         reasoningEffort?: GlobalComposeOptions["reasoningEffort"];
         remoteHost?: string;
@@ -2656,8 +2667,11 @@ export function AppShell({
       perfLog(
         `[perf:newtab] createBackgroundDraftChat start (project=${sessionProject?.id ?? "none"})`,
       );
-      const autoModeId =
-        options.autoModeId !== undefined
+      await refreshRuntimeConfigForNewChat();
+      const autoModeId = options.useDefaultAutoMode
+        ? useRuntimeConfigStore.getState().config.goose.autoRouting
+            ?.defaultModeId
+        : options.autoModeId !== undefined
           ? options.autoModeId
           : options.executionTarget
             ? null
@@ -3120,6 +3134,7 @@ export function AppShell({
 
       const chatOptions = {
         autoModeId: options?.autoModeId,
+        useDefaultAutoMode: options?.useDefaultAutoMode,
         executionTarget: options?.executionTarget,
         reasoningEffort: options?.reasoningEffort,
         remoteHost: options?.remoteHost,
@@ -3362,6 +3377,7 @@ export function AppShell({
         : undefined;
       const chatOptions = {
         autoModeId: options?.autoModeId,
+        useDefaultAutoMode: options?.useDefaultAutoMode,
         executionTarget: options?.executionTarget,
         reasoningEffort: options?.reasoningEffort,
         remoteHost: options?.remoteHost,
@@ -3476,6 +3492,7 @@ export function AppShell({
         activate: realtimeMode,
         reuseExistingDraft: false,
         autoModeId: options?.autoModeId,
+        useDefaultAutoMode: options?.useDefaultAutoMode,
         executionTarget: options?.executionTarget,
         reasoningEffort: options?.reasoningEffort,
         remoteHost: options?.remoteHost,

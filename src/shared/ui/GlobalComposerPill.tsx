@@ -1,6 +1,6 @@
 import { useAutoRoutingPicker } from "@/features/chat/hooks/useAutoRoutingPicker";
 import {
-  getSelectedAutoModeId,
+  usePendingAutoModeStore,
   getAutoModeExecutionTarget,
   selectAutoMode,
 } from "@/features/chat/lib/autoModelSelection";
@@ -69,6 +69,8 @@ import { useVoiceDictationShortcutTarget } from "@/features/chat/lib/voiceDictat
 
 export interface GlobalComposeOptions {
   autoModeId?: string | null;
+  /** Resolve the configured Auto default after the new-chat refresh. */
+  useDefaultAutoMode?: boolean;
   executionTarget?: SessionExecutionTarget;
   projectId?: string | null;
   attachments?: ChatAttachmentDraft[];
@@ -813,8 +815,13 @@ export function GlobalComposerPill({
         return false;
       }
 
-      const autoModeId = getSelectedAutoModeId();
-      const options: GlobalComposeOptions = autoModeId ? { autoModeId } : {};
+      const autoModeId = usePendingAutoModeStore.getState().modeId;
+      const options: GlobalComposeOptions =
+        autoModeId === undefined
+          ? { useDefaultAutoMode: true }
+          : autoModeId
+            ? { autoModeId }
+            : {};
       if (attachments.length > 0) {
         options.attachments = attachments;
       }
@@ -899,8 +906,13 @@ export function GlobalComposerPill({
       });
     }
 
-    const autoModeId = getSelectedAutoModeId();
-    const options: GlobalComposeOptions = autoModeId ? { autoModeId } : {};
+    const autoModeId = usePendingAutoModeStore.getState().modeId;
+    const options: GlobalComposeOptions =
+      autoModeId === undefined
+        ? { useDefaultAutoMode: true }
+        : autoModeId
+          ? { autoModeId }
+          : {};
     const remountSafeAttachments = makeRemountSafeDraftAttachments(attachments);
     if (remountSafeAttachments.length > 0) {
       options.attachments = remountSafeAttachments;
@@ -1095,8 +1107,13 @@ export function GlobalComposerPill({
       return;
     }
 
-    const autoModeId = getSelectedAutoModeId();
-    const options: GlobalComposeOptions = autoModeId ? { autoModeId } : {};
+    const autoModeId = usePendingAutoModeStore.getState().modeId;
+    const options: GlobalComposeOptions =
+      autoModeId === undefined
+        ? { useDefaultAutoMode: true }
+        : autoModeId
+          ? { autoModeId }
+          : {};
     const remountSafeAttachments = makeRemountSafeDraftAttachments(attachments);
     if (remountSafeAttachments.length > 0) {
       options.attachments = remountSafeAttachments;

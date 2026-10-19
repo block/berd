@@ -1,3 +1,4 @@
+import { usePendingAutoModeStore } from "@/features/chat/lib/autoModelSelection";
 import * as remoteSession from "@/features/chat/lib/remoteSession";
 import { REMOTE_SSH_SESSIONS_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { getModelSelectionIntent } from "@/features/chat/model-selection/modelSelectionIntent";
@@ -92,6 +93,11 @@ import {
 } from "./AppShell";
 import type { NavigationPanesViewProps } from "@/app/views/NavigationPanesView";
 import type { AppShellContent as AppShellContentType } from "./ui/AppShellContent";
+
+const mockNewChatRefresh = vi.hoisted(() => vi.fn());
+vi.mock("@/shared/runtime-config/newChatRuntimeConfig", () => ({
+  refreshRuntimeConfigForNewChat: () => mockNewChatRefresh(),
+}));
 
 const mockAcpCreateSession = vi.hoisted(() => vi.fn());
 const mockAcpPrepareSession = vi.hoisted(() => vi.fn());
@@ -974,6 +980,10 @@ describe("AppShell global navigation", () => {
   afterEach(cleanup);
 
   beforeEach(() => {
+    usePendingAutoModeStore.setState({ modeId: undefined });
+    mockNewChatRefresh
+      .mockReset()
+      .mockImplementation(async () => useRuntimeConfigStore.getState().result);
     dispatchOnboarding({ type: "complete" });
     resetHomeWidgetStoreForTests();
     resetStarterWidgetPickerRequestForTests();
@@ -1161,6 +1171,77 @@ describe("AppShell global navigation", () => {
     });
     useProviderCatalogStore.getState().reset();
     setReadyRuntimeConfig();
+  });
+
+  it("awaits fresh Auto defaults for each new chat and refreshes a reused draft", async () => {
+    const configFor = (modeId: string): RuntimeConfig => ({
+      ...DEFAULT_RUNTIME_CONFIG,
+      goose: {
+        ...DEFAULT_RUNTIME_CONFIG.goose,
+        autoRouting: {
+          url: "https://router.example",
+          defaultModeId: modeId,
+          modes: [
+            {
+              id: modeId,
+              displayName: modeId,
+              modelProviderId: "openai",
+              fallback: { modelId: `${modeId}-model`, effort: "medium" },
+              models: [{ modelId: `${modeId}-model`, routerModel: modeId }],
+            },
+          ],
+        },
+      },
+    });
+    mockCheckAllProviderStatus.mockResolvedValue([
+      { providerId: "openai", isConfigured: true },
+    ]);
+    setReadyRuntimeConfig(configFor("old"));
+    const refresh = deferred<void>();
+    mockNewChatRefresh.mockImplementationOnce(async () => {
+      await refresh.promise;
+      setReadyRuntimeConfig(configFor("fresh"));
+      return useRuntimeConfigStore.getState().result;
+    });
+    const user = userEvent.setup();
+    renderAppShell();
+    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
+    expect(mockNewChatRefresh).toHaveBeenCalledTimes(1);
+    expect(mockAcpCreateSession).not.toHaveBeenCalled();
+    expect(useChatSessionStore.getState().sessions).toHaveLength(0);
+    await act(async () => refresh.resolve());
+    await waitFor(() =>
+      expect(mockAcpCreateSession).toHaveBeenCalledWith(
+        "openai",
+        expect.any(String),
+        expect.objectContaining({ modelId: "fresh-model" }),
+      ),
+    );
+    await waitFor(() =>
+      expect(useChatSessionStore.getState().activeSessionId).toBe(
+        "created-session",
+      ),
+    );
+    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
+    expect(mockNewChatRefresh).toHaveBeenCalledTimes(2);
+    expect(mockAcpCreateSession).toHaveBeenCalledTimes(1);
+    mockNewChatRefresh.mockImplementationOnce(async () => {
+      setReadyRuntimeConfig(configFor("next"));
+      return useRuntimeConfigStore.getState().result;
+    });
+    mockAcpCreateSession.mockResolvedValueOnce({ sessionId: "next-session" });
+    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
+    await waitFor(() =>
+      expect(mockAcpCreateSession).toHaveBeenCalledWith(
+        "openai",
+        expect.any(String),
+        expect.objectContaining({ modelId: "next-model" }),
+      ),
+    );
+    expect(mockNewChatRefresh).toHaveBeenCalledTimes(3);
+    expect(
+      useChatSessionStore.getState().getSession("created-session")?.autoModeId,
+    ).toBe("fresh");
   });
 
   it("starts a full blank chat from the sidebar new chat action", async () => {

@@ -1,5 +1,7 @@
+import { refreshRuntimeConfigForNewChat } from "@/shared/runtime-config/newChatRuntimeConfig";
 import {
   getSelectedAutoModeId,
+  getAutoModeExecutionTarget,
   selectAutoMode,
 } from "../lib/autoModelSelection";
 import { projectEnvironment } from "@/features/projects/lib/projectEnvironment";
@@ -2660,10 +2662,13 @@ export function useChatSessionController({
             : session?.executionTarget;
         return (async () => {
           try {
+            await refreshRuntimeConfigForNewChat();
+            const autoModeId = getSelectedAutoModeId(sessionId);
             await ensureRemoteHostConnected(remoteHost);
             const created = await useChatSessionStore.getState().createSession({
-              executionTarget: remoteExecutionTarget,
-              autoModeId: getSelectedAutoModeId(sessionId),
+              executionTarget:
+                getAutoModeExecutionTarget(autoModeId) ?? remoteExecutionTarget,
+              autoModeId,
               personaId:
                 payload.persona.kind === "persona"
                   ? payload.persona.id

@@ -129,6 +129,68 @@ describe("auto routing dispatch", () => {
     });
   });
 
+  it("rejects a runtime refresh during context preparation before invoking routing", async () => {
+    const pending = prepareAutoRoutedPrompt("s", { text: "Task" });
+    const current = useRuntimeConfigStore.getState();
+    current.setResult({
+      status: "ready",
+      source: "bundledFile",
+      config: {
+        ...current.config,
+        goose: { ...current.config.goose, autoRouting: undefined },
+      },
+    });
+    await expect(pending).rejects.toBeInstanceOf(PreCommitSendRejectedError);
+    expect(routeAutoModel).not.toHaveBeenCalled();
+    expect(acpPrepareSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects a runtime refresh while the router request is pending", async () => {
+    let finish!: (result: typeof decision) => void;
+    const started = new Promise<void>((resolve) => {
+      vi.mocked(routeAutoModel).mockImplementationOnce(() => {
+        resolve();
+        return new Promise((done) => {
+          finish = done;
+        });
+      });
+    });
+    const pending = prepareAutoRoutedPrompt("s", { text: "Task" });
+    await started;
+    const current = useRuntimeConfigStore.getState();
+    current.setResult({
+      status: "ready",
+      source: "bundledFile",
+      config: {
+        ...current.config,
+        goose: { ...current.config.goose, autoRouting: undefined },
+      },
+    });
+    finish({ ...decision });
+    await expect(pending).rejects.toBeInstanceOf(PreCommitSendRejectedError);
+    expect(acpPrepareSession).not.toHaveBeenCalled();
+    expect(acpSetSessionConfigOption).not.toHaveBeenCalled();
+    expect(useChatSessionStore.getState().getSession("s")?.autoModeId).toBe(
+      "balanced",
+    );
+  });
+
+  it("continues an in-flight route after a refresh with unchanged routing", async () => {
+    vi.mocked(routeAutoModel).mockImplementationOnce(async () => {
+      const current = useRuntimeConfigStore.getState();
+      current.setResult({
+        status: "ready",
+        source: "bundledFile",
+        config: JSON.parse(JSON.stringify(current.config)),
+      });
+      return { ...decision };
+    });
+    await expect(
+      prepareAutoRoutedPrompt("s", { text: "Task" }),
+    ).resolves.toMatchObject({ modelId: "chosen" });
+    expect(acpPrepareSession).toHaveBeenCalledOnce();
+  });
+
   it("routes each new prompt, applies the supported bounded effort, and retains full diagnostics", async () => {
     for (const text of ["First task", "Follow-up task"]) {
       const lease = acquireSessionDispatchTarget("s");

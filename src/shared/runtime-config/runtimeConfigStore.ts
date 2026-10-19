@@ -3,6 +3,7 @@ import {
   clearFakeRuntimeConfig,
   getRuntimeConfig,
   refreshRuntimeConfig,
+  refreshRuntimeConfigForNewChat,
   setFakeRuntimeConfig,
 } from "@/shared/api/runtimeConfig";
 import {
@@ -23,6 +24,7 @@ interface RuntimeConfigState {
   config: RuntimeConfig;
   load: () => Promise<RuntimeConfigLoadResult>;
   refresh: () => Promise<RuntimeConfigLoadResult>;
+  refreshForNewChat: () => Promise<RuntimeConfigLoadResult>;
   setFakeConfig: (config: RuntimeConfig) => Promise<RuntimeConfigLoadResult>;
   clearFakeConfig: () => Promise<RuntimeConfigLoadResult>;
   setResult: (result: RuntimeConfigLoadResult) => void;
@@ -40,10 +42,22 @@ function resultState(result: RuntimeConfigLoadResult) {
   };
 }
 
-export const useRuntimeConfigStore = create<RuntimeConfigState>((set) => {
+export const useRuntimeConfigStore = create<RuntimeConfigState>((set, get) => {
+  let generation = 0;
+  let newChatRefresh: Promise<RuntimeConfigLoadResult> | undefined;
+
   const applyResult = (result: RuntimeConfigLoadResult) => {
     set(resultState(result));
     return result;
+  };
+  const request = async (
+    load: () => Promise<RuntimeConfigLoadResult>,
+  ): Promise<RuntimeConfigLoadResult> => {
+    const requestGeneration = ++generation;
+    const result = await load();
+    return requestGeneration === generation
+      ? applyResult(result)
+      : get().result;
   };
 
   return {
@@ -51,11 +65,46 @@ export const useRuntimeConfigStore = create<RuntimeConfigState>((set) => {
     result: INITIAL_RUNTIME_CONFIG_RESULT,
     config: DEFAULT_RUNTIME_CONFIG,
 
-    load: async () => applyResult(await getRuntimeConfig()),
-    refresh: async () => applyResult(await refreshRuntimeConfig()),
-    setFakeConfig: async (config) =>
-      applyResult(await setFakeRuntimeConfig(config)),
-    clearFakeConfig: async () => applyResult(await clearFakeRuntimeConfig()),
-    setResult: (result) => set(resultState(result)),
+    load: () => request(getRuntimeConfig),
+    refresh: () => request(refreshRuntimeConfig),
+    refreshForNewChat: () => {
+      // Concurrent creation gestures share one source refresh. A later new
+      // chat always evaluates the source again; this is not a time-based cache.
+      if (newChatRefresh) return newChatRefresh;
+      const pending = request(async () => {
+        try {
+          return await refreshRuntimeConfigForNewChat();
+        } catch {
+          // Transport/schema failures must not replace a valid native snapshot
+          // with defaults or erase saved Auto intent. Native owns source timeout
+          // and last-good fallback for a successfully delivered command.
+          const current = get();
+          if (
+            current.loaded &&
+            current.result.status === "ready" &&
+            current.result.source !== "appDefault"
+          ) {
+            return current.result;
+          }
+          return {
+            status: "unavailable" as const,
+            source: current.result.source,
+            reason: "endpointUnavailable" as const,
+            message: "Runtime configuration refresh unavailable",
+          };
+        }
+      });
+      newChatRefresh = pending;
+      void pending.finally(() => {
+        if (newChatRefresh === pending) newChatRefresh = undefined;
+      });
+      return pending;
+    },
+    setFakeConfig: (config) => request(() => setFakeRuntimeConfig(config)),
+    clearFakeConfig: () => request(clearFakeRuntimeConfig),
+    setResult: (result) => {
+      ++generation;
+      set(resultState(result));
+    },
   };
 });

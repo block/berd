@@ -6922,6 +6922,9 @@ describe("useChatSessionController", () => {
         first = result.current.handleSend("hello remote");
         second = result.current.handleSend("hello remote");
       });
+      await waitFor(() =>
+        expect(mockEnsureRemoteHostConnected).toHaveBeenCalled(),
+      );
       await act(async () => {
         releaseConnect();
         expect(await first).toBe(true);

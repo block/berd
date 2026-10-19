@@ -194,6 +194,7 @@ function expectSentImageAttachment(
   expected: Record<string, unknown>,
 ) {
   expect(onSend).toHaveBeenCalledWith("", {
+    useDefaultAutoMode: true,
     attachments: [expect.objectContaining({ kind: "image", ...expected })],
     executionTarget: { harnessId: "goose" },
     personaId: null,
@@ -208,6 +209,9 @@ function expectSent(
   expect(onSend).toHaveBeenCalledWith(text, {
     executionTarget: { harnessId: "goose" },
     personaId: null,
+    ...(usePendingAutoModeStore.getState().modeId === undefined
+      ? { useDefaultAutoMode: true }
+      : {}),
     ...options,
   });
 }
@@ -555,6 +559,7 @@ describe("GlobalComposerPill", () => {
       text: "keep this draft",
       selectedSkills: [],
       options: {
+        useDefaultAutoMode: true,
         executionTarget: { harnessId: "goose" },
         personaId: null,
       },
@@ -1356,6 +1361,39 @@ describe("GlobalComposerPill", () => {
     expect(screen.queryByText("Project One")).not.toBeInTheDocument();
   });
 
+  it("carries inherited Auto intent without snapshotting the configured default", async () => {
+    const user = userEvent.setup();
+    useRuntimeConfigStore.setState({
+      config: {
+        ...DEFAULT_RUNTIME_CONFIG,
+        goose: {
+          ...DEFAULT_RUNTIME_CONFIG.goose,
+          autoRouting: {
+            url: "https://router.example",
+            defaultModeId: "old-default",
+            modes: [
+              {
+                id: "old-default",
+                displayName: "Old default",
+                modelProviderId: "openai",
+                fallback: { modelId: "old-model", effort: "medium" },
+                models: [{ modelId: "old-model", routerModel: "old" }],
+              },
+            ],
+          },
+        },
+      },
+    });
+    const onSend = renderGlobalComposer();
+    await user.type(screen.getByRole("textbox"), "Use refreshed defaults");
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+    expect(onSend).toHaveBeenCalledWith(
+      "Use refreshed defaults",
+      expect.objectContaining({ useDefaultAutoMode: true }),
+    );
+    expect(onSend.mock.calls[0][1]).not.toHaveProperty("autoModeId");
+  });
+
   it("sends the selected auto mode with its concrete Goose fallback", async () => {
     const user = userEvent.setup();
     useRuntimeConfigStore.setState({
@@ -1683,6 +1721,7 @@ describe("GlobalComposerPill", () => {
       text: "",
       selectedSkills: [],
       options: {
+        useDefaultAutoMode: true,
         executionTarget: {
           harnessId: "goose",
           modelProviderId: "anthropic",
@@ -1870,6 +1909,7 @@ describe("GlobalComposerPill", () => {
       text: "",
       selectedSkills: [],
       options: {
+        useDefaultAutoMode: true,
         executionTarget: { harnessId: "goose" },
         personaId: null,
       },
@@ -1930,6 +1970,7 @@ describe("GlobalComposerPill", () => {
       text: "",
       selectedSkills: [],
       options: {
+        useDefaultAutoMode: true,
         attachments: [
           expect.objectContaining({
             kind: "image",

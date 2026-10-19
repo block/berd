@@ -1,3 +1,6 @@
+import { usePendingAutoModeStore } from "@/features/chat/lib/autoModelSelection";
+import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
+import { DEFAULT_RUNTIME_CONFIG } from "@/shared/runtime-config/schema";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -40,6 +43,7 @@ import type { AcpSessionInfo, AcpSessionsPage } from "@/shared/api/acp";
 import { createUserMessage, getTextContent } from "@/shared/types/messages";
 
 const mocks = vi.hoisted(() => ({
+  refreshNewChat: vi.fn(),
   acpCreateSession: vi.fn(),
   acpDuplicateSession: vi.fn(),
   acpGetSessionInfo: vi.fn(),
@@ -75,6 +79,10 @@ const mocks = vi.hoisted(() => ({
   createSkill: vi.fn(),
   listSkills: vi.fn(),
   getVoiceConversationStatus: vi.fn(),
+}));
+
+vi.mock("@/shared/runtime-config/newChatRuntimeConfig", () => ({
+  refreshRuntimeConfigForNewChat: () => mocks.refreshNewChat(),
 }));
 
 vi.mock("@/shared/api/acp", () => ({
@@ -354,6 +362,9 @@ async function expectCommandError(
 }
 
 beforeEach(() => {
+  usePendingAutoModeStore.setState({ modeId: undefined });
+  useRuntimeConfigStore.setState({ config: DEFAULT_RUNTIME_CONFIG });
+  mocks.refreshNewChat.mockReset().mockResolvedValue(undefined);
   resetSessionTargetCoordinatorsForTests();
   localStorage.removeItem("goose:chat-workspace-metadata");
   useChatSessionStore.setState({
@@ -700,6 +711,117 @@ describe("command safety metadata", () => {
 });
 
 describe("sessions.create", () => {
+  it("preserves an explicit persona instead of applying the refreshed Auto default", async () => {
+    mocks.listPersonas.mockResolvedValue([
+      {
+        id: "agent-7",
+        displayName: "Reviewer",
+        systemPrompt: "Review carefully.",
+        provider: "goose",
+        modelProviderId: "openai",
+        model: "persona-model",
+        isBuiltin: false,
+        writable: true,
+      },
+    ]);
+    mocks.refreshNewChat.mockImplementationOnce(async () => {
+      useRuntimeConfigStore.setState({
+        config: {
+          ...DEFAULT_RUNTIME_CONFIG,
+          goose: {
+            ...DEFAULT_RUNTIME_CONFIG.goose,
+            autoRouting: {
+              url: "https://router.example",
+              defaultModeId: "fresh",
+              modes: [
+                {
+                  id: "fresh",
+                  displayName: "Fresh",
+                  modelProviderId: "openai",
+                  fallback: { modelId: "auto-model", effort: "medium" },
+                  models: [{ modelId: "auto-model", routerModel: "auto" }],
+                },
+              ],
+            },
+          },
+        },
+      });
+    });
+    await dispatchCommand(
+      "sessions",
+      { action: "create", prompt: "Review this", agent_id: "agent-7" },
+      ctx,
+    );
+    expect(mocks.refreshNewChat).toHaveBeenCalledOnce();
+    expect(mocks.acpCreateSession).toHaveBeenCalledWith(
+      "goose",
+      "/resolved/cwd",
+      expect.objectContaining({ personaId: "agent-7", modelId: undefined }),
+    );
+    expect(
+      useChatSessionStore.getState().getSession("session-new")?.autoModeId,
+    ).toBeNull();
+  });
+
+  it.each([
+    null,
+    "unrelated-ui-mode",
+  ])("waits for refreshed defaults and ignores pending UI mode %s before its first prompt", async (pendingUiMode) => {
+    usePendingAutoModeStore.setState({ modeId: pendingUiMode });
+    let releaseRefresh = () => {};
+    mocks.refreshNewChat.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => {
+        releaseRefresh = resolve;
+      });
+      useRuntimeConfigStore.setState({
+        config: {
+          ...DEFAULT_RUNTIME_CONFIG,
+          goose: {
+            ...DEFAULT_RUNTIME_CONFIG.goose,
+            autoRouting: {
+              url: "https://router.example",
+              defaultModeId: "fresh",
+              modes: [
+                {
+                  id: "fresh",
+                  displayName: "Fresh",
+                  modelProviderId: "openai",
+                  fallback: { modelId: "fresh-model", effort: "medium" },
+                  models: [{ modelId: "fresh-model", routerModel: "fresh" }],
+                },
+              ],
+            },
+          },
+        },
+      });
+    });
+    const pending = dispatchCommand(
+      "sessions",
+      { action: "create", prompt: "first prompt" },
+      ctx,
+    );
+    await vi.waitFor(() =>
+      expect(mocks.refreshNewChat).toHaveBeenCalledTimes(1),
+    );
+    expect(mocks.acpCreateSession).not.toHaveBeenCalled();
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-new"],
+    ).toBeUndefined();
+    releaseRefresh();
+    await pending;
+    expect(mocks.acpCreateSession).toHaveBeenCalledWith(
+      "openai",
+      "/resolved/cwd",
+      expect.objectContaining({ modelId: "fresh-model" }),
+    );
+    expect(
+      useChatSessionStore.getState().getSession("session-new")?.autoModeId,
+    ).toBe("fresh");
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-new"]?.[0],
+    ).toMatchObject({ payload: { text: "first prompt" } });
+  });
+
   it("creates the session and leaves the accepted first prompt in the shared queue", async () => {
     seedModelCache("databricks_v2", ["model-9"]);
     mocks.listPersonas.mockResolvedValue([

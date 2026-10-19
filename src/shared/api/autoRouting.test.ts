@@ -5,6 +5,7 @@ import {
   type RuntimeAutoRoutingMode,
 } from "@/shared/runtime-config/schema";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
+import { PreCommitSendRejectedError } from "@/features/chat/lib/preCommitSendRejection";
 import {
   autoRoutingFallback,
   buildAutoRoutingRequest,
@@ -171,7 +172,7 @@ describe("auto routing invocation", () => {
       },
     });
   });
-  it("sends only mode ID and context to the backend", async () => {
+  it("sends mode ID, context and the expected config snapshot to the backend", async () => {
     vi.mocked(invokeWithStartupRetry).mockResolvedValue(
       response("gpt-6-1-sol"),
     );
@@ -181,7 +182,17 @@ describe("auto routing invocation", () => {
     expect(invokeWithStartupRetry).toHaveBeenCalledWith("route_auto_model", {
       modeId: "auto",
       prompt: "context",
+      expectedAutoRouting: config,
     });
+  });
+  it.each([
+    "AUTO_ROUTING_CONFIG_CHANGED",
+    new Error("AUTO_ROUTING_CONFIG_CHANGED"),
+  ])("rejects a changed native snapshot without choosing the stale fallback", async (error) => {
+    vi.mocked(invokeWithStartupRetry).mockRejectedValue(error);
+    await expect(
+      routeAutoModel({ modeId: "auto", prompt: "context" }),
+    ).rejects.toBeInstanceOf(PreCommitSendRejectedError);
   });
   it("rejects immediately on cancellation while native routing is pending", async () => {
     let finish!: (response: unknown) => void;

@@ -642,6 +642,7 @@ pub fn run() {
             commands::runtime_config::set_fake_runtime_config,
             commands::runtime_config::clear_fake_runtime_config,
             commands::runtime_config::refresh_runtime_config,
+            commands::runtime_config::refresh_runtime_config_for_new_chat,
             commands::security_threshold::get_security_threshold,
             commands::security_threshold::set_security_threshold,
             commands::system::get_home_dir,

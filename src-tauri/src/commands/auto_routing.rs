@@ -8,6 +8,17 @@ use serde_json::{json, Value};
 use std::time::Duration;
 use tauri::State;
 
+const AUTO_ROUTING_CONFIG_CHANGED: &str = "AUTO_ROUTING_CONFIG_CHANGED";
+
+fn checked_routing_config<'a>(
+    current: Option<&'a RuntimeAutoRoutingConfig>,
+    expected: &RuntimeAutoRoutingConfig,
+) -> Result<&'a RuntimeAutoRoutingConfig, String> {
+    current
+        .filter(|current| *current == expected)
+        .ok_or_else(|| AUTO_ROUTING_CONFIG_CHANGED.to_string())
+}
+
 fn build_request(
     config: &RuntimeAutoRoutingConfig,
     mode: &RuntimeAutoRoutingMode,
@@ -30,6 +41,7 @@ fn build_request(
 pub async fn route_auto_model(
     mode_id: String,
     prompt: String,
+    expected_auto_routing: RuntimeAutoRoutingConfig,
     runtime_config: State<'_, RuntimeConfigState>,
     distro_bundle: State<'_, DistroBundleState>,
 ) -> Result<Value, String> {
@@ -38,11 +50,10 @@ pub async fn route_auto_model(
         return Err("Routing context exceeds limit".to_string());
     }
     let runtime = runtime_config.ready_config(&distro_bundle).await?;
-    let config = runtime
-        .goose
-        .auto_routing
-        .as_ref()
-        .ok_or("Auto routing is not configured")?;
+    // Never execute caller-supplied configuration. It only ensures the
+    // renderer will interpret this response against the snapshot we use.
+    let config =
+        checked_routing_config(runtime.goose.auto_routing.as_ref(), &expected_auto_routing)?;
     let mode = config
         .modes
         .iter()
@@ -112,6 +123,24 @@ mod tests {
             "models":[{"modelId":"served","routerModel":"system.ai.sol","minEffort":"high"}]
         }]}))
         .unwrap()
+    }
+    #[test]
+    fn renderer_snapshot_must_match_native_before_routing() {
+        let current = config("https://trusted.example.com/route".to_string());
+        assert!(std::ptr::eq(
+            checked_routing_config(Some(&current), &current.clone()).unwrap(),
+            &current,
+        ));
+        let mut changed = current.clone();
+        changed.modes[0].fallback.model_id = "changed".to_string();
+        assert_eq!(
+            checked_routing_config(Some(&current), &changed).unwrap_err(),
+            AUTO_ROUTING_CONFIG_CHANGED,
+        );
+        assert_eq!(
+            checked_routing_config(None, &current).unwrap_err(),
+            AUTO_ROUTING_CONFIG_CHANGED,
+        );
     }
     async fn server(
         status: u16,
