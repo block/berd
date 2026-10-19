@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { readTextFile } from "@/shared/api/system";
+import type { Message } from "@/shared/types/messages";
 import { buildAutoRoutingPrompt } from "./autoRoutingPrompt";
 
 vi.mock("@/shared/api/system", () => ({ readTextFile: vi.fn() }));
@@ -55,6 +56,47 @@ describe("auto routing task context", () => {
         attachments: [attachment],
       }),
     ).toContain("Text preview unavailable");
+  });
+
+  it("excludes agent-hidden and replay coordination before selecting recent history", async () => {
+    const message = (
+      id: string,
+      role: Message["role"],
+      text: string,
+      metadata?: Message["metadata"],
+    ): Message => ({
+      id,
+      role,
+      created: 1,
+      content: [{ type: "text", text }],
+      metadata,
+    });
+    const prompt = await buildAutoRoutingPrompt({
+      text: "Continue the implementation",
+      messages: [
+        message("user", "user", "VISIBLE_USER"),
+        message("assistant", "assistant", "VISIBLE_ASSISTANT", {
+          agentVisible: true,
+        }),
+        message("hidden-user", "user", "PRIVATE_USER", { agentVisible: false }),
+        message("hidden-assistant", "assistant", "PRIVATE_EXPERT", {
+          agentVisible: false,
+          origin: "voice_conversation",
+        }),
+        message(
+          "replay",
+          "user",
+          "[Voice transcript; cursor 1] Spokesperson said: PRIVATE_REPLAY",
+          { origin: "voice_conversation" },
+        ),
+        message("compact", "user", "/compact"),
+        message("system", "system", "PRIVATE_SYSTEM"),
+      ],
+    });
+    expect(prompt).toContain("user: VISIBLE_USER");
+    expect(prompt).toContain("assistant: VISIBLE_ASSISTANT");
+    expect(prompt).not.toContain("PRIVATE_");
+    expect(prompt).not.toContain("/compact");
   });
 
   it("caps the whole request, keeping task and selected skill before history", async () => {

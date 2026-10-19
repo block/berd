@@ -1,5 +1,6 @@
 import { readTextFile } from "@/shared/api/system";
 import type { ChatAttachmentDraft, Message } from "@/shared/types/messages";
+import { sanitizeReplayMessages } from "./replaySanitizer";
 
 // Keep classification bounded independently of the inference prompt. Give each
 // context source enough room for complex tasks, skills, and attached files.
@@ -63,9 +64,11 @@ export async function buildAutoRoutingPrompt(input: {
   if (attachments.length > MAX_FILES) {
     sections.push(`${attachments.length - MAX_FILES} additional attachments`);
   }
-  const history = (input.messages ?? [])
+  const history = sanitizeReplayMessages(input.messages ?? [])
     .filter(
-      (message) => message.role === "user" || message.role === "assistant",
+      (message) =>
+        message.metadata?.agentVisible !== false &&
+        (message.role === "user" || message.role === "assistant"),
     )
     .slice(-4)
     .map(
