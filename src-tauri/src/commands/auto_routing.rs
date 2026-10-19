@@ -53,19 +53,42 @@ pub async fn route_auto_model(
     if prompt.len() > 704_000 {
         return Err("Routing context exceeds limit".to_string());
     }
-    let runtime = runtime_config.ready_config(&distro_bundle).await?;
+    route_with_current_config(
+        &mode_id,
+        &prompt,
+        expected_auto_routing_revision.as_deref(),
+        runtime_config.inner(),
+        distro_bundle.inner(),
+    )
+    .await
+}
+
+async fn route_with_current_config(
+    mode_id: &str,
+    prompt: &str,
+    expected_revision: Option<&str>,
+    runtime_config: &RuntimeConfigState,
+    distro_bundle: &DistroBundleState,
+) -> Result<Value, String> {
+    let runtime = runtime_config.ready_config(distro_bundle).await?;
     // Echo the native-issued revision, never re-encoded renderer config.
     // Native JSON numbers retain their original precision and representation.
-    let config = checked_routing_config(
-        runtime.goose.auto_routing.as_ref(),
-        expected_auto_routing_revision.as_deref(),
-    )?;
+    let config = checked_routing_config(runtime.goose.auto_routing.as_ref(), expected_revision)?;
     let mode = config
         .modes
         .iter()
         .find(|mode| mode.id == mode_id)
         .ok_or("Auto routing mode is not configured")?;
-    request_route(config, mode, &prompt).await
+    let result = request_route(config, mode, prompt).await;
+    // A different window may refresh native state while HTTP is pending.
+    // Reject both obsolete decisions and obsolete errors (which would otherwise
+    // apply the renderer snapshot's old fallback) before releasing the result.
+    let current = runtime_config
+        .ready_config(distro_bundle)
+        .await
+        .map_err(|_| AUTO_ROUTING_CONFIG_CHANGED.to_string())?;
+    checked_routing_config(current.goose.auto_routing.as_ref(), expected_revision)?;
+    result
 }
 
 async fn request_route(
@@ -213,6 +236,57 @@ mod tests {
         });
         (url, handle)
     }
+    #[tokio::test]
+    async fn refresh_during_http_rejects_obsolete_success_and_fallback_error() {
+        for status in [200, 503] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}/route", listener.local_addr().unwrap());
+            let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+            let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+            let server = tokio::spawn(async move {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut request = [0u8; 16384];
+                stream.read(&mut request).await.unwrap();
+                started_tx.send(()).unwrap();
+                release_rx.await.unwrap();
+                let body = r#"{"route_selection":[]}"#;
+                let response = format!("HTTP/1.1 {status} Test\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                stream.write_all(response.as_bytes()).await.unwrap();
+            });
+            let dir = tempfile::tempdir().unwrap();
+            let state = RuntimeConfigState::new(dir.path().to_owned(), None);
+            let distro = DistroBundleState::empty_for_tests();
+            let mut runtime = crate::commands::runtime_config::default_runtime_config();
+            runtime.goose.model_providers.push(
+                serde_json::from_value(json!({
+                    "id":"provider", "displayName":"Provider",
+                    "models":[{"id":"served", "name":"Served"}]
+                }))
+                .unwrap(),
+            );
+            runtime.goose.default_model_provider_id = Some("provider".to_string());
+            runtime.goose.default_model_id = Some("served".to_string());
+            runtime.goose.auto_routing = Some(config(url));
+            state.set_fake_config(runtime.clone()).unwrap();
+            let revision =
+                auto_routing_revision(runtime.goose.auto_routing.as_ref().unwrap()).unwrap();
+            let (result, _) = tokio::join!(
+                route_with_current_config("auto", "context", Some(&revision), &state, &distro),
+                async {
+                    started_rx.await.unwrap();
+                    runtime.goose.auto_routing.as_mut().unwrap().modes[0]
+                        .fallback
+                        .effort = "max".to_string();
+                    state.set_fake_config(runtime).unwrap();
+                    release_tx.send(()).unwrap();
+                },
+            );
+            assert_eq!(result.unwrap_err(), AUTO_ROUTING_CONFIG_CHANGED,
+                "HTTP {status} from an obsolete config must not release its decision or fallback error");
+            server.await.unwrap();
+        }
+    }
+
     #[tokio::test]
     async fn transport_posts_configured_candidates_and_keeps_complete_response() {
         let raw = json!({"route_selection":[],"rationale":"complete","extra":{"evidence":true}});
