@@ -5,6 +5,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::panic::{self, AssertUnwindSafe};
 use std::ptr::NonNull;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
@@ -39,22 +40,25 @@ pub(crate) fn run(options: StartOptions) -> Result<(), String> {
     let port = options.port;
     thread::Builder::new()
         .name("berd-call-session".into())
-        .spawn(move || {
-            let code = match crate::host_session::run(options) {
-                Ok(()) => 0,
-                Err(error) => {
-                    eprintln!("berd-call start failed: {error}");
-                    1
-                }
-            };
-            std::process::exit(code);
-        })
+        .spawn(move || std::process::exit(exit_code(|| crate::host_session::run(options))))
         .map_err(|error| format!("could not start the voice call: {error}"))?;
     let app = NSApplication::sharedApplication(mtm);
     app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
     let _menu_bar = MenuBar::install(mtm, port);
     app.run();
     Ok(())
+}
+
+/// The call's exit status, so that even a panic ends the process rather than leaving the menu bar without its call.
+fn exit_code(run: impl FnOnce() -> Result<(), String>) -> i32 {
+    match panic::catch_unwind(AssertUnwindSafe(run)) {
+        Ok(Ok(())) => 0,
+        Ok(Err(error)) => {
+            eprintln!("berd-call start failed: {error}");
+            1
+        }
+        Err(_) => 101,
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -579,6 +583,11 @@ fn begin_menu_action(
             });
         }
         Err(error) => {
+            // Nothing is listening, so nothing else can end this call.
+            if domain == ActionDomain::Stop {
+                eprintln!("berd-call: {error}; ending the call here");
+                std::process::exit(1);
+            }
             let _ = results.send((generation, domain, Err(error.clone())));
             if let Ok(mut state) = state.lock() {
                 state.action_error = Some(error);
@@ -652,6 +661,13 @@ fn apply_catalog_result(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_call_that_panics_ends_the_process_with_a_failure() {
+        assert_eq!(exit_code(|| Ok(())), 0);
+        assert_eq!(exit_code(|| Err("no microphone".into())), 1);
+        assert_eq!(exit_code(|| panic!("session worker panicked")), 101);
+    }
 
     #[test]
     fn recovered_catalog_clears_its_error() {
