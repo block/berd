@@ -1108,6 +1108,27 @@ fn parse_host_settings_args(
             "--muted" => host_control::ControlRequest::Muted {
                 muted: parse_bool_setting(flag, args.get(index + 1))?,
             },
+            "--status-sounds" => host_control::ControlRequest::StatusSounds {
+                mode: Some(match args.get(index + 1).map(String::as_str) {
+                    Some("off") => berd_call::StatusSoundMode::Off,
+                    Some("working") => berd_call::StatusSoundMode::Working,
+                    Some("working-and-waiting") => berd_call::StatusSoundMode::WorkingAndWaiting,
+                    _ => {
+                        return Err(
+                            "--status-sounds requires off, working, or working-and-waiting".into(),
+                        )
+                    }
+                }),
+                status: None,
+            },
+            "--conversation-status" => host_control::ControlRequest::StatusSounds {
+                mode: None,
+                status: Some(match args.get(index + 1).map(String::as_str) {
+                    Some("working") => berd_call::ConversationStatus::Working,
+                    Some("waiting") => berd_call::ConversationStatus::Waiting,
+                    _ => return Err("--conversation-status requires working or waiting".into()),
+                }),
+            },
             "--spokesperson" => host_control::ControlRequest::SpokespersonMode {
                 on: parse_bool_setting(flag, args.get(index + 1))?,
             },
@@ -1182,7 +1203,7 @@ fn parse_host_settings_args(
 }
 
 const SETTINGS_CHOICE_ERROR: &str =
-    "provide exactly one of --non-blocking, --rate, --voice, --spokesperson-voice, --spokesperson-rate, --tts, --input-during-tts, --muted, --spokesperson, or --restart";
+    "provide exactly one of --non-blocking, --rate, --voice, --spokesperson-voice, --spokesperson-rate, --tts, --input-during-tts, --muted, --status-sounds, --conversation-status, --spokesperson, or --restart";
 
 fn parse_bool_setting(flag: &str, value: Option<&String>) -> Result<bool, String> {
     match value.map(String::as_str) {
@@ -12768,6 +12789,7 @@ mod tests {
                     rate: 1.5,
                 }),
                 input_policy: Some(berd_call::input::InputDuringTtsPolicy::SuppressInput),
+                status_sounds: None,
             },
         )
         .unwrap();
@@ -12930,6 +12952,42 @@ mod tests {
                 .1,
             host_control::ControlRequest::Muted { muted: true }
         ));
+        assert!(matches!(
+            parse_host_settings_args(&args(&[
+                "berd-call",
+                "settings",
+                "--status-sounds",
+                "working-and-waiting",
+            ]))
+            .unwrap()
+            .1,
+            host_control::ControlRequest::StatusSounds {
+                mode: Some(berd_call::StatusSoundMode::WorkingAndWaiting),
+                status: None,
+            }
+        ));
+        assert!(matches!(
+            parse_host_settings_args(&args(&[
+                "berd-call",
+                "settings",
+                "--conversation-status",
+                "waiting",
+            ]))
+            .unwrap()
+            .1,
+            host_control::ControlRequest::StatusSounds {
+                mode: None,
+                status: Some(berd_call::ConversationStatus::Waiting),
+            }
+        ));
+        for (flag, value) in [
+            ("--status-sounds", "loud"),
+            ("--conversation-status", "idle"),
+        ] {
+            assert!(
+                parse_host_settings_args(&args(&["berd-call", "settings", flag, value])).is_err()
+            );
+        }
         assert!(matches!(
             parse_host_settings_args(&args(&["berd-call", "settings", "--spokesperson", "false"]))
                 .unwrap()
