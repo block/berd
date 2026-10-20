@@ -100,8 +100,9 @@ Usage:
 
 The setting applies to subsequent speak calls. In a call started with
 --allow-direct-agent-speech, --voice and --rate change the agents' voice, and
---spokesperson-voice and --spokesperson-rate change the Spokesperson's (an
-OpenAI realtime voice, 0.25 to 1.5). --spokesperson turns the Spokesperson on
+--spokesperson-voice changes the Spokesperson's (an OpenAI realtime voice).
+--rate also sets the Spokesperson's speed, as close as it can go (0.25 to
+1.5); --spokesperson-rate sets only the Spokesperson's. --spokesperson turns the Spokesperson on
 or off, restarting the call's session in the other mode with the same voice;
 options only the other mode takes are dropped, and in a call started with
 --stream live, agents keep their own voice beside the Spokesperson's.
@@ -153,8 +154,9 @@ and default to OpenAI when no environment override is set.
 
 In expert-spokesperson mode, the Expert speaks through the Spokesperson.
 --allow-direct-agent-speech also lets it speak to the user itself, through the
-configured TTS backend, in its own voice beside the Spokesperson's. --spokesperson-voice and
---spokesperson-rate then choose the Spokesperson's own voice and speed."#;
+configured TTS backend, in its own voice beside the Spokesperson's. --spokesperson-voice then
+chooses the Spokesperson's own voice. It speaks as close to --rate as it can, unless
+--spokesperson-rate chooses its own speed."#;
 
 const SYNTHESIZE_HELP: &str = r#"Render text through a configured TTS backend into a new WAV file.
 

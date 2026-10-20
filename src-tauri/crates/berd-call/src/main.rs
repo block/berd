@@ -3337,22 +3337,19 @@ fn unavailable_spokesperson_title(connection_lost: bool, quiescent: bool) -> &'s
 fn apply_spokesperson_startup_settings(
     session: &SessionConfig,
     spokesperson: &mut OpenAiSpokespersonConfig,
-) -> Result<(), String> {
-    // Replies with their own voice leave the Spokesperson's speed to it.
-    let rate = match &session.tts {
-        _ if session.expert_tts => session.spokesperson_rate.unwrap_or(spokesperson.speed()),
-        TtsBackendConfig::OpenAi { rate }
-        | TtsBackendConfig::Siri { rate, .. }
-        | TtsBackendConfig::Pocket { rate, .. } => *rate,
-    };
+) {
+    let (TtsBackendConfig::OpenAi { rate }
+    | TtsBackendConfig::Siri { rate, .. }
+    | TtsBackendConfig::Pocket { rate, .. }) = &session.tts;
     if let Some(voice) = &session.spokesperson_voice {
         spokesperson.session.voice = Some(voice.clone());
     }
-    if !(0.25..=1.5).contains(&rate) {
-        return Err("Expert-Spokesperson rate must be between 0.25 and 1.5".into());
-    }
-    spokesperson.session.speed = Some(rate);
-    Ok(())
+    // The Spokesperson keeps as close to the agents' speed as it can, unless given its own.
+    spokesperson.session.speed = Some(
+        session
+            .spokesperson_rate
+            .unwrap_or_else(|| spokesperson_speed(*rate)),
+    );
 }
 
 fn run_expert_spokesperson_session(
@@ -4500,7 +4497,7 @@ fn run_expert_spokesperson_session(
                 if let Some(url) = &config.endpoints.realtime {
                     spokesperson_config.endpoint.clone_from(url);
                 }
-                apply_spokesperson_startup_settings(&config, &mut spokesperson_config)?;
+                apply_spokesperson_startup_settings(&config, &mut spokesperson_config);
                 if config.expert_tts {
                     reply_tts = Some(Arc::new(create_tts_slot(
                         &config.tts,
@@ -5989,6 +5986,13 @@ fn finish_unready_input_runtime(runtime: VoiceInputRuntime) -> Result<(), String
 /// Lets the Expert speak to the user in its own voice in an
 /// Expert-Spokesperson call, rather than only through the Spokesperson.
 pub(crate) const DIRECT_AGENT_SPEECH: &str = "--allow-direct-agent-speech";
+/// The speeds the Spokesperson's realtime voice supports.
+pub(crate) const SPOKESPERSON_RATES: std::ops::RangeInclusive<f32> = 0.25..=1.5;
+
+/// The Spokesperson's closest supported speed to `rate`.
+pub(crate) fn spokesperson_speed(rate: f32) -> f32 {
+    rate.clamp(*SPOKESPERSON_RATES.start(), *SPOKESPERSON_RATES.end())
+}
 
 fn parse_args(args: &[String]) -> Result<SessionConfig, ParseFailure> {
     if args.get(1).map(String::as_str) != Some("session") {
@@ -6079,7 +6083,7 @@ fn parse_args(args: &[String]) -> Result<SessionConfig, ParseFailure> {
             return Err(format!("OpenAI has no realtime voice named {voice}").into());
         }
     }
-    if spokesperson_rate.is_some_and(|rate| !(0.25..=1.5).contains(&rate)) {
+    if spokesperson_rate.is_some_and(|rate| !SPOKESPERSON_RATES.contains(&rate)) {
         return Err("--spokesperson-rate must be between 0.25 and 1.5".into());
     }
     if mode == SessionMode::ExpertSpokesperson
@@ -10854,7 +10858,7 @@ mod tests {
             semantic_transcript: Vec::new(),
         };
 
-        apply_spokesperson_startup_settings(&session, &mut realtime).unwrap();
+        apply_spokesperson_startup_settings(&session, &mut realtime);
 
         assert_eq!(realtime.speed(), 1.5);
         assert_eq!(realtime.voice(), "marin");
@@ -10898,9 +10902,9 @@ mod tests {
             },
             semantic_transcript: Vec::new(),
         };
-        apply_spokesperson_startup_settings(&own, &mut realtime).unwrap();
-        // The replies' rate is theirs, not the Spokesperson's.
-        assert_eq!(realtime.speed(), 1.0);
+        apply_spokesperson_startup_settings(&own, &mut realtime);
+        // The Spokesperson keeps as close to the replies' rate as it can.
+        assert_eq!(realtime.speed(), 1.5);
         let chosen = expert(&[
             "--tts-backend",
             "openai",
@@ -10911,7 +10915,7 @@ mod tests {
             "1.25",
         ])
         .unwrap();
-        apply_spokesperson_startup_settings(&chosen, &mut realtime).unwrap();
+        apply_spokesperson_startup_settings(&chosen, &mut realtime);
         assert_eq!((realtime.voice(), realtime.speed()), ("cedar", 1.25));
         for (extra, error) in [
             (&["--spokesperson-voice", "cedar"][..], DIRECT_AGENT_SPEECH),
@@ -10932,7 +10936,8 @@ mod tests {
             assert!(expert(&all).unwrap_err().contains(error), "{extra:?}");
         }
         let read_aloud = expert(&["--tts-backend", "openai", "--rate", "2.0"]).unwrap();
-        assert!(apply_spokesperson_startup_settings(&read_aloud, &mut realtime).is_err());
+        apply_spokesperson_startup_settings(&read_aloud, &mut realtime);
+        assert_eq!(realtime.speed(), 1.5);
         assert!(
             parse(&["--tts-backend", "openai", "--allow-direct-agent-speech"])
                 .unwrap_err()

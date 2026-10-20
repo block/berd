@@ -661,18 +661,37 @@ impl HostControl for SessionControl {
     }
 
     fn set_rate(&self, rate: f32) -> Result<Value, String> {
-        let (settings, expected_revision) = {
+        let (settings, expected_revision, spokesperson) = {
             let session = self
                 .ready
                 .session
                 .lock()
                 .map_err(|_| "session settings lock failed")?;
+            // The Spokesperson keeps as close to the agents' speed as it can.
+            let spokesperson = session.spokesperson.as_ref().map(|spokesperson| {
+                (
+                    spokesperson
+                        .settings
+                        .clone()
+                        .with_rate(crate::spokesperson_speed(rate)),
+                    spokesperson.revision,
+                )
+            });
             (
                 session.tts.settings.clone().with_rate(rate),
                 session.tts.revision,
+                spokesperson,
             )
         };
-        self.request(|response| ControlCommand::TtsSettings {
+        let status = self.request(|response| ControlCommand::TtsSettings {
+            settings,
+            expected_revision,
+            response,
+        })?;
+        let Some((settings, expected_revision)) = spokesperson else {
+            return Ok(status);
+        };
+        self.request(|response| ControlCommand::SpokespersonSettings {
             settings,
             expected_revision,
             response,
@@ -781,27 +800,24 @@ impl HostControl for SessionControl {
             return self.status();
         }
         let direct = matches!(*self.transcript, Transcript::Stdout { live: true });
-        // Agents keep the voice they have now, if they speak before and after; otherwise the Spokesperson's voice is its own.
-        let tts = if self.speaks && (!on || direct) {
-            Some(
-                self.ready
-                    .session
-                    .lock()
-                    .map_err(|_| "session settings lock failed")?
-                    .tts
-                    .settings
-                    .clone(),
-            )
-        } else {
-            None
-        };
-        let arguments = match &tts {
-            Some(settings) => crate::saved_settings::merge_arguments(
-                arguments,
-                &tts_arguments(settings, arguments),
-            ),
-            None => arguments.to_vec(),
-        };
+        let live = self
+            .ready
+            .session
+            .lock()
+            .map_err(|_| "session settings lock failed")?
+            .tts
+            .settings
+            .clone();
+        // Agents keep the voice they have now, if they speak before and after; otherwise the Spokesperson's voice is
+        // its own, and only their speed carries over.
+        let tts = (self.speaks && (!on || direct)).then(|| live.clone());
+        let arguments = crate::saved_settings::merge_arguments(
+            arguments,
+            &match &tts {
+                Some(settings) => tts_arguments(settings, arguments),
+                None => vec!["--rate".into(), live.rate().to_string()],
+            },
+        );
         let mut session_arguments = vec!["session".to_string()];
         session_arguments.extend(crate::saved_settings::with_spokesperson(
             &arguments, on, direct,
@@ -4469,8 +4485,8 @@ mod tests {
             ]
         );
         assert_eq!(tts, Some(test_snapshot().tts.settings.with_rate(1.25)));
-        // Otherwise their speed would be the Spokesperson's, which can't go as fast.
-        let (arguments, tts) = toggle(Transcript::Silent, 2.0);
+        // Otherwise only their speed carries over, which the Spokesperson keeps as close to as it can.
+        let (arguments, tts) = toggle(Transcript::Silent, 1.75);
         assert_eq!(
             arguments,
             [
@@ -4481,6 +4497,8 @@ mod tests {
                 "en-GB",
                 "--stt-backend",
                 "openai",
+                "--rate",
+                "1.75",
                 "--mode",
                 "expert-spokesperson",
             ]
@@ -4667,6 +4685,64 @@ mod tests {
             worker.join().unwrap(),
             [(openai("marin", 1.5), 3), (openai("cedar", 1.25), 3)]
         );
+    }
+
+    #[test]
+    fn the_speech_rate_keeps_the_spokesperson_as_close_to_the_agents_as_it_can() {
+        let rates = |spokesperson| {
+            let (commands, receiver) = mpsc::sync_channel(1);
+            let mut snapshot = test_snapshot();
+            snapshot.spokesperson = spokesperson;
+            let control = SessionControl {
+                commands,
+                running: Arc::new(AtomicBool::new(true)),
+                ready: ReadyState {
+                    session: Arc::new(Mutex::new(snapshot)),
+                },
+                non_blocking: Arc::new(AtomicBool::new(false)),
+                stop_requested: Arc::new(AtomicBool::new(false)),
+                muted: Arc::new(AtomicBool::new(false)),
+                transcript: Arc::new(Transcript::Silent),
+                speaks: true,
+                session_arguments: vec!["session".into()],
+            };
+            let worker = thread::spawn(move || {
+                receiver
+                    .iter()
+                    .map(|command| match command {
+                        ControlCommand::TtsSettings {
+                            settings, response, ..
+                        } => {
+                            response.send(Ok(json!({}))).unwrap();
+                            ("agents", settings.rate())
+                        }
+                        ControlCommand::SpokespersonSettings {
+                            settings, response, ..
+                        } => {
+                            response.send(Ok(json!({}))).unwrap();
+                            ("spokesperson", settings.rate())
+                        }
+                        _ => panic!("expected a speech settings command"),
+                    })
+                    .collect::<Vec<_>>()
+            });
+            control.set_rate(2.0).unwrap();
+            drop(control);
+            worker.join().unwrap()
+        };
+        let spokesperson = berd_call::TtsConfigurationSnapshot {
+            revision: 3,
+            settings: berd_call::TtsSettings::OpenAi {
+                model: "gpt-realtime".into(),
+                voice: "marin".into(),
+                rate: 1.0,
+            },
+        };
+        assert_eq!(
+            rates(Some(spokesperson)),
+            [("agents", 2.0), ("spokesperson", 1.5)]
+        );
+        assert_eq!(rates(None), [("agents", 2.0)]);
     }
 
     #[test]

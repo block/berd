@@ -188,6 +188,7 @@ pub(crate) fn without_tts(arguments: &[String]) -> Vec<String> {
 
 /// The same call's session options with the Spokesperson on or off. Options only one mode takes are left out of the
 /// other; with the Spokesperson on, `direct` lets agents also speak in their own voice.
+/// The Spokesperson keeps as close to the agents' speed as it can.
 pub(crate) fn with_spokesperson(arguments: &[String], on: bool, direct: bool) -> Vec<String> {
     let mut result: Vec<_> = arguments
         .iter()
@@ -200,8 +201,8 @@ pub(crate) fn with_spokesperson(arguments: &[String], on: bool, direct: bool) ->
             "--realtime-url" => on,
             "--stt-url" => !on,
             "--tts-url" => !on || direct,
-            // Without replies of their own, the agents' speed would be the Spokesperson's, which takes a narrower range.
-            "--rate" => !on || direct,
+            // The Spokesperson's speed follows the agents'.
+            "--spokesperson-rate" => false,
             _ => on || !spokesperson_flag(pair),
         })
         .flatten()
@@ -311,8 +312,12 @@ mod tests {
             "expert-spokesperson",
             "--voice",
             "Aaron",
+            "--rate",
+            "2",
             "--spokesperson-voice",
             "cedar",
+            "--spokesperson-rate",
+            "1",
             "--realtime-url",
             "wss://realtime.test/",
             "--allow-direct-agent-speech",
@@ -320,7 +325,7 @@ mod tests {
         let conventional = with_spokesperson(&realtime, false, true);
         assert_eq!(
             conventional,
-            strings(&["--voice", "Aaron", "--mode", "conventional"])
+            strings(&["--voice", "Aaron", "--rate", "2", "--mode", "conventional"])
         );
         assert_eq!(
             with_spokesperson(
@@ -335,6 +340,8 @@ mod tests {
             strings(&[
                 "--voice",
                 "Aaron",
+                "--rate",
+                "2",
                 "--mode",
                 "expert-spokesperson",
                 "--allow-direct-agent-speech"
@@ -342,7 +349,14 @@ mod tests {
         );
         assert_eq!(
             with_spokesperson(&conventional, true, false),
-            strings(&["--voice", "Aaron", "--mode", "expert-spokesperson"])
+            strings(&[
+                "--voice",
+                "Aaron",
+                "--rate",
+                "2",
+                "--mode",
+                "expert-spokesperson"
+            ])
         );
     }
 }
