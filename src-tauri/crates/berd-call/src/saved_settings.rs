@@ -186,6 +186,41 @@ pub(crate) fn without_tts(arguments: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// The same call's session options with the Spokesperson on or off. Options only one mode takes are left out of the
+/// other; with the Spokesperson on, `direct` lets agents also speak in their own voice.
+pub(crate) fn with_spokesperson(arguments: &[String], on: bool, direct: bool) -> Vec<String> {
+    let mut result: Vec<_> = arguments
+        .iter()
+        .filter(|argument| *argument != crate::DIRECT_AGENT_SPEECH)
+        .cloned()
+        .collect::<Vec<_>>()
+        .chunks_exact(2)
+        .filter(|pair| match pair[0].as_str() {
+            "--mode" => false,
+            "--realtime-url" => on,
+            "--stt-url" => !on,
+            "--tts-url" => !on || direct,
+            _ => on || !spokesperson_flag(pair),
+        })
+        .flatten()
+        .cloned()
+        .collect();
+    result.extend([
+        "--mode".into(),
+        if on {
+            "expert-spokesperson"
+        } else {
+            "conventional"
+        }
+        .into(),
+    ]);
+    if on && direct {
+        // Last, since it takes no value.
+        result.push(crate::DIRECT_AGENT_SPEECH.into());
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -258,6 +293,54 @@ mod tests {
         assert_eq!(
             without_tts(&arguments),
             ["--mode", "chained", "--stt-backend", "macos"]
+        );
+    }
+
+    #[test]
+    fn turning_the_spokesperson_off_and_on_keeps_the_options_both_modes_take() {
+        let strings = |values: &[&str]| {
+            values
+                .iter()
+                .map(|value| value.to_string())
+                .collect::<Vec<_>>()
+        };
+        let realtime = strings(&[
+            "--mode",
+            "expert-spokesperson",
+            "--voice",
+            "Aaron",
+            "--spokesperson-voice",
+            "cedar",
+            "--realtime-url",
+            "wss://realtime.test/",
+            "--allow-direct-agent-speech",
+        ]);
+        let conventional = with_spokesperson(&realtime, false, true);
+        assert_eq!(
+            conventional,
+            strings(&["--voice", "Aaron", "--mode", "conventional"])
+        );
+        assert_eq!(
+            with_spokesperson(
+                &[
+                    conventional.clone(),
+                    strings(&["--stt-url", "wss://stt.test/"])
+                ]
+                .concat(),
+                true,
+                true
+            ),
+            strings(&[
+                "--voice",
+                "Aaron",
+                "--mode",
+                "expert-spokesperson",
+                "--allow-direct-agent-speech"
+            ])
+        );
+        assert_eq!(
+            with_spokesperson(&conventional, true, false),
+            strings(&["--voice", "Aaron", "--mode", "expert-spokesperson"])
         );
     }
 }

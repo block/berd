@@ -44,6 +44,8 @@ pub(crate) trait HostControl: Send + Sync + 'static {
     ) -> Result<Value, String>;
     fn set_muted(&self, muted: bool) -> Result<Value, String>;
     fn restart(&self, session_arguments: Vec<String>) -> Result<Value, String>;
+    /// Restarts the call's session with the Spokesperson on or off.
+    fn set_spokesperson_mode(&self, on: bool) -> Result<Value, String>;
 }
 
 pub(crate) struct ControlServer {
@@ -154,6 +156,9 @@ pub(crate) enum ControlRequest {
         #[serde(rename = "sessionArguments")]
         session_arguments: Vec<String>,
     },
+    SpokespersonMode {
+        on: bool,
+    },
 }
 
 #[derive(Deserialize, Serialize)]
@@ -204,6 +209,7 @@ pub(crate) fn begin_request(port: u16, request: ControlRequest) -> Result<Pendin
             | ControlRequest::Voice { .. }
             | ControlRequest::Spokesperson { .. }
             | ControlRequest::Restart { .. }
+            | ControlRequest::SpokespersonMode { .. }
     ) {
         None
     } else {
@@ -273,6 +279,7 @@ fn handle_connection(mut stream: TcpStream, control: &dyn HostControl) -> Result
                 ControlRequest::InputDuringTts { policy } => control.set_input_during_tts(policy),
                 ControlRequest::Muted { muted } => control.set_muted(muted),
                 ControlRequest::Restart { session_arguments } => control.restart(session_arguments),
+                ControlRequest::SpokespersonMode { on } => control.set_spokesperson_mode(on),
             },
         );
     let response = match result {
@@ -415,6 +422,9 @@ mod tests {
         }
         fn restart(&self, session_arguments: Vec<String>) -> Result<Value, String> {
             Ok(json!({"sessionArguments": session_arguments}))
+        }
+        fn set_spokesperson_mode(&self, on: bool) -> Result<Value, String> {
+            Ok(json!({"spokesperson": on}))
         }
         fn status(&self) -> Result<Value, String> {
             Ok(json!({"running": !self.stopped.load(Ordering::SeqCst)}))

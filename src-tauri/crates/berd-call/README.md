@@ -109,6 +109,11 @@ complete `berd-call session` options. The call keeps its control port, stream,
 blocking policy, mute state, and input-during-TTS policy; the stream emits a lifecycle row because
 transcript cursors restart with the new session.
 
+`berd-call settings --spokesperson true|false`, or Spokesperson in the menu bar,
+restarts the call the same way in the other mode. Agents keep their current
+voice, options only the other mode takes are left out, and in a `--stream live`
+call the Spokesperson comes back with `--allow-direct-agent-speech`.
+
 This crate owns the neutral PCM output contract and backend-neutral TTS stream
 used by Berd, plus the April ONNX runtime and text chunking used by Berd's native
 voice commands. It also owns the concrete Parakeet model loader and complete

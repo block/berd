@@ -69,6 +69,7 @@ pub(crate) enum MenuAction {
     SpokespersonRate(f32),
     Muted(bool),
     InputDuringTts(InputDuringTtsPolicy),
+    SpokespersonMode(bool),
     Stop,
 }
 
@@ -133,7 +134,15 @@ fn menu_model(state: &MenuState) -> Vec<MenuNode> {
     {
         nodes.push(item(format!("Control error: {error}"), None));
     }
-    nodes.push(SEPARATOR);
+    let expert = mode_name(status) == "Expert-Spokesperson";
+    nodes.extend([
+        SEPARATOR,
+        MenuNode {
+            checked: expert,
+            ..item("Spokesperson", Some(MenuAction::SpokespersonMode(!expert)))
+        },
+        SEPARATOR,
+    ]);
     // Replies with their own voice put the Spokesperson's beside it.
     let agents = if spokesperson.is_null() { "" } else { "Agent " };
     nodes.extend(voice_menu(
@@ -236,6 +245,7 @@ pub(crate) fn control_request(action: &MenuAction) -> ControlRequest {
         },
         MenuAction::Muted(muted) => ControlRequest::Muted { muted: *muted },
         MenuAction::InputDuringTts(policy) => ControlRequest::InputDuringTts { policy: *policy },
+        MenuAction::SpokespersonMode(on) => ControlRequest::SpokespersonMode { on: *on },
         MenuAction::Stop => ControlRequest::Stop,
     }
 }
@@ -577,6 +587,7 @@ enum ActionDomain {
     Tts,
     Mute,
     InputDuringTts,
+    Mode,
     Stop,
 }
 
@@ -588,6 +599,7 @@ fn action_domain(request: &ControlRequest) -> ActionDomain {
         | ControlRequest::Spokesperson { .. } => ActionDomain::Tts,
         ControlRequest::Muted { .. } => ActionDomain::Mute,
         ControlRequest::InputDuringTts { .. } => ActionDomain::InputDuringTts,
+        ControlRequest::SpokespersonMode { .. } => ActionDomain::Mode,
         ControlRequest::Stop => ActionDomain::Stop,
         _ => unreachable!("menu only sends supported actions"),
     }
@@ -770,6 +782,28 @@ mod tests {
                 action: Some(MenuAction::InputDuringTts(
                     InputDuringTtsPolicy::AllowBargeIn
                 )),
+                ..
+            }
+        ));
+        assert!(matches!(
+            find(&nodes, "Spokesperson"),
+            MenuNode {
+                checked: true,
+                action: Some(MenuAction::SpokespersonMode(false)),
+                ..
+            }
+        ));
+        assert!(matches!(
+            find(
+                &menu_model(&MenuState {
+                    status: Some(self::status(false, "allow_barge_in", None)),
+                    ..MenuState::default()
+                }),
+                "Spokesperson"
+            ),
+            MenuNode {
+                checked: false,
+                action: Some(MenuAction::SpokespersonMode(true)),
                 ..
             }
         ));

@@ -95,13 +95,18 @@ Usage:
   berd-call settings [--port PORT] --tts JSON
   berd-call settings [--port PORT] --input-during-tts allow|suppress
   berd-call settings [--port PORT] --muted true|false
+  berd-call settings [--port PORT] --spokesperson true|false
   berd-call settings [--port PORT] --restart [session options]
 
 The setting applies to subsequent speak calls. In a call started with
 --allow-direct-agent-speech, --voice and --rate change the agents' voice, and
 --spokesperson-voice and --spokesperson-rate change the Spokesperson's (an
-OpenAI realtime voice, 0.25 to 1.5). Non-blocking delivery requires
-a call started with --stream or --codex. Successful delivery produces no notification."#;
+OpenAI realtime voice, 0.25 to 1.5). --spokesperson turns the Spokesperson on
+or off, restarting the call's session in the other mode with the same voice;
+options only the other mode takes are dropped, and in a call started with
+--stream live, agents keep their own voice beside the Spokesperson's.
+Non-blocking delivery requires a call started with --stream or --codex.
+Successful delivery produces no notification."#;
 
 const STATUS_HELP: &str = r#"Inspect the active local voice call.
 

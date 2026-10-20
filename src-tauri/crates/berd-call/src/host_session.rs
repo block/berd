@@ -486,6 +486,43 @@ fn default_input_during_tts_policy() -> InputDuringTtsPolicy {
     }
 }
 
+/// Session options for these speech settings, keeping a Pocket model directory from `arguments`.
+fn tts_arguments(settings: &berd_call::TtsSettings, arguments: &[String]) -> Vec<String> {
+    let pocket_model_dir = arguments
+        .chunks_exact(2)
+        .find(|pair| pair[0] == "--model-dir")
+        .map(|pair| pair[1].clone());
+    let backend = match settings {
+        berd_call::TtsSettings::Siri { .. } => "siri",
+        berd_call::TtsSettings::Pocket { .. } => "pocket",
+        berd_call::TtsSettings::OpenAi { .. } => "openai",
+    };
+    let mut replacement = vec![
+        "--tts-backend".to_string(),
+        backend.to_string(),
+        "--rate".to_string(),
+        settings.rate().to_string(),
+    ];
+    match settings {
+        berd_call::TtsSettings::Siri {
+            voice, language, ..
+        } => replacement.extend([
+            "--voice".into(),
+            voice.clone(),
+            "--language".into(),
+            language.clone(),
+        ]),
+        berd_call::TtsSettings::Pocket { voice, .. } => {
+            if let Some(model_dir) = pocket_model_dir {
+                replacement.extend(["--model-dir".into(), model_dir]);
+            }
+            replacement.extend(["--voice".into(), voice.clone()])
+        }
+        berd_call::TtsSettings::OpenAi { .. } => {}
+    }
+    replacement
+}
+
 #[derive(Clone)]
 struct ReadyState {
     session: Arc<Mutex<VoiceSessionSnapshot>>,
@@ -723,6 +760,34 @@ impl HostControl for SessionControl {
         result
             .recv()
             .map_err(|_| "voice call stopped during restart".to_string())?
+    }
+
+    fn set_spokesperson_mode(&self, on: bool) -> Result<Value, String> {
+        let arguments = &self.session_arguments[1..];
+        let realtime = crate::validate_session_arguments(&self.session_arguments)?;
+        if on == realtime {
+            return self.status();
+        }
+        // Agents keep the voice they have now; a realtime call's own voice is the Spokesperson's, which a direct call has no use for.
+        let arguments = if realtime && !self.speaks {
+            arguments.to_vec()
+        } else {
+            let session = self
+                .ready
+                .session
+                .lock()
+                .map_err(|_| "session settings lock failed")?;
+            crate::saved_settings::merge_arguments(
+                arguments,
+                &tts_arguments(&session.tts.settings, arguments),
+            )
+        };
+        let direct = matches!(*self.transcript, Transcript::Stdout { live: true });
+        let mut session_arguments = vec!["session".to_string()];
+        session_arguments.extend(crate::saved_settings::with_spokesperson(
+            &arguments, on, direct,
+        ));
+        self.restart(session_arguments)
     }
 
     fn set_non_blocking(&self, enabled: bool) -> Result<Value, String> {
@@ -1490,40 +1555,7 @@ impl SessionActor {
             return;
         }
         saved.tts = Some(session.tts.settings.clone());
-        let settings = &session.tts.settings;
-        let pocket_model_dir = saved
-            .arguments
-            .chunks_exact(2)
-            .find(|pair| pair[0] == "--model-dir")
-            .map(|pair| pair[1].clone());
-        let backend = match settings {
-            berd_call::TtsSettings::Siri { .. } => "siri",
-            berd_call::TtsSettings::Pocket { .. } => "pocket",
-            berd_call::TtsSettings::OpenAi { .. } => "openai",
-        };
-        let mut replacement = vec![
-            "--tts-backend".to_string(),
-            backend.to_string(),
-            "--rate".to_string(),
-            settings.rate().to_string(),
-        ];
-        match settings {
-            berd_call::TtsSettings::Siri {
-                voice, language, ..
-            } => replacement.extend([
-                "--voice".into(),
-                voice.clone(),
-                "--language".into(),
-                language.clone(),
-            ]),
-            berd_call::TtsSettings::Pocket { voice, .. } => {
-                if let Some(model_dir) = pocket_model_dir {
-                    replacement.extend(["--model-dir".into(), model_dir]);
-                }
-                replacement.extend(["--voice".into(), voice.clone()])
-            }
-            berd_call::TtsSettings::OpenAi { .. } => {}
-        }
+        let replacement = tts_arguments(&session.tts.settings, &saved.arguments);
         saved.arguments = crate::saved_settings::merge_arguments(&saved.arguments, &replacement);
         if let Err(error) = crate::saved_settings::update(path, |latest| match changed {
             SavedPreference::SessionStart => {
@@ -4339,6 +4371,69 @@ mod tests {
         drop(receiver);
         assert_eq!(control.stop().unwrap(), json!({"stopping":true}));
         assert!(stop_requested.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn turning_the_spokesperson_on_restarts_the_call_with_the_agents_current_voice() {
+        let (commands, receiver) = mpsc::sync_channel(1);
+        let control = SessionControl {
+            commands,
+            running: Arc::new(AtomicBool::new(true)),
+            ready: ReadyState {
+                session: Arc::new(Mutex::new(test_snapshot())),
+            },
+            non_blocking: Arc::new(AtomicBool::new(false)),
+            stop_requested: Arc::new(AtomicBool::new(false)),
+            muted: Arc::new(AtomicBool::new(false)),
+            transcript: Arc::new(Transcript::Stdout { live: true }),
+            speaks: true,
+            session_arguments: [
+                "session",
+                "--voice",
+                "Samantha",
+                "--language",
+                "en-GB",
+                "--stt-backend",
+                "openai",
+                "--stt-url",
+                "ws://127.0.0.1:1/stt",
+            ]
+            .map(str::to_string)
+            .to_vec(),
+        };
+        let worker = thread::spawn(move || match receiver.recv().unwrap() {
+            ControlCommand::Restart {
+                arguments,
+                expert_spokesperson,
+                response,
+            } => {
+                response.send(Ok(json!({}))).unwrap();
+                (arguments, expert_spokesperson)
+            }
+            _ => panic!("expected a restart"),
+        });
+        control.set_spokesperson_mode(true).unwrap();
+        let (arguments, expert_spokesperson) = worker.join().unwrap();
+        assert!(expert_spokesperson);
+        assert_eq!(
+            arguments,
+            [
+                "session",
+                "--stt-backend",
+                "openai",
+                "--tts-backend",
+                "siri",
+                "--rate",
+                "1",
+                "--voice",
+                "Aaron",
+                "--language",
+                "en-US",
+                "--mode",
+                "expert-spokesperson",
+                crate::DIRECT_AGENT_SPEECH,
+            ]
+        );
     }
 
     #[test]

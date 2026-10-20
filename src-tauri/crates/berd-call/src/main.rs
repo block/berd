@@ -1108,6 +1108,9 @@ fn parse_host_settings_args(
             "--muted" => host_control::ControlRequest::Muted {
                 muted: parse_bool_setting(flag, args.get(index + 1))?,
             },
+            "--spokesperson" => host_control::ControlRequest::SpokespersonMode {
+                on: parse_bool_setting(flag, args.get(index + 1))?,
+            },
             "--input-during-tts" => host_control::ControlRequest::InputDuringTts {
                 policy: match args.get(index + 1).map(String::as_str) {
                     Some("allow") => berd_call::input::InputDuringTtsPolicy::AllowBargeIn,
@@ -1179,7 +1182,7 @@ fn parse_host_settings_args(
 }
 
 const SETTINGS_CHOICE_ERROR: &str =
-    "provide exactly one of --non-blocking, --rate, --voice, --spokesperson-voice, --spokesperson-rate, --tts, --input-during-tts, --muted, or --restart";
+    "provide exactly one of --non-blocking, --rate, --voice, --spokesperson-voice, --spokesperson-rate, --tts, --input-during-tts, --muted, --spokesperson, or --restart";
 
 fn parse_bool_setting(flag: &str, value: Option<&String>) -> Result<bool, String> {
     match value.map(String::as_str) {
@@ -12893,6 +12896,12 @@ mod tests {
                 .unwrap()
                 .1,
             host_control::ControlRequest::Muted { muted: true }
+        ));
+        assert!(matches!(
+            parse_host_settings_args(&args(&["berd-call", "settings", "--spokesperson", "false"]))
+                .unwrap()
+                .1,
+            host_control::ControlRequest::SpokespersonMode { on: false }
         ));
         assert!(matches!(
             parse_host_settings_args(&args(&[
