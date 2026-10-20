@@ -1186,6 +1186,7 @@ mod tests {
     fn voice_lookup_normalizes_language_but_preserves_exact_name() {
         let voices = vec![SiriVoice {
             name: "Aaron".to_string(),
+            display_name: "Aaron".to_string(),
             language: "en-US".to_string(),
             size_bytes: 10,
             installed: true,
@@ -1287,12 +1288,14 @@ mod tests {
         let voices = vec![
             SiriVoice {
                 name: "Quinn".to_string(),
+                display_name: "Quinn".to_string(),
                 language: "en-US".to_string(),
                 size_bytes: 10,
                 installed: false,
             },
             SiriVoice {
                 name: "Aaron".to_string(),
+                display_name: "Aaron".to_string(),
                 language: "en-US".to_string(),
                 size_bytes: 10,
                 installed: true,
@@ -1312,6 +1315,7 @@ mod tests {
     fn auto_selection_falls_back_to_an_installed_voice_outside_the_filter() {
         let filtered_voices = vec![SiriVoice {
             name: "Aaron".to_string(),
+            display_name: "Aaron".to_string(),
             language: "en-US".to_string(),
             size_bytes: 10,
             installed: false,
@@ -1321,6 +1325,7 @@ mod tests {
             resolve_voice_selection(&filtered_voices, None, || {
                 Ok(vec![SiriVoice {
                     name: "Catherine".to_string(),
+                    display_name: "Catherine".to_string(),
                     language: "en-AU".to_string(),
                     size_bytes: 10,
                     installed: true,
@@ -1339,12 +1344,14 @@ mod tests {
         let preferred_voices = vec![
             SiriVoice {
                 name: "Aaron".to_string(),
+                display_name: "Aaron".to_string(),
                 language: "en-US".to_string(),
                 size_bytes: 10,
                 installed: false,
             },
             SiriVoice {
                 name: "Samantha".to_string(),
+                display_name: "Samantha".to_string(),
                 language: "en-US".to_string(),
                 size_bytes: 10,
                 installed: true,
@@ -1356,6 +1363,7 @@ mod tests {
                 Ok(vec![
                     SiriVoice {
                         name: "Catherine".to_string(),
+                        display_name: "Catherine".to_string(),
                         language: "en-AU".to_string(),
                         size_bytes: 10,
                         installed: true,
@@ -1375,6 +1383,7 @@ mod tests {
         let selected = SiriVoiceSelection::new("Aaron", "en-US").unwrap();
         let voices = vec![SiriVoice {
             name: "Aaron".to_string(),
+            display_name: "Aaron".to_string(),
             language: "en-US".to_string(),
             size_bytes: 10,
             installed: false,
@@ -1391,6 +1400,7 @@ mod tests {
         let selected = SiriVoiceSelection::new("Aaron", "en-US").unwrap();
         let status_catalog = vec![SiriVoice {
             name: selected.name().to_string(),
+            display_name: selected.name().to_string(),
             language: selected.language().to_string(),
             size_bytes: 10,
             installed: true,
@@ -1407,6 +1417,7 @@ mod tests {
             },
             SiriVoice {
                 name: "Catherine".to_string(),
+                display_name: "Catherine".to_string(),
                 language: "en-AU".to_string(),
                 size_bytes: 10,
                 installed: true,
@@ -1427,6 +1438,7 @@ mod tests {
             resolve_stream_voice(&selected, || {
                 Ok(vec![SiriVoice {
                     name: selected.name().to_string(),
+                    display_name: selected.name().to_string(),
                     language: selected.language().to_string(),
                     size_bytes: 10,
                     installed: false,

@@ -1000,8 +1000,13 @@ static NSArray<NSDictionary<NSString *, id> *> *BerdDiscoverVoices(
         // sirittsd can report a voice as downloaded whose assets aren't on disk,
         // and then speaks it in another voice.
         NSString *content = [resource valueForKey:@"contentPath"];
+        // Newer voices have a code as their name (en-US-F); macOS shows its localized name.
+        NSString *localizedName = [resource respondsToSelector:@selector(localizedName)]
+            ? [resource valueForKey:@"localizedName"]
+            : nil;
         byKey[key] = @{
             @"name" : name,
+            @"localizedName" : localizedName ?: @"",
             @"language" : language,
             @"sizeBytes" : [resource valueForKey:@"assetSize"] ?: @0,
             @"content" : @(content.length && [NSFileManager.defaultManager fileExistsAtPath:content]),

@@ -10377,6 +10377,7 @@ mod tests {
                 available_languages: vec!["en-US".into()],
                 voices: vec![berd_call::siri::SiriVoice {
                     name: "Aaron".into(),
+                    display_name: "Aaron".into(),
                     language: "en-US".into(),
                     size_bytes: 42,
                     installed: true,
@@ -10402,6 +10403,7 @@ mod tests {
                     "availableLanguages": ["en-US"],
                     "voices": [{
                         "name": "Aaron",
+                        "displayName": "Aaron",
                         "language": "en-US",
                         "sizeBytes": 42,
                         "installed": true

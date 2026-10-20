@@ -105,7 +105,7 @@ fn item(title: impl Into<String>, action: Option<MenuAction>) -> MenuNode {
 struct VoiceChoice {
     voice: String,
     language: Option<String>,
-    title: String,
+    name: String,
 }
 
 #[derive(Clone, Default)]
@@ -197,15 +197,23 @@ fn voice_menu(
 ) -> MenuNode {
     let voice = tts["voice"].as_str().unwrap_or("Unknown");
     let language = tts["language"].as_str();
+    let chosen = |entry: &VoiceChoice| entry.voice == voice && entry.language.as_deref() == language;
+    let name = voices.iter().find(|entry| chosen(entry)).map_or(voice, |entry| &entry.name);
     MenuNode {
         children: voices
             .iter()
             .map(|entry| MenuNode {
-                checked: entry.voice == voice && entry.language.as_deref() == language,
-                ..item(entry.title.clone(), Some(choose(entry)))
+                checked: chosen(entry),
+                ..item(
+                    match &entry.language {
+                        Some(language) => format!("{} ({language})", entry.name),
+                        None => entry.name.clone(),
+                    },
+                    Some(choose(entry)),
+                )
             })
             .collect(),
-        ..item(format!("{whose}Voice: {voice}"), None)
+        ..item(format!("{whose}Voice: {name}"), None)
     }
 }
 
@@ -676,7 +684,7 @@ fn available_voices(backend: &str) -> Result<Vec<VoiceChoice>, String> {
             .into_iter()
             .filter(|voice| voice.installed)
             .map(|voice| VoiceChoice {
-                title: format!("{} ({})", voice.name, voice.language),
+                name: voice.display_name,
                 voice: voice.name,
                 language: Some(voice.language),
             })
@@ -686,7 +694,7 @@ fn available_voices(backend: &str) -> Result<Vec<VoiceChoice>, String> {
             .iter()
             .map(|voice| VoiceChoice {
                 voice: voice.to_string(),
-                title: voice.to_string(),
+                name: voice.to_string(),
                 language: None,
             })
             .collect(),
@@ -694,7 +702,7 @@ fn available_voices(backend: &str) -> Result<Vec<VoiceChoice>, String> {
             .iter()
             .map(|voice| VoiceChoice {
                 voice: voice.id.to_string(),
-                title: voice.name.to_string(),
+                name: voice.name.to_string(),
                 language: None,
             })
             .collect(),
@@ -1002,7 +1010,7 @@ mod tests {
             .map(|language| VoiceChoice {
                 voice: "Aaron".into(),
                 language: Some(language.into()),
-                title: format!("Aaron ({language})"),
+                name: "Aaron".into(),
             })
             .collect();
         let nodes = menu_model(&MenuState {
@@ -1013,10 +1021,30 @@ mod tests {
         let menu = find(&nodes, "Voice: Aaron");
         assert!(menu.children[0].checked);
         assert!(!menu.children[1].checked);
+        assert_eq!(menu.children[1].title, "Aaron (en-GB)");
         assert!(
             matches!(control_request(menu.children[1].action.as_ref().unwrap()),
             ControlRequest::Voice { voice, language: Some(language) } if voice == "Aaron" && language == "en-GB")
         );
+    }
+
+    #[test]
+    fn voice_menu_shows_display_names_for_code_named_voices() {
+        let mut status = status(false, "allow_barge_in", None);
+        status["session"]["tts"]["voice"] = json!("en-US-F");
+        status["session"]["tts"]["language"] = json!("en-US");
+        let nodes = menu_model(&MenuState {
+            status: Some(status),
+            voices: vec![VoiceChoice {
+                voice: "en-US-F".into(),
+                language: Some("en-US".into()),
+                name: "Siri Voice 7".into(),
+            }],
+            ..MenuState::default()
+        });
+        let menu = find(&nodes, "Voice: Siri Voice 7");
+        assert_eq!(menu.children[0].title, "Siri Voice 7 (en-US)");
+        assert!(menu.children[0].checked);
     }
 
     #[test]
