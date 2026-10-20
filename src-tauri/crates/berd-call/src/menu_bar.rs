@@ -111,6 +111,8 @@ struct MenuState {
     status: Option<Value>,
     voices: Vec<VoiceChoice>,
     action_error: Option<String>,
+    // The mode a Spokesperson switch is restarting the call in, shown until the switch finishes.
+    switching: Option<bool>,
     catalog_error: Option<String>,
 }
 
@@ -134,7 +136,9 @@ fn menu_model(state: &MenuState) -> Vec<MenuNode> {
     {
         nodes.push(item(format!("Control error: {error}"), None));
     }
-    let expert = mode_name(status) == "Expert-Spokesperson";
+    let expert = state
+        .switching
+        .unwrap_or(mode_name(status) == "Expert-Spokesperson");
     nodes.extend([
         SEPARATOR,
         MenuNode {
@@ -503,6 +507,11 @@ fn spawn_coordinator(port: u16, state: Arc<Mutex<MenuState>>) -> mpsc::SyncSende
                 if latest_by_domain.get(&domain) != Some(&generation) {
                     continue;
                 }
+                if domain == ActionDomain::Mode {
+                    if let Ok(mut state) = state.lock() {
+                        state.switching = None;
+                    }
+                }
                 if let Some(error) = menu_action_error(result) {
                     errors.insert(domain, (generation, error));
                 } else {
@@ -534,7 +543,10 @@ fn spawn_coordinator(port: u16, state: Arc<Mutex<MenuState>>) -> mpsc::SyncSende
                     latest
                 });
             if let Ok(mut state) = state.lock() {
-                state.status = latest;
+                // The call doesn't answer while it restarts in the other mode.
+                if latest.is_some() || state.switching.is_none() {
+                    state.status = latest;
+                }
                 state.voices = catalog
                     .as_ref()
                     .map(|(_, voices)| voices.clone())
@@ -623,6 +635,11 @@ fn begin_menu_action(
     results: &mpsc::Sender<(u64, ActionDomain, Result<Value, String>)>,
     state: &Mutex<MenuState>,
 ) {
+    if let ControlRequest::SpokespersonMode { on } = request {
+        if let Ok(mut state) = state.lock() {
+            state.switching = Some(on);
+        }
+    }
     match host_control::begin_request(port, request) {
         Ok(pending) => {
             let results = results.clone();
@@ -807,6 +824,18 @@ mod tests {
                 ..
             }
         ));
+        // A switch shows its mode at once, before the call has restarted in it.
+        assert!(
+            find(
+                &menu_model(&MenuState {
+                    status: Some(self::status(false, "allow_barge_in", None)),
+                    switching: Some(true),
+                    ..MenuState::default()
+                }),
+                "Spokesperson"
+            )
+            .checked
+        );
         assert_eq!(icon_symbol(Some(&status)), "mic.slash");
         find(&menu_model(&MenuState::default()), "End Call");
     }
