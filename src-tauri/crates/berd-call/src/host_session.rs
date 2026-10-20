@@ -23,7 +23,7 @@ use berd_call::protocol::{
     NotAdmittedReason, OutputReadyOutcome, SessionMessage, SessionRequest, UtteranceOrigin,
     VoiceSessionSnapshot,
 };
-use berd_call::PocketAudioPlayer;
+use berd_call::{ConversationStatus, PocketAudioPlayer, StatusSoundMode, StatusSoundSettings};
 
 use crate::codex::{self, CodexRecord, CodexRelay, CodexTarget};
 use crate::host_control::{ControlServer, HostControl};
@@ -108,6 +108,14 @@ pub(crate) fn run(options: StartOptions) -> Result<(), String> {
             .as_ref()
             .and_then(|(_, saved)| saved.input_policy)
             .unwrap_or_else(default_input_during_tts_policy),
+        status_sounds: Arc::new(Mutex::new(StatusSounds {
+            mode: options
+                .saved
+                .as_ref()
+                .and_then(|(_, saved)| saved.status_sounds)
+                .unwrap_or_default(),
+            status: None,
+        })),
         restarted: None,
     };
     loop {
@@ -241,7 +249,30 @@ struct SessionStart {
     mute_epoch: Arc<AtomicU64>,
     system_input_mute: Option<crate::system_input_mute::SystemInputMute>,
     input_during_tts: InputDuringTtsPolicy,
+    status_sounds: Arc<Mutex<StatusSounds>>,
     restarted: Option<SyncSender<Result<Value, String>>>,
+}
+
+/// The call's status sounds: which ones play, and whether the agent is working,
+/// once its host has said. The session plays nothing until then.
+#[derive(Clone, Copy, Default)]
+struct StatusSounds {
+    mode: StatusSoundMode,
+    status: Option<ConversationStatus>,
+}
+
+impl StatusSounds {
+    fn request(self, id: u64) -> Option<SessionRequest> {
+        self.status
+            .map(|status| SessionRequest::SetConversationStatus {
+                id,
+                status,
+                settings: StatusSoundSettings {
+                    mode: self.mode,
+                    ..StatusSoundSettings::default()
+                },
+            })
+    }
 }
 
 fn run_session(
@@ -259,6 +290,7 @@ fn run_session(
         mute_epoch,
         system_input_mute,
         input_during_tts,
+        status_sounds,
         restarted,
     } = start;
     let started = start_session(
@@ -268,6 +300,7 @@ fn run_session(
         mute_epoch,
         system_input_mute,
         input_during_tts,
+        status_sounds,
         transcript,
         non_blocking,
         stop_requested,
@@ -357,6 +390,7 @@ impl SessionActor {
                 .lock()
                 .map(|session| session.input_during_tts.policy)
                 .unwrap_or(input_during_tts),
+            status_sounds: Arc::clone(&self.status_sounds),
             restarted: Some(restart.response),
         }
     }
@@ -379,6 +413,7 @@ fn start_session(
     mute_epoch: Arc<AtomicU64>,
     system_input_mute: Option<crate::system_input_mute::SystemInputMute>,
     input_during_tts: InputDuringTtsPolicy,
+    status_sounds: Arc<Mutex<StatusSounds>>,
     transcript: &Arc<Transcript>,
     non_blocking: &Arc<AtomicBool>,
     stop_requested: &Arc<AtomicBool>,
@@ -418,6 +453,7 @@ fn start_session(
         expert_spokesperson,
     );
     actor.saved = saved;
+    actor.status_sounds = status_sounds;
     actor
         .muted
         .store(muted.load(Ordering::SeqCst), Ordering::SeqCst);
@@ -447,6 +483,11 @@ fn start_session(
         actor.restore_saved_tts(settings, revision, Duration::from_secs(30))?;
     }
     actor.restore_input_mute()?;
+    // A restarted session picks up the status its host last reported.
+    let sounds = *actor.status_sounds.lock().map_err(|_| "status sounds lock failed")?;
+    if let Some(request) = sounds.request(actor.next_id()) {
+        send_request(&actor.writer, &request)?;
+    }
     let capture = DefaultInputCapture::start(
         writer,
         failure_tx,
@@ -461,6 +502,7 @@ fn start_session(
         non_blocking: Arc::clone(non_blocking),
         stop_requested: Arc::clone(stop_requested),
         muted: Arc::clone(&actor.muted),
+        status_sounds: Arc::clone(&actor.status_sounds),
         transcript: Arc::clone(transcript),
         speaks: !expert_spokesperson
             || arguments
@@ -544,6 +586,11 @@ enum ControlCommand {
         muted: bool,
         response: SyncSender<Result<Value, String>>,
     },
+    StatusSounds {
+        mode: Option<StatusSoundMode>,
+        status: Option<ConversationStatus>,
+        response: SyncSender<Result<Value, String>>,
+    },
     TtsSettings {
         settings: berd_call::TtsSettings,
         expected_revision: u64,
@@ -590,6 +637,7 @@ struct SessionControl {
     non_blocking: Arc<AtomicBool>,
     stop_requested: Arc<AtomicBool>,
     muted: Arc<AtomicBool>,
+    status_sounds: Arc<Mutex<StatusSounds>>,
     transcript: Arc<Transcript>,
     // Whether the Expert may speak to the user rather than only through the Spokesperson.
     speaks: bool,
@@ -804,6 +852,24 @@ impl HostControl for SessionControl {
         self.status()
     }
 
+    fn set_status_sounds(&self, mode: StatusSoundMode) -> Result<Value, String> {
+        self.request(|response| ControlCommand::StatusSounds {
+            mode: Some(mode),
+            status: None,
+            response,
+        })?;
+        self.status()
+    }
+
+    fn set_conversation_status(&self, status: ConversationStatus) -> Result<Value, String> {
+        self.request(|response| ControlCommand::StatusSounds {
+            mode: None,
+            status: Some(status),
+            response,
+        })?;
+        self.status()
+    }
+
     fn restart(&self, session_arguments: Vec<String>) -> Result<Value, String> {
         self.restart_with(session_arguments, None)
     }
@@ -855,11 +921,17 @@ impl HostControl for SessionControl {
     }
 
     fn status(&self) -> Result<Value, String> {
+        let sounds = *self
+            .status_sounds
+            .lock()
+            .map_err(|_| "status sounds lock failed")?;
         Ok(json!({
             "running": self.running.load(Ordering::SeqCst),
             "session": *self.ready.session.lock().map_err(|_| "session settings lock failed")?,
             "nonBlocking": self.non_blocking.load(Ordering::SeqCst),
             "muted": self.muted.load(Ordering::SeqCst),
+            "statusSounds": sounds.mode,
+            "conversationStatus": sounds.status,
             "sessionArguments": &self.session_arguments[1..],
         }))
     }
@@ -933,6 +1005,7 @@ enum SavedPreference {
     Tts,
     Spokesperson,
     InputPolicy,
+    StatusSounds,
 }
 
 struct SessionActor {
@@ -958,6 +1031,7 @@ struct SessionActor {
     stopping: bool,
     restart: Option<PendingRestart>,
     muted: Arc<AtomicBool>,
+    status_sounds: Arc<Mutex<StatusSounds>>,
     suppress_startup_persist: bool,
     // Immediate requested mute gates capture before the child acknowledges it.
     // Native callbacks and manual controls write it; `muted` above holds only
@@ -1020,6 +1094,7 @@ impl SessionActor {
             stopping: false,
             restart: None,
             muted: Arc::new(AtomicBool::new(false)),
+            status_sounds: Arc::default(),
             suppress_startup_persist: false,
             capture_muted: Arc::new(AtomicBool::new(false)),
             capture_mute_epoch: Arc::new(AtomicU64::new(0)),
@@ -1193,6 +1268,38 @@ impl SessionActor {
                     &SessionRequest::SetInputMuted { id, active: muted },
                 )?;
                 self.pending_settings.insert(id, response);
+            }
+            ControlCommand::StatusSounds {
+                mode,
+                status,
+                response,
+            } => {
+                // Committed now, so a restart before the reply keeps it.
+                let sounds = {
+                    let mut sounds = self
+                        .status_sounds
+                        .lock()
+                        .map_err(|_| "status sounds lock failed")?;
+                    sounds.mode = mode.unwrap_or(sounds.mode);
+                    sounds.status = status.or(sounds.status);
+                    *sounds
+                };
+                if mode.is_some() {
+                    if let Some((_, saved)) = &mut self.saved {
+                        saved.status_sounds = mode;
+                    }
+                    self.persist_settings(SavedPreference::StatusSounds);
+                }
+                let id = self.next_id();
+                match sounds.request(id) {
+                    Some(request) => {
+                        send_request(&self.writer, &request)?;
+                        self.pending_settings.insert(id, response);
+                    }
+                    None => {
+                        let _ = response.send(Ok(json!({})));
+                    }
+                }
             }
             ControlCommand::TtsSettings {
                 settings,
@@ -1403,6 +1510,11 @@ impl SessionActor {
                     let _ = response.send(Ok(json!({"outcome":outcome,"snapshot":snapshot})));
                 }
             }
+            SessionMessage::ConversationStatusApplied { id, .. } => {
+                if let Some(response) = self.pending_settings.remove(&id) {
+                    let _ = response.send(Ok(json!({})));
+                }
+            }
             SessionMessage::InputMuteApplied { id, active } => {
                 // Commit before acknowledging so a restart cannot read a stale value.
                 self.muted.store(active, Ordering::SeqCst);
@@ -1589,6 +1701,15 @@ impl SessionActor {
         let Some((path, saved)) = &mut self.saved else {
             return;
         };
+        if let SavedPreference::StatusSounds = changed {
+            let mode = saved.status_sounds;
+            if let Err(error) =
+                crate::saved_settings::update(path, |latest| latest.status_sounds = mode)
+            {
+                eprintln!("berd-call: live settings applied but could not be saved: {error}");
+            }
+            return;
+        }
         let Ok(session) = self.session.lock() else {
             return;
         };
@@ -1626,7 +1747,9 @@ impl SessionActor {
                 latest.tts = saved.tts.clone();
             }
             SavedPreference::InputPolicy => latest.input_policy = saved.input_policy,
-            SavedPreference::Spokesperson => unreachable!("saved above"),
+            SavedPreference::Spokesperson | SavedPreference::StatusSounds => {
+                unreachable!("saved above")
+            }
         }) {
             eprintln!("berd-call: live settings applied but could not be saved: {error}");
         }
@@ -4104,6 +4227,7 @@ mod tests {
                 rate: 1.0,
             }),
             input_policy: Some(InputDuringTtsPolicy::SuppressInput),
+            status_sounds: None,
         }
     }
 
@@ -4414,6 +4538,84 @@ mod tests {
     }
 
     #[test]
+    fn status_sounds_wait_for_a_reported_status_and_save_only_their_mode() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let voice = ["--voice", "Aaron", "--language", "en-US"].map(str::to_string);
+        crate::saved_settings::save(
+            &path,
+            &crate::saved_settings::SavedSettings {
+                arguments: voice.to_vec(),
+                ..crate::saved_settings::SavedSettings::default()
+            },
+        )
+        .unwrap();
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let (_events_tx, events) = mpsc::sync_channel(1);
+        let (_commands_tx, commands) = mpsc::sync_channel(1);
+        let (audio_commands, _audio_rx) = mpsc::sync_channel(1);
+        let mut actor = test_actor(writer, events, commands, audio_commands);
+        actor.saved = Some((path.clone(), crate::saved_settings::SavedSettings::default()));
+        let sounds = Arc::clone(&actor.status_sounds);
+
+        // Without a status there is nothing to play, so the mode applies at once.
+        let (response, result) = mpsc::sync_channel(1);
+        actor
+            .handle_command(ControlCommand::StatusSounds {
+                mode: Some(StatusSoundMode::WorkingAndWaiting),
+                status: None,
+                response,
+            })
+            .unwrap();
+        result.try_recv().unwrap().unwrap();
+        let saved = crate::saved_settings::load(&path).unwrap();
+        assert_eq!(saved.status_sounds, Some(StatusSoundMode::WorkingAndWaiting));
+        assert_eq!(saved.arguments, voice);
+
+        // A reported status reaches the session with the mode, and is
+        // committed before the session acknowledges it.
+        let (response, result) = mpsc::sync_channel(1);
+        let id = actor.next_id;
+        actor
+            .handle_command(ControlCommand::StatusSounds {
+                mode: None,
+                status: Some(ConversationStatus::Working),
+                response,
+            })
+            .unwrap();
+        assert_eq!(
+            sounds.lock().unwrap().status,
+            Some(ConversationStatus::Working)
+        );
+        assert!(result.try_recv().is_err());
+        actor
+            .handle_event(SessionMessage::ConversationStatusApplied {
+                id,
+                status: ConversationStatus::Working,
+                settings: StatusSoundSettings {
+                    mode: StatusSoundMode::WorkingAndWaiting,
+                    ..StatusSoundSettings::default()
+                },
+            })
+            .unwrap();
+        result.recv().unwrap().unwrap();
+
+        drop(actor);
+        let mut sent = Vec::new();
+        child.stdout.take().unwrap().read_to_end(&mut sent).unwrap();
+        let sent = String::from_utf8_lossy(&sent);
+        assert!(child.wait().unwrap().success());
+        assert_eq!(sent.matches("set_conversation_status").count(), 1);
+        assert!(sent.contains(r#""status":"working""#));
+        assert!(sent.contains(r#""mode":"working-and-waiting""#));
+    }
+
+    #[test]
     fn stop_is_recorded_even_when_the_session_never_reads_it() {
         let (commands, receiver) = mpsc::sync_channel(1);
         let stop_requested = Arc::new(AtomicBool::new(false));
@@ -4426,6 +4628,7 @@ mod tests {
             non_blocking: Arc::new(AtomicBool::new(false)),
             stop_requested: Arc::clone(&stop_requested),
             muted: Arc::new(AtomicBool::new(false)),
+            status_sounds: Arc::default(),
             transcript: Arc::new(Transcript::Silent),
             speaks: true,
             session_arguments: vec!["session".into()],
@@ -4450,6 +4653,7 @@ mod tests {
                 non_blocking: Arc::new(AtomicBool::new(false)),
                 stop_requested: Arc::new(AtomicBool::new(false)),
                 muted: Arc::new(AtomicBool::new(false)),
+                status_sounds: Arc::default(),
                 transcript: Arc::new(transcript),
                 speaks: true,
                 session_arguments: [
@@ -4540,6 +4744,7 @@ mod tests {
             non_blocking: Arc::new(AtomicBool::new(false)),
             stop_requested: Arc::new(AtomicBool::new(false)),
             muted: Arc::new(AtomicBool::new(false)),
+            status_sounds: Arc::default(),
             transcript: Arc::new(Transcript::Stdout { live: true }),
             speaks: true,
             session_arguments: [
@@ -4599,6 +4804,7 @@ mod tests {
             non_blocking: Arc::new(AtomicBool::new(false)),
             stop_requested: Arc::new(AtomicBool::new(false)),
             muted: Arc::new(AtomicBool::new(false)),
+            status_sounds: Arc::default(),
             transcript: Arc::new(Transcript::Silent),
             speaks: false,
             session_arguments: vec!["session".into()],
@@ -4637,6 +4843,7 @@ mod tests {
             non_blocking: Arc::new(AtomicBool::new(false)),
             stop_requested: Arc::new(AtomicBool::new(false)),
             muted: Arc::new(AtomicBool::new(false)),
+            status_sounds: Arc::default(),
             transcript: Arc::new(Transcript::Silent),
             speaks: true,
             session_arguments: vec!["session".into()],
@@ -4680,6 +4887,7 @@ mod tests {
             non_blocking: Arc::new(AtomicBool::new(false)),
             stop_requested: Arc::new(AtomicBool::new(false)),
             muted: Arc::new(AtomicBool::new(false)),
+            status_sounds: Arc::default(),
             transcript: Arc::new(Transcript::Silent),
             speaks: true,
             session_arguments: vec!["session".into()],
@@ -4728,6 +4936,7 @@ mod tests {
             non_blocking: Arc::new(AtomicBool::new(false)),
             stop_requested: Arc::new(AtomicBool::new(false)),
             muted: Arc::new(AtomicBool::new(false)),
+            status_sounds: Arc::default(),
             transcript: Arc::new(Transcript::Silent),
             speaks: true,
             session_arguments: vec!["session".into()],
@@ -4782,6 +4991,7 @@ mod tests {
                 non_blocking: Arc::new(AtomicBool::new(false)),
                 stop_requested: Arc::new(AtomicBool::new(false)),
                 muted: Arc::new(AtomicBool::new(false)),
+                status_sounds: Arc::default(),
                 transcript: Arc::new(Transcript::Silent),
                 speaks: true,
                 session_arguments: vec!["session".into()],

@@ -96,6 +96,8 @@ Usage:
   berd-call settings [--port PORT] --input-during-tts allow|suppress
   berd-call settings [--port PORT] --muted true|false
   berd-call settings [--port PORT] --spokesperson true|false
+  berd-call settings [--port PORT] --status-sounds off|working|working-and-waiting
+  berd-call settings [--port PORT] --conversation-status working|waiting
   berd-call settings [--port PORT] --restart [session options]
 
 The setting applies to subsequent speak calls. In a call started with
@@ -106,6 +108,11 @@ The setting applies to subsequent speak calls. In a call started with
 or off, restarting the call's session in the other mode with the same voice;
 options only the other mode takes are dropped, and in a call started with
 --stream live, agents keep their own voice beside the Spokesperson's.
+--conversation-status tells the call whether the agent is working or waiting
+for you; the call plays nothing until it is first set. --status-sounds chooses
+what plays and is saved for later calls: Pop every five seconds while the agent
+works (working, the default), also Purr while it waits (working-and-waiting), or
+nothing (off). Both survive --restart.
 Non-blocking delivery requires a call started with --stream or --codex.
 Successful delivery produces no notification."#;
 

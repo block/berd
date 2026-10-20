@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-use berd_call::{input::InputDuringTtsPolicy, TtsSettings};
+use berd_call::{input::InputDuringTtsPolicy, StatusSoundMode, TtsSettings};
 use serde::{Deserialize, Serialize};
 
 /// Call preferences only. Agent identity, transcript routing and credentials
@@ -12,6 +12,8 @@ pub(crate) struct SavedSettings {
     pub arguments: Vec<String>,
     pub tts: Option<TtsSettings>,
     pub input_policy: Option<InputDuringTtsPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_sounds: Option<StatusSoundMode>,
 }
 
 pub(crate) fn path() -> Result<PathBuf, String> {

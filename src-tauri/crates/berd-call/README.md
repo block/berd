@@ -103,6 +103,8 @@ Use `berd-call settings --input-during-tts allow|suppress` to change whether
 microphone input can interrupt speech, and `berd-call settings --muted true|false`
 to mute or unmute microphone input. Both apply live and are reflected by `status`.
 
+`berd-call settings --conversation-status working|waiting` tells the call whether its agent is working or waiting for you, for hosts such as the Buzz plugin that know. The call plays no status sounds until it is first set. `berd-call settings --status-sounds off|working|working-and-waiting`, or Status Sounds in the menu bar, chooses what plays: Pop every five seconds while the agent works (the default), also Purr while it waits, or nothing. The mode is saved for later calls. `status` shows both as `statusSounds` and `conversationStatus`, and both survive `settings --restart`.
+
 Settings the runtime cannot change live, such as STT backend or call mode, use
 `berd-call settings --restart [session options]`. The replacement options are
 complete `berd-call session` options. The call keeps its control port, stream,

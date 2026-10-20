@@ -1118,6 +1118,18 @@ fn parse_host_settings_args(
                     _ => return Err("--input-during-tts requires allow or suppress".into()),
                 },
             },
+            "--status-sounds" => host_control::ControlRequest::StatusSounds {
+                mode: args
+                    .get(index + 1)
+                    .and_then(|value| serde_json::from_value(value.as_str().into()).ok())
+                    .ok_or("--status-sounds requires off, working, or working-and-waiting")?,
+            },
+            "--conversation-status" => host_control::ControlRequest::ConversationStatus {
+                status: args
+                    .get(index + 1)
+                    .and_then(|value| serde_json::from_value(value.as_str().into()).ok())
+                    .ok_or("--conversation-status requires working or waiting")?,
+            },
             "--rate" => host_control::ControlRequest::Rate {
                 rate: args
                     .get(index + 1)
@@ -1182,7 +1194,7 @@ fn parse_host_settings_args(
 }
 
 const SETTINGS_CHOICE_ERROR: &str =
-    "provide exactly one of --non-blocking, --rate, --voice, --spokesperson-voice, --spokesperson-rate, --tts, --input-during-tts, --muted, --spokesperson, or --restart";
+    "provide exactly one of --non-blocking, --rate, --voice, --spokesperson-voice, --spokesperson-rate, --tts, --input-during-tts, --muted, --spokesperson, --status-sounds, --conversation-status, or --restart";
 
 fn parse_bool_setting(flag: &str, value: Option<&String>) -> Result<bool, String> {
     match value.map(String::as_str) {
@@ -12768,6 +12780,7 @@ mod tests {
                     rate: 1.5,
                 }),
                 input_policy: Some(berd_call::input::InputDuringTtsPolicy::SuppressInput),
+                status_sounds: None,
             },
         )
         .unwrap();
@@ -12936,6 +12949,41 @@ mod tests {
                 .1,
             host_control::ControlRequest::SpokespersonMode { on: false }
         ));
+        assert!(matches!(
+            parse_host_settings_args(&args(&[
+                "berd-call",
+                "settings",
+                "--status-sounds",
+                "working-and-waiting",
+            ]))
+            .unwrap()
+            .1,
+            host_control::ControlRequest::StatusSounds {
+                mode: berd_call::StatusSoundMode::WorkingAndWaiting
+            }
+        ));
+        assert!(matches!(
+            parse_host_settings_args(&args(&[
+                "berd-call",
+                "settings",
+                "--conversation-status",
+                "waiting",
+            ]))
+            .unwrap()
+            .1,
+            host_control::ControlRequest::ConversationStatus {
+                status: berd_call::ConversationStatus::Waiting
+            }
+        ));
+        for (flag, value) in [
+            ("--status-sounds", "loud"),
+            ("--status-sounds", "Working"),
+            ("--conversation-status", "idle"),
+        ] {
+            assert!(
+                parse_host_settings_args(&args(&["berd-call", "settings", flag, value])).is_err()
+            );
+        }
         assert!(matches!(
             parse_host_settings_args(&args(&[
                 "berd-call",

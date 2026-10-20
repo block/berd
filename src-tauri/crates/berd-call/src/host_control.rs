@@ -43,6 +43,13 @@ pub(crate) trait HostControl: Send + Sync + 'static {
         policy: berd_call::input::InputDuringTtsPolicy,
     ) -> Result<Value, String>;
     fn set_muted(&self, muted: bool) -> Result<Value, String>;
+    /// Which status sounds the call plays, saved for later calls.
+    fn set_status_sounds(&self, mode: berd_call::StatusSoundMode) -> Result<Value, String>;
+    /// Whether the agent is working or waiting for the user, as its host reports it.
+    fn set_conversation_status(
+        &self,
+        status: berd_call::ConversationStatus,
+    ) -> Result<Value, String>;
     fn restart(&self, session_arguments: Vec<String>) -> Result<Value, String>;
     /// Restarts the call's session with the Spokesperson on or off.
     fn set_spokesperson_mode(&self, on: bool) -> Result<Value, String>;
@@ -151,6 +158,12 @@ pub(crate) enum ControlRequest {
     },
     Muted {
         muted: bool,
+    },
+    StatusSounds {
+        mode: berd_call::StatusSoundMode,
+    },
+    ConversationStatus {
+        status: berd_call::ConversationStatus,
     },
     Restart {
         #[serde(rename = "sessionArguments")]
@@ -278,6 +291,10 @@ fn handle_connection(mut stream: TcpStream, control: &dyn HostControl) -> Result
                 ControlRequest::NonBlocking { enabled } => control.set_non_blocking(enabled),
                 ControlRequest::InputDuringTts { policy } => control.set_input_during_tts(policy),
                 ControlRequest::Muted { muted } => control.set_muted(muted),
+                ControlRequest::StatusSounds { mode } => control.set_status_sounds(mode),
+                ControlRequest::ConversationStatus { status } => {
+                    control.set_conversation_status(status)
+                }
                 ControlRequest::Restart { session_arguments } => control.restart(session_arguments),
                 ControlRequest::SpokespersonMode { on } => control.set_spokesperson_mode(on),
             },
@@ -419,6 +436,15 @@ mod tests {
         }
         fn set_muted(&self, muted: bool) -> Result<Value, String> {
             Ok(json!({"muted": muted}))
+        }
+        fn set_status_sounds(&self, mode: berd_call::StatusSoundMode) -> Result<Value, String> {
+            Ok(json!({"statusSounds": mode}))
+        }
+        fn set_conversation_status(
+            &self,
+            status: berd_call::ConversationStatus,
+        ) -> Result<Value, String> {
+            Ok(json!({"conversationStatus": status}))
         }
         fn restart(&self, session_arguments: Vec<String>) -> Result<Value, String> {
             Ok(json!({"sessionArguments": session_arguments}))
