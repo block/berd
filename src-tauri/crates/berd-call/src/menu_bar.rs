@@ -116,6 +116,8 @@ struct MenuState {
     // The mode a Spokesperson switch is restarting the call in, shown until the switch finishes.
     switching: Option<bool>,
     catalog_error: Option<String>,
+    // Without an OpenAI key the Spokesperson can't be turned on.
+    no_openai_key: bool,
 }
 
 /// Builds the menu from server status and separately owned local menu state.
@@ -141,13 +143,15 @@ fn menu_model(state: &MenuState) -> Vec<MenuNode> {
     let expert = state
         .switching
         .unwrap_or(mode_name(status) == "Expert-Spokesperson");
-    nodes.extend([
-        SEPARATOR,
-        MenuNode {
-            checked: expert,
-            ..item("Spokesperson", Some(MenuAction::SpokespersonMode(!expert)))
-        },
-    ]);
+    if expert || !state.no_openai_key {
+        nodes.extend([
+            SEPARATOR,
+            MenuNode {
+                checked: expert,
+                ..item("Spokesperson", Some(MenuAction::SpokespersonMode(!expert)))
+            },
+        ]);
+    }
     // The Spokesperson's own voice sits with it, and replies with their own voice get a section beside it.
     if expert && !spokesperson.is_null() {
         nodes.push(voice_menu(
@@ -375,7 +379,10 @@ define_class!(
 
 impl MenuTarget {
     fn new(mtm: MainThreadMarker, port: u16) -> Retained<Self> {
-        let state = Arc::new(Mutex::new(MenuState::default()));
+        let state = Arc::new(Mutex::new(MenuState {
+            no_openai_key: berd_call::openai_spokesperson::api_key().is_none(),
+            ..MenuState::default()
+        }));
         let commands = spawn_coordinator(port, state.clone());
         let this = mtm.alloc::<Self>().set_ivars(MenuTargetIvars {
             commands,
@@ -913,6 +920,26 @@ mod tests {
         );
         assert_eq!(icon_symbol(Some(&status)), "mic.slash");
         find(&menu_model(&MenuState::default()), "End Call");
+    }
+
+    #[test]
+    fn the_spokesperson_is_offered_only_with_a_key_to_start_it() {
+        let titles = |mode| {
+            menu_model(&MenuState {
+                status: Some(status(false, "allow_barge_in", mode)),
+                no_openai_key: true,
+                ..MenuState::default()
+            })
+            .into_iter()
+            .map(|node| node.title)
+            .collect::<Vec<_>>()
+        };
+        let conventional = titles(None);
+        assert!(!conventional.contains(&"Spokesperson".to_string()));
+        assert_eq!(conventional[1], "");
+        assert_ne!(conventional[2], "");
+        // A call already in the Spokesperson's hands can still leave them.
+        assert!(titles(Some("expert-spokesperson")).contains(&"Spokesperson".to_string()));
     }
 
     #[test]

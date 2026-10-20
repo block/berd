@@ -26,6 +26,13 @@ const MAX_GRACEFUL_SHUTDOWN_SILENCE_MS: u64 = 3_100;
 const GRACEFUL_SHUTDOWN_SETTLE: Duration = Duration::from_secs(1);
 const GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// The OpenAI key the Spokesperson needs, when the environment has one.
+pub fn api_key() -> Option<String> {
+    std::env::var("OPENAI_API_KEY")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+}
+
 /// Connection settings for the live Spokesperson. This deliberately does not
 /// implement `Debug` because it contains an API key.
 #[derive(Clone)]
@@ -51,9 +58,7 @@ impl OpenAiSpokespersonConfig {
     }
 
     pub fn from_environment() -> Result<Self, String> {
-        let api_key = std::env::var("OPENAI_API_KEY")
-            .ok()
-            .filter(|value| !value.trim().is_empty())
+        let api_key = api_key()
             .ok_or_else(|| "OPENAI_API_KEY is required for Expert-Spokesperson mode".to_string())?;
         let mut config = Self::new(
             api_key,
