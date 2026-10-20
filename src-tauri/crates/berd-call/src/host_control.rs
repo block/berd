@@ -202,29 +202,36 @@ impl PendingResponse {
     }
 }
 
+fn read_timeout(request: &ControlRequest) -> Result<Option<Duration>, String> {
+    Ok(
+        if let ControlRequest::PollInput {
+            timeout_seconds, ..
+        } = request
+        {
+            if !POLL_TIMEOUT_SECONDS.contains(timeout_seconds) {
+                return Err("timeout must be between 1 and 3600 seconds".into());
+            }
+            Some(Duration::from_secs(*timeout_seconds) + IO_TIMEOUT)
+        } else if matches!(
+            request,
+            ControlRequest::Speak { .. }
+                | ControlRequest::TtsSettings { .. }
+                | ControlRequest::Rate { .. }
+                | ControlRequest::Voice { .. }
+                | ControlRequest::Spokesperson { .. }
+                | ControlRequest::StatusSounds { .. }
+                | ControlRequest::Restart { .. }
+                | ControlRequest::SpokespersonMode { .. }
+        ) {
+            None
+        } else {
+            Some(IO_TIMEOUT)
+        },
+    )
+}
+
 pub(crate) fn begin_request(port: u16, request: ControlRequest) -> Result<PendingResponse, String> {
-    let read_timeout = if let ControlRequest::PollInput {
-        timeout_seconds, ..
-    } = &request
-    {
-        if !POLL_TIMEOUT_SECONDS.contains(timeout_seconds) {
-            return Err("timeout must be between 1 and 3600 seconds".into());
-        }
-        Some(Duration::from_secs(*timeout_seconds) + IO_TIMEOUT)
-    } else if matches!(
-        &request,
-        ControlRequest::Speak { .. }
-            | ControlRequest::TtsSettings { .. }
-            | ControlRequest::Rate { .. }
-            | ControlRequest::Voice { .. }
-            | ControlRequest::Spokesperson { .. }
-            | ControlRequest::Restart { .. }
-            | ControlRequest::SpokespersonMode { .. }
-    ) {
-        None
-    } else {
-        Some(IO_TIMEOUT)
-    };
+    let read_timeout = read_timeout(&request)?;
     let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port))
         .map_err(|error| format!("could not connect to berd-call on port {port}: {error}"))?;
     configure_stream(&stream, read_timeout)?;
@@ -543,5 +550,18 @@ mod tests {
         assert!(validate_speak("hello", &[], None, true).is_err());
         assert!(validate_speak("hello", &[], Some(" "), false).is_err());
         assert!(validate_speak("hello", &[], Some("Nora"), true).is_ok());
+    }
+
+    #[test]
+    fn status_sounds_wait_for_the_session_without_a_read_timeout() {
+        let request = ControlRequest::StatusSounds {
+            mode: Some(berd_call::StatusSoundMode::Off),
+            status: None,
+        };
+        assert_eq!(read_timeout(&request).unwrap(), None);
+        assert_eq!(
+            read_timeout(&ControlRequest::Muted { muted: true }).unwrap(),
+            Some(IO_TIMEOUT)
+        );
     }
 }

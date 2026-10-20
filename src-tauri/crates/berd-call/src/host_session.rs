@@ -1,6 +1,6 @@
 #![cfg(target_os = "macos")]
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::fd::{FromRawFd, RawFd};
@@ -460,7 +460,10 @@ fn start_session(
     }
     actor.restore_input_mute()?;
     actor.status_sounds = Arc::clone(status_sounds);
-    actor.send_status_sounds()?;
+    let sounds = *status_sounds
+        .lock()
+        .map_err(|_| "status sounds lock failed")?;
+    actor.send_status_sounds(sounds)?;
     let capture = DefaultInputCapture::start(
         writer,
         failure_tx,
@@ -1008,6 +1011,8 @@ struct SessionActor {
     restart: Option<PendingRestart>,
     muted: Arc<AtomicBool>,
     status_sounds: Arc<Mutex<StatusSounds>>,
+    // Requested sounds and any mode change, committed when the session applies them.
+    pending_status_sounds: BTreeMap<u64, (StatusSounds, Option<berd_call::StatusSoundMode>)>,
     suppress_startup_persist: bool,
     // Immediate requested mute gates capture before the child acknowledges it.
     // Native callbacks and manual controls write it; `muted` above holds only
@@ -1041,11 +1046,7 @@ impl SessionActor {
     }
 
     /// Tells the session its status sounds, once a host has said whether the agent is working.
-    fn send_status_sounds(&mut self) -> Result<Option<u64>, String> {
-        let sounds = *self
-            .status_sounds
-            .lock()
-            .map_err(|_| "status sounds lock failed")?;
+    fn send_status_sounds(&mut self, sounds: StatusSounds) -> Result<Option<u64>, String> {
         let Some(status) = sounds.status else {
             return Ok(None);
         };
@@ -1062,6 +1063,19 @@ impl SessionActor {
             },
         )?;
         Ok(Some(id))
+    }
+
+    fn commit_status_sounds(
+        &mut self,
+        sounds: StatusSounds,
+        mode: Option<berd_call::StatusSoundMode>,
+    ) {
+        if let Ok(mut committed) = self.status_sounds.lock() {
+            *committed = sounds;
+        }
+        if let Some(mode) = mode {
+            self.persist_settings(SavedPreference::StatusSounds(mode));
+        }
     }
 
     fn new(
@@ -1095,6 +1109,7 @@ impl SessionActor {
             restart: None,
             muted: Arc::new(AtomicBool::new(false)),
             status_sounds: Arc::default(),
+            pending_status_sounds: BTreeMap::new(),
             suppress_startup_persist: false,
             capture_muted: Arc::new(AtomicBool::new(false)),
             capture_mute_epoch: Arc::new(AtomicU64::new(0)),
@@ -1274,24 +1289,32 @@ impl SessionActor {
                 status,
                 response,
             } => {
-                if let Ok(mut sounds) = self.status_sounds.lock() {
-                    sounds.mode = mode.unwrap_or(sounds.mode);
-                    sounds.status = status.or(sounds.status);
-                }
-                if let Some(mode) = mode {
-                    self.persist_settings(SavedPreference::StatusSounds(mode));
-                }
+                // Build on the newest request, since the session applies them in order.
+                let latest = match self.pending_status_sounds.last_key_value() {
+                    Some((_, (sounds, _))) if !self.stopping => *sounds,
+                    _ => *self
+                        .status_sounds
+                        .lock()
+                        .map_err(|_| "status sounds lock failed")?,
+                };
+                let sounds = StatusSounds {
+                    mode: mode.unwrap_or(latest.mode),
+                    status: status.or(latest.status),
+                };
                 // A stopping child may already have exited; a restarted session
                 // is sent the committed status when it starts.
-                if self.stopping {
-                    let _ = response.send(Ok(json!({})));
-                    return Ok(());
-                }
-                match self.send_status_sounds()? {
+                let sent = if self.stopping {
+                    None
+                } else {
+                    self.send_status_sounds(sounds)?
+                };
+                match sent {
                     Some(id) => {
+                        self.pending_status_sounds.insert(id, (sounds, mode));
                         self.pending_settings.insert(id, response);
                     }
                     None => {
+                        self.commit_status_sounds(sounds, mode);
                         let _ = response.send(Ok(json!({})));
                     }
                 }
@@ -1506,6 +1529,9 @@ impl SessionActor {
                 }
             }
             SessionMessage::ConversationStatusApplied { id, .. } => {
+                if let Some((sounds, mode)) = self.pending_status_sounds.remove(&id) {
+                    self.commit_status_sounds(sounds, mode);
+                }
                 if let Some(response) = self.pending_settings.remove(&id) {
                     let _ = response.send(Ok(json!({})));
                 }
@@ -1680,6 +1706,7 @@ impl SessionActor {
         for (_, response) in self.pending_settings.drain() {
             let _ = response.send(Err(message.to_string()));
         }
+        self.pending_status_sounds.clear();
         self.respond_speak(Err(message.to_string()));
         for command in self.waiting_speaks.drain(..) {
             if let ControlCommand::Speak { response, .. } = command {
@@ -3209,7 +3236,81 @@ mod tests {
             Some(berd_call::StatusSoundMode::WorkingAndWaiting)
         );
         // A session started later, as after a restart, is sent the reported status.
-        assert!(actor.send_status_sounds().unwrap().is_some());
+        let sounds = *actor.status_sounds.lock().unwrap();
+        assert!(actor.send_status_sounds(sounds).unwrap().is_some());
+        drop(actor);
+        assert!(child.wait().unwrap().success());
+    }
+
+    #[test]
+    fn status_sounds_commit_only_when_the_session_applies_them() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let (_events_tx, events) = mpsc::sync_channel(1);
+        let (_commands_tx, commands) = mpsc::sync_channel(1);
+        let (audio, _audio_rx) = mpsc::sync_channel(1);
+        let mut actor = test_actor(writer, events, commands, audio);
+        actor.saved = Some((path.clone(), Default::default()));
+        *actor.status_sounds.lock().unwrap() = StatusSounds {
+            mode: berd_call::StatusSoundMode::Working,
+            status: Some(berd_call::ConversationStatus::Working),
+        };
+        fn set(
+            actor: &mut SessionActor,
+            mode: berd_call::StatusSoundMode,
+        ) -> Receiver<Result<Value, String>> {
+            let (response, result) = mpsc::sync_channel(1);
+            actor
+                .handle_command(ControlCommand::StatusSounds {
+                    mode: Some(mode),
+                    status: None,
+                    response,
+                })
+                .unwrap();
+            result
+        }
+        let committed = |actor: &SessionActor| actor.status_sounds.lock().unwrap().mode;
+
+        // A session that stops before applying the change leaves it uncommitted.
+        let failed = set(&mut actor, berd_call::StatusSoundMode::Off);
+        assert!(failed.try_recv().is_err());
+        actor.finish_pending("voice call stopped");
+        assert!(failed.try_recv().unwrap().is_err());
+        assert_eq!(committed(&actor), berd_call::StatusSoundMode::Working);
+        assert_eq!(
+            crate::saved_settings::load(&path).unwrap().status_sounds,
+            None
+        );
+
+        // A later request that the session applies commits and saves its mode.
+        let applied = set(&mut actor, berd_call::StatusSoundMode::WorkingAndWaiting);
+        assert_eq!(committed(&actor), berd_call::StatusSoundMode::Working);
+        let id = *actor.pending_settings.keys().next().unwrap();
+        actor
+            .handle_event(SessionMessage::ConversationStatusApplied {
+                id,
+                status: berd_call::ConversationStatus::Working,
+                settings: berd_call::StatusSoundSettings {
+                    mode: berd_call::StatusSoundMode::WorkingAndWaiting,
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+        applied.try_recv().unwrap().unwrap();
+        assert_eq!(
+            committed(&actor),
+            berd_call::StatusSoundMode::WorkingAndWaiting
+        );
+        assert_eq!(
+            crate::saved_settings::load(&path).unwrap().status_sounds,
+            Some(berd_call::StatusSoundMode::WorkingAndWaiting)
+        );
         drop(actor);
         assert!(child.wait().unwrap().success());
     }
