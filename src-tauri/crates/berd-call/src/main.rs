@@ -4653,9 +4653,9 @@ fn run_expert_spokesperson_session(
                 let matches = |response: &LiveResponse| {
                     response.prepare_id == Some(id) && response.speech_id == Some(speech_id)
                 };
-                let reply = responses.iter_mut().find(|(_, response)| {
-                    response.ready_by.is_some() && matches(response)
-                });
+                let reply = responses
+                    .iter_mut()
+                    .find(|(_, response)| response.ready_by.is_some() && matches(response));
                 let valid = if let Some((response_id, response)) = reply {
                     response.ready_by = None;
                     waiting_responses.push_back(response_id.clone());
