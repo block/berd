@@ -3778,6 +3778,36 @@ fn expert_voice_reply_without_output_ready_fails_and_frees_the_slot() {
     session.shutdown();
 }
 
+#[test]
+fn expert_voice_reply_keeps_the_voice_it_was_admitted_with() {
+    let (speech_url, speech_requests) = spawn_speech_server();
+    let mut session = start_direct_speech_session(&speech_url);
+    let tts = session.ready["session"]["tts"].clone();
+    session.send(json!({
+        "type":"prepare_speak",
+        "id":2,
+        "acknowledgement":null,
+        "text":"I checked the repository."
+    }));
+    let admitted = session.recv(Duration::from_secs(2));
+    assert_eq!(admitted["type"], "admitted", "{admitted}");
+    session.send(json!({
+        "type":"set_tts_settings",
+        "id":3,
+        "expected_revision":tts["revision"],
+        "settings":{"backend":"openai","model":tts["model"],"voice":"cedar","rate":1.0}
+    }));
+    let result = session.recv(Duration::from_secs(2));
+    assert_eq!(result["outcome"], "applied", "{result}");
+    session.send(json!({"type":"output_ready","id":2,"speech_id":admitted["speech_id"]}));
+    assert_eq!(session.recv(Duration::from_secs(2))["outcome"], "accepted");
+    let request = speech_requests
+        .recv_timeout(Duration::from_secs(3))
+        .unwrap();
+    assert_eq!(request["voice"], tts["voice"], "{request}");
+    session.shutdown();
+}
+
 /// Stops the host's player once it has played `played_frames` of an Expert reply, as when the
 /// speakers change, returning how the reply ended and what the Spokesperson was told.
 fn stop_expert_reply_after(played_frames: u64) -> (Value, String) {

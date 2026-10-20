@@ -3036,7 +3036,7 @@ struct LiveResponse {
     /// An Expert reply spoken in its own voice. It has no provider
     /// response; its whole text is played at once.
     reply: bool,
-    /// The voice it asked for, when not the Expert's usual one.
+    /// An Expert reply's voice, leased when it was admitted.
     voice: Option<TtsConfigurationLease>,
     /// When an Expert reply still awaits the parent's `output_ready`, the time
     /// it must arrive by.
@@ -4367,7 +4367,6 @@ fn run_expert_spokesperson_session(
                 &audio_transport,
                 &audio_control_tx,
                 &playback_tx,
-                reply_tts.as_deref(),
                 &reply_tx,
                 &mut core,
                 runtime.as_ref().expect("initialized runtime"),
@@ -4391,7 +4390,7 @@ fn run_expert_spokesperson_session(
                     &mut core,
                     runtime.as_ref().expect("initialized runtime"),
                     &mut directive_speeches,
-                    reply_tts.is_some(),
+                    reply_tts.as_deref(),
                     &mut responses,
                     &mut next_speech_id,
                     &mut writer,
@@ -4634,7 +4633,7 @@ fn run_expert_spokesperson_session(
                         &mut core,
                         runtime.as_ref().expect("initialized runtime"),
                         &mut directive_speeches,
-                        reply_tts.is_some(),
+                        reply_tts.as_deref(),
                         &mut responses,
                         &mut next_speech_id,
                         &mut writer,
@@ -5329,12 +5328,12 @@ fn submit_expert_prepare(
     core: &mut RealtimeExpertSpokespersonSession,
     runtime: &OpenAiSpokespersonRuntime,
     directive_speeches: &mut HashMap<u64, DirectiveSpeech>,
-    expert_tts: bool,
+    reply_tts: Option<&ConfiguredTtsSlot>,
     responses: &mut HashMap<String, LiveResponse>,
     next_speech_id: &mut u64,
     writer: &mut impl Write,
 ) -> Result<(), String> {
-    let own_voice = expert_tts && !request.relay;
+    let own_voice = reply_tts.is_some() && !request.relay;
     if !core
         .unknown_handoff_ids(&request.resolved_handoff_ids)
         .is_empty()
@@ -5377,7 +5376,11 @@ fn submit_expert_prepare(
                 let mut response = LiveResponse::new(Some(request.id), Some(speech_id));
                 response.expert_text = Some(message);
                 response.reply = true;
-                response.voice = request.voice;
+                response.voice = Some(
+                    request
+                        .voice
+                        .map_or_else(|| reply_tts.expect("own voice has a slot").lease(), Ok)?,
+                );
                 response.ready_by = Some(Instant::now() + Duration::from_secs(2));
                 response.audio_done = true;
                 response.finish_sent = true;
@@ -5538,7 +5541,6 @@ fn start_next_live_playback(
     audio_transport: &Arc<AudioPipeTransport>,
     audio_control_tx: &mpsc::Sender<AudioOutputControlRequest>,
     playback_tx: &mpsc::Sender<LivePlaybackResult>,
-    reply_tts: Option<&ConfiguredTtsSlot>,
     reply_tx: &mpsc::Sender<ReplyResult>,
     core: &mut RealtimeExpertSpokespersonSession,
     runtime: &OpenAiSpokespersonRuntime,
@@ -5555,7 +5557,6 @@ fn start_next_live_playback(
             continue;
         }
         if response.reply {
-            let tts = reply_tts.ok_or("an Expert reply has no voice of its own")?;
             *active = Some(spawn_reply_playback(
                 response_id,
                 response.speech_id.expect("an Expert reply has a speech ID"),
@@ -5564,8 +5565,8 @@ fn start_next_live_playback(
                 Arc::clone(
                     response
                         .voice
-                        .clone()
-                        .map_or_else(|| tts.lease(), Ok)?
+                        .as_ref()
+                        .expect("an Expert reply leases its voice when admitted")
                         .backend(),
                 ),
                 Arc::clone(audio_transport),
