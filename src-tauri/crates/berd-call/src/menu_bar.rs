@@ -145,9 +145,19 @@ fn menu_model(state: &MenuState) -> Vec<MenuNode> {
             checked: expert,
             ..item("Spokesperson", Some(MenuAction::SpokespersonMode(!expert)))
         },
-        SEPARATOR,
     ]);
-    // Replies with their own voice put the Spokesperson's beside it.
+    // The Spokesperson's own voice sits with it, and replies with their own voice get a section beside it.
+    if expert && !spokesperson.is_null() {
+        nodes.extend(voice_menu(
+            "Spokesperson ",
+            spokesperson,
+            &available_voices("openai").unwrap_or_default(),
+            SPOKESPERSON_RATES,
+            |entry| MenuAction::SpokespersonVoice(entry.voice.clone()),
+            MenuAction::SpokespersonRate,
+        ));
+    }
+    nodes.push(SEPARATOR);
     let agents = if spokesperson.is_null() { "" } else { "Agent " };
     nodes.extend(voice_menu(
         agents,
@@ -160,16 +170,6 @@ fn menu_model(state: &MenuState) -> Vec<MenuNode> {
         },
         MenuAction::Rate,
     ));
-    if !spokesperson.is_null() {
-        nodes.extend(voice_menu(
-            "Spokesperson ",
-            spokesperson,
-            &available_voices("openai").unwrap_or_default(),
-            SPOKESPERSON_RATES,
-            |entry| MenuAction::SpokespersonVoice(entry.voice.clone()),
-            MenuAction::SpokespersonRate,
-        ));
-    }
     nodes.extend([
         MenuNode {
             checked: suppressing,
@@ -873,6 +873,31 @@ mod tests {
             json!({"command": "spokesperson", "voice": "cedar", "rate": null})
         );
         find(&nodes, "Agent Voice: Aaron");
+        // The Spokesperson's voice is in its section, and the agents' in the next.
+        let sections: Vec<_> = nodes[1..]
+            .split(|node| node.title.is_empty())
+            .map(|section| {
+                section
+                    .iter()
+                    .map(|node| node.title.as_str())
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        assert_eq!(
+            sections[1..3],
+            [
+                vec![
+                    "Spokesperson",
+                    "Spokesperson Voice: marin",
+                    "Spokesperson Speech Rate: 1×"
+                ],
+                vec![
+                    "Agent Voice: Aaron",
+                    "Agent Speech Rate: 1.25×",
+                    "Mute Input During TTS"
+                ],
+            ]
+        );
     }
 
     #[test]
