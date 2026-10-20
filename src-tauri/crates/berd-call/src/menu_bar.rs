@@ -197,8 +197,12 @@ fn voice_menu(
 ) -> MenuNode {
     let voice = tts["voice"].as_str().unwrap_or("Unknown");
     let language = tts["language"].as_str();
-    let chosen = |entry: &VoiceChoice| entry.voice == voice && entry.language.as_deref() == language;
-    let name = voices.iter().find(|entry| chosen(entry)).map_or(voice, |entry| &entry.name);
+    let chosen =
+        |entry: &VoiceChoice| entry.voice == voice && entry.language.as_deref() == language;
+    let name = voices
+        .iter()
+        .find(|entry| chosen(entry))
+        .map_or(voice, |entry| &entry.name);
     MenuNode {
         children: voices
             .iter()
