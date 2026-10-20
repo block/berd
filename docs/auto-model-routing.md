@@ -166,8 +166,34 @@ configured URL, selector, candidate allowlist, or credentials.
 The complete accepted response remains in the current session's in-memory Auto
 details. Rationale and evidence can quote task context, so the response is never
 written to the app log, persisted into session history, or sent as telemetry.
-Transport logs record only the response byte count. Request prompts and
-authentication headers are never logged by the routing transport. Feedback
+Transport logs record response byte counts and request duration on success.
+On failure they record only the diagnostic code, HTTP status when applicable,
+elapsed milliseconds, and configured timeout. Request prompts, endpoint URLs,
+authentication headers, and error-response bodies are never logged by the
+routing transport. Feedback
 exports exclude entire older app log files that contain raw router-response
 records, including multiline bodies and files whose exported tail starts inside
-a response. Transport failures have stable fallback reason codes.
+a response.
+
+Expand **Why this model?** to inspect the last routing decision. Native transport
+failures set `fallbackReason` to a stable code and include a `failure` object:
+
+```json
+{
+  "code": "http_error",
+  "elapsedMs": 245,
+  "timeoutMs": 5000,
+  "httpStatus": 429
+}
+```
+
+Codes distinguish `timeout` (including a timeout while reading the body),
+`connection_failed`, `http_error`, `invalid_json`, `response_too_large`,
+`response_read_failed`, `client_unavailable`, `credential_unavailable`, and
+other `request_failed` errors. Connection failures can include DNS or TLS
+failures; the raw error chain is not retained. Old native errors or unrecognized
+command failures remain generic `request_failed` decisions without a `failure`
+object. The timeout budget and fallback model selection are unchanged.
+
+These details describe that attempt, not the router's current health. A new
+prompt makes a new routing attempt.

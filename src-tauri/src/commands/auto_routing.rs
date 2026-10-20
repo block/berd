@@ -4,11 +4,97 @@ use crate::commands::runtime_config::{
     auto_routing_revision, RuntimeAutoRoutingConfig, RuntimeAutoRoutingMode, RuntimeConfigState,
 };
 use crate::services::distro_bundle::DistroBundleState;
+use serde::Serialize;
 use serde_json::{json, Value};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::State;
 
 const AUTO_ROUTING_CONFIG_CHANGED: &str = "AUTO_ROUTING_CONFIG_CHANGED";
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum AutoRoutingCommandError {
+    Preflight(String),
+    Transport(RoutingFailure),
+}
+
+impl From<String> for AutoRoutingCommandError {
+    fn from(message: String) -> Self {
+        Self::Preflight(message)
+    }
+}
+
+impl From<&str> for AutoRoutingCommandError {
+    fn from(message: &str) -> Self {
+        Self::Preflight(message.to_string())
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum RoutingFailureCode {
+    Timeout,
+    ConnectionFailed,
+    HttpError,
+    InvalidJson,
+    ResponseTooLarge,
+    ResponseReadFailed,
+    ClientUnavailable,
+    CredentialUnavailable,
+    RequestFailed,
+}
+
+impl RoutingFailureCode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Timeout => "timeout",
+            Self::ConnectionFailed => "connection_failed",
+            Self::HttpError => "http_error",
+            Self::InvalidJson => "invalid_json",
+            Self::ResponseTooLarge => "response_too_large",
+            Self::ResponseReadFailed => "response_read_failed",
+            Self::ClientUnavailable => "client_unavailable",
+            Self::CredentialUnavailable => "credential_unavailable",
+            Self::RequestFailed => "request_failed",
+        }
+    }
+}
+
+/// Only allowlisted transport metadata may cross the command boundary or enter logs.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoutingFailure {
+    code: RoutingFailureCode,
+    elapsed_ms: u64,
+    timeout_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    http_status: Option<u16>,
+}
+
+struct FailureKind {
+    code: RoutingFailureCode,
+    http_status: Option<u16>,
+}
+
+impl From<RoutingFailureCode> for FailureKind {
+    fn from(code: RoutingFailureCode) -> Self {
+        Self {
+            code,
+            http_status: None,
+        }
+    }
+}
+
+fn classify_request_error(error: &reqwest::Error, fallback: RoutingFailureCode) -> FailureKind {
+    // A connection timeout can also be a connect error; timeout takes precedence.
+    if error.is_timeout() {
+        RoutingFailureCode::Timeout.into()
+    } else if error.is_connect() {
+        RoutingFailureCode::ConnectionFailed.into()
+    } else {
+        fallback.into()
+    }
+}
 
 fn checked_routing_config<'a>(
     current: Option<&'a RuntimeAutoRoutingConfig>,
@@ -48,10 +134,10 @@ pub async fn route_auto_model(
     expected_auto_routing_revision: Option<String>,
     runtime_config: State<'_, RuntimeConfigState>,
     distro_bundle: State<'_, DistroBundleState>,
-) -> Result<Value, String> {
+) -> Result<Value, AutoRoutingCommandError> {
     // Allow four UTF-8 bytes per character in the 176k renderer context budget.
     if prompt.len() > 704_000 {
-        return Err("Routing context exceeds limit".to_string());
+        return Err("Routing context exceeds limit".into());
     }
     route_with_current_config(
         &mode_id,
@@ -69,7 +155,7 @@ async fn route_with_current_config(
     expected_revision: Option<&str>,
     runtime_config: &RuntimeConfigState,
     distro_bundle: &DistroBundleState,
-) -> Result<Value, String> {
+) -> Result<Value, AutoRoutingCommandError> {
     let runtime = runtime_config.ready_config(distro_bundle).await?;
     // Echo the native-issued revision, never re-encoded renderer config.
     // Native JSON numbers retain their original precision and representation.
@@ -88,39 +174,66 @@ async fn route_with_current_config(
         .await
         .map_err(|_| AUTO_ROUTING_CONFIG_CHANGED.to_string())?;
     checked_routing_config(current.goose.auto_routing.as_ref(), expected_revision)?;
-    result
+    result.map_err(AutoRoutingCommandError::Transport)
 }
 
 async fn request_route(
     config: &RuntimeAutoRoutingConfig,
     mode: &RuntimeAutoRoutingMode,
     prompt: &str,
-) -> Result<Value, String> {
+) -> Result<Value, RoutingFailure> {
+    let started = Instant::now();
+    let timeout_ms = config.timeout_ms.unwrap_or(5_000);
+    let result = request_route_inner(config, mode, prompt, timeout_ms).await;
+    let elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+    match result {
+        Ok(response) => {
+            log::info!(target: "auto_routing", "Routing succeeded (elapsed_ms={elapsed_ms}, timeout_ms={timeout_ms})");
+            Ok(response)
+        }
+        Err(kind) => {
+            let failure = RoutingFailure {
+                code: kind.code,
+                elapsed_ms,
+                timeout_ms,
+                http_status: kind.http_status,
+            };
+            log::warn!(target: "auto_routing", "Routing failed (code={}, elapsed_ms={}, timeout_ms={}, http_status={:?})", failure.code.as_str(), failure.elapsed_ms, failure.timeout_ms, failure.http_status);
+            Err(failure)
+        }
+    }
+}
+
+async fn request_route_inner(
+    config: &RuntimeAutoRoutingConfig,
+    mode: &RuntimeAutoRoutingMode,
+    prompt: &str,
+    timeout_ms: u64,
+) -> Result<Value, FailureKind> {
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
-        .timeout(Duration::from_millis(config.timeout_ms.unwrap_or(5_000)))
+        .timeout(Duration::from_millis(timeout_ms))
         .build()
-        .map_err(|_| "Routing client unavailable".to_string())?;
+        .map_err(|_| RoutingFailureCode::ClientUnavailable)?;
     let mut request = client
         .post(&config.url)
         .json(&build_request(config, mode, prompt));
     if let Some(name) = &config.bearer_token_env {
-        let token =
-            std::env::var(name).map_err(|_| "Routing credential unavailable".to_string())?;
+        let token = std::env::var(name).map_err(|_| RoutingFailureCode::CredentialUnavailable)?;
         if token.trim().is_empty() {
-            return Err("Routing credential unavailable".to_string());
+            return Err(RoutingFailureCode::CredentialUnavailable.into());
         }
         request = request.bearer_auth(token);
     }
     let response = request
         .send()
         .await
-        .map_err(|_| "Routing request failed".to_string())?;
+        .map_err(|error| classify_request_error(&error, RoutingFailureCode::RequestFailed))?;
     if !response.status().is_success() {
-        return Err(format!(
-            "Routing request returned HTTP {}",
-            response.status().as_u16()
-        ));
+        return Err(FailureKind {
+            code: RoutingFailureCode::HttpError,
+            http_status: Some(response.status().as_u16()),
+        });
     }
     // Keep the opaque response for session-local inspection, with a bounded body.
     let mut response = response;
@@ -128,15 +241,16 @@ async fn request_route(
     while let Some(chunk) = response
         .chunk()
         .await
-        .map_err(|_| "Routing response read failed".to_string())?
+        .map_err(|error| classify_request_error(&error, RoutingFailureCode::ResponseReadFailed))?
     {
         if bytes.len() + chunk.len() > 1_048_576 {
-            return Err("Routing response exceeds limit".to_string());
+            return Err(RoutingFailureCode::ResponseTooLarge.into());
         }
         bytes.extend_from_slice(&chunk);
     }
+    let response = serde_json::from_slice(&bytes).map_err(|_| RoutingFailureCode::InvalidJson)?;
     log::info!(target: "auto_routing", "Routing response received ({} bytes)", bytes.len());
-    serde_json::from_slice(&bytes).map_err(|_| "Routing response is not JSON".to_string())
+    Ok(response)
 }
 
 #[cfg(test)]
@@ -281,7 +395,7 @@ mod tests {
                     release_tx.send(()).unwrap();
                 },
             );
-            assert_eq!(result.unwrap_err(), AUTO_ROUTING_CONFIG_CHANGED,
+            assert_eq!(serde_json::to_value(result.unwrap_err()).unwrap(), json!(AUTO_ROUTING_CONFIG_CHANGED),
                 "HTTP {status} from an obsolete config must not release its decision or fallback error");
             server.await.unwrap();
         }
@@ -307,33 +421,194 @@ mod tests {
         assert!(body.get("route_selector").is_none());
     }
     #[tokio::test]
-    async fn transport_fails_for_http_status_invalid_json_timeouts_and_oversized_responses() {
-        for (status, body, timeout, delay, expected) in [
-            (503, "unavailable".to_string(), 1000, 0, "HTTP 503"),
-            (200, "not JSON".to_string(), 1000, 0, "not JSON"),
-            (200, "{}".to_string(), 10, 100, "request failed"),
-            (200, "x".repeat(1_048_577), 1000, 0, "exceeds limit"),
-            (302, "{}".to_string(), 1000, 0, "HTTP 302"),
+    async fn transport_preserves_http_json_and_size_failure_categories() {
+        for (status, body, expected, http_status) in [
+            (
+                503,
+                "private response".to_string(),
+                RoutingFailureCode::HttpError,
+                Some(503),
+            ),
+            (
+                401,
+                "private response".to_string(),
+                RoutingFailureCode::HttpError,
+                Some(401),
+            ),
+            (
+                302,
+                "{}".to_string(),
+                RoutingFailureCode::HttpError,
+                Some(302),
+            ),
+            (
+                200,
+                "private invalid JSON".to_string(),
+                RoutingFailureCode::InvalidJson,
+                None,
+            ),
+            (
+                200,
+                "x".repeat(1_048_577),
+                RoutingFailureCode::ResponseTooLarge,
+                None,
+            ),
         ] {
-            let (url, handle) = server(status, body, Duration::from_millis(delay)).await;
-            let mut config = config(url);
-            config.timeout_ms = Some(timeout);
-            let error = request_route(&config, &config.modes[0], "task")
+            let (url, handle) = server(status, body, Duration::ZERO).await;
+            let config = config(url);
+            let error = request_route(&config, &config.modes[0], "private prompt")
                 .await
                 .unwrap_err();
-            assert!(error.contains(expected), "{error}");
+            assert_eq!(error.code, expected);
+            assert_eq!(error.http_status, http_status);
+            assert_eq!(error.timeout_ms, 1000);
+            assert!(error.elapsed_ms < 10_000);
             handle.await.unwrap();
         }
     }
+
     #[tokio::test]
-    async fn missing_credential_fails_before_sending() {
-        let mut config = config("http://127.0.0.1:1/route".to_string());
-        config.bearer_token_env =
-            Some("BERD_AUTO_ROUTING_TEST_MISSING_CREDENTIAL_18A854".to_string());
+    async fn header_timeout_reports_elapsed_time_and_configured_budget() {
+        let (url, handle) = server(200, "{}".to_string(), Duration::from_millis(200)).await;
+        let mut config = config(url);
+        config.timeout_ms = Some(50);
         let error = request_route(&config, &config.modes[0], "task")
             .await
             .unwrap_err();
-        assert_eq!(error, "Routing credential unavailable");
+        assert_eq!(error.code, RoutingFailureCode::Timeout);
+        assert_eq!(error.timeout_ms, 50);
+        assert!(error.elapsed_ms >= 40, "{}", error.elapsed_ms);
+        handle.await.unwrap();
+    }
+
+    async fn partial_body_server(delay: Duration) -> (String, tokio::task::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/private-endpoint", listener.local_addr().unwrap());
+        let handle = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0u8; 16384];
+            stream.read(&mut request).await.unwrap();
+            stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\n{\"private\":").await.unwrap();
+            tokio::time::sleep(delay).await;
+        });
+        (url, handle)
+    }
+
+    #[tokio::test]
+    async fn timeout_while_reading_response_body_stays_a_timeout() {
+        let (url, handle) = partial_body_server(Duration::from_millis(200)).await;
+        let mut config = config(url);
+        config.timeout_ms = Some(50);
+        let error = request_route(&config, &config.modes[0], "task")
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, RoutingFailureCode::Timeout);
+        assert_eq!(error.timeout_ms, 50);
+        assert!(error.elapsed_ms >= 40, "{}", error.elapsed_ms);
+        handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn truncated_body_is_a_response_read_failure() {
+        let (url, handle) = partial_body_server(Duration::ZERO).await;
+        let config = config(url);
+        let error = request_route(&config, &config.modes[0], "task")
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, RoutingFailureCode::ResponseReadFailed);
+        handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn connection_refusal_is_distinct_from_request_failure_and_uses_default_budget() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/private-endpoint", listener.local_addr().unwrap());
+        drop(listener);
+        let mut config = config(url);
+        config.timeout_ms = None;
+        let error = request_route(&config, &config.modes[0], "private prompt")
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, RoutingFailureCode::ConnectionFailed);
+        assert_eq!(error.timeout_ms, 5_000);
+
+        config.url = "invalid-url-private-endpoint".to_string();
+        let error = request_route(&config, &config.modes[0], "private prompt")
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, RoutingFailureCode::RequestFailed);
+        assert_eq!(
+            serde_json::to_value(error)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .len(),
+            3
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_credential_fails_before_sending_and_does_not_expose_secrets() {
+        let mut config = config("http://127.0.0.1:1/private-endpoint".to_string());
+        config.bearer_token_env =
+            Some("BERD_AUTO_ROUTING_TEST_MISSING_CREDENTIAL_18A854".to_string());
+        let error = request_route(&config, &config.modes[0], "private prompt")
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, RoutingFailureCode::CredentialUnavailable);
+        let serialized = serde_json::to_value(AutoRoutingCommandError::Transport(error)).unwrap();
+        assert_eq!(serialized["code"], "credential_unavailable");
+        assert!(serialized["elapsedMs"].is_u64());
+        assert_eq!(serialized["timeoutMs"], 1000);
+        assert_eq!(serialized.as_object().unwrap().len(), 3);
+        let text = serialized.to_string();
+        for private in [
+            "private-endpoint",
+            "private prompt",
+            "127.0.0.1",
+            "BERD_AUTO_ROUTING_TEST",
+        ] {
+            assert!(!text.contains(private));
+        }
+    }
+
+    #[test]
+    fn command_errors_serialize_only_allowlisted_metadata_or_existing_preflight_strings() {
+        for code in [
+            RoutingFailureCode::Timeout,
+            RoutingFailureCode::ConnectionFailed,
+            RoutingFailureCode::HttpError,
+            RoutingFailureCode::InvalidJson,
+            RoutingFailureCode::ResponseTooLarge,
+            RoutingFailureCode::ResponseReadFailed,
+            RoutingFailureCode::ClientUnavailable,
+            RoutingFailureCode::CredentialUnavailable,
+            RoutingFailureCode::RequestFailed,
+        ] {
+            let failure = RoutingFailure {
+                code,
+                elapsed_ms: 123,
+                timeout_ms: 5_000,
+                http_status: (code == RoutingFailureCode::HttpError).then_some(503),
+            };
+            let serialized =
+                serde_json::to_value(AutoRoutingCommandError::Transport(failure)).unwrap();
+            let mut expected = json!({"code": code.as_str(), "elapsedMs":123, "timeoutMs":5000});
+            if code == RoutingFailureCode::HttpError {
+                expected["httpStatus"] = json!(503);
+            }
+            assert_eq!(serialized, expected);
+        }
+        for preflight in [
+            AUTO_ROUTING_CONFIG_CHANGED,
+            "Routing context exceeds limit",
+            "Auto routing mode is not configured",
+        ] {
+            assert_eq!(
+                serde_json::to_value(AutoRoutingCommandError::from(preflight)).unwrap(),
+                json!(preflight)
+            );
+        }
     }
     #[test]
     fn selector_and_bounds_are_forwarded_without_concrete_model_id() {

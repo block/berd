@@ -1,3 +1,4 @@
+import { z } from "zod";
 import {
   autoRoutingEfforts,
   type AutoRoutingEffort,
@@ -13,11 +14,31 @@ import { invokeWithStartupRetry } from "./invokeWithStartupRetry";
 
 const AUTO_ROUTING_CONFIG_CHANGED = "AUTO_ROUTING_CONFIG_CHANGED";
 
+// Accept only native diagnostic codes and bounded numbers. Never copy arbitrary
+// rejection messages/properties into the session's inspectable routing details.
+const autoRoutingFailureSchema = z.object({
+  code: z.enum([
+    "timeout",
+    "connection_failed",
+    "http_error",
+    "invalid_json",
+    "response_too_large",
+    "response_read_failed",
+    "client_unavailable",
+    "credential_unavailable",
+    "request_failed",
+  ]),
+  elapsedMs: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+  timeoutMs: z.number().int().min(1).max(120_000),
+  httpStatus: z.number().int().min(100).max(599).optional(),
+});
+
 export interface AutoRoutingResult {
   modeId: string;
   source: "router" | "fallback";
   rationale?: string;
   fallbackReason?: string;
+  failure?: z.infer<typeof autoRoutingFailureSchema>;
   response?: unknown;
   effortApplied?: string;
   modelProviderId: string;
@@ -217,7 +238,15 @@ export async function routeAutoModel({
         i18n.t("chat:errors.sessionPreparationSuperseded"),
       );
     }
-    // Error messages may contain endpoint details; diagnostics use stable local codes.
+    const failure = autoRoutingFailureSchema.safeParse(error);
+    if (failure.success) {
+      return {
+        ...autoRoutingFallback(mode, failure.data.code),
+        failure: failure.data,
+      };
+    }
+    // Old native versions and IPC failures may still reject with arbitrary
+    // strings. Keep that compatibility path generic rather than exposing them.
     return autoRoutingFallback(mode, "request_failed");
   }
 }

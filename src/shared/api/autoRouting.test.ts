@@ -468,7 +468,54 @@ describe("auto routing invocation", () => {
     ).toBe("router");
     expect(remove).toHaveBeenCalledWith("abort", expect.any(Function));
   });
-  it("falls back on rejected network and timeout requests without retaining sensitive errors", async () => {
+  it.each([
+    { code: "timeout", elapsedMs: 5_003, timeoutMs: 5_000 },
+    { code: "connection_failed", elapsedMs: 12, timeoutMs: 5_000 },
+    { code: "http_error", elapsedMs: 48, timeoutMs: 5_000, httpStatus: 429 },
+    { code: "http_error", elapsedMs: 100, timeoutMs: 5_000, httpStatus: 503 },
+    { code: "invalid_json", elapsedMs: 52, timeoutMs: 5_000 },
+    { code: "response_too_large", elapsedMs: 91, timeoutMs: 5_000 },
+    { code: "response_read_failed", elapsedMs: 23, timeoutMs: 5_000 },
+    { code: "client_unavailable", elapsedMs: 0, timeoutMs: 5_000 },
+    { code: "credential_unavailable", elapsedMs: 0, timeoutMs: 5_000 },
+    { code: "request_failed", elapsedMs: 9, timeoutMs: 5_000 },
+  ])("retains safe native failure details for $code", async (failure) => {
+    vi.mocked(invokeWithStartupRetry).mockRejectedValue({
+      ...failure,
+      message: "secret endpoint error",
+      url: "https://private.example.com/?token=secret",
+      body: "private response",
+    });
+    expect(await routeAutoModel({ modeId: "auto", prompt: "context" })).toEqual(
+      {
+        ...autoRoutingFallback(mode, failure.code),
+        failure,
+      },
+    );
+  });
+  it.each([
+    { code: "secret endpoint error", elapsedMs: 5, timeoutMs: 5_000 },
+    { code: "timeout", elapsedMs: -1, timeoutMs: 5_000 },
+    { code: "timeout", elapsedMs: Infinity, timeoutMs: 5_000 },
+    { code: "timeout", elapsedMs: "secret", timeoutMs: 5_000 },
+    { code: "timeout", elapsedMs: 5, timeoutMs: 0 },
+    {
+      code: "http_error",
+      elapsedMs: 5,
+      timeoutMs: 5_000,
+      httpStatus: "secret",
+    },
+    { code: "http_error", elapsedMs: 5, timeoutMs: 5_000, httpStatus: 999 },
+    { code: "timeout" },
+    "Routing request returned HTTP 503",
+    '{"code":"timeout","message":"secret"}',
+  ])("keeps unknown or malformed failures generic: %j", async (error) => {
+    vi.mocked(invokeWithStartupRetry).mockRejectedValue(error);
+    expect(await routeAutoModel({ modeId: "auto", prompt: "context" })).toEqual(
+      autoRoutingFallback(mode, "request_failed"),
+    );
+  });
+  it("falls back on legacy errors without retaining sensitive messages", async () => {
     vi.mocked(invokeWithStartupRetry).mockRejectedValue(
       new Error("secret endpoint error"),
     );

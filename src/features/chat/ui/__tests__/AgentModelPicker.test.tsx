@@ -143,6 +143,49 @@ describe("AgentModelPicker", () => {
     expect(onModeChange).toHaveBeenCalledWith("fast");
   });
 
+  it("shows transport diagnostics in the expanded fallback details", async () => {
+    const user = userEvent.setup();
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        availableModels={[{ id: "gpt-5", name: "GPT-5" }]}
+        currentModelId="gpt-5"
+        currentModelName="GPT-5"
+        autoRouting={{
+          modes: [{ id: "balanced", displayName: "Auto Balanced" }],
+          selectedModeId: "balanced",
+          onModeChange: vi.fn(),
+          decision: {
+            modeId: "balanced",
+            modelId: "gpt-5",
+            modelProviderId: "provider",
+            effort: "high",
+            source: "fallback",
+            fallbackReason: "http_error",
+            failure: {
+              code: "http_error",
+              elapsedMs: 245,
+              timeoutMs: 5000,
+              httpStatus: 429,
+            },
+          },
+        }}
+      />,
+    );
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    await user.click(screen.getByText("Why this model?"));
+    const details = screen.getByText(/"failure":/);
+    expect(details).toBeVisible();
+    expect(details).toHaveTextContent('"code": "http_error"');
+    expect(details).toHaveTextContent('"elapsedMs": 245');
+    expect(details).toHaveTextContent('"timeoutMs": 5000');
+    expect(details).toHaveTextContent('"httpStatus": 429');
+  });
+
   // Harness agents (pi-acp, codex-acp, etc.) get a wider picker in the
   // new-chat composer because their ACP model names can be long; Goose keeps
   // the compact layout.
