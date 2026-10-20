@@ -342,7 +342,7 @@ impl SessionActor {
         SessionStart {
             saved: self.saved.take().map(|(path, mut saved)| {
                 saved.arguments = saved_settings::persistable_arguments(&restart.arguments[1..]);
-                saved.tts = None;
+                saved.tts = restart.tts;
                 (path, saved)
             }),
             arguments: restart.arguments,
@@ -570,6 +570,8 @@ enum ControlCommand {
     Restart {
         arguments: Vec<String>,
         expert_spokesperson: bool,
+        // Speech settings to restore in the new session, beyond what its options can say.
+        tts: Option<berd_call::TtsSettings>,
         response: SyncSender<Result<Value, String>>,
     },
 }
@@ -577,6 +579,7 @@ enum ControlCommand {
 struct PendingRestart {
     arguments: Vec<String>,
     expert_spokesperson: bool,
+    tts: Option<berd_call::TtsSettings>,
     response: SyncSender<Result<Value, String>>,
 }
 
@@ -594,6 +597,26 @@ struct SessionControl {
 }
 
 impl SessionControl {
+    fn restart_with(
+        &self,
+        session_arguments: Vec<String>,
+        tts: Option<berd_call::TtsSettings>,
+    ) -> Result<Value, String> {
+        let expert_spokesperson = crate::validate_session_arguments(&session_arguments)?;
+        let (response, result) = mpsc::sync_channel(1);
+        self.commands
+            .send(ControlCommand::Restart {
+                arguments: session_arguments,
+                expert_spokesperson,
+                tts,
+                response,
+            })
+            .map_err(|_| "voice call is not running")?;
+        result
+            .recv()
+            .map_err(|_| "voice call stopped during restart".to_string())?
+    }
+
     fn request(
         &self,
         command: impl FnOnce(SyncSender<Result<Value, String>>) -> ControlCommand,
@@ -748,18 +771,7 @@ impl HostControl for SessionControl {
     }
 
     fn restart(&self, session_arguments: Vec<String>) -> Result<Value, String> {
-        let expert_spokesperson = crate::validate_session_arguments(&session_arguments)?;
-        let (response, result) = mpsc::sync_channel(1);
-        self.commands
-            .send(ControlCommand::Restart {
-                arguments: session_arguments,
-                expert_spokesperson,
-                response,
-            })
-            .map_err(|_| "voice call is not running")?;
-        result
-            .recv()
-            .map_err(|_| "voice call stopped during restart".to_string())?
+        self.restart_with(session_arguments, None)
     }
 
     fn set_spokesperson_mode(&self, on: bool) -> Result<Value, String> {
@@ -768,26 +780,33 @@ impl HostControl for SessionControl {
         if on == realtime {
             return self.status();
         }
-        // Agents keep the voice they have now; a realtime call's own voice is the Spokesperson's, which a direct call has no use for.
-        let arguments = if realtime && !self.speaks {
-            arguments.to_vec()
-        } else {
-            let session = self
-                .ready
-                .session
-                .lock()
-                .map_err(|_| "session settings lock failed")?;
-            crate::saved_settings::merge_arguments(
-                arguments,
-                &tts_arguments(&session.tts.settings, arguments),
-            )
-        };
         let direct = matches!(*self.transcript, Transcript::Stdout { live: true });
+        // Agents keep the voice they have now, if they speak before and after; otherwise the Spokesperson's voice is its own.
+        let tts = if self.speaks && (!on || direct) {
+            Some(
+                self.ready
+                    .session
+                    .lock()
+                    .map_err(|_| "session settings lock failed")?
+                    .tts
+                    .settings
+                    .clone(),
+            )
+        } else {
+            None
+        };
+        let arguments = match &tts {
+            Some(settings) => crate::saved_settings::merge_arguments(
+                arguments,
+                &tts_arguments(settings, arguments),
+            ),
+            None => arguments.to_vec(),
+        };
         let mut session_arguments = vec!["session".to_string()];
         session_arguments.extend(crate::saved_settings::with_spokesperson(
             &arguments, on, direct,
         ));
-        self.restart(session_arguments)
+        self.restart_with(session_arguments, tts)
     }
 
     fn set_non_blocking(&self, enabled: bool) -> Result<Value, String> {
@@ -1221,6 +1240,7 @@ impl SessionActor {
             ControlCommand::Restart {
                 arguments,
                 expert_spokesperson,
+                tts,
                 response,
             } => {
                 if self.stopping {
@@ -1232,6 +1252,7 @@ impl SessionActor {
                 self.restart = Some(PendingRestart {
                     arguments,
                     expert_spokesperson,
+                    tts,
                     response,
                 });
             }
@@ -2903,6 +2924,7 @@ mod tests {
             PendingRestart {
                 arguments: vec!["session".into()],
                 expert_spokesperson: false,
+                tts: None,
                 response,
             },
             InputDuringTtsPolicy::AllowBargeIn,
@@ -2957,6 +2979,7 @@ mod tests {
             PendingRestart {
                 arguments: arguments.clone(),
                 expert_spokesperson: false,
+                tts: None,
                 response,
             },
             InputDuringTtsPolicy::AllowBargeIn,
@@ -3001,6 +3024,7 @@ mod tests {
                 .handle_command(ControlCommand::Restart {
                     arguments: vec!["session".into()],
                     expert_spokesperson: false,
+                    tts: None,
                     response,
                 })
                 .unwrap();
@@ -4306,6 +4330,7 @@ mod tests {
             PendingRestart {
                 arguments: vec!["session".into()],
                 expert_spokesperson: false,
+                tts: None,
                 response,
             },
             InputDuringTtsPolicy::AllowBargeIn,
@@ -4375,46 +4400,55 @@ mod tests {
 
     #[test]
     fn turning_the_spokesperson_on_restarts_the_call_with_the_agents_current_voice() {
-        let (commands, receiver) = mpsc::sync_channel(1);
-        let control = SessionControl {
-            commands,
-            running: Arc::new(AtomicBool::new(true)),
-            ready: ReadyState {
-                session: Arc::new(Mutex::new(test_snapshot())),
-            },
-            non_blocking: Arc::new(AtomicBool::new(false)),
-            stop_requested: Arc::new(AtomicBool::new(false)),
-            muted: Arc::new(AtomicBool::new(false)),
-            transcript: Arc::new(Transcript::Stdout { live: true }),
-            speaks: true,
-            session_arguments: [
-                "session",
-                "--voice",
-                "Samantha",
-                "--language",
-                "en-GB",
-                "--stt-backend",
-                "openai",
-                "--stt-url",
-                "ws://127.0.0.1:1/stt",
-            ]
-            .map(str::to_string)
-            .to_vec(),
+        let toggle = |transcript, rate| {
+            let mut snapshot = test_snapshot();
+            snapshot.tts.settings = snapshot.tts.settings.with_rate(rate);
+            let (commands, receiver) = mpsc::sync_channel(1);
+            let control = SessionControl {
+                commands,
+                running: Arc::new(AtomicBool::new(true)),
+                ready: ReadyState {
+                    session: Arc::new(Mutex::new(snapshot)),
+                },
+                non_blocking: Arc::new(AtomicBool::new(false)),
+                stop_requested: Arc::new(AtomicBool::new(false)),
+                muted: Arc::new(AtomicBool::new(false)),
+                transcript: Arc::new(transcript),
+                speaks: true,
+                session_arguments: [
+                    "session",
+                    "--voice",
+                    "Samantha",
+                    "--language",
+                    "en-GB",
+                    "--rate",
+                    "2",
+                    "--stt-backend",
+                    "openai",
+                    "--stt-url",
+                    "ws://127.0.0.1:1/stt",
+                ]
+                .map(str::to_string)
+                .to_vec(),
+            };
+            let worker = thread::spawn(move || match receiver.recv().unwrap() {
+                ControlCommand::Restart {
+                    arguments,
+                    expert_spokesperson,
+                    tts,
+                    response,
+                } => {
+                    response.send(Ok(json!({}))).unwrap();
+                    assert!(expert_spokesperson);
+                    (arguments, tts)
+                }
+                _ => panic!("expected a restart"),
+            });
+            control.set_spokesperson_mode(true).unwrap();
+            worker.join().unwrap()
         };
-        let worker = thread::spawn(move || match receiver.recv().unwrap() {
-            ControlCommand::Restart {
-                arguments,
-                expert_spokesperson,
-                response,
-            } => {
-                response.send(Ok(json!({}))).unwrap();
-                (arguments, expert_spokesperson)
-            }
-            _ => panic!("expected a restart"),
-        });
-        control.set_spokesperson_mode(true).unwrap();
-        let (arguments, expert_spokesperson) = worker.join().unwrap();
-        assert!(expert_spokesperson);
+        // Agents with their own voice keep the one they have now.
+        let (arguments, tts) = toggle(Transcript::Stdout { live: true }, 1.25);
         assert_eq!(
             arguments,
             [
@@ -4424,7 +4458,7 @@ mod tests {
                 "--tts-backend",
                 "siri",
                 "--rate",
-                "1",
+                "1.25",
                 "--voice",
                 "Aaron",
                 "--language",
@@ -4434,6 +4468,25 @@ mod tests {
                 crate::DIRECT_AGENT_SPEECH,
             ]
         );
+        assert_eq!(tts, Some(test_snapshot().tts.settings.with_rate(1.25)));
+        // Otherwise their speed would be the Spokesperson's, which can't go as fast.
+        let (arguments, tts) = toggle(Transcript::Silent, 2.0);
+        assert_eq!(
+            arguments,
+            [
+                "session",
+                "--voice",
+                "Samantha",
+                "--language",
+                "en-GB",
+                "--stt-backend",
+                "openai",
+                "--mode",
+                "expert-spokesperson",
+            ]
+        );
+        assert_eq!(tts, None);
+        assert!(crate::validate_session_arguments(&arguments).unwrap());
     }
 
     #[test]
@@ -4633,6 +4686,7 @@ mod tests {
             .handle_command(ControlCommand::Restart {
                 arguments: vec!["session".into()],
                 expert_spokesperson: false,
+                tts: None,
                 response: restart_tx,
             })
             .unwrap();
@@ -4648,6 +4702,7 @@ mod tests {
             .handle_command(ControlCommand::Restart {
                 arguments: vec!["session".into()],
                 expert_spokesperson: false,
+                tts: None,
                 response: late_tx,
             })
             .unwrap();

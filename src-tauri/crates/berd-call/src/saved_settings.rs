@@ -200,6 +200,8 @@ pub(crate) fn with_spokesperson(arguments: &[String], on: bool, direct: bool) ->
             "--realtime-url" => on,
             "--stt-url" => !on,
             "--tts-url" => !on || direct,
+            // Without replies of their own, the agents' speed would be the Spokesperson's, which takes a narrower range.
+            "--rate" => !on || direct,
             _ => on || !spokesperson_flag(pair),
         })
         .flatten()
