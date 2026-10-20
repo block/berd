@@ -1729,32 +1729,20 @@ impl SessionProcess {
         let write_fd = fds[1];
         let executable = std::env::current_exe()
             .map_err(|error| format!("could not locate berd-call executable: {error}"))?;
+        // Only the write end reaches the child; `pipe` leaves both inheritable.
+        unsafe { libc::fcntl(read_fd, libc::F_SETFD, libc::FD_CLOEXEC) };
         let mut command = Command::new(executable);
-        command
+        // No pre_exec, so std uses posix_spawn: forking a process with AppKit's threads can abort the child.
+        // The host owns Ctrl-C, so terminal signals stay out of the child's process group.
+        let result = command
             .args(arguments)
             .arg("--pcm-output-fd")
             .arg(write_fd.to_string())
+            .process_group(0)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit());
-        unsafe {
-            command.pre_exec(move || {
-                // The host owns Ctrl-C: keep terminal signals away from the
-                // child and restore the default mask the host blocked.
-                libc::setpgid(0, 0);
-                let mut signals = std::mem::zeroed::<libc::sigset_t>();
-                libc::sigemptyset(&mut signals);
-                libc::pthread_sigmask(libc::SIG_SETMASK, &signals, std::ptr::null_mut());
-                libc::close(read_fd);
-                let flags = libc::fcntl(write_fd, libc::F_GETFD);
-                if flags < 0 || libc::fcntl(write_fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) < 0
-                {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
-        let result = command.spawn();
+            .stderr(Stdio::inherit())
+            .spawn();
         unsafe { libc::close(write_fd) };
         let mut child = match result {
             Ok(child) => child,

@@ -498,6 +498,44 @@ fn session_rejects_a_read_only_pcm_descriptor_before_hello() {
 }
 
 #[test]
+fn a_session_stops_on_sigterm_even_when_its_host_blocks_it() {
+    let (mut command, _pcm, _host) = session_command();
+    unsafe {
+        command.pre_exec(|| {
+            // The host blocks its stop signals, and a spawned process inherits that mask.
+            let mut signals = std::mem::zeroed::<libc::sigset_t>();
+            libc::sigemptyset(&mut signals);
+            libc::sigaddset(&mut signals, libc::SIGINT);
+            libc::sigaddset(&mut signals, libc::SIGTERM);
+            libc::pthread_sigmask(libc::SIG_BLOCK, &signals, std::ptr::null_mut());
+            Ok(())
+        });
+    }
+    let mut child = command
+        .args(["--tts-backend", "openai"])
+        .env("OPENAI_API_KEY", "test-key-not-used")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if std::time::Instant::now() > deadline {
+            child.kill().unwrap();
+            panic!("the session ignored SIGTERM");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    use std::os::unix::process::ExitStatusExt;
+    assert_eq!(status.signal(), Some(libc::SIGTERM));
+}
+
+#[test]
 fn framed_hello_reports_input_initialization_failure_before_ready() {
     let missing =
         std::env::temp_dir().join(format!("berd-call-missing-parakeet-{}", std::process::id()));

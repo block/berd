@@ -614,6 +614,12 @@ fn main() {
             print_pretty_json(&response).unwrap_or_else(|error| operational_error("stop", error));
         }
         Some("session") => {
+            // A host blocks its stop signals, and the session inherits that mask.
+            unsafe {
+                let mut signals = std::mem::zeroed::<libc::sigset_t>();
+                libc::sigemptyset(&mut signals);
+                libc::pthread_sigmask(libc::SIG_SETMASK, &signals, std::ptr::null_mut());
+            }
             let config = parse_or_exit(parse_args(&args), &args);
             let pcm_output_fd = parse_or_exit(parse_pcm_output_fd(&args), &args);
             let result = match config.mode {
