@@ -143,7 +143,8 @@ impl<'de> Deserialize<'de> for SiriVoiceIdentity {
 pub struct SiriVoice {
     pub name: String,
     /// The name to show: `name`, or for a voice whose catalog name is a locale
-    /// code such as `en-US-F`, Siri and the name macOS shows (`Siri Voice 7`).
+    /// code, its known name (`en-US-F` is `Zack`) or Siri and the name macOS
+    /// shows (`en-GB-C` is `Siri Voice 3`).
     pub display_name: String,
     pub language: String,
     pub size_bytes: u64,
@@ -262,10 +263,14 @@ fn parse_catalog_json(json: &str) -> Result<Vec<SiriVoice>, String> {
                 .to_ascii_lowercase()
                 .starts_with(&format!("{}-", identity.language.to_ascii_lowercase()));
             Ok(SiriVoice {
-                display_name: if coded && !raw.localized_name.is_empty() {
-                    format!("Siri {}", raw.localized_name)
-                } else {
-                    identity.name.clone()
+                display_name: match identity.name.as_str() {
+                    // Their asset build paths (zack_v2_..., gigi_test_2) name them.
+                    "en-US-F" => "Zack".into(),
+                    "en-US-G" => "Gigi".into(),
+                    _ if coded && !raw.localized_name.is_empty() => {
+                        format!("Siri {}", raw.localized_name)
+                    }
+                    _ => identity.name.clone(),
                 },
                 name: identity.name,
                 language: identity.language,
@@ -776,6 +781,7 @@ mod tests {
         let voices = parse_catalog_json(
             r#"[
                 {"name":"en-US-F","localizedName":"Voice 7","language":"en_US","sizeBytes":42,"installed":true},
+                {"name":"en-US-G","localizedName":"Voice 6","language":"en-US","sizeBytes":42,"installed":false},
                 {"name":"de-DE-C","localizedName":"Voice 3","language":"de-DE","sizeBytes":42,"installed":false},
                 {"name":"en-GB-C","localizedName":"","language":"en-GB","sizeBytes":42,"installed":false},
                 {"name":"Li-Mu","localizedName":"Voice 1","language":"zh-CN","sizeBytes":42,"installed":false},
@@ -790,7 +796,8 @@ mod tests {
         assert_eq!(
             names,
             [
-                ("en-US-F", "Siri Voice 7"),
+                ("en-US-F", "Zack"),
+                ("en-US-G", "Gigi"),
                 ("de-DE-C", "Siri Voice 3"),
                 ("en-GB-C", "en-GB-C"),
                 ("Li-Mu", "Li-Mu"),

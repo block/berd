@@ -1038,12 +1038,12 @@ mod tests {
             voices: vec![VoiceChoice {
                 voice: "en-US-F".into(),
                 language: Some("en-US".into()),
-                name: "Siri Voice 7".into(),
+                name: "Zack".into(),
             }],
             ..MenuState::default()
         });
-        let menu = find(&nodes, "Voice: Siri Voice 7");
-        assert_eq!(menu.children[0].title, "Siri Voice 7 (en-US)");
+        let menu = find(&nodes, "Voice: Zack");
+        assert_eq!(menu.children[0].title, "Zack (en-US)");
         assert!(menu.children[0].checked);
     }
 

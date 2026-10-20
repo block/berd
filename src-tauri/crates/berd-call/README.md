@@ -274,9 +274,10 @@ already been applied.
 
 `voices.list` returns `backend`, normalized `languageFilter`,
 `availableLanguages`, and exact voice records. Each record's `displayName` is
-its `name`, except for voices whose catalog name is a locale code such as
-`en-US-F`, which take the name macOS shows (`Siri Voice 7`). Commands still
-take the exact `name`. A voice is `installed` only when
+its `name`, except for voices whose catalog name is a locale code: en-US-F and
+en-US-G are `Zack` and `Gigi`, named by their asset build paths, and the rest
+take the name macOS shows (`en-GB-C` is `Siri Voice 3`). Commands still take
+the exact `name`. A voice is `installed` only when
 sirittsd reports it downloaded and its assets are on disk: sirittsd can claim
 a voice whose assets are missing, then silently speak it in another voice. `voices.download` returns the
 canonical voice, `installed: true`, and `availabilityWaitSeconds`; a missing
