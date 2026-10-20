@@ -3038,8 +3038,9 @@ struct LiveResponse {
     reply: bool,
     /// The voice it asked for, when not the Expert's usual one.
     voice: Option<TtsConfigurationLease>,
-    /// Whether the parent has accepted the reply's output, so it may play.
-    output_ready: bool,
+    /// When an Expert reply still awaits the parent's `output_ready`, the time
+    /// it must arrive by.
+    ready_by: Option<Instant>,
     delivery: RealtimeAudioDelivery,
     pending_audio: VecDeque<Vec<f32>>,
     pending_frames: usize,
@@ -3059,7 +3060,7 @@ impl LiveResponse {
             expert_text: None,
             reply: false,
             voice: None,
-            output_ready: false,
+            ready_by: None,
             delivery: RealtimeAudioDelivery::default(),
             pending_audio: VecDeque::new(),
             pending_frames: 0,
@@ -4332,6 +4333,31 @@ fn run_expert_spokesperson_session(
                 interrupted,
             )?;
         }
+        let now = Instant::now();
+        let expired: Vec<_> = responses
+            .iter()
+            .filter(|(_, response)| response.ready_by.is_some_and(|by| by <= now))
+            .map(|(response_id, _)| response_id.clone())
+            .collect();
+        for response_id in expired {
+            let response = responses.remove(&response_id).expect("reply exists");
+            write_message(
+                &mut writer,
+                &SessionMessage::SpeechFailed {
+                    id: response
+                        .prepare_id
+                        .expect("an Expert reply has a prepare ID"),
+                    speech_id: response.speech_id.expect("an Expert reply has a speech ID"),
+                    message: "output readiness timed out".into(),
+                },
+            )?;
+            finish_expert_reply(
+                &mut core,
+                runtime.as_ref().expect("initialized runtime"),
+                "",
+                true,
+            )?;
+        }
         if initialized && !turn_gate.input_blocks_output() {
             start_next_live_playback(
                 &mut active,
@@ -4628,10 +4654,10 @@ fn run_expert_spokesperson_session(
                     response.prepare_id == Some(id) && response.speech_id == Some(speech_id)
                 };
                 let reply = responses.iter_mut().find(|(_, response)| {
-                    response.reply && !response.output_ready && matches(response)
+                    response.ready_by.is_some() && matches(response)
                 });
                 let valid = if let Some((response_id, response)) = reply {
-                    response.output_ready = true;
+                    response.ready_by = None;
                     waiting_responses.push_back(response_id.clone());
                     true
                 } else {
@@ -5352,6 +5378,7 @@ fn submit_expert_prepare(
                 response.expert_text = Some(message);
                 response.reply = true;
                 response.voice = request.voice;
+                response.ready_by = Some(Instant::now() + Duration::from_secs(2));
                 response.audio_done = true;
                 response.finish_sent = true;
                 response.server_finished = true;

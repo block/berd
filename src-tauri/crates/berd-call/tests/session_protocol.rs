@@ -3722,6 +3722,62 @@ fn expert_voice_reply_waits_for_output_ready_before_playing() {
     session.shutdown();
 }
 
+/// Starts a direct-speech call against a realtime server that accepts it and then listens.
+fn start_direct_speech_session(speech_url: &str) -> ExpertSpokespersonTestSession {
+    let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async move {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                endpoint_tx
+                    .send(format!("ws://{}/", listener.local_addr().unwrap()))
+                    .unwrap();
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut socket = accept_async(stream).await.unwrap();
+                let initial = receive_realtime_json(&mut socket).await;
+                acknowledge_realtime_session(&mut socket, &initial).await;
+                while socket.next().await.is_some() {}
+            });
+    });
+    ExpertSpokespersonTestSession::start_with_args(
+        endpoint_rx.recv().unwrap(),
+        &["--allow-direct-agent-speech", "--tts-url", speech_url],
+    )
+}
+
+#[test]
+fn expert_voice_reply_without_output_ready_fails_and_frees_the_slot() {
+    let (speech_url, speech_requests) = spawn_speech_server();
+    let mut session = start_direct_speech_session(&speech_url);
+    for id in [2, 3] {
+        session.send(json!({
+            "type":"prepare_speak",
+            "id":id,
+            "acknowledgement":null,
+            "text":"I checked the repository."
+        }));
+        let admitted = session.recv(Duration::from_secs(2));
+        assert_eq!(admitted["type"], "admitted", "{admitted}");
+        if id == 3 {
+            break;
+        }
+        assert_eq!(
+            session.recv(Duration::from_secs(3)),
+            json!({
+                "type":"speech_failed",
+                "id":id,
+                "speech_id":admitted["speech_id"],
+                "message":"output readiness timed out"
+            })
+        );
+    }
+    assert!(speech_requests.try_recv().is_err());
+    session.shutdown();
+}
+
 /// Stops the host's player once it has played `played_frames` of an Expert reply, as when the
 /// speakers change, returning how the reply ended and what the Spokesperson was told.
 fn stop_expert_reply_after(played_frames: u64) -> (Value, String) {
