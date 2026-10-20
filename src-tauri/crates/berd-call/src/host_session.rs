@@ -809,8 +809,14 @@ impl HostControl for SessionControl {
     }
 
     fn set_spokesperson_mode(&self, on: bool) -> Result<Value, String> {
-        let arguments = &self.session_arguments[1..];
         let realtime = crate::validate_session_arguments(&self.session_arguments)?;
+        // Without the one flag that takes no value, so the rest pair up.
+        let arguments: Vec<_> = self.session_arguments[1..]
+            .iter()
+            .filter(|argument| *argument != crate::DIRECT_AGENT_SPEECH)
+            .cloned()
+            .collect();
+        let arguments = &arguments[..];
         if on == realtime {
             return self.status();
         }
@@ -4520,6 +4526,65 @@ mod tests {
         );
         assert_eq!(tts, None);
         assert!(crate::validate_session_arguments(&arguments).unwrap());
+    }
+
+    #[test]
+    fn turning_the_spokesperson_off_drops_direct_speech_wherever_it_was_given() {
+        let (commands, receiver) = mpsc::sync_channel(1);
+        let control = SessionControl {
+            commands,
+            running: Arc::new(AtomicBool::new(true)),
+            ready: ReadyState {
+                session: Arc::new(Mutex::new(test_snapshot())),
+            },
+            non_blocking: Arc::new(AtomicBool::new(false)),
+            stop_requested: Arc::new(AtomicBool::new(false)),
+            muted: Arc::new(AtomicBool::new(false)),
+            transcript: Arc::new(Transcript::Stdout { live: true }),
+            speaks: true,
+            session_arguments: [
+                "session",
+                "--mode",
+                "expert-spokesperson",
+                crate::DIRECT_AGENT_SPEECH,
+                "--voice",
+                "Samantha",
+                "--language",
+                "en-GB",
+            ]
+            .map(str::to_string)
+            .to_vec(),
+        };
+        let worker = thread::spawn(move || match receiver.recv().unwrap() {
+            ControlCommand::Restart {
+                arguments,
+                expert_spokesperson,
+                response,
+                ..
+            } => {
+                response.send(Ok(json!({}))).unwrap();
+                assert!(!expert_spokesperson);
+                arguments
+            }
+            _ => panic!("expected a restart"),
+        });
+        control.set_spokesperson_mode(false).unwrap();
+        assert_eq!(
+            worker.join().unwrap(),
+            [
+                "session",
+                "--tts-backend",
+                "siri",
+                "--rate",
+                "1",
+                "--voice",
+                "Aaron",
+                "--language",
+                "en-US",
+                "--mode",
+                "conventional",
+            ]
+        );
     }
 
     #[test]
