@@ -1281,6 +1281,12 @@ impl SessionActor {
                 if let Some(mode) = mode {
                     self.persist_settings(SavedPreference::StatusSounds(mode));
                 }
+                // A stopping child may already have exited; a restarted session
+                // is sent the committed status when it starts.
+                if self.stopping {
+                    let _ = response.send(Ok(json!({})));
+                    return Ok(());
+                }
                 match self.send_status_sounds()? {
                     Some(id) => {
                         self.pending_settings.insert(id, response);
@@ -3206,6 +3212,34 @@ mod tests {
         assert!(actor.send_status_sounds().unwrap().is_some());
         drop(actor);
         assert!(child.wait().unwrap().success());
+    }
+
+    #[test]
+    fn status_sounds_reported_while_stopping_wait_for_the_next_session() {
+        let mut child = Command::new("/usr/bin/true")
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        assert!(child.wait().unwrap().success());
+        let (_events_tx, events) = mpsc::sync_channel(1);
+        let (_commands_tx, commands) = mpsc::sync_channel(1);
+        let (audio, _audio_rx) = mpsc::sync_channel(1);
+        let mut actor = test_actor(writer, events, commands, audio);
+        actor.stopping = true;
+        let (response, reply) = mpsc::sync_channel(1);
+        actor
+            .handle_command(ControlCommand::StatusSounds {
+                mode: None,
+                status: Some(berd_call::ConversationStatus::Waiting),
+                response,
+            })
+            .unwrap();
+        reply.try_recv().unwrap().unwrap();
+        assert_eq!(
+            actor.status_sounds.lock().unwrap().status,
+            Some(berd_call::ConversationStatus::Waiting)
+        );
     }
 
     #[test]
