@@ -3222,7 +3222,6 @@ fn speech_whose_player_stops_is_interrupted_where_it_was_heard_and_the_call_goes
     send(json!({"type":"prepare_speak","id":3,"acknowledgement":null,"text":"Still here."}));
     assert_eq!(terminal(3)["type"], "speech_completed");
     send(json!({"type":"shutdown"}));
-    drop(send);
     drop(stdin);
     assert!(child.0.take().unwrap().wait().unwrap().success());
     audio_host.join().unwrap();
