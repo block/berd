@@ -688,7 +688,10 @@ impl HostControl for SessionControl {
             expected_revision,
             response,
         })?;
-        let Some((settings, expected_revision)) = spokesperson else {
+        // A rate the agents' voice refuses leaves the Spokesperson's alone too.
+        let Some((settings, expected_revision)) =
+            spokesperson.filter(|_| status["outcome"] == "applied")
+        else {
             return Ok(status);
         };
         self.request(|response| ControlCommand::SpokespersonSettings {
@@ -4689,7 +4692,7 @@ mod tests {
 
     #[test]
     fn the_speech_rate_keeps_the_spokesperson_as_close_to_the_agents_as_it_can() {
-        let rates = |spokesperson| {
+        let rates = |spokesperson, outcome: &'static str| {
             let (commands, receiver) = mpsc::sync_channel(1);
             let mut snapshot = test_snapshot();
             snapshot.spokesperson = spokesperson;
@@ -4713,7 +4716,7 @@ mod tests {
                         ControlCommand::TtsSettings {
                             settings, response, ..
                         } => {
-                            response.send(Ok(json!({}))).unwrap();
+                            response.send(Ok(json!({"outcome": outcome}))).unwrap();
                             ("agents", settings.rate())
                         }
                         ControlCommand::SpokespersonSettings {
@@ -4739,10 +4742,11 @@ mod tests {
             },
         };
         assert_eq!(
-            rates(Some(spokesperson)),
+            rates(Some(spokesperson.clone()), "applied"),
             [("agents", 2.0), ("spokesperson", 1.5)]
         );
-        assert_eq!(rates(None), [("agents", 2.0)]);
+        assert_eq!(rates(Some(spokesperson), "rejected"), [("agents", 2.0)]);
+        assert_eq!(rates(None, "applied"), [("agents", 2.0)]);
     }
 
     #[test]
