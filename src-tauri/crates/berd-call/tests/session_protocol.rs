@@ -3166,6 +3166,94 @@ fn siri_remote_output_supports_consecutive_turns_and_cancellation() {
     audio_host.join().unwrap();
 }
 
+#[test]
+fn speech_whose_player_stops_is_interrupted_where_it_was_heard_and_the_call_goes_on() {
+    let (speech_url, _speech_requests) = spawn_speech_server();
+    let (mut command, pcm_guard, host) = session_command();
+    let child = command
+        .args([
+            "--tts-backend",
+            "openai",
+            "--tts-url",
+            &speech_url,
+            "--stt-backend",
+            "openai",
+            "--stt-url",
+            &spawn_transcription_server(),
+        ])
+        .env("OPENAI_API_KEY", "test-key")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    drop(pcm_guard);
+    let mut child = ChildGuard(Some(child));
+    let process = child.0.as_mut().unwrap();
+    let stdin = Arc::new(Mutex::new(process.stdin.take().unwrap()));
+    let output = spawn_session_message_reader(process.stdout.take().unwrap());
+    // The host's player stops partway through the first speech, as when the speakers change.
+    let audio_host =
+        spawn_audio_host_with_played_limit(host, Arc::clone(&stdin), Some(1_200), None, None, true);
+    let send = |message: Value| {
+        let mut stdin = stdin.lock().unwrap();
+        write_session_json(&mut *stdin, &message);
+        stdin.flush().unwrap();
+    };
+    let terminal = |id: u64| loop {
+        let message = output.recv_timeout(Duration::from_secs(5)).unwrap();
+        match message["type"].as_str() {
+            Some("admitted") => send(json!({
+                "type":"output_ready","id":id,"speech_id":message["speech_id"]
+            })),
+            Some("output_ready_result" | "speech_started") => {}
+            _ => break message,
+        }
+    };
+    send(json!({"type":"hello","id":1,"input_during_tts":"allow_barge_in"}));
+    let ready = output.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(ready["type"], "ready", "{ready}");
+    let text = "A reply cut off by a change of speakers.";
+    send(json!({"type":"prepare_speak","id":2,"acknowledgement":null,"text":text}));
+    let interrupted = terminal(2);
+    assert_eq!(interrupted["type"], "speech_interrupted", "{interrupted}");
+    let heard = interrupted["spoken_through_utf8"].as_u64().unwrap();
+    assert!(heard < text.len() as u64, "{interrupted}");
+    send(json!({"type":"prepare_speak","id":3,"acknowledgement":null,"text":"Still here."}));
+    assert_eq!(terminal(3)["type"], "speech_completed");
+    send(json!({"type":"shutdown"}));
+    drop(send);
+    drop(stdin);
+    assert!(child.0.take().unwrap().wait().unwrap().success());
+    audio_host.join().unwrap();
+}
+
+/// Accepts one OpenAI transcription session that never hears anything.
+fn spawn_transcription_server() -> String {
+    let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async move {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                endpoint_tx
+                    .send(format!("ws://{}/", listener.local_addr().unwrap()))
+                    .unwrap();
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut socket = accept_async(stream).await.unwrap();
+                assert_eq!(
+                    receive_realtime_json(&mut socket).await["type"],
+                    "session.update"
+                );
+                send_realtime_json(&mut socket, json!({"type":"session.updated"})).await;
+                while let Some(Ok(_)) = socket.next().await {}
+            });
+    });
+    endpoint_rx.recv().unwrap()
+}
+
 /// Serves OpenAI speech requests with a little silence, reporting each request body.
 fn spawn_speech_server() -> (String, mpsc::Receiver<Value>) {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

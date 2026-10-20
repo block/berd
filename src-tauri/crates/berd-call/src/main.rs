@@ -8349,40 +8349,50 @@ fn synthesize_to_output_with_finish(
             delivery: unplayed(),
             output_quiescent: false,
         })?;
-    if playback
-        .synthesize_segment(backend, text, &mut |_| Ok(()), on_started, &mut |_| Ok(()))
-        .map_err(|failure| PlaybackFailure {
-            message: failure.message,
-            delivery: failure.delivery,
-            output_quiescent: failure.output_quiescent,
-        })?
-        == OutboundOutcome::Interrupted
-    {
-        return Ok((false, playback.snapshot()));
+    let completed = (|| {
+        if playback
+            .synthesize_segment(backend, text, &mut |_| Ok(()), on_started, &mut |_| Ok(()))
+            .map_err(|failure| PlaybackFailure {
+                message: failure.message,
+                delivery: failure.delivery,
+                output_quiescent: failure.output_quiescent,
+            })?
+            == OutboundOutcome::Interrupted
+        {
+            return Ok(false);
+        }
+        if let Err(message) = finish_writes() {
+            let output_quiescent = output.cancel_and_snapshot().is_ok();
+            return Err(PlaybackFailure {
+                message,
+                delivery: playback.snapshot(),
+                output_quiescent,
+            });
+        }
+        let outcome = playback
+            .finish(
+                DrainPolicy {
+                    timeout: Some(Duration::from_secs(2)),
+                    timeout_outcome: DrainTimeoutOutcome::Fail,
+                    ..DrainPolicy::default()
+                },
+                &mut |_| Ok(()),
+            )
+            .map_err(|failure| PlaybackFailure {
+                message: failure.message,
+                delivery: failure.delivery,
+                output_quiescent: failure.output_quiescent,
+            })?;
+        Ok(outcome == OutboundOutcome::Completed)
+    })();
+    match completed {
+        Ok(completed) => Ok((completed, playback.snapshot())),
+        // Speech the host stopped playing, as when the speakers change, ends where it was cut off, as if you had talked over it.
+        Err(failure) if failure.message == AUDIO_HOST_FAILED && failure.output_quiescent => {
+            Ok((false, playback.snapshot()))
+        }
+        Err(failure) => Err(failure),
     }
-    if let Err(message) = finish_writes() {
-        let output_quiescent = output.cancel_and_snapshot().is_ok();
-        return Err(PlaybackFailure {
-            message,
-            delivery: playback.snapshot(),
-            output_quiescent,
-        });
-    }
-    let outcome = playback
-        .finish(
-            DrainPolicy {
-                timeout: Some(Duration::from_secs(2)),
-                timeout_outcome: DrainTimeoutOutcome::Fail,
-                ..DrainPolicy::default()
-            },
-            &mut |_| Ok(()),
-        )
-        .map_err(|failure| PlaybackFailure {
-            message: failure.message,
-            delivery: failure.delivery,
-            output_quiescent: failure.output_quiescent,
-        })?;
-    Ok((outcome == OutboundOutcome::Completed, playback.snapshot()))
 }
 
 #[cfg(test)]
