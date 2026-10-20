@@ -662,11 +662,79 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// Runs `test` again in a child process with `BERD_CALL_MENU_CHILD` set, returning its exit status, or `None` if it was
+    /// still running after five seconds.
+    fn child_exit(test: &str) -> Option<i32> {
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                &format!("menu_bar::tests::{test}"),
+                "--test-threads=1",
+            ])
+            .env("BERD_CALL_MENU_CHILD", "1")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if let Some(status) = child.try_wait().unwrap() {
+                return status.code();
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        child.kill().unwrap();
+        child.wait().unwrap();
+        None
+    }
+
+    fn in_child() -> bool {
+        std::env::var_os("BERD_CALL_MENU_CHILD").is_some()
+    }
+
     #[test]
-    fn a_call_that_panics_ends_the_process_with_a_failure() {
-        assert_eq!(exit_code(|| Ok(())), 0);
+    fn a_call_that_panics_ends_its_process_with_a_failure() {
+        if in_child() {
+            // As in `run`: the call's worker ends the process while the main thread stays busy with the menu bar.
+            thread::spawn(|| std::process::exit(exit_code(|| panic!("session worker panicked"))));
+            loop {
+                thread::park();
+            }
+        }
+        assert_eq!(
+            child_exit("a_call_that_panics_ends_its_process_with_a_failure"),
+            Some(101)
+        );
         assert_eq!(exit_code(|| Err("no microphone".into())), 1);
-        assert_eq!(exit_code(|| panic!("session worker panicked")), 101);
+        assert_eq!(exit_code(|| Ok(())), 0);
+    }
+
+    #[test]
+    fn end_call_ends_its_process_when_the_control_port_is_gone() {
+        if in_child() {
+            let port = std::net::TcpListener::bind("127.0.0.1:0")
+                .unwrap()
+                .local_addr()
+                .unwrap()
+                .port();
+            let (results, _completed) = mpsc::channel();
+            let state = Mutex::new(MenuState::default());
+            begin_menu_action(
+                port,
+                ControlRequest::Stop,
+                1,
+                ActionDomain::Stop,
+                &results,
+                &state,
+            );
+            loop {
+                thread::park();
+            }
+        }
+        assert_eq!(
+            child_exit("end_call_ends_its_process_when_the_control_port_is_gone"),
+            Some(1)
+        );
     }
 
     #[test]
