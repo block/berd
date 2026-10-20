@@ -3722,9 +3722,9 @@ fn expert_voice_reply_waits_for_output_ready_before_playing() {
     session.shutdown();
 }
 
-/// Fails an Expert reply once the host has played `played_frames` of it, returning the
-/// failure and what the Spokesperson was told.
-fn fail_expert_reply_after(played_frames: u64) -> (Value, String) {
+/// Stops the host's player once it has played `played_frames` of an Expert reply, as when the
+/// speakers change, returning how the reply ended and what the Spokesperson was told.
+fn stop_expert_reply_after(played_frames: u64) -> (Value, String) {
     let (speech_url, _speech_requests) = spawn_speech_server();
     let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
     let (context_tx, context_rx) = mpsc::sync_channel(1);
@@ -3784,28 +3784,28 @@ fn fail_expert_reply_after(played_frames: u64) -> (Value, String) {
         "played_frames":played_frames,
         "message":"output device disappeared"
     }));
-    let failed = loop {
+    let ended = loop {
         let message = session.recv(Duration::from_secs(2));
         assert!(
             !matches!(
                 message["type"].as_str(),
-                Some("fatal" | "speech_completed" | "speech_interrupted")
+                Some("fatal" | "speech_completed" | "speech_failed")
             ),
             "{message}"
         );
-        if message["type"] == "speech_failed" {
+        if message["type"] == "speech_interrupted" {
             break message;
         }
     };
     let context = context_rx.recv_timeout(Duration::from_secs(2)).unwrap();
     session.shutdown();
-    (failed, context)
+    (ended, context)
 }
 
 #[test]
-fn a_failed_expert_reply_tells_the_spokesperson_what_was_heard() {
-    let (failed, context) = fail_expert_reply_after(1_000);
-    assert_eq!(failed["id"], 2);
+fn an_expert_reply_whose_player_stops_tells_the_spokesperson_what_was_heard() {
+    let (ended, context) = stop_expert_reply_after(1_000);
+    assert_eq!(ended["id"], 2);
     assert!(
         context.contains("in its own voice") && context.contains("I checked the repository"),
         "{context}"
@@ -3814,9 +3814,9 @@ fn a_failed_expert_reply_tells_the_spokesperson_what_was_heard() {
 }
 
 #[test]
-fn an_expert_reply_that_fails_unheard_tells_the_spokesperson_so() {
-    let (failed, context) = fail_expert_reply_after(0);
-    assert_eq!(failed["id"], 2);
+fn an_expert_reply_whose_player_stops_unheard_tells_the_spokesperson_so() {
+    let (ended, context) = stop_expert_reply_after(0);
+    assert_eq!(ended["id"], 2);
     assert!(context.contains("before hearing any of it"), "{context}");
 }
 
