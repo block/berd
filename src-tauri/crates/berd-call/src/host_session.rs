@@ -661,7 +661,7 @@ impl HostControl for SessionControl {
     }
 
     fn set_rate(&self, rate: f32) -> Result<Value, String> {
-        let (settings, expected_revision, spokesperson) = {
+        let (previous, expected_revision, spokesperson) = {
             let session = self
                 .ready
                 .session
@@ -678,13 +678,13 @@ impl HostControl for SessionControl {
                 )
             });
             (
-                session.tts.settings.clone().with_rate(rate),
+                session.tts.settings.clone(),
                 session.tts.revision,
                 spokesperson,
             )
         };
         let status = self.request(|response| ControlCommand::TtsSettings {
-            settings,
+            settings: previous.clone().with_rate(rate),
             expected_revision,
             response,
         })?;
@@ -694,11 +694,23 @@ impl HostControl for SessionControl {
         else {
             return Ok(status);
         };
-        self.request(|response| ControlCommand::SpokespersonSettings {
+        let result = self.request(|response| ControlCommand::SpokespersonSettings {
             settings,
             expected_revision,
             response,
-        })
+        });
+        // One the Spokesperson refuses puts the agents' back, so the voices never disagree.
+        if let (false, Some(expected_revision)) = (
+            matches!(&result, Ok(value) if value["outcome"] == "applied"),
+            status["snapshot"]["revision"].as_u64(),
+        ) {
+            let _ = self.request(|response| ControlCommand::TtsSettings {
+                settings: previous,
+                expected_revision,
+                response,
+            });
+        }
+        result
     }
 
     fn set_voice(&self, voice: String, language: Option<String>) -> Result<Value, String> {
@@ -4692,7 +4704,7 @@ mod tests {
 
     #[test]
     fn the_speech_rate_keeps_the_spokesperson_as_close_to_the_agents_as_it_can() {
-        let rates = |spokesperson, outcome: &'static str| {
+        let rates = |spokesperson, outcome: &'static str, spokesperson_outcome: &'static str| {
             let (commands, receiver) = mpsc::sync_channel(1);
             let mut snapshot = test_snapshot();
             snapshot.spokesperson = spokesperson;
@@ -4716,13 +4728,17 @@ mod tests {
                         ControlCommand::TtsSettings {
                             settings, response, ..
                         } => {
-                            response.send(Ok(json!({"outcome": outcome}))).unwrap();
+                            response
+                                .send(Ok(json!({"outcome": outcome, "snapshot": {"revision": 2}})))
+                                .unwrap();
                             ("agents", settings.rate())
                         }
                         ControlCommand::SpokespersonSettings {
                             settings, response, ..
                         } => {
-                            response.send(Ok(json!({}))).unwrap();
+                            response
+                                .send(Ok(json!({"outcome": spokesperson_outcome})))
+                                .unwrap();
                             ("spokesperson", settings.rate())
                         }
                         _ => panic!("expected a speech settings command"),
@@ -4742,11 +4758,19 @@ mod tests {
             },
         };
         assert_eq!(
-            rates(Some(spokesperson.clone()), "applied"),
+            rates(Some(spokesperson.clone()), "applied", "applied"),
             [("agents", 2.0), ("spokesperson", 1.5)]
         );
-        assert_eq!(rates(Some(spokesperson), "rejected"), [("agents", 2.0)]);
-        assert_eq!(rates(None, "applied"), [("agents", 2.0)]);
+        // A Spokesperson that refuses its speed puts the agents' back.
+        assert_eq!(
+            rates(Some(spokesperson.clone()), "applied", "rejected"),
+            [("agents", 2.0), ("spokesperson", 1.5), ("agents", 1.0)]
+        );
+        assert_eq!(
+            rates(Some(spokesperson), "rejected", "applied"),
+            [("agents", 2.0)]
+        );
+        assert_eq!(rates(None, "applied", "applied"), [("agents", 2.0)]);
     }
 
     #[test]
