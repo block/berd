@@ -574,6 +574,7 @@ fn framed_hello_reports_input_initialization_failure_before_ready() {
 
 #[test]
 fn expert_spokesperson_renews_before_provider_expiry_without_changing_settings() {
+    let started = std::time::Instant::now();
     let (endpoint_tx, endpoint_rx) = mpsc::sync_channel(1);
     let (audio_ready_tx, audio_ready_rx) = mpsc::sync_channel(1);
     let (release_speech_tx, release_speech_rx) = mpsc::sync_channel(1);
@@ -630,18 +631,21 @@ fn expert_spokesperson_renews_before_provider_expiry_without_changing_settings()
                 let truncate = receive_realtime_json(&mut old).await;
                 assert_eq!(truncate["type"], "conversation.item.truncate");
                 send_realtime_json(&mut old, json!({"type":"conversation.item.truncated","item_id":"assistant-1","content_index":0})).await;
-                send_realtime_json(&mut old, json!({"type":"response.done","response":{"id":"response-1","status":"cancelled"}})).await;
                 send_realtime_json(&mut old, json!({"type":"input_audio_buffer.speech_stopped","item_id":"user-2"})).await;
                 send_realtime_json(&mut old, json!({"type":"conversation.item.input_audio_transcription.completed","item_id":"user-2","transcript":"interrupt now"})).await;
+                // Keep the cancelled response inflight until its successor blocks renewal.
                 send_realtime_json(&mut old, json!({"type":"response.created","response":{"id":"response-2"}})).await;
+                send_realtime_json(&mut old, json!({"type":"response.done","response":{"id":"response-1","status":"cancelled"}})).await;
                 send_realtime_json(&mut old, json!({"type":"response.output_audio_transcript.done","response_id":"response-2","item_id":"assistant-2","output_index":0,"content_index":0,"transcript":"after interruption"})).await;
                 send_realtime_json(&mut old, json!({"type":"response.done","response":{"id":"response-2","status":"completed"}})).await;
 
+                eprintln!("renewal: waiting for candidate at {:?}", started.elapsed());
                 let (candidate_stream, _) =
                     tokio::time::timeout(Duration::from_secs(2), listener.accept())
                         .await
                         .expect("renewal candidate should connect before provider expiry")
                         .unwrap();
+                eprintln!("renewal: candidate connected at {:?}", started.elapsed());
                 let mut candidate = accept_async(candidate_stream).await.unwrap();
                 let replacement = receive_realtime_json(&mut candidate).await;
                 assert_eq!(replacement["type"], "session.update");
@@ -651,6 +655,7 @@ fn expert_spokesperson_renews_before_provider_expiry_without_changing_settings()
                 );
                 assert_eq!(replacement["session"]["audio"]["output"]["speed"], 1.0);
                 acknowledge_realtime_session(&mut candidate, &replacement).await;
+                eprintln!("renewal: candidate ready; replaying transcript at {:?}", started.elapsed());
                 let user_seed = receive_realtime_json(&mut candidate).await;
                 assert_eq!(user_seed["item"]["role"], "user");
                 assert_eq!(user_seed["item"]["content"][0]["text"], "remember this");
@@ -677,10 +682,13 @@ fn expert_spokesperson_renews_before_provider_expiry_without_changing_settings()
                     assert_eq!(seed["item"]["content"][0]["text"], text);
                     send_realtime_json(&mut candidate, json!({"type":"conversation.item.created","item":{"id":seed["item"]["id"]}})).await;
                 }
+                eprintln!("renewal: transcript replayed; waiting for input barrier at {:?}", started.elapsed());
                 let clear = receive_realtime_json(&mut old).await;
                 assert_eq!(clear["type"], "input_audio_buffer.clear");
                 send_realtime_json(&mut old, json!({"type":"input_audio_buffer.cleared"})).await;
+                eprintln!("renewal: input barrier acknowledged; waiting for old session close at {:?}", started.elapsed());
                 let _ = old.next().await;
+                eprintln!("renewal: old session closed at {:?}", started.elapsed());
                 renewed_tx.send(()).unwrap();
                 let _ = candidate.next().await;
             });
@@ -695,7 +703,16 @@ fn expert_spokesperson_renews_before_provider_expiry_without_changing_settings()
     );
     audio_ready_rx.recv_timeout(Duration::from_secs(2)).unwrap();
     release_speech_tx.send(()).unwrap();
-    renewed_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    renewed_rx
+        .recv_timeout(Duration::from_secs(2))
+        .unwrap_or_else(|error| {
+            panic!(
+                "renewal did not finish at {:?}: {error}; output: {:?}; stderr: {:?}",
+                started.elapsed(),
+                session.output.try_iter().collect::<Vec<_>>(),
+                session.stderr.try_iter().collect::<Vec<_>>()
+            )
+        });
     let messages = session.shutdown_and_collect();
     assert!(messages
         .iter()
