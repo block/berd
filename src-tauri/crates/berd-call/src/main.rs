@@ -8365,11 +8365,12 @@ fn read_framed_requests(
             Input::Pcm(frame) => match pcm_sender.try_send(frame) {
                 Ok(()) => sent_pcm = sent_pcm.saturating_add(1),
                 Err(mpsc::TrySendError::Full(_)) => {
-                    let _ = writeln!(diagnostics, "{}", progress.overflow(sent_pcm));
+                    let diagnostic = progress.overflow(sent_pcm);
                     let _ = control_sender.send(OrderedControl {
                         after_pcm: sent_pcm,
                         input: Input::Invalid("session PCM input queue is full".into()),
                     });
+                    let _ = writeln!(diagnostics, "{diagnostic}");
                     return;
                 }
                 Err(mpsc::TrySendError::Disconnected(_)) => return,
@@ -12250,6 +12251,38 @@ mod tests {
         };
         assert_eq!(message, "session PCM input queue is full");
         assert!(control_receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn pcm_overflow_reports_fatal_before_blocked_diagnostics() {
+        struct GatedWriter(Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>);
+        impl Write for GatedWriter {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                if let Some((entered, release)) = self.0.take() {
+                    entered.send(()).unwrap();
+                    release.recv_timeout(Duration::from_secs(2)).unwrap();
+                }
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> { Ok(()) }
+        }
+        let (control_tx, control_rx) = mpsc::channel();
+        let (pcm_tx, _pcm_rx) = mpsc::sync_channel(1);
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let bytes = framed(PCM_FRAME_KIND, &[0_u8; PCM_FRAME_BYTES]).repeat(2);
+        let worker = thread::spawn(move || {
+            read_framed_requests(Cursor::new(bytes), control_tx, pcm_tx,
+                &SessionInputProgress::default(),
+                &mut GatedWriter(Some((entered_tx, release_rx))));
+        });
+        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let terminal = control_rx.try_recv();
+        release_tx.send(()).unwrap();
+        worker.join().unwrap();
+        let terminal = terminal.expect("blocked diagnostics must not delay fatal control");
+        assert_eq!(terminal.after_pcm, 1);
+        assert!(matches!(terminal.input, Input::Invalid(_)));
     }
 
     #[test]
