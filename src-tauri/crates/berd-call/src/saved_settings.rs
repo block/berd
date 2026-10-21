@@ -141,7 +141,11 @@ pub(crate) fn persistable_arguments(arguments: &[String]) -> Vec<String> {
         .filter(|pair| {
             !matches!(
                 pair[0].as_str(),
-                "--realtime-url" | "--stt-url" | "--tts-url" | "--spokesperson-options" | "--stt-hint"
+                "--realtime-url"
+                    | "--stt-url"
+                    | "--tts-url"
+                    | "--spokesperson-options"
+                    | "--stt-hint"
             )
         })
         .flatten()
