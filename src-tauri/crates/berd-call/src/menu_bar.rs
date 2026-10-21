@@ -147,7 +147,7 @@ fn menu_model(state: &MenuState) -> Vec<MenuNode> {
         return vec![item("Berd Call is starting…", None), SEPARATOR, end_call];
     };
     let muted = status["muted"].as_bool().unwrap_or(false);
-    let suppressing = input_policy(status) == Some(InputDuringTtsPolicy::SuppressInput);
+    let input_policy = input_policy(status);
     let tts = &status["session"]["tts"];
     let spokesperson = &status["session"]["spokesperson"];
     let mut nodes = vec![item(format!("Berd Call · {}", mode_name(status)), None)];
@@ -201,15 +201,19 @@ fn menu_model(state: &MenuState) -> Vec<MenuNode> {
         ),
         rate_menu(tts, spokesperson, rate_range(status)),
         MenuNode {
-            checked: suppressing,
-            ..item(
-                "Mute Input During TTS",
-                Some(MenuAction::InputDuringTts(if suppressing {
-                    InputDuringTtsPolicy::AllowBargeIn
-                } else {
-                    InputDuringTtsPolicy::SuppressInput
-                })),
-            )
+            title: "Mute Input During TTS".into(),
+            children: [
+                ("On", InputDuringTtsPolicy::SuppressInput),
+                ("Off", InputDuringTtsPolicy::AllowBargeIn),
+                ("Auto", InputDuringTtsPolicy::Auto),
+            ]
+            .into_iter()
+            .map(|(title, policy)| MenuNode {
+                checked: input_policy == Some(policy),
+                ..item(title, Some(MenuAction::InputDuringTts(policy)))
+            })
+            .collect(),
+            ..MenuNode::default()
         },
         status_sounds_menu(status),
         SEPARATOR,
@@ -1014,6 +1018,29 @@ mod tests {
     }
 
     #[test]
+    fn menu_keeps_auto_selected() {
+        let nodes = menu_model(&MenuState {
+            status: Some(status(false, "auto", None)),
+            ..MenuState::default()
+        });
+        let choices = &find(&nodes, "Mute Input During TTS").children;
+        assert_eq!(
+            choices
+                .iter()
+                .filter(|node| node.checked)
+                .map(|node| node.title.as_str())
+                .collect::<Vec<_>>(),
+            ["Auto"]
+        );
+        assert!(matches!(
+            control_request(find(choices, "Auto").action.as_ref().unwrap()),
+            ControlRequest::InputDuringTts {
+                policy: InputDuringTtsPolicy::Auto
+            }
+        ));
+    }
+
+    #[test]
     fn menu_reflects_live_call_state() {
         let status = status(true, "suppress_input", Some("expert-spokesperson"));
         let nodes = menu_model(&MenuState {
@@ -1046,11 +1073,11 @@ mod tests {
             }
         ));
         assert!(matches!(
-            find(&nodes, "Mute Input During TTS"),
+            find(&find(&nodes, "Mute Input During TTS").children, "On"),
             MenuNode {
                 checked: true,
                 action: Some(MenuAction::InputDuringTts(
-                    InputDuringTtsPolicy::AllowBargeIn
+                    InputDuringTtsPolicy::SuppressInput
                 )),
                 ..
             }

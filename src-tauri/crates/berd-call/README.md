@@ -99,7 +99,7 @@ to update the running call through the runtime's revision-checked TTS settings.
 The result includes `outcome` and the acknowledged `snapshot`; `status` reflects
 that snapshot. Changes apply to subsequent speech without restarting the call.
 
-Use `berd-call settings --input-during-tts allow|suppress` to change whether
+Use `berd-call settings --input-during-tts auto|allow|suppress` to change whether
 microphone input can interrupt speech, and `berd-call settings --muted true|false`
 to mute or unmute microphone input. Both apply live and are reflected by `status`.
 
@@ -442,3 +442,5 @@ rejects a warmup-inclusive workload above 20 recognition commits or 120 seconds
 of streamed PCM. Endpoint and model overrides use the same environment variables
 as the session; reports record only which source supplied them and never include
 the key or endpoint value.
+
+Auto is the default input-during-speech preference. It mutes microphone input during playback on detected speakers and permits interruption on other routes. It follows the default output route during a call (within about 100 ms). Explicit allow/suppress overrides Auto. The preference is saved across calls and restarts. Speaker detection is best-effort; use suppress for an unrecognized external speaker.

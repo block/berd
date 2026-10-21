@@ -457,11 +457,7 @@ fn start_session(
 }
 
 fn default_input_during_tts_policy() -> InputDuringTtsPolicy {
-    if berd_call::macos_audio_route::output_device_is_builtin_speaker(None) {
-        InputDuringTtsPolicy::SuppressInput
-    } else {
-        InputDuringTtsPolicy::AllowBargeIn
-    }
+    InputDuringTtsPolicy::Auto
 }
 
 /// Session options for these speech settings, keeping a Pocket model directory from `arguments`.

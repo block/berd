@@ -383,23 +383,8 @@ pub(crate) fn effective_output_device_name(configured: Option<&str>) -> Option<S
 }
 
 pub(crate) fn output_device_uses_speakers(output_device: Option<&str>) -> bool {
-    if output_device.is_some_and(|name| {
-        let normalized = name.to_lowercase();
-        ["speaker", "altavo"]
-            .iter()
-            .any(|keyword| normalized.contains(keyword))
-    }) {
-        return true;
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        output_device.is_some()
-            && berd_call::macos_audio_route::output_device_is_builtin_speaker(output_device)
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    false
+    // No configured/effective route remains unknown to the desktop host.
+    output_device.is_some() && berd_call::input::output_device_uses_speakers(output_device)
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
@@ -416,14 +401,9 @@ pub(crate) fn resolve_input_during_tts_policy(
     output_device: Option<&str>,
 ) -> InputDuringTtsPolicy {
     match mode {
-        // Automatic is best-effort because macOS cannot classify every external route.
-        // Prevent feedback remains the reliable fallback when this heuristic misses one.
-        VoiceInterruptionMode::Automatic if output_device_uses_speakers(output_device) => {
-            InputDuringTtsPolicy::SuppressInput
-        }
-        VoiceInterruptionMode::Automatic | VoiceInterruptionMode::AllowInterruptions => {
-            InputDuringTtsPolicy::AllowBargeIn
-        }
+        VoiceInterruptionMode::Automatic => InputDuringTtsPolicy::Auto
+            .resolve_for_speakers(output_device_uses_speakers(output_device)),
+        VoiceInterruptionMode::AllowInterruptions => InputDuringTtsPolicy::AllowBargeIn,
         VoiceInterruptionMode::PreventFeedback => InputDuringTtsPolicy::SuppressInput,
     }
 }

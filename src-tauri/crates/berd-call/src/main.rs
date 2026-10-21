@@ -18,8 +18,8 @@ use berd_call::benchmark::{
 use berd_call::endpoint_url::{is_allowed_endpoint_url, EndpointProtocol};
 use berd_call::expert_spokesperson::{ExpertDirectiveOutcome, LiveSideEvent};
 use berd_call::input::{
-    AssistantActivityGuard, InputDuringTtsSlot, InputDuringTtsSnapshot, VoiceInputConfig,
-    VoiceInputControls, VoiceInputEngineConfig, VoiceInputEvent, VoiceInputFrame,
+    AssistantActivityGuard, InputDuringTtsPolicy, InputDuringTtsSlot, InputDuringTtsSnapshot,
+    VoiceInputConfig, VoiceInputControls, VoiceInputEngineConfig, VoiceInputEvent, VoiceInputFrame,
     VoiceInputRuntime, INPUT_FRAME_SAMPLES,
 };
 use berd_call::openai_realtime_protocol::accepted_handoff_tool_output;
@@ -1147,7 +1147,8 @@ fn parse_host_settings_args(
                 policy: match args.get(index + 1).map(String::as_str) {
                     Some("allow") => berd_call::input::InputDuringTtsPolicy::AllowBargeIn,
                     Some("suppress") => berd_call::input::InputDuringTtsPolicy::SuppressInput,
-                    _ => return Err("--input-during-tts requires allow or suppress".into()),
+                    Some("auto") => InputDuringTtsPolicy::Auto,
+                    _ => return Err("--input-during-tts requires auto, allow or suppress".into()),
                 },
             },
             "--rate" => host_control::ControlRequest::Rate {
@@ -3457,12 +3458,18 @@ fn run_expert_spokesperson_session(
     let mut session_tts: Option<berd_call::TtsConfigurationSnapshot> = None;
     let mut input_during_tts_slot: Option<InputDuringTtsSlot> = None;
     let mut input_muted = false;
+    let mut route_checked = Instant::now() - Duration::from_secs(1);
+    let mut auto_input_policy = InputDuringTtsPolicy::AllowBargeIn;
     let mut input_resets = InputResets::default();
     let mut queued_tts_settings = VoiceUpdateQueue::<PendingSpokespersonSettingsUpdate>::default();
     let mut pending_voice_update: Option<VoiceUpdateTransaction> = None;
     let mut status_sound_runtime = StatusSoundRuntime::default();
 
     loop {
+        if route_checked.elapsed() >= Duration::from_millis(100) {
+            auto_input_policy = InputDuringTtsPolicy::Auto.resolve(None);
+            route_checked = Instant::now();
+        }
         if initialized {
             input_resets.poll(&mut writer)?;
             let work = spokesperson_host_work(
@@ -4529,7 +4536,13 @@ fn run_expert_spokesperson_session(
                     input_during_tts_slot
                         .as_ref()
                         .expect("hello initialized input policy")
-                        .snapshot()?,
+                        .snapshot()
+                        .map(|mut snapshot| {
+                            snapshot.policy = snapshot.policy.resolve_for_speakers(
+                                auto_input_policy == InputDuringTtsPolicy::SuppressInput,
+                            );
+                            snapshot
+                        })?,
                 ) {
                     if let Some(update) = pending_voice_update
                         .as_mut()
@@ -8502,7 +8515,6 @@ fn synthesize_to_output_with_finish(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use berd_call::input::InputDuringTtsPolicy;
     use berd_call::{PcmAudioOutput, TtsOutcome, TtsPcmSpec};
     use serde_json::{json, Value};
     use std::io::{Cursor, Read, Write};
@@ -9271,6 +9283,23 @@ mod tests {
             .send(Err("provider refused".into()))
             .unwrap();
         assert_eq!(resets.poll(&mut output).unwrap_err(), "provider refused");
+    }
+
+    #[test]
+    fn cli_accepts_auto_input_policy() {
+        let (_, request) = parse_host_settings_args(&args(&[
+            "berd-call",
+            "settings",
+            "--input-during-tts",
+            "auto",
+        ]))
+        .unwrap();
+        assert!(matches!(
+            request,
+            host_control::ControlRequest::InputDuringTts {
+                policy: InputDuringTtsPolicy::Auto
+            }
+        ));
     }
 
     #[test]
