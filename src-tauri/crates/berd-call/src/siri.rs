@@ -527,7 +527,13 @@ pub fn preview_voice(
         return Ok(SiriPreviewSource::Sample);
     }
     let sample_error = take_error(error, "No system preview is available");
-    if validate_installed_voice(identity).is_err() {
+    // sirittsd can claim a voice whose assets are missing and then speak another voice, so
+    // speak only a voice the catalog lists as installed, as `voices list` and `download` do.
+    let installed = load_voice_catalog(Some(&identity.language))?
+        .voices
+        .iter()
+        .any(|voice| voice.installed && voice.identity() == *identity);
+    if !installed {
         return Err(sample_error);
     }
     error = std::ptr::null_mut();
