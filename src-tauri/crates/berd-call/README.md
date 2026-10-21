@@ -289,7 +289,11 @@ en-US-G are `Zack` and `Gigi`, named by their asset build paths, and the rest
 take the name macOS shows (`en-GB-C` is `Siri Voice 3`). Commands still take
 the exact `name`. A voice is `installed` only when
 sirittsd reports it downloaded and its assets are on disk: sirittsd can claim
-a voice whose assets are missing, then silently speak it in another voice. `voices.download` returns the
+a voice whose assets are missing, then silently speak it in another voice. The
+assets are found through axassetsd's content path or, when that is stale after
+a download, the Siri UAF asset directory. `voices.download` subscribes each
+voice under its own sirittsd client id, so downloading one voice does not
+evict another, and succeeds on the same installed test `voices.list` applies. It returns the
 canonical voice, `installed: true`, and `availabilityWaitSeconds`; a missing
 exact catalog identity fails with `voice_not_found` before any native download
 request. `voices.preview` plays the voice through the default output and

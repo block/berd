@@ -972,6 +972,32 @@ static NSArray<NSString *> *BerdAssetBuildPaths(NSString *content) {
     return @[];
 }
 
+// The name a voice's natural premium UAF asset carries as its CFBundleName.
+static NSString *BerdUAFVoiceAssetName(NSString *language, NSString *voiceName) {
+    return [[NSString stringWithFormat:@"com.apple.siri.tts.voice.%@.%@.natural.premium",
+        [language stringByReplacingOccurrencesOfString:@"-" withString:@"_"], voiceName]
+        lowercaseString];
+}
+
+// The UAF voice assets on disk, by BerdUAFVoiceAssetName, valued with their AssetData
+// directory. This is where sirittsd reads voices from, and unlike the axassetsd voice
+// database behind TTSAXResourceManager it is current right after a download.
+static NSDictionary<NSString *, NSString *> *BerdUAFVoiceAssets(NSString *root) {
+    NSMutableDictionary<NSString *, NSString *> *assets = [NSMutableDictionary dictionary];
+    for (NSString *entry in [NSFileManager.defaultManager contentsOfDirectoryAtPath:root error:nil] ?: @[]) {
+        NSString *asset = [root stringByAppendingPathComponent:entry];
+        NSString *content = [asset stringByAppendingPathComponent:@"AssetData"];
+        BOOL directory = NO;
+        NSString *name = [NSDictionary dictionaryWithContentsOfFile:
+            [asset stringByAppendingPathComponent:@"Info.plist"]][@"CFBundleName"];
+        if ([name isKindOfClass:NSString.class] &&
+            [NSFileManager.defaultManager fileExistsAtPath:content isDirectory:&directory] && directory) {
+            assets[name.lowercaseString] = content;
+        }
+    }
+    return assets;
+}
+
 static NSArray<NSDictionary<NSString *, id> *> *BerdDiscoverVoices(
     NSString *languageFilter,
     NSError **error
@@ -1001,6 +1027,8 @@ static NSArray<NSDictionary<NSString *, id> *> *BerdDiscoverVoices(
     NSArray *resources = ((SendObject)objc_msgSend)(manager, voicesSelector, nil);
     NSString *normalizedFilter =
         [[languageFilter stringByReplacingOccurrencesOfString:@"_" withString:@"-"] lowercaseString];
+    NSDictionary<NSString *, NSString *> *diskAssets = BerdUAFVoiceAssets(
+        @"/System/Library/AssetsV2/com_apple_MobileAsset_UAF_Siri_TextToSpeech/purpose_auto");
     NSMutableDictionary<NSString *, NSDictionary<NSString *, id> *> *byKey =
         [NSMutableDictionary dictionary];
     for (id resource in resources ?: @[]) {
@@ -1014,8 +1042,13 @@ static NSArray<NSDictionary<NSString *, id> *> *BerdDiscoverVoices(
         if (!name.length || !language.length) continue;
         NSString *key = [NSString stringWithFormat:@"%@|%@", name, normalizedLanguage];
         // sirittsd can report a voice as downloaded whose assets aren't on disk,
-        // and then speaks it in another voice.
+        // and then speaks it in another voice. axassetsd's content path goes stale
+        // after a download made outside System Settings, so fall back to the asset
+        // on disk.
         NSString *content = [resource valueForKey:@"contentPath"];
+        if (!content.length || ![NSFileManager.defaultManager fileExistsAtPath:content]) {
+            content = diskAssets[BerdUAFVoiceAssetName(language, name)];
+        }
         // Newer voices have a code as their name (en-US-F); macOS shows its localized name.
         NSString *localizedName = [resource respondsToSelector:@selector(localizedName)]
             ? [resource valueForKey:@"localizedName"]
@@ -1025,7 +1058,7 @@ static NSArray<NSDictionary<NSString *, id> *> *BerdDiscoverVoices(
             @"localizedName" : localizedName ?: @"",
             @"language" : language,
             @"sizeBytes" : [resource valueForKey:@"assetSize"] ?: @0,
-            @"content" : @(content.length && [NSFileManager.defaultManager fileExistsAtPath:content]),
+            @"content" : @(content.length > 0),
             @"assetPaths" : content.length ? BerdAssetBuildPaths(content) : @[],
         };
     }
@@ -1037,6 +1070,31 @@ static NSArray<NSDictionary<NSString *, id> *> *BerdDiscoverVoices(
                 ? language
                 : [left[@"name"] localizedCaseInsensitiveCompare:right[@"name"]];
         }];
+}
+
+// What `list` calls installed: sirittsd reports the exact voice downloaded and its assets are on disk.
+static BOOL BerdVoiceInstalledSync(NSString *language, NSString *voiceName, NSError **error) {
+    if (!BerdDownloadedVoiceSync(language, voiceName, error)) return NO;
+    NSString *normalized =
+        [[language stringByReplacingOccurrencesOfString:@"_" withString:@"-"] lowercaseString];
+    for (NSDictionary *candidate in BerdDiscoverVoices(language, nil) ?: @[]) {
+        NSString *candidateLanguage =
+            [[candidate[@"language"] stringByReplacingOccurrencesOfString:@"_" withString:@"-"]
+                lowercaseString];
+        if ([candidate[@"name"] isEqualToString:voiceName] &&
+            [candidateLanguage isEqualToString:normalized]) {
+            return [candidate[@"content"] boolValue];
+        }
+    }
+    return NO;
+}
+
+// sirittsd keeps one subscription per client id and a new one replaces the last,
+// unsubscribing its voice, so a shared id evicts the previously downloaded voice.
+// One id per voice keeps each voice subscribed.
+static NSString *BerdVoiceClientId(NSString *language, NSString *voiceName) {
+    return [NSString stringWithFormat:@"com.block.berd.call.voice.%@.%@",
+        [language stringByReplacingOccurrencesOfString:@"_" withString:@"-"], voiceName];
 }
 
 static BOOL BerdSubscribeVoiceSync(NSString *language, NSString *voiceName, NSError **error) {
@@ -1073,7 +1131,7 @@ static BOOL BerdSubscribeVoiceSync(NSString *language, NSString *voiceName, NSEr
             finish(proxyError);
         }];
     [proxy subscribeWithVoices:@[ voice ]
-                     clientId:@"com.apple.speech"
+                     clientId:BerdVoiceClientId(language, voiceName)
                   accessoryId:@""
                         reply:^(NSError *failure) { finish(failure); }];
     long wait = dispatch_semaphore_wait(
@@ -1224,7 +1282,7 @@ bool berd_siri_tts_download_voice(
         NSString *language = [NSString stringWithUTF8String:languageValue];
         NSString *voiceName = [NSString stringWithUTF8String:voiceNameValue];
         NSError *error = nil;
-        if (BerdDownloadedVoiceSync(language, voiceName, &error)) return true;
+        if (BerdVoiceInstalledSync(language, voiceName, &error)) return true;
         error = nil;
         if (!BerdSubscribeVoiceSync(language, voiceName, &error) ||
             !BerdTriggerDownload(language, &error)) {
@@ -1235,7 +1293,7 @@ bool berd_siri_tts_download_voice(
         NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:MAX(1, timeoutSeconds)];
         while ([deadline timeIntervalSinceNow] > 0) {
             error = nil;
-            if (BerdDownloadedVoiceSync(language, voiceName, &error)) return true;
+            if (BerdVoiceInstalledSync(language, voiceName, &error)) return true;
             [NSThread sleepForTimeInterval:2];
         }
         BerdSetError(errorOut, BerdError(11,

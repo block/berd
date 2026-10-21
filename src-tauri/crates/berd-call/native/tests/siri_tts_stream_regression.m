@@ -230,11 +230,54 @@ static BerdAudioComparison BerdCompareAudio(NSData *actualData, NSData *expected
     };
 }
 
+static BOOL BerdTestVoiceDownloadIdentity(NSError **error) {
+    NSString *damon = BerdVoiceClientId(@"en_US", @"Damon");
+    if (![damon isEqualToString:BerdVoiceClientId(@"en-US", @"Damon")] ||
+        [damon isEqualToString:BerdVoiceClientId(@"en-US", @"Quinn")] ||
+        [damon isEqualToString:@"com.apple.speech"]) {
+        if (error) *error = BerdError(107, @"Siri voices share a subscription client id.");
+        return NO;
+    }
+    NSString *root = [NSTemporaryDirectory()
+        stringByAppendingPathComponent:[NSUUID UUID].UUIDString];
+    NSFileManager *files = NSFileManager.defaultManager;
+    for (NSArray *asset in @[
+        @[ @"a", @"com.apple.siri.tts.voice.en_US.damon.natural.premium", @YES ],
+        @[ @"b", @"com.apple.siri.tts.voice.en_US.en-US-F.natural.premium", @YES ],
+        @[ @"c", @"com.apple.siri.tts.voice.en_US.quinn.neural.premium", @YES ],
+        @[ @"d", @"com.apple.siri.tts.voice.en_US.simone.natural.premium", @NO ],
+    ]) {
+        NSString *directory = [root stringByAppendingPathComponent:asset[0]];
+        [files createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:nil];
+        if ([asset[2] boolValue]) {
+            [files createDirectoryAtPath:[directory stringByAppendingPathComponent:@"AssetData"]
+             withIntermediateDirectories:YES attributes:nil error:nil];
+        }
+        [@{ @"CFBundleName" : asset[1] }
+            writeToFile:[directory stringByAppendingPathComponent:@"Info.plist"] atomically:YES];
+    }
+    NSDictionary *assets = BerdUAFVoiceAssets(root);
+    [files removeItemAtPath:root error:nil];
+    if (![assets[BerdUAFVoiceAssetName(@"en-US", @"Damon")] hasSuffix:@"/a/AssetData"] ||
+        ![assets[BerdUAFVoiceAssetName(@"en-US", @"en-US-F")] hasSuffix:@"/b/AssetData"] ||
+        assets[BerdUAFVoiceAssetName(@"en-US", @"Quinn")] ||
+        assets[BerdUAFVoiceAssetName(@"en-US", @"Simone")] ||
+        assets[BerdUAFVoiceAssetName(@"en-GB", @"Damon")]) {
+        if (error) *error = BerdError(108, @"Siri voice assets on disk were matched wrongly.");
+        return NO;
+    }
+    return YES;
+}
+
 int main(void) {
     @autoreleasepool {
         NSError *error = nil;
         if (!BerdTestExplicitUnitRate(&error)) {
             fprintf(stderr, "set Siri rate: %s\n", error.localizedDescription.UTF8String);
+            return 1;
+        }
+        if (!BerdTestVoiceDownloadIdentity(&error)) {
+            fprintf(stderr, "voice download identity: %s\n", error.localizedDescription.UTF8String);
             return 1;
         }
         if (!BerdTestPCMNormalization(&error)) {
