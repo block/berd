@@ -214,16 +214,28 @@ impl InputDuringTtsPolicy {
 
 /// Shared best-effort route classification for desktop and CLI callers.
 pub fn output_device_uses_speakers(output_device: Option<&str>) -> bool {
-    if output_device.is_some_and(|name| {
+    #[cfg(target_os = "macos")]
+    let (default_name, builtin) = (
+        crate::macos_audio_route::default_output_device_name as fn() -> Option<String>,
+        || crate::macos_audio_route::output_device_is_builtin_speaker(output_device),
+    );
+    #[cfg(not(target_os = "macos"))]
+    let (default_name, builtin) = ((|| None) as fn() -> Option<String>, || false);
+    route_uses_speakers(output_device, default_name, builtin)
+}
+
+/// A named route is judged by its name, then by built-in speaker metadata. No
+/// name means the default output, which is named the same way.
+fn route_uses_speakers(
+    output_device: Option<&str>,
+    default_name: impl FnOnce() -> Option<String>,
+    builtin_speaker: impl FnOnce() -> bool,
+) -> bool {
+    let name = output_device.map(str::to_owned).or_else(default_name);
+    name.is_some_and(|name| {
         let name = name.to_lowercase();
         ["speaker", "altavo"].iter().any(|word| name.contains(word))
-    }) {
-        return true;
-    }
-    #[cfg(target_os = "macos")]
-    return crate::macos_audio_route::output_device_is_builtin_speaker(output_device);
-    #[cfg(not(target_os = "macos"))]
-    false
+    }) || builtin_speaker()
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -2147,6 +2159,29 @@ fn openai_worker(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_output_is_classified_by_its_name() {
+        for name in ["USB Speakers", "Bluetooth SPEAKER", "Altavoces externos"] {
+            assert!(
+                route_uses_speakers(None, || Some(name.into()), || false),
+                "{name}"
+            );
+        }
+        for name in ["AirPods Pro", "USB Headphones"] {
+            assert!(!route_uses_speakers(None, || Some(name.into()), || false));
+        }
+        assert!(!route_uses_speakers(None, || None, || false));
+        assert!(route_uses_speakers(
+            None,
+            || Some("MacBook".into()),
+            || true
+        ));
+        let named = |default: fn() -> Option<String>| {
+            route_uses_speakers(Some("AirPods"), default, || false)
+        };
+        assert!(!named(|| Some("USB Speakers".into())));
+    }
 
     fn silence_frame() -> VoiceInputFrame {
         VoiceInputFrame::try_from_samples(&[0.0; INPUT_FRAME_SAMPLES]).unwrap()
