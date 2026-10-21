@@ -5475,9 +5475,13 @@ fn spawn_live_playback(
     thread::spawn(move || {
         let result = (|| {
             worker_output.start()?;
+            let mut loudness = berd_call::SpokespersonLoudness::default();
             while let Ok(input) = receiver.recv() {
                 match input {
-                    LivePlaybackInput::Samples(samples) => worker_output.write(&samples)?,
+                    LivePlaybackInput::Samples(mut samples) => {
+                        loudness.process(&mut samples);
+                        worker_output.write(&samples)?;
+                    }
                     LivePlaybackInput::Finish => {
                         worker_output.finish_writes()?;
                         let deadline = Instant::now() + Duration::from_secs(3);
@@ -10158,6 +10162,77 @@ mod tests {
         let mut payload = vec![0; length];
         reader.read_exact(&mut payload).unwrap();
         (header[3], payload)
+    }
+
+    #[test]
+    fn live_spokesperson_playback_levels_chunks_before_the_audio_pipe() {
+        let (child, mut host) = UnixStream::pair().unwrap();
+        host.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let transport =
+            Arc::new(unsafe { AudioPipeTransport::from_raw_fd(child.into_raw_fd()) }.unwrap());
+        let (control, _controls) = mpsc::channel();
+        let (completed, results) = mpsc::channel();
+        let playback =
+            spawn_live_playback("response".into(), 7, None, transport, control, completed).unwrap();
+        assert_eq!(
+            read_audio_record(&mut host).0,
+            session_audio::AUDIO_BEGIN_KIND
+        );
+        playback
+            .output
+            .handle_ack(AudioHostAck::BeginAccepted)
+            .unwrap();
+        for (sequence, input) in [(1, 0.1), (2, 0.9), (3, 0.1)] {
+            playback
+                .sender
+                .send(LivePlaybackInput::Samples(
+                    vec![input; session_audio::MAX_AUDIO_CHUNK_FRAMES],
+                ))
+                .unwrap();
+            let (kind, payload) = read_audio_record(&mut host);
+            assert_eq!(kind, session_audio::AUDIO_CHUNK_KIND);
+            let samples: Vec<f32> = payload[16..]
+                .chunks_exact(4)
+                .map(|bytes| f32::from_le_bytes(bytes.try_into().unwrap()))
+                .collect();
+            assert!(samples.iter().all(|sample| sample.abs() <= 0.95));
+            match sequence {
+                1 => assert!((samples[0] - 0.16).abs() < 0.00001),
+                2 => assert!((samples[0] - 0.95).abs() < 0.00001),
+                3 => assert!(
+                    samples[0] < 0.11,
+                    "limiter state must cross chunk boundaries"
+                ),
+                _ => unreachable!(),
+            }
+            playback
+                .output
+                .handle_ack(AudioHostAck::ChunkAccepted { sequence })
+                .unwrap();
+            playback
+                .output
+                .handle_ack(AudioHostAck::Played {
+                    played_frames: sequence * session_audio::MAX_AUDIO_CHUNK_FRAMES as u64,
+                })
+                .unwrap();
+        }
+        playback.sender.send(LivePlaybackInput::Finish).unwrap();
+        let (kind, payload) = read_audio_record(&mut host);
+        assert_eq!(kind, session_audio::AUDIO_END_KIND);
+        playback
+            .output
+            .handle_ack(AudioHostAck::Drained {
+                sequence: u64::from_le_bytes(payload[8..16].try_into().unwrap()),
+                played_frames: 3 * session_audio::MAX_AUDIO_CHUNK_FRAMES as u64,
+            })
+            .unwrap();
+        assert_eq!(
+            results
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap()
+                .unwrap(),
+            ("response".into(), 7)
+        );
     }
 
     #[test]

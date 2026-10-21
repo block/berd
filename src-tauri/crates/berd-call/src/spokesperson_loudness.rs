@@ -1,6 +1,6 @@
 /// Capped level compensation for the Spokesperson's 24 kHz mono stream.
 /// The limiter attacks immediately and recovers over 250 ms, without delaying audio.
-pub(crate) struct SpokespersonLoudness {
+pub struct SpokespersonLoudness {
     gain: f32,
 }
 
@@ -15,7 +15,7 @@ impl Default for SpokespersonLoudness {
 }
 
 impl SpokespersonLoudness {
-    pub(crate) fn process(&mut self, samples: &mut [f32]) {
+    pub fn process(&mut self, samples: &mut [f32]) {
         for sample in samples {
             let input = if sample.is_finite() { *sample } else { 0.0 };
             self.gain += (BOOST - self.gain) * RECOVERY;

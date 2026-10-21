@@ -61,6 +61,7 @@ pub use pocket::{
 };
 #[cfg(target_os = "macos")]
 pub use siri::SiriTts;
+pub use spokesperson_loudness::SpokespersonLoudness;
 pub use status_sounds::ConversationStatus;
 pub use status_sounds::ManagedStatusSoundRuntime;
 pub use status_sounds::StatusSoundActivityGuard;
