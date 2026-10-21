@@ -43,59 +43,15 @@ const CLEAN_STOP: &str = "Berd Call stopped after a stop request. This is a clea
 const INPUT_FRAME_SAMPLES: usize = 960;
 const MAX_AUDIO_RECORD_BYTES: usize = 4096 * std::mem::size_of::<f32>() + 16;
 
-/// Turns Ctrl-C and SIGTERM into the same stop request `berd-call stop`
-/// sends, so the call ends through its normal shutdown and reports it.
-/// Must run before any other thread starts so every thread inherits the mask.
-pub(crate) fn route_stop_signals(port: u16) -> Result<(), String> {
-    // SAFETY: the set is initialized by sigemptyset before use.
-    let signals = unsafe {
-        let mut signals = std::mem::zeroed::<libc::sigset_t>();
-        libc::sigemptyset(&mut signals);
-        libc::sigaddset(&mut signals, libc::SIGINT);
-        libc::sigaddset(&mut signals, libc::SIGTERM);
-        // An inherited SIG_IGN (e.g. a background job) would discard the
-        // signal before sigwait could receive it.
-        libc::signal(libc::SIGINT, libc::SIG_DFL);
-        libc::signal(libc::SIGTERM, libc::SIG_DFL);
-        if libc::pthread_sigmask(libc::SIG_BLOCK, &signals, std::ptr::null_mut()) != 0 {
-            return Err("could not route stop signals".into());
-        }
-        signals
-    };
-    thread::Builder::new()
-        .name("berd-call-signals".into())
-        .spawn(move || {
-            let mut stopping = false;
-            loop {
-                let mut signal = 0;
-                // SAFETY: `signals` is blocked on every thread, so sigwait
-                // is the only receiver.
-                if unsafe { libc::sigwait(&signals, &mut signal) } != 0 {
-                    continue;
-                }
-                if stopping {
-                    std::process::exit(130);
-                }
-                stopping = true;
-                thread::spawn(move || {
-                    if crate::host_control::request(port, crate::host_control::ControlRequest::Stop)
-                        .is_err()
-                    {
-                        std::process::exit(130);
-                    }
-                });
-            }
-        })
-        .map(drop)
-        .map_err(|error| format!("could not route stop signals: {error}"))
-}
-
 pub(crate) fn run(options: StartOptions) -> Result<(), String> {
     let server = ControlServer::bind(options.port)?;
     let transcript = Arc::new(Transcript::for_options(&options)?);
     transcript.start()?;
     let non_blocking = Arc::new(AtomicBool::new(options.non_blocking));
     let stop_requested = Arc::new(AtomicBool::new(false));
+    if matches!(&*transcript, Transcript::Stdout { .. }) {
+        crate::host_lifetime::watch_stdout(Arc::clone(&stop_requested))?;
+    }
     let status_sounds = Arc::new(Mutex::new(StatusSounds {
         mode: options
             .saved
@@ -142,6 +98,10 @@ pub(crate) fn run(options: StartOptions) -> Result<(), String> {
             }
             Ok(Some(next)) => {
                 session = next;
+            }
+            Err(_) if stop_requested.load(Ordering::SeqCst) => {
+                transcript.finish(CLEAN_STOP);
+                return Ok(());
             }
             Err(message) => {
                 transcript.finish(&format!("Berd Call failed: {message}"));
@@ -236,9 +196,9 @@ impl Transcript {
 }
 
 fn print_flushed(line: &str) -> Result<(), String> {
-    println!("{line}");
-    std::io::stdout()
-        .flush()
+    let mut stdout = std::io::stdout().lock();
+    writeln!(stdout, "{line}")
+        .and_then(|()| stdout.flush())
         .map_err(|error| format!("could not flush voice stream: {error}"))
 }
 
@@ -417,7 +377,7 @@ fn start_session(
             status_sound_output_device: None,
         },
     )?;
-    let ready = receive_ready(&event_rx)?;
+    let ready = receive_ready(&event_rx, stop_requested)?;
     let running = Arc::new(AtomicBool::new(true));
     let (command_tx, command_rx) = mpsc::sync_channel(32);
     let mut actor = SessionActor::new(
@@ -1828,18 +1788,11 @@ struct PendingInputPoll {
     response: SyncSender<Result<Value, String>>,
 }
 
-fn receive_ready(events: &Receiver<SessionMessage>) -> Result<ReadyState, String> {
-    let event = events
-        .recv_timeout(Duration::from_secs(60))
-        .map_err(|error| {
-            match error {
-                mpsc::RecvTimeoutError::Timeout => "timed out waiting for voice session startup",
-                mpsc::RecvTimeoutError::Disconnected => {
-                    "voice session event stream closed during startup"
-                }
-            }
-            .to_string()
-        })?;
+fn receive_ready(
+    events: &Receiver<SessionMessage>,
+    stopped: &AtomicBool,
+) -> Result<ReadyState, String> {
+    let event = crate::host_lifetime::receive_ready_event(events, stopped)?;
     match event {
         SessionMessage::Ready {
             id: 1,
