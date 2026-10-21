@@ -28,9 +28,7 @@ const GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The OpenAI key the Spokesperson needs, when the environment has one.
 pub fn api_key() -> Option<String> {
-    std::env::var("OPENAI_API_KEY")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
+    crate::openai::openai_key("OPENAI_REALTIME_API_KEY")
 }
 
 /// Connection settings for the live Spokesperson. This deliberately does not
@@ -58,8 +56,10 @@ impl OpenAiSpokespersonConfig {
     }
 
     pub fn from_environment() -> Result<Self, String> {
-        let api_key = api_key()
-            .ok_or_else(|| "OPENAI_API_KEY is required for Expert-Spokesperson mode".to_string())?;
+        let api_key = api_key().ok_or_else(|| {
+            "OPENAI_REALTIME_API_KEY or OPENAI_API_KEY is required for Expert-Spokesperson mode"
+                .to_string()
+        })?;
         let mut config = Self::new(
             api_key,
             RealtimeSpokespersonSessionOptions {

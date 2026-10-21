@@ -5,6 +5,29 @@ use futures_util::StreamExt;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use serde_json::json;
 
+/// The variable and key for one OpenAI service: its own variable (for example
+/// `OPENAI_TTS_API_KEY`), else `OPENAI_API_KEY`. Blank values count as unset.
+fn credential(
+    kind_var: &'static str,
+    get: impl Fn(&str) -> Option<String>,
+) -> Option<(&'static str, String)> {
+    [kind_var, "OPENAI_API_KEY"].into_iter().find_map(|name| {
+        get(name)
+            .filter(|key| !key.trim().is_empty())
+            .map(|key| (name, key))
+    })
+}
+
+/// The environment variable that supplies `kind_var`'s key, if any.
+pub fn openai_key_var(kind_var: &'static str) -> Option<&'static str> {
+    credential(kind_var, |name| std::env::var(name).ok()).map(|(name, _)| name)
+}
+
+/// The OpenAI key for one service, falling back to `OPENAI_API_KEY`.
+pub fn openai_key(kind_var: &'static str) -> Option<String> {
+    credential(kind_var, |name| std::env::var(name).ok()).map(|(_, key)| key)
+}
+
 #[derive(Clone, Debug)]
 pub struct OpenAiSpeechConfig {
     pub endpoint: String,
@@ -130,7 +153,42 @@ fn pcm16le_to_f32(bytes: &[u8]) -> Vec<f32> {
 
 #[cfg(test)]
 mod tests {
-    use super::pcm16le_to_f32;
+    use super::{credential, pcm16le_to_f32};
+
+    fn lookup<'a>(vars: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |name| {
+            vars.iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, v)| v.to_string())
+        }
+    }
+
+    #[test]
+    fn service_key_wins_over_the_shared_key() {
+        let vars = [("OPENAI_API_KEY", "shared"), ("OPENAI_TTS_API_KEY", "tts")];
+        assert_eq!(
+            credential("OPENAI_TTS_API_KEY", lookup(&vars)),
+            Some(("OPENAI_TTS_API_KEY", "tts".into()))
+        );
+        assert_eq!(
+            credential("OPENAI_STT_API_KEY", lookup(&vars)),
+            Some(("OPENAI_API_KEY", "shared".into()))
+        );
+    }
+
+    #[test]
+    fn blank_or_unset_service_key_falls_back_to_the_shared_key() {
+        let vars = [
+            ("OPENAI_API_KEY", "shared"),
+            ("OPENAI_REALTIME_API_KEY", "  "),
+        ];
+        assert_eq!(
+            credential("OPENAI_REALTIME_API_KEY", lookup(&vars)),
+            Some(("OPENAI_API_KEY", "shared".into()))
+        );
+        let blank = [("OPENAI_API_KEY", " "), ("OPENAI_STT_API_KEY", "")];
+        assert_eq!(credential("OPENAI_STT_API_KEY", lookup(&blank)), None);
+    }
 
     #[test]
     fn decodes_little_endian_pcm_without_changing_frame_units() {
