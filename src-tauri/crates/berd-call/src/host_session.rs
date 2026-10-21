@@ -40,6 +40,8 @@ use crate::{StartOptions, TranscriptDestination};
 const NON_BLOCKING_REQUIRES_DELIVERY: &str =
     "non-blocking speech requires start --stream or --codex for delivery events";
 const CLEAN_STOP: &str = "Berd Call stopped after a stop request. This is a clean shutdown, not a crash. Do not restart it unless asked.";
+// How long a restart waits for speech to finish before cutting it off: longer than a typical spoken reply.
+const RESTART_SPEECH_WAIT: Duration = Duration::from_secs(60);
 const INPUT_FRAME_SAMPLES: usize = 960;
 const MAX_AUDIO_RECORD_BYTES: usize = 4096 * std::mem::size_of::<f32>() + 16;
 
@@ -986,6 +988,8 @@ struct SessionActor {
     transcribed: HashSet<u64>,
     stopping: bool,
     restart: Option<PendingRestart>,
+    // When a restart waiting for speech to end stops waiting.
+    restart_not_after: Instant,
     muted: Arc<AtomicBool>,
     status_sounds: Arc<Mutex<StatusSounds>>,
     // Requested sounds and any mode change, committed when the session applies them.
@@ -1084,6 +1088,7 @@ impl SessionActor {
             transcribed: HashSet::new(),
             stopping: false,
             restart: None,
+            restart_not_after: Instant::now(),
             muted: Arc::new(AtomicBool::new(false)),
             status_sounds: Arc::default(),
             pending_status_sounds: BTreeMap::new(),
@@ -1199,6 +1204,19 @@ impl SessionActor {
             if let Some(command) = self.waiting_speaks.pop_front() {
                 self.handle_command(command)?;
             }
+        }
+        self.start_restart_between_replies()
+    }
+
+    /// Shuts the session down for a requested restart once no speech is playing or queued, or the wait is up.
+    fn start_restart_between_replies(&mut self) -> Result<(), String> {
+        let quiet = self.pending_speak.is_none() && self.waiting_speaks.is_empty();
+        if !self.stopping
+            && self.restart.is_some()
+            && (quiet || Instant::now() >= self.restart_not_after)
+        {
+            send_request(&self.writer, &SessionRequest::Shutdown)?;
+            self.stopping = true;
         }
         Ok(())
     }
@@ -1382,18 +1400,24 @@ impl SessionActor {
                 tts,
                 response,
             } => {
-                if self.stopping {
-                    let _ = response.send(Err("voice call is stopping".into()));
+                if self.stopping || self.restart.is_some() {
+                    let _ = response.send(Err(if self.stopping {
+                        "voice call is stopping"
+                    } else {
+                        "voice session is already restarting"
+                    }
+                    .into()));
                     return Ok(());
                 }
-                send_request(&self.writer, &SessionRequest::Shutdown)?;
-                self.stopping = true;
                 self.restart = Some(PendingRestart {
                     arguments,
                     expert_spokesperson,
                     tts,
                     response,
                 });
+                // Ending the session ends its speech, so a restart waits for the reply being played.
+                self.restart_not_after = Instant::now() + RESTART_SPEECH_WAIT;
+                self.start_restart_between_replies()?;
             }
             ControlCommand::Stop { response } => {
                 self.stop()?;
@@ -3841,6 +3865,181 @@ mod tests {
         assert!(first_rx.recv().unwrap().is_err());
         assert!(next_rx.recv().unwrap().is_err());
         assert!(actor.waiting_speaks.is_empty());
+        drop(actor);
+        assert!(child.wait().unwrap().success());
+    }
+
+    fn restart_command() -> (ControlCommand, Receiver<Result<Value, String>>) {
+        let (response, reply) = mpsc::sync_channel(1);
+        let command = ControlCommand::Restart {
+            arguments: vec!["session".into(), "--mode".into(), "conventional".into()],
+            expert_spokesperson: false,
+            tts: None,
+            response,
+        };
+        (command, reply)
+    }
+
+    #[test]
+    fn a_restart_waits_for_the_speech_in_progress_and_the_speech_queued_behind_it() {
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let (events_tx, events) = mpsc::sync_channel(8);
+        let (_commands_tx, commands) = mpsc::sync_channel(1);
+        let (audio, _audio_rx) = mpsc::sync_channel(1);
+        let mut actor = test_actor(writer, events, commands, audio);
+        let (playing_tx, playing) = mpsc::sync_channel(1);
+        actor.pending_speak = Some(PendingSpeak {
+            prepare_id: 2,
+            text: "playing".into(),
+            non_blocking: false,
+            response: Some(playing_tx),
+        });
+        let (queued_tx, queued) = mpsc::sync_channel(1);
+        actor
+            .handle_command(ControlCommand::Speak {
+                text: "queued".into(),
+                acknowledgement: None,
+                resolved_handoff_ids: Vec::new(),
+                voice: None,
+                language: None,
+                relay: false,
+                non_blocking: false,
+                response: queued_tx,
+            })
+            .unwrap();
+        let (restart, restarted) = restart_command();
+        actor.handle_command(restart).unwrap();
+        actor.poll().unwrap();
+        // The reply keeps playing: the switch waits for it and for what follows it.
+        assert!(!actor.stopping);
+        assert!(actor.restart.is_some());
+        assert!(matches!(restarted.try_recv(), Err(TryRecvError::Empty)));
+        assert!(matches!(playing.try_recv(), Err(TryRecvError::Empty)));
+        events_tx
+            .send(SessionMessage::SpeechCompleted {
+                id: 2,
+                speech_id: 1,
+            })
+            .unwrap();
+        actor.poll().unwrap();
+        assert_eq!(
+            playing.try_recv().unwrap().unwrap(),
+            json!({"spoke":true,"status":"completed"})
+        );
+        // The queued reply is next, and the session is still the old one.
+        assert!(!actor.stopping);
+        let queued_id = actor.pending_prepare_id().unwrap();
+        events_tx
+            .send(SessionMessage::SpeechCompleted {
+                id: queued_id,
+                speech_id: 2,
+            })
+            .unwrap();
+        actor.poll().unwrap();
+        assert_eq!(
+            queued.try_recv().unwrap().unwrap(),
+            json!({"spoke":true,"status":"completed"})
+        );
+        // Between replies, the restart goes ahead.
+        assert!(actor.stopping);
+        assert!(actor.restart.is_some());
+        actor.finish_pending("voice session restarted");
+        assert!(actor.pending_speak.is_none());
+        drop(actor);
+        assert!(child.wait().unwrap().success());
+    }
+
+    #[test]
+    fn a_restart_does_not_wait_for_speech_forever() {
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let (_events_tx, events) = mpsc::sync_channel(1);
+        let (_commands_tx, commands) = mpsc::sync_channel(1);
+        let (audio, _audio_rx) = mpsc::sync_channel(1);
+        let mut actor = test_actor(writer, events, commands, audio);
+        let (playing_tx, playing) = mpsc::sync_channel(1);
+        actor.pending_speak = Some(PendingSpeak {
+            prepare_id: 2,
+            text: "playing".into(),
+            non_blocking: false,
+            response: Some(playing_tx),
+        });
+        let (restart, _restarted) = restart_command();
+        actor.handle_command(restart).unwrap();
+        actor.poll().unwrap();
+        assert!(!actor.stopping);
+        // A second restart cannot queue behind the first.
+        let (second, refused) = restart_command();
+        actor.handle_command(second).unwrap();
+        assert!(refused.try_recv().unwrap().is_err());
+        actor.restart_not_after = Instant::now();
+        actor.poll().unwrap();
+        assert!(actor.stopping);
+        actor.finish_pending("voice session restarted");
+        assert_eq!(
+            playing.try_recv().unwrap().unwrap_err(),
+            "voice session restarted"
+        );
+        drop(actor);
+        assert!(child.wait().unwrap().success());
+    }
+
+    #[test]
+    fn a_restart_with_nothing_playing_starts_at_once() {
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let (_events_tx, events) = mpsc::sync_channel(1);
+        let (_commands_tx, commands) = mpsc::sync_channel(1);
+        let (audio, _audio_rx) = mpsc::sync_channel(1);
+        let mut actor = test_actor(writer, events, commands, audio);
+        let (restart, _restarted) = restart_command();
+        actor.handle_command(restart).unwrap();
+        assert!(actor.stopping);
+        drop(actor);
+        assert!(child.wait().unwrap().success());
+    }
+
+    #[test]
+    fn ending_the_call_still_cuts_off_speech_and_a_waiting_restart() {
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let (_events_tx, events) = mpsc::sync_channel(1);
+        let (_commands_tx, commands) = mpsc::sync_channel(1);
+        let (audio, _audio_rx) = mpsc::sync_channel(1);
+        let mut actor = test_actor(writer, events, commands, audio);
+        let (playing_tx, _playing) = mpsc::sync_channel(1);
+        actor.pending_speak = Some(PendingSpeak {
+            prepare_id: 2,
+            text: "playing".into(),
+            non_blocking: false,
+            response: Some(playing_tx),
+        });
+        let (restart, restarted) = restart_command();
+        actor.handle_command(restart).unwrap();
+        actor.stop().unwrap();
+        assert!(actor.stopping);
+        assert!(actor.restart.is_none());
+        assert_eq!(
+            restarted.try_recv().unwrap().unwrap_err(),
+            "voice call stopped"
+        );
         drop(actor);
         assert!(child.wait().unwrap().success());
     }
