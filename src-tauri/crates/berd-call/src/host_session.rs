@@ -4186,15 +4186,14 @@ mod tests {
             },
         };
         actor.session.lock().unwrap().spokesperson = Some(openai("marin", 1));
-        actor.saved = Some((
-            path.clone(),
-            crate::saved_settings::SavedSettings {
-                arguments: ["--voice", "Aaron", "--language", "en-US"]
-                    .map(str::to_string)
-                    .to_vec(),
-                ..crate::saved_settings::SavedSettings::default()
-            },
-        ));
+        let saved = crate::saved_settings::SavedSettings {
+            arguments: ["--voice", "Aaron", "--language", "en-US"]
+                .map(str::to_string)
+                .to_vec(),
+            ..crate::saved_settings::SavedSettings::default()
+        };
+        crate::saved_settings::save(&path, &saved).unwrap();
+        actor.saved = Some((path.clone(), saved));
         let (response, result) = mpsc::sync_channel(1);
         actor
             .handle_command(ControlCommand::SpokespersonSettings {
