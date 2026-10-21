@@ -1089,11 +1089,10 @@ static BOOL BerdSubscribeVoiceSync(NSString *language, NSString *voiceName, NSEr
 }
 
 static BOOL BerdTriggerDownload(NSString *language, NSError **error) {
-    if (!BerdLoadFramework(
-        @"/System/Library/PrivateFrameworks/UnifiedAssetFramework.framework/UnifiedAssetFramework",
-        error
-    )) return NO;
-    Class serviceClass = objc_getClass("UAFAssetUtilitiesService");
+    // macOS 27 moved the service from UnifiedAssetFramework to SiriAssetUtilities.
+    BerdLoadFramework(@"/System/Library/PrivateFrameworks/SiriAssetUtilities.framework/SiriAssetUtilities", NULL);
+    BerdLoadFramework(@"/System/Library/PrivateFrameworks/UnifiedAssetFramework.framework/UnifiedAssetFramework", NULL);
+    Class serviceClass = objc_getClass("SAUAssetUtilitiesService") ?: objc_getClass("UAFAssetUtilitiesService");
     if (!serviceClass) {
         if (error) *error = BerdError(8, @"Siri voice download service is unavailable.");
         return NO;
