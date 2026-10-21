@@ -956,6 +956,22 @@ static NSDictionary<NSString *, id> *BerdDownloadedVoiceSync(
     return nil;
 }
 
+// An asset's build paths, which name a code-named voice (.../assets/zack_v2_.../p2a).
+static NSArray<NSString *> *BerdAssetBuildPaths(NSString *content) {
+    for (NSString *directory in @[ content, [content stringByAppendingPathComponent:@"AssetData"] ]) {
+        NSDictionary *info = [NSDictionary
+            dictionaryWithContentsOfFile:[directory stringByAppendingPathComponent:@"Info.plist"]];
+        NSDictionary *meta = info[@"TtsAssetMetaInfo"];
+        if (![meta isKindOfClass:NSDictionary.class]) continue;
+        NSMutableArray<NSString *> *paths = [NSMutableArray array];
+        for (NSString *key in [meta.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
+            if ([meta[key] isKindOfClass:NSString.class]) [paths addObject:meta[key]];
+        }
+        return paths;
+    }
+    return @[];
+}
+
 static NSArray<NSDictionary<NSString *, id> *> *BerdDiscoverVoices(
     NSString *languageFilter,
     NSError **error
@@ -1010,6 +1026,7 @@ static NSArray<NSDictionary<NSString *, id> *> *BerdDiscoverVoices(
             @"language" : language,
             @"sizeBytes" : [resource valueForKey:@"assetSize"] ?: @0,
             @"content" : @(content.length && [NSFileManager.defaultManager fileExistsAtPath:content]),
+            @"assetPaths" : content.length ? BerdAssetBuildPaths(content) : @[],
         };
     }
     return [[byKey allValues] sortedArrayUsingComparator:

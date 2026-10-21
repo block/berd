@@ -202,6 +202,8 @@ struct RawSiriVoice {
     language: String,
     size_bytes: u64,
     installed: bool,
+    #[serde(default)]
+    asset_paths: Vec<String>,
 }
 
 /// Normalizes one Siri catalog language using the shared BCP-47 identity rule.
@@ -251,6 +253,28 @@ pub fn normalize_language(value: &str) -> Result<String, String> {
     Ok(normalized.join("-"))
 }
 
+/// The name in a voice asset's build paths, such as `Zack` from
+/// `.../assets/zack_v2_dual_prompt_with_fallback/p2a`, when every path that
+/// names one agrees.
+#[cfg(any(test, target_os = "macos"))]
+fn asset_voice_name(paths: &[String]) -> Option<String> {
+    let mut names = paths.iter().filter_map(|path| {
+        let segments = path.split('/').collect::<Vec<_>>();
+        // A named build directory sits under `assets/` with more path below it.
+        let directory = segments
+            .windows(3)
+            .find(|window| window[0] == "assets")
+            .map(|window| window[1])?;
+        let word = directory.split('_').next()?;
+        (word.len() > 1 && word.bytes().all(|byte| byte.is_ascii_alphabetic())).then(|| {
+            let word = word.to_ascii_lowercase();
+            word[..1].to_ascii_uppercase() + &word[1..]
+        })
+    });
+    let name = names.next()?;
+    names.all(|other| other == name).then_some(name)
+}
+
 #[cfg(any(test, target_os = "macos"))]
 fn parse_catalog_json(json: &str) -> Result<Vec<SiriVoice>, String> {
     serde_json::from_str::<Vec<RawSiriVoice>>(json)
@@ -264,13 +288,16 @@ fn parse_catalog_json(json: &str) -> Result<Vec<SiriVoice>, String> {
                 .starts_with(&format!("{}-", identity.language.to_ascii_lowercase()));
             Ok(SiriVoice {
                 display_name: match identity.name.as_str() {
-                    // Their asset build paths (zack_v2_..., gigi_test_2) name them.
-                    "en-US-F" => "Zack".into(),
-                    "en-US-G" => "Gigi".into(),
-                    _ if coded && !raw.localized_name.is_empty() => {
-                        format!("Siri {}", raw.localized_name)
-                    }
-                    _ => identity.name.clone(),
+                    _ if !coded => identity.name.clone(),
+                    name => asset_voice_name(&raw.asset_paths).unwrap_or_else(|| match name {
+                        // Known names for when the asset isn't installed or readable.
+                        "en-US-F" => "Zack".into(),
+                        "en-US-G" => "Gigi".into(),
+                        _ if !raw.localized_name.is_empty() => {
+                            format!("Siri {}", raw.localized_name)
+                        }
+                        _ => name.into(),
+                    }),
                 },
                 name: identity.name,
                 language: identity.language,
@@ -697,16 +724,16 @@ fn take_string(value: *mut c_char) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use super::{
+        asset_voice_name, download_voice_with, parse_catalog_json, parse_languages_json,
+        validate_download_wait_timeout, SiriDownloadAvailabilityWait, SiriVoice, SiriVoiceCatalog,
+        SiriVoiceDownloadError, SiriVoiceIdentity, MAX_SIRI_DOWNLOAD_WAIT_TIMEOUT,
+        MIN_SIRI_DOWNLOAD_WAIT_TIMEOUT,
+    };
     #[cfg(target_os = "macos")]
     use super::{
         berd_siri_tts_test_closed_pcm_gate_ignores_late_callback, receive_pcm,
         receive_pcm_until_complete, CallbackContext, SiriTts, MAX_PENDING_PCM_FRAMES,
-    };
-    use super::{
-        download_voice_with, parse_catalog_json, parse_languages_json,
-        validate_download_wait_timeout, SiriDownloadAvailabilityWait, SiriVoice, SiriVoiceCatalog,
-        SiriVoiceDownloadError, SiriVoiceIdentity, MAX_SIRI_DOWNLOAD_WAIT_TIMEOUT,
-        MIN_SIRI_DOWNLOAD_WAIT_TIMEOUT,
     };
     #[cfg(target_os = "macos")]
     use crate::{TtsBackend, TtsOutcome, TtsSynthesisEvent};
@@ -809,6 +836,60 @@ mod tests {
                 ("Aaron", "Aaron")
             ]
         );
+    }
+
+    #[test]
+    fn code_named_voices_take_their_name_from_the_installed_asset() {
+        let voices = parse_catalog_json(
+            r#"[
+                {"name":"en-US-H","localizedName":"Voice 8","language":"en-US","sizeBytes":42,"installed":true,
+                 "assetPaths":["s3://tts-turi/users/someone/orion/assets/remy_v1_dual_prompt/anetec",
+                               "s3://tts-voice-build/natural_voices/en-US-H_5030/assets/device",
+                               "s3://tts-turi/users/someone/orion/assets/remy_v1_dual_prompt/p2a"]},
+                {"name":"en-US-F","localizedName":"Voice 7","language":"en-US","sizeBytes":42,"installed":true,
+                 "assetPaths":["s3://tts-voice-build/natural_voices/en-US-F_5028/assets/device"]},
+                {"name":"en-US-J","localizedName":"Voice 9","language":"en-US","sizeBytes":42,"installed":true,
+                 "assetPaths":["s3://a/assets/remy_v1/p2a","s3://a/assets/zack_v2/p2a"]},
+                {"name":"Aaron","localizedName":"Voice 1","language":"en-US","sizeBytes":42,"installed":true,
+                 "assetPaths":["s3://a/assets/zack_v2/p2a"]}
+            ]"#,
+        )
+        .expect("catalog");
+        let names = voices
+            .iter()
+            .map(|voice| (voice.name.as_str(), voice.display_name.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            [
+                ("en-US-H", "Remy"),
+                ("en-US-F", "Zack"),
+                ("en-US-J", "Siri Voice 9"),
+                ("Aaron", "Aaron")
+            ]
+        );
+    }
+
+    #[test]
+    fn asset_names_come_only_from_a_named_build_directory() {
+        for (paths, name) in [
+            (
+                &["s3://tts-turi/users/huiwencheng/orion/assets/zack_v2_dual_prompt_with_fallback/p2a"][..],
+                Some("Zack"),
+            ),
+            (
+                &["s3://tts_turi/users/huiwencheng/orion/assets/gigi_test_2/assets/device"],
+                Some("Gigi"),
+            ),
+            (&["s3://tts-voice-build/natural_voices/en-US-F_5028/assets/device"], None),
+            (&["s3://a/assets/x_v2/p2a"], None),
+            (&["s3://a/assets/2nd_voice/p2a"], None),
+            (&[""], None),
+            (&[], None),
+        ] {
+            let paths = paths.iter().map(|path| path.to_string()).collect::<Vec<_>>();
+            assert_eq!(asset_voice_name(&paths).as_deref(), name, "{paths:?}");
+        }
     }
 
     #[test]
