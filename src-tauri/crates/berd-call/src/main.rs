@@ -12264,7 +12264,9 @@ mod tests {
                 }
                 Ok(bytes.len())
             }
-            fn flush(&mut self) -> io::Result<()> { Ok(()) }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
         }
         let (control_tx, control_rx) = mpsc::channel();
         let (pcm_tx, _pcm_rx) = mpsc::sync_channel(1);
@@ -12272,9 +12274,13 @@ mod tests {
         let (release_tx, release_rx) = mpsc::channel();
         let bytes = framed(PCM_FRAME_KIND, &[0_u8; PCM_FRAME_BYTES]).repeat(2);
         let worker = thread::spawn(move || {
-            read_framed_requests(Cursor::new(bytes), control_tx, pcm_tx,
+            read_framed_requests(
+                Cursor::new(bytes),
+                control_tx,
+                pcm_tx,
                 &SessionInputProgress::default(),
-                &mut GatedWriter(Some((entered_tx, release_rx))));
+                &mut GatedWriter(Some((entered_tx, release_rx))),
+            );
         });
         entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
         let terminal = control_rx.try_recv();
