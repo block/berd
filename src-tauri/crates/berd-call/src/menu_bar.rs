@@ -38,6 +38,7 @@ const STATUS_SOUNDS: [(StatusSoundMode, &str); 3] = [
         "While Working and Waiting",
     ),
 ];
+const SPOKESPERSON: &str = "Enable Experimental Realtime Spokesperson";
 const REFRESH_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Runs the call on a worker thread while the main thread owns the menu bar.
@@ -167,18 +168,19 @@ fn menu_model(state: &MenuState) -> Vec<MenuNode> {
     let expert = state
         .switching
         .unwrap_or(mode_name(status) == "Expert-Spokesperson");
+    // The experimental Spokesperson goes last, with its own voice under it.
+    let mut experimental = vec![];
     if expert || !state.no_openai_key {
-        nodes.extend([
+        experimental.extend([
             SEPARATOR,
             MenuNode {
                 checked: expert,
-                ..item("Spokesperson", Some(MenuAction::SpokespersonMode(!expert)))
+                ..item(SPOKESPERSON, Some(MenuAction::SpokespersonMode(!expert)))
             },
         ]);
     }
-    // The Spokesperson's own voice sits with it, and replies with their own voice get a section beside it.
     if expert && !spokesperson.is_null() {
-        nodes.push(voice_menu(
+        experimental.push(voice_menu(
             "Spokesperson ",
             spokesperson,
             &available_voices("openai").unwrap_or_default(),
@@ -222,9 +224,9 @@ fn menu_model(state: &MenuState) -> Vec<MenuNode> {
             key: "m",
             ..item("Mute Microphone", Some(MenuAction::Muted(!muted)))
         },
-        SEPARATOR,
-        end_call,
     ]);
+    nodes.extend(experimental);
+    nodes.extend([SEPARATOR, end_call]);
     nodes
 }
 
@@ -1083,7 +1085,7 @@ mod tests {
             }
         ));
         assert!(matches!(
-            find(&nodes, "Spokesperson"),
+            find(&nodes, SPOKESPERSON),
             MenuNode {
                 checked: true,
                 action: Some(MenuAction::SpokespersonMode(false)),
@@ -1096,7 +1098,7 @@ mod tests {
                     status: Some(self::status(false, "allow_barge_in", None)),
                     ..MenuState::default()
                 }),
-                "Spokesperson"
+                SPOKESPERSON
             ),
             MenuNode {
                 checked: false,
@@ -1112,7 +1114,7 @@ mod tests {
                     switching: Some(true),
                     ..MenuState::default()
                 }),
-                "Spokesperson"
+                SPOKESPERSON
             )
             .checked
         );
@@ -1151,15 +1153,15 @@ mod tests {
             .collect::<Vec<_>>()
         };
         let conventional = titles(None);
-        assert!(!conventional.contains(&"Spokesperson".to_string()));
+        assert!(!conventional.contains(&SPOKESPERSON.to_string()));
         assert_eq!(conventional[1], "");
         assert_ne!(conventional[2], "");
         // A call already in the Spokesperson's hands can still leave them.
-        assert!(titles(Some("expert-spokesperson")).contains(&"Spokesperson".to_string()));
+        assert!(titles(Some("expert-spokesperson")).contains(&SPOKESPERSON.to_string()));
     }
 
     #[test]
-    fn replies_with_their_own_voice_put_the_spokespersons_beside_it() {
+    fn replies_with_their_own_voice_put_the_spokespersons_at_the_bottom() {
         let mut status = status(false, "allow_barge_in", Some("expert-spokesperson"));
         status["session"]["spokesperson"] = json!({"backend": "openai", "model": "gpt-realtime", "voice": "marin", "rate": 1.0, "revision": 1});
         let nodes = menu_model(&MenuState {
@@ -1189,7 +1191,7 @@ mod tests {
             json!({"command": "spokesperson", "voice": "cedar", "rate": null})
         );
         find(&nodes, "Agent Voice: Aaron");
-        // The Spokesperson's voice is in its section, and the agents' in the next.
+        // The agents' voice comes first, and the Spokesperson's sits with it at the bottom.
         let sections: Vec<_> = nodes[1..]
             .split(|node| node.title.is_empty())
             .map(|section| {
@@ -1200,15 +1202,17 @@ mod tests {
             })
             .collect();
         assert_eq!(
-            sections[1..3],
+            sections[1..],
             [
-                vec!["Spokesperson", "Spokesperson Voice: marin"],
                 vec![
                     "Agent Voice: Aaron",
                     "Speech Rate: 1.25× (Spokesperson 1×)",
                     "Mute Input During TTS",
                     "Status Sounds: While Working and Waiting"
                 ],
+                vec!["Mute Microphone"],
+                vec![SPOKESPERSON, "Spokesperson Voice: marin"],
+                vec!["End Call"],
             ]
         );
     }
