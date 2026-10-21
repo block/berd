@@ -228,7 +228,7 @@ _tauri-check-unix:
 _tauri-check-windows:
     just tauri-check-windows
 
-# Run the Rust plugin tests plus the app-crate suites for feature-gated
+# Run the Rust plugin and Berd Call tests plus app-crate suites for feature-gated
 # modules (telemetry consent, skill marketplace) with external sidecars
 # disabled. Gated lanes pass a name filter and their enabling Cargo feature —
 # e.g. `block-telemetry-enforced` swaps in the enforced-consent tests.
@@ -252,6 +252,7 @@ _tauri-test-unix:
     if [ "$(uname -s)" = "Linux" ]; then rm -rf src-tauri/target/sherpa-onnx-prebuilt; fi
     just _tauri-cargo-unix test -p tauri-plugin-berdctl --features server
     just _tauri-cargo-unix test -p berdctl
+    just _tauri-cargo-unix test -p berd-call --locked
     just _tauri-cargo-unix test --lib services::acp::goose_serve::tests::storage_identity_guard
     just _tauri-cargo-unix test --lib services::goose_config::tests
     just _tauri-cargo-unix test --lib commands::message_search::tests
