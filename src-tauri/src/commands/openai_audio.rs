@@ -509,7 +509,8 @@ pub fn start_openai_voice_stream(
         let active = Arc::new(AtomicBool::new(true));
         let output_device = selected_output_device();
         let effective_output_device = effective_output_device_name(output_device.as_deref());
-        let input_during_tts = resolve_input_during_tts_policy(interruption_mode);
+        let input_during_tts =
+            resolve_input_during_tts_policy(interruption_mode, output_device.as_deref());
         let output_latency_grace =
             playback_latency_safety_duration(effective_output_device.as_deref());
         let Some(admission) = native_voice.claim_assistant_speech(

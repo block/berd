@@ -396,11 +396,18 @@ pub(crate) enum VoiceInterruptionMode {
 }
 
 #[cfg_attr(not(any(test, target_os = "macos")), allow(dead_code))]
-pub(crate) fn resolve_input_during_tts_policy(mode: VoiceInterruptionMode) -> InputDuringTtsPolicy {
-    match mode {
-        VoiceInterruptionMode::Automatic => InputDuringTtsPolicy::Auto,
-        VoiceInterruptionMode::AllowInterruptions => InputDuringTtsPolicy::AllowBargeIn,
-        VoiceInterruptionMode::PreventFeedback => InputDuringTtsPolicy::SuppressInput,
+pub(crate) fn resolve_input_during_tts_policy(
+    mode: VoiceInterruptionMode,
+    configured_output_device: Option<&str>,
+) -> InputDuringTtsPolicy {
+    match (mode, configured_output_device) {
+        // Only the system default follows route changes during playback.
+        (VoiceInterruptionMode::Automatic, Some(output)) => {
+            InputDuringTtsPolicy::Auto.resolve(Some(output))
+        }
+        (VoiceInterruptionMode::Automatic, None) => InputDuringTtsPolicy::Auto,
+        (VoiceInterruptionMode::AllowInterruptions, _) => InputDuringTtsPolicy::AllowBargeIn,
+        (VoiceInterruptionMode::PreventFeedback, _) => InputDuringTtsPolicy::SuppressInput,
     }
 }
 
@@ -777,7 +784,8 @@ pub fn start_pocket_voice_stream(
             .ok_or_else(|| format!("Unknown selected Pocket voice: {voice_id}"))?;
         let session = begin_playback(&state, "Pocket voice playback is already active", &base)?;
         let output_device = selected_output_device();
-        let input_during_tts = resolve_input_during_tts_policy(interruption_mode);
+        let input_during_tts =
+            resolve_input_during_tts_policy(interruption_mode, output_device.as_deref());
         let (sender, receiver) = mpsc::channel();
         {
             let mut playback = state
@@ -2504,17 +2512,47 @@ mod tests {
     #[test]
     fn interruption_mode_resolves_shared_input_policy() {
         assert_eq!(
-            resolve_input_during_tts_policy(VoiceInterruptionMode::Automatic),
+            resolve_input_during_tts_policy(VoiceInterruptionMode::Automatic, None),
             InputDuringTtsPolicy::Auto
         );
         assert_eq!(
-            resolve_input_during_tts_policy(VoiceInterruptionMode::AllowInterruptions),
+            resolve_input_during_tts_policy(VoiceInterruptionMode::AllowInterruptions, None),
             InputDuringTtsPolicy::AllowBargeIn
         );
         assert_eq!(
-            resolve_input_during_tts_policy(VoiceInterruptionMode::PreventFeedback),
+            resolve_input_during_tts_policy(VoiceInterruptionMode::PreventFeedback, None),
             InputDuringTtsPolicy::SuppressInput
         );
+    }
+
+    #[test]
+    fn configured_output_route_controls_automatic_interruption_policy() {
+        for (output, automatic) in [
+            (
+                Some("External Speakers"),
+                InputDuringTtsPolicy::SuppressInput,
+            ),
+            (Some("USB Headphones"), InputDuringTtsPolicy::AllowBargeIn),
+            (None, InputDuringTtsPolicy::Auto),
+        ] {
+            for (mode, expected) in [
+                (VoiceInterruptionMode::Automatic, automatic),
+                (
+                    VoiceInterruptionMode::AllowInterruptions,
+                    InputDuringTtsPolicy::AllowBargeIn,
+                ),
+                (
+                    VoiceInterruptionMode::PreventFeedback,
+                    InputDuringTtsPolicy::SuppressInput,
+                ),
+            ] {
+                assert_eq!(
+                    resolve_input_during_tts_policy(mode, output),
+                    expected,
+                    "{mode:?}: {output:?}"
+                );
+            }
+        }
     }
 
     #[cfg(target_os = "macos")]
