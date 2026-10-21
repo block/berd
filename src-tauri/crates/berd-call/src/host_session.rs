@@ -310,13 +310,34 @@ impl SessionActor {
         restart: PendingRestart,
         input_during_tts: InputDuringTtsPolicy,
     ) -> SessionStart {
+        let mut arguments = restart.arguments;
         SessionStart {
             saved: self.saved.take().map(|(path, mut saved)| {
-                saved.arguments = saved_settings::persistable_arguments(&restart.arguments[1..]);
+                // Calls whose replies don't have their own voice keep the Spokesperson's for later.
+                let kept = saved_settings::only_spokesperson(&saved.arguments);
+                saved.arguments = saved_settings::merge_arguments(
+                    &kept,
+                    &saved_settings::persistable_arguments(&arguments[1..]),
+                );
                 saved.tts = restart.tts;
+                // Turning the Spokesperson back on starts with its saved voice.
+                if arguments
+                    .iter()
+                    .any(|argument| argument == crate::DIRECT_AGENT_SPEECH)
+                    && !arguments
+                        .iter()
+                        .any(|argument| argument == "--spokesperson-voice")
+                {
+                    if let Some(voice) = kept
+                        .chunks_exact(2)
+                        .find(|pair| pair[0] == "--spokesperson-voice")
+                    {
+                        arguments.splice(1..1, voice.iter().cloned());
+                    }
+                }
                 (path, saved)
             }),
-            arguments: restart.arguments,
+            arguments,
             expert_spokesperson: restart.expert_spokesperson,
             // Keep native registration and shared intent across session handoffs
             // so gestures remain effective.
@@ -3120,6 +3141,122 @@ mod tests {
         );
         drop(actor);
         assert!(child.wait().unwrap().success());
+    }
+
+    #[test]
+    fn restart_keeps_the_saved_spokesperson_voice_for_later() {
+        let restart = |arguments: &[&str]| {
+            let mut child = Command::new("/bin/cat")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .spawn()
+                .unwrap();
+            let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+            let (_events_tx, events) = mpsc::sync_channel(1);
+            let (_commands_tx, commands) = mpsc::sync_channel(1);
+            let (audio, _audio_rx) = mpsc::sync_channel(1);
+            let mut actor = test_actor(writer, events, commands, audio);
+            actor.saved = Some((
+                "settings.json".into(),
+                crate::saved_settings::SavedSettings {
+                    arguments: [
+                        "--spokesperson-voice",
+                        "cedar",
+                        "--spokesperson-rate",
+                        "1.1",
+                    ]
+                    .map(str::to_string)
+                    .to_vec(),
+                    ..Default::default()
+                },
+            ));
+            let (response, _reply) = mpsc::sync_channel(1);
+            let start = actor.restart_start(
+                PendingRestart {
+                    arguments: arguments
+                        .iter()
+                        .map(|argument| argument.to_string())
+                        .collect(),
+                    expert_spokesperson: false,
+                    tts: None,
+                    response,
+                },
+                InputDuringTtsPolicy::AllowBargeIn,
+            );
+            drop(actor);
+            assert!(child.wait().unwrap().success());
+            (start.arguments, start.saved.unwrap().1.arguments)
+        };
+        let strings =
+            |arguments: &[&str]| arguments.iter().map(|a| a.to_string()).collect::<Vec<_>>();
+        // A mode that can't take them leaves them saved only.
+        let (arguments, saved) = restart(&["session", "--mode", "conventional"]);
+        assert_eq!(arguments, strings(&["session", "--mode", "conventional"]));
+        assert_eq!(
+            saved,
+            strings(&[
+                "--spokesperson-voice",
+                "cedar",
+                "--spokesperson-rate",
+                "1.1",
+                "--mode",
+                "conventional",
+            ])
+        );
+        // One that can starts with the saved voice, not the default.
+        let (arguments, saved) = restart(&[
+            "session",
+            "--mode",
+            "expert-spokesperson",
+            crate::DIRECT_AGENT_SPEECH,
+        ]);
+        assert_eq!(
+            arguments,
+            strings(&[
+                "session",
+                "--spokesperson-voice",
+                "cedar",
+                "--mode",
+                "expert-spokesperson",
+                crate::DIRECT_AGENT_SPEECH,
+            ])
+        );
+        assert_eq!(
+            saved[..4],
+            strings(&[
+                "--spokesperson-voice",
+                "cedar",
+                "--spokesperson-rate",
+                "1.1"
+            ])[..]
+        );
+        // Explicit flags win.
+        let (arguments, saved) = restart(&[
+            "session",
+            "--spokesperson-voice",
+            "marin",
+            "--mode",
+            "expert-spokesperson",
+            crate::DIRECT_AGENT_SPEECH,
+        ]);
+        assert_eq!(
+            arguments[1..3],
+            strings(&["--spokesperson-voice", "marin"])[..]
+        );
+        assert_eq!(
+            arguments
+                .iter()
+                .filter(|a| *a == "--spokesperson-voice")
+                .count(),
+            1
+        );
+        assert_eq!(saved[..2], strings(&["--spokesperson-rate", "1.1"])[..]);
+        assert!(saved.ends_with(&strings(&[
+            "--spokesperson-voice",
+            "marin",
+            "--mode",
+            "expert-spokesperson"
+        ])));
     }
 
     #[test]
