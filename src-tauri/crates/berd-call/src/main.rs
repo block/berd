@@ -3246,6 +3246,16 @@ impl InputResets {
         self.clearing.clear();
         self.poll(writer)
     }
+
+    /// Waits for every outstanding clear, which the runtime settles within its acknowledgement timeout, then answers.
+    fn finish(&mut self, writer: &mut impl Write) -> Result<(), String> {
+        for clearing in self.clearing.drain(..) {
+            clearing
+                .recv()
+                .map_err(|_| "Spokesperson runtime is closed".to_string())??;
+        }
+        self.poll(writer)
+    }
 }
 
 fn set_spokesperson_input_policy(
@@ -4471,8 +4481,12 @@ fn run_expert_spokesperson_session(
             Input::VoiceBuilt(_) | Input::VoiceUnavailable { .. } => {
                 unreachable!("voice builds are filtered")
             }
-            Input::Eof => break,
+            Input::Eof => {
+                input_resets.finish(&mut writer)?;
+                break;
+            }
             Input::Request(SessionRequest::Shutdown) => {
+                input_resets.finish(&mut writer)?;
                 if let Some(request) = queued_tts_settings.take() {
                     reject_spokesperson_tts_settings(
                         request.id,
