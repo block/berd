@@ -74,6 +74,24 @@ unsafe extern "C" {
         voice_name: *const c_char,
         error_out: *mut *mut c_char,
     ) -> bool;
+    fn berd_siri_tts_play_sample(
+        voice_name: *const c_char,
+        language: *const c_char,
+        rate: f32,
+        should_stop: unsafe extern "C" fn(*mut c_void) -> bool,
+        context: *mut c_void,
+        error_out: *mut *mut c_char,
+    ) -> bool;
+    fn berd_siri_tts_speak(
+        text: *const c_char,
+        language: *const c_char,
+        voice_name: *const c_char,
+        rate: f32,
+        should_stop: unsafe extern "C" fn(*mut c_void) -> bool,
+        playback_started: Option<unsafe extern "C" fn(*mut c_void)>,
+        context: *mut c_void,
+        error_out: *mut *mut c_char,
+    ) -> bool;
     fn berd_siri_tts_synthesize_pcm(
         text: *const c_char,
         language: *const c_char,
@@ -457,6 +475,79 @@ fn download_voice_platform(
     _availability_wait_timeout: Duration,
 ) -> Result<(), String> {
     Err("Siri TTS is only available on macOS".into())
+}
+
+/// What a voice preview played.
+#[cfg(target_os = "macos")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SiriPreviewSource {
+    /// Apple's bundled sample, which exists even for undownloaded voices.
+    Sample,
+    /// The fixed preview sentence, spoken by the installed voice.
+    Speech,
+}
+
+#[cfg(target_os = "macos")]
+unsafe extern "C" fn preview_should_stop(context: *mut c_void) -> bool {
+    // SAFETY: The context is the `active` flag borrowed for the whole call.
+    !unsafe { &*context.cast::<AtomicBool>() }.load(Ordering::SeqCst)
+}
+
+/// Previews one voice through the default output and blocks until playback
+/// ends or `active` turns false. Apple's system sample plays first; without
+/// one, an installed voice speaks a fixed sentence instead.
+#[cfg(target_os = "macos")]
+pub fn preview_voice(
+    identity: &SiriVoiceIdentity,
+    rate: f32,
+    active: &AtomicBool,
+) -> Result<SiriPreviewSource, String> {
+    if !rate.is_finite() || !(0.5..=2.0).contains(&rate) {
+        return Err("Siri rate must be between 0.5 and 2.0".into());
+    }
+    let text = CString::new("Hello. This is a preview of my voice.").expect("static preview");
+    let language =
+        CString::new(identity.language.as_str()).expect("normalized language has no NUL");
+    let name = CString::new(identity.name.as_str()).expect("validated name has no NUL");
+    let context = std::ptr::from_ref(active).cast_mut().cast();
+    let mut error = std::ptr::null_mut();
+    // SAFETY: The bridge copies all strings synchronously, and `active`
+    // outlives this blocking call.
+    if unsafe {
+        berd_siri_tts_play_sample(
+            name.as_ptr(),
+            language.as_ptr(),
+            rate,
+            preview_should_stop,
+            context,
+            &mut error,
+        )
+    } {
+        return Ok(SiriPreviewSource::Sample);
+    }
+    let sample_error = take_error(error, "No system preview is available");
+    if validate_installed_voice(identity).is_err() {
+        return Err(sample_error);
+    }
+    error = std::ptr::null_mut();
+    // SAFETY: As above.
+    if unsafe {
+        berd_siri_tts_speak(
+            text.as_ptr(),
+            language.as_ptr(),
+            name.as_ptr(),
+            rate,
+            preview_should_stop,
+            None,
+            context,
+            &mut error,
+        )
+    } {
+        Ok(SiriPreviewSource::Speech)
+    } else {
+        Err(take_error(error, "Siri voice preview failed"))
+    }
 }
 
 #[cfg(target_os = "macos")]

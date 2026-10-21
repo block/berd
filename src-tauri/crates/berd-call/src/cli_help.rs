@@ -18,7 +18,7 @@ Call runtime:
 
 Speech and models:
   synthesize              Render text to a WAV file
-  voices                  List or download Siri voices
+  voices                  List, download, or preview Siri voices
   models                  Inspect or install speech models
 
 Diagnostics:
@@ -181,12 +181,18 @@ Usage:
 The command never overwrites an existing output file. OpenAI synthesis requires
 explicit --allow-paid-openai consent."#;
 
-const VOICES_HELP: &str = r#"Inspect or download Siri voices.
+const VOICES_HELP: &str = r#"Inspect, download, or preview Siri voices.
 
 Usage:
   berd-call voices list [--language BCP47]
   berd-call voices download --voice NAME --language BCP47
-    [--availability-wait-seconds 1..1800]"#;
+    [--availability-wait-seconds 1..1800]
+  berd-call voices preview --voice NAME --language BCP47 [--rate 0.5..2.0]
+
+preview plays the voice through the default output and exits when playback
+ends. It plays Apple's system sample, which works before the voice is
+downloaded, or else speaks a short sentence with an installed voice. SIGINT or
+SIGTERM stops playback and exits."#;
 
 const MODELS_HELP: &str = r#"Inspect or install speech models.
 
@@ -255,7 +261,7 @@ fn help_for(topic: &[&str]) -> Option<&'static str> {
         ["stop"] => Some(STOP_HELP),
         ["session"] => Some(SESSION_HELP),
         ["synthesize"] => Some(SYNTHESIZE_HELP),
-        ["voices"] | ["voices", "list" | "download"] => Some(VOICES_HELP),
+        ["voices"] | ["voices", "list" | "download" | "preview"] => Some(VOICES_HELP),
         ["models"]
         | ["models", "macos", "status" | "install"]
         | ["models", "openai", "voices"]

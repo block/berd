@@ -279,7 +279,7 @@ impl SynthesisConfig {
 
 const MANAGEMENT_SCHEMA_VERSION: u32 = 1;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 enum ManagementCommand {
     ListVoices {
         language: Option<String>,
@@ -287,6 +287,10 @@ enum ManagementCommand {
     DownloadVoice {
         identity: berd_call::siri::SiriVoiceIdentity,
         availability_wait: berd_call::siri::SiriDownloadAvailabilityWait,
+    },
+    PreviewVoice {
+        identity: berd_call::siri::SiriVoiceIdentity,
+        rate: f32,
     },
     MacosModelStatus,
     InstallMacosModel,
@@ -311,6 +315,7 @@ impl ManagementCommand {
         match self {
             Self::ListVoices { .. } => "voices.list",
             Self::DownloadVoice { .. } => "voices.download",
+            Self::PreviewVoice { .. } => "voices.preview",
             Self::MacosModelStatus => "models.macos.status",
             Self::InstallMacosModel => "models.macos.install",
             Self::PocketModelStatus { .. } => "models.pocket.status",
@@ -419,6 +424,16 @@ struct VoiceDownloadResult {
     voice: berd_call::siri::SiriVoiceIdentity,
     installed: bool,
     availability_wait_seconds: u64,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VoicePreviewResult {
+    backend: &'static str,
+    voice: berd_call::siri::SiriVoiceIdentity,
+    rate: f32,
+    source: berd_call::siri::SiriPreviewSource,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -1432,6 +1447,45 @@ fn parse_management_args(args: &[String]) -> Result<ManagementCommand, ParseFail
                 availability_wait,
             })
         }
+        (Some("voices"), Some("preview"), _) => {
+            let mut voice = None;
+            let mut language = None;
+            let mut rate = None;
+            let mut index = 3;
+            while index < args.len() {
+                let flag = args[index].as_str();
+                if is_help_flag(flag) {
+                    return Err(ParseFailure::HelpRequested);
+                }
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| format!("{flag} requires a value"))?;
+                match flag {
+                    "--voice" if voice.is_none() => voice = Some(value.clone()),
+                    "--language" if language.is_none() => language = Some(value.clone()),
+                    "--rate" if rate.is_none() => {
+                        let value = value
+                            .parse::<f32>()
+                            .map_err(|_| "--rate must be a number".to_string())?;
+                        if !value.is_finite() || !(0.5..=2.0).contains(&value) {
+                            return Err("--rate must be between 0.5 and 2.0".into());
+                        }
+                        rate = Some(value);
+                    }
+                    "--voice" | "--language" | "--rate" => {
+                        return Err(format!("{flag} may be provided only once").into())
+                    }
+                    _ => return Err(format!("unknown voices preview argument: {flag}").into()),
+                }
+                index += 2;
+            }
+            let voice = voice.ok_or_else(|| "--voice is required".to_string())?;
+            let language = language.ok_or_else(|| "--language is required".to_string())?;
+            Ok(ManagementCommand::PreviewVoice {
+                identity: berd_call::siri::SiriVoiceIdentity::new(voice, &language)?,
+                rate: rate.unwrap_or(1.0),
+            })
+        }
         (Some("models"), Some("macos"), Some("status" | "install"))
             if args.len() == 5 && args.get(4).is_some_and(|value| is_help_flag(value)) =>
         {
@@ -1479,7 +1533,7 @@ fn parse_management_args(args: &[String]) -> Result<ManagementCommand, ParseFail
                 roots: parse_local_model_roots(args)?,
             })
         }
-        (Some("voices"), _, _) => Err("expected voices list or voices download".into()),
+        (Some("voices"), _, _) => Err("expected voices list, download, or preview".into()),
         (Some("models"), _, _) => Err("expected a supported models command".into()),
         _ => Err("expected a management command".into()),
     }
@@ -1938,6 +1992,31 @@ fn voice_download_failure(error: berd_call::siri::SiriVoiceDownloadError) -> Man
     }
 }
 
+/// Previews a voice, stopping playback and exiting on SIGINT or SIGTERM so a
+/// host can end a preview by signaling the process.
+#[cfg(target_os = "macos")]
+fn preview_voice_until_stopped(
+    identity: &berd_call::siri::SiriVoiceIdentity,
+    rate: f32,
+) -> Result<berd_call::siri::SiriPreviewSource, String> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static ACTIVE: AtomicBool = AtomicBool::new(true);
+    extern "C" fn stop(_: libc::c_int) {
+        ACTIVE.store(false, Ordering::SeqCst);
+    }
+    let handler = stop as extern "C" fn(libc::c_int) as libc::sighandler_t;
+    // SAFETY: The handler only stores to an atomic.
+    unsafe {
+        libc::signal(libc::SIGINT, handler);
+        libc::signal(libc::SIGTERM, handler);
+    }
+    let result = berd_call::siri::preview_voice(identity, rate, &ACTIVE);
+    if !ACTIVE.load(Ordering::SeqCst) {
+        std::process::exit(130);
+    }
+    result
+}
+
 fn run_management_command(command: ManagementCommand) -> Result<(), ManagementFailure> {
     let operation = command.operation();
     match command {
@@ -1972,6 +2051,36 @@ fn run_management_command(command: ManagementCommand) -> Result<(), ManagementFa
                 let identity = berd_call::siri::download_voice(&identity, availability_wait)
                     .map_err(voice_download_failure)?;
                 let result = voice_download_report(&identity, availability_wait);
+                write_management_result(operation, result).map_err(|error| {
+                    management_failure("output_failed", "Could not write command result", error)
+                })
+            }
+        }
+        ManagementCommand::PreviewVoice { identity, rate } => {
+            #[cfg(not(target_os = "macos"))]
+            {
+                let _ = (identity, rate);
+                return Err(management_failure(
+                    "unsupported",
+                    "Siri voice preview is available only on macOS",
+                    "Siri voice preview is available only on macOS",
+                ));
+            }
+            #[cfg(target_os = "macos")]
+            {
+                let source = preview_voice_until_stopped(&identity, rate).map_err(|error| {
+                    management_failure(
+                        "operation_failed",
+                        "Could not preview the Siri voice",
+                        error,
+                    )
+                })?;
+                let result = VoicePreviewResult {
+                    backend: "siri",
+                    voice: identity,
+                    rate,
+                    source,
+                };
                 write_management_result(operation, result).map_err(|error| {
                     management_failure("output_failed", "Could not write command result", error)
                 })
@@ -10661,6 +10770,33 @@ mod tests {
                     "voice": {"name": "Aaron", "language": "en-US"},
                     "installed": true,
                     "availabilityWaitSeconds": 300
+                }
+            })
+        );
+
+        #[cfg(target_os = "macos")]
+        assert_eq!(
+            serde_json::to_value(ManagementResultEnvelope {
+                schema_version: MANAGEMENT_SCHEMA_VERSION,
+                operation: "voices.preview",
+                event: "result",
+                result: VoicePreviewResult {
+                    backend: "siri",
+                    voice: identity,
+                    rate: 1.5,
+                    source: berd_call::siri::SiriPreviewSource::Sample,
+                },
+            })
+            .unwrap(),
+            json!({
+                "schemaVersion": 1,
+                "operation": "voices.preview",
+                "event": "result",
+                "result": {
+                    "backend": "siri",
+                    "voice": {"name": "Aaron", "language": "en-US"},
+                    "rate": 1.5,
+                    "source": "sample"
                 }
             })
         );

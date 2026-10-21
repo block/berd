@@ -203,7 +203,7 @@ persisted or exposed. Download is a blocking terminal success/error operation
 with a validated availability-polling bound and no invented byte progress.
 Native validation and subscription have separate bounded waits before that
 polling deadline. Berd continues to own persisted selection, fallback policy,
-settings/UI events, and management preview playback. There is intentionally no
+settings/UI events, and in-app preview playback. There is intentionally no
 host settings or fallback policy in the standalone management commands.
 
 ## Voice and model management
@@ -217,6 +217,8 @@ berd-call voices list --language en-US
 berd-call voices download --voice Aaron --language en-US
 berd-call voices download --voice Aaron --language en-US \
   --availability-wait-seconds 300
+berd-call voices preview --voice Aaron --language en-US
+berd-call voices preview --voice Aaron --language en-US --rate 1.25
 berd-call models macos status
 berd-call models macos install
 berd-call models pocket status --store-root /absolute/portable-store
@@ -290,7 +292,13 @@ sirittsd reports it downloaded and its assets are on disk: sirittsd can claim
 a voice whose assets are missing, then silently speak it in another voice. `voices.download` returns the
 canonical voice, `installed: true`, and `availabilityWaitSeconds`; a missing
 exact catalog identity fails with `voice_not_found` before any native download
-request. macOS status and install results contain `supported`, `locale`,
+request. `voices.preview` plays the voice through the default output and
+returns after playback ends, with `backend`, the canonical `voice`, `rate`
+(default `1.0`, `0.5` to `2.0`), and `source`: `sample` for Apple's bundled
+system preview, which works even for a voice that isn't downloaded, or `speech`
+when none exists and the installed voice spoke a short fixed sentence. SIGINT or
+SIGTERM stops playback and exits 130 without a result, so a host stops a preview
+by killing the process. macOS status and install results contain `supported`, `locale`,
 `localeSupported`, `modelStatus`, and `ready`. Install progress records contain
 the native finite fraction clamped to `0...1`; nonfinite callbacks are omitted.
 `models.pocket.voices` is a separate immutable catalog because Pocket installs
