@@ -60,12 +60,13 @@ pub(crate) fn watch_stdout(stopped: Arc<AtomicBool>) -> Result<(), String> {
         .spawn(move || {
             let mut stdout = libc::pollfd {
                 fd: libc::STDOUT_FILENO,
-                events: 0,
+                events: libc::POLLOUT,
                 revents: 0,
             };
             loop {
-                // Request no readiness events: writable stdout must not busy-loop.
-                // Pipe errors/hangup are reported even with an empty interest mask.
+                // Darwin only reports a closed pipe reader when write readiness
+                // is requested. A writable pipe returns immediately, so throttle
+                // successful polls below rather than spinning on readiness.
                 let result = unsafe { libc::poll(&mut stdout, 1, 250) };
                 if result < 0 {
                     if std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
@@ -76,6 +77,9 @@ pub(crate) fn watch_stdout(stopped: Arc<AtomicBool>) -> Result<(), String> {
                 if stdout.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
                     stopped.store(true, Ordering::SeqCst);
                     return;
+                }
+                if result > 0 {
+                    thread::sleep(Duration::from_millis(250));
                 }
             }
         })
