@@ -199,6 +199,7 @@ enum SttBackendConfig {
 struct SessionConfig {
     tts: TtsBackendConfig,
     stt: SttBackendConfig,
+    stt_hints: Vec<String>,
     mode: SessionMode,
     endpoints: SessionEndpointOverrides,
     /// In Expert-Spokesperson mode, speak the Expert's replies with `tts`
@@ -2433,18 +2434,21 @@ fn run_session(config: SessionConfig, pcm_output_fd: RawFd) -> Result<(), String
                     }
                 };
                 input_progress.enter("hello_stt");
-                let (runtime, mut events) =
-                    match create_input_runtime(&config.stt, config.endpoints.stt.as_deref()) {
-                        Ok(runtime) => runtime,
-                        Err(message) => {
-                            write_protocol_fatal(
-                                &mut writer,
-                                &public_stt_startup_error(&config.stt),
-                                &format!("STT startup failed: {message}"),
-                            )?;
-                            return Ok(());
-                        }
-                    };
+                let (runtime, mut events) = match create_input_runtime(
+                    &config.stt,
+                    config.endpoints.stt.as_deref(),
+                    &config.stt_hints,
+                ) {
+                    Ok(runtime) => runtime,
+                    Err(message) => {
+                        write_protocol_fatal(
+                            &mut writer,
+                            &public_stt_startup_error(&config.stt),
+                            &format!("STT startup failed: {message}"),
+                        )?;
+                        return Ok(());
+                    }
+                };
                 let readiness = wait_for_input_ready(&mut events, INPUT_STARTUP_TIMEOUT);
                 if let Err(message) = readiness {
                     runtime.cancel();
@@ -6274,6 +6278,7 @@ fn parse_args(args: &[String]) -> Result<SessionConfig, ParseFailure> {
     let mut rate = None;
     let mut stt_backend = "macos";
     let mut stt_model_dir = None;
+    let mut stt_hints = Vec::new();
     let mut mode = SessionMode::Conventional;
     let mut endpoints = SessionEndpointOverrides::default();
     let mut expert_tts = false;
@@ -6308,6 +6313,17 @@ fn parse_args(args: &[String]) -> Result<SessionConfig, ParseFailure> {
             }
             "--stt-backend" => stt_backend = value,
             "--stt-model-dir" => stt_model_dir = Some(PathBuf::from(value)),
+            "--stt-hint" => {
+                let hint = value.trim();
+                if hint.is_empty() || hint.len() > 256 || stt_hints.len() >= 100 {
+                    return Err(
+                        "--stt-hint accepts up to 100 nonempty phrases of at most 256 bytes".into(),
+                    );
+                }
+                if !stt_hints.iter().any(|existing| existing == hint) {
+                    stt_hints.push(hint.to_string());
+                }
+            }
             "--realtime-url" => {
                 endpoints.realtime = Some(parse_endpoint_url(value, "--realtime-url", true)?)
             }
@@ -6375,6 +6391,7 @@ fn parse_args(args: &[String]) -> Result<SessionConfig, ParseFailure> {
     Ok(SessionConfig {
         tts,
         stt,
+        stt_hints,
         mode,
         endpoints,
         expert_tts,
@@ -7000,7 +7017,7 @@ fn create_stt_benchmark_report(
         &pack,
         config.runs,
         config.mode,
-        || create_input_runtime(&config.stt, None),
+        || create_input_runtime(&config.stt, None, &[]),
     )))
 }
 
@@ -7340,6 +7357,7 @@ fn run_synthesis_command(config: SynthesisConfig) -> Result<(), SynthesisFailure
 fn create_input_runtime(
     config: &SttBackendConfig,
     endpoint_override: Option<&str>,
+    _hints: &[String],
 ) -> Result<
     (
         VoiceInputRuntime,
@@ -7360,7 +7378,9 @@ fn create_input_runtime(
                     )
                 })?;
                 validate_macos_stt_status(&status)?;
-                VoiceInputEngineConfig::MacSpeech
+                VoiceInputEngineConfig::MacSpeech {
+                    hints: _hints.to_vec(),
+                }
             }
             #[cfg(not(target_os = "macos"))]
             {
@@ -11147,6 +11167,7 @@ mod tests {
                     rate: 1.0,
                 },
                 stt: SttBackendConfig::Macos,
+                stt_hints: vec![],
                 mode: SessionMode::Conventional,
                 endpoints: SessionEndpointOverrides::default(),
                 expert_tts: false,
@@ -11161,6 +11182,7 @@ mod tests {
             SessionConfig {
                 tts: TtsBackendConfig::OpenAi { rate: 1.0 },
                 stt: SttBackendConfig::Macos,
+                stt_hints: vec![],
                 mode: SessionMode::Conventional,
                 endpoints: SessionEndpointOverrides::default(),
                 expert_tts: false,
@@ -11241,6 +11263,7 @@ mod tests {
                     rate: 1.0,
                 },
                 stt: SttBackendConfig::Macos,
+                stt_hints: vec![],
                 mode: SessionMode::Conventional,
                 endpoints: SessionEndpointOverrides::default(),
                 expert_tts: false,
@@ -11300,6 +11323,7 @@ mod tests {
                 rate: 1.5,
             },
             stt: SttBackendConfig::Macos,
+            stt_hints: vec![],
             mode: SessionMode::ExpertSpokesperson,
             endpoints: SessionEndpointOverrides::default(),
             expert_tts: false,
@@ -11585,6 +11609,7 @@ mod tests {
                     rate: 1.0,
                 },
                 stt: SttBackendConfig::Macos,
+                stt_hints: vec![],
                 mode: SessionMode::Conventional,
                 endpoints: SessionEndpointOverrides::default(),
                 expert_tts: false,
@@ -11650,6 +11675,7 @@ mod tests {
                 stt: SttBackendConfig::Parakeet {
                     model_dir: PathBuf::from("/models/parakeet")
                 },
+                stt_hints: vec![],
                 mode: SessionMode::Conventional,
                 endpoints: SessionEndpointOverrides::default(),
                 expert_tts: false,
@@ -12098,6 +12124,7 @@ mod tests {
                     rate: 1.0
                 },
                 stt: SttBackendConfig::OpenAi,
+                stt_hints: vec![],
                 mode: SessionMode::Conventional,
                 endpoints: SessionEndpointOverrides::default(),
                 expert_tts: false,
@@ -13755,5 +13782,38 @@ mod tests {
             parse_speak_control_args(&args(&["berd-call", "speak", "--legacy", "hello",])).is_err()
         );
         assert!(parse_control_port(&args(&["berd-call", "stop", "extra"])).is_err());
+    }
+}
+
+#[cfg(test)]
+mod speech_hint_tests {
+    use super::*;
+
+    #[test]
+    fn speech_hints_are_bounded_and_preserve_names() {
+        let args = |hints: &[&str]| {
+            [
+                "berd-call",
+                "session",
+                "--voice",
+                "Aaron",
+                "--language",
+                "en-US",
+            ]
+            .into_iter()
+            .chain(hints.iter().flat_map(|hint| ["--stt-hint", *hint]))
+            .map(String::from)
+            .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            parse_args(&args(&["Nora", " Aaron ", "Nora"]))
+                .unwrap()
+                .stt_hints,
+            ["Nora", "Aaron"]
+        );
+        assert!(parse_args(&args(&[""])).is_err());
+        assert!(parse_args(&args(&[&"a".repeat(257)])).is_err());
+        let many = (0..101).map(|i| format!("agent{i}")).collect::<Vec<_>>();
+        assert!(parse_args(&args(&many.iter().map(String::as_str).collect::<Vec<_>>())).is_err());
     }
 }

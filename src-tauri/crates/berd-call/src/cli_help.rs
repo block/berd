@@ -148,7 +148,7 @@ Usage:
 
 Each form also accepts:
     [--rate FLOAT]
-    [--stt-backend macos|parakeet|openai] [--stt-model-dir PATH]
+    [--stt-backend macos|parakeet|openai] [--stt-model-dir PATH] [--stt-hint PHRASE]...
     [--mode conventional|expert-spokesperson] [--allow-direct-agent-speech]
     [--spokesperson-voice NAME] [--spokesperson-rate 0.25..1.5]
     [--spokesperson-options JSON]
