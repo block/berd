@@ -1697,6 +1697,12 @@ impl SessionActor {
         Ok(())
     }
 
+    fn reset_input_activity(&mut self) -> Result<(), String> {
+        self.input_speaking = false;
+        self.recognition_pending = false;
+        self.stream_input_activity()
+    }
+
     fn stream_live_event(
         &self,
         token: u64,
@@ -2226,9 +2232,7 @@ impl DefaultInputCapture {
                 )
             })?
         {
-            actor.input_speaking = false;
-            actor.recognition_pending = false;
-            actor.stream_input_activity()?;
+            actor.reset_input_activity()?;
         }
         Ok(())
     }
@@ -3839,6 +3843,90 @@ mod tests {
                     json!({"speaking": speaking, "recognizing": recognizing})
                 );
             }
+        }
+    }
+
+    #[test]
+    fn input_activity_stream_covers_transitions_mute_and_recovery() {
+        const CHILD: &str = "BERD_CALL_TEST_ACTIVITY_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let output = Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "host_session::tests::input_activity_stream_covers_transitions_mute_and_recovery", "--nocapture"])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            let rows: Vec<Value> = stdout
+                .lines()
+                .filter_map(|line| {
+                    line.strip_prefix("0\tinput_activity\t")
+                        .map(|text| serde_json::from_str(text).unwrap())
+                })
+                .collect();
+            let expected: Vec<_> = [
+                (true, false),
+                (true, true),
+                (false, true),
+                (false, false),
+                (false, false),
+                (false, false),
+                (false, true),
+                (true, true),
+                (false, false),
+            ]
+            .into_iter()
+            .map(|(speaking, recognizing)| json!({"speaking":speaking, "recognizing":recognizing}))
+            .collect();
+            assert_eq!(rows, expected, "{stdout}");
+            return;
+        }
+        for stream in [true, false] {
+            let mut child = Command::new("/bin/cat")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .spawn()
+                .unwrap();
+            let writer = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+            let (_event_tx, events) = mpsc::sync_channel(1);
+            let (_command_tx, commands) = mpsc::sync_channel(1);
+            let (audio, _audio_rx) = mpsc::sync_channel(1);
+            let mut actor = test_actor(writer, events, commands, audio);
+            if !stream {
+                actor.transcript = Arc::new(Transcript::Silent);
+            }
+            actor.muted.store(false, Ordering::SeqCst);
+            let next_id = actor.next_id;
+            for event in [
+                SessionMessage::InputSpeaking { active: true },
+                SessionMessage::RecognitionPending { active: true },
+                SessionMessage::InputSpeaking { active: false },
+                SessionMessage::InputMuteApplied {
+                    id: 0,
+                    active: true,
+                },
+                SessionMessage::InputSpeaking { active: true },
+                SessionMessage::InputSpeaking { active: false },
+                SessionMessage::InputMuteApplied {
+                    id: 0,
+                    active: false,
+                },
+                SessionMessage::InputSpeaking { active: true },
+            ] {
+                actor.handle_event(event).unwrap();
+            }
+            actor.reset_input_activity().unwrap();
+            actor
+                .handle_event(SessionMessage::InputSpeaking { active: false })
+                .unwrap();
+            assert_eq!(actor.next_id, next_id);
+            assert!(actor.transcribed.is_empty());
+            child.kill().unwrap();
+            child.wait().unwrap();
         }
     }
 
