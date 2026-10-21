@@ -82,6 +82,7 @@ pub(crate) enum MenuAction {
     InputDuringTts(InputDuringTtsPolicy),
     StatusSounds(StatusSoundMode),
     SpokespersonMode(bool),
+    DownloadVoice(VoiceChoice),
     Stop,
 }
 
@@ -111,11 +112,13 @@ fn item(title: impl Into<String>, action: Option<MenuAction>) -> MenuNode {
     }
 }
 
-#[derive(Clone, Debug)]
-struct VoiceChoice {
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct VoiceChoice {
     voice: String,
     language: Option<String>,
     name: String,
+    // A Siri voice that isn't installed yet, and its download size.
+    download_bytes: Option<u64>,
 }
 
 #[derive(Clone, Default)]
@@ -128,6 +131,10 @@ struct MenuState {
     catalog_error: Option<String>,
     // Without an OpenAI key the Spokesperson can't be turned on.
     no_openai_key: bool,
+    downloading: Option<VoiceChoice>,
+    download_error: Option<String>,
+    // A download finished, so the coordinator reloads which voices are installed.
+    reload_catalog: bool,
 }
 
 /// Builds the menu from server status and separately owned local menu state.
@@ -144,11 +151,18 @@ fn menu_model(state: &MenuState) -> Vec<MenuNode> {
     let tts = &status["session"]["tts"];
     let spokesperson = &status["session"]["spokesperson"];
     let mut nodes = vec![item(format!("Berd Call · {}", mode_name(status)), None)];
-    for error in [&state.action_error, &state.catalog_error]
-        .into_iter()
-        .flatten()
+    for error in [
+        &state.action_error,
+        &state.catalog_error,
+        &state.download_error,
+    ]
+    .into_iter()
+    .flatten()
     {
         nodes.push(item(format!("Control error: {error}"), None));
+    }
+    if let Some(voice) = &state.downloading {
+        nodes.push(item(format!("Downloading {}…", voice.name), None));
     }
     let expert = state
         .switching
@@ -168,16 +182,23 @@ fn menu_model(state: &MenuState) -> Vec<MenuNode> {
             "Spokesperson ",
             spokesperson,
             &available_voices("openai").unwrap_or_default(),
+            None,
             |entry| MenuAction::SpokespersonVoice(entry.voice.clone()),
         ));
     }
     let agents = if spokesperson.is_null() { "" } else { "Agent " };
     nodes.extend([
         SEPARATOR,
-        voice_menu(agents, tts, &state.voices, |entry| MenuAction::Voice {
-            voice: entry.voice.clone(),
-            language: entry.language.clone(),
-        }),
+        voice_menu(
+            agents,
+            tts,
+            &state.voices,
+            state.downloading.as_ref(),
+            |entry| MenuAction::Voice {
+                voice: entry.voice.clone(),
+                language: entry.language.clone(),
+            },
+        ),
         rate_menu(tts, spokesperson, rate_range(status)),
         MenuNode {
             checked: suppressing,
@@ -203,11 +224,13 @@ fn menu_model(state: &MenuState) -> Vec<MenuNode> {
     nodes
 }
 
-/// A voice's choices, titled with whose voice it is.
+/// A voice's choices, titled with whose voice it is, then the voices in its
+/// language that can be downloaded, one at a time.
 fn voice_menu(
     whose: &str,
     tts: &Value,
     voices: &[VoiceChoice],
+    downloading: Option<&VoiceChoice>,
     choose: impl Fn(&VoiceChoice) -> MenuAction,
 ) -> MenuNode {
     let voice = tts["voice"].as_str().unwrap_or("Unknown");
@@ -218,20 +241,52 @@ fn voice_menu(
         .iter()
         .find(|entry| chosen(entry))
         .map_or(voice, |entry| &entry.name);
+    let (installed, uninstalled): (Vec<_>, Vec<_>) = voices
+        .iter()
+        .partition(|entry| entry.download_bytes.is_none());
+    let downloads: Vec<_> = uninstalled
+        .into_iter()
+        .filter(|entry| entry.language.as_deref() == language)
+        .map(|entry| match (downloading, entry.download_bytes) {
+            (Some(active), _) if active == entry => {
+                item(format!("Downloading {}…", entry.name), None)
+            }
+            (active, bytes) => item(
+                format!(
+                    "{} ({} MB)",
+                    entry.name,
+                    bytes.unwrap_or_default() / 1_000_000
+                ),
+                active
+                    .is_none()
+                    .then(|| MenuAction::DownloadVoice(entry.clone())),
+            ),
+        })
+        .collect();
+    let mut children: Vec<_> = installed
+        .into_iter()
+        .map(|entry| MenuNode {
+            checked: chosen(entry),
+            ..item(
+                match &entry.language {
+                    Some(language) => format!("{} ({language})", entry.name),
+                    None => entry.name.clone(),
+                },
+                Some(choose(entry)),
+            )
+        })
+        .collect();
+    if !downloads.is_empty() {
+        children.extend([
+            SEPARATOR,
+            MenuNode {
+                children: downloads,
+                ..item("Download", None)
+            },
+        ]);
+    }
     MenuNode {
-        children: voices
-            .iter()
-            .map(|entry| MenuNode {
-                checked: chosen(entry),
-                ..item(
-                    match &entry.language {
-                        Some(language) => format!("{} ({language})", entry.name),
-                        None => entry.name.clone(),
-                    },
-                    Some(choose(entry)),
-                )
-            })
-            .collect(),
+        children,
         ..item(format!("{whose}Voice: {name}"), None)
     }
 }
@@ -301,6 +356,7 @@ pub(crate) fn control_request(action: &MenuAction) -> ControlRequest {
             status: None,
         },
         MenuAction::SpokespersonMode(on) => ControlRequest::SpokespersonMode { on: *on },
+        MenuAction::DownloadVoice(_) => unreachable!("the menu downloads voices itself"),
         MenuAction::Stop => ControlRequest::Stop,
     }
 }
@@ -406,6 +462,15 @@ define_class!(
             else {
                 return;
             };
+            if let MenuAction::DownloadVoice(choice) = action {
+                start_download(
+                    choice,
+                    self.ivars().state.clone(),
+                    self.ivars().commands.clone(),
+                    download_siri_voice,
+                );
+                return;
+            }
             let request = control_request(&action);
             if let Err(error) = self.ivars().commands.try_send(request) {
                 if let Ok(mut state) = self.ivars().state.lock() {
@@ -578,6 +643,12 @@ fn spawn_coordinator(port: u16, state: Arc<Mutex<MenuState>>) -> mpsc::SyncSende
                         .map(|(_, error)| error.clone());
                 }
             }
+            if state
+                .lock()
+                .is_ok_and(|mut state| std::mem::take(&mut state.reload_catalog))
+            {
+                catalog = None;
+            }
             let latest = host_control::request(port, ControlRequest::Status)
                 .ok()
                 .map(|latest| {
@@ -717,6 +788,39 @@ fn begin_menu_action(
     }
 }
 
+/// Downloads a Siri voice off the main thread, then switches the call to it.
+fn start_download(
+    choice: VoiceChoice,
+    state: Arc<Mutex<MenuState>>,
+    commands: mpsc::SyncSender<ControlRequest>,
+    download: impl FnOnce(&VoiceChoice) -> Result<(), String> + Send + 'static,
+) {
+    if let Ok(mut state) = state.lock() {
+        state.downloading = Some(choice.clone());
+        state.download_error = None;
+    }
+    thread::spawn(move || {
+        let result = download(&choice);
+        let Ok(mut state) = state.lock() else {
+            return;
+        };
+        state.downloading = None;
+        match result {
+            Ok(()) => {
+                state.reload_catalog = true;
+                let request = ControlRequest::Voice {
+                    voice: choice.voice,
+                    language: choice.language,
+                };
+                if let Err(error) = commands.try_send(request) {
+                    state.download_error = Some(error.to_string());
+                }
+            }
+            Err(error) => state.download_error = Some(error),
+        }
+    });
+}
+
 fn menu_action_error(result: Result<Value, String>) -> Option<String> {
     match result {
         Err(error) => Some(error),
@@ -735,11 +839,11 @@ fn available_voices(backend: &str) -> Result<Vec<VoiceChoice>, String> {
         "siri" => berd_call::siri::load_voice_catalog(None)?
             .voices
             .into_iter()
-            .filter(|voice| voice.installed)
             .map(|voice| VoiceChoice {
                 name: voice.display_name,
                 voice: voice.name,
                 language: Some(voice.language),
+                download_bytes: (!voice.installed).then_some(voice.size_bytes),
             })
             .collect(),
         "openai" => crate::openai_voices_report()
@@ -749,6 +853,7 @@ fn available_voices(backend: &str) -> Result<Vec<VoiceChoice>, String> {
                 voice: voice.to_string(),
                 name: voice.to_string(),
                 language: None,
+                download_bytes: None,
             })
             .collect(),
         "pocket" => berd_call::pocket_assets::voices()
@@ -757,10 +862,21 @@ fn available_voices(backend: &str) -> Result<Vec<VoiceChoice>, String> {
                 voice: voice.id.to_string(),
                 name: voice.name.to_string(),
                 language: None,
+                download_bytes: None,
             })
             .collect(),
         _ => return Err("voice catalog unavailable for the active backend".into()),
     })
+}
+
+fn download_siri_voice(choice: &VoiceChoice) -> Result<(), String> {
+    let identity = berd_call::siri::SiriVoiceIdentity::new(
+        choice.voice.clone(),
+        choice.language.as_deref().unwrap_or_default(),
+    )?;
+    berd_call::siri::download_voice(&identity, Default::default())
+        .map(drop)
+        .map_err(|error| error.to_string())
 }
 
 fn apply_catalog_result(
@@ -1104,6 +1220,7 @@ mod tests {
                 voice: "Aaron".into(),
                 language: Some(language.into()),
                 name: "Aaron".into(),
+                download_bytes: None,
             })
             .collect();
         let nodes = menu_model(&MenuState {
@@ -1132,12 +1249,136 @@ mod tests {
                 voice: "en-US-F".into(),
                 language: Some("en-US".into()),
                 name: "Zack".into(),
+                download_bytes: None,
             }],
             ..MenuState::default()
         });
         let menu = find(&nodes, "Voice: Zack");
         assert_eq!(menu.children[0].title, "Zack (en-US)");
         assert!(menu.children[0].checked);
+    }
+
+    fn siri_voice(voice: &str, language: &str, download_bytes: Option<u64>) -> VoiceChoice {
+        VoiceChoice {
+            voice: voice.into(),
+            language: Some(language.into()),
+            name: voice.into(),
+            download_bytes,
+        }
+    }
+
+    fn downloadable_state() -> MenuState {
+        MenuState {
+            status: Some(status(false, "allow_barge_in", None)),
+            voices: vec![
+                siri_voice("Aaron", "en-US", None),
+                siri_voice("Damon", "en-US", Some(325_238_784)),
+                siri_voice("Quinn", "en-US", Some(310_472_704)),
+                siri_voice("Arthur", "en-GB", Some(257_454_080)),
+            ],
+            ..MenuState::default()
+        }
+    }
+
+    #[test]
+    fn voice_menu_offers_its_languages_uninstalled_voices_to_download() {
+        let nodes = menu_model(&downloadable_state());
+        let menu = find(&nodes, "Voice: Aaron");
+        let titles: Vec<_> = menu
+            .children
+            .iter()
+            .map(|node| node.title.as_str())
+            .collect();
+        assert_eq!(titles, ["Aaron (en-US)", "", "Download"]);
+        let downloads = &find(&menu.children, "Download").children;
+        assert_eq!(
+            downloads
+                .iter()
+                .map(|node| node.title.as_str())
+                .collect::<Vec<_>>(),
+            ["Damon (325 MB)", "Quinn (310 MB)"]
+        );
+        assert_eq!(
+            downloads[0].action,
+            Some(MenuAction::DownloadVoice(siri_voice(
+                "Damon",
+                "en-US",
+                Some(325_238_784)
+            )))
+        );
+    }
+
+    #[test]
+    fn a_download_in_progress_shows_and_holds_off_another() {
+        let nodes = menu_model(&MenuState {
+            downloading: Some(siri_voice("Damon", "en-US", Some(325_238_784))),
+            ..downloadable_state()
+        });
+        find(&nodes, "Downloading Damon…");
+        let downloads = &find(&find(&nodes, "Voice: Aaron").children, "Download").children;
+        assert_eq!(downloads[0].title, "Downloading Damon…");
+        assert!(downloads.iter().all(|node| node.action.is_none()));
+    }
+
+    #[test]
+    fn a_finished_download_selects_its_voice_and_a_failed_one_shows_why() {
+        let damon = siri_voice("Damon", "en-US", Some(325_238_784));
+        let state = Arc::new(Mutex::new(downloadable_state()));
+        let (commands, requests) = mpsc::sync_channel(1);
+        start_download(damon.clone(), state.clone(), commands.clone(), |_| Ok(()));
+        let request = requests.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(
+            matches!(request, ControlRequest::Voice { voice, language: Some(language) } if voice == "Damon" && language == "en-US")
+        );
+        let finished = state.lock().unwrap().clone();
+        assert!(finished.downloading.is_none() && finished.reload_catalog);
+
+        start_download(damon, state.clone(), commands, |_| {
+            Err("not enough space".into())
+        });
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while state.lock().unwrap().downloading.is_some() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "download never finished"
+            );
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert!(requests.try_recv().is_err());
+        find(
+            &menu_model(&state.lock().unwrap()),
+            "Control error: not enough space",
+        );
+    }
+
+    #[test]
+    fn coordinator_reloads_the_catalog_after_a_download() {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        listener.set_nonblocking(true).unwrap();
+        let state = Arc::new(Mutex::new(MenuState {
+            reload_catalog: true,
+            ..MenuState::default()
+        }));
+        let commands = spawn_coordinator(port, state.clone());
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while state.lock().unwrap().reload_catalog {
+            assert!(std::time::Instant::now() < deadline, "catalog not reloaded");
+            if let Ok((mut stream, _)) = listener.accept() {
+                stream.set_nonblocking(false).unwrap();
+                let mut line = String::new();
+                BufReader::new(&stream).read_line(&mut line).unwrap();
+                writeln!(
+                    stream,
+                    "{}",
+                    json!({"ok": true, "value": {"session": {"tts": {"backend": "openai"}}}})
+                )
+                .unwrap();
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        drop(commands);
     }
 
     #[test]
