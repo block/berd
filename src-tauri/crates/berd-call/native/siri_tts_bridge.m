@@ -4,6 +4,7 @@
 #import <AudioToolbox/AudioToolbox.h>
 #import <Foundation/Foundation.h>
 #import <math.h>
+#import <stdatomic.h>
 #import <dlfcn.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
@@ -706,13 +707,25 @@ static void BerdSetSiriRequestRate(id request, float rate) {
 }
 @end
 
-@interface BerdPocketAudioPlayer : NSObject
+@interface BerdRenderHealth : NSObject {
+@public
+    atomic_bool failed;
+}
+@end
+@implementation BerdRenderHealth
+@end
+
+@interface BerdPocketAudioPlayer : NSObject {
+    BerdRenderHealth *_renderHealth;
+}
 @property(nonatomic, strong) AVAudioEngine *engine;
 @property(nonatomic, strong) AVAudioPlayerNode *player;
 @property(nonatomic, strong) AVAudioUnitTimePitch *timePitch;
 @property(nonatomic, strong) AVAudioFormat *format;
 @property(nonatomic, assign) uint64_t pendingBuffers;
 @property(nonatomic, assign) uint64_t completedSourceFrames;
+@property(nonatomic, strong) NSArray<AUAudioUnit *> *renderUnits;
+@property(nonatomic, strong) NSArray<NSNumber *> *renderObserverTokens;
 @property(nonatomic, assign) BOOL stopped;
 - (instancetype)initWithSampleRate:(double)sampleRate
                               rate:(float)rate
@@ -722,6 +735,8 @@ static void BerdSetSiriRequestRate(id request, float rate) {
             frameCount:(AVAudioFrameCount)frameCount
                  error:(NSError **)error;
 - (uint64_t)completedSourceFramesSnapshot;
+- (void)observeRenderErrors;
+- (BOOL)failed;
 - (void)pause;
 - (void)resume;
 - (void)stop;
@@ -781,10 +796,44 @@ static void BerdSetSiriRequestRate(id request, float rate) {
     [_engine attachNode:_timePitch];
     [_engine connect:_player to:_timePitch format:_format];
     [_engine connect:_timePitch to:_engine.mainMixerNode format:_format];
+    [self observeRenderErrors];
 
     [_engine prepare];
     if (![_engine startAndReturnError:error]) return nil;
     return self;
+}
+
+- (void)observeRenderErrors {
+    BerdRenderHealth *health = [BerdRenderHealth new];
+    atomic_init(&health->failed, false);
+    _renderHealth = health;
+    self.renderUnits = @[self.engine.outputNode.AUAudioUnit,
+                         self.timePitch.AUAudioUnit,
+                         self.engine.mainMixerNode.AUAudioUnit];
+    NSMutableArray<NSNumber *> *tokens = [NSMutableArray new];
+    for (AUAudioUnit *unit in self.renderUnits) {
+        NSInteger token = [unit tokenByAddingRenderObserver:^(AudioUnitRenderActionFlags flags,
+            const AudioTimeStamp *timestamp, AUAudioFrameCount frames, NSInteger bus) {
+            if (!(flags & kAudioUnitRenderAction_PostRenderError)) return;
+            atomic_store_explicit(&health->failed, true, memory_order_relaxed);
+        }];
+        [tokens addObject:@(token)];
+    }
+    self.renderObserverTokens = tokens;
+}
+
+- (BOOL)failed {
+    @synchronized (self) {
+        if (self.stopped) return NO;
+        if (atomic_load_explicit(&_renderHealth->failed, memory_order_relaxed)) return YES;
+    }
+    // Engine queries can take AVFAudio locks used by completion callbacks.
+    BOOL running = self.engine.isRunning;
+    @synchronized (self) {
+        if (self.stopped) return NO;
+        if (!running) atomic_store_explicit(&_renderHealth->failed, true, memory_order_relaxed);
+        return atomic_load_explicit(&_renderHealth->failed, memory_order_relaxed);
+    }
 }
 
 - (BOOL)enqueueSamples:(const float *)samples
@@ -857,6 +906,11 @@ static void BerdSetSiriRequestRate(id request, float rate) {
         self.stopped = YES;
         self.pendingBuffers = 0;
     }
+    for (NSUInteger i = 0; i < self.renderObserverTokens.count; i++) {
+        [self.renderUnits[i] removeRenderObserver:self.renderObserverTokens[i].integerValue];
+    }
+    self.renderObserverTokens = nil;
+    self.renderUnits = nil;
     [self.player stop];
     [self.engine stop];
 }
@@ -1857,9 +1911,7 @@ uint64_t berd_pocket_audio_player_pending_buffers(void *playerValue) {
 bool berd_pocket_audio_player_failed(void *playerValue) {
     if (!playerValue) return true;
     BerdPocketAudioPlayer *player = (__bridge BerdPocketAudioPlayer *)playerValue;
-    @synchronized (player) {
-        return !player.stopped && !player.engine.isRunning;
-    }
+    return [player failed];
 }
 
 void berd_pocket_audio_player_stop(void *playerValue) {
